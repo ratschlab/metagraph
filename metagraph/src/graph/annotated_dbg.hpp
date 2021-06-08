@@ -87,9 +87,8 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
                         const std::vector<Label> &labels,
                         uint64_t start);
 
-    void add_kmer_coords(const std::vector<std::tuple<std::string,
-                                                      std::vector<Label>,
-                                                      uint64_t>> &data);
+    void add_kmer_coords(
+        const std::vector<std::tuple<std::string, std::vector<Label>, uint64_t>> &data);
 
     /*********************** Special queries **********************/
 

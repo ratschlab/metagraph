@@ -158,9 +158,8 @@ void AnnotatedDBG::add_kmer_coord(std::string_view sequence,
     }
 }
 
-void AnnotatedDBG::add_kmer_coords(const std::vector<std::tuple<std::string,
-                                                                std::vector<Label>,
-                                                                uint64_t>> &data) {
+void AnnotatedDBG::add_kmer_coords(
+        const std::vector<std::tuple<std::string, std::vector<Label>, uint64_t>> &data) {
     assert(check_compatibility());
 
     std::vector<std::vector<row_index>> ids(data.size());

@@ -687,7 +687,7 @@ void convert_batch_to_row_diff_coord(const std::string &pred_succ_fprefix,
                                      const std::string &row_reduction_fname,
                                      uint64_t buf_size_bytes,
                                      bool compute_row_reduction,
-                                     size_t coords_in_seq);
+                                     size_t num_coords_per_seq);
 
 void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                                const std::vector<std::string> &source_files,
@@ -698,7 +698,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                                bool compute_row_reduction,
                                bool with_values,
                                bool with_coordinates,
-                               size_t coords_in_seq) {
+                               size_t num_coords_per_seq) {
     if (with_values) {
         convert_batch_to_row_diff<std::pair<uint64_t, uint64_t>>(
                 pred_succ_fprefix, source_files, col_out_dir, swap_dir,
@@ -707,7 +707,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
         convert_batch_to_row_diff_coord(
                 pred_succ_fprefix, source_files, col_out_dir, swap_dir,
                 row_reduction_fname, buf_size_bytes, compute_row_reduction,
-                coords_in_seq);
+                num_coords_per_seq);
     } else {
         convert_batch_to_row_diff<uint64_t>(
                 pred_succ_fprefix, source_files, col_out_dir, swap_dir,
@@ -1136,7 +1136,7 @@ void convert_batch_to_row_diff_coord(const std::string &pred_succ_fprefix,
                                      const std::string &row_reduction_fname,
                                      uint64_t buf_size_bytes,
                                      bool compute_row_reduction,
-                                     size_t coords_in_seq) {
+                                     size_t num_coords_per_seq) {
     if (source_files.empty())
         return;
 
@@ -1196,12 +1196,12 @@ void convert_batch_to_row_diff_coord(const std::string &pred_succ_fprefix,
 
     auto get_diff = [&](std::vector<uint64_t> curr,
                         std::vector<uint64_t>&& next) {
-        if (coords_in_seq > 1) {
+        if (num_coords_per_seq > 1) {
             // skip starting coordinates -- they can always be reconstructed
             // if all sequences have the same length
             size_t i = 0;
             for (size_t j = 0; j < next.size(); ++j) {
-                if (next[j] % coords_in_seq)
+                if (next[j] % num_coords_per_seq)
                     next[i++] = next[j];
             }
             next.resize(i);
