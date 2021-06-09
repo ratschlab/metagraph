@@ -189,6 +189,9 @@ uint64_t update_row_reduction(
 inline uint64_t to_row(graph::DeBruijnGraph::node_index i) {
     return graph::AnnotatedSequenceGraph::graph_to_anno_index(i);
 }
+inline graph::DeBruijnGraph::node_index to_node(uint64_t i) {
+    return graph::AnnotatedSequenceGraph::anno_to_graph_index(i);
+}
 
 template <class Callback>
 void sum_and_call_counts(const fs::path &dir,
@@ -262,8 +265,7 @@ rd_succ_bv_type route_at_forks(const graph::DBGSuccinct &graph,
                       " the largest number of labels");
 
         const bit_vector &last = graph.get_boss().get_last();
-        graph::DeBruijnGraph::node_index graph_idx
-            = graph::AnnotatedSequenceGraph::anno_to_graph_index(0);
+        graph::DeBruijnGraph::node_index graph_idx = to_node(0);
 
         std::vector<uint32_t> outgoing_counts;
 
@@ -443,8 +445,7 @@ void assign_anchors(const std::string &graph_fname,
             [&](int32_t count) {
                 // check if the reduction is negative
                 if (count < 0)
-                    anchors_bv[graph.kmer_to_boss_index(
-                        graph::AnnotatedSequenceGraph::anno_to_graph_index(i))] = true;
+                    anchors_bv[graph.kmer_to_boss_index(to_node(i))] = true;
                 i++;
             }
         );
@@ -466,40 +467,41 @@ void assign_anchors(const std::string &graph_fname,
     logger->trace("Assigning required anchors...");
     {
         rd_succ_bv_type rd_succ;
-        const std::string rd_succ_filename = outfbase + kRowDiffForkSuccExt;
-        std::ifstream f(rd_succ_filename, ios::binary);
+        const std::string &rd_succ_fname = outfbase + kRowDiffForkSuccExt;
+        std::ifstream f(rd_succ_fname, ios::binary);
         if (!rd_succ.load(f)) {
-            logger->error("Couldn't load row-diff successor bitmap from {}",
-                          rd_succ_filename);
+            logger->error("Couldn't load row-diff successor bitmap from {}", rd_succ_fname);
             exit(1);
         }
+
         if (rd_succ.size()) {
-            logger->trace("Assigning anchors for RowDiff successors {}...", rd_succ_filename);
+            logger->trace("Assigning anchors for RowDiff successors {}...", rd_succ_fname);
             boss.row_diff_traverse(num_threads, max_length, rd_succ, &anchors_bv);
         } else {
-            logger->warn("Assigning anchors... The last outgoing edges will be"
-                         " used for routing assign anchors.");
+            logger->warn("Assigning anchors without chosen RowDiff successors."
+                         " The last outgoing edges will be used for routing.");
             boss.row_diff_traverse(num_threads, max_length, boss.get_last(), &anchors_bv);
         }
     }
 
     // anchors_bv uses BOSS edges as indices, so we need to map it to annotation indices
-    sdsl::bit_vector anchors(num_rows, false);
-    for (BOSS::edge_index i = 1; i < anchors_bv.size(); ++i) {
-        if (anchors_bv[i]) {
-            uint64_t graph_idx = graph.boss_to_kmer_index(i);
-            assert(to_row(graph_idx) < num_rows);
-            anchors[to_row(graph_idx)] = 1;
+    {
+        sdsl::bit_vector anchors(num_rows, false);
+        for (BOSS::edge_index i = 1; i < anchors_bv.size(); ++i) {
+            if (anchors_bv[i]) {
+                uint64_t graph_idx = graph.boss_to_kmer_index(i);
+                assert(to_row(graph_idx) < num_rows);
+                anchors[to_row(graph_idx)] = 1;
+            }
         }
+        anchors_bv = std::move(anchors);
     }
 
-    anchors_bv = sdsl::bit_vector();
-    anchor_bv_type ranchors(std::move(anchors));
-
-    logger->trace("Final number of anchors in row-diff: {}", ranchors.num_set_bits());
+    anchor_bv_type anchors(std::move(anchors_bv));
+    logger->trace("Final number of anchors in row-diff: {}", anchors.num_set_bits());
 
     std::ofstream f(anchor_filename, ios::binary);
-    ranchors.serialize(f);
+    anchors.serialize(f);
     logger->trace("Serialized anchors to {}", anchor_filename);
 }
 
