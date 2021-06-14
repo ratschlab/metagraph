@@ -63,6 +63,40 @@ load_columns(const std::vector<std::string> &source_files, uint64_t *num_rows) {
     return sources;
 }
 
+template <class Callback>
+void load_coordinates(const std::vector<std::string> &source_files,
+                      const std::vector<annot::ColumnCompressed<>> &sources,
+                      Callback callback,
+                      size_t num_threads) {
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+    for (size_t i = 0; i < source_files.size(); ++i) {
+        if (!sources[i].num_labels())
+            continue;
+
+        const auto &coords_fname = utils::remove_suffix(source_files[i],
+                                                        ColumnCompressed<>::kExtension)
+                                        + ColumnCompressed<>::kCoordExtension;
+        std::ifstream in(coords_fname, std::ios::binary);
+        if (!in) {
+            logger->error("Could not open file with coordinates {}", coords_fname);
+            exit(1);
+        }
+
+        sdsl::int_vector<> coords;
+        bit_vector_smart delims;
+        for (size_t j = 0; j < sources[i].num_labels(); ++j) {
+            try {
+                coords.load(in);
+                delims.load(in);
+            } catch (...) {
+                logger->error("Couldn't read coordinates from {}", coords_fname);
+                exit(1);
+            }
+            callback(i, std::move(coords), std::move(delims));
+        }
+    }
+}
+
 void count_labels_per_row(const std::vector<std::string> &source_files,
                           const std::string &row_count_fname,
                           bool with_coordinates) {
@@ -78,32 +112,12 @@ void count_labels_per_row(const std::vector<std::string> &source_files,
 
     std::vector<std::vector<bit_vector_smart>> delims(source_files.size());
     if (with_coordinates) {
-        #pragma omp parallel for num_threads(get_num_threads())
-        for (size_t i = 0; i < source_files.size(); ++i) {
-            if (!sources[i].num_labels())
-                continue;
-
-            const auto &coords_fname = utils::remove_suffix(source_files[i],
-                                                            ColumnCompressed<>::kExtension)
-                                            + ColumnCompressed<>::kCoordExtension;
-            std::ifstream in(coords_fname, std::ios::binary);
-            if (!in) {
-                logger->error("Could not open file with coordinates {}", coords_fname);
-                exit(1);
-            }
-
-            sdsl::int_vector<> temp;
-            delims[i].resize(sources[i].num_labels());
-            for (auto &bv : delims[i]) {
-                try {
-                    bv.load(in);
-                    temp.load(in);
-                } catch (...) {
-                    logger->error("Couldn't read coordinates from {}", coords_fname);
-                    exit(1);
-                }
-            }
-        }
+        load_coordinates(source_files, sources,
+            [&](size_t s, sdsl::int_vector<>&&, bit_vector_smart&& d) {
+                delims[s].push_back(std::move(d));
+            },
+            get_num_threads()
+        );
         logger->trace("Done loading coordinates");
     }
 
@@ -180,10 +194,6 @@ void count_labels_per_row(const std::vector<std::string> &source_files,
 
     async_writer.join();
 }
-
-uint64_t update_row_reduction(
-            const std::vector<std::vector<std::unique_ptr<bit_vector>>> &diff_columns,
-            sdsl::int_vector_buffer<> &row_reduction);
 
 // convert index
 inline uint64_t to_row(graph::DeBruijnGraph::node_index i) {
@@ -1076,20 +1086,8 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
 
     utils::remove_temp_dir(tmp_path);
 
-    if (compute_row_reduction) {
-        uint64_t num_larger_rows = update_row_reduction(diff_columns, row_reduction);
-        logger->trace("Rows with negative row reduction: {} in vector {}",
-                      num_larger_rows, row_reduction_fname);
-    }
-}
-
-uint64_t update_row_reduction(
-            const std::vector<std::vector<std::unique_ptr<bit_vector>>> &diff_columns,
-            sdsl::int_vector_buffer<> &row_reduction) {
-    ThreadPool async_writer(1, 1);
-    std::vector<uint32_t> row_nbits_block;
-    // buffer for writing previous block while populating next row_nbits_block
-    std::vector<uint32_t> row_nbits_block_other;
+    if (!compute_row_reduction)
+        return;
 
     uint64_t num_larger_rows = 0;
     ProgressBar progress_bar(row_reduction.size(), "Update row reduction",
@@ -1097,7 +1095,7 @@ uint64_t update_row_reduction(
     for (uint64_t chunk = 0; chunk < row_reduction.size(); chunk += BLOCK_SIZE) {
         row_nbits_block.assign(std::min(BLOCK_SIZE, row_reduction.size() - chunk), 0);
 
-        #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
+        #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
         for (size_t l_idx = 0; l_idx < diff_columns.size(); ++l_idx) {
             for (const auto &col_ptr : diff_columns[l_idx]) {
                 col_ptr->call_ones_in_range(chunk, chunk + row_nbits_block.size(),
@@ -1126,7 +1124,8 @@ uint64_t update_row_reduction(
 
     async_writer.join();
 
-    return num_larger_rows;
+    logger->trace("Rows with negative row reduction: {} in vector {}",
+                  num_larger_rows, row_reduction_fname);
 }
 
 void convert_batch_to_row_diff_coord(const std::string &pred_succ_fprefix,
@@ -1152,32 +1151,13 @@ void convert_batch_to_row_diff_coord(const std::string &pred_succ_fprefix,
 
     std::vector<std::vector<sdsl::int_vector<>>> coords(source_files.size());
     std::vector<std::vector<bit_vector_smart>> delims(source_files.size());
-    #pragma omp parallel for num_threads(num_threads)
-    for (size_t i = 0; i < source_files.size(); ++i) {
-        if (!sources[i].num_labels())
-            continue;
-
-        const auto &coords_fname = utils::remove_suffix(source_files[i],
-                                                        ColumnCompressed<>::kExtension)
-                                        + ColumnCompressed<>::kCoordExtension;
-        std::ifstream in(coords_fname, std::ios::binary);
-        if (!in) {
-            logger->error("Could not open file with coordinates {}", coords_fname);
-            exit(1);
-        }
-
-        coords[i].resize(sources[i].num_labels());
-        delims[i].resize(sources[i].num_labels());
-        for (size_t j = 0; j < coords[i].size(); ++j) {
-            try {
-                delims[i][j].load(in);
-                coords[i][j].load(in);
-            } catch (...) {
-                logger->error("Couldn't read coordinates from {}", coords_fname);
-                exit(1);
-            }
-        }
-    }
+    load_coordinates(source_files, sources,
+        [&](size_t s, sdsl::int_vector<>&& c, bit_vector_smart&& d) {
+            coords[s].push_back(std::move(c));
+            delims[s].push_back(std::move(d));
+        },
+        num_threads
+    );
     logger->trace("Done loading coordinates");
 
     // get bit at position |i| or its value
