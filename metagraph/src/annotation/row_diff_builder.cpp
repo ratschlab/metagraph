@@ -195,6 +195,7 @@ void count_labels_per_row(const std::vector<std::string> &source_files,
     async_writer.join();
 }
 
+
 // convert index
 inline uint64_t to_row(graph::DeBruijnGraph::node_index i) {
     return graph::AnnotatedSequenceGraph::graph_to_anno_index(i);
@@ -1330,7 +1331,7 @@ void convert_batch_to_row_diff_coord(const std::string &pred_succ_fprefix,
 
     // We use this dummy index for an optimization where we don't store diff
     // for non-anchor k-mers with no coordinates.
-    uint64_t dummy_coord = -1;
+    uint64_t DUMMY_COORD = -1;
 
     traverse_anno_chunked(
             num_rows, pred_succ_fprefix, sources,
@@ -1375,7 +1376,7 @@ void convert_batch_to_row_diff_coord(const std::string &pred_succ_fprefix,
                     if (curr_value.size() && !source_col[*pred_p] && !anchor[*pred_p]) {
                         auto &v = set_rows_bwd[s][j];
                         // indicate that there are no coordinates for the predecessor
-                        v.emplace_back(*pred_p, dummy_coord);
+                        v.emplace_back(*pred_p, DUMMY_COORD);
                         row_diff_bits[s][j]++;
 
                         if (v.size() == v.capacity()) {
@@ -1467,7 +1468,7 @@ void convert_batch_to_row_diff_coord(const std::string &pred_succ_fprefix,
                         last = i;
                         *delims_it++ = 1;
                     }
-                    if (coord != dummy_coord) {
+                    if (coord != DUMMY_COORD) {
                         *coords_it++ = coord;
                         ++delims_it;
                     }
