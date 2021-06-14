@@ -9,6 +9,9 @@
 #include <vector>
 
 #include "annotation/representation/annotation_matrix/annotation_matrix.hpp"
+#include "annotation/binary_matrix/rainbowfish/rainbow.hpp"
+#include "annotation/binary_matrix/base/binary_matrix.hpp"
+
 #include "common/serialization.hpp"
 #include "common/unix_tools.hpp"
 #include "common/utils/string_utils.hpp"
@@ -680,7 +683,156 @@ TaxId TaxonomyDB::assign_class_slow(const graph::AnnotatedDBG &anno, const std::
     // }
 
     return best_lca;
+}
 
+TaxId TaxonomyDB::assign_class_getrows(const graph::AnnotatedDBG &anno, const std::string &sequence) const {
+    // int cnt_kmer = 0;
+    std::vector<uint64_t> forward_kmers;
+
+    anno.get_graph_ptr()->map_to_nodes(sequence, [&](uint64_t i) {
+        forward_kmers.push_back(i - 1);
+    });
+
+    auto rb = &anno.annotator_->get_matrix();
+    auto unique_rows = rb->get_rows(forward_kmers);
+
+    assert(forward_kmers.size() == unique_rows.size());
+    // VectorMap<LabelCode, SignatureCount> label_codes_to_presence;
+
+    if (unique_rows.size() >= std::numeric_limits<uint32_t>::max()) {
+        throw std::runtime_error("There must be less than 2^32 unique rows."
+                                    " Reduce the query batch size.");
+    }
+
+    for (auto row : unique_rows) {
+        std::cout << "\nfk=" << forward_kmers.size() << " ur=" << unique_rows.size() << "\n";
+        for (auto column : row) {
+            std::cout << column << "-" << std::flush;
+            // std::cout << anno.annotator_->label_encoder_.decode(column) << " " << std::flush;
+        }
+        std::cout << "\n";
+    }
+
+    std::cout << "\n\n";
+
+    return 0;
+    // std::vector<uint64_t> row_indexes(full_to_small.size());
+    // for (size_t i = 0; i < full_to_small.size(); ++i) {
+    //     row_indexes[i] = full_to_small[i].first;
+    // }
+
+    // // get unique rows and set pointers to them in |row_indexes|
+    // auto unique_rows = rb->get_rows(&row_indexes, num_threads);
+
+    
+    // anno.get_graph_ptr()->map_to_nodes(sequence, [&](uint64_t i) {
+    //     if (i > 0) {
+    //         std::vector<std::string> labels_discovered = anno.annotator_->get(i - 1);
+    //         std::vector<NormalizedTaxId> curr_taxids;
+    //         for (uint64_t j = 0; j < labels_discovered.size(); ++j) {
+    //             // std::cerr << "\t lb -> " << labels_discovered[j] << "\n";
+    //             std::string act_str = utils::split_string(labels_discovered[j], "|")[1];
+    //             TaxId act = static_cast<uint64_t>(std::stoull(act_str));
+    //             if (this->normalized_taxid.count(act)) {
+    //                 curr_taxids.push_back(this->normalized_taxid.at(act));
+    //             }
+    //         }
+    //         if (curr_taxids.size() == 0) {
+    //             forward_kmers.push_back(0);
+    //         } else {
+    //             forward_kmers.push_back(this->denormalized_taxid[find_lca(curr_taxids)]);
+    //         }
+
+    //         // std::cerr << "\t f" << forward_kmers.back() << "\n";
+    //     } else {
+    //         forward_kmers.push_back(0);
+    //     }
+    //     cnt_kmer++;
+    // });
+
+    // std::string reversed_sequence = sequence;
+    // reverse_complement(reversed_sequence.begin(), reversed_sequence.end());
+	// std::vector<uint64_t> backward_kmers(cnt_kmer); 
+
+    // anno.get_graph_ptr()->map_to_nodes(reversed_sequence, [&](uint64_t i) {
+    //     cnt_kmer--;
+    //     if (cnt_kmer < 0) {
+    //         std::cerr << "\n\n\n cnt_kmer < 0!!!!! \n" << std::endl;
+    //     }
+    //     if (i > 0) {
+    //         std::vector<std::string> labels_discovered = anno.annotator_->get(i - 1);
+    //         std::vector<NormalizedTaxId> curr_taxids;
+    //         for (uint64_t j = 0; j < labels_discovered.size(); ++j) {
+    //             std::string act_str = utils::split_string(labels_discovered[j], "|")[1];
+    //             TaxId act = static_cast<uint64_t>(std::stoull(act_str));
+    //             if (this->normalized_taxid.count(act)) {
+    //                 curr_taxids.push_back(this->normalized_taxid.at(act));
+    //             }
+    //         }
+
+    //         if (curr_taxids.size() != 0) {
+    //             backward_kmers[cnt_kmer] = this->denormalized_taxid[find_lca(curr_taxids)];
+    //         }
+    //         // std::cerr << "\t b" << forward_kmers.back() << "\n";
+    //     }
+    // });
+
+    // tsl::hopscotch_map<TaxId, uint64_t> num_kmers_per_node;
+
+    // uint64_t total_discovered_kmers = 0;
+
+    // for (uint64_t i = 0; i < backward_kmers.size(); ++i) {
+
+    //     if (forward_kmers[i] == 0 && backward_kmers[i] == 0) {
+    //         continue;
+    //     }
+    //     TaxId curr_taxid;
+    //     if (backward_kmers[i] == 0) {
+    //         curr_taxid = forward_kmers[i];
+    //     } else if (forward_kmers[i] == 0) {
+    //         curr_taxid = backward_kmers[i];
+    //     } else {
+    //         TaxId forward_taxid = forward_kmers[i];
+    //         TaxId backward_taxid = backward_kmers[i];
+    //         if (forward_taxid == 0) {
+    //             curr_taxid = backward_taxid;
+    //         } else if (backward_taxid == 0) {
+    //             curr_taxid = forward_taxid;
+    //         } else {
+    //             curr_taxid = find_lca(forward_taxid, backward_taxid);
+    //         }
+    //     }
+    //     if (curr_taxid) {
+    //         total_discovered_kmers += 1;
+    //         num_kmers_per_node[curr_taxid]++;
+    //     }
+    // }
+
+    // uint64_t total_kmers = forward_kmers.size();
+
+    // if (total_discovered_kmers <= 0.2 * total_kmers) {
+    //     return 0; // 0 is a wildcard for not enough discovered kmers.
+    // }
+
+    // tsl::hopscotch_set<TaxId> nodes_already_propagated;
+    // tsl::hopscotch_map<TaxId, uint64_t> node_scores;
+
+    // uint64_t desired_number_kmers = total_discovered_kmers * 0.4;
+    // TaxId best_lca = this->root_node;
+    // uint64_t best_lca_dist_to_root = 1;
+
+    // for (const pair<TaxId, uint64_t> &node_pair : num_kmers_per_node) {
+    //     TaxId start_node = node_pair.first;
+    //     update_scores_and_lca(start_node, num_kmers_per_node, desired_number_kmers,
+    //                           &node_scores, &nodes_already_propagated, &best_lca,
+    //                           &best_lca_dist_to_root);
+    // }
+
+    // // for (auto &it : node_scores) {
+    // //     std::cerr << "\t" << it.first << " " << it.second << "\n";
+    // // }
+
+    // return best_lca;
 }
 
 } // namespace annot

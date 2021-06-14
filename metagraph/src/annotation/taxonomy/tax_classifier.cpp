@@ -37,24 +37,34 @@ void TaxClassifier::import_taxonomy(const std::string &filepath) {
         std::exit(1);
     }
 
-    sdsl::int_vector<> code_to_taxid;
-    code_to_taxid.load(f);
-    if (code_to_taxid.empty()) {
+    sdsl::int_vector<> code_to_taxid_raw;
+    code_to_taxid_raw.load(f);
+    if (code_to_taxid_raw.empty()) {
         logger->error("Can't load serialized 'code_to_taxid' from file {}.", filepath.c_str());
         std::exit(1);
     }
+    code_to_taxid.resize(code_to_taxid_raw.size());
+    for (uint32_t i = 0; i < code_to_taxid_raw.size(); ++i) {
+        code_to_taxid[i] = code_to_taxid_raw[i];
+    }
 
-    sdsl::dac_vector_dp<sdsl::rrr_vector<>> code;
-    code.load(f);
-    if (code.empty()) {
+    sdsl::dac_vector_dp<sdsl::rrr_vector<>> code_raw;
+    // sdsl::dac_vector<> code_raw;
+    // sdsl::vlc_vector<sdsl::coder::elias_gamma, 128> code_raw;
+    code_raw.load(f);
+    if (code_raw.empty()) {
         logger->error("Can't load serialized 'code' from file {}.", filepath.c_str());
         std::exit(1);
     }
-
-    this->taxonomic_map.resize(code.size());
-    for (uint64_t i = 0; i < code.size(); ++i) {
-        this->taxonomic_map[i] = code_to_taxid[code[i]];
+    code.resize(code_raw.size());
+    for (uint32_t i = 0; i < code_raw.size(); ++i) {
+        code[i] = code_raw[i];
     }
+
+    // this->taxonomic_map.resize(code.size());
+    // for (uint64_t i = 0; i < code.size(); ++i) {
+    //     this->taxonomic_map[i] = code_to_taxid[code[i]];
+    // }
 
     logger->trace("Finished taxdb importing after {}s", timer.elapsed());
 }
@@ -202,12 +212,12 @@ TaxId TaxClassifier::assign_class(const mtg::graph::DeBruijnGraph &graph,
 
         TaxId curr_taxid;
         if (backward_kmers[i] == 0) {
-            curr_taxid = this->taxonomic_map[forward_kmers[i] - 1];
+            curr_taxid = code_to_taxid[code[forward_kmers[i] - 1]];
         } else if (forward_kmers[i] == 0) {
-            curr_taxid = this->taxonomic_map[backward_kmers[i] - 1];
+            curr_taxid = code_to_taxid[code[backward_kmers[i] - 1]];
         } else {
-            TaxId forward_taxid = this->taxonomic_map[forward_kmers[i] - 1];
-            TaxId backward_taxid = this->taxonomic_map[backward_kmers[i] - 1];
+            TaxId forward_taxid = code_to_taxid[code[forward_kmers[i] - 1]];
+            TaxId backward_taxid = code_to_taxid[code[backward_kmers[i] - 1]];
             if (forward_taxid == 0) {
                 curr_taxid = backward_taxid;
             } else if (backward_taxid == 0) {

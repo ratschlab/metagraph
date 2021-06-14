@@ -62,6 +62,10 @@ class TaxonomyDB {
   
   TaxId assign_class_slow(const graph::AnnotatedDBG &anno,
 					   const std::string &sequence) const;
+  
+  TaxId assign_class_getrows(const graph::AnnotatedDBG &anno, 
+             const std::string &sequence) const;
+
 
   private:
     /**

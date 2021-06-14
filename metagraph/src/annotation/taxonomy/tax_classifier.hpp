@@ -3,10 +3,14 @@
 
 #include <tsl/hopscotch_map.h>
 #include <tsl/hopscotch_set.h>
+#include <sdsl/int_vector.hpp>
+#include <sdsl/vlc_vector.hpp>
+#include <sdsl/vectors.hpp>
 
 #include "annotation/representation/base/annotation.hpp"
 #include "cli/load/load_annotated_graph.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
+#include <sdsl/dac_vector.hpp>
 
 namespace mtg {
 namespace annot {
@@ -86,6 +90,9 @@ class TaxClassifier {
 
     double lca_coverage_rate;
     double kmers_discovery_rate;
+    vector<uint64_t> code_to_taxid;
+    vector<uint64_t> code;
+    // sdsl::vlc_vector<sdsl::coder::elias_gamma, 128> code;
 };
 
 } // namespace annot
