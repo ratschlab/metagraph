@@ -113,6 +113,13 @@ Config::Config(int argc, char *argv[]) {
             print_column_names = true;
         } else if (!strcmp(argv[i], "--print-internal")) {
             print_graph_internal_repr = true;
+        } else if (!strcmp(argv[i], "--coordinates")) {
+            coordinates = true;
+        } else if (!strcmp(argv[i], "--num-kmers-in-seq")) {
+            // FYI: experimental
+            std::cerr << "WARNING: Flag --num-kmers-in-seq is experimental and"
+                         " should only be used for experimental purposes" << std::endl;
+            num_kmers_in_seq = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--count-kmers")) {
             count_kmers = true;
         } else if (!strcmp(argv[i], "--count-width")) {
@@ -1074,6 +1081,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --count-kmers \tadd k-mer counts to the annotation [off]\n");
             fprintf(stderr, "\t   --count-width \tnumber of bits used to represent k-mer abundance [8]\n");
+            fprintf(stderr, "\t   --coordinates \tannotate coordinates as multi-integer attributes [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
             // fprintf(stderr, "\t   --fast \t\t\tannotate in fast regime (leads to repeated labels and bigger annotation) [off]\n");
@@ -1133,6 +1141,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --max-path-length [INT] \tmaximum path length in row_diff annotation [100]\n");
             fprintf(stderr, "\t-i --infile-base [STR] \t\tgraph for generating succ/pred/anchors (for row_diff types) []\n");
             fprintf(stderr, "\t   --count-kmers \t\tadd k-mer counts to the row_diff annotation [off]\n");
+            fprintf(stderr, "\t   --coordinates \t\tadd k-mer coordinates to the row_diff annotation [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --parallel-nodes [INT] \tnumber of nodes processed in parallel in brwt tree [n_threads]\n");
             fprintf(stderr, "\n");

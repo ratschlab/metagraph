@@ -58,6 +58,7 @@ class Config {
     bool filter_by_kmer = false;
     bool output_json = false;
     bool aggregate_columns = false;
+    bool coordinates = false;
 
     unsigned int k = 3;
 
@@ -91,6 +92,7 @@ class Config {
     unsigned int row_diff_stage = 0;
     unsigned int max_path_length = 100;
     unsigned int smoothing_window = 1;  // no smoothing by default
+    unsigned int num_kmers_in_seq = 0;  // assume all input reads have this length
 
     unsigned long long int query_batch_size_in_bytes = 100'000'000;
     unsigned long long int num_rows_subsampled = 1'000'000;

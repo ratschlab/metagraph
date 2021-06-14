@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <stdexcept>
 
+#include <ips4o.hpp>
+
 #include "common/serialization.hpp"
 #include "common/utils/string_utils.hpp"
 #include "common/logger.hpp"
@@ -148,6 +150,17 @@ void ColumnCompressed<Label>::add_label_counts(const std::vector<Index> &indices
     }
 }
 
+// for each label and index 'i' add numeric attribute 'coord'
+template <typename Label>
+void ColumnCompressed<Label>::add_label_coord(Index i, const VLabels &labels, uint64_t coord) {
+    coords_.resize(num_labels());
+
+    for (const auto &label : labels) {
+        const size_t j = label_encoder_.encode(label);
+        coords_[j].emplace_back(i, coord);
+    }
+}
+
 template <typename Label>
 bool ColumnCompressed<Label>::has_label(Index i, const Label &label) const {
     try {
@@ -170,32 +183,37 @@ template <typename Label>
 void ColumnCompressed<Label>::serialize(const std::string &filename) const {
     flush();
 
-    std::ofstream outstream(make_suffix(filename, kExtension), std::ios::binary);
-    if (!outstream.good()) {
+    std::ofstream out(make_suffix(filename, kExtension), std::ios::binary);
+    if (!out) {
         logger->error("Could not open file for writing: {}",
                       make_suffix(filename, kExtension));
         throw std::ofstream::failure("Bad stream");
     }
 
-    serialize_number(outstream, num_rows_);
+    serialize_number(out, num_rows_);
 
-    label_encoder_.serialize(outstream);
+    label_encoder_.serialize(out);
 
     for (const auto &column : bitmatrix_) {
         assert(column.get());
-        column->serialize(outstream);
+        column->serialize(out);
     }
 
-    if (!relation_counts_.size())
-        return;
+    out.close();
 
-    outstream.close();
+    if (coords_.size())
+        serialize_coordinates(filename);
 
-    outstream.open(remove_suffix(filename, kExtension) + kCountExtension,
-                   std::ios::binary);
-    if (!outstream.good()) {
-        logger->error("Could not open file for writing: {}",
-                      remove_suffix(filename, kExtension) + kCountExtension);
+    if (relation_counts_.size())
+        serialize_counts(filename);
+}
+
+template <typename Label>
+void ColumnCompressed<Label>::serialize_counts(const std::string &filename) const {
+    auto counts_fname = remove_suffix(filename, kExtension) + kCountExtension;
+    std::ofstream out(counts_fname, std::ios::binary);
+    if (!out) {
+        logger->error("Could not open file for writing: {}", counts_fname);
         throw std::ofstream::failure("Bad stream");
     }
 
@@ -204,7 +222,7 @@ void ColumnCompressed<Label>::serialize(const std::string &filename) const {
 
     for (size_t j = 0; j < relation_counts_.size(); ++j) {
         if (!relation_counts_[j].size()) {
-            sdsl::int_vector<>(bitmatrix_[j]->num_set_bits(), 0, count_width_).serialize(outstream);
+            sdsl::int_vector<>(bitmatrix_[j]->num_set_bits(), 0, count_width_).serialize(out);
 
         } else {
             assert(relation_counts_[j].size() == bitmatrix_[j]->num_set_bits()
@@ -215,16 +233,83 @@ void ColumnCompressed<Label>::serialize(const std::string &filename) const {
                 sum_counts += v;
             }
 
-            relation_counts_[j].serialize(outstream);
+            relation_counts_[j].serialize(out);
         }
     }
 
     for (size_t j = relation_counts_.size(); j < bitmatrix_.size(); ++j) {
-        sdsl::int_vector<>(bitmatrix_[j]->num_set_bits(), 0, count_width_).serialize(outstream);
+        sdsl::int_vector<>(bitmatrix_[j]->num_set_bits(), 0, count_width_).serialize(out);
     }
 
     logger->info("Num relation counts: {}", num_counts);
     logger->info("Total relation count: {}", sum_counts);
+}
+
+template <typename Label>
+void ColumnCompressed<Label>::serialize_coordinates(const std::string &filename) const {
+    auto coords_fname = remove_suffix(filename, kExtension) + kCoordExtension;
+    std::ofstream out(coords_fname, std::ios::binary);
+    if (!out) {
+        logger->error("Could not open file for writing: {}", coords_fname);
+        throw std::ofstream::failure("Bad stream");
+    }
+
+    uint64_t num_coordinates = 0;
+
+    for (size_t j = 0; j < coords_.size(); ++j) {
+        // sort pairs <rank, coord>
+        auto &c_v = const_cast<ColumnCompressed*>(this)->coords_[j];
+
+        ips4o::parallel::sort(c_v.begin(), c_v.end(), std::less<>(), get_num_threads());
+        c_v.erase(std::unique(c_v.begin(), c_v.end()), c_v.end());
+
+        #pragma omp parallel for num_threads(get_num_threads())
+        for (size_t i = 0; i < c_v.size(); ++i) {
+            if (uint64_t rank = bitmatrix_[j]->conditional_rank1(c_v[i].first)) {
+                c_v[i].first = rank;
+            } else {
+                logger->warn("Trying to add attribute {} for not annotated object {}."
+                             " The attribute is ignored.", c_v[i].second, c_v[i].first);
+            }
+        }
+
+        // transform rank to index
+        size_t it = 0;
+        for (size_t i = 0; i < c_v.size(); ++i) {
+            if (c_v[i].first)
+                c_v[it++] = c_v[i];
+        }
+        c_v.resize(it);
+
+        // marks where the next block starts
+        //  *- * *
+        // 1001010
+        sdsl::bit_vector delim(c_v.size() + bitmatrix_[j]->num_set_bits() + 1, 0);
+        // pack coordinates
+        uint64_t max_coord = 0;
+        for (auto [r, coord] : c_v) {
+            max_coord = std::max(max_coord, coord);
+        }
+        sdsl::int_vector<> coords(c_v.size(), 0, sdsl::bits::hi(max_coord) + 1);
+        uint64_t cur = 0;
+        for (size_t i = 0; i < c_v.size(); ++i) {
+            auto [r, coord] = c_v[i];
+            while (cur < r) {
+                delim[i + cur++] = 1;
+            }
+            coords[i] = coord;
+        }
+        for (uint64_t t = cur + c_v.size(); t < delim.size(); ++t) {
+            delim[t] = 1;
+        }
+
+        bit_vector_smart(std::move(delim)).serialize(out);
+        coords.serialize(out);
+
+        num_coordinates += c_v.size();
+    }
+
+    logger->info("Number of coordinates: {} in {}", num_coordinates, coords_fname);
 }
 
 template <typename Label>

@@ -372,6 +372,26 @@ class TestAnnotate(unittest.TestCase):
         self.assertEqual('density: 0.0185072', params_str[2])
         self.assertEqual('representation: ' + anno_repr, params_str[3])
 
+    @parameterized.expand(GRAPH_TYPES)
+    def test_annotate_coordinates(self, graph_repr):
+
+        construct_command = f'{METAGRAPH} build --mask-dummy -p {NUM_THREADS} \
+                              --graph {graph_repr} -k 11 \
+                              -o {self.tempdir.name}/graph \
+                              {TEST_DATA_DIR}/transcripts_100.fa'
+
+        res = subprocess.run([construct_command], shell=True)
+        self.assertEqual(res.returncode, 0)
+
+        # build annotation
+        annotate_command = f'{METAGRAPH} annotate --anno-header -p {NUM_THREADS} --coordinates \
+                            -i {self.tempdir.name}/graph{graph_file_extension[graph_repr]} \
+                            -o {self.tempdir.name}/annotation \
+                            {TEST_DATA_DIR}/transcripts_100.fa'
+
+        res = subprocess.run([annotate_command], shell=True)
+        self.assertEqual(res.returncode, 0)
+
 
 if __name__ == '__main__':
     unittest.main()

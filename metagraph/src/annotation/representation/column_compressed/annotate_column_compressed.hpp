@@ -63,6 +63,8 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
     void add_label_counts(const std::vector<Index> &indices,
                           const VLabels &labels,
                           const std::vector<uint64_t> &counts) override;
+    // for each label and index 'i' add numeric attribute 'coord'
+    void add_label_coord(Index i, const VLabels &labels, uint64_t coord) override;
 
     bool has_label(Index i, const Label &label) const override;
     bool has_labels(Index i, const VLabels &labels) const override;
@@ -119,6 +121,7 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
 
     static constexpr auto kExtension = ".column.annodbg";
     static constexpr auto kCountExtension = ".column.annodbg.counts";
+    static constexpr auto kCoordExtension = ".column.annodbg.coords";
 
   private:
     void set(Index i, size_t j, bool value);
@@ -127,6 +130,8 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
     bitmap_builder& decompress_builder(size_t j);
     bitmap_dyn& decompress_bitmap(size_t j);
     const bitmap& get_column(size_t j) const;
+    void serialize_counts(const std::string &filename) const;
+    void serialize_coordinates(const std::string &filename) const;
 
     uint64_t num_rows_;
 
@@ -147,6 +152,7 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
     uint8_t count_width_;
     uint64_t max_count_;
     std::vector<sdsl::int_vector<>> relation_counts_;
+    std::vector<Vector<std::pair<Index, uint64_t>>> coords_;
 
     using MultiLabelEncoded<Label>::label_encoder_;
 };

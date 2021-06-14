@@ -324,6 +324,55 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                 );
             }
         }
+    } else if (config.coordinates) {
+        BatchAccumulator<std::tuple<std::string, std::vector<std::string>, uint64_t>> batcher(
+            [&](auto&& data) {
+                thread_pool.enqueue([&](auto &data) {
+                    anno_graph->add_kmer_coords(std::move(data));
+                }, std::move(data));
+            },
+            batch_size, batch_length, batch_size
+        );
+
+        for (const auto &file : files) {
+            logger->trace("Annotating k-mer coordinates for file {}", file);
+
+            if (file_format(file) != "FASTA"
+                    && file_format(file) != "FASTQ") {
+                logger->error("Currently only FASTA or FASTQ format is supported"
+                              " for annotating k-mer coordinates");
+                exit(1);
+            }
+
+            uint64_t coord = 0;
+            call_annotations(
+                file,
+                config.refpath,
+                anno_graph->get_graph(),
+                forward_and_reverse,
+                config.min_count,
+                config.max_count,
+                config.filename_anno,
+                config.annotate_sequence_headers,
+                config.fasta_anno_comment_delim,
+                config.fasta_header_delimiter,
+                config.anno_labels,
+                [&](std::string sequence, auto labels) {
+                    if (config.num_kmers_in_seq
+                            && config.num_kmers_in_seq + k - 1 != sequence.size()) {
+                        logger->error("All input sequences must have the same"
+                                      " length when flag --const-length is on");
+                        exit(1);
+                    }
+                    if (sequence.size() >= k) {
+                        uint64_t num_kmers = sequence.size() - k + 1;
+                        batcher.push_and_pay(sequence.size(),
+                                             std::move(sequence), std::move(labels), coord);
+                        coord += num_kmers;
+                    }
+                }
+            );
+        }
     }
 
     thread_pool.join();

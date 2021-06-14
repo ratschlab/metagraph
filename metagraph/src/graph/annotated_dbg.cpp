@@ -132,6 +132,63 @@ void AnnotatedDBG::add_kmer_counts(std::string_view sequence,
         annotator_->add_label_counts(indices, labels, kmer_counts);
 }
 
+void AnnotatedDBG::add_kmer_coord(std::string_view sequence,
+                                  const std::vector<Label> &labels,
+                                  uint64_t coord) {
+    assert(check_compatibility());
+
+    if (sequence.size() < dbg_.get_k())
+        return;
+
+    std::vector<row_index> indices;
+    indices.reserve(sequence.size() - dbg_.get_k() + 1);
+
+    graph_->map_to_nodes(sequence, [&](node_index i) { indices.push_back(i); });
+
+    if (!indices.size())
+        return;
+
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    for (node_index i : indices) {
+        // only insert coordinates for matched k-mers and increment the coordinates
+        if (i > 0)
+            annotator_->add_label_coord(graph_to_anno_index(i), labels, coord);
+        coord++;
+    }
+}
+
+void AnnotatedDBG::add_kmer_coords(
+        const std::vector<std::tuple<std::string, std::vector<Label>, uint64_t>> &data) {
+    assert(check_compatibility());
+
+    std::vector<std::vector<row_index>> ids(data.size());
+    for (size_t t = 0; t < data.size(); ++t) {
+        const auto &[sequence, labels, _] = data[t];
+        if (sequence.size() < dbg_.get_k())
+            continue;
+
+        auto &indices = ids[t];
+        indices.reserve(sequence.size() - dbg_.get_k() + 1);
+
+        graph_->map_to_nodes(sequence, [&](node_index i) { indices.push_back(i); });
+    }
+
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    for (size_t t = 0; t < data.size(); ++t) {
+        const auto &labels = std::get<1>(data[t]);
+        uint64_t coord = std::get<2>(data[t]);
+
+        for (node_index i : ids[t]) {
+            // only insert coordinates for matched k-mers and increment the coordinates
+            if (i > 0)
+                annotator_->add_label_coord(graph_to_anno_index(i), labels, coord);
+            coord++;
+        }
+    }
+}
+
 std::vector<Label> AnnotatedDBG::get_labels(std::string_view sequence,
                                             double presence_ratio) const {
     assert(presence_ratio >= 0.);

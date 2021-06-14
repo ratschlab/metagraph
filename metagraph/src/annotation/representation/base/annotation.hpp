@@ -54,6 +54,8 @@ class MultiLabelAnnotation
     virtual void add_label_counts(const std::vector<Index> &indices,
                                   const VLabels &labels,
                                   const std::vector<uint64_t> &counts);
+    // for each label and index 'i' add numeric attribute 'coord'
+    virtual void add_label_coord(Index i, const VLabels &labels, uint64_t coord);
 
     virtual bool has_label(Index i, const Label &label) const = 0;
     virtual bool has_labels(Index i, const VLabels &labels) const = 0;
