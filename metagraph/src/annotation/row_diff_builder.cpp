@@ -1098,7 +1098,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
     for (uint64_t chunk = 0; chunk < row_reduction.size(); chunk += BLOCK_SIZE) {
         row_nbits_block.assign(std::min(BLOCK_SIZE, row_reduction.size() - chunk), 0);
 
-        #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
+        #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
         for (size_t l_idx = 0; l_idx < diff_columns.size(); ++l_idx) {
             for (const auto &col_ptr : diff_columns[l_idx]) {
                 col_ptr->call_ones_in_range(chunk, chunk + row_nbits_block.size(),
@@ -1126,6 +1126,9 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
     }
 
     async_writer.join();
+
+    logger->trace("Rows with negative row reduction: {} in vector {}",
+                  num_larger_rows, row_reduction_fname);
 }
 
 void convert_batch_to_row_diff_coord(const std::string &pred_succ_fprefix,
