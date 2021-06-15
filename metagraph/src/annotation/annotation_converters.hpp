@@ -105,7 +105,7 @@ void convert_to_row_annotator(const ColumnCompressed<Label> &annotator,
  * kept, extension is changed from 'column.annodbg' to 'row_diff.annodbg'
  * @param swap_dir directory for temporary files
  * @param with_values row-diff transform with k-mer counts/attributes
- * @param with_coordinates row-diff transform with k-mer aoordinates/attributes
+ * @param with_coordinates row-diff transform with k-mer coordinates/attributes
  * @param num_coords_per_seq assume a constant length of each sequence (0: off)
  */
 enum class RowDiffStage { COUNT_LABELS = 0, COMPUTE_REDUCTION, CONVERT };

@@ -66,7 +66,6 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
     // for each label and index 'i' add numeric attribute 'coord'
     void add_label_coord(Index i, const VLabels &labels, uint64_t coord) override;
 
-
     bool has_label(Index i, const Label &label) const override;
     bool has_labels(Index i, const VLabels &labels) const override;
 

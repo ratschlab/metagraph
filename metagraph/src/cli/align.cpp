@@ -176,6 +176,9 @@ void map_sequences_in_file(const std::string &file,
         } else if (config.query_presence || config.count_kmers) {
             // TODO: make more efficient
             // TODO: canonicalization
+            if (dbg->get_mode() == CanonicalDBG::PRIMARY)
+                logger->warn("Sub-k-mers will be mapped to unwrapped primary graph");
+
             for (size_t i = 0; i + graph.get_k() <= read_stream->seq.l; ++i) {
                 dbg->call_nodes_with_suffix_matching_longest_prefix(
                     std::string_view(read_stream->seq.s + i, config.alignment_length),
@@ -390,6 +393,11 @@ int align_to_graph(Config *config) {
     ThreadPool thread_pool(get_num_threads());
     std::mutex print_mutex;
 
+    if (graph->get_mode() == DeBruijnGraph::PRIMARY) {
+        logger->trace("Primary graph wrapped into canonical");
+        graph = std::make_shared<CanonicalDBG>(graph);
+    }
+
     if (config->map_sequences) {
         if (!config->alignment_length) {
             config->alignment_length = graph->get_k();
@@ -415,11 +423,6 @@ int align_to_graph(Config *config) {
         thread_pool.join();
 
         return 0;
-    }
-
-    if (graph->get_mode() == DeBruijnGraph::PRIMARY) {
-        logger->trace("Primary graph wrapped into canonical");
-        graph = std::make_shared<CanonicalDBG>(graph);
     }
 
     DBGAlignerConfig aligner_config = initialize_aligner_config(graph->get_k(), *config);

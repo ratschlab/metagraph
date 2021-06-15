@@ -259,14 +259,16 @@ void ColumnCompressed<Label>::serialize_coordinates(const std::string &filename)
     for (size_t j = 0; j < coords_.size(); ++j) {
         // sort pairs <rank, coord>
         auto &c_v = const_cast<ColumnCompressed*>(this)->coords_[j];
+
         ips4o::parallel::sort(c_v.begin(), c_v.end(), std::less<>(), get_num_threads());
-        assert(std::unique(c_v.begin(), c_v.end()) == c_v.end());
+        c_v.erase(std::unique(c_v.begin(), c_v.end()), c_v.end());
+
         #pragma omp parallel for num_threads(get_num_threads())
         for (size_t i = 0; i < c_v.size(); ++i) {
             if (uint64_t rank = bitmatrix_[j]->conditional_rank1(c_v[i].first)) {
                 c_v[i].first = rank;
             } else {
-                logger->warn("Trying to add attribute {} for non-annotated object {}."
+                logger->warn("Trying to add attribute {} for not annotated object {}."
                              " The attribute is ignored.", c_v[i].second, c_v[i].first);
             }
         }
@@ -274,10 +276,8 @@ void ColumnCompressed<Label>::serialize_coordinates(const std::string &filename)
         // transform rank to index
         size_t it = 0;
         for (size_t i = 0; i < c_v.size(); ++i) {
-            if (c_v[i].first) {
-                c_v[i].first--;
+            if (c_v[i].first)
                 c_v[it++] = c_v[i];
-            }
         }
         c_v.resize(it);
 
@@ -292,14 +292,12 @@ void ColumnCompressed<Label>::serialize_coordinates(const std::string &filename)
         }
         sdsl::int_vector<> coords(c_v.size(), 0, sdsl::bits::hi(max_coord) + 1);
         uint64_t cur = 0;
-        delim[cur] = 1;
         for (size_t i = 0; i < c_v.size(); ++i) {
             auto [r, coord] = c_v[i];
             while (cur < r) {
-                delim[++cur + i] = 1;
+                delim[i + cur++] = 1;
             }
             coords[i] = coord;
-            // delim[cur + i] is already set to 0;
         }
         for (uint64_t t = cur + c_v.size(); t < delim.size(); ++t) {
             delim[t] = 1;
@@ -311,7 +309,7 @@ void ColumnCompressed<Label>::serialize_coordinates(const std::string &filename)
         num_coordinates += c_v.size();
     }
 
-    logger->info("Num coordinates: {}", num_coordinates);
+    logger->info("Number of coordinates: {} in {}", num_coordinates, coords_fname);
 }
 
 template <typename Label>
