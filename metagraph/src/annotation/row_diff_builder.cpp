@@ -889,6 +889,13 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
         }
     };
 
+    graph::DBGSuccinct graph(2);
+    logger->trace("Loading graph...");
+    if (!graph.load(pred_succ_fprefix)) {
+        logger->error("Cannot load graph from {}", pred_succ_fprefix);
+        std::exit(1);
+    }
+
     traverse_anno_chunked(
             num_rows, pred_succ_fprefix, sources,
             [&](uint64_t chunk_size) {
@@ -919,20 +926,40 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                     // or if the successor has zero diff
                     uint64_t succ_value = is_anchor ? 0 : get_value(source_col, source_idx, j, *succ);
                     if (succ_value != curr_value) {
-                        // no reduction, we must keep the bit
-                        auto &v = set_rows_fwd[source_idx][j];
-                        if constexpr(with_values) {
-                            v.emplace_back(row_idx, curr_value - succ_value);
-                        } else {
-                            v.push_back(row_idx);
-                        }
-                        if (is_anchor)
+                        if (is_anchor) {
                             num_relations_anchored[source_idx][j]++;
+                        } else {
+                            // no reduction, we must keep the bit
+                            auto &v = set_rows_fwd[source_idx][j];
+                            if constexpr(with_values) {
+                                v.emplace_back(row_idx, curr_value - succ_value);
+                            } else {
+                                v.push_back(row_idx);
+                            }
 
-                        if (v.size() == v.capacity()) {
-                            // dump chunk to disk
-                            dump_chunk_to_disk(v, source_idx, j, 0);
-                            v.resize(0);
+                            if (v.size() == v.capacity()) {
+                                // dump chunk to disk
+                                dump_chunk_to_disk(v, source_idx, j, 0);
+                                v.resize(0);
+                            }
+                        }
+                    } else {
+                        if (!succ) {
+                            auto edge = graph.kmer_to_boss_index(to_node(row_idx));
+                            const auto &boss = graph.get_boss();
+                            logger->trace("Reduction: value {}"
+                                          "\nFrom    anchor: {}, only_incoming: {}, only_outgoing: {}"
+                                          "\nTo      NULL",
+                                          curr_value, anchor[row_idx], boss.is_single_incoming(edge, boss.get_W()[edge]), boss.is_single_outgoing(edge));
+                        } else {
+                            auto edge = graph.kmer_to_boss_index(to_node(row_idx));
+                            auto next_edge = graph.kmer_to_boss_index(to_node(*succ));
+                            const auto &boss = graph.get_boss();
+                            logger->trace("Reduction: value {}"
+                                          "\nFrom    anchor: {}, only_incoming: {}, only_outgoing: {}"
+                                          "\nTo      anchor: {}, only_incoming: {}, only_outgoing: {}",
+                                          curr_value, anchor[row_idx], boss.is_single_incoming(edge, boss.get_W()[edge]), boss.is_single_outgoing(edge),
+                                          anchor[*succ], boss.is_single_incoming(next_edge, boss.get_W()[next_edge]), boss.is_single_outgoing(next_edge));
                         }
                     }
                 }
@@ -1098,7 +1125,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
     for (uint64_t chunk = 0; chunk < row_reduction.size(); chunk += BLOCK_SIZE) {
         row_nbits_block.assign(std::min(BLOCK_SIZE, row_reduction.size() - chunk), 0);
 
-        #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+        #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
         for (size_t l_idx = 0; l_idx < diff_columns.size(); ++l_idx) {
             for (const auto &col_ptr : diff_columns[l_idx]) {
                 col_ptr->call_ones_in_range(chunk, chunk + row_nbits_block.size(),
@@ -1126,9 +1153,6 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
     }
 
     async_writer.join();
-
-    logger->trace("Rows with negative row reduction: {} in vector {}",
-                  num_larger_rows, row_reduction_fname);
 }
 
 void convert_batch_to_row_diff_coord(const std::string &pred_succ_fprefix,
@@ -1347,30 +1371,40 @@ void convert_batch_to_row_diff_coord(const std::string &pred_succ_fprefix,
 
                 bool is_anchor = anchor[row_idx];
 
-                if (is_anchor)
+                if (is_anchor) {
                     num_coords_anchored[s][j] += curr_value.size();
+                } else {
+                    const auto diff = is_anchor
+                        ? curr_value
+                        : get_diff(curr_value, get_value(source_col, s, j, *succ));
 
-                const auto diff = is_anchor
-                    ? curr_value
-                    : get_diff(curr_value, get_value(source_col, s, j, *succ));
+                    if (diff.size()) {
+                        // must write the coordinates/diff
+                        auto &v = set_rows_fwd[s][j];
 
-                if (diff.size()) {
-                    // must write the coordinates/diff
-                    auto &v = set_rows_fwd[s][j];
-
-                    for (uint64_t coord : diff) {
-                        assert((!v.size() || v.back() != std::make_pair(row_idx, coord))
-                               && "coordinates must be unique and can't repeat");
-                        v.emplace_back(row_idx, coord);
-                        row_diff_coords[s][j]++;
-
-                        if (v.size() == v.capacity()) {
-                            // dump chunk to disk
-                            dump_chunk_to_disk(v, s, j, 0);
-                            v.resize(0);
+                        if (is_anchor) {
+                            logger->trace("anchor: {}", curr_value.size());
+                        } else {
+                            logger->trace("diff: {}{}: {} -> {}",
+                                curr_value.size() <= get_value(source_col, s, j, *succ).size()
+                                    ? "\t\t\t + " : "\t - ",
+                                diff.size(), curr_value.size(), get_value(source_col, s, j, *succ).size());
                         }
+
+                        for (uint64_t coord : diff) {
+                            assert((!v.size() || v.back() != std::make_pair(row_idx, coord))
+                                   && "coordinates must be unique and can't repeat");
+                            v.emplace_back(row_idx, coord);
+                            row_diff_coords[s][j]++;
+
+                            if (v.size() == v.capacity()) {
+                                // dump chunk to disk
+                                dump_chunk_to_disk(v, s, j, 0);
+                                v.resize(0);
+                            }
+                        }
+                        row_diff_bits[s][j]++;
                     }
-                    row_diff_bits[s][j]++;
                 }
 
                 // check non-anchor predecessor nodes and add them if they are zero
