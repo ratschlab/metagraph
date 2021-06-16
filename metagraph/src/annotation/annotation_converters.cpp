@@ -1247,8 +1247,7 @@ void convert_to_row_diff(const std::vector<std::string> &files,
         }
 
         Timer timer;
-        logger->trace("Annotations in batch: {}",
-                      file_batch.size());
+        logger->trace("Annotations in batch: {}", file_batch.size());
 
         if (construction_stage == RowDiffStage::COUNT_LABELS) {
             count_labels_per_row(file_batch, count_vector_fname, with_coordinates);

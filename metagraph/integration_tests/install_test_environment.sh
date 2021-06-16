@@ -12,7 +12,7 @@ VENV_DIR="$2"
 
 if [ -f ${VENV_DIR}/DONE ]; then
   echo "Found a previously set up virtual environment in ${VENV_DIR}"
-  return
+  exit 0
 fi
 echo "Setting up virtual environment in ${VENV_DIR}"
 python3 -m venv ${VENV_DIR}

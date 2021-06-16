@@ -161,6 +161,7 @@ class BOSS {
                             sdsl::bit_vector *rd_succ,
                             size_t max_length) const;
 
+    // TODO: remove
     edge_index row_diff_successor(edge_index edge, const bit_vector &rd_succ) const {
         TAlphabet d = get_W(edge) % alph_size;
         assert(d != kSentinelCode && "sinks have no row-diff successors");

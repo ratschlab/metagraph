@@ -280,7 +280,7 @@ void route_at_forks(const graph::DBGSuccinct &graph,
 
         std::vector<uint32_t> outgoing_counts;
 
-        sdsl::bit_vector rd_succ_bv(graph.num_nodes(), false);
+        sdsl::bit_vector rd_succ_bv(graph.num_nodes() + 1, false);
 
         sum_and_call_counts(count_vectors_dir, row_count_extension, "row counts",
             [&](int32_t count) {
@@ -291,7 +291,7 @@ void route_at_forks(const graph::DBGSuccinct &graph,
                     size_t max_pos = std::max_element(outgoing_counts.rbegin(),
                                                       outgoing_counts.rend())
                                      - outgoing_counts.rbegin();
-                    rd_succ_bv[to_row(graph_idx - max_pos)] = true;
+                    rd_succ_bv[graph_idx - max_pos] = true;
                     outgoing_counts.resize(0);
                 }
                 graph_idx++;
@@ -483,7 +483,7 @@ void assign_anchors(const std::string &graph_fname,
             {
                 sdsl::bit_vector rd_succ_bv(boss.get_last().size(), 0);
                 rd_succ.call_ones([&](uint64_t i) {
-                    rd_succ_bv[graph.kmer_to_boss_index(to_node(i))] = 1;
+                    rd_succ_bv[graph.kmer_to_boss_index(i)] = 1;
                 });
                 rd_succ = rd_succ_bv_type(rd_succ_bv);
             }
@@ -493,11 +493,11 @@ void assign_anchors(const std::string &graph_fname,
             uint64_t num_fork_successors = rd_succ.num_set_bits();
             sdsl::bit_vector rd_succ_bv = rd_succ.convert_to<sdsl::bit_vector>();
             rd_succ = rd_succ_bv_type();
-            boss.row_diff_add_forks(num_threads, anchors_bv, &rd_succ_bv, 10 * max_length);
+            // boss.row_diff_add_forks(num_threads, anchors_bv, &rd_succ_bv, 10 * max_length);
             {
-                sdsl::bit_vector bv(num_rows, 0);
+                sdsl::bit_vector bv(graph.num_nodes() + 1, 0);
                 call_ones(rd_succ_bv, [&](BOSS::edge_index i) {
-                    bv[to_row(graph.boss_to_kmer_index(i))] = 1;
+                    bv[graph.boss_to_kmer_index(i)] = 1;
                 });
                 rd_succ_bv = std::move(bv);
             }
@@ -820,7 +820,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
             logger->error("Couldn't load row-diff successor bitmap from {}", rd_succ_fname);
             exit(1);
         }
-        if (rd_succ.size() != num_rows) {
+        if (rd_succ.size() != num_rows + 1) {
             logger->error("Successor bitmap {} is incompatible with annotations."
                           " Vector size: {}, number of rows: {}",
                           rd_succ_fname, rd_succ.size(), num_rows);
@@ -913,7 +913,11 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                          const uint64_t *it, const uint64_t *end) -> uint64_t {
         if (!with_values) {
             for ( ; it != end; ++it) {
-                if ((!rd_succ.size() || rd_succ[*it]) && col[*it])
+                if (!rd_succ.size()) {
+                    // the last edge (first succ row) is the only successor
+                    return col[*it];
+                }
+                if (rd_succ[to_node(*it)] && col[*it])
                     return true;
             }
             return false;
@@ -921,7 +925,12 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
             uint64_t value = 0;
             uint64_t rk;
             for ( ; it != end; ++it) {
-                if ((!rd_succ.size() || rd_succ[*it]) && (rk = col.conditional_rank1(*it)))
+                if (!rd_succ.size()) {
+                    // the last edge (first succ row) is the only successor
+                    rk = col.conditional_rank1(*it);
+                    return rk ? values[s][j][rk - 1] : 0;
+                }
+                if (rd_succ[to_node(*it)] && (rk = col.conditional_rank1(*it)))
                     value += values[s][j][rk - 1];
             }
             return value;
@@ -1006,7 +1015,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                     }
                 }
 
-                if (!curr_value || !rd_succ.size() || !rd_succ[row_idx])
+                if (!curr_value || !rd_succ.size() || !rd_succ[to_node(row_idx)])
                     return;
 
                 // check non-anchor predecessor nodes and add them if they are zero
@@ -1115,33 +1124,35 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
 
             const bool remove_chunks = true;
             uint64_t r = 0;
-            std::vector<uint64_t> indexes;
-            indexes.reserve(row_diff_bits[l_idx][j]);
+            // TODO: use int_vector_buffer
+            std::vector<uint64_t> ids;
+            ids.reserve(row_diff_bits[l_idx][j]);
             int64_t value = 0;
             elias_fano::merge_files<T>(filenames, [&](T v) {
                 if constexpr(with_values) {
                     assert(v.second && "zero diffs must have been skipped");
-                    if (indexes.empty() || v.first != indexes.back()) {
-                        if (!indexes.empty())
+                    if (ids.empty() || v.first != ids.back()) {
+                        if (!ids.empty())
                             values[l_idx][j][r++] = matrix::encode_diff(value);
                         value = 0;
-                        indexes.push_back(v.first);
+                        ids.push_back(v.first);
                     }
                     value += v.second;
                 } else {
-                    indexes.push_back(v);
+                    if (ids.empty() || v != ids.back())
+                        ids.push_back(v);
                 }
             }, remove_chunks, chunks_open_per_thread, false);
-            if constexpr(with_values) {
+            if (with_values && ids.size()) {
                 values[l_idx][j][r++] = matrix::encode_diff(value);
                 values[l_idx][j].resize(r);
-                assert(r == indexes.size());
+                assert(r == ids.size());
             }
-            assert(row_diff_bits[l_idx][j] >= indexes.size());
+            assert(row_diff_bits[l_idx][j] >= ids.size());
 
             columns[j] = std::make_unique<bit_vector_smart>(
-                [&](const auto &callback) { std::for_each(indexes.begin(), indexes.end(), callback); },
-                num_rows, indexes.size());
+                [&](const auto &callback) { std::for_each(ids.begin(), ids.end(), callback); },
+                num_rows, ids.size());
         }
 
         if (compute_row_reduction) {
@@ -1260,7 +1271,7 @@ void convert_batch_to_row_diff_coord(const std::string &pred_succ_fprefix,
         std::vector<uint64_t> result;
         uint64_t rk;
         for ( ; it != end; ++it) {
-            if ((!rd_succ.size() || rd_succ[*it]) && (rk = col.conditional_rank1(*it))) {
+            if ((!rd_succ.size() || rd_succ[to_node(*it)]) && (rk = col.conditional_rank1(*it))) {
                 uint64_t t = delims[s][j].select1(rk);
                 while (!delims[s][j][++t]) {
                     result.push_back(coords[s][j][t - rk]);
@@ -1373,7 +1384,7 @@ void convert_batch_to_row_diff_coord(const std::string &pred_succ_fprefix,
         logger->error("Couldn't load row-diff successor bitmap from {}", rd_succ_fname);
         exit(1);
     }
-    if (rd_succ.size() != num_rows) {
+    if (rd_succ.size() != num_rows + 1) {
         logger->error("Successor bitmap {} is incompatible with annotations."
                       " Vector size: {}, number of rows: {}",
                       rd_succ_fname, rd_succ.size(), num_rows);
@@ -1489,7 +1500,7 @@ void convert_batch_to_row_diff_coord(const std::string &pred_succ_fprefix,
                     row_diff_bits[s][j]++;
                 }
 
-                if (!curr_value.size() || !rd_succ[row_idx])
+                if (!curr_value.size() || !rd_succ[to_node(row_idx)])
                     return;
 
                 // check non-anchor predecessor nodes and add them if they are zero
