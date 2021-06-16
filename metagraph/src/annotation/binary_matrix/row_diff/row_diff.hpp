@@ -169,7 +169,7 @@ std::vector<BinaryMatrix::SetBitPositions>
 RowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
     assert(graph_ && "graph must be loaded");
     assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
-    assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());
+    assert(!fork_succ_.size() || fork_succ_.size() == graph_->num_nodes());
 
     // diff rows annotating nodes along the row-diff paths
     std::vector<Row> rd_ids;

@@ -188,7 +188,8 @@ template <typename T>
 void merge_files(std::vector<std::string> sources,
                  const std::function<void(const T &)> &on_new_item,
                  bool remove_sources = true,
-                 size_t max_sources_open = -1) {
+                 size_t max_sources_open = -1,
+                 bool deduplicate = true) {
     if (!sources.size())
         return;
 
@@ -223,7 +224,7 @@ void merge_files(std::vector<std::string> sources,
                     EliasFanoEncoderBuffered<T>::append_block(buf, new_chunks.back());
                     buf.resize(0);
                 }
-            });
+            }, remove_sources, -1, deduplicate);
             if (buf.size()) {
                 EliasFanoEncoderBuffered<T>::append_block(buf, new_chunks.back());
             }
@@ -238,7 +239,7 @@ void merge_files(std::vector<std::string> sources,
     T last = decoder.pop();
     while (!decoder.empty()) {
         T curr = decoder.pop();
-        if (curr != last) {
+        if (!deduplicate || curr != last) {
             on_new_item(last);
             last = curr;
         }

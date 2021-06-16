@@ -156,6 +156,11 @@ class BOSS {
                            const bit_vector &rd_succ,
                            sdsl::bit_vector *terminal) const;
 
+    void row_diff_add_forks(size_t num_threads,
+                            const sdsl::bit_vector &anchors,
+                            sdsl::bit_vector *rd_succ,
+                            size_t max_length) const;
+
     edge_index row_diff_successor(edge_index edge, const bit_vector &rd_succ) const {
         TAlphabet d = get_W(edge) % alph_size;
         assert(d != kSentinelCode && "sinks have no row-diff successors");

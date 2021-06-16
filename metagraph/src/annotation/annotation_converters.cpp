@@ -1174,6 +1174,23 @@ void convert_to_row_diff(const std::vector<std::string> &files,
         mem_bytes -= anchor_size;
     }
 
+    // TODO: move
+    if (construction_stage != RowDiffStage::COUNT_LABELS) {
+        const std::string rd_succ_fname = graph_fname + kRowDiffForkSuccExt;
+        if (!fs::exists(rd_succ_fname)) {
+            logger->error("Can't find row-diff successor bitmap at {}", rd_succ_fname);
+            exit(1);
+        }
+        uint64_t rd_succ_size = fs::file_size(rd_succ_fname);
+        if (rd_succ_size > mem_bytes) {
+            logger->warn("row-diff successor bitmap ({} MiB) is larger than"
+                         " the memory allocated ({} MiB). Reserve more RAM.",
+                         rd_succ_size >> 20, mem_bytes >> 20);
+            return;
+        }
+        mem_bytes -= rd_succ_size;
+    }
+
     if (!files.size())
         return;
 

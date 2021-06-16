@@ -2681,7 +2681,7 @@ void traverse_rd_path_backward(const BOSS &boss,
                                T max_length,
                                sdsl::bit_vector *visited,
                                sdsl::bit_vector *terminal,
-                               sdsl::bit_vector *dummy,
+                               const sdsl::bit_vector &dummy,
                                ProgressBar &progress_bar) {
     constexpr bool async = true;
 
@@ -2696,7 +2696,7 @@ void traverse_rd_path_backward(const BOSS &boss,
         std::tie(edge, dist_to_anchor) = queue.back();
         queue.pop_back();
 
-        assert(boss.get_W(edge) && !fetch_bit(dummy->data(), edge, async));
+        assert(boss.get_W(edge) && !dummy[edge]);
 
         // mark as visited
         // also check if the node had already been visited (in case of loop)
@@ -2725,7 +2725,7 @@ void traverse_rd_path_backward(const BOSS &boss,
         // So, we propagate the diff path backward.
         boss.call_incoming_to_target(boss.bwd(edge), boss.get_node_last_value(edge),
             [&](edge_index pred) {
-                if (!fetch_bit(dummy->data(), pred, async))
+                if (!dummy[pred])
                     queue.emplace_back(pred, dist_to_anchor + 1);
             }
         );
@@ -2805,7 +2805,7 @@ void BOSS::row_diff_traverse(size_t num_threads,
     // backward traversal
     traverse_path = [&](edge_index anchor) {
         traverse_rd_path_backward(*this, rd_succ, anchor, max_length, &visited,
-                                  terminal, &dummy, progress_bar);
+                                  terminal, dummy, progress_bar);
     };
 
     // run backward traversal from every anchor
@@ -2916,6 +2916,55 @@ void BOSS::row_diff_traverse(size_t num_threads,
 #ifndef NDEBUG
     assert_no_leftovers(*this, visited);
 #endif
+}
+
+void BOSS::row_diff_add_forks(size_t num_threads,
+                              const sdsl::bit_vector &anchor,
+                              sdsl::bit_vector *rd_succ,
+                              size_t max_length) const {
+    ProgressBar progress_bar(W_->size(), "Adding fork successors",
+                             std::cerr, !common::get_verbose());
+
+    constexpr bool async = true;
+    sdsl::bit_vector excluded(rd_succ->size(), false);
+
+    // start from 0 and go with blocks of 1024 bits to avoid race conditions
+    #pragma omp parallel for num_threads(num_threads) schedule(static, 1024)
+    for (edge_index i = 0; i < W_->size(); ++i) {
+        ++progress_bar;
+        // skip edge if it's not a fork or it's already selected
+        if (i < 2 || is_single_outgoing(i) || (*rd_succ)[i])
+            continue;
+
+        // (*rd_succ)[i] = true;
+        // continue;
+        // TODO: test this
+        // if (!is_single_incoming(i, get_W(i)))
+        //     continue;
+
+        std::vector<edge_index> queue = { i };
+
+        // make branching edge a successor if it reaches anchors not too deep
+        for (size_t depth = 0; depth < max_length && queue.size(); ++depth) {
+            edge_index edge = queue.back();
+            queue.pop_back();
+            // stop branch if anchor is reached
+            if (anchor[edge])
+                continue;
+
+            assert(get_W(edge) % alph_size);
+
+            call_outgoing(fwd(edge, get_W(edge) % alph_size), [&](BOSS::edge_index next) {
+                if (!fetch_bit(excluded.data(), next, async))
+                    queue.push_back(next);
+            });
+        }
+        if (queue.empty()) {
+            (*rd_succ)[i] = true;
+        } else {
+            set_bit(excluded.data(), i, async);
+        }
+    }
 }
 
 void BOSS::call_unitigs(Call<std::string&&, std::vector<edge_index>&&> callback,
