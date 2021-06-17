@@ -5,6 +5,7 @@
 #include "graph/representation/canonical_dbg.hpp"
 #include "common/logger.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
+#include "graph/representation/rc_dbg.hpp"
 
 
 namespace mtg {
@@ -58,56 +59,39 @@ void Alignment<NodeType>::append(Alignment&& other) {
 }
 
 template <typename NodeType>
-void Alignment<NodeType>::trim_offset() {
-    if (!offset_ || empty() || cigar_.empty())
-        return;
+size_t Alignment<NodeType>::trim_offset() {
+    if (!offset_ || nodes_.size() <= 1)
+        return 0;
 
-    auto it = cigar_.begin();
-    if (it->first == Cigar::CLIPPED)
-        ++it;
-
-    if (it == cigar_.end())
-        return;
-
-    auto jt = nodes_.begin();
-    size_t counter = 0;
-    while (offset_ && it != cigar_.end() && jt != nodes_.end()) {
-        if (counter == it->second
-                || it->first == Cigar::CLIPPED
-                || it->first == Cigar::INSERTION) {
-            ++it;
-            counter = 0;
-            continue;
-        }
-
-        size_t jump = std::min({ offset_, static_cast<size_t>(it->second),
-                                          static_cast<size_t>(nodes_.end() - jt) });
-        offset_ -= jump;
-        counter += jump;
-        jt += jump;
-    }
-
-    if (jt == nodes_.end()) {
-        --jt;
-        ++offset_;
-    }
-
-    nodes_.erase(nodes_.begin(), jt);
+    size_t trim = std::min(offset_, nodes_.size() - 1);
+    offset_ -= trim;
+    nodes_.erase(nodes_.begin(), nodes_.begin() + trim);
+    return trim;
 }
 
 template <typename NodeType>
 void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
                                              std::string_view query_rev_comp) {
-    assert(graph.get_mode() == DeBruijnGraph::CANONICAL);
-
-    if (empty())
-        return;
-
     assert(query_.size() + get_end_clipping() == query_rev_comp.size() - get_clipping());
-    assert(is_valid(graph));
 
     trim_offset();
-    assert(is_valid(graph));
+    assert(!offset_ || nodes_.size() == 1);
+
+    if (const auto *rc_dbg = dynamic_cast<const RCDBG*>(&graph)) {
+        if (offset_) {
+            *this = Alignment<NodeType>();
+        } else {
+            std::reverse(cigar_.begin(), cigar_.end());
+            std::reverse(nodes_.begin(), nodes_.end());
+            ::reverse_complement(sequence_.begin(), sequence_.end());
+            assert(query_rev_comp.size() >= get_clipping() + get_end_clipping());
+
+            orientation_ = !orientation_;
+            query_ = { query_rev_comp.data() + get_clipping(),
+                       query_rev_comp.size() - get_clipping() - get_end_clipping() };
+        }
+        return;
+    }
 
     if (!offset_) {
         reverse_complement_seq_path(graph, sequence_, nodes_);
@@ -463,10 +447,6 @@ Json::Value Alignment<NodeType>::to_json(std::string_view full_query,
 
     if (orientation_)
         alignment["read_on_reverse_strand"] = orientation_;
-
-    if (label.data())
-        alignment["sample_name"] = std::string(label);
-
 
     // Unused flags (for now)
     //alignment["quality"]; // bytes

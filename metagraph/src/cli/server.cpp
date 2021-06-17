@@ -163,7 +163,7 @@ std::string process_search_request(const std::string &received_message,
     std::unique_ptr<graph::align::DBGAlignerConfig> aligner_config;
     if (json.get("align", false).asBool()) {
         aligner_config.reset(new graph::align::DBGAlignerConfig(
-            initialize_aligner_config(anno_graph.get_graph().get_k(), config)
+            initialize_aligner_config(config)
         ));
     }
 
@@ -229,7 +229,8 @@ std::string process_align_request(const std::string &received_message,
         "max_num_nodes_per_seq_char",
         config.alignment_max_nodes_per_seq_char).asDouble();
 
-    std::unique_ptr<graph::align::IDBGAligner> aligner = build_aligner(graph, config);
+    graph::align::DBGAlignerConfig aligner_config = initialize_aligner_config(config);
+    std::unique_ptr<graph::align::IDBGAligner> aligner = build_aligner(graph, aligner_config);
 
     // TODO: make parallel?
     seq_io::read_fasta_from_string(fasta.asString(),

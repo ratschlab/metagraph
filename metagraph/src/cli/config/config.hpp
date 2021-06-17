@@ -54,7 +54,7 @@ class Config {
     bool files_sequentially = false;
     bool map_sequences = false;
     bool align_sequences = false;
-    bool align_both_strands = false;
+    bool align_one_strand = false;
     bool filter_by_kmer = false;
     bool output_json = false;
     bool aggregate_columns = false;
@@ -110,7 +110,6 @@ class Config {
     int8_t alignment_gap_opening_penalty = 5;
     int8_t alignment_gap_extension_penalty = 2;
 
-    int32_t alignment_min_cell_score = 0;
     int32_t alignment_min_path_score = 0;
     int32_t alignment_xdrop = 27;
 
