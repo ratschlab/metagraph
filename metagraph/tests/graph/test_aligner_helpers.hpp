@@ -86,7 +86,18 @@ inline void check_extend(std::shared_ptr<const DeBruijnGraph> graph,
     ASSERT_EQ(paths.size(), unimem_paths.size());
 
     for (size_t i = 0; i < paths.size(); ++i) {
-        EXPECT_EQ(paths[i], unimem_paths[i]) << paths[i] << "\n" << unimem_paths[i];
+        if (graph->get_mode() == DeBruijnGraph::CANONICAL) {
+            auto alt = unimem_paths[i];
+            alt.reverse_complement(*graph, paths.get_query(!alt.get_orientation()));
+            if (alt.size()) {
+                EXPECT_TRUE(paths[i] == unimem_paths[i] || paths[i] == alt)
+                     << i << "\n" << paths[i] << "\n" << unimem_paths[i];
+            } else {
+                EXPECT_EQ(paths[i], unimem_paths[i]) << i << "\n" << paths[i] << "\n" << unimem_paths[i];
+            }
+        } else {
+            EXPECT_EQ(paths[i], unimem_paths[i]) << i << "\n" << paths[i] << "\n" << unimem_paths[i];
+        }
     }
 }
 
