@@ -7,6 +7,10 @@
 #include "load/load_graph.hpp"
 #include "seq_io/sequence_io.hpp"
 
+#include "annotation/taxonomy/taxonomic_db.hpp"
+#include "load/load_graph.hpp"
+#include "load/load_annotated_graph.hpp"
+
 #include "common/logger.hpp"
 
 namespace mtg {
@@ -14,7 +18,7 @@ namespace cli {
 
 using mtg::common::logger;
 
-uint64_t QUERY_SEQ_BATCH_SIZE = 10000;
+uint64_t QUERY_SEQ_BATCH_SIZE = 1000;
 
 std::vector<std::pair<std::string, uint64_t> > pair_label_taxid;
 std::mutex tax_mutex;
@@ -42,9 +46,7 @@ void run_sequence_batch(const std::vector<std::pair<std::string, std::string> > 
 }
 
 void execute_fasta_file(const string &file,
-                        ThreadPool &thread_pool,
-                        const mtg::graph::DeBruijnGraph &graph,
-                        const mtg::annot::TaxClassifier &tax_classifier) {
+                        std::function<void(const std::vector<std::pair<std::string, std::string> > &)> &callback) {
     logger->trace("Parsing query sequences from file {}.", file);
 
     seq_io::FastaParser fasta_parser(file);
@@ -58,8 +60,7 @@ void execute_fasta_file(const string &file,
         if (seq_batch.size() != QUERY_SEQ_BATCH_SIZE) {
             continue;
         }
-
-        run_sequence_batch(seq_batch, tax_classifier, graph, thread_pool);
+        callback(seq_batch);
 
         cnt_queries_started ++;
         if (cnt_queries_started % 100000 == 0) {
@@ -67,7 +68,7 @@ void execute_fasta_file(const string &file,
         }
         seq_batch.clear();
     }
-    run_sequence_batch(seq_batch, tax_classifier, graph, thread_pool);
+    callback(seq_batch);
 }
 
 int taxonomic_classification(Config *config) {
@@ -76,13 +77,6 @@ int taxonomic_classification(Config *config) {
     const std::vector<std::string> &files = config->fnames;
 
     Timer timer;
-    logger->trace("Loading TaxonomyDB...");
-    mtg::annot::TaxClassifier tax_classifier(config->taxonomic_tree,
-                                             config->lca_coverage_fraction,
-                                             config->discovery_fraction);
-    logger->trace("Finished loading TaxonomyDB in {}s.", timer.elapsed());
-
-    timer.reset();
     logger->trace("Graph loading...");
     auto graph = load_critical_dbg(config->infbase);
     logger->trace("Finished graph loading in {}s.", timer.elapsed());
@@ -90,11 +84,66 @@ int taxonomic_classification(Config *config) {
     timer.reset();
     logger->trace("Processing the classification...");
     ThreadPool thread_pool(std::max(1u, get_num_threads()) - 1, 1000);
+
+    std::function<void(const std::vector<std::pair<std::string, std::string> > &)> callback;
+
+    std::unique_ptr<mtg::annot::TaxClassifier> tax_classifier;
+    std::unique_ptr<graph::AnnotatedDBG> anno_graph;
+    std::unique_ptr<annot::TaxonomyDB> taxonomy;
+
+    if (config->taxonomic_db != "") {
+        timer.reset();
+        logger->trace("Loading TaxonomyDB...");
+        tax_classifier = std::make_unique<annot::TaxClassifier>(config->taxonomic_db,
+                                                                config->lca_coverage_fraction,
+                                                                config->discovery_fraction);
+
+        logger->trace("Finished loading TaxonomyDB in {}s.", timer.elapsed());
+        callback = [&](const std::vector<std::pair<std::string, std::string> > &seq_batch){
+                thread_pool.enqueue([&](std::vector<std::pair<std::string, std::string> > sequences){
+                    for (std::pair<std::string, std::string> &seq : sequences) {
+                        append_new_result(seq.second, tax_classifier->assign_class(*graph, seq.first));
+                    }
+                }, std::move(seq_batch));
+        };
+    } else {
+        if (config->infbase_annotators.size() == 0) {
+            logger->error("The annotation matrix is missing from the command line, please use '-a' flag for the annotation matrix filepath.");
+            std::exit(1);
+        }
+        timer.reset();
+        logger->trace("Graph and Annotation loading...");
+        graph = load_critical_dbg(config->infbase);
+        anno_graph = initialize_annotated_dbg(graph, *config);
+        logger->trace("Finished graph&anno loading in {}s.", timer.elapsed());
+
+        timer.reset();
+        logger->trace("Constructing TaxonomyDB...");
+
+        taxonomy = std::make_unique<annot::TaxonomyDB>(config->taxonomic_tree, "", tsl::hopscotch_set<std::string>{});
+        logger->trace("Finished TaxonomyDB construction in {}s.", timer.elapsed());
+
+        if (config->top_label_fraction > 0) {
+            callback = [&](const std::vector<std::pair<std::string, std::string> > &seq_batch){
+                thread_pool.enqueue([&](std::vector<std::pair<std::string, std::string> > sequences){
+                    for (std::pair<std::string, std::string> &seq : sequences) {
+                        append_new_result(seq.second, taxonomy->assign_class_toplabels(*anno_graph, seq.first, config->top_label_fraction));
+                    }
+                }, std::move(seq_batch));
+            };
+        } else {
+            callback = [&](const std::vector<std::pair<std::string, std::string> > &seq_batch){
+                thread_pool.enqueue([&](std::vector<std::pair<std::string, std::string> > sequences){
+                    for (std::pair<std::string, std::string> &seq : sequences) {
+                        append_new_result(seq.second, taxonomy->assign_class_getrows(*anno_graph, seq.first, config->lca_coverage_fraction));
+                    }
+                }, std::move(seq_batch));
+            };
+        }
+    }
+
     for (const std::string &file : files) {
-        execute_fasta_file(file,
-                           thread_pool,
-                           *graph,
-                           tax_classifier);
+        execute_fasta_file(file, callback);
     }
     thread_pool.join();
 
