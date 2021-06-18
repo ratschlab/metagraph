@@ -1,6 +1,7 @@
 #ifndef __VECTORS_HPP__
 #define __VECTORS_HPP__
 
+#include <cstddef>
 #include <cstdint>
 
 #if _USE_FOLLY
