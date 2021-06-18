@@ -15,15 +15,15 @@ TEST_DATA_DIR = os.path.dirname(os.path.realpath(__file__)) + '/../tests/data'
 TAX_DATA_DIR = TEST_DATA_DIR + "/taxonomic_data"
 
 tax_tests = {
-    'one_thread': {
+    'one_thread_taxdb': {
         'threads': 1,
         'discovery_fraction': 0,
     },
-    '5_threads': {
+    '5_threads_taxdb': {
         'threads': 5,
         'discovery_fraction': 0,
     },
-    '16_threads': {
+    '16_threads_taxdb': {
         'threads': 16,
         'discovery_fraction': 0,
     }
@@ -36,6 +36,8 @@ class TestTaxonomy(unittest.TestCase):
         self.tempdir = TemporaryDirectory()
         self.tax_parent = {}
         self.tax_root = -1
+        self.lca_coverage = 0.9
+        self.k = 20
         tax_lines = open(TAX_DATA_DIR + '/dumb_nodes.dmp').readlines()
         for line in tax_lines:
             act_node = line.split('\t')[0].strip()
@@ -51,15 +53,11 @@ class TestTaxonomy(unittest.TestCase):
                 return True
         return False
 
-    @parameterized.expand(test_params)
-    @unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
-    def test_taxonomy(self, tax_test):
-        k = 20
-        lca_coverage = 0.9
+    def build_graph_and_annotation(self, num_threads: int):
         construct_command = '{exe} build -p {num_threads} -k {k} -o {outfile} {input}'.format(
             exe=METAGRAPH,
-            num_threads=tax_tests[tax_test]['threads'],
-            k=k,
+            num_threads=num_threads,
+            k=self.k,
             outfile=self.tempdir.name + '/graph',
             input=TAX_DATA_DIR + '/tax_input.fa'
         )
@@ -70,12 +68,66 @@ class TestTaxonomy(unittest.TestCase):
             exe=METAGRAPH,
             dbg=self.tempdir.name + '/graph.dbg',
             anno=self.tempdir.name + '/annotation',
-            num_threads=tax_tests[tax_test]['threads'],
+            num_threads=num_threads,
             input_fasta=TAX_DATA_DIR + '/tax_input.fa'
         )
         res = subprocess.run([annotate_command], shell=True)
         self.assertEqual(res.returncode, 0)
 
+    def get_prediction_statistics_from(self, res_lines: [str]) -> {}:
+        result = {}
+        result["num_correct_tips"] = 0
+        result["num_correct_internals"] = 0
+        result["num_total_tips"] = 0
+        result["num_total_internals"] = 0
+
+        result["num_descendant_prediction_internals"] = 0
+        result["num_ancestor_prediction_tips"] = 0
+        result["num_ancestor_prediction_internals"] = 0
+
+        result["num_wrong_prediction_tips"] = 0
+        result["num_wrong_prediction_internals"] = 0
+
+        result["num_too_few_discovered_kmers"] = 0
+
+        for line in res_lines:
+            if line == "":
+                continue
+            query_expected = line.split(" ")[1].split("|")[1].strip()
+            query_prediction = line.split(" ")[7].split("'")[1].strip()
+
+            if query_prediction == "0":
+                result["num_too_few_discovered_kmers"] += 1
+                continue
+
+            if int(line.split(" ")[1].split("|")[1]) >= 10009:
+                # This taxid is a tip, has no children in the taxonomic tree.
+                result["num_total_tips"] += 1
+                if query_expected == query_prediction:
+                    result["num_correct_tips"] += 1
+                else:
+                    if self.is_descendant(node=query_prediction, query=query_expected):
+                        result["num_ancestor_prediction_tips"] += 1
+                    else:
+                        result["num_wrong_prediction_tips"] += 1
+            else:
+                # This taxid is an internal node.
+                result["num_total_internals"] += 1
+                if query_expected == query_prediction:
+                    result["num_correct_internals"] += 1
+                else:
+                    if self.is_descendant(node=query_prediction, query=query_expected):
+                        result["num_ancestor_prediction_internals"] += 1
+                    elif self.is_descendant(node=query_expected, query=query_prediction):
+                        result["num_descendant_prediction_internals"] += 1
+                    else:
+                        result["num_wrong_prediction_internals"] += 1
+        return result
+
+    @parameterized.expand(test_params)
+    @unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
+    def test_taxonomy_taxdb(self, tax_test):
+        self.build_graph_and_annotation(tax_tests[tax_test]['threads'])
         transform_anno_tax_command = '{exe} transform_anno_tax --taxonomic-tree {tax_tree} \
                                      --label-taxid-map {lookup_table} -o {output} -p {num_threads} {anno}'.format(
             exe=METAGRAPH,
@@ -88,78 +140,112 @@ class TestTaxonomy(unittest.TestCase):
         res = subprocess.run([transform_anno_tax_command], shell=True)
         self.assertEqual(res.returncode, 0)
 
-        tax_class_command = '{exe} tax_class -i {dbg} {fasta_queries} --taxonomic-tree {taxDB} \
+        tax_class_command = '{exe} tax_class -i {dbg} {fasta_queries} --taxonomic-db {taxDB} \
                             --lca-coverage-fraction {lca_coverage} -p {num_threads} \
                             --discovery-fraction {discovery_fraction}'.format(
             exe=METAGRAPH,
             dbg=self.tempdir.name + '/graph.dbg',
             fasta_queries=TAX_DATA_DIR + '/tax_query.fa',
             taxDB=self.tempdir.name + '/taxDB.taxdb',
-            lca_coverage=lca_coverage,
+            lca_coverage=self.lca_coverage,
             num_threads=tax_tests[tax_test]['threads'],
             discovery_fraction=tax_tests[tax_test]['discovery_fraction'],
         )
         res = subprocess.run([tax_class_command], shell=True, stdout=PIPE)
         self.assertEqual(res.returncode, 0)
+
         res_lines = res.stdout.decode().rstrip().split('\n')
 
-        num_correct_tips = 0
-        num_correct_internals = 0
-        num_total_tips = 0
-        num_total_internals = 0
+        statistics = self.get_prediction_statistics_from(res_lines)
 
-        num_descendant_prediction_internals = 0
-        num_ancestor_prediction_tips = 0
-        num_ancestor_prediction_internals = 0
+        self.assertEqual(statistics["num_total_tips"], 120)
+        self.assertEqual(statistics["num_total_internals"], 80)
 
-        num_wrong_prediction_tips = 0
-        num_wrong_prediction_internals = 0
+        self.assertEqual(statistics["num_correct_tips"], 111)
+        self.assertEqual(statistics["num_correct_internals"], 38)
 
-        num_too_few_discovered_kmers = 0
+        self.assertEqual(statistics["num_ancestor_prediction_internals"], 5)
+        self.assertEqual(statistics["num_descendant_prediction_internals"], 34)
+        self.assertEqual(statistics["num_ancestor_prediction_tips"], 9)
 
-        for line in res_lines:
-            if line == "":
-                continue
-            query_expected = line.split(" ")[1].split("|")[3].strip()
-            query_prediction = line.split(" ")[7].split("'")[1].strip()
+        self.assertEqual(statistics["num_wrong_prediction_internals"], 3)
+        self.assertEqual(statistics["num_wrong_prediction_tips"], 0)
 
-            if query_prediction == "0":
-                num_too_few_discovered_kmers += 1
-                continue
+        self.assertEqual(statistics["num_too_few_discovered_kmers"], 0)
 
-            if line.split(" ")[1].split("|")[5] == "0":
-                # This taxid is a tip, has no children in the taxonomic tree.
-                num_total_tips += 1
-                if query_expected == query_prediction:
-                    num_correct_tips += 1
-                else:
-                    if self.is_descendant(node=query_prediction, query=query_expected):
-                        num_ancestor_prediction_tips += 1
-                    else:
-                        num_wrong_prediction_tips += 1
-            else:
-                # This taxid is an internal node.
-                num_total_internals += 1
-                if query_expected == query_prediction:
-                    num_correct_internals += 1
-                else:
-                    if self.is_descendant(node=query_prediction, query=query_expected):
-                        num_ancestor_prediction_internals += 1
-                    elif self.is_descendant(node=query_expected, query=query_prediction):
-                        num_descendant_prediction_internals += 1
-                    else:
-                        num_wrong_prediction_internals += 1
-        self.assertEqual(num_total_tips, 585)
-        self.assertEqual(num_total_internals, 39)
+    @parameterized.expand(test_params)
+    @unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
+    def test_taxonomy_getrows(self, tax_test):
+        self.build_graph_and_annotation(tax_tests[tax_test]['threads'])
+        tax_class_command = '{exe} tax_class -i {dbg} {fasta_queries} --taxonomic-tree {tax_tree} \
+                            --lca-coverage-fraction {lca_coverage} -p {num_threads} -a {anno} \
+                            --discovery-fraction {discovery_fraction}'.format(
+            exe=METAGRAPH,
+            dbg=self.tempdir.name + '/graph.dbg',
+            fasta_queries=TAX_DATA_DIR + '/tax_query.fa',
+            tax_tree=TAX_DATA_DIR + '/dumb_nodes.dmp',
+            lca_coverage=self.lca_coverage,
+            num_threads=tax_tests[tax_test]['threads'],
+            anno=self.tempdir.name + '/annotation.column.annodbg',
+            discovery_fraction=tax_tests[tax_test]['discovery_fraction'],
+        )
+        res = subprocess.run([tax_class_command], shell=True, stdout=PIPE)
+        self.assertEqual(res.returncode, 0)
 
-        self.assertEqual(num_correct_tips, 547)
-        self.assertEqual(num_correct_internals, 23)
+        res_lines = res.stdout.decode().rstrip().split('\n')
 
-        self.assertEqual(num_ancestor_prediction_internals, 5)
-        self.assertEqual(num_descendant_prediction_internals, 8)
-        self.assertEqual(num_ancestor_prediction_tips, 33)
+        statistics = self.get_prediction_statistics_from(res_lines)
 
-        self.assertEqual(num_wrong_prediction_internals, 3)
-        self.assertEqual(num_wrong_prediction_tips, 5)
+        self.assertEqual(statistics["num_total_tips"], 120)
+        self.assertEqual(statistics["num_total_internals"], 80)
 
-        self.assertEqual(num_too_few_discovered_kmers, 73)
+        self.assertEqual(statistics["num_correct_tips"], 111)
+        self.assertEqual(statistics["num_correct_internals"], 38)
+
+        self.assertEqual(statistics["num_ancestor_prediction_internals"], 5)
+        self.assertEqual(statistics["num_descendant_prediction_internals"], 34)
+        self.assertEqual(statistics["num_ancestor_prediction_tips"], 9)
+
+        self.assertEqual(statistics["num_wrong_prediction_internals"], 3)
+        self.assertEqual(statistics["num_wrong_prediction_tips"], 0)
+
+        self.assertEqual(statistics["num_too_few_discovered_kmers"], 0)
+
+    @parameterized.expand(test_params)
+    @unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
+    def test_taxonomy_toplabels(self, tax_test):
+        self.build_graph_and_annotation(tax_tests[tax_test]['threads'])
+        tax_class_command = '{exe} tax_class -i {dbg} {fasta_queries} --taxonomic-tree {tax_tree} \
+                            --lca-coverage-fraction {lca_coverage} -p {num_threads} -a {anno} \
+                            --discovery-fraction {discovery_fraction} --top-label-fraction {top_label_fraction}'.format(
+            exe=METAGRAPH,
+            dbg=self.tempdir.name + '/graph.dbg',
+            fasta_queries=TAX_DATA_DIR + '/tax_query.fa',
+            tax_tree=TAX_DATA_DIR + '/dumb_nodes.dmp',
+            lca_coverage=self.lca_coverage,
+            num_threads=tax_tests[tax_test]['threads'],
+            anno=self.tempdir.name + '/annotation.column.annodbg',
+            discovery_fraction=tax_tests[tax_test]['discovery_fraction'],
+            top_label_fraction=0.7,
+        )
+        res = subprocess.run([tax_class_command], shell=True, stdout=PIPE)
+        self.assertEqual(res.returncode, 0)
+
+        res_lines = res.stdout.decode().rstrip().split('\n')
+
+        statistics = self.get_prediction_statistics_from(res_lines)
+
+        self.assertEqual(statistics["num_total_tips"], 118)
+        self.assertEqual(statistics["num_total_internals"], 68)
+
+        self.assertEqual(statistics["num_correct_tips"], 74)
+        self.assertEqual(statistics["num_correct_internals"], 24)
+
+        self.assertEqual(statistics["num_ancestor_prediction_internals"], 27)
+        self.assertEqual(statistics["num_descendant_prediction_internals"], 15)
+        self.assertEqual(statistics["num_ancestor_prediction_tips"], 44)
+
+        self.assertEqual(statistics["num_wrong_prediction_internals"], 2)
+        self.assertEqual(statistics["num_wrong_prediction_tips"], 0)
+
+        self.assertEqual(statistics["num_too_few_discovered_kmers"], 14)

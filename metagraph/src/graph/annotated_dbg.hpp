@@ -60,8 +60,9 @@ class AnnotatedSequenceGraph {
 
   protected:
     std::shared_ptr<SequenceGraph> graph_;
+public:
     std::unique_ptr<Annotator> annotator_;
-
+protected:
     std::mutex mutex_;
     bool force_fast_;
 };

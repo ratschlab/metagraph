@@ -398,6 +398,7 @@ TEST (TaxonomyTest, ClassifierUpdateScoresAndLca) {
 
             for (uint64_t node: nodes_set) {
                 tax_classifier.update_scores_and_lca(node, num_kmers_per_node, test.desired_number_kmers,
+                                                     tax_classifier.root_node, tax_classifier.node_parent,
                                                      &node_scores, &nodes_already_propagated,
                                                      &best_lca, &best_lca_dist_to_root);
             }
