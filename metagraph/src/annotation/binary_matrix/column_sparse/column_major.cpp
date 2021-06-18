@@ -45,19 +45,25 @@ ColumnMajor::SetBitPositions ColumnMajor::get_row(Row row) const {
 
 std::vector<ColumnMajor::SetBitPositions>
 ColumnMajor::get_rows(const std::vector<Row> &row_ids) const {
+    // std::cerr << "in get_rows for sparse columns" << std::endl;
     std::vector<SetBitPositions> rows(row_ids.size());
 
     for (size_t j = 0; j < columns_->size(); ++j) {
+        // std::cerr << "j-th column " << j << std::endl;
         assert((*columns_)[j].get());
         const auto &col = (*(*columns_)[j]);
 
         for (size_t i = 0; i < row_ids.size(); ++i) {
+            // std::cerr << "i-th row " << i << std::endl;
+            // std::cerr << "i-th row " << row_ids[i] << " of " << num_rows() << std::endl;
             assert(row_ids[i] < num_rows());
+            // std::cerr << "col[row_ids[i]]= " << col[row_ids[i]] << std::endl;
 
             if (col[row_ids[i]])
                 rows[i].push_back(j);
         }
     }
+    // std::cerr << "finished get_rows for sparse columns" << std::endl;
 
     return rows;
 }

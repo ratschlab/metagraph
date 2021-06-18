@@ -48,6 +48,7 @@ std::vector<BinaryMatrix::Row> RowSparse::get_column(Column column) const {
 }
 
 BinaryMatrix::SetBitPositions RowSparse::get_row(Row row) const {
+    std::cerr << "in BinaryMatrix::SetBitPositions get_row\n";
     assert(boundary_[boundary_.size() - 1] == 1);
     SetBitPositions result;
     uint64_t start_idx = row == 0 ? 0 : boundary_.select1(row) + 1;

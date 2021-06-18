@@ -52,7 +52,7 @@ void run_sequence_batch_db(const std::vector<std::pair<std::string, std::string>
 	// std::cerr << "before enque" << std::endl;
 	thread_pool.enqueue([&](std::vector<std::pair<std::string, std::string> > sequences){
 		for (std::pair<std::string, std::string> &seq : sequences) {
-			std::cout << "\nseq=" << seq.second << "\n";
+			// std::cout << "\nseq=" << seq.second << "\n";
 			// append_new_result(seq.second, taxonomy.assign_class(anno, seq.first));
 			// append_new_result(seq.second, taxonomy.assign_class_slow(anno, seq.first));
 			append_new_result(seq.second, taxonomy.assign_class_getrows(anno, seq.first));
@@ -125,9 +125,12 @@ int taxonomic_classification(Config *config) {
     const std::vector<std::string> &files = config->fnames;
 
     Timer timer;
-    if (fatruelse) {
+    if (true) {
 		std::cerr << "\n\nRun tax classify from TaxonomyDB\n\n";
 		logger->trace("Graph and Annotation loading...");
+		std::shared_ptr<graph::DeBruijnGraph> graph = load_critical_dbg(config->infbase);
+		std::unique_ptr<graph::AnnotatedDBG> anno_graph = initialize_annotated_dbg(graph, *config);
+
 		std::shared_ptr<graph::DeBruijnGraph> graph = load_critical_dbg(config->infbase);
 		std::unique_ptr<graph::AnnotatedDBG> anno_graph = initialize_annotated_dbg(graph, *config);
 		logger->trace("Finished graph&anno loading in {}s.", timer.elapsed());

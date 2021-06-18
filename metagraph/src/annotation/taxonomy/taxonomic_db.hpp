@@ -5,6 +5,7 @@
 #include <tsl/hopscotch_map.h>
 
 #include "annotation/representation/base/annotation.hpp"
+#include "graph/representation/base/sequence_graph.hpp"
 #include "graph/annotated_dbg.hpp"
 
 namespace mtg {
@@ -19,10 +20,10 @@ class TaxonomyDB {
   public:
     using AccessionVersion = std::string;
     using TaxId = std::uint64_t;
-    using NormalizedTaxId = std::uint64_t;
-    using ChildrenList = std::vector<std::vector<NormalizedTaxId>>;
+    using ChildrenList = std::vector<std::vector<TaxId>>;
     using Annotator = annot::MultiLabelEncoded<AccessionVersion>;
     using KmerId = Annotator::Index;
+    using node_index = graph::SequenceGraph::node_index;
 
     /**
      * TaxonomyDB constructor
@@ -52,9 +53,9 @@ class TaxonomyDB {
     /**
      * Find LCA for a set of nodes in the tree.
      */
-    NormalizedTaxId find_lca(const std::vector<NormalizedTaxId> &taxids) const;
+    TaxId find_lca(const std::vector<TaxId> &taxids) const;
 
-    bool get_normalized_taxid(const std::string accession_version, NormalizedTaxId *taxid) const;
+    bool get_taxid_from_acc_version(const std::string accession_version, TaxId *taxid) const;
     static std::string get_accession_version_from_label(const std::string &label);
 
 	TaxId assign_class(const graph::AnnotatedDBG &anno,
@@ -73,11 +74,11 @@ class TaxonomyDB {
      *
      * @param [input] tax_tree_filepath path to a "nodes.dmp" file.
      * @param [output] tree -> tree stored as list of children.
-     * @param [output] root_node -> normalized id of the root of the tree.
+     * @param [output] root_node -> taxid of the root of the tree.
      */
     void read_tree(const std::string &tax_tree_filepath,
                    ChildrenList *tree,
-                   NormalizedTaxId *root_node);
+                   TaxId *root_node);
 
     /**
      * Reads and returns the label_taxid_map (accession version to taxid) corresponding to the received set of used accession versions.
@@ -94,7 +95,7 @@ class TaxonomyDB {
      *
      * @param [input] tree_linearization -> the linearization of the received tree.
      */
-    void rmq_preprocessing(const std::vector<NormalizedTaxId> &tree_linearization);
+    void rmq_preprocessing(const std::vector<TaxId> &tree_linearization);
 
     /**
      * dfs_statistics calculates a tree_linearization, this->node_depth and
@@ -104,9 +105,9 @@ class TaxonomyDB {
      * @param [input] tree -> tree stored as list of children.
      * @param [output] tree_linearization -> the linearization of the received tree.
      */
-    void dfs_statistics(const NormalizedTaxId node,
+    void dfs_statistics(const TaxId node,
                         const ChildrenList &tree,
-                        std::vector<NormalizedTaxId> *tree_linearization);
+                        std::vector<TaxId> *tree_linearization);
 
     void update_scores_and_lca(const TaxId start_node,
                                           const tsl::hopscotch_map<TaxId, uint64_t> &num_kmers_per_node,
@@ -131,7 +132,7 @@ class TaxonomyDB {
      * in the linearization.
      *          (e.g. rmq_data[3][6] return the node with max depth in [6, 13])
      */
-    std::vector<std::vector<NormalizedTaxId>> rmq_data;
+    std::vector<std::vector<TaxId>> rmq_data;
 
     /**
      * node_to_linearization_idx[node] returns the index of the first occurrence of node
@@ -157,17 +158,20 @@ class TaxonomyDB {
     /**
      * Maps taxid to its normalized index. Used for optimizing the runtime performance.
      */
-    tsl::hopscotch_map<TaxId, NormalizedTaxId> normalized_taxid;
+    // tsl::hopscotch_map<TaxId, NormalizedTaxId> normalized_taxid;
 
     /**
      * Maps normalized taxid to its denormalized counterpart.
      */
-    std::vector<TaxId> denormalized_taxid;
+    // std::vector<TaxId> denormalized_taxid;
 
     /**
     * taxonomic_map[kmer] returns the taxid LCA for the given kmer.
     */
     sdsl::int_vector<> taxonomic_map;
+
+    uint64_t max_taxid;
+    std::vector<uint64_t> taxid_leaves;
 
     // num_external_get_taxid_calls and num_external_get_taxid_calls_failed used only for logging purposes.
     static uint64_t num_get_taxid_calls;
