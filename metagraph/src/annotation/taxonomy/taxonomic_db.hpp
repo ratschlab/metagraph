@@ -61,7 +61,8 @@ class TaxonomyDB {
 
     TaxId assign_class_getrows(const graph::AnnotatedDBG &anno,
                                const std::string &sequence,
-                               const double lca_coverage_rate) const;
+                               const double lca_coverage_rate,
+                               const double kmers_discovery_rate) const;
 
     TaxId assign_class_toplabels(const graph::AnnotatedDBG &anno,
                                  const std::string &sequence,

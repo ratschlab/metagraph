@@ -415,10 +415,20 @@ void TaxonomyDB::export_to_file(const std::string &filepath) {
                   timer.elapsed());
 }
 
-TaxId TaxonomyDB::assign_class_getrows(const graph::AnnotatedDBG &anno, const std::string &sequence, const double lca_coverage_rate) const {
+TaxId TaxonomyDB::assign_class_getrows(const graph::AnnotatedDBG &anno,
+                                       const std::string &sequence,
+                                       const double lca_coverage_rate,
+                                       const double kmers_discovery_rate) const {
     logger->trace("inside assign_class_getrows");
-    std::vector<node_index> forward_kmers;
+    std::vector<NormalizedTaxId> curr_taxids;
+    auto callback_cell = [&](const std::string &label) {
+        TaxId act = static_cast<uint64_t>(std::stoull(utils::split_string(label, "|")[1]));
+        if (this->normalized_taxid.count(act)) {
+            curr_taxids.push_back(this->normalized_taxid.at(act));
+        }
+    };
 
+    std::vector<node_index> forward_kmers;
     uint64_t num_kmers = 0;
     vector<uint64_t> poz_forward;
     anno.get_graph_ptr()->map_to_nodes(sequence, [&](node_index i) {
@@ -430,30 +440,15 @@ TaxId TaxonomyDB::assign_class_getrows(const graph::AnnotatedDBG &anno, const st
         poz_forward.push_back(num_kmers - 1);
     });
 
-    auto rb = &anno.annotator_->get_matrix();
-    auto unique_rows = rb->get_rows(forward_kmers);
-
-    assert(forward_kmers.size() == unique_rows.size());
-
-    if (unique_rows.size() >= std::numeric_limits<uint32_t>::max()) {
-        throw std::runtime_error("There must be less than 2^32 unique rows."
-                                 " Reduce the query batch size.");
-    }
-
     std::vector<uint64_t> forward_taxids(num_kmers);
     uint64_t cnt = 0;
-    for (auto row : unique_rows) {
-        std::vector<NormalizedTaxId> curr_taxids;
-        for (auto column : row) {
-            TaxId act = static_cast<uint64_t>(std::stoull(utils::split_string(anno.annotator_->label_encoder_.decode(column), "|")[1]));
-            if (this->normalized_taxid.count(act)) {
-                curr_taxids.push_back(this->normalized_taxid.at(act));
-            }
-        }
+
+    anno.call_annotated_rows(forward_kmers, callback_cell,[&]() {
         if (curr_taxids.size() != 0) {
             forward_taxids[poz_forward[cnt++]] = this->denormalized_taxid[find_lca(curr_taxids)];
         }
-    }
+        curr_taxids.clear();
+    });
 
     std::string reversed_sequence = sequence;
     reverse_complement(reversed_sequence.begin(), reversed_sequence.end());
@@ -470,29 +465,15 @@ TaxId TaxonomyDB::assign_class_getrows(const graph::AnnotatedDBG &anno, const st
         poz_backward.push_back(cnt - 1);
     });
 
-    unique_rows = rb->get_rows(backward_kmers);
-    assert(backward_kmers.size() == unique_rows.size());
-
-    if (unique_rows.size() >= std::numeric_limits<uint32_t>::max()) {
-        throw std::runtime_error("There must be less than 2^32 unique rows."
-                                 " Reduce the query batch size.");
-    }
-
     std::vector<uint64_t> backward_taxids(num_kmers);
     cnt = 0;
-    for (auto row : unique_rows) {
-        std::vector<NormalizedTaxId> curr_taxids;
-        for (auto column : row) {
-            TaxId act = static_cast<uint64_t>(std::stoull(utils::split_string(anno.annotator_->label_encoder_.decode(column), "|")[1]));
-            if (this->normalized_taxid.count(act)) {
-                curr_taxids.push_back(this->normalized_taxid.at(act));
-            }
-        }
+
+    anno.call_annotated_rows(backward_kmers, callback_cell, [&]() {
         if (curr_taxids.size() != 0) {
-            backward_taxids[num_kmers - 1 - poz_backward[cnt]] = this->denormalized_taxid[find_lca(curr_taxids)];
+            backward_taxids[poz_backward[cnt++]] = this->denormalized_taxid[find_lca(curr_taxids)];
         }
-        cnt++;
-    }
+        curr_taxids.clear();
+    });
 
     tsl::hopscotch_map<TaxId, uint64_t> num_kmers_per_node;
 
@@ -524,7 +505,7 @@ TaxId TaxonomyDB::assign_class_getrows(const graph::AnnotatedDBG &anno, const st
         }
     }
 
-    if (total_discovered_kmers <= 0.2 * num_kmers) {
+    if (total_discovered_kmers <= kmers_discovery_rate * num_kmers) {
         return 0; // 0 is a wildcard for not enough discovered kmers.
     }
 

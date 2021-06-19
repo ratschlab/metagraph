@@ -135,7 +135,9 @@ int taxonomic_classification(Config *config) {
             callback = [&](const std::vector<std::pair<std::string, std::string> > &seq_batch){
                 thread_pool.enqueue([&](std::vector<std::pair<std::string, std::string> > sequences){
                     for (std::pair<std::string, std::string> &seq : sequences) {
-                        append_new_result(seq.second, taxonomy->assign_class_getrows(*anno_graph, seq.first, config->lca_coverage_fraction));
+                        append_new_result(seq.second, taxonomy->assign_class_getrows(*anno_graph, seq.first,
+                                                                                     config->lca_coverage_fraction,
+                                                                                     config->discovery_fraction));
                     }
                 }, std::move(seq_batch));
             };
