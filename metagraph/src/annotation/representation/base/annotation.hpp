@@ -167,7 +167,7 @@ class MultiLabelEncoded : public MultiLabelAnnotation<uint64_t, LabelType> {
 
     virtual const binmat::BinaryMatrix& get_matrix() const = 0;
 
-  public:
+  protected:
     LabelEncoder<Label> label_encoder_;
 };
 
