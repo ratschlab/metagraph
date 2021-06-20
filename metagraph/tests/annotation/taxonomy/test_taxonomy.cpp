@@ -161,7 +161,7 @@ TEST (TaxonomyTest, FindLca) {
 
     for(const auto &it: queries) {
         EXPECT_EQ(make_pair(it.test_id, it.expected),
-                  make_pair(it.test_id, tax.find_lca(it.nodes)));
+                  make_pair(it.test_id, tax.find_normalized_lca(it.nodes)));
     }
 }
 
@@ -190,9 +190,9 @@ TEST (TaxonomyTest, KmerToTaxidUpdate) {
      */
 
     uint64_t k = 20;
-    uint64_t SEQ1 = 10;
-    uint64_t SEQ2 = 1;
-    uint64_t SEQ3 = 0;
+    uint64_t SEQ1 = 10; // "NC_19.1"
+    uint64_t SEQ2 = 1;  // "NC_10.1"
+    uint64_t SEQ3 = 0;  // "NC_09.1"
 
     get_sequences_and_labels_from_file(input_filepath, all_sequences, all_labels);
 
@@ -212,17 +212,17 @@ TEST (TaxonomyTest, KmerToTaxidUpdate) {
     ASSERT_TRUE(tax.get_normalized_taxid(tax.get_accession_version_from_label(all_labels[SEQ3]),
         &normalized_taxid_seq3));
 
-    uint64_t normalized_lca_seq23 = tax.find_lca({normalized_taxid_seq2,
-                                                    normalized_taxid_seq3});
-    uint64_t normalized_lca_seq123 = tax.find_lca({normalized_taxid_seq1,
-                                                    normalized_taxid_seq2,
-                                                    normalized_taxid_seq3});
+    uint64_t normalized_lca_seq23 = tax.find_normalized_lca({normalized_taxid_seq2,
+                                                             normalized_taxid_seq3});
+    uint64_t normalized_lca_seq123 = tax.find_normalized_lca({normalized_taxid_seq1,
+                                                              normalized_taxid_seq2,
+                                                              normalized_taxid_seq3});
 
     struct query_tax_map_update {
         std::string test_id;
         // 'expected_freq_taxid' represents the expected number of kmers that are pointing to each taxid node.
         tsl::hopscotch_map<uint64_t, uint64_t> expected_freq_taxid;
-        // 'seq_list' represents the sequences which will be sent to KmerToTaxidUpdate in the given order.
+        // 'seq_list' represents the sequences that will be processed in the given order.
         std::vector<uint64_t> seq_list;
     };
 

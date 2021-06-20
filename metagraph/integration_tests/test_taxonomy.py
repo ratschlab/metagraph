@@ -7,25 +7,22 @@ from tempfile import TemporaryDirectory
 import os
 
 
-"""Test taxonomy classification workflow"""
+"""Test taxonomy classification framework"""
 
 METAGRAPH = './metagraph'
-PROTEIN_MODE = os.readlink(METAGRAPH).endswith("_Protein")
+PROTEIN_MODE = os.readlink(METAGRAPH).endswith("_Protein") # TODO - decide if we need to consider this "_Protein" case
 TEST_DATA_DIR = os.path.dirname(os.path.realpath(__file__)) + '/../tests/data'
 TAX_DATA_DIR = TEST_DATA_DIR + "/taxonomic_data"
 
 tax_tests = {
-    'one_thread_taxdb': {
+    'one_thread': {
         'threads': 1,
-        'discovery_fraction': 0,
     },
-    '5_threads_taxdb': {
+    '5_threads': {
         'threads': 5,
-        'discovery_fraction': 0,
     },
-    '16_threads_taxdb': {
+    '16_threads': {
         'threads': 16,
-        'discovery_fraction': 0,
     }
 }
 
@@ -96,12 +93,14 @@ class TestTaxonomy(unittest.TestCase):
             query_expected = line.split(" ")[1].split("|")[1].strip()
             query_prediction = line.split(" ")[7].split("'")[1].strip()
 
+            # TaxId 0 means that there were not enough discovered kmers in order to realize the tax classification.
             if query_prediction == "0":
                 result["num_too_few_discovered_kmers"] += 1
                 continue
 
+            # All the tax nodes with ids {10001, 10002 .. 10008} represents internal nodes. TaxIds >= 10009 are reserved for the leaves.
             if int(line.split(" ")[1].split("|")[1]) >= 10009:
-                # This taxid is a tip, has no children in the taxonomic tree.
+                # The current taxid is a tip, thus, it has no children in the taxonomic tree.
                 result["num_total_tips"] += 1
                 if query_expected == query_prediction:
                     result["num_correct_tips"] += 1
@@ -111,7 +110,7 @@ class TestTaxonomy(unittest.TestCase):
                     else:
                         result["num_wrong_prediction_tips"] += 1
             else:
-                # This taxid is an internal node.
+                # The current taxid is an internal node.
                 result["num_total_internals"] += 1
                 if query_expected == query_prediction:
                     result["num_correct_internals"] += 1
@@ -125,7 +124,7 @@ class TestTaxonomy(unittest.TestCase):
         return result
 
     @parameterized.expand(test_params)
-    @unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
+    @unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets") # TODO - decide if this skipIf can be deleted.
     def test_taxonomy_taxdb(self, tax_test):
         self.build_graph_and_annotation(tax_tests[tax_test]['threads'])
         transform_anno_tax_command = '{exe} transform_anno_tax --taxonomic-tree {tax_tree} \
@@ -141,27 +140,24 @@ class TestTaxonomy(unittest.TestCase):
         self.assertEqual(res.returncode, 0)
 
         tax_class_command = '{exe} tax_class -i {dbg} {fasta_queries} --taxonomic-db {taxDB} \
-                            --lca-coverage-fraction {lca_coverage} -p {num_threads} \
-                            --discovery-fraction {discovery_fraction}'.format(
+                            --lca-coverage-fraction {lca_coverage} -p {num_threads}'.format(
             exe=METAGRAPH,
             dbg=self.tempdir.name + '/graph.dbg',
             fasta_queries=TAX_DATA_DIR + '/tax_query.fa',
             taxDB=self.tempdir.name + '/taxDB.taxdb',
             lca_coverage=self.lca_coverage,
             num_threads=tax_tests[tax_test]['threads'],
-            discovery_fraction=tax_tests[tax_test]['discovery_fraction'],
         )
         res = subprocess.run([tax_class_command], shell=True, stdout=PIPE)
         self.assertEqual(res.returncode, 0)
 
         res_lines = res.stdout.decode().rstrip().split('\n')
-
         statistics = self.get_prediction_statistics_from(res_lines)
 
-        self.assertEqual(statistics["num_total_tips"], 120)
+        self.assertEqual(statistics["num_total_tips"], 118)
         self.assertEqual(statistics["num_total_internals"], 80)
 
-        self.assertEqual(statistics["num_correct_tips"], 111)
+        self.assertEqual(statistics["num_correct_tips"], 109)
         self.assertEqual(statistics["num_correct_internals"], 38)
 
         self.assertEqual(statistics["num_ancestor_prediction_internals"], 5)
@@ -171,15 +167,14 @@ class TestTaxonomy(unittest.TestCase):
         self.assertEqual(statistics["num_wrong_prediction_internals"], 3)
         self.assertEqual(statistics["num_wrong_prediction_tips"], 0)
 
-        self.assertEqual(statistics["num_too_few_discovered_kmers"], 0)
+        self.assertEqual(statistics["num_too_few_discovered_kmers"], 2)
 
     @parameterized.expand(test_params)
     @unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
     def test_taxonomy_getrows(self, tax_test):
         self.build_graph_and_annotation(tax_tests[tax_test]['threads'])
         tax_class_command = '{exe} tax_class -i {dbg} {fasta_queries} --taxonomic-tree {tax_tree} \
-                            --lca-coverage-fraction {lca_coverage} -p {num_threads} -a {anno} \
-                            --discovery-fraction {discovery_fraction}'.format(
+                            --lca-coverage-fraction {lca_coverage} -p {num_threads} -a {anno}'.format(
             exe=METAGRAPH,
             dbg=self.tempdir.name + '/graph.dbg',
             fasta_queries=TAX_DATA_DIR + '/tax_query.fa',
@@ -187,19 +182,17 @@ class TestTaxonomy(unittest.TestCase):
             lca_coverage=self.lca_coverage,
             num_threads=tax_tests[tax_test]['threads'],
             anno=self.tempdir.name + '/annotation.column.annodbg',
-            discovery_fraction=tax_tests[tax_test]['discovery_fraction'],
         )
         res = subprocess.run([tax_class_command], shell=True, stdout=PIPE)
         self.assertEqual(res.returncode, 0)
 
         res_lines = res.stdout.decode().rstrip().split('\n')
-
         statistics = self.get_prediction_statistics_from(res_lines)
 
-        self.assertEqual(statistics["num_total_tips"], 120)
+        self.assertEqual(statistics["num_total_tips"], 118)
         self.assertEqual(statistics["num_total_internals"], 80)
 
-        self.assertEqual(statistics["num_correct_tips"], 111)
+        self.assertEqual(statistics["num_correct_tips"], 109)
         self.assertEqual(statistics["num_correct_internals"], 38)
 
         self.assertEqual(statistics["num_ancestor_prediction_internals"], 5)
@@ -209,7 +202,7 @@ class TestTaxonomy(unittest.TestCase):
         self.assertEqual(statistics["num_wrong_prediction_internals"], 3)
         self.assertEqual(statistics["num_wrong_prediction_tips"], 0)
 
-        self.assertEqual(statistics["num_too_few_discovered_kmers"], 0)
+        self.assertEqual(statistics["num_too_few_discovered_kmers"], 2)
 
     @parameterized.expand(test_params)
     @unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
@@ -217,7 +210,7 @@ class TestTaxonomy(unittest.TestCase):
         self.build_graph_and_annotation(tax_tests[tax_test]['threads'])
         tax_class_command = '{exe} tax_class -i {dbg} {fasta_queries} --taxonomic-tree {tax_tree} \
                             --lca-coverage-fraction {lca_coverage} -p {num_threads} -a {anno} \
-                            --discovery-fraction {discovery_fraction} --top-label-fraction {top_label_fraction}'.format(
+                            --top-label-fraction {top_label_fraction}'.format(
             exe=METAGRAPH,
             dbg=self.tempdir.name + '/graph.dbg',
             fasta_queries=TAX_DATA_DIR + '/tax_query.fa',
@@ -225,14 +218,12 @@ class TestTaxonomy(unittest.TestCase):
             lca_coverage=self.lca_coverage,
             num_threads=tax_tests[tax_test]['threads'],
             anno=self.tempdir.name + '/annotation.column.annodbg',
-            discovery_fraction=tax_tests[tax_test]['discovery_fraction'],
             top_label_fraction=0.7,
         )
         res = subprocess.run([tax_class_command], shell=True, stdout=PIPE)
         self.assertEqual(res.returncode, 0)
 
         res_lines = res.stdout.decode().rstrip().split('\n')
-
         statistics = self.get_prediction_statistics_from(res_lines)
 
         self.assertEqual(statistics["num_total_tips"], 118)
