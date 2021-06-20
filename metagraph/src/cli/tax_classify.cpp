@@ -20,29 +20,19 @@ using mtg::common::logger;
 
 uint64_t QUERY_SEQ_BATCH_SIZE = 1000;
 
-std::vector<std::pair<std::string, uint64_t> > pair_label_taxid;
-std::mutex tax_mutex;
-
-void append_new_result(const std::string &seq_label, const uint64_t taxid) {
-    std::scoped_lock<std::mutex> guard(tax_mutex);
-    pair_label_taxid.emplace_back(seq_label, taxid);
+void append_new_result(const std::string &seq_label,
+                       const uint64_t taxid,
+                       std::vector<std::pair<std::string, uint64_t> > *pair_label_taxid,
+                       std::mutex *tax_mutex) {
+    std::scoped_lock<std::mutex> guard(*tax_mutex);
+    (*pair_label_taxid).emplace_back(seq_label, taxid);
 }
 
-void print_all_results(const std::function<void(const std::string &, const uint64_t &)> &callback) {
+void print_all_results(const std::vector<std::pair<std::string, uint64_t> > &pair_label_taxid,
+                       const std::function<void(const std::string &, const uint64_t &)> &callback) {
     for (const std::pair<std::string, uint64_t> &label_taxid : pair_label_taxid) {
         callback(label_taxid.first, label_taxid.second);
     }
-}
-
-void run_sequence_batch(const std::vector<std::pair<std::string, std::string> > &seq_batch,
-                        const mtg::annot::TaxClassifier &tax_classifier,
-                        const mtg::graph::DeBruijnGraph &graph,
-                        ThreadPool &thread_pool) {
-    thread_pool.enqueue([&](std::vector<std::pair<std::string, std::string> > sequences){
-        for (std::pair<std::string, std::string> &seq : sequences) {
-            append_new_result(seq.second, tax_classifier.assign_class(graph, seq.first));
-        }
-    }, std::move(seq_batch));
 }
 
 void execute_fasta_file(const string &file,
@@ -50,7 +40,6 @@ void execute_fasta_file(const string &file,
     logger->trace("Parsing query sequences from file {}.", file);
 
     seq_io::FastaParser fasta_parser(file);
-
     std::vector<std::pair<std::string, std::string> > seq_batch;
 
     uint64_t cnt_queries_started = 0;
@@ -79,7 +68,7 @@ int taxonomic_classification(Config *config) {
     Timer timer;
     logger->trace("Graph loading...");
     auto graph = load_critical_dbg(config->infbase);
-    logger->trace("Finished graph loading in {}s.", timer.elapsed());
+    logger->trace("Finished graph loading after {}s.", timer.elapsed());
 
     timer.reset();
     logger->trace("Processing the classification...");
@@ -87,11 +76,15 @@ int taxonomic_classification(Config *config) {
 
     std::function<void(const std::vector<std::pair<std::string, std::string> > &)> callback;
 
+    std::vector<std::pair<std::string, uint64_t> > pair_label_taxid;
+    std::mutex tax_mutex;
+
     std::unique_ptr<mtg::annot::TaxClassifier> tax_classifier;
     std::unique_ptr<graph::AnnotatedDBG> anno_graph;
     std::unique_ptr<annot::TaxonomyDB> taxonomy;
 
     if (config->taxonomic_db != "") {
+        // Given a taxdb filepath, use the tax_class version with taxonomic database.
         timer.reset();
         logger->trace("Loading TaxonomyDB...");
         tax_classifier = std::make_unique<annot::TaxClassifier>(config->taxonomic_db,
@@ -102,11 +95,13 @@ int taxonomic_classification(Config *config) {
         callback = [&](const std::vector<std::pair<std::string, std::string> > &seq_batch){
                 thread_pool.enqueue([&](std::vector<std::pair<std::string, std::string> > sequences){
                     for (std::pair<std::string, std::string> &seq : sequences) {
-                        append_new_result(seq.second, tax_classifier->assign_class(*graph, seq.first));
+                        append_new_result(seq.second, tax_classifier->assign_class(*graph, seq.first),
+                                          &pair_label_taxid, &tax_mutex);
                     }
                 }, std::move(seq_batch));
         };
     } else {
+        // Use tax_class without any precomputed database.
         if (config->infbase_annotators.size() == 0) {
             logger->error("The annotation matrix is missing from the command line, please use '-a' flag for the annotation matrix filepath.");
             std::exit(1);
@@ -115,29 +110,35 @@ int taxonomic_classification(Config *config) {
         logger->trace("Graph and Annotation loading...");
         graph = load_critical_dbg(config->infbase);
         anno_graph = initialize_annotated_dbg(graph, *config);
-        logger->trace("Finished graph&anno loading in {}s.", timer.elapsed());
+        logger->trace("Finished graph annotation loading after {}s.", timer.elapsed());
 
         timer.reset();
         logger->trace("Constructing TaxonomyDB...");
-
+        // Create a 'TaxonomyDB' object here. The constructor will initialize all the taxonomic tree statistics that are further used by taxonomy.classify().
         taxonomy = std::make_unique<annot::TaxonomyDB>(config->taxonomic_tree, "", tsl::hopscotch_set<std::string>{});
-        logger->trace("Finished TaxonomyDB construction in {}s.", timer.elapsed());
+        logger->trace("Finished TaxonomyDB construction after {}s.", timer.elapsed());
 
         if (config->top_label_fraction > 0) {
+            // Use tax_class version that is returning the LCA of the top labels among the kmers.
+            // This version is fast, but less precise.
             callback = [&](const std::vector<std::pair<std::string, std::string> > &seq_batch){
                 thread_pool.enqueue([&](std::vector<std::pair<std::string, std::string> > sequences){
                     for (std::pair<std::string, std::string> &seq : sequences) {
-                        append_new_result(seq.second, taxonomy->assign_class_toplabels(*anno_graph, seq.first, config->top_label_fraction));
+                        append_new_result(seq.second, taxonomy->assign_class_toplabels(*anno_graph, seq.first, config->top_label_fraction),
+                                          &pair_label_taxid, &tax_mutex);
                     }
                 }, std::move(seq_batch));
             };
         } else {
+            // Use tax_class version that computest the LCA taxid for each kmer.
+            // The prediction result will be identical to the one using taxdb, but the computations will be slower.
             callback = [&](const std::vector<std::pair<std::string, std::string> > &seq_batch){
                 thread_pool.enqueue([&](std::vector<std::pair<std::string, std::string> > sequences){
                     for (std::pair<std::string, std::string> &seq : sequences) {
                         append_new_result(seq.second, taxonomy->assign_class_getrows(*anno_graph, seq.first,
                                                                                      config->lca_coverage_fraction,
-                                                                                     config->discovery_fraction));
+                                                                                     config->discovery_fraction),
+                                          &pair_label_taxid, &tax_mutex);
                     }
                 }, std::move(seq_batch));
             };
@@ -149,8 +150,7 @@ int taxonomic_classification(Config *config) {
     }
     thread_pool.join();
 
-    print_all_results(
-            [](const std::string name_seq, const uint64_t &taxid) {
+    print_all_results(pair_label_taxid, [](const std::string name_seq, const uint64_t &taxid) {
                 std::string result = fmt::format(
                       "Sequence '{}' was classified with Tax ID '{}'\n",
                       name_seq, taxid);
