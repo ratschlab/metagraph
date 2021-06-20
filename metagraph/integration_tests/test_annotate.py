@@ -59,14 +59,12 @@ class TestAnnotate(unittest.TestCase):
 
         for anno_repr in ['row', 'column']:
             # build annotation
-            annotate_command = '{exe} annotate --anno-header -i {graph} \
-                    --anno-type {anno_repr} -o {outfile} {input}'.format(
-                exe=METAGRAPH,
-                graph=self.tempdir.name + '/graph' + graph_file_extension[graph_repr],
-                anno_repr=anno_repr,
-                outfile=self.tempdir.name + '/annotation',
-                input=TEST_DATA_DIR + '/transcripts_100.fa'
-            )
+            annotate_command = f'{METAGRAPH} annotate --anno-header -p {NUM_THREADS} \
+                                -i {self.tempdir.name}/graph{graph_file_extension[graph_repr]} \
+                                --anno-type {anno_repr} \
+                                -o {self.tempdir.name}/annotation \
+                                {TEST_DATA_DIR}/transcripts_100.fa'
+
             res = subprocess.run([annotate_command], shell=True)
             self.assertEqual(res.returncode, 0)
 
@@ -113,14 +111,11 @@ class TestAnnotate(unittest.TestCase):
 
         for anno_repr in ['row', 'column']:
             # build annotation
-            annotate_command = '{exe} annotate --anno-header -i {graph} \
-                    --anno-type {anno_repr} -o {outfile} {input}'.format(
-                exe=METAGRAPH,
-                graph=self.tempdir.name + '/graph' + graph_file_extension[graph_repr],
-                anno_repr=anno_repr,
-                outfile=self.tempdir.name + '/annotation',
-                input=TEST_DATA_DIR + '/transcripts_100.fa'
-            )
+            annotate_command = f'{METAGRAPH} annotate --anno-header -p {NUM_THREADS} \
+                                -i {self.tempdir.name}/graph{graph_file_extension[graph_repr]} \
+                                --anno-type {anno_repr} -o {self.tempdir.name}/annotation \
+                                {TEST_DATA_DIR}/transcripts_100.fa'
+
             res = subprocess.run([annotate_command], shell=True)
             self.assertEqual(res.returncode, 0)
 
@@ -143,14 +138,10 @@ class TestAnnotate(unittest.TestCase):
         Annotate non-canonical graph constructed from non-canonical KMC database
         """
 
-        construct_command = '{exe} build --mask-dummy -p {num_threads} \
-                --graph {repr} -k 11 -o {outfile} {input}'.format(
-            exe=METAGRAPH,
-            num_threads=NUM_THREADS,
-            repr=graph_repr,
-            outfile=self.tempdir.name + '/graph',
-            input=TEST_DATA_DIR + '/transcripts_1000_kmc_counters.kmc_suf'
-        )
+        construct_command = f'{METAGRAPH} build --mask-dummy -p {NUM_THREADS} \
+                            --graph {graph_repr} -k 11 \
+                            -o {self.tempdir.name}/graph \
+                            {TEST_DATA_DIR}/transcripts_1000_kmc_counters.kmc_suf'
 
         res = subprocess.run([construct_command], shell=True)
         self.assertEqual(res.returncode, 0)
@@ -168,14 +159,11 @@ class TestAnnotate(unittest.TestCase):
 
         for anno_repr in ['row', 'column']:
             # build annotation
-            annotate_command = '{exe} annotate --anno-label LabelName -i {graph} \
-                    --anno-type {anno_repr} -o {outfile} {input}'.format(
-                exe=METAGRAPH,
-                graph=self.tempdir.name + '/graph' + graph_file_extension[graph_repr],
-                anno_repr=anno_repr,
-                outfile=self.tempdir.name + '/annotation',
-                input=TEST_DATA_DIR + '/transcripts_1000_kmc_counters.kmc_suf'
-            )
+            annotate_command = f'{METAGRAPH} annotate --anno-label LabelName -p {NUM_THREADS} \
+                                -i {self.tempdir.name}/graph{graph_file_extension[graph_repr]} \
+                                --anno-type {anno_repr} -o {self.tempdir.name}/annotation \
+                                {TEST_DATA_DIR}/transcripts_1000_kmc_counters.kmc_suf'
+
             res = subprocess.run([annotate_command], shell=True)
             self.assertEqual(res.returncode, 0)
 
@@ -198,14 +186,10 @@ class TestAnnotate(unittest.TestCase):
         Annotate non-canonical graph constructed from canonical KMC database
         """
 
-        construct_command = '{exe} build --mask-dummy -p {num_threads} \
-                --graph {repr} -k 11 -o {outfile} {input}'.format(
-            exe=METAGRAPH,
-            num_threads=NUM_THREADS,
-            repr=graph_repr,
-            outfile=self.tempdir.name + '/graph',
-            input=TEST_DATA_DIR + '/transcripts_1000_kmc_counters_both_strands.kmc_suf'
-        )
+        construct_command = f'{METAGRAPH} build --mask-dummy -p {NUM_THREADS} \
+                            --graph {graph_repr} -k 11 \
+                            -o {self.tempdir.name}/graph \
+                            {TEST_DATA_DIR}/transcripts_1000_kmc_counters_both_strands.kmc_suf'
 
         res = subprocess.run([construct_command], shell=True)
         self.assertEqual(res.returncode, 0)
@@ -223,14 +207,11 @@ class TestAnnotate(unittest.TestCase):
 
         for anno_repr in ['row', 'column']:
             # build annotation
-            annotate_command = '{exe} annotate --anno-label LabelName -i {graph} \
-                    --anno-type {anno_repr} -o {outfile} {input}'.format(
-                exe=METAGRAPH,
-                graph=self.tempdir.name + '/graph' + graph_file_extension[graph_repr],
-                anno_repr=anno_repr,
-                outfile=self.tempdir.name + '/annotation_single',
-                input=TEST_DATA_DIR + '/transcripts_1000_kmc_counters.kmc_suf'
-            )
+            annotate_command = f'{METAGRAPH} annotate --anno-label LabelName -p {NUM_THREADS} \
+                                -i {self.tempdir.name}/graph{graph_file_extension[graph_repr]} \
+                                --anno-type {anno_repr} -o {self.tempdir.name}/annotation_single \
+                                {TEST_DATA_DIR}/transcripts_1000_kmc_counters.kmc_suf'
+
             res = subprocess.run([annotate_command], shell=True)
             self.assertEqual(res.returncode, 0)
 
@@ -248,14 +229,11 @@ class TestAnnotate(unittest.TestCase):
             self.assertEqual('representation: ' + anno_repr, params_str[3])
 
             # both strands
-            annotate_command = '{exe} annotate --anno-label LabelName -i {graph} \
-                    --anno-type {anno_repr} -o {outfile} {input}'.format(
-                exe=METAGRAPH,
-                graph=self.tempdir.name + '/graph' + graph_file_extension[graph_repr],
-                anno_repr=anno_repr,
-                outfile=self.tempdir.name + '/annotation_both',
-                input=TEST_DATA_DIR + '/transcripts_1000_kmc_counters_both_strands.kmc_suf'
-            )
+            annotate_command = f'{METAGRAPH} annotate --anno-label LabelName -p {NUM_THREADS} \
+                                -i {self.tempdir.name}/graph{graph_file_extension[graph_repr]} \
+                                --anno-type {anno_repr} -o {self.tempdir.name}/annotation_both \
+                                {TEST_DATA_DIR}/transcripts_1000_kmc_counters_both_strands.kmc_suf'
+
             res = subprocess.run([annotate_command], shell=True)
             self.assertEqual(res.returncode, 0)
 
@@ -280,14 +258,10 @@ class TestAnnotate(unittest.TestCase):
         Annotate canonical graph with k-mers from KMC
         """
 
-        construct_command = '{exe} build --mask-dummy -p {num_threads} \
-                --graph {repr} --mode canonical -k 11 -o {outfile} {input}'.format(
-            exe=METAGRAPH,
-            num_threads=NUM_THREADS,
-            repr=graph_repr,
-            outfile=self.tempdir.name + '/graph',
-            input=TEST_DATA_DIR + '/transcripts_1000_kmc_counters.kmc_suf'
-        )
+        construct_command = f'{METAGRAPH} build --mask-dummy -p {NUM_THREADS} \
+                            --graph {graph_repr} --mode canonical -k 11 \
+                            -o {self.tempdir.name}/graph \
+                            {TEST_DATA_DIR}/transcripts_1000_kmc_counters.kmc_suf'
 
         res = subprocess.run([construct_command], shell=True)
         self.assertEqual(res.returncode, 0)
@@ -305,14 +279,11 @@ class TestAnnotate(unittest.TestCase):
 
         for anno_repr in ['row', 'column']:
             # build annotation
-            annotate_command = '{exe} annotate --anno-label LabelName -i {graph} \
-                    --anno-type {anno_repr} -o {outfile} {input}'.format(
-                exe=METAGRAPH,
-                graph=self.tempdir.name + '/graph' + graph_file_extension[graph_repr],
-                anno_repr=anno_repr,
-                outfile=self.tempdir.name + '/annotation_single',
-                input=TEST_DATA_DIR + '/transcripts_1000_kmc_counters.kmc_suf'
-            )
+            annotate_command = f'{METAGRAPH} annotate --anno-label LabelName -p {NUM_THREADS} \
+                                -i {self.tempdir.name}/graph{graph_file_extension[graph_repr]} \
+                                --anno-type {anno_repr} -o {self.tempdir.name}/annotation_single \
+                                {TEST_DATA_DIR}/transcripts_1000_kmc_counters.kmc_suf'
+
             res = subprocess.run([annotate_command], shell=True)
             self.assertEqual(res.returncode, 0)
 
@@ -330,14 +301,11 @@ class TestAnnotate(unittest.TestCase):
             self.assertEqual('representation: ' + anno_repr, params_str[3])
 
             # both strands
-            annotate_command = '{exe} annotate --anno-label LabelName -i {graph} \
-                    --anno-type {anno_repr} -o {outfile} {input}'.format(
-                exe=METAGRAPH,
-                graph=self.tempdir.name + '/graph' + graph_file_extension[graph_repr],
-                anno_repr=anno_repr,
-                outfile=self.tempdir.name + '/annotation_both',
-                input=TEST_DATA_DIR + '/transcripts_1000_kmc_counters_both_strands.kmc_suf'
-            )
+            annotate_command = f'{METAGRAPH} annotate --anno-label LabelName -p {NUM_THREADS} \
+                                -i {self.tempdir.name}/graph{graph_file_extension[graph_repr]} \
+                                --anno-type {anno_repr} -o {self.tempdir.name}/annotation_both \
+                                {TEST_DATA_DIR}/transcripts_1000_kmc_counters_both_strands.kmc_suf'
+
             res = subprocess.run([annotate_command], shell=True)
             self.assertEqual(res.returncode, 0)
 
@@ -382,16 +350,12 @@ class TestAnnotate(unittest.TestCase):
         self.assertEqual('mode: basic', params_str[2])
 
         # build annotation
-        annotate_command = '{exe} annotate --anno-header -i {graph} \
-                --disk-swap {tmp_dir} --mem-cap-gb 1e-6 \
-                --anno-type {anno_repr} -o {outfile} {input}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/graph' + graph_file_extension[graph_repr],
-            anno_repr=anno_repr,
-            tmp_dir=self.tempdir.name,
-            outfile=self.tempdir.name + '/annotation',
-            input=TEST_DATA_DIR + '/transcripts_100.fa'
-        )
+        annotate_command = f'{METAGRAPH} annotate --anno-header \
+                            --disk-swap {self.tempdir.name} --mem-cap-gb 1e-6 \
+                            -i {self.tempdir.name}/graph{graph_file_extension[graph_repr]} \
+                            --anno-type {anno_repr} -o {self.tempdir.name}/annotation \
+                            {TEST_DATA_DIR}/transcripts_100.fa'
+
         res = subprocess.run([annotate_command], shell=True)
         self.assertEqual(res.returncode, 0)
 
@@ -407,6 +371,26 @@ class TestAnnotate(unittest.TestCase):
         self.assertEqual('objects: 46960', params_str[1])
         self.assertEqual('density: 0.0185072', params_str[2])
         self.assertEqual('representation: ' + anno_repr, params_str[3])
+
+    @parameterized.expand(GRAPH_TYPES)
+    def test_annotate_coordinates(self, graph_repr):
+
+        construct_command = f'{METAGRAPH} build --mask-dummy -p {NUM_THREADS} \
+                              --graph {graph_repr} -k 11 \
+                              -o {self.tempdir.name}/graph \
+                              {TEST_DATA_DIR}/transcripts_100.fa'
+
+        res = subprocess.run([construct_command], shell=True)
+        self.assertEqual(res.returncode, 0)
+
+        # build annotation
+        annotate_command = f'{METAGRAPH} annotate --anno-header -p {NUM_THREADS} --coordinates \
+                            -i {self.tempdir.name}/graph{graph_file_extension[graph_repr]} \
+                            -o {self.tempdir.name}/annotation \
+                            {TEST_DATA_DIR}/transcripts_100.fa'
+
+        res = subprocess.run([annotate_command], shell=True)
+        self.assertEqual(res.returncode, 0)
 
 
 if __name__ == '__main__':

@@ -176,30 +176,30 @@ TEST (TaxonomyTest, KmerToTaxidUpdate) {
      * Tree configuration in '../tests/data/taxonomic_data/dumb_nodes.dmp'
      *
      *
-     *                        0(normalized650)
-     *                    5(n651)            \
-     *               47(n568) 48(n503)       2(n310)
+     *                             (NC_01.1)
+     *                     (NC_04.1)       (NC_19.1)
+     *               (NC_09.1) (NC_10.1)
      *
      *
-     *      For node  0 the normalized value is 650       ---> root
-     *      For node  5 the normalized value is 651
-     *      For node  2 the normalized value is 310       ---> SEQ1
-     *      For node 47 the normalized value is 568       ---> SEQ2
-     *      For node 48 the normalized value is 503       ---> SEQ3
+     *      Accession version "NC_01.1",                norm=20   ---> root, LCA("NC_09.1", "NC_10.1", "NC_19.1")
+     *      Accession version "NC_04.1",                norm=13   ---> LCA("NC_09.1", "NC_10.1")
+     *      Accession version "NC_09.1", all_labels[0]  norm=1    ---> SEQ3
+     *      Accession version "NC_10.1", all_labels[1]  norm=10   ---> SEQ2
+     *      Accession version "NC_19.1", all_labels[10] norm=9    ---> SEQ1
      *
      */
 
     uint64_t k = 20;
-    uint64_t SEQ1 = 0;
-    uint64_t SEQ2 = 40;
-    uint64_t SEQ3 = 41;
+    uint64_t SEQ1 = 10;
+    uint64_t SEQ2 = 1;
+    uint64_t SEQ3 = 0;
 
     get_sequences_and_labels_from_file(input_filepath, all_sequences, all_labels);
 
     ASSERT_TRUE(tax.taxonomic_map.size() == 0);
 
     // Iterating a hopscotch_map on linux and on darwin returns the objects in a different order.
-    // Thus, the normalization ids are different and we need to compute all of them here.
+    // Thus, we need to compute the normalization ids for each node/taxid.
     uint64_t normalized_taxid_seq1;
     ASSERT_TRUE(tax.get_normalized_taxid(tax.get_accession_version_from_label(all_labels[SEQ1]),
         &normalized_taxid_seq1));
@@ -220,29 +220,31 @@ TEST (TaxonomyTest, KmerToTaxidUpdate) {
 
     struct query_tax_map_update {
         std::string test_id;
+        // 'expected_freq_taxid' represents the expected number of kmers that are pointing to each taxid node.
         tsl::hopscotch_map<uint64_t, uint64_t> expected_freq_taxid;
+        // 'seq_list' represents the sequences which will be sent to KmerToTaxidUpdate in the given order.
         std::vector<uint64_t> seq_list;
     };
 
     std::vector<query_tax_map_update> tests = {
-        {"test1", {{normalized_taxid_seq1, 979}}, {SEQ1}},
+        {"test1", {{normalized_taxid_seq1, 469}}, {SEQ1}},
         {"test2", {
-                           {normalized_lca_seq123, 201},
-                           {normalized_taxid_seq2, 778},
-                           {normalized_taxid_seq1, 778}
+                           {normalized_lca_seq123, 150},
+                           {normalized_taxid_seq2, 320},
+                           {normalized_taxid_seq1, 319}
                    }, {{SEQ1, SEQ2}}},
         {"test3", {
-                           {normalized_lca_seq123, 217},
-                           {normalized_lca_seq23, 650},
-                           {normalized_taxid_seq1, 762},
-                           {normalized_taxid_seq2, 128},
-                           {normalized_taxid_seq3, 171}
+                           {normalized_lca_seq123, 179},
+                           {normalized_lca_seq23, 157},
+                           {normalized_taxid_seq1, 290},
+                           {normalized_taxid_seq2, 163},
+                           {normalized_taxid_seq3, 139}
                    }, {{SEQ1, SEQ2, SEQ3}}
         },
         {"test4", {
-                           {normalized_lca_seq23, 792},
-                           {normalized_taxid_seq2, 187},
-                           {normalized_taxid_seq3, 187}
+                           {normalized_lca_seq23, 301},
+                           {normalized_taxid_seq2, 169},
+                           {normalized_taxid_seq3, 168}
                    }, {{SEQ2, SEQ3}}},
     };
 
@@ -398,6 +400,7 @@ TEST (TaxonomyTest, ClassifierUpdateScoresAndLca) {
 
             for (uint64_t node: nodes_set) {
                 tax_classifier.update_scores_and_lca(node, num_kmers_per_node, test.desired_number_kmers,
+                                                     tax_classifier.root_node, tax_classifier.node_parent,
                                                      &node_scores, &nodes_already_propagated,
                                                      &best_lca, &best_lca_dist_to_root);
             }

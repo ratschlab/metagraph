@@ -58,6 +58,7 @@ class Config {
     bool filter_by_kmer = false;
     bool output_json = false;
     bool aggregate_columns = false;
+    bool coordinates = false;
 
     unsigned int k = 3;
 
@@ -91,6 +92,7 @@ class Config {
     unsigned int row_diff_stage = 0;
     unsigned int max_path_length = 100;
     unsigned int smoothing_window = 1;  // no smoothing by default
+    unsigned int num_kmers_in_seq = 0;  // assume all input reads have this length
 
     unsigned long long int query_batch_size_in_bytes = 100'000'000;
     unsigned long long int num_rows_subsampled = 1'000'000;
@@ -130,6 +132,7 @@ class Config {
     double alignment_min_exact_match = 0.7;
     double intersect_ratio = 1;
     double lca_coverage_fraction = 0.66;
+    double top_label_fraction = 0;
     double min_fraction = 0.0;
     double max_fraction = 1.0;
     std::vector<double> count_slice_quantiles;
@@ -150,6 +153,7 @@ class Config {
     std::string header = "";
     std::string host_address;
     std::string taxonomic_tree;
+    std::string taxonomic_db;
     std::string label_taxid_map;
     std::string linkage_file;
     std::string intersected_columns;

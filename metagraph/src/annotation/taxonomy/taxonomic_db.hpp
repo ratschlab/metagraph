@@ -5,6 +5,7 @@
 #include <tsl/hopscotch_map.h>
 
 #include "annotation/representation/base/annotation.hpp"
+#include "graph/representation/base/sequence_graph.hpp"
 #include "graph/annotated_dbg.hpp"
 
 namespace mtg {
@@ -23,6 +24,7 @@ class TaxonomyDB {
     using ChildrenList = std::vector<std::vector<NormalizedTaxId>>;
     using Annotator = annot::MultiLabelEncoded<AccessionVersion>;
     using KmerId = Annotator::Index;
+    using node_index = graph::SequenceGraph::node_index;
 
     /**
      * TaxonomyDB constructor
@@ -57,6 +59,14 @@ class TaxonomyDB {
     bool get_normalized_taxid(const std::string accession_version, NormalizedTaxId *taxid) const;
     static std::string get_accession_version_from_label(const std::string &label);
 
+    TaxId assign_class_getrows(const graph::AnnotatedDBG &anno,
+                               const std::string &sequence,
+                               const double lca_coverage_rate,
+                               const double kmers_discovery_rate) const;
+
+    TaxId assign_class_toplabels(const graph::AnnotatedDBG &anno,
+                                 const std::string &sequence,
+                                 const double label_fraction) const;
 
   private:
     /**
@@ -64,11 +74,9 @@ class TaxonomyDB {
      *
      * @param [input] tax_tree_filepath path to a "nodes.dmp" file.
      * @param [output] tree -> tree stored as list of children.
-     * @param [output] root_node -> normalized id of the root of the tree.
      */
     void read_tree(const std::string &tax_tree_filepath,
-                   ChildrenList *tree,
-                   NormalizedTaxId *root_node);
+                   ChildrenList *tree);
 
     /**
      * Reads and returns the label_taxid_map (accession version to taxid) corresponding to the received set of used accession versions.
@@ -104,6 +112,8 @@ class TaxonomyDB {
      * The root is the unique node with maximal depth and all the leaves have depth 1.
      */
     std::vector<uint64_t> node_depth;
+    TaxId root_node;
+    tsl::hopscotch_map<TaxId, TaxId> node_parent;
 
     /**
      * rmq_data[0] contains the taxonomic tree linearization

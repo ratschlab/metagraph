@@ -110,9 +110,6 @@ batch_insert_avx2(BloomFilter &bloom,
     const __m256i add = _mm256_setr_epi64x(0, 1, 2, 3);
     const __m256i numhash = _mm256_set1_epi64x(num_hash_functions_);
 
-    __m256i block_indices;
-    const uint64_t *block_index_array = reinterpret_cast<const uint64_t*>(&block_indices);
-
     uint64_t ids_store[4] __attribute__ ((aligned (32)));
     uint64_t updates_store[4] __attribute__ ((aligned (32)));
     __m256i *ids_cast = reinterpret_cast<__m256i*>(&ids_store);
@@ -120,7 +117,8 @@ batch_insert_avx2(BloomFilter &bloom,
 
     // check four input elements (represented by hashes) at a time
     for (; hashes_begin + 4 <= hashes_end; hashes_begin += 4) {
-        block_indices = restrict_to_mask_epi64(hashes_begin, size, block_mask_out);
+        __m256i block_indices = restrict_to_mask_epi64(hashes_begin, size, block_mask_out);
+        const uint64_t *block_index_array = reinterpret_cast<const uint64_t*>(&block_indices);
 
         if (num_hash_functions_ > 1) {
             for (size_t j = 0; j < 4; ++j) {

@@ -8,6 +8,9 @@
 #include "cli/load/load_annotated_graph.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 
+#include <sdsl/int_vector.hpp>
+#include <sdsl/dac_vector.hpp>
+
 namespace mtg {
 namespace annot {
 
@@ -45,14 +48,10 @@ class TaxClassifier {
     TaxId assign_class(const mtg::graph::DeBruijnGraph &graph,
                        const std::string &sequence) const;
 
-  private:
-    TaxId find_lca(const TaxId a, const TaxId b) const;
-
-    /**
-     * Import 'this->taxonomic_map' and the taxonomic tree (as parent list)
-     * from the given taxDB filepath (created by './metagraph transform_anno_tax').
-     */
-    void import_taxonomy(const std::string &filepath);
+    static TaxId find_lca(const TaxId a,
+                          const TaxId b,
+                          const TaxId root_node,
+                          const tsl::hopscotch_map<TaxId, TaxId> &node_parent);
 
     /**
      * Update the current node_scores and best_lca by taking into account the kmers in start_node and all it's ancestors.
@@ -60,18 +59,29 @@ class TaxClassifier {
      * @param [input] 'start_node' starting node to update ancestors and descendants in the taxonomic tree
      * @param [input] 'num_kmers_per_node[taxid]' the number of kmers that point to 'taxid' according to the 'taxonomic_map'.
      * @param [input] 'desired_number_kmers' represents the threshold score that a node have to exceed in order to be considered a valid solution.
+     * @param
+     * @param
      * @param [modified] 'node_scores' the current scores for each node in the tree.
      * @param [modified] 'nodes_already_propagated' list of nodes that were already considered as 'start_node'.
      * @param [modified] 'best_lca' the node furthest to the root that exceeds the `desired_number_kmers` threshold.
      * @param [modified] 'best_lca_dist_to_root' represents the distance to the root for the current best lca taxid.
      */
-     void update_scores_and_lca(const TaxId start_node,
-                                const tsl::hopscotch_map<TaxId, uint64_t> &num_kmers_per_node,
-                                const uint64_t desired_number_kmers,
-                                tsl::hopscotch_map<TaxId, uint64_t> *node_scores,
-                                tsl::hopscotch_set<TaxId> *nodes_already_propagated,
-                                TaxId *best_lca,
-                                uint64_t *best_lca_dist_to_root) const;
+     static void update_scores_and_lca(const TaxId start_node,
+                                       const tsl::hopscotch_map<TaxId, uint64_t> &num_kmers_per_node,
+                                       const uint64_t desired_number_kmers,
+                                       const TaxId root_node,
+                                       const tsl::hopscotch_map<TaxId, TaxId> &node_parent,
+                                       tsl::hopscotch_map<TaxId, uint64_t> *node_scores,
+                                       tsl::hopscotch_set<TaxId> *nodes_already_propagated,
+                                       TaxId *best_lca,
+                                       uint64_t *best_lca_dist_to_root);
+private:
+    /**
+     * Import 'this->taxonomic_map' and the taxonomic tree (as parent list)
+     * from the given taxDB filepath (created by './metagraph transform_anno_tax').
+     */
+    void import_taxonomy(const std::string &filepath);
+
     TaxId root_node;
 
     /**
@@ -80,9 +90,10 @@ class TaxClassifier {
     tsl::hopscotch_map<TaxId, TaxId> node_parent;
 
     /**
-     * taxonomic_map returns the taxid LCA for a given kmer.
+     * taxonomic_map (code_to_taxid[code[]]) returns the taxid LCA for a given kmer.
      */
-    sdsl::int_vector<> taxonomic_map;
+    sdsl::dac_vector_dp<sdsl::rrr_vector<>> code;
+    sdsl::int_vector<> code_to_taxid;
 
     double lca_coverage_rate;
     double kmers_discovery_rate;

@@ -70,11 +70,49 @@ void AnnotatedSequenceGraph
     annotator_->add_labels(indices, labels);
 }
 
+void AnnotatedSequenceGraph
+::annotate_sequences(const std::vector<std::pair<std::string, std::vector<Label>>> &data) {
+    assert(check_compatibility());
+
+    std::vector<std::vector<row_index>> ids(data.size());
+    size_t last = 0;
+    for (size_t t = 0; t < data.size(); ++t) {
+        // if the labels are the same, write indexes to the same array
+        auto &indices = data[t].second == data[last].second ? ids[last] : ids[t];
+        indices.reserve(data[t].first.size());
+
+        graph_->map_to_nodes(data[t].first, [&](node_index i) {
+            if (i > 0)
+                indices.push_back(graph_to_anno_index(i));
+        });
+    }
+
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    for (size_t t = 0; t < data.size(); ++t) {
+        if (!ids[t].size())
+            continue;
+
+        if (force_fast_) {
+            auto row_major = dynamic_cast<annot::RowCompressed<Label>*>(annotator_.get());
+            if (row_major) {
+                row_major->add_labels_fast(ids[t], data[t].second);
+                continue;
+            }
+        }
+
+        annotator_->add_labels(ids[t], data[t].second);
+    }
+}
+
 void AnnotatedDBG::add_kmer_counts(std::string_view sequence,
                                    const std::vector<Label> &labels,
                                    std::vector<uint64_t>&& kmer_counts) {
     assert(check_compatibility());
     assert(kmer_counts.size() == sequence.size() - dbg_.get_k() + 1);
+
+    if (sequence.size() < dbg_.get_k())
+        return;
 
     std::vector<row_index> indices;
     indices.reserve(sequence.size() - dbg_.get_k() + 1);
@@ -90,12 +128,65 @@ void AnnotatedDBG::add_kmer_counts(std::string_view sequence,
 
     kmer_counts.resize(end);
 
+    if (indices.size())
+        annotator_->add_label_counts(indices, labels, kmer_counts);
+}
+
+void AnnotatedDBG::add_kmer_coord(std::string_view sequence,
+                                  const std::vector<Label> &labels,
+                                  uint64_t coord) {
+    assert(check_compatibility());
+
+    if (sequence.size() < dbg_.get_k())
+        return;
+
+    std::vector<row_index> indices;
+    indices.reserve(sequence.size() - dbg_.get_k() + 1);
+
+    graph_->map_to_nodes(sequence, [&](node_index i) { indices.push_back(i); });
+
     if (!indices.size())
         return;
 
     std::lock_guard<std::mutex> lock(mutex_);
 
-    annotator_->add_label_counts(indices, labels, kmer_counts);
+    for (node_index i : indices) {
+        // only insert coordinates for matched k-mers and increment the coordinates
+        if (i > 0)
+            annotator_->add_label_coord(graph_to_anno_index(i), labels, coord);
+        coord++;
+    }
+}
+
+void AnnotatedDBG::add_kmer_coords(
+        const std::vector<std::tuple<std::string, std::vector<Label>, uint64_t>> &data) {
+    assert(check_compatibility());
+
+    std::vector<std::vector<row_index>> ids(data.size());
+    for (size_t t = 0; t < data.size(); ++t) {
+        const auto &[sequence, labels, _] = data[t];
+        if (sequence.size() < dbg_.get_k())
+            continue;
+
+        auto &indices = ids[t];
+        indices.reserve(sequence.size() - dbg_.get_k() + 1);
+
+        graph_->map_to_nodes(sequence, [&](node_index i) { indices.push_back(i); });
+    }
+
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    for (size_t t = 0; t < data.size(); ++t) {
+        const auto &labels = std::get<1>(data[t]);
+        uint64_t coord = std::get<2>(data[t]);
+
+        for (node_index i : ids[t]) {
+            // only insert coordinates for matched k-mers and increment the coordinates
+            if (i > 0)
+                annotator_->add_label_coord(graph_to_anno_index(i), labels, coord);
+            coord++;
+        }
+    }
 }
 
 std::vector<Label> AnnotatedDBG::get_labels(std::string_view sequence,
@@ -396,6 +487,31 @@ void AnnotatedSequenceGraph
         label,
         [&](row_index index) { callback(anno_to_graph_index(index)); }
     );
+}
+
+void AnnotatedDBG::call_annotated_rows(const std::vector<node_index> &rows,
+                                       std::function<void(const std::string&)> callback_cell,
+                                       std::function<void()> callback_row) const {
+    assert(check_compatibility());
+
+    auto unique_matrix_rows = annotator_->get_matrix().get_rows(rows);
+
+    //TODO make sure that this function works even if we have duplications in 'rows'. Then, delete this error catch.
+    if (rows.size() != unique_matrix_rows.size()) {
+        throw std::runtime_error("There must be no duplications in the received set of 'rows' in 'call_annotated_rows'.");
+    }
+
+    if (unique_matrix_rows.size() >= std::numeric_limits<uint32_t>::max()) {
+        throw std::runtime_error("There must be less than 2^32 unique rows."
+                                 " Reduce the query batch size.");
+    }
+    const auto &label_encoder = annotator_->get_label_encoder();
+    for (auto row : unique_matrix_rows) {
+        for (auto cell : row) {
+            callback_cell(label_encoder.decode(cell));
+        }
+        callback_row();
+    }
 }
 
 bool AnnotatedSequenceGraph::check_compatibility() const {

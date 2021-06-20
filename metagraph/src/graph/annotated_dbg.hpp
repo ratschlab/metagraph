@@ -34,6 +34,9 @@ class AnnotatedSequenceGraph {
     // thread-safe, can be called from multiple threads concurrently
     virtual void annotate_sequence(std::string_view sequence,
                                    const std::vector<Label> &labels);
+    // thread-safe, can be called from multiple threads concurrently
+    virtual void annotate_sequences(
+        const std::vector<std::pair<std::string, std::vector<Label>>> &data);
 
     virtual void call_annotated_nodes(const Label &label,
                                       std::function<void(node_index)> callback) const;
@@ -58,7 +61,6 @@ class AnnotatedSequenceGraph {
   protected:
     std::shared_ptr<SequenceGraph> graph_;
     std::unique_ptr<Annotator> annotator_;
-
     std::mutex mutex_;
     bool force_fast_;
 };
@@ -74,10 +76,18 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
 
     const DeBruijnGraph& get_graph() const { return dbg_; }
 
-    // add k-mer counts to the annotation
+    // add k-mer counts to the annotation, thread-safe for concurrent calls
     void add_kmer_counts(std::string_view sequence,
                          const std::vector<Label> &labels,
                          std::vector<uint64_t>&& kmer_counts);
+
+    // add k-mer coordinates to the annotation
+    void add_kmer_coord(std::string_view sequence,
+                        const std::vector<Label> &labels,
+                        uint64_t start);
+
+    void add_kmer_coords(
+        const std::vector<std::tuple<std::string, std::vector<Label>, uint64_t>> &data);
 
     /*********************** Special queries **********************/
 
@@ -114,7 +124,11 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
                                      int32_t match_score = 1,
                                      int32_t mismatch_score = 2) const;
 
-  private:
+    void call_annotated_rows(const std::vector<node_index> &rows,
+                             std::function<void(const std::string&)> callback_cell,
+                             std::function<void()> callback_row) const;
+
+private:
     DeBruijnGraph &dbg_;
 };
 

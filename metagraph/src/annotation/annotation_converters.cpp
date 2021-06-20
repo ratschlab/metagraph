@@ -289,14 +289,10 @@ convert_row_diff_to_BRWT(RowDiffColumnAnnotator &&annotator,
                          BRWTBottomUpBuilder::Partitioner partitioning,
                          size_t num_parallel_nodes,
                          size_t num_threads) {
-    // we are going to take the columns from the annotator and thus
-    // have to replace them with empty columns to keep the structure valid
     const graph::DBGSuccinct* graph = annotator.get_matrix().graph();
-    std::vector<std::unique_ptr<bit_vector>> columns
-            = annotator.release_matrix()->diffs().release_columns();
 
     auto matrix = std::make_unique<BRWT>(
-            BRWTBottomUpBuilder::build(std::move(columns),
+            BRWTBottomUpBuilder::build(std::move(annotator.release_matrix()->diffs().data()),
                                        partitioning,
                                        num_parallel_nodes,
                                        num_threads)
@@ -1147,7 +1143,11 @@ void convert_to_row_diff(const std::vector<std::string> &files,
                          fs::path swap_dir,
                          RowDiffStage construction_stage,
                          fs::path count_vector_fname,
-                         bool with_values) {
+                         bool with_values,
+                         bool with_coordinates,
+                         size_t num_coords_per_seq) {
+    assert(!with_values || !with_coordinates);
+
     if (out_dir.empty())
         out_dir = "./";
 
@@ -1197,6 +1197,16 @@ void convert_to_row_diff(const std::vector<std::string> &files,
                     // is missing for a non-empty annotation, the error will be thrown later
                     // in convert_batch_to_row_diff, so we skip it here in any case.
                 }
+            } else if (with_coordinates) {
+                // also add k-mer coordinates
+                try {
+                    const auto &coord_fname
+                        = utils::remove_suffix(files[i], ColumnCompressed<>::kExtension)
+                                                    + ColumnCompressed<>::kCoordExtension;
+                    file_size += fs::file_size(coord_fname);
+                } catch (...) {
+                    // Attribute vectors may be missing for empty annotations
+                }
             }
             if (file_size > mem_bytes) {
                 logger->warn("Not enough memory to process {}, requires {} MB, skipped",
@@ -1224,12 +1234,12 @@ void convert_to_row_diff(const std::vector<std::string> &files,
                       file_batch.size());
 
         if (construction_stage == RowDiffStage::COUNT_LABELS) {
-            count_labels_per_row(file_batch, count_vector_fname);
+            count_labels_per_row(file_batch, count_vector_fname, with_coordinates);
         } else {
             convert_batch_to_row_diff(graph_fname,
                     file_batch, out_dir, swap_dir, count_vector_fname, ROW_DIFF_BUFFER_BYTES,
                     construction_stage == RowDiffStage::COMPUTE_REDUCTION,
-                    with_values);
+                    with_values, with_coordinates, num_coords_per_seq);
         }
 
         logger->trace("Batch processed in {} sec", timer.elapsed());

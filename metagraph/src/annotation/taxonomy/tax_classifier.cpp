@@ -37,23 +37,16 @@ void TaxClassifier::import_taxonomy(const std::string &filepath) {
         std::exit(1);
     }
 
-    sdsl::int_vector<> code_to_taxid;
     code_to_taxid.load(f);
     if (code_to_taxid.empty()) {
         logger->error("Can't load serialized 'code_to_taxid' from file {}.", filepath.c_str());
         std::exit(1);
     }
 
-    sdsl::dac_vector_dp<sdsl::rrr_vector<>> code;
     code.load(f);
     if (code.empty()) {
         logger->error("Can't load serialized 'code' from file {}.", filepath.c_str());
         std::exit(1);
-    }
-
-    this->taxonomic_map.resize(code.size());
-    for (uint64_t i = 0; i < code.size(); ++i) {
-        this->taxonomic_map[i] = code_to_taxid[code[i]];
     }
 
     logger->trace("Finished taxdb importing after {}s", timer.elapsed());
@@ -86,10 +79,12 @@ TaxClassifier::TaxClassifier(const std::string &filepath,
 void TaxClassifier::update_scores_and_lca(const TaxId start_node,
                                           const tsl::hopscotch_map<TaxId, uint64_t> &num_kmers_per_node,
                                           const uint64_t desired_number_kmers,
+                                          const TaxId root_node,
+                                          const tsl::hopscotch_map<TaxId, TaxId> &node_parent,
                                           tsl::hopscotch_map<TaxId, uint64_t> *node_scores,
                                           tsl::hopscotch_set<TaxId> *nodes_already_propagated,
                                           TaxId *best_lca,
-                                          uint64_t *best_lca_dist_to_root) const {
+                                          uint64_t *best_lca_dist_to_root) {
     if (nodes_already_propagated->count(start_node)) {
         return;
     }
@@ -102,8 +97,8 @@ void TaxClassifier::update_scores_and_lca(const TaxId start_node,
     TaxId act_node = start_node;
     unprocessed_parents.push_back(act_node);
 
-    while (act_node != this->root_node) {
-        act_node = this->node_parent.at(act_node);
+    while (act_node != root_node) {
+        act_node = node_parent.at(act_node);
         if (!nodes_already_propagated->count(act_node)) {
             if (num_kmers_per_node.count(act_node)) {
                 score_from_unprocessed_parents += num_kmers_per_node.at(act_node);
@@ -143,22 +138,25 @@ void TaxClassifier::update_scores_and_lca(const TaxId start_node,
     }
 }
 
-TaxId TaxClassifier::find_lca(const TaxId a, const TaxId b) const {
+TaxId TaxClassifier::find_lca(const TaxId a,
+                              const TaxId b,
+                              const TaxId root_node,
+                              const tsl::hopscotch_map<TaxId, TaxId> &node_parent) {
     std::vector<TaxId> ancestors_a;
     std::vector<TaxId> ancestors_b;
 
     TaxId curr_node = a;
-    while (curr_node != this->root_node) {
+    while (curr_node != root_node) {
         ancestors_a.push_back(curr_node);
-        curr_node = this->node_parent.at(curr_node);
+        curr_node = node_parent.at(curr_node);
     }
     curr_node = b;
-    while (curr_node != this->root_node) {
+    while (curr_node != root_node) {
         ancestors_b.push_back(curr_node);
-        curr_node = this->node_parent.at(curr_node);
+        curr_node = node_parent.at(curr_node);
     }
 
-    TaxId lca = this->root_node;
+    TaxId lca = root_node;
     int idx_ancs_a = ancestors_a.size() - 1;
     int idx_ancs_b = ancestors_b.size() - 1;
 
@@ -202,18 +200,18 @@ TaxId TaxClassifier::assign_class(const mtg::graph::DeBruijnGraph &graph,
 
         TaxId curr_taxid;
         if (backward_kmers[i] == 0) {
-            curr_taxid = this->taxonomic_map[forward_kmers[i] - 1];
+            curr_taxid = this->code_to_taxid[this->code[forward_kmers[i] - 1]];
         } else if (forward_kmers[i] == 0) {
-            curr_taxid = this->taxonomic_map[backward_kmers[i] - 1];
+            curr_taxid = this->code_to_taxid[this->code[backward_kmers[i] - 1]];
         } else {
-            TaxId forward_taxid = this->taxonomic_map[forward_kmers[i] - 1];
-            TaxId backward_taxid = this->taxonomic_map[backward_kmers[i] - 1];
+            TaxId forward_taxid = this->code_to_taxid[this->code[forward_kmers[i] - 1]];
+            TaxId backward_taxid = this->code_to_taxid[this->code[backward_kmers[i] - 1]];
             if (forward_taxid == 0) {
                 curr_taxid = backward_taxid;
             } else if (backward_taxid == 0) {
                 curr_taxid = forward_taxid;
             } else {
-                curr_taxid = find_lca(forward_taxid, backward_taxid);
+                curr_taxid = find_lca(forward_taxid, backward_taxid, this->root_node, this->node_parent);
             }
         }
         if (curr_taxid) {
@@ -235,6 +233,7 @@ TaxId TaxClassifier::assign_class(const mtg::graph::DeBruijnGraph &graph,
     for (const pair<TaxId, uint64_t> &node_pair : num_kmers_per_node) {
         TaxId start_node = node_pair.first;
         update_scores_and_lca(start_node, num_kmers_per_node, desired_number_kmers,
+                              this->root_node, this->node_parent,
                               &node_scores, &nodes_already_propagated, &best_lca,
                               &best_lca_dist_to_root);
     }

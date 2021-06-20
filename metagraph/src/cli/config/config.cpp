@@ -117,6 +117,13 @@ Config::Config(int argc, char *argv[]) {
             print_column_names = true;
         } else if (!strcmp(argv[i], "--print-internal")) {
             print_graph_internal_repr = true;
+        } else if (!strcmp(argv[i], "--coordinates")) {
+            coordinates = true;
+        } else if (!strcmp(argv[i], "--num-kmers-in-seq")) {
+            // FYI: experimental
+            std::cerr << "WARNING: Flag --num-kmers-in-seq is experimental and"
+                         " should only be used for experimental purposes" << std::endl;
+            num_kmers_in_seq = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--count-kmers")) {
             count_kmers = true;
         } else if (!strcmp(argv[i], "--count-width")) {
@@ -263,8 +270,12 @@ Config::Config(int argc, char *argv[]) {
             files_sequentially = true;
         } else if (!strcmp(argv[i], "--taxonomic-tree")) {
             taxonomic_tree = std::string(get_value(i++));
+		} else if (!strcmp(argv[i], "--taxonomic-db")) {
+			taxonomic_db = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--lca-coverage-fraction")) {
             lca_coverage_fraction = std::stof(get_value(i++));
+        } else if (!strcmp(argv[i], "--top-label-fraction")) {
+            top_label_fraction = std::stof(get_value(i++));
         } else if (!strcmp(argv[i], "--label-taxid-map")) {
             label_taxid_map = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--num-top-labels")) {
@@ -462,8 +473,10 @@ Config::Config(int argc, char *argv[]) {
     }
 #endif
 
-    if (tmp_dir == "OUTFBASE_TEMP_DIR")
+    if (tmp_dir == "OUTFBASE_TEMP_DIR") {
         tmp_dir = std::filesystem::path(outfbase).remove_filename();
+    }
+    utils::set_swap_path(tmp_dir);
 
     if (identity != CONCATENATE
             && identity != STATS
@@ -1087,6 +1100,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --count-kmers \tadd k-mer counts to the annotation [off]\n");
             fprintf(stderr, "\t   --count-width \tnumber of bits used to represent k-mer abundance [8]\n");
+            fprintf(stderr, "\t   --coordinates \tannotate coordinates as multi-integer attributes [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
             // fprintf(stderr, "\t   --fast \t\t\tannotate in fast regime (leads to repeated labels and bigger annotation) [off]\n");
@@ -1146,6 +1160,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --max-path-length [INT] \tmaximum path length in row_diff annotation [100]\n");
             fprintf(stderr, "\t-i --infile-base [STR] \t\tgraph for generating succ/pred/anchors (for row_diff types) []\n");
             fprintf(stderr, "\t   --count-kmers \t\tadd k-mer counts to the row_diff annotation [off]\n");
+            fprintf(stderr, "\t   --coordinates \t\tadd k-mer coordinates to the row_diff annotation [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --parallel-nodes [INT] \tnumber of nodes processed in parallel in brwt tree [n_threads]\n");
             fprintf(stderr, "\n");
@@ -1235,13 +1250,15 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
         case TAX_CLASSIFY: {
             fprintf(stderr, "Usage: %s tax_class [options]\n"
                         "\t\t -i <GRAPH>\n"
-                        "\t\t --taxonomic-tree <TAXONOMIC_DB-basename> FILE1 [[FILE2] ...]\n"
+                        "\t\t --taxonomic-db <TAXONOMIC_DB-basename> FILE1 [[FILE2] ...]\n"
                         "\tEach input file is given in FASTA or FASTQ format.\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for taxonomic classify:\n");
             fprintf(stderr, "\t   --lca-coverage-fraction [FLOAT] \tfraction of covered kmers by the returned LCA's subtree and ancestors [0.66]\n");
             fprintf(stderr, "\t-p --parallel [INT] \t\t\tuse multiple threads for computation [1]\n");
             fprintf(stderr, "\t   --discovery-fraction [FLOAT] \tfraction of labeled k-mers required for annotation [0.7]\n");
+            fprintf(stderr, "\t   --top-label-fraction [FLOAT] \tif greater than 0, use a faster tax_class algorithm "
+                            "\tthat returns the LCA of labels linked to at least 'top_label_fraction' percent of kmers [0]\n");
         }
     }
 

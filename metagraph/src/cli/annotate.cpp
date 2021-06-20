@@ -4,6 +4,7 @@
 
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
+#include "common/batch_accumulator.hpp"
 #include "common/threads/threading.hpp"
 #include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
 #include "seq_io/formats.hpp"
@@ -205,6 +206,7 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                    const std::vector<std::string> &files,
                    const std::string &annotator_filename) {
     auto anno_graph = initialize_annotated_dbg(graph, config);
+    const size_t k = anno_graph->get_graph().get_k();
 
     bool forward_and_reverse = config.forward_and_reverse;
     if (anno_graph->get_graph().get_mode() == graph::DeBruijnGraph::CANONICAL) {
@@ -216,8 +218,20 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
 
     ThreadPool thread_pool(get_num_threads() > 1 ? get_num_threads() : 0);
 
+    // not too small, not too large
+    const size_t batch_size = 1'000;
+    const size_t batch_length = 100'000;
+
     // iterate over input files
     for (const auto &file : files) {
+        BatchAccumulator<std::pair<std::string, std::vector<std::string>>> batcher(
+            [&](auto&& data) {
+                thread_pool.enqueue([&](auto &data) {
+                    anno_graph->annotate_sequences(std::move(data));
+                }, std::move(data));
+            },
+            batch_size, batch_length, batch_size
+        );
         call_annotations(
             file,
             config.refpath,
@@ -231,12 +245,10 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
             config.fasta_header_delimiter,
             config.anno_labels,
             [&](std::string sequence, auto labels) {
-                thread_pool.enqueue(
-                    [&anno_graph](const std::string &sequence, const auto &labels) {
-                        anno_graph->annotate_sequence(sequence, labels);
-                    },
-                    std::move(sequence), std::move(labels)
-                );
+                if (sequence.size() >= k) {
+                    batcher.push_and_pay(sequence.size(),
+                                         std::move(sequence), std::move(labels));
+                }
             }
         );
     }
@@ -245,7 +257,25 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
 
     if (config.count_kmers) {
         // add k-mer counts
+        BatchAccumulator<std::tuple<std::string,
+                                    std::vector<std::string>,
+                                    std::vector<uint64_t>>> batcher(
+            [&](auto&& data) {
+                using Batch = std::vector<std::tuple<std::string,
+                                                     std::vector<std::string>,
+                                                     std::vector<uint64_t>>>;
+                thread_pool.enqueue([&](Batch &data) {
+                    for (auto &[seq, labels, kmer_counts] : data) {
+                        anno_graph->add_kmer_counts(seq, labels, std::move(kmer_counts));
+                    }
+                }, std::move(data));
+            },
+            batch_size, batch_length, batch_size
+        );
+
         for (const auto &file : files) {
+            logger->trace("Annotating k-mer counts for file {}", file);
+
             const std::string &counts_fname
                     = utils::remove_suffix(file, ".gz", ".fasta") + ".kmer_counts.gz";
 
@@ -262,14 +292,11 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                     [&](std::string sequence,
                                 std::vector<std::string> labels,
                                 std::vector<uint64_t> kmer_counts) {
-                        thread_pool.enqueue(
-                            [&](std::string &sequence,
-                                    std::vector<std::string> &labels,
-                                    std::vector<uint64_t> &kmer_counts) {
-                                anno_graph->add_kmer_counts(sequence, labels, std::move(kmer_counts));
-                            },
-                            std::move(sequence), std::move(labels), std::move(kmer_counts)
-                        );
+                        if (sequence.size() >= k) {
+                            batcher.push_and_pay(sequence.size(),
+                                                 std::move(sequence), std::move(labels),
+                                                 std::move(kmer_counts));
+                        }
                     }
                 );
             } else {
@@ -288,19 +315,63 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                     config.fasta_header_delimiter,
                     config.anno_labels,
                     [&](std::string sequence, auto labels) {
-                        thread_pool.enqueue(
-                            [&anno_graph](const std::string &sequence, const auto &labels) {
-                                const size_t k = anno_graph->get_graph().get_k();
-                                if (sequence.size() >= k) {
-                                    anno_graph->add_kmer_counts(sequence, labels,
-                                        std::vector<uint64_t>(sequence.size() - k + 1, 1));
-                                }
-                            },
-                            std::move(sequence), std::move(labels)
-                        );
+                        if (sequence.size() >= k) {
+                            batcher.push_and_pay(sequence.size(),
+                                                 std::move(sequence), std::move(labels),
+                                                 std::vector<uint64_t>(sequence.size() - k + 1, 1));
+                        }
                     }
                 );
             }
+        }
+    } else if (config.coordinates) {
+        BatchAccumulator<std::tuple<std::string, std::vector<std::string>, uint64_t>> batcher(
+            [&](auto&& data) {
+                thread_pool.enqueue([&](auto &data) {
+                    anno_graph->add_kmer_coords(std::move(data));
+                }, std::move(data));
+            },
+            batch_size, batch_length, batch_size
+        );
+
+        for (const auto &file : files) {
+            logger->trace("Annotating k-mer coordinates for file {}", file);
+
+            if (file_format(file) != "FASTA"
+                    && file_format(file) != "FASTQ") {
+                logger->error("Currently only FASTA or FASTQ format is supported"
+                              " for annotating k-mer coordinates");
+                exit(1);
+            }
+
+            uint64_t coord = 0;
+            call_annotations(
+                file,
+                config.refpath,
+                anno_graph->get_graph(),
+                forward_and_reverse,
+                config.min_count,
+                config.max_count,
+                config.filename_anno,
+                config.annotate_sequence_headers,
+                config.fasta_anno_comment_delim,
+                config.fasta_header_delimiter,
+                config.anno_labels,
+                [&](std::string sequence, auto labels) {
+                    if (config.num_kmers_in_seq
+                            && config.num_kmers_in_seq + k - 1 != sequence.size()) {
+                        logger->error("All input sequences must have the same"
+                                      " length when flag --const-length is on");
+                        exit(1);
+                    }
+                    if (sequence.size() >= k) {
+                        uint64_t num_kmers = sequence.size() - k + 1;
+                        batcher.push_and_pay(sequence.size(),
+                                             std::move(sequence), std::move(labels), coord);
+                        coord += num_kmers;
+                    }
+                }
+            );
         }
     }
 
