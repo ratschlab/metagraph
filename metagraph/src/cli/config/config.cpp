@@ -270,8 +270,8 @@ Config::Config(int argc, char *argv[]) {
             files_sequentially = true;
         } else if (!strcmp(argv[i], "--taxonomic-tree")) {
             taxonomic_tree = std::string(get_value(i++));
-		} else if (!strcmp(argv[i], "--taxonomic-db")) {
-			taxonomic_db = std::string(get_value(i++));
+        } else if (!strcmp(argv[i], "--taxonomic-db")) {
+            taxonomic_db = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--lca-coverage-fraction")) {
             lca_coverage_fraction = std::stof(get_value(i++));
         } else if (!strcmp(argv[i], "--top-label-fraction")) {
@@ -1244,7 +1244,6 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
                         "\t\t --label-taxid-map <*.accession2taxid>\n"
                         "\t\t -o <taxonomy-db-basename> ANNOT1 [[ANNOT2] ...]\n\n",
                 prog_name.c_str());
-//            fprintf(stderr, "Available options for transform annotation to taxonomy:\n");
             break;
         }
         case TAX_CLASSIFY: {
@@ -1257,8 +1256,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --lca-coverage-fraction [FLOAT] \tfraction of covered kmers by the returned LCA's subtree and ancestors [0.66]\n");
             fprintf(stderr, "\t-p --parallel [INT] \t\t\tuse multiple threads for computation [1]\n");
             fprintf(stderr, "\t   --discovery-fraction [FLOAT] \tfraction of labeled k-mers required for annotation [0.7]\n");
-            fprintf(stderr, "\t   --top-label-fraction [FLOAT] \tif greater than 0, use a faster tax_class algorithm "
-                            "\tthat returns the LCA of labels linked to at least 'top_label_fraction' percent of kmers [0]\n");
+            fprintf(stderr, "\t   --top-label-fraction [FLOAT] \tif greater than 0, use a faster tax_class algorithm\n"
+                            "\t\t\t\t\t\t\tthat returns the LCA of the labels linked to at least 'top_label_fraction' percent of kmers [0]\n");
         }
     }
 

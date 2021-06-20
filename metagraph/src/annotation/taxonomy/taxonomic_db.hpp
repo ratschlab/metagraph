@@ -54,10 +54,11 @@ class TaxonomyDB {
     /**
      * Find LCA for a set of nodes in the tree.
      */
-    NormalizedTaxId find_lca(const std::vector<NormalizedTaxId> &taxids) const;
+    NormalizedTaxId find_normalized_lca(const std::vector<NormalizedTaxId> &taxids) const;
 
     bool get_normalized_taxid(const std::string accession_version, NormalizedTaxId *taxid) const;
     static std::string get_accession_version_from_label(const std::string &label);
+    bool get_normalized_taxid_from_label(const std::string &label, NormalizedTaxId *taxid) const;
 
     TaxId assign_class_getrows(const graph::AnnotatedDBG &anno,
                                const std::string &sequence,
@@ -70,16 +71,16 @@ class TaxonomyDB {
 
   private:
     /**
-     * Reads and returns the taxonomic tree
+     * Reads and returns the taxonomic tree as a children list.
      *
      * @param [input] tax_tree_filepath path to a "nodes.dmp" file.
-     * @param [output] tree -> tree stored as list of children.
+     * @param [output] tree -> tree stored as a children list.
      */
     void read_tree(const std::string &tax_tree_filepath,
                    ChildrenList *tree);
 
     /**
-     * Reads and returns the label_taxid_map (accession version to taxid) corresponding to the received set of used accession versions.
+     * Reads and saves to 'this->label_taxid_map[]' the accession version to taxid map corresponding to the received set of used accession versions.
      *
      * @param [input] label_taxid_map_filepath path to a ".accession2taxid" file.
      * @param [input] input_accessions contains all the accession version in the input.
@@ -96,8 +97,7 @@ class TaxonomyDB {
     void rmq_preprocessing(const std::vector<NormalizedTaxId> &tree_linearization);
 
     /**
-     * dfs_statistics calculates a tree_linearization, this->node_depth and
-     *      this->node_to_linearization_idx.
+     * dfs_statistics calculates a tree_linearization, this->node_depth and this->node_to_linearization_idx.
      *
      * @param [input] node -> the node that is currently processed.
      * @param [input] tree -> tree stored as list of children.

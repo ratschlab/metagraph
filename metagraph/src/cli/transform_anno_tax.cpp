@@ -19,6 +19,7 @@ std::vector<std::string> get_anno_filenames(const std::vector<std::string> &path
 
     for (const std::string &path : paths) {
         if (!filesystem::is_directory(path)) {
+            // Make sure that all the given files (not directories) have a ".annodbg" suffix.
             if (std::filesystem::path(path).extension() != ".annodbg") {
                 logger->warn("File {} is not an annotation file (*.annodbg). File skipped.", path);
                 continue;
@@ -26,6 +27,8 @@ std::vector<std::string> get_anno_filenames(const std::vector<std::string> &path
             filenames.push_back(path);
             continue;
         }
+
+        // For all the directory paths, do a recursive search for ".annodbg" files in the given directory subtree.
         logger->trace("Looking for annotation files in directory {}.", path);
         for (auto &rec_file : filesystem::recursive_directory_iterator(path)) {
             if (std::filesystem::path(rec_file.path().string()).extension() == ".annodbg") {
