@@ -1157,7 +1157,8 @@ void convert_to_row_diff(const std::vector<std::string> &files,
 
     if (construction_stage == RowDiffStage::CONVERT) {
         assign_anchors(graph_fname, graph_fname, out_dir, max_path_length,
-                       ".row_reduction", get_num_threads());
+                       ".row_reduction", get_num_threads(),
+                       with_values || with_coordinates);
 
         const std::string anchors_fname = graph_fname + kRowDiffAnchorExt;
         if (!fs::exists(anchors_fname)) {

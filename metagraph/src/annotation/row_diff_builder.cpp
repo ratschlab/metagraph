@@ -421,7 +421,8 @@ void assign_anchors(const std::string &graph_fname,
                     const std::filesystem::path &count_vectors_dir,
                     uint32_t max_length,
                     const std::string &row_reduction_extension,
-                    uint32_t num_threads) {
+                    uint32_t num_threads,
+                    bool multiple_fork_successors) {
     std::string anchor_filename = outfbase + kRowDiffAnchorExt;
     if (fs::exists(anchor_filename)) {
         logger->trace("Using existing anchors {}", anchor_filename);
@@ -502,14 +503,15 @@ void assign_anchors(const std::string &graph_fname,
         uint64_t num_fork_successors = rd_succ.num_set_bits();
         sdsl::bit_vector rd_succ_bv = rd_succ.convert_to<sdsl::bit_vector>();
         rd_succ = rd_succ_bv_type();
-        // boss.row_diff_add_forks(num_threads, anchors_bv, &rd_succ_bv, 10 * max_length);
-        {
-            sdsl::bit_vector bv(graph.num_nodes() + 1, 0);
-            call_ones(rd_succ_bv, [&](BOSS::edge_index i) {
-                bv[graph.boss_to_kmer_index(i)] = 1;
-            });
-            rd_succ_bv = std::move(bv);
-        }
+        if (multiple_fork_successors)
+            boss.row_diff_add_forks(num_threads, anchors_bv, &rd_succ_bv, 10 * max_length);
+
+        sdsl::bit_vector bv(graph.num_nodes() + 1, 0);
+        call_ones(rd_succ_bv, [&](BOSS::edge_index i) {
+            bv[graph.boss_to_kmer_index(i)] = 1;
+        });
+        rd_succ_bv = std::move(bv);
+
         rd_succ = rd_succ_bv_type(std::move(rd_succ_bv));
         logger->trace("Number of successors at forks increased from {} to {}",
                       num_fork_successors, rd_succ.num_set_bits());
