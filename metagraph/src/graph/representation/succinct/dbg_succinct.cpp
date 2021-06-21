@@ -870,7 +870,8 @@ void DBGSuccinct::mask_dummy_kmers(size_t num_threads, bool with_pruning) {
 }
 
 uint64_t DBGSuccinct::kmer_to_boss_index(node_index node) const {
-    assert(node > 0 && node <= num_nodes());
+    assert(node > 0);
+    assert(node <= num_nodes());
 
     if (!valid_edges_.get())
         return node;
