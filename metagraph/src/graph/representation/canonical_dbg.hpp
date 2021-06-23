@@ -24,27 +24,27 @@ class CanonicalDBG : public DeBruijnGraph {
      * @param graph a graph
      * @param cache_size the number of graph traversal call results to be cached
      */
-    CanonicalDBG(const DeBruijnGraph &graph, size_t cache_size = 100'000);
+    CanonicalDBG(const DeBruijnGraph &graph, size_t cache_size = 1000);
 
     /**
      * Constructs a CanonicalDBG
      * @param graph a graph
      * @param cache_size the number of graph traversal call results to be cached
      */
-    CanonicalDBG(DeBruijnGraph &graph, size_t cache_size = 100'000);
+    CanonicalDBG(DeBruijnGraph &graph, size_t cache_size = 1000);
 
     /**
      * Constructs a CanonicalDBG
      * @param graph a pointer to the graph
      * @param cache_size the number of graph traversal call results to be cached
      */
-    CanonicalDBG(std::shared_ptr<const DeBruijnGraph> graph, size_t cache_size = 100'000);
+    CanonicalDBG(std::shared_ptr<const DeBruijnGraph> graph, size_t cache_size = 1000);
     /**
      * Constructs a CanonicalDBG
      * @param graph a pointer to the graph
      * @param cache_size the number of graph traversal call results to be cached
      */
-    CanonicalDBG(std::shared_ptr<DeBruijnGraph> graph, size_t cache_size = 100'000);
+    CanonicalDBG(std::shared_ptr<DeBruijnGraph> graph, size_t cache_size = 1000);
 
     virtual ~CanonicalDBG() {}
 
