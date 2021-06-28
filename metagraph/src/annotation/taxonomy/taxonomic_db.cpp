@@ -174,13 +174,18 @@ void TaxonomyDB::rmq_preprocessing(const std::vector<NormalizedTaxId> &tree_line
 }
 
 // TODO - decide if we want to keep only 'get_taxid_from_label()' function and delete 'get_accession_version_from_label()' and 'get_normalized_taxid()'.
+// std::string TaxonomyDB::get_accession_version_from_label(const std::string &label) {
+//     std::vector<std::string> label_parts = utils::split_string(label, "|");
+//     if (label_parts.size() <= 3 || label_parts[3] == "") {
+//         logger->error("Failed to get accession from fasta label. Please make sure that the labels in the annotation matrix are in the standard ncbi format.");
+//         exit(1);
+//     }
+//     return label_parts[3];
+// }
+
 std::string TaxonomyDB::get_accession_version_from_label(const std::string &label) {
-    std::vector<std::string> label_parts = utils::split_string(label, "|");
-    if (label_parts.size() <= 3 || label_parts[3] == "") {
-        logger->error("Failed to get accession from fasta label. Please make sure that the labels in the annotation matrix are in the standard ncbi format.");
-        exit(1);
-    }
-    return label_parts[3];
+    auto aux = utils::split_string(label, "|")[2];
+    return utils::split_string(aux, " ")[0];
 }
 
 bool TaxonomyDB::get_normalized_taxid(const std::string accession_version,
@@ -362,23 +367,16 @@ void TaxonomyDB::export_to_file(const std::string &filepath) {
         std::exit(1);
     }
 
-    const std::vector<NormalizedTaxId> &linearization = this->rmq_data[0];
-    tsl::hopscotch_map<TaxId, TaxId> node_parent;
+    // for (uint64_t i = 0; i < node_parent.size(); ++i) {
+    //     node_parent[i] = this->denormalized_taxid[node_parent[i]];
+    //     // if (node_parent.count(this->denormalized_taxid[node_parent[i]])) {
+    //     //     // Prv is act's child.
+    //     //     continue;
+    //     // }
+    //     // // Prv is act's parent.
+    //     // node_parent[this->denormalized_taxid[act]] = this->denormalized_taxid[prv];
+    // }
 
-    node_parent[this->denormalized_taxid[linearization[0]]] =
-            this->denormalized_taxid[linearization[0]];
-
-    // Start the iteration from 1, because we are computing linearization[i - 1].
-    for (uint64_t i = 1; i < linearization.size(); ++i) {
-        uint64_t act = linearization[i];
-        uint64_t prv = linearization[i - 1];
-        if (node_parent.count(this->denormalized_taxid[act])) {
-            // Prv is act's child.
-            continue;
-        }
-        // Prv is act's parent.
-        node_parent[this->denormalized_taxid[act]] = this->denormalized_taxid[prv];
-    }
     serialize_number_number_map(f, node_parent);
 
     std::vector<std::pair<uint64_t, uint64_t>> taxid_frequencies(1);
@@ -451,6 +449,7 @@ TaxId TaxonomyDB::assign_class_getrows(const graph::AnnotatedDBG &anno,
         }
     };
 
+    std::cerr << "inside assign_class_getrows" << std::endl;
 
     // num_kmers represents the total number of kmers in one read (read.len - graph.k + 1).
     uint64_t num_kmers = 0;
@@ -504,7 +503,7 @@ TaxId TaxonomyDB::assign_class_getrows(const graph::AnnotatedDBG &anno,
 
     anno.call_annotated_rows(backward_kmers, callback_cell, [&]() {
         if (curr_taxids.size() != 0) {
-            backward_taxids[poz_backward[cnt++]] = this->denormalized_taxid[find_normalized_lca(curr_taxids)];
+            backward_taxids[num_kmers - 1 - poz_backward[cnt++]] = this->denormalized_taxid[find_normalized_lca(curr_taxids)];
         }
         curr_taxids.clear();
     });
@@ -533,7 +532,9 @@ TaxId TaxonomyDB::assign_class_getrows(const graph::AnnotatedDBG &anno,
             } else if (backward_taxid == 0) {
                 curr_taxid = forward_taxid;
             } else {
-                curr_taxid = TaxClassifier::find_lca(forward_taxid, backward_taxid, this->root_node, this->node_parent);
+                std::cerr << "\n f" << forward_taxid << " b=" << backward_taxid << std::flush;
+                curr_taxid = TaxClassifier::find_lca(forward_taxid, backward_taxid, denormalized_taxid[this->root_node], this->node_parent);
+                std::cerr << "lca/find_lca curr_taxid = " << curr_taxid << std::endl;
                 // todo - decide if it is worth to compute the normalization for all taxids. If not, we can delete one of  TaxClassifier::find_lca() or this.find_normalized_lca().
             }
         }
@@ -572,6 +573,8 @@ TaxId TaxonomyDB::assign_class_toplabels(const graph::AnnotatedDBG &anno,
                                          ) const {
     // Get all the labels with a frequency better than 'label_fraction' among the kmers in the forward read.
     std::vector<std::string> labels_discovered = anno.get_labels(sequence, label_fraction);
+
+    std::cerr << "inside assign_class_toplabels" << std::endl;
 
     std::string reversed_sequence = sequence;
     reverse_complement(reversed_sequence.begin(), reversed_sequence.end());

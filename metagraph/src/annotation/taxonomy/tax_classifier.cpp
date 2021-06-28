@@ -220,7 +220,9 @@ TaxId TaxClassifier::assign_class(const mtg::graph::DeBruijnGraph &graph,
             } else if (backward_taxid == 0) {
                 curr_taxid = forward_taxid;
             } else {
+                std::cerr << "\n f" << forward_taxid << "b=" << backward_taxid << std::flush;
                 curr_taxid = find_lca(forward_taxid, backward_taxid, this->root_node, this->node_parent);
+                std::cerr << "lca/find_lca curr_taxid = " << curr_taxid << std::endl;
             }
         }
         if (curr_taxid) {

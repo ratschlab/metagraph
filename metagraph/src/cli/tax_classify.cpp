@@ -150,14 +150,22 @@ int taxonomic_classification(Config *config) {
     }
     thread_pool.join();
 
-    print_all_results(pair_label_taxid, [](const std::string name_seq, const uint64_t &taxid) {
+    uint64_t num_hits = 0;
+
+    print_all_results(pair_label_taxid, [&](const std::string name_seq, const uint64_t &taxid) {
                 std::string result = fmt::format(
                       "Sequence '{}' was classified with Tax ID '{}'\n",
                       name_seq, taxid);
                 std::cout << result << std::endl;
+                if (utils::split_string(name_seq, "|")[1] == to_string(taxid)) {
+                    num_hits += 1;
+                }
             });
 
     logger->trace("Finished all the queries in {}s.", timer.elapsed());
+
+    std::cerr << "num hits = " << num_hits << "\n total results =" << pair_label_taxid.size() << "\n";
+    std::cerr << "hit rate = " << (double)num_hits / pair_label_taxid.size() << "\n";
 
     return 0;
 }
