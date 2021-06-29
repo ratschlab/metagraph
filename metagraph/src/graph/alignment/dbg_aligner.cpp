@@ -173,38 +173,52 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
                                           std::string_view query_rc,
                                           const ISeeder<node_index> &seeder,
                                           IExtender<node_index> &extender) {
+            size_t farthest_reach = 0;
+            score_t max_score = config_.min_cell_score;
             std::vector<DBGAlignment> rc_of_alignments;
 
             DEBUG_LOG("Extending in forwards direction");
-            align_core(query, seeder, extender, [&](DBGAlignment&& path) {
-                score_t min_path_score = get_min_path_score(path);
+            align_core(query, seeder, extender,
+                [&](DBGAlignment&& path) {
+                    score_t min_path_score = get_min_path_score(path);
 
-                if (path.get_score() >= min_path_score)
-                    alignment_callback(DBGAlignment(path));
+                    farthest_reach = std::max(farthest_reach,
+                                              path.get_query().size() + path.get_clipping());
+                    max_score = std::max(max_score, path.get_score());
 
-                if (!path.get_clipping())
-                    return;
-
-                auto rev = path;
-                rev.reverse_complement(graph_, query_rc);
-                if (rev.empty()) {
-                    DEBUG_LOG("Alignment cannot be reversed, returning");
                     if (path.get_score() >= min_path_score)
-                        alignment_callback(std::move(path));
+                        alignment_callback(DBGAlignment(path));
 
-                    return;
+                    if (!path.get_clipping())
+                        return;
+
+                    auto rev = path;
+                    rev.reverse_complement(graph_, query_rc);
+                    if (rev.empty()) {
+                        DEBUG_LOG("Alignment cannot be reversed, returning");
+                        if (path.get_score() >= min_path_score)
+                            alignment_callback(std::move(path));
+
+                        return;
+                    }
+
+                    // Remove any character skipping from the end so that the
+                    // alignment can proceed
+                    assert(rev.get_end_clipping());
+                    rev.trim_end_clipping();
+                    assert(rev.is_valid(graph_, &config_));
+
+                    // Pass the reverse complement of the forward alignment
+                    // as a seed for extension
+                    rc_of_alignments.emplace_back(std::move(rev));
+                },
+                [&](const DBGAlignment &seed) {
+                    return seed.get_clipping() <= farthest_reach
+                        && config_.fraction_of_top > 0
+                            ? max_score * config_.fraction_of_top
+                            : config_.min_cell_score;
                 }
-
-                // Remove any character skipping from the end so that the
-                // alignment can proceed
-                assert(rev.get_end_clipping());
-                rev.trim_end_clipping();
-                assert(rev.is_valid(graph_, &config_));
-
-                // Pass the reverse complement of the forward alignment
-                // as a seed for extension
-                rc_of_alignments.emplace_back(std::move(rev));
-            }, [&](const auto&) { return config_.min_cell_score; });
+            );
 
             return rc_of_alignments;
         };

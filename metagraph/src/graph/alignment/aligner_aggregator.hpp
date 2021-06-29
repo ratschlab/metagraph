@@ -58,8 +58,10 @@ inline void AlignmentAggregator<NodeType, AlignmentCompare>
 template <typename NodeType, class AlignmentCompare>
 inline auto AlignmentAggregator<NodeType, AlignmentCompare>
 ::get_min_path_score(const DBGAlignment &) const -> score_t {
-    return path_queue_.size() ? path_queue_.minimum().get_score()
-                              : config_.min_path_score;
+    return path_queue_.size() < config_.num_alternative_paths
+        ? config_.min_path_score
+        : std::max(static_cast<score_t>(path_queue_.maximum().get_score() * config_.fraction_of_top),
+                   path_queue_.minimum().get_score());
 }
 
 template <typename NodeType, class AlignmentCompare>

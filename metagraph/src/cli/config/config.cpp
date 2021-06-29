@@ -198,6 +198,8 @@ Config::Config(int argc, char *argv[]) {
             dump_text_anno = true;
         } else if (!strcmp(argv[i], "--discovery-fraction")) {
             discovery_fraction = std::stof(get_value(i++));
+        } else if (!strcmp(argv[i], "--align-fraction-of-top")) {
+            alignment_fraction_of_top = std::stof(get_value(i++));
         } else if (!strcmp(argv[i], "--query-presence")) {
             query_presence = true;
         } else if (!strcmp(argv[i], "--filter-present")) {
