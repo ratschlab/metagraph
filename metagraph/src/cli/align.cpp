@@ -394,12 +394,12 @@ int align_to_graph(Config *config) {
     ThreadPool thread_pool(get_num_threads());
     std::mutex print_mutex;
 
-    if (graph->get_mode() == DeBruijnGraph::PRIMARY) {
-        logger->trace("Primary graph wrapped into canonical");
-        graph = std::make_shared<CanonicalDBG>(graph);
-    }
-
     if (config->map_sequences) {
+        if (graph->get_mode() == DeBruijnGraph::PRIMARY) {
+            logger->trace("Primary graph wrapped into canonical");
+            graph = std::make_shared<CanonicalDBG>(graph);
+        }
+
         if (!config->alignment_length) {
             config->alignment_length = graph->get_k();
         } else if (config->alignment_length > graph->get_k()) {
@@ -464,10 +464,10 @@ int align_to_graph(Config *config) {
                 num_bytes_read += it->seq.l;
             }
 
-            auto process_batch = [&](SeqBatch batch, uint64_t size) {
+            auto process_batch = [&,graph](SeqBatch batch) mutable {
                 auto aln_graph = graph;
-                if (graph->get_mode() == DeBruijnGraph::PRIMARY)
-                    aln_graph = std::make_shared<CanonicalDBG>(aln_graph, size);
+                if (aln_graph->get_mode() == DeBruijnGraph::PRIMARY)
+                    aln_graph = std::make_shared<CanonicalDBG>(aln_graph);
 
                 auto aligner = build_aligner(*aln_graph, aligner_config);
 
@@ -501,15 +501,18 @@ int align_to_graph(Config *config) {
                     }
 
                     thread_pool.enqueue(process_batch,
-                                        SeqBatch(last_mv_it, std::make_move_iterator(it)),
-                                        mbatch_size);
+                                        SeqBatch(last_mv_it, std::make_move_iterator(it)));
                     ++num_minibatches;
                 }
 
                 logger->trace("Num minibatches: {}, minibatch size: {} KB",
                               num_minibatches, mbatch_size / 1e3);
             } else {
-                thread_pool.enqueue(process_batch, std::move(seq_batch), batch_size);
+                if (it != end) {
+                    thread_pool.enqueue(process_batch, std::move(seq_batch));
+                } else {
+                    process_batch(std::move(seq_batch));
+                }
             }
         };
 
