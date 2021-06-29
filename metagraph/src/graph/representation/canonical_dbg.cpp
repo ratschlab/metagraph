@@ -242,14 +242,13 @@ void CanonicalDBG
 
     const auto &alphabet = graph_.alphabet();
 
-    try {
-        auto children = child_node_cache_.Get(node);
+    if (auto fetch = child_node_cache_.TryGet(node)) {
         for (size_t c = 0; c < alphabet.size(); ++c) {
-            if (children[c] != npos)
-                callback(children[c], alphabet[c]);
+            if ((*fetch)[c] != npos)
+                callback((*fetch)[c], alphabet[c]);
         }
 
-    } catch (const std::range_error&) {
+    } else {
         std::vector<node_index> children(alphabet.size(), npos);
         size_t max_num_edges_left = children.size() - has_sentinel_;
 
@@ -359,14 +358,13 @@ void CanonicalDBG
 
     const auto &alphabet = graph_.alphabet();
 
-    try {
-        auto parents = parent_node_cache_.Get(node);
+    if (auto fetch = parent_node_cache_.TryGet(node)) {
         for (size_t c = 0; c < alphabet.size(); ++c) {
-            if (parents[c] != npos)
-                callback(parents[c], alphabet[c]);
+            if ((*fetch)[c] != npos)
+                callback((*fetch)[c], alphabet[c]);
         }
 
-    } catch (const std::range_error&) {
+    } else {
         std::vector<node_index> parents(alphabet.size(), npos);
         size_t max_num_edges_left = parents.size() - has_sentinel_;
 
@@ -523,10 +521,10 @@ DeBruijnGraph::node_index CanonicalDBG::reverse_complement(node_index node) cons
 
     }
 
-    try {
-        return is_palindrome_cache_.Get(node) ? node : node + offset_;
+    if (auto fetch = is_palindrome_cache_.TryGet(node)) {
+        return *fetch ? node : node + offset_;
 
-    } catch (const std::range_error&) {
+    } else {
         std::string seq = graph_.get_node_sequence(node);
         std::string rev_seq = seq;
         ::reverse_complement(rev_seq.begin(), rev_seq.end());
