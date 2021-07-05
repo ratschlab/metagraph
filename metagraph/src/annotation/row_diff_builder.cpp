@@ -314,10 +314,8 @@ void route_at_forks(const graph::DBGSuccinct &graph,
         rd_succ_bv[0] = false;
     }
 
-    rd_succ_bv_type rd_succ = rd_succ_bv_type(std::move(rd_succ_bv));
-
     std::ofstream f(rd_succ_fname, ios::binary);
-    rd_succ.serialize(f);
+    rd_succ_bv.serialize(f);
     logger->trace("RowDiff successors are assigned for forks and written to {}",
                   rd_succ_fname);
 }
@@ -475,44 +473,33 @@ void assign_anchors(const std::string &graph_fname,
     // assign extra anchors and restrict the length of row-diff paths
     logger->trace("Assigning required anchors...");
     {
-        rd_succ_bv_type rd_succ;
+        sdsl::bit_vector rd_succ_bv;
         const std::string &rd_succ_fname = outfbase + kRowDiffForkSuccExt;
         std::ifstream f(rd_succ_fname, ios::binary);
-        if (!rd_succ.load(f)) {
+        try {
+            rd_succ_bv.load(f);
+        } catch (...) {
             logger->error("Couldn't load row-diff successor bitmap from {}", rd_succ_fname);
             exit(1);
         }
-        if (rd_succ.size() != num_rows + 1) {
-            logger->error("Successor bitmap {} is incompatible with annotations."
-                          " Vector size: {}, number of rows: {}",
-                          rd_succ_fname, rd_succ.size(), num_rows);
+        if (rd_succ_bv.size() != graph.num_nodes() + 1) {
+            logger->error("Successor bitmap {} is incompatible with the graph."
+                          " Vector size: {}, number of nodes: {}",
+                          rd_succ_fname, rd_succ_bv.size(), graph.num_nodes());
             exit(1);
         }
 
         logger->trace("Assigning anchors for RowDiff successors {}...", rd_succ_fname);
-        {
-            sdsl::bit_vector rd_succ_bv(boss.get_last().size(), 0);
-            rd_succ.call_ones([&](uint64_t i) {
-                rd_succ_bv[graph.kmer_to_boss_index(i)] = 1;
-            });
-            rd_succ = rd_succ_bv_type(rd_succ_bv);
-        }
-        boss.row_diff_traverse(num_threads, max_length, rd_succ, &anchors_bv);
+        boss.row_diff_traverse(num_threads, max_length,
+                               [&](BOSS::edge_index i) { return rd_succ_bv[graph.boss_to_kmer_index(i)]; },
+                               &anchors_bv);
 
         logger->trace("Adding branching off forks to RowDiff successors {}...", rd_succ_fname);
-        uint64_t num_fork_successors = rd_succ.num_set_bits();
-        sdsl::bit_vector rd_succ_bv = rd_succ.convert_to<sdsl::bit_vector>();
-        rd_succ = rd_succ_bv_type();
+        uint64_t num_fork_successors = sdsl::util::cnt_one_bits(rd_succ_bv);
         if (multiple_fork_successors)
-            boss.row_diff_add_forks(num_threads, anchors_bv, &rd_succ_bv, 10 * max_length);
+            graph.add_rd_successors_at_forks(num_threads, anchors_bv, &rd_succ_bv, 10 * max_length);
 
-        sdsl::bit_vector bv(graph.num_nodes() + 1, 0);
-        call_ones(rd_succ_bv, [&](BOSS::edge_index i) {
-            bv[graph.boss_to_kmer_index(i)] = 1;
-        });
-        rd_succ_bv = std::move(bv);
-
-        rd_succ = rd_succ_bv_type(std::move(rd_succ_bv));
+        rd_succ_bv_type rd_succ(std::move(rd_succ_bv));
         logger->trace("Number of successors at forks increased from {} to {}",
                       num_fork_successors, rd_succ.num_set_bits());
         std::ofstream out(rd_succ_fname, ios::binary);

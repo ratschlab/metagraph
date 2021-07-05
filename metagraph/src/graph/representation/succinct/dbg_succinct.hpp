@@ -170,6 +170,11 @@ class DBGSuccinct : public DeBruijnGraph {
     template <class Callback>
     void call_row_diff_successors(node_index node, const bit_vector &rd_succ, const Callback &callback) const;
 
+    void add_rd_successors_at_forks(size_t num_threads,
+                                    const sdsl::bit_vector &anchors,
+                                    sdsl::bit_vector *rd_succ,
+                                    size_t max_length) const;
+
     uint64_t kmer_to_boss_index(node_index kmer_index) const;
     node_index boss_to_kmer_index(uint64_t boss_index) const;
 

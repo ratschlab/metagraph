@@ -1173,10 +1173,7 @@ void convert_to_row_diff(const std::vector<std::string> &files,
             return;
         }
         mem_bytes -= anchor_size;
-    }
 
-    // TODO: move
-    if (construction_stage != RowDiffStage::COUNT_LABELS) {
         const std::string rd_succ_fname = graph_fname + kRowDiffForkSuccExt;
         if (!fs::exists(rd_succ_fname)) {
             logger->error("Can't find row-diff successor bitmap at {}", rd_succ_fname);
