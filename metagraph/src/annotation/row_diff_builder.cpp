@@ -1118,7 +1118,8 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
             std::vector<uint64_t> ids;
             ids.reserve(row_diff_bits[l_idx][j]);
             int64_t value = 0;
-            // TODO: sum in merge?
+            // Call merge_files<T> with a single template parameter (not pair).
+            // It can't extract and add counts, so we do this manually.
             elias_fano::merge_files<T>(filenames, [&](T v) {
                 if constexpr(with_values) {
                     assert(v.second && "zero diffs must have been skipped");
