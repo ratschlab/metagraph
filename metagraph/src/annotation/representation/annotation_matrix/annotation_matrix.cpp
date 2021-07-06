@@ -208,9 +208,9 @@ template class StaticBinRelAnnotator<binmat::RowSparse, std::string>;
 
 template class StaticBinRelAnnotator<binmat::RowDiff<binmat::RowSparse>, std::string>;
 
-template class StaticBinRelAnnotator<matrix::CSCMatrix<binmat::BRWT, sdsl::dac_vector_dp<>>, std::string>;
+template class StaticBinRelAnnotator<matrix::CSCMatrix<binmat::BRWT, CountsVector>, std::string>;
 
-template class StaticBinRelAnnotator<matrix::IntRowDiff<matrix::CSCMatrix<binmat::BRWT, sdsl::dac_vector_dp<>>>, std::string>;
+template class StaticBinRelAnnotator<matrix::IntRowDiff<matrix::CSCMatrix<binmat::BRWT, CountsVector>>, std::string>;
 
 template class StaticBinRelAnnotator<matrix::CSRMatrix, std::string>;
 
