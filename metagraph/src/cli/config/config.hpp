@@ -130,6 +130,9 @@ class Config {
     double alignment_max_nodes_per_seq_char = 12.0;
     double alignment_max_ram = 200;
     double alignment_min_exact_match = 0.7;
+    double intersect_ratio = 1;
+    double lca_coverage_fraction = 0.66;
+    double top_label_fraction = 0;
     double min_fraction = 0.0;
     double max_fraction = 1.0;
     std::vector<double> count_slice_quantiles;
@@ -149,6 +152,9 @@ class Config {
     std::string fasta_anno_comment_delim = UNINITIALIZED_STR;
     std::string header = "";
     std::string host_address;
+    std::string taxonomic_tree;
+    std::string taxonomic_db;
+    std::string label_taxid_map;
     std::string linkage_file;
     std::string intersected_columns;
 
@@ -175,6 +181,8 @@ class Config {
         RELAX_BRWT,
         QUERY,
         SERVER_QUERY,
+        TRANSFORM_ANNO_TAX,
+        TAX_CLASSIFY,
     };
     IdentityType identity = NO_IDENTITY;
 

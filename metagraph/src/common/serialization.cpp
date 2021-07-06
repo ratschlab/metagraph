@@ -326,6 +326,9 @@ void serialize_number_number_map(std::ostream &out,
 template
 void serialize_number_number_map(std::ostream &out,
                                  const std::unordered_map<uint32_t, uint32_t> &map);
+template
+void serialize_number_number_map(std::ostream &out,
+                                 const tsl::hopscotch_map<uint64_t, uint64_t> &map);
 
 template <class Map>
 bool load_number_number_map(std::istream &in, Map *map) {
@@ -374,6 +377,9 @@ bool load_number_number_map(std::istream &in,
 template
 bool load_number_number_map(std::istream &in,
                             std::unordered_map<uint32_t, uint32_t> *map);
+template
+bool load_number_number_map(std::istream &in,
+                            tsl::hopscotch_map<uint64_t, uint64_t> *map);
 
 
 template <class Map>
