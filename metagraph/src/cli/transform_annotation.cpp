@@ -259,7 +259,7 @@ convert_to_IntMultiBRWT(const std::vector<std::string> &files,
 
     logger->trace("Converted to Multi-BRWT in {} sec", timer.elapsed());
 
-    std::vector<sdsl::dac_vector_dp<>> column_values;
+    std::vector<CountsVector> column_values;
     ColumnCompressed<>::load_column_values(files,
         [&](size_t j, const std::string &label, sdsl::int_vector<>&& values) {
             if (label != brwt_annotator->get_label_encoder().decode(j)) {
@@ -267,7 +267,7 @@ convert_to_IntMultiBRWT(const std::vector<std::string> &files,
                               " from the order of the input columns");
                 exit(1);
             }
-            sdsl::dac_vector_dp<> values_compressed(std::move(values));
+            CountsVector values_compressed(std::move(values));
             #pragma omp critical
             {
                 while (j >= column_values.size()) {
@@ -288,7 +288,7 @@ convert_to_IntMultiBRWT(const std::vector<std::string> &files,
 
     auto multi_brwt = brwt_annotator->release_matrix();
     return IntMultiBRWTAnnotator(
-                std::make_unique<matrix::CSCMatrix<binmat::BRWT, sdsl::dac_vector_dp<>>>(
+                std::make_unique<matrix::CSCMatrix<binmat::BRWT, CountsVector>>(
                         std::move(*multi_brwt), std::move(column_values)),
                 brwt_annotator->get_label_encoder());
 }
@@ -753,7 +753,7 @@ int transform_annotation(Config *config) {
                 auto int_annotation = convert_to_IntMultiBRWT(files, *config, timer);
                 logger->trace("Annotation converted in {} sec", timer.elapsed());
 
-                using CSCMatrix = matrix::CSCMatrix<binmat::BRWT, sdsl::dac_vector_dp<>>;
+                using CSCMatrix = matrix::CSCMatrix<binmat::BRWT, CountsVector>;
 
                 IntRowDiffBRWTAnnotator annotation(
                         std::make_unique<matrix::IntRowDiff<CSCMatrix>>(nullptr,

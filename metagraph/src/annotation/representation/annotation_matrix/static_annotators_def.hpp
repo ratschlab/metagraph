@@ -43,9 +43,11 @@ typedef StaticBinRelAnnotator<binmat::RowDiff<binmat::BRWT>, std::string> RowDif
 
 typedef StaticBinRelAnnotator<binmat::RowDiff<binmat::RowSparse>, std::string> RowDiffRowSparseAnnotator;
 
-typedef StaticBinRelAnnotator<matrix::CSCMatrix<binmat::BRWT, sdsl::dac_vector_dp<>>, std::string> IntMultiBRWTAnnotator;
+typedef sdsl::dac_vector_dp<> CountsVector;
 
-typedef StaticBinRelAnnotator<matrix::IntRowDiff<matrix::CSCMatrix<binmat::BRWT, sdsl::dac_vector_dp<>>>, std::string> IntRowDiffBRWTAnnotator;
+typedef StaticBinRelAnnotator<matrix::CSCMatrix<binmat::BRWT, CountsVector>, std::string> IntMultiBRWTAnnotator;
+
+typedef StaticBinRelAnnotator<matrix::IntRowDiff<matrix::CSCMatrix<binmat::BRWT, CountsVector>>, std::string> IntRowDiffBRWTAnnotator;
 
 typedef StaticBinRelAnnotator<matrix::CSRMatrix, std::string> IntRowAnnotator;
 
