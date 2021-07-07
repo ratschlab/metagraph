@@ -2,7 +2,6 @@
 
 #include <omp.h>
 #include <progress_bar.hpp>
-#include <sdsl/coder_elias_delta.hpp>
 
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "annotation/int_matrix/row_diff/int_row_diff.hpp"
@@ -740,7 +739,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
 }
 
 uint8_t code_len(uint64_t x) {
-    return sdsl::coder::elias_delta::encoding_length(x);
+    return sdsl::bits::hi(x) + 1;
 }
 
 // 'T' is either a row index, or a pair (row index, value)
@@ -952,13 +951,19 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                 }
 
                 if (compute_row_reduction) {
-                    uint64_t succ_value = get_value(source_col, source_idx, j, succ_begin, succ_end);
-                    // if anchor
-                    int n_bits_before = with_values ? code_len(matrix::encode_diff(curr_value)) : 1;
-                    // if diff
-                    int n_bits_after = with_values ? code_len(matrix::encode_diff(curr_value - succ_value)) : succ_value;
-                    // add reduction
-                    __atomic_add_fetch(&row_nbits_block[chunk_idx], n_bits_before - n_bits_after, __ATOMIC_RELAXED);
+                    if (succ_begin != succ_end) {
+                        const uint64_t succ_value = get_value(source_col, source_idx, j, succ_begin, succ_end);
+                        // if anchor
+                        int n_bits_before = curr_value
+                            ? (with_values ? code_len(matrix::encode_diff(curr_value)) : 1)
+                            : 0;
+                        // if diff
+                        int n_bits_after = curr_value != succ_value
+                            ? (with_values ? code_len(matrix::encode_diff(curr_value - succ_value)) : 1)
+                            : 0;
+                        // reduction
+                        __atomic_add_fetch(&row_nbits_block[chunk_idx], n_bits_before - n_bits_after, __ATOMIC_RELAXED);
+                    }
                 } else {
                     bool is_anchor = anchor[row_idx];
                     // add current bit if this node is an anchor
@@ -1165,15 +1170,16 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                 for (size_t j = 0; j < label_encoders[l_idx].size(); ++j) {
                     values[l_idx][j].serialize(outstream);
                 }
+                logger->trace("Serialized {}", fpath);
+                values[l_idx].clear();
 
             } else {
                 fpath.replace_extension().replace_extension(RowDiffColumnAnnotator::kExtension);
                 RowDiffColumnAnnotator(
                         std::make_unique<RowDiff<ColumnMajor>>(nullptr, ColumnMajor(std::move(columns))),
                         std::move(label_encoders[l_idx])).serialize(fpath);
+                logger->trace("Serialized {}", fpath);
             }
-
-            logger->trace("Serialized {}", fpath);
         }
     }
 
