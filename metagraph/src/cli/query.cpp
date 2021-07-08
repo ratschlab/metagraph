@@ -60,7 +60,8 @@ std::string QueryExecutor::execute_query(const std::string &seq_name,
                                          double discovery_fraction,
                                          std::string anno_labels_delimiter,
                                          const AnnotatedDBG &anno_graph,
-                                         bool with_kmer_counts) {
+                                         bool with_kmer_counts,
+                                         const std::vector<double> &count_quantiles) {
     std::string output;
     output.reserve(1'000);
 
@@ -80,6 +81,26 @@ std::string QueryExecutor::execute_query(const std::string &seq_name,
                                   sdsl::util::cnt_one_bits(kmer_presence_mask),
                                   sdsl::util::to_string(kmer_presence_mask),
                                   anno_graph.score_kmer_presence_mask(kmer_presence_mask));
+        }
+
+        output += '\n';
+
+    } else if (count_quantiles.size()) {
+        auto result = anno_graph.get_label_count_quantiles(sequence,
+                                                           num_top_labels,
+                                                           discovery_fraction,
+                                                           count_quantiles);
+
+        if (!result.size() && suppress_unlabeled)
+            return "";
+
+        output += seq_name;
+
+        for (const auto &[label, quantiles] : result) {
+            output += "\t<" + label + ">";
+            for (uint64_t count : quantiles) {
+                output += fmt::format(":{}", count);
+            }
         }
 
         output += '\n';
@@ -893,7 +914,7 @@ std::string query_sequence(size_t id, std::string name, std::string seq,
                                         config.count_labels, config.print_signature,
                                         config.suppress_unlabeled, config.num_top_labels,
                                         config.discovery_fraction, config.anno_labels_delimiter,
-                                        anno_graph, config.count_kmers);
+                                        anno_graph, config.count_kmers, config.count_slice_quantiles);
 }
 
 void QueryExecutor::query_fasta(const string &file,
