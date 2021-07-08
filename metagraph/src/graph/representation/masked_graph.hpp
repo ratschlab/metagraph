@@ -28,6 +28,8 @@ class MaskedDeBruijnGraph : public DeBruijnGraph {
 
     virtual ~MaskedDeBruijnGraph() {}
 
+    virtual const DeBruijnGraph& get_base_graph() const override final { return graph_->get_base_graph(); }
+
     virtual void add_sequence(std::string_view,
                               const std::function<void(node_index)> &) override {
         throw std::runtime_error("Not implemented");

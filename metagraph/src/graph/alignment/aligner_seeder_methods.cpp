@@ -220,8 +220,7 @@ auto SuffixSeeder<BaseSeeder>::get_seeds() const -> std::vector<Seed> {
         }
     }
 
-    const auto *canonical = dynamic_cast<const CanonicalDBG*>(&this->graph_);
-    if (canonical) {
+    if (const auto *canonical = dynamic_cast<const CanonicalDBG*>(&this->graph_)) {
         // find sub-k matches in the reverse complement
         // TODO: find sub-k seeds which are sink tips in the underlying graph
         std::string query_rc(this->query_);
@@ -326,15 +325,6 @@ auto SuffixSeeder<BaseSeeder>::get_seeds() const -> std::vector<Seed> {
     return output_seeds;
 }
 
-template <class BaseSeeder>
-const DBGSuccinct& SuffixSeeder<BaseSeeder>
-::get_base_dbg_succ(const DeBruijnGraph &graph) {
-    return dynamic_cast<const CanonicalDBG*>(&graph)
-        ? dynamic_cast<const DBGSuccinct&>(
-              dynamic_cast<const CanonicalDBG&>(graph).get_graph())
-        : dynamic_cast<const DBGSuccinct&>(graph);
-}
-
 template <typename NodeType>
 auto MEMSeeder<NodeType>::get_seeds() const -> std::vector<Seed> {
     size_t k = this->graph_.get_k();
@@ -402,6 +392,17 @@ auto MEMSeeder<NodeType>::get_seeds() const -> std::vector<Seed> {
     return seeds;
 }
 
+template <class BaseSeeder>
+const DBGSuccinct& SuffixSeeder<BaseSeeder>
+::get_base_dbg_succ(const DeBruijnGraph &graph) {
+    try {
+      return dynamic_cast<const DBGSuccinct&>(graph.get_base_graph());
+
+    } catch (const std::bad_cast &e) {
+        common::logger->error("SuffixSeeder can be used only with succinct graph representation");
+        throw e;
+    }
+}
 
 template class ExactSeeder<>;
 template class MEMSeeder<>;
