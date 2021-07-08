@@ -303,11 +303,9 @@ AnnotatedDBG::get_label_count_quantiles(std::string_view sequence,
     assert(presence_ratio <= 1.);
     assert(check_compatibility());
     if (!std::is_sorted(count_quantiles.begin(), count_quantiles.end()))
-        throw std::runtime_error("quantiles must be sorted");
-    if (count_quantiles.at(0) < 0.)
-        throw std::runtime_error("p can't be < 0 in p-quantile");
-    if (count_quantiles.back() > 1.)
-        throw std::runtime_error("p can't be > 1 in p-quantile");
+        throw std::runtime_error("Quantiles must be sorted");
+    if (count_quantiles.at(0) < 0. || count_quantiles.back() > 1.)
+        throw std::runtime_error("Quantiles must be in range [0, 1]");
 
     if (sequence.size() < dbg_.get_k())
         return {};
@@ -325,6 +323,11 @@ AnnotatedDBG::get_label_count_quantiles(std::string_view sequence,
     if (rows.size() < min_count)
         return {};
 
+    std::vector<size_t> q_low(count_quantiles.size());
+    for (size_t i = 0; i < count_quantiles.size(); ++i) {
+        q_low[i] = (num_kmers - 1) * count_quantiles[i];
+    }
+
     VectorMap<size_t, std::vector<uint64_t>> code_to_counts;
     for (const auto &row_values : dynamic_cast<const IntMatrix &>(annotator_->get_matrix())
                                                     .get_row_values(rows)) {
@@ -337,7 +340,7 @@ AnnotatedDBG::get_label_count_quantiles(std::string_view sequence,
     code_counts.reserve(code_to_counts.size());
     for (auto &[j, counts] : code_to_counts.values_container()) {
         // filter by the number of matched k-mers
-        if (counts.size() > min_count)
+        if (counts.size() >= min_count)
             code_counts.emplace_back(j, std::move(counts));
     }
     // sort by the number of matched k-mers
@@ -354,24 +357,19 @@ AnnotatedDBG::get_label_count_quantiles(std::string_view sequence,
     label_quantiles.reserve(code_counts.size());
     // Quantiles are defined as `count[i]` where `i < q * N <= i + 1`
     for (auto &[j, counts] : code_counts) {
-        label_quantiles.emplace_back(annotator_->get_label_encoder().decode(j),
-                                     std::vector<size_t>(count_quantiles.size()));
-        std::vector<size_t> &quantiles = label_quantiles.back().second;
-
         std::sort(counts.begin(), counts.end());
         const size_t num_zeros = num_kmers - counts.size();
-        size_t i = 0;
 
-        size_t q = 0;
-        while (q < quantiles.size() && count_quantiles[q] * num_kmers <= num_zeros) {
-            quantiles[q++] = 0;
-        }
+        label_quantiles.emplace_back(annotator_->get_label_encoder().decode(j),
+                                     std::vector<size_t>(q_low.size()));
 
-        while (q < quantiles.size()) {
-            while (i < counts.size() && count_quantiles[q] * num_kmers > num_zeros + i) {
-                i++;
+        std::vector<size_t> &quantiles = label_quantiles.back().second;
+        for (size_t q = 0; q < q_low.size(); ++q) {
+            if (q_low[q] < num_zeros) {
+                quantiles[q] = 0;
+            } else {
+                quantiles[q] = counts[q_low[q] - num_zeros];
             }
-            quantiles[q++] = counts[i - 1];
         }
     }
 

@@ -914,7 +914,7 @@ std::string query_sequence(size_t id, std::string name, std::string seq,
                                         config.count_labels, config.print_signature,
                                         config.suppress_unlabeled, config.num_top_labels,
                                         config.discovery_fraction, config.anno_labels_delimiter,
-                                        anno_graph, config.count_kmers, config.count_slice_quantiles);
+                                        anno_graph, config.count_kmers, config.count_quantiles);
 }
 
 void QueryExecutor::query_fasta(const string &file,
