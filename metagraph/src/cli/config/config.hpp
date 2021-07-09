@@ -133,6 +133,7 @@ class Config {
     double min_fraction = 0.0;
     double max_fraction = 1.0;
     std::vector<double> count_slice_quantiles;
+    std::vector<double> count_quantiles;
 
     std::vector<std::string> fnames;
     std::vector<std::string> anno_labels;

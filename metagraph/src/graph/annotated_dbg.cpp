@@ -294,6 +294,88 @@ AnnotatedDBG::get_top_labels(std::string_view sequence,
     return top_labels;
 }
 
+std::vector<std::pair<std::string, std::vector<size_t>>>
+AnnotatedDBG::get_label_count_quantiles(std::string_view sequence,
+                                        size_t num_top_labels,
+                                        double presence_ratio,
+                                        const std::vector<double> &count_quantiles) const {
+    assert(presence_ratio >= 0.);
+    assert(presence_ratio <= 1.);
+    assert(check_compatibility());
+    if (!std::is_sorted(count_quantiles.begin(), count_quantiles.end()))
+        throw std::runtime_error("Quantiles must be sorted");
+    if (count_quantiles.at(0) < 0. || count_quantiles.back() > 1.)
+        throw std::runtime_error("Quantiles must be in range [0, 1]");
+
+    if (sequence.size() < dbg_.get_k())
+        return {};
+
+    std::vector<row_index> rows;
+    size_t num_kmers = sequence.size() - dbg_.get_k() + 1;
+    rows.reserve(num_kmers);
+
+    graph_->map_to_nodes(sequence, [&](node_index i) {
+        if (i > 0)
+            rows.push_back(graph_to_anno_index(i));
+    });
+
+    uint64_t min_count = std::max(1.0, std::ceil(presence_ratio * num_kmers));
+    if (rows.size() < min_count)
+        return {};
+
+    std::vector<size_t> q_low(count_quantiles.size());
+    for (size_t i = 0; i < count_quantiles.size(); ++i) {
+        q_low[i] = (num_kmers - 1) * count_quantiles[i];
+    }
+
+    VectorMap<size_t, std::vector<uint64_t>> code_to_counts;
+    for (const auto &row_values : dynamic_cast<const IntMatrix &>(annotator_->get_matrix())
+                                                    .get_row_values(rows)) {
+        for (const auto &[column, count] : row_values) {
+            code_to_counts[column].push_back(count);
+        }
+    }
+
+    std::vector<std::pair<size_t, std::vector<uint64_t>>> code_counts;
+    code_counts.reserve(code_to_counts.size());
+    for (auto &[j, counts] : code_to_counts.values_container()) {
+        // filter by the number of matched k-mers
+        if (counts.size() >= min_count)
+            code_counts.emplace_back(j, std::move(counts));
+    }
+    // sort by the number of matched k-mers
+    std::sort(code_counts.begin(), code_counts.end(),
+              [](const auto &x, const auto &y) {
+                  return x.second.size() > y.second.size()
+                      || (x.second.size() == y.second.size() && x.first < y.first);
+              });
+    // keep only the first |num_top_labels| top labels
+    if (code_counts.size() > num_top_labels)
+        code_counts.resize(num_top_labels);
+
+    std::vector<std::pair<Label, std::vector<size_t>>> label_quantiles;
+    label_quantiles.reserve(code_counts.size());
+    // Quantiles are defined as `count[i]` where `i < q * N <= i + 1`
+    for (auto &[j, counts] : code_counts) {
+        std::sort(counts.begin(), counts.end());
+        const size_t num_zeros = num_kmers - counts.size();
+
+        label_quantiles.emplace_back(annotator_->get_label_encoder().decode(j),
+                                     std::vector<size_t>(q_low.size()));
+
+        std::vector<size_t> &quantiles = label_quantiles.back().second;
+        for (size_t q = 0; q < q_low.size(); ++q) {
+            if (q_low[q] < num_zeros) {
+                quantiles[q] = 0;
+            } else {
+                quantiles[q] = counts[q_low[q] - num_zeros];
+            }
+        }
+    }
+
+    return label_quantiles;
+}
+
 std::vector<std::pair<Label, sdsl::bit_vector>>
 AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
                                        size_t num_top_labels,
