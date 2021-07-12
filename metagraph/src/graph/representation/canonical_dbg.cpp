@@ -153,9 +153,7 @@ void CanonicalDBG
     assert(path.size() == rev_path.size());
 
     auto it = rev_path.rbegin();
-    auto seq_it = sequence.begin();
-    auto seq_jt = rev_seq.end() - get_k();
-    for (auto jt = path.begin(); jt != path.end(); ++jt, ++it, ++seq_it, --seq_jt) {
+    for (auto jt = path.begin(); jt != path.end(); ++jt, ++it) {
         if (terminate())
             return;
 
