@@ -23,7 +23,9 @@ using mtg::common::logger;
 
 std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnGraph> graph,
                                                        const Config &config) {
-    uint64_t max_index = graph->get_base_graph().max_index();
+    assert(graph.get() == &graph->get_base_graph());
+    uint64_t max_index = graph->max_index();
+    const auto *dbg_graph = dynamic_cast<const DBGSuccinct*>(graph.get());
 
     if (graph->get_mode() == DeBruijnGraph::PRIMARY) {
         graph = std::make_shared<CanonicalDBG>(graph);
@@ -54,7 +56,7 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
         using namespace annot::binmat;
         BinaryMatrix &matrix = const_cast<BinaryMatrix &>(annotation_temp->get_matrix());
         if (IRowDiff *row_diff = dynamic_cast<IRowDiff*>(&matrix)) {
-            if (const auto *dbg_graph = dynamic_cast<const DBGSuccinct*>(&graph->get_base_graph())) {
+            if (dbg_graph) {
                 row_diff->set_graph(dbg_graph);
 
                 if (auto *row_diff_column = dynamic_cast<RowDiff<ColumnMajor> *>(&matrix)) {
