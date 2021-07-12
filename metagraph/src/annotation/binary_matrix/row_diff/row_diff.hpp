@@ -13,7 +13,6 @@
 #include "common/logger.hpp"
 #include "common/utils/template_utils.hpp"
 #include "graph/annotated_dbg.hpp"
-#include "graph/representation/succinct/boss.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 
 
@@ -110,7 +109,7 @@ template <class BaseMatrix>
 bool RowDiff<BaseMatrix>::get(Row row, Column column) const {
     assert(graph_ && "graph must be loaded");
     assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
-    assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());
+    assert(!fork_succ_.size() || fork_succ_.size() == graph_->num_nodes() + 1);
 
     SetBitPositions set_bits = get_row(row);
     SetBitPositions::iterator v = std::lower_bound(set_bits.begin(), set_bits.end(), column);
@@ -125,7 +124,7 @@ template <class BaseMatrix>
 std::vector<BinaryMatrix::Row> RowDiff<BaseMatrix>::get_column(Column column) const {
     assert(graph_ && "graph must be loaded");
     assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
-    assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());
+    assert(!fork_succ_.size() || fork_succ_.size() == graph_->num_nodes() + 1);
 
     // TODO: implement a more efficient algorithm
     std::vector<Row> result;
@@ -140,21 +139,16 @@ template <class BaseMatrix>
 BinaryMatrix::SetBitPositions RowDiff<BaseMatrix>::get_row(Row row) const {
     assert(graph_ && "graph must be loaded");
     assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
-    assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());
+    assert(!fork_succ_.size() || fork_succ_.size() == graph_->num_nodes() + 1);
 
     Vector<uint64_t> result = diffs_.get_row(row);
     std::sort(result.begin(), result.end());
 
-    uint64_t boss_edge = graph_->kmer_to_boss_index(
-            graph::AnnotatedSequenceGraph::anno_to_graph_index(row));
-    const graph::boss::BOSS &boss = graph_->get_boss();
-    const bit_vector &rd_succ = fork_succ_.size() ? fork_succ_ : boss.get_last();
+    auto node = graph::AnnotatedSequenceGraph::anno_to_graph_index(row);
 
     while (!anchor_[row]) {
-        boss_edge = boss.row_diff_successor(boss_edge, rd_succ);
-
-        row = graph::AnnotatedSequenceGraph::graph_to_anno_index(
-                graph_->boss_to_kmer_index(boss_edge));
+        node = graph_->row_diff_successor(node, fork_succ_);
+        row = graph::AnnotatedSequenceGraph::graph_to_anno_index(node);
 
         auto diff_row = diffs_.get_row(row);
         std::sort(diff_row.begin(), diff_row.end());
@@ -169,7 +163,7 @@ std::vector<BinaryMatrix::SetBitPositions>
 RowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
     assert(graph_ && "graph must be loaded");
     assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
-    assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());
+    assert(!fork_succ_.size() || fork_succ_.size() == graph_->num_nodes() + 1);
 
     // diff rows annotating nodes along the row-diff paths
     std::vector<Row> rd_ids;
@@ -184,19 +178,10 @@ RowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
     // been reached before, and thus, will be reconstructed before this one.
     std::vector<std::vector<size_t>> rd_paths_trunc(row_ids.size());
 
-    const graph::boss::BOSS &boss = graph_->get_boss();
-    const bit_vector &rd_succ = fork_succ_.size() ? fork_succ_ : boss.get_last();
-
     for (size_t i = 0; i < row_ids.size(); ++i) {
         Row row = row_ids[i];
 
-        graph::boss::BOSS::edge_index boss_edge = graph_->kmer_to_boss_index(
-                graph::AnnotatedSequenceGraph::anno_to_graph_index(row));
-
         while (true) {
-            row = graph::AnnotatedSequenceGraph::graph_to_anno_index(
-                    graph_->boss_to_kmer_index(boss_edge));
-
             auto [it, is_new] = node_to_rd.try_emplace(row, rd_ids.size());
             rd_paths_trunc[i].push_back(it.value());
 
@@ -212,7 +197,9 @@ RowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
             if (anchor_[row])
                 break;
 
-            boss_edge = boss.row_diff_successor(boss_edge, rd_succ);
+            auto node = graph::AnnotatedSequenceGraph::anno_to_graph_index(row);
+            node = graph_->row_diff_successor(node, fork_succ_);
+            row = graph::AnnotatedSequenceGraph::graph_to_anno_index(node);
         }
     }
 

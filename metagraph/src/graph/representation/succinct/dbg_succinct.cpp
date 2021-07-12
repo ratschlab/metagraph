@@ -6,6 +6,8 @@
 #include <string>
 #include <filesystem>
 
+#include <progress_bar.hpp>
+
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/serialization.hpp"
 #include "common/logger.hpp"
@@ -870,7 +872,8 @@ void DBGSuccinct::mask_dummy_kmers(size_t num_threads, bool with_pruning) {
 }
 
 uint64_t DBGSuccinct::kmer_to_boss_index(node_index node) const {
-    assert(node > 0 && node <= num_nodes());
+    assert(node > 0);
+    assert(node <= num_nodes());
 
     if (!valid_edges_.get())
         return node;
@@ -1009,6 +1012,59 @@ void DBGSuccinct::print(std::ostream &out) const {
         }
 
         out << std::endl;
+    }
+}
+
+void DBGSuccinct::add_rd_successors_at_forks(size_t num_threads,
+                                             const sdsl::bit_vector &anchor,
+                                             sdsl::bit_vector *rd_succ,
+                                             size_t max_length) const {
+    const auto &W = boss_graph_->get_W();
+
+    ProgressBar progress_bar(W.size(), "Adding fork successors",
+                             std::cerr, !common::get_verbose());
+
+    constexpr bool async = true;
+    sdsl::bit_vector excluded(W.size(), false);
+
+    // start from 0 and go with blocks of 1024 bits to avoid race conditions
+    #pragma omp parallel for num_threads(num_threads) schedule(static, 1024)
+    for (BOSS::edge_index i = 0; i < W.size(); ++i) {
+        ++progress_bar;
+        // skip edge if it's not a fork or it's already selected
+        if (i < 2 || boss_graph_->is_single_outgoing(i) || (*rd_succ)[boss_to_kmer_index(i)])
+            continue;
+
+        // (*rd_succ)[i] = true;
+        // continue;
+        // TODO: test this
+        // if (!is_single_incoming(i, get_W(i)))
+        //     continue;
+
+        std::vector<BOSS::edge_index> queue = { i };
+
+        // make branching edge a successor if it reaches anchors not too deep
+        for (size_t depth = 0; depth < max_length && queue.size(); ++depth) {
+            BOSS::edge_index edge = queue.back();
+            queue.pop_back();
+            // stop branch if anchor is reached
+            if (anchor[edge])
+                continue;
+
+            assert(W[edge] % boss_graph_->alph_size);
+
+            boss_graph_->call_outgoing(boss_graph_->fwd(edge, W[edge] % boss_graph_->alph_size),
+                [&](BOSS::edge_index next) {
+                    if (!fetch_bit(excluded.data(), next, async))
+                        queue.push_back(next);
+                }
+            );
+        }
+        if (queue.empty()) {
+            (*rd_succ)[boss_to_kmer_index(i)] = true;
+        } else {
+            set_bit(excluded.data(), i, async);
+        }
     }
 }
 

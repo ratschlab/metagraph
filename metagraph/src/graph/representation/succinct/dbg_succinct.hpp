@@ -166,6 +166,15 @@ class DBGSuccinct : public DeBruijnGraph {
 
     virtual void call_source_nodes(const std::function<void(node_index)> &callback) const override final;
 
+    node_index row_diff_successor(node_index node, const bit_vector &rd_succ) const;
+    template <class Callback>
+    void call_row_diff_successors(node_index node, const bit_vector &rd_succ, const Callback &callback) const;
+
+    void add_rd_successors_at_forks(size_t num_threads,
+                                    const sdsl::bit_vector &anchors,
+                                    sdsl::bit_vector *rd_succ,
+                                    size_t max_length) const;
+
     uint64_t kmer_to_boss_index(node_index kmer_index) const;
     node_index boss_to_kmer_index(uint64_t boss_index) const;
 
@@ -190,6 +199,53 @@ class DBGSuccinct : public DeBruijnGraph {
 
     std::unique_ptr<mtg::kmer::KmerBloomFilter<>> bloom_filter_;
 };
+
+inline DBGSuccinct::node_index
+DBGSuccinct::row_diff_successor(node_index node, const bit_vector &rd_succ) const {
+    const boss::BOSS &boss = *boss_graph_;
+    boss::BOSS::edge_index edge = kmer_to_boss_index(node);
+    boss::BOSS::TAlphabet d = boss.get_W(edge) % boss.alph_size;
+    assert(d != boss::BOSS::kSentinelCode && "sinks have no row-diff successors");
+    // make one traversal step
+    edge = boss.fwd(edge, d);
+    node = boss_to_kmer_index(edge);
+
+    if (!rd_succ.size() || boss.get_last(edge - 1))
+        return node;
+
+    // pick the row-diff successor
+    while (!rd_succ[node]) {
+        node--;
+        edge--;
+        assert(!boss.get_last(edge) && "a row-diff successor must exist");
+    }
+    return node;
+}
+
+template <class Callback>
+inline void DBGSuccinct::call_row_diff_successors(node_index node,
+                                                  const bit_vector &rd_succ,
+                                                  const Callback &callback) const {
+    const boss::BOSS &boss = *boss_graph_;
+    boss::BOSS::edge_index edge = kmer_to_boss_index(node);
+    boss::BOSS::TAlphabet d = boss.get_W(edge) % boss.alph_size;
+    assert(d != boss::BOSS::kSentinelCode && "sinks have no row-diff successors");
+    // make one traversal step
+    edge = boss.fwd(edge, d);
+    node = boss_to_kmer_index(edge);
+
+    if (!rd_succ.size() || boss.get_last(edge - 1)) {
+        callback(node);
+        return;
+    }
+
+    // pick the row-diff successor
+    do {
+        if (rd_succ[node])
+            callback(node);
+        node--;
+    } while (!boss.get_last(--edge));
+}
 
 } // namespace graph
 } // namespace mtg

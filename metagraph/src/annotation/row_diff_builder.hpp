@@ -27,7 +27,8 @@ void assign_anchors(const std::string &graph_filename,
                     const std::filesystem::path &dest_dir,
                     uint32_t max_length,
                     const std::string &row_reduction_extension,
-                    uint32_t num_threads);
+                    uint32_t num_threads,
+                    bool multiple_fork_successors);
 
 void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                                const std::vector<std::string> &source_files,

@@ -13,7 +13,6 @@
 #include "common/logger.hpp"
 #include "common/utils/template_utils.hpp"
 #include "graph/annotated_dbg.hpp"
-#include "graph/representation/succinct/boss.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "annotation/int_matrix/base/int_matrix.hpp"
@@ -99,7 +98,7 @@ template <class BaseMatrix>
 std::vector<IntMatrix::Row> IntRowDiff<BaseMatrix>::get_column(Column j) const {
     assert(graph_ && "graph must be loaded");
     assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
-    assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());
+    assert(!fork_succ_.size() || fork_succ_.size() == graph_->num_nodes() + 1);
 
     // TODO: implement a more efficient algorithm
     std::vector<Row> result;
@@ -122,36 +121,7 @@ IntMatrix::SetBitPositions IntRowDiff<BaseMatrix>::get_row(Row i) const {
 
 template <class BaseMatrix>
 IntMatrix::RowValues IntRowDiff<BaseMatrix>::get_row_values(Row row) const {
-    assert(graph_ && "graph must be loaded");
-    assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
-    assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());
-
-    RowValues result = diffs_.get_row_values(row);
-    decode_diffs(&result);
-    std::sort(result.begin(), result.end());
-
-    uint64_t boss_edge = graph_->kmer_to_boss_index(
-            graph::AnnotatedSequenceGraph::anno_to_graph_index(row));
-    const graph::boss::BOSS &boss = graph_->get_boss();
-    const bit_vector &rd_succ = fork_succ_.size() ? fork_succ_ : boss.get_last();
-
-    while (!anchor_[row]) {
-        boss_edge = boss.row_diff_successor(boss_edge, rd_succ);
-
-        row = graph::AnnotatedSequenceGraph::graph_to_anno_index(
-                graph_->boss_to_kmer_index(boss_edge));
-
-        RowValues diff_row = diffs_.get_row_values(row);
-        decode_diffs(&diff_row);
-        std::sort(diff_row.begin(), diff_row.end());
-        add_diff(diff_row, &result);
-    }
-
-    assert(std::all_of(result.begin(), result.end(),
-                       [](auto &p) { return p.second; }));
-    assert(std::all_of(result.begin(), result.end(),
-                       [](auto &p) { return (int64_t)p.second > 0; }));
-    return result;
+    return get_row_values(std::vector<Row>{ row })[0];
 }
 
 template <class BaseMatrix>
@@ -176,7 +146,7 @@ std::vector<IntMatrix::RowValues>
 IntRowDiff<BaseMatrix>::get_row_values(const std::vector<Row> &row_ids) const {
     assert(graph_ && "graph must be loaded");
     assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
-    assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());
+    assert(!fork_succ_.size() || fork_succ_.size() == graph_->num_nodes() + 1);
 
     // diff rows annotating nodes along the row-diff paths
     std::vector<Row> rd_ids;
@@ -189,38 +159,50 @@ IntRowDiff<BaseMatrix>::get_row_values(const std::vector<Row> &row_ids) const {
     // Truncated row-diff paths, indexes to |rd_rows|.
     // The last index in each path points to an anchor or to a row which had
     // been reached before, and thus, will be reconstructed before this one.
-    std::vector<std::vector<size_t>> rd_paths_trunc(row_ids.size());
-
-    const graph::boss::BOSS &boss = graph_->get_boss();
-    const bit_vector &rd_succ = fork_succ_.size() ? fork_succ_ : boss.get_last();
+    std::vector<std::vector<std::pair<size_t, size_t>>> rd_paths_trunc(row_ids.size());
 
     for (size_t i = 0; i < row_ids.size(); ++i) {
-        Row row = row_ids[i];
+        std::vector<std::pair<size_t, size_t>> &rd_path = rd_paths_trunc[i];
 
-        graph::boss::BOSS::edge_index boss_edge = graph_->kmer_to_boss_index(
-                graph::AnnotatedSequenceGraph::anno_to_graph_index(row));
+        std::vector<size_t> path;
+        Vector<std::pair<size_t, Row>> queue;
+        queue.emplace_back(0, row_ids[i]);
 
-        while (true) {
-            row = graph::AnnotatedSequenceGraph::graph_to_anno_index(
-                    graph_->boss_to_kmer_index(boss_edge));
-
+        while (queue.size()) {
+            size_t depth = queue.back().first;
+            Row row = queue.back().second;
+            queue.pop_back();
+            while (depth < path.size()) {
+                assert(path.size() > 1);
+                rd_path.emplace_back(*(path.rbegin() + 1), *path.rbegin());
+                path.pop_back();
+            }
             auto [it, is_new] = node_to_rd.try_emplace(row, rd_ids.size());
-            rd_paths_trunc[i].push_back(it.value());
-
+            path.push_back(it.value());
             // If a node had been reached before, we interrupt the diff path.
             // The annotation for that node will have been reconstructed earlier
             // than for other nodes in this path as well. Thus, we will start
             // reconstruction from that node and don't need its successors.
             if (!is_new)
-                break;
+                continue;
 
             rd_ids.push_back(row);
 
             if (anchor_[row])
-                break;
+                continue;
 
-            boss_edge = boss.row_diff_successor(boss_edge, rd_succ);
+            auto node = graph::AnnotatedSequenceGraph::anno_to_graph_index(row);
+            graph_->call_row_diff_successors(node, fork_succ_, [&](auto succ) {
+                queue.emplace_back(depth + 1, graph::AnnotatedSequenceGraph::graph_to_anno_index(succ));
+            });
         }
+
+        while (path.size() > 1) {
+            rd_path.emplace_back(*(path.rbegin() + 1), *path.rbegin());
+            path.pop_back();
+        }
+        assert(path.size());
+        rd_path.emplace_back(-1, path[0]);
     }
 
     node_to_rd = VectorMap<Row, size_t>();
@@ -228,6 +210,7 @@ IntRowDiff<BaseMatrix>::get_row_values(const std::vector<Row> &row_ids) const {
     std::vector<RowValues> rd_rows = diffs_.get_row_values(rd_ids);
     for (auto &row : rd_rows) {
         decode_diffs(&row);
+        std::sort(row.begin(), row.end());
     }
 
     rd_ids = std::vector<Row>();
@@ -236,17 +219,17 @@ IntRowDiff<BaseMatrix>::get_row_values(const std::vector<Row> &row_ids) const {
     std::vector<RowValues> rows(row_ids.size());
 
     for (size_t i = 0; i < row_ids.size(); ++i) {
-        RowValues &result = rows[i];
+        const auto &rd_path = rd_paths_trunc[i];
         // propagate back and reconstruct full annotations for predecessors
-        for (auto it = rd_paths_trunc[i].rbegin(); it != rd_paths_trunc[i].rend(); ++it) {
-            std::sort(rd_rows[*it].begin(), rd_rows[*it].end());
-            add_diff(rd_rows[*it], &result);
-            // replace diff row with full reconstructed annotation
-            rd_rows[*it] = result;
+        for (size_t j = 0; j + 1 < rd_path.size(); ++j) {
+            auto [node, succ] = rd_path[j];
+            // reconstruct annotation by adding the diff (full succ + diff)
+            add_diff(rd_rows[succ], &rd_rows[node]);
         }
-        assert(std::all_of(result.begin(), result.end(),
+        rows[i] = rd_rows[rd_path.back().second];
+        assert(std::all_of(rows[i].begin(), rows[i].end(),
                            [](auto &p) { return p.second; }));
-        assert(std::all_of(result.begin(), result.end(),
+        assert(std::all_of(rows[i].begin(), rows[i].end(),
                            [](auto &p) { return (int64_t)p.second > 0; }));
     }
 
