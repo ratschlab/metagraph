@@ -77,7 +77,6 @@ void CanonicalDBG
 
     // map until the first mismatch
     bool stop = false;
-    auto seq_it = sequence.begin();
     graph_.map_to_nodes_sequentially(sequence,
         [&](node_index node) {
             if (node) {
@@ -85,7 +84,6 @@ void CanonicalDBG
             } else {
                 stop = true;
             }
-            ++seq_it;
         },
         [&]() { return stop; }
     );
@@ -155,7 +153,7 @@ void CanonicalDBG
     assert(path.size() == rev_path.size());
 
     auto it = rev_path.rbegin();
-    seq_it = sequence.begin();
+    auto seq_it = sequence.begin();
     auto seq_jt = rev_seq.end() - get_k();
     for (auto jt = path.begin(); jt != path.end(); ++jt, ++it, ++seq_it, --seq_jt) {
         if (terminate())
