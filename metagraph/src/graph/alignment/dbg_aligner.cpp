@@ -335,12 +335,7 @@ inline void SeedAndExtendAlignerCore<AlignmentCompare>
             assert(alignment.is_valid(graph_, &config_));
             aggregator_.add_alignment(std::move(alignment));
         },
-        [&](const DBGAlignment &seed) {
-            return std::max(
-                aggregator_.get_min_path_score(seed),
-                static_cast<score_t>(aggregator_.get_max_path_score() * config_.fraction_of_top)
-            );
-        }
+        [&](const DBGAlignment &seed) { return aggregator_.get_min_path_score(seed); }
     );
 }
 
