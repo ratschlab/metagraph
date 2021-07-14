@@ -7,6 +7,12 @@
 namespace mtg {
 namespace graph {
 
+/**
+ * RCDBG is a wrapper which represents the reverse complement of the underlying
+ * DeBruijnGraph.
+ * e.g., get_node_sequence(n) := reverse_complement(graph.get_node_sequence(n))
+ * e.g., traverse(n, c) := graph.traverse_back(n, complement(c))
+ */
 class RCDBG : public DeBruijnGraph {
   public:
     RCDBG(const DeBruijnGraph &graph) : graph_(graph) {}

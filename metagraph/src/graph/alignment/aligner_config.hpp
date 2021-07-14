@@ -55,7 +55,6 @@ class DBGAlignerConfig {
     size_t min_seed_length = 0;
     size_t max_seed_length = 0;
     size_t max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
-    size_t num_top_labels = std::numeric_limits<size_t>::max();
 
     // thresholds for scores
     score_t min_cell_score = std::numeric_limits<score_t>::min() + 100;
