@@ -120,7 +120,7 @@ class Alignment {
             cigar_.pop_back();
     }
 
-    void trim_offset();
+    size_t trim_offset();
 
     void reverse_complement(const DeBruijnGraph &graph,
                             std::string_view query_rev_comp);
@@ -134,16 +134,22 @@ class Alignment {
 
     typedef typename std::vector<NodeType>::iterator iterator;
     typedef typename std::vector<NodeType>::const_iterator const_iterator;
+    typedef typename std::vector<NodeType>::reverse_iterator reverse_iterator;
+    typedef typename std::vector<NodeType>::const_reverse_iterator const_reverse_iterator;
 
     const_iterator begin() const { return nodes_.cbegin(); }
     const_iterator end() const { return nodes_.cend(); }
+    const_reverse_iterator rbegin() const { return nodes_.crbegin(); }
+    const_reverse_iterator rend() const { return nodes_.crend(); }
 
     bool operator==(const Alignment &other) const {
         return orientation_ == other.orientation_
+            && offset_ == other.offset_
             && score_ == other.score_
-            && sequence_ == other.sequence_
             && query_ == other.query_
-            && cigar_ == other.cigar_;
+            && sequence_ == other.sequence_
+            && cigar_ == other.cigar_
+            && nodes_ == other.nodes_;
     }
 
     bool operator!=(const Alignment &other) const { return !(*this == other); }
@@ -196,7 +202,7 @@ bool spell_path(const DeBruijnGraph &graph,
 
 struct LocalAlignmentLess {
     template <typename NodeType>
-    bool operator()(const Alignment<NodeType> &a, const Alignment<NodeType> &b) {
+    bool operator()(const Alignment<NodeType> &a, const Alignment<NodeType> &b) const {
         // 1) score is less, or
         // 2) more of the query is covered, or
         // 3) if it is in the reverse orientation, or
@@ -210,7 +216,7 @@ struct LocalAlignmentLess {
 
 struct LocalAlignmentGreater {
     template <typename NodeType>
-    bool operator()(const Alignment<NodeType> &a, const Alignment<NodeType> &b) {
+    bool operator()(const Alignment<NodeType> &a, const Alignment<NodeType> &b) const {
         // 1) score is higher, or
         // 2) less of the query is covered, or
         // 3) if it is in the forward orientation, or
@@ -226,9 +232,14 @@ struct LocalAlignmentGreater {
 template <typename NodeType = uint64_t>
 class QueryAlignment {
   public:
+    typedef typename std::vector<Alignment<NodeType>>::iterator iterator;
     typedef typename std::vector<Alignment<NodeType>>::const_iterator const_iterator;
 
-    QueryAlignment(std::string_view query, bool is_reverse_complement = false);
+    explicit QueryAlignment(std::string_view query, bool is_reverse_complement = false);
+
+    explicit QueryAlignment(std::shared_ptr<std::string> query,
+                            std::shared_ptr<std::string> query_rc)
+          : query_(query), query_rc_(query_rc) {}
 
     size_t size() const { return alignments_.size(); }
     bool empty() const { return alignments_.empty(); }
@@ -249,15 +260,27 @@ class QueryAlignment {
     void pop_back() { alignments_.pop_back(); }
     void clear() { alignments_.clear(); }
 
+    void resize(size_t size) { alignments_.resize(size); }
+
     const std::string& get_query(bool reverse_complement = false) const {
         return !reverse_complement ? *query_ : *query_rc_;
     }
 
+    std::shared_ptr<std::string> get_query_ptr(bool reverse_complement = false) const {
+        return !reverse_complement ? query_ : query_rc_;
+    }
+
     const Alignment<NodeType>& operator[](size_t i) const { return alignments_[i]; }
-    const_iterator begin() const { return alignments_.cbegin(); }
-    const_iterator end() const { return alignments_.cend(); }
+    iterator begin() { return alignments_.begin(); }
+    iterator end() { return alignments_.end(); }
+    const_iterator begin() const { return alignments_.begin(); }
+    const_iterator end() const { return alignments_.end(); }
     const_iterator cbegin() const { return alignments_.cbegin(); }
     const_iterator cend() const { return alignments_.cend(); }
+
+    iterator erase(const_iterator begin, const_iterator end) {
+        return alignments_.erase(begin, end);
+    }
 
   private:
     std::shared_ptr<std::string> query_;

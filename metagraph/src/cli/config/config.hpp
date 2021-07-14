@@ -54,7 +54,7 @@ class Config {
     bool files_sequentially = false;
     bool map_sequences = false;
     bool align_sequences = false;
-    bool align_both_strands = false;
+    bool align_one_strand = false;
     bool filter_by_kmer = false;
     bool output_json = false;
     bool aggregate_columns = false;
@@ -110,7 +110,6 @@ class Config {
     int8_t alignment_gap_opening_penalty = 5;
     int8_t alignment_gap_extension_penalty = 2;
 
-    int32_t alignment_min_cell_score = 0;
     int32_t alignment_min_path_score = 0;
     int32_t alignment_xdrop = 27;
 
@@ -118,6 +117,8 @@ class Config {
     size_t alignment_min_seed_length = 0;
     size_t alignment_max_seed_length = std::numeric_limits<size_t>::max();
     size_t alignment_max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
+
+    double alignment_fraction_of_top = 0.8;
 
     double discovery_fraction = 0.7;
     double label_mask_in_fraction = 1.0;

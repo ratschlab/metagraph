@@ -48,6 +48,8 @@ class CanonicalDBG : public DeBruijnGraph {
 
     virtual ~CanonicalDBG() {}
 
+    virtual const DeBruijnGraph& get_base_graph() const override final { return graph_.get_base_graph(); }
+
     virtual void add_sequence(std::string_view sequence,
                               const std::function<void(node_index)> &on_insertion = [](node_index) {}) override;
 

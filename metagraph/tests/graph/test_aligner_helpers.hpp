@@ -71,10 +71,7 @@ DBGAligner<>::DBGQueryAlignment get_extend(std::shared_ptr<const DeBruijnGraph> 
     EXPECT_EQ(query, paths.get_query());
     auto uniconfig = config;
     uniconfig.max_seed_length = std::numeric_limits<size_t>::max();
-
-    return std::dynamic_pointer_cast<const DBGSuccinct>(graph)
-        ? DBGAligner<SuffixSeeder<UniMEMSeeder<>>>(*graph, uniconfig).align(query)
-        : DBGAligner<UniMEMSeeder<>>(*graph, uniconfig).align(query);
+    return DBGAligner<>(*graph, uniconfig).align(query);
 }
 
 inline void check_extend(std::shared_ptr<const DeBruijnGraph> graph,
