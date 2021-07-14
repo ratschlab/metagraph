@@ -766,10 +766,11 @@ bitmap_builder& ColumnCompressed<Label>::decompress_builder(size_t j) {
 
     flushed_ = false;
 
-    try {
+    if (auto cached = cached_columns_.TryGet(j)) {
         // check the  the cached bitmap builder
-        return *cached_columns_.Get(j);
-    } catch (...) {
+        return **cached;
+
+    } else {
         assert(j <= bitmatrix_.size());
 
         bitmap_builder *vector;
@@ -800,7 +801,7 @@ bitmap_builder& ColumnCompressed<Label>::decompress_builder(size_t j) {
         }
 
         cached_columns_.Put(j, vector);
-        return *cached_columns_.Get(j);
+        return *vector;
     }
 }
 

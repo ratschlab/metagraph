@@ -144,6 +144,7 @@ class CanonicalDBG : public DeBruijnGraph {
     const DeBruijnGraph &graph_ = *const_graph_ptr_;
     size_t offset_;
     bool k_odd_;
+    bool has_sentinel_;
 
     std::shared_ptr<DeBruijnGraph> graph_ptr_;
 

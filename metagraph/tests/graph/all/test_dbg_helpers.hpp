@@ -111,14 +111,7 @@ typedef ::testing::Types<DBGBitmap,
                          DBGSuccinctBloom<4, 1>,
                          DBGSuccinctBloom<4, 50>> StableGraphTypes;
 
-typedef ::testing::Types<DBGHashFast,
-                         DBGSuccinct,
-#if _PROTEIN_GRAPH
-                         DBGSuccinctIndexed<2>,
-#else
-                         DBGSuccinctIndexed<10>,
-#endif
-                         DBGSuccinctBloomFPR<1, 10>> FewGraphTypes;
+typedef ::testing::Types<DBGHashFast, DBGSuccinct> FewGraphTypes;
 
 } // namespace test
 } // namespace mtg
