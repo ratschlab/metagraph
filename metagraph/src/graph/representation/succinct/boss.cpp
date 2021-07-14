@@ -623,7 +623,7 @@ BOSS::get_minus_k_value(edge_index i, size_t k) const {
     for (; k > 0; --k) {
         i = bwd(i);
     }
-    return std::make_pair(get_node_last_value(i), bwd(i));
+    return std::make_pair(get_node_last_value(i), i);
 }
 
 /**

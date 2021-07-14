@@ -6,6 +6,7 @@
 #include "common/unix_tools.hpp"
 #include "common/threads/threading.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
+#include "graph/representation/succinct/dbg_succinct_cached.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "graph/alignment/dbg_aligner.hpp"
 #include "graph/alignment/aligner_seeder_methods.hpp"
@@ -437,7 +438,16 @@ int align_to_graph(Config *config) {
 
             auto process_batch = [&,graph](SeqBatch batch) mutable {
                 auto aln_graph = graph;
-                if (aln_graph->get_mode() == DeBruijnGraph::PRIMARY)
+                const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(graph.get());
+                bool is_primary = aln_graph->get_mode() == DeBruijnGraph::PRIMARY;
+                bool use_cache = dbg_succ && (is_primary
+                    || (aligner_config.forward_and_reverse_complement
+                        && aln_graph->get_mode() != DeBruijnGraph::CANONICAL));
+
+                if (use_cache)
+                    aln_graph = std::make_shared<DBGSuccinctCached>(*dbg_succ);
+
+                if (is_primary)
                     aln_graph = std::make_shared<CanonicalDBG>(aln_graph);
 
                 std::unique_ptr<IDBGAligner> aligner;
