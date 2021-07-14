@@ -74,6 +74,9 @@ Cigar::Cigar(std::string_view cigar_str) {
                 cigar_.emplace_back(Cigar::CLIPPED, std::stol(op_count));
                 op_count.clear();
                 break;
+            case 'G':
+                cigar_.emplace_back(Cigar::NODE_INSERTION, std::stol(op_count));
+                break;
             default:
                 op_count += c;
         }
@@ -127,18 +130,23 @@ bool Cigar::is_valid(std::string_view reference, std::string_view query) const {
             case Operator::CLIPPED: {
                 if ((ref_it != reference.begin() || alt_it != query.begin())
                         && (ref_it != reference.end() || alt_it != query.end())) {
-                    std::cerr << "Internal clipping found in CIGAR" << std::endl
-                              << to_string() << std::endl
-                              << reference << std::endl
-                              << query << std::endl;
-                    return false;
+                    if (alt_it > query.end() - op.second) {
+                        std::cerr << "Query too short after "
+                                  << Cigar::opt_to_char(op.first) << std::endl
+                                  << to_string() << std::endl
+                                  << reference << std::endl
+                                  << query << std::endl;
+                        return false;
+                    }
+
+                    alt_it += op.second;
                 }
             } break;
             case Operator::MATCH:
-                // do nothing
             case Operator::MISMATCH: {
                 if (ref_it > reference.end() - op.second) {
-                    std::cerr << "Reference too short" << std::endl
+                    std::cerr << "Reference too short after "
+                              << Cigar::opt_to_char(op.first) << std::endl
                               << to_string() << std::endl
                               << reference << std::endl
                               << query << std::endl;
@@ -146,7 +154,8 @@ bool Cigar::is_valid(std::string_view reference, std::string_view query) const {
                 }
 
                 if (alt_it > query.end() - op.second) {
-                    std::cerr << "Query too short" << std::endl
+                    std::cerr << "Query too short after "
+                              << Cigar::opt_to_char(op.first) << std::endl
                               << to_string() << std::endl
                               << reference << std::endl
                               << query << std::endl;
@@ -175,7 +184,8 @@ bool Cigar::is_valid(std::string_view reference, std::string_view query) const {
                 }
 
                 if (alt_it > query.end() - op.second) {
-                    std::cerr << "Query too short" << std::endl
+                    std::cerr << "Query too short after "
+                              << Cigar::opt_to_char(op.first) << std::endl
                               << to_string() << std::endl
                               << reference << std::endl
                               << query << std::endl;
@@ -194,7 +204,8 @@ bool Cigar::is_valid(std::string_view reference, std::string_view query) const {
                 }
 
                 if (ref_it > reference.end() - op.second) {
-                    std::cerr << "Reference too short" << std::endl
+                    std::cerr << "Reference too short after "
+                              << Cigar::opt_to_char(op.first) << std::endl
                               << to_string() << std::endl
                               << reference << std::endl
                               << query << std::endl;
@@ -202,6 +213,9 @@ bool Cigar::is_valid(std::string_view reference, std::string_view query) const {
                 }
 
                 ref_it += op.second;
+            } break;
+            case Operator::NODE_INSERTION: {
+                // do nothing
             } break;
         }
     }

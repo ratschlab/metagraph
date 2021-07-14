@@ -20,7 +20,8 @@ class Cigar {
         MISMATCH,
         MATCH,
         DELETION,
-        INSERTION
+        INSERTION,
+        NODE_INSERTION
     };
 
     typedef uint32_t LengthType;
@@ -66,6 +67,9 @@ class Cigar {
         cigar_.insert(it, std::forward<Args>(args)...);
     }
 
+    template <typename... Args>
+    void erase(Args&&... args) { cigar_.erase(std::forward<Args>(args)...); }
+
     value_type& front() { return cigar_.front(); }
     value_type& back() { return cigar_.back(); }
     const value_type& front() const { return cigar_.front(); }
@@ -102,7 +106,7 @@ class Cigar {
     static constexpr char opt_to_char(Cigar::Operator op) { return op_str_[op]; }
 
   private:
-    static constexpr char op_str_[] = "SX=DIN";
+    static constexpr char op_str_[] = "SX=DIG";
     std::vector<value_type> cigar_;
 };
 

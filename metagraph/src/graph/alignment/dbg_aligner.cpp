@@ -31,12 +31,12 @@ class SeedAndExtendAlignerCore {
                              Args&&... args)
           : graph_(graph), config_(config), rc_dbg_(graph_),
             paths_(std::forward<Args>(args)...),
-            aggregator_(paths_.get_query(false), paths_.get_query(true), config_) {}
+            aggregator_(graph_, paths_.get_query(false), paths_.get_query(true), config_) {}
 
     void flush(const std::function<bool(const DBGAlignment&)> &skip
                    = [](const auto &) { return false; },
                const std::function<bool()> &terminate = []() { return false; }) {
-        aggregator_.call_alignments([&](auto&& alignment) {
+        aggregator_.call_alignments([&](DBGAlignment&& alignment) {
             assert(alignment.is_valid(graph_, &config_));
             if (!skip(alignment))
                 paths_.emplace_back(std::move(alignment));
@@ -180,7 +180,7 @@ inline void SeedAndExtendAlignerCore<AlignmentCompare>
             callback(std::move(seed));
         }
 
-        for (auto&& extension : extensions) {
+        for (DBGAlignment &extension : extensions) {
             DEBUG_LOG("Alignment (extension): {}", extension);
             callback(std::move(extension));
         }
