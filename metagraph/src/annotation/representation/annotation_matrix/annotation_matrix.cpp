@@ -67,7 +67,14 @@ bool StaticBinRelAnnotator<BinaryMatrixType, Label>::load(const std::string &fil
 
     try {
         assert(matrix_.get());
-        return label_encoder_.load(instream) && matrix_->load(instream);
+        auto pos = instream.tellg();
+        if (!label_encoder_.load(instream)) {
+            instream.seekg(pos);
+            (void)load_number(instream);
+            if (!label_encoder_.load(instream))
+                return false;
+        }
+        return matrix_->load(instream);
     } catch (...) {
         return false;
     }
@@ -213,6 +220,8 @@ template class StaticBinRelAnnotator<matrix::CSCMatrix<binmat::BRWT, CountsVecto
 template class StaticBinRelAnnotator<matrix::IntRowDiff<matrix::CSCMatrix<binmat::BRWT, CountsVector>>, std::string>;
 
 template class StaticBinRelAnnotator<matrix::CSRMatrix, std::string>;
+
+template class StaticBinRelAnnotator<matrix::TupleCSCMatrix<binmat::ColumnMajor>, std::string>;
 
 } // namespace annot
 } // namespace mtg

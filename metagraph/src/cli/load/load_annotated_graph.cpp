@@ -4,6 +4,7 @@
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "annotation/binary_matrix/row_sparse/row_sparse.hpp"
+#include "annotation/int_matrix/base/int_matrix.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "graph/annotated_dbg.hpp"
@@ -17,7 +18,7 @@ namespace mtg {
 namespace cli {
 
 using namespace mtg::graph;
-
+using mtg::annot::matrix::MultiIntMatrix;
 using mtg::common::logger;
 
 
@@ -52,6 +53,23 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
                           config.infbase);
             exit(1);
         }
+
+        // load annotated coordinates
+        if (const auto *mat = dynamic_cast<const MultiIntMatrix *>(&annotation_temp->get_matrix())) {
+            if (config.infbase_annotators.size() > 1) {
+                logger->error("Merging coordinates from multiple columns is not supported");
+                exit(1);
+            }
+            auto coords_fname = utils::remove_suffix(config.infbase_annotators.at(0),
+                                                     annot::ColumnCompressed<>::kExtension)
+                                    + annot::ColumnCompressed<>::kCoordExtension;
+            std::ifstream in(coords_fname);
+            if (!const_cast<MultiIntMatrix *>(mat)->load_tuples(in)) {
+                logger->error("Cannot load tuples from file {}", coords_fname);
+                exit(1);
+            }
+        }
+
         // row_diff annotation is special, as it must know the graph structure
         using namespace annot::binmat;
         BinaryMatrix &matrix = const_cast<BinaryMatrix &>(annotation_temp->get_matrix());

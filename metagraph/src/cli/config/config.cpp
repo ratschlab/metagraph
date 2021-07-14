@@ -700,6 +700,8 @@ std::string Config::annotype_to_string(AnnotationType state) {
             return "int_brwt";
         case IntRowDiffBRWT:
             return "row_diff_int_brwt";
+        case ColumnCoord:
+            return "column_coord";
     }
     throw std::runtime_error("Never happens");
 }
@@ -733,6 +735,8 @@ Config::AnnotationType Config::string_to_annotype(const std::string &string) {
         return AnnotationType::IntBRWT;
     } else if (string == "row_diff_int_brwt") {
         return AnnotationType::IntRowDiffBRWT;
+    } else if (string == "column_coord") {
+        return AnnotationType::ColumnCoord;
     } else {
         std::cerr << "Error: unknown annotation representation" << std::endl;
         exit(1);
@@ -795,6 +799,7 @@ DeBruijnGraph::Mode Config::string_to_graphmode(const std::string &string) {
 
 void Config::print_usage(const std::string &prog_name, IdentityType identity) {
     const char annotation_list[] = "\t\t( column, brwt, rb_brwt, int_brwt,\n"
+                                   "\t\t  column_coord,\n"
                                    "\t\t  row_diff, row_diff_brwt, row_diff_sparse, row_diff_int_brwt,\n"
                                    "\t\t  row, flat, row_sparse, rbfish, bin_rel_wt, bin_rel_wt_sdsl )";
 

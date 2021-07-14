@@ -652,6 +652,10 @@ int transform_annotation(Config *config) {
                 assert(false);
                 break;
             }
+            case Config::ColumnCoord: {
+                logger->error("Coordinates must be originally annotated");
+                break;
+            }
             case Config::RowDiffBRWT: {
                 logger->error("Convert to row_diff first, and then to row_diff_brwt");
                 return 0;
