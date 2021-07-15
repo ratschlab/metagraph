@@ -388,23 +388,44 @@ AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
     if (sequence.size() < dbg_.get_k())
         return {};
 
-    std::vector<row_index> rows;
+    std::vector<node_index> path;
     size_t num_kmers = sequence.size() - dbg_.get_k() + 1;
-    rows.reserve(num_kmers);
-
-    std::vector<size_t> ids;
-    ids.reserve(num_kmers);
+    path.reserve(num_kmers);
 
     graph_->map_to_nodes(sequence, [&](node_index i) {
+        path.push_back(i);
+    });
+
+    return get_kmer_coordinates(path, num_top_labels, presence_ratio);
+}
+
+std::vector<std::pair<std::string, std::vector<SmallVector<uint64_t>>>>
+AnnotatedDBG::get_kmer_coordinates(const std::vector<node_index> &path,
+                                   size_t num_top_labels,
+                                   double presence_ratio) const {
+    assert(presence_ratio >= 0.);
+    assert(presence_ratio <= 1.);
+    assert(check_compatibility());
+
+    if (!path.size())
+        return {};
+
+    std::vector<row_index> rows;
+    rows.reserve(path.size());
+
+    std::vector<size_t> ids;
+    ids.reserve(path.size());
+
+    for (node_index i : path) {
         if (i > 0) {
             ids.push_back(rows.size());
             rows.push_back(graph_to_anno_index(i));
         } else {
             ids.push_back(-1);
         }
-    });
+    }
 
-    uint64_t min_count = std::max(1.0, std::ceil(presence_ratio * num_kmers));
+    uint64_t min_count = std::max(1.0, std::ceil(presence_ratio * path.size()));
     if (rows.size() < min_count)
         return {};
 
