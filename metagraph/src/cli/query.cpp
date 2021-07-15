@@ -100,7 +100,7 @@ std::string QueryExecutor::execute_query(const std::string &seq_name,
             output += "\t<" + label + ">";
             for (const auto &coords : tuples) {
                 output += ":";
-                output += fmt::join(coords, ",");
+                output += fmt::format("{}", fmt::join(coords, ","));
             }
         }
 
