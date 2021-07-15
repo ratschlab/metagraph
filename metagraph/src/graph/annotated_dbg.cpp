@@ -392,10 +392,16 @@ AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
     size_t num_kmers = sequence.size() - dbg_.get_k() + 1;
     rows.reserve(num_kmers);
 
+    std::vector<size_t> ids;
+    ids.reserve(num_kmers);
+
     graph_->map_to_nodes(sequence, [&](node_index i) {
-        // TODO: add empty tuples for missing k-mers
-        if (i > 0)
+        if (i > 0) {
+            ids.push_back(rows.size());
             rows.push_back(graph_to_anno_index(i));
+        } else {
+            ids.push_back(-1);
+        }
     });
 
     uint64_t min_count = std::max(1.0, std::ceil(presence_ratio * num_kmers));
@@ -425,7 +431,7 @@ AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
     // filter by the number of matched k-mers
     code_counts.erase(
         std::upper_bound(code_counts.begin(), code_counts.end(), min_count,
-                         [](uint64_t min, const auto &x) { return x.second > min; }),
+                         [](uint64_t min, const auto &x) { return x.second < min; }),
         code_counts.end()
     );
 
@@ -437,11 +443,16 @@ AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
         result[j].first = annotator_->get_label_encoder().decode(code_counts[j].first);
     }
 
-    for (size_t i = 0; i < rows_tuples.size(); ++i) {
+    for (size_t i : ids) {
         for (size_t j = 0; j < result.size(); ++j) {
             // append empty tuple
             result[j].second.emplace_back();
         }
+
+        // leave all tuples empty if the k-mer is missing
+        if (i == (size_t)-1)
+            continue;
+
         // set the non-empty tuples
         for (auto &[j, tuple] : rows_tuples[i]) {
             auto it = code_to_count.find(j);

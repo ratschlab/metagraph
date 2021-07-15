@@ -175,7 +175,7 @@ inline bool TupleCSCMatrix<BaseMatrix, Values, Delims>::load_tuples(std::istream
             delimiters_[j].load(in);
             column_values_[j].load(in);
         } catch (...) {
-            common::logger->error("Couldn't load multi-integer values for column {}", j);
+            common::logger->error("Couldn't load tuple attributes for column {}", j);
             return false;
         }
     }
