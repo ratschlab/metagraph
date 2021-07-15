@@ -4,7 +4,6 @@
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "annotation/binary_matrix/row_sparse/row_sparse.hpp"
-#include "annotation/int_matrix/base/int_matrix.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "graph/annotated_dbg.hpp"
@@ -18,7 +17,6 @@ namespace mtg {
 namespace cli {
 
 using namespace mtg::graph;
-using mtg::annot::matrix::MultiIntMatrix;
 using mtg::common::logger;
 
 

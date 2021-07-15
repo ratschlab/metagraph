@@ -1,7 +1,6 @@
 #include "load_annotation.hpp"
 
 #include <string>
-#include <filesystem>
 
 #include "common/logger.hpp"
 #include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
@@ -13,7 +12,6 @@
 namespace mtg {
 namespace cli {
 
-namespace fs = std::filesystem;
 using mtg::common::logger;
 
 const uint64_t kBytesInGigabyte = 1'000'000'000;
