@@ -653,7 +653,24 @@ int transform_annotation(Config *config) {
                 break;
             }
             case Config::ColumnCoord: {
-                logger->error("Coordinates must be originally annotated");
+                auto label_encoder = annotator->get_label_encoder();
+                auto tuple_matrix = std::make_unique<matrix::TupleCSCMatrix<binmat::ColumnMajor>>(
+                                            annotator->release_matrix());
+                if (files.size() > 1) {
+                    logger->error("Merging coordinates from multiple columns is not supported");
+                    exit(1);
+                }
+                auto coords_fname = utils::remove_suffix(files.at(0),
+                                                         ColumnCompressed<>::kExtension)
+                                        + ColumnCompressed<>::kCoordExtension;
+                std::ifstream in(coords_fname);
+                tuple_matrix->load_tuples(in);
+
+                ColumnCoordAnnotator column_coord(std::move(tuple_matrix), label_encoder);
+
+                logger->trace("Annotation converted in {} sec", timer.elapsed());
+                column_coord.serialize(config->outfbase);
+                logger->trace("Serialized to {}", config->outfbase);
                 break;
             }
             case Config::RowDiffBRWT: {

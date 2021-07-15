@@ -67,14 +67,7 @@ bool StaticBinRelAnnotator<BinaryMatrixType, Label>::load(const std::string &fil
 
     try {
         assert(matrix_.get());
-        auto pos = instream.tellg();
-        if (!label_encoder_.load(instream)) {
-            instream.seekg(pos);
-            (void)load_number(instream);
-            if (!label_encoder_.load(instream))
-                return false;
-        }
-        return matrix_->load(instream);
+        return label_encoder_.load(instream) && matrix_->load(instream);
     } catch (...) {
         return false;
     }

@@ -25,10 +25,8 @@ class TupleCSCMatrix : public MultiIntMatrix {
   public:
     TupleCSCMatrix() {}
 
-    // TupleCSCMatrix(BaseMatrix&& index_matrix,
-    //                std::vector<ColumnValues>&& column_values)
-    //   : binary_matrix_(std::move(index_matrix)),
-    //     column_values_(column_values) {}
+    TupleCSCMatrix(BaseMatrix&& index_matrix)
+      : binary_matrix_(std::move(index_matrix)) {}
 
     // return tuple sizes (if not zero) at each entry
     RowValues get_row_values(Row row) const;
@@ -162,7 +160,7 @@ TupleCSCMatrix<BaseMatrix, Values, Delims>::get_row_tuples(const std::vector<Row
 
 template <class BaseMatrix, class Values, class Delims>
 inline bool TupleCSCMatrix<BaseMatrix, Values, Delims>::load(std::istream &in) {
-    return binary_matrix_.load(in);
+    return binary_matrix_.load(in) && load_tuples(in);
 }
 
 template <class BaseMatrix, class Values, class Delims>
@@ -187,6 +185,7 @@ inline bool TupleCSCMatrix<BaseMatrix, Values, Delims>::load_tuples(std::istream
 template <class BaseMatrix, class Values, class Delims>
 inline void TupleCSCMatrix<BaseMatrix, Values, Delims>::serialize(std::ostream &out) const {
     binary_matrix_.serialize(out);
+    serialize_tuples(out);
 }
 
 template <class BaseMatrix, class Values, class Delims>

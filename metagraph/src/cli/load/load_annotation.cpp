@@ -21,12 +21,10 @@ const uint64_t kBytesInGigabyte = 1'000'000'000;
 
 Config::AnnotationType parse_annotation_type(const std::string &filename) {
     if (utils::ends_with(filename, annot::ColumnCompressed<>::kExtension)) {
-        auto coords_fname = utils::remove_suffix(filename, annot::ColumnCompressed<>::kExtension)
-                                                    + annot::ColumnCompressed<>::kCoordExtension;
-        if (fs::exists(coords_fname))
-            return Config::AnnotationType::ColumnCoord;
-
         return Config::AnnotationType::ColumnCompressed;
+
+    } else if (utils::ends_with(filename, annot::ColumnCoordAnnotator::kExtension)) {
+        return Config::AnnotationType::ColumnCoord;
 
     } else if (utils::ends_with(filename, annot::RowDiffColumnAnnotator::kExtension)) {
         return Config::AnnotationType::RowDiff;

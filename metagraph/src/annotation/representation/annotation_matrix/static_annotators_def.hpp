@@ -84,7 +84,7 @@ inline const std::string IntRowDiffBRWTAnnotator::kExtension = ".row_diff_int_br
 template <>
 inline const std::string IntRowAnnotator::kExtension = ".int_csr.annodbg";
 template <>
-inline const std::string ColumnCoordAnnotator::kExtension = ".column.annodbg";
+inline const std::string ColumnCoordAnnotator::kExtension = ".column_coord.annodbg";
 
 } // namespace annot
 } // namespace mtg
