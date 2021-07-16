@@ -214,5 +214,7 @@ template class StaticBinRelAnnotator<matrix::IntRowDiff<matrix::CSCMatrix<binmat
 
 template class StaticBinRelAnnotator<matrix::CSRMatrix, std::string>;
 
+template class StaticBinRelAnnotator<matrix::TupleCSCMatrix<binmat::ColumnMajor>, std::string>;
+
 } // namespace annot
 } // namespace mtg
