@@ -23,13 +23,10 @@ class IntMatrix : public binmat::BinaryMatrix {
     virtual std::vector<RowValues>
     get_row_values(const std::vector<Row> &rows) const = 0;
 
-    // Get all columns for which the sum of the values in queried rows
-    // is greater than or equal to |min|. Stop counting if the sum is
-    // greater than |cap|.
+    // sum values for each column with at least |min_count| non-zero values
     virtual RowValues
     sum_row_values(const std::vector<std::pair<Row, size_t>> &index_counts,
-                   size_t min = 1,
-                   size_t cap = std::numeric_limits<size_t>::max()) const;
+                   size_t min_count = 1) const;
 };
 
 
