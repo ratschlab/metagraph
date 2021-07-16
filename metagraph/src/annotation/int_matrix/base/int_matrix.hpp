@@ -23,14 +23,14 @@ class IntMatrix : public binmat::BinaryMatrix {
     virtual std::vector<RowValues>
     get_row_values(const std::vector<Row> &rows) const = 0;
 
-    // sum values for each column with at least |min_count| non-zero values
+    // sum up values for each column with at least |min_count| non-zero values
     virtual RowValues
     sum_row_values(const std::vector<std::pair<Row, size_t>> &index_counts,
                    size_t min_count = 1) const;
 };
 
 
-// Entries are tuples and aggregated values are tuple sizes
+// Entries are tuples and their aggregated `values` are tuple sizes
 class MultiIntMatrix : public IntMatrix {
   public:
     typedef SmallVector<uint64_t> Tuple;

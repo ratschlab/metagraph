@@ -99,8 +99,7 @@ std::string QueryExecutor::execute_query(const std::string &seq_name,
         for (const auto &[label, tuples] : result) {
             output += "\t<" + label + ">";
             for (const auto &coords : tuples) {
-                output += ":";
-                output += fmt::format("{}", fmt::join(coords, ","));
+                output += fmt::format(":{}", fmt::join(coords, ","));
             }
         }
 
@@ -118,10 +117,7 @@ std::string QueryExecutor::execute_query(const std::string &seq_name,
         output += seq_name;
 
         for (const auto &[label, quantiles] : result) {
-            output += "\t<" + label + ">";
-            for (uint64_t count : quantiles) {
-                output += fmt::format(":{}", count);
-            }
+            output += fmt::format("\t<{}>:{}", label, fmt::join(quantiles, ":"));
         }
 
         output += '\n';
@@ -138,10 +134,7 @@ std::string QueryExecutor::execute_query(const std::string &seq_name,
         output += seq_name;
 
         for (const auto &[label, count] : top_labels) {
-            output += "\t<";
-            output += label;
-            output += ">:";
-            output += fmt::format_int(count).c_str();
+            output += fmt::format("\t<{}>:{}", label, count);
         }
 
         output += '\n';
