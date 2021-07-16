@@ -754,7 +754,7 @@ class TestQueryCounts(TestingBase):
         query_command[4] = ' '.join([str(p) for p in quantiles])
         res = subprocess.run(query_command, stdout=PIPE)
         self.assertEqual(res.returncode, 0)
-        self.assertEqual(len(res.stdout.decode()), 5840)
+        self.assertEqual(len(res.stdout.decode()), 5230)
 
 
 @parameterized_class(('graph_repr', 'anno_repr'),
