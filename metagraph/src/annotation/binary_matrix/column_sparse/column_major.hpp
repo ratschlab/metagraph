@@ -23,6 +23,10 @@ class ColumnMajor : public BinaryMatrix {
     bool get(Row row, Column column) const override;
     SetBitPositions get_row(Row row) const override;
     std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const override;
+    // query row and get ranks of each set bit in its column
+    Vector<std::pair<Column, uint64_t>> get_column_ranks(Row row) const;
+    std::vector<Vector<std::pair<Column, uint64_t>>>
+    get_column_ranks(const std::vector<Row> &rows) const;
     std::vector<Row> get_column(Column column) const override;
     // get all selected rows appended with -1 and concatenated
     std::vector<Column> slice_rows(const std::vector<Row> &rows) const override;

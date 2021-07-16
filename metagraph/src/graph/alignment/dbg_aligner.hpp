@@ -104,14 +104,14 @@ class DBGAligner : public ISeedAndExtendAligner<AlignmentCompare> {
   private:
     std::shared_ptr<IExtender<DeBruijnGraph::node_index>>
     build_extender(std::string_view query,
-                   const AlignmentAggregator<IDBGAligner::node_index, AlignmentCompare>&) const override {
+                   const AlignmentAggregator<IDBGAligner::node_index, AlignmentCompare>&) const override final {
         return std::make_shared<Extender>(this->graph_, this->get_config(), query);
     }
 
     std::shared_ptr<ISeeder<DeBruijnGraph::node_index>>
     build_seeder(std::string_view query,
                  bool is_reverse_complement,
-                 const std::vector<DeBruijnGraph::node_index> &nodes) const override {
+                 const std::vector<DeBruijnGraph::node_index> &nodes) const override final {
         return this->template build_seeder_impl<Seeder>(query, is_reverse_complement, nodes);
     }
 };

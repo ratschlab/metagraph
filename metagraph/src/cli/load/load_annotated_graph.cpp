@@ -17,7 +17,6 @@ namespace mtg {
 namespace cli {
 
 using namespace mtg::graph;
-
 using mtg::common::logger;
 
 
@@ -32,9 +31,11 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
         logger->trace("Primary graph was wrapped into canonical");
     }
 
-    auto annotation_temp = config.infbase_annotators.size()
+    std::shared_ptr<AnnotatedDBG::Annotator> annotation_temp{
+        (config.infbase_annotators.size()
             ? initialize_annotation(config.infbase_annotators.at(0), config, 0)
-            : initialize_annotation(config.anno_type, config, max_index);
+            : initialize_annotation(config.anno_type, config, max_index)).release()
+    };
 
     if (config.infbase_annotators.size()) {
         bool loaded = false;
@@ -52,6 +53,7 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
                           config.infbase);
             exit(1);
         }
+
         // row_diff annotation is special, as it must know the graph structure
         using namespace annot::binmat;
         BinaryMatrix &matrix = const_cast<BinaryMatrix &>(annotation_temp->get_matrix());
@@ -72,8 +74,7 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
     }
 
     // load graph
-    auto anno_graph
-            = std::make_unique<AnnotatedDBG>(std::move(graph), std::move(annotation_temp));
+    auto anno_graph = std::make_unique<AnnotatedDBG>(std::move(graph), annotation_temp);
 
     if (!anno_graph->check_compatibility()) {
         logger->error("Graph and annotation are not compatible");

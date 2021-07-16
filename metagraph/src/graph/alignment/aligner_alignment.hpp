@@ -12,6 +12,9 @@
 #include "aligner_cigar.hpp"
 #include "aligner_config.hpp"
 
+#include "common/vector.hpp"
+#include "graph/representation/base/sequence_graph.hpp"
+
 
 namespace mtg {
 namespace graph {
@@ -23,7 +26,7 @@ namespace align {
 // Note: this object stores pointers to the query sequence, so it is the user's
 //       responsibility to ensure that the query sequence is not destroyed when
 //       calling this class' methods
-template <typename NodeType = uint64_t>
+template <typename NodeType = DeBruijnGraph::node_index>
 class Alignment {
   public:
     typedef NodeType node_index;
@@ -178,6 +181,12 @@ class Alignment {
 
     bool is_valid(const DeBruijnGraph &graph, const DBGAlignerConfig *config = nullptr) const;
 
+    Vector<uint64_t> target_columns;
+
+    // for each column in target_columns, store a vector of path indices and
+    // corresponding coordinate ranges
+    std::vector<std::vector<std::pair<size_t, std::pair<uint64_t, uint64_t>>>> target_coordinates;
+
   private:
     Json::Value path_json(size_t node_size, std::string_view label = {}) const;
 
@@ -236,7 +245,7 @@ struct LocalAlignmentGreater {
 };
 
 
-template <typename NodeType = uint64_t>
+template <typename NodeType = DeBruijnGraph::node_index>
 class QueryAlignment {
   public:
     typedef typename std::vector<Alignment<NodeType>>::iterator iterator;

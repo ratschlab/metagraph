@@ -106,7 +106,9 @@ class TestingBase(unittest.TestCase):
     def _annotate_graph(input, graph_path, output, anno_repr,
                         separate=False, no_fork_opt=False, no_anchor_opt=False):
         target_anno = anno_repr
-        if anno_repr in {'row_sparse'} or anno_repr.endswith('brwt') or anno_repr.startswith('row_diff'):
+        if (anno_repr in {'row_sparse', 'column_coord'} or
+                anno_repr.endswith('brwt') or
+                anno_repr.startswith('row_diff')):
             target_anno = anno_repr
             anno_repr = 'column'
         elif anno_repr in {'flat', 'rbfish'}:
@@ -116,6 +118,9 @@ class TestingBase(unittest.TestCase):
         command = f'{METAGRAPH} annotate -p {NUM_THREADS} --anno-header \
                     -i {graph_path} --anno-type {anno_repr} \
                     -o {output} {input}'
+
+        if target_anno.endswith('_coord'):
+            command += ' --coordinates'
 
         with_counts = target_anno.endswith('int_brwt')
         if with_counts:

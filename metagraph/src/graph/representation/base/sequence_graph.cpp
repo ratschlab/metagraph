@@ -105,6 +105,32 @@ void DeBruijnGraph::traverse(node_index start,
     }
 }
 
+DeBruijnGraph::node_index DeBruijnGraph::get_base_node(node_index node) const {
+    if (node == npos || get_mode() != DeBruijnGraph::CANONICAL) {
+        return node;
+    } else {
+        node_index ret_val;
+        map_to_nodes(get_node_sequence(node), [&](node_index node) {
+            ret_val = node;
+        });
+        return ret_val;
+    }
+}
+
+auto DeBruijnGraph::get_base_path(const std::vector<node_index> &path,
+                                  const std::string &sequence) const
+        -> std::pair<std::vector<node_index>, bool /* is reversed */> {
+    if (path.empty() || get_mode() != DeBruijnGraph::CANONICAL) {
+        return std::make_pair(path, false);
+    } else {
+        std::pair<std::vector<node_index>, bool> ret_val{ {}, false };
+        ret_val.first.reserve(path.size());
+        map_to_nodes(sequence, [&](node_index i) { ret_val.first.push_back(i); });
+        assert(ret_val.first.size() == path.size());
+        return ret_val;
+    }
+}
+
 void call_sequences_from(const DeBruijnGraph &graph,
                          node_index start,
                          const DeBruijnGraph::CallPath &callback,

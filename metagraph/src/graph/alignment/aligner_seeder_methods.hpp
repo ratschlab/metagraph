@@ -12,7 +12,7 @@ class DBGSuccinct;
 
 namespace align {
 
-template <typename NodeType = uint64_t>
+template <typename NodeType = DeBruijnGraph::node_index>
 class ISeeder {
   public:
     typedef Alignment<NodeType> Seed;
@@ -22,7 +22,7 @@ class ISeeder {
     virtual std::vector<Seed> get_seeds() const = 0;
 };
 
-template <typename NodeType = uint64_t>
+template <typename NodeType = DeBruijnGraph::node_index>
 class ManualSeeder : public ISeeder<NodeType> {
   public:
     typedef NodeType node_index;
@@ -39,7 +39,7 @@ class ManualSeeder : public ISeeder<NodeType> {
     std::vector<Seed> seeds_;
 };
 
-template <typename NodeType = uint64_t>
+template <typename NodeType = DeBruijnGraph::node_index>
 class ExactSeeder : public ISeeder<NodeType> {
   public:
     typedef NodeType node_index;
@@ -67,7 +67,7 @@ class ExactSeeder : public ISeeder<NodeType> {
     size_t num_exact_matching() const;
 };
 
-template <typename NodeType = uint64_t>
+template <typename NodeType = DeBruijnGraph::node_index>
 class MEMSeeder : public ExactSeeder<NodeType> {
   public:
     typedef typename ISeeder<NodeType>::Seed Seed;
@@ -82,7 +82,7 @@ class MEMSeeder : public ExactSeeder<NodeType> {
     virtual const bitmap& get_mem_terminator() const = 0;
 };
 
-template <typename NodeType = uint64_t>
+template <typename NodeType = DeBruijnGraph::node_index>
 class UniMEMSeeder : public MEMSeeder<NodeType> {
   public:
     typedef NodeType node_index;
@@ -121,8 +121,8 @@ class SuffixSeeder : public BaseSeeder {
     std::vector<Seed> get_seeds() const override;
 
     BaseSeeder& get_base_seeder() { return dynamic_cast<BaseSeeder&>(*this); }
-    static const DBGSuccinct& get_base_dbg_succ(const DeBruijnGraph &graph);
 
+    static const DBGSuccinct& get_base_dbg_succ(const DeBruijnGraph &graph);
 };
 
 } // namespace align

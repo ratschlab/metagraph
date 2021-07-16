@@ -82,12 +82,12 @@ void load_coordinates(const std::vector<std::string> &source_files,
             exit(1);
         }
 
-        sdsl::int_vector<> coords;
         bit_vector_smart delims;
+        sdsl::int_vector<> coords;
         for (size_t j = 0; j < sources[i].num_labels(); ++j) {
             try {
-                coords.load(in);
                 delims.load(in);
+                coords.load(in);
             } catch (...) {
                 logger->error("Couldn't read coordinates from {}", coords_fname);
                 exit(1);

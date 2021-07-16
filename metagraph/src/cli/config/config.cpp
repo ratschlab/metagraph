@@ -202,6 +202,8 @@ Config::Config(int argc, char *argv[]) {
             alignment_fraction_of_top = std::stof(get_value(i++));
         } else if (!strcmp(argv[i], "--query-presence")) {
             query_presence = true;
+        } else if (!strcmp(argv[i], "--query-coords")) {
+            query_coords = true;
         } else if (!strcmp(argv[i], "--filter-present")) {
             filter_present = true;
         } else if (!strcmp(argv[i], "--count-labels")) {
@@ -246,6 +248,8 @@ Config::Config(int argc, char *argv[]) {
             alignment_max_seed_length = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--align-max-num-seeds-per-locus")) {
             alignment_max_num_seeds_per_locus = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--align-label-every-n")) {
+            alignment_label_every_n = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--align-max-nodes-per-seq-char")) {
             alignment_max_nodes_per_seq_char = std::stof(get_value(i++));
         } else if (!strcmp(argv[i], "--align-min-exact-match")) {
@@ -697,6 +701,8 @@ std::string Config::annotype_to_string(AnnotationType state) {
             return "int_brwt";
         case IntRowDiffBRWT:
             return "row_diff_int_brwt";
+        case ColumnCoord:
+            return "column_coord";
     }
     throw std::runtime_error("Never happens");
 }
@@ -730,6 +736,8 @@ Config::AnnotationType Config::string_to_annotype(const std::string &string) {
         return AnnotationType::IntBRWT;
     } else if (string == "row_diff_int_brwt") {
         return AnnotationType::IntRowDiffBRWT;
+    } else if (string == "column_coord") {
+        return AnnotationType::ColumnCoord;
     } else {
         std::cerr << "Error: unknown annotation representation" << std::endl;
         exit(1);
@@ -792,6 +800,7 @@ DeBruijnGraph::Mode Config::string_to_graphmode(const std::string &string) {
 
 void Config::print_usage(const std::string &prog_name, IdentityType identity) {
     const char annotation_list[] = "\t\t( column, brwt, rb_brwt, int_brwt,\n"
+                                   "\t\t  column_coord,\n"
                                    "\t\t  row_diff, row_diff_brwt, row_diff_sparse, row_diff_int_brwt,\n"
                                    "\t\t  row, flat, row_sparse, rbfish, bin_rel_wt, bin_rel_wt_sdsl )";
 
@@ -937,6 +946,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --batch-size \t\tquery batch size (number of base pairs) [100000000]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "Available options for alignment:\n");
+            fprintf(stderr, "\t-a --annotator [STR] \t\t\t\tannotator to load []\n");
             fprintf(stderr, "\t-o --outfile-base [STR]\t\t\t\tbasename of output file []\n");
             fprintf(stderr, "\t   --json \t\t\t\t\toutput alignment in JSON format [off]\n");
             fprintf(stderr, "\t   --align-one-strand \t\t\t\tdo not align backwards from a seed on basic-mode graphs [off]\n");
@@ -1170,7 +1180,9 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --count-labels \t\tcount labels for k-mers from querying sequences [off]\n");
             fprintf(stderr, "\t   --count-kmers \t\tweight k-mers with their annotated counts (requires count annotation) [off]\n");
             fprintf(stderr, "\t   --count-quantiles [FLOAT ...] \tk-mer count quantiles to compute for each label [off]\n"
-                            "\t                                 \t\tExample: --count-quantiles '0.33 0.5 0.66 1'\n");
+                            "\t                                 \t\tExample: --count-quantiles '0 0.33 0.5 0.66 1'\n"
+                            "\t                                 \t\t(0 corresponds to MIN, 1 corresponds to MAX)\n");
+            fprintf(stderr, "\t   --query-coords \t\tquery k-mer coordinates (requires coord annotation) [off]\n");
             fprintf(stderr, "\t   --print-signature \t\tprint vectors indicating present/absent k-mers [off]\n");
             fprintf(stderr, "\t   --num-top-labels \t\tmaximum number of frequent labels to print [off]\n");
             fprintf(stderr, "\t   --discovery-fraction [FLOAT] fraction of labeled k-mers required for annotation [0.7]\n");

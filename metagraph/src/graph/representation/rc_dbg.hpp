@@ -125,6 +125,15 @@ class RCDBG : public DeBruijnGraph {
         return rc;
     }
 
+    virtual std::pair<std::vector<node_index>, bool /* is reversed */>
+    get_base_path(const std::vector<node_index> &path,
+                  const std::string &sequence) const override final {
+        auto ret_val = graph_.get_base_path(path, sequence);
+        ret_val.second = !ret_val.second;
+        std::reverse(ret_val.first.begin(), ret_val.first.end());
+        return ret_val;
+    }
+
   private:
     const DeBruijnGraph &graph_;
 };

@@ -39,6 +39,7 @@ class Config {
     bool count_kmers = false;
     bool print_signature = false;
     bool query_presence = false;
+    bool query_coords = false;
     bool filter_present = false;
     bool dump_text_anno = false;
     bool sparse = false;
@@ -118,6 +119,7 @@ class Config {
     size_t alignment_min_seed_length = 0;
     size_t alignment_max_seed_length = std::numeric_limits<size_t>::max();
     size_t alignment_max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
+    size_t alignment_label_every_n = 0;
 
     double alignment_fraction_of_top = 0.8;
 
@@ -201,6 +203,7 @@ class Config {
         RbBRWT,
         IntBRWT,
         IntRowDiffBRWT,
+        ColumnCoord,
     };
 
     enum GraphType {

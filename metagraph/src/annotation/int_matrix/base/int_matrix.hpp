@@ -32,6 +32,34 @@ class IntMatrix : public binmat::BinaryMatrix {
                    size_t cap = std::numeric_limits<size_t>::max()) const;
 };
 
+
+// Entries are tuples and aggregated values are tuple sizes
+class MultiIntMatrix : public IntMatrix {
+  public:
+    typedef SmallVector<uint64_t> Tuple;
+    typedef Vector<std::pair<Column, Tuple>> RowTuples;
+
+    virtual ~MultiIntMatrix() {}
+
+    // return tuple sizes (if not zero) at each entry
+    virtual RowValues get_row_values(Row row) const;
+
+    virtual std::vector<RowValues>
+    get_row_values(const std::vector<Row> &rows) const;
+
+    // return total number of attributes in all tuples
+    virtual uint64_t num_attributes() const = 0;
+
+    // return entries of the matrix -- where each entry is a set of integers
+    virtual RowTuples get_row_tuples(Row row) const = 0;
+
+    virtual std::vector<RowTuples>
+    get_row_tuples(const std::vector<Row> &rows) const = 0;
+
+    virtual bool load_tuples(std::istream &in) = 0;
+    virtual void serialize_tuples(std::ostream &out) const = 0;
+};
+
 } // namespace matrix
 } // namespace annot
 } // namespace mtg

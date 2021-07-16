@@ -29,6 +29,12 @@ using namespace mtg::graph;
 template <class Graph, class Annotation = annot::ColumnCompressed<>>
 std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
                                                const std::vector<std::string> &sequences,
+                                               const std::vector<std::string> &labels,
+                                               DeBruijnGraph::Mode mode = DeBruijnGraph::BASIC);
+
+template <class Annotation = annot::ColumnCompressed<>>
+std::unique_ptr<AnnotatedDBG> build_anno_graph(std::shared_ptr<DeBruijnGraph> graph,
+                                               const std::vector<std::string> &sequences,
                                                const std::vector<std::string> &labels);
 
 } // namespace test
