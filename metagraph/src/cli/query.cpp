@@ -126,7 +126,7 @@ std::string QueryExecutor::execute_query(const std::string &seq_name,
 
         output += '\n';
 
-    } else if (count_labels) {
+    } else if (count_labels || with_kmer_counts) {
         auto top_labels = anno_graph.get_top_labels(sequence,
                                                     num_top_labels,
                                                     discovery_fraction,
