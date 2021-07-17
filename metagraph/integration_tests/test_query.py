@@ -17,6 +17,7 @@ DNA_MODE = os.readlink(METAGRAPH).endswith("_DNA")
 PROTEIN_MODE = os.readlink(METAGRAPH).endswith("_Protein")
 
 anno_file_extension = {'column': '.column.annodbg',
+                       'column_coord': '.column_coord.annodbg',
                        'row': '.row.annodbg',
                        'row_diff': '.row_diff.annodbg',
                        'row_sparse': '.row_sparse.annodbg',
@@ -504,6 +505,28 @@ class TestQuery(TestingBase):
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 136959)
 
+    def test_query_coordinates(self):
+        if not self.anno_repr.endswith('_coord'):
+            self.skipTest('annotation does not support coordinates')
+
+        query_command = f'{METAGRAPH} query --query-coords \
+                            -i {self.tempdir.name}/graph{graph_file_extension[self.graph_repr]} \
+                            -a {self.tempdir.name}/annotation{anno_file_extension[self.anno_repr]} \
+                            --discovery-fraction 0.05 {TEST_DATA_DIR}/transcripts_100.fa'
+
+        res = subprocess.run(query_command.split(), stdout=PIPE)
+        self.assertEqual(res.returncode, 0)
+        self.assertEqual(len(res.stdout), 2155983)
+
+        query_command = f'{METAGRAPH} query --query-coords \
+                            -i {self.tempdir.name}/graph{graph_file_extension[self.graph_repr]} \
+                            -a {self.tempdir.name}/annotation{anno_file_extension[self.anno_repr]} \
+                            --discovery-fraction 0.95 {TEST_DATA_DIR}/transcripts_100.fa'
+
+        res = subprocess.run(query_command.split(), stdout=PIPE)
+        self.assertEqual(res.returncode, 0)
+        self.assertEqual(len(res.stdout), 687712)
+
 
 @parameterized_class(('graph_repr', 'anno_repr'),
     input_values=product(
@@ -542,8 +565,6 @@ class TestQueryCounts(TestingBase):
             'GGT': 18,
             'GTT': 19,
             'TTT': 20,
-            'TTA': 21,
-            'TAA': 22,
         }
         fasta_file = cls.tempdir.name + '/file.fa'
         with open(fasta_file, 'w') as f:
@@ -626,6 +647,57 @@ class TestQueryCounts(TestingBase):
             assert('objects: 12' == params_str[1])
         assert('representation: ' + cls.anno_repr == params_str[3])
 
+    def test_count_query(self):
+        query_file = self.tempdir.name + '/query.fa'
+        queries = [
+            'AAA',
+            'AAAA',
+            'AAAAAAAAAAAAA',
+            'CCC',
+            'CCCC',
+            'CCCCCCCCCCCCC',
+            'TTT',
+            'AAACCCGGGTTT',
+            'AAACCCGGGTTTTTT',
+            'AAACCCGGGTTTAAA',
+            'TTTAAACCCGGG',
+            'ACACACACACACATTTAAACCCGGG',
+        ]
+        for discovery_rate in np.linspace(0, 1, 5):
+            expected_output = ''
+            with open(query_file, 'w') as f:
+                for i, s in enumerate(queries):
+                    f.write(f'>s{i}\n{s}\n')
+                    expected_output += f'{i}\ts{i}'
+                    def get_count(d, kmer):
+                        try:
+                            return d[kmer]
+                        except:
+                            return 0
+
+                    num_kmers = len(s) - self.k + 1
+
+                    num_matches_1 = sum([get_count(self.kmer_counts_1, s[i:i + self.k]) > 0 for i in range(num_kmers)])
+                    count_1 = sum([get_count(self.kmer_counts_1, s[i:i + self.k]) for i in range(len(s) - self.k + 1)])
+
+                    num_matches_2 = sum([get_count(self.kmer_counts_2, s[i:i + self.k]) > 0 for i in range(num_kmers)])
+                    count_2 = sum([get_count(self.kmer_counts_2, s[i:i + self.k]) for i in range(len(s) - self.k + 1)])
+
+                    for (c, i, n) in [(count_1, 1, num_matches_1), (count_2, 0, num_matches_2)]:
+                        if n >= discovery_rate * num_kmers:
+                            expected_output += f'\t<L{2-i}>:{c}'
+
+                    expected_output += '\n'
+
+            query_command = f'{METAGRAPH} query --fast --count-kmers \
+                            -i {self.tempdir.name}/graph{graph_file_extension[self.graph_repr]} \
+                            -a {self.tempdir.name}/annotation{anno_file_extension[self.anno_repr]} \
+                            --discovery-fraction {discovery_rate} {query_file}'
+
+            res = subprocess.run(query_command.split(), stdout=PIPE)
+            self.assertEqual(res.returncode, 0)
+            self.assertEqual(res.stdout.decode(), expected_output)
+
     def test_count_quantiles(self):
         query_file = self.tempdir.name + '/query.fa'
         queries = [
@@ -662,17 +734,27 @@ class TestQueryCounts(TestingBase):
                     expected_output += f':{np.quantile(counts, p, interpolation="lower")}'
                 expected_output += '\n'
 
-        query_command = '{exe} query --fast --count-quantiles <SET_BELOW> -i {graph} -a {annotation} --discovery-fraction 0.0 {input}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
-            annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
-            input=query_file
-        )
+        query_command = f'{METAGRAPH} query --fast --count-quantiles <SET_BELOW> \
+                        -i {self.tempdir.name}/graph{graph_file_extension[self.graph_repr]} \
+                        -a {self.tempdir.name}/annotation{anno_file_extension[self.anno_repr]} \
+                        --discovery-fraction 0.0 {query_file}'
+
         query_command = query_command.split()
         query_command[4] = ' '.join([str(p) for p in quantiles])
         res = subprocess.run(query_command, stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         self.assertEqual(res.stdout.decode(), expected_output)
+
+        query_command = f'{METAGRAPH} query --fast --count-quantiles <SET_BELOW> \
+                        -i {self.tempdir.name}/graph{graph_file_extension[self.graph_repr]} \
+                        -a {self.tempdir.name}/annotation{anno_file_extension[self.anno_repr]} \
+                        --discovery-fraction 1.0 {query_file}'
+
+        query_command = query_command.split()
+        query_command[4] = ' '.join([str(p) for p in quantiles])
+        res = subprocess.run(query_command, stdout=PIPE)
+        self.assertEqual(res.returncode, 0)
+        self.assertEqual(len(res.stdout.decode()), 5230)
 
 
 @parameterized_class(('graph_repr', 'anno_repr'),
