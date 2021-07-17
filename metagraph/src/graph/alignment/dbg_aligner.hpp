@@ -42,22 +42,7 @@ class IDBGAligner {
 template <class AlignmentCompare = LocalAlignmentLess>
 class ISeedAndExtendAligner : public IDBGAligner {
   public:
-    ISeedAndExtendAligner(const DeBruijnGraph &graph, const DBGAlignerConfig &config)
-          : graph_(graph), config_(config) {
-        if (!config_.min_seed_length)
-            config_.min_seed_length = graph_.get_k();
-
-        if (!config_.max_seed_length)
-            config_.max_seed_length = graph_.get_k();
-
-        assert(config_.max_seed_length >= config_.min_seed_length);
-        assert(config_.num_alternative_paths);
-        assert(graph_.get_mode() != DeBruijnGraph::PRIMARY
-            && "primary graphs must be wrapped into canonical");
-
-        if (!config_.check_config_scores())
-            throw std::runtime_error("Error: sum of min_cell_score and lowest penalty too low.");
-    }
+    ISeedAndExtendAligner(const DeBruijnGraph &graph, const DBGAlignerConfig &config);
 
     virtual ~ISeedAndExtendAligner() {}
 
@@ -67,11 +52,12 @@ class ISeedAndExtendAligner : public IDBGAligner {
     const DBGAlignerConfig& get_config() const { return config_; }
 
   protected:
+    typedef AlignmentAggregator<node_index, AlignmentCompare> Aggregator;
     const DeBruijnGraph &graph_;
 
     virtual std::shared_ptr<IExtender<DeBruijnGraph::node_index>>
     build_extender(std::string_view query,
-                   const AlignmentAggregator<IDBGAligner::node_index, AlignmentCompare> &aggregator) const = 0;
+                   const Aggregator &aggregator) const = 0;
 
     virtual std::shared_ptr<ISeeder<DeBruijnGraph::node_index>>
     build_seeder(std::string_view query,
@@ -90,6 +76,28 @@ class ISeedAndExtendAligner : public IDBGAligner {
 
   private:
     DBGAlignerConfig config_;
+
+    // Align the forward and reverse complement of the query sequence in both
+    // directions and return the overall best alignment. e.g., for the forward query
+    // 1. Find all seeds of its reverse complement
+    // 2. Given a seed, extend forwards to get alignment A
+    // 3. Reverse complement the alignment to get A', treat it like a new seed
+    // 4. Extend A' forwards to get the final alignment A''
+    void align_both_directions(std::string_view forward,
+                               std::string_view reverse,
+                               const ISeeder<node_index> &forward_seeder,
+                               const ISeeder<node_index> &reverse_seeder,
+                               IExtender<node_index> &forward_extender,
+                               IExtender<node_index> &reverse_extender,
+                               const std::function<void(DBGAlignment&&)> &callback,
+                               const std::function<score_t(const DBGAlignment&)> &get_min_path_score) const;
+
+    // Generates seeds and extends them
+    void align_core(std::string_view query,
+                    const ISeeder<node_index> &seeder,
+                    IExtender<node_index> &extender,
+                    const std::function<void(DBGAlignment&&)> &callback,
+                    const std::function<score_t(const DBGAlignment&)> &get_min_path_score) const;
 };
 
 template <class Extender = DefaultColumnExtender<>,
