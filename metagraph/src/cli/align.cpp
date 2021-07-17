@@ -172,15 +172,14 @@ void map_sequences_in_file(const std::string &file,
 
         if (config.count_kmers) {
             std::sort(graphindices.begin(), graphindices.end());
-            size_t num_unique_matching_kmers = graphindices.size() ? std::inner_product(
-                graphindices.begin() + 1, graphindices.end(),
-                graphindices.begin(),
-                size_t(graphindices.front() != DeBruijnGraph::npos),
-                std::plus<size_t>(),
-                [](DeBruijnGraph::node_index next, DeBruijnGraph::node_index prev) {
-                    return next != DeBruijnGraph::npos && next != prev;
-                }
-            ) : 0;
+            size_t num_unique_matching_kmers = 0;
+            auto prev = DeBruijnGraph::npos;
+            for (auto i : graphindices) {
+                if (i != DeBruijnGraph::npos && i != prev)
+                    ++num_unique_matching_kmers;
+
+                prev = i;
+            }
             *out << read_stream->name.s << "\t"
                  << num_discovered << "/" << num_kmers << "/"
                  << num_unique_matching_kmers << "\n";
@@ -363,12 +362,12 @@ int align_to_graph(Config *config) {
     ThreadPool thread_pool(get_num_threads());
     std::mutex print_mutex;
 
-    if (config->map_sequences) {
-        if (graph->get_mode() == DeBruijnGraph::PRIMARY) {
-            logger->trace("Primary graph wrapped into canonical");
-            graph = std::make_shared<CanonicalDBG>(graph);
-        }
+    if (graph->get_mode() == DeBruijnGraph::PRIMARY) {
+        logger->trace("Primary graph wrapped into canonical");
+        graph = std::make_shared<CanonicalDBG>(graph);
+    }
 
+    if (config->map_sequences) {
         if (!config->alignment_length) {
             config->alignment_length = graph->get_k();
         } else if (config->alignment_length > graph->get_k()) {
@@ -435,10 +434,10 @@ int align_to_graph(Config *config) {
                 num_bytes_read += it->seq.l;
             }
 
-            auto process_batch = [&,graph](SeqBatch batch) mutable {
+            auto process_batch = [&](SeqBatch batch) {
                 auto aln_graph = graph;
-                if (aln_graph->get_mode() == DeBruijnGraph::PRIMARY)
-                    aln_graph = std::make_shared<CanonicalDBG>(aln_graph);
+                if (auto *canonical = dynamic_cast<CanonicalDBG*>(graph.get()))
+                    aln_graph = std::make_shared<CanonicalDBG>(*canonical);
 
                 std::unique_ptr<IDBGAligner> aligner;
                 aligner = build_aligner(*aln_graph, aligner_config);
