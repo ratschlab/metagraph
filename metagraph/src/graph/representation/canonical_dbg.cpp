@@ -330,22 +330,22 @@ void CanonicalDBG::append_prev_rc_nodes(node_index node,
 
                     c = kmer::KmerExtractorBOSS::complement(c);
 
-                    if (parents[c] != npos) {
-                        if (k_odd_) {
-                            logger->error(
-                                "Primary graph contains both forward and reverse complement: {} {} -> {} {}\t{} {}",
-                                node, graph_.get_node_sequence(node),
-                                parents[c], graph_.get_node_sequence(parents[c]),
-                                prev, graph_.get_node_sequence(prev)
-                            );
-                            exit(1);
-                        }
-
-                        is_palindrome_cache_.Put(prev, true);
-
-                    } else {
+                    if (parents[c] == npos) {
                         parents[c] = prev + offset_;
+                        return;
                     }
+
+                    if (k_odd_) {
+                        logger->error(
+                            "Primary graph contains both forward and reverse complement: {} {} -> {} {}\t{} {}",
+                            node, graph_.get_node_sequence(node),
+                            parents[c], graph_.get_node_sequence(parents[c]),
+                            prev, graph_.get_node_sequence(prev)
+                        );
+                        exit(1);
+                    }
+
+                    is_palindrome_cache_.Put(prev, true);
                 }
             });
         }
