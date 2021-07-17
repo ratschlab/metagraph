@@ -285,7 +285,7 @@ TYPED_TEST(DBGAlignerTest, align_straight_forward_and_reverse_complement) {
                            ext_paths.begin(), ext_paths.end()));
 
     // test copy
-    auto paths_copy = const_cast<const DBGAligner<>::DBGQueryAlignment&>(paths);
+    auto paths_copy = paths;
     for (const auto &path : paths_copy) {
         EXPECT_TRUE(path.is_valid(*graph, &config));
     }

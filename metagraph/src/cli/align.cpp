@@ -173,15 +173,14 @@ void map_sequences_in_file(const std::string &file,
 
         if (config.count_kmers) {
             std::sort(graphindices.begin(), graphindices.end());
-            size_t num_unique_matching_kmers = graphindices.size() ? std::inner_product(
-                graphindices.begin() + 1, graphindices.end(),
-                graphindices.begin(),
-                size_t(graphindices.front() != DeBruijnGraph::npos),
-                std::plus<size_t>(),
-                [](DeBruijnGraph::node_index next, DeBruijnGraph::node_index prev) {
-                    return next != DeBruijnGraph::npos && next != prev;
-                }
-            ) : 0;
+            size_t num_unique_matching_kmers = 0;
+            auto prev = DeBruijnGraph::npos;
+            for (auto i : graphindices) {
+                if (i != DeBruijnGraph::npos && i != prev)
+                    ++num_unique_matching_kmers;
+
+                prev = i;
+            }
             *out << read_stream->name.s << "\t"
                  << num_discovered << "/" << num_kmers << "/"
                  << num_unique_matching_kmers << "\n";
@@ -291,7 +290,7 @@ void gfa_map_files(const Config *config,
 }
 
 std::string format_alignment(std::string_view header,
-                             const DBGAligner<>::DBGQueryAlignment &paths,
+                             const QueryAlignment &paths,
                              const DeBruijnGraph &graph,
                              const Config &config) {
     std::string sout;
@@ -322,9 +321,8 @@ std::string format_alignment(std::string_view header,
         }
 
         if (paths.empty()) {
-            Json::Value json_line = DBGAligner<>::DBGAlignment().to_json(
-                paths.get_query(), graph, secondary, header
-            );
+            Json::Value json_line = Alignment().to_json(paths.get_query(), graph,
+                                                        secondary, header);
 
             sout += fmt::format("{}\n", Json::writeString(builder, json_line));
         }
@@ -336,7 +334,7 @@ std::string format_alignment(std::string_view header,
 void process_alignments(const DeBruijnGraph &graph,
                         const Config &config,
                         std::string_view header,
-                        IDBGAligner::DBGQueryAlignment&& paths,
+                        QueryAlignment&& paths,
                         std::ostream &out,
                         std::mutex &mu) {
     std::string res = format_alignment(header, paths, graph, config);
@@ -353,7 +351,7 @@ int align_to_graph(Config *config) {
 
     // initialize graph
     auto graph = load_critical_dbg(config->infbase);
-    auto input_graph = graph;
+    auto base_graph = graph;
 
     if (utils::ends_with(config->outfbase, ".gfa")) {
         gfa_map_files(config, files, *graph);
@@ -364,19 +362,19 @@ int align_to_graph(Config *config) {
     ThreadPool thread_pool(get_num_threads());
     std::mutex print_mutex;
 
-    if (config->map_sequences) {
-        if (graph->get_mode() == DeBruijnGraph::PRIMARY) {
-            logger->trace("Primary graph wrapped into canonical");
-            graph = std::make_shared<CanonicalDBG>(graph);
-        }
+    if (graph->get_mode() == DeBruijnGraph::PRIMARY) {
+        logger->trace("Primary graph wrapped into canonical");
+        graph = std::make_shared<CanonicalDBG>(graph);
+    }
 
+    if (config->map_sequences) {
         if (!config->alignment_length) {
             config->alignment_length = graph->get_k();
         } else if (config->alignment_length > graph->get_k()) {
             logger->warn("Mapping to k-mers longer than k is not supported");
             config->alignment_length = graph->get_k();
         } else if (config->alignment_length != graph->get_k()
-                && !dynamic_cast<const DBGSuccinct*>(input_graph.get())) {
+                && !dynamic_cast<const DBGSuccinct*>(base_graph.get())) {
             logger->error("Matching k-mers shorter than k only supported for succinct graphs");
             exit(1);
         }
@@ -436,9 +434,10 @@ int align_to_graph(Config *config) {
                 num_bytes_read += it->seq.l;
             }
 
-            auto process_batch = [&,graph](SeqBatch batch) mutable {
-                auto aln_graph = graph;
-                const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(graph.get());
+            auto process_batch = [&,base_graph](SeqBatch batch) {
+                // aliasing constructor
+                auto aln_graph = base_graph;
+                const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(aln_graph.get());
                 bool is_primary = aln_graph->get_mode() == DeBruijnGraph::PRIMARY;
                 bool use_cache = dbg_succ && (is_primary
                     || (aligner_config.forward_and_reverse_complement

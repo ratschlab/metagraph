@@ -60,6 +60,66 @@ class TestDNAAlign(TestingBase):
         self.assertEqual(last_split[1], "AACAGAGAATTGTTTAAATTACAATCTTAGCTATGGGTGCTAAAGGTGGAGTTATAGACTTTTTCACTGATTTGTCGTTGGAAAAAGCTTTTCATCTCGGGTTTACAAGTCTGGTGTATTTGTTTATACTAGAAGGACAGGCGCATTTGA")
         self.assertEqual(last_split[4], "22")
 
+    @parameterized.expand(GRAPH_TYPES)
+    def test_simple_align_map_all_graphs(self, representation):
+
+        self._build_graph(input=TEST_DATA_DIR + '/genome.MT.fa',
+                          output=self.tempdir.name + '/genome.MT',
+                          k=11, repr=representation,
+                          extra_params="--mask-dummy")
+
+        res = self._get_stats(self.tempdir.name + '/genome.MT' + graph_file_extension[representation])
+        params_str = res.stdout.decode().split('\n')[2:]
+        self.assertEqual('k: 11', params_str[0])
+        self.assertEqual('nodes (k): 16438', params_str[1])
+        self.assertEqual('mode: basic', params_str[2])
+
+        stats_command = '{exe} align -i {graph} --map --count-kmers {reads}'.format(
+            exe=METAGRAPH,
+            graph=self.tempdir.name + '/genome.MT' + graph_file_extension[representation],
+            reads=TEST_DATA_DIR + '/genome_MT1.fq',
+        )
+        res = subprocess.run(stats_command.split(), stdout=PIPE)
+        self.assertEqual(res.returncode, 0)
+        params_str = res.stdout.decode().rstrip().split('\n')
+        self.assertEqual(len(params_str), 6)
+        self.assertEqual(params_str[0], 'MT-10/1\t1/140/1')
+        self.assertEqual(params_str[1], 'MT-8/1\t140/140/140')
+        self.assertEqual(params_str[2], 'MT-6/1\t140/140/140')
+        self.assertEqual(params_str[3], 'MT-4/1\t0/140/0')
+        self.assertEqual(params_str[4], 'MT-2/1\t140/140/140')
+        self.assertEqual(params_str[5], 'MT-11/1\t1/140/1')
+
+    @parameterized.expand(GRAPH_TYPES)
+    def test_simple_align_map_canonical_all_graphs(self, representation):
+
+        self._build_graph(input=TEST_DATA_DIR + '/genome.MT.fa',
+                          output=self.tempdir.name + '/genome.MT',
+                          k=11, repr=representation, mode='canonical',
+                          extra_params="--mask-dummy")
+
+        res = self._get_stats(self.tempdir.name + '/genome.MT' + graph_file_extension[representation])
+        params_str = res.stdout.decode().split('\n')[2:]
+        self.assertEqual('k: 11', params_str[0])
+        self.assertEqual('nodes (k): 32782', params_str[1])
+        self.assertEqual('mode: canonical', params_str[2])
+
+        stats_command = '{exe} align -i {graph} --map --count-kmers {reads}'.format(
+            exe=METAGRAPH,
+            graph=self.tempdir.name + '/genome.MT' + graph_file_extension[representation],
+            reads=TEST_DATA_DIR + '/genome_MT1.fq',
+        )
+        res = subprocess.run(stats_command.split(), stdout=PIPE)
+        self.assertEqual(res.returncode, 0)
+        params_str = res.stdout.decode().rstrip().split('\n')
+        self.assertEqual(len(params_str), 6)
+        self.assertEqual(params_str[0], 'MT-10/1\t140/140/140')
+        self.assertEqual(params_str[1], 'MT-8/1\t140/140/140')
+        self.assertEqual(params_str[2], 'MT-6/1\t140/140/140')
+        self.assertEqual(params_str[3], 'MT-4/1\t129/140/129')
+        self.assertEqual(params_str[4], 'MT-2/1\t140/140/139')
+        self.assertEqual(params_str[5], 'MT-11/1\t2/140/2')
+
     @parameterized.expand(['succinct'])
     def test_simple_align_json_all_graphs(self, representation):
 

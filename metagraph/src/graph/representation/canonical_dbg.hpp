@@ -46,6 +46,17 @@ class CanonicalDBG : public DeBruijnGraph {
      */
     CanonicalDBG(std::shared_ptr<DeBruijnGraph> graph, size_t cache_size = 1000);
 
+    /**
+     * Copy constructor for CanonicalDBG. This creates a new wrapper with empty caches.
+     * @param canonical the graph to copy
+     */
+    CanonicalDBG(const CanonicalDBG &canonical);
+
+    // caches cannot be resized or moved, so disable these constructors
+    CanonicalDBG& operator=(const CanonicalDBG &canonical) = delete;
+    CanonicalDBG(CanonicalDBG&&) = delete;
+    CanonicalDBG& operator=(CanonicalDBG&&) = delete;
+
     virtual ~CanonicalDBG() {}
 
     virtual const DeBruijnGraph& get_base_graph() const override final { return graph_.get_base_graph(); }
@@ -151,6 +162,8 @@ class CanonicalDBG : public DeBruijnGraph {
     std::shared_ptr<DeBruijnGraph> graph_ptr_;
 
     std::array<size_t, 256> alphabet_encoder_;
+
+    size_t cache_size_;
 
     // cache the results of call_outgoing_kmers
     mutable caches::fixed_sized_cache<node_index, std::vector<node_index>,
