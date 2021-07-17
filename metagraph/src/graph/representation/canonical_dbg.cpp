@@ -17,11 +17,14 @@ CanonicalDBG::CanonicalDBG(std::shared_ptr<const DeBruijnGraph> graph, size_t ca
         k_odd_(graph_.get_k() % 2),
         has_sentinel_(false),
         alphabet_encoder_({ graph_.alphabet().size() }),
-        child_node_cache_(cache_size),
-        parent_node_cache_(cache_size),
-        is_palindrome_cache_(k_odd_ ? 0 : cache_size) {
-    if (graph->get_mode() != DeBruijnGraph::PRIMARY)
-        throw std::runtime_error("Only primary graphs can be wrapped in CanonicalDBG");
+        cache_size_(cache_size),
+        child_node_cache_(cache_size_),
+        parent_node_cache_(cache_size_),
+        is_palindrome_cache_(k_odd_ ? 0 : cache_size_) {
+    if (graph->get_mode() != DeBruijnGraph::PRIMARY) {
+        logger->error("Only primary graphs can be wrapped in CanonicalDBG");
+        exit(1);
+    }
 
     for (size_t i = 0; i < graph_.alphabet().size(); ++i) {
         alphabet_encoder_[graph_.alphabet()[i]] = i;
@@ -29,6 +32,17 @@ CanonicalDBG::CanonicalDBG(std::shared_ptr<const DeBruijnGraph> graph, size_t ca
             has_sentinel_ = true;
     }
 }
+
+CanonicalDBG::CanonicalDBG(const CanonicalDBG &canonical)
+      : const_graph_ptr_(canonical.const_graph_ptr_),
+        offset_(canonical.offset_),
+        k_odd_(canonical.k_odd_),
+        has_sentinel_(canonical.has_sentinel_),
+        alphabet_encoder_(canonical.alphabet_encoder_),
+        cache_size_(canonical.cache_size_),
+        child_node_cache_(cache_size_),
+        parent_node_cache_(cache_size_),
+        is_palindrome_cache_(k_odd_ ? 0 : cache_size_) {}
 
 CanonicalDBG::CanonicalDBG(std::shared_ptr<DeBruijnGraph> graph, size_t cache_size)
       : CanonicalDBG(std::dynamic_pointer_cast<const DeBruijnGraph>(graph), cache_size) {

@@ -391,12 +391,12 @@ int align_to_graph(Config *config) {
     ThreadPool thread_pool(get_num_threads());
     std::mutex print_mutex;
 
-    if (config->map_sequences) {
-        if (graph->get_mode() == DeBruijnGraph::PRIMARY) {
-            logger->trace("Primary graph wrapped into canonical");
-            graph = std::make_shared<CanonicalDBG>(graph);
-        }
+    if (graph->get_mode() == DeBruijnGraph::PRIMARY) {
+        logger->trace("Primary graph wrapped into canonical");
+        graph = std::make_shared<CanonicalDBG>(graph);
+    }
 
+    if (config->map_sequences) {
         if (!config->alignment_length) {
             config->alignment_length = graph->get_k();
         } else if (config->alignment_length > graph->get_k()) {
@@ -461,10 +461,10 @@ int align_to_graph(Config *config) {
                 num_bytes_read += it->seq.l;
             }
 
-            auto process_batch = [&,graph](SeqBatch batch) mutable {
+            auto process_batch = [&](SeqBatch batch) {
                 auto aln_graph = graph;
-                if (aln_graph->get_mode() == DeBruijnGraph::PRIMARY)
-                    aln_graph = std::make_shared<CanonicalDBG>(aln_graph);
+                if (auto *canonical = dynamic_cast<CanonicalDBG*>(graph.get()))
+                    aln_graph = std::make_shared<CanonicalDBG>(*canonical);
 
                 auto aligner = build_aligner(*aln_graph, aligner_config);
 
