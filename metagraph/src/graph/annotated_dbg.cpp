@@ -9,12 +9,15 @@
 #include "common/aligned_vector.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 #include "common/vector_map.hpp"
+#include "common/logger.hpp"
 
 
 namespace mtg {
 namespace graph {
 
+using mtg::common::logger;
 using mtg::annot::matrix::IntMatrix;
+using mtg::annot::matrix::MultiIntMatrix;
 
 typedef AnnotatedDBG::Label Label;
 typedef std::pair<Label, size_t> StringCountPair;
@@ -322,9 +325,14 @@ AnnotatedDBG::get_label_count_quantiles(std::string_view sequence,
         q_low[i] = (num_kmers - 1) * count_quantiles[i];
     }
 
+    const auto *int_matrix = dynamic_cast<const IntMatrix *>(&annotator_->get_matrix());
+    if (!int_matrix) {
+        logger->error("k-mer counts are not indexed in this annotator");
+        exit(1);
+    }
+
     VectorMap<size_t, std::vector<uint64_t>> code_to_counts;
-    for (const auto &row_values : dynamic_cast<const IntMatrix &>(annotator_->get_matrix())
-                                                    .get_row_values(rows)) {
+    for (const auto &row_values : int_matrix->get_row_values(rows)) {
         for (const auto &[column, count] : row_values) {
             code_to_counts[column].push_back(count);
         }
@@ -368,6 +376,120 @@ AnnotatedDBG::get_label_count_quantiles(std::string_view sequence,
     }
 
     return label_quantiles;
+}
+
+std::vector<std::pair<std::string, std::vector<SmallVector<uint64_t>>>>
+AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
+                                   size_t num_top_labels,
+                                   double presence_ratio) const {
+    assert(presence_ratio >= 0.);
+    assert(presence_ratio <= 1.);
+    assert(check_compatibility());
+
+    if (sequence.size() < dbg_.get_k())
+        return {};
+
+    std::vector<node_index> path;
+    size_t num_kmers = sequence.size() - dbg_.get_k() + 1;
+    path.reserve(num_kmers);
+
+    graph_->map_to_nodes(sequence, [&](node_index i) {
+        path.push_back(i);
+    });
+
+    return get_kmer_coordinates(path, num_top_labels, presence_ratio);
+}
+
+std::vector<std::pair<std::string, std::vector<SmallVector<uint64_t>>>>
+AnnotatedDBG::get_kmer_coordinates(const std::vector<node_index> &path,
+                                   size_t num_top_labels,
+                                   double presence_ratio) const {
+    assert(presence_ratio >= 0.);
+    assert(presence_ratio <= 1.);
+    assert(check_compatibility());
+
+    if (!path.size())
+        return {};
+
+    std::vector<row_index> rows;
+    rows.reserve(path.size());
+
+    std::vector<size_t> ids;
+    ids.reserve(path.size());
+
+    for (node_index i : path) {
+        if (i > 0) {
+            ids.push_back(rows.size());
+            rows.push_back(graph_to_anno_index(i));
+        } else {
+            ids.push_back(-1);
+        }
+    }
+
+    uint64_t min_count = std::max(1.0, std::ceil(presence_ratio * path.size()));
+    if (rows.size() < min_count)
+        return {};
+
+    const auto *tuple_matrix = dynamic_cast<const MultiIntMatrix *>(&annotator_->get_matrix());
+    if (!tuple_matrix) {
+        logger->error("k-mer coordinates are not indexed in this annotator");
+        exit(1);
+    }
+
+    auto rows_tuples = tuple_matrix->get_row_tuples(rows);
+
+    VectorMap<size_t, size_t> code_to_count;
+    for (const auto &row_tuples : rows_tuples) {
+        for (const auto &[column, tuple] : row_tuples) {
+            code_to_count[column] += 1;
+        }
+    }
+
+    auto code_counts = code_to_count.values_container();
+    // sort by the number of matched k-mers
+    std::sort(code_counts.begin(), code_counts.end(),
+              [](const auto &x, const auto &y) {
+                  return x.second > y.second || (x.second == y.second && x.first < y.first);
+              });
+
+    // keep only the first |num_top_labels| top labels
+    if (code_counts.size() > num_top_labels)
+        code_counts.resize(num_top_labels);
+
+    // filter by the number of matched k-mers
+    code_counts.erase(
+        std::upper_bound(code_counts.begin(), code_counts.end(), min_count,
+                         [](uint64_t min, const auto &x) { return x.second < min; }),
+        code_counts.end()
+    );
+
+    code_to_count = VectorMap<size_t, size_t>(code_counts.begin(), code_counts.end());
+
+    std::vector<std::pair<std::string, std::vector<SmallVector<uint64_t>>>> result(code_to_count.size());
+
+    for (size_t j = 0; j < result.size(); ++j) {
+        result[j].first = annotator_->get_label_encoder().decode(code_counts[j].first);
+    }
+
+    for (size_t i : ids) {
+        for (size_t j = 0; j < result.size(); ++j) {
+            // append empty tuple
+            result[j].second.emplace_back();
+        }
+
+        // leave all tuples empty if the k-mer is missing
+        if (i == (size_t)-1)
+            continue;
+
+        // set the non-empty tuples
+        for (auto &[j, tuple] : rows_tuples[i]) {
+            auto it = code_to_count.find(j);
+            if (it != code_to_count.end())
+                result[it - code_to_count.begin()].second.back() = std::move(tuple);
+        }
+    }
+
+    return result;
 }
 
 std::vector<std::pair<Label, sdsl::bit_vector>>

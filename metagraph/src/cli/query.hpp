@@ -65,7 +65,8 @@ class QueryExecutor {
                                      std::string anno_labels_delimiter,
                                      const graph::AnnotatedDBG &anno_graph,
                                      bool with_kmer_counts = false,
-                                     const std::vector<double> &count_quantiles = {});
+                                     const std::vector<double> &count_quantiles = {},
+                                     bool query_coords = false);
 
   private:
     const Config &config_;
