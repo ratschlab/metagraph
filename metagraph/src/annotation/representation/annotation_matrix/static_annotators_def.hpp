@@ -16,6 +16,7 @@
 #include "annotation/int_matrix/rank_extended/csc_matrix.hpp"
 #include "annotation/int_matrix/row_diff/int_row_diff.hpp"
 #include "annotation/int_matrix/csr_matrix/csr_matrix.hpp"
+#include "annotation/int_matrix/rank_extended/tuple_csc_matrix.hpp"
 
 
 namespace mtg {
@@ -51,6 +52,8 @@ typedef StaticBinRelAnnotator<matrix::IntRowDiff<matrix::CSCMatrix<binmat::BRWT,
 
 typedef StaticBinRelAnnotator<matrix::CSRMatrix, std::string> IntRowAnnotator;
 
+typedef StaticBinRelAnnotator<matrix::TupleCSCMatrix<binmat::ColumnMajor>, std::string> ColumnCoordAnnotator;
+
 
 template <>
 inline const std::string RowFlatAnnotator::kExtension = ".flat.annodbg";
@@ -80,6 +83,8 @@ template <>
 inline const std::string IntRowDiffBRWTAnnotator::kExtension = ".row_diff_int_brwt.annodbg";
 template <>
 inline const std::string IntRowAnnotator::kExtension = ".int_csr.annodbg";
+template <>
+inline const std::string ColumnCoordAnnotator::kExtension = ".column_coord.annodbg";
 
 } // namespace annot
 } // namespace mtg

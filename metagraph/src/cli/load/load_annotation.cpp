@@ -21,6 +21,9 @@ Config::AnnotationType parse_annotation_type(const std::string &filename) {
     if (utils::ends_with(filename, annot::ColumnCompressed<>::kExtension)) {
         return Config::AnnotationType::ColumnCompressed;
 
+    } else if (utils::ends_with(filename, annot::ColumnCoordAnnotator::kExtension)) {
+        return Config::AnnotationType::ColumnCoord;
+
     } else if (utils::ends_with(filename, annot::RowDiffColumnAnnotator::kExtension)) {
         return Config::AnnotationType::RowDiff;
 
@@ -135,6 +138,10 @@ initialize_annotation(Config::AnnotationType anno_type,
         }
         case Config::IntRowDiffBRWT: {
             annotation.reset(new annot::IntRowDiffBRWTAnnotator());
+            break;
+        }
+        case Config::ColumnCoord: {
+            annotation.reset(new annot::ColumnCoordAnnotator());
             break;
         }
     }
