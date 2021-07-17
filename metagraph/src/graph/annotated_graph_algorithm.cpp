@@ -17,7 +17,6 @@ using mtg::common::logger;
 typedef AnnotatedDBG::node_index node_index;
 typedef AnnotatedDBG::row_index row_index;
 typedef AnnotatedDBG::Annotator::Label Label;
-typedef Alignment<DeBruijnGraph::node_index> DBGAlignment;
 
 
 std::unique_ptr<bitmap_vector>

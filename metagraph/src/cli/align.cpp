@@ -289,7 +289,7 @@ void gfa_map_files(const Config *config,
 }
 
 std::string format_alignment(std::string_view header,
-                             const DBGAligner<>::DBGQueryAlignment &paths,
+                             const QueryAlignment &paths,
                              const DeBruijnGraph &graph,
                              const Config &config) {
     std::string sout;
@@ -320,9 +320,8 @@ std::string format_alignment(std::string_view header,
         }
 
         if (paths.empty()) {
-            Json::Value json_line = DBGAligner<>::DBGAlignment().to_json(
-                paths.get_query(), graph, secondary, header
-            );
+            Json::Value json_line = Alignment().to_json(paths.get_query(), graph,
+                                                        secondary, header);
 
             sout += fmt::format("{}\n", Json::writeString(builder, json_line));
         }
@@ -334,7 +333,7 @@ std::string format_alignment(std::string_view header,
 void process_alignments(const DeBruijnGraph &graph,
                         const Config &config,
                         std::string_view header,
-                        IDBGAligner::DBGQueryAlignment&& paths,
+                        QueryAlignment&& paths,
                         std::ostream &out,
                         std::mutex &mu) {
     std::string res = format_alignment(header, paths, graph, config);

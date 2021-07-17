@@ -25,9 +25,8 @@ inline int8_t single_char_score(const DBGAlignerConfig &config, char a, int8_t b
     return config.get_row(a)[b];
 }
 
-template <typename NodeType>
 void check_json_dump_load(const DeBruijnGraph &graph,
-                          const Alignment<NodeType> &alignment,
+                          const Alignment &alignment,
                           const std::string &query,
                           const std::string &rc_query = "") {
     ASSERT_TRUE(!rc_query.size() || query.size() == rc_query.size());
@@ -40,7 +39,7 @@ void check_json_dump_load(const DeBruijnGraph &graph,
                           alignment.get_query().size()),
               alignment.get_query());
 
-    Alignment<NodeType> load_alignment;
+    Alignment load_alignment;
     auto load_sequence = load_alignment.load_from_json(
         alignment.to_json(path_query, graph),
         graph
@@ -63,10 +62,10 @@ void check_json_dump_load(const DeBruijnGraph &graph,
         << load_alignment.get_query() << "\n";
 }
 
-DBGAligner<>::DBGQueryAlignment get_extend(std::shared_ptr<const DeBruijnGraph> graph,
-                                           const DBGAlignerConfig &config,
-                                           const DBGAligner<>::DBGQueryAlignment &paths,
-                                           const std::string &query) {
+QueryAlignment get_extend(std::shared_ptr<const DeBruijnGraph> graph,
+                          const DBGAlignerConfig &config,
+                          const QueryAlignment &paths,
+                          const std::string &query) {
     assert(graph.get());
     EXPECT_EQ(query, paths.get_query());
     auto uniconfig = config;
@@ -76,7 +75,7 @@ DBGAligner<>::DBGQueryAlignment get_extend(std::shared_ptr<const DeBruijnGraph> 
 
 inline void check_extend(std::shared_ptr<const DeBruijnGraph> graph,
                          const DBGAlignerConfig &config,
-                         const DBGAligner<>::DBGQueryAlignment &paths,
+                         const QueryAlignment &paths,
                          const std::string &query) {
     auto unimem_paths = get_extend(graph, config, paths, query);
 

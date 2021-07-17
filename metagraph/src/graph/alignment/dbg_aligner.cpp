@@ -8,11 +8,11 @@ namespace graph {
 namespace align {
 
 
-IDBGAligner::DBGQueryAlignment IDBGAligner::align(std::string_view query,
-                                                  bool is_reverse_complement) const {
-    DBGQueryAlignment result(query);
+QueryAlignment IDBGAligner::align(std::string_view query,
+                                  bool is_reverse_complement) const {
+    QueryAlignment result(query);
     align_batch({ Query{ std::string{}, query, is_reverse_complement} },
-        [&](std::string_view, DBGQueryAlignment&& alignment) {
+        [&](std::string_view, QueryAlignment&& alignment) {
             result = std::move(alignment);
         }
     );
@@ -44,17 +44,15 @@ void ISeedAndExtendAligner<AlignmentCompare>
 ::align_batch(const std::vector<IDBGAligner::Query> &seq_batch,
               const AlignmentCallback &callback) const {
     for (const auto &[header, query, is_reverse_complement] : seq_batch) {
-        DBGQueryAlignment paths(query, is_reverse_complement);
-        AlignmentAggregator<node_index, AlignmentCompare> aggregator(
-            paths.get_query(false), paths.get_query(true), config_
-        );
+        QueryAlignment paths(query, is_reverse_complement);
+        Aggregator aggregator(paths.get_query(false), paths.get_query(true), config_);
 
-        auto add_alignment = [&](DBGAlignment&& alignment) {
+        auto add_alignment = [&](Alignment&& alignment) {
             assert(alignment.is_valid(graph_, &config_));
             aggregator.add_alignment(std::move(alignment));
         };
 
-        auto get_min_path_score = [&](const DBGAlignment &seed) {
+        auto get_min_path_score = [&](const Alignment &seed) {
             return aggregator.get_min_path_score(seed);
         };
 
@@ -97,7 +95,7 @@ void ISeedAndExtendAligner<AlignmentCompare>
 
         num_explored_nodes += extender->num_explored_nodes();
 
-        aggregator.call_alignments([&](DBGAlignment&& alignment) {
+        aggregator.call_alignments([&](Alignment&& alignment) {
             assert(alignment.is_valid(graph_, &config_));
             paths.emplace_back(std::move(alignment));
         });
@@ -115,11 +113,11 @@ void ISeedAndExtendAligner<AlignmentCompare>
 template <class AlignmentCompare>
 void ISeedAndExtendAligner<AlignmentCompare>
 ::align_core(std::string_view query,
-             const ISeeder<node_index> &seeder,
-             IExtender<node_index> &extender,
-             const std::function<void(DBGAlignment&&)> &callback,
-             const std::function<score_t(const DBGAlignment&)> &get_min_path_score) const {
-    for (DBGAlignment &seed : seeder.get_seeds()) {
+             const ISeeder &seeder,
+             IExtender &extender,
+             const std::function<void(Alignment&&)> &callback,
+             const std::function<score_t(const Alignment&)> &get_min_path_score) const {
+    for (Alignment &seed : seeder.get_seeds()) {
         if (seed.empty())
             continue;
 
@@ -147,12 +145,12 @@ template <class AlignmentCompare>
 void ISeedAndExtendAligner<AlignmentCompare>
 ::align_both_directions(std::string_view forward,
                         std::string_view reverse,
-                        const ISeeder<node_index> &forward_seeder,
-                        const ISeeder<node_index> &reverse_seeder,
-                        IExtender<node_index> &forward_extender,
-                        IExtender<node_index> &reverse_extender,
-                        const std::function<void(DBGAlignment&&)> &callback,
-                        const std::function<score_t(const DBGAlignment&)> &get_min_path_score) const {
+                        const ISeeder &forward_seeder,
+                        const ISeeder &reverse_seeder,
+                        IExtender &forward_extender,
+                        IExtender &reverse_extender,
+                        const std::function<void(Alignment&&)> &callback,
+                        const std::function<score_t(const Alignment&)> &get_min_path_score) const {
 #if _PROTEIN_GRAPH
     assert(false && "Only alignment in one direction supported for Protein graphs");
 #endif
@@ -163,7 +161,7 @@ void ISeedAndExtendAligner<AlignmentCompare>
 
     const DeBruijnGraph &rc_graph = use_rcdbg ? rc_dbg : graph_;
 
-    auto is_reversible = [this](const DBGAlignment &alignment) {
+    auto is_reversible = [this](const Alignment &alignment) {
         return graph_.get_mode() == DeBruijnGraph::CANONICAL
             && alignment.get_orientation()
             && !alignment.get_offset();
@@ -171,15 +169,15 @@ void ISeedAndExtendAligner<AlignmentCompare>
 
     auto get_forward_alignments = [&](std::string_view query,
                                       std::string_view query_rc,
-                                      const ISeeder<node_index> &seeder,
-                                      IExtender<node_index> &extender) {
+                                      const ISeeder &seeder,
+                                      IExtender &extender) {
         size_t farthest_reach = 0;
         score_t max_score = config_.min_cell_score;
-        std::vector<DBGAlignment> rc_of_alignments;
+        std::vector<Alignment> rc_of_alignments;
 
         DEBUG_LOG("Extending in forwards direction");
         align_core(query, seeder, extender,
-            [&](DBGAlignment&& path) {
+            [&](Alignment&& path) {
                 score_t min_path_score = get_min_path_score(path);
 
                 farthest_reach = std::max(farthest_reach,
@@ -188,19 +186,19 @@ void ISeedAndExtendAligner<AlignmentCompare>
 
                 if (path.get_score() >= min_path_score) {
                     if (is_reversible(path)) {
-                        DBGAlignment out_path = path;
+                        Alignment out_path = path;
                         out_path.reverse_complement(graph_, query_rc);
                         assert(out_path.size());
                         callback(std::move(out_path));
                     } else {
-                        callback(DBGAlignment(path));
+                        callback(Alignment(path));
                     }
                 }
 
                 if (!path.get_clipping() || path.get_offset())
                     return;
 
-                DBGAlignment rev = path;
+                Alignment rev = path;
                 rev.reverse_complement(rc_graph, query_rc);
 
                 if (rev.empty()) {
@@ -219,7 +217,7 @@ void ISeedAndExtendAligner<AlignmentCompare>
                 // as a seed for extension
                 rc_of_alignments.emplace_back(std::move(rev));
             },
-            [&](const DBGAlignment &seed) {
+            [&](const Alignment &seed) {
                 return seed.get_clipping() <= farthest_reach
                     && config_.fraction_of_top > 0
                         ? max_score * config_.fraction_of_top
@@ -233,23 +231,23 @@ void ISeedAndExtendAligner<AlignmentCompare>
         return rc_of_alignments;
     };
 
-    ManualSeeder<node_index> rc_of_reverse(get_forward_alignments(
+    ManualSeeder rc_of_reverse(get_forward_alignments(
         reverse, forward, reverse_seeder, reverse_extender
     ));
 
-    ManualSeeder<node_index> rc_of_forward(get_forward_alignments(
+    ManualSeeder rc_of_forward(get_forward_alignments(
         forward, reverse, forward_seeder, forward_extender
     ));
 
     auto finish_alignment = [&](std::string_view query,
                                 std::string_view query_rc,
-                                const ManualSeeder<node_index> &seeder,
-                                IExtender<node_index> &extender) {
+                                const ManualSeeder &seeder,
+                                IExtender &extender) {
         if (use_rcdbg)
             extender.set_graph(rc_dbg);
 
         align_core(query_rc, seeder, extender,
-            [&](DBGAlignment&& path) {
+            [&](Alignment&& path) {
                 if (use_rcdbg || is_reversible(path)) {
                     path.reverse_complement(rc_graph, query);
                     if (path.empty())

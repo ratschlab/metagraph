@@ -12,12 +12,11 @@ namespace align {
 
 typedef DBGAlignerConfig::score_t score_t;
 
-template <typename NodeType>
-ExactSeeder<NodeType>::ExactSeeder(const DeBruijnGraph &graph,
-                                   std::string_view query,
-                                   bool orientation,
-                                   const std::vector<NodeType> &nodes,
-                                   const DBGAlignerConfig &config)
+ExactSeeder::ExactSeeder(const DeBruijnGraph &graph,
+                         std::string_view query,
+                         bool orientation,
+                         const std::vector<node_index> &nodes,
+                         const DBGAlignerConfig &config)
       : graph_(graph),
         query_(query),
         orientation_(orientation),
@@ -37,13 +36,12 @@ ExactSeeder<NodeType>::ExactSeeder(const DeBruijnGraph &graph,
     assert(!partial_sum_.front());
 }
 
-template <typename NodeType>
-size_t ExactSeeder<NodeType>::num_exact_matching() const {
+size_t ExactSeeder::num_exact_matching() const {
     size_t num_matching = 0;
     size_t last_match_count = 0;
     for (auto it = query_nodes_.begin(); it != query_nodes_.end(); ++it) {
         if (*it) {
-            auto jt = std::find(it + 1, query_nodes_.end(), NodeType());
+            auto jt = std::find(it + 1, query_nodes_.end(), node_index());
             num_matching += graph_.get_k() + std::distance(it, jt) - 1 - last_match_count;
             last_match_count = graph_.get_k();
             it = jt - 1;
@@ -56,8 +54,7 @@ size_t ExactSeeder<NodeType>::num_exact_matching() const {
     return num_matching;
 }
 
-template <typename NodeType>
-auto ExactSeeder<NodeType>::get_seeds() const -> std::vector<Seed> {
+auto ExactSeeder::get_seeds() const -> std::vector<Seed> {
     size_t k = graph_.get_k();
     assert(k >= config_.min_seed_length);
 
@@ -74,7 +71,7 @@ auto ExactSeeder<NodeType>::get_seeds() const -> std::vector<Seed> {
 
             if (match_score > config_.min_cell_score) {
                 seeds.emplace_back(query_.substr(i, k),
-                                   std::vector<NodeType>{ query_nodes_[i] },
+                                   std::vector<node_index>{ query_nodes_[i] },
                                    match_score, i, orientation_);
                 assert(seeds.back().is_valid(graph_, &config_));
             }
@@ -133,7 +130,7 @@ void suffix_to_prefix(const DBGSuccinct &dbg_succ,
 template <class BaseSeeder>
 auto SuffixSeeder<BaseSeeder>::get_seeds() const -> std::vector<Seed> {
     // this method assumes that seeds from the BaseSeeder are exact match only
-    static_assert(std::is_base_of_v<ExactSeeder<node_index>, BaseSeeder>);
+    static_assert(std::is_base_of_v<ExactSeeder, BaseSeeder>);
 
     if (this->config_.min_seed_length >= this->graph_.get_k())
         return this->BaseSeeder::get_seeds();
@@ -338,12 +335,11 @@ auto SuffixSeeder<BaseSeeder>::get_seeds() const -> std::vector<Seed> {
     return output_seeds;
 }
 
-template <typename NodeType>
-auto MEMSeeder<NodeType>::get_seeds() const -> std::vector<Seed> {
+auto MEMSeeder::get_seeds() const -> std::vector<Seed> {
     size_t k = this->graph_.get_k();
 
     if (k >= this->config_.max_seed_length)
-        return ExactSeeder<NodeType>::get_seeds();
+        return ExactSeeder::get_seeds();
 
     if (this->num_matching_ < this->config_.min_exact_match * this->query_.size())
         return {};
@@ -396,7 +392,7 @@ auto MEMSeeder<NodeType>::get_seeds() const -> std::vector<Seed> {
 
             if (match_score > this->config_.min_cell_score) {
                 seeds.emplace_back(std::string_view(begin_it, mem_length),
-                                   std::vector<NodeType>{ node_begin_it, node_end_it },
+                                   std::vector<node_index>{ node_begin_it, node_end_it },
                                    match_score, i,this->orientation_);
                 assert(seeds.back().is_valid(this->graph_, &this->config_));
             }
@@ -420,11 +416,8 @@ const DBGSuccinct& SuffixSeeder<BaseSeeder>
     }
 }
 
-template class ExactSeeder<>;
-template class MEMSeeder<>;
-template class UniMEMSeeder<>;
-template class SuffixSeeder<ExactSeeder<>>;
-template class SuffixSeeder<UniMEMSeeder<>>;
+template class SuffixSeeder<ExactSeeder>;
+template class SuffixSeeder<UniMEMSeeder>;
 
 } // namespace align
 } // namespace graph

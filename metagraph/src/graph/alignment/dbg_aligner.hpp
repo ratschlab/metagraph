@@ -19,15 +19,13 @@ namespace align {
 class IDBGAligner {
   public:
     typedef DeBruijnGraph::node_index node_index;
-    typedef Alignment<node_index> DBGAlignment;
-    typedef QueryAlignment<node_index> DBGQueryAlignment;
-    typedef typename DBGAlignment::score_t score_t;
+    typedef Alignment::score_t score_t;
 
     typedef std::tuple<std::string /* header */,
                        std::string /* seq */,
                        bool /* orientation of seq */> Query;
     typedef std::function<void(std::string_view /* header */,
-                               DBGQueryAlignment&& /* alignments */)> AlignmentCallback;
+                               QueryAlignment&& /* alignments */)> AlignmentCallback;
 
     virtual ~IDBGAligner() {}
 
@@ -36,7 +34,7 @@ class IDBGAligner {
                              const AlignmentCallback &callback) const = 0;
 
     // Convenience method
-    DBGQueryAlignment align(std::string_view query, bool is_reverse_complement = false) const;
+    QueryAlignment align(std::string_view query, bool is_reverse_complement = false) const;
 };
 
 template <class AlignmentCompare = LocalAlignmentLess>
@@ -52,23 +50,22 @@ class ISeedAndExtendAligner : public IDBGAligner {
     const DBGAlignerConfig& get_config() const { return config_; }
 
   protected:
-    typedef AlignmentAggregator<node_index, AlignmentCompare> Aggregator;
+    typedef AlignmentAggregator<AlignmentCompare> Aggregator;
     const DeBruijnGraph &graph_;
 
-    virtual std::shared_ptr<IExtender<DeBruijnGraph::node_index>>
-    build_extender(std::string_view query,
-                   const Aggregator &aggregator) const = 0;
+    virtual std::shared_ptr<IExtender>
+    build_extender(std::string_view query, const Aggregator &aggregator) const = 0;
 
-    virtual std::shared_ptr<ISeeder<DeBruijnGraph::node_index>>
+    virtual std::shared_ptr<ISeeder>
     build_seeder(std::string_view query,
                  bool is_reverse_complement,
-                 const std::vector<DeBruijnGraph::node_index> &nodes) const = 0;
+                 const std::vector<node_index> &nodes) const = 0;
 
     template <class Seeder>
-    std::shared_ptr<ISeeder<DeBruijnGraph::node_index>>
+    std::shared_ptr<ISeeder>
     build_seeder_impl(std::string_view query,
                       bool is_reverse_complement,
-                      const std::vector<DeBruijnGraph::node_index> &nodes) const {
+                      const std::vector<node_index> &nodes) const {
         return std::make_shared<SuffixSeeder<Seeder>>(
             graph_, query, is_reverse_complement, nodes, config_
         );
@@ -85,23 +82,23 @@ class ISeedAndExtendAligner : public IDBGAligner {
     // 4. Extend A' forwards to get the final alignment A''
     void align_both_directions(std::string_view forward,
                                std::string_view reverse,
-                               const ISeeder<node_index> &forward_seeder,
-                               const ISeeder<node_index> &reverse_seeder,
-                               IExtender<node_index> &forward_extender,
-                               IExtender<node_index> &reverse_extender,
-                               const std::function<void(DBGAlignment&&)> &callback,
-                               const std::function<score_t(const DBGAlignment&)> &get_min_path_score) const;
+                               const ISeeder &forward_seeder,
+                               const ISeeder &reverse_seeder,
+                               IExtender &forward_extender,
+                               IExtender &reverse_extender,
+                               const std::function<void(Alignment&&)> &callback,
+                               const std::function<score_t(const Alignment&)> &get_min_path_score) const;
 
     // Generates seeds and extends them
     void align_core(std::string_view query,
-                    const ISeeder<node_index> &seeder,
-                    IExtender<node_index> &extender,
-                    const std::function<void(DBGAlignment&&)> &callback,
-                    const std::function<score_t(const DBGAlignment&)> &get_min_path_score) const;
+                    const ISeeder &seeder,
+                    IExtender &extender,
+                    const std::function<void(Alignment&&)> &callback,
+                    const std::function<score_t(const Alignment&)> &get_min_path_score) const;
 };
 
-template <class Extender = DefaultColumnExtender<>,
-          class Seeder = UniMEMSeeder<>,
+template <class Extender = DefaultColumnExtender,
+          class Seeder = UniMEMSeeder,
           class AlignmentCompare = LocalAlignmentLess>
 class DBGAligner : public ISeedAndExtendAligner<AlignmentCompare> {
   public:
@@ -110,16 +107,16 @@ class DBGAligner : public ISeedAndExtendAligner<AlignmentCompare> {
           : ISeedAndExtendAligner<AlignmentCompare>(std::forward<Args>(args)...) {}
 
   private:
-    std::shared_ptr<IExtender<DeBruijnGraph::node_index>>
-    build_extender(std::string_view query,
-                   const AlignmentAggregator<IDBGAligner::node_index, AlignmentCompare>&) const override {
+    typedef typename ISeedAndExtendAligner<AlignmentCompare>::Aggregator Aggregator;
+    std::shared_ptr<IExtender>
+    build_extender(std::string_view query, const Aggregator&) const override {
         return std::make_shared<Extender>(this->graph_, this->get_config(), query);
     }
 
-    std::shared_ptr<ISeeder<DeBruijnGraph::node_index>>
+    std::shared_ptr<ISeeder>
     build_seeder(std::string_view query,
                  bool is_reverse_complement,
-                 const std::vector<DeBruijnGraph::node_index> &nodes) const override {
+                 const std::vector<IDBGAligner::node_index> &nodes) const override {
         return this->template build_seeder_impl<Seeder>(query, is_reverse_complement, nodes);
     }
 };

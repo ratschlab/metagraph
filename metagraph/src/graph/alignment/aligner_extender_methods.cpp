@@ -18,11 +18,10 @@ constexpr score_t ninf = std::numeric_limits<score_t>::min() + 100;
 constexpr size_t kPadding = 5;
 
 
-template <typename NodeType>
-DefaultColumnExtender<NodeType>::DefaultColumnExtender(const DeBruijnGraph &graph,
-                                                       const DBGAlignerConfig &config,
-                                                       std::string_view query)
-      : SeedFilteringExtender<NodeType>(query),
+DefaultColumnExtender::DefaultColumnExtender(const DeBruijnGraph &graph,
+                                             const DBGAlignerConfig &config,
+                                             std::string_view query)
+      : SeedFilteringExtender(query),
         graph_(&graph), config_(config), query_(query) {
     assert(config_.check_config_scores());
 
@@ -56,8 +55,7 @@ DefaultColumnExtender<NodeType>::DefaultColumnExtender(const DeBruijnGraph &grap
     }
 }
 
-template <typename NodeType>
-bool SeedFilteringExtender<NodeType>::set_seed(const DBGAlignment &seed) {
+bool SeedFilteringExtender::set_seed(const Alignment &seed) {
     assert(seed.size());
     assert(seed.get_cigar().size());
     assert(seed.get_cigar().back().first == Cigar::MATCH
@@ -83,11 +81,10 @@ bool SeedFilteringExtender<NodeType>::set_seed(const DBGAlignment &seed) {
     return seed_;
 }
 
-template <typename NodeType>
-bool SeedFilteringExtender<NodeType>::update_seed_filter(node_index node,
-                                                         size_t query_start,
-                                                         const score_t *s_begin,
-                                                         const score_t *s_end) {
+bool SeedFilteringExtender::update_seed_filter(node_index node,
+                                               size_t query_start,
+                                               const score_t *s_begin,
+                                               const score_t *s_end) {
     assert(s_end >= s_begin);
     assert(query_start + (s_end - s_begin) <= query_size_);
 
@@ -137,10 +134,9 @@ bool SeedFilteringExtender<NodeType>::update_seed_filter(node_index node,
     }
 }
 
-template <typename NodeType>
-bool SeedFilteringExtender<NodeType>::filter_nodes(node_index node,
-                                                   size_t query_start,
-                                                   size_t query_end) {
+bool SeedFilteringExtender::filter_nodes(node_index node,
+                                         size_t query_start,
+                                         size_t query_end) {
     assert(query_end >= query_start);
     assert(query_end <= query_size_);
     constexpr score_t mscore = -ninf;
@@ -335,12 +331,11 @@ void extend_ins(AlignedVector<score_t> &S,
     }
 }
 
-template <typename NodeType>
-void DefaultColumnExtender<NodeType>
-::call_outgoing(NodeType node,
+void DefaultColumnExtender
+::call_outgoing(node_index node,
                 size_t /* max_prefetch_distance */,
-                const std::function<void(NodeType, char)> &callback) {
-    graph_->call_outgoing_kmers(node, [&](NodeType next, char c) {
+                const std::function<void(node_index, char)> &callback) {
+    graph_->call_outgoing_kmers(node, [&](node_index next, char c) {
         if (c != boss::BOSS::kSentinel)
             callback(next, c);
     });
@@ -368,9 +363,7 @@ Column alloc_column(size_t size, RestArgs... args) {
     return column;
 }
 
-template <typename NodeType>
-auto DefaultColumnExtender<NodeType>
-::extend(score_t min_path_score) -> std::vector<DBGAlignment> {
+auto DefaultColumnExtender::extend(score_t min_path_score) -> std::vector<Alignment> {
     assert(this->seed_);
 
     table.clear();
@@ -415,7 +408,7 @@ auto DefaultColumnExtender<NodeType>
         while (nofork) {
             nofork = false;
 
-            std::vector<std::pair<NodeType, char>> outgoing;
+            std::vector<std::pair<node_index, char>> outgoing;
             size_t next_offset = -1;
 
             size_t prev_begin = 0;
@@ -470,7 +463,7 @@ auto DefaultColumnExtender<NodeType>
                     }
                 } else {
                     call_outgoing(node, window.size() + 1 - offset - S.size(),
-                                  [&](NodeType next, char c) { outgoing.emplace_back(next, c); });
+                                  [&](node_index next, char c) { outgoing.emplace_back(next, c); });
                 }
             }
 
@@ -579,15 +572,13 @@ auto DefaultColumnExtender<NodeType>
     return backtrack(min_path_score, window);
 }
 
-template <typename NodeType>
-auto DefaultColumnExtender<NodeType>
-::construct_alignment(Cigar cigar,
-                      size_t clipping,
-                      std::string_view window,
-                      std::vector<NodeType> final_path,
-                      std::string match,
-                      score_t score,
-                      size_t offset) const -> DBGAlignment {
+auto DefaultColumnExtender::construct_alignment(Cigar cigar,
+                                                size_t clipping,
+                                                std::string_view window,
+                                                std::vector<node_index> final_path,
+                                                std::string match,
+                                                score_t score,
+                                                size_t offset) const -> Alignment {
     assert(final_path.size());
     cigar.append(Cigar::CLIPPED, clipping);
 
@@ -595,7 +586,7 @@ auto DefaultColumnExtender<NodeType>
     std::reverse(final_path.begin(), final_path.end());
     std::reverse(match.begin(), match.end());
 
-    DBGAlignment extension(window, std::move(final_path), std::move(match), score,
+    Alignment extension(window, std::move(final_path), std::move(match), score,
                            std::move(cigar), 0, this->seed_->get_orientation(), offset);
     assert(extension.is_valid(*this->graph_, &config_));
 
@@ -608,15 +599,14 @@ auto DefaultColumnExtender<NodeType>
     return extension;
 }
 
-template <typename NodeType>
-auto DefaultColumnExtender<NodeType>
-::backtrack(score_t min_path_score, std::string_view window) -> std::vector<DBGAlignment> {
+auto DefaultColumnExtender
+::backtrack(score_t min_path_score, std::string_view window) -> std::vector<Alignment> {
     if (table.empty())
         return {};
 
     init_backtrack();
 
-    std::vector<DBGAlignment> extensions;
+    std::vector<Alignment> extensions;
 
     size_t seed_clipping = this->seed_->get_clipping();
     ssize_t seed_offset = static_cast<ssize_t>(this->seed_->get_offset() - 1);
@@ -744,7 +734,7 @@ auto DefaultColumnExtender<NodeType>
 
                 call_alignments(S[pos - trim], score, min_path_score, path, trace, ops,
                                 pos, align_offset, window.substr(pos, end_pos - pos), seq,
-                                [&](DBGAlignment&& alignment) {
+                                [&](Alignment&& alignment) {
                     extensions.emplace_back(std::move(alignment));
                 });
             }
@@ -753,8 +743,6 @@ auto DefaultColumnExtender<NodeType>
 
     return extensions;
 }
-
-template class DefaultColumnExtender<>;
 
 } // namespace align
 } // namespace graph

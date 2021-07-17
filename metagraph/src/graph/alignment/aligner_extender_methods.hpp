@@ -12,19 +12,17 @@ namespace mtg {
 namespace graph {
 namespace align {
 
-template <typename NodeType = uint64_t>
 class IExtender {
   public:
-    typedef Alignment<NodeType> DBGAlignment;
-    typedef typename DBGAlignment::node_index node_index;
-    typedef typename DBGAlignment::score_t score_t;
+    typedef DeBruijnGraph::node_index node_index;
+    typedef Alignment::score_t score_t;
 
     virtual ~IExtender() {}
 
-    std::vector<DBGAlignment>
-    get_extensions(const DBGAlignment &seed,
+    std::vector<Alignment>
+    get_extensions(const Alignment &seed,
                    score_t min_path_score = std::numeric_limits<score_t>::min()) {
-        return set_seed(seed) ? extend(min_path_score) : std::vector<DBGAlignment>{};
+        return set_seed(seed) ? extend(min_path_score) : std::vector<Alignment>{};
     }
 
     virtual void set_graph(const DeBruijnGraph &graph) = 0;
@@ -32,19 +30,14 @@ class IExtender {
     virtual size_t num_explored_nodes() const = 0;
 
   protected:
-    virtual const DBGAlignment& get_seed() const = 0;
-    virtual bool set_seed(const DBGAlignment &seed) = 0;
+    virtual const Alignment& get_seed() const = 0;
+    virtual bool set_seed(const Alignment &seed) = 0;
 
-    virtual std::vector<DBGAlignment> extend(score_t min_path_score) = 0;
+    virtual std::vector<Alignment> extend(score_t min_path_score) = 0;
 };
 
-template <typename NodeType = uint64_t>
-class SeedFilteringExtender : public IExtender<NodeType> {
+class SeedFilteringExtender : public IExtender {
   public:
-    typedef typename IExtender<NodeType>::DBGAlignment DBGAlignment;
-    typedef typename IExtender<NodeType>::node_index node_index;
-    typedef typename IExtender<NodeType>::score_t score_t;
-
     SeedFilteringExtender(std::string_view query) : query_size_(query.size()) {}
 
     virtual ~SeedFilteringExtender() {}
@@ -54,14 +47,14 @@ class SeedFilteringExtender : public IExtender<NodeType> {
     virtual size_t num_explored_nodes() const override { return conv_checker_.size(); }
 
   protected:
-    const DBGAlignment *seed_ = nullptr;
+    const Alignment *seed_ = nullptr;
     size_t query_size_;
 
     typedef std::pair<size_t, AlignedVector<score_t>> ScoreVec;
-    tsl::hopscotch_map<NodeType, ScoreVec> conv_checker_;
+    tsl::hopscotch_map<node_index, ScoreVec> conv_checker_;
 
-    virtual const DBGAlignment& get_seed() const override final { return *seed_; }
-    virtual bool set_seed(const DBGAlignment &seed) override;
+    virtual const Alignment& get_seed() const override final { return *seed_; }
+    virtual bool set_seed(const Alignment &seed) override;
 
     virtual bool update_seed_filter(node_index node,
                                     size_t query_start,
@@ -71,14 +64,8 @@ class SeedFilteringExtender : public IExtender<NodeType> {
     virtual bool filter_nodes(node_index node, size_t query_start, size_t query_end);
 };
 
-
-template <typename NodeType = uint64_t>
-class DefaultColumnExtender : public SeedFilteringExtender<NodeType> {
+class DefaultColumnExtender : public SeedFilteringExtender {
   public:
-    typedef typename IExtender<NodeType>::DBGAlignment DBGAlignment;
-    typedef typename IExtender<NodeType>::node_index node_index;
-    typedef typename IExtender<NodeType>::score_t score_t;
-
     DefaultColumnExtender(const DeBruijnGraph &graph,
                           const DBGAlignerConfig &config,
                           std::string_view query);
@@ -86,7 +73,7 @@ class DefaultColumnExtender : public SeedFilteringExtender<NodeType> {
     virtual ~DefaultColumnExtender() {}
 
     virtual void set_graph(const DeBruijnGraph &graph) override {
-        SeedFilteringExtender<NodeType>::set_graph(graph);
+        SeedFilteringExtender::set_graph(graph);
         graph_ = &graph;
     }
 
@@ -102,7 +89,7 @@ class DefaultColumnExtender : public SeedFilteringExtender<NodeType> {
     using Column = std::tuple<AlignedVector<score_t> /* S (best score) */,
                               AlignedVector<score_t> /* E (best score after insert) */,
                               AlignedVector<score_t> /* F (best score after delete) */,
-                              NodeType /* node */,
+                              node_index /* node */,
                               size_t /* parent index in table */,
                               char /* last char of node */,
                               ssize_t /* offset (distance from start of the first node) */,
@@ -113,10 +100,10 @@ class DefaultColumnExtender : public SeedFilteringExtender<NodeType> {
 
     tsl::hopscotch_set<size_t> prev_starts;
 
-    virtual std::vector<DBGAlignment> extend(score_t min_path_score) override;
+    virtual std::vector<Alignment> extend(score_t min_path_score) override;
 
     // backtracking helpers
-    virtual bool terminate_backtrack_start(const std::vector<DBGAlignment> &extensions) const {
+    virtual bool terminate_backtrack_start(const std::vector<Alignment> &extensions) const {
         return extensions.size() >= config_.num_alternative_paths;
     }
 
@@ -136,7 +123,7 @@ class DefaultColumnExtender : public SeedFilteringExtender<NodeType> {
                                  size_t offset,
                                  std::string_view window,
                                  const std::string &match,
-                                 const std::function<void(DBGAlignment&&)> &callback) {
+                                 const std::function<void(Alignment&&)> &callback) {
         assert(path.size());
         assert(ops.size());
 
@@ -149,14 +136,14 @@ class DefaultColumnExtender : public SeedFilteringExtender<NodeType> {
 
     virtual void init_backtrack() {}
 
-    virtual void call_outgoing(NodeType node,
+    virtual void call_outgoing(node_index node,
                                size_t max_prefetch_distance,
-                               const std::function<void(NodeType, char)> &callback);
+                               const std::function<void(node_index, char)> &callback);
 
-    DBGAlignment construct_alignment(Cigar cigar,
+    Alignment construct_alignment(Cigar cigar,
                                      size_t clipping,
                                      std::string_view window,
-                                     std::vector<NodeType> final_path,
+                                     std::vector<node_index> final_path,
                                      std::string match,
                                      score_t score,
                                      size_t offset) const;
@@ -171,7 +158,7 @@ class DefaultColumnExtender : public SeedFilteringExtender<NodeType> {
     tsl::hopscotch_map<char, AlignedVector<Cigar::Operator>> profile_op_;
 
     // backtrack through the DP table to reconstruct alignments
-    std::vector<DBGAlignment> backtrack(score_t min_path_score,
+    std::vector<Alignment> backtrack(score_t min_path_score,
                                         std::string_view window);
 };
 
