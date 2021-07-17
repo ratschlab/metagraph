@@ -198,16 +198,17 @@ void CanonicalDBG::append_next_rc_nodes(node_index node,
                 c = kmer::KmerExtractorBOSS::complement(c);
 
                 if (children[c] != npos) {
-                    if (!k_odd_) {
-                        is_palindrome_cache_.Put(next, true);
-                    } else {
-                        throw std::runtime_error(fmt::format(
+                    if (k_odd_) {
+                        logger->error(
                             "Primary graph contains both forward and reverse complement: {} {} -> {} {}\t{} {}",
                             node, graph_.get_node_sequence(node),
                             children[c], graph_.get_node_sequence(children[c]),
                             next, graph_.get_node_sequence(next)
-                        ));
+                        );
+                        exit(1);
                     }
+
+                    is_palindrome_cache_.Put(next, true);
 
                 } else {
                     children[c] = next + offset_;
@@ -218,6 +219,8 @@ void CanonicalDBG::append_next_rc_nodes(node_index node,
 
     } else {
         for (size_t c = 0; c < alphabet.size(); ++c) {
+            // Do the checks by directly mapping the sequences of the desired k-mers.
+            // For non-DBGSuccinct graphs, this should be fast enough.
             if (alphabet[c] != boss::BOSS::kSentinel && children[c] == npos) {
                 rev_seq[0] = complement(alphabet[c]);
                 node_index next = graph_.kmer_to_node(rev_seq);
@@ -315,16 +318,17 @@ void CanonicalDBG::append_prev_rc_nodes(node_index node,
                     c = kmer::KmerExtractorBOSS::complement(c);
 
                     if (parents[c] != npos) {
-                        if (!k_odd_) {
-                            is_palindrome_cache_.Put(prev, true);
-                        } else {
-                            throw std::runtime_error(fmt::format(
+                        if (k_odd_) {
+                            logger->error(
                                 "Primary graph contains both forward and reverse complement: {} {} -> {} {}\t{} {}",
                                 node, graph_.get_node_sequence(node),
                                 parents[c], graph_.get_node_sequence(parents[c]),
                                 prev, graph_.get_node_sequence(prev)
-                            ));
+                            );
+                            exit(1);
                         }
+
+                        is_palindrome_cache_.Put(prev, true);
 
                     } else {
                         parents[c] = prev + offset_;
@@ -335,6 +339,8 @@ void CanonicalDBG::append_prev_rc_nodes(node_index node,
 
     } else {
         for (size_t c = 0; c < alphabet.size(); ++c) {
+            // Do the checks by directly mapping the sequences of the desired k-mers.
+            // For non-DBGSuccinct graphs, this should be fast enough.
             if (alphabet[c] != boss::BOSS::kSentinel && parents[c] == npos) {
                 rev_seq.back() = complement(alphabet[c]);
                 node_index prev = graph_.kmer_to_node(rev_seq);
