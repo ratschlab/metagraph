@@ -216,6 +216,8 @@ void map_sequences_in_file(const std::string &file,
             for (auto i : graphindices) {
                 if (i != DeBruijnGraph::npos && i != prev)
                     ++num_unique_matching_kmers;
+
+                prev = i;
             }
             *out << read_stream->name.s << "\t"
                  << num_discovered << "/" << num_kmers << "/"
