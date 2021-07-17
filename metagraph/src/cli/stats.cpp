@@ -167,6 +167,12 @@ void print_stats(const Annotator &annotation) {
               << utils::split_string(annotation.file_extension(), ".").at(0) << std::endl;
 
     using namespace annot::binmat;
+    using mtg::annot::matrix::MultiIntMatrix;
+
+    if (const auto *mat_coord = dynamic_cast<const MultiIntMatrix *>(&annotation.get_matrix())) {
+        std::cout << "================== COORDINATES STATS ===================" << std::endl;
+        std::cout << "coordinates: " << mat_coord->num_attributes() << std::endl;
+    }
 
     if (const auto *rbmat = dynamic_cast<const RainbowMatrix *>(&annotation.get_matrix())) {
         std::cout << "================= RAINBOW MATRIX STATS =================" << std::endl;
