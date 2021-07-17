@@ -74,8 +74,6 @@ class Alignment {
 
     std::string_view get_query() const { return query_; }
 
-    void set_query_begin(const char *begin) { query_ = { begin, query_.size() }; }
-
     void extend_query_begin(const char *begin) {
         size_t clipping = get_clipping();
         const char *full_query_begin = query_.data() - clipping;
@@ -110,8 +108,7 @@ class Alignment {
 
     size_t trim_offset();
 
-    void reverse_complement(const DeBruijnGraph &graph,
-                            std::string_view query_rev_comp);
+    void reverse_complement(const DeBruijnGraph &graph, std::string_view query_rev_comp);
 
     const std::string& get_sequence() const { return sequence_; }
     const Cigar& get_cigar() const { return cigar_; }
@@ -153,9 +150,9 @@ class Alignment {
                         std::string_view name = {},
                         std::string_view label = {}) const;
 
-    std::shared_ptr<const std::string>
-    load_from_json(const Json::Value &alignment,
-                   const DeBruijnGraph &graph);
+    // returns a shared_ptr of the query string which is referenced in this object
+    std::shared_ptr<const std::string> load_from_json(const Json::Value &alignment,
+                                                      const DeBruijnGraph &graph);
 
     bool is_valid(const DeBruijnGraph &graph, const DBGAlignerConfig *config = nullptr) const;
 
@@ -172,11 +169,6 @@ class Alignment {
 };
 
 std::ostream& operator<<(std::ostream& out, const Alignment &alignment);
-
-bool spell_path(const DeBruijnGraph &graph,
-                const std::vector<DeBruijnGraph::node_index> &path,
-                std::string &seq,
-                size_t offset = 0);
 
 struct LocalAlignmentLess {
     bool operator()(const Alignment &a, const Alignment &b) const {
@@ -251,8 +243,6 @@ class QueryAlignment {
     iterator end() { return alignments_.end(); }
     const_iterator begin() const { return alignments_.begin(); }
     const_iterator end() const { return alignments_.end(); }
-    const_iterator cbegin() const { return alignments_.cbegin(); }
-    const_iterator cend() const { return alignments_.cend(); }
 
     iterator erase(const_iterator begin, const_iterator end) {
         return alignments_.erase(begin, end);
