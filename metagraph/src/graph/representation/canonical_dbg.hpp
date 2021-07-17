@@ -52,11 +52,10 @@ class CanonicalDBG : public DeBruijnGraph {
      */
     CanonicalDBG(const CanonicalDBG &canonical);
 
-    // caches cannot be resized, so disable copy assignment
+    // caches cannot be resized or moved, so disable these constructors
     CanonicalDBG& operator=(const CanonicalDBG &canonical) = delete;
-
-    CanonicalDBG(CanonicalDBG&&) = default;
-    CanonicalDBG& operator=(CanonicalDBG&&) = default;
+    CanonicalDBG(CanonicalDBG&&) = delete;
+    CanonicalDBG& operator=(CanonicalDBG&&) = delete;
 
     virtual ~CanonicalDBG() {}
 
