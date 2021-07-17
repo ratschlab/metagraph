@@ -65,13 +65,13 @@ uint64_t CanonicalDBG::num_nodes() const {
 void CanonicalDBG
 ::add_sequence(std::string_view sequence,
                const std::function<void(node_index)> &on_insertion) {
-    if (!graph_ptr_)
-        throw std::runtime_error("add_sequence only supported for non-const graphs.");
+    assert(graph_ptr_ && "add_sequence only supported for non-const graphs.");
 
     graph_ptr_->add_sequence(sequence, on_insertion);
     offset_ = graph_.max_index();
     child_node_cache_.Clear();
     parent_node_cache_.Clear();
+    is_palindrome_cache_.Clear();
 }
 
 
