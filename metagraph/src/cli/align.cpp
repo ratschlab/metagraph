@@ -350,7 +350,7 @@ int align_to_graph(Config *config) {
 
     // initialize graph
     auto graph = load_critical_dbg(config->infbase);
-    auto input_graph = graph;
+    auto base_graph = graph;
 
     if (utils::ends_with(config->outfbase, ".gfa")) {
         gfa_map_files(config, files, *graph);
@@ -373,7 +373,7 @@ int align_to_graph(Config *config) {
             logger->warn("Mapping to k-mers longer than k is not supported");
             config->alignment_length = graph->get_k();
         } else if (config->alignment_length != graph->get_k()
-                && !dynamic_cast<const DBGSuccinct*>(input_graph.get())) {
+                && !dynamic_cast<const DBGSuccinct*>(base_graph.get())) {
             logger->error("Matching k-mers shorter than k only supported for succinct graphs");
             exit(1);
         }
