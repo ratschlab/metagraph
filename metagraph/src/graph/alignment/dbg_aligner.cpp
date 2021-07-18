@@ -134,7 +134,7 @@ void ISeedAndExtendAligner<AlignmentCompare>
             callback(std::move(seed));
         }
 
-        for (auto&& extension : extensions) {
+        for (Alignment &extension : extensions) {
             DEBUG_LOG("Alignment (extension): {}", extension);
             callback(std::move(extension));
         }

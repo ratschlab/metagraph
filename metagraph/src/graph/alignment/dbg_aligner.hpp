@@ -109,14 +109,14 @@ class DBGAligner : public ISeedAndExtendAligner<AlignmentCompare> {
   private:
     typedef typename ISeedAndExtendAligner<AlignmentCompare>::Aggregator Aggregator;
     std::shared_ptr<IExtender>
-    build_extender(std::string_view query, const Aggregator&) const override {
+    build_extender(std::string_view query, const Aggregator&) const override final {
         return std::make_shared<Extender>(this->graph_, this->get_config(), query);
     }
 
     std::shared_ptr<ISeeder>
     build_seeder(std::string_view query,
                  bool is_reverse_complement,
-                 const std::vector<IDBGAligner::node_index> &nodes) const override {
+                 const std::vector<IDBGAligner::node_index> &nodes) const override final {
         return this->template build_seeder_impl<Seeder>(query, is_reverse_complement, nodes);
     }
 };
