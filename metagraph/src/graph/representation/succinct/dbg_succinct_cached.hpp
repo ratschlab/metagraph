@@ -11,6 +11,7 @@
 namespace mtg {
 namespace graph {
 
+
 class DBGSuccinctCached : public DeBruijnGraph {
   public:
     typedef boss::BOSS::edge_index edge_index;
@@ -19,28 +20,23 @@ class DBGSuccinctCached : public DeBruijnGraph {
     template <typename Key, typename Value>
     using LRUCache = caches::fixed_sized_cache<Key, Value, caches::LRUCachePolicy<Key>>;
 
-    typedef LRUCache<node_index, std::string> DecodedCache;
     typedef LRUCache<edge_index, edge_index> BwdFirstCache;
 
-    DBGSuccinctCached(const DBGSuccinct &dbg, size_t cache_size = 1000)
-          : graph_(dbg), boss_(graph_.get_boss()),
-            bwd_first_cache_(cache_size),
-            decoded_cache_(cache_size * dbg.alphabet().size()) {}
+    DBGSuccinctCached(const DBGSuccinct &dbg, size_t cache_size)
+          : graph_(dbg), boss_(graph_.get_boss()), cache_size_(cache_size),
+            bwd_first_cache_(cache_size_) {}
 
-    DBGSuccinctCached(const DeBruijnGraph &graph, size_t cache_size = 1000)
+    DBGSuccinctCached(const DeBruijnGraph &graph, size_t cache_size)
           : DBGSuccinctCached(dynamic_cast<const DBGSuccinct&>(graph), cache_size) {}
+
+    virtual ~DBGSuccinctCached() {}
 
     virtual const DeBruijnGraph& get_base_graph() const override final { return graph_.get_base_graph(); }
 
     const DBGSuccinct& get_dbg_succ() const { return graph_; }
 
-    inline void put_decoded_node(node_index node, const std::string &seq) const {
-        decoded_cache_.Put(node, seq);
-    }
-
-    inline std::optional<std::string> get_decoded_node(node_index node) const {
-        return decoded_cache_.TryGet(node);
-    }
+    virtual void put_decoded_node(node_index node, const std::string &seq) const = 0;
+    virtual std::optional<std::string> get_decoded_node(node_index node) const = 0;
 
     inline TAlphabet get_first_value(edge_index i) const {
         TAlphabet c;
@@ -63,7 +59,7 @@ class DBGSuccinctCached : public DeBruijnGraph {
     }
 
     virtual std::string get_node_sequence(node_index node) const override final {
-        if (auto fetch = decoded_cache_.TryGet(node)) {
+        if (auto fetch = get_decoded_node(node)) {
             return *fetch;
         } else {
             std::string seq = graph_.get_node_sequence(node);
@@ -75,7 +71,7 @@ class DBGSuccinctCached : public DeBruijnGraph {
     virtual void call_incoming_kmers(node_index node, const IncomingEdgeCallback &callback) const override final {
         assert(node > 0 && node <= num_nodes());
         std::string seq;
-        if (auto fetch = decoded_cache_.TryGet(node))
+        if (auto fetch = get_decoded_node(node))
             seq = std::string(1, boss::BOSS::kSentinel) + fetch->substr(0, get_k() - 1);
 
         edge_index edge = graph_.kmer_to_boss_index(node);
@@ -101,7 +97,7 @@ class DBGSuccinctCached : public DeBruijnGraph {
 
     virtual void call_outgoing_kmers(node_index node, const OutgoingEdgeCallback &callback) const override final {
         std::string seq;
-        if (auto fetch = decoded_cache_.TryGet(node))
+        if (auto fetch = get_decoded_node(node))
             seq = fetch->substr(1) + std::string(1, boss::BOSS::kSentinel);
 
         graph_.call_outgoing_kmers(node, [&](node_index next, char c) {
@@ -116,7 +112,7 @@ class DBGSuccinctCached : public DeBruijnGraph {
 
     virtual node_index traverse(node_index node, char next_char) const override final {
         if (node_index ret = graph_.traverse(node, next_char)) {
-            if (auto fetch = decoded_cache_.TryGet(node))
+            if (auto fetch = get_decoded_node(node))
                 put_decoded_node(ret, fetch->substr(1) + next_char);
 
             return ret;
@@ -127,7 +123,7 @@ class DBGSuccinctCached : public DeBruijnGraph {
 
     virtual node_index traverse_back(node_index node, char prev_char) const override final {
         if (node_index ret = graph_.traverse_back(node, prev_char)) {
-            if (auto fetch = decoded_cache_.TryGet(node)) {
+            if (auto fetch = get_decoded_node(node)) {
                 put_decoded_node(ret,
                     std::string(1, prev_char) + fetch->substr(0, get_k() - 1)
                 );
@@ -221,13 +217,41 @@ class DBGSuccinctCached : public DeBruijnGraph {
         throw std::runtime_error("Not implemented");
     }
 
-  private:
+  protected:
     const DBGSuccinct &graph_;
     const boss::BOSS &boss_;
+    size_t cache_size_;
 
+  private:
     mutable BwdFirstCache bwd_first_cache_;
+};
+
+template <typename KmerType>
+class DBGSuccinctCachedImpl : public DBGSuccinctCached {
+  public:
+    typedef LRUCache<node_index, KmerType> DecodedCache;
+
+    template <typename... Args>
+    DBGSuccinctCachedImpl(Args&&... args)
+          : DBGSuccinctCached(std::forward<Args>(args)...),
+            decoded_cache_(cache_size_ * graph_.alphabet().size()) {}
+
+    void put_decoded_node(node_index node, const std::string &seq) const {
+        decoded_cache_.Put(node, seq);
+    }
+
+    std::optional<std::string> get_decoded_node(node_index node) const {
+        return decoded_cache_.TryGet(node);
+    }
+
+  private:
     mutable DecodedCache decoded_cache_;
 };
+
+inline std::shared_ptr<DBGSuccinctCached>
+make_cached_dbgsuccinct(const DeBruijnGraph &graph, size_t cache_size = 1000) {
+    return std::make_shared<DBGSuccinctCachedImpl<std::string>>(graph, cache_size);
+}
 
 } // namespace graph
 } // namespace mtg

@@ -444,7 +444,7 @@ int align_to_graph(Config *config) {
                         && aln_graph->get_mode() != DeBruijnGraph::CANONICAL));
 
                 if (use_cache)
-                    aln_graph = std::make_shared<DBGSuccinctCached>(*dbg_succ);
+                    aln_graph = make_cached_dbgsuccinct(*dbg_succ);
 
                 if (is_primary)
                     aln_graph = std::make_shared<CanonicalDBG>(aln_graph);
