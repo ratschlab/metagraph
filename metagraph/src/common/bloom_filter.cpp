@@ -1,11 +1,6 @@
 #include "bloom_filter.hpp"
 
 #include "common/utils/simd_utils.hpp"
-
-#ifdef __AVX2__
-#include <immintrin.h>
-#endif
-
 #include "common/serialization.hpp"
 
 // used to implement size % 512
