@@ -17,6 +17,7 @@ class DBGSuccinctCached : public DeBruijnGraph {
     typedef boss::BOSS::edge_index edge_index;
     typedef boss::BOSS::TAlphabet TAlphabet;
 
+    // TODO: switch to a more efficient LRU cache implementation?
     template <typename Key, typename Value>
     using LRUCache = caches::fixed_sized_cache<Key, Value, caches::LRUCachePolicy<Key>>;
 
