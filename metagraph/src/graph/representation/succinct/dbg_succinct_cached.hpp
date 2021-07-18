@@ -159,7 +159,7 @@ class DBGSuccinctCachedImpl : public DBGSuccinctCached {
 
     void put_decoded_node(node_index node, const std::string &seq) const {
         assert(seq.size() == graph_.get_k());
-        decoded_cache_.Put(node, KmerExtractor::sequence_to_kmer<KmerType>(seq));
+        decoded_cache_.Put(node, to_kmer(seq));
     }
 
     std::optional<std::string> get_decoded_node(node_index node) const {
@@ -240,22 +240,18 @@ class DBGSuccinctCachedImpl : public DBGSuccinctCached {
                                    const std::function<bool()> &terminate
                                        = [](){ return false; }) const {
         size_t k = graph_.get_k();
-        auto begin = sequence.begin();
-        auto last = begin + k - 1;
+        const char *begin = sequence.data();
+        const char *last = begin + k - 1;
         std::optional<KmerType> prev{std::nullopt};
         graph_.map_to_nodes_sequentially(sequence,
             [&](node_index i) {
                 if (i) {
                     if (prev) {
                         // update the previous k-mer
-                        prev->to_next(graph_.get_k(),
-                                      KmerExtractor::encode(*last),
-                                      KmerExtractor::encode(*(last - 1)));
+                        prev->to_next(k, encode(*last), encode(*(last - 1)));
                     } else {
                         // initialize a new k-mer
-                        prev = KmerExtractor::sequence_to_kmer<KmerType>(
-                            std::string(begin, last + 1)
-                        );
+                        prev = to_kmer(std::string_view(begin, k));
                     }
                     decoded_cache_.Put(i, *prev);
                 } else {
@@ -274,14 +270,19 @@ class DBGSuccinctCachedImpl : public DBGSuccinctCached {
   private:
     mutable LRUCache<node_index, KmerType> decoded_cache_;
 
+    inline static constexpr TAlphabet encode(char c) { return KmerExtractor::encode(c); }
+    inline static constexpr KmerType to_kmer(std::string_view seq) {
+        return KmerExtractor::sequence_to_kmer<KmerType>(seq);
+    }
+
     KmerType update_node_next_from_kmer(KmerType kmer, node_index next, char c) const {
-        kmer.to_next(graph_.get_k(), KmerExtractor::encode(c));
+        kmer.to_next(graph_.get_k(), encode(c));
         decoded_cache_.Put(next, kmer);
         return kmer;
     }
 
     KmerType update_node_prev_from_kmer(KmerType kmer, node_index prev, char c) const {
-        kmer.to_prev(graph_.get_k(), KmerExtractor::encode(c));
+        kmer.to_prev(graph_.get_k(), encode(c));
         decoded_cache_.Put(prev, kmer);
         return kmer;
     }
