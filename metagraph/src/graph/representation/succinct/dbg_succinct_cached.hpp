@@ -205,22 +205,26 @@ class DBGSuccinctCached : public DeBruijnGraph {
 
 
     virtual void add_sequence(std::string_view /* sequence */,
-                              const std::function<void(node_index)> & /* on_insertion */ = [](uint64_t) {}) override final {
+                              const std::function<void(node_index)> & /* on_insertion */
+                                  = [](uint64_t) {}) override final {
         throw std::runtime_error("Not implemented");
     }
 
     virtual void map_to_nodes(std::string_view sequence,
                               const std::function<void(node_index)> &callback,
-                              const std::function<bool()> &terminate = [](){ return false; }) const override final {
+                              const std::function<bool()> &terminate
+                                  = [](){ return false; }) const override final {
         graph_.map_to_nodes(sequence, callback, terminate);
     }
 
-    virtual void adjacent_outgoing_nodes(node_index node,
-                                         const std::function<void(node_index)> &callback) const override final {
+    virtual void
+    adjacent_outgoing_nodes(node_index node,
+                            const std::function<void(node_index)> &callback) const override final {
         graph_.adjacent_outgoing_nodes(node, callback);
     }
-    virtual void adjacent_incoming_nodes(node_index node,
-                                         const std::function<void(node_index)> &callback) const override final {
+    virtual void
+    adjacent_incoming_nodes(node_index node,
+                            const std::function<void(node_index)> &callback) const override final {
         graph_.adjacent_incoming_nodes(node, callback);
     }
 
