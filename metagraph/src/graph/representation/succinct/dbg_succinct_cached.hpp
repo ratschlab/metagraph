@@ -38,16 +38,6 @@ class DBGSuccinctCached : public DeBruijnGraph {
     virtual void put_decoded_node(node_index node, const std::string &seq) const = 0;
     virtual std::optional<std::string> get_decoded_node(node_index node) const = 0;
 
-    virtual void update_node_next(node_index node,
-                                  const std::string &node_seq,
-                                  node_index next,
-                                  char c) const = 0;
-
-    virtual void update_node_prev(node_index node,
-                                  const std::string &node_seq,
-                                  node_index prev,
-                                  char c) const = 0;
-
     inline TAlphabet get_first_value(edge_index i) const {
         TAlphabet c;
         edge_index first;
@@ -76,101 +66,6 @@ class DBGSuccinctCached : public DeBruijnGraph {
             put_decoded_node(node, seq);
             return seq;
         }
-    }
-
-    virtual void call_incoming_kmers(node_index node,
-                                     const IncomingEdgeCallback &callback) const override final {
-        assert(node > 0 && node <= num_nodes());
-        std::string seq;
-        if (auto fetch = get_decoded_node(node))
-            seq = *fetch;
-
-        edge_index edge = graph_.kmer_to_boss_index(node);
-
-        boss_.call_incoming_to_target(boss_.bwd(edge), boss_.get_node_last_value(edge),
-            [&](edge_index incoming_boss_edge) {
-                assert(boss_.get_W(incoming_boss_edge) % boss_.alph_size
-                        == boss_.get_node_last_value(edge));
-
-                auto prev = graph_.boss_to_kmer_index(incoming_boss_edge);
-                TAlphabet s = get_first_value(incoming_boss_edge);
-                if (prev != npos && s != boss::BOSS::kSentinelCode) {
-                    char c = boss_.decode(s);
-
-                    if (seq.size())
-                        update_node_prev(node, seq, prev, c);
-
-                    callback(prev, c);
-                }
-            }
-        );
-    }
-
-    virtual void call_outgoing_kmers(node_index node,
-                                     const OutgoingEdgeCallback &callback) const override final {
-        std::string seq;
-        if (auto fetch = get_decoded_node(node))
-            seq = *fetch;
-
-        graph_.call_outgoing_kmers(node, [&](node_index next, char c) {
-            if (c != boss::BOSS::kSentinel) {
-                if (seq.size())
-                    update_node_next(node, seq, next, c);
-
-                callback(next, c);
-            }
-        });
-    }
-
-    virtual node_index traverse(node_index node, char next_char) const override final {
-        if (node_index ret = graph_.traverse(node, next_char)) {
-            if (auto fetch = get_decoded_node(node))
-                update_node_next(node, *fetch, ret, next_char);
-
-            return ret;
-        } else {
-            return npos;
-        }
-    }
-
-    virtual node_index traverse_back(node_index node, char prev_char) const override final {
-        if (node_index ret = graph_.traverse_back(node, prev_char)) {
-            if (auto fetch = get_decoded_node(node))
-                update_node_prev(node, *fetch, ret, prev_char);
-
-            return ret;
-        } else {
-            return npos;
-        }
-    }
-
-    virtual void
-    map_to_nodes_sequentially(std::string_view sequence,
-                              const std::function<void(node_index)> &callback,
-                              const std::function<bool()> &terminate
-                                  = [](){ return false; }) const override final {
-        size_t k = get_k();
-        auto begin = sequence.begin();
-        auto last = begin + k - 1;
-        node_index prev = npos;
-        graph_.map_to_nodes_sequentially(sequence,
-            [&](node_index i) {
-                if (i) {
-                    if (prev) {
-                        assert(begin != sequence.begin());
-                        update_node_next(prev, std::string(begin - 1, last), i, *last);
-                    } else {
-                        put_decoded_node(i, std::string(begin, last + 1));
-                    }
-                }
-
-                callback(i);
-                ++begin;
-                ++last;
-                prev = i;
-            },
-            terminate
-        );
     }
 
     virtual size_t get_k() const override final { return graph_.get_k(); }
@@ -218,14 +113,14 @@ class DBGSuccinctCached : public DeBruijnGraph {
     }
 
     virtual void
-    adjacent_outgoing_nodes(node_index node,
-                            const std::function<void(node_index)> &callback) const override final {
-        graph_.adjacent_outgoing_nodes(node, callback);
+    adjacent_outgoing_nodes(node_index,
+                            const std::function<void(node_index)> &) const override final {
+        throw std::runtime_error("Not implemented");
     }
     virtual void
-    adjacent_incoming_nodes(node_index node,
-                            const std::function<void(node_index)> &callback) const override final {
-        graph_.adjacent_incoming_nodes(node, callback);
+    adjacent_incoming_nodes(node_index,
+                            const std::function<void(node_index)> &) const override final {
+        throw std::runtime_error("Not implemented");
     }
 
     virtual uint64_t num_nodes() const override final { return graph_.num_nodes(); }
@@ -266,49 +161,129 @@ class DBGSuccinctCachedImpl : public DBGSuccinctCached {
         decoded_cache_.Put(node, KmerExtractor::sequence_to_kmer<KmerType>(seq));
     }
 
-    void update_node_next(node_index node,
-                          const std::string &node_seq,
-                          node_index next,
-                          char c) const {
-        assert(c != boss::BOSS::kSentinel);
-        assert(node_seq.back() != boss::BOSS::kSentinel);
-        if (auto fetch = decoded_cache_.TryGet(node)) {
-            fetch->to_next(graph_.get_k(),
-                           KmerExtractor::encode(c),
-                           KmerExtractor::encode(node_seq.back()));
-            decoded_cache_.Put(next, *fetch);
-        } else {
-            put_decoded_node(next, node_seq.substr(1) + c);
-        }
-    }
-
-    void update_node_prev(node_index node,
-                          const std::string &node_seq,
-                          node_index prev,
-                          char c) const {
-        assert(c != boss::BOSS::kSentinel);
-        if (auto fetch = decoded_cache_.TryGet(node)) {
-            fetch->to_prev(graph_.get_k(), KmerExtractor::encode(c));
-            decoded_cache_.Put(prev, *fetch);
-        } else {
-            put_decoded_node(prev, std::string(1, c) + node_seq.substr(0, graph_.get_k() - 1));
-        }
-    }
-
     std::optional<std::string> get_decoded_node(node_index node) const {
-        if (auto fetch = decoded_cache_.TryGet(node)) {
-            std::string ret_val = KmerExtractor::kmer_to_sequence<KmerType>(
-                *fetch, graph_.get_k()
-            );
-            assert(ret_val.size() == graph_.get_k());
-            return ret_val;
+        if (auto kmer = decoded_cache_.TryGet(node)) {
+            auto seq = KmerExtractor::kmer_to_sequence<KmerType>(*kmer, graph_.get_k());
+            assert(seq.size() == graph_.get_k());
+            return seq;
         } else {
             return std::nullopt;
         }
     }
 
+    void call_outgoing_kmers(node_index node,
+                             const OutgoingEdgeCallback &callback) const {
+        auto kmer = decoded_cache_.TryGet(node);
+        graph_.call_outgoing_kmers(node, [&](node_index next, char c) {
+            if (c != boss::BOSS::kSentinel) {
+                if (kmer)
+                    update_node_next_from_kmer(*kmer, next, c);
+
+                callback(next, c);
+            }
+        });
+    }
+
+    void call_incoming_kmers(node_index node,
+                             const IncomingEdgeCallback &callback) const {
+        assert(node > 0 && node <= num_nodes());
+
+        auto kmer = decoded_cache_.TryGet(node);
+        edge_index edge = graph_.kmer_to_boss_index(node);
+
+        boss_.call_incoming_to_target(boss_.bwd(edge), boss_.get_node_last_value(edge),
+            [&](edge_index incoming_boss_edge) {
+                assert(boss_.get_W(incoming_boss_edge) % boss_.alph_size
+                        == boss_.get_node_last_value(edge));
+
+                auto prev = graph_.boss_to_kmer_index(incoming_boss_edge);
+                TAlphabet s = get_first_value(incoming_boss_edge);
+                if (prev != npos && s != boss::BOSS::kSentinelCode) {
+                    char c = boss_.decode(s);
+
+                    if (kmer)
+                        update_node_prev_from_kmer(*kmer, prev, c);
+
+                    callback(prev, c);
+                }
+            }
+        );
+    }
+
+    node_index traverse(node_index node, char next_char) const {
+        if (node_index next = graph_.traverse(node, next_char)) {
+            if (auto kmer = decoded_cache_.TryGet(node))
+                update_node_next_from_kmer(*kmer, next, next_char);
+
+            return next;
+
+        } else {
+            return npos;
+        }
+    }
+
+    node_index traverse_back(node_index node, char prev_char) const {
+        if (node_index prev = graph_.traverse_back(node, prev_char)) {
+            if (auto kmer = decoded_cache_.TryGet(node))
+                update_node_prev_from_kmer(*kmer, prev, prev_char);
+
+            return prev;
+
+        } else {
+            return npos;
+        }
+    }
+
+    void map_to_nodes_sequentially(std::string_view sequence,
+                                   const std::function<void(node_index)> &callback,
+                                   const std::function<bool()> &terminate
+                                       = [](){ return false; }) const {
+        size_t k = graph_.get_k();
+        auto begin = sequence.begin();
+        auto last = begin + k - 1;
+        std::optional<KmerType> prev{std::nullopt};
+        graph_.map_to_nodes_sequentially(sequence,
+            [&](node_index i) {
+                if (i) {
+                    if (prev) {
+                        // update the previous k-mer
+                        prev->to_next(graph_.get_k(),
+                                      KmerExtractor::encode(*last),
+                                      KmerExtractor::encode(*(last - 1)));
+                    } else {
+                        // initialize a new k-mer
+                        prev = KmerExtractor::sequence_to_kmer<KmerType>(
+                            std::string(begin, last + 1)
+                        );
+                    }
+                    decoded_cache_.Put(i, *prev);
+                } else {
+                    // reset the k-mer to null
+                    prev = std::nullopt;
+                }
+
+                callback(i);
+                ++begin;
+                ++last;
+            },
+            terminate
+        );
+    }
+
   private:
     mutable LRUCache<node_index, KmerType> decoded_cache_;
+
+    KmerType update_node_next_from_kmer(KmerType kmer, node_index next, char c) const {
+        kmer.to_next(graph_.get_k(), KmerExtractor::encode(c));
+        decoded_cache_.Put(next, kmer);
+        return kmer;
+    }
+
+    KmerType update_node_prev_from_kmer(KmerType kmer, node_index prev, char c) const {
+        kmer.to_prev(graph_.get_k(), KmerExtractor::encode(c));
+        decoded_cache_.Put(prev, kmer);
+        return kmer;
+    }
 };
 
 inline std::shared_ptr<DBGSuccinctCached>
