@@ -141,12 +141,12 @@ class DefaultColumnExtender : public SeedFilteringExtender {
                                const std::function<void(node_index, char)> &callback);
 
     Alignment construct_alignment(Cigar cigar,
-                                     size_t clipping,
-                                     std::string_view window,
-                                     std::vector<node_index> final_path,
-                                     std::string match,
-                                     score_t score,
-                                     size_t offset) const;
+                                  size_t clipping,
+                                  std::string_view window,
+                                  std::vector<node_index> final_path,
+                                  std::string match,
+                                  score_t score,
+                                  size_t offset) const;
 
   private:
     // compute perfect match scores for all suffixes
