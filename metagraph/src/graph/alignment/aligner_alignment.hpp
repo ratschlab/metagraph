@@ -196,61 +196,54 @@ struct LocalAlignmentGreater {
     }
 };
 
-
+// A container holding many alignments to a shared query sequence. Each alignment
+// only holds a string_view to the query, so this class ensures that the query sequence
+// is always accessible.
+// TODO: rename to AlignmentResults
 class QueryAlignment {
   public:
-    typedef DeBruijnGraph::node_index node_index;
     typedef std::vector<Alignment>::iterator iterator;
     typedef std::vector<Alignment>::const_iterator const_iterator;
 
     explicit QueryAlignment(std::string_view query, bool is_reverse_complement = false);
 
-    explicit QueryAlignment(std::shared_ptr<std::string> query,
-                            std::shared_ptr<std::string> query_rc)
+    explicit QueryAlignment(std::shared_ptr<const std::string> query,
+                            std::shared_ptr<const std::string> query_rc)
           : query_(query), query_rc_(query_rc) {}
-
-    size_t size() const { return alignments_.size(); }
-    bool empty() const { return alignments_.empty(); }
 
     template <typename... Args>
     void emplace_back(Args&&... args) {
         alignments_.emplace_back(std::forward<Args>(args)...);
 
-#ifndef NDEBUG
-        const auto &added = alignments_.back();
-        const std::string &this_query = get_query(added.get_orientation());
-        assert(added.get_query().data() >= this_query.c_str());
-        assert(added.get_query().data() + added.get_query().size()
-                    <= this_query.c_str() + this_query.size());
-#endif
+        assert(alignments_.back().get_query().data()
+            >= get_query(alignments_.back().get_orientation()).c_str());
+        assert(alignments_.back().get_query().data() + alignments_.back().get_query().size()
+            <= get_query(alignments_.back().get_orientation()).c_str()
+                + get_query(alignments_.back().get_orientation()).size());
     }
 
-    void pop_back() { alignments_.pop_back(); }
-    void clear() { alignments_.clear(); }
-
-    void resize(size_t size) { alignments_.resize(size); }
-
-    const std::string& get_query(bool reverse_complement = false) const {
-        return !reverse_complement ? *query_ : *query_rc_;
-    }
-
-    std::shared_ptr<std::string> get_query_ptr(bool reverse_complement = false) const {
+    std::shared_ptr<const std::string> get_query_ptr(bool reverse_complement = false) const {
         return !reverse_complement ? query_ : query_rc_;
     }
 
+    const std::string& get_query(bool reverse_complement = false) const {
+        return *get_query_ptr(reverse_complement);
+    }
+
+    size_t size() const { return alignments_.size(); }
+    bool empty() const { return alignments_.empty(); }
     const Alignment& operator[](size_t i) const { return alignments_[i]; }
     iterator begin() { return alignments_.begin(); }
     iterator end() { return alignments_.end(); }
     const_iterator begin() const { return alignments_.begin(); }
     const_iterator end() const { return alignments_.end(); }
 
-    iterator erase(const_iterator begin, const_iterator end) {
-        return alignments_.erase(begin, end);
-    }
+    std::vector<Alignment>& data() { return alignments_; }
+    const std::vector<Alignment>& data() const { return alignments_; }
 
   private:
-    std::shared_ptr<std::string> query_;
-    std::shared_ptr<std::string> query_rc_;
+    std::shared_ptr<const std::string> query_;
+    std::shared_ptr<const std::string> query_rc_;
     std::vector<Alignment> alignments_;
 };
 

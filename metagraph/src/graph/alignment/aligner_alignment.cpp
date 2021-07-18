@@ -643,29 +643,33 @@ bool Alignment::is_valid(const DeBruijnGraph &graph, const DBGAlignerConfig *con
 }
 
 
-QueryAlignment::QueryAlignment(std::string_view query, bool is_reverse_complement)
-      : query_(new std::string()), query_rc_(new std::string()) {
+QueryAlignment::QueryAlignment(std::string_view query, bool is_reverse_complement) {
     // pad sequences for easier access in 64-bit blocks
-    query_->reserve(query.size() + 8);
-    query_->resize(query.size());
-    query_rc_->reserve(query.size() + 8);
-    query_rc_->resize(query.size());
+    std::string query_padded;
+    query_padded.reserve(query.size() + 8);
 
     // TODO: use alphabet encoder
     // transform to upper and fix non-standard characters
-    std::transform(query.begin(), query.end(), query_->begin(), [](char c) {
-        return c >= 0 ? toupper(c) : 127;
-    });
+    std::transform(query.begin(), query.end(), std::back_inserter(query_padded),
+                   [](char c) { return c >= 0 ? toupper(c) : 127; });
 
     // fill padding with '\0'
-    memset(query_->data() + query_->size(), '\0', query_->capacity() - query_->size());
+    memset(query_padded.data() + query.size(), '\0', query_padded.capacity() - query.size());
 
     // set the reverse complement
-    memcpy(query_rc_->data(), query_->data(), query_->capacity());
-    reverse_complement(query_rc_->begin(), query_rc_->end());
+    std::string query_rc_padded(query_padded);
 
+    // fill padding just in case optimizations removed it
+    query_rc_padded.reserve(query.size() + 8);
+    memset(query_rc_padded.data() + query.size(), '\0', query_rc_padded.capacity() - query.size());
+
+    // reverse complement
+    reverse_complement(query_rc_padded.begin(), query_rc_padded.end());
     if (is_reverse_complement)
-        std::swap(query_, query_rc_);
+        std::swap(query_padded, query_rc_padded);
+
+    query_ = std::make_shared<const std::string>(std::move(query_padded));
+    query_rc_ = std::make_shared<const std::string>(std::move(query_rc_padded));
 }
 
 } // namespace align
