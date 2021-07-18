@@ -6,7 +6,7 @@
 
 #include "boss.hpp"
 #include "dbg_succinct.hpp"
-#include "common/seq_tools/reverse_complement.hpp"
+#include "kmer/kmer_extractor.hpp"
 
 namespace mtg {
 namespace graph {
@@ -20,8 +20,6 @@ class DBGSuccinctCached : public DeBruijnGraph {
     template <typename Key, typename Value>
     using LRUCache = caches::fixed_sized_cache<Key, Value, caches::LRUCachePolicy<Key>>;
 
-    typedef LRUCache<edge_index, edge_index> BwdFirstCache;
-
     DBGSuccinctCached(const DBGSuccinct &dbg, size_t cache_size)
           : graph_(dbg), boss_(graph_.get_boss()), cache_size_(cache_size),
             bwd_first_cache_(cache_size_) {}
@@ -31,12 +29,24 @@ class DBGSuccinctCached : public DeBruijnGraph {
 
     virtual ~DBGSuccinctCached() {}
 
-    virtual const DeBruijnGraph& get_base_graph() const override final { return graph_.get_base_graph(); }
+    virtual const DeBruijnGraph& get_base_graph() const override final {
+        return graph_.get_base_graph();
+    }
 
     const DBGSuccinct& get_dbg_succ() const { return graph_; }
 
     virtual void put_decoded_node(node_index node, const std::string &seq) const = 0;
     virtual std::optional<std::string> get_decoded_node(node_index node) const = 0;
+
+    virtual void update_node_next(node_index node,
+                                  const std::string &node_seq,
+                                  node_index next,
+                                  char c) const = 0;
+
+    virtual void update_node_prev(node_index node,
+                                  const std::string &node_seq,
+                                  node_index prev,
+                                  char c) const = 0;
 
     inline TAlphabet get_first_value(edge_index i) const {
         TAlphabet c;
@@ -68,11 +78,12 @@ class DBGSuccinctCached : public DeBruijnGraph {
         }
     }
 
-    virtual void call_incoming_kmers(node_index node, const IncomingEdgeCallback &callback) const override final {
+    virtual void call_incoming_kmers(node_index node,
+                                     const IncomingEdgeCallback &callback) const override final {
         assert(node > 0 && node <= num_nodes());
         std::string seq;
         if (auto fetch = get_decoded_node(node))
-            seq = std::string(1, boss::BOSS::kSentinel) + fetch->substr(0, get_k() - 1);
+            seq = *fetch;
 
         edge_index edge = graph_.kmer_to_boss_index(node);
 
@@ -82,12 +93,12 @@ class DBGSuccinctCached : public DeBruijnGraph {
                         == boss_.get_node_last_value(edge));
 
                 auto prev = graph_.boss_to_kmer_index(incoming_boss_edge);
-                if (prev != npos) {
-                    char c = boss_.decode(get_first_value(incoming_boss_edge));
-                    if (seq.size()) {
-                        seq[0] = c;
-                        put_decoded_node(prev, seq);
-                    }
+                TAlphabet s = get_first_value(incoming_boss_edge);
+                if (prev != npos && s != boss::BOSS::kSentinelCode) {
+                    char c = boss_.decode(s);
+
+                    if (seq.size())
+                        update_node_prev(node, seq, prev, c);
 
                     callback(prev, c);
                 }
@@ -95,25 +106,26 @@ class DBGSuccinctCached : public DeBruijnGraph {
         );
     }
 
-    virtual void call_outgoing_kmers(node_index node, const OutgoingEdgeCallback &callback) const override final {
+    virtual void call_outgoing_kmers(node_index node,
+                                     const OutgoingEdgeCallback &callback) const override final {
         std::string seq;
         if (auto fetch = get_decoded_node(node))
-            seq = fetch->substr(1) + std::string(1, boss::BOSS::kSentinel);
+            seq = *fetch;
 
         graph_.call_outgoing_kmers(node, [&](node_index next, char c) {
-            if (seq.size()) {
-                seq.back() = c;
-                put_decoded_node(next, seq);
-            }
+            if (c != boss::BOSS::kSentinel) {
+                if (seq.size())
+                    update_node_next(node, seq, next, c);
 
-            callback(next, c);
+                callback(next, c);
+            }
         });
     }
 
     virtual node_index traverse(node_index node, char next_char) const override final {
         if (node_index ret = graph_.traverse(node, next_char)) {
             if (auto fetch = get_decoded_node(node))
-                put_decoded_node(ret, fetch->substr(1) + next_char);
+                update_node_next(node, *fetch, ret, next_char);
 
             return ret;
         } else {
@@ -123,11 +135,8 @@ class DBGSuccinctCached : public DeBruijnGraph {
 
     virtual node_index traverse_back(node_index node, char prev_char) const override final {
         if (node_index ret = graph_.traverse_back(node, prev_char)) {
-            if (auto fetch = get_decoded_node(node)) {
-                put_decoded_node(ret,
-                    std::string(1, prev_char) + fetch->substr(0, get_k() - 1)
-                );
-            }
+            if (auto fetch = get_decoded_node(node))
+                update_node_prev(node, *fetch, ret, prev_char);
 
             return ret;
         } else {
@@ -135,18 +144,30 @@ class DBGSuccinctCached : public DeBruijnGraph {
         }
     }
 
-    virtual void map_to_nodes_sequentially(std::string_view sequence,
-                                           const std::function<void(node_index)> &callback,
-                                           const std::function<bool()> &terminate = [](){ return false; }) const override final {
+    virtual void
+    map_to_nodes_sequentially(std::string_view sequence,
+                              const std::function<void(node_index)> &callback,
+                              const std::function<bool()> &terminate
+                                  = [](){ return false; }) const override final {
         size_t k = get_k();
-        auto it = sequence.begin();
+        auto begin = sequence.begin();
+        auto last = begin + k - 1;
+        node_index prev = npos;
         graph_.map_to_nodes_sequentially(sequence,
             [&](node_index i) {
-                if (i)
-                    put_decoded_node(i, std::string(it, it + k));
+                if (i) {
+                    if (prev) {
+                        assert(begin != sequence.begin());
+                        update_node_next(prev, std::string(begin - 1, last), i, *last);
+                    } else {
+                        put_decoded_node(i, std::string(begin, last + 1));
+                    }
+                }
 
                 callback(i);
-                ++it;
+                ++begin;
+                ++last;
+                prev = i;
             },
             terminate
         );
@@ -223,13 +244,13 @@ class DBGSuccinctCached : public DeBruijnGraph {
     size_t cache_size_;
 
   private:
-    mutable BwdFirstCache bwd_first_cache_;
+    mutable LRUCache<edge_index, edge_index> bwd_first_cache_;
 };
 
 template <typename KmerType>
 class DBGSuccinctCachedImpl : public DBGSuccinctCached {
   public:
-    typedef LRUCache<node_index, KmerType> DecodedCache;
+    typedef kmer::KmerExtractorBOSS KmerExtractor;
 
     template <typename... Args>
     DBGSuccinctCachedImpl(Args&&... args)
@@ -237,20 +258,64 @@ class DBGSuccinctCachedImpl : public DBGSuccinctCached {
             decoded_cache_(cache_size_ * graph_.alphabet().size()) {}
 
     void put_decoded_node(node_index node, const std::string &seq) const {
-        decoded_cache_.Put(node, seq);
+        assert(seq.size() == graph_.get_k());
+        decoded_cache_.Put(node, KmerExtractor::sequence_to_kmer<KmerType>(seq));
+    }
+
+    void update_node_next(node_index node,
+                          const std::string &node_seq,
+                          node_index next,
+                          char c) const {
+        assert(c != boss::BOSS::kSentinel);
+        assert(node_seq.back() != boss::BOSS::kSentinel);
+        if (auto fetch = decoded_cache_.TryGet(node)) {
+            fetch->to_next(graph_.get_k(),
+                           KmerExtractor::encode(c),
+                           KmerExtractor::encode(node_seq.back()));
+            decoded_cache_.Put(next, *fetch);
+        } else {
+            put_decoded_node(next, node_seq.substr(1) + c);
+        }
+    }
+
+    void update_node_prev(node_index node,
+                          const std::string &node_seq,
+                          node_index prev,
+                          char c) const {
+        assert(c != boss::BOSS::kSentinel);
+        if (auto fetch = decoded_cache_.TryGet(node)) {
+            fetch->to_prev(graph_.get_k(), KmerExtractor::encode(c));
+            decoded_cache_.Put(prev, *fetch);
+        } else {
+            put_decoded_node(prev, std::string(1, c) + node_seq.substr(0, graph_.get_k() - 1));
+        }
     }
 
     std::optional<std::string> get_decoded_node(node_index node) const {
-        return decoded_cache_.TryGet(node);
+        if (auto fetch = decoded_cache_.TryGet(node)) {
+            std::string ret_val = KmerExtractor::kmer_to_sequence<KmerType>(
+                *fetch, graph_.get_k()
+            );
+            assert(ret_val.size() == graph_.get_k());
+            return ret_val;
+        } else {
+            return std::nullopt;
+        }
     }
 
   private:
-    mutable DecodedCache decoded_cache_;
+    mutable LRUCache<node_index, KmerType> decoded_cache_;
 };
 
 inline std::shared_ptr<DBGSuccinctCached>
 make_cached_dbgsuccinct(const DeBruijnGraph &graph, size_t cache_size = 1000) {
-    return std::make_shared<DBGSuccinctCachedImpl<std::string>>(graph, cache_size);
+    if (graph.get_k() * kmer::KmerExtractorBOSS::bits_per_char <= 64) {
+        return std::make_shared<DBGSuccinctCachedImpl<kmer::KmerExtractorBOSS::Kmer64>>(graph, cache_size);
+    } else if (graph.get_k() * kmer::KmerExtractorBOSS::bits_per_char <= 128) {
+        return std::make_shared<DBGSuccinctCachedImpl<kmer::KmerExtractorBOSS::Kmer128>>(graph, cache_size);
+    } else {
+        return std::make_shared<DBGSuccinctCachedImpl<kmer::KmerExtractorBOSS::Kmer256>>(graph, cache_size);
+    }
 }
 
 } // namespace graph

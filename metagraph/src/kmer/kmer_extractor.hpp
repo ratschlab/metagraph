@@ -66,6 +66,13 @@ class KmerExtractorBOSS {
                                   Vector<KMER> *kmers,
                                   bool canonical_mode = false);
 
+    /**
+     * Basic conversion of a sequence to a k-mer. Sentinel characters in the
+     * input sequence are also encoded.
+     */
+    template <class KMER>
+    static KMER sequence_to_kmer(std::string_view sequence, bool canonical_mode = false);
+
     template <class KMER>
     static std::string kmer_to_sequence(const KMER &kmer, size_t k) {
         return kmer.to_string(k, alphabet);

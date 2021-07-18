@@ -399,6 +399,44 @@ void KmerExtractorBOSS::sequence_to_kmers(std::string_view,
                                           Vector<Kmer256>*,
                                           bool);
 
+template <typename KMER>
+KMER KmerExtractorBOSS::sequence_to_kmer(std::string_view sequence,
+                                         bool canonical_mode) {
+    // encode sequence
+    std::vector<TAlphabet> seq(sequence.size(), alphabet.size());
+
+    std::transform(sequence.begin(), sequence.end(), seq.begin(), [](char c) {
+        return c != alphabet[0] ? encode(c) : 0;
+    });
+
+    if (std::find(seq.begin(), seq.end(), alphabet.size()) != seq.end())
+        throw std::runtime_error("Invalid characters encoded");
+
+    KMER ret_val{0};
+#ifndef NDEBUG
+    bool encoded = false;
+#endif
+    ::sequence_to_kmers<KMER>(seq.data(), seq.data() + seq.size(), seq.size(), {},
+        [&](auto kmer) {
+#ifndef NDEBUG
+            encoded = true;
+#endif
+            ret_val = kmer;
+        },
+        canonical_mode ? kComplementCode : std::vector<uint8_t>(),
+        []() { return false; }
+    );
+
+    assert(encoded);
+
+    return ret_val;
+}
+
+template KmerExtractorBOSS::Kmer64 KmerExtractorBOSS::sequence_to_kmer<KmerExtractorBOSS::Kmer64>(std::string_view, bool);
+template KmerExtractorBOSS::Kmer128 KmerExtractorBOSS::sequence_to_kmer<KmerExtractorBOSS::Kmer128>(std::string_view, bool);
+template KmerExtractorBOSS::Kmer256 KmerExtractorBOSS::sequence_to_kmer<KmerExtractorBOSS::Kmer256>(std::string_view, bool);
+
+
 std::vector<std::string> KmerExtractorBOSS::generate_suffixes(size_t len) {
     std::vector<std::string> valid_suffixes;
 
