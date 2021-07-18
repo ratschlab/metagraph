@@ -36,7 +36,7 @@ class DBGSuccinctCached : public DeBruijnGraph {
 
     const DBGSuccinct& get_dbg_succ() const { return graph_; }
 
-    virtual void put_decoded_node(node_index node, const std::string &seq) const = 0;
+    virtual void put_decoded_node(node_index node, std::string_view seq) const = 0;
     virtual std::optional<std::string> get_decoded_node(node_index node) const = 0;
 
     inline TAlphabet get_first_value(edge_index i) const {
@@ -157,7 +157,7 @@ class DBGSuccinctCachedImpl : public DBGSuccinctCached {
           : DBGSuccinctCached(std::forward<Args>(args)...),
             decoded_cache_(cache_size_ * graph_.alphabet().size()) {}
 
-    void put_decoded_node(node_index node, const std::string &seq) const {
+    void put_decoded_node(node_index node, std::string_view seq) const {
         assert(seq.size() == graph_.get_k());
         decoded_cache_.Put(node, to_kmer(seq));
     }

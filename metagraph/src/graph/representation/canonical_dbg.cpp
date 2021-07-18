@@ -140,7 +140,7 @@ void CanonicalDBG
             [&](boss::BOSS::edge_index edge) {
                 path.push_back(dbg_succ->boss_to_kmer_index(edge));
                 if (cached && path.back())
-                    cached->put_decoded_node(path.back(), std::string(jt, jt + get_k()));
+                    cached->put_decoded_node(path.back(), std::string_view(jt, get_k()));
 
                 ++it;
                 ++jt;
