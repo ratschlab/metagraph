@@ -45,7 +45,7 @@ DBGAlignerConfig initialize_aligner_config(const Config &config) {
     aligner_config.alignment_match_score = config.alignment_match_score;
     aligner_config.alignment_mm_transition_score = config.alignment_mm_transition_score;
     aligner_config.alignment_mm_transversion_score = config.alignment_mm_transversion_score;
-    aligner_config.fraction_of_top = config.alignment_fraction_of_top;
+    aligner_config.rel_score_cutoff = config.alignment_rel_score_cutoff;
 
     logger->trace("Alignment settings:");
     logger->trace("\t Alignments to report: {}", aligner_config.num_alternative_paths);
@@ -56,7 +56,6 @@ DBGAlignerConfig initialize_aligner_config(const Config &config) {
     logger->trace("\t Max RAM per alignment: {}", aligner_config.max_ram_per_alignment);
     logger->trace("\t Gap opening penalty: {}", int64_t(aligner_config.gap_opening_penalty));
     logger->trace("\t Gap extension penalty: {}", int64_t(aligner_config.gap_extension_penalty));
-    logger->trace("\t Min DP table cell score: {}", int64_t(aligner_config.min_cell_score));
     logger->trace("\t Min alignment score: {}", aligner_config.min_path_score);
     logger->trace("\t X drop-off: {}", aligner_config.xdrop);
     logger->trace("\t Exact nucleotide match threshold: {}", aligner_config.min_exact_match);

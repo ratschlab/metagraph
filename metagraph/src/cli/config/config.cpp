@@ -198,8 +198,8 @@ Config::Config(int argc, char *argv[]) {
             dump_text_anno = true;
         } else if (!strcmp(argv[i], "--discovery-fraction")) {
             discovery_fraction = std::stof(get_value(i++));
-        } else if (!strcmp(argv[i], "--align-fraction-of-top")) {
-            alignment_fraction_of_top = std::stof(get_value(i++));
+        } else if (!strcmp(argv[i], "--align-rel-score-cutoff")) {
+            alignment_rel_score_cutoff = std::stof(get_value(i++));
         } else if (!strcmp(argv[i], "--query-presence")) {
             query_presence = true;
         } else if (!strcmp(argv[i], "--query-coords")) {
@@ -950,7 +950,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --align-max-nodes-per-seq-char [FLOAT]\tmaximum number of nodes to consider per sequence character [12.0]\n");
             fprintf(stderr, "\t   --align-max-ram [FLOAT]\t\t\tmaximum amount of RAM used per alignment in MB [200.0]\n");
             fprintf(stderr, "\t   --align-xdrop [INT]\t\t\t\tthe maximum difference between the current and the best alignment [27]\n");
-            fprintf(stderr, "\t   --align-fraction-of-top [FLOAT]\t\tduring extension, use this fraction of the current best alignment as a lower bound on the alignment score [0.8]\n");
+            fprintf(stderr, "\t   --align-rel-score-cutoff [FLOAT]\t\tmin score relative to the current best alignment to use as a lower bound for subsequent extensions [0.8]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "Advanced options for scoring:\n");
             fprintf(stderr, "\t   --align-match-score [INT]\t\t\tpositive match score [2]\n");
@@ -963,7 +963,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Advanced options for seeding:\n");
             fprintf(stderr, "\t   --align-min-seed-length [INT]\t\tthe minimum length of a seed [graph k]\n");
             fprintf(stderr, "\t   --align-max-seed-length [INT]\t\tthe maximum length of a seed [graph k]\n");
-            fprintf(stderr, "\t   --align-min-exact-match [FLOAT] \t\tfraction of matching nucleotides required to align sequence [0.7]\n");
+            fprintf(stderr, "\t   --align-min-exact-match [FLOAT] \t\tfraction of matching nucleotides required to align sequence [0.0]\n");
             fprintf(stderr, "\t   --align-max-num-seeds-per-locus [INT]\tthe maximum number of allowed inexact seeds per locus [inf]\n");
         } break;
         case COMPARE: {
@@ -1213,7 +1213,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Advanced options for seeding:\n");
             fprintf(stderr, "\t   --align-min-seed-length [INT]\t\tthe minimum length of a seed [graph k]\n");
             fprintf(stderr, "\t   --align-max-seed-length [INT]\t\tthe maximum length of a seed [graph k]\n");
-            fprintf(stderr, "\t   --align-min-exact-match [FLOAT] fraction of matching nucleotides required to align sequence [0.7]\n");
+            fprintf(stderr, "\t   --align-min-exact-match [FLOAT] fraction of matching nucleotides required to align sequence [0.0]\n");
             fprintf(stderr, "\t   --align-max-num-seeds-per-locus [INT]\tthe maximum number of allowed inexact seeds per locus [inf]\n");
         } break;
         case SERVER_QUERY: {

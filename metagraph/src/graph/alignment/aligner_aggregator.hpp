@@ -80,7 +80,7 @@ template <class AlignmentCompare>
 inline auto AlignmentAggregator<AlignmentCompare>::get_min_path_score() const -> score_t {
     return path_queue_.size() < config_.num_alternative_paths
         ? config_.min_path_score
-        : std::max(static_cast<score_t>(path_queue_.maximum().get_score() * config_.fraction_of_top),
+        : std::max(static_cast<score_t>(path_queue_.maximum().get_score() * config_.rel_score_cutoff),
                    path_queue_.minimum().get_score());
 }
 

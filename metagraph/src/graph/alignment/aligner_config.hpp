@@ -64,7 +64,7 @@ class DBGAlignerConfig {
     double min_exact_match = 0.0;
     double max_nodes_per_seq_char = std::numeric_limits<double>::max();
     double max_ram_per_alignment = std::numeric_limits<double>::max();
-    double fraction_of_top = 0.0;
+    double rel_score_cutoff = 0.0;
 
     int8_t gap_opening_penalty;
     int8_t gap_extension_penalty;
