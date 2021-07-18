@@ -82,13 +82,14 @@ class TestDNAAlign(TestingBase):
         res = subprocess.run(stats_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         params_str = res.stdout.decode().rstrip().split('\n')
-        self.assertEqual(len(params_str), 6)
+        self.assertEqual(len(params_str), 7)
         self.assertEqual(params_str[0], 'MT-10/1\t1/140/1')
         self.assertEqual(params_str[1], 'MT-8/1\t140/140/140')
         self.assertEqual(params_str[2], 'MT-6/1\t140/140/140')
         self.assertEqual(params_str[3], 'MT-4/1\t0/140/0')
         self.assertEqual(params_str[4], 'MT-2/1\t140/140/140')
         self.assertEqual(params_str[5], 'MT-11/1\t1/140/1')
+        self.assertEqual(params_str[6], 'MT-11/1\t1/140/1')
 
     @parameterized.expand(GRAPH_TYPES)
     def test_simple_align_map_canonical_all_graphs(self, representation):
@@ -112,13 +113,14 @@ class TestDNAAlign(TestingBase):
         res = subprocess.run(stats_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         params_str = res.stdout.decode().rstrip().split('\n')
-        self.assertEqual(len(params_str), 6)
+        self.assertEqual(len(params_str), 7)
         self.assertEqual(params_str[0], 'MT-10/1\t140/140/140')
         self.assertEqual(params_str[1], 'MT-8/1\t140/140/140')
         self.assertEqual(params_str[2], 'MT-6/1\t140/140/140')
         self.assertEqual(params_str[3], 'MT-4/1\t129/140/129')
         self.assertEqual(params_str[4], 'MT-2/1\t140/140/139')
         self.assertEqual(params_str[5], 'MT-11/1\t2/140/2')
+        self.assertEqual(params_str[6], 'MT-11/1\t140/140/140')
 
     @parameterized.expand(['succinct'])
     def test_simple_align_json_all_graphs(self, representation):
