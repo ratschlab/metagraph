@@ -12,14 +12,20 @@ namespace graph {
 namespace align {
 
 
+template <typename Type, typename Sequence, typename Compare>
+class PriorityDeque : public boost::container::priority_deque<Type, Sequence, Compare> {
+  public:
+    Sequence& data() { return this->sequence(); }
+    Compare& cmp() { return this->compare(); }
+};
+
+
 template <class AlignmentCompare>
 class AlignmentAggregator {
   public:
     typedef Alignment::node_index node_index;
     typedef Alignment::score_t score_t;
-    typedef boost::container::priority_deque<Alignment,
-                                             std::vector<Alignment>,
-                                             AlignmentCompare> PathQueue;
+    typedef PriorityDeque<Alignment, std::vector<Alignment>, AlignmentCompare> PathQueue;
 
     AlignmentAggregator(std::string_view query,
                         std::string_view rc_query,
@@ -87,9 +93,10 @@ template <class AlignmentCompare>
 inline void AlignmentAggregator<AlignmentCompare>
 ::call_alignments(const std::function<void(Alignment&&)> &callback,
                   const std::function<bool()> &terminate) {
-    while (!terminate() && path_queue_.size()) {
-        callback(Alignment(path_queue_.maximum()));
-        path_queue_.pop_maximum();
+    auto &data = path_queue_.data();
+    for (auto it = data.rbegin(); it != data.rend() && !terminate(); ++it) {
+        boost::heap::pop_interval_heap_max(data.begin(), it.base(), path_queue_.cmp());
+        callback(std::move(*it));
     }
 }
 
