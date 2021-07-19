@@ -738,10 +738,6 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
     }
 }
 
-uint8_t code_len(uint64_t x) {
-    return sdsl::bits::hi(x) + 1;
-}
-
 // 'T' is either a row index, or a pair (row index, value)
 template <typename T>
 void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
@@ -946,17 +942,11 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                 if (compute_row_reduction) {
                     if (succ_begin != succ_end) {
                         const uint64_t succ_value = get_value(source_col, source_idx, j, succ_begin, succ_end);
-                        // if anchor
-                        int n_bits_before = curr_value
-                            ? (with_values ? code_len(matrix::encode_diff(curr_value)) : 1)
-                            : 0;
-                        // if diff
-                        int n_bits_after = curr_value != succ_value
-                            ? (with_values ? code_len(matrix::encode_diff(curr_value - succ_value)) : 1)
-                            : 0;
+                        bool before = curr_value; // if anchor
+                        bool after = (curr_value != succ_value); // if diff
                         // reduction
                         __atomic_add_fetch(&row_nbits_block[chunk_idx],
-                                           n_bits_before - n_bits_after, __ATOMIC_RELAXED);
+                                           (int)before - (int)after, __ATOMIC_RELAXED);
                     }
                 } else {
                     bool is_anchor = anchor[row_idx];
@@ -983,22 +973,23 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                     }
                 }
 
-                if (curr_value && (compute_row_reduction || rd_succ[to_node(row_idx)])) {
-                    // check non-anchor predecessor nodes and add them if they are zero
-                    for (const uint64_t *pred_p = pred_begin; pred_p < pred_end; ++pred_p) {
-                        if (!source_col[*pred_p] && (compute_row_reduction || !anchor[*pred_p])) {
-                            auto &v = set_rows_bwd[source_idx][j];
-                            if constexpr(with_values) {
-                                v.emplace_back(*pred_p, -curr_value);
-                            } else {
-                                v.push_back(*pred_p);
-                            }
+                if (!curr_value || !(compute_row_reduction || rd_succ[to_node(row_idx)]))
+                    return;
 
-                            if (v.size() == v.capacity()) {
-                                std::sort(v.begin(), v.end());
-                                dump_chunk_to_disk(v, source_idx, j, num_chunks[source_idx][j]++);
-                                v.resize(0);
-                            }
+                // check non-anchor predecessor nodes and add them if they are zero
+                for (const uint64_t *pred_p = pred_begin; pred_p < pred_end; ++pred_p) {
+                    if (!source_col[*pred_p] && (compute_row_reduction || !anchor[*pred_p])) {
+                        auto &v = set_rows_bwd[source_idx][j];
+                        if constexpr(with_values) {
+                            v.emplace_back(*pred_p, -curr_value);
+                        } else {
+                            v.push_back(*pred_p);
+                        }
+
+                        if (v.size() == v.capacity()) {
+                            std::sort(v.begin(), v.end());
+                            dump_chunk_to_disk(v, source_idx, j, num_chunks[source_idx][j]++);
+                            v.resize(0);
                         }
                     }
                 }
@@ -1168,21 +1159,12 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
 
         #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
         for (size_t l_idx = 0; l_idx < diff_columns.size(); ++l_idx) {
-            for (size_t j = 0; j < diff_columns[l_idx].size(); ++j) {
-                const auto &col_ptr = diff_columns[l_idx][j];
-                if (with_values) {
-                    const uint64_t max_rank = col_ptr->rank1(chunk + row_nbits_block.size() - 1);
-                    for (uint64_t r = chunk ? col_ptr->rank1(chunk - 1) + 1 : 1; r <= max_rank; ++r) {
-                        __atomic_add_fetch(&row_nbits_block[col_ptr->select1(r) - chunk],
-                                           code_len(values[l_idx][j][r - 1]), __ATOMIC_RELAXED);
+            for (const auto &col_ptr : diff_columns[l_idx]) {
+                col_ptr->call_ones_in_range(chunk, chunk + row_nbits_block.size(),
+                    [&](uint64_t i) {
+                        __atomic_add_fetch(&row_nbits_block[i - chunk], 1, __ATOMIC_RELAXED);
                     }
-                } else {
-                    col_ptr->call_ones_in_range(chunk, chunk + row_nbits_block.size(),
-                        [&](uint64_t i) {
-                            __atomic_add_fetch(&row_nbits_block[i - chunk], 1, __ATOMIC_RELAXED);
-                        }
-                    );
-                }
+                );
             }
         }
 
