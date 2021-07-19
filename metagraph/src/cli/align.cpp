@@ -329,17 +329,6 @@ std::string format_alignment(std::string_view header,
     return sout;
 }
 
-void process_alignments(const DeBruijnGraph &graph,
-                        const Config &config,
-                        std::string_view header,
-                        QueryAlignment&& paths,
-                        std::ostream &out,
-                        std::mutex &mu) {
-    std::string res = format_alignment(header, paths, graph, config);
-    std::lock_guard<std::mutex> lock(mu);
-    out << res;
-}
-
 int align_to_graph(Config *config) {
     assert(config);
 
@@ -401,9 +390,9 @@ int align_to_graph(Config *config) {
 
         Timer data_reading_timer;
 
-        std::ostream *out = config->outfbase.size()
-            ? new std::ofstream(config->outfbase)
-            : &std::cout;
+        std::shared_ptr<std::ostream> out{ std::shared_ptr<std::ostream>{}, &std::cout };
+        if (config->outfbase.size())
+            out = std::make_shared<std::ofstream>(config->outfbase);
 
         const uint64_t batch_size = config->query_batch_size_in_bytes;
 
@@ -441,8 +430,9 @@ int align_to_graph(Config *config) {
                 aligner = build_aligner(*aln_graph, aligner_config);
 
                 aligner->align_batch(batch, [&](std::string_view header, auto&& paths) {
-                    process_alignments(*aln_graph, *config, header,
-                                       std::move(paths), *out, print_mutex);
+                    std::string res = format_alignment(header, paths, *aln_graph, *config);
+                    std::lock_guard<std::mutex> lock(print_mutex);
+                    *out << res;
                 });
             };
 
@@ -486,9 +476,6 @@ int align_to_graph(Config *config) {
                       "current mem usage: {} MB, total time {} sec",
                       file, data_reading_timer.elapsed(), num_batches, batch_size / 1e3,
                       get_curr_RSS() / 1e6, timer.elapsed());
-
-        if (config->outfbase.size())
-            delete out;
     }
 
     return 0;

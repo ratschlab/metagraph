@@ -44,12 +44,13 @@ Alignment::Alignment(std::string_view query,
 }
 
 std::ostream& operator<<(std::ostream& out, const Alignment &alignment) {
-    out << (alignment.get_orientation() ? "-" : "+") << "\t"
-        << alignment.get_sequence() << "\t"
-        << alignment.get_score() << "\t"
-        << alignment.get_num_matches() << "\t"
-        << alignment.get_cigar().to_string() << "\t"
-        << alignment.get_offset();
+    out << fmt::format("{}\t{}\t{}\t{}\t{}\t{}",
+                       (alignment.get_orientation() ? "-" : "+"),
+                       alignment.get_sequence(),
+                       alignment.get_score(),
+                       alignment.get_num_matches(),
+                       alignment.get_cigar().to_string(),
+                       alignment.get_offset());
 
     return out;
 }
