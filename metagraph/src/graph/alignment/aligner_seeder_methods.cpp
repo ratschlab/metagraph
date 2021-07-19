@@ -72,7 +72,8 @@ auto ExactSeeder::get_seeds() const -> std::vector<Seed> {
             if (match_score > config_.min_cell_score) {
                 seeds.emplace_back(query_.substr(i, k),
                                    std::vector<node_index>{ query_nodes_[i] },
-                                   match_score, i, orientation_);
+                                   std::string(query_.substr(i, k)), match_score,
+                                   i, orientation_);
                 assert(seeds.back().is_valid(graph_, &config_));
             }
         }
@@ -176,8 +177,8 @@ auto SuffixSeeder<BaseSeeder>::get_seeds() const -> std::vector<Seed> {
 
         assert(seed_length == min_seed_length[i]);
         suffix_seeds[i].emplace_back(seed_seq, std::vector<node_index>{ alt_node },
-                                     match_score, i, this->orientation_,
-                                     this->graph_.get_k() - seed_length);
+                                     std::string(seed_seq), match_score, i,
+                                     this->orientation_, this->graph_.get_k() - seed_length);
         assert(suffix_seeds[i].back().is_valid(this->graph_, &this->config_));
     };
 
@@ -393,6 +394,7 @@ auto MEMSeeder::get_seeds() const -> std::vector<Seed> {
             if (match_score > this->config_.min_cell_score) {
                 seeds.emplace_back(std::string_view(begin_it, mem_length),
                                    std::vector<node_index>{ node_begin_it, node_end_it },
+                                   std::string(begin_it, begin_it + mem_length),
                                    match_score, i,this->orientation_);
                 assert(seeds.back().is_valid(this->graph_, &this->config_));
             }

@@ -23,24 +23,17 @@ Alignment::Alignment(std::string_view query,
                      bool orientation,
                      size_t offset)
       : query_(query), nodes_(std::move(nodes)), sequence_(std::move(sequence)),
-        score_(score), orientation_(orientation), offset_(offset) {
-    size_t min_length = std::min(query_.size(), sequence_.size());
-
-    cigar_ = std::inner_product(
-        query_.data(),
-        query_.data() + min_length,
-        sequence_.c_str(),
-        Cigar(Cigar::CLIPPED, clipping),
-        [&](Cigar &cigar, bool equal) -> Cigar& {
-            cigar.append(equal ? Cigar::MATCH : Cigar::MISMATCH);
-            return cigar;
-        },
-        std::equal_to<char>()
-    );
-
-    assert(!(query_.size() - min_length) || (sequence_.size() - min_length));
-    cigar_.append(Cigar::INSERTION, query_.size() - min_length);
-    cigar_.append(Cigar::DELETION, sequence_.size() - min_length);
+        score_(score),
+        orientation_(orientation),
+        offset_(offset) {
+    assert(query_.size() == sequence_.size());
+    cigar_ = std::inner_product(query_.begin(), query_.end(), sequence_.begin(),
+                                Cigar(Cigar::CLIPPED, clipping),
+                                [&](Cigar &cigar, bool equal) -> Cigar& {
+                                    cigar.append(equal ? Cigar::MATCH : Cigar::MISMATCH);
+                                    return cigar;
+                                },
+                                std::equal_to<char>());
 }
 
 std::ostream& operator<<(std::ostream& out, const Alignment &alignment) {
@@ -48,7 +41,7 @@ std::ostream& operator<<(std::ostream& out, const Alignment &alignment) {
                        (alignment.get_orientation() ? "-" : "+"),
                        alignment.get_sequence(),
                        alignment.get_score(),
-                       alignment.get_num_matches(),
+                       alignment.get_cigar().get_num_matches(),
                        alignment.get_cigar().to_string(),
                        alignment.get_offset());
 
@@ -445,7 +438,7 @@ Json::Value Alignment::to_json(std::string_view full_query,
         alignment["is_secondary"] = is_secondary;
 
     alignment["identity"] = query_.size()
-        ? static_cast<double>(get_num_matches()) / query_.size()
+        ? static_cast<double>(cigar_.get_num_matches()) / query_.size()
         : 0;
 
     alignment["read_mapped"] = static_cast<bool>(query_.size());

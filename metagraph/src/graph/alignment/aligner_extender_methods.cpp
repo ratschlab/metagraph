@@ -63,7 +63,7 @@ bool SeedFilteringExtender::set_seed(const Alignment &seed) {
 
     seed_ = nullptr;
 
-    auto it = conv_checker_.find(seed.back());
+    auto it = conv_checker_.find(seed.get_nodes().back());
 
     if (it != conv_checker_.end()) {
         size_t pos = seed.get_query().size() + seed.get_clipping() - 1;
@@ -393,7 +393,7 @@ auto DefaultColumnExtender::extend(score_t min_path_score) -> std::vector<Alignm
     ssize_t seed_offset = static_cast<ssize_t>(this->seed_->get_offset()) - 1;
 
     // initialize the root of the tree
-    table.emplace_back(alloc_column<Column>(window.size() + 1, this->seed_->front(),
+    table.emplace_back(alloc_column<Column>(window.size() + 1, this->seed_->get_nodes().front(),
                                             static_cast<size_t>(-1), '\0', seed_offset, 0, 0));
     std::fill(std::get<0>(table[0]).begin(), std::get<0>(table[0]).end(), 0);
 
@@ -470,12 +470,12 @@ auto DefaultColumnExtender::extend(score_t min_path_score) -> std::vector<Alignm
                 if (next_offset - this->seed_->get_offset() < this->seed_->get_sequence().size()) {
                     if (next_offset < graph_->get_k()) {
                         outgoing.emplace_back(
-                            this->seed_->front(),
+                            this->seed_->get_nodes().front(),
                             this->seed_->get_sequence()[next_offset - this->seed_->get_offset()]
                         );
                     } else {
                         outgoing.emplace_back(
-                            (*this->seed_)[next_offset - graph_->get_k() + 1],
+                            this->seed_->get_nodes()[next_offset - graph_->get_k() + 1],
                             this->seed_->get_sequence()[next_offset - this->seed_->get_offset()]
                         );
                         assert(graph_->traverse(node, outgoing.back().second) == outgoing.back().first);
