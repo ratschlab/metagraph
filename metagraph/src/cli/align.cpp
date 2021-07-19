@@ -319,8 +319,8 @@ std::string format_alignment(std::string_view header,
         }
 
         if (paths.empty()) {
-            Json::Value json_line = Alignment().to_json(paths.get_query(), graph,
-                                                        secondary, header);
+            Json::Value json_line
+                    = Alignment().to_json(paths.get_query(), graph, secondary, header);
 
             sout += fmt::format("{}\n", Json::writeString(builder, json_line));
         }
