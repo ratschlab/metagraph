@@ -437,7 +437,7 @@ int align_to_graph(Config *config) {
             auto process_batch = [&,base_graph](SeqBatch batch) {
                 // aliasing constructor
                 auto aln_graph = base_graph;
-                const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(aln_graph.get());
+                auto *dbg_succ = dynamic_cast<DBGSuccinct*>(aln_graph.get());
                 bool is_primary = aln_graph->get_mode() == DeBruijnGraph::PRIMARY;
                 bool use_cache = dbg_succ && (is_primary
                     || (aligner_config.forward_and_reverse_complement
