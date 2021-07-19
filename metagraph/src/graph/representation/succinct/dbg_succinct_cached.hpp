@@ -1,8 +1,7 @@
 #ifndef __DBG_SUCCINCT_CACHED__
 #define __DBG_SUCCINCT_CACHED__
 
-#include <cache.hpp>
-#include <lru_cache_policy.hpp>
+#include <tsl/hopscotch_map.h>
 
 #include "boss.hpp"
 #include "dbg_succinct.hpp"
@@ -12,6 +11,39 @@ namespace mtg {
 namespace graph {
 
 
+// A wrapper which caches the results of get_node_sequence, get_minus_k_value,
+// and call_*_kmers calls for DBGSuccinct graphs.
+class DBGSuccinctCached;
+
+// A fast LRU cache which memoizes computation results. More precisely, if a key
+// is already present, it assumes that the corresponding value will be the same.
+template <typename Key, typename Value>
+class ThreadUnsafeLRUCacheMemoizer {
+  public:
+    ThreadUnsafeLRUCacheMemoizer(size_t max_size) : max_size_(max_size) {}
+
+    std::optional<Value> TryGet(const Key &key);
+    void Put(const Key &key, Value value);
+    void Clear() {
+        values_.clear();
+        finder_.clear();
+    }
+
+  private:
+    size_t max_size_;
+    std::list<std::pair<Key, Value>> values_;
+    tsl::hopscotch_map<Key, typename std::list<std::pair<Key, Value>>::iterator> finder_;
+};
+
+std::shared_ptr<DBGSuccinctCached>
+make_cached_dbgsuccinct(std::shared_ptr<DeBruijnGraph> graph, size_t cache_size = 1024);
+
+inline std::shared_ptr<DBGSuccinctCached>
+make_cached_dbgsuccinct(DeBruijnGraph &graph, size_t cache_size = 1024) {
+    return make_cached_dbgsuccinct({ std::shared_ptr<DeBruijnGraph>{}, &graph }, cache_size);
+}
+
+
 class DBGSuccinctCached : public DeBruijnGraph {
   public:
     typedef boss::BOSS::edge_index edge_index;
@@ -19,7 +51,7 @@ class DBGSuccinctCached : public DeBruijnGraph {
 
     // TODO: switch to a more efficient LRU cache implementation?
     template <typename Key, typename Value>
-    using LRUCache = caches::fixed_sized_cache<Key, Value, caches::LRUCachePolicy<Key>>;
+    using LRUCache = ThreadUnsafeLRUCacheMemoizer<Key, Value>;
 
     explicit DBGSuccinctCached(std::shared_ptr<DBGSuccinct> graph, size_t cache_size)
           : graph_ptr_(graph), boss_(&graph_ptr_->get_boss()),
@@ -184,6 +216,9 @@ class DBGSuccinctCached : public DeBruijnGraph {
     mutable LRUCache<edge_index, edge_index> bwd_first_cache_;
 };
 
+
+// A fast LRU cache which memoizes computation results. More precisely, if a key
+// is already present, it assumes that the corresponding value will be the same.
 template <typename KmerType>
 class DBGSuccinctCachedImpl : public DBGSuccinctCached {
   public:
@@ -340,8 +375,9 @@ class DBGSuccinctCachedImpl : public DBGSuccinctCached {
     }
 };
 
+
 inline std::shared_ptr<DBGSuccinctCached>
-make_cached_dbgsuccinct(std::shared_ptr<DeBruijnGraph> graph, size_t cache_size = 1024) {
+make_cached_dbgsuccinct(std::shared_ptr<DeBruijnGraph> graph, size_t cache_size) {
     if (graph->get_k() * kmer::KmerExtractorBOSS::bits_per_char <= 64) {
         return std::make_shared<DBGSuccinctCachedImpl<kmer::KmerExtractorBOSS::Kmer64>>(graph, cache_size);
     } else if (graph->get_k() * kmer::KmerExtractorBOSS::bits_per_char <= 128) {
@@ -351,9 +387,33 @@ make_cached_dbgsuccinct(std::shared_ptr<DeBruijnGraph> graph, size_t cache_size 
     }
 }
 
-inline std::shared_ptr<DBGSuccinctCached>
-make_cached_dbgsuccinct(DeBruijnGraph &graph, size_t cache_size = 1024) {
-    return make_cached_dbgsuccinct({ std::shared_ptr<DeBruijnGraph>{}, &graph }, cache_size);
+
+template <typename Key, typename Value>
+inline std::optional<Value> ThreadUnsafeLRUCacheMemoizer<Key, Value>
+::TryGet(const Key &key) {
+    auto find = finder_.find(key);
+    if (find == finder_.end())
+        return std::nullopt;
+
+    values_.splice(values_.begin(), values_, find->second);
+    return find->second->second;
+}
+
+template <typename Key, typename Value>
+inline void ThreadUnsafeLRUCacheMemoizer<Key, Value>::Put(const Key &key, Value value) {
+    auto find = finder_.find(key);
+    if (find != finder_.end()) {
+        assert(find->second->second == value);
+        values_.splice(values_.begin(), values_, find->second);
+    } else {
+        values_.insert(values_.begin(), std::make_pair(key, std::move(value)));
+        finder_[key] = values_.begin();
+    }
+
+    if (values_.size() > max_size_) {
+        finder_.erase(values_.back().first);
+        values_.pop_back();
+    }
 }
 
 } // namespace graph
