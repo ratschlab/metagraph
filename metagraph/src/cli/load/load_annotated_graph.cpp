@@ -17,7 +17,6 @@ namespace mtg {
 namespace cli {
 
 using namespace mtg::graph;
-
 using mtg::common::logger;
 
 
@@ -52,6 +51,7 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
                           config.infbase);
             exit(1);
         }
+
         // row_diff annotation is special, as it must know the graph structure
         using namespace annot::binmat;
         BinaryMatrix &matrix = const_cast<BinaryMatrix &>(annotation_temp->get_matrix());

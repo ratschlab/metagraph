@@ -277,8 +277,7 @@ TYPED_TEST(DBGAlignerTest, align_straight_forward_and_reverse_complement) {
     check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
 
     check_extend(graph, aligner.get_config(), paths, query);
-
-    auto ext_paths = DBGAligner<UniMEMSeeder<>>(*graph, config_fwd_and_rev).align(query);
+    auto ext_paths = get_extend(graph, config_fwd_and_rev, paths, query);
 
     EXPECT_TRUE(std::equal(paths.begin(), paths.end(),
                            ext_paths.begin(), ext_paths.end()));

@@ -15,17 +15,34 @@ CanonicalDBG::CanonicalDBG(std::shared_ptr<const DeBruijnGraph> graph, size_t ca
       : const_graph_ptr_(graph),
         offset_(graph_.max_index()),
         k_odd_(graph_.get_k() % 2),
+        has_sentinel_(false),
         alphabet_encoder_({ graph_.alphabet().size() }),
-        child_node_cache_(cache_size),
-        parent_node_cache_(cache_size),
-        is_palindrome_cache_(k_odd_ ? 0 : cache_size) {
-    if (graph->get_mode() != DeBruijnGraph::PRIMARY)
-        throw std::runtime_error("Only primary graphs can be wrapped in CanonicalDBG");
+        cache_size_(cache_size),
+        child_node_cache_(cache_size_),
+        parent_node_cache_(cache_size_),
+        is_palindrome_cache_(k_odd_ ? 0 : cache_size_) {
+    if (graph->get_mode() != DeBruijnGraph::PRIMARY) {
+        logger->error("Only primary graphs can be wrapped in CanonicalDBG");
+        exit(1);
+    }
 
     for (size_t i = 0; i < graph_.alphabet().size(); ++i) {
         alphabet_encoder_[graph_.alphabet()[i]] = i;
+        if (graph_.alphabet()[i] == boss::BOSS::kSentinel)
+            has_sentinel_ = true;
     }
 }
+
+CanonicalDBG::CanonicalDBG(const CanonicalDBG &canonical)
+      : const_graph_ptr_(canonical.const_graph_ptr_),
+        offset_(canonical.offset_),
+        k_odd_(canonical.k_odd_),
+        has_sentinel_(canonical.has_sentinel_),
+        alphabet_encoder_(canonical.alphabet_encoder_),
+        cache_size_(canonical.cache_size_),
+        child_node_cache_(cache_size_),
+        parent_node_cache_(cache_size_),
+        is_palindrome_cache_(k_odd_ ? 0 : cache_size_) {}
 
 CanonicalDBG::CanonicalDBG(std::shared_ptr<DeBruijnGraph> graph, size_t cache_size)
       : CanonicalDBG(std::dynamic_pointer_cast<const DeBruijnGraph>(graph), cache_size) {
@@ -48,13 +65,13 @@ uint64_t CanonicalDBG::num_nodes() const {
 void CanonicalDBG
 ::add_sequence(std::string_view sequence,
                const std::function<void(node_index)> &on_insertion) {
-    if (!graph_ptr_)
-        throw std::runtime_error("add_sequence only supported for non-const graphs.");
+    assert(graph_ptr_ && "add_sequence only supported for non-const graphs.");
 
     graph_ptr_->add_sequence(sequence, on_insertion);
     offset_ = graph_.max_index();
     child_node_cache_.Clear();
     parent_node_cache_.Clear();
+    is_palindrome_cache_.Clear();
 }
 
 
@@ -182,8 +199,7 @@ void CanonicalDBG::append_next_rc_nodes(node_index node,
 
     // for each n, check for nAGCCA. If found, define and store the index for
     // TGGCTrc(n) as index(nAGCCA) + offset_
-    const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph_);
-    if (dbg_succ) {
+    if (const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph_)) {
         const auto &boss = dbg_succ->get_boss();
         dbg_succ->call_nodes_with_suffix_matching_longest_prefix(
             std::string_view(&rev_seq[1], get_k() - 1),
@@ -195,21 +211,35 @@ void CanonicalDBG::append_next_rc_nodes(node_index node,
 
                 c = kmer::KmerExtractorBOSS::complement(c);
 
-                if (children[c] == npos)
+                if (children[c] == npos) {
                     children[c] = next + offset_;
+                    return;
+                }
+
+                if (k_odd_) {
+                    logger->error(
+                        "Primary graph contains both forward and reverse complement: {} {} -> {} {}\t{} {}",
+                        node, graph_.get_node_sequence(node),
+                        children[c], graph_.get_node_sequence(children[c]),
+                        next, graph_.get_node_sequence(next));
+                    exit(1);
+                }
+
+                is_palindrome_cache_.Put(next, true);
             },
             get_k() - 1
         );
 
     } else {
         for (size_t c = 0; c < alphabet.size(); ++c) {
-            if (children[c] != npos)
-                continue;
-
-            rev_seq[0] = complement(alphabet[c]);
-            node_index next = graph_.kmer_to_node(rev_seq);
-            if (next != npos)
-                children[c] = next + offset_;
+            // Do the checks by directly mapping the sequences of the desired k-mers.
+            // For non-DBGSuccinct graphs, this should be fast enough.
+            if (alphabet[c] != boss::BOSS::kSentinel && children[c] == npos) {
+                rev_seq[0] = complement(alphabet[c]);
+                node_index next = graph_.kmer_to_node(rev_seq);
+                if (next != npos)
+                    children[c] = next + offset_;
+            }
         }
     }
 }
@@ -229,22 +259,21 @@ void CanonicalDBG
 
     const auto &alphabet = graph_.alphabet();
 
-    try {
-        auto children = child_node_cache_.Get(node);
+    if (auto fetch = child_node_cache_.TryGet(node)) {
         for (size_t c = 0; c < alphabet.size(); ++c) {
-            if (children[c] != npos)
-                callback(children[c], alphabet[c]);
+            if ((*fetch)[c] != npos)
+                callback((*fetch)[c], alphabet[c]);
         }
 
-    } catch (...) {
-        size_t max_num_edges_left = alphabet.size();
-        std::vector<node_index> children(max_num_edges_left);
+    } else {
+        std::vector<node_index> children(alphabet.size(), npos);
+        size_t max_num_edges_left = children.size() - has_sentinel_;
 
         graph_.call_outgoing_kmers(node, [&](node_index next, char c) {
-            if (c != boss::BOSS::kSentinel)
+            if (c != boss::BOSS::kSentinel) {
                 children[alphabet_encoder_[c]] = next;
-
-            --max_num_edges_left;
+                --max_num_edges_left;
+            }
         });
 
         if (max_num_edges_left)
@@ -301,21 +330,36 @@ void CanonicalDBG::append_prev_rc_nodes(node_index node,
 
                     c = kmer::KmerExtractorBOSS::complement(c);
 
-                    if (parents[c] == npos)
+                    if (parents[c] == npos) {
                         parents[c] = prev + offset_;
+                        return;
+                    }
+
+                    if (k_odd_) {
+                        logger->error(
+                            "Primary graph contains both forward and reverse complement: {} {} -> {} {}\t{} {}",
+                            node, graph_.get_node_sequence(node),
+                            parents[c], graph_.get_node_sequence(parents[c]),
+                            prev, graph_.get_node_sequence(prev)
+                        );
+                        exit(1);
+                    }
+
+                    is_palindrome_cache_.Put(prev, true);
                 }
             });
         }
 
     } else {
         for (size_t c = 0; c < alphabet.size(); ++c) {
-            if (parents[c] != npos)
-                continue;
-
-            rev_seq.back() = complement(alphabet[c]);
-            node_index prev = graph_.kmer_to_node(rev_seq);
-            if (prev != npos)
-                parents[c] = prev + offset_;
+            // Do the checks by directly mapping the sequences of the desired k-mers.
+            // For non-DBGSuccinct graphs, this should be fast enough.
+            if (alphabet[c] != boss::BOSS::kSentinel && parents[c] == npos) {
+                rev_seq.back() = complement(alphabet[c]);
+                node_index prev = graph_.kmer_to_node(rev_seq);
+                if (prev != npos)
+                    parents[c] = prev + offset_;
+            }
         }
     }
 }
@@ -335,22 +379,21 @@ void CanonicalDBG
 
     const auto &alphabet = graph_.alphabet();
 
-    try {
-        auto parents = parent_node_cache_.Get(node);
+    if (auto fetch = parent_node_cache_.TryGet(node)) {
         for (size_t c = 0; c < alphabet.size(); ++c) {
-            if (parents[c] != npos)
-                callback(parents[c], alphabet[c]);
+            if ((*fetch)[c] != npos)
+                callback((*fetch)[c], alphabet[c]);
         }
 
-    } catch (...) {
-        size_t max_num_edges_left = alphabet.size();
-        std::vector<node_index> parents(max_num_edges_left);
+    } else {
+        std::vector<node_index> parents(alphabet.size(), npos);
+        size_t max_num_edges_left = parents.size() - has_sentinel_;
 
         graph_.call_incoming_kmers(node, [&](node_index prev, char c) {
-            if (c != boss::BOSS::kSentinel)
+            if (c != boss::BOSS::kSentinel) {
                 parents[alphabet_encoder_[c]] = prev;
-
-            --max_num_edges_left;
+                --max_num_edges_left;
+            }
         });
 
         if (max_num_edges_left)
@@ -499,10 +542,10 @@ DeBruijnGraph::node_index CanonicalDBG::reverse_complement(node_index node) cons
 
     }
 
-    try {
-        return is_palindrome_cache_.Get(node) ? node : node + offset_;
+    if (auto fetch = is_palindrome_cache_.TryGet(node)) {
+        return *fetch ? node : node + offset_;
 
-    } catch (...) {
+    } else {
         std::string seq = graph_.get_node_sequence(node);
         std::string rev_seq = seq;
         ::reverse_complement(rev_seq.begin(), rev_seq.end());
@@ -524,7 +567,7 @@ void CanonicalDBG::reverse_complement(std::string &seq,
 
     std::vector<node_index> rev_path(path.size());
     std::transform(path.begin(), path.end(), rev_path.rbegin(), [&](node_index i) {
-        return reverse_complement(i);
+        return i ? reverse_complement(i) : i;
     });
     std::swap(path, rev_path);
 }

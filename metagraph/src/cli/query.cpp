@@ -60,7 +60,9 @@ std::string QueryExecutor::execute_query(const std::string &seq_name,
                                          double discovery_fraction,
                                          std::string anno_labels_delimiter,
                                          const AnnotatedDBG &anno_graph,
-                                         bool with_kmer_counts) {
+                                         bool with_kmer_counts,
+                                         const std::vector<double> &count_quantiles,
+                                         bool query_coords) {
     std::string output;
     output.reserve(1'000);
 
@@ -84,7 +86,43 @@ std::string QueryExecutor::execute_query(const std::string &seq_name,
 
         output += '\n';
 
-    } else if (count_labels) {
+    } else if (query_coords) {
+        auto result = anno_graph.get_kmer_coordinates(sequence,
+                                                      num_top_labels,
+                                                      discovery_fraction);
+
+        if (!result.size() && suppress_unlabeled)
+            return "";
+
+        output += seq_name;
+
+        for (const auto &[label, tuples] : result) {
+            output += "\t<" + label + ">";
+            for (const auto &coords : tuples) {
+                output += fmt::format(":{}", fmt::join(coords, ","));
+            }
+        }
+
+        output += '\n';
+
+    } else if (count_quantiles.size()) {
+        auto result = anno_graph.get_label_count_quantiles(sequence,
+                                                           num_top_labels,
+                                                           discovery_fraction,
+                                                           count_quantiles);
+
+        if (!result.size() && suppress_unlabeled)
+            return "";
+
+        output += seq_name;
+
+        for (const auto &[label, quantiles] : result) {
+            output += fmt::format("\t<{}>:{}", label, fmt::join(quantiles, ":"));
+        }
+
+        output += '\n';
+
+    } else if (count_labels || with_kmer_counts) {
         auto top_labels = anno_graph.get_top_labels(sequence,
                                                     num_top_labels,
                                                     discovery_fraction,
@@ -96,10 +134,7 @@ std::string QueryExecutor::execute_query(const std::string &seq_name,
         output += seq_name;
 
         for (const auto &[label, count] : top_labels) {
-            output += "\t<";
-            output += label;
-            output += ">:";
-            output += fmt::format_int(count).c_str();
+            output += fmt::format("\t<{}>:{}", label, count);
         }
 
         output += '\n';
@@ -893,7 +928,8 @@ std::string query_sequence(size_t id, std::string name, std::string seq,
                                         config.count_labels, config.print_signature,
                                         config.suppress_unlabeled, config.num_top_labels,
                                         config.discovery_fraction, config.anno_labels_delimiter,
-                                        anno_graph, config.count_kmers);
+                                        anno_graph, config.count_kmers, config.count_quantiles,
+                                        config.query_coords);
 }
 
 void QueryExecutor::query_fasta(const string &file,
@@ -903,6 +939,10 @@ void QueryExecutor::query_fasta(const string &file,
     seq_io::FastaParser fasta_parser(file, config_.forward_and_reverse);
 
     if (config_.fast) {
+        if (config_.query_coords) {
+            logger->error("Querying coordinates in batch mode is not supported");
+            exit(1);
+        }
         // Construct a query graph and query against it
         batched_query_fasta(fasta_parser, callback);
         return;

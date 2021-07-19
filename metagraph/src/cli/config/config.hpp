@@ -39,6 +39,7 @@ class Config {
     bool count_kmers = false;
     bool print_signature = false;
     bool query_presence = false;
+    bool query_coords = false;
     bool filter_present = false;
     bool dump_text_anno = false;
     bool sparse = false;
@@ -133,6 +134,7 @@ class Config {
     double min_fraction = 0.0;
     double max_fraction = 1.0;
     std::vector<double> count_slice_quantiles;
+    std::vector<double> count_quantiles;
 
     std::vector<std::string> fnames;
     std::vector<std::string> anno_labels;
@@ -198,6 +200,7 @@ class Config {
         RbBRWT,
         IntBRWT,
         IntRowDiffBRWT,
+        ColumnCoord,
     };
 
     enum GraphType {

@@ -9,6 +9,7 @@
 
 #include "representation/base/sequence_graph.hpp"
 #include "annotation/representation/base/annotation.hpp"
+#include "common/vector.hpp"
 
 
 namespace mtg {
@@ -115,6 +116,22 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
                    size_t num_top_labels,
                    size_t min_count = 0,
                    bool with_kmer_counts = false) const;
+
+    std::vector<std::pair<Label, std::vector<size_t>>>
+    get_label_count_quantiles(std::string_view sequence,
+                              size_t num_top_labels,
+                              double presence_ratio,
+                              const std::vector<double> &count_quantiles) const;
+
+    std::vector<std::pair<Label, std::vector<SmallVector<uint64_t>>>>
+    get_kmer_coordinates(std::string_view sequence,
+                         size_t num_top_labels,
+                         double presence_ratio) const;
+
+    std::vector<std::pair<Label, std::vector<SmallVector<uint64_t>>>>
+    get_kmer_coordinates(const std::vector<node_index> &path,
+                         size_t num_top_labels,
+                         double presence_ratio) const;
 
     std::vector<std::pair<Label, sdsl::bit_vector>>
     get_top_label_signatures(std::string_view sequence,
