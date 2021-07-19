@@ -329,6 +329,16 @@ void extend_ins(AlignedVector<score_t> &S,
             break;
         }
     }
+
+    // allocate and initialize enough space to allow the SIMD code to access these
+    // vectors in 16 byte blocks without reading out of bounds
+    S.reserve(S.size() + kPadding);
+    E.reserve(E.size() + kPadding);
+    F.reserve(F.size() + kPadding);
+
+    std::fill(S.data() + S.size(), S.data() + S.capacity(), ninf);
+    std::fill(E.data() + E.size(), E.data() + E.capacity(), ninf);
+    std::fill(F.data() + F.size(), F.data() + F.capacity(), ninf);
 }
 
 void DefaultColumnExtender
@@ -348,10 +358,14 @@ Column alloc_column(size_t size, RestArgs... args) {
     Column column { {}, {}, {}, args... };
     auto &[S, E, F, node, i_prev, c, offset, max_pos, trim] = column;
 
+    // allocate and initialize enough space to allow the SIMD code to access these
+    // vectors in 16 byte blocks without reading out of bounds
     S.reserve(size + kPadding);
     E.reserve(size + kPadding);
     F.reserve(size + kPadding);
 
+    // the size is set properly to allow for AlignedVector methods (size(), push_back())
+    // to function properly
     S.resize(size, ninf);
     E.resize(size, ninf);
     F.resize(size, ninf);
@@ -374,6 +388,7 @@ auto DefaultColumnExtender::extend(score_t min_path_score) -> std::vector<Alignm
     // the sequence to align (the suffix of the query starting from the seed)
     std::string_view window(this->seed_->get_query().data(),
                             query_.data() + query_.size() - this->seed_->get_query().data());
+    assert(partial_sums_.at(start) == config_.match_score(window));
 
     ssize_t seed_offset = static_cast<ssize_t>(this->seed_->get_offset()) - 1;
 
@@ -386,16 +401,20 @@ auto DefaultColumnExtender::extend(score_t min_path_score) -> std::vector<Alignm
     assert(config_.xdrop > 0);
     assert(xdrop_cutoff < 0);
 
+    // The nodes in the traversal (with corresponding score columns) are sorted by
+    // 1) their score (higher is better), then by
+    // 2) the absolute distance of their highest scoring index from the score
+    //    matrix diagonal (lower is better), finally by
+    // 3) Their index in the table vector (higher is better, for better cache locality)
     using TableIt = std::tuple<score_t,
                                ssize_t, /* negative off_diag */
                                size_t /* table idx */>;
     TableIt best_score { 0, 0, 0 };
 
-    // node traversal heap
     std::priority_queue<TableIt> queue;
-    queue.emplace(best_score);
 
-    assert(partial_sums_.at(start) == config_.match_score(window));
+    // Initialize the node traversal heap with the root.
+    queue.emplace(best_score);
 
     while (queue.size()) {
         size_t i = std::get<2>(queue.top());

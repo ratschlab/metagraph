@@ -86,6 +86,8 @@ class DefaultColumnExtender : public SeedFilteringExtender {
     // seed, then the query is aligned against this tree.
     // Each Column object represents the alignment of a substring of the query
     // against a node in the tree.
+    // The horizontal concatenation (hstack) of all of the columns along a path
+    // in this tree is analogous to a Needleman-Wunsch dynamic programming score matrix.
     using Column = std::tuple<AlignedVector<score_t> /* S (best score) */,
                               AlignedVector<score_t> /* E (best score after insert) */,
                               AlignedVector<score_t> /* F (best score after delete) */,
