@@ -924,13 +924,6 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
         }
     };
 
-    // graph::DBGSuccinct graph(2);
-    // logger->trace("Loading graph...");
-    // if (!graph.load(pred_succ_fprefix)) {
-    //     logger->error("Cannot load graph from {}", pred_succ_fprefix);
-    //     std::exit(1);
-    // }
-
     traverse_anno_chunked(
             num_rows, pred_succ_fprefix, sources,
             [&](uint64_t chunk_size) {
@@ -962,7 +955,8 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                             ? (with_values ? code_len(matrix::encode_diff(curr_value - succ_value)) : 1)
                             : 0;
                         // reduction
-                        __atomic_add_fetch(&row_nbits_block[chunk_idx], n_bits_before - n_bits_after, __ATOMIC_RELAXED);
+                        __atomic_add_fetch(&row_nbits_block[chunk_idx],
+                                           n_bits_before - n_bits_after, __ATOMIC_RELAXED);
                     }
                 } else {
                     bool is_anchor = anchor[row_idx];
@@ -978,55 +972,33 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                         } else {
                             v.push_back(row_idx);
                         }
+                        if (is_anchor)
+                            num_relations_anchored[source_idx][j]++;
 
                         if (v.size() == v.capacity()) {
                             // dump chunk to disk
                             dump_chunk_to_disk(v, source_idx, j, 0);
                             v.resize(0);
                         }
-                        if (is_anchor)
-                            num_relations_anchored[source_idx][j]++;
                     }
-                    //  else {
-                    //     if (succ_begin == succ_end) {
-                    //         auto edge = graph.kmer_to_boss_index(to_node(row_idx));
-                    //         const auto &boss = graph.get_boss();
-                    //         logger->trace("Reduction: value {}"
-                    //             "\nFrom    anchor: {}, only_incoming: {}, only_outgoing: {}"
-                    //             "\nTo      NULL",
-                    //             curr_value, anchor[row_idx], boss.is_single_incoming(edge, boss.get_W()[edge]), boss.is_single_outgoing(edge));
-                    //     } else {
-                    //         auto edge = graph.kmer_to_boss_index(to_node(row_idx));
-                    //         const auto &boss = graph.get_boss();
-                    //         logger->trace("Reduction: value {}"
-                    //                       "\nFrom    anchor: {}, only_incoming: {}, only_outgoing: {}",
-                    //                       curr_value, anchor[row_idx], boss.is_single_incoming(edge, boss.get_W()[edge]), boss.is_single_outgoing(edge));
-                    //         for (const uint64_t *it = succ_begin; it != succ_end; ++it) {
-                    //             auto next_edge = graph.kmer_to_boss_index(to_node(*it));
-                    //             logger->trace("\nTo      anchor: {}, only_incoming: {}, only_outgoing: {}",
-                    //                           anchor[*it], boss.is_single_incoming(next_edge, boss.get_W()[next_edge]), boss.is_single_outgoing(next_edge));
-                    //         }
-                    //     }
-                    // }
                 }
 
-                if (!curr_value || (!compute_row_reduction && !rd_succ[to_node(row_idx)]))
-                    return;
+                if (curr_value && (compute_row_reduction || rd_succ[to_node(row_idx)])) {
+                    // check non-anchor predecessor nodes and add them if they are zero
+                    for (const uint64_t *pred_p = pred_begin; pred_p < pred_end; ++pred_p) {
+                        if (!source_col[*pred_p] && (compute_row_reduction || !anchor[*pred_p])) {
+                            auto &v = set_rows_bwd[source_idx][j];
+                            if constexpr(with_values) {
+                                v.emplace_back(*pred_p, -curr_value);
+                            } else {
+                                v.push_back(*pred_p);
+                            }
 
-                // check non-anchor predecessor nodes and add them if they are zero
-                for (const uint64_t *pred_p = pred_begin; pred_p < pred_end; ++pred_p) {
-                    if (!source_col[*pred_p] && (compute_row_reduction || !anchor[*pred_p])) {
-                        auto &v = set_rows_bwd[source_idx][j];
-                        if constexpr(with_values) {
-                            v.emplace_back(*pred_p, -curr_value);
-                        } else {
-                            v.push_back(*pred_p);
-                        }
-
-                        if (v.size() == v.capacity()) {
-                            std::sort(v.begin(), v.end());
-                            dump_chunk_to_disk(v, source_idx, j, num_chunks[source_idx][j]++);
-                            v.resize(0);
+                            if (v.size() == v.capacity()) {
+                                std::sort(v.begin(), v.end());
+                                dump_chunk_to_disk(v, source_idx, j, num_chunks[source_idx][j]++);
+                                v.resize(0);
+                            }
                         }
                     }
                 }
@@ -1123,8 +1095,8 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
             std::vector<uint64_t> ids;
             ids.reserve(row_diff_bits[l_idx][j]);
             int64_t value = 0;
-            // Call merge_files<T> with a single template parameter (not pair).
-            // It can't extract and add counts, so we do this manually.
+            // merge_files<T> with a single template parameter (not pair)
+            // can't extract and add counts, so we do this manually.
             elias_fano::merge_files<T>(filenames, [&](T v) {
                 if constexpr(with_values) {
                     assert(v.second && "zero diffs must have been skipped");
@@ -1359,8 +1331,7 @@ void convert_batch_to_row_diff_coord(const std::string &pred_succ_fprefix,
                     const auto diff = get_diff(curr_value, get_value(source_col, s, j, succ_begin, succ_end));
                     // reduction (zero diff)
                     __atomic_add_fetch(&row_nbits_block[chunk_idx],
-                                       curr_value.size() - diff.size(),
-                                       __ATOMIC_RELAXED);
+                                       curr_value.size() - diff.size(), __ATOMIC_RELAXED);
                 },
                 [&](uint64_t block_begin) {
                     __atomic_thread_fence(__ATOMIC_ACQUIRE);
