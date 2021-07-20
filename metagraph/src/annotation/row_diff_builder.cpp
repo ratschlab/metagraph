@@ -86,8 +86,8 @@ void load_coordinates(const std::vector<std::string> &source_files,
         bit_vector_smart delims;
         for (size_t j = 0; j < sources[i].num_labels(); ++j) {
             try {
-                coords.load(in);
                 delims.load(in);
+                coords.load(in);
             } catch (...) {
                 logger->error("Couldn't read coordinates from {}", coords_fname);
                 exit(1);

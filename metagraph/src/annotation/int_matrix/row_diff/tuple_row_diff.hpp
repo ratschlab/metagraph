@@ -1,5 +1,5 @@
-#ifndef __INT_ROW_DIFF_HPP__
-#define __INT_ROW_DIFF_HPP__
+#ifndef __TUPLE_ROW_DIFF_HPP__
+#define __TUPLE_ROW_DIFF_HPP__
 
 #include <algorithm>
 #include <iostream>
@@ -23,49 +23,29 @@ namespace mtg {
 namespace annot {
 namespace matrix {
 
-const size_t RD_PATH_RESERVE_SIZE = 2;
-
-
-/**
- * Convert deltas to positive integer for enable compression:
- *      0  -> X (not allowed, zero diffs must be skipped)
- *      1  -> 0
- *      -1 -> 1
- *      2  -> 2
- *      -2 -> 3
- *      ...
- */
-inline uint64_t encode_diff(int64_t x) {
-    assert(x);
-    return (std::abs(x) - 1) * 2 + (x < 0);
-}
-
-inline int64_t decode_diff(uint64_t c) {
-    return !(c & 1) ? c / 2 + 1 : -((c + 1) / 2);
-}
-
 template <class BaseMatrix>
-class IntRowDiff : public binmat::IRowDiff, public IntMatrix {
+class TupleRowDiff : public binmat::IRowDiff, public MultiIntMatrix {
   public:
     using anchor_bv_type = bit_vector_small;
     using fork_succ_bv_type = bit_vector_small;
-    static_assert(std::is_convertible<BaseMatrix*, IntMatrix*>::value);
+    static_assert(std::is_convertible<BaseMatrix*, MultiIntMatrix*>::value);
+    static const int SHIFT = 1; // coordinates increase by 1 at each edge
 
-    IntRowDiff() {}
+    TupleRowDiff() {}
 
-    IntRowDiff(const graph::DBGSuccinct *graph, BaseMatrix&& diff)
+    TupleRowDiff(const graph::DBGSuccinct *graph, BaseMatrix&& diff)
         : diffs_(std::move(diff)) { graph_ = graph; }
 
     bool get(Row i, Column j) const override;
     std::vector<Row> get_column(Column j) const override;
     SetBitPositions get_row(Row i) const override;
     std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const override;
-    // query integer values
-    RowValues get_row_values(Row i) const override;
-    std::vector<RowValues> get_row_values(const std::vector<Row> &rows) const override;
+    RowTuples get_row_tuples(Row i) const override;
+    std::vector<RowTuples> get_row_tuples(const std::vector<Row> &rows) const override;
 
     uint64_t num_columns() const override { return diffs_.num_columns(); }
     uint64_t num_relations() const override { return diffs_.num_relations(); }
+    uint64_t num_attributes() const override { return diffs_.num_attributes(); }
     uint64_t num_rows() const override { return diffs_.num_rows(); }
 
     bool load(std::istream &in) override;
@@ -79,8 +59,8 @@ class IntRowDiff : public binmat::IRowDiff, public IntMatrix {
     BaseMatrix& diffs() { return diffs_; }
 
   private:
-    static void decode_diffs(RowValues *diffs);
-    static void add_diff(const RowValues &diff, RowValues *row);
+    static void decode_diffs(RowTuples *diffs);
+    static void add_diff(const RowTuples &diff, RowTuples *row);
 
     BaseMatrix diffs_;
     anchor_bv_type anchor_;
@@ -89,14 +69,14 @@ class IntRowDiff : public binmat::IRowDiff, public IntMatrix {
 
 
 template <class BaseMatrix>
-bool IntRowDiff<BaseMatrix>::get(Row i, Column j) const {
+bool TupleRowDiff<BaseMatrix>::get(Row i, Column j) const {
     SetBitPositions set_bits = get_row(i);
     auto v = std::lower_bound(set_bits.begin(), set_bits.end(), j);
     return v != set_bits.end() && *v == j;
 }
 
 template <class BaseMatrix>
-std::vector<IntMatrix::Row> IntRowDiff<BaseMatrix>::get_column(Column j) const {
+std::vector<MultiIntMatrix::Row> TupleRowDiff<BaseMatrix>::get_column(Column j) const {
     assert(graph_ && "graph must be loaded");
     assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
     assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());
@@ -111,8 +91,8 @@ std::vector<IntMatrix::Row> IntRowDiff<BaseMatrix>::get_column(Column j) const {
 }
 
 template <class BaseMatrix>
-IntMatrix::SetBitPositions IntRowDiff<BaseMatrix>::get_row(Row i) const {
-    RowValues row = get_row_values(i);
+MultiIntMatrix::SetBitPositions TupleRowDiff<BaseMatrix>::get_row(Row i) const {
+    RowTuples row = get_row_tuples(i);
     SetBitPositions result(row.size());
     for (size_t k = 0; k < row.size(); ++k) {
         result[k] = row[k].first;
@@ -121,62 +101,35 @@ IntMatrix::SetBitPositions IntRowDiff<BaseMatrix>::get_row(Row i) const {
 }
 
 template <class BaseMatrix>
-IntMatrix::RowValues IntRowDiff<BaseMatrix>::get_row_values(Row row) const {
-    assert(graph_ && "graph must be loaded");
-    assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
-    assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());
-
-    RowValues result = diffs_.get_row_values(row);
-    decode_diffs(&result);
-    std::sort(result.begin(), result.end());
-
-    uint64_t boss_edge = graph_->kmer_to_boss_index(
-            graph::AnnotatedSequenceGraph::anno_to_graph_index(row));
-    const graph::boss::BOSS &boss = graph_->get_boss();
-    const bit_vector &rd_succ = fork_succ_.size() ? fork_succ_ : boss.get_last();
-
-    while (!anchor_[row]) {
-        boss_edge = boss.row_diff_successor(boss_edge, rd_succ);
-
-        row = graph::AnnotatedSequenceGraph::graph_to_anno_index(
-                graph_->boss_to_kmer_index(boss_edge));
-
-        RowValues diff_row = diffs_.get_row_values(row);
-        decode_diffs(&diff_row);
-        std::sort(diff_row.begin(), diff_row.end());
-        add_diff(diff_row, &result);
-    }
-
-    assert(std::all_of(result.begin(), result.end(),
-                       [](auto &p) { return p.second; }));
-    assert(std::all_of(result.begin(), result.end(),
-                       [](auto &p) { return (int64_t)p.second > 0; }));
-    return result;
-}
-
-template <class BaseMatrix>
-std::vector<IntMatrix::SetBitPositions>
-IntRowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
+std::vector<MultiIntMatrix::SetBitPositions>
+TupleRowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
     std::vector<SetBitPositions> result;
     result.reserve(row_ids.size());
 
-    for (auto&& row : get_row_values(row_ids)) {
+    for (auto&& row : get_row_tuples(row_ids)) {
         result.emplace_back(row.size());
         for (size_t k = 0; k < row.size(); ++k) {
             result.back()[k] = row[k].first;
         }
-        row = RowValues();
+        row = RowTuples();
     }
 
     return result;
 }
 
 template <class BaseMatrix>
-std::vector<IntMatrix::RowValues>
-IntRowDiff<BaseMatrix>::get_row_values(const std::vector<Row> &row_ids) const {
+MultiIntMatrix::RowTuples TupleRowDiff<BaseMatrix>::get_row_tuples(Row row) const {
+    return get_row_tuples(std::vector<Row>{ row })[0];
+}
+
+template <class BaseMatrix>
+std::vector<MultiIntMatrix::RowTuples>
+TupleRowDiff<BaseMatrix>::get_row_tuples(const std::vector<Row> &row_ids) const {
     assert(graph_ && "graph must be loaded");
     assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
     assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());
+
+    const size_t RD_PATH_RESERVE_SIZE = 2;
 
     // diff rows annotating nodes along the row-diff paths
     std::vector<Row> rd_ids;
@@ -225,7 +178,7 @@ IntRowDiff<BaseMatrix>::get_row_values(const std::vector<Row> &row_ids) const {
 
     node_to_rd = VectorMap<Row, size_t>();
 
-    std::vector<RowValues> rd_rows = diffs_.get_row_values(rd_ids);
+    std::vector<RowTuples> rd_rows = diffs_.get_row_tuples(rd_ids);
     for (auto &row : rd_rows) {
         decode_diffs(&row);
     }
@@ -233,35 +186,37 @@ IntRowDiff<BaseMatrix>::get_row_values(const std::vector<Row> &row_ids) const {
     rd_ids = std::vector<Row>();
 
     // reconstruct annotation rows from row-diff
-    std::vector<RowValues> rows(row_ids.size());
+    std::vector<RowTuples> rows(row_ids.size());
 
     for (size_t i = 0; i < row_ids.size(); ++i) {
-        RowValues &result = rows[i];
+        RowTuples &result = rows[i];
+
+        auto it = rd_paths_trunc[i].rbegin();
+        std::sort(rd_rows[*it].begin(), rd_rows[*it].end());
+        result = rd_rows[*it];
         // propagate back and reconstruct full annotations for predecessors
-        for (auto it = rd_paths_trunc[i].rbegin(); it != rd_paths_trunc[i].rend(); ++it) {
+        for (++it ; it != rd_paths_trunc[i].rend(); ++it) {
             std::sort(rd_rows[*it].begin(), rd_rows[*it].end());
             add_diff(rd_rows[*it], &result);
             // replace diff row with full reconstructed annotation
             rd_rows[*it] = result;
         }
         assert(std::all_of(result.begin(), result.end(),
-                           [](auto &p) { return p.second; }));
-        assert(std::all_of(result.begin(), result.end(),
-                           [](auto &p) { return (int64_t)p.second > 0; }));
+                           [](auto &p) { return p.second.size(); }));
     }
 
     return rows;
 }
 
 template <class BaseMatrix>
-bool IntRowDiff<BaseMatrix>::load(std::istream &in) {
+bool TupleRowDiff<BaseMatrix>::load(std::istream &in) {
     std::string version(4, '\0');
     in.read(version.data(), 4);
     return anchor_.load(in) && fork_succ_.load(in) && diffs_.load(in);
 }
 
 template <class BaseMatrix>
-void IntRowDiff<BaseMatrix>::serialize(std::ostream &out) const {
+void TupleRowDiff<BaseMatrix>::serialize(std::ostream &out) const {
     out.write("v2.0", 4);
     anchor_.serialize(out);
     fork_succ_.serialize(out);
@@ -269,47 +224,57 @@ void IntRowDiff<BaseMatrix>::serialize(std::ostream &out) const {
 }
 
 template <class BaseMatrix>
-void IntRowDiff<BaseMatrix>::decode_diffs(RowValues *diffs) {
-    for (auto &[j, value] : *diffs) {
-        value = decode_diff(value);
-    }
+void TupleRowDiff<BaseMatrix>::decode_diffs(RowTuples *diffs) {
+    std::ignore = diffs;
+    // no encoding
 }
 
 template <class BaseMatrix>
-void IntRowDiff<BaseMatrix>::add_diff(const RowValues &diff, RowValues *row) {
+void TupleRowDiff<BaseMatrix>::add_diff(const RowTuples &diff, RowTuples *row) {
     assert(std::is_sorted(row->begin(), row->end()));
     assert(std::is_sorted(diff.begin(), diff.end()));
 
-    if (diff.empty())
-        return;
+    if (diff.size()) {
+        RowTuples result;
+        result.reserve(row->size() + diff.size());
 
-    RowValues result;
-    result.reserve(row->size() + diff.size());
+        auto it = row->begin();
+        auto it2 = diff.begin();
+        while (it != row->end() && it2 != diff.end()) {
+            if (it->first < it2->first) {
+                result.push_back(*it);
+                ++it;
+            } else if (it->first > it2->first) {
+                result.push_back(*it2);
+                ++it2;
+            } else {
+                if (it2->second.size()) {
+                    result.emplace_back(it->first, Tuple{});
+                    std::set_symmetric_difference(it->second.begin(), it->second.end(),
+                                                  it2->second.begin(), it2->second.end(),
+                                                  std::back_inserter(result.back().second));
+                }
+                ++it;
+                ++it2;
+            }
+        }
+        std::copy(it, row->end(), std::back_inserter(result));
+        std::copy(it2, diff.end(), std::back_inserter(result));
 
-    auto it = row->begin();
-    auto it2 = diff.begin();
-    while (it != row->end() && it2 != diff.end()) {
-        if (it->first < it2->first) {
-            result.push_back(*it);
-            ++it;
-        } else if (it->first > it2->first) {
-            result.push_back(*it2);
-            ++it2;
-        } else {
-            if (uint64_t sum = it->second + it2->second)
-                result.emplace_back(it->first, sum);
-            ++it;
-            ++it2;
+        row->swap(result);
+    }
+
+    assert(std::is_sorted(row->begin(), row->end()));
+    for (auto &[j, tuple] : *row) {
+        assert(std::is_sorted(tuple.begin(), tuple.end()));
+        for (uint64_t &c : tuple) {
+            c -= SHIFT;
         }
     }
-    std::copy(it, row->end(), std::back_inserter(result));
-    std::copy(it2, diff.end(), std::back_inserter(result));
-
-    row->swap(result);
 }
 
 template <class BaseMatrix>
-void IntRowDiff<BaseMatrix>::load_anchor(const std::string &filename) {
+void TupleRowDiff<BaseMatrix>::load_anchor(const std::string &filename) {
     if (!std::filesystem::exists(filename)) {
         common::logger->error("Can't read anchor file: {}", filename);
         std::exit(1);
@@ -323,7 +288,7 @@ void IntRowDiff<BaseMatrix>::load_anchor(const std::string &filename) {
 }
 
 template <class BaseMatrix>
-void IntRowDiff<BaseMatrix>::load_fork_succ(const std::string &filename) {
+void TupleRowDiff<BaseMatrix>::load_fork_succ(const std::string &filename) {
     if (!std::filesystem::exists(filename)) {
         common::logger->error("Can't read fork successor file: {}", filename);
         std::exit(1);
@@ -340,4 +305,4 @@ void IntRowDiff<BaseMatrix>::load_fork_succ(const std::string &filename) {
 } // namespace annot
 } // namespace mtg
 
-#endif // __INT_ROW_DIFF_HPP__
+#endif // __TUPLE_ROW_DIFF_HPP__
