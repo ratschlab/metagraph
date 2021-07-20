@@ -1,38 +1,17 @@
 #ifndef __DBG_SUCCINCT_CACHED__
 #define __DBG_SUCCINCT_CACHED__
 
-#include <tsl/hopscotch_map.h>
-
 #include "boss.hpp"
 #include "dbg_succinct.hpp"
 #include "kmer/kmer_extractor.hpp"
+#include "common/caches.hpp"
 
 namespace mtg {
 namespace graph {
 
 
-// A wrapper which caches the results of get_node_sequence, get_minus_k_value,
-// and call_*_kmers calls for DBGSuccinct graphs.
+// A wrapper which caches computed node sequences for DBGSuccinct graphs.
 class DBGSuccinctCached;
-
-// A fast LRU cache
-template <typename Key, typename Value>
-class ThreadUnsafeLRUCache {
-  public:
-    ThreadUnsafeLRUCache(size_t max_size) : max_size_(max_size) {}
-
-    std::optional<Value> TryGet(const Key &key);
-    void Put(const Key &key, Value value);
-    void Clear() {
-        values_.clear();
-        finder_.clear();
-    }
-
-  private:
-    size_t max_size_;
-    std::list<std::pair<Key, Value>> values_;
-    tsl::hopscotch_map<Key, typename std::list<std::pair<Key, Value>>::iterator> finder_;
-};
 
 std::shared_ptr<DBGSuccinctCached>
 make_cached_dbgsuccinct(std::shared_ptr<DeBruijnGraph> graph, size_t cache_size = 1024);
@@ -129,16 +108,6 @@ class DBGSuccinctCached : public DeBruijnGraph {
         graph_ptr_->serialize(filename);
     }
 
-    virtual bool load(const std::string &filename) override {
-        auto loaded = std::make_shared<DBGSuccinct>(graph_ptr_->get_k());
-        if (!loaded->load(filename))
-            return false;
-
-        graph_ptr_ = loaded;
-        boss_ = &graph_ptr_->get_boss();
-        return true;
-    }
-
     virtual std::string file_extension() const override final {
         return graph_ptr_->file_extension();
     }
@@ -224,45 +193,18 @@ class DBGSuccinctCachedImpl : public DBGSuccinctCached {
         graph_ptr_->call_outgoing_kmers(node, [&](node_index next, char c) {
             if (c != boss::BOSS::kSentinel) {
                 if (kmer)
-                    update_node_next_from_kmer(*kmer, next, c);
+                    update_node_next(*kmer, graph_ptr_->kmer_to_boss_index(next), c);
 
                 callback(next, c);
             }
         });
     }
 
-    void call_incoming_kmers(node_index node,
-                             const IncomingEdgeCallback &callback) const {
-        assert(node > 0 && node <= num_nodes());
-
-        edge_index i = graph_ptr_->kmer_to_boss_index(node);
-        auto kmer = decoded_cache_.TryGet(i);
-        edge_index edge = graph_ptr_->kmer_to_boss_index(node);
-
-        boss_->call_incoming_to_target(boss_->bwd(edge), boss_->get_node_last_value(edge),
-            [&](edge_index incoming_boss_edge) {
-                assert(boss_->get_W(incoming_boss_edge) % boss_->alph_size
-                        == boss_->get_node_last_value(edge));
-
-                auto prev = graph_ptr_->boss_to_kmer_index(incoming_boss_edge);
-                TAlphabet s = get_first_value(prev);
-                if (prev != npos && s != boss::BOSS::kSentinelCode) {
-                    char c = boss_->decode(s);
-
-                    if (kmer)
-                        update_node_prev_from_kmer(*kmer, prev, c);
-
-                    callback(prev, c);
-                }
-            }
-        );
-    }
-
     node_index traverse(node_index node, char next_char) const {
         if (node_index next = graph_ptr_->traverse(node, next_char)) {
             edge_index i = graph_ptr_->kmer_to_boss_index(node);
             if (auto kmer = decoded_cache_.TryGet(i))
-                update_node_next_from_kmer(*kmer, next, next_char);
+                update_node_next(*kmer, graph_ptr_->kmer_to_boss_index(next), next_char);
 
             return next;
 
@@ -271,17 +213,31 @@ class DBGSuccinctCachedImpl : public DBGSuccinctCached {
         }
     }
 
+    void call_incoming_kmers(node_index node,
+                             const IncomingEdgeCallback &callback) const {
+        assert(node > 0 && node <= num_nodes());
+
+        edge_index edge = graph_ptr_->kmer_to_boss_index(node);
+
+        boss_->call_incoming_to_target(boss_->bwd(edge), boss_->get_node_last_value(edge),
+            [&](edge_index incoming_boss_edge) {
+                assert(boss_->get_W(incoming_boss_edge) % boss_->alph_size
+                        == boss_->get_node_last_value(edge));
+
+                auto prev = graph_ptr_->boss_to_kmer_index(incoming_boss_edge);
+
+                // no need to update prev, this call handles it
+                TAlphabet s = get_first_value(prev);
+
+                if (prev != npos && s != boss::BOSS::kSentinelCode)
+                    callback(prev, boss_->decode(s));
+            }
+        );
+    }
+
     node_index traverse_back(node_index node, char prev_char) const {
-        if (node_index prev = graph_ptr_->traverse_back(node, prev_char)) {
-            edge_index i = graph_ptr_->kmer_to_boss_index(node);
-            if (auto kmer = decoded_cache_.TryGet(i))
-                update_node_prev_from_kmer(*kmer, prev, prev_char);
-
-            return prev;
-
-        } else {
-            return npos;
-        }
+        // TODO: handle caching at some point. For now, this method isn't really used
+        return graph_ptr_->traverse(node, prev_char);
     }
 
     void map_to_nodes_sequentially(std::string_view sequence,
@@ -324,18 +280,64 @@ class DBGSuccinctCachedImpl : public DBGSuccinctCached {
     }
 
     bool load(const std::string &filename) {
-        if (!DBGSuccinctCached::load(filename))
+        auto loaded = std::make_shared<DBGSuccinct>(graph_ptr_->get_k());
+        if (!loaded->load(filename))
             return false;
 
+        graph_ptr_ = loaded;
+        boss_ = &graph_ptr_->get_boss();
         decoded_cache_.Clear();
         return true;
     }
 
   private:
-    typedef std::pair<KmerType, edge_index> CacheNode;
+    // KmerType is the encoded k-mer
+    // edge_index is the boss node whose last character is the first character of the k-mer
+    typedef std::pair<KmerType, edge_index> CacheValue;
 
-    // TODO: switch to a more efficient LRU cache implementation?
-    mutable ThreadUnsafeLRUCache<edge_index, CacheNode> decoded_cache_;
+    mutable common::ThreadUnsafeLRUCache<edge_index, CacheValue> decoded_cache_;
+
+    void put_kmer(edge_index key, CacheValue value) const {
+        assert(!value.second || value.first[1] == boss_->get_node_last_value(value.second));
+        assert(value.first[1] == boss_->get_minus_k_value(key, get_k() - 2).first);
+        assert(to_kmer(graph_ptr_->get_node_sequence(graph_ptr_->boss_to_kmer_index(key)))
+            == value.first);
+        decoded_cache_.Put(key, std::move(value));
+    }
+
+    CacheValue get_kmer_pair(edge_index i, bool check_second = false) const {
+        auto kmer = decoded_cache_.TryGet(i);
+        if (check_second && !kmer->second)
+            kmer = std::nullopt;
+
+        if (!kmer) {
+            std::vector<TAlphabet> seq;
+            edge_index first = 0;
+
+            if (check_second) {
+                std::tie(seq, first) = boss_->get_node_seq_with_end_node(i);
+            } else {
+                seq = boss_->get_node_seq(i);
+            }
+
+            seq.push_back(boss_->get_W(i) % boss_->alph_size);
+            kmer = !kmer ? std::make_pair(to_kmer(seq), first)
+                         : std::make_pair(kmer->first, first);
+
+            put_kmer(i, *kmer);
+        }
+
+        return *kmer;
+    }
+
+    void update_node_next(CacheValue kmer, edge_index next, char c) const {
+        kmer.first.to_next(graph_ptr_->get_k(), encode(c));
+        if (kmer.second) {
+            TAlphabet w = boss_->get_W(kmer.second);
+            kmer.second = w < boss_->alph_size ? boss_->fwd(kmer.second, w) : 0;
+        }
+        put_kmer(next, std::move(kmer));
+    }
 
     inline static constexpr TAlphabet encode(char c) { return KmerExtractor::encode(c); }
     inline static constexpr std::string decode(const std::vector<TAlphabet> &v) {
@@ -346,48 +348,7 @@ class DBGSuccinctCachedImpl : public DBGSuccinctCached {
     }
     inline static constexpr KmerType to_kmer(const std::vector<TAlphabet> &seq) {
         // TODO: avoid decode step
-        return KmerExtractor::sequence_to_kmer<KmerType>(decode(seq));
-    }
-
-    void put_kmer(edge_index key, CacheNode value) const {
-        assert(!value.second || value.first[1] == boss_->get_node_last_value(value.second));
-        assert(value.first[1] == boss_->get_minus_k_value(key, get_k() - 2).first);
-        assert(to_kmer(graph_ptr_->get_node_sequence(graph_ptr_->boss_to_kmer_index(key)))
-            == value.first);
-        decoded_cache_.Put(key, std::move(value));
-    }
-
-    CacheNode get_kmer_pair(edge_index i, bool check_second = false) const {
-        auto kmer = decoded_cache_.TryGet(i);
-        if (!kmer || (check_second && !kmer->second)) {
-            auto [seq, first] = get_boss_node_seq(i);
-
-            kmer = !kmer ? std::make_pair(to_kmer(seq), first)
-                         : std::make_pair(kmer->first, first);
-
-            put_kmer(i, *kmer);
-        }
-
-        return *kmer;
-    }
-
-    void update_node_next_from_kmer(CacheNode kmer, node_index next, char c) const {
-        kmer.first.to_next(graph_ptr_->get_k(), encode(c));
-        kmer.second = 0;
-        put_kmer(graph_ptr_->kmer_to_boss_index(next), std::move(kmer));
-    }
-
-    void update_node_prev_from_kmer(CacheNode kmer, node_index prev, char c) const {
-        kmer.first.to_prev(graph_ptr_->get_k(), encode(c));
-        kmer.second = 0;
-        put_kmer(graph_ptr_->kmer_to_boss_index(prev), std::move(kmer));
-    }
-
-    std::pair<std::vector<TAlphabet>, edge_index> get_boss_node_seq(edge_index i) const {
-        auto ret_val = boss_->get_node_seq_with_node(i);
-        assert(ret_val.first[0] == boss_->get_node_last_value(ret_val.second));
-        ret_val.first.push_back(boss_->get_W(i) % boss_->alph_size);
-        return ret_val;
+        return to_kmer(decode(seq));
     }
 };
 
@@ -403,33 +364,6 @@ make_cached_dbgsuccinct(std::shared_ptr<DeBruijnGraph> graph, size_t cache_size)
     }
 }
 
-
-template <typename Key, typename Value>
-inline std::optional<Value> ThreadUnsafeLRUCache<Key, Value>::TryGet(const Key &key) {
-    auto find = finder_.find(key);
-    if (find == finder_.end())
-        return std::nullopt;
-
-    values_.splice(values_.begin(), values_, find->second);
-    return find->second->second;
-}
-
-template <typename Key, typename Value>
-inline void ThreadUnsafeLRUCache<Key, Value>::Put(const Key &key, Value value) {
-    auto find = finder_.find(key);
-    if (find != finder_.end()) {
-        find->second->second = std::move(value);
-        values_.splice(values_.begin(), values_, find->second);
-    } else {
-        values_.insert(values_.begin(), std::make_pair(key, std::move(value)));
-        finder_[key] = values_.begin();
-    }
-
-    if (values_.size() > max_size_) {
-        finder_.erase(values_.back().first);
-        values_.pop_back();
-    }
-}
 
 } // namespace graph
 } // namespace mtg

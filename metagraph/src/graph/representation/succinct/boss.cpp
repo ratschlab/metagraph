@@ -854,7 +854,7 @@ bool BOSS::compare_node_suffix(edge_index first, const TAlphabet *second) const 
  * node is the last node visited after k - indexed_suffix_length_ bwd steps.
  */
 std::pair<std::vector<TAlphabet>, edge_index> BOSS
-::get_node_seq_with_node_indexed(edge_index x) const {
+::get_node_seq_with_end_node_indexed(edge_index x) const {
     CHECK_INDEX(x);
 
     std::vector<TAlphabet> ret(k_);
@@ -904,7 +904,7 @@ std::pair<std::vector<TAlphabet>, edge_index> BOSS
  * source node.
  */
 std::vector<TAlphabet> BOSS::get_node_seq(edge_index i) const {
-    return get_node_seq_with_node_indexed(i).first;
+    return get_node_seq_with_end_node_indexed(i).first;
 }
 
 /**
@@ -913,8 +913,8 @@ std::vector<TAlphabet> BOSS::get_node_seq(edge_index i) const {
  * character of the sequence.
  */
 std::pair<std::vector<TAlphabet>, edge_index> BOSS
-::get_node_seq_with_node(edge_index i) const {
-    auto ret_val = get_node_seq_with_node_indexed(i);
+::get_node_seq_with_end_node(edge_index i) const {
+    auto ret_val = get_node_seq_with_end_node_indexed(i);
     for (size_t i = 1; i < indexed_suffix_length_; ++i) {
         CHECK_INDEX(ret_val.second);
         ret_val.second = bwd(ret_val.second);
