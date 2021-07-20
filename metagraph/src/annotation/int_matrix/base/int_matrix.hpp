@@ -52,9 +52,6 @@ class MultiIntMatrix : public IntMatrix {
 
     virtual std::vector<RowTuples>
     get_row_tuples(const std::vector<Row> &rows) const = 0;
-
-    virtual bool load_tuples(std::istream &in) = 0;
-    virtual void serialize_tuples(std::ostream &out) const = 0;
 };
 
 } // namespace matrix

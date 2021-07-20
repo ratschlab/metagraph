@@ -673,6 +673,45 @@ int transform_annotation(Config *config) {
                 logger->trace("Serialized to {}", config->outfbase);
                 break;
             }
+            case Config::RowDiffCoord: {
+                assert(config->infbase.size());
+                const std::string anchors_file = config->infbase + annot::binmat::kRowDiffAnchorExt;
+                if (!std::filesystem::exists(anchors_file)) {
+                    logger->error("Anchor bitmap {} does not exist. Run the row_diff"
+                                  " transform followed by anchor optimization.", anchors_file);
+                    std::exit(1);
+                }
+                const std::string fork_succ_file = config->infbase + annot::binmat::kRowDiffForkSuccExt;
+                if (!std::filesystem::exists(fork_succ_file)) {
+                    logger->error("Fork successor bitmap {} does not exist", fork_succ_file);
+                    std::exit(1);
+                }
+
+                auto label_encoder = annotator->get_label_encoder();
+                using RDMatrix = matrix::TupleRowDiff<matrix::TupleCSCMatrix<binmat::ColumnMajor>>;
+                auto tuple_matrix = std::make_unique<RDMatrix>(nullptr, annotator->release_matrix());
+                tuple_matrix->load_anchor(anchors_file);
+                tuple_matrix->load_fork_succ(fork_succ_file);
+                logger->trace("RowDiff support bitmaps loaded");
+
+                if (files.size() > 1) {
+                    logger->error("Merging coordinates from multiple columns is not supported");
+                    exit(1);
+                }
+                auto coords_fname = utils::remove_suffix(files.at(0),
+                                                         ColumnCompressed<>::kExtension)
+                                        + ColumnCompressed<>::kCoordExtension;
+                std::ifstream in(coords_fname);
+                tuple_matrix->diffs().load_tuples(in);
+
+                RowDiffCoordAnnotator annotation(std::move(tuple_matrix), label_encoder);
+
+                logger->trace("Annotation converted in {} sec", timer.elapsed());
+
+                annotation.serialize(config->outfbase);
+                logger->trace("Serialized to {}", config->outfbase);
+                break;
+            }
             case Config::RowDiffBRWT: {
                 logger->error("Convert to row_diff first, and then to row_diff_brwt");
                 return 0;
@@ -774,20 +813,15 @@ int transform_annotation(Config *config) {
                 auto int_annotation = convert_to_IntMultiBRWT(files, *config, timer);
                 logger->trace("Annotation converted in {} sec", timer.elapsed());
 
+                auto label_encoder = int_annotation.get_label_encoder();
                 using CSCMatrix = matrix::CSCMatrix<binmat::BRWT, CountsVector>;
-
-                IntRowDiffBRWTAnnotator annotation(
-                        std::make_unique<matrix::IntRowDiff<CSCMatrix>>(nullptr,
-                                std::move(*int_annotation.release_matrix())),
-                        int_annotation.get_label_encoder());
-
-                const_cast<matrix::IntRowDiff<CSCMatrix> &>(annotation.get_matrix())
-                        .load_anchor(anchors_file);
-                const_cast<matrix::IntRowDiff<CSCMatrix> &>(annotation.get_matrix())
-                        .load_fork_succ(fork_succ_file);
-
+                auto matrix = std::make_unique<matrix::IntRowDiff<CSCMatrix>>(nullptr,
+                                std::move(*int_annotation.release_matrix()));
+                matrix->load_anchor(anchors_file);
+                matrix->load_fork_succ(fork_succ_file);
                 logger->trace("RowDiff support bitmaps loaded");
 
+                IntRowDiffBRWTAnnotator annotation(std::move(matrix), std::move(label_encoder));
                 annotation.serialize(config->outfbase);
                 logger->trace("Serialized to {}", config->outfbase);
                 break;
