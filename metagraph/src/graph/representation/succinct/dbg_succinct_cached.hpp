@@ -339,10 +339,11 @@ class DBGSuccinctCachedImpl : public DBGSuccinctCached {
         put_kmer(next, std::move(kmer));
     }
 
-    inline static constexpr TAlphabet encode(char c) { return KmerExtractor::encode(c); }
-    inline static constexpr std::string decode(const std::vector<TAlphabet> &v) {
+    inline static std::string decode(const std::vector<TAlphabet> &v) {
         return KmerExtractor::decode(v);
     }
+
+    inline static constexpr TAlphabet encode(char c) { return KmerExtractor::encode(c); }
     inline static constexpr KmerType to_kmer(std::string_view seq) {
         return KmerExtractor::sequence_to_kmer<KmerType>(seq);
     }
