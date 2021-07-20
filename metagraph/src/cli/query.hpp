@@ -62,6 +62,7 @@ class QueryExecutor {
                                      bool suppress_unlabeled,
                                      size_t num_top_labels,
                                      double discovery_fraction,
+                                     double presence_fraction,
                                      std::string anno_labels_delimiter,
                                      const graph::AnnotatedDBG &anno_graph,
                                      bool with_kmer_counts = false,

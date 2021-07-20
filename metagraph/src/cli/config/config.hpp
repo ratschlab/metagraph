@@ -123,6 +123,7 @@ class Config {
     double alignment_rel_score_cutoff = 0.8;
 
     double discovery_fraction = 0.7;
+    double presence_fraction = 0.0;
     double label_mask_in_fraction = 1.0;
     double label_mask_out_fraction = 0.0;
     double label_other_fraction = 1.0;
