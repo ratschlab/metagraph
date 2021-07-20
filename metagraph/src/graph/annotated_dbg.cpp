@@ -237,9 +237,9 @@ void AnnotatedDBG::annotate_kmer_coords(
 }
 
 std::vector<Label> AnnotatedDBG::get_labels(std::string_view sequence,
-                                            double presence_ratio) const {
-    assert(presence_ratio >= 0.);
-    assert(presence_ratio <= 1.);
+                                            double discovery_fraction) const {
+    assert(discovery_fraction >= 0.);
+    assert(discovery_fraction <= 1.);
     assert(check_compatibility());
 
     if (sequence.size() < dbg_.get_k())
@@ -260,7 +260,7 @@ std::vector<Label> AnnotatedDBG::get_labels(std::string_view sequence,
         }
     });
 
-    size_t min_count = std::max(1.0, std::ceil(presence_ratio
+    size_t min_count = std::max(1.0, std::ceil(discovery_fraction
                                                  * (num_present_kmers
                                                      + num_missing_kmers)));
 
@@ -305,10 +305,10 @@ AnnotatedSequenceGraph::get_labels(node_index index) const {
 std::vector<StringCountPair>
 AnnotatedDBG::get_top_labels(std::string_view sequence,
                              size_t num_top_labels,
-                             double presence_ratio,
+                             double discovery_fraction,
                              bool with_kmer_counts) const {
-    assert(presence_ratio >= 0.);
-    assert(presence_ratio <= 1.);
+    assert(discovery_fraction >= 0.);
+    assert(discovery_fraction <= 1.);
     assert(check_compatibility());
 
     if (sequence.size() < dbg_.get_k())
@@ -327,7 +327,7 @@ AnnotatedDBG::get_top_labels(std::string_view sequence,
         }
     });
 
-    uint64_t min_count = std::max(1.0, std::ceil(presence_ratio * num_kmers));
+    uint64_t min_count = std::max(1.0, std::ceil(discovery_fraction * num_kmers));
     if (num_present_kmers < min_count)
         return {};
 
@@ -344,10 +344,10 @@ AnnotatedDBG::get_top_labels(std::string_view sequence,
 std::vector<std::pair<std::string, std::vector<size_t>>>
 AnnotatedDBG::get_label_count_quantiles(std::string_view sequence,
                                         size_t num_top_labels,
-                                        double presence_ratio,
+                                        double discovery_fraction,
                                         const std::vector<double> &count_quantiles) const {
-    assert(presence_ratio >= 0.);
-    assert(presence_ratio <= 1.);
+    assert(discovery_fraction >= 0.);
+    assert(discovery_fraction <= 1.);
     assert(check_compatibility());
     if (!std::is_sorted(count_quantiles.begin(), count_quantiles.end()))
         throw std::runtime_error("Quantiles must be sorted");
@@ -366,7 +366,7 @@ AnnotatedDBG::get_label_count_quantiles(std::string_view sequence,
             rows.push_back(graph_to_anno_index(i));
     });
 
-    uint64_t min_count = std::max(1.0, std::ceil(presence_ratio * num_kmers));
+    uint64_t min_count = std::max(1.0, std::ceil(discovery_fraction * num_kmers));
     if (rows.size() < min_count)
         return {};
 
@@ -431,9 +431,9 @@ AnnotatedDBG::get_label_count_quantiles(std::string_view sequence,
 std::vector<std::pair<std::string, std::vector<SmallVector<uint64_t>>>>
 AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
                                    size_t num_top_labels,
-                                   double presence_ratio) const {
-    assert(presence_ratio >= 0.);
-    assert(presence_ratio <= 1.);
+                                   double discovery_fraction) const {
+    assert(discovery_fraction >= 0.);
+    assert(discovery_fraction <= 1.);
     assert(check_compatibility());
 
     if (sequence.size() < dbg_.get_k())
@@ -447,15 +447,15 @@ AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
         path.push_back(i);
     });
 
-    return get_kmer_coordinates(path, num_top_labels, presence_ratio);
+    return get_kmer_coordinates(path, num_top_labels, discovery_fraction);
 }
 
 std::vector<std::pair<std::string, std::vector<SmallVector<uint64_t>>>>
 AnnotatedDBG::get_kmer_coordinates(const std::vector<node_index> &path,
                                    size_t num_top_labels,
-                                   double presence_ratio) const {
-    assert(presence_ratio >= 0.);
-    assert(presence_ratio <= 1.);
+                                   double discovery_fraction) const {
+    assert(discovery_fraction >= 0.);
+    assert(discovery_fraction <= 1.);
     assert(check_compatibility());
 
     if (!path.size())
@@ -476,7 +476,7 @@ AnnotatedDBG::get_kmer_coordinates(const std::vector<node_index> &path,
         }
     }
 
-    uint64_t min_count = std::max(1.0, std::ceil(presence_ratio * path.size()));
+    uint64_t min_count = std::max(1.0, std::ceil(discovery_fraction * path.size()));
     if (rows.size() < min_count)
         return {};
 
@@ -545,9 +545,9 @@ AnnotatedDBG::get_kmer_coordinates(const std::vector<node_index> &path,
 std::vector<std::pair<Label, sdsl::bit_vector>>
 AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
                                        size_t num_top_labels,
-                                       double presence_ratio) const {
-    assert(presence_ratio >= 0.);
-    assert(presence_ratio <= 1.);
+                                       double discovery_fraction) const {
+    assert(discovery_fraction >= 0.);
+    assert(discovery_fraction <= 1.);
     assert(check_compatibility());
 
     if (sequence.size() < dbg_.get_k())
@@ -555,10 +555,10 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
 
     size_t num_kmers = sequence.size() - dbg_.get_k() + 1;
 
-    if (presence_ratio == 1.) {
+    if (discovery_fraction == 1.) {
         std::vector<std::pair<Label, sdsl::bit_vector>> presence_vectors;
 
-        auto label_counts = get_top_labels(sequence, num_top_labels, presence_ratio);
+        auto label_counts = get_top_labels(sequence, num_top_labels, discovery_fraction);
         presence_vectors.reserve(label_counts.size());
         for (auto&& [label, count] : label_counts) {
             presence_vectors.emplace_back(
@@ -586,7 +586,7 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
     });
     assert(j == num_kmers);
 
-    const uint64_t min_count = std::max(1.0, std::ceil(presence_ratio * num_kmers));
+    const uint64_t min_count = std::max(1.0, std::ceil(discovery_fraction * num_kmers));
 
     if (kmer_positions.size() < min_count)
         return {};
@@ -648,7 +648,7 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
 
 #ifndef NDEBUG
     // sanity check, make sure that the same matches are output by get_top_labels
-    auto top_labels = get_top_labels(sequence, num_top_labels, presence_ratio);
+    auto top_labels = get_top_labels(sequence, num_top_labels, discovery_fraction);
     assert(top_labels.size() == results.size());
 
     std::unordered_map<Label, uint64_t> check(top_labels.begin(), top_labels.end());

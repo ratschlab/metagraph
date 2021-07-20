@@ -100,9 +100,9 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
 
     /*********************** Special queries **********************/
 
-    // return labels that occur at least in |presence_ratio| k-mers
+    // return labels that occur at least in |discovery_fraction| k-mers
     std::vector<Label> get_labels(std::string_view sequence,
-                                  double presence_ratio) const;
+                                  double discovery_fraction) const;
 
     std::vector<Label> get_labels(const std::vector<std::pair<row_index, size_t>> &index_counts,
                                   size_t min_count) const;
@@ -113,7 +113,7 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
     std::vector<std::pair<Label, size_t>>
     get_top_labels(std::string_view sequence,
                    size_t num_top_labels,
-                   double presence_ratio = 0.0,
+                   double discovery_fraction = 0.0,
                    bool with_kmer_counts = false) const;
 
     // The returned counts are weighted by the annotated relation counts if
@@ -127,23 +127,23 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
     std::vector<std::pair<Label, std::vector<size_t>>>
     get_label_count_quantiles(std::string_view sequence,
                               size_t num_top_labels,
-                              double presence_ratio,
+                              double discovery_fraction,
                               const std::vector<double> &count_quantiles) const;
 
     std::vector<std::pair<Label, std::vector<SmallVector<uint64_t>>>>
     get_kmer_coordinates(std::string_view sequence,
                          size_t num_top_labels,
-                         double presence_ratio) const;
+                         double discovery_fraction) const;
 
     std::vector<std::pair<Label, std::vector<SmallVector<uint64_t>>>>
     get_kmer_coordinates(const std::vector<node_index> &path,
                          size_t num_top_labels,
-                         double presence_ratio) const;
+                         double discovery_fraction) const;
 
     std::vector<std::pair<Label, sdsl::bit_vector>>
     get_top_label_signatures(std::string_view sequence,
                              size_t num_top_labels,
-                             double presence_ratio = 0.0) const;
+                             double discovery_fraction = 0.0) const;
 
     int32_t score_kmer_presence_mask(const sdsl::bit_vector &kmer_presence_mask,
                                      int32_t match_score = 1,
