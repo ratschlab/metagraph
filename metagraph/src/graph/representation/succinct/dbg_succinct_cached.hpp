@@ -138,8 +138,6 @@ class DBGSuccinctCached : public DeBruijnGraph {
 };
 
 
-// A fast LRU cache which memoizes computation results. More precisely, if a key
-// is already present, it assumes that the corresponding value will be the same.
 template <typename KmerType>
 class DBGSuccinctCachedImpl : public DBGSuccinctCached {
     typedef kmer::KmerExtractorBOSS KmerExtractor;
