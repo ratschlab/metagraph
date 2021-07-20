@@ -274,6 +274,13 @@ class BOSS {
     std::vector<TAlphabet> get_node_seq(edge_index i) const;
 
     /**
+     * Given an edge index i, this function returns the k-mer sequence of its
+     * source node, and the node whose last character corresponds to the first
+     * character of the sequence.
+     */
+    std::pair<std::vector<TAlphabet>, edge_index> get_node_seq_with_node(edge_index i) const;
+
+    /**
      * Given index i of an edge and a value k, this function
      * returns the k-th last character of the source node for edge i.
      */
@@ -556,6 +563,14 @@ class BOSS {
      * node has the same k-1 suffix as k-mer |second|.
      */
     bool compare_node_suffix(edge_index first, const TAlphabet *second) const;
+
+    /**
+     * Given an edge index i, this function returns the k-mer sequence of its
+     * source node, and the node whose last character corresponds to the first
+     * character of the sequence. If the graph is suffix indexed, then the returned
+     * node is the last node visited after k - indexed_suffix_length_ bwd steps.
+     */
+    std::pair<std::vector<TAlphabet>, edge_index> get_node_seq_with_node_indexed(edge_index i) const;
 
     /**
      * Given a (k+1)-mer, this function returns the index

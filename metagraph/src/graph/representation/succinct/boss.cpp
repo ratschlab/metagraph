@@ -849,9 +849,12 @@ bool BOSS::compare_node_suffix(edge_index first, const TAlphabet *second) const 
 
 /**
  * Given an edge index i, this function returns the k-mer sequence of its
- * source node.
+ * source node, and the node whose last character corresponds to the first
+ * character of the sequence. If the graph is suffix indexed, then the returned
+ * node is the last node visited after k - indexed_suffix_length_ bwd steps.
  */
-std::vector<TAlphabet> BOSS::get_node_seq(edge_index x) const {
+std::pair<std::vector<TAlphabet>, edge_index> BOSS
+::get_node_seq_with_node_indexed(edge_index x) const {
     CHECK_INDEX(x);
 
     std::vector<TAlphabet> ret(k_);
@@ -880,7 +883,7 @@ std::vector<TAlphabet> BOSS::get_node_seq(edge_index x) const {
                 ret[i] = index - next_index * (alph_size - 1) + 1;
                 index = next_index;
             }
-            return ret;
+            return std::make_pair(ret, x);
         }
     }
 
@@ -893,7 +896,33 @@ std::vector<TAlphabet> BOSS::get_node_seq(edge_index x) const {
         ret[--i] = get_node_last_value(x);
     }
 
-    return ret;
+    return std::make_pair(ret, x);
+}
+
+/**
+ * Given an edge index i, this function returns the k-mer sequence of its
+ * source node.
+ */
+std::vector<TAlphabet> BOSS::get_node_seq(edge_index i) const {
+    return get_node_seq_with_node_indexed(i).first;
+}
+
+/**
+ * Given an edge index i, this function returns the k-mer sequence of its
+ * source node, and the node whose last character corresponds to the first
+ * character of the sequence.
+ */
+std::pair<std::vector<TAlphabet>, edge_index> BOSS
+::get_node_seq_with_node(edge_index i) const {
+    auto ret_val = get_node_seq_with_node_indexed(i);
+    for (size_t i = 1; i < indexed_suffix_length_; ++i) {
+        CHECK_INDEX(ret_val.second);
+        ret_val.second = bwd(ret_val.second);
+    }
+
+    assert(ret_val.first[0] == get_node_last_value(ret_val.second));
+
+    return ret_val;
 }
 
 /**

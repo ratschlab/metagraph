@@ -220,7 +220,7 @@ void CanonicalDBG::append_next_rc_nodes(node_index node,
             [&](node_index next, uint64_t /* match length */) {
                 auto edge = dbg_succ->kmer_to_boss_index(next);
                 boss::BOSS::TAlphabet c = cached
-                    ? cached->get_first_value(edge)
+                    ? cached->get_first_value(next)
                     : boss.get_minus_k_value(edge, get_k() - 2).first;
                 if (c == boss::BOSS::kSentinelCode)
                     return;
