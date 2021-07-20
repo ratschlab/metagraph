@@ -11,6 +11,7 @@ namespace graph {
 
 
 // A wrapper which caches computed node sequences for DBGSuccinct graphs.
+// This allows for faster get_node_sequence and call_incoming_kmers calls.
 class DBGSuccinctCached;
 
 std::shared_ptr<DBGSuccinctCached>
@@ -45,14 +46,17 @@ class DBGSuccinctCached : public DeBruijnGraph {
 
     virtual ~DBGSuccinctCached() {}
 
+    // if the sequence of a node has been constructed externally, cache the result
+    virtual void put_decoded_node(node_index node, std::string_view seq) const = 0;
+
+    // get the encoding of the first character of this node's sequence
+    virtual TAlphabet get_first_value(node_index node) const = 0;
+
     virtual const DeBruijnGraph& get_base_graph() const override final {
         return graph_ptr_->get_base_graph();
     }
 
     const DBGSuccinct& get_dbg_succ() const { return *graph_ptr_; }
-
-    virtual void put_decoded_node(node_index node, std::string_view seq) const = 0;
-    virtual TAlphabet get_first_value(node_index node) const = 0;
 
     virtual size_t get_k() const override final { return graph_ptr_->get_k(); }
 
@@ -154,6 +158,7 @@ class DBGSuccinctCachedImpl : public DBGSuccinctCached {
     }
 
     std::string get_node_sequence(node_index node) const {
+        // get the sequence from either the cache, or the underlying graph
         auto ret_val = KmerExtractor::kmer_to_sequence<KmerType>(
             get_kmer_pair(graph_ptr_->kmer_to_boss_index(node)).first,
             graph_ptr_->get_k()
@@ -165,6 +170,9 @@ class DBGSuccinctCachedImpl : public DBGSuccinctCached {
 
     TAlphabet get_first_value(node_index node) const {
         edge_index i = graph_ptr_->kmer_to_boss_index(node);
+
+        // Take k - 1 traversal steps to construct the node sequence. This way,
+        // the last node visited and its parent can be cached for subsequence calls.
         auto kmer_pair = get_kmer_pair(i, true);
         assert(kmer_pair.second);
 
@@ -224,6 +232,7 @@ class DBGSuccinctCachedImpl : public DBGSuccinctCached {
 
                 auto prev = graph_ptr_->boss_to_kmer_index(incoming_boss_edge);
 
+                // get the first character from either the cache, or the graph
                 TAlphabet s = get_first_value(prev);
 
                 if (prev != npos && s != boss::BOSS::kSentinelCode)
@@ -255,6 +264,8 @@ class DBGSuccinctCachedImpl : public DBGSuccinctCached {
                         // initialize a new k-mer
                         prev = to_kmer(std::string_view(begin, k));
                     }
+
+                    // cache the result
                     put_kmer(graph_ptr_->kmer_to_boss_index(i), std::make_pair(*prev, 0));
                 } else {
                     // reset the k-mer to null
@@ -294,6 +305,7 @@ class DBGSuccinctCachedImpl : public DBGSuccinctCached {
 
     mutable common::ThreadUnsafeLRUCache<edge_index, CacheValue> decoded_cache_;
 
+    // cache a computed result
     void put_kmer(edge_index key, CacheValue value) const {
         assert(!value.second || value.first[1] == boss_->get_node_last_value(value.second));
         assert(value.first[1] == boss_->get_minus_k_value(key, get_k() - 2).first);
@@ -304,22 +316,30 @@ class DBGSuccinctCachedImpl : public DBGSuccinctCached {
 
     CacheValue get_kmer_pair(edge_index i, bool check_second = false) const {
         auto kmer = decoded_cache_.TryGet(i);
+
+        // if the result of bwd^{k - 1}(i) is desired and not cached, then
+        // clear the k-mer so it can be recomputed below
         if (check_second && !kmer->second)
             kmer = std::nullopt;
 
         if (!kmer) {
             std::vector<TAlphabet> seq;
-            edge_index first = 0;
+
+            // initialize
+            kmer = CacheValue{ KmerType(), 0 };
 
             if (check_second) {
-                std::tie(seq, first) = boss_->get_node_seq_with_end_node(i);
+                // we need the result of bwd^{k - 1}(i), so take all traversal steps
+                std::tie(seq, kmer->second) = boss_->get_node_seq_with_end_node(i);
             } else {
+                // We don't need that value, so use the built-in method to compute
+                // the sequence. This uses the BOSS suffix index to speed it up.
                 seq = boss_->get_node_seq(i);
             }
 
+            // append the last character and cache the result
             seq.push_back(boss_->get_W(i) % boss_->alph_size);
-            kmer = !kmer ? std::make_pair(to_kmer(seq), first)
-                         : std::make_pair(kmer->first, first);
+            kmer->first = to_kmer(seq);
 
             put_kmer(i, *kmer);
         }
@@ -328,11 +348,15 @@ class DBGSuccinctCachedImpl : public DBGSuccinctCached {
     }
 
     void update_node_next(CacheValue kmer, edge_index next, char c) const {
+        // update the k-mer with the next character
         kmer.first.to_next(graph_ptr_->get_k(), encode(c));
+
         if (kmer.second) {
+            // update the corresponding front BOSS node
             TAlphabet w = boss_->get_W(kmer.second);
             kmer.second = w < boss_->alph_size ? boss_->fwd(kmer.second, w) : 0;
         }
+
         put_kmer(next, std::move(kmer));
     }
 
