@@ -583,7 +583,8 @@ Config::Config(int argc, char *argv[]) {
         const bool to_row_diff = anno_type == RowDiff
                                     || anno_type == RowDiffBRWT
                                     || anno_type == IntRowDiffBRWT
-                                    || anno_type == RowDiffRowSparse;
+                                    || anno_type == RowDiffRowSparse
+                                    || anno_type == RowDiffCoord;
         if (to_row_diff && !infbase.size()) {
             std::cerr << "Path to graph must be passed with '-i <GRAPH>'" << std::endl;
             print_usage_and_exit = true;
@@ -704,6 +705,8 @@ std::string Config::annotype_to_string(AnnotationType state) {
             return "row_diff_int_brwt";
         case ColumnCoord:
             return "column_coord";
+        case RowDiffCoord:
+            return "row_diff_coord";
     }
     throw std::runtime_error("Never happens");
 }
@@ -739,6 +742,8 @@ Config::AnnotationType Config::string_to_annotype(const std::string &string) {
         return AnnotationType::IntRowDiffBRWT;
     } else if (string == "column_coord") {
         return AnnotationType::ColumnCoord;
+    } else if (string == "row_diff_coord") {
+        return AnnotationType::RowDiffCoord;
     } else {
         std::cerr << "Error: unknown annotation representation" << std::endl;
         exit(1);
