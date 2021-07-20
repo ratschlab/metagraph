@@ -268,7 +268,7 @@ void TupleRowDiff<BaseMatrix>::add_diff(const RowTuples &diff, RowTuples *row) {
     for (auto &[j, tuple] : *row) {
         assert(std::is_sorted(tuple.begin(), tuple.end()));
         for (uint64_t &c : tuple) {
-            c--;
+            c -= SHIFT;
         }
     }
 }
