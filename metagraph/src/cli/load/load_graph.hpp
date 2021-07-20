@@ -25,10 +25,14 @@ std::shared_ptr<Graph> load_critical_graph_from_file(const std::string &filename
 
 std::shared_ptr<graph::DeBruijnGraph> load_critical_dbg(const std::string &filename);
 
-// Wrap PRIMARY mode graphs into CANONICAL graphs, and enable caching of decoded
-// k-mers for DBGSuccinct graphs if requested.
-std::shared_ptr<graph::DeBruijnGraph> wrap_graph(std::shared_ptr<graph::DeBruijnGraph> graph,
-                                                 bool enable_cache = false);
+std::shared_ptr<graph::DeBruijnGraph>
+primary_to_canonical(std::shared_ptr<graph::DeBruijnGraph> graph,
+                     size_t cache_size = 1024);
+
+std::shared_ptr<graph::DeBruijnGraph>
+make_cached_graph(std::shared_ptr<graph::DeBruijnGraph> graph,
+                  const Config &config,
+                  size_t cache_size = 1024);
 
 } // namespace cli
 } // namespace mtg

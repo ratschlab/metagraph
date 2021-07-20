@@ -73,17 +73,41 @@ std::shared_ptr<DeBruijnGraph> load_critical_dbg(const std::string &filename) {
     exit(1);
 }
 
-std::shared_ptr<graph::DeBruijnGraph> wrap_graph(std::shared_ptr<graph::DeBruijnGraph> graph,
-                                                 bool enable_cache) {
-    if (enable_cache) {
-        if (auto dbg_succ = std::dynamic_pointer_cast<DBGSuccinct>(graph))
-            graph = make_cached_dbgsuccinct(dbg_succ);
+std::shared_ptr<DeBruijnGraph> primary_to_canonical(std::shared_ptr<DeBruijnGraph> graph,
+                                                    size_t cache_size) {
+    if (graph->get_mode() != DeBruijnGraph::PRIMARY) {
+        logger->error("Only primary mode graphs can be wrapped into canonical mode.");
+        exit(1);
     }
 
-    if (graph->get_mode() == DeBruijnGraph::PRIMARY) {
-        logger->trace("Primary graph wrapped into canonical");
-        graph = std::make_shared<CanonicalDBG>(graph);
+    logger->trace("Primary graph wrapped into canonical");
+    return std::make_shared<CanonicalDBG>(graph, cache_size);
+}
+
+std::shared_ptr<DeBruijnGraph> make_cached_graph(std::shared_ptr<DeBruijnGraph> graph,
+                                                 const Config &config,
+                                                 size_t cache_size) {
+    // if alignment in both directions is not required, then there's no need to cache
+    if (graph->get_mode() != DeBruijnGraph::CANONICAL && config.align_one_strand)
+        return graph;
+
+    auto base_graph = graph;
+    auto canonical = std::dynamic_pointer_cast<CanonicalDBG>(graph);
+
+    if (canonical) {
+        base_graph = canonical->get_graph_ptr();
+        assert(base_graph && "CanonicalDBG should be built from a non-const graph");
     }
+
+    if (auto dbg_succ = std::dynamic_pointer_cast<DBGSuccinct>(base_graph)) {
+        graph = make_cached_dbgsuccinct(base_graph, cache_size);
+    } else {
+        // graphs other than DBGSuccinct can't be cached
+        return graph;
+    }
+
+    if (graph->get_mode() == DeBruijnGraph::PRIMARY)
+        graph = primary_to_canonical(graph, cache_size);
 
     return graph;
 }

@@ -331,7 +331,6 @@ int align_to_graph(Config *config) {
 
     // initialize graph
     auto graph = load_critical_dbg(config->infbase);
-    auto base_graph = graph;
 
     if (utils::ends_with(config->outfbase, ".gfa")) {
         gfa_map_files(config, files, *graph);
@@ -342,7 +341,8 @@ int align_to_graph(Config *config) {
     ThreadPool thread_pool(get_num_threads());
     std::mutex print_mutex;
 
-    graph = wrap_graph(graph);
+    if (graph->get_mode() == DeBruijnGraph::PRIMARY)
+        graph = primary_to_canonical(graph);
 
     if (config->map_sequences) {
         if (!config->alignment_length) {
@@ -351,7 +351,7 @@ int align_to_graph(Config *config) {
             logger->warn("Mapping to k-mers longer than k is not supported");
             config->alignment_length = graph->get_k();
         } else if (config->alignment_length != graph->get_k()
-                && !dynamic_cast<const DBGSuccinct*>(base_graph.get())) {
+                && !dynamic_cast<const DBGSuccinct*>(&graph->get_base_graph())) {
             logger->error("Matching k-mers shorter than k only supported for succinct graphs");
             exit(1);
         }
@@ -414,12 +414,7 @@ int align_to_graph(Config *config) {
             auto process_batch = [&](SeqBatch batch) {
                 // the graph should only be cached if the base graph is in PRIMARY mode,
                 // or if it's not CANONICAL and backwards traversal will be required
-                auto aln_graph = wrap_graph(
-                    base_graph,
-                    base_graph->get_mode() == DeBruijnGraph::PRIMARY
-                        || (aligner_config.forward_and_reverse_complement
-                            && base_graph->get_mode() != DeBruijnGraph::CANONICAL)
-                );
+                auto aln_graph = make_cached_graph(graph, *config);
 
                 std::unique_ptr<IDBGAligner> aligner;
                 aligner = build_aligner(*aln_graph, aligner_config);

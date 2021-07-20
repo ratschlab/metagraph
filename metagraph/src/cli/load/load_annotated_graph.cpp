@@ -25,8 +25,8 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
     uint64_t max_index = graph->max_index();
     const auto *dbg_graph = dynamic_cast<const DBGSuccinct*>(graph.get());
 
-    // wrap PRIMARY graphs to CANONICAL
-    graph = wrap_graph(graph);
+    if (graph->get_mode() == DeBruijnGraph::PRIMARY)
+        graph = primary_to_canonical(graph);
 
     auto annotation_temp = config.infbase_annotators.size()
             ? initialize_annotation(config.infbase_annotators.at(0), config, 0)
