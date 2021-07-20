@@ -46,7 +46,7 @@ DBGAlignerConfig initialize_aligner_config(const Config &config) {
     aligner_config.alignment_match_score = config.alignment_match_score;
     aligner_config.alignment_mm_transition_score = config.alignment_mm_transition_score;
     aligner_config.alignment_mm_transversion_score = config.alignment_mm_transversion_score;
-    aligner_config.fraction_of_top = config.alignment_fraction_of_top;
+    aligner_config.rel_score_cutoff = config.alignment_rel_score_cutoff;
 
     logger->trace("Alignment settings:");
     logger->trace("\t Alignments to report: {}", aligner_config.num_alternative_paths);
@@ -57,7 +57,6 @@ DBGAlignerConfig initialize_aligner_config(const Config &config) {
     logger->trace("\t Max RAM per alignment: {}", aligner_config.max_ram_per_alignment);
     logger->trace("\t Gap opening penalty: {}", int64_t(aligner_config.gap_opening_penalty));
     logger->trace("\t Gap extension penalty: {}", int64_t(aligner_config.gap_extension_penalty));
-    logger->trace("\t Min DP table cell score: {}", int64_t(aligner_config.min_cell_score));
     logger->trace("\t Min alignment score: {}", aligner_config.min_path_score);
     logger->trace("\t X drop-off: {}", aligner_config.xdrop);
     logger->trace("\t Exact nucleotide match threshold: {}", aligner_config.min_exact_match);
@@ -321,25 +320,14 @@ std::string format_alignment(std::string_view header,
         }
 
         if (paths.empty()) {
-            Json::Value json_line = Alignment().to_json(paths.get_query(), graph,
-                                                        secondary, header);
+            Json::Value json_line
+                    = Alignment().to_json(paths.get_query(), graph, secondary, header);
 
             sout += fmt::format("{}\n", Json::writeString(builder, json_line));
         }
     }
 
     return sout;
-}
-
-void process_alignments(const DeBruijnGraph &graph,
-                        const Config &config,
-                        std::string_view header,
-                        QueryAlignment&& paths,
-                        std::ostream &out,
-                        std::mutex &mu) {
-    std::string res = format_alignment(header, paths, graph, config);
-    std::lock_guard<std::mutex> lock(mu);
-    out << res;
 }
 
 int align_to_graph(Config *config) {
@@ -403,9 +391,9 @@ int align_to_graph(Config *config) {
 
         Timer data_reading_timer;
 
-        std::ostream *out = config->outfbase.size()
-            ? new std::ofstream(config->outfbase)
-            : &std::cout;
+        std::shared_ptr<std::ostream> out{ std::shared_ptr<std::ostream>{}, &std::cout };
+        if (config->outfbase.size())
+            out = std::make_shared<std::ofstream>(config->outfbase);
 
         const uint64_t batch_size = config->query_batch_size_in_bytes;
 
@@ -453,8 +441,9 @@ int align_to_graph(Config *config) {
                 aligner = build_aligner(*aln_graph, aligner_config);
 
                 aligner->align_batch(batch, [&](std::string_view header, auto&& paths) {
-                    process_alignments(*aln_graph, *config, header,
-                                       std::move(paths), *out, print_mutex);
+                    std::string res = format_alignment(header, paths, *aln_graph, *config);
+                    std::lock_guard<std::mutex> lock(print_mutex);
+                    *out << res;
                 });
             };
 
@@ -498,9 +487,6 @@ int align_to_graph(Config *config) {
                       "current mem usage: {} MB, total time {} sec",
                       file, data_reading_timer.elapsed(), num_batches, batch_size / 1e3,
                       get_curr_RSS() / 1e6, timer.elapsed());
-
-        if (config->outfbase.size())
-            delete out;
     }
 
     return 0;

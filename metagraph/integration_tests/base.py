@@ -141,6 +141,7 @@ class TestingBase(unittest.TestCase):
                     {output + anno_file_extension[anno_repr]}'
 
         other_args = ' --count-kmers' if with_counts else ''
+        other_args += ' --coordinates' if final_anno.endswith('_coord') else ''
 
         if target_anno == 'row_diff':
             command += ' -i ' + graph_path
@@ -170,7 +171,7 @@ class TestingBase(unittest.TestCase):
             assert(res.returncode == 0)
 
             if final_anno != target_anno:
-                rd_type = 'column' if with_counts else 'row_diff'
+                rd_type = 'column' if with_counts or final_anno.endswith('_coord') else 'row_diff'
                 command = f'{METAGRAPH} transform_anno --anno-type {final_anno} --greedy -o {output} ' \
                                    f'-i {graph_path} -p {NUM_THREADS} {output}.{rd_type}.annodbg'
                 res = subprocess.run([command], shell=True)

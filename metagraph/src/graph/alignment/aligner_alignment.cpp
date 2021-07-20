@@ -23,33 +23,27 @@ Alignment::Alignment(std::string_view query,
                      bool orientation,
                      size_t offset)
       : query_(query), nodes_(std::move(nodes)), sequence_(std::move(sequence)),
-        score_(score), orientation_(orientation), offset_(offset) {
-    size_t min_length = std::min(query_.size(), sequence_.size());
-
-    cigar_ = std::inner_product(
-        query_.data(),
-        query_.data() + min_length,
-        sequence_.c_str(),
-        Cigar(Cigar::CLIPPED, clipping),
-        [&](Cigar &cigar, bool equal) -> Cigar& {
-            cigar.append(equal ? Cigar::MATCH : Cigar::MISMATCH);
-            return cigar;
-        },
-        std::equal_to<char>()
-    );
-
-    assert(!(query_.size() - min_length) || (sequence_.size() - min_length));
-    cigar_.append(Cigar::INSERTION, query_.size() - min_length);
-    cigar_.append(Cigar::DELETION, sequence_.size() - min_length);
+        score_(score),
+        orientation_(orientation),
+        offset_(offset) {
+    assert(query_.size() == sequence_.size());
+    cigar_ = std::inner_product(query_.begin(), query_.end(), sequence_.begin(),
+                                Cigar(Cigar::CLIPPED, clipping),
+                                [&](Cigar &cigar, bool equal) -> Cigar& {
+                                    cigar.append(equal ? Cigar::MATCH : Cigar::MISMATCH);
+                                    return cigar;
+                                },
+                                std::equal_to<char>());
 }
 
 std::ostream& operator<<(std::ostream& out, const Alignment &alignment) {
-    out << (alignment.get_orientation() ? "-" : "+") << "\t"
-        << alignment.get_sequence() << "\t"
-        << alignment.get_score() << "\t"
-        << alignment.get_num_matches() << "\t"
-        << alignment.get_cigar().to_string() << "\t"
-        << alignment.get_offset();
+    out << fmt::format("{}\t{}\t{}\t{}\t{}\t{}",
+                       (alignment.get_orientation() ? "-" : "+"),
+                       alignment.get_sequence(),
+                       alignment.get_score(),
+                       alignment.get_cigar().get_num_matches(),
+                       alignment.get_cigar().to_string(),
+                       alignment.get_offset());
 
     return out;
 }
@@ -444,7 +438,7 @@ Json::Value Alignment::to_json(std::string_view full_query,
         alignment["is_secondary"] = is_secondary;
 
     alignment["identity"] = query_.size()
-        ? static_cast<double>(get_num_matches()) / query_.size()
+        ? static_cast<double>(cigar_.get_num_matches()) / query_.size()
         : 0;
 
     alignment["read_mapped"] = static_cast<bool>(query_.size());
@@ -643,29 +637,33 @@ bool Alignment::is_valid(const DeBruijnGraph &graph, const DBGAlignerConfig *con
 }
 
 
-QueryAlignment::QueryAlignment(std::string_view query, bool is_reverse_complement)
-      : query_(new std::string()), query_rc_(new std::string()) {
+QueryAlignment::QueryAlignment(std::string_view query, bool is_reverse_complement) {
     // pad sequences for easier access in 64-bit blocks
-    query_->reserve(query.size() + 8);
-    query_->resize(query.size());
-    query_rc_->reserve(query.size() + 8);
-    query_rc_->resize(query.size());
+    std::string query_padded;
+    query_padded.reserve(query.size() + 8);
 
     // TODO: use alphabet encoder
     // transform to upper and fix non-standard characters
-    std::transform(query.begin(), query.end(), query_->begin(), [](char c) {
-        return c >= 0 ? toupper(c) : 127;
-    });
+    std::transform(query.begin(), query.end(), std::back_inserter(query_padded),
+                   [](char c) { return c >= 0 ? toupper(c) : 127; });
 
     // fill padding with '\0'
-    memset(query_->data() + query_->size(), '\0', query_->capacity() - query_->size());
+    memset(query_padded.data() + query.size(), '\0', query_padded.capacity() - query.size());
 
     // set the reverse complement
-    memcpy(query_rc_->data(), query_->data(), query_->capacity());
-    reverse_complement(query_rc_->begin(), query_rc_->end());
+    std::string query_rc_padded(query_padded);
 
+    // fill padding just in case optimizations removed it
+    query_rc_padded.reserve(query.size() + 8);
+    memset(query_rc_padded.data() + query.size(), '\0', query_rc_padded.capacity() - query.size());
+
+    // reverse complement
+    reverse_complement(query_rc_padded.begin(), query_rc_padded.end());
     if (is_reverse_complement)
-        std::swap(query_, query_rc_);
+        std::swap(query_padded, query_rc_padded);
+
+    query_ = std::make_shared<const std::string>(std::move(query_padded));
+    query_rc_ = std::make_shared<const std::string>(std::move(query_rc_padded));
 }
 
 } // namespace align

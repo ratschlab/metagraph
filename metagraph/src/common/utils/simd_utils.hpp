@@ -1,20 +1,11 @@
 #ifndef __SIMD_UTILS_HPP__
 #define __SIMD_UTILS_HPP__
 
-#ifdef __AVX2__
-#include <immintrin.h>
-#endif
-
-#ifdef __SSE4_1__
-#include <smmintrin.h>
-#endif
-
-#ifdef __SSE2__
-#include <emmintrin.h>
-#endif
+#include <x86intrin.h>
 
 #include <cassert>
 #include <cstdint>
+#include <cstddef>
 
 // Branch prediction helper macros
 #ifndef LIKELY
@@ -250,43 +241,6 @@ inline __m128i cvtepi64_epi32(__m256i v) {
         _mm256_setr_epi32(0, 2, 4, 6, 1, 3, 5, 7)
     ));
 }
-
-
-/**
- * Helpers for aligner
- */
-
-// Drop-in replacement for _mm_loadu_si64
-inline __m128i mm_loadu_si64(const void *mem_addr) {
-    return _mm_loadl_epi64((const __m128i*)mem_addr);
-}
-
-// Drop-in replacement for _mm_storeu_si64
-inline void mm_storeu_si64(void *mem_addr, __m128i a) {
-    _mm_storel_epi64((__m128i*)mem_addr, a);
-}
-
-inline void mm_maskstorel_epi8(int8_t *mem_addr, __m128i mask, __m128i a) {
-    __m128i orig = mm_loadu_si64((__m128i*)mem_addr);
-    a = _mm_blendv_epi8(orig, a, mask);
-    mm_storeu_si64(mem_addr, a);
-}
-
-#if defined(__AVX512VL__) && defined(__AVX512F__)
-#define mm256_cvtepi32_epi8 _mm256_cvtepi32_epi8
-#else
-inline __m128i mm256_cvtepi32_epi8(__m256i a) {
-    a = _mm256_shuffle_epi8(a,
-        _mm256_setr_epi8(   0,    4,    8,   12, 0x80, 0x80, 0x80, 0x80,
-                         0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80,
-                            0,    4,    8,   12, 0x80, 0x80, 0x80, 0x80,
-                         0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80)
-    );
-    return _mm256_castsi256_si128(
-        _mm256_permutevar8x32_epi32(a, _mm256_setr_epi32(0, 4, 1, 1, 1, 1, 1, 1))
-    );
-}
-#endif
 
 /**
  * Helpers for score_kmer_presence_mask

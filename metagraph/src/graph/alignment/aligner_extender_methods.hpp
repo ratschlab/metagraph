@@ -86,6 +86,8 @@ class DefaultColumnExtender : public SeedFilteringExtender {
     // seed, then the query is aligned against this tree.
     // Each Column object represents the alignment of a substring of the query
     // against a node in the tree.
+    // The horizontal concatenation (hstack) of all of the columns along a path
+    // in this tree is analogous to a Needleman-Wunsch dynamic programming score matrix.
     using Column = std::tuple<AlignedVector<score_t> /* S (best score) */,
                               AlignedVector<score_t> /* E (best score after insert) */,
                               AlignedVector<score_t> /* F (best score after delete) */,
@@ -141,12 +143,12 @@ class DefaultColumnExtender : public SeedFilteringExtender {
                                const std::function<void(node_index, char)> &callback);
 
     Alignment construct_alignment(Cigar cigar,
-                                     size_t clipping,
-                                     std::string_view window,
-                                     std::vector<node_index> final_path,
-                                     std::string match,
-                                     score_t score,
-                                     size_t offset) const;
+                                  size_t clipping,
+                                  std::string_view window,
+                                  std::vector<node_index> final_path,
+                                  std::string match,
+                                  score_t score,
+                                  size_t offset) const;
 
   private:
     // compute perfect match scores for all suffixes

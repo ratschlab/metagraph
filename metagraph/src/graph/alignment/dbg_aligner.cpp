@@ -219,8 +219,8 @@ void ISeedAndExtendAligner<AlignmentCompare>
             },
             [&](const Alignment &seed) {
                 return seed.get_clipping() <= farthest_reach
-                    && config_.fraction_of_top > 0
-                        ? max_score * config_.fraction_of_top
+                    && config_.rel_score_cutoff > 0
+                        ? max_score * config_.rel_score_cutoff
                         : config_.min_cell_score;
             }
         );
