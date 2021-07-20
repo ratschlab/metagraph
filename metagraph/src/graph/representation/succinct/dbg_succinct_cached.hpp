@@ -56,7 +56,7 @@ class DBGSuccinctCached : public DeBruijnGraph {
     explicit DBGSuccinctCached(std::shared_ptr<DBGSuccinct> graph, size_t cache_size)
           : graph_ptr_(graph), boss_(&graph_ptr_->get_boss()),
             cache_size_(cache_size), bwd_first_cache_(cache_size_) {
-        assert(graph_ptr_);
+        assert(graph_ptr_ && "Only DBGSuccinct can be cached");
     }
 
     explicit DBGSuccinctCached(std::shared_ptr<DeBruijnGraph> graph, size_t cache_size)

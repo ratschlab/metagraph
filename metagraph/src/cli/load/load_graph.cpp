@@ -9,6 +9,8 @@
 #include "graph/representation/hash/dbg_hash_fast.hpp"
 #include "graph/representation/bitmap/dbg_bitmap.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
+#include "graph/representation/succinct/dbg_succinct_cached.hpp"
+#include "graph/representation/canonical_dbg.hpp"
 #include "cli/config/config.hpp"
 
 
@@ -69,6 +71,21 @@ std::shared_ptr<DeBruijnGraph> load_critical_dbg(const std::string &filename) {
     }
     assert(false);
     exit(1);
+}
+
+std::shared_ptr<graph::DeBruijnGraph> wrap_graph(std::shared_ptr<graph::DeBruijnGraph> graph,
+                                                 bool enable_cache) {
+    if (enable_cache) {
+        if (auto dbg_succ = std::dynamic_pointer_cast<DBGSuccinct>(graph))
+            graph = make_cached_dbgsuccinct(dbg_succ);
+    }
+
+    if (graph->get_mode() == DeBruijnGraph::PRIMARY) {
+        logger->trace("Primary graph wrapped into canonical");
+        graph = std::make_shared<CanonicalDBG>(graph);
+    }
+
+    return graph;
 }
 
 } // namespace cli
