@@ -226,7 +226,6 @@ class DBGSuccinctCachedImpl : public DBGSuccinctCached {
 
                 auto prev = graph_ptr_->boss_to_kmer_index(incoming_boss_edge);
 
-                // no need to update prev, this call handles it
                 TAlphabet s = get_first_value(prev);
 
                 if (prev != npos && s != boss::BOSS::kSentinelCode)
@@ -237,7 +236,7 @@ class DBGSuccinctCachedImpl : public DBGSuccinctCached {
 
     node_index traverse_back(node_index node, char prev_char) const {
         // TODO: handle caching at some point. For now, this method isn't really used
-        return graph_ptr_->traverse(node, prev_char);
+        return graph_ptr_->traverse_back(node, prev_char);
     }
 
     void map_to_nodes_sequentially(std::string_view sequence,
