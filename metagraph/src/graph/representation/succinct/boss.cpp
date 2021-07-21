@@ -853,7 +853,7 @@ bool BOSS::compare_node_suffix(edge_index first, const TAlphabet *second) const 
  * character of the sequence. If the graph is suffix indexed, then the returned
  * node is the last node visited after k - indexed_suffix_length_ bwd steps.
  */
-std::pair<std::vector<TAlphabet>, edge_index> BOSS
+std::tuple<std::vector<TAlphabet>, edge_index, bool> BOSS
 ::get_node_seq_with_end_node_indexed(edge_index x) const {
     CHECK_INDEX(x);
 
@@ -883,7 +883,7 @@ std::pair<std::vector<TAlphabet>, edge_index> BOSS
                 ret[i] = index - next_index * (alph_size - 1) + 1;
                 index = next_index;
             }
-            return std::make_pair(ret, x);
+            return std::make_tuple(ret, x, true);
         }
     }
 
@@ -896,7 +896,7 @@ std::pair<std::vector<TAlphabet>, edge_index> BOSS
         ret[--i] = get_node_last_value(x);
     }
 
-    return std::make_pair(ret, x);
+    return std::make_tuple(ret, x, false);
 }
 
 /**
@@ -904,7 +904,7 @@ std::pair<std::vector<TAlphabet>, edge_index> BOSS
  * source node.
  */
 std::vector<TAlphabet> BOSS::get_node_seq(edge_index i) const {
-    return get_node_seq_with_end_node_indexed(i).first;
+    return std::get<0>(get_node_seq_with_end_node_indexed(i));
 }
 
 /**
@@ -914,15 +914,23 @@ std::vector<TAlphabet> BOSS::get_node_seq(edge_index i) const {
  */
 std::pair<std::vector<TAlphabet>, edge_index> BOSS
 ::get_node_seq_with_end_node(edge_index i) const {
-    auto ret_val = get_node_seq_with_end_node_indexed(i);
-    for (size_t i = 1; i < indexed_suffix_length_; ++i) {
-        CHECK_INDEX(ret_val.second);
-        ret_val.second = bwd(ret_val.second);
+    auto [seq, last_node, indexed] = get_node_seq_with_end_node_indexed(i);
+
+    if (indexed) {
+        assert(indexed_suffix_length_);
+
+        auto it = seq.rend() - indexed_suffix_length_;
+        assert(*it == get_node_last_value(last_node));
+        for (++it; it != seq.rend(); ++it) {
+            last_node = bwd(last_node);
+            assert(*it == get_node_last_value(last_node));
+        }
     }
 
-    assert(ret_val.first[0] == get_node_last_value(ret_val.second));
+    assert(seq[0] == get_node_last_value(last_node));
+    assert(std::make_pair(seq[0], last_node) == get_minus_k_value(i, k_ - 1));
 
-    return ret_val;
+    return std::make_pair(std::move(seq), last_node);
 }
 
 /**
