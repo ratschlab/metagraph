@@ -317,6 +317,8 @@ class DBGSuccinctCachedImpl : public DBGSuccinctCached {
         assert(key);
         assert(!value.second || value.first[1] == boss_->get_node_last_value(value.second));
         assert(value.first[1] == boss_->get_minus_k_value(key, get_k() - 2).first);
+        assert(!value.second || value.second
+            == boss_->get_minus_k_value(key, get_k() - 2).second);
         decoded_cache_.Put(key, std::move(value));
     }
 
