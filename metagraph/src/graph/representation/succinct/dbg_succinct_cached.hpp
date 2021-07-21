@@ -359,19 +359,7 @@ class DBGSuccinctCachedImpl : public DBGSuccinctCached {
 
         // update the k-mer with the next character
         kmer.first.to_next(graph_ptr_->get_k(), encode(c));
-
-        if (kmer.second) {
-            // update the corresponding front BOSS node
-            TAlphabet w = boss_->get_W(kmer.second);
-            if (w == kmer.first[1]) {
-                assert(boss_->bwd(boss_->fwd(kmer.second, w)) == kmer.second);
-                kmer.second = boss_->fwd(kmer.second, w);
-                assert(kmer.first[1] == boss_->get_node_last_value(kmer.second));
-            } else {
-                kmer.second = 0;
-            }
-        }
-
+        kmer.second;
         put_kmer(next, std::move(kmer));
     }
 
