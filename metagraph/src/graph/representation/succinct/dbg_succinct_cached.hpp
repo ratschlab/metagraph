@@ -359,7 +359,7 @@ class DBGSuccinctCachedImpl : public DBGSuccinctCached {
 
         // update the k-mer with the next character
         kmer.first.to_next(graph_ptr_->get_k(), encode(c));
-        kmer.second;
+        kmer.second = 0;
         put_kmer(next, std::move(kmer));
     }
 
