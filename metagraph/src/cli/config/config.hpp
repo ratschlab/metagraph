@@ -55,7 +55,7 @@ class Config {
     bool files_sequentially = false;
     bool map_sequences = false;
     bool align_sequences = false;
-    bool align_one_strand = false;
+    bool align_only_forwards = false;
     bool filter_by_kmer = false;
     bool output_json = false;
     bool aggregate_columns = false;

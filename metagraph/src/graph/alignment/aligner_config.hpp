@@ -57,7 +57,7 @@ class DBGAlignerConfig {
     size_t max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
 
     // thresholds for scores
-    score_t min_cell_score = std::numeric_limits<score_t>::min() + 100;
+    score_t min_cell_score = std::numeric_limits<score_t>::min() + 100; // to prevent underflow
     score_t min_path_score = 0;
     score_t xdrop = std::numeric_limits<score_t>::max();
 

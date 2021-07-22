@@ -40,7 +40,7 @@ DBGAlignerConfig initialize_aligner_config(const Config &config) {
     aligner_config.min_exact_match = config.alignment_min_exact_match;
     aligner_config.gap_opening_penalty = -config.alignment_gap_opening_penalty;
     aligner_config.gap_extension_penalty = -config.alignment_gap_extension_penalty;
-    aligner_config.forward_and_reverse_complement = !config.align_one_strand;
+    aligner_config.forward_and_reverse_complement = !config.align_only_forwards;
     aligner_config.alignment_edit_distance = config.alignment_edit_distance;
     aligner_config.alignment_match_score = config.alignment_match_score;
     aligner_config.alignment_mm_transition_score = config.alignment_mm_transition_score;
@@ -91,11 +91,8 @@ void map_sequences_in_file(const std::string &file,
     // TODO: multithreaded
     std::ignore = std::tie(thread_pool, print_mutex);
 
-    const DBGSuccinct *dbg = dynamic_cast<const DBGSuccinct*>(&graph);
-    if (!dbg) {
-        if (const auto *canonical = dynamic_cast<const CanonicalDBG*>(&graph))
-            dbg = dynamic_cast<const DBGSuccinct*>(&canonical->get_graph());
-    }
+    // used for sub-k sequence matching
+    const DBGSuccinct *dbg = dynamic_cast<const DBGSuccinct*>(&graph.get_base_graph());
 
     std::unique_ptr<std::ofstream> ofile;
     if (config.outfbase.size())
@@ -297,7 +294,7 @@ std::string format_alignment(std::string_view header,
         if (paths.empty()) {
             sout += fmt::format("\t*\t*\t{}\t*\t*\t*", config.alignment_min_path_score);
         } else {
-            for (const auto &path : paths) {
+            for (const auto &path : paths.data()) {
                 sout += fmt::format("\t{}", path);
             }
         }
@@ -390,9 +387,11 @@ int align_to_graph(Config *config) {
 
         Timer data_reading_timer;
 
-        std::shared_ptr<std::ostream> out{ std::shared_ptr<std::ostream>{}, &std::cout };
+        std::unique_ptr<std::ofstream> ofile;
         if (config->outfbase.size())
-            out = std::make_shared<std::ofstream>(config->outfbase);
+            ofile = std::make_unique<std::ofstream>(config->outfbase);
+
+        std::ostream *out = ofile ? ofile.get() : &std::cout;
 
         const uint64_t batch_size = config->query_batch_size_in_bytes;
 

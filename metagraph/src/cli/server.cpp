@@ -243,7 +243,7 @@ std::string process_align_request(const std::string &received_message,
         // not supporting reverse complement yet
         Json::Value alignments = Json::Value(Json::arrayValue);
 
-        for (const auto &path : paths) {
+        for (const auto &path : paths.data()) {
             Json::Value a;
             a[SCORE_JSON_FIELD] = path.get_score();
             a[SEQUENCE_JSON_FIELD] = path.get_sequence();

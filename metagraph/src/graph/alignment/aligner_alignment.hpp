@@ -177,9 +177,6 @@ struct LocalAlignmentGreater {
 // TODO: rename to AlignmentResults
 class QueryAlignment {
   public:
-    typedef std::vector<Alignment>::iterator iterator;
-    typedef std::vector<Alignment>::const_iterator const_iterator;
-
     explicit QueryAlignment(std::string_view query, bool is_reverse_complement = false);
 
     explicit QueryAlignment(std::shared_ptr<const std::string> query,
@@ -208,10 +205,6 @@ class QueryAlignment {
     size_t size() const { return alignments_.size(); }
     bool empty() const { return alignments_.empty(); }
     const Alignment& operator[](size_t i) const { return alignments_[i]; }
-    iterator begin() { return alignments_.begin(); }
-    iterator end() { return alignments_.end(); }
-    const_iterator begin() const { return alignments_.begin(); }
-    const_iterator end() const { return alignments_.end(); }
 
     std::vector<Alignment>& data() { return alignments_; }
     const std::vector<Alignment>& data() const { return alignments_; }
