@@ -1,6 +1,7 @@
 #ifndef __BOSS_HPP__
 #define __BOSS_HPP__
 
+#include <optional>
 #include <type_traits>
 
 #include "common/vectors/bit_vector.hpp"
@@ -276,9 +277,11 @@ class BOSS {
     /**
      * Given an edge index i, this function returns the k-mer sequence of its
      * source node, and the node whose last character corresponds to the first
-     * character of the sequence.
+     * character of the sequence. If force_get_end_node is false, then the last
+     * traversed node will only be returned if it is computed.
      */
-    std::pair<std::vector<TAlphabet>, edge_index> get_node_seq_with_end_node(edge_index i) const;
+    std::pair<std::vector<TAlphabet>, std::optional<edge_index>>
+    get_node_seq_with_end_node(edge_index i, bool force_get_end_node = false) const;
 
     /**
      * Given index i of an edge and a value k, this function

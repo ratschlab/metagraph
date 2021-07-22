@@ -332,24 +332,14 @@ class DBGSuccinctCachedImpl : public DBGSuccinctCached {
             kmer = std::nullopt;
 
         if (!kmer) {
-            std::vector<TAlphabet> seq;
-
-            // initialize
-            kmer = CacheValue{ KmerType(), 0 };
-
-            if (check_second) {
-                // we need the result of bwd^{k - 1}(i), so take all traversal steps
-                std::tie(seq, kmer->second) = boss_->get_node_seq_with_end_node(i);
-            } else {
-                // We don't need that value, so use the built-in method to compute
-                // the sequence. This uses the BOSS suffix index to speed it up.
-                seq = boss_->get_node_seq(i);
-            }
+            // get the node sequence and possibly the last node accessed while computing
+            auto [seq, last_node_opt] = boss_->get_node_seq_with_end_node(i, check_second);
 
             // append the last character and cache the result
             seq.push_back(boss_->get_W(i) % boss_->alph_size);
-            kmer->first = to_kmer(seq);
 
+            // cache the result
+            kmer = CacheValue{ to_kmer(seq), last_node_opt ? *last_node_opt : 0 };
             put_kmer(i, *kmer);
         }
 

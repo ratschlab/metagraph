@@ -883,7 +883,7 @@ std::tuple<std::vector<TAlphabet>, edge_index, bool> BOSS
                 ret[i] = index - next_index * (alph_size - 1) + 1;
                 index = next_index;
             }
-            return std::make_tuple(ret, x, true);
+            return std::make_tuple(std::move(ret), x, true);
         }
     }
 
@@ -896,7 +896,7 @@ std::tuple<std::vector<TAlphabet>, edge_index, bool> BOSS
         ret[--i] = get_node_last_value(x);
     }
 
-    return std::make_tuple(ret, x, false);
+    return std::make_tuple(std::move(ret), x, false);
 }
 
 /**
@@ -910,13 +910,23 @@ std::vector<TAlphabet> BOSS::get_node_seq(edge_index i) const {
 /**
  * Given an edge index i, this function returns the k-mer sequence of its
  * source node, and the node whose last character corresponds to the first
- * character of the sequence.
+ * character of the sequence. If force_get_end_node is false, then the last
+ * traversed node will only be returned if it is computed.
  */
-std::pair<std::vector<TAlphabet>, edge_index> BOSS
-::get_node_seq_with_end_node(edge_index i) const {
-    auto [seq, last_node, indexed] = get_node_seq_with_end_node_indexed(i);
+std::pair<std::vector<TAlphabet>, std::optional<edge_index>> BOSS
+::get_node_seq_with_end_node(edge_index i, bool force_get_end_node) const {
+    auto [seq, last_node, partially_traversed] = get_node_seq_with_end_node_indexed(i);
 
-    if (indexed) {
+    std::optional<edge_index> last_node_opt = std::nullopt;
+
+    if (!partially_traversed) {
+        // if the full traversal was done, then we already have the last node
+        last_node_opt = last_node;
+
+    } else if (force_get_end_node) {
+        // if the full traversal was not done due to the suffix range index, but
+        // the last node from traversal is still requested, then complete the traversal
+        // to get that node
         assert(indexed_suffix_length_);
 
         auto it = seq.rend() - indexed_suffix_length_;
@@ -925,12 +935,14 @@ std::pair<std::vector<TAlphabet>, edge_index> BOSS
             last_node = bwd(last_node);
             assert(*it == get_node_last_value(last_node));
         }
+
+        last_node_opt = last_node;
     }
 
-    assert(seq[0] == get_node_last_value(last_node));
-    assert(std::make_pair(seq[0], last_node) == get_minus_k_value(i, k_ - 1));
+    assert(!last_node_opt || seq[0] == get_node_last_value(last_node));
+    assert(!last_node_opt || std::make_pair(seq[0], last_node) == get_minus_k_value(i, k_ - 1));
 
-    return std::make_pair(std::move(seq), last_node);
+    return std::make_pair(std::move(seq), last_node_opt);
 }
 
 /**
