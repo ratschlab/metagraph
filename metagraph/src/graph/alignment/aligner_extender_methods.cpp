@@ -202,14 +202,13 @@ void update_column(size_t prev_end,
         F_v[j] = std::max(S_prev_v[j] + config_.gap_opening_penalty,
                           F_prev_v[j] + config_.gap_extension_penalty);
 
-        match = std::max(del_score, match);
+        match = std::max(F_v[j], match);
 
-        if (match >= xdrop_cutoff) {
-            if (j + 1 < prev_end)
-                E_v[j + 1] = match + config_.gap_opening_penalty;
+        if (j + 1 < prev_end)
+            E_v[j + 1] = match + config_.gap_opening_penalty;
 
+        if (match >= xdrop_cutoff)
             S_v[j] = std::max(match, E_v[j]);
-        }
     }
 #else
     const __m128i gap_open = _mm_set1_epi32(config_.gap_opening_penalty);
