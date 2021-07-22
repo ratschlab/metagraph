@@ -205,10 +205,10 @@ void update_column(size_t prev_end,
         match = std::max(del_score, match);
 
         if (match >= xdrop_cutoff) {
-            S_v[j] = match;
-            score_t ins_score = match + config_.gap_opening_penalty;
             if (j + 1 < prev_end)
-                E_v[j + 1] = ins_score;
+                E_v[j + 1] = match + config_.gap_opening_penalty;
+
+            S_v[j] = std::max(match, E_v[j]);
         }
     }
 #else
@@ -252,52 +252,41 @@ void update_column(size_t prev_end,
         mask = _mm_and_si128(mask, bound);
         match = _mm_blendv_epi8(ninf_v, match, mask);
 
-        // S_v[j] = match
+        // ins_open_next = S[j] + gap_open
+        __m128i ins_open_next = _mm_add_epi32(match, gap_open);
+
+        // E_v[j + 1] = ins_open_next
+        _mm_storeu_si128((__m128i*)&E_v[j + 1], ins_open_next);
+
+        // load E_v[j] vector by rotating elements of ins_open_next right, then inserting E_v[j]
+        __m128i ins_open = _mm_shuffle_epi32(ins_open_next, 0b10010000);
+        ins_open = _mm_insert_epi32(ins_open, E_v[j], 0);
+
+        // E_v[j] >= xdrop_cutoff
+        ins_open = _mm_blendv_epi8(ninf_v, ins_open, mask);
+
+        // S_v[j] = max(match, E_v[j])
+        match = _mm_max_epi32(match, ins_open);
         _mm_store_si128((__m128i*)&S_v[j], match);
-
-        // ins_open = S[j] + gap_open
-        __m128i ins_open = _mm_add_epi32(match, gap_open);
-
-        // E_v[j + 1] = ins_open
-        _mm_storeu_si128((__m128i*)&E_v[j + 1], ins_open);
     }
 
 #endif
 
     if (S_v.size() > prev_end) {
         size_t j = S_v.size() - 1;
-        score_t match = S_prev_v[j - 1] + profile_scores[j];
+        score_t match = std::max(S_prev_v[j - 1] + profile_scores[j], E_v[j]);
         if (match >= xdrop_cutoff)
             S_v[j] = match;
     }
 }
 
-void update_ins(AlignedVector<score_t> &S,
-                AlignedVector<score_t> &E,
-                score_t xdrop_cutoff,
-                const DBGAlignerConfig &config_) {
-    // update insertion scores
+// update insertion extension scores
+void update_ins_extension(AlignedVector<score_t> &S,
+                          AlignedVector<score_t> &E,
+                          score_t xdrop_cutoff,
+                          const DBGAlignerConfig &config_) {
     // elements are dependent on the previous one, so this can't be vectorized easily
     // this takes 15% of the run time when aligning long reads...
-#ifndef __SSE4_1__
-    for (size_t j = 1; j < S.size(); ++j) {
-        E[j] = std::max(E[j - 1] + config_.gap_extension_penalty, E[j]);
-        if (E[j] >= xdrop_cutoff)
-            S[j] = std::max(S[j], E[j]);
-    }
-#else
-    // first update the best score vector with insert open penalties
-    const __m128i xdrop_v = _mm_set1_epi32(xdrop_cutoff - 1);
-    const __m128i ninf_v = _mm_set1_epi32(ninf);
-    for (size_t j = 0; j < S.size(); j += 4) {
-        __m128i ins_open = _mm_load_si128((__m128i*)&E[j]);
-        __m128i mask = _mm_cmpgt_epi32(ins_open, xdrop_v);
-        ins_open = _mm_blendv_epi8(ninf_v, ins_open, mask);
-        ins_open = _mm_max_epi32(_mm_load_si128((__m128i*)&S[j]), ins_open);
-        _mm_store_si128((__m128i*)&S[j], ins_open);
-    }
-
-    // then compute insert extension penalties
     for (size_t j = 1; j < S.size(); ++j) {
         score_t ins_extend = E[j - 1] + config_.gap_extension_penalty;
         if (ins_extend > std::max(E[j], xdrop_cutoff - 1)) {
@@ -305,16 +294,15 @@ void update_ins(AlignedVector<score_t> &S,
             S[j] = std::max(S[j], ins_extend);
         }
     }
-#endif
 }
 
 // add insertions to the end of the array until the score drops too low
-void extend_ins(AlignedVector<score_t> &S,
-                AlignedVector<score_t> &E,
-                AlignedVector<score_t> &F,
-                size_t max_size,
-                score_t xdrop_cutoff,
-                const DBGAlignerConfig &config_) {
+void extend_ins_end(AlignedVector<score_t> &S,
+                    AlignedVector<score_t> &E,
+                    AlignedVector<score_t> &F,
+                    size_t max_size,
+                    score_t xdrop_cutoff,
+                    const DBGAlignerConfig &config_) {
     while (S.back() >= xdrop_cutoff && S.size() < max_size) {
         score_t ins_score = std::max(
             S.back() + config_.gap_opening_penalty,
@@ -521,8 +509,8 @@ auto DefaultColumnExtender::extend(score_t min_path_score) -> std::vector<Alignm
                               profile_score_[c].data() + start + trim,
                               xdrop_cutoff, config_);
 
-                update_ins(S, E, xdrop_cutoff, config_);
-                extend_ins(S, E, F, window.size() + 1 - trim, xdrop_cutoff, config_);
+                update_ins_extension(S, E, xdrop_cutoff, config_);
+                extend_ins_end(S, E, F, window.size() + 1 - trim, xdrop_cutoff, config_);
 
                 assert(max_pos >= trim);
                 assert(static_cast<size_t>(max_pos - trim) < S.size());
