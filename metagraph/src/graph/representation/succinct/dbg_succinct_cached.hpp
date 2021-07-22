@@ -146,6 +146,10 @@ template <typename KmerType>
 class DBGSuccinctCachedImpl : public DBGSuccinctCached {
     typedef kmer::KmerExtractorBOSS KmerExtractor;
 
+    // KmerType is the encoded k-mer
+    // edge_index is the boss node whose last character is the first character of the k-mer
+    typedef std::pair<KmerType, std::optional<edge_index>> CacheValue;
+
   public:
     template <typename... Args>
     DBGSuccinctCachedImpl(Args&&... args)
@@ -157,7 +161,8 @@ class DBGSuccinctCachedImpl : public DBGSuccinctCached {
         assert(seq.size() == graph_ptr_->get_k());
         assert(graph_ptr_->get_node_sequence(node) == seq);
 
-        put_kmer(graph_ptr_->kmer_to_boss_index(node), std::make_pair(to_kmer(seq), 0));
+        put_kmer(graph_ptr_->kmer_to_boss_index(node),
+                 CacheValue{ to_kmer(seq), std::nullopt });
     }
 
     std::string get_node_sequence(node_index node) const {
@@ -186,9 +191,9 @@ class DBGSuccinctCachedImpl : public DBGSuccinctCached {
         edge_index bwd_i = boss_->bwd(i);
         auto fetch_bwd = decoded_cache_.TryGet(bwd_i);
         if (!fetch_bwd) {
-            kmer_pair.second = boss_->bwd(kmer_pair.second);
+            kmer_pair.second = boss_->bwd(*kmer_pair.second);
             kmer_pair.first.to_prev(graph_ptr_->get_k(),
-                                    boss_->get_node_last_value(kmer_pair.second));
+                                    boss_->get_node_last_value(*kmer_pair.second));
             put_kmer(bwd_i, std::move(kmer_pair));
         }
 
@@ -273,7 +278,8 @@ class DBGSuccinctCachedImpl : public DBGSuccinctCached {
                     }
 
                     // cache the result
-                    put_kmer(graph_ptr_->kmer_to_boss_index(i), std::make_pair(*prev, 0));
+                    put_kmer(graph_ptr_->kmer_to_boss_index(i),
+                             CacheValue{ *prev, std::nullopt });
                 } else {
                     // reset the k-mer to null
                     prev = std::nullopt;
@@ -306,18 +312,14 @@ class DBGSuccinctCachedImpl : public DBGSuccinctCached {
     }
 
   private:
-    // KmerType is the encoded k-mer
-    // edge_index is the boss node whose last character is the first character of the k-mer
-    typedef std::pair<KmerType, edge_index> CacheValue;
-
     mutable common::ThreadUnsafeLRUCache<edge_index, CacheValue> decoded_cache_;
 
     // cache a computed result
     void put_kmer(edge_index key, CacheValue value) const {
         assert(key);
-        assert(!value.second || value.first[1] == boss_->get_node_last_value(value.second));
+        assert(!value.second || value.first[1] == boss_->get_node_last_value(*value.second));
         assert(value.first[1] == boss_->get_minus_k_value(key, get_k() - 2).first);
-        assert(!value.second || value.second
+        assert(!value.second || *value.second
             == boss_->get_minus_k_value(key, get_k() - 2).second);
         decoded_cache_.Put(key, std::move(value));
     }
@@ -339,7 +341,7 @@ class DBGSuccinctCachedImpl : public DBGSuccinctCached {
             seq.push_back(boss_->get_W(i) % boss_->alph_size);
 
             // cache the result
-            kmer = CacheValue{ to_kmer(seq), last_node_opt ? *last_node_opt : 0 };
+            kmer = CacheValue{ to_kmer(seq), last_node_opt };
             put_kmer(i, *kmer);
         }
 
@@ -351,7 +353,7 @@ class DBGSuccinctCachedImpl : public DBGSuccinctCached {
 
         // update the k-mer with the next character
         kmer.first.to_next(graph_ptr_->get_k(), encode(c));
-        kmer.second = 0;
+        kmer.second = std::nullopt;
         put_kmer(next, std::move(kmer));
     }
 
