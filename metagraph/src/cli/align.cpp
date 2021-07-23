@@ -84,15 +84,13 @@ template std::unique_ptr<IDBGAligner> build_aligner<DeBruijnGraph>(const DeBruij
 
 void map_sequences_in_file(const std::string &file,
                            const DeBruijnGraph &graph,
+                           const DBGSuccinct *dbg,
                            const Config &config,
                            const Timer &timer,
                            ThreadPool *thread_pool = nullptr,
                            std::mutex *print_mutex = nullptr) {
     // TODO: multithreaded
     std::ignore = std::tie(thread_pool, print_mutex);
-
-    // used for sub-k sequence matching
-    const DBGSuccinct *dbg = dynamic_cast<const DBGSuccinct*>(&graph.get_base_graph());
 
     std::unique_ptr<std::ofstream> ofile;
     if (config.outfbase.size())
@@ -352,13 +350,13 @@ int align_to_graph(Config *config) {
     }
 
     if (config->map_sequences) {
+        const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(base_graph.get());
         if (!config->alignment_length) {
             config->alignment_length = graph->get_k();
         } else if (config->alignment_length > graph->get_k()) {
             logger->warn("Mapping to k-mers longer than k is not supported");
             config->alignment_length = graph->get_k();
-        } else if (config->alignment_length != graph->get_k()
-                && !dynamic_cast<const DBGSuccinct*>(base_graph.get())) {
+        } else if (config->alignment_length != graph->get_k() && !dbg_succ) {
             logger->error("Matching k-mers shorter than k only supported for succinct graphs");
             exit(1);
         }
@@ -370,7 +368,8 @@ int align_to_graph(Config *config) {
         for (const auto &file : files) {
             logger->trace("Map sequences from file {}", file);
 
-            map_sequences_in_file(file, *graph, *config, timer, &thread_pool, &print_mutex);
+            map_sequences_in_file(file, *graph, dbg_succ, *config, timer,
+                                  &thread_pool, &print_mutex);
         }
 
         thread_pool.join();
