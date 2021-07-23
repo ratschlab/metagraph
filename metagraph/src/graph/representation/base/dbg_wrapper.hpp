@@ -12,14 +12,15 @@ namespace graph {
  * This class stores a graph internally and transfers all calls to it.
  * It can be used as a parent to other wrappers which add additional functionality.
  */
+template <class Graph = DeBruijnGraph>
 class DBGWrapper : public DeBruijnGraph {
   public:
-    explicit DBGWrapper(std::shared_ptr<const DeBruijnGraph> graph)
+    explicit DBGWrapper(std::shared_ptr<const Graph> graph)
           : const_graph_ptr_(graph), graph_(*const_graph_ptr_) {
         assert(const_graph_ptr_);
     }
 
-    explicit DBGWrapper(std::shared_ptr<DeBruijnGraph> graph)
+    explicit DBGWrapper(std::shared_ptr<Graph> graph)
           : const_graph_ptr_(graph), graph_ptr_(graph), graph_(*const_graph_ptr_) {
         assert(const_graph_ptr_);
         assert(graph_ptr_);
@@ -27,12 +28,12 @@ class DBGWrapper : public DeBruijnGraph {
 
     virtual ~DBGWrapper() {}
 
-    virtual const DeBruijnGraph& get_base_graph() const override final {
+    virtual const Graph& get_base_graph() const override final {
         return graph_.get_base_graph();
     }
 
-    virtual const DeBruijnGraph& get_graph() const { return graph_; }
-    virtual std::shared_ptr<const DeBruijnGraph> get_graph_ptr() const { return const_graph_ptr_; }
+    virtual const Graph& get_graph() const { return graph_; }
+    virtual std::shared_ptr<const Graph> get_graph_ptr() const { return const_graph_ptr_; }
 
     virtual void add_sequence(std::string_view sequence,
                               const std::function<void(node_index)> &on_insertion
@@ -147,9 +148,9 @@ class DBGWrapper : public DeBruijnGraph {
     }
 
   protected:
-    std::shared_ptr<const DeBruijnGraph> const_graph_ptr_;
-    std::shared_ptr<DeBruijnGraph> graph_ptr_;
-    const DeBruijnGraph &graph_;
+    std::shared_ptr<const Graph> const_graph_ptr_;
+    std::shared_ptr<Graph> graph_ptr_;
+    const Graph &graph_;
 };
 
 } // namespace graph

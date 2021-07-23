@@ -11,7 +11,7 @@
 namespace mtg {
 namespace graph {
 
-class MaskedDeBruijnGraph : public DBGWrapper {
+class MaskedDeBruijnGraph : public DBGWrapper<DeBruijnGraph> {
   public:
     MaskedDeBruijnGraph(std::shared_ptr<const DeBruijnGraph> graph,
                         std::unique_ptr<bitmap>&& kmers_in_graph,
