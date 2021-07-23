@@ -45,7 +45,7 @@ class DBGSuccinctCached : public DBGWrapper<DBGSuccinct> {
         }
 
         if (other_succ)
-            return graph_ptr_->operator==(*other_succ);
+            return graph_->operator==(*other_succ);
 
         throw std::runtime_error("Not implemented");
         return false;
@@ -79,32 +79,30 @@ class DBGSuccinctCachedImpl : public DBGSuccinctCached {
   public:
     template <typename Graph>
     DBGSuccinctCachedImpl(Graph graph, size_t cache_size)
-          : DBGSuccinctCached(graph), boss_(&graph_ptr_->get_boss()),
+          : DBGSuccinctCached(graph), boss_(&graph_->get_boss()),
             cache_size_(cache_size), decoded_cache_(cache_size_) {}
 
-    void put_decoded_node(node_index node, std::string_view seq) const {
+    virtual void put_decoded_node(node_index node, std::string_view seq) const override final {
         assert(node > 0 && node <= num_nodes());
-        assert(seq.size() == graph_ptr_->get_k());
-        assert(graph_ptr_->get_node_sequence(node) == seq);
+        assert(seq.size() == graph_->get_k());
+        assert(graph_->get_node_sequence(node) == seq);
 
-        put_kmer(graph_ptr_->kmer_to_boss_index(node),
-                 CacheValue{ to_kmer(seq), std::nullopt });
+        put_kmer(graph_->kmer_to_boss_index(node), CacheValue{ to_kmer(seq), std::nullopt });
     }
 
-    std::string get_node_sequence(node_index node) const {
+    virtual std::string get_node_sequence(node_index node) const override final {
         assert(node > 0 && node <= num_nodes());
 
         // get the sequence from either the cache, or the underlying graph
         auto ret_val = KmerExtractor::kmer_to_sequence<KmerType>(
-            get_kmer_pair(graph_ptr_->kmer_to_boss_index(node)).first,
-            graph_ptr_->get_k()
+            get_kmer_pair(graph_->kmer_to_boss_index(node)).first, get_k()
         );
 
-        assert(ret_val == graph_ptr_->get_node_sequence(node));
+        assert(ret_val == graph_->get_node_sequence(node));
         return ret_val;
     }
 
-    TAlphabet get_first_value(edge_index i) const {
+    virtual TAlphabet get_first_value(edge_index i) const override final {
         assert(i);
 
         // Take k - 1 traversal steps to construct the node sequence. This way,
@@ -118,37 +116,36 @@ class DBGSuccinctCachedImpl : public DBGSuccinctCached {
         auto fetch_bwd = decoded_cache_.TryGet(bwd_i);
         if (!fetch_bwd) {
             kmer_pair.second = boss_->bwd(*kmer_pair.second);
-            kmer_pair.first.to_prev(graph_ptr_->get_k(),
-                                    boss_->get_node_last_value(*kmer_pair.second));
+            kmer_pair.first.to_prev(get_k(), boss_->get_node_last_value(*kmer_pair.second));
             put_kmer(bwd_i, std::move(kmer_pair));
         }
 
         return c;
     }
 
-    void call_outgoing_kmers(node_index node,
-                             const OutgoingEdgeCallback &callback) const {
+    virtual void call_outgoing_kmers(node_index node,
+                                     const OutgoingEdgeCallback &callback) const override final {
         assert(node > 0 && node <= num_nodes());
 
-        edge_index i = graph_ptr_->kmer_to_boss_index(node);
+        edge_index i = graph_->kmer_to_boss_index(node);
         auto kmer = decoded_cache_.TryGet(i);
-        graph_ptr_->call_outgoing_kmers(node, [&](node_index next, char c) {
+        graph_->call_outgoing_kmers(node, [&](node_index next, char c) {
             if (c != boss::BOSS::kSentinel) {
                 if (kmer)
-                    update_node_next(*kmer, graph_ptr_->kmer_to_boss_index(next), c);
+                    update_node_next(*kmer, graph_->kmer_to_boss_index(next), c);
 
                 callback(next, c);
             }
         });
     }
 
-    node_index traverse(node_index node, char next_char) const {
+    virtual node_index traverse(node_index node, char next_char) const override final {
         assert(node > 0 && node <= num_nodes());
 
-        if (node_index next = graph_ptr_->traverse(node, next_char)) {
-            edge_index i = graph_ptr_->kmer_to_boss_index(node);
+        if (node_index next = graph_->traverse(node, next_char)) {
+            edge_index i = graph_->kmer_to_boss_index(node);
             if (auto kmer = decoded_cache_.TryGet(i))
-                update_node_next(*kmer, graph_ptr_->kmer_to_boss_index(next), next_char);
+                update_node_next(*kmer, graph_->kmer_to_boss_index(next), next_char);
 
             return next;
 
@@ -157,18 +154,18 @@ class DBGSuccinctCachedImpl : public DBGSuccinctCached {
         }
     }
 
-    void call_incoming_kmers(node_index node,
-                             const IncomingEdgeCallback &callback) const {
+    virtual void call_incoming_kmers(node_index node,
+                                     const IncomingEdgeCallback &callback) const override final {
         assert(node > 0 && node <= num_nodes());
 
-        edge_index edge = graph_ptr_->kmer_to_boss_index(node);
+        edge_index edge = graph_->kmer_to_boss_index(node);
 
         boss_->call_incoming_to_target(boss_->bwd(edge), boss_->get_node_last_value(edge),
             [&](edge_index incoming_boss_edge) {
                 assert(boss_->get_W(incoming_boss_edge) % boss_->alph_size
                         == boss_->get_node_last_value(edge));
 
-                auto prev = graph_ptr_->boss_to_kmer_index(incoming_boss_edge);
+                auto prev = graph_->boss_to_kmer_index(incoming_boss_edge);
 
                 // get the first character from either the cache, or the graph
                 TAlphabet s = get_first_value(incoming_boss_edge);
@@ -179,20 +176,15 @@ class DBGSuccinctCachedImpl : public DBGSuccinctCached {
         );
     }
 
-    node_index traverse_back(node_index node, char prev_char) const {
-        // TODO: handle caching at some point. For now, this method isn't really used
-        return graph_ptr_->traverse_back(node, prev_char);
-    }
-
-    void map_to_nodes_sequentially(std::string_view sequence,
-                                   const std::function<void(node_index)> &callback,
-                                   const std::function<bool()> &terminate
-                                       = [](){ return false; }) const {
-        size_t k = graph_ptr_->get_k();
+    virtual void map_to_nodes_sequentially(std::string_view sequence,
+                                           const std::function<void(node_index)> &callback,
+                                           const std::function<bool()> &terminate
+                                               = [](){ return false; }) const override final {
+        size_t k = get_k();
         const char *begin = sequence.data();
         const char *last = begin + k - 1;
         std::optional<KmerType> prev{std::nullopt};
-        graph_ptr_->map_to_nodes_sequentially(sequence,
+        graph_->map_to_nodes_sequentially(sequence,
             [&](node_index i) {
                 if (i) {
                     if (prev) {
@@ -204,7 +196,7 @@ class DBGSuccinctCachedImpl : public DBGSuccinctCached {
                     }
 
                     // cache the result
-                    put_kmer(graph_ptr_->kmer_to_boss_index(i),
+                    put_kmer(graph_->kmer_to_boss_index(i),
                              CacheValue{ *prev, std::nullopt });
                 } else {
                     // reset the k-mer to null
@@ -267,7 +259,7 @@ class DBGSuccinctCachedImpl : public DBGSuccinctCached {
         assert(c != boss::BOSS::kSentinel);
 
         // update the k-mer with the next character
-        kmer.first.to_next(graph_ptr_->get_k(), encode(c));
+        kmer.first.to_next(get_k(), encode(c));
         kmer.second = std::nullopt;
         put_kmer(next, std::move(kmer));
     }
