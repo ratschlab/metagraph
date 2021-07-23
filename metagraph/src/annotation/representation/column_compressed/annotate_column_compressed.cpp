@@ -161,6 +161,18 @@ void ColumnCompressed<Label>::add_label_coord(Index i, const VLabels &labels, ui
     }
 }
 
+// for each label and index 'i' add numeric attribute 'coord'
+template <typename Label>
+void ColumnCompressed<Label>::add_label_coords(const std::vector<std::pair<Index, uint64_t>> &coords,
+                                               const VLabels &labels) {
+    coords_.resize(num_labels());
+
+    for (const auto &label : labels) {
+        const size_t j = label_encoder_.encode(label);
+        coords_[j].insert(coords_[j].end(), coords.begin(), coords.end());
+    }
+}
+
 template <typename Label>
 bool ColumnCompressed<Label>::has_label(Index i, const Label &label) const {
     try {
