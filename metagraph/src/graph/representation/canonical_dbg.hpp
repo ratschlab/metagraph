@@ -91,7 +91,7 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
                             const std::function<bool()> &stop_early = [](){ return false; }) const override final;
 
     bool operator==(const CanonicalDBG &other) const {
-        return graph_ == other.graph_;
+        return *graph_ == *other.graph_;
     }
 
     virtual bool operator==(const DeBruijnGraph &other) const override final;

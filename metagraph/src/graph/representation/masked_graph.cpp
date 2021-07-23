@@ -262,7 +262,7 @@ bool MaskedDeBruijnGraph::operator==(const MaskedDeBruijnGraph &other) const {
             && get_mode() == other.get_mode()
             && num_nodes() == other.num_nodes()
             && *kmers_in_graph_ == *other.kmers_in_graph_
-            && graph_ == other.graph_;
+            && *graph_ == *other.graph_;
 }
 
 bool MaskedDeBruijnGraph::operator==(const DeBruijnGraph &other) const {
