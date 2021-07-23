@@ -41,7 +41,7 @@ class TestDNAAlign(TestingBase):
         self.assertEqual('nodes (k): 16438', params_str[1])
         self.assertEqual('mode: basic', params_str[2])
 
-        stats_command = '{exe} align --align-one-strand -i {graph} --align-min-exact-match 0.0 {reads}'.format(
+        stats_command = '{exe} align --align-only-forwards -i {graph} --align-min-exact-match 0.0 {reads}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/genome.MT' + graph_file_extension[representation],
             reads=TEST_DATA_DIR + '/genome_MT1.fq',
@@ -136,7 +136,7 @@ class TestDNAAlign(TestingBase):
         self.assertEqual('nodes (k): 16438', params_str[1])
         self.assertEqual('mode: basic', params_str[2])
 
-        stats_command = '{exe} align --align-one-strand -i {graph} --align-min-exact-match 0.0 {reads}'.format(
+        stats_command = '{exe} align --align-only-forwards -i {graph} --align-min-exact-match 0.0 {reads}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/genome.MT' + graph_file_extension[representation],
             reads=TEST_DATA_DIR + '/genome_MT1.fq',
