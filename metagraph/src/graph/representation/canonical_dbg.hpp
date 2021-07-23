@@ -22,25 +22,10 @@ namespace graph {
 class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
   public:
     template <typename Graph>
-    explicit CanonicalDBG(Graph graph, size_t cache_size = 1024)
-          : DBGWrapper(graph), offset_(graph->max_index()), k_odd_(graph->get_k() % 2),
-            has_sentinel_(false), alphabet_encoder_({ graph->alphabet().size() }),
-            cache_size_(cache_size), child_node_cache_(cache_size_),
-            parent_node_cache_(cache_size_), is_palindrome_cache_(k_odd_ ? 0 : cache_size_) {
-        if (graph_->get_mode() != DeBruijnGraph::PRIMARY) {
-            common::logger->error("Only primary graphs can be wrapped in CanonicalDBG");
-            exit(1);
-        }
-
-        for (size_t i = 0; i < graph_->alphabet().size(); ++i) {
-            alphabet_encoder_[graph_->alphabet()[i]] = i;
-            if (graph_->alphabet()[i] == boss::BOSS::kSentinel)
-                has_sentinel_ = true;
-        }
-    }
+    explicit CanonicalDBG(Graph graph, size_t cache_size = 1024);
 
     CanonicalDBG(const CanonicalDBG &canonical)
-        : CanonicalDBG(canonical.graph_ptr_ ? canonical.graph_ptr_ : canonical.graph_,
+          : CanonicalDBG(canonical.graph_ptr_ ? canonical.graph_ptr_ : canonical.graph_,
                          canonical.cache_size_) {}
 
     // caches cannot be resized or moved, so disable these constructors
@@ -49,9 +34,6 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
     CanonicalDBG& operator=(CanonicalDBG&&) = delete;
 
     virtual ~CanonicalDBG() {}
-
-    virtual void add_sequence(std::string_view sequence,
-                              const std::function<void(node_index)> &on_insertion = [](node_index) {}) override final;
 
     // Traverse graph mapping sequence to the graph nodes
     // and run callback for each node until the termination condition is satisfied
@@ -115,14 +97,6 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
 
     virtual bool operator==(const DeBruijnGraph &other) const override final;
 
-    virtual bool load(const std::string & /* filename */) override final {
-        throw std::runtime_error("Not implemented");
-    }
-
-    virtual void serialize(const std::string & /* filename */) const override final {
-        throw std::runtime_error("Not implemented");
-    }
-
     void reverse_complement(std::string &seq, std::vector<node_index> &path) const;
 
     inline node_index get_base_node(node_index node) const {
@@ -134,12 +108,6 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
     node_index reverse_complement(node_index node) const;
 
   private:
-    size_t offset_;
-    bool k_odd_;
-    bool has_sentinel_;
-
-    std::array<size_t, 256> alphabet_encoder_;
-
     size_t cache_size_;
 
     // cache the results of call_outgoing_kmers
@@ -154,8 +122,11 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
     mutable caches::fixed_sized_cache<node_index, bool,
                                       caches::LRUCachePolicy<node_index>> is_palindrome_cache_;
 
-    // Private constructor. The others delegate to this one
-    explicit CanonicalDBG(std::shared_ptr<const DeBruijnGraph> graph, size_t cache_size);
+    size_t offset_;
+    bool k_odd_;
+    bool has_sentinel_;
+
+    std::array<size_t, 256> alphabet_encoder_;
 
     // find all parent nodes of node in the CanonicalDBG which are represented
     // in the reverse complement orientation in the underlying primary graph
@@ -164,6 +135,9 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
     // find all child nodes of node in the CanonicalDBG which are represented
     // in the reverse complement orientation in the underlying primary graph
     void append_next_rc_nodes(node_index node, std::vector<node_index> &children) const;
+
+    // reset the internal storage, done after loading or updating the graph
+    virtual void flush() override final;
 };
 
 } // namespace graph

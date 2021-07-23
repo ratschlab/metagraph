@@ -14,16 +14,34 @@ inline const DBGSuccinct* get_dbg_succ(const DeBruijnGraph &graph) {
     return dynamic_cast<const DBGSuccinct*>(&graph.get_base_graph());
 }
 
-void CanonicalDBG
-::add_sequence(std::string_view sequence,
-               const std::function<void(node_index)> &on_insertion) {
-    assert(graph_ptr_ && "add_sequence only supported for non-const graphs.");
+template <typename Graph>
+CanonicalDBG::CanonicalDBG(Graph graph, size_t cache_size)
+      : DBGWrapper(graph), cache_size_(cache_size), child_node_cache_(cache_size_),
+        parent_node_cache_(cache_size_), is_palindrome_cache_(cache_size_) { flush(); }
 
-    graph_ptr_->add_sequence(sequence, on_insertion);
-    offset_ = graph_->max_index();
+template CanonicalDBG::CanonicalDBG(std::shared_ptr<DeBruijnGraph>, size_t);
+template CanonicalDBG::CanonicalDBG(std::shared_ptr<const DeBruijnGraph>, size_t);
+
+void CanonicalDBG::flush() {
+    if (graph_->get_mode() != DeBruijnGraph::PRIMARY) {
+        logger->error("Only primary graphs can be wrapped in CanonicalDBG");
+        exit(1);
+    }
+
     child_node_cache_.Clear();
     parent_node_cache_.Clear();
     is_palindrome_cache_.Clear();
+
+    offset_ = graph_->max_index();
+    k_odd_ = (graph_->get_k() % 2);
+    has_sentinel_ = false;
+    alphabet_encoder_.fill(graph_->alphabet().size());
+
+    for (size_t i = 0; i < graph_->alphabet().size(); ++i) {
+        alphabet_encoder_[graph_->alphabet()[i]] = i;
+        if (graph_->alphabet()[i] == boss::BOSS::kSentinel)
+            has_sentinel_ = true;
+    }
 }
 
 void CanonicalDBG
@@ -519,7 +537,7 @@ DeBruijnGraph::node_index CanonicalDBG::reverse_complement(node_index node) cons
     ::reverse_complement(rev_seq.begin(), rev_seq.end());
     bool palindrome = (rev_seq == seq);
 
-    assert(palindrome || graph_.kmer_to_node(rev_seq) == npos);
+    assert(palindrome || graph_->kmer_to_node(rev_seq) == npos);
 
     is_palindrome_cache_.Put(node, palindrome);
     return palindrome ? node : node + offset_;
