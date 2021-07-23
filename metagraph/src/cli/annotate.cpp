@@ -481,12 +481,9 @@ int annotate_graph(Config *config) {
     } else {
         // |config->separately| is true
 
-        size_t num_threads = 1;
-        if (!config->files_sequentially) {
-            // annotate multiple files in parallel, each in a single thread
-            num_threads = get_num_threads();
-            set_num_threads(1);
-        }
+        // annotate multiple files in parallel, each with |parallel_each| threads
+        size_t num_threads = get_num_threads();
+        set_num_threads(std::max(1u, config->parallel_each));
 
         if (!config->outfbase.empty()) {
             try {
