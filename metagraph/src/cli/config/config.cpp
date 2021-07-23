@@ -949,12 +949,13 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Available options for alignment:\n");
             fprintf(stderr, "\t-o --outfile-base [STR]\t\t\t\tbasename of output file []\n");
             fprintf(stderr, "\t   --json \t\t\t\t\toutput alignment in JSON format [off]\n");
-            fprintf(stderr, "\t   --align-only-forwards \t\t\t\tdo not align backwards from a seed on basic-mode graphs [off]\n");
+            fprintf(stderr, "\t   --align-only-forwards \t\t\tdo not align backwards from a seed on basic-mode graphs [off]\n");
             fprintf(stderr, "\t   --align-alternative-alignments \t\tthe number of alternative paths to report per seed [1]\n");
             fprintf(stderr, "\t   --align-min-path-score [INT]\t\t\tthe minimum score that a reported path can have [0]\n");
             fprintf(stderr, "\t   --align-max-nodes-per-seq-char [FLOAT]\tmaximum number of nodes to consider per sequence character [12.0]\n");
             fprintf(stderr, "\t   --align-max-ram [FLOAT]\t\t\tmaximum amount of RAM used per alignment in MB [200.0]\n");
-            fprintf(stderr, "\t   --align-xdrop [INT]\t\t\t\tthe maximum difference between the current and the best alignment [27]\n");
+            fprintf(stderr, "\t   --align-xdrop [INT]\t\t\t\tthe maximum difference between the current score and the best alignment score [27]\n");
+            fprintf(stderr, "\t   \t\t\t\t\t\t\tNote that this parameter should be scaled accordingly when changing the default scoring parameters.\n");
             fprintf(stderr, "\t   --align-rel-score-cutoff [FLOAT]\t\tmin score relative to the current best alignment to use as a lower bound for subsequent extensions [0.8]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "Advanced options for scoring:\n");
@@ -1201,7 +1202,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --align-min-path-score [INT]\t\t\tthe minimum score that a reported path can have [0]\n");
             fprintf(stderr, "\t   --align-max-nodes-per-seq-char [FLOAT]\tmaximum number of nodes to consider per sequence character [12.0]\n");
             fprintf(stderr, "\t   --align-max-ram [FLOAT]\t\t\tmaximum amount of RAM used per alignment in MB [200.0]\n");
-            fprintf(stderr, "\t   --align-xdrop [INT]\t\t\t\tthe maximum difference between the current and the best alignment [27]\n");
+            fprintf(stderr, "\t   --align-xdrop [INT]\t\t\t\tthe maximum difference between the current score and the best alignment score [27]\n");
+            fprintf(stderr, "\t   \t\t\t\t\t\t\tNote that this parameter should be scaled accordingly when changing the default scoring parameters.\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --batch-align \t\talign against query graph [off]\n");
             fprintf(stderr, "\t   --max-hull-forks [INT]\tmaximum number of forks to take when expanding query graph [4]\n");
