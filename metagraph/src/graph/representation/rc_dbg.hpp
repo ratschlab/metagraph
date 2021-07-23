@@ -1,7 +1,7 @@
 #ifndef __RC_DBG_HPP__
 #define __RC_DBG_HPP__
 
-#include "graph/representation/base/sequence_graph.hpp"
+#include "graph/representation/base/dbg_wrapper.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 
 namespace mtg {
@@ -13,14 +13,10 @@ namespace graph {
  * e.g., get_node_sequence(n) := reverse_complement(graph.get_node_sequence(n))
  * e.g., traverse(n, c) := graph.traverse_back(n, complement(c))
  */
-class RCDBG : public DeBruijnGraph {
+class RCDBG : public DBGWrapper {
   public:
-    RCDBG(const DeBruijnGraph &graph) : graph_(graph) {}
-
-    virtual const DeBruijnGraph& get_base_graph() const override final { return graph_.get_base_graph(); }
-
-    virtual size_t get_k() const override final { return graph_.get_k(); }
-    virtual Mode get_mode() const override final { return graph_.get_mode(); }
+    template <typename... Args>
+    RCDBG(Args&&... args) : DBGWrapper(std::forward<Args>(args)...) {}
 
     virtual node_index traverse(node_index node, char next_char) const override final {
         return graph_.traverse_back(node, complement(next_char));
@@ -82,14 +78,6 @@ class RCDBG : public DeBruijnGraph {
         });
     }
 
-    virtual const std::string& alphabet() const override final { return graph_.alphabet(); }
-
-
-    virtual void add_sequence(std::string_view /* sequence */,
-                              const std::function<void(node_index)> & /* on_insertion */ = [](uint64_t) {}) override final {
-        throw std::runtime_error("Not implemented");
-    }
-
     virtual void map_to_nodes(std::string_view /* sequence */,
                               const std::function<void(node_index)> & /* callback */,
                               const std::function<bool()> & /* terminate */ = [](){ return false; }) const override final {
@@ -105,28 +93,11 @@ class RCDBG : public DeBruijnGraph {
         graph_.adjacent_outgoing_nodes(node, callback);
     }
 
-    virtual uint64_t num_nodes() const override final { return graph_.num_nodes(); }
-
-    virtual bool load(const std::string &) override final {
-        throw std::runtime_error("Not implemented");
-    }
-
-    virtual void serialize(const std::string &) const override final {
-        throw std::runtime_error("Not implemented");
-    }
-
-    virtual std::string file_extension() const override final {
-        throw std::runtime_error("Not implemented");
-    }
-
     virtual std::string get_node_sequence(node_index node) const override final {
         std::string rc = graph_.get_node_sequence(node);
         ::reverse_complement(rc.begin(), rc.end());
         return rc;
     }
-
-  private:
-    const DeBruijnGraph &graph_;
 };
 
 } // namespace mtg

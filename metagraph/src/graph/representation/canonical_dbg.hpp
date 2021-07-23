@@ -7,7 +7,7 @@
 #include <cache.hpp>
 #include <lru_cache_policy.hpp>
 
-#include "graph/representation/base/sequence_graph.hpp"
+#include "graph/representation/base/dbg_wrapper.hpp"
 
 
 namespace mtg {
@@ -17,39 +17,11 @@ namespace graph {
  * CanonicalDBG is a wrapper which acts like a canonical-mode DeBruijnGraph, but
  * uses a non-canonical DeBruijnGraph as the underlying storage.
  */
-class CanonicalDBG : public DeBruijnGraph {
+class CanonicalDBG : public DBGWrapper {
   public:
-    /**
-     * Constructs a CanonicalDBG
-     * @param graph a graph
-     * @param cache_size the number of graph traversal call results to be cached
-     */
-    CanonicalDBG(const DeBruijnGraph &graph, size_t cache_size = 100'000);
+    template <typename Graph>
+    explicit CanonicalDBG(Graph graph, size_t cache_size = 100'000);
 
-    /**
-     * Constructs a CanonicalDBG
-     * @param graph a graph
-     * @param cache_size the number of graph traversal call results to be cached
-     */
-    CanonicalDBG(DeBruijnGraph &graph, size_t cache_size = 100'000);
-
-    /**
-     * Constructs a CanonicalDBG
-     * @param graph a pointer to the graph
-     * @param cache_size the number of graph traversal call results to be cached
-     */
-    CanonicalDBG(std::shared_ptr<const DeBruijnGraph> graph, size_t cache_size = 100'000);
-    /**
-     * Constructs a CanonicalDBG
-     * @param graph a pointer to the graph
-     * @param cache_size the number of graph traversal call results to be cached
-     */
-    CanonicalDBG(std::shared_ptr<DeBruijnGraph> graph, size_t cache_size = 100'000);
-
-    /**
-     * Copy constructor for CanonicalDBG. This creates a new wrapper with empty caches.
-     * @param canonical the graph to copy
-     */
     CanonicalDBG(const CanonicalDBG &canonical);
 
     // caches cannot be resized or moved, so disable these constructors
@@ -58,8 +30,6 @@ class CanonicalDBG : public DeBruijnGraph {
     CanonicalDBG& operator=(CanonicalDBG&&) = delete;
 
     virtual ~CanonicalDBG() {}
-
-    virtual const DeBruijnGraph& get_base_graph() const override final { return graph_.get_base_graph(); }
 
     virtual void add_sequence(std::string_view sequence,
                               const std::function<void(node_index)> &on_insertion = [](node_index) {}) override;
@@ -100,26 +70,12 @@ class CanonicalDBG : public DeBruijnGraph {
                               size_t min_tip_size = 1,
                               bool kmers_in_single_form = false) const override;
 
-    virtual uint64_t num_nodes() const override;
+    virtual uint64_t num_nodes() const override { return graph_.num_nodes() * 2; }
     virtual uint64_t max_index() const override { return graph_.max_index() * 2; }
-
-    virtual bool load(const std::string &) override {
-        throw std::runtime_error("Not implemented");
-    }
-
-    virtual void serialize(const std::string &) const override {
-        throw std::runtime_error("Not implemented");
-    }
-
-    virtual std::string file_extension() const override { return graph_.file_extension(); }
-
-    virtual const std::string& alphabet() const override { return graph_.alphabet(); }
 
     // Get string corresponding to |node_index|.
     // Note: Not efficient if sequences in nodes overlap. Use sparingly.
     virtual std::string get_node_sequence(node_index index) const override;
-
-    virtual size_t get_k() const override { return graph_.get_k(); }
 
     virtual Mode get_mode() const override { return CANONICAL; }
 
@@ -134,13 +90,19 @@ class CanonicalDBG : public DeBruijnGraph {
     virtual void call_nodes(const std::function<void(node_index)> &callback,
                             const std::function<bool()> &stop_early = [](){ return false; }) const override;
 
-    virtual const DeBruijnGraph& get_graph() const { return graph_; }
-
     virtual bool operator==(const CanonicalDBG &other) const {
         return graph_ == other.graph_;
     }
 
     virtual bool operator==(const DeBruijnGraph &other) const override;
+
+    virtual bool load(const std::string & /* filename */) override {
+        throw std::runtime_error("Not implemented");
+    }
+
+    virtual void serialize(const std::string & /* filename */) const override {
+        throw std::runtime_error("Not implemented");
+    }
 
     void reverse_complement(std::string &seq, std::vector<node_index> &path) const;
 
@@ -153,13 +115,9 @@ class CanonicalDBG : public DeBruijnGraph {
     node_index reverse_complement(node_index node) const;
 
   private:
-    std::shared_ptr<const DeBruijnGraph> const_graph_ptr_;
-    const DeBruijnGraph &graph_ = *const_graph_ptr_;
     size_t offset_;
     bool k_odd_;
     bool has_sentinel_;
-
-    std::shared_ptr<DeBruijnGraph> graph_ptr_;
 
     std::array<size_t, 256> alphabet_encoder_;
 

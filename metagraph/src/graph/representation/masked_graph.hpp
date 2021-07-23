@@ -5,13 +5,13 @@
 #include <vector>
 
 #include "common/vectors/bitmap.hpp"
-#include "graph/representation/base/sequence_graph.hpp"
+#include "graph/representation/base/dbg_wrapper.hpp"
 
 
 namespace mtg {
 namespace graph {
 
-class MaskedDeBruijnGraph : public DeBruijnGraph {
+class MaskedDeBruijnGraph : public DBGWrapper {
   public:
     MaskedDeBruijnGraph(std::shared_ptr<const DeBruijnGraph> graph,
                         std::unique_ptr<bitmap>&& kmers_in_graph,
@@ -27,13 +27,6 @@ class MaskedDeBruijnGraph : public DeBruijnGraph {
     MaskedDeBruijnGraph& operator=(MaskedDeBruijnGraph&&) = default;
 
     virtual ~MaskedDeBruijnGraph() {}
-
-    virtual const DeBruijnGraph& get_base_graph() const override final { return graph_->get_base_graph(); }
-
-    virtual void add_sequence(std::string_view,
-                              const std::function<void(node_index)> &) override {
-        throw std::runtime_error("Not implemented");
-    }
 
     // Traverse graph mapping sequence to the graph nodes
     // and run callback for each node until the termination condition is satisfied
@@ -72,7 +65,6 @@ class MaskedDeBruijnGraph : public DeBruijnGraph {
                               bool kmers_in_single_form = false) const override;
 
     virtual uint64_t num_nodes() const override { return kmers_in_graph_->num_set_bits(); }
-    virtual uint64_t max_index() const override { return graph_->max_index(); }
 
     virtual bool load(const std::string &) override {
         throw std::runtime_error("Not implemented");
@@ -82,15 +74,9 @@ class MaskedDeBruijnGraph : public DeBruijnGraph {
         throw std::runtime_error("Not implemented");
     }
 
-    virtual std::string file_extension() const override { return graph_->file_extension(); }
-
-    virtual const std::string& alphabet() const override { return graph_->alphabet(); }
-
     // Get string corresponding to |node_index|.
     // Note: Not efficient if sequences in nodes overlap. Use sparingly.
     virtual std::string get_node_sequence(node_index index) const override;
-
-    virtual size_t get_k() const override { return graph_->get_k(); }
 
     virtual Mode get_mode() const override { return mode_; }
 
@@ -105,11 +91,8 @@ class MaskedDeBruijnGraph : public DeBruijnGraph {
     virtual void call_nodes(const std::function<void(node_index)> &callback,
                             const std::function<bool()> &stop_early = [](){ return false; }) const override;
 
-    virtual const DeBruijnGraph& get_graph() const { return *graph_; }
-    std::shared_ptr<const DeBruijnGraph> get_graph_ptr() const { return graph_; }
-
     virtual inline bool in_subgraph(node_index node) const {
-        assert(node > 0 && node <= graph_->max_index());
+        assert(node > 0 && node <= max_index());
         assert(kmers_in_graph_.get());
 
         return (*kmers_in_graph_)[node];
@@ -123,7 +106,6 @@ class MaskedDeBruijnGraph : public DeBruijnGraph {
     virtual const bitmap& get_mask() const { return *kmers_in_graph_; }
 
   private:
-    std::shared_ptr<const DeBruijnGraph> graph_;
     std::unique_ptr<bitmap> kmers_in_graph_;
     bool only_valid_nodes_in_mask_;
     Mode mode_;

@@ -10,18 +10,13 @@ namespace graph {
 
 using mtg::common::logger;
 
-
-CanonicalDBG::CanonicalDBG(std::shared_ptr<const DeBruijnGraph> graph, size_t cache_size)
-      : const_graph_ptr_(graph),
-        offset_(graph_.max_index()),
-        k_odd_(graph_.get_k() % 2),
-        has_sentinel_(false),
-        alphabet_encoder_({ graph_.alphabet().size() }),
-        cache_size_(cache_size),
-        child_node_cache_(cache_size_),
-        parent_node_cache_(cache_size_),
-        is_palindrome_cache_(k_odd_ ? 0 : cache_size_) {
-    if (graph->get_mode() != DeBruijnGraph::PRIMARY) {
+template <typename Graph>
+CanonicalDBG::CanonicalDBG(Graph graph, size_t cache_size)
+      : DBGWrapper(graph), offset_(graph->max_index()), k_odd_(graph->get_k() % 2),
+        has_sentinel_(false), alphabet_encoder_({ graph->alphabet().size() }),
+        cache_size_(cache_size), child_node_cache_(cache_size_),
+        parent_node_cache_(cache_size_), is_palindrome_cache_(k_odd_ ? 0 : cache_size_) {
+    if (graph_.get_mode() != DeBruijnGraph::PRIMARY) {
         logger->error("Only primary graphs can be wrapped in CanonicalDBG");
         exit(1);
     }
@@ -33,34 +28,15 @@ CanonicalDBG::CanonicalDBG(std::shared_ptr<const DeBruijnGraph> graph, size_t ca
     }
 }
 
+template CanonicalDBG::CanonicalDBG(std::shared_ptr<DeBruijnGraph>, size_t);
+template CanonicalDBG::CanonicalDBG(std::shared_ptr<const DeBruijnGraph>, size_t);
+
 CanonicalDBG::CanonicalDBG(const CanonicalDBG &canonical)
-      : const_graph_ptr_(canonical.const_graph_ptr_),
-        offset_(canonical.offset_),
-        k_odd_(canonical.k_odd_),
-        has_sentinel_(canonical.has_sentinel_),
-        alphabet_encoder_(canonical.alphabet_encoder_),
-        cache_size_(canonical.cache_size_),
-        child_node_cache_(cache_size_),
-        parent_node_cache_(cache_size_),
+      : DBGWrapper(canonical.graph_ptr_), offset_(canonical.offset_),
+        k_odd_(canonical.k_odd_), has_sentinel_(canonical.has_sentinel_),
+        alphabet_encoder_(canonical.alphabet_encoder_), cache_size_(canonical.cache_size_),
+        child_node_cache_(cache_size_), parent_node_cache_(cache_size_),
         is_palindrome_cache_(k_odd_ ? 0 : cache_size_) {}
-
-CanonicalDBG::CanonicalDBG(std::shared_ptr<DeBruijnGraph> graph, size_t cache_size)
-      : CanonicalDBG(std::dynamic_pointer_cast<const DeBruijnGraph>(graph), cache_size) {
-    graph_ptr_ = graph;
-}
-
-CanonicalDBG::CanonicalDBG(const DeBruijnGraph &graph, size_t cache_size)
-      : CanonicalDBG(std::shared_ptr<const DeBruijnGraph>(&graph, [](const auto*) {}),
-                     cache_size) {}
-
-CanonicalDBG::CanonicalDBG(DeBruijnGraph &graph, size_t cache_size)
-      : CanonicalDBG(std::shared_ptr<DeBruijnGraph>(&graph, [](const auto*) {}),
-                     cache_size) {}
-
-uint64_t CanonicalDBG::num_nodes() const {
-    logger->trace("Number of nodes may be overestimated if k is even or reverse complements are present in the graph");
-    return graph_.num_nodes() * 2;
-}
 
 void CanonicalDBG
 ::add_sequence(std::string_view sequence,
