@@ -26,7 +26,7 @@ class DBGWrapper : public DeBruijnGraph {
 
     virtual ~DBGWrapper() {}
 
-    virtual const Graph& get_base_graph() const override final {
+    virtual const DeBruijnGraph& get_base_graph() const override final {
         return graph_->get_base_graph();
     }
 

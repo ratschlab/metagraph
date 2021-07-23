@@ -100,7 +100,7 @@ std::shared_ptr<DeBruijnGraph> make_cached_graph(std::shared_ptr<DeBruijnGraph> 
     }
 
     if (auto dbg_succ = std::dynamic_pointer_cast<DBGSuccinct>(base_graph)) {
-        graph = make_cached_dbgsuccinct(base_graph, cache_size);
+        graph = make_cached_dbgsuccinct(dbg_succ, cache_size);
     } else {
         // graphs other than DBGSuccinct can't be cached
         return graph;

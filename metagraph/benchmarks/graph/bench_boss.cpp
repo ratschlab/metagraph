@@ -33,13 +33,14 @@ std::shared_ptr<OutGraph> load_graph(benchmark::State &state) {
         return graph;
     } else {
         static_assert(std::is_same_v<OutGraph, DeBruijnGraph>);
-        std::shared_ptr<OutGraph> out_graph = graph;
         if constexpr(std::is_same_v<Graph, CanonicalDBG>) {
-            return std::make_shared<CanonicalDBG>(out_graph);
+            return std::make_shared<CanonicalDBG>(
+                std::dynamic_pointer_cast<DeBruijnGraph>(graph)
+            );
         } else if constexpr(std::is_same_v<Graph, DBGSuccinctCached>) {
             std::shared_ptr<DeBruijnGraph> wrapped_graph
-                = make_cached_dbgsuccinct(out_graph, CACHE_SIZE);
-            if (out_graph->get_mode() == DeBruijnGraph::PRIMARY)
+                = make_cached_dbgsuccinct(graph, CACHE_SIZE);
+            if (graph->get_mode() == DeBruijnGraph::PRIMARY)
                 wrapped_graph = std::make_shared<CanonicalDBG>(wrapped_graph);
 
             return wrapped_graph;

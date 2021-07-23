@@ -250,7 +250,9 @@ std::shared_ptr<DeBruijnGraph>
 build_graph<DBGSuccinctCachedWrapped>(uint64_t k,
                                       std::vector<std::string> sequences,
                                       DeBruijnGraph::Mode mode) {
-    return make_cached_dbgsuccinct(build_graph<DBGSuccinct>(k, sequences, mode));
+    return make_cached_dbgsuccinct(std::dynamic_pointer_cast<DBGSuccinct>(
+        build_graph<DBGSuccinct>(k, sequences, mode)
+    ));
 }
 
 
@@ -404,7 +406,9 @@ std::shared_ptr<DeBruijnGraph>
 build_graph_batch<DBGSuccinctCachedWrapped>(uint64_t k,
                                             std::vector<std::string> sequences,
                                             DeBruijnGraph::Mode mode) {
-    return make_cached_dbgsuccinct(build_graph_batch<DBGSuccinct>(k, sequences, mode));
+    return make_cached_dbgsuccinct(std::dynamic_pointer_cast<DBGSuccinct>(
+        build_graph_batch<DBGSuccinct>(k, sequences, mode)
+    ));
 }
 
 

@@ -3,6 +3,7 @@
 
 #include "boss.hpp"
 #include "dbg_succinct.hpp"
+#include "graph/representation/base/dbg_wrapper.hpp"
 #include "kmer/kmer_extractor.hpp"
 #include "common/caches.hpp"
 
@@ -15,106 +16,21 @@ namespace graph {
 class DBGSuccinctCached;
 
 std::shared_ptr<DBGSuccinctCached>
-make_cached_dbgsuccinct(std::shared_ptr<DeBruijnGraph> graph, size_t cache_size = 1024);
+make_cached_dbgsuccinct(std::shared_ptr<DBGSuccinct> graph, size_t cache_size = 1024);
 
-inline std::shared_ptr<DBGSuccinctCached>
-make_cached_dbgsuccinct(DeBruijnGraph &graph, size_t cache_size = 1024) {
-    return make_cached_dbgsuccinct({ std::shared_ptr<DeBruijnGraph>{}, &graph }, cache_size);
-}
-
-
-class DBGSuccinctCached : public DeBruijnGraph {
+class DBGSuccinctCached : public DBGWrapper<DBGSuccinct> {
   public:
     typedef boss::BOSS::edge_index edge_index;
     typedef boss::BOSS::TAlphabet TAlphabet;
 
-    explicit DBGSuccinctCached(std::shared_ptr<DBGSuccinct> graph, size_t cache_size)
-          : graph_ptr_(graph), boss_(&graph_ptr_->get_boss()), cache_size_(cache_size) {
-        assert(graph_ptr_ && "Only DBGSuccinct can be cached");
-    }
-
-    explicit DBGSuccinctCached(std::shared_ptr<DeBruijnGraph> graph, size_t cache_size)
-          : DBGSuccinctCached(std::dynamic_pointer_cast<DBGSuccinct>(graph), cache_size) {}
-
-    explicit DBGSuccinctCached(DBGSuccinct &dbg, size_t cache_size)
-          : DBGSuccinctCached(std::shared_ptr<DBGSuccinct>(
-                std::shared_ptr<DBGSuccinct>{}, &dbg
-            ), cache_size) {}
-
-    explicit DBGSuccinctCached(DeBruijnGraph &graph, size_t cache_size)
-          : DBGSuccinctCached(dynamic_cast<DBGSuccinct&>(graph), cache_size) {}
-
-    virtual ~DBGSuccinctCached() {}
+    template <typename Graph>
+    explicit DBGSuccinctCached(Graph graph) : DBGWrapper(graph) {}
 
     // if the sequence of a node has been constructed externally, cache the result
     virtual void put_decoded_node(node_index node, std::string_view seq) const = 0;
 
     // get the encoding of the first character of this node's sequence
     virtual TAlphabet get_first_value(edge_index i) const = 0;
-
-    virtual const DeBruijnGraph& get_base_graph() const override final {
-        return graph_ptr_->get_base_graph();
-    }
-
-    const DBGSuccinct& get_dbg_succ() const { return *graph_ptr_; }
-
-    virtual size_t get_k() const override final { return graph_ptr_->get_k(); }
-
-    virtual Mode get_mode() const override final { return graph_ptr_->get_mode(); }
-
-    virtual size_t outdegree(node_index node) const override final {
-        return graph_ptr_->outdegree(node);
-    }
-
-    virtual bool has_single_outgoing(node_index node) const override final {
-        return graph_ptr_->has_single_outgoing(node);
-    }
-
-    virtual bool has_multiple_outgoing(node_index node) const override final {
-        return graph_ptr_->has_multiple_outgoing(node);
-    }
-
-    virtual size_t indegree(node_index node) const override final {
-        return graph_ptr_->indegree(node);
-    }
-
-    virtual bool has_no_incoming(node_index node) const override final {
-        return graph_ptr_->has_no_incoming(node);
-    }
-
-    virtual bool has_single_incoming(node_index node) const override final {
-        return graph_ptr_->has_single_incoming(node);
-    }
-
-    virtual const std::string& alphabet() const override final { return graph_ptr_->alphabet(); }
-
-    virtual void map_to_nodes(std::string_view sequence,
-                              const std::function<void(node_index)> &callback,
-                              const std::function<bool()> &terminate
-                                  = [](){ return false; }) const override final {
-        graph_ptr_->map_to_nodes(sequence, callback, terminate);
-    }
-
-    virtual void
-    adjacent_outgoing_nodes(node_index node,
-                            const std::function<void(node_index)> &callback) const override final {
-        graph_ptr_->adjacent_outgoing_nodes(node, callback);
-    }
-    virtual void
-    adjacent_incoming_nodes(node_index node,
-                            const std::function<void(node_index)> &callback) const override final {
-        graph_ptr_->adjacent_incoming_nodes(node, callback);
-    }
-
-    virtual uint64_t num_nodes() const override final { return graph_ptr_->num_nodes(); }
-
-    virtual void serialize(const std::string &filename) const override final {
-        graph_ptr_->serialize(filename);
-    }
-
-    virtual std::string file_extension() const override final {
-        return graph_ptr_->file_extension();
-    }
 
     virtual bool operator==(const DeBruijnGraph &other) const override final {
         if (get_k() != other.get_k()
@@ -125,7 +41,7 @@ class DBGSuccinctCached : public DeBruijnGraph {
         const auto *other_succ = dynamic_cast<const DBGSuccinct*>(&other);
         if (!other_succ) {
             if (const auto *other_cached = dynamic_cast<const DBGSuccinctCached*>(&other))
-                other_succ = &other_cached->get_dbg_succ();
+                other_succ = &other_cached->get_graph();
         }
 
         if (other_succ)
@@ -134,11 +50,6 @@ class DBGSuccinctCached : public DeBruijnGraph {
         throw std::runtime_error("Not implemented");
         return false;
     }
-
-  protected:
-    std::shared_ptr<DBGSuccinct> graph_ptr_;
-    const boss::BOSS *boss_;
-    size_t cache_size_;
 };
 
 
@@ -151,10 +62,10 @@ class DBGSuccinctCachedImpl : public DBGSuccinctCached {
     typedef std::pair<KmerType, std::optional<edge_index>> CacheValue;
 
   public:
-    template <typename... Args>
-    DBGSuccinctCachedImpl(Args&&... args)
-          : DBGSuccinctCached(std::forward<Args>(args)...),
-            decoded_cache_(cache_size_) {}
+    template <typename Graph>
+    DBGSuccinctCachedImpl(Graph graph, size_t cache_size)
+          : DBGSuccinctCached(graph), boss_(&graph_ptr_->get_boss()),
+            cache_size_(cache_size), decoded_cache_(cache_size_) {}
 
     void put_decoded_node(node_index node, std::string_view seq) const {
         assert(node > 0 && node <= num_nodes());
@@ -312,6 +223,8 @@ class DBGSuccinctCachedImpl : public DBGSuccinctCached {
     }
 
   private:
+    const boss::BOSS *boss_;
+    size_t cache_size_;
     mutable common::ThreadUnsafeLRUCache<edge_index, CacheValue> decoded_cache_;
 
     // cache a computed result
@@ -373,7 +286,7 @@ class DBGSuccinctCachedImpl : public DBGSuccinctCached {
 
 
 inline std::shared_ptr<DBGSuccinctCached>
-make_cached_dbgsuccinct(std::shared_ptr<DeBruijnGraph> graph, size_t cache_size) {
+make_cached_dbgsuccinct(std::shared_ptr<DBGSuccinct> graph, size_t cache_size) {
     if (graph->get_k() * kmer::KmerExtractorBOSS::bits_per_char <= 64) {
         return std::make_shared<DBGSuccinctCachedImpl<kmer::KmerExtractorBOSS::Kmer64>>(graph, cache_size);
     } else if (graph->get_k() * kmer::KmerExtractorBOSS::bits_per_char <= 128) {
