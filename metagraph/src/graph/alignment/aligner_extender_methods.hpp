@@ -115,6 +115,8 @@ class DefaultColumnExtender : public SeedFilteringExtender {
         return !prev_starts.emplace(table_i).second;
     }
 
+    // This method calls at most one alignment, but can be overridden by a child
+    // class to call multiple alignments.
     virtual void call_alignments(score_t cur_cell_score,
                                  score_t end_score,
                                  score_t min_path_score,
@@ -160,8 +162,7 @@ class DefaultColumnExtender : public SeedFilteringExtender {
     tsl::hopscotch_map<char, AlignedVector<Cigar::Operator>> profile_op_;
 
     // backtrack through the DP table to reconstruct alignments
-    std::vector<Alignment> backtrack(score_t min_path_score,
-                                        std::string_view window);
+    std::vector<Alignment> backtrack(score_t min_path_score, std::string_view window);
 };
 
 } // namespace align
