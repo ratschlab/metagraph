@@ -50,21 +50,6 @@ class DBGSuccinctCached : public DBGWrapper<DBGSuccinct> {
         throw std::runtime_error("Not implemented");
         return false;
     }
-
-    virtual void call_sequences(const CallPath &callback,
-                                size_t /* num_threads */ = 1,
-                                bool kmers_in_single_form = false) const override final {
-        // TODO: the cache is not thread safe, so for now, only single threaded
-        graph_->call_sequences(callback, 1, kmers_in_single_form);
-    }
-
-    virtual void call_unitigs(const CallPath &callback,
-                              size_t /* num_threads */ = 1,
-                              size_t min_tip_size = 1,
-                              bool kmers_in_single_form = false) const override {
-        // TODO: the cache is not thread safe, so for now, only single threaded
-        graph_->call_unitigs(callback, 1, min_tip_size, kmers_in_single_form);
-    }
 };
 
 
@@ -214,7 +199,7 @@ class DBGSuccinctCachedImpl : public DBGSuccinctCached {
   private:
     const boss::BOSS *boss_;
     size_t cache_size_;
-    mutable common::ThreadUnsafeLRUCache<edge_index, CacheValue> decoded_cache_;
+    mutable common::LRUCache<edge_index, CacheValue> decoded_cache_;
 
     virtual void flush() override final {
         boss_ = &graph_->get_boss();
