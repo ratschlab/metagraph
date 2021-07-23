@@ -26,12 +26,13 @@ class DBGWrapper : public DeBruijnGraph {
 
     virtual ~DBGWrapper() {}
 
-    virtual const Graph& get_base_graph() const override final {
+    virtual const DeBruijnGraph& get_base_graph() const override final {
         return graph_->get_base_graph();
     }
 
     virtual const Graph& get_graph() const { return *graph_; }
     virtual std::shared_ptr<const Graph> get_graph_ptr() const { return graph_; }
+    virtual std::shared_ptr<Graph> get_mutable_graph_ptr() const { return graph_ptr_; }
 
     virtual void add_sequence(std::string_view sequence,
                               const std::function<void(node_index)> &on_insertion
@@ -42,6 +43,7 @@ class DBGWrapper : public DeBruijnGraph {
         }
 
         graph_ptr_->add_sequence(sequence, on_insertion);
+        flush();
     }
 
     // Traverse graph mapping sequence to the graph nodes
@@ -107,7 +109,11 @@ class DBGWrapper : public DeBruijnGraph {
             exit(1);
         }
 
-        return graph_ptr_->load(filename);
+        if (!graph_ptr_->load(filename))
+            return false;
+
+        flush();
+        return true;
     }
 
     virtual void serialize(const std::string &filename) const override {
@@ -148,6 +154,9 @@ class DBGWrapper : public DeBruijnGraph {
   protected:
     std::shared_ptr<const Graph> graph_;
     std::shared_ptr<Graph> graph_ptr_;
+
+    // clear any internal storage the wrapper may have
+    virtual void flush() {}
 };
 
 } // namespace graph

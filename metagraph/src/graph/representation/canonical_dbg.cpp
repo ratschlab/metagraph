@@ -12,14 +12,26 @@ using mtg::common::logger;
 
 template <typename Graph>
 CanonicalDBG::CanonicalDBG(Graph graph, size_t cache_size)
-      : DBGWrapper(graph), offset_(graph->max_index()), k_odd_(graph->get_k() % 2),
-        has_sentinel_(false), alphabet_encoder_({ graph->alphabet().size() }),
-        cache_size_(cache_size), child_node_cache_(cache_size_),
-        parent_node_cache_(cache_size_), is_palindrome_cache_(k_odd_ ? 0 : cache_size_) {
+      : DBGWrapper(graph), cache_size_(cache_size), child_node_cache_(cache_size_),
+        parent_node_cache_(cache_size_), is_palindrome_cache_(cache_size_) { flush(); }
+
+template CanonicalDBG::CanonicalDBG(std::shared_ptr<DeBruijnGraph>, size_t);
+template CanonicalDBG::CanonicalDBG(std::shared_ptr<const DeBruijnGraph>, size_t);
+
+void CanonicalDBG::flush() {
     if (graph_->get_mode() != DeBruijnGraph::PRIMARY) {
         logger->error("Only primary graphs can be wrapped in CanonicalDBG");
         exit(1);
     }
+
+    child_node_cache_.Clear();
+    parent_node_cache_.Clear();
+    is_palindrome_cache_.Clear();
+
+    offset_ = graph_->max_index();
+    k_odd_ = (graph_->get_k() % 2);
+    has_sentinel_ = false;
+    alphabet_encoder_.fill(graph_->alphabet().size());
 
     for (size_t i = 0; i < graph_->alphabet().size(); ++i) {
         alphabet_encoder_[graph_->alphabet()[i]] = i;
@@ -27,26 +39,6 @@ CanonicalDBG::CanonicalDBG(Graph graph, size_t cache_size)
             has_sentinel_ = true;
     }
 }
-
-template CanonicalDBG::CanonicalDBG(std::shared_ptr<DeBruijnGraph>, size_t);
-template CanonicalDBG::CanonicalDBG(std::shared_ptr<const DeBruijnGraph>, size_t);
-
-CanonicalDBG::CanonicalDBG(const CanonicalDBG &canonical)
-      : CanonicalDBG(canonical.graph_ptr_ ? canonical.graph_ptr_ : canonical.graph_,
-                     canonical.cache_size_) {}
-
-void CanonicalDBG
-::add_sequence(std::string_view sequence,
-               const std::function<void(node_index)> &on_insertion) {
-    assert(graph_ptr_ && "add_sequence only supported for non-const graphs.");
-
-    graph_ptr_->add_sequence(sequence, on_insertion);
-    offset_ = graph_->max_index();
-    child_node_cache_.Clear();
-    parent_node_cache_.Clear();
-    is_palindrome_cache_.Clear();
-}
-
 
 void CanonicalDBG
 ::map_to_nodes_sequentially(std::string_view sequence,
