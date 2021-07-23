@@ -420,9 +420,12 @@ int align_to_graph(Config *config) {
                 num_bytes_read += it->seq.l;
             }
 
-            auto process_batch = [&](SeqBatch batch) {
-                auto aln_graph = graph;
-                if (auto *canonical = dynamic_cast<CanonicalDBG*>(graph.get()))
+            auto process_batch = [&,graph](SeqBatch batch) {
+                // make a shared_ptr in a thread-safe way
+                std::shared_ptr<DeBruijnGraph> aln_graph(
+                    std::shared_ptr<DeBruijnGraph>{}, graph.get()
+                );
+                if (auto *canonical = dynamic_cast<CanonicalDBG*>(aln_graph.get()))
                     aln_graph = std::make_shared<CanonicalDBG>(*canonical);
 
                 std::unique_ptr<IDBGAligner> aligner;
