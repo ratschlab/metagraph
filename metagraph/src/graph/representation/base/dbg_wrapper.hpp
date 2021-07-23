@@ -15,25 +15,23 @@ namespace graph {
 template <class Graph = DeBruijnGraph>
 class DBGWrapper : public DeBruijnGraph {
   public:
-    explicit DBGWrapper(std::shared_ptr<const Graph> graph)
-          : const_graph_ptr_(graph), graph_(*const_graph_ptr_) {
-        assert(const_graph_ptr_);
+    explicit DBGWrapper(std::shared_ptr<const Graph> graph) : graph_(graph) {
+        assert(graph_);
     }
 
-    explicit DBGWrapper(std::shared_ptr<Graph> graph)
-          : const_graph_ptr_(graph), graph_ptr_(graph), graph_(*const_graph_ptr_) {
-        assert(const_graph_ptr_);
+    explicit DBGWrapper(std::shared_ptr<Graph> graph) : graph_(graph), graph_ptr_(graph) {
+        assert(graph_);
         assert(graph_ptr_);
     }
 
     virtual ~DBGWrapper() {}
 
     virtual const Graph& get_base_graph() const override final {
-        return graph_.get_base_graph();
+        return graph_->get_base_graph();
     }
 
-    virtual const Graph& get_graph() const { return graph_; }
-    virtual std::shared_ptr<const Graph> get_graph_ptr() const { return const_graph_ptr_; }
+    virtual const Graph& get_graph() const { return *graph_; }
+    virtual std::shared_ptr<const Graph> get_graph_ptr() const { return graph_; }
 
     virtual void add_sequence(std::string_view sequence,
                               const std::function<void(node_index)> &on_insertion
@@ -52,7 +50,7 @@ class DBGWrapper : public DeBruijnGraph {
                               const std::function<void(node_index)> &callback,
                               const std::function<bool()> &terminate
                                   = [](){ return false; }) const override {
-        graph_.map_to_nodes(sequence, callback, terminate);
+        graph_->map_to_nodes(sequence, callback, terminate);
     }
 
     // Traverse graph mapping sequence to the graph nodes
@@ -62,46 +60,46 @@ class DBGWrapper : public DeBruijnGraph {
                                            const std::function<void(node_index)> &callback,
                                            const std::function<bool()> &terminate
                                                = [](){ return false; }) const override {
-        graph_.map_to_nodes_sequentially(sequence, callback, terminate);
+        graph_->map_to_nodes_sequentially(sequence, callback, terminate);
     }
 
     // Given a node index, call the target nodes of all edges outgoing from it.
     virtual void adjacent_outgoing_nodes(node_index node,
                                          const std::function<void(node_index)> &callback) const override {
-        graph_.adjacent_outgoing_nodes(node, callback);
+        graph_->adjacent_outgoing_nodes(node, callback);
     }
 
     virtual void call_outgoing_kmers(node_index kmer,
                                      const OutgoingEdgeCallback &callback) const override {
-        graph_.call_outgoing_kmers(kmer, callback);
+        graph_->call_outgoing_kmers(kmer, callback);
     }
 
     virtual void call_incoming_kmers(node_index kmer,
                                      const IncomingEdgeCallback &callback) const override {
-        graph_.call_incoming_kmers(kmer, callback);
+        graph_->call_incoming_kmers(kmer, callback);
     }
 
     // Given a node index, call the source nodes of all edges incoming to it.
     virtual void adjacent_incoming_nodes(node_index node,
                                          const std::function<void(node_index)> &callback) const override {
-        graph_.adjacent_incoming_nodes(node, callback);
+        graph_->adjacent_incoming_nodes(node, callback);
     }
 
     virtual void call_sequences(const CallPath &callback,
                                 size_t num_threads = 1,
                                 bool kmers_in_single_form = false) const override {
-        graph_.call_sequences(callback, num_threads, kmers_in_single_form);
+        graph_->call_sequences(callback, num_threads, kmers_in_single_form);
     }
 
     virtual void call_unitigs(const CallPath &callback,
                               size_t num_threads = 1,
                               size_t min_tip_size = 1,
                               bool kmers_in_single_form = false) const override {
-        graph_.call_unitigs(callback, num_threads, min_tip_size, kmers_in_single_form);
+        graph_->call_unitigs(callback, num_threads, min_tip_size, kmers_in_single_form);
     }
 
-    virtual uint64_t num_nodes() const override { return graph_.num_nodes(); }
-    virtual uint64_t max_index() const override { return graph_.max_index(); }
+    virtual uint64_t num_nodes() const override { return graph_->num_nodes(); }
+    virtual uint64_t max_index() const override { return graph_->max_index(); }
 
     virtual bool load(const std::string &filename) override {
         if (!graph_ptr_) {
@@ -113,44 +111,43 @@ class DBGWrapper : public DeBruijnGraph {
     }
 
     virtual void serialize(const std::string &filename) const override {
-        graph_.serialize(filename);
+        graph_->serialize(filename);
     }
 
-    virtual std::string file_extension() const override { return graph_.file_extension(); }
+    virtual std::string file_extension() const override { return graph_->file_extension(); }
 
-    virtual const std::string& alphabet() const override { return graph_.alphabet(); }
+    virtual const std::string& alphabet() const override { return graph_->alphabet(); }
 
     // Get string corresponding to |node_index|.
     // Note: Not efficient if sequences in nodes overlap. Use sparingly.
     virtual std::string get_node_sequence(node_index index) const override {
-        return graph_.get_node_sequence(index);
+        return graph_->get_node_sequence(index);
     }
 
-    virtual size_t get_k() const override { return graph_.get_k(); }
+    virtual size_t get_k() const override { return graph_->get_k(); }
 
-    virtual Mode get_mode() const override { return graph_.get_mode(); }
+    virtual Mode get_mode() const override { return graph_->get_mode(); }
 
     virtual node_index traverse(node_index node, char next_char) const override {
-        return graph_.traverse(node, next_char);
+        return graph_->traverse(node, next_char);
     }
 
     virtual node_index traverse_back(node_index node, char prev_char) const override {
-        return graph_.traverse_back(node, prev_char);
+        return graph_->traverse_back(node, prev_char);
     }
 
-    virtual size_t outdegree(node_index node) const override { return graph_.outdegree(node); }
-    virtual size_t indegree(node_index node) const override { return graph_.indegree(node); }
+    virtual size_t outdegree(node_index node) const override { return graph_->outdegree(node); }
+    virtual size_t indegree(node_index node) const override { return graph_->indegree(node); }
 
     virtual void call_nodes(const std::function<void(node_index)> &callback,
                             const std::function<bool()> &stop_early
                                 = [](){ return false; }) const override {
-        graph_.call_nodes(callback, stop_early);
+        graph_->call_nodes(callback, stop_early);
     }
 
   protected:
-    std::shared_ptr<const Graph> const_graph_ptr_;
+    std::shared_ptr<const Graph> graph_;
     std::shared_ptr<Graph> graph_ptr_;
-    const Graph &graph_;
 };
 
 } // namespace graph

@@ -70,8 +70,8 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
                               size_t min_tip_size = 1,
                               bool kmers_in_single_form = false) const override final;
 
-    virtual uint64_t num_nodes() const override final { return graph_.num_nodes() * 2; }
-    virtual uint64_t max_index() const override final { return graph_.max_index() * 2; }
+    virtual uint64_t num_nodes() const override final { return graph_->num_nodes() * 2; }
+    virtual uint64_t max_index() const override final { return graph_->max_index() * 2; }
 
     // Get string corresponding to |node_index|.
     // Note: Not efficient if sequences in nodes overlap. Use sparingly.

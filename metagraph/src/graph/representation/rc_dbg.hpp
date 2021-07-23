@@ -18,11 +18,11 @@ class RCDBG : public DBGWrapper<DeBruijnGraph> {
     RCDBG(Args&&... args) : DBGWrapper(std::forward<Args>(args)...) {}
 
     virtual node_index traverse(node_index node, char next_char) const override final {
-        return graph_.traverse_back(node, complement(next_char));
+        return graph_->traverse_back(node, complement(next_char));
     }
 
     virtual node_index traverse_back(node_index node, char prev_char) const override final {
-        return graph_.traverse(node, complement(prev_char));
+        return graph_->traverse(node, complement(prev_char));
     }
 
     virtual void map_to_nodes_sequentially(std::string_view sequence,
@@ -33,46 +33,46 @@ class RCDBG : public DBGWrapper<DeBruijnGraph> {
 
         std::string rc(sequence);
         ::reverse_complement(rc.begin(), rc.end());
-        std::vector<node_index> nodes = map_sequence_to_nodes(graph_, rc);
+        std::vector<node_index> nodes = map_sequence_to_nodes(*graph_, rc);
         for (auto it = nodes.rbegin(); it != nodes.rend() && !terminate(); ++it) {
             callback(*it);
         }
     }
 
     virtual size_t outdegree(node_index node) const override final {
-        return graph_.indegree(node);
+        return graph_->indegree(node);
     }
 
     virtual bool has_single_outgoing(node_index node) const override final {
-        return graph_.has_single_incoming(node);
+        return graph_->has_single_incoming(node);
     }
 
     virtual bool has_multiple_outgoing(node_index node) const override final {
-        return graph_.indegree(node) > 1;
+        return graph_->indegree(node) > 1;
     }
 
     virtual size_t indegree(node_index node) const override final {
-        return graph_.outdegree(node);
+        return graph_->outdegree(node);
     }
 
     virtual bool has_no_incoming(node_index node) const override final {
-        return graph_.outdegree(node) == 0;
+        return graph_->outdegree(node) == 0;
     }
 
     virtual bool has_single_incoming(node_index node) const override final {
-        return graph_.has_single_outgoing(node);
+        return graph_->has_single_outgoing(node);
     }
 
     virtual void call_outgoing_kmers(node_index kmer,
                                      const OutgoingEdgeCallback &callback) const override final {
-        graph_.call_incoming_kmers(kmer, [&](node_index prev, char c) {
+        graph_->call_incoming_kmers(kmer, [&](node_index prev, char c) {
             callback(prev, complement(c));
         });
     }
 
     virtual void call_incoming_kmers(node_index kmer,
                                      const IncomingEdgeCallback &callback) const override final {
-        graph_.call_outgoing_kmers(kmer, [&](node_index next, char c) {
+        graph_->call_outgoing_kmers(kmer, [&](node_index next, char c) {
             callback(next, complement(c));
         });
     }
@@ -85,15 +85,15 @@ class RCDBG : public DBGWrapper<DeBruijnGraph> {
 
     virtual void adjacent_outgoing_nodes(node_index node,
                                          const std::function<void(node_index)> &callback) const override final {
-        graph_.adjacent_incoming_nodes(node, callback);
+        graph_->adjacent_incoming_nodes(node, callback);
     }
     virtual void adjacent_incoming_nodes(node_index node,
                                          const std::function<void(node_index)> &callback) const override final {
-        graph_.adjacent_outgoing_nodes(node, callback);
+        graph_->adjacent_outgoing_nodes(node, callback);
     }
 
     virtual std::string get_node_sequence(node_index node) const override final {
-        std::string rc = graph_.get_node_sequence(node);
+        std::string rc = graph_->get_node_sequence(node);
         ::reverse_complement(rc.begin(), rc.end());
         return rc;
     }
