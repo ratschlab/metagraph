@@ -13,7 +13,7 @@ MaskedDeBruijnGraph
                       std::unique_ptr<bitmap>&& kmers_in_graph,
                       bool only_valid_nodes_in_mask,
                       Mode mode)
-      : graph_(graph),
+      : DBGWrapper(graph),
         kmers_in_graph_(std::move(kmers_in_graph)),
         only_valid_nodes_in_mask_(only_valid_nodes_in_mask),
         mode_(mode) {
@@ -61,7 +61,9 @@ size_t MaskedDeBruijnGraph::outdegree(node_index node) const {
     assert(in_subgraph(node));
 
     size_t outdegree = 0;
-    graph_->adjacent_outgoing_nodes(node, [&](auto index) { outdegree += in_subgraph(index); });
+    graph_->adjacent_outgoing_nodes(node, [&](auto index) {
+        outdegree += in_subgraph(index);
+    });
     return outdegree;
 }
 
@@ -69,7 +71,9 @@ size_t MaskedDeBruijnGraph::indegree(node_index node) const {
     assert(in_subgraph(node));
 
     size_t indegree = 0;
-    graph_->adjacent_incoming_nodes(node, [&](auto index) { indegree += in_subgraph(index); });
+    graph_->adjacent_incoming_nodes(node, [&](auto index) {
+        indegree += in_subgraph(index);
+    });
     return indegree;
 }
 
@@ -98,13 +102,10 @@ void MaskedDeBruijnGraph
                       const OutgoingEdgeCallback &callback) const {
     assert(in_subgraph(kmer));
 
-    graph_->call_outgoing_kmers(
-        kmer,
-        [&](const auto &index, auto c) {
-            if (in_subgraph(index))
-                callback(index, c);
-        }
-    );
+    graph_->call_outgoing_kmers(kmer, [&](const auto &index, auto c) {
+        if (in_subgraph(index))
+            callback(index, c);
+    });
 }
 
 void MaskedDeBruijnGraph
@@ -112,13 +113,10 @@ void MaskedDeBruijnGraph
                       const IncomingEdgeCallback &callback) const {
     assert(in_subgraph(kmer));
 
-    graph_->call_incoming_kmers(
-        kmer,
-        [&](const auto &index, auto c) {
-            if (in_subgraph(index))
-                callback(index, c);
-        }
-    );
+    graph_->call_incoming_kmers(kmer, [&](const auto &index, auto c) {
+        if (in_subgraph(index))
+            callback(index, c);
+    });
 }
 
 bit_vector_stat get_boss_mask(const DBGSuccinct &dbg_succ,
@@ -126,20 +124,16 @@ bit_vector_stat get_boss_mask(const DBGSuccinct &dbg_succ,
                               bool only_valid_nodes_in_mask) {
     sdsl::bit_vector mask_bv(dbg_succ.get_boss().num_edges() + 1, false);
     if (only_valid_nodes_in_mask) {
-        kmers_in_graph.call_ones(
-            [&](auto i) {
-                assert(dbg_succ.kmer_to_boss_index(i));
-                mask_bv[dbg_succ.kmer_to_boss_index(i)] = true;
-            }
-        );
+        kmers_in_graph.call_ones([&](auto i) {
+            assert(dbg_succ.kmer_to_boss_index(i));
+            mask_bv[dbg_succ.kmer_to_boss_index(i)] = true;
+        });
     } else {
-        dbg_succ.call_nodes(
-            [&](auto i) {
-                assert(dbg_succ.kmer_to_boss_index(i));
-                if (kmers_in_graph[i])
-                    mask_bv[dbg_succ.kmer_to_boss_index(i)] = true;
-            }
-        );
+        dbg_succ.call_nodes([&](auto i) {
+            assert(dbg_succ.kmer_to_boss_index(i));
+            if (kmers_in_graph[i])
+                mask_bv[dbg_succ.kmer_to_boss_index(i)] = true;
+        });
     }
     return bit_vector_stat(std::move(mask_bv));
 }
@@ -200,20 +194,18 @@ void MaskedDeBruijnGraph
     if (only_valid_nodes_in_mask_) {
         // iterate only through the nodes marked in the mask
         // TODO: add terminate<bool(void)> to call_ones
-        kmers_in_graph_->call_ones(
-            [&](auto index) {
-                if (stop || !index)
-                    return;
+        kmers_in_graph_->call_ones([&](auto index) {
+            if (stop || !index)
+                return;
 
-                assert(in_subgraph(index));
+            assert(in_subgraph(index));
 
-                if (stop_early()) {
-                    stop = true;
-                } else {
-                    callback(index);
-                }
+            if (stop_early()) {
+                stop = true;
+            } else {
+                callback(index);
             }
-        );
+        });
     } else {
         // call all nodes in the base graph and check the mask
         graph_->call_nodes(

@@ -37,7 +37,7 @@ DBGAlignerConfig initialize_aligner_config(const Config &config) {
     aligner_config.min_exact_match = config.alignment_min_exact_match;
     aligner_config.gap_opening_penalty = -config.alignment_gap_opening_penalty;
     aligner_config.gap_extension_penalty = -config.alignment_gap_extension_penalty;
-    aligner_config.forward_and_reverse_complement = !config.align_one_strand;
+    aligner_config.forward_and_reverse_complement = !config.align_only_forwards;
     aligner_config.alignment_edit_distance = config.alignment_edit_distance;
     aligner_config.alignment_match_score = config.alignment_match_score;
     aligner_config.alignment_mm_transition_score = config.alignment_mm_transition_score;
@@ -81,14 +81,13 @@ template std::unique_ptr<IDBGAligner> build_aligner<DeBruijnGraph>(const DeBruij
 
 void map_sequences_in_file(const std::string &file,
                            const DeBruijnGraph &graph,
+                           const DBGSuccinct *dbg,
                            const Config &config,
                            const Timer &timer,
                            ThreadPool *thread_pool = nullptr,
                            std::mutex *print_mutex = nullptr) {
     // TODO: multithreaded
     std::ignore = std::tie(thread_pool, print_mutex);
-
-    const DBGSuccinct *dbg = dynamic_cast<const DBGSuccinct*>(&graph.get_base_graph());
 
     std::unique_ptr<std::ofstream> ofile;
     if (config.outfbase.size())
@@ -290,7 +289,7 @@ std::string format_alignment(std::string_view header,
         if (paths.empty()) {
             sout += fmt::format("\t*\t*\t{}\t*\t*\t*", config.alignment_min_path_score);
         } else {
-            for (const auto &path : paths) {
+            for (const auto &path : paths.data()) {
                 sout += fmt::format("\t{}", path);
             }
         }
@@ -345,13 +344,13 @@ int align_to_graph(Config *config) {
         graph = primary_to_canonical(graph);
 
     if (config->map_sequences) {
+        const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph->get_base_graph());
         if (!config->alignment_length) {
             config->alignment_length = graph->get_k();
         } else if (config->alignment_length > graph->get_k()) {
             logger->warn("Mapping to k-mers longer than k is not supported");
             config->alignment_length = graph->get_k();
-        } else if (config->alignment_length != graph->get_k()
-                && !dynamic_cast<const DBGSuccinct*>(&graph->get_base_graph())) {
+        } else if (config->alignment_length != graph->get_k() && !dbg_succ) {
             logger->error("Matching k-mers shorter than k only supported for succinct graphs");
             exit(1);
         }
@@ -363,7 +362,8 @@ int align_to_graph(Config *config) {
         for (const auto &file : files) {
             logger->trace("Map sequences from file {}", file);
 
-            map_sequences_in_file(file, *graph, *config, timer, &thread_pool, &print_mutex);
+            map_sequences_in_file(file, *graph, dbg_succ, *config, timer,
+                                  &thread_pool, &print_mutex);
         }
 
         thread_pool.join();
@@ -380,9 +380,11 @@ int align_to_graph(Config *config) {
 
         Timer data_reading_timer;
 
-        std::shared_ptr<std::ostream> out{ std::shared_ptr<std::ostream>{}, &std::cout };
+        std::unique_ptr<std::ofstream> ofile;
         if (config->outfbase.size())
-            out = std::make_shared<std::ofstream>(config->outfbase);
+            ofile = std::make_unique<std::ofstream>(config->outfbase);
+
+        std::ostream *out = ofile ? ofile.get() : &std::cout;
 
         const uint64_t batch_size = config->query_batch_size_in_bytes;
 
@@ -411,10 +413,15 @@ int align_to_graph(Config *config) {
                 num_bytes_read += it->seq.l;
             }
 
-            auto process_batch = [&](SeqBatch batch) {
+            auto process_batch = [&,graph](SeqBatch batch) {
+                // make a shared_ptr in a thread-safe way
+                std::shared_ptr<DeBruijnGraph> aln_graph(
+                    std::shared_ptr<DeBruijnGraph>{}, graph.get()
+                );
+
                 // the graph should only be cached if the base graph is in PRIMARY mode,
                 // or if it's not CANONICAL and backwards traversal will be required
-                auto aln_graph = make_cached_graph(graph, *config);
+                aln_graph = make_cached_graph(graph, *config);
 
                 std::unique_ptr<IDBGAligner> aligner;
                 aligner = build_aligner(*aln_graph, aligner_config);

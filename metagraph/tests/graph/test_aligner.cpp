@@ -281,18 +281,18 @@ TYPED_TEST(DBGAlignerTest, align_straight_forward_and_reverse_complement) {
     check_extend(graph, aligner.get_config(), paths, query);
     auto ext_paths = get_extend(graph, config_fwd_and_rev, paths, query);
 
-    EXPECT_TRUE(std::equal(paths.begin(), paths.end(),
-                           ext_paths.begin(), ext_paths.end()));
+    EXPECT_TRUE(std::equal(paths.data().begin(), paths.data().end(),
+                           ext_paths.data().begin(), ext_paths.data().end()));
 
     // test copy
     auto paths_copy = paths;
-    for (const auto &path : paths_copy) {
+    for (const auto &path : paths_copy.data()) {
         EXPECT_TRUE(path.is_valid(*graph, &config));
     }
 
     // test move
     auto paths_move = std::move(paths);
-    for (const auto &path : paths_move) {
+    for (const auto &path : paths_move.data()) {
         EXPECT_TRUE(path.is_valid(*graph, &config));
     }
 }
@@ -1396,12 +1396,9 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_canonical) {
         auto dbg_succ = std::make_shared<DBGSuccinct>(k, mode);
         dbg_succ->add_sequence(reference_rc);
 
-        std::shared_ptr<DeBruijnGraph> graph;
-        if (mode == DeBruijnGraph::PRIMARY) {
-            graph = std::make_shared<CanonicalDBG>(*dbg_succ);
-        } else {
-            graph = dbg_succ;
-        }
+        std::shared_ptr<DeBruijnGraph> graph = dbg_succ;
+        if (mode == DeBruijnGraph::PRIMARY)
+            graph = std::make_shared<CanonicalDBG>(graph);
 
         DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
         config.max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
@@ -1655,7 +1652,9 @@ TEST(DBGAlignerTest, align_suffix_seed_no_full_seeds) {
 
     auto dbg_succ = std::make_shared<DBGSuccinct>(k, DeBruijnGraph::PRIMARY);
     dbg_succ->add_sequence(reference);
-    auto graph = std::make_shared<CanonicalDBG>(*dbg_succ);
+    auto graph = std::make_shared<CanonicalDBG>(
+        std::dynamic_pointer_cast<DeBruijnGraph>(dbg_succ)
+    );
 
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
     config.max_num_seeds_per_locus = std::numeric_limits<size_t>::max();

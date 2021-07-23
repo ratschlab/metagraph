@@ -88,14 +88,14 @@ std::shared_ptr<DeBruijnGraph> make_cached_graph(std::shared_ptr<DeBruijnGraph> 
                                                  const Config &config,
                                                  size_t cache_size) {
     // if alignment in both directions is not required, then there's no need to cache
-    if (graph->get_mode() != DeBruijnGraph::CANONICAL && config.align_one_strand)
+    if (graph->get_mode() != DeBruijnGraph::CANONICAL && config.align_only_forwards)
         return graph;
 
     auto base_graph = graph;
     auto canonical = std::dynamic_pointer_cast<CanonicalDBG>(graph);
 
     if (canonical) {
-        base_graph = canonical->get_graph_ptr();
+        base_graph = canonical->get_mutable_graph_ptr();
         assert(base_graph && "CanonicalDBG should be built from a non-const graph");
     }
 

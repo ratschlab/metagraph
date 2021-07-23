@@ -41,7 +41,7 @@ class TestDNAAlign(TestingBase):
         self.assertEqual('nodes (k): 16438', params_str[1])
         self.assertEqual('mode: basic', params_str[2])
 
-        stats_command = '{exe} align --align-one-strand -i {graph} --align-min-exact-match 0.0 {reads}'.format(
+        stats_command = '{exe} align --align-only-forwards -i {graph} --align-min-exact-match 0.0 {reads}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/genome.MT' + graph_file_extension[representation],
             reads=TEST_DATA_DIR + '/genome_MT1.fq',
@@ -136,7 +136,7 @@ class TestDNAAlign(TestingBase):
         self.assertEqual('nodes (k): 16438', params_str[1])
         self.assertEqual('mode: basic', params_str[2])
 
-        stats_command = '{exe} align --align-one-strand -i {graph} --align-min-exact-match 0.0 {reads}'.format(
+        stats_command = '{exe} align --align-only-forwards -i {graph} --align-min-exact-match 0.0 {reads}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/genome.MT' + graph_file_extension[representation],
             reads=TEST_DATA_DIR + '/genome_MT1.fq',
@@ -320,17 +320,16 @@ class TestDNAAlign(TestingBase):
         self.assertEqual('nodes (k): 16461', params_str[1])
         self.assertEqual('mode: basic', params_str[2])
 
-        stats_command = '{exe} align -o {output} --json -i {graph} --align-min-exact-match 0.0 {reads}'.format(
+        stats_command = '{exe} align --json -i {graph} --align-min-exact-match 0.0 {reads}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/genome.MT' + graph_file_extension[representation],
             reads=TEST_DATA_DIR + '/genome_MT1.fq',
-            output=self.tempdir.name + '/genome.MT' + graph_file_extension[representation] + '.align.json',
         )
         res = subprocess.run(stats_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
-        params_str = open(self.tempdir.name + '/genome.MT' + graph_file_extension[representation] + '.align.json', 'r').readlines()
+        params_str = res.stdout.decode().rstrip().split('\n')
         self.assertEqual(len(params_str), 7)
-        ref_align_str = open(TEST_DATA_DIR + '/genome_MT1.align.json', 'r').readlines()
+        ref_align_str = [a.rstrip() for a in open(TEST_DATA_DIR + '/genome_MT1.align.json', 'r').readlines()]
         for [a, b] in zip(params_str, ref_align_str):
             self.assertEqual(a, b)
 
@@ -347,17 +346,16 @@ class TestDNAAlign(TestingBase):
         self.assertEqual('nodes (k): 16461', params_str[1])
         self.assertEqual('mode: basic', params_str[2])
 
-        stats_command = '{exe} align -o {output} --json --align-edit-distance -i {graph} --align-min-exact-match 0.0 {reads}'.format(
+        stats_command = '{exe} align --json --align-edit-distance -i {graph} --align-min-exact-match 0.0 {reads}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/genome.MT' + graph_file_extension[representation],
             reads=TEST_DATA_DIR + '/genome_MT1.fq',
-            output=self.tempdir.name + '/genome.MT' + graph_file_extension[representation] + '.align.json',
         )
         res = subprocess.run(stats_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
-        params_str = open(self.tempdir.name + '/genome.MT' + graph_file_extension[representation] + '.align.json', 'r').readlines()
+        params_str = res.stdout.decode().rstrip().split('\n')
         self.assertEqual(len(params_str), 7)
-        ref_align_str = open(TEST_DATA_DIR + '/genome_MT1.align.edit.json', 'r').readlines()
+        ref_align_str = [a.rstrip() for a in open(TEST_DATA_DIR + '/genome_MT1.align.edit.json', 'r').readlines()]
         for [a, b] in zip(params_str, ref_align_str):
             self.assertEqual(a, b)
 

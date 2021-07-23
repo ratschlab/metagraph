@@ -7,7 +7,9 @@
 #include <cache.hpp>
 #include <lru_cache_policy.hpp>
 
-#include "graph/representation/base/sequence_graph.hpp"
+#include "graph/representation/base/dbg_wrapper.hpp"
+#include "graph/representation/succinct/dbg_succinct.hpp"
+#include "common/logger.hpp"
 
 
 namespace mtg {
@@ -17,34 +19,29 @@ namespace graph {
  * CanonicalDBG is a wrapper which acts like a canonical-mode DeBruijnGraph, but
  * uses a non-canonical DeBruijnGraph as the underlying storage.
  */
-class CanonicalDBG : public DeBruijnGraph {
+class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
   public:
-    /**
-     * Constructs a CanonicalDBG
-     * @param graph a graph
-     * @param cache_size the number of graph traversal call results to be cached
-     */
-    CanonicalDBG(const DeBruijnGraph &graph, size_t cache_size = 1024);
+    template <typename Graph>
+    explicit CanonicalDBG(Graph graph, size_t cache_size = 1024)
+          : DBGWrapper(graph), offset_(graph->max_index()), k_odd_(graph->get_k() % 2),
+            has_sentinel_(false), alphabet_encoder_({ graph->alphabet().size() }),
+            cache_size_(cache_size), child_node_cache_(cache_size_),
+            parent_node_cache_(cache_size_), is_palindrome_cache_(k_odd_ ? 0 : cache_size_) {
+        if (graph_->get_mode() != DeBruijnGraph::PRIMARY) {
+            common::logger->error("Only primary graphs can be wrapped in CanonicalDBG");
+            exit(1);
+        }
 
-    /**
-     * Constructs a CanonicalDBG
-     * @param graph a graph
-     * @param cache_size the number of graph traversal call results to be cached
-     */
-    CanonicalDBG(DeBruijnGraph &graph, size_t cache_size = 1024);
+        for (size_t i = 0; i < graph_->alphabet().size(); ++i) {
+            alphabet_encoder_[graph_->alphabet()[i]] = i;
+            if (graph_->alphabet()[i] == boss::BOSS::kSentinel)
+                has_sentinel_ = true;
+        }
+    }
 
-    /**
-     * Constructs a CanonicalDBG
-     * @param graph a pointer to the graph
-     * @param cache_size the number of graph traversal call results to be cached
-     */
-    CanonicalDBG(std::shared_ptr<DeBruijnGraph> graph, size_t cache_size = 1024);
-
-    /**
-     * Copy constructor for CanonicalDBG. This creates a new wrapper with empty caches.
-     * @param canonical the graph to copy
-     */
-    CanonicalDBG(const CanonicalDBG &canonical);
+    CanonicalDBG(const CanonicalDBG &canonical)
+        : CanonicalDBG(canonical.graph_ptr_ ? canonical.graph_ptr_ : canonical.graph_,
+                         canonical.cache_size_) {}
 
     // caches cannot be resized or moved, so disable these constructors
     CanonicalDBG& operator=(const CanonicalDBG &canonical) = delete;
@@ -53,90 +50,78 @@ class CanonicalDBG : public DeBruijnGraph {
 
     virtual ~CanonicalDBG() {}
 
-    virtual const DeBruijnGraph& get_base_graph() const override final { return graph_.get_base_graph(); }
-
     virtual void add_sequence(std::string_view sequence,
-                              const std::function<void(node_index)> &on_insertion = [](node_index) {}) override;
+                              const std::function<void(node_index)> &on_insertion = [](node_index) {}) override final;
 
     // Traverse graph mapping sequence to the graph nodes
     // and run callback for each node until the termination condition is satisfied
     virtual void map_to_nodes(std::string_view sequence,
                               const std::function<void(node_index)> &callback,
-                              const std::function<bool()> &terminate = [](){ return false; }) const override;
+                              const std::function<bool()> &terminate = [](){ return false; }) const override final;
 
     // Traverse graph mapping sequence to the graph nodes
     // and run callback for each node until the termination condition is satisfied.
     // Guarantees that nodes are called in the same order as the input sequence
     virtual void map_to_nodes_sequentially(std::string_view sequence,
                                            const std::function<void(node_index)> &callback,
-                                           const std::function<bool()> &terminate = [](){ return false; }) const override;
+                                           const std::function<bool()> &terminate = [](){ return false; }) const override final;
 
     // Given a node index, call the target nodes of all edges outgoing from it.
     virtual void adjacent_outgoing_nodes(node_index node,
-                                         const std::function<void(node_index)> &callback) const override;
+                                         const std::function<void(node_index)> &callback) const override final;
 
     virtual void call_outgoing_kmers(node_index kmer,
-                                     const OutgoingEdgeCallback &callback) const override;
+                                     const OutgoingEdgeCallback &callback) const override final;
 
     virtual void call_incoming_kmers(node_index kmer,
-                                     const IncomingEdgeCallback &callback) const override;
+                                     const IncomingEdgeCallback &callback) const override final;
 
     // Given a node index, call the source nodes of all edges incoming to it.
     virtual void adjacent_incoming_nodes(node_index node,
-                                         const std::function<void(node_index)> &callback) const override;
+                                         const std::function<void(node_index)> &callback) const override final;
 
     virtual void call_sequences(const CallPath &callback,
                                 size_t num_threads = 1,
-                                bool kmers_in_single_form = false) const override;
+                                bool kmers_in_single_form = false) const override final;
 
     virtual void call_unitigs(const CallPath &callback,
                               size_t num_threads = 1,
                               size_t min_tip_size = 1,
-                              bool kmers_in_single_form = false) const override;
+                              bool kmers_in_single_form = false) const override final;
 
-    virtual uint64_t num_nodes() const override;
-    virtual uint64_t max_index() const override { return graph_.max_index() * 2; }
-
-    virtual bool load(const std::string &) override {
-        throw std::runtime_error("Not implemented");
-    }
-
-    virtual void serialize(const std::string &) const override {
-        throw std::runtime_error("Not implemented");
-    }
-
-    virtual std::string file_extension() const override { return graph_.file_extension(); }
-
-    virtual const std::string& alphabet() const override { return graph_.alphabet(); }
+    virtual uint64_t num_nodes() const override final { return graph_->num_nodes() * 2; }
+    virtual uint64_t max_index() const override final { return graph_->max_index() * 2; }
 
     // Get string corresponding to |node_index|.
     // Note: Not efficient if sequences in nodes overlap. Use sparingly.
-    virtual std::string get_node_sequence(node_index index) const override;
-
-    virtual size_t get_k() const override { return graph_.get_k(); }
+    virtual std::string get_node_sequence(node_index index) const override final;
 
     virtual Mode get_mode() const override { return CANONICAL; }
 
     // Traverse the outgoing edge
-    virtual node_index traverse(node_index node, char next_char) const override;
+    virtual node_index traverse(node_index node, char next_char) const override final;
     // Traverse the incoming edge
-    virtual node_index traverse_back(node_index node, char prev_char) const override;
+    virtual node_index traverse_back(node_index node, char prev_char) const override final;
 
-    virtual size_t outdegree(node_index) const override;
-    virtual size_t indegree(node_index) const override;
+    virtual size_t outdegree(node_index) const override final;
+    virtual size_t indegree(node_index) const override final;
 
     virtual void call_nodes(const std::function<void(node_index)> &callback,
-                            const std::function<bool()> &stop_early = [](){ return false; }) const override;
+                            const std::function<bool()> &stop_early = [](){ return false; }) const override final;
 
-    virtual const DeBruijnGraph& get_graph() const { return graph_; }
-    std::shared_ptr<DeBruijnGraph> get_graph_ptr() const { return graph_ptr_; }
-    std::shared_ptr<const DeBruijnGraph> get_const_graph_ptr() const { return const_graph_ptr_; }
-
-    virtual bool operator==(const CanonicalDBG &other) const {
-        return graph_ == other.graph_;
+    bool operator==(const CanonicalDBG &other) const {
+        return *graph_ == *other.graph_;
     }
 
-    virtual bool operator==(const DeBruijnGraph &other) const override;
+    virtual bool operator==(const DeBruijnGraph &other) const override final;
+
+    virtual bool load(const std::string & /* filename */) override final {
+        throw std::runtime_error("Not implemented");
+    }
+
+    virtual void serialize(const std::string & /* filename */) const override final {
+        throw std::runtime_error("Not implemented");
+    }
 
     void reverse_complement(std::string &seq, std::vector<node_index> &path) const;
 
@@ -149,13 +134,9 @@ class CanonicalDBG : public DeBruijnGraph {
     node_index reverse_complement(node_index node) const;
 
   private:
-    std::shared_ptr<const DeBruijnGraph> const_graph_ptr_;
-    const DeBruijnGraph &graph_ = *const_graph_ptr_;
     size_t offset_;
     bool k_odd_;
     bool has_sentinel_;
-
-    std::shared_ptr<DeBruijnGraph> graph_ptr_;
 
     std::array<size_t, 256> alphabet_encoder_;
 
