@@ -50,6 +50,21 @@ class DBGSuccinctCached : public DBGWrapper<DBGSuccinct> {
         throw std::runtime_error("Not implemented");
         return false;
     }
+
+    virtual void call_sequences(const CallPath &callback,
+                                size_t /* num_threads */ = 1,
+                                bool kmers_in_single_form = false) const override final {
+        // TODO: the cache is not thread safe, so for now, only single threaded
+        graph_->call_sequences(callback, 1, kmers_in_single_form);
+    }
+
+    virtual void call_unitigs(const CallPath &callback,
+                              size_t /* num_threads */ = 1,
+                              size_t min_tip_size = 1,
+                              bool kmers_in_single_form = false) const override {
+        // TODO: the cache is not thread safe, so for now, only single threaded
+        graph_->call_unitigs(callback, 1, min_tip_size, kmers_in_single_form);
+    }
 };
 
 
@@ -204,28 +219,15 @@ class DBGSuccinctCachedImpl : public DBGSuccinctCached {
         );
     }
 
-    void add_sequence(std::string_view sequence,
-                      const std::function<void(node_index)> &on_insertion
-                          = [](uint64_t) {}) {
-        graph_ptr_->add_sequence(sequence, on_insertion);
-        decoded_cache_.Clear();
-    }
-
-    bool load(const std::string &filename) {
-        auto loaded = std::make_shared<DBGSuccinct>(graph_ptr_->get_k());
-        if (!loaded->load(filename))
-            return false;
-
-        graph_ptr_ = loaded;
-        boss_ = &graph_ptr_->get_boss();
-        decoded_cache_.Clear();
-        return true;
-    }
-
   private:
     const boss::BOSS *boss_;
     size_t cache_size_;
     mutable common::ThreadUnsafeLRUCache<edge_index, CacheValue> decoded_cache_;
+
+    virtual void flush() override final {
+        boss_ = &graph_->get_boss();
+        decoded_cache_.Clear();
+    }
 
     // cache a computed result
     void put_kmer(edge_index key, CacheValue value) const {
