@@ -191,6 +191,7 @@ void MaskedDeBruijnGraph
         kmers_in_graph_->call_ones([&](node_index index) {
             if (index) {
                 assert(in_subgraph(index));
+                // TODO: make this more efficient
                 callback(index, get_node_sequence(index));
             }
         });

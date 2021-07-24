@@ -129,7 +129,6 @@ class MaskedDeBruijnGraph : public DBGNodeModifyingWrapper<DeBruijnGraph> {
 
     virtual const bitmap& get_mask() const { return *kmers_in_graph_; }
 
-    // TODO: make this more efficient
     virtual void call_kmers(const std::function<void(node_index, const std::string&)> &callback) const override;
 
     virtual node_index kmer_to_node(std::string_view kmer) const override {
