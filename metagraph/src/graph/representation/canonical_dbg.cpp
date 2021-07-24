@@ -12,9 +12,9 @@ using mtg::common::logger;
 
 template <typename Graph>
 CanonicalDBG::CanonicalDBG(Graph&& graph, size_t cache_size)
-      : DBGWrapper(std::forward<Graph>(graph)), cache_size_(cache_size),
-        child_node_cache_(cache_size_), parent_node_cache_(cache_size_),
-        is_palindrome_cache_(cache_size_) {
+      : DBGNodeModifyingWrapper<DeBruijnGraph>(std::forward<Graph>(graph)),
+        cache_size_(cache_size), child_node_cache_(cache_size_),
+        parent_node_cache_(cache_size_), is_palindrome_cache_(cache_size_) {
     static_assert(!std::is_same_v<Graph, std::shared_ptr<CanonicalDBG>>);
     static_assert(!std::is_same_v<Graph, std::shared_ptr<const CanonicalDBG>>);
     flush();
@@ -498,14 +498,30 @@ DeBruijnGraph::node_index CanonicalDBG::traverse_back(node_index node,
 
 void CanonicalDBG::call_nodes(const std::function<void(node_index)> &callback,
                               const std::function<bool()> &stop_early) const {
-    graph_->call_nodes([&](node_index i) {
-                          callback(i);
-                          if (!stop_early()) {
-                              node_index j = reverse_complement(i);
-                              if (j != i)
-                                  callback(j);
-                          }
-                      }, stop_early);
+    graph_->call_nodes(
+        [&](node_index i) {
+            callback(i);
+            if (!stop_early()) {
+                node_index j = reverse_complement(i);
+                if (j != i)
+                    callback(j);
+            }
+        },
+        stop_early
+    );
+}
+
+void CanonicalDBG
+::call_kmers(const std::function<void(node_index, const std::string&)> &callback) const {
+    graph_->call_kmers([&](node_index i, const std::string &seq) {
+        callback(i, seq);
+        node_index j = reverse_complement(i);
+        if (j != i) {
+            std::string rseq(seq);
+            ::reverse_complement(rseq.begin(), rseq.end());
+            callback(j, rseq);
+        }
+    });
 }
 
 bool CanonicalDBG::operator==(const DeBruijnGraph &other) const {
