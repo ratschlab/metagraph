@@ -1652,9 +1652,7 @@ TEST(DBGAlignerTest, align_suffix_seed_no_full_seeds) {
 
     auto dbg_succ = std::make_shared<DBGSuccinct>(k, DeBruijnGraph::PRIMARY);
     dbg_succ->add_sequence(reference);
-    auto graph = std::make_shared<CanonicalDBG>(
-        std::dynamic_pointer_cast<DeBruijnGraph>(dbg_succ)
-    );
+    auto graph = std::make_shared<CanonicalDBG>(dbg_succ);
 
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
     config.max_num_seeds_per_locus = std::numeric_limits<size_t>::max();

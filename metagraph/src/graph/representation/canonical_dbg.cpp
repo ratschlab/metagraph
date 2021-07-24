@@ -24,6 +24,7 @@ template CanonicalDBG::CanonicalDBG(std::shared_ptr<DeBruijnGraph>&&, size_t);
 template CanonicalDBG::CanonicalDBG(std::shared_ptr<const DeBruijnGraph>&&, size_t);
 template CanonicalDBG::CanonicalDBG(std::shared_ptr<DeBruijnGraph>&, size_t);
 template CanonicalDBG::CanonicalDBG(std::shared_ptr<const DeBruijnGraph>&, size_t);
+template CanonicalDBG::CanonicalDBG(std::shared_ptr<DBGSuccinct>&, size_t);
 
 void CanonicalDBG::flush() {
     if (graph_->get_mode() != DeBruijnGraph::PRIMARY) {

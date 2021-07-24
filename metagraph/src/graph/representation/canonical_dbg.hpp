@@ -9,7 +9,6 @@
 
 #include "graph/representation/base/dbg_wrapper.hpp"
 
-
 namespace mtg {
 namespace graph {
 
