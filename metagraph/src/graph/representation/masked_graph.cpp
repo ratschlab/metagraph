@@ -8,38 +8,6 @@
 namespace mtg {
 namespace graph {
 
-MaskedDeBruijnGraph
-::MaskedDeBruijnGraph(std::shared_ptr<const DeBruijnGraph> graph,
-                      std::unique_ptr<bitmap>&& kmers_in_graph,
-                      bool only_valid_nodes_in_mask,
-                      Mode mode)
-      : DBGWrapper(graph),
-        kmers_in_graph_(std::move(kmers_in_graph)),
-        only_valid_nodes_in_mask_(only_valid_nodes_in_mask),
-        mode_(mode) {
-    assert(kmers_in_graph_.get());
-    assert(kmers_in_graph_->size() == graph->max_index() + 1);
-
-    if (graph_->get_mode() == PRIMARY && mode_ != PRIMARY) {
-        throw std::runtime_error("Any subgraph of a primary graph is primary, thus"
-                                 " the mode of the subgraph must be set to PRIMARY");
-    }
-    if (graph_->get_mode() != CANONICAL && mode_ == CANONICAL) {
-        throw std::runtime_error("Canonical subgraph requires canonical base graph");
-    }
-}
-
-MaskedDeBruijnGraph
-::MaskedDeBruijnGraph(std::shared_ptr<const DeBruijnGraph> graph,
-                      std::function<bool(node_index)>&& callback,
-                      bool only_valid_nodes_in_mask,
-                      Mode mode)
-      : MaskedDeBruijnGraph(graph,
-                            std::make_unique<bitmap_lazy>(std::move(callback),
-                                                          graph->max_index() + 1),
-                            only_valid_nodes_in_mask,
-                            mode) {}
-
 // Traverse the outgoing edge
 MaskedDeBruijnGraph::node_index MaskedDeBruijnGraph
 ::traverse(node_index node, char next_char) const {
@@ -98,8 +66,7 @@ void MaskedDeBruijnGraph
 }
 
 void MaskedDeBruijnGraph
-::call_outgoing_kmers(node_index kmer,
-                      const OutgoingEdgeCallback &callback) const {
+::call_outgoing_kmers(node_index kmer, const OutgoingEdgeCallback &callback) const {
     assert(in_subgraph(kmer));
 
     graph_->call_outgoing_kmers(kmer, [&](const auto &index, auto c) {
@@ -109,8 +76,7 @@ void MaskedDeBruijnGraph
 }
 
 void MaskedDeBruijnGraph
-::call_incoming_kmers(node_index kmer,
-                      const IncomingEdgeCallback &callback) const {
+::call_incoming_kmers(node_index kmer, const IncomingEdgeCallback &callback) const {
     assert(in_subgraph(kmer));
 
     graph_->call_incoming_kmers(kmer, [&](const auto &index, auto c) {
@@ -138,10 +104,9 @@ bit_vector_stat get_boss_mask(const DBGSuccinct &dbg_succ,
     return bit_vector_stat(std::move(mask_bv));
 }
 
-void MaskedDeBruijnGraph
-::call_sequences(const CallPath &callback,
-                 size_t num_threads,
-                 bool kmers_in_single_form) const {
+void MaskedDeBruijnGraph::call_sequences(const CallPath &callback,
+                                         size_t num_threads,
+                                         bool kmers_in_single_form) const {
     if (auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(graph_.get())) {
         bit_vector_stat mask = get_boss_mask(*dbg_succ, *kmers_in_graph_,
                                              only_valid_nodes_in_mask_);
@@ -159,11 +124,10 @@ void MaskedDeBruijnGraph
     }
 }
 
-void MaskedDeBruijnGraph
-::call_unitigs(const CallPath &callback,
-               size_t num_threads,
-               size_t min_tip_size,
-               bool kmers_in_single_form) const {
+void MaskedDeBruijnGraph::call_unitigs(const CallPath &callback,
+                                       size_t num_threads,
+                                       size_t min_tip_size,
+                                       bool kmers_in_single_form) const {
     if (auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(graph_.get())) {
         bit_vector_stat mask = get_boss_mask(*dbg_succ, *kmers_in_graph_,
                                              only_valid_nodes_in_mask_);
@@ -220,10 +184,9 @@ void MaskedDeBruijnGraph
 
 // Traverse graph mapping sequence to the graph nodes
 // and run callback for each node until the termination condition is satisfied
-void MaskedDeBruijnGraph
-::map_to_nodes(std::string_view sequence,
-               const std::function<void(node_index)> &callback,
-               const std::function<bool()> &terminate) const {
+void MaskedDeBruijnGraph::map_to_nodes(std::string_view sequence,
+                                       const std::function<void(node_index)> &callback,
+                                       const std::function<bool()> &terminate) const {
     graph_->map_to_nodes(
         sequence,
         [&](const node_index &index) {

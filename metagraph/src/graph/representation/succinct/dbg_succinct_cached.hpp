@@ -24,7 +24,7 @@ class DBGSuccinctCached : public DBGWrapper<DBGSuccinct> {
     typedef boss::BOSS::TAlphabet TAlphabet;
 
     template <typename Graph>
-    explicit DBGSuccinctCached(Graph graph) : DBGWrapper(graph) {}
+    explicit DBGSuccinctCached(Graph&& graph) : DBGWrapper(std::forward<Graph>(graph)) {}
 
     // if the sequence of a node has been constructed externally, cache the result
     virtual void put_decoded_node(node_index node, std::string_view seq) const = 0;

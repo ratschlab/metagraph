@@ -155,9 +155,7 @@ void ISeedAndExtendAligner<AlignmentCompare>
     assert(false && "Only alignment in one direction supported for Protein graphs");
 #endif
 
-    RCDBG rc_dbg(std::shared_ptr<const DeBruijnGraph>(
-        std::shared_ptr<const DeBruijnGraph>{}, &graph_
-    ));
+    RCDBG rc_dbg(graph_);
     bool use_rcdbg = graph_.get_mode() != DeBruijnGraph::CANONICAL
                         && config_.forward_and_reverse_complement;
 

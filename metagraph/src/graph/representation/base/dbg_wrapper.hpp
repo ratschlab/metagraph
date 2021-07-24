@@ -15,13 +15,26 @@ namespace graph {
 template <class Graph = DeBruijnGraph>
 class DBGWrapper : public DeBruijnGraph {
   public:
-    explicit DBGWrapper(std::shared_ptr<const Graph> graph) : graph_(graph) {
-        assert(graph_);
-    }
-
-    explicit DBGWrapper(std::shared_ptr<Graph> graph) : graph_(graph), graph_ptr_(graph) {
+    template <class InGraph>
+    explicit DBGWrapper(std::shared_ptr<InGraph> graph)
+          : graph_ptr_(std::dynamic_pointer_cast<Graph>(graph)), graph_(graph_ptr_) {
         assert(graph_);
         assert(graph_ptr_);
+    }
+
+    template <class InGraph>
+    explicit DBGWrapper(std::shared_ptr<const InGraph> graph)
+          : graph_(std::dynamic_pointer_cast<const Graph>(graph)) {
+        assert(graph_);
+        assert(!graph_ptr_);
+    }
+
+    // aliasing constructor
+    template <class InGraph>
+    explicit DBGWrapper(const InGraph &graph)
+          : graph_(std::shared_ptr<const Graph>{}, dynamic_cast<const Graph*>(&graph)) {
+        assert(graph_);
+        assert(!graph_ptr_);
     }
 
     virtual ~DBGWrapper() {}
@@ -152,11 +165,11 @@ class DBGWrapper : public DeBruijnGraph {
     }
 
   protected:
-    std::shared_ptr<const Graph> graph_;
     std::shared_ptr<Graph> graph_ptr_;
+    std::shared_ptr<const Graph> graph_;
 
     // clear any internal storage the wrapper may have
-    virtual void flush() {}
+    virtual void flush() = 0;
 };
 
 } // namespace graph

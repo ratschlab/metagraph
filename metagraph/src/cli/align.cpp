@@ -336,6 +336,12 @@ int align_to_graph(Config *config) {
         return 0;
     }
 
+    // For graphs which still feature a mask, this speeds up mapping and allows
+    // for dummy nodes to be matched by suffix seeding
+    auto *dbg_succ = dynamic_cast<DBGSuccinct*>(graph.get());
+    if (dbg_succ)
+        dbg_succ->reset_mask();
+
     Timer timer;
     ThreadPool thread_pool(get_num_threads());
     std::mutex print_mutex;
@@ -344,7 +350,6 @@ int align_to_graph(Config *config) {
         graph = primary_to_canonical(graph);
 
     if (config->map_sequences) {
-        const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph->get_base_graph());
         if (!config->alignment_length) {
             config->alignment_length = graph->get_k();
         } else if (config->alignment_length > graph->get_k()) {

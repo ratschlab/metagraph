@@ -11,7 +11,6 @@
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "common/logger.hpp"
 
-
 namespace mtg {
 namespace graph {
 
@@ -22,9 +21,13 @@ namespace graph {
 class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
   public:
     template <typename Graph>
-    explicit CanonicalDBG(Graph graph, size_t cache_size = 1024);
+    explicit CanonicalDBG(Graph&& graph, size_t cache_size = 1024);
 
     CanonicalDBG(const CanonicalDBG &canonical)
+          : CanonicalDBG(canonical.graph_ptr_ ? canonical.graph_ptr_ : canonical.graph_,
+                         canonical.cache_size_) {}
+
+    CanonicalDBG(CanonicalDBG &canonical)
           : CanonicalDBG(canonical.graph_ptr_ ? canonical.graph_ptr_ : canonical.graph_,
                          canonical.cache_size_) {}
 

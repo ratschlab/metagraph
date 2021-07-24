@@ -13,18 +13,36 @@ namespace graph {
 
 class MaskedDeBruijnGraph : public DBGWrapper<DeBruijnGraph> {
   public:
-    MaskedDeBruijnGraph(std::shared_ptr<const DeBruijnGraph> graph,
+    template <class Graph>
+    MaskedDeBruijnGraph(Graph&& graph,
                         std::unique_ptr<bitmap>&& kmers_in_graph,
                         bool only_valid_nodes_in_mask = false,
-                        Mode mode = BASIC);
+                        Mode mode = BASIC)
+          : DBGWrapper(std::forward<Graph>(graph)),
+            kmers_in_graph_(std::move(kmers_in_graph)),
+            only_valid_nodes_in_mask_(only_valid_nodes_in_mask),
+            mode_(mode) {
+        assert(kmers_in_graph_.get());
+        assert(kmers_in_graph_->size() == graph_->max_index() + 1);
 
-    MaskedDeBruijnGraph(std::shared_ptr<const DeBruijnGraph> graph,
+        if (graph_->get_mode() == PRIMARY && mode_ != PRIMARY) {
+            throw std::runtime_error("Any subgraph of a primary graph is primary, thus"
+                                     " the mode of the subgraph must be set to PRIMARY");
+        }
+
+        if (graph_->get_mode() != CANONICAL && mode_ == CANONICAL)
+            throw std::runtime_error("Canonical subgraph requires canonical base graph");
+    }
+
+    template <class Graph>
+    MaskedDeBruijnGraph(Graph&& graph,
                         std::function<bool(node_index)>&& callback,
                         bool only_valid_nodes_in_mask = false,
-                        Mode mode = BASIC);
-
-    MaskedDeBruijnGraph(MaskedDeBruijnGraph&&) = default;
-    MaskedDeBruijnGraph& operator=(MaskedDeBruijnGraph&&) = default;
+                        Mode mode = BASIC)
+          : MaskedDeBruijnGraph(std::forward<Graph>(graph),
+                                std::make_unique<bitmap_lazy>(
+                                    std::move(callback), graph->max_index() + 1),
+                                only_valid_nodes_in_mask, mode) {}
 
     virtual ~MaskedDeBruijnGraph() {}
 
@@ -104,6 +122,11 @@ class MaskedDeBruijnGraph : public DBGWrapper<DeBruijnGraph> {
     virtual void set_mask(bitmap *mask) { kmers_in_graph_.reset(mask); }
 
     virtual const bitmap& get_mask() const { return *kmers_in_graph_; }
+
+  protected:
+    virtual void flush() override final {
+        assert(kmers_in_graph_->size() == graph_->max_index() + 1);
+    }
 
   private:
     std::unique_ptr<bitmap> kmers_in_graph_;
