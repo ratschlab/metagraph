@@ -98,6 +98,14 @@ class RCDBG : public DBGWrapper<DeBruijnGraph> {
         return rc;
     }
 
+    virtual bool operator==(const DeBruijnGraph &other) const override final {
+        if (const auto *other_rc = dynamic_cast<const RCDBG*>(&other)) {
+            return *graph_ == *other_rc->graph_;
+        } else {
+            throw std::runtime_error("Not implemented");
+        }
+    }
+
   protected:
     virtual void flush() override final {}
 };
