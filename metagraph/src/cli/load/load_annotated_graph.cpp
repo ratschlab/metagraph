@@ -23,6 +23,7 @@ using mtg::common::logger;
 std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnGraph> graph,
                                                        const Config &config) {
     assert(graph.get() == &graph->get_base_graph());
+
     uint64_t max_index = graph->max_index();
     const auto *dbg_graph = dynamic_cast<const DBGSuccinct*>(graph.get());
 
@@ -56,17 +57,15 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
         using namespace annot::binmat;
         BinaryMatrix &matrix = const_cast<BinaryMatrix &>(annotation_temp->get_matrix());
         if (IRowDiff *row_diff = dynamic_cast<IRowDiff*>(&matrix)) {
-            if (dbg_graph) {
-                row_diff->set_graph(dbg_graph);
-
-                if (auto *row_diff_column = dynamic_cast<RowDiff<ColumnMajor> *>(&matrix)) {
-                    row_diff_column->load_anchor(config.infbase + kRowDiffAnchorExt);
-                    row_diff_column->load_fork_succ(config.infbase + kRowDiffForkSuccExt);
-                }
-            } else {
+            if (!dbg_graph) {
                 logger->error("Only succinct de Bruijn graph representations"
                               " are supported for row-diff annotations");
                 std::exit(1);
+            }
+
+            if (auto *row_diff_column = dynamic_cast<RowDiff<ColumnMajor> *>(&matrix)) {
+                row_diff_column->load_anchor(config.infbase + kRowDiffAnchorExt);
+                row_diff_column->load_fork_succ(config.infbase + kRowDiffForkSuccExt);
             }
         }
     }
