@@ -138,8 +138,6 @@ class DefaultColumnExtender : public SeedFilteringExtender {
         }
     }
 
-    virtual void init_backtrack() {}
-
     virtual void call_outgoing(node_index node,
                                size_t max_prefetch_distance,
                                const std::function<void(node_index, char)> &callback);
@@ -162,7 +160,7 @@ class DefaultColumnExtender : public SeedFilteringExtender {
     tsl::hopscotch_map<char, AlignedVector<Cigar::Operator>> profile_op_;
 
     // backtrack through the DP table to reconstruct alignments
-    std::vector<Alignment> backtrack(score_t min_path_score, std::string_view window);
+    virtual std::vector<Alignment> backtrack(score_t min_path_score, std::string_view window);
 };
 
 } // namespace align

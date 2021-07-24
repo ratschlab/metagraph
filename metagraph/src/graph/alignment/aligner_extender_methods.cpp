@@ -610,8 +610,6 @@ auto DefaultColumnExtender
     if (table.empty())
         return {};
 
-    init_backtrack();
-
     std::vector<Alignment> extensions;
 
     size_t seed_clipping = this->seed_->get_clipping();
