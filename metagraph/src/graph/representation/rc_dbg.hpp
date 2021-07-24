@@ -97,6 +97,9 @@ class RCDBG : public DBGWrapper<DeBruijnGraph> {
         ::reverse_complement(rc.begin(), rc.end());
         return rc;
     }
+
+  protected:
+    virtual void flush() override final {}
 };
 
 } // namespace mtg

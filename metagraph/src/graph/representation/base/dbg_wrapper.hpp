@@ -156,7 +156,7 @@ class DBGWrapper : public DeBruijnGraph {
     std::shared_ptr<Graph> graph_ptr_;
 
     // clear any internal storage the wrapper may have
-    virtual void flush() {}
+    virtual void flush() = 0;
 };
 
 } // namespace graph

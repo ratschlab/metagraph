@@ -105,6 +105,11 @@ class MaskedDeBruijnGraph : public DBGWrapper<DeBruijnGraph> {
 
     virtual const bitmap& get_mask() const { return *kmers_in_graph_; }
 
+  protected:
+    virtual void flush() override final {
+        assert(kmers_in_graph_->size() == graph_->max_index() + 1);
+    }
+
   private:
     std::unique_ptr<bitmap> kmers_in_graph_;
     bool only_valid_nodes_in_mask_;
