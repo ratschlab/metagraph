@@ -63,6 +63,8 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
                 std::exit(1);
             }
 
+            row_diff->set_graph(dbg_graph);
+
             if (auto *row_diff_column = dynamic_cast<RowDiff<ColumnMajor> *>(&matrix)) {
                 row_diff_column->load_anchor(config.infbase + kRowDiffAnchorExt);
                 row_diff_column->load_fork_succ(config.infbase + kRowDiffForkSuccExt);
