@@ -1,5 +1,7 @@
 #include "align.hpp"
 
+#include <tsl/ordered_set.h>
+
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
 #include "common/threads/threading.hpp"
@@ -11,8 +13,6 @@
 #include "seq_io/sequence_io.hpp"
 #include "config/config.hpp"
 #include "load/load_graph.hpp"
-
-#include <tsl/ordered_set.h>
 
 namespace mtg {
 namespace cli {

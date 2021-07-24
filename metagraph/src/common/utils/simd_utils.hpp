@@ -1,16 +1,11 @@
 #ifndef __SIMD_UTILS_HPP__
 #define __SIMD_UTILS_HPP__
 
-#ifdef __AVX2__
-#include <immintrin.h>
-#endif
-
-#ifdef __SSE2__
-#include <emmintrin.h>
-#endif
+#include <x86intrin.h>
 
 #include <cassert>
 #include <cstdint>
+#include <cstddef>
 
 // Branch prediction helper macros
 #ifndef LIKELY
