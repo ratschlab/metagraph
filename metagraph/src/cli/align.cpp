@@ -334,16 +334,16 @@ int align_to_graph(Config *config) {
     // initialize graph
     auto graph = load_critical_dbg(config->infbase);
 
+    if (utils::ends_with(config->outfbase, ".gfa")) {
+        gfa_map_files(config, files, *graph);
+        return 0;
+    }
+
     // For graphs which still feature a mask, this speeds up mapping and allows
     // for dummy nodes to be matched by suffix seeding
     auto *dbg_succ = dynamic_cast<DBGSuccinct*>(graph.get());
     if (dbg_succ)
         dbg_succ->reset_mask();
-
-    if (utils::ends_with(config->outfbase, ".gfa")) {
-        gfa_map_files(config, files, *graph);
-        return 0;
-    }
 
     Timer timer;
     ThreadPool thread_pool(get_num_threads());
