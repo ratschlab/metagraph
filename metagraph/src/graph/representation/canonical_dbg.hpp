@@ -92,6 +92,11 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
     virtual void call_nodes(const std::function<void(node_index)> &callback,
                             const std::function<bool()> &stop_early = [](){ return false; }) const override final;
 
+    virtual void add_sequence(std::string_view sequence,
+                              const std::function<void(node_index)> &on_insertion
+                                  = [](node_index) {}) override;
+    virtual bool load(const std::string &filename) override;
+
     bool operator==(const CanonicalDBG &other) const {
         return *graph_ == *other.graph_;
     }
@@ -129,6 +134,9 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
 
     std::array<size_t, 256> alphabet_encoder_;
 
+    // reset all caches
+    void flush();
+
     // find all parent nodes of node in the CanonicalDBG which are represented
     // in the reverse complement orientation in the underlying primary graph
     void append_prev_rc_nodes(node_index node, std::vector<node_index> &parents) const;
@@ -136,9 +144,6 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
     // find all child nodes of node in the CanonicalDBG which are represented
     // in the reverse complement orientation in the underlying primary graph
     void append_next_rc_nodes(node_index node, std::vector<node_index> &children) const;
-
-    // reset the internal storage, done after loading or updating the graph
-    virtual void flush() override final;
 };
 
 } // namespace graph

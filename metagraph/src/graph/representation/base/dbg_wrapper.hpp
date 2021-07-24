@@ -9,8 +9,9 @@ namespace mtg {
 namespace graph {
 
 /**
- * This class stores a graph internally and transfers all calls to it.
+ * This abstract class stores a graph internally and transfers all calls to it.
  * It can be used as a parent to other wrappers which add additional functionality.
+ * All children of this class must implement add_sequence, load, and operator==
  */
 template <class Graph = DeBruijnGraph>
 class DBGWrapper : public DeBruijnGraph {
@@ -51,15 +52,7 @@ class DBGWrapper : public DeBruijnGraph {
      */
     virtual void add_sequence(std::string_view sequence,
                               const std::function<void(node_index)> &on_insertion
-                                  = [](node_index) {}) override {
-        if (!graph_ptr_) {
-            common::logger->error("add_sequence only supported for non-const graphs");
-            exit(1);
-        }
-
-        graph_ptr_->add_sequence(sequence, on_insertion);
-        flush();
-    }
+                                  = [](node_index) {}) override = 0;
 
     // Traverse graph mapping sequence to the graph nodes
     // and run callback for each node until the termination condition is satisfied
@@ -103,18 +96,7 @@ class DBGWrapper : public DeBruijnGraph {
     virtual uint64_t num_nodes() const override { return graph_->num_nodes(); }
     virtual uint64_t max_index() const override { return graph_->max_index(); }
 
-    virtual bool load(const std::string &filename) override {
-        if (!graph_ptr_) {
-            common::logger->error("load only supported for non-const graphs");
-            exit(1);
-        }
-
-        if (!graph_ptr_->load(filename))
-            return false;
-
-        flush();
-        return true;
-    }
+    virtual bool load(const std::string &filename) override = 0;
 
     virtual void serialize(const std::string &filename) const override {
         graph_->serialize(filename);
@@ -232,9 +214,6 @@ class DBGWrapper : public DeBruijnGraph {
   protected:
     std::shared_ptr<Graph> graph_ptr_;
     std::shared_ptr<const Graph> graph_;
-
-    // clear any internal storage the wrapper may have
-    virtual void flush() = 0;
 };
 
 } // namespace graph

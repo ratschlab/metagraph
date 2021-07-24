@@ -106,8 +106,21 @@ class RCDBG : public DBGWrapper<DeBruijnGraph> {
         }
     }
 
-  protected:
-    virtual void flush() override final {}
+    virtual bool load(const std::string &filename) override final {
+        if (!graph_ptr_)
+            throw std::runtime_error("load only supported for non-const graphs");
+
+        return graph_ptr_->load(filename);
+    }
+
+    virtual void add_sequence(std::string_view sequence,
+                              const std::function<void(node_index)> &on_insertion
+                                  = [](node_index) {}) override final {
+        if (!graph_ptr_)
+            throw std::runtime_error("load only supported for non-const graphs");
+
+        graph_ptr_->add_sequence(sequence, on_insertion);
+    }
 };
 
 } // namespace mtg

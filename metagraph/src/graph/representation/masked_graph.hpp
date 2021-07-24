@@ -84,6 +84,11 @@ class MaskedDeBruijnGraph : public DBGWrapper<DeBruijnGraph> {
 
     virtual uint64_t num_nodes() const override { return kmers_in_graph_->num_set_bits(); }
 
+    virtual void add_sequence(std::string_view,
+                              const std::function<void(node_index)> &) override {
+        throw std::runtime_error("Not implemented");
+    }
+
     virtual bool load(const std::string &) override {
         throw std::runtime_error("Not implemented");
     }
@@ -122,11 +127,6 @@ class MaskedDeBruijnGraph : public DBGWrapper<DeBruijnGraph> {
     virtual void set_mask(bitmap *mask) { kmers_in_graph_.reset(mask); }
 
     virtual const bitmap& get_mask() const { return *kmers_in_graph_; }
-
-  protected:
-    virtual void flush() override final {
-        assert(kmers_in_graph_->size() == graph_->max_index() + 1);
-    }
 
   private:
     std::unique_ptr<bitmap> kmers_in_graph_;
