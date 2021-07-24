@@ -45,54 +45,28 @@ Alignment<NodeType>::Alignment(std::string_view query,
 
 template <typename NodeType>
 void Alignment<NodeType>::append(Alignment&& other) {
-    assert(query_.data() + query_.size() == other.query_.data());
+    assert(query_.data() + query_.size() + other.get_clipping() == other.query_.data());
     assert(orientation_ == other.orientation_);
-    assert(cigar_.empty() || cigar_.back().first != Cigar::CLIPPED);
 
     nodes_.insert(nodes_.end(), other.nodes_.begin(), other.nodes_.end());
     sequence_ += std::move(other.sequence_);
     score_ += other.score_;
 
     cigar_.append(std::move(other.cigar_));
-    query_ = { query_.data(), query_.size() + other.query_.size() };
+
+    // expand the query window to cover both alignments
+    query_ = std::string_view(query_.data(), other.query_.end() - query_.begin());
 }
 
 template <typename NodeType>
-void Alignment<NodeType>::trim_offset() {
-    if (!offset_ || empty() || cigar_.empty())
-        return;
+size_t Alignment<NodeType>::trim_offset() {
+    if (!offset_ || nodes_.size() <= 1)
+        return 0;
 
-    auto it = cigar_.begin();
-    if (it->first == Cigar::CLIPPED)
-        ++it;
-
-    if (it == cigar_.end())
-        return;
-
-    auto jt = nodes_.begin();
-    size_t counter = 0;
-    while (offset_ && it != cigar_.end() && jt != nodes_.end()) {
-        if (counter == it->second
-                || it->first == Cigar::CLIPPED
-                || it->first == Cigar::INSERTION) {
-            ++it;
-            counter = 0;
-            continue;
-        }
-
-        size_t jump = std::min({ offset_, static_cast<size_t>(it->second),
-                                          static_cast<size_t>(nodes_.end() - jt) });
-        offset_ -= jump;
-        counter += jump;
-        jt += jump;
-    }
-
-    if (jt == nodes_.end()) {
-        --jt;
-        ++offset_;
-    }
-
-    nodes_.erase(nodes_.begin(), jt);
+    size_t trim = std::min(offset_, nodes_.size() - 1);
+    offset_ -= trim;
+    nodes_.erase(nodes_.begin(), nodes_.begin() + trim);
+    return trim;
 }
 
 template <typename NodeType>
@@ -235,7 +209,7 @@ void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
         assert(graph.get_node_sequence(nodes_[0]).substr(offset_) == sequence_);
     }
 
-    std::reverse(cigar_.begin(), cigar_.end());
+    std::reverse(cigar_.data().begin(), cigar_.data().end());
     assert(query_rev_comp.size() >= get_clipping() + get_end_clipping());
 
     orientation_ = !orientation_;
@@ -253,13 +227,13 @@ Json::Value Alignment<NodeType>::path_json(size_t node_size,
 
     Json::Value path;
 
-    auto cigar_it = cigar_.begin();
+    auto cigar_it = cigar_.data().begin();
     if (cigar_.size() && cigar_it->first == Cigar::CLIPPED) {
         cigar_it++;
     }
 
     size_t cigar_offset = 0;
-    assert(cigar_it != cigar_.end());
+    assert(cigar_it != cigar_.data().end());
 
     int64_t rank = 1;
     const char *query_start = query_.data();
@@ -283,7 +257,7 @@ Json::Value Alignment<NodeType>::path_json(size_t node_size,
     mapping["position"] = position;
 
     // handle alignment to the first node
-    while (cur_pos < node_size && cigar_it != cigar_.end()) {
+    while (cur_pos < node_size && cigar_it != cigar_.data().end()) {
         assert(cigar_it->second > cigar_offset);
         size_t next_pos = std::min(node_size,
                                    cur_pos + (cigar_it->second - cigar_offset));
@@ -323,7 +297,7 @@ Json::Value Alignment<NodeType>::path_json(size_t node_size,
             case Cigar::CLIPPED: {
                 ++cigar_it;
                 cigar_offset = 0;
-                assert(cigar_it == cigar_.end());
+                assert(cigar_it == cigar_.data().end());
                 continue;
             }
         }
@@ -344,7 +318,7 @@ Json::Value Alignment<NodeType>::path_json(size_t node_size,
 
     // handle the rest of the alignment
     for (auto node_it = nodes_.begin() + 1; node_it != nodes_.end(); ++node_it) {
-        assert(cigar_it != cigar_.end());
+        assert(cigar_it != cigar_.data().end());
         assert(cigar_it->second > cigar_offset);
 
         Json::Value mapping;
@@ -355,7 +329,7 @@ Json::Value Alignment<NodeType>::path_json(size_t node_size,
         //position["is_reverse"] = false;
         mapping["position"] = position;
 
-        if (cigar_it->first == Cigar::INSERTION) {
+        if (cigar_it->first == Cigar::INSERTION || cigar_it->first == Cigar::CLIPPED) {
             Json::Value edit;
             size_t length = cigar_it->second - cigar_offset;
             assert(query_start + length < query_end);
@@ -367,7 +341,7 @@ Json::Value Alignment<NodeType>::path_json(size_t node_size,
             ++cigar_it;
             cigar_offset = 0;
             mapping["edit"].append(edit);
-            assert(cigar_it != cigar_.end());
+            assert(cigar_it != cigar_.data().end());
         }
 
         Json::Value edit;
@@ -403,8 +377,8 @@ Json::Value Alignment<NodeType>::path_json(size_t node_size,
     }
 
     assert(query_start == query_end);
-    assert(cigar_it == cigar_.end()
-            || (cigar_it + 1 == cigar_.end() && cigar_it->first == Cigar::CLIPPED));
+    assert(cigar_it == cigar_.data().end()
+            || (cigar_it + 1 == cigar_.data().end() && cigar_it->first == Cigar::CLIPPED));
 
     path["length"] = Json::Value::UInt64(nodes_.size());
 
@@ -500,7 +474,7 @@ Json::Value Alignment<NodeType>::to_json(std::string_view full_query,
 template <typename NodeType>
 std::shared_ptr<const std::string> Alignment<NodeType>
 ::load_from_json(const Json::Value &alignment, const DeBruijnGraph &graph) {
-    cigar_.clear();
+    cigar_ = Cigar();
     nodes_.clear();
     sequence_.clear();
 
@@ -526,13 +500,11 @@ std::shared_ptr<const std::string> Alignment<NodeType>
         if (nodes_.size() == 1) {
             sequence_ = graph.get_node_sequence(nodes_.back()).substr(offset_);
         } else {
-            graph.call_outgoing_kmers(
-                *(nodes_.rbegin() + 1),
-                [&](auto node, char c) {
-                    if (node == nodes_.back())
-                        sequence_ += c;
-                }
-            );
+            graph.call_outgoing_kmers(*(nodes_.rbegin() + 1),
+                                      [&](auto node, char c) {
+                if (node == nodes_.back())
+                    sequence_ += c;
+            });
         }
         const Json::Value &edits = mapping[i]["edit"];
 
