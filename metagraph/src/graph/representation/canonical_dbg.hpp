@@ -20,9 +20,13 @@ namespace graph {
 class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
   public:
     template <typename Graph>
-    explicit CanonicalDBG(Graph graph, size_t cache_size = 100'000);
+    explicit CanonicalDBG(Graph&& graph, size_t cache_size = 100'000);
 
     CanonicalDBG(const CanonicalDBG &canonical)
+          : CanonicalDBG(canonical.graph_ptr_ ? canonical.graph_ptr_ : canonical.graph_,
+                         canonical.cache_size_) {}
+
+    CanonicalDBG(CanonicalDBG &canonical)
           : CanonicalDBG(canonical.graph_ptr_ ? canonical.graph_ptr_ : canonical.graph_,
                          canonical.cache_size_) {}
 
