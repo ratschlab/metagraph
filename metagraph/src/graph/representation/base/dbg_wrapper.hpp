@@ -2,7 +2,6 @@
 #define __DBG_WRAPPER__
 
 #include "sequence_graph.hpp"
-#include "common/logger.hpp"
 
 
 namespace mtg {
