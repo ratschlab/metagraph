@@ -124,21 +124,26 @@ bool Cigar::is_valid(std::string_view reference, std::string_view query) const {
         }
 
         switch (op.first) {
-            case Operator::CLIPPED: {
+            case CLIPPED: {
                 if ((ref_it != reference.begin() || alt_it != query.begin())
                         && (ref_it != reference.end() || alt_it != query.end())) {
-                    std::cerr << "Internal clipping found in CIGAR" << std::endl
-                              << to_string() << std::endl
-                              << reference << std::endl
-                              << query << std::endl;
-                    return false;
+                    if (alt_it > query.end() - op.second) {
+                        std::cerr << "Query too short after "
+                                  << Cigar::opt_to_char(op.first) << std::endl
+                                  << to_string() << std::endl
+                                  << reference << std::endl
+                                  << query << std::endl;
+                        return false;
+                    }
+
+                    alt_it += op.second;
                 }
             } break;
-            case Operator::MATCH:
-                // do nothing
-            case Operator::MISMATCH: {
+            case MATCH:
+            case MISMATCH: {
                 if (ref_it > reference.end() - op.second) {
-                    std::cerr << "Reference too short" << std::endl
+                    std::cerr << "Reference too short after "
+                              << Cigar::opt_to_char(op.first) << std::endl
                               << to_string() << std::endl
                               << reference << std::endl
                               << query << std::endl;
@@ -146,7 +151,8 @@ bool Cigar::is_valid(std::string_view reference, std::string_view query) const {
                 }
 
                 if (alt_it > query.end() - op.second) {
-                    std::cerr << "Query too short" << std::endl
+                    std::cerr << "Query too short after "
+                              << Cigar::opt_to_char(op.first) << std::endl
                               << to_string() << std::endl
                               << reference << std::endl
                               << query << std::endl;
@@ -165,8 +171,8 @@ bool Cigar::is_valid(std::string_view reference, std::string_view query) const {
                 ref_it += op.second;
                 alt_it += op.second;
             } break;
-            case Operator::INSERTION: {
-                if (i && cigar_[i - 1].first == Operator::DELETION) {
+            case INSERTION: {
+                if (i && cigar_[i - 1].first == DELETION) {
                     std::cerr << "INSERTION after DELETION" << std::endl
                               << to_string() << std::endl
                               << reference << std::endl
@@ -175,7 +181,8 @@ bool Cigar::is_valid(std::string_view reference, std::string_view query) const {
                 }
 
                 if (alt_it > query.end() - op.second) {
-                    std::cerr << "Query too short" << std::endl
+                    std::cerr << "Query too short after "
+                              << Cigar::opt_to_char(op.first) << std::endl
                               << to_string() << std::endl
                               << reference << std::endl
                               << query << std::endl;
@@ -184,8 +191,8 @@ bool Cigar::is_valid(std::string_view reference, std::string_view query) const {
 
                 alt_it += op.second;
             } break;
-            case Operator::DELETION: {
-                if (i && cigar_[i - 1].first == Operator::INSERTION) {
+            case DELETION: {
+                if (i && cigar_[i - 1].first == INSERTION) {
                     std::cerr << "DELETION after INSERTION" << std::endl
                               << to_string() << std::endl
                               << reference << std::endl
@@ -194,7 +201,8 @@ bool Cigar::is_valid(std::string_view reference, std::string_view query) const {
                 }
 
                 if (ref_it > reference.end() - op.second) {
-                    std::cerr << "Reference too short" << std::endl
+                    std::cerr << "Reference too short after "
+                              << Cigar::opt_to_char(op.first) << std::endl
                               << to_string() << std::endl
                               << reference << std::endl
                               << query << std::endl;

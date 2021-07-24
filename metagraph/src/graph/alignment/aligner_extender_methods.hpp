@@ -131,7 +131,7 @@ class DefaultColumnExtender : public SeedFilteringExtender {
         assert(path.size());
         assert(ops.size());
 
-        if (cur_cell_score == 0 && ops.back().first == Cigar::MATCH
+        if (cur_cell_score == 0 && ops.data().back().first == Cigar::MATCH
                 && end_score >= min_path_score) {
             callback(construct_alignment(ops, clipping, window, path, match,
                                          end_score, offset));

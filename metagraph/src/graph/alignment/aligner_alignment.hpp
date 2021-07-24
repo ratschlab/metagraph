@@ -60,36 +60,21 @@ class Alignment {
     std::string_view get_query() const { return query_; }
 
     void extend_query_begin(const char *begin) {
-        size_t clipping = get_clipping();
-        const char *full_query_begin = query_.data() - clipping;
-        assert(begin <= full_query_begin);
-        if (begin == full_query_begin)
-            return;
-
-        if (clipping) {
-            cigar_.front().second += full_query_begin - begin;
-        } else {
-            cigar_.insert(cigar_.begin(),
-                          std::make_pair(Cigar::CLIPPED, full_query_begin - begin));
-        }
+        const char *full_query_begin = query_.data() - get_clipping();
+        assert(full_query_begin >= begin);
+        if (full_query_begin > begin)
+            cigar_.extend_clipping(full_query_begin - begin);
     }
 
     void extend_query_end(const char *end) {
         const char *full_query_end = query_.data() + query_.size() + get_end_clipping();
-        assert(end >= full_query_end);
-        if (end > full_query_end)
+        assert(full_query_end <= end);
+        if (full_query_end < end)
             cigar_.append(Cigar::CLIPPED, end - full_query_end);
     }
 
-    void trim_clipping() {
-        if (get_clipping())
-            cigar_.pop_front();
-    }
-
-    void trim_end_clipping() {
-        if (get_end_clipping())
-            cigar_.pop_back();
-    }
+    inline size_t trim_clipping() { return cigar_.trim_clipping(); }
+    inline size_t trim_end_clipping() { return cigar_.trim_end_clipping(); }
 
     size_t trim_offset();
 
@@ -114,11 +99,6 @@ class Alignment {
 
     bool operator!=(const Alignment &other) const { return !(*this == other); }
 
-    bool is_exact_match() const {
-        return cigar_.size() == 1
-            && cigar_.front() == Cigar::value_type(Cigar::MATCH, query_.size());
-    }
-
     Json::Value to_json(std::string_view query,
                         const DeBruijnGraph &graph,
                         bool is_secondary = false,
@@ -134,6 +114,7 @@ class Alignment {
   private:
     Json::Value path_json(size_t node_size, std::string_view label = {}) const;
 
+    // TODO: rename to query_view_
     std::string_view query_;
     std::vector<node_index> nodes_;
     std::string sequence_;

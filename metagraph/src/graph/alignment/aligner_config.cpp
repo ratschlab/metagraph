@@ -62,13 +62,23 @@ DBGAlignerConfig::score_t DBGAlignerConfig
     score_t score = 0;
 
     assert(cigar.is_valid(reference, query));
+
+    if (cigar.empty())
+        return score;
+
     auto ref_it = reference.begin();
     auto alt_it = query.begin();
+    auto it = cigar.data().begin();
+    if (it->first == Cigar::CLIPPED)
+        ++it;
 
-    for (const auto &op : cigar) {
+    for ( ; it != cigar.data().end(); ++it) {
+        const auto &op = *it;
         switch (op.first) {
-            case Cigar::CLIPPED:
-                break;
+            case Cigar::CLIPPED: {
+                if (it + 1 != cigar.data().end())
+                    alt_it += op.second;
+            } break;
             case Cigar::MATCH: {
                 score += match_score(std::string_view(ref_it, op.second));
                 ref_it += op.second;
@@ -90,6 +100,9 @@ DBGAlignerConfig::score_t DBGAlignerConfig
             } break;
         }
     }
+
+    assert(ref_it == reference.end());
+    assert(alt_it == query.end());
 
     return score;
 }

@@ -22,6 +22,10 @@ using namespace mtg::kmer;
 const std::string test_data_dir = "../tests/data";
 const bool PICK_REV_COMP = true;
 
+inline bool is_exact_match(const Alignment &alignment) {
+    return alignment.get_cigar().is_exact_match(alignment.get_query().size());
+}
+
 void check_score_matrix(const DBGAlignerConfig &config,
                         const char* alphabet,
                         size_t alph_size) {
@@ -137,7 +141,7 @@ TYPED_TEST(DBGAlignerTest, align_big_self_loop) {
     EXPECT_EQ(config.match_score(query), path.get_score());
     EXPECT_EQ("9=", path.get_cigar().to_string());
     EXPECT_EQ(9u, path.get_cigar().get_num_matches());
-    EXPECT_TRUE(path.is_exact_match());
+    EXPECT_TRUE(is_exact_match(path));
     EXPECT_EQ(0u, path.get_clipping());
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
@@ -165,7 +169,7 @@ TYPED_TEST(DBGAlignerTest, align_single_node) {
     EXPECT_EQ(config.match_score(query), path.get_score());
     EXPECT_EQ("3=", path.get_cigar().to_string());
     EXPECT_EQ(3u, path.get_cigar().get_num_matches());
-    EXPECT_TRUE(path.is_exact_match());
+    EXPECT_TRUE(is_exact_match(path));
     EXPECT_EQ(0u, path.get_clipping());
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
@@ -193,7 +197,7 @@ TYPED_TEST(DBGAlignerTest, align_straight) {
     EXPECT_EQ(config.match_score(query), path.get_score());
     EXPECT_EQ("14=", path.get_cigar().to_string());
     EXPECT_EQ(14u, path.get_cigar().get_num_matches());
-    EXPECT_TRUE(path.is_exact_match());
+    EXPECT_TRUE(is_exact_match(path));
     EXPECT_EQ(0u, path.get_clipping());
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
@@ -237,7 +241,7 @@ TYPED_TEST(DBGAlignerTest, align_straight_with_N) {
     EXPECT_EQ(config.score_sequences(reference, query), path.get_score());
     EXPECT_EQ("4=1X9=", path.get_cigar().to_string());
     EXPECT_EQ(13u, path.get_cigar().get_num_matches());
-    EXPECT_FALSE(path.is_exact_match());
+    EXPECT_FALSE(is_exact_match(path));
     EXPECT_EQ(0u, path.get_clipping());
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
@@ -271,7 +275,7 @@ TYPED_TEST(DBGAlignerTest, align_straight_forward_and_reverse_complement) {
     EXPECT_EQ(config.match_score(query), path.get_score());
     EXPECT_EQ("14=", path.get_cigar().to_string());
     EXPECT_EQ(14u, path.get_cigar().get_num_matches());
-    EXPECT_TRUE(path.is_exact_match());
+    EXPECT_TRUE(is_exact_match(path));
     EXPECT_EQ(0u, path.get_clipping());
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
@@ -321,7 +325,7 @@ TYPED_TEST(DBGAlignerTest, align_ending_branch) {
     EXPECT_EQ(config.match_score(query), path.get_score());
     EXPECT_EQ("9=", path.get_cigar().to_string());
     EXPECT_EQ(9u, path.get_cigar().get_num_matches());
-    EXPECT_TRUE(path.is_exact_match());
+    EXPECT_TRUE(is_exact_match(path));
     EXPECT_EQ(0u, path.get_clipping());
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
@@ -352,7 +356,7 @@ TYPED_TEST(DBGAlignerTest, align_branch) {
     EXPECT_EQ(config.match_score(query), path.get_score());
     EXPECT_EQ("17=", path.get_cigar().to_string());
     EXPECT_EQ(17u, path.get_cigar().get_num_matches());
-    EXPECT_TRUE(path.is_exact_match());
+    EXPECT_TRUE(is_exact_match(path));
     EXPECT_EQ(0u, path.get_clipping());
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
@@ -383,7 +387,7 @@ TYPED_TEST(DBGAlignerTest, align_branch_with_cycle) {
     EXPECT_EQ(config.match_score(query), path.get_score());
     EXPECT_EQ("17=", path.get_cigar().to_string());
     EXPECT_EQ(17u, path.get_cigar().get_num_matches());
-    EXPECT_TRUE(path.is_exact_match());
+    EXPECT_TRUE(is_exact_match(path));
     EXPECT_EQ(0u, path.get_clipping());
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
@@ -411,7 +415,7 @@ TYPED_TEST(DBGAlignerTest, repetitive_sequence_alignment) {
     EXPECT_EQ(config.match_score(query), path.get_score());
     EXPECT_EQ("6=", path.get_cigar().to_string());
     EXPECT_EQ(6u, path.get_cigar().get_num_matches());
-    EXPECT_TRUE(path.is_exact_match());
+    EXPECT_TRUE(is_exact_match(path));
     EXPECT_EQ(0u, path.get_clipping());
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
@@ -440,7 +444,7 @@ TYPED_TEST(DBGAlignerTest, variation) {
     EXPECT_EQ(config.score_sequences(query, reference), path.get_score());
     EXPECT_EQ("5=1X6=", path.get_cigar().to_string());
     EXPECT_EQ(11u, path.get_cigar().get_num_matches());
-    EXPECT_FALSE(path.is_exact_match());
+    EXPECT_FALSE(is_exact_match(path));
     EXPECT_EQ(0u, path.get_clipping());
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
@@ -476,7 +480,7 @@ TYPED_TEST(DBGAlignerTest, variation_in_branching_point) {
     // TODO: what about other cases?
     EXPECT_EQ("8=3X4=", path.get_cigar().to_string());
     EXPECT_EQ(12u, path.get_cigar().get_num_matches());
-    EXPECT_FALSE(path.is_exact_match());
+    EXPECT_FALSE(is_exact_match(path));
     EXPECT_EQ(0u, path.get_clipping());
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
@@ -505,7 +509,7 @@ TYPED_TEST(DBGAlignerTest, multiple_variations) {
     EXPECT_EQ(config.score_sequences(query, reference), path.get_score());
     EXPECT_EQ("6=1X6=1X1=1X4=", path.get_cigar().to_string());
     EXPECT_EQ(17u, path.get_cigar().get_num_matches());
-    EXPECT_FALSE(path.is_exact_match());
+    EXPECT_FALSE(is_exact_match(path));
     EXPECT_EQ(0u, path.get_clipping());
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
@@ -536,7 +540,7 @@ TYPED_TEST(DBGAlignerTest, align_noise_in_branching_point) {
     EXPECT_EQ(reference_1 + "T", path.get_sequence());
     EXPECT_EQ("4=1D7=", path.get_cigar().to_string());
     EXPECT_EQ(11u, path.get_cigar().get_num_matches());
-    EXPECT_FALSE(path.is_exact_match());
+    EXPECT_FALSE(is_exact_match(path));
     EXPECT_EQ(0u, path.get_clipping());
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
@@ -568,7 +572,7 @@ TYPED_TEST(DBGAlignerTest, alternative_path_basic) {
     EXPECT_EQ("4=1X4=1X2=", path.get_cigar().to_string())
         << query << "\n" << path.get_sequence();
     EXPECT_EQ(10u, path.get_cigar().get_num_matches());
-    EXPECT_FALSE(path.is_exact_match());
+    EXPECT_FALSE(is_exact_match(path));
     EXPECT_EQ(0u, path.get_clipping());
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
@@ -596,7 +600,7 @@ TYPED_TEST(DBGAlignerTest, align_multiple_misalignment) {
     EXPECT_EQ(config.score_sequences(query, reference), path.get_score());
     EXPECT_EQ("4=1X9=1X6=", path.get_cigar().to_string());
     EXPECT_EQ(19u, path.get_cigar().get_num_matches());
-    EXPECT_FALSE(path.is_exact_match());
+    EXPECT_FALSE(is_exact_match(path));
     EXPECT_EQ(0u, path.get_clipping());
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
@@ -627,7 +631,7 @@ TYPED_TEST(DBGAlignerTest, align_insert_non_existent) {
     EXPECT_EQ(config.match_score(reference) + config.gap_opening_penalty, path.get_score());
     EXPECT_EQ("5=1I5=", path.get_cigar().to_string());
     EXPECT_EQ(10u, path.get_cigar().get_num_matches());
-    EXPECT_FALSE(path.is_exact_match());
+    EXPECT_FALSE(is_exact_match(path));
     EXPECT_EQ(0u, path.get_clipping());
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
@@ -659,7 +663,7 @@ TYPED_TEST(DBGAlignerTest, align_insert_multi) {
         + config.gap_opening_penalty + config.gap_extension_penalty, path.get_score());
     EXPECT_EQ("5=2I5=", path.get_cigar().to_string());
     EXPECT_EQ(10u, path.get_cigar().get_num_matches());
-    EXPECT_FALSE(path.is_exact_match());
+    EXPECT_FALSE(is_exact_match(path));
     EXPECT_EQ(0u, path.get_clipping());
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
@@ -691,7 +695,7 @@ TYPED_TEST(DBGAlignerTest, align_insert_long) {
         + score_t(8) * config.gap_extension_penalty, path.get_score());
     EXPECT_EQ("5=9I5=", path.get_cigar().to_string());
     EXPECT_EQ(10u, path.get_cigar().get_num_matches());
-    EXPECT_FALSE(path.is_exact_match());
+    EXPECT_FALSE(is_exact_match(path));
     EXPECT_EQ(0u, path.get_clipping());
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
@@ -725,7 +729,7 @@ TYPED_TEST(DBGAlignerTest, align_insert_long_offset) {
     EXPECT_TRUE(path.get_cigar().to_string() == "6=1X9I6="
         || path.get_cigar().to_string() == "6=9I1X6=") << path.get_cigar().to_string();
     EXPECT_EQ(12u, path.get_cigar().get_num_matches());
-    EXPECT_FALSE(path.is_exact_match());
+    EXPECT_FALSE(is_exact_match(path));
     EXPECT_EQ(0u, path.get_clipping());
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
@@ -751,7 +755,7 @@ TYPED_TEST(DBGAlignerTest, align_delete) {
     ASSERT_EQ(1ull, paths.size());
     auto path = paths[0];
 
-    EXPECT_FALSE(path.is_exact_match());
+    EXPECT_FALSE(is_exact_match(path));
     EXPECT_EQ(reference.size() - k + 1, path.size());
     EXPECT_EQ(reference, path.get_sequence());
     EXPECT_EQ(config.match_score(query) + config.gap_opening_penalty, path.get_score());
@@ -761,7 +765,7 @@ TYPED_TEST(DBGAlignerTest, align_delete) {
         || "5=1D6=" == path.get_cigar().to_string());
     // EXPECT_EQ("6=1I5=", path.get_cigar().to_string());
 
-    EXPECT_FALSE(path.is_exact_match());
+    EXPECT_FALSE(is_exact_match(path));
     EXPECT_EQ(0u, path.get_clipping());
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
@@ -794,7 +798,7 @@ TYPED_TEST(DBGAlignerTest, align_gap) {
         + score_t(3) * config.gap_extension_penalty, path.get_score());
     EXPECT_EQ("10=4D9=", path.get_cigar().to_string());
     EXPECT_EQ(19u, path.get_cigar().get_num_matches());
-    EXPECT_FALSE(path.is_exact_match());
+    EXPECT_FALSE(is_exact_match(path));
     EXPECT_EQ(0u, path.get_clipping());
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
@@ -826,7 +830,7 @@ TYPED_TEST(DBGAlignerTest, align_gap_after_seed) {
         + score_t(3) * config.gap_extension_penalty, path.get_score());
     EXPECT_EQ("4=4D9=", path.get_cigar().to_string());
     EXPECT_EQ(13u, path.get_cigar().get_num_matches());
-    EXPECT_FALSE(path.is_exact_match());
+    EXPECT_FALSE(is_exact_match(path));
     EXPECT_EQ(0u, path.get_clipping());
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
@@ -860,7 +864,7 @@ TYPED_TEST(DBGAlignerTest, align_loop_deletion) {
         + score_t(2) * config.gap_extension_penalty, path.get_score());
     EXPECT_EQ("4=3D9=", path.get_cigar().to_string());
     EXPECT_EQ(13u, path.get_cigar().get_num_matches());
-    EXPECT_FALSE(path.is_exact_match());
+    EXPECT_FALSE(is_exact_match(path));
     EXPECT_EQ(0u, path.get_clipping());
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
@@ -890,7 +894,7 @@ TYPED_TEST(DBGAlignerTest, align_straight_long_xdrop) {
     EXPECT_EQ(config.match_score(query), path.get_score());
     EXPECT_EQ("63=", path.get_cigar().to_string());
     EXPECT_EQ(63u, path.get_cigar().get_num_matches());
-    EXPECT_TRUE(path.is_exact_match());
+    EXPECT_TRUE(is_exact_match(path));
     EXPECT_EQ(0u, path.get_clipping());
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
@@ -922,7 +926,7 @@ TYPED_TEST(DBGAlignerTest, align_drop_seed) {
     EXPECT_EQ(config.match_score(reference.substr(7)), path.get_score());
     EXPECT_EQ("7S9=", path.get_cigar().to_string());
     EXPECT_EQ(9u, path.get_cigar().get_num_matches());
-    EXPECT_FALSE(path.is_exact_match());
+    EXPECT_FALSE(is_exact_match(path));
     EXPECT_EQ(7u, path.get_clipping());
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
@@ -954,7 +958,7 @@ TYPED_TEST(DBGAlignerTest, align_long_gap_after_seed) {
     EXPECT_EQ(config.match_score(query.substr(4)), path.get_score());
     EXPECT_EQ("4S9=", path.get_cigar().to_string());
     EXPECT_EQ(9u, path.get_cigar().get_num_matches());
-    EXPECT_FALSE(path.is_exact_match());
+    EXPECT_FALSE(is_exact_match(path));
     EXPECT_EQ(4u, path.get_clipping());
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
@@ -995,7 +999,7 @@ TYPED_TEST(DBGAlignerTest, align_repeat_sequence_no_delete_after_insert) {
              || path.get_cigar().to_string() == "44=4I1=3I8=1X39=")
         << path.get_cigar().to_string();
     EXPECT_EQ(92u, path.get_cigar().get_num_matches());
-    EXPECT_FALSE(path.is_exact_match());
+    EXPECT_FALSE(is_exact_match(path));
     EXPECT_EQ(0u, path.get_clipping());
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
@@ -1019,7 +1023,7 @@ TYPED_TEST(DBGAlignerTest, align_repeat_sequence_no_delete_after_insert) {
              || path.get_cigar().to_string() == "44=4I1=3I8=1X39=")
         << path.get_cigar().to_string();
     EXPECT_EQ(92u, path.get_cigar().get_num_matches());
-    EXPECT_FALSE(path.is_exact_match());
+    EXPECT_FALSE(is_exact_match(path));
     EXPECT_EQ(0u, path.get_clipping());
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
@@ -1046,7 +1050,7 @@ TYPED_TEST(DBGAlignerTest, align_clipping1) {
     EXPECT_EQ("2S8=", path.get_cigar().to_string())
         << reference.substr(2) << " " << path.get_sequence();
     EXPECT_EQ(8u, path.get_cigar().get_num_matches());
-    EXPECT_FALSE(path.is_exact_match());
+    EXPECT_FALSE(is_exact_match(path));
     EXPECT_EQ(2u, path.get_clipping());
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
@@ -1075,7 +1079,7 @@ TYPED_TEST(DBGAlignerTest, align_clipping2) {
     EXPECT_EQ(config.match_score(query.substr(2)), path.get_score());
     EXPECT_EQ("2S14=", path.get_cigar().to_string());
     EXPECT_EQ(14u, path.get_cigar().get_num_matches());
-    EXPECT_FALSE(path.is_exact_match());
+    EXPECT_FALSE(is_exact_match(path));
     EXPECT_EQ(2u, path.get_clipping());
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
@@ -1105,7 +1109,7 @@ TYPED_TEST(DBGAlignerTest, align_long_clipping) {
     EXPECT_EQ(config.match_score(query.substr(7)), path.get_score());
     EXPECT_EQ("7S17=", path.get_cigar().to_string());
     EXPECT_EQ(17u, path.get_cigar().get_num_matches());
-    EXPECT_FALSE(path.is_exact_match());
+    EXPECT_FALSE(is_exact_match(path));
     EXPECT_EQ(7u, path.get_clipping());
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
@@ -1134,7 +1138,7 @@ TYPED_TEST(DBGAlignerTest, align_end_clipping) {
     EXPECT_EQ(config.match_score(query.substr(0, 17)), path.get_score());
     EXPECT_EQ("17=7S", path.get_cigar().to_string());
     EXPECT_EQ(17u, path.get_cigar().get_num_matches());
-    EXPECT_FALSE(path.is_exact_match());
+    EXPECT_FALSE(is_exact_match(path));
     EXPECT_EQ(0u, path.get_clipping());
     EXPECT_EQ(7u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
@@ -1165,7 +1169,7 @@ TYPED_TEST(DBGAlignerTest, align_clipping_min_cell_score) {
     EXPECT_EQ(config.match_score(query.substr(2)), path.get_score());
     EXPECT_EQ("2S13=", path.get_cigar().to_string());
     EXPECT_EQ(13u, path.get_cigar().get_num_matches());
-    EXPECT_FALSE(path.is_exact_match());
+    EXPECT_FALSE(is_exact_match(path));
     EXPECT_EQ(2u, path.get_clipping());
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
@@ -1193,7 +1197,7 @@ TYPED_TEST(DBGAlignerTest, align_low_similarity) {
     // EXPECT_EQ(config.match_score(query.substr(2)), path.get_score());
     // EXPECT_EQ("2S13=", path.get_cigar().to_string());
     // EXPECT_EQ(13u, path.get_cigar().get_num_matches());
-    // EXPECT_FALSE(path.is_exact_match());
+    // EXPECT_FALSE(is_exact_match(path));
     // EXPECT_EQ(2u, path.get_clipping());
     // EXPECT_EQ(0u, path.get_end_clipping());
     // EXPECT_EQ(0u, path.get_offset());
@@ -1287,7 +1291,7 @@ TYPED_TEST(DBGAlignerTest, align_low_similarity4) {
                 paths = aligner.align(match);
                 ASSERT_LE(1ull, paths.size());
                 EXPECT_EQ(match, paths[0].get_sequence());
-                EXPECT_TRUE(paths[0].is_exact_match());
+                EXPECT_TRUE(is_exact_match(paths[0]));
             }
         }
     }
@@ -1338,7 +1342,7 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_min_seed_length) {
         EXPECT_EQ(config.match_score(query.substr(2)), path.get_score());
         EXPECT_EQ("2S13=", path.get_cigar().to_string());
         EXPECT_EQ(13u, path.get_cigar().get_num_matches());
-        EXPECT_FALSE(path.is_exact_match());
+        EXPECT_FALSE(is_exact_match(path));
         EXPECT_EQ(2u, path.get_clipping());
         EXPECT_EQ(0u, path.get_end_clipping());
         EXPECT_EQ(0u, path.get_offset());
@@ -1371,7 +1375,7 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_min_seed_length) {
         EXPECT_EQ(config.score_sequences(query, reference.substr(12)), path.get_score());
         EXPECT_EQ("1=1X13=", path.get_cigar().to_string());
         EXPECT_EQ(14u, path.get_cigar().get_num_matches());
-        EXPECT_FALSE(path.is_exact_match());
+        EXPECT_FALSE(is_exact_match(path));
         EXPECT_EQ(0u, path.get_clipping());
         EXPECT_EQ(0u, path.get_end_clipping());
         EXPECT_EQ(0u, path.get_offset());
@@ -1428,7 +1432,7 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_canonical) {
         }
         EXPECT_EQ(5u, path.get_offset());
         EXPECT_EQ(13u, path.get_cigar().get_num_matches());
-        EXPECT_FALSE(path.is_exact_match());
+        EXPECT_FALSE(is_exact_match(path));
         EXPECT_TRUE(path.is_valid(*graph, &config));
         check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
 
@@ -1467,7 +1471,7 @@ TYPED_TEST(DBGAlignerTest, align_both_directions) {
     }
 
     EXPECT_EQ(17u, path.get_cigar().get_num_matches());
-    EXPECT_FALSE(path.is_exact_match());
+    EXPECT_FALSE(is_exact_match(path));
     EXPECT_EQ(0u, path.get_clipping());
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());
@@ -1564,7 +1568,7 @@ TYPED_TEST(DBGAlignerTest, align_nodummy) {
             EXPECT_EQ(12u, path.get_cigar().get_num_matches());
             EXPECT_EQ(6u, path.get_clipping());
         }
-        EXPECT_FALSE(path.is_exact_match());
+        EXPECT_FALSE(is_exact_match(path));
         EXPECT_EQ(0u, path.get_end_clipping());
         EXPECT_EQ(0u, path.get_offset());
         EXPECT_TRUE(path.is_valid(*graph, &config));
@@ -1611,7 +1615,7 @@ TEST(DBGAlignerTest, align_dummy) {
     EXPECT_EQ(config.score_sequences(query, reference), path.get_score());
     EXPECT_EQ("5=1X12=", path.get_cigar().to_string());
     EXPECT_EQ(17u, path.get_cigar().get_num_matches());
-    EXPECT_FALSE(path.is_exact_match());
+    EXPECT_FALSE(is_exact_match(path));
     EXPECT_EQ(0u, path.get_clipping());
     EXPECT_EQ(0u, path.get_end_clipping());
     EXPECT_EQ(0u, path.get_offset());

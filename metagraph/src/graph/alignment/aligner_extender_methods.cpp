@@ -58,8 +58,8 @@ DefaultColumnExtender::DefaultColumnExtender(const DeBruijnGraph &graph,
 bool SeedFilteringExtender::set_seed(const Alignment &seed) {
     assert(seed.size());
     assert(seed.get_cigar().size());
-    assert(seed.get_cigar().back().first == Cigar::MATCH
-        || seed.get_cigar().back().first == Cigar::MISMATCH);
+    assert(seed.get_cigar().data().back().first == Cigar::MATCH
+        || seed.get_cigar().data().back().first == Cigar::MISMATCH);
 
     seed_ = nullptr;
 
@@ -588,7 +588,7 @@ auto DefaultColumnExtender::construct_alignment(Cigar cigar,
     assert(final_path.size());
     cigar.append(Cigar::CLIPPED, clipping);
 
-    std::reverse(cigar.begin(), cigar.end());
+    std::reverse(cigar.data().begin(), cigar.data().end());
     std::reverse(final_path.begin(), final_path.end());
     std::reverse(match.begin(), match.end());
 
@@ -687,7 +687,8 @@ auto DefaultColumnExtender
                 assert(j_prev != static_cast<size_t>(-1));
                 j = j_prev;
 
-            } else if (S[pos - trim] == F[pos - trim] && ops.size() && ops.back().first != Cigar::INSERTION) {
+            } else if (S[pos - trim] == F[pos - trim] && ops.size()
+                    && ops.data().back().first != Cigar::INSERTION) {
                 // deletion
                 Cigar::Operator last_op = Cigar::DELETION;
                 while (last_op == Cigar::DELETION && j) {
@@ -712,7 +713,8 @@ auto DefaultColumnExtender
                     assert(j_prev != static_cast<size_t>(-1));
                     j = j_prev;
                 }
-            } else if (pos && S[pos - trim] == E[pos - trim] && ops.size() && ops.back().first != Cigar::DELETION) {
+            } else if (pos && S[pos - trim] == E[pos - trim] && ops.size()
+                    && ops.data().back().first != Cigar::DELETION) {
                 // insertion
                 Cigar::Operator last_op = Cigar::INSERTION;
                 while (last_op == Cigar::INSERTION) {
