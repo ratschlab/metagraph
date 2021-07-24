@@ -215,6 +215,110 @@ class DBGWrapper : public DeBruijnGraph {
     std::shared_ptr<const Graph> graph_;
 };
 
+template <typename Graph = DeBruijnGraph>
+class DBGNodeModifyingWrapper : public DBGWrapper<Graph> {
+  public:
+    typedef typename Graph::node_index node_index;
+    typedef typename Graph::CallPath CallPath;
+    typedef typename Graph::OutgoingEdgeCallback OutgoingEdgeCallback;
+    typedef typename Graph::IncomingEdgeCallback IncomingEdgeCallback;
+
+    template <typename... Args>
+    explicit DBGNodeModifyingWrapper(Args&&... args)
+          : DBGWrapper<Graph>(std::forward<Args>(args)...) {}
+
+    virtual ~DBGNodeModifyingWrapper() {}
+
+    virtual void map_to_nodes(std::string_view sequence,
+                              const std::function<void(node_index)> &callback,
+                              const std::function<bool()> &terminate
+                                  = [](){ return false; }) const override = 0;
+
+    virtual void map_to_nodes_sequentially(std::string_view sequence,
+                                           const std::function<void(node_index)> &callback,
+                                           const std::function<bool()> &terminate
+                                               = [](){ return false; }) const override = 0;
+
+    virtual void
+    adjacent_outgoing_nodes(node_index node,
+                            const std::function<void(node_index)> &callback) const override = 0;
+
+    virtual void
+    adjacent_incoming_nodes(node_index node,
+                            const std::function<void(node_index)> &callback) const override = 0;
+
+    virtual void call_outgoing_kmers(node_index kmer,
+                                     const OutgoingEdgeCallback &callback) const override = 0;
+
+    virtual void call_incoming_kmers(node_index kmer,
+                                     const IncomingEdgeCallback &callback) const override = 0;
+
+    virtual void call_nodes(const std::function<void(node_index)> &callback,
+                            const std::function<bool()> &stop_early
+                                = [](){ return false; }) const override = 0;
+    virtual void call_kmers(const std::function<void(node_index, const std::string&)> &callback) const override = 0;
+
+    virtual uint64_t num_nodes() const override = 0;
+    virtual uint64_t max_index() const override = 0;
+
+    virtual std::string get_node_sequence(node_index index) const override = 0;
+
+    virtual node_index traverse(node_index node, char next_char) const override = 0;
+    virtual node_index traverse_back(node_index node, char prev_char) const override = 0;
+
+    virtual size_t outdegree(node_index node) const override = 0;
+    virtual size_t indegree(node_index node) const override = 0;
+
+    virtual void traverse(node_index start,
+                          const char *begin,
+                          const char *end,
+                          const std::function<void(node_index)> &callback,
+                          const std::function<bool()> &terminate = [](){ return false; }) const override {
+        DeBruijnGraph::traverse(start, begin, end, callback, terminate);
+    }
+
+    virtual void call_sequences(const CallPath &callback,
+                                size_t num_threads = 1,
+                                bool kmers_in_single_form = false) const override {
+        DeBruijnGraph::call_sequences(callback, num_threads, kmers_in_single_form);
+    }
+
+    virtual void call_unitigs(const CallPath &callback,
+                              size_t num_threads = 1,
+                              size_t min_tip_size = 1,
+                              bool kmers_in_single_form = false) const override {
+        DeBruijnGraph::call_unitigs(callback, num_threads, min_tip_size, kmers_in_single_form);
+    }
+
+    virtual bool has_single_outgoing(node_index node) const override {
+        return DeBruijnGraph::has_single_outgoing(node);
+    }
+
+    virtual bool has_multiple_outgoing(node_index node) const override {
+        return DeBruijnGraph::has_multiple_outgoing(node);
+    }
+
+    virtual bool has_no_incoming(node_index node) const override {
+        return DeBruijnGraph::has_no_incoming(node);
+    }
+
+    virtual bool has_single_incoming(node_index node) const override {
+        return DeBruijnGraph::has_single_incoming(node);
+    }
+
+    virtual node_index kmer_to_node(std::string_view kmer) const override {
+        return DeBruijnGraph::kmer_to_node(kmer);
+    }
+
+    virtual bool find(std::string_view sequence, double discovery_fraction = 1) const override {
+        return DeBruijnGraph::find(sequence, discovery_fraction);
+    }
+
+    virtual void call_source_nodes(const std::function<void(node_index)> &callback) const override {
+        return DeBruijnGraph::call_source_nodes(callback);
+    }
+};
+
 } // namespace graph
 } // namespace mtg
 
