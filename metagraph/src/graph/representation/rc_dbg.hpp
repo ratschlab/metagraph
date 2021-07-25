@@ -20,6 +20,7 @@ class RCDBG : public DBGNodeModifyingWrapper<DeBruijnGraph> {
 
     virtual uint64_t num_nodes() const override final { return graph_->num_nodes(); }
     virtual uint64_t max_index() const override final { return graph_->max_index(); }
+    virtual Mode get_mode() const override final { return graph_->get_mode(); }
 
     virtual node_index traverse(node_index node, char next_char) const override final {
         return graph_->traverse_back(node, complement(next_char));
