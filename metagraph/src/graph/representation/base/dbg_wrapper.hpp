@@ -10,33 +10,11 @@ namespace graph {
 /**
  * This abstract class stores a graph internally and transfers all calls to it.
  * It can be used as a parent to other wrappers which add additional functionality.
- * All children of this class must implement add_sequence, load, and operator==
+ * All children of this class must implement operator==
  */
 template <class Graph = DeBruijnGraph>
 class IDBGWrapper : public DeBruijnGraph {
   public:
-    template <class InGraph>
-    explicit IDBGWrapper(std::shared_ptr<InGraph> graph)
-          : graph_ptr_(std::dynamic_pointer_cast<Graph>(graph)), graph_(graph_ptr_) {
-        assert(graph_);
-        assert(graph_ptr_);
-    }
-
-    template <class InGraph>
-    explicit IDBGWrapper(std::shared_ptr<const InGraph> graph)
-          : graph_(std::dynamic_pointer_cast<const Graph>(graph)) {
-        assert(graph_);
-        assert(!graph_ptr_);
-    }
-
-    // aliasing constructor
-    template <class InGraph>
-    explicit IDBGWrapper(const InGraph &graph)
-          : graph_(std::shared_ptr<const Graph>{}, dynamic_cast<const Graph*>(&graph)) {
-        assert(graph_);
-        assert(!graph_ptr_);
-    }
-
     virtual ~IDBGWrapper() {}
 
     /**
@@ -44,7 +22,6 @@ class IDBGWrapper : public DeBruijnGraph {
      */
     virtual const Graph& get_graph() const { return *graph_; }
     virtual std::shared_ptr<const Graph> get_graph_ptr() const { return graph_; }
-    virtual std::shared_ptr<Graph> get_mutable_graph_ptr() const { return graph_ptr_; }
 
     /**
      * Methods shared by all wrappers
@@ -56,8 +33,21 @@ class IDBGWrapper : public DeBruijnGraph {
     virtual const DeBruijnGraph& get_base_graph() const override final {
         return graph_->get_base_graph();
     }
-    virtual void serialize(const std::string &filename) const override {
-        graph_->serialize(filename);
+
+    /**
+     * Not implemented
+     */
+    virtual void serialize(const std::string &) const override final {
+        throw std::runtime_error("serialize not implemented on graph wrappers");
+    }
+
+    virtual bool load(const std::string &) override final {
+        throw std::runtime_error("load not implemented on graph wrappers");
+    }
+
+    virtual void add_sequence(std::string_view,
+                              const std::function<void(node_index)> &) override final {
+        throw std::runtime_error("add_sequence not implemented on graph wrappers");
     }
 
     /**
@@ -66,12 +56,34 @@ class IDBGWrapper : public DeBruijnGraph {
     virtual bool operator==(const DeBruijnGraph &other) const override = 0;
 
   protected:
-    std::shared_ptr<Graph> graph_ptr_;
     std::shared_ptr<const Graph> graph_;
+
+    template <class InGraph>
+    IDBGWrapper(std::shared_ptr<const InGraph> graph)
+          : graph_(std::dynamic_pointer_cast<const Graph>(graph)) { assert(graph_); }
+
+    template <class InGraph>
+    IDBGWrapper(std::shared_ptr<InGraph> graph)
+          : graph_(std::dynamic_pointer_cast<const Graph>(graph)) { assert(graph_); }
+
+    // aliasing constructors
+    template <class InGraph>
+    explicit IDBGWrapper(const InGraph &graph)
+          : graph_(std::shared_ptr<const Graph>{}, dynamic_cast<const Graph*>(&graph)) {
+        assert(graph_);
+    }
+
+    template <class InGraph>
+    explicit IDBGWrapper(InGraph &graph)
+          : graph_(std::shared_ptr<const Graph>{}, dynamic_cast<const Graph*>(&graph)) {
+        assert(graph_);
+    }
 };
 
 /**
- * This wrapper uses the default methods from Graph when available
+ * This wrapper uses the default methods from Graph when available. This may be
+ * used when the nodes and edges of the wrapped graph differ from the underlying
+ * graph.
  */
 template <typename Graph = DeBruijnGraph>
 class DBGNodeModifyingWrapper : public IDBGWrapper<Graph> {
@@ -79,7 +91,7 @@ class DBGNodeModifyingWrapper : public IDBGWrapper<Graph> {
     typedef typename Graph::node_index node_index;
 
     template <typename... Args>
-    explicit DBGNodeModifyingWrapper(Args&&... args)
+    DBGNodeModifyingWrapper(Args&&... args)
           : IDBGWrapper<Graph>(std::forward<Args>(args)...) {}
 
     virtual ~DBGNodeModifyingWrapper() {}
@@ -97,7 +109,9 @@ class DBGNodeModifyingWrapper : public IDBGWrapper<Graph> {
 };
 
 /**
- * This wrapper uses the methods directly from the underlying graph by default
+ * This wrapper uses the methods directly from the underlying graph by default.
+ * This may be used when the nodes and edges of the wrapped graph are the
+ * same as the underlying graph.
  */
 template <class Graph = DeBruijnGraph>
 class DBGWrapper : public IDBGWrapper<Graph> {
@@ -108,7 +122,7 @@ class DBGWrapper : public IDBGWrapper<Graph> {
     typedef typename Graph::IncomingEdgeCallback IncomingEdgeCallback;
 
     template <typename... Args>
-    explicit DBGWrapper(Args&&... args) : IDBGWrapper<Graph>(std::forward<Args>(args)...) {}
+    DBGWrapper(Args&&... args) : IDBGWrapper<Graph>(std::forward<Args>(args)...) {}
 
     virtual ~DBGWrapper() {}
 
