@@ -196,12 +196,27 @@ class DBGSuccinctCachedImpl : public DBGSuccinctCached {
         );
     }
 
+    virtual void add_sequence(std::string_view sequence,
+                              const std::function<void(node_index)> &on_insertion
+                                  = [](node_index) {}) override final {
+        graph_ptr_->add_sequence(sequence, on_insertion);
+        flush();
+    }
+
+    virtual bool load(const std::string &filename) override final {
+        if (!graph_ptr_->load(filename))
+            return false;
+
+        flush();
+        return true;
+    }
+
   private:
     const boss::BOSS *boss_;
     size_t cache_size_;
     mutable common::LRUCache<edge_index, CacheValue> decoded_cache_;
 
-    virtual void flush() override final {
+    void flush() {
         boss_ = &graph_->get_boss();
         decoded_cache_.Clear();
     }
