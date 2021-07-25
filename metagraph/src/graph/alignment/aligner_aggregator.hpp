@@ -5,7 +5,6 @@
 #include <priority_deque.hpp>
 
 #include "aligner_alignment.hpp"
-#include "common/vector_map.hpp"
 
 namespace mtg {
 namespace graph {
