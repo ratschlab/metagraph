@@ -54,8 +54,8 @@ template <typename NodeType>
 void DefaultColumnExtender<NodeType>::initialize(const DBGAlignment &seed) {
     assert(seed.size());
     assert(seed.get_cigar().size());
-    assert(seed.get_cigar().back().first == Cigar::MATCH
-        || seed.get_cigar().back().first == Cigar::MISMATCH);
+    assert(seed.get_cigar().data().back().first == Cigar::MATCH
+        || seed.get_cigar().data().back().first == Cigar::MISMATCH);
 
     seed_ = &seed;
     reset();
@@ -291,7 +291,7 @@ bool update_column(const DeBruijnGraph &graph_,
     std::ignore = seed_;
     assert(std::get<0>(prev_node) != graph_.max_index() + 1 || std::get<2>(prev_node)
         || (offset <= 1 && S[1 - offset] == seed_.get_score()
-            && OS[1 - offset] == seed_.get_cigar().back().first
+            && OS[1 - offset] == seed_.get_cigar().data().back().first
             && PS[1 - offset] == Extender::PREV));
 
     return updated;
@@ -348,7 +348,7 @@ void backtrack(const Table &table_,
             if (std::get<0>(prev) != graph_.max_index() + 1
                     || std::get<0>(best_node) != seed_.back()
                     || std::get<2>(best_node)
-                    || last_op != seed_.get_cigar().back().first) {
+                    || last_op != seed_.get_cigar().data().back().first) {
                 // last op in the seed was skipped
                 // TODO: reconstruct the entire alignment. for now, throw this out
                 return;
@@ -416,7 +416,7 @@ void backtrack(const Table &table_,
     if (pos > 1)
         cigar.append(Cigar::CLIPPED, pos - 1);
 
-    std::reverse(cigar.begin(), cigar.end());
+    std::reverse(cigar.data().begin(), cigar.data().end());
     std::reverse(path.begin(), path.end());
     std::reverse(seq.begin(), seq.end());
 
