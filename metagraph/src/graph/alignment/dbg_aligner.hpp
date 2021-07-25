@@ -20,16 +20,14 @@ namespace align {
 class IDBGAligner {
   public:
     typedef DeBruijnGraph::node_index node_index;
-    typedef Alignment<node_index> DBGAlignment;
-    typedef QueryAlignment<node_index> DBGQueryAlignment;
-    typedef typename DBGAlignment::score_t score_t;
+    typedef Alignment::score_t score_t;
 
     typedef std::function<void(std::string_view /* header */,
                                std::string_view /* seq */,
                                bool /* orientation of seq */)> QueryCallback;
     typedef std::function<void(const QueryCallback&)> QueryGenerator;
     typedef std::function<void(std::string_view /* header */,
-                               DBGQueryAlignment&& /* alignments */)> AlignmentCallback;
+                               QueryAlignment&& /* alignments */)> AlignmentCallback;
 
     virtual ~IDBGAligner() {}
 
@@ -38,8 +36,8 @@ class IDBGAligner {
                              const AlignmentCallback &callback) const = 0;
 
     // Convenience methods
-    DBGQueryAlignment align(std::string_view query,
-                            bool is_reverse_complement = false) const;
+    QueryAlignment align(std::string_view query,
+                         bool is_reverse_complement = false) const;
     void align_batch(const std::vector<std::pair<std::string, std::string>> &seq_batch,
                      const AlignmentCallback &callback) const;
 };
@@ -54,18 +52,11 @@ class ISeedAndExtendAligner : public IDBGAligner {
 template <class AlignmentCompare = LocalAlignmentLess>
 class SeedAndExtendAlignerCore;
 
-template <class Seeder = ExactSeeder<>,
-          class Extender = DefaultColumnExtender<>,
+template <class Seeder = ExactSeeder,
+          class Extender = DefaultColumnExtender,
           class AlignmentCompare = LocalAlignmentLess>
 class DBGAligner : public ISeedAndExtendAligner {
   public:
-    typedef IDBGAligner::node_index node_index;
-    typedef IDBGAligner::DBGAlignment DBGAlignment;
-    typedef IDBGAligner::DBGQueryAlignment DBGQueryAlignment;
-    typedef IDBGAligner::score_t score_t;
-    typedef IDBGAligner::QueryGenerator QueryGenerator;
-    typedef IDBGAligner::AlignmentCallback AlignmentCallback;
-
     DBGAligner(const DeBruijnGraph &graph, const DBGAlignerConfig &config)
           : graph_(graph), config_(config) {
         assert(config_.num_alternative_paths);
@@ -88,20 +79,17 @@ template <class AlignmentCompare>
 class SeedAndExtendAlignerCore {
   public:
     typedef IDBGAligner::node_index node_index;
-    typedef IDBGAligner::DBGAlignment DBGAlignment;
-    typedef IDBGAligner::DBGQueryAlignment DBGQueryAlignment;
     typedef IDBGAligner::score_t score_t;
 
-    typedef std::function<void(DBGAlignment&&)> LocalAlignmentCallback;
-    typedef std::function<score_t(const DBGAlignment&)> MinScoreComputer;
+    typedef std::function<void(Alignment&&)> LocalAlignmentCallback;
+    typedef std::function<score_t(const Alignment&)> MinScoreComputer;
     typedef const std::function<void(const LocalAlignmentCallback&,
                                      const MinScoreComputer&)> AlignmentGenerator;
 
-    typedef std::function<void(const ISeeder<node_index>&,
-                               IExtender<node_index>&&)> AlignCoreCallback;
+    typedef std::function<void(const ISeeder&, IExtender&&)> AlignCoreCallback;
     typedef std::function<void(std::string_view /* reverse_query */,
-                               const ISeeder<node_index> & /* forward seeder */,
-                               std::vector<DBGAlignment>&& /* rev_comp_seeds */,
+                               const ISeeder& /* forward seeder */,
+                               std::vector<Alignment>&& /* rev_comp_seeds */,
                                const AlignCoreCallback&)> AlignCoreGenerator;
 
     SeedAndExtendAlignerCore(const DeBruijnGraph &graph, const DBGAlignerConfig &config)
@@ -109,18 +97,18 @@ class SeedAndExtendAlignerCore {
 
     // Align the query sequence in the given orientation (false is forward,
     // true is reverse complement)
-    void align_one_direction(DBGQueryAlignment &paths,
+    void align_one_direction(QueryAlignment &paths,
                              bool orientation_to_align,
-                             const ISeeder<node_index> &seeder,
-                             IExtender<node_index>&& extender) const;
+                             const ISeeder &seeder,
+                             IExtender&& extender) const;
 
     // Align both the forward and reverse complement of the query sequence,
     // then report the best scoring alignment.
-    void align_best_direction(DBGQueryAlignment &paths,
-                              const ISeeder<node_index> &seeder,
-                              const ISeeder<node_index> &seeder_rc,
-                              IExtender<node_index>&& extender,
-                              IExtender<node_index>&& extender_rc) const;
+    void align_best_direction(QueryAlignment &paths,
+                              const ISeeder &seeder,
+                              const ISeeder &seeder_rc,
+                              IExtender&& extender,
+                              IExtender&& extender_rc) const;
 
     // Align the forward and reverse complement of the query sequence in both
     // directions and return the overall best alignment. e.g., for the forward query
@@ -128,25 +116,25 @@ class SeedAndExtendAlignerCore {
     // 2. Given a seed, extend forwards to get alignment A
     // 3. Reverse complement the alignment to get A', treat it like a new seed
     // 4. Extend A' forwards to get the final alignment A''
-    void align_both_directions(DBGQueryAlignment &paths,
-                               const ISeeder<node_index> &forward_seeder,
-                               const ISeeder<node_index> &reverse_seeder,
-                               IExtender<node_index>&& forward_extender,
-                               IExtender<node_index>&& reverse_extender,
+    void align_both_directions(QueryAlignment &paths,
+                               const ISeeder &forward_seeder,
+                               const ISeeder &reverse_seeder,
+                               IExtender&& forward_extender,
+                               IExtender&& reverse_extender,
                                const AlignCoreGenerator &rev_comp_core_generator) const;
 
   protected:
     // Generate seeds, then extend them
     void align_core(std::string_view query,
-                    const ISeeder<node_index> &seeder,
-                    IExtender<node_index> &extender,
+                    const ISeeder &seeder,
+                    IExtender &extender,
                     const LocalAlignmentCallback &callback,
                     const MinScoreComputer &get_min_path_score) const;
 
     // Given alignments generated by a generator, add them to a priority queue
     // and add the top ones to paths.
     virtual void
-    align_aggregate(DBGQueryAlignment &paths,
+    align_aggregate(QueryAlignment &paths,
                     const AlignmentGenerator &alignment_generator) const;
 
     const DeBruijnGraph &graph_;
@@ -164,7 +152,7 @@ inline void DBGAligner<Seeder, Extender, AlignmentCompare>
                        std::string_view query,
                        bool is_reverse_complement) {
         SeedAndExtendAlignerCore<AlignmentCompare> aligner_core(graph_, config_);
-        DBGQueryAlignment paths(query, is_reverse_complement);
+        QueryAlignment paths(query, is_reverse_complement);
         std::string_view this_query = paths.get_query(is_reverse_complement);
         assert(this_query == query);
 
@@ -181,7 +169,7 @@ inline void DBGAligner<Seeder, Extender, AlignmentCompare>
                                                      const auto &,
                                                      auto&& rev_comp_seeds,
                                                      const auto &callback) {
-                ManualSeeder<node_index> seeder_rc(std::move(rev_comp_seeds));
+                ManualSeeder seeder_rc(std::move(rev_comp_seeds));
                 callback(seeder_rc, Extender(graph_, config_, reverse));
             };
 

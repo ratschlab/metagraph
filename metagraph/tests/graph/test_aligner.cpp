@@ -22,7 +22,7 @@ using namespace mtg::kmer;
 const std::string test_data_dir = "../tests/data";
 const bool PICK_REV_COMP = true;
 
-inline bool is_exact_match(const Alignment<DeBruijnGraph::node_index> &alignment) {
+inline bool is_exact_match(const Alignment &alignment) {
     return alignment.get_cigar().is_exact_match(alignment.get_query().size());
 }
 
@@ -287,7 +287,7 @@ TYPED_TEST(DBGAlignerTest, align_straight_forward_and_reverse_complement) {
                            ext_paths.begin(), ext_paths.end()));
 
     // test copy
-    auto paths_copy = const_cast<const DBGAligner<>::DBGQueryAlignment&>(paths);
+    auto paths_copy = const_cast<const QueryAlignment&>(paths);
     for (const auto &path : paths_copy) {
         EXPECT_TRUE(path.is_valid(*graph, &config));
     }
@@ -1313,7 +1313,7 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_min_seed_length) {
         config.min_cell_score = std::numeric_limits<score_t>::min() + 100;
         config.min_path_score = std::numeric_limits<score_t>::min() + 100;
         config.max_seed_length = k;
-        DBGAligner<SuffixSeeder<ExactSeeder<>>> aligner(*graph, config);
+        DBGAligner<SuffixSeeder<ExactSeeder>> aligner(*graph, config);
         auto paths = aligner.align(query);
         ASSERT_EQ(1ull, paths.size());
         auto path = paths[0];
@@ -1347,7 +1347,7 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_min_seed_length) {
         config.min_cell_score = std::numeric_limits<score_t>::min() + 100;
         config.min_path_score = std::numeric_limits<score_t>::min() + 100;
         config.max_seed_length = k;
-        DBGAligner<SuffixSeeder<ExactSeeder<>>> aligner(*graph, config);
+        DBGAligner<SuffixSeeder<ExactSeeder>> aligner(*graph, config);
         auto paths = aligner.align(query);
         ASSERT_EQ(1ull, paths.size());
         auto path = paths[0];
@@ -1395,7 +1395,7 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_canonical) {
         config.min_path_score = std::numeric_limits<score_t>::min() + 100;
         config.max_seed_length = k;
         config.min_seed_length = 13;
-        DBGAligner<SuffixSeeder<ExactSeeder<>>> aligner(*graph, config);
+        DBGAligner<SuffixSeeder<ExactSeeder>> aligner(*graph, config);
         auto paths = aligner.align(query);
         ASSERT_EQ(1ull, paths.size());
         auto path = paths[0];
@@ -1525,7 +1525,7 @@ TEST(DBGAlignerTest, align_dummy) {
     config.max_seed_length = k;
     graph->add_sequence(reference);
 
-    DBGAligner<SuffixSeeder<ExactSeeder<>>> aligner(*graph, config);
+    DBGAligner<SuffixSeeder<ExactSeeder>> aligner(*graph, config);
     auto paths = aligner.align(query);
     ASSERT_EQ(1ull, paths.size());
     auto path = paths[0];
@@ -1557,7 +1557,7 @@ TEST(DBGAlignerTest, align_extended_insert_after_match) {
     graph->add_sequence(reference_1);
     graph->add_sequence(reference_2);
 
-    DBGAligner<SuffixSeeder<ExactSeeder<>>> aligner(*graph, config);
+    DBGAligner<SuffixSeeder<ExactSeeder>> aligner(*graph, config);
     auto paths = aligner.align(query);
     ASSERT_EQ(1ull, paths.size());
     auto path = paths[0];
@@ -1587,7 +1587,7 @@ TEST(DBGAlignerTest, align_suffix_seed_no_full_seeds) {
 
     for (size_t max_seed_length : { k, k + 100 }) {
         config.max_seed_length = max_seed_length;
-        DBGAligner<SuffixSeeder<ExactSeeder<>>> aligner(*graph, config);
+        DBGAligner<SuffixSeeder<ExactSeeder>> aligner(*graph, config);
         auto paths = aligner.align(query);
         ASSERT_EQ(1ull, paths.size());
         auto path = paths[0];

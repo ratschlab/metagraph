@@ -11,6 +11,7 @@
 
 #include "aligner_cigar.hpp"
 #include "aligner_config.hpp"
+#include "graph/representation/base/sequence_graph.hpp"
 
 
 namespace mtg {
@@ -23,14 +24,13 @@ namespace align {
 // Note: this object stores pointers to the query sequence, so it is the user's
 //       responsibility to ensure that the query sequence is not destroyed when
 //       calling this class' methods
-template <typename NodeType = uint64_t>
 class Alignment {
   public:
-    typedef NodeType node_index;
+    typedef DeBruijnGraph::node_index node_index;
     typedef DBGAlignerConfig::score_t score_t;
 
     Alignment(std::string_view query,
-              std::vector<NodeType>&& nodes = {},
+              std::vector<node_index>&& nodes = {},
               std::string&& sequence = "",
               score_t score = 0,
               Cigar&& cigar = Cigar(),
@@ -47,7 +47,7 @@ class Alignment {
 
     // Used for constructing seeds
     Alignment(std::string_view query = {},
-              std::vector<NodeType>&& nodes = {},
+              std::vector<node_index>&& nodes = {},
               score_t score = 0,
               size_t clipping = 0,
               bool orientation = false,
@@ -65,7 +65,7 @@ class Alignment {
 
     // Used for constructing exact match seeds
     Alignment(std::string_view query,
-              std::vector<NodeType>&& nodes,
+              std::vector<node_index>&& nodes,
               std::string&& sequence,
               score_t score,
               size_t clipping = 0,
@@ -76,10 +76,10 @@ class Alignment {
 
     size_t size() const { return nodes_.size(); }
     bool empty() const { return nodes_.empty(); }
-    const std::vector<NodeType>& get_nodes() const { return nodes_; }
-    const NodeType& operator[](size_t i) const { return nodes_[i]; }
-    const NodeType& front() const { return nodes_.front(); }
-    const NodeType& back() const { return nodes_.back(); }
+    const std::vector<node_index>& get_nodes() const { return nodes_; }
+    const node_index& operator[](size_t i) const { return nodes_[i]; }
+    const node_index& front() const { return nodes_.front(); }
+    const node_index& back() const { return nodes_.back(); }
 
     score_t get_score() const { return score_; }
     uint64_t get_num_matches() const { return cigar_.get_num_matches(); }
@@ -117,8 +117,8 @@ class Alignment {
     Cigar::LengthType get_clipping() const { return cigar_.get_clipping(); }
     Cigar::LengthType get_end_clipping() const { return cigar_.get_end_clipping(); }
 
-    typedef typename std::vector<NodeType>::iterator iterator;
-    typedef typename std::vector<NodeType>::const_iterator const_iterator;
+    typedef typename std::vector<node_index>::iterator iterator;
+    typedef typename std::vector<node_index>::const_iterator const_iterator;
 
     const_iterator begin() const { return nodes_.cbegin(); }
     const_iterator end() const { return nodes_.cend(); }
@@ -150,7 +150,7 @@ class Alignment {
 
     // TODO: rename to query_view_
     std::string_view query_;
-    std::vector<NodeType> nodes_;
+    std::vector<node_index> nodes_;
     std::string sequence_;
     score_t score_;
     Cigar cigar_;
@@ -158,8 +158,7 @@ class Alignment {
     size_t offset_;
 };
 
-template <typename NodeType>
-std::ostream& operator<<(std::ostream& out, const Alignment<NodeType> &alignment) {
+inline std::ostream& operator<<(std::ostream& out, const Alignment &alignment) {
     out << (alignment.get_orientation() ? "-" : "+") << "\t"
         << alignment.get_sequence() << "\t"
         << alignment.get_score() << "\t"
@@ -176,8 +175,7 @@ bool spell_path(const DeBruijnGraph &graph,
                 size_t offset = 0);
 
 struct LocalAlignmentLess {
-    template <typename NodeType>
-    bool operator()(const Alignment<NodeType> &a, const Alignment<NodeType> &b) {
+    bool operator()(const Alignment &a, const Alignment &b) {
         // 1) score is less, or
         // 2) more of the query is covered, or
         // 3) if it is in the reverse orientation, or
@@ -190,8 +188,7 @@ struct LocalAlignmentLess {
 };
 
 struct LocalAlignmentGreater {
-    template <typename NodeType>
-    bool operator()(const Alignment<NodeType> &a, const Alignment<NodeType> &b) {
+    bool operator()(const Alignment &a, const Alignment &b) {
         // 1) score is higher, or
         // 2) less of the query is covered, or
         // 3) if it is in the forward orientation, or
@@ -204,10 +201,9 @@ struct LocalAlignmentGreater {
 };
 
 
-template <typename NodeType = uint64_t>
 class QueryAlignment {
   public:
-    typedef typename std::vector<Alignment<NodeType>>::const_iterator const_iterator;
+    typedef typename std::vector<Alignment>::const_iterator const_iterator;
 
     QueryAlignment(std::string_view query, bool is_reverse_complement = false);
 
@@ -234,7 +230,7 @@ class QueryAlignment {
         return !reverse_complement ? *query_ : *query_rc_;
     }
 
-    const Alignment<NodeType>& operator[](size_t i) const { return alignments_[i]; }
+    const Alignment& operator[](size_t i) const { return alignments_[i]; }
     const_iterator begin() const { return alignments_.cbegin(); }
     const_iterator end() const { return alignments_.cend(); }
     const_iterator cbegin() const { return alignments_.cbegin(); }
@@ -243,7 +239,7 @@ class QueryAlignment {
   private:
     std::shared_ptr<std::string> query_;
     std::shared_ptr<std::string> query_rc_;
-    std::vector<Alignment<NodeType>> alignments_;
+    std::vector<Alignment> alignments_;
 };
 
 } // namespace align

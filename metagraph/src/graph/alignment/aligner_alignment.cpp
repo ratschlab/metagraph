@@ -14,14 +14,13 @@ namespace align {
 using mtg::common::logger;
 
 
-template <typename NodeType>
-Alignment<NodeType>::Alignment(std::string_view query,
-                               std::vector<NodeType>&& nodes,
-                               std::string&& sequence,
-                               score_t score,
-                               size_t clipping,
-                               bool orientation,
-                               size_t offset)
+Alignment::Alignment(std::string_view query,
+                     std::vector<node_index>&& nodes,
+                     std::string&& sequence,
+                     score_t score,
+                     size_t clipping,
+                     bool orientation,
+                     size_t offset)
       : query_(query), nodes_(std::move(nodes)), sequence_(std::move(sequence)),
         score_(score), orientation_(orientation), offset_(offset) {
     size_t min_length = std::min(query_.size(), sequence_.size());
@@ -43,8 +42,7 @@ Alignment<NodeType>::Alignment(std::string_view query,
     cigar_.append(Cigar::DELETION, sequence_.size() - min_length);
 }
 
-template <typename NodeType>
-void Alignment<NodeType>::append(Alignment&& other) {
+void Alignment::append(Alignment&& other) {
     assert(query_.data() + query_.size() + other.get_clipping() == other.query_.data());
     assert(orientation_ == other.orientation_);
 
@@ -58,8 +56,7 @@ void Alignment<NodeType>::append(Alignment&& other) {
     query_ = std::string_view(query_.data(), other.query_.end() - query_.begin());
 }
 
-template <typename NodeType>
-size_t Alignment<NodeType>::trim_offset() {
+size_t Alignment::trim_offset() {
     if (!offset_ || nodes_.size() <= 1)
         return 0;
 
@@ -69,9 +66,8 @@ size_t Alignment<NodeType>::trim_offset() {
     return trim;
 }
 
-template <typename NodeType>
-void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
-                                             std::string_view query_rev_comp) {
+void Alignment::reverse_complement(const DeBruijnGraph &graph,
+                                   std::string_view query_rev_comp) {
     assert(graph.get_mode() == DeBruijnGraph::CANONICAL);
 
     if (empty())
@@ -141,9 +137,9 @@ void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
             }
 
             for (size_t i = num_first_steps; i < offset_; ++i) {
-                NodeType next_node = 0;
+                node_index next_node = 0;
                 char last_char;
-                canonical->call_outgoing_kmers(nodes_[0], [&](NodeType next, char c) {
+                canonical->call_outgoing_kmers(nodes_[0], [&](node_index next, char c) {
                     if (c == boss::BOSS::kSentinel)
                         return;
 
@@ -184,7 +180,7 @@ void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
             // trim off ending from reverse complement (corresponding to the added prefix)
             for (size_t i = 0; i < offset_; ++i) {
                 size_t indegree = 0;
-                graph.adjacent_incoming_nodes(nodes_[0], [&](NodeType prev) {
+                graph.adjacent_incoming_nodes(nodes_[0], [&](node_index prev) {
                     ++indegree;
 
                     // TODO: there are multiple possible reverse complements, which
@@ -220,9 +216,7 @@ void Alignment<NodeType>::reverse_complement(const DeBruijnGraph &graph,
 
 // derived from:
 // https://github.com/maickrau/GraphAligner/blob/236e1cf0514cfa9104e9a3333cdc1c43209c3c5a/src/vg.proto
-template <typename NodeType>
-Json::Value Alignment<NodeType>::path_json(size_t node_size,
-                                           std::string_view label) const {
+Json::Value Alignment::path_json(size_t node_size, std::string_view label) const {
     assert(nodes_.size());
 
     Json::Value path;
@@ -391,12 +385,11 @@ Json::Value Alignment<NodeType>::path_json(size_t node_size,
     return path;
 }
 
-template <typename NodeType>
-Json::Value Alignment<NodeType>::to_json(std::string_view full_query,
-                                         const DeBruijnGraph &graph,
-                                         bool is_secondary,
-                                         std::string_view read_name,
-                                         std::string_view label) const {
+Json::Value Alignment::to_json(std::string_view full_query,
+                               const DeBruijnGraph &graph,
+                               bool is_secondary,
+                               std::string_view read_name,
+                               std::string_view label) const {
     assert(is_valid(graph));
 
     // encode alignment
@@ -471,8 +464,7 @@ Json::Value Alignment<NodeType>::to_json(std::string_view full_query,
     return alignment;
 }
 
-template <typename NodeType>
-std::shared_ptr<const std::string> Alignment<NodeType>
+std::shared_ptr<const std::string> Alignment
 ::load_from_json(const Json::Value &alignment, const DeBruijnGraph &graph) {
     cigar_ = Cigar();
     nodes_.clear();
@@ -602,9 +594,8 @@ bool spell_path(const DeBruijnGraph &graph,
     return true;
 }
 
-template <typename NodeType>
-bool Alignment<NodeType>::is_valid(const DeBruijnGraph &graph,
-                                   const DBGAlignerConfig *config) const {
+bool Alignment::is_valid(const DeBruijnGraph &graph,
+                         const DBGAlignerConfig *config) const {
     std::string path;
     if (!spell_path(graph, nodes_, path, offset_)) {
         std::cerr << *this << std::endl;
@@ -636,9 +627,7 @@ bool Alignment<NodeType>::is_valid(const DeBruijnGraph &graph,
 }
 
 
-template <typename NodeType>
-QueryAlignment<NodeType>::QueryAlignment(std::string_view query,
-                                         bool is_reverse_complement)
+QueryAlignment::QueryAlignment(std::string_view query, bool is_reverse_complement)
           : query_(new std::string()), query_rc_(new std::string()) {
     // pad sequences for easier access in 64-bit blocks
     query_->reserve(query.size() + 8);
@@ -663,9 +652,6 @@ QueryAlignment<NodeType>::QueryAlignment(std::string_view query,
         std::swap(query_, query_rc_);
 }
 
-
-template class Alignment<>;
-template class QueryAlignment<>;
 
 } // namespace align
 } // namespace graph

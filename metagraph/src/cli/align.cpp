@@ -105,11 +105,11 @@ std::unique_ptr<IDBGAligner> build_aligner(const DeBruijnGraph &graph,
 
         // Use the seeder that seeds to node suffixes
         if (aligner_config.max_seed_length == k) {
-            return std::make_unique<DBGAligner<SuffixSeeder<ExactSeeder<>>>>(
+            return std::make_unique<DBGAligner<SuffixSeeder<ExactSeeder>>>(
                 graph, aligner_config
             );
         } else {
-            return std::make_unique<DBGAligner<SuffixSeeder<UniMEMSeeder<>>>>(
+            return std::make_unique<DBGAligner<SuffixSeeder<UniMEMSeeder>>>(
                 graph, aligner_config
             );
         }
@@ -122,7 +122,7 @@ std::unique_ptr<IDBGAligner> build_aligner(const DeBruijnGraph &graph,
 
     } else {
         // seeds are maximal matches within unitigs (uni-MEMs)
-        return std::make_unique<DBGAligner<UniMEMSeeder<>>>(graph, aligner_config);
+        return std::make_unique<DBGAligner<UniMEMSeeder>>(graph, aligner_config);
     }
 }
 
@@ -327,7 +327,7 @@ void gfa_map_files(const Config *config,
 }
 
 std::string format_alignment(std::string_view header,
-                             const DBGAligner<>::DBGQueryAlignment &paths,
+                             const QueryAlignment &paths,
                              const DeBruijnGraph &graph,
                              const Config &config) {
     std::string sout;
@@ -356,9 +356,8 @@ std::string format_alignment(std::string_view header,
         }
 
         if (paths.empty()) {
-            Json::Value json_line = DBGAligner<>::DBGAlignment().to_json(
-                paths.get_query(), graph, secondary, header
-            );
+            Json::Value json_line
+                = Alignment().to_json(paths.get_query(), graph, secondary, header);
 
             sout += fmt::format("{}\n", Json::writeString(builder, json_line));
         }

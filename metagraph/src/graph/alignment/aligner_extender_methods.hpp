@@ -1,5 +1,5 @@
-#ifndef __DBG_ALIGNER_METHODS_HPP__
-#define __DBG_ALIGNER_METHODS_HPP__
+#ifndef __DBG_EXTENDER_METHODS_HPP__
+#define __DBG_EXTENDER_METHODS_HPP__
 
 #include <tsl/hopscotch_map.h>
 
@@ -9,43 +9,33 @@
 
 namespace mtg {
 namespace graph {
-
-class DBGSuccinct;
-
 namespace align {
 
-template <typename NodeType = uint64_t>
 class IExtender {
   public:
-    typedef Alignment<NodeType> DBGAlignment;
-    typedef typename DBGAlignment::node_index node_index;
-    typedef typename DBGAlignment::score_t score_t;
+    typedef DeBruijnGraph::node_index node_index;
+    typedef Alignment::score_t score_t;
 
     virtual ~IExtender() {}
 
-    virtual std::vector<DBGAlignment>
+    virtual std::vector<Alignment>
     get_extensions(score_t min_path_score = std::numeric_limits<score_t>::min()) = 0;
 
-    virtual void initialize(const DBGAlignment &seed) = 0;
+    virtual void initialize(const Alignment &seed) = 0;
 
     virtual void
-    call_visited_nodes(const std::function<void(NodeType,
+    call_visited_nodes(const std::function<void(node_index,
                                                 size_t /* range begin */,
                                                 size_t /* range end */)> &callback) const = 0;
 
   protected:
     virtual void reset() = 0;
-    virtual const DBGAlignment& get_seed() const = 0;
+    virtual const Alignment& get_seed() const = 0;
 };
 
 
-template <typename NodeType = uint64_t>
-class DefaultColumnExtender : public IExtender<NodeType> {
+class DefaultColumnExtender : public IExtender {
   public:
-    typedef typename IExtender<NodeType>::DBGAlignment DBGAlignment;
-    typedef typename IExtender<NodeType>::node_index node_index;
-    typedef typename IExtender<NodeType>::score_t score_t;
-
     enum NodeId : uint8_t {
         NONE,
         PREV,
@@ -58,13 +48,13 @@ class DefaultColumnExtender : public IExtender<NodeType> {
 
     virtual ~DefaultColumnExtender() {}
 
-    virtual std::vector<DBGAlignment>
+    virtual std::vector<Alignment>
     get_extensions(score_t min_path_score = std::numeric_limits<score_t>::min()) override;
 
-    virtual void initialize(const DBGAlignment &seed) override;
+    virtual void initialize(const Alignment &seed) override;
 
     virtual void
-    call_visited_nodes(const std::function<void(NodeType,
+    call_visited_nodes(const std::function<void(node_index,
                                                 size_t /* range begin */,
                                                 size_t /* range end */)> &callback) const override;
 
@@ -73,7 +63,7 @@ class DefaultColumnExtender : public IExtender<NodeType> {
     const DBGAlignerConfig &config_;
     std::string_view query_;
 
-    typedef std::tuple<NodeType,
+    typedef std::tuple<node_index,
                        char /* last character of the node label */,
                        size_t /* copy number */,
                        size_t /* distance from origin */> AlignNode;
@@ -88,13 +78,13 @@ class DefaultColumnExtender : public IExtender<NodeType> {
                        size_t /* max_pos */> Scores;
     typedef std::pair<std::vector<Scores>, bool> Column;
 
-    tsl::hopscotch_map<NodeType, Column> table_;
+    tsl::hopscotch_map<node_index, Column> table_;
 
     virtual void reset() override { table_.clear(); }
 
-    virtual const DBGAlignment& get_seed() const override { return *seed_; }
+    virtual const Alignment& get_seed() const override { return *seed_; }
 
-    virtual std::vector<std::pair<NodeType, char>> get_outgoing(const AlignNode &node) const;
+    virtual std::vector<std::pair<node_index, char>> get_outgoing(const AlignNode &node) const;
 
   private:
     // compute perfect match scores for all suffixes
@@ -106,7 +96,7 @@ class DefaultColumnExtender : public IExtender<NodeType> {
     tsl::hopscotch_map<char, AlignedVector<Cigar::Operator>> profile_op_;
 
     // the initial seed
-    const DBGAlignment *seed_;
+    const Alignment *seed_;
 
     std::string_view extend_window_;
 
@@ -122,4 +112,4 @@ class DefaultColumnExtender : public IExtender<NodeType> {
 } // namespace graph
 } // namespace mtg
 
-#endif // __DBG_ALIGNER_METHODS_HPP__
+#endif // __DBG_EXTENDER_METHODS_HPP__
