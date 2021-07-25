@@ -1,11 +1,6 @@
 #include "annotated_dbg.hpp"
 
 #include <array>
-
-#ifdef __AVX2__
-#include <immintrin.h>
-#endif
-
 #include <cstdlib>
 
 #include "graph/representation/canonical_dbg.hpp"
