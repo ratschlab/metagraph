@@ -21,6 +21,7 @@ class CanonicalDBG : public DBGNodeModifyingWrapper<DeBruijnGraph> {
     template <typename Graph>
     explicit CanonicalDBG(Graph&& graph, size_t cache_size = 100'000);
 
+    // copy constructors
     CanonicalDBG(const CanonicalDBG &canonical)
           : CanonicalDBG(canonical.graph_ptr_ ? canonical.graph_ptr_ : canonical.graph_,
                          canonical.cache_size_) {}
@@ -36,6 +37,23 @@ class CanonicalDBG : public DBGNodeModifyingWrapper<DeBruijnGraph> {
 
     virtual ~CanonicalDBG() {}
 
+    /**
+     * Added methods
+     */
+    bool operator==(const CanonicalDBG &other) const { return *graph_ == *other.graph_; }
+
+    void reverse_complement(std::string &seq, std::vector<node_index> &path) const;
+    node_index reverse_complement(node_index node) const;
+
+    inline node_index get_base_node(node_index node) const {
+        assert(node);
+        assert(node <= offset_ * 2);
+        return node > offset_ ? node - offset_ : node;
+    }
+
+    /**
+     * Methods from DeBruijnGraph
+     */
     // Traverse graph mapping sequence to the graph nodes
     // and run callback for each node until the termination condition is satisfied
     virtual void map_to_nodes(std::string_view sequence,
@@ -79,18 +97,14 @@ class CanonicalDBG : public DBGNodeModifyingWrapper<DeBruijnGraph> {
     // Note: Not efficient if sequences in nodes overlap. Use sparingly.
     virtual std::string get_node_sequence(node_index index) const override final;
 
-    virtual Mode get_mode() const override { return CANONICAL; }
-
-    // Traverse the outgoing edge
+    virtual Mode get_mode() const override final { return CANONICAL; }
     virtual node_index traverse(node_index node, char next_char) const override final;
-    // Traverse the incoming edge
     virtual node_index traverse_back(node_index node, char prev_char) const override final;
 
     virtual size_t outdegree(node_index) const override final;
     virtual size_t indegree(node_index) const override final;
 
-    virtual void call_kmers(const std::function<void(node_index, const std::string&)> &callback) const override;
-
+    virtual void call_kmers(const std::function<void(node_index, const std::string&)> &callback) const override final;
     virtual void call_nodes(const std::function<void(node_index)> &callback,
                             const std::function<bool()> &stop_early = [](){ return false; }) const override final;
 
@@ -98,22 +112,7 @@ class CanonicalDBG : public DBGNodeModifyingWrapper<DeBruijnGraph> {
                               const std::function<void(node_index)> &on_insertion
                                   = [](node_index) {}) override final;
     virtual bool load(const std::string &filename) override final;
-
-    bool operator==(const CanonicalDBG &other) const {
-        return *graph_ == *other.graph_;
-    }
-
     virtual bool operator==(const DeBruijnGraph &other) const override final;
-
-    void reverse_complement(std::string &seq, std::vector<node_index> &path) const;
-
-    inline node_index get_base_node(node_index node) const {
-        assert(node);
-        assert(node <= offset_ * 2);
-        return node > offset_ ? node - offset_ : node;
-    }
-
-    node_index reverse_complement(node_index node) const;
 
   private:
     size_t cache_size_;

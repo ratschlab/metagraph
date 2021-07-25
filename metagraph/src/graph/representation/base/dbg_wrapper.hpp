@@ -71,7 +71,9 @@ class IDBGWrapper : public DeBruijnGraph {
 };
 
 /**
- * This wrapper uses the default methods from Graph when available
+ * This wrapper uses the default methods from Graph when available. This may be
+ * used when the nodes and edges of the wrapped graph differ from the underlying
+ * graph.
  */
 template <typename Graph = DeBruijnGraph>
 class DBGNodeModifyingWrapper : public IDBGWrapper<Graph> {
@@ -97,7 +99,9 @@ class DBGNodeModifyingWrapper : public IDBGWrapper<Graph> {
 };
 
 /**
- * This wrapper uses the methods directly from the underlying graph by default
+ * This wrapper uses the methods directly from the underlying graph by default.
+ * This may be used when the nodes and edges of the wrapped graph are the
+ * same as the underlying graph.
  */
 template <class Graph = DeBruijnGraph>
 class DBGWrapper : public IDBGWrapper<Graph> {
