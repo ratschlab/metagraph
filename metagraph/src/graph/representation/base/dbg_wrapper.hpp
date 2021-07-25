@@ -71,7 +71,7 @@ class IDBGWrapper : public DeBruijnGraph {
 };
 
 /**
- * This wrapper uses the default methods from DeBruijnGraph when available
+ * This wrapper uses the default methods from Graph when available
  */
 template <typename Graph = DeBruijnGraph>
 class DBGNodeModifyingWrapper : public IDBGWrapper<Graph> {
@@ -85,8 +85,7 @@ class DBGNodeModifyingWrapper : public IDBGWrapper<Graph> {
     virtual ~DBGNodeModifyingWrapper() {}
 
     /**
-     * These methods should be implemented. The DeBruijnGraph defaults cannot
-     * be used.
+     * These methods should be implemented. The Graph defaults cannot be used.
      */
     virtual void call_nodes(const std::function<void(node_index)> &callback,
                             const std::function<bool()> &stop_early
