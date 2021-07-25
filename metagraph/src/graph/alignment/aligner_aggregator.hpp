@@ -64,8 +64,7 @@ class AlignmentAggregator {
 
 
 template <class AlignmentCompare>
-inline void AlignmentAggregator<AlignmentCompare>
-::add_alignment(Alignment&& alignment) {
+inline void AlignmentAggregator<AlignmentCompare>::add_alignment(Alignment&& alignment) {
     if (std::find(path_queue_.begin(), path_queue_.end(), alignment) != path_queue_.end())
         return;
 
