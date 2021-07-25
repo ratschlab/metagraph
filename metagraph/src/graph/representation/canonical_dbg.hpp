@@ -96,8 +96,8 @@ class CanonicalDBG : public DBGNodeModifyingWrapper<DeBruijnGraph> {
 
     virtual void add_sequence(std::string_view sequence,
                               const std::function<void(node_index)> &on_insertion
-                                  = [](node_index) {}) override;
-    virtual bool load(const std::string &filename) override;
+                                  = [](node_index) {}) override final;
+    virtual bool load(const std::string &filename) override final;
 
     bool operator==(const CanonicalDBG &other) const {
         return *graph_ == *other.graph_;
