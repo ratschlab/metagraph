@@ -6,15 +6,14 @@ namespace mtg {
 namespace graph {
 namespace align {
 
-IDBGAligner::DBGQueryAlignment IDBGAligner::align(std::string_view query,
-                                                  bool is_reverse_complement) const {
-    DBGQueryAlignment result(query);
+QueryAlignment IDBGAligner::align(std::string_view query, bool is_reverse_complement) const {
+    QueryAlignment result(query);
     std::string empty_header;
     align_batch(
         [&](const QueryCallback &callback) {
             callback(empty_header, query, is_reverse_complement);
         },
-        [&](std::string_view, DBGQueryAlignment&& alignment) {
+        [&](std::string_view, QueryAlignment&& alignment) {
             result = std::move(alignment);
         }
     );
@@ -35,16 +34,16 @@ void IDBGAligner
 template <class AlignmentCompare>
 void SeedAndExtendAlignerCore<AlignmentCompare>
 ::align_core(std::string_view query,
-             const ISeeder<node_index> &seeder,
-             IExtender<node_index> &extender,
+             const ISeeder &seeder,
+             IExtender &extender,
              const LocalAlignmentCallback &callback,
              const MinScoreComputer &get_min_path_score) const {
-    bool filter_seeds = dynamic_cast<const ExactSeeder<node_index>*>(&seeder);
+    bool filter_seeds = dynamic_cast<const ExactSeeder*>(&seeder);
 
-    std::vector<DBGAlignment> seeds = seeder.get_seeds();
+    std::vector<Alignment> seeds = seeder.get_seeds();
     std::sort(seeds.begin(), seeds.end(), LocalAlignmentGreater());
 
-    for (DBGAlignment &seed : seeds) {
+    for (Alignment &seed : seeds) {
         score_t min_path_score = get_min_path_score(seed);
 
         // check if this seed has been explored before in an alignment and discard
@@ -127,10 +126,10 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
 
 template <class AlignmentCompare>
 void SeedAndExtendAlignerCore<AlignmentCompare>
-::align_one_direction(DBGQueryAlignment &paths,
+::align_one_direction(QueryAlignment &paths,
                       bool orientation_to_align,
-                      const ISeeder<node_index> &seeder,
-                      IExtender<node_index>&& extender) const {
+                      const ISeeder &seeder,
+                      IExtender&& extender) const {
     std::string_view query = paths.get_query(orientation_to_align);
 
     align_aggregate(paths, [&](const auto &alignment_callback,
@@ -141,11 +140,11 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
 
 template <class AlignmentCompare>
 void SeedAndExtendAlignerCore<AlignmentCompare>
-::align_best_direction(DBGQueryAlignment &paths,
-                       const ISeeder<node_index> &seeder,
-                       const ISeeder<node_index> &seeder_rc,
-                       IExtender<node_index>&& extender,
-                       IExtender<node_index>&& extender_rc) const {
+::align_best_direction(QueryAlignment &paths,
+                       const ISeeder &seeder,
+                       const ISeeder &seeder_rc,
+                       IExtender&& extender,
+                       IExtender&& extender_rc) const {
     std::string_view forward = paths.get_query();
     std::string_view reverse = paths.get_query(true);
 
@@ -158,11 +157,11 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
 
 template <class AlignmentCompare>
 void SeedAndExtendAlignerCore<AlignmentCompare>
-::align_both_directions(DBGQueryAlignment &paths,
-                        const ISeeder<node_index> &forward_seeder,
-                        const ISeeder<node_index> &reverse_seeder,
-                        IExtender<node_index>&& forward_extender,
-                        IExtender<node_index>&& reverse_extender,
+::align_both_directions(QueryAlignment &paths,
+                        const ISeeder &forward_seeder,
+                        const ISeeder &reverse_seeder,
+                        IExtender&& forward_extender,
+                        IExtender&& reverse_extender,
                         const AlignCoreGenerator &rev_comp_core_generator) const {
     std::string_view forward = paths.get_query();
     std::string_view reverse = paths.get_query(true);
@@ -171,16 +170,16 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
                                const auto &get_min_path_score) {
         auto get_forward_alignments = [&](std::string_view query,
                                           std::string_view query_rc,
-                                          const ISeeder<node_index> &seeder,
-                                          IExtender<node_index> &extender) {
-            std::vector<DBGAlignment> rc_of_alignments;
+                                          const ISeeder &seeder,
+                                          IExtender &extender) {
+            std::vector<Alignment> rc_of_alignments;
 
             DEBUG_LOG("Extending in forwards direction");
-            align_core(query, seeder, extender, [&](DBGAlignment&& path) {
+            align_core(query, seeder, extender, [&](Alignment&& path) {
                 score_t min_path_score = get_min_path_score(path);
 
                 if (path.get_score() >= min_path_score)
-                    alignment_callback(DBGAlignment(path));
+                    alignment_callback(Alignment(path));
 
                 if (!path.get_clipping())
                     return;
@@ -209,16 +208,16 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
             return rc_of_alignments;
         };
 
-        std::vector<DBGAlignment> rc_of_reverse = get_forward_alignments(
+        std::vector<Alignment> rc_of_reverse = get_forward_alignments(
             reverse, forward, reverse_seeder, reverse_extender
         );
-        std::vector<DBGAlignment> rc_of_forward = get_forward_alignments(
+        std::vector<Alignment> rc_of_forward = get_forward_alignments(
             forward, reverse, forward_seeder, forward_extender
         );
 
         auto extend_reverse = [&](std::string_view query_rc,
-                                  const ISeeder<node_index> &seeder,
-                                  std::vector<DBGAlignment>&& rc_of_alignments) {
+                                  const ISeeder &seeder,
+                                  std::vector<Alignment>&& rc_of_alignments) {
             DEBUG_LOG("Extending in reverse direction");
             rev_comp_core_generator(query_rc, seeder, std::move(rc_of_alignments),
                                     [&](const auto &seeder_rc, auto&& extender_rc) {
@@ -234,17 +233,17 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
 
 template <class AlignmentCompare>
 void SeedAndExtendAlignerCore<AlignmentCompare>
-::align_aggregate(DBGQueryAlignment &paths,
+::align_aggregate(QueryAlignment &paths,
                   const AlignmentGenerator &alignment_generator) const {
-    AlignmentAggregator<node_index, AlignmentCompare> path_queue(
+    AlignmentAggregator<AlignmentCompare> path_queue(
         paths.get_query() /* forward */,
         paths.get_query(true) /* reverse complement */,
         config_
     );
 
     alignment_generator(
-        [&](DBGAlignment&& alignment) { path_queue.add_alignment(std::move(alignment)); },
-        [&](const DBGAlignment &seed) { return path_queue.get_min_path_score(seed); }
+        [&](Alignment&& alignment) { path_queue.add_alignment(std::move(alignment)); },
+        [&](const Alignment &seed) { return path_queue.get_min_path_score(seed); }
     );
 
     path_queue.call_alignments([&](auto&& alignment) {
