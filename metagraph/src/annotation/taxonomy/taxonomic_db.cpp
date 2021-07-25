@@ -364,19 +364,26 @@ void TaxonomyDB::export_to_file(const std::string &filepath) {
     serialize_number_number_map(f, this->node_parent);
     std::vector<std::pair<uint64_t, uint64_t>> taxid_frequencies(1);
 
+    uint64_t last_taxonomic_index = this->taxonomic_map.size() - 1;
+    while (this->taxonomic_map[last_taxonomic_index] == 0 && last_taxonomic_index) {
+        last_taxonomic_index --;
+    }
+    assert(last_taxonomic_index);
+
+    uint64_t max_taxid_found = 1;
     // Compute taxid_frequencies.
-    for (size_t i = 0; i < this->taxonomic_map.size(); ++i) {
-        if (this->taxonomic_map[i] == 0) {
-            continue;
-        }
+    for (size_t i = 0; i < last_taxonomic_index + 1; ++i) {
         uint64_t taxid = this->taxonomic_map[i];
         while (taxid >= taxid_frequencies.size()) {
             taxid_frequencies.resize(2 * taxid_frequencies.size());
         }
+        if (taxid > max_taxid_found) {
+            max_taxid_found = taxid;
+        }
         ++taxid_frequencies[taxid].first;
         taxid_frequencies[taxid].second = taxid;
     }
-    // Sort the taxids in descending frequencies order for better compression.
+    // Sort the taxids in descending order of frequencies for better compression.
     std::sort(taxid_frequencies.begin(), taxid_frequencies.end(),
         [](const std::pair<uint64_t, uint64_t> &a, const std::pair<uint64_t, uint64_t> &b){
             if (a.first != b.first) {
@@ -387,7 +394,7 @@ void TaxonomyDB::export_to_file(const std::string &filepath) {
 
     // Construct 'code_to_taxid' and 'code' such that 'taxonomic_map[i]=code_to_taxid[code[i]]'.
 
-    sdsl::int_vector<> code_to_taxid(taxid_frequencies.size());
+    sdsl::int_vector<> code_to_taxid(max_taxid_found + 1);
     for (uint64_t i = 0; i < taxid_frequencies.size(); ++i) {
         if (taxid_frequencies[i].first == 0) {
             break;
@@ -400,22 +407,19 @@ void TaxonomyDB::export_to_file(const std::string &filepath) {
         taxid_to_code[code_to_taxid[i]] = i;
     }
 
-    sdsl::int_vector<> code_vector(this->taxonomic_map.size());
+    sdsl::int_vector<> code_vector(last_taxonomic_index + 1);
     uint64_t code_vector_cnt = 0;
-    for (TaxId taxid : this->taxonomic_map) {
-        code_vector[code_vector_cnt++] = taxid_to_code[taxid];
+    for (uint64_t i = 0; i < last_taxonomic_index + 1; ++i) {
+        code_vector[code_vector_cnt++] = taxid_to_code[this->taxonomic_map[i]];
     }
     sdsl::dac_vector_dp<sdsl::rrr_vector<>> code(code_vector);
+    code.serialize(f);
 
     // Denormalize code_to_taxid.
     for (uint64_t i = 0; i < code_to_taxid.size(); ++i) {
         code_to_taxid[i] = this->denormalized_taxid[code_to_taxid[i]];
     }
     code_to_taxid.serialize(f);
-
-    code.serialize(f);
-    serialize_number_number_map(f, node_parent);
-
     logger->trace("Finished exporting metagraph taxonomic data after {}s",
                   timer.elapsed());
 }

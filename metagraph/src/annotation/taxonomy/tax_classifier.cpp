@@ -37,15 +37,15 @@ void TaxClassifier::import_taxonomy(const std::string &taxdb_filepath) {
         std::exit(1);
     }
 
-    code_to_taxid.load(f);
-    if (code_to_taxid.empty()) {
-        logger->error("Can't load serialized 'code_to_taxid' from file {}.", taxdb_filepath.c_str());
-        std::exit(1);
-    }
-
     code.load(f);
     if (code.empty()) {
         logger->error("Can't load serialized 'code' from file {}.", taxdb_filepath.c_str());
+        std::exit(1);
+    }
+
+    code_to_taxid.load(f);
+    if (code_to_taxid.empty()) {
+        logger->error("Can't load serialized 'code_to_taxid' from file {}.", taxdb_filepath.c_str());
         std::exit(1);
     }
 

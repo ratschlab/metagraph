@@ -18,7 +18,7 @@ namespace cli {
 
 using mtg::common::logger;
 
-const uint64_t QUERY_SEQ_BATCH_SIZE = 1000;
+const uint64_t QUERY_SEQ_BATCH_SIZE = 100000;
 
 void append_new_result(const std::string &seq_label,
                        const uint64_t taxid,

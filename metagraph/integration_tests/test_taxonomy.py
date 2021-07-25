@@ -139,6 +139,9 @@ class TestTaxonomy(unittest.TestCase):
         res = subprocess.run([transform_anno_tax_command], shell=True)
         self.assertEqual(res.returncode, 0)
 
+        taxdb_size = os.path.getsize(self.tempdir.name + '/taxDB.taxdb')
+        self.assertEqual(taxdb_size, 1856)
+
         tax_class_command = '{exe} tax_class -i {dbg} {fasta_queries} --taxonomic-db {taxDB} \
                             --lca-coverage-fraction {lca_coverage} -p {num_threads}'.format(
             exe=METAGRAPH,
