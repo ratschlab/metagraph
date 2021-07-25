@@ -10,8 +10,6 @@ namespace mtg {
 namespace graph {
 namespace align {
 
-typedef DBGAlignerConfig::score_t score_t;
-
 ExactSeeder::ExactSeeder(const DeBruijnGraph &graph,
                          std::string_view query,
                          bool orientation,

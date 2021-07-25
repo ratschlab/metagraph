@@ -37,6 +37,8 @@ class ManualSeeder : public ISeeder {
 
 class ExactSeeder : public ISeeder {
   public:
+    typedef DBGAlignerConfig::score_t score_t;
+
     ExactSeeder(const DeBruijnGraph &graph,
                 std::string_view query,
                 bool orientation,
@@ -53,7 +55,7 @@ class ExactSeeder : public ISeeder {
     bool orientation_;
     const std::vector<node_index> &query_nodes_;
     const DBGAlignerConfig &config_;
-    std::vector<DBGAlignerConfig::score_t> partial_sum_;
+    std::vector<score_t> partial_sum_;
     size_t num_matching_;
 
     size_t num_exact_matching() const;
@@ -77,11 +79,11 @@ class UniMEMSeeder : public MEMSeeder {
     UniMEMSeeder(Args&&... args)
           : MEMSeeder(std::forward<Args>(args)...),
             is_mem_terminus_([&](auto i) {
-                                 return this->graph_.has_multiple_outgoing(i)
-                                     || this->graph_.indegree(i) > 1;
+                                 return graph_.has_multiple_outgoing(i)
+                                     || graph_.indegree(i) > 1;
                              },
-                             this->graph_.max_index() + 1) {
-        assert(is_mem_terminus_.size() == this->graph_.max_index() + 1);
+                             graph_.max_index() + 1) {
+        assert(is_mem_terminus_.size() == graph_.max_index() + 1);
     }
 
     virtual ~UniMEMSeeder() {}
@@ -97,6 +99,7 @@ class SuffixSeeder : public BaseSeeder {
   public:
     typedef typename BaseSeeder::Seed Seed;
     typedef typename BaseSeeder::node_index node_index;
+    typedef typename BaseSeeder::score_t score_t;
 
     template <typename... Args>
     SuffixSeeder(Args&&... args) : BaseSeeder(std::forward<Args>(args)...) {}

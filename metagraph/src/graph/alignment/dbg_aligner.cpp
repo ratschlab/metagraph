@@ -8,8 +8,7 @@ namespace graph {
 namespace align {
 
 
-QueryAlignment IDBGAligner::align(std::string_view query,
-                                  bool is_reverse_complement) const {
+QueryAlignment IDBGAligner::align(std::string_view query, bool is_reverse_complement) const {
     QueryAlignment result(query);
     align_batch({ Query{ std::string{}, query, is_reverse_complement} },
         [&](std::string_view, QueryAlignment&& alignment) {
