@@ -58,8 +58,9 @@ inline void AlignmentAggregator<AlignmentCompare>::add_alignment(Alignment&& ali
 template <class AlignmentCompare>
 inline auto AlignmentAggregator<AlignmentCompare>
 ::get_min_path_score(const Alignment &) const -> score_t {
-    return path_queue_.size() ? path_queue_.minimum().get_score()
-                              : config_.min_path_score;
+    return path_queue_.size() < config_.num_alternative_paths
+        ? config_.min_path_score
+        : path_queue_.minimum().get_score();
 }
 
 template <class AlignmentCompare>
