@@ -26,26 +26,6 @@ template CanonicalDBG::CanonicalDBG(std::shared_ptr<DeBruijnGraph>&, size_t);
 template CanonicalDBG::CanonicalDBG(std::shared_ptr<const DeBruijnGraph>&, size_t);
 template CanonicalDBG::CanonicalDBG(std::shared_ptr<DBGSuccinct>&, size_t);
 
-void CanonicalDBG::add_sequence(std::string_view sequence,
-                               const std::function<void(node_index)> &on_insertion) {
-    if (!graph_ptr_)
-        throw std::runtime_error("load only supported for non-const graphs");
-
-    graph_ptr_->add_sequence(sequence, on_insertion);
-    flush();
-}
-
-bool CanonicalDBG::load(const std::string &filename) {
-    if (!graph_ptr_)
-        throw std::runtime_error("load only supported for non-const graphs");
-
-    if (!graph_ptr_->load(filename))
-        return false;
-
-    flush();
-    return true;
-}
-
 void CanonicalDBG::flush() {
     if (graph_->get_mode() != DeBruijnGraph::PRIMARY) {
         logger->error("Only primary graphs can be wrapped in CanonicalDBG");

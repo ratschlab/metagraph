@@ -23,12 +23,10 @@ class CanonicalDBG : public DBGNodeModifyingWrapper<DeBruijnGraph> {
 
     // copy constructors
     CanonicalDBG(const CanonicalDBG &canonical)
-          : CanonicalDBG(canonical.graph_ptr_ ? canonical.graph_ptr_ : canonical.graph_,
-                         canonical.cache_size_) {}
+          : CanonicalDBG(canonical.graph_, canonical.cache_size_) {}
 
     CanonicalDBG(CanonicalDBG &canonical)
-          : CanonicalDBG(canonical.graph_ptr_ ? canonical.graph_ptr_ : canonical.graph_,
-                         canonical.cache_size_) {}
+          : CanonicalDBG(canonical.graph_, canonical.cache_size_) {}
 
     // caches cannot be resized or moved, so disable these constructors
     CanonicalDBG& operator=(const CanonicalDBG &canonical) = delete;
@@ -108,10 +106,6 @@ class CanonicalDBG : public DBGNodeModifyingWrapper<DeBruijnGraph> {
     virtual void call_nodes(const std::function<void(node_index)> &callback,
                             const std::function<bool()> &stop_early = [](){ return false; }) const override final;
 
-    virtual void add_sequence(std::string_view sequence,
-                              const std::function<void(node_index)> &on_insertion
-                                  = [](node_index) {}) override final;
-    virtual bool load(const std::string &filename) override final;
     virtual bool operator==(const DeBruijnGraph &other) const override final;
 
   private:

@@ -85,19 +85,6 @@ class MaskedDeBruijnGraph : public DBGNodeModifyingWrapper<DeBruijnGraph> {
     virtual uint64_t num_nodes() const override { return kmers_in_graph_->num_set_bits(); }
     virtual uint64_t max_index() const override { return graph_->max_index(); }
 
-    virtual void add_sequence(std::string_view,
-                              const std::function<void(node_index)> &) override {
-        throw std::runtime_error("Not implemented");
-    }
-
-    virtual bool load(const std::string &) override {
-        throw std::runtime_error("Not implemented");
-    }
-
-    virtual void serialize(const std::string &) const override {
-        throw std::runtime_error("Not implemented");
-    }
-
     // Get string corresponding to |node_index|.
     // Note: Not efficient if sequences in nodes overlap. Use sparingly.
     virtual std::string get_node_sequence(node_index index) const override;
