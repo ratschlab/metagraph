@@ -15,28 +15,6 @@ namespace graph {
 template <class Graph = DeBruijnGraph>
 class IDBGWrapper : public DeBruijnGraph {
   public:
-    template <class InGraph>
-    explicit IDBGWrapper(std::shared_ptr<InGraph> graph)
-          : graph_ptr_(std::dynamic_pointer_cast<Graph>(graph)), graph_(graph_ptr_) {
-        assert(graph_);
-        assert(graph_ptr_);
-    }
-
-    template <class InGraph>
-    explicit IDBGWrapper(std::shared_ptr<const InGraph> graph)
-          : graph_(std::dynamic_pointer_cast<const Graph>(graph)) {
-        assert(graph_);
-        assert(!graph_ptr_);
-    }
-
-    // aliasing constructor
-    template <class InGraph>
-    explicit IDBGWrapper(const InGraph &graph)
-          : graph_(std::shared_ptr<const Graph>{}, dynamic_cast<const Graph*>(&graph)) {
-        assert(graph_);
-        assert(!graph_ptr_);
-    }
-
     virtual ~IDBGWrapper() {}
 
     /**
@@ -68,6 +46,28 @@ class IDBGWrapper : public DeBruijnGraph {
   protected:
     std::shared_ptr<Graph> graph_ptr_;
     std::shared_ptr<const Graph> graph_;
+
+    template <class InGraph>
+    explicit IDBGWrapper(std::shared_ptr<InGraph> graph)
+          : graph_ptr_(std::dynamic_pointer_cast<Graph>(graph)), graph_(graph_ptr_) {
+        assert(graph_);
+        assert(graph_ptr_);
+    }
+
+    template <class InGraph>
+    explicit IDBGWrapper(std::shared_ptr<const InGraph> graph)
+          : graph_(std::dynamic_pointer_cast<const Graph>(graph)) {
+        assert(graph_);
+        assert(!graph_ptr_);
+    }
+
+    // aliasing constructor
+    template <class InGraph>
+    explicit IDBGWrapper(const InGraph &graph)
+          : graph_(std::shared_ptr<const Graph>{}, dynamic_cast<const Graph*>(&graph)) {
+        assert(graph_);
+        assert(!graph_ptr_);
+    }
 };
 
 /**
