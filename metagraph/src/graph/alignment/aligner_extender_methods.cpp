@@ -134,9 +134,8 @@ bool SeedFilteringExtender::update_seed_filter(node_index node,
     }
 }
 
-bool SeedFilteringExtender::filter_nodes(node_index node,
-                                         size_t query_start,
-                                         size_t query_end) {
+bool SeedFilteringExtender
+::filter_nodes(node_index node, size_t query_start, size_t query_end) {
     assert(query_end >= query_start);
     assert(query_end <= query_size_);
     constexpr score_t mscore = -ninf;
@@ -364,7 +363,7 @@ Column alloc_column(size_t size, RestArgs... args) {
     return column;
 }
 
-auto DefaultColumnExtender::extend(score_t min_path_score) -> std::vector<Alignment> {
+std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score) {
     assert(this->seed_);
 
     table.clear();
@@ -578,13 +577,13 @@ auto DefaultColumnExtender::extend(score_t min_path_score) -> std::vector<Alignm
     return backtrack(min_path_score, window);
 }
 
-auto DefaultColumnExtender::construct_alignment(Cigar cigar,
-                                                size_t clipping,
-                                                std::string_view window,
-                                                std::vector<node_index> final_path,
-                                                std::string match,
-                                                score_t score,
-                                                size_t offset) const -> Alignment {
+Alignment DefaultColumnExtender::construct_alignment(Cigar cigar,
+                                                     size_t clipping,
+                                                     std::string_view window,
+                                                     std::vector<node_index> final_path,
+                                                     std::string match,
+                                                     score_t score,
+                                                     size_t offset) const {
     assert(final_path.size());
     cigar.append(Cigar::CLIPPED, clipping);
 
@@ -605,8 +604,8 @@ auto DefaultColumnExtender::construct_alignment(Cigar cigar,
     return extension;
 }
 
-auto DefaultColumnExtender
-::backtrack(score_t min_path_score, std::string_view window) -> std::vector<Alignment> {
+std::vector<Alignment> DefaultColumnExtender
+::backtrack(score_t min_path_score, std::string_view window) {
     if (table.empty())
         return {};
 
