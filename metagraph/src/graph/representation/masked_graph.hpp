@@ -11,14 +11,14 @@
 namespace mtg {
 namespace graph {
 
-class MaskedDeBruijnGraph : public DBGWrapper<DeBruijnGraph> {
+class MaskedDeBruijnGraph : public DBGNodeModifyingWrapper<DeBruijnGraph> {
   public:
     template <class Graph>
     MaskedDeBruijnGraph(Graph&& graph,
                         std::unique_ptr<bitmap>&& kmers_in_graph,
                         bool only_valid_nodes_in_mask = false,
                         Mode mode = BASIC)
-          : DBGWrapper(std::forward<Graph>(graph)),
+          : DBGNodeModifyingWrapper<DeBruijnGraph>(std::forward<Graph>(graph)),
             kmers_in_graph_(std::move(kmers_in_graph)),
             only_valid_nodes_in_mask_(only_valid_nodes_in_mask),
             mode_(mode) {
@@ -83,6 +83,12 @@ class MaskedDeBruijnGraph : public DBGWrapper<DeBruijnGraph> {
                               bool kmers_in_single_form = false) const override;
 
     virtual uint64_t num_nodes() const override { return kmers_in_graph_->num_set_bits(); }
+    virtual uint64_t max_index() const override { return graph_->max_index(); }
+
+    virtual void add_sequence(std::string_view,
+                              const std::function<void(node_index)> &) override {
+        throw std::runtime_error("Not implemented");
+    }
 
     virtual bool load(const std::string &) override {
         throw std::runtime_error("Not implemented");
@@ -123,9 +129,18 @@ class MaskedDeBruijnGraph : public DBGWrapper<DeBruijnGraph> {
 
     virtual const bitmap& get_mask() const { return *kmers_in_graph_; }
 
-  protected:
-    virtual void flush() override final {
-        assert(kmers_in_graph_->size() == graph_->max_index() + 1);
+    virtual void call_kmers(const std::function<void(node_index, const std::string&)> &callback) const override;
+
+    virtual node_index kmer_to_node(std::string_view kmer) const override {
+        node_index node = graph_->kmer_to_node(kmer);
+        return (*kmers_in_graph_)[node] ? node : npos;
+    }
+
+    virtual void call_source_nodes(const std::function<void(node_index)> &callback) const override {
+        graph_->call_source_nodes([&](node_index node) {
+            if ((*kmers_in_graph_)[node])
+                callback(node);
+        });
     }
 
   private:

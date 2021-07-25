@@ -18,7 +18,7 @@ namespace graph {
  * CanonicalDBG is a wrapper which acts like a canonical-mode DeBruijnGraph, but
  * uses a non-canonical DeBruijnGraph as the underlying storage.
  */
-class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
+class CanonicalDBG : public DBGNodeModifyingWrapper<DeBruijnGraph> {
   public:
     template <typename Graph>
     explicit CanonicalDBG(Graph&& graph, size_t cache_size = 1024);
@@ -91,8 +91,15 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
     virtual size_t outdegree(node_index) const override final;
     virtual size_t indegree(node_index) const override final;
 
+    virtual void call_kmers(const std::function<void(node_index, const std::string&)> &callback) const override;
+
     virtual void call_nodes(const std::function<void(node_index)> &callback,
                             const std::function<bool()> &stop_early = [](){ return false; }) const override final;
+
+    virtual void add_sequence(std::string_view sequence,
+                              const std::function<void(node_index)> &on_insertion
+                                  = [](node_index) {}) override;
+    virtual bool load(const std::string &filename) override;
 
     bool operator==(const CanonicalDBG &other) const {
         return *graph_ == *other.graph_;
@@ -131,6 +138,9 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
 
     std::array<size_t, 256> alphabet_encoder_;
 
+    // reset all caches
+    void flush();
+
     // find all parent nodes of node in the CanonicalDBG which are represented
     // in the reverse complement orientation in the underlying primary graph
     void append_prev_rc_nodes(node_index node, std::vector<node_index> &parents) const;
@@ -138,9 +148,6 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
     // find all child nodes of node in the CanonicalDBG which are represented
     // in the reverse complement orientation in the underlying primary graph
     void append_next_rc_nodes(node_index node, std::vector<node_index> &children) const;
-
-    // reset the internal storage, done after loading or updating the graph
-    virtual void flush() override final;
 };
 
 } // namespace graph
