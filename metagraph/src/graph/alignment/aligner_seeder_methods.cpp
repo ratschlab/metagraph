@@ -168,7 +168,7 @@ auto SuffixSeeder<BaseSeeder>::get_seeds() const -> std::vector<Seed> {
         assert(i < suffix_seeds.size());
 
         std::string_view seed_seq = this->query_.substr(i, seed_length);
-        DBGAlignerConfig::score_t match_score = this->config_.match_score(seed_seq);
+        score_t match_score = this->config_.match_score(seed_seq);
 
         if (match_score <= this->config_.min_cell_score)
             return;
@@ -307,6 +307,8 @@ auto SuffixSeeder<BaseSeeder>::get_seeds() const -> std::vector<Seed> {
         if (pos_seeds.empty())
             continue;
 
+        // all seeds should have the same properties, but they will be at different
+        // graph nodes
         assert(std::equal(pos_seeds.begin() + 1, pos_seeds.end(), pos_seeds.begin(),
                           [](const Seed &a, const Seed &b) {
             return a.get_orientation() == b.get_orientation()
