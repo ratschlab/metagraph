@@ -70,6 +70,7 @@ class DBGAlignerConfig {
     int8_t gap_extension_penalty;
 
     bool forward_and_reverse_complement = true;
+    bool chain_alignments = false;
 
     bool alignment_edit_distance;
     int8_t alignment_match_score;

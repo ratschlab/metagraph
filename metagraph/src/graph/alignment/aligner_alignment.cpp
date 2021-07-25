@@ -63,6 +63,9 @@ void Alignment::append(Alignment&& other) {
 }
 
 size_t Alignment::trim_offset() {
+    assert(std::find(nodes_.begin(), nodes_.end(), DeBruijnGraph::npos) == nodes_.end()
+            && "chains not supported");
+
     if (!offset_ || nodes_.size() <= 1)
         return 0;
 
@@ -70,6 +73,88 @@ size_t Alignment::trim_offset() {
     offset_ -= trim;
     nodes_.erase(nodes_.begin(), nodes_.begin() + trim);
     return trim;
+}
+
+size_t Alignment::trim_query_prefix(size_t n,
+                                    const DeBruijnGraph &graph,
+                                    const DBGAlignerConfig &config) {
+    assert(!offset_);
+
+    size_t clipping = get_clipping() + n;
+
+    auto it = cigar_.data().begin() + static_cast<bool>(clipping);
+    size_t cigar_offset = 0;
+
+    auto s_it = sequence_.begin();
+    auto node_it = nodes_.begin();
+
+    size_t offset_cutoff = graph.get_k() - 1;
+
+    auto consume_ref = [&]() {
+        assert(s_it != sequence_.end());
+        ++s_it;
+        if (offset_ < offset_cutoff) {
+            ++offset_;
+        } else if (node_it + 1 < nodes_.end()) {
+            ++node_it;
+        } else {
+            *this = Alignment();
+        }
+    };
+
+    while (n) {
+        if (it == cigar_.data().end()) {
+            *this = Alignment();
+            return 0;
+        }
+
+        switch (it->first) {
+            case Cigar::MATCH:
+            case Cigar::MISMATCH: {
+                assert(s_it != sequence_.end());
+                score_ -= config.get_row(query_[0])[*s_it];
+                query_.remove_prefix(1);
+                --n;
+                consume_ref();
+                if (empty())
+                    return 0;
+            } break;
+            case Cigar::INSERTION: {
+                score_ -= it->second - cigar_offset == 1
+                    ? config.gap_opening_penalty
+                    : config.gap_extension_penalty;
+                query_.remove_prefix(1);
+                --n;
+            } break;
+            case Cigar::DELETION: {
+                score_ -= it->second - cigar_offset == 1
+                    ? config.gap_opening_penalty
+                    : config.gap_extension_penalty;
+                consume_ref();
+                if (empty())
+                    return 0;
+            } break;
+            case Cigar::CLIPPED:
+            case Cigar::NODE_INSERTION: {
+                assert(false && "trimming chains not supported");
+            } break;
+        }
+
+        ++cigar_offset;
+        if (cigar_offset == it->second) {
+            ++it;
+            cigar_offset = 0;
+        }
+    }
+
+    nodes_.erase(nodes_.begin(), node_it);
+    sequence_.erase(sequence_.begin(), s_it);
+    it->second -= cigar_offset;
+    cigar_.data().erase(cigar_.data().begin(), it);
+
+    assert(is_valid(graph, &config));
+
+    return cigar_offset;
 }
 
 void Alignment::reverse_complement(const DeBruijnGraph &graph,
@@ -307,7 +392,10 @@ Json::Value Alignment::path_json(size_t node_size, std::string_view label) const
                 cigar_offset = 0;
                 assert(cigar_it == cigar_.data().end());
                 continue;
-            }
+            } break;
+            case Cigar::NODE_INSERTION: {
+                assert(false && "this should not be reached");
+            } break;
         }
 
         cigar_offset += next_size;
@@ -371,7 +459,8 @@ Json::Value Alignment::path_json(size_t node_size, std::string_view label) const
                 query_start++;
             } break;
             case Cigar::INSERTION:
-            case Cigar::CLIPPED: assert(false); break;
+            case Cigar::NODE_INSERTION:
+            case Cigar::CLIPPED: assert(false && "this should not be reached"); break;
         }
 
         if (++cigar_offset == cigar_it->second) {
@@ -405,6 +494,10 @@ Json::Value Alignment::to_json(std::string_view full_query,
                                std::string_view read_name,
                                std::string_view label) const {
     assert(is_valid(graph));
+    if (sequence_.find("$") != std::string::npos
+            || std::find(nodes_.begin(), nodes_.end(), DeBruijnGraph::npos) != nodes_.end()) {
+        throw std::runtime_error("JSON output for chains not supported");
+    }
 
     // encode alignment
     Json::Value alignment;
@@ -505,7 +598,7 @@ std::shared_ptr<const std::string> Alignment
             graph.call_outgoing_kmers(*(nodes_.rbegin() + 1),
                                       [&](auto node, char c) {
                 if (node == nodes_.back())
-                    sequence_ += c;
+                    sequence_.push_back(c);
             });
         }
         const Json::Value &edits = mapping[i]["edit"];
@@ -558,6 +651,90 @@ std::shared_ptr<const std::string> Alignment
     return query_sequence;
 }
 
+void Alignment::insert_gap_prefix(ssize_t gap_length,
+                                  const DeBruijnGraph &graph,
+                                  const DBGAlignerConfig &config) {
+    size_t extra_nodes = graph.get_k();
+
+    if (gap_length < 0) {
+        // alignments overlap
+        // extra_nodes = k - 1 - matching_overlap
+        // e.g.,
+        // k = 4
+        // overlap = 4
+        // matching overlap = 2
+        // ATGCTATGCA
+        //       ACCAACGACT
+
+        trim_clipping();
+        assert(extra_nodes + gap_length > 1);
+        extra_nodes += gap_length - 1;
+
+        if (offset_) {
+            // if there are suffix-mapped nodes, only keep the ones that are
+            // part of the overlap
+            assert(static_cast<ssize_t>(offset_) >= -gap_length);
+            nodes_.erase(nodes_.begin(), nodes_.begin() + offset_ + gap_length);
+        }
+
+        if (extra_nodes) {
+            // they can't be joined since the overlap is too small
+            // ATGCTATGCA
+            //           ACGACT
+            //       TGCA
+            //        GCAA - added
+            //         CAAC
+            //          AACG
+            //           ACGA
+            score_ += config.gap_opening_penalty
+                + (extra_nodes - 1) * config.gap_extension_penalty;
+            cigar_.data().insert(cigar_.data().begin(),
+                                 Cigar::value_type{ Cigar::NODE_INSERTION, extra_nodes });
+        }
+    } else {
+        // no overlap
+        // extra_nodes = k
+        // e.g.,
+        // k = 4
+        // gap = 2
+        // ATGCTATGCA
+        //             ACGTACGACT
+        //       TGCA
+        //        GCA$ - added
+        //         CA$A - added
+        //          A$AC - added
+        //           $ACG - added
+        //            ACGT
+
+        assert(get_clipping() >= gap_length);
+        trim_clipping();
+
+        sequence_ = std::string(1, '$') + sequence_;
+        cigar_.data().insert(cigar_.data().begin(), Cigar::value_type{ Cigar::DELETION, 1 });
+        score_ += config.gap_opening_penalty;
+
+        if (static_cast<size_t>(gap_length) < graph.get_k()) {
+            // overlap is small, so add only the required dummy nods
+            trim_offset();
+            assert(extra_nodes >= 2);
+            score_ += config.gap_opening_penalty
+                + (extra_nodes - 2) * config.gap_extension_penalty;
+            cigar_.data().insert(
+                cigar_.data().begin(),
+                Cigar::value_type{ Cigar::NODE_INSERTION, extra_nodes - 1 }
+            );
+        }
+
+        extend_query_begin(query_.data() - gap_length);
+    }
+
+    nodes_.insert(nodes_.begin(), extra_nodes, DeBruijnGraph::npos);
+
+    assert(nodes_.size() == sequence_.size());
+    offset_ = graph.get_k() - 1;
+}
+
+
 bool spell_path(const DeBruijnGraph &graph,
                 const std::vector<DeBruijnGraph::node_index> &path,
                 std::string &seq,
@@ -567,36 +744,50 @@ bool spell_path(const DeBruijnGraph &graph,
     if (path.empty())
         return "";
 
-    if (std::find(path.begin(), path.end(), DeBruijnGraph::npos) != path.end()) {
-        std::cerr << "ERROR: path has invalid nodes\n";
-
-        for (DeBruijnGraph::node_index node : path) {
-            std::cerr << node << " ";
-        }
-
-        std::cerr << std::endl;
-
-        return false;
-    }
-
     seq.clear();
     seq.reserve(path.size() + graph.get_k() - 1 - offset);
 
-    seq += graph.get_node_sequence(path.front()).substr(offset);
+    size_t num_dummy = 0;
+    if (path.front()) {
+        seq += graph.get_node_sequence(path.front()).substr(offset);
+    } else {
+        seq += std::string(graph.get_k() - offset, '$');
+        num_dummy = 1;
+    }
 
     for (size_t i = 1; i < path.size(); ++i) {
-        char next = '\0';
-        graph.call_outgoing_kmers(path[i - 1], [&](auto next_node, char c) {
-            if (next_node == path[i])
-                next = c;
-        });
-
-        if (!next) {
-            std::cerr << "ERROR: invalid edge " << path[i - 1] << " " << path[i] << std::endl;
+        if (num_dummy > graph.get_k()) {
+            logger->error("Too many dummy nodes\n{}", fmt::join(path, " "));
             return false;
         }
 
-        seq += next;
+        if (path[i]) {
+            if (num_dummy) {
+                seq += '$';
+                std::string next_seq = graph.get_node_sequence(path[i]);
+                std::copy(next_seq.begin(), next_seq.end(), seq.end() - next_seq.size());
+                num_dummy = 0;
+            } else {
+                char next = '\0';
+                graph.call_outgoing_kmers(path[i - 1], [&](auto next_node, char c) {
+                    if (next_node == path[i])
+                        next = c;
+                });
+
+                if (!next) {
+                    logger->error("Invalid edge {} {}\t{} {}",
+                                  path[i - 1], path[i],
+                                  graph.get_node_sequence(path[i - 1]),
+                                  graph.get_node_sequence(path[i]));
+                    return false;
+                }
+
+                seq += next;
+            }
+        } else {
+            seq += '$';
+            ++num_dummy;
+        }
     }
 
     assert(seq.size() == path.size() + graph.get_k() - 1 - offset);
