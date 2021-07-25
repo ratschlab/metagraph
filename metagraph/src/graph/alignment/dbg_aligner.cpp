@@ -94,10 +94,10 @@ void ISeedAndExtendAligner<AlignmentCompare>
 
         num_explored_nodes += extender->num_explored_nodes();
 
-        aggregator.call_alignments([&](Alignment&& alignment) {
+        for (auto&& alignment : aggregator.get_alignments()) {
             assert(alignment.is_valid(graph_, &config_));
-            paths.emplace_back(std::move(alignment));
-        });
+            paths.emplace_back(std::forward<decltype(alignment)>(alignment));
+        }
 
         common::logger->trace(
             "{}\tlength: {}\texplored nodes: {}\texplored nodes/k-mer: {}",
