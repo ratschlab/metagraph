@@ -284,7 +284,6 @@ void update_ins_extension(AlignedVector<score_t> &S,
                           score_t xdrop_cutoff,
                           const DBGAlignerConfig &config_) {
     // elements are dependent on the previous one, so this can't be vectorized easily
-    // this takes 15% of the run time when aligning long reads...
     for (size_t j = 1; j < S.size(); ++j) {
         score_t ins_extend = E[j - 1] + config_.gap_extension_penalty;
         if (ins_extend > std::max(E[j], xdrop_cutoff - 1)) {
