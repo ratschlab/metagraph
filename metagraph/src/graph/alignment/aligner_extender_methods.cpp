@@ -12,7 +12,7 @@ namespace graph {
 namespace align {
 
 using score_t = DBGAlignerConfig::score_t;
-constexpr score_t ninf = std::numeric_limits<score_t>::min() + 100;
+constexpr score_t ninf = DBGAlignerConfig::ninf;
 
 // to ensure that SIMD operations on arrays don't read out of bounds
 constexpr size_t kPadding = 5;

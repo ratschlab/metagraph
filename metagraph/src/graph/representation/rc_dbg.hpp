@@ -17,9 +17,6 @@ class RCDBG : public DBGWrapper<DeBruijnGraph> {
     template <typename... Args>
     RCDBG(Args&&... args) : DBGWrapper<DeBruijnGraph>(std::forward<Args>(args)...) {}
 
-    virtual uint64_t num_nodes() const override final { return graph_->num_nodes(); }
-    virtual uint64_t max_index() const override final { return graph_->max_index(); }
-
     virtual node_index traverse(node_index node, char next_char) const override final {
         return graph_->traverse_back(node, complement(next_char));
     }
