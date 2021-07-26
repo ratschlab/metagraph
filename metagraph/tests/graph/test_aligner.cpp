@@ -1382,12 +1382,9 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_canonical) {
         auto dbg_succ = std::make_shared<DBGSuccinct>(k, mode);
         dbg_succ->add_sequence(reference_rc);
 
-        std::shared_ptr<DeBruijnGraph> graph;
-        if (mode == DeBruijnGraph::PRIMARY) {
-            graph = std::make_shared<CanonicalDBG>(*dbg_succ);
-        } else {
-            graph = dbg_succ;
-        }
+        std::shared_ptr<DeBruijnGraph> graph = dbg_succ;
+        if (mode == DeBruijnGraph::PRIMARY)
+            graph = std::make_shared<CanonicalDBG>(graph);
 
         DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
         config.max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
@@ -1577,7 +1574,7 @@ TEST(DBGAlignerTest, align_suffix_seed_no_full_seeds) {
 
     auto dbg_succ = std::make_shared<DBGSuccinct>(k, DeBruijnGraph::PRIMARY);
     dbg_succ->add_sequence(reference);
-    auto graph = std::make_shared<CanonicalDBG>(*dbg_succ);
+    auto graph = std::make_shared<CanonicalDBG>(dbg_succ);
 
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
     config.max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
