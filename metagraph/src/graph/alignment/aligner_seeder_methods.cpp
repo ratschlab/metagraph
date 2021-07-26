@@ -409,7 +409,7 @@ template <class BaseSeeder>
 const DBGSuccinct& SuffixSeeder<BaseSeeder>
 ::get_base_dbg_succ(const DeBruijnGraph &graph) {
     try {
-      return dynamic_cast<const DBGSuccinct&>(graph.get_base_graph());
+        return dynamic_cast<const DBGSuccinct&>(graph.get_base_graph());
 
     } catch (const std::bad_cast &e) {
         common::logger->error("SuffixSeeder can be used only with succinct graph representation");
