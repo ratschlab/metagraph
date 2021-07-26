@@ -20,6 +20,7 @@ class RCDBG : public DBGNodeModifyingWrapper<DeBruijnGraph> {
 
     virtual uint64_t num_nodes() const override final { return graph_->num_nodes(); }
     virtual uint64_t max_index() const override final { return graph_->max_index(); }
+    virtual Mode get_mode() const override final { return graph_->get_mode(); }
 
     virtual node_index traverse(node_index node, char next_char) const override final {
         return graph_->traverse_back(node, complement(next_char));
@@ -40,6 +41,26 @@ class RCDBG : public DBGNodeModifyingWrapper<DeBruijnGraph> {
         std::string rc(sequence);
         ::reverse_complement(rc.begin(), rc.end());
         std::vector<node_index> nodes = map_sequence_to_nodes(*graph_, rc);
+
+        for (auto it = nodes.rbegin(); it != nodes.rend() && !terminate(); ++it) {
+            callback(*it);
+        }
+    }
+
+    virtual void map_to_nodes(std::string_view sequence,
+                              const std::function<void(node_index)> &callback,
+                              const std::function<bool()> &terminate
+                                  = [](){ return false; }) const override final {
+        if (terminate() || sequence.size() < get_k())
+            return;
+
+        std::string rc(sequence);
+        ::reverse_complement(rc.begin(), rc.end());
+
+        std::vector<node_index> nodes;
+        nodes.reserve(sequence.size() - get_k() + 1);
+        graph_->map_to_nodes(rc, [&](node_index node) { nodes.push_back(node); });
+
         for (auto it = nodes.rbegin(); it != nodes.rend() && !terminate(); ++it) {
             callback(*it);
         }
@@ -75,13 +96,6 @@ class RCDBG : public DBGNodeModifyingWrapper<DeBruijnGraph> {
         });
     }
 
-    virtual void map_to_nodes(std::string_view /* sequence */,
-                              const std::function<void(node_index)> & /* callback */,
-                              const std::function<bool()> & /* terminate */
-                                  = [](){ return false; }) const override final {
-        throw std::runtime_error("Not implemented");
-    }
-
     virtual void
     adjacent_outgoing_nodes(node_index node,
                             const std::function<void(node_index)> &callback) const override final {
@@ -105,22 +119,6 @@ class RCDBG : public DBGNodeModifyingWrapper<DeBruijnGraph> {
         } else {
             return DeBruijnGraph::operator==(other);
         }
-    }
-
-    virtual bool load(const std::string &filename) override final {
-        if (!graph_ptr_)
-            throw std::runtime_error("load only supported for non-const graphs");
-
-        return graph_ptr_->load(filename);
-    }
-
-    virtual void add_sequence(std::string_view sequence,
-                              const std::function<void(node_index)> &on_insertion
-                                  = [](node_index) {}) override final {
-        if (!graph_ptr_)
-            throw std::runtime_error("load only supported for non-const graphs");
-
-        graph_ptr_->add_sequence(sequence, on_insertion);
     }
 
     virtual void call_nodes(const std::function<void(node_index)> &callback,

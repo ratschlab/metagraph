@@ -11,14 +11,14 @@
 namespace mtg {
 namespace graph {
 
-class MaskedDeBruijnGraph : public DBGNodeModifyingWrapper<DeBruijnGraph> {
+class MaskedDeBruijnGraph : public DBGWrapper<DeBruijnGraph> {
   public:
     template <class Graph>
     MaskedDeBruijnGraph(Graph&& graph,
                         std::unique_ptr<bitmap>&& kmers_in_graph,
                         bool only_valid_nodes_in_mask = false,
                         Mode mode = BASIC)
-          : DBGNodeModifyingWrapper<DeBruijnGraph>(std::forward<Graph>(graph)),
+          : DBGWrapper<DeBruijnGraph>(std::forward<Graph>(graph)),
             kmers_in_graph_(std::move(kmers_in_graph)),
             only_valid_nodes_in_mask_(only_valid_nodes_in_mask),
             mode_(mode) {
@@ -84,19 +84,6 @@ class MaskedDeBruijnGraph : public DBGNodeModifyingWrapper<DeBruijnGraph> {
 
     virtual uint64_t num_nodes() const override { return kmers_in_graph_->num_set_bits(); }
     virtual uint64_t max_index() const override { return graph_->max_index(); }
-
-    virtual void add_sequence(std::string_view,
-                              const std::function<void(node_index)> &) override {
-        throw std::runtime_error("Not implemented");
-    }
-
-    virtual bool load(const std::string &) override {
-        throw std::runtime_error("Not implemented");
-    }
-
-    virtual void serialize(const std::string &) const override {
-        throw std::runtime_error("Not implemented");
-    }
 
     // Get string corresponding to |node_index|.
     // Note: Not efficient if sequences in nodes overlap. Use sparingly.

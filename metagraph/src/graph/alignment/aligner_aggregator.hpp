@@ -5,7 +5,6 @@
 #include <priority_deque.hpp>
 
 #include "aligner_alignment.hpp"
-#include "common/vector_map.hpp"
 
 namespace mtg {
 namespace graph {
@@ -45,8 +44,7 @@ class AlignmentAggregator {
     const Alignment& maximum() const { return path_queue_.maximum(); }
     void pop_maximum() { path_queue_.pop_maximum(); }
 
-    void call_alignments(const std::function<void(Alignment&&)> &callback,
-                         const std::function<bool()> &terminate = []() { return false; });
+    std::vector<Alignment> get_alignments();
 
     size_t size() const { return path_queue_.size(); }
 
@@ -64,8 +62,7 @@ class AlignmentAggregator {
 
 
 template <class AlignmentCompare>
-inline void AlignmentAggregator<AlignmentCompare>
-::add_alignment(Alignment&& alignment) {
+inline void AlignmentAggregator<AlignmentCompare>::add_alignment(Alignment&& alignment) {
     if (std::find(path_queue_.begin(), path_queue_.end(), alignment) != path_queue_.end())
         return;
 
@@ -90,14 +87,16 @@ inline auto AlignmentAggregator<AlignmentCompare>::get_max_path_score() const ->
 }
 
 template <class AlignmentCompare>
-inline void AlignmentAggregator<AlignmentCompare>
-::call_alignments(const std::function<void(Alignment&&)> &callback,
-                  const std::function<bool()> &terminate) {
-    auto &data = path_queue_.data();
-    for (auto it = data.rbegin(); it != data.rend() && !terminate(); ++it) {
-        boost::heap::pop_interval_heap_max(data.begin(), it.base(), path_queue_.cmp());
-        callback(std::move(*it));
+inline std::vector<Alignment> AlignmentAggregator<AlignmentCompare>::get_alignments() {
+    std::vector<Alignment> data(std::move(path_queue_.data()));
+    path_queue_.clear();
+
+    // Pop off the min element to the back of the range each time. This results
+    // in the vector being in non-increasing order
+    for (auto it = data.rbegin(); it != data.rend(); ++it) {
+        boost::heap::pop_interval_heap_min(data.begin(), it.base(), path_queue_.cmp());
     }
+    return data;
 }
 
 

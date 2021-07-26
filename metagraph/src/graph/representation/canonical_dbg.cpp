@@ -16,7 +16,7 @@ inline const DBGSuccinct* get_dbg_succ(const DeBruijnGraph &graph) {
 
 template <typename Graph>
 CanonicalDBG::CanonicalDBG(Graph&& graph, size_t cache_size)
-      : DBGNodeModifyingWrapper<DeBruijnGraph>(std::forward<Graph>(graph)),
+      : DBGWrapper<DeBruijnGraph>(std::forward<Graph>(graph)),
         cache_size_(cache_size), child_node_cache_(cache_size_),
         parent_node_cache_(cache_size_), is_palindrome_cache_(cache_size_) {
     static_assert(!std::is_same_v<Graph, std::shared_ptr<CanonicalDBG>>);
@@ -29,26 +29,6 @@ template CanonicalDBG::CanonicalDBG(std::shared_ptr<const DeBruijnGraph>&&, size
 template CanonicalDBG::CanonicalDBG(std::shared_ptr<DeBruijnGraph>&, size_t);
 template CanonicalDBG::CanonicalDBG(std::shared_ptr<const DeBruijnGraph>&, size_t);
 template CanonicalDBG::CanonicalDBG(std::shared_ptr<DBGSuccinct>&, size_t);
-
-void CanonicalDBG::add_sequence(std::string_view sequence,
-                               const std::function<void(node_index)> &on_insertion) {
-    if (!graph_ptr_)
-        throw std::runtime_error("load only supported for non-const graphs");
-
-    graph_ptr_->add_sequence(sequence, on_insertion);
-    flush();
-}
-
-bool CanonicalDBG::load(const std::string &filename) {
-    if (!graph_ptr_)
-        throw std::runtime_error("load only supported for non-const graphs");
-
-    if (!graph_ptr_->load(filename))
-        return false;
-
-    flush();
-    return true;
-}
 
 void CanonicalDBG::flush() {
     if (graph_->get_mode() != DeBruijnGraph::PRIMARY) {
