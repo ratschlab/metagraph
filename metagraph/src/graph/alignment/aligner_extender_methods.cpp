@@ -379,13 +379,18 @@ std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score) {
     ssize_t seed_offset = static_cast<ssize_t>(this->seed_->get_offset()) - 1;
 
     // initialize the root of the tree
-    table.emplace_back(alloc_column<Column>(window.size() + 1, this->seed_->get_nodes().front(),
+    table.emplace_back(alloc_column<Column>(1, this->seed_->get_nodes().front(),
                                             static_cast<size_t>(-1), '\0', seed_offset, 0, 0));
-    std::fill(std::get<0>(table[0]).begin(), std::get<0>(table[0]).end(), 0);
 
     score_t xdrop_cutoff = std::max(-config_.xdrop, ninf + 1);
     assert(config_.xdrop > 0);
     assert(xdrop_cutoff < 0);
+
+    {
+        auto &[S, E, F, node, i_prev, c, offset, max_pos, trim] = table[0];
+        S[0] = 0;
+        extend_ins_end(S, E, F, window.size() + 1 - trim, xdrop_cutoff, config_);
+    }
 
     // The nodes in the traversal (with corresponding score columns) are sorted by
     // 1) their score (higher is better), then by
@@ -489,9 +494,6 @@ std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score) {
 
                 auto &[S, E, F, node_cur, i_cur, c_stored, offset, max_pos, trim]
                     = table.back();
-
-                if (next != node_prev && !trim && !trim_prev)
-                    S[0] = S_prev[0];
 
                 assert(i_cur == i);
                 assert(node_cur == next);
