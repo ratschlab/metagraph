@@ -426,11 +426,11 @@ int align_to_graph(Config *config) {
                 std::shared_ptr<DeBruijnGraph> aln_graph(
                     std::shared_ptr<DeBruijnGraph>{}, graph.get()
                 );
+
                 if (auto *canonical = dynamic_cast<CanonicalDBG*>(aln_graph.get()))
                     aln_graph = std::make_shared<CanonicalDBG>(*canonical);
 
-                std::unique_ptr<IDBGAligner> aligner;
-                aligner = build_aligner(*aln_graph, aligner_config);
+                auto aligner = build_aligner(*aln_graph, aligner_config);
 
                 aligner->align_batch(batch, [&](std::string_view header, auto&& paths) {
                     std::string res = format_alignment(header, paths, *aln_graph, *config);
