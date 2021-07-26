@@ -16,7 +16,7 @@ namespace graph {
  * CanonicalDBG is a wrapper which acts like a canonical-mode DeBruijnGraph, but
  * uses a non-canonical DeBruijnGraph as the underlying storage.
  */
-class CanonicalDBG : public DBGNodeModifyingWrapper<DeBruijnGraph> {
+class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
   public:
     template <typename Graph>
     explicit CanonicalDBG(Graph&& graph, size_t cache_size = 100'000);
