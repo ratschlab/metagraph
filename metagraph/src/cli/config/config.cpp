@@ -949,6 +949,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --batch-size \t\tquery batch size (number of base pairs) [100000000]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "Available options for alignment:\n");
+            fprintf(stderr, "\t-a --annotator [STR] \t\t\t\tannotator to load []\n");
             fprintf(stderr, "\t-o --outfile-base [STR]\t\t\t\tbasename of output file []\n");
             fprintf(stderr, "\t   --json \t\t\t\t\toutput alignment in JSON format [off]\n");
             fprintf(stderr, "\t   --align-only-forwards \t\t\tdo not align backwards from a seed on basic-mode graphs [off]\n");

@@ -25,18 +25,13 @@ typedef std::pair<Label, size_t> StringCountPair;
 
 AnnotatedSequenceGraph
 ::AnnotatedSequenceGraph(std::shared_ptr<SequenceGraph> graph,
-                         std::unique_ptr<Annotator>&& annotation,
+                         std::shared_ptr<Annotator> annotation,
                          bool force_fast)
-      : graph_(graph), annotator_(std::move(annotation)),
+      : graph_(graph), annotator_(annotation),
         force_fast_(force_fast) {
     assert(graph_.get());
     assert(annotator_.get());
 }
-
-AnnotatedDBG::AnnotatedDBG(std::shared_ptr<DeBruijnGraph> dbg,
-                           std::unique_ptr<Annotator>&& annotation,
-                           bool force_fast)
-      : AnnotatedSequenceGraph(dbg, std::move(annotation), force_fast), dbg_(*dbg) {}
 
 void AnnotatedSequenceGraph
 ::annotate_sequence(std::string_view sequence,
@@ -654,6 +649,8 @@ AnnotatedDBG::get_top_labels(const std::vector<std::pair<row_index, size_t>> &in
     assert(check_compatibility());
 
     if (with_kmer_counts) {
+        // TODO: Don't take into account counts when comparing to min_count.
+        //       It should be compared to sum_rows and not sum_row_values.
         return top_labels(dynamic_cast<const IntMatrix &>(annotator_->get_matrix())
                                                   .sum_row_values(index_counts, min_count),
                           annotator_->get_label_encoder(),

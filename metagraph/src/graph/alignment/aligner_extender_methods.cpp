@@ -329,7 +329,8 @@ void extend_ins_end(AlignedVector<score_t> &S,
 void DefaultColumnExtender
 ::call_outgoing(node_index node,
                 size_t /* max_prefetch_distance */,
-                const std::function<void(node_index, char)> &callback) {
+                const std::function<void(node_index, char)> &callback,
+                size_t /* table_idx */) {
     graph_->call_outgoing_kmers(node, [&](node_index next, char c) {
         if (c != boss::BOSS::kSentinel)
             callback(next, c);
@@ -362,7 +363,8 @@ Column alloc_column(size_t size, RestArgs... args) {
     return column;
 }
 
-std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score) {
+std::vector<Alignment> DefaultColumnExtender
+::extend(score_t min_path_score, bool force_fixed_seed) {
     assert(this->seed_);
 
     table.clear();
@@ -455,24 +457,25 @@ std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score) {
                 if (!has_extension)
                     continue;
 
+                size_t seed_pos = next_offset - this->seed_->get_offset();
+                bool in_seed = seed_pos < this->seed_->get_sequence().size();
+
                 // Get the next node(s) from the graph. If the current node is
-                // part of the seed, then pick the next node from the seed.
-                if (next_offset - this->seed_->get_offset() < this->seed_->get_sequence().size()) {
-                    if (next_offset < graph_->get_k()) {
-                        outgoing.emplace_back(
-                            this->seed_->get_nodes().front(),
-                            this->seed_->get_sequence()[next_offset - this->seed_->get_offset()]
-                        );
-                    } else {
-                        outgoing.emplace_back(
-                            this->seed_->get_nodes()[next_offset - graph_->get_k() + 1],
-                            this->seed_->get_sequence()[next_offset - this->seed_->get_offset()]
-                        );
-                        assert(graph_->traverse(node, outgoing.back().second) == outgoing.back().first);
-                    }
+                // part of the seed and the arguments tell us to force using
+                // the full seed, then pick the next node from the seed.
+                if (in_seed && next_offset < graph_->get_k()) {
+                    outgoing.emplace_back(this->seed_->get_nodes().front(),
+                                          this->seed_->get_sequence()[seed_pos]);
+                } else if (in_seed && (force_fixed_seed || this->fixed_seed())) {
+                    outgoing.emplace_back((*this->seed_).get_nodes()[next_offset - graph_->get_k() + 1],
+                                          this->seed_->get_sequence()[seed_pos]);
+                    assert(graph_->traverse(node, outgoing.back().second)
+                                == outgoing.back().first);
                 } else {
                     call_outgoing(node, window.size() + 1 - offset - S.size(),
-                                  [&](node_index next, char c) { outgoing.emplace_back(next, c); });
+                                  [&](node_index next, char c) {
+                                      outgoing.emplace_back(next, c);
+                                  }, i);
                 }
             }
 

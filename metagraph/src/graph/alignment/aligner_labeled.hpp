@@ -1,0 +1,251 @@
+#ifndef __LABELED_ALIGNER_HPP__
+#define __LABELED_ALIGNER_HPP__
+
+#include <optional>
+
+#include <tsl/hopscotch_map.h>
+#include <tsl/ordered_set.h>
+
+#include "dbg_aligner.hpp"
+#include "common/hashers/hash.hpp"
+#include "graph/annotated_dbg.hpp"
+#include "annotation/binary_matrix/base/binary_matrix.hpp"
+
+namespace mtg {
+
+namespace annot {
+namespace matrix {
+    class MultiIntMatrix;
+}
+}
+
+namespace graph {
+namespace align {
+
+
+template <typename Key, class Hash = std::hash<Key>, typename IndexType = uint64_t,
+          class EqualTo = std::equal_to<Key>, class Allocator = std::allocator<Key>,
+          class Container = std::vector<Key, Allocator>>
+using VectorSet = tsl::ordered_set<Key, Hash, EqualTo, Allocator, Container, IndexType>;
+
+
+class DynamicLabeledGraph {
+  public:
+    typedef DeBruijnGraph::node_index node_index;
+    typedef annot::binmat::BinaryMatrix::Column Column;
+    typedef annot::binmat::BinaryMatrix::Row Row;
+
+    static constexpr Row nrow = std::numeric_limits<Row>::max();
+
+    DynamicLabeledGraph(const AnnotatedDBG &anno_graph);
+
+    const AnnotatedDBG& get_anno_graph() const { return anno_graph_; }
+    const annot::matrix::MultiIntMatrix* get_coordinate_matrix() const { return multi_int_; }
+
+    // flush the buffer and fetch their annotations from the AnnotatedDBG
+    void flush();
+
+    // push (a) node(s) to the buffer
+    void add_node(node_index node);
+    void add_path(const std::vector<node_index> &path, std::string sequence);
+
+    // Checks if the edge (node, next), with its corresponding sequence, is
+    // consistent w.r.t. coordinates. Always returns true if a coordinate annotation
+    // is not loaded
+    bool is_coord_consistent(node_index node, node_index next, std::string sequence) const;
+
+    // get the annotations of a node if they have been fetched
+    std::optional<std::reference_wrapper<const Vector<Column>>>
+    operator[](node_index node) const {
+        auto it = targets_.find(node);
+        if (it == targets_.end() || it->second.second == nannot) {
+            // if the node hasn't been seen before, or if its annotations haven't
+            // been flushed, return nothing
+            return std::nullopt;
+        } else {
+            return std::cref(targets_set_.data()[it->second.second]);
+        }
+    }
+
+    std::vector<Row> get_anno_rows(const std::vector<node_index> &path) const {
+        std::vector<Row> rows;
+        rows.reserve(path.size());
+        for (node_index n : path) {
+            auto find = targets_.find(n);
+            rows.push_back(find != targets_.end() ? find->second.first : nrow);
+        }
+        return rows;
+    }
+
+  private:
+    const AnnotatedDBG &anno_graph_;
+    const annot::matrix::MultiIntMatrix *multi_int_;
+
+    // placeholder index for an unfetched annotation
+    static constexpr size_t nannot = std::numeric_limits<size_t>::max();
+
+    // keep a unique set of annotation rows
+    VectorSet<Vector<Column>, utils::VectorHash> targets_set_;
+
+    // map nodes to indexes in targets_set_
+    tsl::hopscotch_map<node_index, std::pair<Row, size_t>> targets_;
+
+    // buffer of accessed nodes and their corresponding annotation rows
+    std::vector<Row> added_rows_;
+    std::vector<node_index> added_nodes_;
+};
+
+
+template <class AlignmentCompare = LocalAlignmentLess>
+class ILabeledAligner : public ISeedAndExtendAligner<AlignmentCompare> {
+  public:
+    typedef IDBGAligner::node_index node_index;
+
+    ILabeledAligner(const AnnotatedDBG &anno_graph, const DBGAlignerConfig &config)
+          : ISeedAndExtendAligner<AlignmentCompare>(anno_graph.get_graph(), config),
+            labeled_graph_(anno_graph) {}
+
+    virtual ~ILabeledAligner() {}
+
+    virtual void align_batch(const std::vector<IDBGAligner::Query> &seq_batch,
+                             const IDBGAligner::AlignmentCallback &callback) const override {
+        ISeedAndExtendAligner<AlignmentCompare>::align_batch(seq_batch,
+            [&](std::string_view header, QueryAlignment&& alignments) {
+                auto it = std::remove_if(
+                    alignments.data().begin(), alignments.data().end(),
+                    [](const auto &a) { return a.target_columns.empty(); }
+                );
+                alignments.data().erase(it, alignments.data().end());
+
+                for (auto &alignment : alignments.data()) {
+                    set_target_coordinates(alignment);
+                }
+
+                callback(header, std::move(alignments));
+            }
+        );
+    }
+
+
+  protected:
+    mutable DynamicLabeledGraph labeled_graph_;
+
+    void set_target_coordinates(Alignment &alignment) const;
+};
+
+
+class LabeledBacktrackingExtender : public DefaultColumnExtender {
+  public:
+    typedef DynamicLabeledGraph::Column Column;
+    typedef AlignmentAggregator<LocalAlignmentLess> Aggregator;
+
+    LabeledBacktrackingExtender(DynamicLabeledGraph &labeled_graph,
+                                const DBGAlignerConfig &config,
+                                const Aggregator &aggregator,
+                                std::string_view query)
+          : DefaultColumnExtender(labeled_graph.get_anno_graph().get_graph(), config, query),
+            labeled_graph_(labeled_graph),
+            aggregator_(aggregator),
+            no_chain_config_(disable_chaining(this->config_)),
+            extensions_(labeled_graph.get_anno_graph().get_graph(),
+                        aggregator_.get_query(false),
+                        aggregator_.get_query(true), no_chain_config_) {}
+
+    virtual ~LabeledBacktrackingExtender() {}
+
+  protected:
+    virtual std::vector<Alignment> extend(score_t min_path_score, bool force_fixed_seed) override;
+
+    virtual bool terminate_backtrack_start(const std::vector<Alignment> &) const override final { return false; }
+
+    virtual bool terminate_backtrack() const override final { return target_intersection_.empty(); }
+
+    virtual bool skip_backtrack_start(size_t i) override final;
+
+    virtual bool update_seed_filter(node_index node,
+                                    size_t query_start,
+                                    const score_t *s_begin,
+                                    const score_t *s_end) override final;
+
+    virtual bool fixed_seed() const override final { return false; }
+
+    virtual void call_outgoing(node_index node,
+                               size_t max_prefetch_distance,
+                               const std::function<void(node_index, char)> &callback,
+                               size_t table_idx) override final;
+
+    virtual void call_alignments(score_t cur_cell_score,
+                                 score_t end_score,
+                                 score_t min_path_score,
+                                 const std::vector<node_index> &path,
+                                 const std::vector<size_t> &trace,
+                                 const Cigar &ops,
+                                 size_t clipping,
+                                 size_t offset,
+                                 std::string_view window,
+                                 const std::string &match,
+                                 const std::function<void(Alignment&&)> &callback) override final;
+
+  private:
+    DynamicLabeledGraph &labeled_graph_;
+
+    // global set of alignments
+    const Aggregator &aggregator_;
+
+    // local set of alignments
+    DBGAlignerConfig no_chain_config_;
+    Aggregator extensions_;
+
+    // keep track of the label set for the current backtracking
+    Vector<Column> target_intersection_;
+    size_t last_path_size_;
+
+    // After a node has been visited during backtracking, we keep track of which
+    // of its labels haven't been considered yet. This way, if backtracking is
+    // called from this node, then we can restrict it to these labels.
+    tsl::hopscotch_map<size_t, Vector<Column>> diff_target_sets_;
+
+    static DBGAlignerConfig disable_chaining(DBGAlignerConfig config) {
+        config.chain_alignments = false;
+        return config;
+    }
+
+    // backtrack through the DP table to reconstruct alignments
+    virtual std::vector<Alignment> backtrack(score_t min_path_score,
+                                             std::string_view window) override final {
+        labeled_graph_.flush();
+        diff_target_sets_.clear();
+        return DefaultColumnExtender::backtrack(min_path_score, window);
+    }
+};
+
+
+template <class Extender = LabeledBacktrackingExtender,
+          class Seeder = UniMEMSeeder,
+          class AlignmentCompare = LocalAlignmentLess>
+class LabeledAligner : public ILabeledAligner<AlignmentCompare> {
+  public:
+    template <typename... Args>
+    LabeledAligner(Args&&... args)
+          : ILabeledAligner<AlignmentCompare>(std::forward<Args>(args)...) {}
+
+  protected:
+    std::shared_ptr<IExtender>
+    build_extender(std::string_view query,
+                   const typename Extender::Aggregator &aggregator) const override final {
+        return std::make_shared<Extender>(this->labeled_graph_, this->get_config(), aggregator, query);
+    }
+
+    std::shared_ptr<ISeeder>
+    build_seeder(std::string_view query,
+                 bool is_reverse_complement,
+                 const std::vector<IDBGAligner::node_index> &nodes) const override final {
+        return this->template build_seeder_impl<Seeder>(query, is_reverse_complement, nodes);
+    }
+};
+
+} // namespace align
+} // namespace graph
+} // namespace mtg
+
+#endif // __LABELED_ALIGNER_HPP__

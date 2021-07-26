@@ -87,6 +87,12 @@ class DBGWrapper : public DeBruijnGraph {
 
     virtual uint64_t max_index() const override = 0;
 
+    virtual node_index get_base_node(node_index node) const = 0;
+
+    virtual std::pair<std::vector<node_index>, bool /* is reversed */>
+    get_base_path(const std::vector<node_index> &path,
+                  const std::string &sequence) const = 0;
+
   protected:
     std::shared_ptr<const Graph> graph_;
 };

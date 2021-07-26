@@ -94,7 +94,8 @@ class ISeedAndExtendAligner : public IDBGAligner {
                     const ISeeder &seeder,
                     IExtender &extender,
                     const std::function<void(Alignment&&)> &callback,
-                    const std::function<score_t(const Alignment&)> &get_min_path_score) const;
+                    const std::function<score_t(const Alignment&)> &get_min_path_score,
+                    bool force_fixed_seed) const;
 };
 
 template <class Extender = DefaultColumnExtender,

@@ -63,7 +63,7 @@ void ISeedAndExtendAligner<AlignmentCompare>
         auto seeder = build_seeder(this_query, is_reverse_complement, nodes);
         auto extender = build_extender(this_query, aggregator);
 
-        size_t num_explored_nodes = 0;
+        double num_explored_nodes = 0;
 
 #if ! _PROTEIN_GRAPH
         if (graph_.get_mode() == DeBruijnGraph::CANONICAL
@@ -86,13 +86,16 @@ void ISeedAndExtendAligner<AlignmentCompare>
             num_explored_nodes += extender_rc->num_explored_nodes();
 
         } else {
-            align_core(this_query, *seeder, *extender, add_alignment, get_min_path_score);
+            align_core(this_query, *seeder, *extender, add_alignment,
+                       get_min_path_score, false);
         }
 #else
-        align_core(this_query, *seeder, *extender, add_alignment, get_min_path_score);
+        align_core(this_query, *seeder, *extender, add_alignment,
+                   get_min_path_score, false);
 #endif
 
         num_explored_nodes += extender->num_explored_nodes();
+        size_t num_targets = aggregator.num_targets();
 
         for (auto&& alignment : aggregator.get_alignments()) {
             assert(alignment.is_valid(graph_, &config_));
@@ -100,9 +103,11 @@ void ISeedAndExtendAligner<AlignmentCompare>
         }
 
         common::logger->trace(
-            "{}\tlength: {}\texplored nodes: {}\texplored nodes/k-mer: {}",
+            "{}\tlength: {}\texplored nodes: {}\tnodes/k-mer: {}\tlabels: {}\tnodes/k-mer/label: {}",
             header, query.size(), num_explored_nodes,
-            static_cast<double>(num_explored_nodes) / nodes.size()
+            num_explored_nodes / nodes.size(),
+            num_targets,
+            num_explored_nodes / nodes.size() / num_targets
         );
 
         callback(header, std::move(paths));
@@ -115,7 +120,8 @@ void ISeedAndExtendAligner<AlignmentCompare>
              const ISeeder &seeder,
              IExtender &extender,
              const std::function<void(Alignment&&)> &callback,
-             const std::function<score_t(const Alignment&)> &get_min_path_score) const {
+             const std::function<score_t(const Alignment&)> &get_min_path_score,
+             bool force_fixed_seed) const {
     for (Alignment &seed : seeder.get_seeds()) {
         if (seed.empty())
             continue;
@@ -124,7 +130,7 @@ void ISeedAndExtendAligner<AlignmentCompare>
 
         DEBUG_LOG("Min path score: {}\tSeed: {}", min_path_score, seed);
 
-        auto extensions = extender.get_extensions(seed, min_path_score);
+        auto extensions = extender.get_extensions(seed, min_path_score, force_fixed_seed);
 
         if (extensions.empty() && seed.get_score() >= min_path_score) {
             seed.extend_query_end(query.data() + query.size());
@@ -221,7 +227,8 @@ void ISeedAndExtendAligner<AlignmentCompare>
                     && config_.rel_score_cutoff > 0
                         ? max_score * config_.rel_score_cutoff
                         : config_.min_cell_score;
-            }
+            },
+            false
         );
 
         std::sort(rc_of_alignments.begin(), rc_of_alignments.end(),
@@ -256,7 +263,8 @@ void ISeedAndExtendAligner<AlignmentCompare>
                 assert(path.is_valid(graph_, &config_));
                 callback(std::move(path));
             },
-            get_min_path_score
+            get_min_path_score,
+            true
         );
     };
 

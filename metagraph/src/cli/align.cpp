@@ -5,12 +5,16 @@
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
 #include "common/threads/threading.hpp"
+#include "common/utils/string_utils.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "graph/alignment/dbg_aligner.hpp"
+#include "graph/alignment/aligner_labeled.hpp"
+#include "graph/annotated_dbg.hpp"
 #include "seq_io/sequence_io.hpp"
 #include "config/config.hpp"
 #include "load/load_graph.hpp"
+#include "load/load_annotated_graph.hpp"
 
 namespace mtg {
 namespace cli {
@@ -74,13 +78,25 @@ DBGAlignerConfig initialize_aligner_config(const Config &config) {
     return aligner_config;
 }
 
+template <class Graph, template <class ... Types> class Aligner>
+inline std::unique_ptr<graph::align::IDBGAligner>
+build_aligner_infer_args(const Graph &graph, const DBGAlignerConfig &aligner_config) {
+    return std::make_unique<Aligner<>>(graph, aligner_config);
+}
+
 template <class Graph>
 std::unique_ptr<graph::align::IDBGAligner>
 build_aligner(const Graph &graph, const DBGAlignerConfig &aligner_config) {
-    return std::make_unique<DBGAligner<>>(graph, aligner_config);
+    if constexpr(std::is_same_v<Graph, AnnotatedDBG>) {
+        return build_aligner_infer_args<Graph, LabeledAligner>(graph, aligner_config);
+    } else {
+        return build_aligner_infer_args<Graph, DBGAligner>(graph, aligner_config);
+    }
 }
 
 template std::unique_ptr<IDBGAligner> build_aligner<DeBruijnGraph>(const DeBruijnGraph &, const DBGAlignerConfig &);
+template std::unique_ptr<IDBGAligner> build_aligner<AnnotatedDBG>(const AnnotatedDBG &, const DBGAlignerConfig &);
+
 
 void map_sequences_in_file(const std::string &file,
                            const DeBruijnGraph &graph,
@@ -285,15 +301,18 @@ void gfa_map_files(const Config *config,
 std::string format_alignment(std::string_view header,
                              const QueryAlignment &paths,
                              const DeBruijnGraph &graph,
-                             const Config &config) {
+                             const Config &config,
+                             const std::vector<std::string> *labels = nullptr) {
     std::string sout;
     if (!config.output_json) {
         sout += fmt::format("{}\t{}", header, paths.get_query());
         if (paths.empty()) {
-            sout += fmt::format("\t*\t*\t{}\t*\t*\t*", config.alignment_min_path_score);
+            sout += fmt::format("\t*\t*\t{}\t*\t*\t*{}",
+                                config.alignment_min_path_score,
+                                labels ? "\t*" : "");
         } else {
-            for (const auto &path : paths.data()) {
-                sout += fmt::format("\t{}", path);
+            for (size_t i = 0; i < paths.size(); ++i) {
+                sout += fmt::format("\t{}{}", paths[i], labels ? (*labels)[i] : "");
             }
         }
 
@@ -306,8 +325,12 @@ std::string format_alignment(std::string_view header,
         for (size_t i = 0; i < paths.size(); ++i) {
             const auto &path = paths[i];
 
+            std::string_view label;
+            if (labels)
+                label = (*labels)[i];
+
             Json::Value json_line = path.to_json(paths.get_query(path.get_orientation()),
-                                                 graph, secondary, header);
+                                                 graph, secondary, header, label);
 
             sout += fmt::format("{}\n", Json::writeString(builder, json_line));
             secondary = true;
@@ -322,6 +345,39 @@ std::string format_alignment(std::string_view header,
     }
 
     return sout;
+}
+
+template <class LabelEncoder>
+std::string format_alignment_labels(const DeBruijnGraph &graph,
+                                    const LabelEncoder &label_encoder,
+                                    const Config &config,
+                                    std::string_view header,
+                                    QueryAlignment&& paths) {
+    std::vector<std::string> labels;
+    size_t last_offset = graph.get_k() - 1;
+
+    for (const auto &path : paths.data()) {
+        if (path.target_columns.empty()) {
+            labels.emplace_back("\t*");
+        } else {
+            auto &cur_label = labels.emplace_back("\t");
+            for (size_t i = 0; i < path.target_columns.size(); ++i) {
+                cur_label += label_encoder.decode(path.target_columns[i]);
+                if (path.target_coordinates.size()) {
+                    for (const auto &[path_i, range] : path.target_coordinates[i]) {
+                        const auto &[first, last] = range;
+                        // {path_i}-{first coordinate}-{last coordinate}
+                        cur_label += fmt::format(":{}-{}-{}",
+                                                 path_i, first, last + last_offset);
+                    }
+                }
+                cur_label += ";";
+            }
+            cur_label.pop_back();
+        }
+    }
+
+    return format_alignment(header, paths, graph, config, &labels);
 }
 
 int align_to_graph(Config *config) {
@@ -383,6 +439,12 @@ int align_to_graph(Config *config) {
 
     DBGAlignerConfig aligner_config = initialize_aligner_config(*config);
 
+    std::shared_ptr<AnnotatedDBG::Annotator> annotator;
+    if (config->infbase_annotators.size()) {
+        assert(config->infbase_annotators.size() == 1);
+        annotator = initialize_annotated_dbg(graph, *config)->get_annotation_ptr();
+    }
+
     for (const auto &file : files) {
         logger->trace("Align sequences from file {}", file);
         seq_io::FastaParser fasta_parser(file, config->forward_and_reverse);
@@ -432,13 +494,28 @@ int align_to_graph(Config *config) {
                 if (auto *canonical = dynamic_cast<CanonicalDBG*>(aln_graph.get()))
                     aln_graph = std::make_shared<CanonicalDBG>(*canonical);
 
-                auto aligner = build_aligner(*aln_graph, aligner_config);
-
-                aligner->align_batch(batch, [&](std::string_view header, auto&& paths) {
-                    std::string res = format_alignment(header, paths, *aln_graph, *config);
-                    std::lock_guard<std::mutex> lock(print_mutex);
-                    *out << res;
-                });
+                if (annotator) {
+                    AnnotatedDBG aln_anno_graph(aln_graph, annotator);
+                    const auto &label_encoder = annotator->get_label_encoder();
+                    build_aligner(aln_anno_graph, aligner_config)->align_batch(
+                        batch, [&](std::string_view header, auto&& paths) {
+                        std::string res = format_alignment_labels(
+                            *aln_graph, label_encoder, *config,
+                            header, std::move(paths)
+                        );
+                        std::lock_guard<std::mutex> lock(print_mutex);
+                        *out << res;
+                    });
+                } else {
+                    build_aligner(*aln_graph, aligner_config)->align_batch(
+                        batch, [&](std::string_view header, auto&& paths) {
+                        std::string res = format_alignment(
+                            header, std::move(paths), *aln_graph, *config
+                        );
+                        std::lock_guard<std::mutex> lock(print_mutex);
+                        *out << res;
+                    });
+                }
             };
 
             ++num_batches;

@@ -71,10 +71,8 @@ namespace utils {
                                 BIt second_begin, BIt second_end) {
         assert(std::is_sorted(first_begin, first_end));
         assert(std::is_sorted(second_begin, second_end));
-        assert(std::set<typename AIt::value_type>(first_begin, first_end).size()
-                    == static_cast<uint64_t>(std::distance(first_begin, first_end)));
-        assert(std::set<typename BIt::value_type>(second_begin, second_end).size()
-                    == static_cast<uint64_t>(std::distance(second_begin, second_end)));
+        assert(std::adjacent_find(first_begin, first_end) == first_end);
+        assert(std::adjacent_find(second_begin, second_end) == second_end);
 
         uint64_t count = 0;
 
