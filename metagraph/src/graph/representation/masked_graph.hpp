@@ -11,14 +11,14 @@
 namespace mtg {
 namespace graph {
 
-class MaskedDeBruijnGraph : public DBGNodeModifyingWrapper<DeBruijnGraph> {
+class MaskedDeBruijnGraph : public DBGWrapper<DeBruijnGraph> {
   public:
     template <class Graph>
     MaskedDeBruijnGraph(Graph&& graph,
                         std::unique_ptr<bitmap>&& kmers_in_graph,
                         bool only_valid_nodes_in_mask = false,
                         Mode mode = BASIC)
-          : DBGNodeModifyingWrapper<DeBruijnGraph>(std::forward<Graph>(graph)),
+          : DBGWrapper<DeBruijnGraph>(std::forward<Graph>(graph)),
             kmers_in_graph_(std::move(kmers_in_graph)),
             only_valid_nodes_in_mask_(only_valid_nodes_in_mask),
             mode_(mode) {

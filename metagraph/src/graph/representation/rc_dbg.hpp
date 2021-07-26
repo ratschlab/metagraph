@@ -12,15 +12,13 @@ namespace graph {
  * e.g., get_node_sequence(n) := reverse_complement(graph.get_node_sequence(n))
  * e.g., traverse(n, c) := graph.traverse_back(n, complement(c))
  */
-class RCDBG : public DBGNodeModifyingWrapper<DeBruijnGraph> {
+class RCDBG : public DBGWrapper<DeBruijnGraph> {
   public:
     template <typename... Args>
-    RCDBG(Args&&... args)
-          : DBGNodeModifyingWrapper<DeBruijnGraph>(std::forward<Args>(args)...) {}
+    RCDBG(Args&&... args) : DBGWrapper<DeBruijnGraph>(std::forward<Args>(args)...) {}
 
     virtual uint64_t num_nodes() const override final { return graph_->num_nodes(); }
     virtual uint64_t max_index() const override final { return graph_->max_index(); }
-    virtual Mode get_mode() const override final { return graph_->get_mode(); }
 
     virtual node_index traverse(node_index node, char next_char) const override final {
         return graph_->traverse_back(node, complement(next_char));

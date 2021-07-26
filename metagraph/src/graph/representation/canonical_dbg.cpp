@@ -12,7 +12,7 @@ using mtg::common::logger;
 
 template <typename Graph>
 CanonicalDBG::CanonicalDBG(Graph&& graph, size_t cache_size)
-      : DBGNodeModifyingWrapper<DeBruijnGraph>(std::forward<Graph>(graph)),
+      : DBGWrapper<DeBruijnGraph>(std::forward<Graph>(graph)),
         cache_size_(cache_size), child_node_cache_(cache_size_),
         parent_node_cache_(cache_size_), is_palindrome_cache_(cache_size_) {
     static_assert(!std::is_same_v<Graph, std::shared_ptr<CanonicalDBG>>);
