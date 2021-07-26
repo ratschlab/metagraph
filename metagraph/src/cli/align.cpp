@@ -428,8 +428,7 @@ int align_to_graph(Config *config) {
                 // or if it's not CANONICAL and backwards traversal will be required
                 aln_graph = make_cached_graph(graph, *config);
 
-                std::unique_ptr<IDBGAligner> aligner;
-                aligner = build_aligner(*aln_graph, aligner_config);
+                auto aligner = build_aligner(*aln_graph, aligner_config);
 
                 aligner->align_batch(batch, [&](std::string_view header, auto&& paths) {
                     std::string res = format_alignment(header, paths, *aln_graph, *config);

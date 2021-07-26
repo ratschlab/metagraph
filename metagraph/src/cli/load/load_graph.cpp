@@ -91,15 +91,12 @@ std::shared_ptr<DeBruijnGraph> make_cached_graph(std::shared_ptr<DeBruijnGraph> 
     if (graph->get_mode() != DeBruijnGraph::CANONICAL && config.align_only_forwards)
         return graph;
 
-    auto base_graph = graph;
-    auto canonical = std::dynamic_pointer_cast<CanonicalDBG>(graph);
+    std::shared_ptr<const DeBruijnGraph> base_graph = graph;
 
-    if (canonical) {
-        base_graph = canonical->get_mutable_graph_ptr();
-        assert(base_graph && "CanonicalDBG should be built from a non-const graph");
-    }
+    if (auto canonical = std::dynamic_pointer_cast<CanonicalDBG>(graph))
+        base_graph = canonical->get_graph_ptr();
 
-    if (auto dbg_succ = std::dynamic_pointer_cast<DBGSuccinct>(base_graph)) {
+    if (auto dbg_succ = std::dynamic_pointer_cast<const DBGSuccinct>(base_graph)) {
         graph = make_cached_dbgsuccinct(dbg_succ, cache_size);
     } else {
         // graphs other than DBGSuccinct can't be cached

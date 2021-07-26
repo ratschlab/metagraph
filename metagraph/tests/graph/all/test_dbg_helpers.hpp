@@ -103,6 +103,23 @@ typedef ::testing::Types<DBGBitmap,
                          DBGSuccinctBloom<4, 50>,
                          DBGSuccinctCachedWrapped> GraphTypes;
 
+template <typename Graph>
+class MutableDeBruijnGraphTest : public ::testing::Test { };
+typedef ::testing::Types<DBGBitmap,
+                         DBGHashString,
+                         DBGHashOrdered,
+                         DBGHashFast,
+                         DBGSuccinct,
+                         DBGSuccinctIndexed<1>,
+                         DBGSuccinctIndexed<2>,
+#if ! _PROTEIN_GRAPH
+                         DBGSuccinctIndexed<10>,
+#endif
+                         DBGSuccinctBloomFPR<1, 1>,
+                         DBGSuccinctBloomFPR<1, 10>,
+                         DBGSuccinctBloom<4, 1>,
+                         DBGSuccinctBloom<4, 50>> MutableGraphTypes;
+
 // in stable graphs the order of input sequences
 // does not change the order of k-mers and their indexes
 template <typename Graph>

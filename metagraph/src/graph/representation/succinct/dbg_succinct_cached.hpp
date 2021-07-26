@@ -16,7 +16,7 @@ namespace graph {
 class DBGSuccinctCached;
 
 std::shared_ptr<DBGSuccinctCached>
-make_cached_dbgsuccinct(std::shared_ptr<DBGSuccinct> graph, size_t cache_size = 1024);
+make_cached_dbgsuccinct(std::shared_ptr<const DBGSuccinct> graph, size_t cache_size = 1024);
 
 class DBGSuccinctCached : public DBGWrapper<DBGSuccinct> {
   public:
@@ -49,6 +49,78 @@ class DBGSuccinctCached : public DBGWrapper<DBGSuccinct> {
 
         throw std::runtime_error("Not implemented");
         return false;
+    }
+
+    /**
+     * Delegated methods
+     */
+    #define DELEGATE_METHOD(RETURN_TYPE, METHOD, ARG_TYPE, ARG_NAME) \
+    virtual RETURN_TYPE METHOD(ARG_TYPE ARG_NAME) const override final { \
+        return graph_->METHOD(ARG_NAME); \
+    } \
+
+    DELEGATE_METHOD(void, call_kmers, const std::function<void(node_index, const std::string&)> &, callback)
+    DELEGATE_METHOD(void, call_source_nodes, const std::function<void(node_index)> &, callback)
+
+    DELEGATE_METHOD(uint64_t, num_nodes, , )
+    DELEGATE_METHOD(uint64_t, max_index, , )
+    DELEGATE_METHOD(size_t, outdegree, node_index, node)
+    DELEGATE_METHOD(bool, has_single_outgoing, node_index, node)
+    DELEGATE_METHOD(bool, has_multiple_outgoing, node_index, node)
+    DELEGATE_METHOD(size_t, indegree, node_index, node)
+    DELEGATE_METHOD(bool, has_no_incoming, node_index, node)
+    DELEGATE_METHOD(bool, has_single_incoming, node_index, node)
+    DELEGATE_METHOD(node_index, kmer_to_node, std::string_view, kmer)
+
+    virtual void call_nodes(const std::function<void(node_index)> &callback,
+                            const std::function<bool()> &stop_early
+                                = [](){ return false; }) const override final {
+        graph_->call_nodes(callback, stop_early);
+    }
+
+    virtual void traverse(node_index start,
+                          const char *begin,
+                          const char *end,
+                          const std::function<void(node_index)> &callback,
+                          const std::function<bool()> &terminate
+                              = [](){ return false; }) const override final {
+        graph_->traverse(start, begin, end, callback, terminate);
+    }
+
+    virtual void call_sequences(const CallPath &callback,
+                                size_t num_threads = 1,
+                                bool kmers_in_single_form = false) const override final {
+        graph_->call_sequences(callback, num_threads, kmers_in_single_form);
+    }
+
+    virtual void call_unitigs(const CallPath &callback,
+                              size_t num_threads = 1,
+                              size_t min_tip_size = 1,
+                              bool kmers_in_single_form = false) const override final {
+        graph_->call_unitigs(callback, num_threads, min_tip_size, kmers_in_single_form);
+    }
+
+    virtual bool find(std::string_view sequence, double discovery_fraction = 1) const override final {
+        return graph_->find(sequence, discovery_fraction);
+    }
+
+    virtual void map_to_nodes(std::string_view sequence,
+                              const std::function<void(node_index)> &callback,
+                              const std::function<bool()> &terminate
+                                  = [](){ return false; }) const override final {
+        graph_->map_to_nodes(sequence, callback, terminate);
+    }
+
+    virtual void
+    adjacent_outgoing_nodes(node_index node,
+                            const std::function<void(node_index)> &callback) const override final {
+        graph_->adjacent_outgoing_nodes(node, callback);
+    }
+
+    virtual void
+    adjacent_incoming_nodes(node_index node,
+                            const std::function<void(node_index)> &callback) const override final {
+        graph_->adjacent_incoming_nodes(node, callback);
     }
 };
 
@@ -139,6 +211,11 @@ class DBGSuccinctCachedImpl : public DBGSuccinctCached {
         }
     }
 
+    virtual node_index traverse_back(node_index node, char prev_char) const override final {
+        // TODO: cache stuff in the future if this function starts being used
+        return graph_->traverse_back(node, prev_char);
+    }
+
     virtual void call_incoming_kmers(node_index node,
                                      const IncomingEdgeCallback &callback) const override final {
         assert(node > 0 && node <= num_nodes());
@@ -196,30 +273,10 @@ class DBGSuccinctCachedImpl : public DBGSuccinctCached {
         );
     }
 
-    virtual void add_sequence(std::string_view sequence,
-                              const std::function<void(node_index)> &on_insertion
-                                  = [](node_index) {}) override final {
-        graph_ptr_->add_sequence(sequence, on_insertion);
-        flush();
-    }
-
-    virtual bool load(const std::string &filename) override final {
-        if (!graph_ptr_->load(filename))
-            return false;
-
-        flush();
-        return true;
-    }
-
   private:
     const boss::BOSS *boss_;
     size_t cache_size_;
     mutable common::LRUCache<edge_index, CacheValue> decoded_cache_;
-
-    void flush() {
-        boss_ = &graph_->get_boss();
-        decoded_cache_.Clear();
-    }
 
     // cache a computed result
     void put_kmer(edge_index key, CacheValue value) const {
@@ -280,7 +337,7 @@ class DBGSuccinctCachedImpl : public DBGSuccinctCached {
 
 
 inline std::shared_ptr<DBGSuccinctCached>
-make_cached_dbgsuccinct(std::shared_ptr<DBGSuccinct> graph, size_t cache_size) {
+make_cached_dbgsuccinct(std::shared_ptr<const DBGSuccinct> graph, size_t cache_size) {
     if (graph->get_k() * kmer::KmerExtractorBOSS::bits_per_char <= 64) {
         return std::make_shared<DBGSuccinctCachedImpl<kmer::KmerExtractorBOSS::Kmer64>>(graph, cache_size);
     } else if (graph->get_k() * kmer::KmerExtractorBOSS::bits_per_char <= 128) {

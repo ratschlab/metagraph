@@ -21,6 +21,7 @@ const std::string test_dump_basename = test_data_dir + "/dump_test_graph";
 const size_t kBitsPerCount = 8;
 
 TYPED_TEST_SUITE(DeBruijnGraphTest, GraphTypes);
+TYPED_TEST_SUITE(MutableDeBruijnGraphTest, MutableGraphTypes);
 
 
 TYPED_TEST(DeBruijnGraphTest, GraphDefaultConstructor) {
@@ -43,7 +44,7 @@ TYPED_TEST(DeBruijnGraphTest, InitializeEmpty) {
     EXPECT_FALSE(graph->find("GCTAGCTAGCTACGATCAGCTAGTACATG"));
 }
 
-TYPED_TEST(DeBruijnGraphTest, SerializeEmpty) {
+TYPED_TEST(MutableDeBruijnGraphTest, SerializeEmpty) {
     {
         auto graph = build_graph<TypeParam>(12);
         ASSERT_EQ(0u, graph->num_nodes());
@@ -65,7 +66,7 @@ TYPED_TEST(DeBruijnGraphTest, SerializeEmpty) {
     EXPECT_TRUE(check_graph_nodes(graph));
 }
 
-TYPED_TEST(DeBruijnGraphTest, Serialize) {
+TYPED_TEST(MutableDeBruijnGraphTest, Serialize) {
     {
         auto graph = build_graph<TypeParam>(12, {
             "AAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
@@ -128,7 +129,7 @@ void test_graph_serialization(size_t k_max) {
     }
 }
 
-TYPED_TEST(DeBruijnGraphTest, SerializeAnyK) {
+TYPED_TEST(MutableDeBruijnGraphTest, SerializeAnyK) {
     TEST_COUT << "Max k: " << max_test_k<TypeParam>();
     test_graph_serialization<TypeParam>(max_test_k<TypeParam>());
 }
