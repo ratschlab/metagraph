@@ -52,6 +52,7 @@ class DBGWrapper : public DeBruijnGraph {
     virtual size_t get_k() const override final { return graph_->get_k(); }
     virtual const std::string& alphabet() const override final { return graph_->alphabet(); }
     virtual void print(std::ostream &out) const override { graph_->print(out); }
+    virtual Mode get_mode() const override { return graph_->get_mode(); }
     virtual const DeBruijnGraph& get_base_graph() const override final {
         return graph_->get_base_graph();
     }
