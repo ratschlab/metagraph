@@ -431,9 +431,11 @@ int align_to_graph(Config *config) {
 
         Timer data_reading_timer;
 
-        std::ostream *out = config->outfbase.size()
-            ? new std::ofstream(config->outfbase)
-            : &std::cout;
+        std::unique_ptr<std::ofstream> ofile;
+        if (config->outfbase.size())
+            ofile = std::make_unique<std::ofstream>(config->outfbase);
+
+        std::ostream *out = ofile ? ofile.get() : &std::cout;
 
         const uint64_t batch_size = config->query_batch_size_in_bytes;
 
@@ -461,18 +463,21 @@ int align_to_graph(Config *config) {
                 num_bytes_read += it->seq.l;
             }
 
-            auto process_batch = [&](SeqBatch batch) {
-                auto aln_graph = graph;
-                if (auto *canonical = dynamic_cast<CanonicalDBG*>(graph.get()))
+            auto process_batch = [&,graph](SeqBatch batch) {
+                // make a shared_ptr in a thread-safe way
+                std::shared_ptr<DeBruijnGraph> aln_graph(
+                    std::shared_ptr<DeBruijnGraph>{}, graph.get()
+                );
+
+                if (auto *canonical = dynamic_cast<CanonicalDBG*>(aln_graph.get()))
                     aln_graph = std::make_shared<CanonicalDBG>(*canonical);
 
                 auto aligner = build_aligner(*aln_graph, aligner_config);
 
                 aligner->align_batch(batch, [&](std::string_view header, auto&& paths) {
-                    std::string sout = format_alignment(header, paths, *aln_graph, *config);
-
+                    std::string res = format_alignment(header, paths, *aln_graph, *config);
                     std::lock_guard<std::mutex> lock(print_mutex);
-                    *out << sout;
+                    *out << res;
                 });
             };
 
@@ -516,9 +521,6 @@ int align_to_graph(Config *config) {
                       "current mem usage: {} MB, total time {} sec",
                       file, data_reading_timer.elapsed(), num_batches, batch_size / 1e3,
                       get_curr_RSS() / 1e6, timer.elapsed());
-
-        if (config->outfbase.size())
-            delete out;
     }
 
     return 0;
