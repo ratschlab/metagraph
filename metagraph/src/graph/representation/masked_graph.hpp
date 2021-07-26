@@ -83,7 +83,6 @@ class MaskedDeBruijnGraph : public DBGWrapper<DeBruijnGraph> {
                               bool kmers_in_single_form = false) const override;
 
     virtual uint64_t num_nodes() const override { return kmers_in_graph_->num_set_bits(); }
-    virtual uint64_t max_index() const override { return graph_->max_index(); }
 
     // Get string corresponding to |node_index|.
     // Note: Not efficient if sequences in nodes overlap. Use sparingly.

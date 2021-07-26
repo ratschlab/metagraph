@@ -58,6 +58,12 @@ class DBGWrapper : public DeBruijnGraph {
     }
 
     /**
+     * Override these if the wrapper changes the graph's indexing
+     */
+    virtual uint64_t num_nodes() const override { return graph_->num_nodes(); }
+    virtual uint64_t max_index() const override { return graph_->max_index(); }
+
+    /**
      * Not implemented
      */
     virtual void serialize(const std::string &) const override final {
@@ -84,8 +90,6 @@ class DBGWrapper : public DeBruijnGraph {
                                 = [](){ return false; }) const override = 0;
 
     virtual void call_kmers(const std::function<void(node_index, const std::string&)> &callback) const override = 0;
-
-    virtual uint64_t max_index() const override = 0;
 
     virtual node_index get_base_node(node_index node) const override = 0;
 

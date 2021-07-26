@@ -12,7 +12,7 @@ namespace graph {
 namespace align {
 
 using score_t = DBGAlignerConfig::score_t;
-constexpr score_t ninf = std::numeric_limits<score_t>::min() + 100;
+constexpr score_t ninf = DBGAlignerConfig::ninf;
 
 // to ensure that SIMD operations on arrays don't read out of bounds
 constexpr size_t kPadding = 5;
@@ -95,43 +95,42 @@ bool SeedFilteringExtender::update_seed_filter(node_index node,
     if (it == conv_checker_.end()) {
         conv_checker_.emplace(node, ScoreVec(query_start, { s_begin, s_end }));
         return true;
+    }
 
-    } else {
-        auto &[start, vec] = it.value();
-        if (query_start + size <= start) {
-            vec.insert(vec.begin(), start - query_start, ninf);
-            std::copy(s_begin, s_end, vec.begin());
-            start = query_start;
-            return true;
+    auto &[start, vec] = it.value();
+    if (query_start + size <= start) {
+        vec.insert(vec.begin(), start - query_start, ninf);
+        std::copy(s_begin, s_end, vec.begin());
+        start = query_start;
+        return true;
+    }
 
-        } else if (query_start >= start + vec.size()) {
-            vec.reserve(query_start + size - start);
-            vec.insert(vec.end(), query_start - start - vec.size(), ninf);
-            vec.insert(vec.end(), s_begin, s_end);
-            return true;
+    if (query_start >= start + vec.size()) {
+        vec.reserve(query_start + size - start);
+        vec.insert(vec.end(), query_start - start - vec.size(), ninf);
+        vec.insert(vec.end(), s_begin, s_end);
+        return true;
+    }
 
-        } else {
-            // overlap
-            if (query_start < start) {
-                vec.insert(vec.begin(), start - query_start, ninf);
-                start = query_start;
-            }
+    // overlap
+    if (query_start < start) {
+        vec.insert(vec.begin(), start - query_start, ninf);
+        start = query_start;
+    }
 
-            if (query_start + size > start + vec.size())
-                vec.resize(query_start + size - start, ninf);
+    if (query_start + size > start + vec.size())
+        vec.resize(query_start + size - start, ninf);
 
-            bool converged = true;
-            score_t *v = vec.data() + query_start - start;
-            for (size_t j = 0; j < size; ++j) {
-                if (s_begin[j] > v[j]) {
-                    converged = false;
-                    v[j] = s_begin[j];
-                }
-            }
-
-            return !converged;
+    bool converged = true;
+    score_t *v = vec.data() + query_start - start;
+    for (size_t j = 0; j < size; ++j) {
+        if (s_begin[j] > v[j]) {
+            converged = false;
+            v[j] = s_begin[j];
         }
     }
+
+    return !converged;
 }
 
 bool SeedFilteringExtender
@@ -147,43 +146,42 @@ bool SeedFilteringExtender
             node, ScoreVec(query_start, AlignedVector<score_t>(size, mscore))
         );
         return true;
+    }
 
-    } else {
-        auto &[start, vec] = it.value();
-        if (query_start + size <= start) {
-            vec.insert(vec.begin(), start - query_start, ninf);
-            std::fill(vec.begin(), vec.begin() + size, mscore);
-            start = query_start;
-            return true;
+    auto &[start, vec] = it.value();
+    if (query_start + size <= start) {
+        vec.insert(vec.begin(), start - query_start, ninf);
+        std::fill(vec.begin(), vec.begin() + size, mscore);
+        start = query_start;
+        return true;
+    }
 
-        } else if (query_start >= start + vec.size()) {
-            vec.reserve(query_start + size - start);
-            vec.insert(vec.end(), query_start - start - vec.size(), ninf);
-            vec.insert(vec.end(), size, mscore);
-            return true;
+    if (query_start >= start + vec.size()) {
+        vec.reserve(query_start + size - start);
+        vec.insert(vec.end(), query_start - start - vec.size(), ninf);
+        vec.insert(vec.end(), size, mscore);
+        return true;
+    }
 
-        } else {
-            // overlap
-            if (query_start < start) {
-                vec.insert(vec.begin(), start - query_start, ninf);
-                start = query_start;
-            }
+    // overlap
+    if (query_start < start) {
+        vec.insert(vec.begin(), start - query_start, ninf);
+        start = query_start;
+    }
 
-            if (query_start + size > start + vec.size())
-                vec.resize(query_start + size - start, ninf);
+    if (query_start + size > start + vec.size())
+        vec.resize(query_start + size - start, ninf);
 
-            bool converged = true;
-            score_t *v = vec.data() + query_start - start;
-            for (size_t j = 0; j < size; ++j) {
-                if (mscore > v[j]) {
-                    converged = false;
-                    v[j] = mscore;
-                }
-            }
-
-            return !converged;
+    bool converged = true;
+    score_t *v = vec.data() + query_start - start;
+    for (size_t j = 0; j < size; ++j) {
+        if (mscore > v[j]) {
+            converged = false;
+            v[j] = mscore;
         }
     }
+
+    return !converged;
 }
 
 void update_column(size_t prev_end,
@@ -306,13 +304,12 @@ void extend_ins_end(AlignedVector<score_t> &S,
             E.back() + config_.gap_extension_penalty
         );
 
-        if (ins_score >= xdrop_cutoff) {
-            S.push_back(ins_score);
-            E.push_back(ins_score);
-            F.push_back(ninf);
-        } else {
+        if (ins_score < xdrop_cutoff)
             break;
-        }
+
+        S.push_back(ins_score);
+        E.push_back(ins_score);
+        F.push_back(ninf);
     }
 
     // allocate and initialize enough space to allow the SIMD code to access these
@@ -530,49 +527,49 @@ std::vector<Alignment> DefaultColumnExtender
                 assert(max_pos >= trim);
                 assert(static_cast<size_t>(max_pos - trim) < S.size());
 
+                score_t max_val = S[max_pos - trim];
+                if (max_val < xdrop_cutoff) {
+                    table.pop_back();
+                    continue;
+                }
+
                 // if the best score in this column is above the xdrop score
                 // then check if the extension can continue
-                score_t max_val = S[max_pos - trim];
-                if (max_val >= xdrop_cutoff) {
-                    TableIt next_score { max_val, -std::abs(max_pos - diag_i),
-                                         table.size() - 1 };
+                TableIt next_score { max_val, -std::abs(max_pos - diag_i),
+                                     table.size() - 1 };
 
-                    if (max_val - xdrop_cutoff > config_.xdrop)
-                        xdrop_cutoff = max_val - config_.xdrop;
+                if (max_val - xdrop_cutoff > config_.xdrop)
+                    xdrop_cutoff = max_val - config_.xdrop;
 
-                    if (max_val > std::get<0>(best_score))
-                        best_score = next_score;
+                if (max_val > std::get<0>(best_score))
+                    best_score = next_score;
 
-                    size_t vec_offset = start + begin;
-                    score_t *s_begin = S.data();
-                    score_t *s_end = S.data() + S.size();
+                size_t vec_offset = start + begin;
+                score_t *s_begin = S.data();
+                score_t *s_end = S.data() + S.size();
 
-                    // skip the first index since it corresponds to the position
-                    // before the query start
-                    if (!begin) {
-                        ++s_begin;
-                    } else {
-                        --vec_offset;
-                    }
-
-                    assert(s_begin <= s_end);
-                    assert(vec_offset + (s_end - s_begin) <= query_.size());
-
-                    // if this node has not been reached by a different
-                    // alignment with a better score, continue
-                    if (this->update_seed_filter(next, vec_offset, s_begin, s_end)) {
-                        // if there is only one outgoing edge, which is the best,
-                        // don't update the node traversal heap
-                        if (outgoing.size() == 1 && max_val >= std::get<0>(queue.top())) {
-                            nofork = true;
-                            i = table.size() - 1;
-                        } else {
-                            queue.emplace(next_score);
-                        }
-                    }
-
+                // skip the first index since it corresponds to the position
+                // before the query start
+                if (!begin) {
+                    ++s_begin;
                 } else {
-                    table.pop_back();
+                    --vec_offset;
+                }
+
+                assert(s_begin <= s_end);
+                assert(vec_offset + (s_end - s_begin) <= query_.size());
+
+                // if this node has not been reached by a different
+                // alignment with a better score, continue
+                if (this->update_seed_filter(next, vec_offset, s_begin, s_end)) {
+                    // if there is only one outgoing edge, which is the best,
+                    // don't update the node traversal heap
+                    if (outgoing.size() == 1 && max_val >= std::get<0>(queue.top())) {
+                        nofork = true;
+                        i = table.size() - 1;
+                    } else {
+                        queue.emplace(next_score);
+                    }
                 }
             }
         }
