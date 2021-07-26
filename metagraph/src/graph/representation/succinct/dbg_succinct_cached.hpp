@@ -78,15 +78,6 @@ class DBGSuccinctCached : public DBGWrapper<DBGSuccinct> {
         graph_->call_nodes(callback, stop_early);
     }
 
-    virtual void traverse(node_index start,
-                          const char *begin,
-                          const char *end,
-                          const std::function<void(node_index)> &callback,
-                          const std::function<bool()> &terminate
-                              = [](){ return false; }) const override final {
-        graph_->traverse(start, begin, end, callback, terminate);
-    }
-
     virtual void call_sequences(const CallPath &callback,
                                 size_t num_threads = 1,
                                 bool kmers_in_single_form = false) const override final {
@@ -209,6 +200,15 @@ class DBGSuccinctCachedImpl : public DBGSuccinctCached {
         } else {
             return npos;
         }
+    }
+
+    virtual void traverse(node_index start,
+                          const char *begin,
+                          const char *end,
+                          const std::function<void(node_index)> &callback,
+                          const std::function<bool()> &terminate
+                              = [](){ return false; }) const override final {
+        graph_->traverse(start, begin, end, callback, terminate);
     }
 
     virtual node_index traverse_back(node_index node, char prev_char) const override final {
