@@ -53,7 +53,7 @@ class AlignmentAggregator {
 
     void clear() { path_queue_.clear(); }
 
-    std::string_view get_query(bool is_reverse_complement) {
+    std::string_view get_query(bool is_reverse_complement) const {
         return is_reverse_complement ? rc_query_ : query_;
     }
 
