@@ -56,8 +56,13 @@ class DBGAlignerConfig {
     size_t max_seed_length = 0;
     size_t max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
 
+    // Lowest possible score. 100 is added to prevent underflow during operations.
+    // For this to work, all penalties should be less than 100.
+    // This is checked whenever an aligner is initialized.
+    constexpr static score_t ninf = std::numeric_limits<score_t>::min() + 100;
+
     // thresholds for scores
-    score_t min_cell_score = std::numeric_limits<score_t>::min() + 100; // to prevent underflow
+    score_t min_cell_score = ninf;
     score_t min_path_score = 0;
     score_t xdrop = std::numeric_limits<score_t>::max();
 
