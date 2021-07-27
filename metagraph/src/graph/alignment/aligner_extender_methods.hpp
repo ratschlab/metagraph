@@ -2,6 +2,7 @@
 #define __DBG_EXTENDER_METHODS_HPP__
 
 #include <tsl/hopscotch_map.h>
+#include <tsl/hopscotch_set.h>
 
 #include "aligner_alignment.hpp"
 #include "common/aligned_vector.hpp"
@@ -18,73 +19,136 @@ class IExtender {
 
     virtual ~IExtender() {}
 
-    virtual std::vector<Alignment>
-    get_extensions(score_t min_path_score = std::numeric_limits<score_t>::min()) = 0;
+    std::vector<Alignment>
+    get_extensions(const Alignment &seed,
+                   score_t min_path_score = std::numeric_limits<score_t>::min()) {
+        return set_seed(seed) ? extend(min_path_score) : std::vector<Alignment>{};
+    }
 
-    virtual void initialize(const Alignment &seed) = 0;
+    virtual void set_graph(const DeBruijnGraph &graph) = 0;
 
-    virtual void
-    call_visited_nodes(const std::function<void(node_index,
-                                                size_t /* range begin */,
-                                                size_t /* range end */)> &callback) const = 0;
+    virtual size_t num_explored_nodes() const = 0;
 
   protected:
-    virtual void reset() = 0;
     virtual const Alignment& get_seed() const = 0;
+    virtual bool set_seed(const Alignment &seed) = 0;
+
+    virtual std::vector<Alignment> extend(score_t min_path_score) = 0;
 };
 
-
-class DefaultColumnExtender : public IExtender {
+class SeedFilteringExtender : public IExtender {
   public:
-    enum NodeId : uint8_t {
-        NONE,
-        PREV,
-        CUR
-    };
+    SeedFilteringExtender(std::string_view query) : query_size_(query.size()) {}
 
+    virtual ~SeedFilteringExtender() {}
+
+    virtual void set_graph(const DeBruijnGraph &) override { conv_checker_.clear(); }
+
+    virtual size_t num_explored_nodes() const override { return conv_checker_.size(); }
+
+  protected:
+    const Alignment *seed_ = nullptr;
+    size_t query_size_;
+
+    typedef std::pair<size_t, AlignedVector<score_t>> ScoreVec;
+    tsl::hopscotch_map<node_index, ScoreVec> conv_checker_;
+
+    virtual const Alignment& get_seed() const override final { return *seed_; }
+    virtual bool set_seed(const Alignment &seed) override;
+
+    virtual bool update_seed_filter(node_index node,
+                                    size_t query_start,
+                                    const score_t *s_begin,
+                                    const score_t *s_end);
+
+    virtual bool filter_nodes(node_index node, size_t query_start, size_t query_end);
+};
+
+class DefaultColumnExtender : public SeedFilteringExtender {
+  public:
     DefaultColumnExtender(const DeBruijnGraph &graph,
                           const DBGAlignerConfig &config,
                           std::string_view query);
 
     virtual ~DefaultColumnExtender() {}
 
-    virtual std::vector<Alignment>
-    get_extensions(score_t min_path_score = std::numeric_limits<score_t>::min()) override;
-
-    virtual void initialize(const Alignment &seed) override;
-
-    virtual void
-    call_visited_nodes(const std::function<void(node_index,
-                                                size_t /* range begin */,
-                                                size_t /* range end */)> &callback) const override;
+    virtual void set_graph(const DeBruijnGraph &graph) override {
+        SeedFilteringExtender::set_graph(graph);
+        graph_ = &graph;
+    }
 
   protected:
-    const DeBruijnGraph &graph_;
+    const DeBruijnGraph *graph_;
     const DBGAlignerConfig &config_;
     std::string_view query_;
 
-    typedef std::tuple<node_index,
-                       char /* last character of the node label */,
-                       size_t /* copy number */,
-                       size_t /* distance from origin */> AlignNode;
+    // During extension, a tree is constructed from the graph starting at the
+    // seed, then the query is aligned against this tree.
+    // Each Column object represents the alignment of a substring of the query
+    // against a node in the tree.
+    // The horizontal concatenation (hstack) of all of the columns along a path
+    // in this tree is analogous to a Needleman-Wunsch dynamic programming score matrix.
+    using Column = std::tuple<AlignedVector<score_t> /* S (best score) */,
+                              AlignedVector<score_t> /* E (best score after insert) */,
+                              AlignedVector<score_t> /* F (best score after delete) */,
+                              node_index /* node */,
+                              size_t /* parent index in table */,
+                              char /* last char of node */,
+                              ssize_t /* offset (distance from start of the first node) */,
+                              ssize_t /* absolute index of maximal value*/,
+                              ssize_t /* trim (starting absolute index of array) */>;
+    // e.g., the maximal value is located at S[std::get<7>(col) - std::get<8>(col)]
+    std::vector<Column> table;
 
-    typedef AlignedVector<score_t> ScoreVec;
-    typedef AlignedVector<NodeId> PrevVec;
-    typedef AlignedVector<Cigar::Operator> OpVec;
-    typedef std::tuple<ScoreVec, ScoreVec, ScoreVec,
-                       OpVec, OpVec, OpVec, AlignNode,
-                       PrevVec, PrevVec,
-                       size_t /* offset */,
-                       size_t /* max_pos */> Scores;
-    typedef std::pair<std::vector<Scores>, bool> Column;
+    tsl::hopscotch_set<size_t> prev_starts;
 
-    tsl::hopscotch_map<node_index, Column> table_;
+    virtual std::vector<Alignment> extend(score_t min_path_score) override;
 
-    virtual void reset() override { table_.clear(); }
+    // backtracking helpers
+    virtual bool terminate_backtrack_start(const std::vector<Alignment> &extensions) const {
+        return extensions.size() >= config_.num_alternative_paths;
+    }
 
-    virtual const Alignment& get_seed() const override { return *seed_; }
+    virtual bool terminate_backtrack() const { return false; }
 
-    virtual std::vector<std::pair<node_index, char>> get_outgoing(const AlignNode &node) const;
+    virtual bool skip_backtrack_start(size_t table_i) {
+        return !prev_starts.emplace(table_i).second;
+    }
+
+    // This method calls at most one alignment, but can be overridden by a child
+    // class to call multiple alignments.
+    virtual void call_alignments(score_t cur_cell_score,
+                                 score_t end_score,
+                                 score_t min_path_score,
+                                 const std::vector<node_index> &path,
+                                 const std::vector<size_t> & /* trace */,
+                                 const Cigar &ops,
+                                 size_t clipping,
+                                 size_t offset,
+                                 std::string_view window,
+                                 const std::string &match,
+                                 const std::function<void(Alignment&&)> &callback) {
+        assert(path.size());
+        assert(ops.size());
+
+        if (cur_cell_score == 0 && ops.data().back().first == Cigar::MATCH
+                && end_score >= min_path_score) {
+            callback(construct_alignment(ops, clipping, window, path, match,
+                                         end_score, offset));
+        }
+    }
+
+    virtual void call_outgoing(node_index node,
+                               size_t max_prefetch_distance,
+                               const std::function<void(node_index, char)> &callback);
+
+    Alignment construct_alignment(Cigar cigar,
+                                  size_t clipping,
+                                  std::string_view window,
+                                  std::vector<node_index> final_path,
+                                  std::string match,
+                                  score_t score,
+                                  size_t offset) const;
 
   private:
     // compute perfect match scores for all suffixes
@@ -92,20 +156,11 @@ class DefaultColumnExtender : public IExtender {
     std::vector<score_t> partial_sums_;
 
     // a quick lookup table of char pair match/mismatch scores for the current query
-    tsl::hopscotch_map<char, AlignedVector<int8_t>> profile_score_;
+    tsl::hopscotch_map<char, AlignedVector<score_t>> profile_score_;
     tsl::hopscotch_map<char, AlignedVector<Cigar::Operator>> profile_op_;
 
-    // the initial seed
-    const Alignment *seed_;
-
-    std::string_view extend_window_;
-
-    // start of the partial sum table
-    const score_t *match_score_begin_;
-
-    static bool has_converged(const Column &column, const Scores &next);
-
-    static void sanitize(Scores &scores);
+    // backtrack through the DP table to reconstruct alignments
+    virtual std::vector<Alignment> backtrack(score_t min_path_score, std::string_view window);
 };
 
 } // namespace align

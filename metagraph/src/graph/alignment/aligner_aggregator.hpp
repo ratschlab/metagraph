@@ -10,11 +10,21 @@ namespace mtg {
 namespace graph {
 namespace align {
 
+
+template <typename Type, typename Sequence, typename Compare>
+class PriorityDeque : public boost::container::priority_deque<Type, Sequence, Compare> {
+  public:
+    Sequence& data() { return this->sequence(); }
+    Compare& cmp() { return this->compare(); }
+};
+
+
 template <class AlignmentCompare>
 class AlignmentAggregator {
   public:
     typedef Alignment::node_index node_index;
     typedef Alignment::score_t score_t;
+    typedef PriorityDeque<Alignment, std::vector<Alignment>, AlignmentCompare> PathQueue;
 
     AlignmentAggregator(std::string_view query,
                         std::string_view rc_query,
@@ -23,31 +33,39 @@ class AlignmentAggregator {
         assert(config_.num_alternative_paths);
     }
 
-    inline void add_alignment(Alignment&& alignment);
+    void add_alignment(Alignment&& alignment);
 
-    inline score_t get_min_path_score(const Alignment &seed) const;
+    score_t get_min_path_score() const;
+    score_t get_max_path_score() const;
+
+    score_t get_min_path_score(const Alignment &) const { return get_min_path_score(); }
+    score_t get_max_path_score(const Alignment &) const { return get_max_path_score(); }
 
     const Alignment& maximum() const { return path_queue_.maximum(); }
     void pop_maximum() { path_queue_.pop_maximum(); }
 
-    void call_alignments(const std::function<void(Alignment&&)> &callback);
+    std::vector<Alignment> get_alignments();
 
     size_t size() const { return path_queue_.size(); }
+
     bool empty() const { return path_queue_.empty(); }
+
+    void clear() { path_queue_.clear(); }
 
   private:
     std::string_view query_;
     std::string_view rc_query_;
     const DBGAlignerConfig &config_;
-    boost::container::priority_deque<Alignment,
-                                     std::vector<Alignment>,
-                                     AlignmentCompare> path_queue_;
+    PathQueue path_queue_;
     AlignmentCompare cmp_;
 };
 
 
 template <class AlignmentCompare>
 inline void AlignmentAggregator<AlignmentCompare>::add_alignment(Alignment&& alignment) {
+    if (std::find(path_queue_.begin(), path_queue_.end(), alignment) != path_queue_.end())
+        return;
+
     if (path_queue_.size() < config_.num_alternative_paths) {
         path_queue_.emplace(std::move(alignment));
     } else if (!cmp_(alignment, path_queue_.minimum())) {
@@ -56,23 +74,29 @@ inline void AlignmentAggregator<AlignmentCompare>::add_alignment(Alignment&& ali
 }
 
 template <class AlignmentCompare>
-inline auto AlignmentAggregator<AlignmentCompare>
-::get_min_path_score(const Alignment &) const -> score_t {
+inline auto AlignmentAggregator<AlignmentCompare>::get_min_path_score() const -> score_t {
     return path_queue_.size() < config_.num_alternative_paths
         ? config_.min_path_score
-        : path_queue_.minimum().get_score();
+        : std::max(static_cast<score_t>(path_queue_.maximum().get_score() * config_.rel_score_cutoff),
+                   path_queue_.minimum().get_score());
 }
 
 template <class AlignmentCompare>
-inline void AlignmentAggregator<AlignmentCompare>
-::call_alignments(const std::function<void(Alignment&&)> &callback) {
-    if (path_queue_.empty())
-        return;
+inline auto AlignmentAggregator<AlignmentCompare>::get_max_path_score() const -> score_t {
+    return path_queue_.size() ? path_queue_.maximum().get_score() : config_.min_path_score;
+}
 
-    while (path_queue_.size()) {
-        callback(Alignment(path_queue_.maximum()));
-        path_queue_.pop_maximum();
+template <class AlignmentCompare>
+inline std::vector<Alignment> AlignmentAggregator<AlignmentCompare>::get_alignments() {
+    std::vector<Alignment> data(std::move(path_queue_.data()));
+    path_queue_.clear();
+
+    // Pop off the min element to the back of the range each time. This results
+    // in the vector being in non-increasing order
+    for (auto it = data.rbegin(); it != data.rend(); ++it) {
+        boost::heap::pop_interval_heap_min(data.begin(), it.base(), path_queue_.cmp());
     }
+    return data;
 }
 
 

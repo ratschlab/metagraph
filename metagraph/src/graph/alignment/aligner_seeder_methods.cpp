@@ -13,29 +13,15 @@ namespace align {
 ExactSeeder::ExactSeeder(const DeBruijnGraph &graph,
                          std::string_view query,
                          bool orientation,
-                         std::vector<node_index>&& nodes,
+                         const std::vector<node_index> &nodes,
                          const DBGAlignerConfig &config)
       : graph_(graph),
         query_(query),
         orientation_(orientation),
-        query_nodes_(std::move(nodes)),
+        query_nodes_(nodes),
         config_(config),
-        num_matching_(0) {
+        num_matching_(num_exact_matching()) {
     assert(config_.check_config_scores());
-
-    // count the number of matching nucleotides
-    size_t last_match_count = 0;
-    for (auto it = query_nodes_.begin(); it != query_nodes_.end(); ++it) {
-        if (*it) {
-            auto jt = std::find(it + 1, query_nodes_.end(), node_index{});
-            num_matching_ += graph_.get_k() + std::distance(it, jt) - 1 - last_match_count;
-            last_match_count = graph_.get_k();
-            it = jt - 1;
-        } else if (last_match_count) {
-            --last_match_count;
-        }
-    }
-    assert(num_matching_ <= query_.size());
 
     partial_sum_.resize(query_.size() + 1);
     std::transform(query_.begin(), query_.end(),
@@ -46,6 +32,24 @@ ExactSeeder::ExactSeeder(const DeBruijnGraph &graph,
     assert(config_.match_score(query_) == partial_sum_.back());
     assert(config_.get_row(query_.front())[query_.front()] == partial_sum_[1]);
     assert(!partial_sum_.front());
+}
+
+size_t ExactSeeder::num_exact_matching() const {
+    size_t num_matching = 0;
+    size_t last_match_count = 0;
+    for (auto it = query_nodes_.begin(); it != query_nodes_.end(); ++it) {
+        if (*it) {
+            auto jt = std::find(it + 1, query_nodes_.end(), node_index());
+            num_matching += graph_.get_k() + std::distance(it, jt) - 1 - last_match_count;
+            last_match_count = graph_.get_k();
+            it = jt - 1;
+        } else if (last_match_count) {
+            --last_match_count;
+        }
+    }
+    assert(num_matching <= query_.size());
+
+    return num_matching;
 }
 
 auto ExactSeeder::get_seeds() const -> std::vector<Seed> {
@@ -66,7 +70,8 @@ auto ExactSeeder::get_seeds() const -> std::vector<Seed> {
             if (match_score > config_.min_cell_score) {
                 seeds.emplace_back(query_.substr(i, k),
                                    std::vector<node_index>{ query_nodes_[i] },
-                                   match_score, i, orientation_);
+                                   std::string(query_.substr(i, k)), match_score,
+                                   i, orientation_);
                 assert(seeds.back().is_valid(graph_, &config_));
             }
         }
@@ -126,6 +131,14 @@ auto SuffixSeeder<BaseSeeder>::get_seeds() const -> std::vector<Seed> {
     // this method assumes that seeds from the BaseSeeder are exact match only
     static_assert(std::is_base_of_v<ExactSeeder, BaseSeeder>);
 
+    if (this->config_.min_seed_length >= this->graph_.get_k())
+        return this->BaseSeeder::get_seeds();
+
+    const DBGSuccinct &dbg_succ = get_base_dbg_succ(this->graph_);
+
+    if (this->query_.size() < this->config_.min_seed_length)
+        return {};
+
     std::vector<std::vector<Seed>> suffix_seeds(
         this->query_.size() - this->config_.min_seed_length + 1
     );
@@ -162,8 +175,8 @@ auto SuffixSeeder<BaseSeeder>::get_seeds() const -> std::vector<Seed> {
 
         assert(seed_length == min_seed_length[i]);
         suffix_seeds[i].emplace_back(seed_seq, std::vector<node_index>{ alt_node },
-                                     match_score, i, this->orientation_,
-                                     this->graph_.get_k() - seed_length);
+                                     std::string(seed_seq), match_score, i,
+                                     this->orientation_, this->graph_.get_k() - seed_length);
         assert(suffix_seeds[i].back().is_valid(this->graph_, &this->config_));
     };
 
@@ -184,7 +197,7 @@ auto SuffixSeeder<BaseSeeder>::get_seeds() const -> std::vector<Seed> {
                                                 this->graph_.get_k() - 1,
                                                 this->query_.size() - i });
             if (max_seed_length >= min_seed_length[i]) {
-                dbg_succ_.call_nodes_with_suffix_matching_longest_prefix(
+                dbg_succ.call_nodes_with_suffix_matching_longest_prefix(
                     this->query_.substr(i, max_seed_length),
                     [&](node_index alt_node, size_t seed_length) {
                         if (seed_length > min_seed_length[i])
@@ -208,8 +221,7 @@ auto SuffixSeeder<BaseSeeder>::get_seeds() const -> std::vector<Seed> {
         }
     }
 
-    const auto *canonical = dynamic_cast<const CanonicalDBG*>(&this->graph_);
-    if (canonical) {
+    if (const auto *canonical = dynamic_cast<const CanonicalDBG*>(&this->graph_)) {
         // find sub-k matches in the reverse complement
         // TODO: find sub-k seeds which are sink tips in the underlying graph
         std::string query_rc(this->query_);
@@ -245,7 +257,7 @@ auto SuffixSeeder<BaseSeeder>::get_seeds() const -> std::vector<Seed> {
             if (j_min > j_max)
                 continue;
 
-            const auto &boss = dbg_succ_.get_boss();
+            const auto &boss = dbg_succ.get_boss();
 
             auto encoded = boss.encode({ query_rc.data() + i, max_seed_length });
             auto [first, last, end] = boss.index_range(encoded.begin(), encoded.end());
@@ -279,7 +291,7 @@ auto SuffixSeeder<BaseSeeder>::get_seeds() const -> std::vector<Seed> {
             }
 
             // e.g., match: ***ATG, want ATG***
-            suffix_to_prefix(dbg_succ_, std::make_tuple(first, last, seed_length),
+            suffix_to_prefix(dbg_succ, std::make_tuple(first, last, seed_length),
                              [&](node_index prefix_node) {
                 append_suffix_seed(
                     j, canonical->reverse_complement(prefix_node), seed_length
@@ -295,7 +307,17 @@ auto SuffixSeeder<BaseSeeder>::get_seeds() const -> std::vector<Seed> {
         if (pos_seeds.empty())
             continue;
 
-        assert(std::equal(pos_seeds.begin() + 1, pos_seeds.end(), pos_seeds.begin()));
+        // all seeds should have the same properties, but they will be at different
+        // graph nodes
+        assert(std::equal(pos_seeds.begin() + 1, pos_seeds.end(), pos_seeds.begin(),
+                          [](const Seed &a, const Seed &b) {
+            return a.get_orientation() == b.get_orientation()
+                && a.get_offset() == b.get_offset()
+                && a.get_score() == b.get_score()
+                && a.get_query() == b.get_query()
+                && a.get_sequence() == b.get_sequence()
+                && a.get_cigar() == b.get_cigar();
+        }));
 
         if (!pos_seeds[0].get_offset()) {
             assert(min_seed_length[i] == this->graph_.get_k());
@@ -314,17 +336,11 @@ auto SuffixSeeder<BaseSeeder>::get_seeds() const -> std::vector<Seed> {
     return output_seeds;
 }
 
-template <class BaseSeeder>
-const DBGSuccinct& SuffixSeeder<BaseSeeder>
-::get_base_dbg_succ(const DeBruijnGraph &graph) {
-    return dynamic_cast<const CanonicalDBG*>(&graph)
-        ? dynamic_cast<const DBGSuccinct&>(
-              dynamic_cast<const CanonicalDBG&>(graph).get_graph())
-        : dynamic_cast<const DBGSuccinct&>(graph);
-}
-
 auto MEMSeeder::get_seeds() const -> std::vector<Seed> {
     size_t k = graph_.get_k();
+
+    if (k >= config_.max_seed_length)
+        return ExactSeeder::get_seeds();
 
     if (num_matching_ < config_.min_exact_match * query_.size())
         return {};
@@ -377,7 +393,8 @@ auto MEMSeeder::get_seeds() const -> std::vector<Seed> {
             if (match_score > config_.min_cell_score) {
                 seeds.emplace_back(std::string_view(begin_it, mem_length),
                                    std::vector<node_index>{ node_begin_it, node_end_it },
-                                   match_score, i,orientation_);
+                                   std::string(begin_it, begin_it + mem_length),
+                                   match_score, i, orientation_);
                 assert(seeds.back().is_valid(graph_, &config_));
             }
         }
@@ -388,6 +405,17 @@ auto MEMSeeder::get_seeds() const -> std::vector<Seed> {
     return seeds;
 }
 
+template <class BaseSeeder>
+const DBGSuccinct& SuffixSeeder<BaseSeeder>
+::get_base_dbg_succ(const DeBruijnGraph &graph) {
+    try {
+        return dynamic_cast<const DBGSuccinct&>(graph.get_base_graph());
+
+    } catch (const std::bad_cast &e) {
+        common::logger->error("SuffixSeeder can be used only with succinct graph representation");
+        throw e;
+    }
+}
 
 template class SuffixSeeder<ExactSeeder>;
 template class SuffixSeeder<UniMEMSeeder>;

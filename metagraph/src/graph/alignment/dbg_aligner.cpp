@@ -1,18 +1,16 @@
 #include "dbg_aligner.hpp"
 
-#include "aligner_aggregator.hpp"
+#include "common/algorithms.hpp"
+#include "graph/representation/rc_dbg.hpp"
 
 namespace mtg {
 namespace graph {
 namespace align {
 
+
 QueryAlignment IDBGAligner::align(std::string_view query, bool is_reverse_complement) const {
     QueryAlignment result(query);
-    std::string empty_header;
-    align_batch(
-        [&](const QueryCallback &callback) {
-            callback(empty_header, query, is_reverse_complement);
-        },
+    align_batch({ Query{ std::string{}, query, is_reverse_complement} },
         [&](std::string_view, QueryAlignment&& alignment) {
             result = std::move(alignment);
         }
@@ -21,176 +19,189 @@ QueryAlignment IDBGAligner::align(std::string_view query, bool is_reverse_comple
     return result;
 }
 
-void IDBGAligner
-::align_batch(const std::vector<std::pair<std::string, std::string>> &seq_batch,
-              const AlignmentCallback &callback) const {
-    align_batch([&](const QueryCallback &query_callback) {
-        for (const auto &[header, seq] : seq_batch) {
-            query_callback(header, seq, false /* orientation of seq */);
-        }
-    }, callback);
+template <class AlignmentCompare>
+ISeedAndExtendAligner<AlignmentCompare>
+::ISeedAndExtendAligner(const DeBruijnGraph &graph, const DBGAlignerConfig &config)
+      : graph_(graph), config_(config) {
+    if (!config_.min_seed_length)
+        config_.min_seed_length = graph_.get_k();
+
+    if (!config_.max_seed_length)
+        config_.max_seed_length = graph_.get_k();
+
+    assert(config_.max_seed_length >= config_.min_seed_length);
+    assert(config_.num_alternative_paths);
+    assert(graph_.get_mode() != DeBruijnGraph::PRIMARY
+        && "primary graphs must be wrapped into canonical");
+
+    if (!config_.check_config_scores())
+        throw std::runtime_error("Error: sum of min_cell_score and lowest penalty too low.");
 }
 
 template <class AlignmentCompare>
-void SeedAndExtendAlignerCore<AlignmentCompare>
+void ISeedAndExtendAligner<AlignmentCompare>
+::align_batch(const std::vector<IDBGAligner::Query> &seq_batch,
+              const AlignmentCallback &callback) const {
+    for (const auto &[header, query, is_reverse_complement] : seq_batch) {
+        QueryAlignment paths(query, is_reverse_complement);
+        Aggregator aggregator(paths.get_query(false), paths.get_query(true), config_);
+
+        auto add_alignment = [&](Alignment&& alignment) {
+            assert(alignment.is_valid(graph_, &config_));
+            aggregator.add_alignment(std::move(alignment));
+        };
+
+        auto get_min_path_score = [&](const Alignment &seed) {
+            return aggregator.get_min_path_score(seed);
+        };
+
+        std::string_view this_query = paths.get_query(is_reverse_complement);
+        assert(this_query == query);
+
+        std::vector<node_index> nodes = map_sequence_to_nodes(graph_, query);
+
+        auto seeder = build_seeder(this_query, is_reverse_complement, nodes);
+        auto extender = build_extender(this_query, aggregator);
+
+        size_t num_explored_nodes = 0;
+
+#if ! _PROTEIN_GRAPH
+        if (graph_.get_mode() == DeBruijnGraph::CANONICAL
+                || config_.forward_and_reverse_complement) {
+            std::vector<node_index> nodes_rc(nodes);
+            std::string dummy(query);
+            reverse_complement_seq_path(graph_, dummy, nodes_rc);
+            assert(dummy == paths.get_query(!is_reverse_complement));
+            assert(nodes_rc.size() == nodes.size());
+
+            std::string_view reverse = paths.get_query(!is_reverse_complement);
+
+            auto seeder_rc = build_seeder(reverse, !is_reverse_complement, nodes_rc);
+            auto extender_rc = build_extender(reverse, aggregator);
+
+            align_both_directions(paths.get_query(false), paths.get_query(true),
+                                  *seeder, *seeder_rc, *extender, *extender_rc,
+                                  add_alignment, get_min_path_score);
+
+            num_explored_nodes += extender_rc->num_explored_nodes();
+
+        } else {
+            align_core(this_query, *seeder, *extender, add_alignment, get_min_path_score);
+        }
+#else
+        align_core(this_query, *seeder, *extender, add_alignment, get_min_path_score);
+#endif
+
+        num_explored_nodes += extender->num_explored_nodes();
+
+        for (auto&& alignment : aggregator.get_alignments()) {
+            assert(alignment.is_valid(graph_, &config_));
+            paths.emplace_back(std::forward<decltype(alignment)>(alignment));
+        }
+
+        common::logger->trace(
+            "{}\tlength: {}\texplored nodes: {}\texplored nodes/k-mer: {}",
+            header, query.size(), num_explored_nodes,
+            static_cast<double>(num_explored_nodes) / nodes.size()
+        );
+
+        callback(header, std::move(paths));
+    };
+}
+
+template <class AlignmentCompare>
+void ISeedAndExtendAligner<AlignmentCompare>
 ::align_core(std::string_view query,
              const ISeeder &seeder,
              IExtender &extender,
-             const LocalAlignmentCallback &callback,
-             const MinScoreComputer &get_min_path_score) const {
-    bool filter_seeds = dynamic_cast<const ExactSeeder*>(&seeder);
-
-    std::vector<Alignment> seeds = seeder.get_seeds();
-    std::sort(seeds.begin(), seeds.end(), LocalAlignmentGreater());
-
-    for (Alignment &seed : seeds) {
-        score_t min_path_score = get_min_path_score(seed);
-
-        // check if this seed has been explored before in an alignment and discard
-        // it if so
-        if (filter_seeds) {
-            size_t found_count = 0;
-            std::pair<size_t, size_t> idx_range {
-                seed.get_clipping(),
-                seed.get_clipping() + graph_.get_k() - seed.get_offset()
-            };
-            for (node_index node : seed) {
-                auto emplace = visited_nodes_.emplace(node, idx_range);
-                auto &range = emplace.first.value();
-                if (emplace.second) {
-                } else if (range.first > idx_range.first || range.second < idx_range.second) {
-                    DEBUG_LOG("Node: {}; Prev_range: [{},{})", node, range.first, range.second);
-                    range.first = std::min(range.first, idx_range.first);
-                    range.second = std::max(range.second, idx_range.second);
-                    DEBUG_LOG("Node: {}; cur_range: [{},{})", node, range.first, range.second);
-                } else {
-                    ++found_count;
-                }
-
-                if (idx_range.second - idx_range.first == graph_.get_k())
-                    ++idx_range.first;
-
-                ++idx_range.second;
-            }
-
-            if (found_count == seed.size()) {
-                DEBUG_LOG("Skipping seed: {}", seed);
-                continue;
-            }
-        }
-
-        if (seed.get_query().data() + seed.get_query().size()
-                == query.data() + query.size()) {
-            if (seed.get_score() >= min_path_score) {
-                seed.trim_offset();
-                assert(seed.is_valid(graph_, &config_));
-                DEBUG_LOG("Alignment: {}", seed);
-                callback(std::move(seed));
-            }
-
+             const std::function<void(Alignment&&)> &callback,
+             const std::function<score_t(const Alignment&)> &get_min_path_score) const {
+    for (Alignment &seed : seeder.get_seeds()) {
+        if (seed.empty())
             continue;
-        }
+
+        score_t min_path_score = get_min_path_score(seed);
 
         DEBUG_LOG("Min path score: {}\tSeed: {}", min_path_score, seed);
 
-        extender.initialize(seed);
-        auto extensions = extender.get_extensions(min_path_score);
-
-        // if the ManualSeeder is not used, then add nodes to the visited_nodes_
-        // table to allow for seed filtration
-        if (filter_seeds) {
-            extender.call_visited_nodes([&](node_index node, size_t begin, size_t end) {
-                auto emplace = visited_nodes_.emplace(node, std::make_pair(begin, end));
-                auto &range = emplace.first.value();
-                if (!emplace.second) {
-                    range.first = std::min(range.first, begin);
-                    range.second = std::max(range.second, end);
-                }
-            });
-        }
+        auto extensions = extender.get_extensions(seed, min_path_score);
 
         if (extensions.empty() && seed.get_score() >= min_path_score) {
             seed.extend_query_end(query.data() + query.size());
             seed.trim_offset();
-            assert(seed.is_valid(graph_, &config_));
             DEBUG_LOG("Alignment (seed): {}", seed);
             callback(std::move(seed));
         }
 
-        for (auto&& extension : extensions) {
-            assert(extension.is_valid(graph_, &config_));
+        for (Alignment &extension : extensions) {
+            DEBUG_LOG("Alignment (extension): {}", extension);
             callback(std::move(extension));
         }
     }
 }
 
 template <class AlignmentCompare>
-void SeedAndExtendAlignerCore<AlignmentCompare>
-::align_one_direction(QueryAlignment &paths,
-                      bool orientation_to_align,
-                      const ISeeder &seeder,
-                      IExtender&& extender) const {
-    std::string_view query = paths.get_query(orientation_to_align);
-
-    align_aggregate(paths, [&](const auto &alignment_callback,
-                               const auto &get_min_path_score) {
-        align_core(query, seeder, extender, alignment_callback, get_min_path_score);
-    });
-}
-
-template <class AlignmentCompare>
-void SeedAndExtendAlignerCore<AlignmentCompare>
-::align_best_direction(QueryAlignment &paths,
-                       const ISeeder &seeder,
-                       const ISeeder &seeder_rc,
-                       IExtender&& extender,
-                       IExtender&& extender_rc) const {
-    std::string_view forward = paths.get_query();
-    std::string_view reverse = paths.get_query(true);
-
-    align_aggregate(paths, [&](const auto &alignment_callback,
-                               const auto &get_min_path_score) {
-        align_core(forward, seeder, extender, alignment_callback, get_min_path_score);
-        align_core(reverse, seeder_rc, extender_rc, alignment_callback, get_min_path_score);
-    });
-}
-
-template <class AlignmentCompare>
-void SeedAndExtendAlignerCore<AlignmentCompare>
-::align_both_directions(QueryAlignment &paths,
+void ISeedAndExtendAligner<AlignmentCompare>
+::align_both_directions(std::string_view forward,
+                        std::string_view reverse,
                         const ISeeder &forward_seeder,
                         const ISeeder &reverse_seeder,
-                        IExtender&& forward_extender,
-                        IExtender&& reverse_extender,
-                        const AlignCoreGenerator &rev_comp_core_generator) const {
-    std::string_view forward = paths.get_query();
-    std::string_view reverse = paths.get_query(true);
+                        IExtender &forward_extender,
+                        IExtender &reverse_extender,
+                        const std::function<void(Alignment&&)> &callback,
+                        const std::function<score_t(const Alignment&)> &get_min_path_score) const {
+#if _PROTEIN_GRAPH
+    assert(false && "Only alignment in one direction supported for Protein graphs");
+#endif
 
-    align_aggregate(paths, [&](const auto &alignment_callback,
-                               const auto &get_min_path_score) {
-        auto get_forward_alignments = [&](std::string_view query,
-                                          std::string_view query_rc,
-                                          const ISeeder &seeder,
-                                          IExtender &extender) {
-            std::vector<Alignment> rc_of_alignments;
+    RCDBG rc_dbg(graph_);
+    bool use_rcdbg = graph_.get_mode() != DeBruijnGraph::CANONICAL
+                        && config_.forward_and_reverse_complement;
 
-            DEBUG_LOG("Extending in forwards direction");
-            align_core(query, seeder, extender, [&](Alignment&& path) {
+    const DeBruijnGraph &rc_graph = use_rcdbg ? rc_dbg : graph_;
+
+    auto is_reversible = [this](const Alignment &alignment) {
+        return graph_.get_mode() == DeBruijnGraph::CANONICAL
+            && alignment.get_orientation()
+            && !alignment.get_offset();
+    };
+
+    auto get_forward_alignments = [&](std::string_view query,
+                                      std::string_view query_rc,
+                                      const ISeeder &seeder,
+                                      IExtender &extender) {
+        size_t farthest_reach = 0;
+        score_t max_score = config_.min_cell_score;
+        std::vector<Alignment> rc_of_alignments;
+
+        DEBUG_LOG("Extending in forwards direction");
+        align_core(query, seeder, extender,
+            [&](Alignment&& path) {
                 score_t min_path_score = get_min_path_score(path);
 
-                if (path.get_score() >= min_path_score)
-                    alignment_callback(Alignment(path));
+                farthest_reach = std::max(farthest_reach,
+                                          path.get_query().size() + path.get_clipping());
+                max_score = std::max(max_score, path.get_score());
 
-                if (!path.get_clipping())
+                if (path.get_score() >= min_path_score) {
+                    if (is_reversible(path)) {
+                        Alignment out_path = path;
+                        out_path.reverse_complement(graph_, query_rc);
+                        assert(out_path.size());
+                        callback(std::move(out_path));
+                    } else {
+                        callback(Alignment(path));
+                    }
+                }
+
+                if (!path.get_clipping() || path.get_offset())
                     return;
 
-                auto rev = path;
-                rev.reverse_complement(graph_, query_rc);
-                if (rev.empty()) {
-                    DEBUG_LOG("Alignment cannot be reversed, returning");
-                    if (path.get_score() >= min_path_score)
-                        alignment_callback(std::move(path));
+                Alignment rev = path;
+                rev.reverse_complement(rc_graph, query_rc);
 
+                if (rev.empty()) {
+                    DEBUG_LOG("This local alignment cannot be reversed, skipping");
                     return;
                 }
 
@@ -198,61 +209,68 @@ void SeedAndExtendAlignerCore<AlignmentCompare>
                 // alignment can proceed
                 assert(rev.get_end_clipping());
                 rev.trim_end_clipping();
-                assert(rev.is_valid(graph_, &config_));
+
+                assert(rev.is_valid(rc_graph, &config_));
 
                 // Pass the reverse complement of the forward alignment
                 // as a seed for extension
                 rc_of_alignments.emplace_back(std::move(rev));
-            }, [&](const auto&) { return config_.min_cell_score; });
-
-            return rc_of_alignments;
-        };
-
-        std::vector<Alignment> rc_of_reverse = get_forward_alignments(
-            reverse, forward, reverse_seeder, reverse_extender
-        );
-        std::vector<Alignment> rc_of_forward = get_forward_alignments(
-            forward, reverse, forward_seeder, forward_extender
+            },
+            [&](const Alignment &seed) {
+                return seed.get_clipping() <= farthest_reach
+                    && config_.rel_score_cutoff > 0
+                        ? max_score * config_.rel_score_cutoff
+                        : config_.min_cell_score;
+            }
         );
 
-        auto extend_reverse = [&](std::string_view query_rc,
-                                  const ISeeder &seeder,
-                                  std::vector<Alignment>&& rc_of_alignments) {
-            DEBUG_LOG("Extending in reverse direction");
-            rev_comp_core_generator(query_rc, seeder, std::move(rc_of_alignments),
-                                    [&](const auto &seeder_rc, auto&& extender_rc) {
-                align_core(query_rc, seeder_rc, extender_rc,
-                           alignment_callback, get_min_path_score);
-            });
-        };
+        std::sort(rc_of_alignments.begin(), rc_of_alignments.end(),
+                  LocalAlignmentGreater());
 
-        extend_reverse(forward, reverse_seeder, std::move(rc_of_reverse));
-        extend_reverse(reverse, forward_seeder, std::move(rc_of_forward));
-    });
+        return rc_of_alignments;
+    };
+
+    ManualSeeder rc_of_reverse(get_forward_alignments(
+        reverse, forward, reverse_seeder, reverse_extender
+    ));
+
+    ManualSeeder rc_of_forward(get_forward_alignments(
+        forward, reverse, forward_seeder, forward_extender
+    ));
+
+    auto finish_alignment = [&](std::string_view query,
+                                std::string_view query_rc,
+                                const ManualSeeder &seeder,
+                                IExtender &extender) {
+        if (use_rcdbg)
+            extender.set_graph(rc_dbg);
+
+        align_core(query_rc, seeder, extender,
+            [&](Alignment&& path) {
+                if (use_rcdbg || is_reversible(path)) {
+                    path.reverse_complement(rc_graph, query);
+                    if (path.empty())
+                        return;
+                }
+
+                assert(path.is_valid(graph_, &config_));
+                callback(std::move(path));
+            },
+            get_min_path_score
+        );
+    };
+
+    if (rc_of_forward.data().size() && (rc_of_reverse.data().empty()
+            || rc_of_forward.data()[0].get_score() >= rc_of_reverse.data()[0].get_score())) {
+        finish_alignment(forward, reverse, rc_of_forward, reverse_extender);
+        finish_alignment(reverse, forward, rc_of_reverse, forward_extender);
+    } else {
+        finish_alignment(reverse, forward, rc_of_reverse, forward_extender);
+        finish_alignment(forward, reverse, rc_of_forward, reverse_extender);
+    }
 }
 
-template <class AlignmentCompare>
-void SeedAndExtendAlignerCore<AlignmentCompare>
-::align_aggregate(QueryAlignment &paths,
-                  const AlignmentGenerator &alignment_generator) const {
-    AlignmentAggregator<AlignmentCompare> path_queue(
-        paths.get_query() /* forward */,
-        paths.get_query(true) /* reverse complement */,
-        config_
-    );
-
-    alignment_generator(
-        [&](Alignment&& alignment) { path_queue.add_alignment(std::move(alignment)); },
-        [&](const Alignment &seed) { return path_queue.get_min_path_score(seed); }
-    );
-
-    path_queue.call_alignments([&](auto&& alignment) {
-        assert(alignment.is_valid(graph_, &config_));
-        paths.emplace_back(std::move(alignment));
-    });
-}
-
-template class SeedAndExtendAlignerCore<>;
+template class ISeedAndExtendAligner<>;
 
 } // namespace align
 } // namespace graph
