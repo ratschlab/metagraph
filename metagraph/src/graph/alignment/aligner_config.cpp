@@ -98,6 +98,9 @@ DBGAlignerConfig::score_t DBGAlignerConfig
                 score += gap_opening_penalty + (op.second - 1) * gap_extension_penalty;
                 ref_it += op.second;
             } break;
+            case Cigar::NODE_INSERTION: {
+                score += gap_opening_penalty + (op.second - 1) * gap_extension_penalty;
+            } break;
         }
     }
 

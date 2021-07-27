@@ -44,7 +44,7 @@ void ISeedAndExtendAligner<AlignmentCompare>
               const AlignmentCallback &callback) const {
     for (const auto &[header, query, is_reverse_complement] : seq_batch) {
         QueryAlignment paths(query, is_reverse_complement);
-        Aggregator aggregator(paths.get_query(false), paths.get_query(true), config_);
+        Aggregator aggregator(graph_, paths.get_query(false), paths.get_query(true), config_);
 
         auto add_alignment = [&](Alignment&& alignment) {
             assert(alignment.is_valid(graph_, &config_));

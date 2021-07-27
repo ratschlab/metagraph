@@ -20,7 +20,8 @@ class Cigar {
         MISMATCH,
         MATCH,
         DELETION,
-        INSERTION
+        INSERTION,
+        NODE_INSERTION
     };
 
     typedef uint32_t LengthType;
@@ -103,7 +104,7 @@ class Cigar {
     static constexpr char opt_to_char(Cigar::Operator op) { return op_str_[op]; }
 
   private:
-    static constexpr char op_str_[] = "SX=DIN";
+    static constexpr char op_str_[] = "SX=DIG";
     std::vector<value_type> cigar_;
 };
 
