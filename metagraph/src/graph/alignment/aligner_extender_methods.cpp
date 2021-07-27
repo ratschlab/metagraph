@@ -639,7 +639,7 @@ std::vector<Alignment> DefaultColumnExtender
     ssize_t seed_offset = static_cast<ssize_t>(this->seed_->get_offset() - 1);
     ssize_t k_minus_1 = graph_->get_k() - 1;
 
-    std::vector<std::tuple<score_t, ssize_t, size_t>> indices;
+    std::vector<std::tuple<score_t, ssize_t, ssize_t>> indices;
     indices.reserve(table.size());
     for (size_t i = 1; i < table.size(); ++i) {
         const auto &[S, E, F, node, j_prev, c, offset, max_pos, trim] = table[i];
@@ -654,27 +654,32 @@ std::vector<Alignment> DefaultColumnExtender
                 && offset >= k_minus_1
                 && S[pos] == S_p[pos_p] + profile_score_.find(c)->second[seed_clipping + max_pos]
                 && profile_op_.find(c)->second[seed_clipping + max_pos] == Cigar::MATCH) {
-            indices.emplace_back(-S[pos], std::abs(max_pos - offset + seed_offset), i);
+            indices.emplace_back(S[pos], -std::abs(max_pos - offset + seed_offset), -i);
         }
     }
 
     // find highest scoring which is closest to the diagonal
-    std::sort(indices.begin(), indices.end());
+    // use heap sort to make this run in O(n + (num_alternative_paths) * log(n)) time
+    std::make_heap(indices.begin(), indices.end());
 
-    for (const auto &[neg_score, off_diag, j_start] : indices) {
+    for (auto it = indices.rbegin(); it != indices.rend(); ++it) {
+        std::pop_heap(indices.begin(), it.base());
+
         if (terminate_backtrack_start(extensions))
             break;
 
-        if (skip_backtrack_start(j_start))
+        const auto &[start_score, neg_off_diag, neg_j_start] = *it;
+        size_t j = -neg_j_start;
+
+        if (skip_backtrack_start(j))
             continue;
 
         std::vector<DeBruijnGraph::node_index> path;
         std::vector<size_t> trace;
         Cigar ops;
         std::string seq;
-        score_t score = -neg_score;
+        score_t score = start_score;
 
-        size_t j = j_start;
         ssize_t pos = std::get<7>(table[j]);
         ssize_t end_pos = pos;
         size_t align_offset = this->seed_->get_offset();
