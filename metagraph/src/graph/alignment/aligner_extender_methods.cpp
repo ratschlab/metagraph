@@ -363,6 +363,7 @@ std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score) {
     assert(this->seed_);
 
     table.clear();
+    table_size_bytes_ = sizeof(table);
     prev_starts.clear();
 
     size_t start = this->seed_->get_clipping();
@@ -386,6 +387,13 @@ std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score) {
         auto &[S, E, F, node, i_prev, c, offset, max_pos, trim] = table[0];
         S[0] = 0;
         extend_ins_end(S, E, F, window.size() + 1 - trim, xdrop_cutoff, config_);
+
+        static_assert(std::is_same_v<decltype(table)::value_type, Column>);
+        static_assert(std::is_same_v<decltype(S)::value_type, score_t>);
+        static_assert(std::is_same_v<decltype(E)::value_type, score_t>);
+        static_assert(std::is_same_v<decltype(F)::value_type, score_t>);
+
+        table_size_bytes_ = sizeof(Column) + S.capacity() * sizeof(score_t) * 3;
     }
 
     // The nodes in the traversal (with corresponding score columns) are sorted by
@@ -425,8 +433,19 @@ std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score) {
                 next_offset = offset + 1;
 
                 // if too many nodes have been explored, give up
-                if (static_cast<double>(table.size()) / window.size() >= config_.max_nodes_per_seq_char)
+                if (static_cast<double>(table.size()) / window.size()
+                        >= config_.max_nodes_per_seq_char) {
+                    DEBUG_LOG("Alignment node limit reached, stopping extension");
+                    queue = std::priority_queue<TableIt>();
                     continue;
+                }
+
+                if (static_cast<double>(table_size_bytes_) / 1'000'000
+                        > config_.max_ram_per_alignment) {
+                    DEBUG_LOG("Alignment RAM limit reached, stopping extension");
+                    queue = std::priority_queue<TableIt>();
+                    continue;
+                }
 
                 // determine maximal range within the xdrop score cutoff
                 auto in_range = [xdrop_cutoff](score_t s) { return s >= xdrop_cutoff; };
@@ -529,6 +548,13 @@ std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score) {
                     table.pop_back();
                     continue;
                 }
+
+                static_assert(std::is_same_v<decltype(table)::value_type, Column>);
+                static_assert(std::is_same_v<decltype(S)::value_type, score_t>);
+                static_assert(std::is_same_v<decltype(E)::value_type, score_t>);
+                static_assert(std::is_same_v<decltype(F)::value_type, score_t>);
+
+                table_size_bytes_ += sizeof(Column) + S.capacity() * sizeof(score_t) * 3;
 
                 // if the best score in this column is above the xdrop score
                 // then check if the extension can continue
