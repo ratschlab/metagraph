@@ -154,26 +154,58 @@ class LabeledBacktrackingExtender : public DefaultColumnExtender {
     virtual ~LabeledBacktrackingExtender() {}
 
   protected:
-    virtual std::vector<Alignment> extend(score_t min_path_score, bool force_fixed_seed) override;
+    virtual std::vector<Alignment> extend(score_t min_path_score,
+                                          bool force_fixed_seed) override final {
+        // the overridden backtrack populates extensions_, so this should return nothing
+        DefaultColumnExtender::extend(min_path_score, force_fixed_seed);
 
+        // fetch the alignments from extensions_
+        return extensions_.get_alignments();
+    }
+
+    // backtrack through the DP table to reconstruct alignments
+    virtual std::vector<Alignment> backtrack(score_t min_path_score,
+                                             std::string_view window) override final {
+        // extract all labels for explored nodes
+        labeled_graph_.flush();
+
+        // reset the per-node temporary label storage
+        diff_target_sets_.clear();
+
+        // run backtracking
+        return DefaultColumnExtender::backtrack(min_path_score, window);
+    }
+
+    // overrides for backtracking helpers
     virtual bool terminate_backtrack_start(const std::vector<Alignment> &) const override final { return false; }
-
     virtual bool terminate_backtrack() const override final { return target_intersection_.empty(); }
-
     virtual bool skip_backtrack_start(size_t i) override final;
 
     virtual bool update_seed_filter(node_index node,
                                     size_t query_start,
                                     const score_t *s_begin,
-                                    const score_t *s_end) override final;
+                                    const score_t *s_end) override final {
+        if (SeedFilteringExtender::update_seed_filter(node, query_start, s_begin, s_end)) {
+            // if this node was explored, add it to the buffer
+            labeled_graph_.add_node(node);
+            return true;
+        } else {
+            return false;
+        }
+    }
 
+    // since multi-node seeds may span across different labels, we no longer
+    // want the restriction that the seed must be a prefix of the extended alignment
     virtual bool fixed_seed() const override final { return false; }
 
+    // this override ensures that outgoing nodes are label- and coordinate-consistent
+    // (when applicable)
     virtual void call_outgoing(node_index node,
                                size_t max_prefetch_distance,
                                const std::function<void(node_index, char)> &callback,
                                size_t table_idx) override final;
 
+    // this method calls multiple label-consistent alignments by backtracking
     virtual void call_alignments(score_t cur_cell_score,
                                  score_t end_score,
                                  score_t min_path_score,
@@ -205,17 +237,11 @@ class LabeledBacktrackingExtender : public DefaultColumnExtender {
     // called from this node, then we can restrict it to these labels.
     tsl::hopscotch_map<size_t, Vector<Column>> diff_target_sets_;
 
+    // we don't want to chain alignments in the local set of alignments, so
+    // this generates a modified config for the local aggregator
     static DBGAlignerConfig disable_chaining(DBGAlignerConfig config) {
         config.chain_alignments = false;
         return config;
-    }
-
-    // backtrack through the DP table to reconstruct alignments
-    virtual std::vector<Alignment> backtrack(score_t min_path_score,
-                                             std::string_view window) override final {
-        labeled_graph_.flush();
-        diff_target_sets_.clear();
-        return DefaultColumnExtender::backtrack(min_path_score, window);
     }
 };
 

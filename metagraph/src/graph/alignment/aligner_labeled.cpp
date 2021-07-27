@@ -205,18 +205,6 @@ void DynamicLabeledGraph::add_node(node_index node) {
     add_path({ node }, std::string(anno_graph_.get_graph().get_k(), '#'));
 }
 
-bool LabeledBacktrackingExtender::update_seed_filter(node_index node,
-                                                     size_t query_start,
-                                                     const score_t *s_begin,
-                                                     const score_t *s_end) {
-    if (SeedFilteringExtender::update_seed_filter(node, query_start, s_begin, s_end)) {
-        labeled_graph_.add_node(node);
-        return true;
-    } else {
-        return false;
-    }
-}
-
 bool LabeledBacktrackingExtender::skip_backtrack_start(size_t i) {
     target_intersection_.clear();
 
@@ -447,13 +435,6 @@ void LabeledBacktrackingExtender
             extensions_.add_alignment(std::move(alignment));
         }
     }
-}
-
-std::vector<Alignment> LabeledBacktrackingExtender
-::extend(score_t min_path_score, bool force_fixed_seed) {
-    extensions_.clear();
-    DefaultColumnExtender::extend(min_path_score, force_fixed_seed);
-    return extensions_.get_alignments();
 }
 
 template class ILabeledAligner<>;
