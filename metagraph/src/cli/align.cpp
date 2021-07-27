@@ -389,6 +389,7 @@ int align_to_graph(Config *config) {
 
     // initialize graph
     auto graph = load_critical_dbg(config->infbase);
+    auto base_graph = graph;
 
     if (utils::ends_with(config->outfbase, ".gfa")) {
         gfa_map_files(config, files, *graph);
@@ -442,7 +443,7 @@ int align_to_graph(Config *config) {
     std::shared_ptr<AnnotatedDBG::Annotator> annotator;
     if (config->infbase_annotators.size()) {
         assert(config->infbase_annotators.size() == 1);
-        annotator = initialize_annotated_dbg(graph, *config)->get_annotation_ptr();
+        annotator = initialize_annotated_dbg(base_graph, *config)->get_annotation_ptr();
     }
 
     for (const auto &file : files) {
