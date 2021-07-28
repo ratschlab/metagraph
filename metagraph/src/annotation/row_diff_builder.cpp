@@ -16,6 +16,7 @@ const uint64_t BLOCK_SIZE = 1 << 25;
 const uint64_t BUFFER_SIZE = 1024 * 1024; // 1 MiB
 const uint64_t ROW_REDUCTION_WIDTH = 32;
 const uint32_t MAX_NUM_FILES_OPEN = 2000;
+const uint64_t MAX_COLUMNS_IN_BATCH = 1'000'000;
 
 
 namespace mtg {
@@ -796,13 +797,8 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
         }
     }
 
+    const bool swap_disk = !swap_dir.empty();
     fs::path tmp_path;
-    bool swap_disk = !swap_dir.empty();
-    if (swap_disk) {
-        tmp_path = utils::create_temp_dir(swap_dir, "col");
-    } else {
-        logger->info("Diff-transform in memory without disk swap");
-    }
 
     // stores the row indices that were set because of differences to incoming/outgoing
     // edges, for each of the sources, per chunk. set_rows_fwd is already sorted
@@ -817,47 +813,71 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
     };
     auto dump_chunk_to_disk = [&](std::vector<T> &v, size_t s, size_t j, size_t chunk) {
         if (!swap_disk)
-            return;
-        std::sort(v.begin(), v.end());
+            return; // no swap -> nothing to dump
+
+        if (chunk == 0) {
+            assert(std::is_sorted(v.begin(), v.end()));
+        } else {
+            std::sort(v.begin(), v.end());
+        }
         Encoder<T>::append_block(v, tmp_file(s, j, chunk));
         row_diff_bits[s][j] += v.size();
         v.resize(0);
     };
 
-    const uint32_t chunks_open_per_thread
-            = MAX_NUM_FILES_OPEN / std::max((uint32_t)1, num_threads) / (2 + with_values);
-    if (chunks_open_per_thread < 3) {
-        logger->error("Can't merge with less than 3 chunks per thread open. "
-                      "Max num files open: {}. Current number of threads: {}.",
-                      MAX_NUM_FILES_OPEN, num_threads);
-        exit(1);
-    }
+    std::function<std::function<void(const std::function<void(uint64_t)> &)>(size_t, size_t)> call_diffs;
+    if (swap_disk) {
+        uint64_t total_num_labels = 0;
+        for (size_t s = 0; s < sources.size(); ++s) {
+            total_num_labels += sources[s].num_labels();
+        }
 
-    using CallOnes = std::function<void(const std::function<void(uint64_t)> &)>;
-    std::function<CallOnes(size_t, size_t)> call_ones = [&](size_t s, size_t j) {
-        CallOnes caller = [&,s,j](const std::function<void(uint64_t)> &call) {
-            std::vector<std::string> filenames;
-            // skip chunk with fwd bits which have already been counted if stage 1
-            for (uint32_t chunk = compute_row_reduction ? 1 : 0;
-                                chunk < num_chunks[s][j]; ++chunk) {
-                filenames.push_back(tmp_file(s, j, chunk));
-            }
+        if (total_num_labels > MAX_COLUMNS_IN_BATCH / 2) {
+            logger->warn("The number of columns to transform is large: {}."
+                         " Consider disabling disk swap (pass --disk-swap \"\").",
+                         total_num_labels);
+        }
+        if (total_num_labels > MAX_COLUMNS_IN_BATCH) {
+            logger->error("Too many columns to transform with disk swap: {} (> MAX {}).",
+                          total_num_labels, MAX_COLUMNS_IN_BATCH);
+            exit(1);
+        }
+        tmp_path = utils::create_temp_dir(swap_dir, "col");
 
-            const bool remove_chunks = true;
-            uint64_t r = 0;
-            elias_fano::merge_files<T>(filenames, [&](T v) {
-                call(utils::get_first(v));
-                if constexpr(with_values) {
-                    assert(v.second && "zero diffs must have been skipped");
-                    values[s][j][r++] = matrix::encode_diff(v.second);
+        const uint32_t chunks_open_per_thread
+                = MAX_NUM_FILES_OPEN / std::max((uint32_t)1, num_threads) / (2 + with_values);
+        if (chunks_open_per_thread < 3) {
+            logger->error("Can't merge with less than 3 chunks per thread open. "
+                          "Max num files open: {}. Current number of threads: {}.",
+                          MAX_NUM_FILES_OPEN, num_threads);
+            exit(1);
+        }
+
+        call_diffs = [&,chunks_open_per_thread](size_t s, size_t j) {
+            return [&,s,j](const std::function<void(uint64_t)> &call) {
+                std::vector<std::string> filenames;
+                // skip chunk with fwd bits which have already been counted if stage 1
+                for (uint32_t chunk = compute_row_reduction ? 1 : 0;
+                                    chunk < num_chunks[s][j]; ++chunk) {
+                    filenames.push_back(tmp_file(s, j, chunk));
                 }
-            }, remove_chunks, chunks_open_per_thread);
+
+                const bool remove_chunks = true;
+                uint64_t r = 0;
+                elias_fano::merge_files<T>(filenames, [&](T v) {
+                    call(utils::get_first(v));
+                    if constexpr(with_values) {
+                        assert(v.second && "zero diffs must have been skipped");
+                        values[s][j][r++] = matrix::encode_diff(v.second);
+                    }
+                }, remove_chunks, chunks_open_per_thread);
+            };
         };
-        return caller;
-    };
-    if (!swap_disk) {
-        call_ones = [&](size_t s, size_t j) {
-            CallOnes caller = [&,s,j](const std::function<void(uint64_t)> &call) {
+    } else {
+        logger->info("Diff-transform in memory without disk swap");
+
+        call_diffs = [&](size_t s, size_t j) {
+            return [&,s,j](const std::function<void(uint64_t)> &call) {
                 auto &v = set_rows_fwd[s][j];
                 v.insert(v.end(), set_rows_bwd[s][j].begin(), set_rows_bwd[s][j].end());
                 set_rows_bwd[s][j] = {};
@@ -873,7 +893,6 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                     }
                 }
             };
-            return caller;
         };
     }
 
@@ -1087,7 +1106,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                                                       std::min(values[l_idx][j].width() + 1, 64));
             }
 
-            columns[j] = std::make_unique<bit_vector_smart>(call_ones(l_idx, j), num_rows,
+            columns[j] = std::make_unique<bit_vector_smart>(call_diffs(l_idx, j), num_rows,
                                                             row_diff_bits[l_idx][j]);
         }
 
