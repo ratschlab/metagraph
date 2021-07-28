@@ -156,6 +156,10 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
                                      int32_t match_score = 1,
                                      int32_t mismatch_score = 2) const;
 
+    void call_annotated_rows(const std::vector<node_index> &rows,
+                             std::function<void(const std::string&)> callback_cell,
+                             std::function<void()> callback_row) const;
+
   private:
     DeBruijnGraph &dbg_;
 };
