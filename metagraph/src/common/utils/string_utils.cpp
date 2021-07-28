@@ -11,7 +11,7 @@ bool starts_with(const std::string &str, const std::string &prefix) {
     if (prefix.size() > str.size()) {
         return false;
     }
-    return prefix == std::string_view(str).substr(0, prefix.size());
+    return prefix == str.substr(0, static_cast<int>(prefix.size()));
 }
 
 bool ends_with(const std::string &str, const std::string &suffix) {
