@@ -832,23 +832,24 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
             total_num_labels += sources[s].num_labels();
         }
 
-        if (total_num_labels > MAX_COLUMNS_IN_BATCH / 2) {
-            logger->warn("The number of columns to transform is large: {}."
-                         " Consider disabling disk swap (pass --disk-swap \"\").",
-                         total_num_labels);
-        }
         if (total_num_labels > MAX_COLUMNS_IN_BATCH) {
-            logger->error("Too many columns to transform with disk swap: {} (> MAX {}).",
+            logger->error("Too many columns to transform with disk swap: {} (> MAX {})."
+                          " Disable disk swap (pass --disk-swap \"\").",
                           total_num_labels, MAX_COLUMNS_IN_BATCH);
             exit(1);
+        } else if (total_num_labels > MAX_COLUMNS_IN_BATCH / 2) {
+            logger->warn("The number of columns in batch is large: {}."
+                         " Consider disabling disk swap (pass --disk-swap \"\").",
+                         total_num_labels);
         }
         tmp_path = utils::create_temp_dir(swap_dir, "col");
 
         const uint32_t chunks_open_per_thread
                 = MAX_NUM_FILES_OPEN / std::max((uint32_t)1, num_threads) / (2 + with_values);
         if (chunks_open_per_thread < 3) {
-            logger->error("Can't merge with less than 3 chunks per thread open. "
-                          "Max num files open: {}. Current number of threads: {}.",
+            logger->error("Can't merge with less than 3 open chunks per thread. "
+                          "Max num files open: {}. Current number of threads: {}. "
+                          "Please reduce the number of threads.",
                           MAX_NUM_FILES_OPEN, num_threads);
             exit(1);
         }
