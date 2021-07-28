@@ -654,7 +654,8 @@ std::vector<Alignment> DefaultColumnExtender
                 && offset >= k_minus_1
                 && S[pos] == S_p[pos_p] + profile_score_.find(c)->second[seed_clipping + max_pos]
                 && profile_op_.find(c)->second[seed_clipping + max_pos] == Cigar::MATCH) {
-            indices.emplace_back(S[pos], -std::abs(max_pos - offset + seed_offset), -i);
+            indices.emplace_back(S[pos], -std::abs(max_pos - offset + seed_offset),
+                                 -static_cast<ssize_t>(i));
         }
     }
 
