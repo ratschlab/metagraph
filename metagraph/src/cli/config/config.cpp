@@ -158,6 +158,8 @@ Config::Config(int argc, char *argv[]) {
             set_num_threads(atoi(get_value(i++)));
         } else if (!strcmp(argv[i], "--parallel-nodes")) {
             parallel_nodes = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--threads-each")) {
+            parallel_each = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--max-path-length")) {
             max_path_length = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--parts-total")) {
@@ -200,6 +202,8 @@ Config::Config(int argc, char *argv[]) {
             discovery_fraction = std::stof(get_value(i++));
         } else if (!strcmp(argv[i], "--align-rel-score-cutoff")) {
             alignment_rel_score_cutoff = std::stof(get_value(i++));
+        } else if (!strcmp(argv[i], "--presence-fraction")) {
+            presence_fraction = std::stof(get_value(i++));
         } else if (!strcmp(argv[i], "--query-presence")) {
             query_presence = true;
         } else if (!strcmp(argv[i], "--query-coords")) {
@@ -270,8 +274,6 @@ Config::Config(int argc, char *argv[]) {
             anno_labels_delimiter = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--separately")) {
             separately = true;
-        } else if (!strcmp(argv[i], "--sequentially")) {
-            files_sequentially = true;
         } else if (!strcmp(argv[i], "--num-top-labels")) {
             num_top_labels = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--port")) {
@@ -598,6 +600,9 @@ Config::Config(int argc, char *argv[]) {
         print_usage_and_exit = true;
 
     if (discovery_fraction < 0 || discovery_fraction > 1)
+        print_usage_and_exit = true;
+
+    if (presence_fraction < 0 || presence_fraction > 1)
         print_usage_and_exit = true;
 
     if (min_count >= max_count) {
@@ -1089,7 +1094,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --mem-cap-gb [FLOAT]\tbuffer size in GB (per column in construction) [1]\n");
             fprintf(stderr, "\t-o --outfile-base [STR] basename of output file (or directory, for --separately) []\n");
             fprintf(stderr, "\t   --separately \tannotate each file independently and dump to the same directory [off]\n");
-            fprintf(stderr, "\t   --sequentially \tannotate files sequentially (each may use multiple threads) [off]\n");
+            fprintf(stderr, "\t   --threads-each [INT]\tnumber of threads to use when annotating each file with --separately [1]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --anno-filename \t\tinclude filenames as annotation labels [off]\n");
             fprintf(stderr, "\t   --anno-header \t\textract annotation labels from headers of sequences in files [off]\n");
@@ -1193,6 +1198,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --print-signature \t\tprint vectors indicating present/absent k-mers [off]\n");
             fprintf(stderr, "\t   --num-top-labels \t\tmaximum number of frequent labels to print [off]\n");
             fprintf(stderr, "\t   --discovery-fraction [FLOAT] fraction of labeled k-mers required for annotation [0.7]\n");
+            fprintf(stderr, "\t   --presence-fraction [FLOAT] \tfraction of k-mers required to be present in the graph [0.0]\n");
             fprintf(stderr, "\t   --labels-delimiter [STR]\tdelimiter for annotation labels [\":\"]\n");
             fprintf(stderr, "\t   --suppress-unlabeled \tdo not show results for sequences missing in graph [off]\n");
             // fprintf(stderr, "\t-d --distance [INT] \tmax allowed alignment distance [0]\n");

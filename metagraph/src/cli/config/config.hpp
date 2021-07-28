@@ -52,7 +52,6 @@ class Config {
     bool greedy_brwt = false;
     bool cluster_linkage = false;
     bool separately = false;
-    bool files_sequentially = false;
     bool map_sequences = false;
     bool align_sequences = false;
     bool align_only_forwards = false;
@@ -69,6 +68,7 @@ class Config {
     static const size_t kDefaultIndexSuffixLen;
     unsigned int node_suffix_length = kDefaultIndexSuffixLen;
     unsigned int distance = 0;
+    unsigned int parallel_each = 1;
     unsigned int parallel_nodes = -1;  // if not set, redefined by |parallel|
     unsigned int num_bins_per_thread = 1;
     unsigned int parts_total = 1;
@@ -123,6 +123,7 @@ class Config {
     double alignment_rel_score_cutoff = 0.8;
 
     double discovery_fraction = 0.7;
+    double presence_fraction = 0.0;
     double label_mask_in_fraction = 1.0;
     double label_mask_out_fraction = 0.0;
     double label_other_fraction = 1.0;

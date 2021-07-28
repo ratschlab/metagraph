@@ -102,6 +102,7 @@ class DefaultColumnExtender : public SeedFilteringExtender {
                               ssize_t /* trim (starting absolute index of array) */>;
     // e.g., the maximal value is located at S[std::get<7>(col) - std::get<8>(col)]
     std::vector<Column> table;
+    size_t table_size_bytes_;
 
     tsl::hopscotch_set<size_t> prev_starts;
 
