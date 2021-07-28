@@ -1078,6 +1078,9 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
 
     async_writer.join();
 
+    // For transforms with disk swap, the diffs are dumped to temp chunks, so the
+    // fwd and bwd buffers can be removed. Otherwise, the diffs are stored there
+    // and hence must be kept (they are extracted in `call_diffs` invoked below).
     if (swap_disk) {
         set_rows_fwd.clear(); // free up memory
         set_rows_bwd.clear();
