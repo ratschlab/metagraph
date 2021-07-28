@@ -857,7 +857,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
         call_diffs = [&,chunks_open_per_thread](size_t s, size_t j) {
             return [&,s,j](const std::function<void(uint64_t)> &call) {
                 std::vector<std::string> filenames;
-                // skip chunk with fwd bits which have already been counted if stage 1
+                // for stage 1, fwd bits are already counted, so we skip that chunk
                 for (uint32_t chunk = compute_row_reduction ? 1 : 0;
                                     chunk < num_chunks[s][j]; ++chunk) {
                     filenames.push_back(tmp_file(s, j, chunk));
