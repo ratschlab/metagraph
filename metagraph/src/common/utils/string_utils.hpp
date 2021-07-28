@@ -8,6 +8,8 @@
 
 namespace utils {
 
+bool starts_with(const std::string &str, const std::string &prefix);
+
 bool ends_with(const std::string &str, const std::string &suffix);
 
 std::string remove_suffix(const std::string &str, const std::string &suffix);
