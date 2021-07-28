@@ -43,6 +43,7 @@ DBGAlignerConfig initialize_aligner_config(const Config &config) {
     aligner_config.alignment_mm_transition_score = config.alignment_mm_transition_score;
     aligner_config.alignment_mm_transversion_score = config.alignment_mm_transversion_score;
     aligner_config.rel_score_cutoff = config.alignment_rel_score_cutoff;
+    aligner_config.chain_alignments = config.alignment_chain;
 
     logger->trace("Alignment settings:");
     logger->trace("\t Alignments to report: {}", aligner_config.num_alternative_paths);
@@ -56,6 +57,7 @@ DBGAlignerConfig initialize_aligner_config(const Config &config) {
     logger->trace("\t Min alignment score: {}", aligner_config.min_path_score);
     logger->trace("\t X drop-off: {}", aligner_config.xdrop);
     logger->trace("\t Exact nucleotide match threshold: {}", aligner_config.min_exact_match);
+    logger->trace("\t Chain alignments: {}", aligner_config.chain_alignments);
 
     logger->trace("\t Scoring matrix: {}", config.alignment_edit_distance ? "unit costs" : "matrix");
     if (!config.alignment_edit_distance) {

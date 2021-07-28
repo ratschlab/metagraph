@@ -65,6 +65,8 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
                           const std::vector<uint64_t> &counts) override;
     // for each label and index 'i' add numeric attribute 'coord'
     void add_label_coord(Index i, const VLabels &labels, uint64_t coord) override;
+    void add_label_coords(const std::vector<std::pair<Index, uint64_t>> &coords,
+                          const VLabels &labels) override;
 
     bool has_label(Index i, const Label &label) const override;
     bool has_labels(Index i, const VLabels &labels) const override;

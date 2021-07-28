@@ -74,6 +74,9 @@ Cigar::Cigar(std::string_view cigar_str) {
                 cigar_.emplace_back(Cigar::CLIPPED, std::stol(op_count));
                 op_count.clear();
                 break;
+            case 'G':
+                cigar_.emplace_back(Cigar::NODE_INSERTION, std::stol(op_count));
+                break;
             default:
                 op_count += c;
         }
@@ -210,6 +213,9 @@ bool Cigar::is_valid(std::string_view reference, std::string_view query) const {
                 }
 
                 ref_it += op.second;
+            } break;
+            case NODE_INSERTION: {
+                // do nothing
             } break;
         }
     }

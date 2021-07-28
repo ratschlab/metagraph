@@ -207,6 +207,27 @@ TYPED_TEST(DBGAlignerTest, align_straight) {
     check_extend(graph, aligner.get_config(), paths, query);
 }
 
+TYPED_TEST(DBGAlignerTest, align_straight_max_size) {
+    size_t k = 4;
+    std::string reference = "AGCTTCGAGGCCAA";
+    std::string query = reference;
+
+    auto graph = build_graph_batch<TypeParam>(k, { reference });
+    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    config.xdrop = 4;
+    config.max_ram_per_alignment = (24.0 + (120.0 + sizeof(score_t) * 3.0 * 2.0) * 2.0) / 1'000'000.0;
+    DBGAligner<> aligner(*graph, config);
+    auto paths = aligner.align(query);
+
+    EXPECT_EQ(1ull, paths.size());
+    auto path = paths[0];
+
+    EXPECT_NE("14=", path.get_cigar().to_string());
+    EXPECT_LT(0u, path.get_cigar().get_num_matches());
+    EXPECT_GT(14u, path.get_cigar().get_num_matches());
+    EXPECT_TRUE(path.is_valid(*graph, &config));
+}
+
 TYPED_TEST(DBGAlignerTest, align_straight_min_path_score) {
     size_t k = 4;
     std::string reference = "AGCTTCGAGGCCAA";
