@@ -776,34 +776,6 @@ void AnnotatedSequenceGraph
     );
 }
 
-void AnnotatedDBG::call_annotated_rows(const std::vector<node_index> &rows,
-                                       std::function<void(const std::string&)> callback_cell,
-                                       std::function<void()> callback_row) const {
-    assert(check_compatibility());
-
-    auto unique_matrix_rows = annotator_->get_matrix().get_rows(rows);
-
-    //TODO make sure that this function works even if we have duplications in 'rows'. Then, delete this error catch.
-    if (rows.size() != unique_matrix_rows.size()) {
-        throw std::runtime_error("The current 'call_annotated_rows' call contains duplication.");
-    }
-
-    if (unique_matrix_rows.size() >= std::numeric_limits<uint32_t>::max()) {
-        throw std::runtime_error(
-                folly::to<string>("The current 'call_annotated_rows' call has returned, ", unique_matrix_rows.size(),
-                                  "rows. The maximum number of rows that can be returned is ",
-                                  std::numeric_limits<uint32_t>::max(),
-                                  ". Please reduce the query batch size"));
-    }
-    const auto &label_encoder = annotator_->get_label_encoder();
-    for (auto row : unique_matrix_rows) {
-        for (auto cell : row) {
-            callback_cell(label_encoder.decode(cell));
-        }
-        callback_row();
-    }
-}
-
 bool AnnotatedSequenceGraph::check_compatibility() const {
     return graph_->max_index() == annotator_->num_objects();
 }
