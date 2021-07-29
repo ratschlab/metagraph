@@ -24,13 +24,21 @@ class DBGSuccinctCached : public DBGWrapper<DBGSuccinct> {
     typedef boss::BOSS::TAlphabet TAlphabet;
 
     template <typename Graph>
-    explicit DBGSuccinctCached(Graph&& graph) : DBGWrapper(std::forward<Graph>(graph)) {}
+    explicit DBGSuccinctCached(Graph&& graph, size_t cache_size = 1024)
+          : DBGWrapper(std::forward<Graph>(graph)), boss_(&graph_->get_boss()),
+            cache_size_(cache_size), rev_comp_prev_cache_(cache_size_),
+            rev_comp_next_cache_(cache_size_) {}
+
+    virtual ~DBGSuccinctCached() {}
 
     // if the sequence of a node has been constructed externally, cache the result
     virtual void put_decoded_node(node_index node, std::string_view seq) const = 0;
 
     // get the encoding of the first character of this node's sequence
     virtual TAlphabet get_first_value(edge_index i) const = 0;
+
+    edge_index get_rev_comp_boss_next_node(node_index node) const;
+    edge_index get_rev_comp_boss_prev_node(node_index node) const;
 
     virtual bool operator==(const DeBruijnGraph &other) const override final {
         if (get_k() != other.get_k()
@@ -50,6 +58,8 @@ class DBGSuccinctCached : public DBGWrapper<DBGSuccinct> {
         throw std::runtime_error("Not implemented");
         return false;
     }
+
+    virtual node_index traverse_back(node_index node, char prev_char) const override final;
 
     /**
      * Delegated methods
@@ -113,6 +123,14 @@ class DBGSuccinctCached : public DBGWrapper<DBGSuccinct> {
                             const std::function<void(node_index)> &callback) const override final {
         graph_->adjacent_incoming_nodes(node, callback);
     }
+
+  protected:
+    const boss::BOSS *boss_;
+    size_t cache_size_;
+    mutable common::LRUCache<node_index, std::pair<edge_index, size_t>> rev_comp_prev_cache_;
+    mutable common::LRUCache<node_index, std::pair<edge_index, size_t>> rev_comp_next_cache_;
+
+    virtual TAlphabet complement(TAlphabet c) const = 0;
 };
 
 
@@ -127,8 +145,7 @@ class DBGSuccinctCachedImpl : public DBGSuccinctCached {
   public:
     template <typename Graph>
     DBGSuccinctCachedImpl(Graph graph, size_t cache_size)
-          : DBGSuccinctCached(graph), boss_(&graph_->get_boss()),
-            cache_size_(cache_size), decoded_cache_(cache_size_) {}
+          : DBGSuccinctCached(graph, cache_size), decoded_cache_(cache_size_) {}
 
     virtual void put_decoded_node(node_index node, std::string_view seq) const override final {
         assert(node > 0 && node <= num_nodes());
@@ -211,11 +228,6 @@ class DBGSuccinctCachedImpl : public DBGSuccinctCached {
         graph_->traverse(start, begin, end, callback, terminate);
     }
 
-    virtual node_index traverse_back(node_index node, char prev_char) const override final {
-        // TODO: cache stuff in the future if this function starts being used
-        return graph_->traverse_back(node, prev_char);
-    }
-
     virtual void call_incoming_kmers(node_index node,
                                      const IncomingEdgeCallback &callback) const override final {
         assert(node > 0 && node <= num_nodes());
@@ -274,8 +286,6 @@ class DBGSuccinctCachedImpl : public DBGSuccinctCached {
     }
 
   private:
-    const boss::BOSS *boss_;
-    size_t cache_size_;
     mutable common::LRUCache<edge_index, CacheValue> decoded_cache_;
 
     // cache a computed result
@@ -294,7 +304,7 @@ class DBGSuccinctCachedImpl : public DBGSuccinctCached {
 
         // if the result of bwd^{k - 1}(i) is desired and not cached, then
         // clear the k-mer so it can be recomputed below
-        if (check_second && !kmer->second)
+        if (check_second && kmer && !kmer->second)
             kmer = std::nullopt;
 
         if (!kmer) {
@@ -332,6 +342,10 @@ class DBGSuccinctCachedImpl : public DBGSuccinctCached {
     inline static constexpr KmerType to_kmer(const std::vector<TAlphabet> &seq) {
         // TODO: avoid decode step
         return to_kmer(decode(seq));
+    }
+
+    virtual TAlphabet complement(TAlphabet c) const override final {
+        return KmerExtractor::complement(c);
     }
 };
 
