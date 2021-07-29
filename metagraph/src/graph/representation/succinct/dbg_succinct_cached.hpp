@@ -59,8 +59,6 @@ class DBGSuccinctCached : public DBGWrapper<DBGSuccinct> {
         return false;
     }
 
-    virtual node_index traverse_back(node_index node, char prev_char) const override final;
-
     /**
      * Delegated methods
      */
@@ -122,6 +120,11 @@ class DBGSuccinctCached : public DBGWrapper<DBGSuccinct> {
     adjacent_incoming_nodes(node_index node,
                             const std::function<void(node_index)> &callback) const override final {
         graph_->adjacent_incoming_nodes(node, callback);
+    }
+
+    virtual node_index traverse_back(node_index node, char prev_char) const override final {
+        // TODO: implemented a cached version of this later if needed
+        return graph_->traverse_back(node, prev_char);
     }
 
   protected:

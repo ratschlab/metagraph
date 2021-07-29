@@ -262,45 +262,6 @@ auto DBGSuccinctCached::get_rev_comp_boss_prev_node(node_index node) const -> ed
     return ret_val;
 }
 
-auto DBGSuccinctCached::traverse_back(node_index node, char prev_char) const -> node_index {
-    assert(node > 0 && node <= num_nodes());
-    TAlphabet c = boss_->encode(prev_char);
-
-    if (c == boss_->alph_size)
-        return npos;
-
-    // dbg node is a boss edge
-    edge_index edge = boss_->bwd(graph_->kmer_to_boss_index(node));
-
-    // only one incoming edge for the dummy source node
-    if (edge == 1) {
-        if (c == boss::BOSS::kSentinelCode) {
-            return graph_->boss_to_kmer_index(1);
-        } else {
-            return npos;
-        }
-    }
-
-    // check if the first incoming edge has label `c`
-    if (get_first_value(edge) == c)
-        return edge;
-
-    if (edge == boss_->num_edges())
-        return npos;
-
-    // TODO: could be improved. implement without succ_W.
-    TAlphabet d = boss_->get_W(edge);
-    edge_index y = boss_->succ_W(edge + 1, d);
-
-    // iterate over the rest of the incoming edges
-    while (edge + 1 < y) {
-        edge = boss_->succ_W(edge + 1, d + boss_->alph_size);
-        if (edge < y && get_first_value(edge) == c)
-            return edge;
-    }
-
-    return npos;
-}
 
 } // namespace graph
 } // namespace mtg
