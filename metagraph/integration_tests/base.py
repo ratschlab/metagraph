@@ -106,6 +106,11 @@ class TestingBase(unittest.TestCase):
     def _annotate_graph(input, graph_path, output, anno_repr,
                         separate=False, no_fork_opt=False, no_anchor_opt=False):
         target_anno = anno_repr
+
+        noswap = anno_repr.endswith('_noswap')
+        if noswap:
+            anno_repr = anno_repr[:-len('_noswap')]
+
         if (anno_repr in {'row_sparse', 'column_coord'} or
                 anno_repr.endswith('brwt') or
                 anno_repr.startswith('row_diff')):
@@ -142,6 +147,7 @@ class TestingBase(unittest.TestCase):
 
         other_args = ' --count-kmers' if with_counts else ''
         other_args += ' --coordinates' if final_anno.endswith('_coord') else ''
+        other_args += ' --disk-swap \"\"' if noswap else ''
 
         if target_anno == 'row_diff':
             command += ' -i ' + graph_path
