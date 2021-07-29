@@ -28,6 +28,13 @@ class TupleCSCMatrix : public MultiIntMatrix {
     TupleCSCMatrix(BaseMatrix&& index_matrix)
       : binary_matrix_(std::move(index_matrix)) {}
 
+    TupleCSCMatrix(BaseMatrix&& index_matrix,
+                   std::vector<Delims>&& delimiters,
+                   std::vector<Values>&& column_values)
+      : binary_matrix_(std::move(index_matrix)),
+        delimiters_(std::move(delimiters)),
+        column_values_(std::move(column_values)) {}
+
     // return tuple sizes (if not zero) at each entry
     RowValues get_row_values(Row row) const;
 
@@ -63,6 +70,8 @@ class TupleCSCMatrix : public MultiIntMatrix {
     bool load(std::istream &in);
     void serialize(std::ostream &out) const;
 
+    template <class Callback>
+    static void load_tuples(std::istream &in, uint64_t num_columns, const Callback &callback);
     bool load_tuples(std::istream &in);
     void serialize_tuples(std::ostream &out) const;
 
@@ -168,18 +177,31 @@ inline bool TupleCSCMatrix<BaseMatrix, Values, Delims>::load_tuples(std::istream
     delimiters_.clear();
     column_values_.clear();
 
-    delimiters_.resize(num_columns());
-    column_values_.resize(num_columns());
-    for (size_t j = 0; j < column_values_.size(); ++j) {
-        try {
-            delimiters_[j].load(in);
-            column_values_[j].load(in);
-        } catch (...) {
-            common::logger->error("Couldn't load tuple attributes for column {}", j);
-            return false;
-        }
+    delimiters_.reserve(num_columns());
+    column_values_.reserve(num_columns());
+    try {
+        load_tuples(in, num_columns(), [&](Delims&& delims, Values&& values) {
+            delimiters_.push_back(std::move(delims));
+            column_values_.push_back(std::move(values));
+        });
+    } catch (...) {
+        common::logger->error("Couldn't load tuple attributes");
+        return false;
     }
     return true;
+}
+
+template <class BaseMatrix, class Values, class Delims>
+template <class Callback>
+inline void TupleCSCMatrix<BaseMatrix, Values, Delims>
+::load_tuples(std::istream &in, uint64_t num_columns, const Callback &callback) {
+    for (size_t j = 0; j < num_columns; ++j) {
+        Delims delims;
+        Values column_values;
+        delims.load(in);
+        column_values.load(in);
+        callback(std::move(delims), std::move(column_values));
+    }
 }
 
 template <class BaseMatrix, class Values, class Delims>

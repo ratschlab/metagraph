@@ -24,6 +24,8 @@ using mtg::common::get_verbose;
 
 typedef MultiLabelEncoded<std::string> Annotator;
 
+typedef matrix::TupleCSCMatrix<binmat::ColumnMajor> TupleCSC;
+
 static const Eigen::IOFormat CSVFormat(Eigen::StreamPrecision,
                                        Eigen::DontAlignCols, " ", "\n");
 
@@ -291,6 +293,49 @@ convert_to_IntMultiBRWT(const std::vector<std::string> &files,
                 std::make_unique<matrix::CSCMatrix<binmat::BRWT, CountsVector>>(
                         std::move(*multi_brwt), std::move(column_values)),
                 brwt_annotator->get_label_encoder());
+}
+
+void load_coords(const std::vector<std::string> &files,
+                 std::vector<bit_vector_smart> *delimiters,
+                 std::vector<sdsl::int_vector<>> *column_values) {
+    delimiters->clear();
+    column_values->clear();
+
+    std::vector<uint64_t> num_columns(files.size());
+    // load labels to check the number of columns in each file
+    #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
+    for (size_t i = 0; i < files.size(); ++i) {
+        try {
+            num_columns[i] = ColumnCompressed<>::read_num_labels(files[i]);
+        } catch (...) {
+            logger->error("Can't load label encoder from {}", files[i]);
+            exit(1);
+        }
+    }
+    // compute global offsets (partial sums)
+    std::vector<uint64_t> offsets(num_columns.size() + 1, 0);
+    std::partial_sum(num_columns.begin(), num_columns.end(), offsets.begin() + 1);
+
+    delimiters->resize(offsets.back());
+    column_values->resize(offsets.back());
+
+    #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
+    for (size_t i = 0; i < files.size(); ++i) {
+        auto coords_fname = utils::remove_suffix(files[i], ColumnCompressed<>::kExtension)
+                                                        + ColumnCompressed<>::kCoordExtension;
+        std::ifstream in(coords_fname);
+        size_t j = offsets[i];
+        try {
+            TupleCSC::load_tuples(in, num_columns[i], [&](auto&& delims, auto&& values) {
+                delimiters->at(j) = std::move(delims);
+                column_values->at(j) = std::move(values);
+                j++;
+            });
+        } catch (...) {
+            logger->error("Couldn't load coordinates from {}", coords_fname);
+            exit(1);
+        }
+    }
 }
 
 
@@ -654,19 +699,22 @@ int transform_annotation(Config *config) {
             }
             case Config::ColumnCoord: {
                 auto label_encoder = annotator->get_label_encoder();
-                auto tuple_matrix = std::make_unique<matrix::TupleCSCMatrix<binmat::ColumnMajor>>(
-                                            annotator->release_matrix());
-                if (files.size() > 1) {
-                    logger->error("Merging coordinates from multiple columns is not supported");
+
+                std::vector<bit_vector_smart> delimiters;
+                std::vector<sdsl::int_vector<>> column_values;
+                load_coords(files, &delimiters, &column_values);
+                if (delimiters.size() != label_encoder.size()) {
+                    logger->error("Merging of columns with the same labels annotated"
+                                  " with coordinates is not implemented");
                     exit(1);
                 }
-                auto coords_fname = utils::remove_suffix(files.at(0),
-                                                         ColumnCompressed<>::kExtension)
-                                        + ColumnCompressed<>::kCoordExtension;
-                std::ifstream in(coords_fname);
-                tuple_matrix->load_tuples(in);
+                logger->trace("Tuples loaded");
 
-                ColumnCoordAnnotator column_coord(std::move(tuple_matrix), label_encoder);
+                ColumnCoordAnnotator column_coord(
+                        std::make_unique<TupleCSC>(annotator->release_matrix(),
+                                                   std::move(delimiters),
+                                                   std::move(column_values)),
+                        label_encoder);
 
                 logger->trace("Annotation converted in {} sec", timer.elapsed());
                 column_coord.serialize(config->outfbase);
@@ -688,21 +736,24 @@ int transform_annotation(Config *config) {
                 }
 
                 auto label_encoder = annotator->get_label_encoder();
-                using RDMatrix = matrix::TupleRowDiff<matrix::TupleCSCMatrix<binmat::ColumnMajor>>;
-                auto tuple_matrix = std::make_unique<RDMatrix>(nullptr, annotator->release_matrix());
+
+                std::vector<bit_vector_smart> delimiters;
+                std::vector<sdsl::int_vector<>> column_values;
+                load_coords(files, &delimiters, &column_values);
+                if (delimiters.size() != label_encoder.size()) {
+                    logger->error("Merging of columns with the same labels annotated"
+                                  " with coordinates is not implemented");
+                    exit(1);
+                }
+                logger->trace("Tuples loaded");
+
+                auto tuple_matrix = std::make_unique<matrix::TupleRowDiff<TupleCSC>>(nullptr,
+                            TupleCSC(annotator->release_matrix(),
+                                     std::move(delimiters),
+                                     std::move(column_values)));
                 tuple_matrix->load_anchor(anchors_file);
                 tuple_matrix->load_fork_succ(fork_succ_file);
                 logger->trace("RowDiff support bitmaps loaded");
-
-                if (files.size() > 1) {
-                    logger->error("Merging coordinates from multiple columns is not supported");
-                    exit(1);
-                }
-                auto coords_fname = utils::remove_suffix(files.at(0),
-                                                         ColumnCompressed<>::kExtension)
-                                        + ColumnCompressed<>::kCoordExtension;
-                std::ifstream in(coords_fname);
-                tuple_matrix->diffs().load_tuples(in);
 
                 RowDiffCoordAnnotator annotation(std::move(tuple_matrix), label_encoder);
 

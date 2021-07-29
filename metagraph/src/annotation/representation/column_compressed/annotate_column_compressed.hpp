@@ -80,6 +80,7 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
     static bool merge_load(const std::vector<std::string> &filenames,
                            const ColumnCallback &callback,
                            size_t num_threads = 1);
+    static size_t read_num_labels(const std::string &filename);
 
     using ValuesCallback = std::function<void(uint64_t offset,
                                               const Label &,
