@@ -125,6 +125,10 @@ auto DBGSuccinctCached::get_rev_comp_boss_prev_node(node_index node) const -> ed
     // 8% effective
     edge_index ret_val = 0;
     size_t chars_unmatched = 0;
+    edge_index edge_1 = 0;
+    edge_index edge_2 = 0;
+    std::vector<TAlphabet> encoded;
+    std::vector<TAlphabet>::iterator end = encoded.begin();
     if (auto fetch = rev_comp_prev_cache_.TryGet(node)) {
         std::tie(ret_val, chars_unmatched) = *fetch;
         if (!ret_val && !chars_unmatched)
@@ -142,10 +146,10 @@ auto DBGSuccinctCached::get_rev_comp_boss_prev_node(node_index node) const -> ed
         rev_seq.pop_back();
         ::reverse_complement(rev_seq.begin(), rev_seq.end());
         auto encoded = boss_->encode(rev_seq);
-        auto [edge, edge_2, end] = boss_->index_range(encoded.begin(), encoded.end());
-        assert(end != encoded.end() || edge == edge_2);
+        std::tie(edge_1, edge_2, end) = boss_->index_range(encoded.begin(), encoded.end());
+        assert(end != encoded.end() || edge_1 == edge_2);
         if (end == encoded.end()) {
-            ret_val = edge;
+            ret_val = edge_1;
         } else {
             chars_unmatched = encoded.end() - end;
         }
@@ -158,21 +162,68 @@ auto DBGSuccinctCached::get_rev_comp_boss_prev_node(node_index node) const -> ed
         });
     }
 
-    // TODO: given an LCS array, we can do the same check as get_rev_comp_boss_next_node
-    //       to find neighbouring nodes with rev comp matches
-    //       e.g., we only looked for
-    //       AGAGGATCTCGTATGCCGTCTTCTGCTTGAG
-    //       TCAAGCAGAAGACGGCATACGAGATCCTCT
-    //       and matched a suffix
-    //       XXXXXXXXTCAAGCAGAAGACGGCATACGA
-    //       so if we try to match the previous k-mer
-    //       XAGAGGATCTCGTATGCCGTCTTCTGCTTGA
-    //       corresponding to
-    //        CAAGCAGAAGACGGCATACGAGATCCTCTx
-    //       we can use the LCS array to delete the first character from the match
-    //       and work from there
+    if (!ret_val && chars_unmatched > 1 && encoded.size()) {
+        // TODO: given an LCS array, we can do the same check as get_rev_comp_boss_next_node
+        //       to find neighbouring nodes with rev comp matches
+        //       e.g., we looked for
+        //       AGAGGATCTCGTATGCCGTCTTCTGCTTGAG
+        //       TCAAGCAGAAGACGGCATACGAGATCCTCT
+        //       and matched a suffix
+        //       XXXXXXXXTCAAGCAGAAGACGGCATACGA
+        //       so if we try to match the previous k-mer
+        //       XAGAGGATCTCGTATGCCGTCTTCTGCTTGA
+        //       corresponding to
+        //        CAAGCAGAAGACGGCATACGAGATCCTCTx
+        //       we can use the LCS array to delete the first character from the match
+        //       and work from there
+        // expand the range up
+        bool expand_up_exists = false;
+        bool expand_down_exists = false;
+        auto cur_seq = decode(encoded);
+        if (edge_1 > 1) {
+            edge_index edge_prev = boss_->pred_last(edge_1 - 1);
+            if (node_index prev = graph_->boss_to_kmer_index(edge_prev)) {
+                auto prev_seq = get_node_sequence(prev).substr(0, get_k() - 1);
+                if (std::equal(prev_seq.begin() + chars_unmatched + 1,
+                               prev_seq.end(), cur_seq.begin() + 1)) {
+                    expand_up_exists = true;
+                }
+            }
+        }
 
-    if (ret_val) {
+        // expand the range down
+        if (edge_2 < boss_->num_edges()) {
+            edge_index edge_next = boss_->succ_last(edge_2 + 1);
+            if (node_index next = graph_->boss_to_kmer_index(edge_next)) {
+                auto next_seq = get_node_sequence(next).substr(0, get_k() - 1);
+                if (std::equal(next_seq.begin() + chars_unmatched + 1,
+                               next_seq.end(), cur_seq.begin() + 1)) {
+                    expand_down_exists = true;
+                }
+            }
+        }
+
+        if (!expand_up_exists && !expand_down_exists) {
+            size_t next_chars_unmatched = chars_unmatched - 1;
+            auto stored_val = std::make_pair(0, next_chars_unmatched);
+            adjacent_incoming_nodes(node, [&](node_index prev) {
+                rev_comp_prev_cache_.Put(prev, stored_val);
+#ifndef NDEBUG
+                std::string test_seq = graph_->get_node_sequence(node);
+                test_seq.pop_back();
+                ::reverse_complement(test_seq.begin(), test_seq.end());
+                auto encoded = boss_->encode(test_seq);
+                auto [edge, edge_2, end] = boss_->index_range(encoded.begin(), encoded.end());
+                assert(end != encoded.end());
+                if (next_chars_unmatched > static_cast<size_t>(encoded.end() - end)) {
+                    common::logger->error("Unmatched chars incorrectly stored: {} vs. {}",
+                                          next_chars_unmatched, encoded.end() - end);
+                    assert(false);
+                }
+#endif
+            });
+        }
+    } else if (ret_val) {
         // traverse ret_val forward by X, then node back by comp(X)
         std::vector<std::pair<node_index, edge_index>> parents(alphabet().size());
         size_t parents_count = 0;
@@ -204,7 +255,7 @@ auto DBGSuccinctCached::get_rev_comp_boss_prev_node(node_index node) const -> ed
         auto encoded = boss_->encode(test_seq);
         auto [edge, edge_2, end] = boss_->index_range(encoded.begin(), encoded.end());
         assert(end != encoded.end());
-        assert(chars_unmatched == static_cast<size_t>(encoded.end() - end));
+        assert(chars_unmatched <= static_cast<size_t>(encoded.end() - end));
     }
 #endif
 

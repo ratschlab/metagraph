@@ -131,6 +131,7 @@ class DBGSuccinctCached : public DBGWrapper<DBGSuccinct> {
     mutable common::LRUCache<node_index, std::pair<edge_index, size_t>> rev_comp_next_cache_;
 
     virtual TAlphabet complement(TAlphabet c) const = 0;
+    virtual std::string decode(const std::vector<TAlphabet> &v) const = 0;
 };
 
 
@@ -331,7 +332,7 @@ class DBGSuccinctCachedImpl : public DBGSuccinctCached {
         put_kmer(next, std::move(kmer));
     }
 
-    inline static std::string decode(const std::vector<TAlphabet> &v) {
+    virtual std::string decode(const std::vector<TAlphabet> &v) const override final {
         return KmerExtractor::decode(v);
     }
 
@@ -341,7 +342,7 @@ class DBGSuccinctCachedImpl : public DBGSuccinctCached {
     }
     inline static constexpr KmerType to_kmer(const std::vector<TAlphabet> &seq) {
         // TODO: avoid decode step
-        return to_kmer(decode(seq));
+        return to_kmer(KmerExtractor::decode(seq));
     }
 
     virtual TAlphabet complement(TAlphabet c) const override final {
