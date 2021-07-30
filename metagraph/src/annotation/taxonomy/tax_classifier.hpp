@@ -31,6 +31,8 @@ class TaxonomyBase {
   protected:
     std::string get_accession_version_from_label(const std::string &label) const;
 
+    bool get_taxid_from_label(const std::string &label, TaxId *taxid) const;
+
     /** Reads the accession version to taxid lookup table.
      * If 'anno_matrix' is not NULL, only the labels that exist in the given annotation matrix will be stored.
      * If 'anno_matrix' is NULL, the entire content of 'filepath' will be read and stored.
@@ -80,7 +82,10 @@ class TaxonomyClsAnno : public TaxonomyBase {
                     const std::string &label_taxid_map_filepath = "");
     TaxonomyClsAnno() {}
 
-  private:
+    // todo implement
+    TaxId assign_class(const std::string &sequence) const;
+
+ private:
     /**
      * Reads and returns the taxonomic tree as a list of children.
      *

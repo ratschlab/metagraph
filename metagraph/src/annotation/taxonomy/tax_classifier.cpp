@@ -134,10 +134,8 @@ TaxonomyClsAnno::TaxonomyClsAnno(const graph::AnnotatedDBG &anno,
                                  const double lca_coverage_rate,
                                  const double kmers_discovery_rate,
                                  const std::string &tax_tree_filepath,
-                                 const std::string &label_taxid_map_filepath) : _anno_matrix(&anno) {
-    _lca_coverage_rate = lca_coverage_rate;
-    _kmers_discovery_rate = kmers_discovery_rate;
-
+                                 const std::string &label_taxid_map_filepath) :
+                                 TaxonomyBase(lca_coverage_rate, kmers_discovery_rate), _anno_matrix(&anno) {
     if (!std::filesystem::exists(tax_tree_filepath)) {
         logger->error("Can't open taxonomic tree file {}.", tax_tree_filepath);
         std::exit(1);
@@ -171,8 +169,7 @@ TaxonomyClsAnno::TaxonomyClsAnno(const graph::AnnotatedDBG &anno,
     logger->trace("Finished rmq preprocessing in {}s.", timer.elapsed());
 }
 
-void TaxonomyClsAnno::read_tree(const std::string &tax_tree_filepath,
-                                ChildrenList *tree) {
+void TaxonomyClsAnno::read_tree(const std::string &tax_tree_filepath, ChildrenList *tree) {
     std::ifstream f(tax_tree_filepath);
     if (!f.good()) {
         logger->error("Failed to open Taxonomic Tree file {}.", tax_tree_filepath);
