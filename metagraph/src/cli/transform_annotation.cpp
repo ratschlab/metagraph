@@ -704,8 +704,8 @@ int transform_annotation(Config *config) {
                 std::vector<sdsl::int_vector<>> column_values;
                 load_coords(files, &delimiters, &column_values);
                 if (delimiters.size() != label_encoder.size()) {
-                    logger->error("Merging of columns with the same labels annotated"
-                                  " with coordinates is not implemented");
+                    logger->error("Merging coordinate annotations with overlapping"
+                                  " labels is not implemented");
                     exit(1);
                 }
                 logger->trace("Tuples loaded");
@@ -741,8 +741,8 @@ int transform_annotation(Config *config) {
                 std::vector<sdsl::int_vector<>> column_values;
                 load_coords(files, &delimiters, &column_values);
                 if (delimiters.size() != label_encoder.size()) {
-                    logger->error("Merging of columns with the same labels annotated"
-                                  " with coordinates is not implemented");
+                    logger->error("Merging coordinate annotations with overlapping"
+                                  " labels is not implemented");
                     exit(1);
                 }
                 logger->trace("Tuples loaded");

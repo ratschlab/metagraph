@@ -435,7 +435,7 @@ size_t ColumnCompressed<Label>::read_num_labels(const std::string &filename) {
     std::ignore = load_number(in); // read num_rows
     LabelEncoder<Label> label_encoder;
     if (!label_encoder.load(in))
-        throw "Can't load label encoder";
+        throw std::ofstream::failure("Can't load label encoder from " + fname);
     return label_encoder.size();
 }
 

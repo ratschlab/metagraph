@@ -197,8 +197,8 @@ inline void TupleCSCMatrix<BaseMatrix, Values, Delims>
 ::load_tuples(std::istream &in, uint64_t num_columns, const Callback &callback) {
     for (size_t j = 0; j < num_columns; ++j) {
         Delims delims;
-        Values column_values;
         delims.load(in);
+        Values column_values;
         column_values.load(in);
         callback(std::move(delims), std::move(column_values));
     }
