@@ -295,40 +295,44 @@ convert_to_IntMultiBRWT(const std::vector<std::string> &files,
                 brwt_annotator->get_label_encoder());
 }
 
-void load_coords(const std::vector<std::string> &files,
-                 std::vector<bit_vector_smart> *delimiters,
-                 std::vector<sdsl::int_vector<>> *column_values) {
-    delimiters->clear();
-    column_values->clear();
-
+ColumnCoordAnnotator load_coord_anno(const std::vector<std::string> &files) {
+    std::vector<ColumnCompressed<>> annotator(files.size());
     std::vector<uint64_t> num_columns(files.size());
     // load labels to check the number of columns in each file
     #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
     for (size_t i = 0; i < files.size(); ++i) {
-        try {
-            num_columns[i] = ColumnCompressed<>::read_num_labels(files[i]);
-        } catch (...) {
-            logger->error("Can't load label encoder from {}", files[i]);
+        if (!annotator[i].load(files[i])) {
+            logger->error("Can't load annotations from {}", files[i]);
             exit(1);
         }
+        num_columns[i] = annotator[i].num_labels();
     }
     // compute global offsets (partial sums)
     std::vector<uint64_t> offsets(num_columns.size() + 1, 0);
     std::partial_sum(num_columns.begin(), num_columns.end(), offsets.begin() + 1);
 
-    delimiters->resize(offsets.back());
-    column_values->resize(offsets.back());
+    std::vector<std::string> labels(offsets.back());
+    std::vector<std::unique_ptr<bit_vector>> columns(offsets.back());
+    std::vector<bit_vector_smart> delimiters(offsets.back());
+    std::vector<sdsl::int_vector<>> column_values(offsets.back());
 
     #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
     for (size_t i = 0; i < files.size(); ++i) {
+        auto anno_labels = annotator[i].get_all_labels();
+        auto anno_columns = std::move(annotator[i].release_matrix().data());
+        for (size_t j = 0; j < num_columns[i]; ++j) {
+            labels[offsets[i] + j] = anno_labels[j];
+            columns[offsets[i] + j] = std::move(anno_columns[j]);
+        }
+
         auto coords_fname = utils::remove_suffix(files[i], ColumnCompressed<>::kExtension)
                                                         + ColumnCompressed<>::kCoordExtension;
         std::ifstream in(coords_fname);
         size_t j = offsets[i];
         try {
             TupleCSC::load_tuples(in, num_columns[i], [&](auto&& delims, auto&& values) {
-                delimiters->at(j) = std::move(delims);
-                column_values->at(j) = std::move(values);
+                delimiters[j] = std::move(delims);
+                column_values[j] = std::move(values);
                 j++;
             });
         } catch (...) {
@@ -336,6 +340,21 @@ void load_coords(const std::vector<std::string> &files,
             exit(1);
         }
     }
+
+    LabelEncoder<std::string> label_encoder;
+    for (size_t i = 0; i < labels.size(); ++i) {
+        if (label_encoder.insert_and_encode(labels[i]) != i) {
+            logger->error("Merging coordinate annotations with overlapping"
+                          " labels is not implemented");
+            exit(1);
+        }
+    }
+
+    return ColumnCoordAnnotator(
+            std::make_unique<TupleCSC>(binmat::ColumnMajor(std::move(columns)),
+                                       std::move(delimiters),
+                                       std::move(column_values)),
+            std::move(label_encoder));
 }
 
 
@@ -682,6 +701,8 @@ int transform_annotation(Config *config) {
         if (config->anno_type != Config::BRWT
                 && config->anno_type != Config::RbBRWT
                 && config->anno_type != Config::IntBRWT
+                && config->anno_type != Config::ColumnCoord
+                && config->anno_type != Config::RowDiffCoord
                 && config->anno_type != Config::RowDiff) {
             annotator = std::make_unique<ColumnCompressed<>>(0);
             logger->trace("Loading annotation from disk...");
@@ -698,25 +719,10 @@ int transform_annotation(Config *config) {
                 break;
             }
             case Config::ColumnCoord: {
-                auto label_encoder = annotator->get_label_encoder();
-
-                std::vector<bit_vector_smart> delimiters;
-                std::vector<sdsl::int_vector<>> column_values;
-                load_coords(files, &delimiters, &column_values);
-                if (delimiters.size() != label_encoder.size()) {
-                    logger->error("Merging coordinate annotations with overlapping"
-                                  " labels is not implemented");
-                    exit(1);
-                }
-                logger->trace("Tuples loaded");
-
-                ColumnCoordAnnotator column_coord(
-                        std::make_unique<TupleCSC>(annotator->release_matrix(),
-                                                   std::move(delimiters),
-                                                   std::move(column_values)),
-                        label_encoder);
+                ColumnCoordAnnotator column_coord = load_coord_anno(files);
 
                 logger->trace("Annotation converted in {} sec", timer.elapsed());
+
                 column_coord.serialize(config->outfbase);
                 logger->trace("Serialized to {}", config->outfbase);
                 break;
@@ -735,27 +741,18 @@ int transform_annotation(Config *config) {
                     std::exit(1);
                 }
 
-                auto label_encoder = annotator->get_label_encoder();
+                ColumnCoordAnnotator column_coord = load_coord_anno(files);
 
-                std::vector<bit_vector_smart> delimiters;
-                std::vector<sdsl::int_vector<>> column_values;
-                load_coords(files, &delimiters, &column_values);
-                if (delimiters.size() != label_encoder.size()) {
-                    logger->error("Merging coordinate annotations with overlapping"
-                                  " labels is not implemented");
-                    exit(1);
-                }
-                logger->trace("Tuples loaded");
+                auto label_encoder = column_coord.get_label_encoder();
 
-                auto tuple_matrix = std::make_unique<matrix::TupleRowDiff<TupleCSC>>(nullptr,
-                            TupleCSC(annotator->release_matrix(),
-                                     std::move(delimiters),
-                                     std::move(column_values)));
-                tuple_matrix->load_anchor(anchors_file);
-                tuple_matrix->load_fork_succ(fork_succ_file);
+                auto diff_matrix = std::make_unique<matrix::TupleRowDiff<TupleCSC>>(nullptr,
+                            std::move(*column_coord.release_matrix()));
+
+                diff_matrix->load_anchor(anchors_file);
+                diff_matrix->load_fork_succ(fork_succ_file);
                 logger->trace("RowDiff support bitmaps loaded");
 
-                RowDiffCoordAnnotator annotation(std::move(tuple_matrix), label_encoder);
+                RowDiffCoordAnnotator annotation(std::move(diff_matrix), label_encoder);
 
                 logger->trace("Annotation converted in {} sec", timer.elapsed());
 
