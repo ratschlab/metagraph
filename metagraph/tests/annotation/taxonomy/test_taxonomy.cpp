@@ -77,10 +77,6 @@ TEST (TaxonomyTest, RmqPreprocessing) {
     std::vector<uint32_t> linearization = {
             0, 1, 4, 7, 4, 8, 4, 1, 5, 1, 0, 2, 0, 3, 6, 3, 0
     };
-    std::vector<uint32_t> expected_pow2 = {1, 2, 4, 8, 16};
-    std::vector<uint32_t> expected_log2 = {
-        0, 0, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 4
-    };
     std::vector<std::vector<uint32_t> > expected_rmq = {
         {0, 1, 4, 7, 4, 8, 4, 1, 5, 1, 0, 2, 0, 3, 6, 3, 0},
         {0, 1, 4, 4, 4, 4, 1, 1, 1, 0, 0, 0, 0, 3, 3, 0, 0},
@@ -90,8 +86,6 @@ TEST (TaxonomyTest, RmqPreprocessing) {
     };
 
     tax->rmq_preprocessing(linearization);
-    EXPECT_EQ(expected_pow2, tax->fast_pow2);
-    EXPECT_EQ(expected_log2, tax->fast_log2);
     EXPECT_EQ(expected_rmq, tax->rmq_data);
 }
 

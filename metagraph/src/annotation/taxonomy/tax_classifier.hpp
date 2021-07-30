@@ -26,8 +26,14 @@ public:
     using node_index = graph::SequenceGraph::node_index;
 
     enum LabelType {
-        UNASSIGNED, GEN_BANK, KRAKEN
+        UNASSIGNED,
+        GEN_BANK, // e.g. ">gi|1070643132|ref|NC_031224.1| Arthrobacter phage Mudcat, complete genome"
+        TAXID, // e.g. ">kraken:taxid|2016032|NC_047834.1 Alteromonas virus vB_AspP-H4/4, complete genome"
     };
+
+    TaxonomyBase() {};
+    TaxonomyBase(const double lca_coverage_rate, const double kmers_discovery_rate) :
+                 _lca_coverage_rate(lca_coverage_rate), _kmers_discovery_rate(kmers_discovery_rate) {};
 
     virtual ~TaxonomyBase() {};
 
@@ -49,8 +55,7 @@ PROTECTED_TESTABLE:
     * @param [input] filepath -> a ".accession2taxid" file.
     * @param [input] anno_matrix -> pointer to the annotation matrix
     */
-    void read_accversion_to_taxid_map(const std::string &filepath,
-                                      const graph::AnnotatedDBG *anno_matrix);
+    void read_accversion_to_taxid_map(const std::string &filepath, const graph::AnnotatedDBG *anno_matrix);
 
     // TODO implement.
     /**
@@ -119,7 +124,6 @@ public:
                     const std::string &tax_tree_filepath,
                     const std::string &label_taxid_map_filepath = "");
     TaxonomyClsAnno() {};
-    ~TaxonomyClsAnno() {};
 
     // todo implement
     void export_taxdb(const std::string &filepath) const;
@@ -138,7 +142,7 @@ PRIVATE_TESTABLE:
                    ChildrenList *tree);
 
     /**
-     * rmq_preprocessing computes 'this->rmq_data', 'this->precalc_log' and 'this->precalc_pow2' fields.
+     * rmq_preprocessing computes 'this->rmq_data' field.
      *
      * @param [input] tree_linearization -> the linearization of the taxonomic tree.
      */
@@ -171,16 +175,6 @@ PRIVATE_TESTABLE:
      * in the tree linearization order. This array will be further used inside a RMQ query.
      */
     tsl::hopscotch_map<TaxId, uint32_t> node_to_linearization_idx;
-
-    /**
-     * fast_log2 is a table for a fast compute of log2(x).
-     */
-    std::vector<uint32_t> fast_log2;
-
-    /**
-     * fast_pow2 is a table for a fast compute of pow2(x).
-     */
-    std::vector<uint32_t> fast_pow2;
 
     const graph::AnnotatedDBG *_anno_matrix = NULL;
 };
