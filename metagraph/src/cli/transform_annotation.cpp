@@ -339,7 +339,7 @@ ColumnCoordAnnotator load_coord_anno(const std::vector<std::string> &files) {
             logger->error("Couldn't load coordinates from {}", coords_fname);
             exit(1);
         }
-        assert(j = offsets[i + 1]);
+        assert(j == offsets[i + 1]);
     }
 
     LabelEncoder<std::string> label_encoder;
