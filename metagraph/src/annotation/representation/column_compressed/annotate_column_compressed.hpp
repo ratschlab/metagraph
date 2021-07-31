@@ -73,7 +73,7 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
 
     void serialize(const std::string &filename) const override;
     bool load(const std::string &filename) override;
-    // the order of the columns is not preserved on merge
+    // the order of the columns may be changed when merging multiple annotators
     bool merge_load(const std::vector<std::string> &filenames);
     using ColumnCallback = std::function<void(uint64_t offset,
                                               const Label &,

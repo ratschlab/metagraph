@@ -296,16 +296,16 @@ convert_to_IntMultiBRWT(const std::vector<std::string> &files,
 }
 
 ColumnCoordAnnotator load_coord_anno(const std::vector<std::string> &files) {
-    std::vector<ColumnCompressed<>> annotator(files.size());
-    std::vector<uint64_t> num_columns(files.size());
-    // load labels to check the number of columns in each file
+    std::vector<ColumnCompressed<>> annotators(files.size());
+    std::vector<size_t> num_columns(files.size());
+    // load labels to check the number of columns in each annotator
     #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
     for (size_t i = 0; i < files.size(); ++i) {
-        if (!annotator[i].load(files[i])) {
+        if (!annotators[i].load(files[i])) {
             logger->error("Can't load annotations from {}", files[i]);
             exit(1);
         }
-        num_columns[i] = annotator[i].num_labels();
+        num_columns[i] = annotators[i].num_labels();
     }
     // compute global offsets (partial sums)
     std::vector<uint64_t> offsets(num_columns.size() + 1, 0);
@@ -317,9 +317,9 @@ ColumnCoordAnnotator load_coord_anno(const std::vector<std::string> &files) {
     std::vector<sdsl::int_vector<>> column_values(offsets.back());
 
     #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
-    for (size_t i = 0; i < files.size(); ++i) {
-        auto anno_labels = annotator[i].get_all_labels();
-        auto anno_columns = std::move(annotator[i].release_matrix().data());
+    for (size_t i = 0; i < annotators.size(); ++i) {
+        auto anno_labels = annotators[i].get_all_labels();
+        auto anno_columns = std::move(annotators[i].release_matrix().data());
         for (size_t j = 0; j < num_columns[i]; ++j) {
             labels[offsets[i] + j] = anno_labels[j];
             columns[offsets[i] + j] = std::move(anno_columns[j]);
@@ -327,7 +327,7 @@ ColumnCoordAnnotator load_coord_anno(const std::vector<std::string> &files) {
 
         auto coords_fname = utils::remove_suffix(files[i], ColumnCompressed<>::kExtension)
                                                         + ColumnCompressed<>::kCoordExtension;
-        std::ifstream in(coords_fname);
+        std::ifstream in(coords_fname, std::ios::binary);
         size_t j = offsets[i];
         try {
             TupleCSC::load_tuples(in, num_columns[i], [&](auto&& delims, auto&& values) {
@@ -339,6 +339,7 @@ ColumnCoordAnnotator load_coord_anno(const std::vector<std::string> &files) {
             logger->error("Couldn't load coordinates from {}", coords_fname);
             exit(1);
         }
+        assert(j = offsets[i + 1]);
     }
 
     LabelEncoder<std::string> label_encoder;
