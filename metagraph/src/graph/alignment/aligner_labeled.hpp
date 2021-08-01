@@ -10,15 +10,9 @@
 #include "common/hashers/hash.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
+#include "annotation/int_matrix/base/int_matrix.hpp"
 
 namespace mtg {
-
-namespace annot {
-namespace matrix {
-    class MultiIntMatrix;
-}
-}
-
 namespace graph {
 namespace align {
 
@@ -34,6 +28,10 @@ class DynamicLabeledGraph {
     typedef DeBruijnGraph::node_index node_index;
     typedef annot::binmat::BinaryMatrix::Column Column;
     typedef annot::binmat::BinaryMatrix::Row Row;
+    typedef annot::matrix::MultiIntMatrix::Tuple Tuple;
+
+    typedef std::reference_wrapper<const Vector<Column>> LabelSet;
+    typedef std::reference_wrapper<const Vector<Tuple>> CoordsSet;
 
     static constexpr Row nrow = std::numeric_limits<Row>::max();
 
@@ -49,14 +47,8 @@ class DynamicLabeledGraph {
     void add_node(node_index node);
     void add_path(const std::vector<node_index> &path, std::string sequence);
 
-    // Checks if the edge (node, next), with its corresponding sequence, is
-    // consistent w.r.t. coordinates. Always returns true if a coordinate annotation
-    // is not loaded
-    bool is_coord_consistent(node_index node, node_index next, std::string sequence) const;
-
     // get the annotations of a node if they have been fetched
-    std::optional<std::reference_wrapper<const Vector<Column>>>
-    operator[](node_index node) const {
+    std::optional<LabelSet> get_labels(node_index node) const {
         auto it = targets_.find(node);
         if (it == targets_.end() || it->second.second == nannot) {
             // if the node hasn't been seen before, or if its annotations haven't
@@ -64,6 +56,23 @@ class DynamicLabeledGraph {
             return std::nullopt;
         } else {
             return std::cref(targets_set_.data()[it->second.second]);
+        }
+    }
+
+    // get the annotations and coordinates of a node if they have been fetched
+    std::optional<std::pair<LabelSet, CoordsSet>> get_coordinates(node_index node) const {
+        if (!multi_int_)
+            return std::nullopt;
+
+        auto it = targets_.find(node);
+        if (it == targets_.end() || it->second.second == nannot) {
+            // if the node hasn't been seen before, or if its annotations haven't
+            // been flushed, return nothing
+            return std::nullopt;
+        } else {
+            assert(static_cast<size_t>(it - targets_.begin()) < target_coords_.size());
+            return std::make_pair(std::cref(targets_set_.data()[it->second.second]),
+                                  std::cref(target_coords_[it - targets_.begin()]));
         }
     }
 
@@ -88,7 +97,10 @@ class DynamicLabeledGraph {
     VectorSet<Vector<Column>, utils::VectorHash> targets_set_;
 
     // map nodes to indexes in targets_set_
-    tsl::hopscotch_map<node_index, std::pair<Row, size_t>> targets_;
+    VectorMap<node_index, std::pair<Row, size_t>> targets_;
+
+    // map each annotation row to a set of coordinates
+    std::vector<Vector<Tuple>> target_coords_;
 
     // buffer of accessed nodes and their corresponding annotation rows
     std::vector<Row> added_rows_;
@@ -116,11 +128,6 @@ class ILabeledAligner : public ISeedAndExtendAligner<AlignmentCompare> {
                     [](const auto &a) { return a.target_columns.empty(); }
                 );
                 alignments.data().erase(it, alignments.data().end());
-
-                for (auto &alignment : alignments.data()) {
-                    set_target_coordinates(alignment);
-                }
-
                 callback(header, std::move(alignments));
             }
         );
@@ -129,14 +136,13 @@ class ILabeledAligner : public ISeedAndExtendAligner<AlignmentCompare> {
 
   protected:
     mutable DynamicLabeledGraph labeled_graph_;
-
-    void set_target_coordinates(Alignment &alignment) const;
 };
 
 
 class LabeledBacktrackingExtender : public DefaultColumnExtender {
   public:
     typedef DynamicLabeledGraph::Column Column;
+    typedef DynamicLabeledGraph::Tuple Tuple;
     typedef AlignmentAggregator<LocalAlignmentLess> Aggregator;
 
     LabeledBacktrackingExtender(DynamicLabeledGraph &labeled_graph,
@@ -231,6 +237,8 @@ class LabeledBacktrackingExtender : public DefaultColumnExtender {
     // keep track of the label set for the current backtracking
     Vector<Column> target_intersection_;
     size_t last_path_size_;
+
+    Vector<Tuple> target_intersection_coords_;
 
     // After a node has been visited during backtracking, we keep track of which
     // of its labels haven't been considered yet. This way, if backtracking is

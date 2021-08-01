@@ -1,5 +1,7 @@
 #include "aligner_labeled.hpp"
 
+#include <unordered_set>
+
 #include <tsl/hopscotch_set.h>
 
 #include "graph/representation/canonical_dbg.hpp"
@@ -38,89 +40,50 @@ bool check_targets(const DeBruijnGraph &graph,
 }
 
 DynamicLabeledGraph::DynamicLabeledGraph(const AnnotatedDBG &anno_graph)
-      : anno_graph_(anno_graph),
-        multi_int_(dynamic_cast<const annot::matrix::MultiIntMatrix*>(
-            &anno_graph_.get_annotation().get_matrix())
-        ) {
+      : anno_graph_(anno_graph), multi_int_(nullptr) {
+    if (anno_graph.get_graph().get_mode() != DeBruijnGraph::CANONICAL) {
+        multi_int_ = dynamic_cast<const annot::matrix::MultiIntMatrix*>(
+            &anno_graph_.get_annotation().get_matrix()
+        );
+    }
+
     targets_set_.emplace(); // insert empty vector
 }
 
 void DynamicLabeledGraph::flush() {
-    auto node_it = added_nodes_.begin();
-    for (const auto &labels : anno_graph_.get_annotation().get_matrix().get_rows(added_rows_)) {
+    auto push_node_labels = [&](auto node_it, auto&& labels) {
         assert(node_it != added_nodes_.end());
-
-        auto label_it = targets_set_.emplace(labels).first;
-        assert(labels == *label_it);
+        auto label_it = targets_set_.emplace(std::forward<decltype(labels)>(labels)).first;
         assert(targets_[*node_it].first
             == *(added_rows_.begin() + (node_it - added_nodes_.begin())));
 
         targets_[*node_it].second = label_it - targets_set_.begin();
+    };
 
-        ++node_it;
+    auto node_it = added_nodes_.begin();
+    if (multi_int_) {
+        for (auto&& row_tuples : multi_int_->get_row_tuples(added_rows_)) {
+            Vector<Column> labels;
+            labels.reserve(row_tuples.size());
+            target_coords_.emplace_back();
+            target_coords_.back().reserve(row_tuples.size());
+            for (auto&& [label, coords] : row_tuples) {
+                labels.push_back(label);
+                target_coords_.back().emplace_back(std::forward<decltype(coords)>(coords));
+            }
+
+            push_node_labels(node_it++, std::move(labels));
+        }
+    } else {
+        for (auto&& labels : anno_graph_.get_annotation().get_matrix().get_rows(added_rows_)) {
+            push_node_labels(node_it++, std::forward<decltype(labels)>(labels));
+        }
     }
 
     assert(node_it == added_nodes_.end());
 
     added_rows_.clear();
     added_nodes_.clear();
-}
-
-bool DynamicLabeledGraph::is_coord_consistent(node_index node, node_index next,
-                                              std::string sequence) const {
-    if (!multi_int_ || !node || node == next)
-        return true;
-
-    const DeBruijnGraph &graph = anno_graph_.get_graph();
-    bool base_is_canonical = graph.get_base_graph().get_mode() == DeBruijnGraph::CANONICAL;
-
-    if (base_is_canonical && sequence.front() == '#') {
-        sequence = graph.get_node_sequence(node) + sequence.back();
-    }
-
-    auto [base_path, reversed] = graph.get_base_path({ node, next }, sequence);
-
-    if ((!reversed && !base_path[1]) || (reversed && !base_path[0]))
-        return false;
-
-    base_path[0] = AnnotatedDBG::graph_to_anno_index(base_path[0]);
-    base_path[1] = AnnotatedDBG::graph_to_anno_index(base_path[1]);
-
-    auto tuples = multi_int_->get_row_tuples(base_path);
-
-    std::vector<uint64_t> coordinates[2];
-    for (size_t i = 0; i < 2; ++i) {
-        for (const auto &[j, tuple] : tuples[i]) {
-            for (uint64_t coord : tuple) {
-                // TODO: make sure the offsets are correct (query max_int in multi_int)
-                // TODO: if this takes up a significant amount of time, preallocate
-                //       the entire vector beforehand
-                coordinates[i].push_back(j * 1e15 + coord);
-            }
-        }
-        assert(std::is_sorted(coordinates[i].begin(), coordinates[i].end()));
-    }
-
-    // check if coord[0] + 1 == coord[1]
-    for (uint64_t &c : coordinates[0]) {
-        ++c;
-    }
-
-    bool check_intersection =
-        utils::count_intersection(coordinates[0].begin(), coordinates[0].end(),
-                                  coordinates[1].begin(), coordinates[1].end());
-
-    if (check_intersection || !base_is_canonical)
-        return check_intersection;
-
-    // for a base canonical graph, also check
-    // coord[0] + 1 == coord[1] + 2 <=> coord[0] - 1 == coord[1]
-    for (uint64_t &c : coordinates[1]) {
-        c += 2;
-    }
-
-    return utils::count_intersection(coordinates[0].begin(), coordinates[0].end(),
-                                     coordinates[1].begin(), coordinates[1].end());
 }
 
 void LabeledBacktrackingExtender
@@ -130,19 +93,11 @@ void LabeledBacktrackingExtender
                 size_t table_idx) {
     std::function<void(node_index, char)> call = callback;
 
-    if (labeled_graph_.get_coordinate_matrix()) {
-        // coordinate consistency
-        call = [&,dummy=std::string(this->graph_->get_k(), '#')](node_index next, char c) mutable {
-            dummy.back() = c;
-            if (labeled_graph_.is_coord_consistent(node, next, dummy))
-                callback(next, c);
-        };
-
-    } else if (auto cached_labels = labeled_graph_[node]) {
+    if (auto cached_labels = labeled_graph_.get_labels(node)) {
         // label consistency (weaker than coordinate consistency):
         // checks if there is at least one label shared between adjacent nodes
         call = [&](node_index next, char c) {
-            auto next_labels = labeled_graph_[next];
+            auto next_labels = labeled_graph_.get_labels(next);
             // If labels at the next node are not cached, always take the edge.
             // In this case, the label consistency will be checked later.
             // If they are cached, the existence of at least one common label is checked.
@@ -207,16 +162,28 @@ void DynamicLabeledGraph::add_node(node_index node) {
 
 bool LabeledBacktrackingExtender::skip_backtrack_start(size_t i) {
     target_intersection_.clear();
+    target_intersection_coords_.clear();
 
     if (this->prev_starts.emplace(i).second) {
         // if backtracking hasn't been started from here yet, get its labels
-
+        node_index node = std::get<3>(this->table[i]);
         auto target_find = diff_target_sets_.find(i);
         if (target_find != diff_target_sets_.end()) {
             // extract a subset of the labels if this node was previously traversed
             target_intersection_ = target_find->second;
+            if (auto fetch = labeled_graph_.get_coordinates(node)) {
+                const Vector<Column> &labels = fetch->first.get();
+                const Vector<Tuple> &coords = fetch->second.get();
+                assert(std::includes(labels.begin(), labels.end(),
+                                     target_intersection_.begin(), target_intersection_.end()));
+                auto it = labels.begin();
+                for (Column label : target_intersection_) {
+                    it = std::lower_bound(it, labels.end(), label);
+                    target_intersection_coords_.push_back(coords[it - labels.begin()]);
+                }
+            }
 
-        } else if (auto labels = labeled_graph_[std::get<3>(this->table[i])]) {
+        } else if (auto labels = labeled_graph_.get_labels(node)) {
             if (this->seed_->target_columns.size()) {
                 // if the seed had labels, intersect with those
                 std::set_intersection(labels->get().begin(),
@@ -224,9 +191,24 @@ bool LabeledBacktrackingExtender::skip_backtrack_start(size_t i) {
                                       this->seed_->target_columns.begin(),
                                       this->seed_->target_columns.end(),
                                       std::back_inserter(target_intersection_));
+                if (auto fetch = labeled_graph_.get_coordinates(node)) {
+                    const Vector<Column> &coord_labels = fetch->first.get();
+                    const Vector<Tuple> &coords = fetch->second.get();
+                    assert(std::includes(coord_labels.begin(), coord_labels.end(),
+                                         target_intersection_.begin(), target_intersection_.end()));
+                    auto it = coord_labels.begin();
+                    for (Column label : target_intersection_) {
+                        it = std::lower_bound(it, coord_labels.end(), label);
+                        target_intersection_coords_.push_back(coords[it - coord_labels.begin()]);
+                    }
+                }
             } else {
                 // otherwise take the full label set
                 target_intersection_ = *labels;
+                if (auto fetch = labeled_graph_.get_coordinates(node)) {
+                    assert(fetch->first.get() == *labels);
+                    target_intersection_coords_ = fetch->second.get();
+                }
             }
         }
 
@@ -234,123 +216,11 @@ bool LabeledBacktrackingExtender::skip_backtrack_start(size_t i) {
         last_path_size_ = 1;
     }
 
+    assert(!labeled_graph_.get_coordinate_matrix()
+        || target_intersection_.size() == target_intersection_coords_.size());
+
     // skip backtracking from this node if no labels could be determined for it
     return target_intersection_.empty();
-}
-
-template <class AlignmentCompare>
-void ILabeledAligner<AlignmentCompare>::set_target_coordinates(Alignment &alignment) const {
-    const auto *multi_int = labeled_graph_.get_coordinate_matrix();
-
-    if (!multi_int)
-        return;
-
-    using Column = DynamicLabeledGraph::Column;
-    const std::vector<node_index> &path = alignment.get_nodes();
-    const Vector<Column> &target_columns = alignment.target_columns;
-    auto &target_coordinates = alignment.target_coordinates;
-
-    typedef std::vector<std::pair<size_t, std::pair<uint64_t, uint64_t>>> TargetCoords;
-    target_coordinates.assign(target_columns.size(), TargetCoords{});
-
-    typedef tsl::hopscotch_map<int64_t, std::vector<size_t>> RelativeCoordsMap;
-    tsl::hopscotch_map<Column, RelativeCoordsMap> row_coordinates;
-    for (Column target : target_columns) {
-        row_coordinates.emplace(target, RelativeCoordsMap{});
-    }
-
-    auto anno_rows = labeled_graph_.get_anno_rows(path);
-    std::vector<size_t> missing_rows;
-    for (size_t i = 0; i < anno_rows.size(); ++i) {
-        if (anno_rows[i] == DynamicLabeledGraph::nrow)
-            missing_rows.push_back(i);
-    }
-
-    anno_rows.erase(std::remove_if(anno_rows.begin(), anno_rows.end(),
-                                   [](auto row) { return row == DynamicLabeledGraph::nrow; }),
-                    anno_rows.end());
-
-    auto tuples = multi_int->get_row_tuples(anno_rows);
-    size_t offset = 0;
-    for (size_t i = 0; i < tuples.size(); ++i) {
-        while (offset < missing_rows.size() && i + offset == missing_rows[offset]) {
-            ++offset;
-        }
-
-        for (const auto &[j, coords] : tuples[i]) {
-            auto find = row_coordinates.find(j);
-            if (find != row_coordinates.end()) {
-                for (int64_t coord : coords) {
-                    find.value()[coord - i - offset].emplace_back(i + offset);
-                }
-            }
-        }
-    }
-
-    for (auto it = row_coordinates.begin(); it != row_coordinates.end(); ++it) {
-        TargetCoords &cur_target_coords = target_coordinates[it->first];
-        bool full_length_found = false;
-        for (auto jt = it.value().begin(); jt != it.value().end(); ++jt) {
-            int64_t start = jt->first;
-            auto &relative_coords = jt.value();
-            if (relative_coords.size()) {
-                std::sort(relative_coords.begin(), relative_coords.end());
-                relative_coords.erase(std::unique(relative_coords.begin(),
-                                                  relative_coords.end()),
-                                      relative_coords.end());
-                std::pair<size_t, size_t> cur_range(relative_coords[0], relative_coords[0]);
-                for (size_t i = 1; i < relative_coords.size(); ++i) {
-                    if (relative_coords[i] == cur_range.second + 1) {
-                        ++cur_range.second;
-                    } else {
-                        if (cur_range.second - cur_range.first + 1 == path.size()) {
-                            assert(!cur_range.first);
-                            if (full_length_found)
-                                continue;
-
-                            full_length_found = true;
-                        }
-                        cur_target_coords.emplace_back(cur_range.first,
-                            std::make_pair(cur_range.first + start,
-                                           cur_range.second + start)
-                        );
-                        cur_range.first = relative_coords[i];
-                        cur_range.second = relative_coords[i];
-                    }
-                }
-
-                if (cur_range.second - cur_range.first + 1 == path.size()) {
-                    assert(!cur_range.first);
-                    if (full_length_found)
-                        continue;
-
-                    full_length_found = true;
-                }
-
-                cur_target_coords.emplace_back(cur_range.first,
-                    std::make_pair(cur_range.first + start,
-                                   cur_range.second + start)
-                );
-            }
-        }
-
-        if (cur_target_coords.size()) {
-            std::sort(cur_target_coords.begin(), cur_target_coords.end(),
-                      [](const auto &a, const auto &b) {
-                return std::make_tuple(b.second.second - b.second.first, a.first, a.second.first)
-                    < std::make_tuple(a.second.second - a.second.first, b.first, b.second.first);
-            });
-
-            if (full_length_found) {
-                auto it = std::find_if(cur_target_coords.begin(),
-                                       cur_target_coords.end(),
-                                       [&path](const auto &a) {
-                    return a.second.second - a.second.first + 1 < path.size();
-                });
-                cur_target_coords.erase(it, cur_target_coords.end());
-            }
-        }
-    }
 }
 
 void LabeledBacktrackingExtender
@@ -374,41 +244,92 @@ void LabeledBacktrackingExtender
     if (label_path_end > last_path_size_) {
         for (size_t i = last_path_size_; i < label_path_end; ++i) {
             assert(static_cast<size_t>(i) < path.size());
-            if (auto labels = labeled_graph_[path[i]]) {
+
+            for (auto &coords : target_intersection_coords_) {
+                for (uint64_t &c : coords) {
+                    --c;
+                }
+            }
+
+            const Vector<Column> *label_set = nullptr;
+
+            if (auto label_coords = labeled_graph_.get_coordinates(path[i])) {
+                const Vector<Column> &labels = label_coords->first.get();
+                const Vector<Tuple> &coords = label_coords->second.get();
+                label_set = &labels;
+                Vector<Column> label_inter;
+                Vector<Tuple> coord_inter;
+                auto it = target_intersection_.begin();
+                auto jt = labels.begin();
+                auto kt = target_intersection_coords_.begin();
+                auto lt = coords.begin();
+                while (it != target_intersection_.end() && jt != labels.end()) {
+                    if (*it < *jt) {
+                        auto it_next = std::lower_bound(it, target_intersection_.end(), *jt);
+                        kt += it_next - it;
+                        it = it_next;
+                    } else if (*jt < *it) {
+                        auto jt_next = std::lower_bound(jt, labels.end(), *it);
+                        lt += jt_next - jt;
+                        jt = jt_next;
+                    } else {
+                        Tuple coord_merge;
+                        std::set_intersection(lt->begin(), lt->end(), kt->begin(), kt->end(),
+                                              std::back_inserter(coord_merge));
+                        if (coord_merge.size()) {
+                            label_inter.push_back(*it);
+                            coord_inter.push_back(std::move(coord_merge));
+                        }
+                        ++it;
+                        ++jt;
+                        ++kt;
+                        ++lt;
+                    }
+                }
+
+                std::swap(target_intersection_, label_inter);
+                std::swap(target_intersection_coords_, coord_inter);
+
+                if (target_intersection_.empty())
+                    return;
+
+            } else if (auto labels = labeled_graph_.get_labels(path[i])) {
+                label_set = &labels->get();
                 Vector<Column> inter;
                 std::set_intersection(target_intersection_.begin(),
                                       target_intersection_.end(),
                                       labels->get().begin(), labels->get().end(),
                                       std::back_inserter(inter));
 
-                if (labels->get().size() > inter.size() && this->prev_starts.count(trace[i])) {
-                    Vector<Column> diff;
-                    auto prev_labels = diff_target_sets_.find(trace[i]);
-                    if (prev_labels == diff_target_sets_.end()) {
-                        std::set_difference(labels->get().begin(), labels->get().end(),
-                                            target_intersection_.begin(),
-                                            target_intersection_.end(),
-                                            std::back_inserter(diff));
-                        if (diff.size()) {
-                            diff_target_sets_.emplace(trace[i], std::move(diff));
-                            this->prev_starts.erase(trace[i]);
-                        }
-                    } else {
-                        std::set_difference(prev_labels->second.begin(),
-                                            prev_labels->second.end(),
-                                            target_intersection_.begin(),
-                                            target_intersection_.end(),
-                                            std::back_inserter(diff));
-                        std::swap(prev_labels.value(), diff);
-                        if (diff.size())
-                            this->prev_starts.erase(trace[i]);
-                    }
-                }
-
                 std::swap(target_intersection_, inter);
 
                 if (target_intersection_.empty())
                     return;
+            }
+
+            if (label_set && label_set->size() > target_intersection_.size()
+                    && this->prev_starts.count(trace[i])) {
+                Vector<Column> diff;
+                auto prev_labels = diff_target_sets_.find(trace[i]);
+                if (prev_labels == diff_target_sets_.end()) {
+                    std::set_difference(label_set->begin(), label_set->end(),
+                                        target_intersection_.begin(),
+                                        target_intersection_.end(),
+                                        std::back_inserter(diff));
+                    if (diff.size()) {
+                        diff_target_sets_.emplace(trace[i], std::move(diff));
+                        this->prev_starts.erase(trace[i]);
+                    }
+                } else {
+                    std::set_difference(prev_labels->second.begin(),
+                                        prev_labels->second.end(),
+                                        target_intersection_.begin(),
+                                        target_intersection_.end(),
+                                        std::back_inserter(diff));
+                    std::swap(prev_labels.value(), diff);
+                    if (diff.size())
+                        this->prev_starts.erase(trace[i]);
+                }
             }
         }
 
@@ -431,6 +352,20 @@ void LabeledBacktrackingExtender
             assert(!alignment.get_offset());
             alignment.target_columns = target_intersection_;
             assert(check_targets(*this->graph_, labeled_graph_.get_anno_graph(), alignment));
+
+            if (labeled_graph_.get_coordinate_matrix()) {
+                assert(target_intersection_.size() == target_intersection_coords_.size());
+                alignment.target_coordinates.resize(target_intersection_coords_.size());
+                for (size_t i = 0; i < target_intersection_coords_.size(); ++i) {
+                    auto &cur_coords = alignment.target_coordinates[i];
+                    for (uint64_t c : target_intersection_coords_[i]) {
+                        // alignment coordinates are 1-based
+                        cur_coords.emplace_back(
+                            c + 1, c + alignment.get_nodes().size() + graph_->get_k() - 1
+                        );
+                    }
+                }
+            }
 
             extensions_.add_alignment(std::move(alignment));
         }

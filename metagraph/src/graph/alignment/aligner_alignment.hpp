@@ -123,7 +123,7 @@ class Alignment {
 
     // for each column in target_columns, store a vector of path indices and
     // corresponding coordinate ranges
-    std::vector<std::vector<std::pair<size_t, std::pair<uint64_t, uint64_t>>>> target_coordinates;
+    std::vector<std::vector<std::pair<uint64_t, uint64_t>>> target_coordinates;
 
   private:
     Json::Value path_json(size_t node_size, std::string_view label = {}) const;
