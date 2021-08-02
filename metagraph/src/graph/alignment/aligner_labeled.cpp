@@ -65,7 +65,7 @@ constexpr bool share_element(InputIt1 first1, InputIt1 last1,
 DynamicLabeledGraph::DynamicLabeledGraph(const AnnotatedDBG &anno_graph)
       : anno_graph_(anno_graph),
         multi_int_(dynamic_cast<const MIM*>(&anno_graph_.get_annotation().get_matrix())) {
-    if (anno_graph.get_graph().get_mode() == DeBruijnGraph::CANONICAL) {
+    if (multi_int_ && anno_graph.get_graph().get_mode() == DeBruijnGraph::CANONICAL) {
         multi_int_ = nullptr;
         common::logger->warn("Coordinates not supported when aligning to CANONICAL "
                              "or PRIMARY mode graphs");
