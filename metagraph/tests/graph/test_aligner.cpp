@@ -1614,6 +1614,26 @@ TYPED_TEST(DBGAlignerTest, align_seed_to_end) {
     check_extend(graph, aligner.get_config(), paths, query);
 }
 
+TYPED_TEST(DBGAlignerTest, align_bfs_vs_dfs_xdrop) {
+    size_t k = 31;
+    std::string reference_1 = "TCGGGGCAAGAAACACACAGCCTTCTCATCCAAGGGCCTCAGTGATGAAGAGTACGATGAGTACAAGAGGATCAGAGAAGAAAGGAATGGCAAATACTCCATAGAAGAGTACCTTCAGGACAGGGACAGATACTATGAGGAGGTGGCCAT";
+    std::string reference_2 = "TCGGGGCAAGAAACACACAGCCTTCTCATCCAAGGGCCTCAGTGATGAAGAGTACGATGAGTACAAGAGAATCAGAGAGGAGAGGAATGGCAAATACTCAATAGAGGAATACCTCCAAGATAGGGACAGATACTATGAAGAGCTTGCCAT";
+    std::string query =       "TCGGGGCAAGAAACACACAGCCTTCTCATCCAAGGGCCTCAGTGATGATGAGTACGATGAGTACAAGAGCATCAGAGAGGAGAGGAATGGCAAATACTCAATAGAGGAATACCTCCAAGATAGGGACAGATACTATGAAGAGCTTGCCAT";
+
+    auto graph = build_graph_batch<TypeParam>(k, { reference_1, reference_2 });
+    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -3, -3));
+    config.xdrop = 27;
+    config.min_seed_length = 0;
+    config.max_seed_length = 0;
+    config.rel_score_cutoff = 0.8;
+    DBGAligner<> aligner(*graph, config);
+    auto paths = aligner.align(query);
+    ASSERT_EQ(1ull, paths.size());
+    auto path = paths[0];
+    EXPECT_EQ("48=1X20=1X80=", path.get_cigar().to_string());
+    check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
+}
+
 TEST(DBGAlignerTest, align_dummy) {
     size_t k = 7;
     std::string reference = "AAAAGCTTTCGAGGCCAA";
