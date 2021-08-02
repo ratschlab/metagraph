@@ -73,6 +73,8 @@ Config::Config(int argc, char *argv[]) {
         identity = ASSEMBLE;
     } else if (!strcmp(argv[1], "relax_brwt")) {
         identity = RELAX_BRWT;
+    } else if (!strcmp(argv[1], "tax_class")) {
+        identity = TAX_CLASS;
     } else if (!strcmp(argv[1], "-h") || !strcmp(argv[1], "--help")) {
         print_welcome_message();
         print_usage(argv[0]);
@@ -274,6 +276,16 @@ Config::Config(int argc, char *argv[]) {
             anno_labels_delimiter = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--separately")) {
             separately = true;
+        } else if (!strcmp(argv[i], "--taxonomic-tree")) {
+            taxonomic_tree = std::string(get_value(i++));
+        } else if (!strcmp(argv[i], "--taxonomic-db")) {
+            taxonomic_db = std::string(get_value(i++));
+        } else if (!strcmp(argv[i], "--lca-coverage-fraction")) {
+            lca_coverage_fraction = std::stof(get_value(i++));
+        } else if (!strcmp(argv[i], "--top-label-fraction")) {
+            top_label_fraction = std::stof(get_value(i++));
+        } else if (!strcmp(argv[i], "--label-taxid-map")) {
+            label_taxid_map = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--num-top-labels")) {
             num_top_labels = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--port")) {
@@ -858,6 +870,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\tquery\t\tannotate sequences from fast[a|q] files\n\n");
             fprintf(stderr, "\tserver_query\tannotate received sequences and send annotations back\n\n");
 
+            fprintf(stderr, "\ttax_class \tclassify sequences according to the taxonomic hierarchy\n");
             return;
         }
         case BUILD: {
@@ -1246,6 +1259,22 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-p --parallel [INT] \tmaximum number of parallel connections [1]\n");
             // fprintf(stderr, "\t   --cache-size [INT] \tnumber of uncompressed rows to store in the cache [0]\n");
         } break;
+        case TAX_CLASS: {
+            fprintf(stderr, "Usage: %s tax_class [options]\n"
+                            "\t\t -i <GRAPH> FILE1 [[FILE2] ...]\n"
+                            "\t\t -a <ANNOTATION> --taxonomic_tree <nodes.dmp> \n"
+                            "\t\t [--label-taxid-map <*.accession2taxid>]"
+                            "\tEach input file is given in FASTA or FASTQ format.\n\n", prog_name.c_str());
+
+            fprintf(stderr, "Available options for taxonomic classification:\n");
+            fprintf(stderr, "\t   --lca-coverage-fraction [FLOAT] \tfraction of kmers that needs to be covered\n"
+                            "\t\t\t\t\t\tby the returned LCA, it's subtree and it's ancestors [0.66]\n");
+            fprintf(stderr, "\t-p --parallel [INT] \t\t\tuse multiple threads for computation [1]\n");
+            fprintf(stderr, "\t   --discovery-fraction [FLOAT] \tfraction of labeled k-mers required for a valid annotation [0.7]\n");
+            fprintf(stderr, "\t   --top-label-fraction [FLOAT] \tif greater than 0, use a faster tax_class algorithm\n"
+                            "\t\t\t\t\t\tthat returns the LCA of the labels linked to at least \n"
+                            "\t\t\t\t\t\t'top_label_fraction' percent of the existent kmers [0]\n");
+        }
     }
 
     fprintf(stderr, "\n\tGeneral options:\n");

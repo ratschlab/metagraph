@@ -514,5 +514,35 @@ TaxId TaxonomyClsImportDB::find_lca(const std::vector<TaxId> &taxids) const {
                              + to_string(taxids.size()));
 }
 
+TaxId TaxonomyClsAnno::assign_class_toplabels(const std::string &sequence, const double label_fraction) const {
+    // Get all the labels with a frequency higher than 'label_fraction' among the kmers in the forward read.
+    std::vector<std::string> labels_discovered = _anno_matrix->get_labels(sequence, label_fraction);
+
+    std::string reversed_sequence = sequence;
+    reverse_complement(reversed_sequence.begin(), reversed_sequence.end());
+    // Get all the labels with a frequency higher than 'label_fraction' among the kmers in the reversed read.
+    std::vector<std::string> labels_discovered_rev = _anno_matrix->get_labels(reversed_sequence, label_fraction);
+
+    // Usually, only one of the two sets ('labels_discovered', 'labels_discovered_rev') will be nonempty.
+
+    std::vector<TaxId> curr_taxids;
+    for (uint32_t i = 0; i < labels_discovered.size(); ++i) {
+        TaxId act;
+        if(get_taxid_from_label(labels_discovered[i], &act)) {
+            curr_taxids.push_back(act);
+        }
+    }
+    for (uint32_t i = 0; i < labels_discovered_rev.size(); ++i) {
+        TaxId act;
+        if(get_taxid_from_label(labels_discovered_rev[i], &act)) {
+            curr_taxids.push_back(act);
+        }
+    }
+    if (curr_taxids.size() == 0) {
+        return 0; // Wildcard for not being able to assign a taxid.
+    }
+    return find_lca(curr_taxids);
+}
+
 } // namespace annot
 } // namespace mtg
