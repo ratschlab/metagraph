@@ -24,6 +24,7 @@ anno_file_extension = {'column': '.column.annodbg',
                        'row_sparse': '.row_sparse.annodbg',
                        'row_diff_brwt': '.row_diff_brwt.annodbg',
                        'row_diff_sparse': '.row_diff_sparse.annodbg',
+                       'row_diff_sparse_noswap': '.row_diff_sparse.annodbg',
                        'rb_brwt': '.rb_brwt.annodbg',
                        'brwt': '.brwt.annodbg',
                        'int_brwt': '.int_brwt.annodbg',
@@ -135,6 +136,10 @@ class TestQuery(TestingBase):
         assert('labels:  100' == params_str[0])
         if cls.graph_repr != 'hashfast' and (cls.graph_repr != 'succinct' or cls.mask_dummy):
             assert('objects: 46960' == params_str[1])
+
+        if cls.anno_repr.endswith('_noswap'):
+            cls.anno_repr = cls.anno_repr[:-len('_noswap')]
+
         assert('representation: ' + cls.anno_repr == params_str[3])
 
     def test_query(self):
@@ -832,6 +837,10 @@ class TestQueryCanonical(TestingBase):
         assert('labels:  100' == params_str[0])
         if cls.graph_repr != 'hashfast' and (cls.graph_repr != 'succinct' or cls.mask_dummy):
             assert('objects: 91584' == params_str[1])
+
+        if cls.anno_repr.endswith('_noswap'):
+            cls.anno_repr = cls.anno_repr[:-len('_noswap')]
+
         assert('representation: ' + cls.anno_repr == params_str[3])
 
     def test_query(self):
@@ -1038,6 +1047,10 @@ class TestQueryPrimary(TestingBase):
         assert('labels:  100' == params_str[0])
         if cls.graph_repr != 'hashfast' and (cls.graph_repr != 'succinct' or cls.mask_dummy):
             assert('objects: 45792' == params_str[1])
+
+        if cls.anno_repr.endswith('_noswap'):
+            cls.anno_repr = cls.anno_repr[:-len('_noswap')]
+
         assert('representation: ' + cls.anno_repr == params_str[3])
 
     def test_query(self):
