@@ -17,6 +17,8 @@ namespace mtg {
 namespace graph {
 namespace align {
 
+using MIM = annot::matrix::MultiIntMatrix;
+
 
 bool check_labels(const DeBruijnGraph &graph,
                   const AnnotatedDBG &anno_graph,
@@ -61,11 +63,12 @@ constexpr bool share_element(InputIt1 first1, InputIt1 last1,
 }
 
 DynamicLabeledGraph::DynamicLabeledGraph(const AnnotatedDBG &anno_graph)
-      : anno_graph_(anno_graph), multi_int_(nullptr) {
-    if (anno_graph.get_graph().get_mode() != DeBruijnGraph::CANONICAL) {
-        multi_int_ = dynamic_cast<const annot::matrix::MultiIntMatrix*>(
-            &anno_graph_.get_annotation().get_matrix()
-        );
+      : anno_graph_(anno_graph),
+        multi_int_(dynamic_cast<const MIM*>(&anno_graph_.get_annotation().get_matrix())) {
+    if (anno_graph.get_graph().get_mode() == DeBruijnGraph::CANONICAL) {
+        multi_int_ = nullptr;
+        common::logger->warn("Coordinates not supported when aligning to CANONICAL "
+                             "or PRIMARY mode graphs");
     }
 
     labels_set_.emplace(); // insert empty vector
