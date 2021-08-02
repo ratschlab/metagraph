@@ -265,14 +265,15 @@ void LabeledBacktrackingExtender
     assert(label_intersection_.size());
     assert(trace.size() >= this->graph_->get_k());
 
+    ssize_t coord_step = dynamic_cast<const RCDBG*>(graph_) ? 1 : -1;
+
     size_t label_path_end = trace.size() - this->graph_->get_k() + 1;
     if (label_path_end > last_path_size_) {
+        assert(label_path_end <= path.size());
         for (size_t i = last_path_size_; i < label_path_end; ++i) {
-            assert(static_cast<size_t>(i) < path.size());
-
             for (auto &coords : label_intersection_coords_) {
                 for (uint64_t &c : coords) {
-                    --c;
+                    c += coord_step;
                 }
             }
 
@@ -385,9 +386,11 @@ void LabeledBacktrackingExtender
                     auto &cur_coords = alignment.label_coordinates[i];
                     for (uint64_t c : label_intersection_coords_[i]) {
                         // alignment coordinates are 1-based
-                        cur_coords.emplace_back(
-                            c + 1, c + alignment.get_nodes().size() + graph_->get_k() - 1
-                        );
+                        ++c;
+                        if (coord_step == 1)
+                            c = c + graph_->get_k() - alignment.get_sequence().size();
+
+                        cur_coords.emplace_back(c, c + alignment.get_sequence().size() - 1);
                     }
                 }
             }
