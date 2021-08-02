@@ -95,7 +95,7 @@ void ISeedAndExtendAligner<AlignmentCompare>
 #endif
 
         num_explored_nodes += extender->num_explored_nodes();
-        size_t num_targets = aggregator.num_targets();
+        size_t num_labels = aggregator.num_labels();
 
         for (auto&& alignment : aggregator.get_alignments()) {
             assert(alignment.is_valid(graph_, &config_));
@@ -106,8 +106,8 @@ void ISeedAndExtendAligner<AlignmentCompare>
             "{}\tlength: {}\texplored nodes: {}\tnodes/k-mer: {}\tlabels: {}\tnodes/k-mer/label: {}",
             header, query.size(), num_explored_nodes,
             num_explored_nodes / nodes.size(),
-            num_targets,
-            num_explored_nodes / nodes.size() / num_targets
+            num_labels,
+            num_explored_nodes / nodes.size() / num_labels
         );
 
         callback(header, std::move(paths));

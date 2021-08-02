@@ -52,18 +52,18 @@ class AlignmentAggregator {
 
     void add_alignment(Alignment&& alignment);
 
-    score_t get_min_path_score(const Vector<Column> &targets) const;
-    score_t get_max_path_score(const Vector<Column> &targets) const;
+    score_t get_min_path_score(const Vector<Column> &labels) const;
+    score_t get_max_path_score(const Vector<Column> &labels) const;
 
-    score_t get_min_path_score(Column target = ncol) const;
-    score_t get_max_path_score(Column target = ncol) const;
+    score_t get_min_path_score(Column label = ncol) const;
+    score_t get_max_path_score(Column label = ncol) const;
 
     score_t get_min_path_score(const Alignment &seed) const {
-        return get_min_path_score(seed.target_columns);
+        return get_min_path_score(seed.label_columns);
     }
 
     score_t get_max_path_score(const Alignment &seed) const {
-        return get_max_path_score(seed.target_columns);
+        return get_max_path_score(seed.label_columns);
     }
 
     const Alignment& maximum() const { return path_queue_.maximum(); }
@@ -73,13 +73,13 @@ class AlignmentAggregator {
 
     size_t size() const {
         size_t size = 0;
-        for (const auto &[target, queue] : path_queue_)
+        for (const auto &[label, queue] : path_queue_)
             size += queue.size();
 
         return size;
     }
 
-    size_t num_targets() const { return path_queue_.size(); }
+    size_t num_labels() const { return path_queue_.size(); }
 
     bool empty() const { return path_queue_.empty(); }
 
@@ -113,8 +113,8 @@ template <class AlignmentCompare>
 inline void AlignmentAggregator<AlignmentCompare>::add_alignment(Alignment&& alignment) {
     auto packaged_alignment = std::make_shared<Alignment>(std::move(alignment));
 
-    auto add_to_target = [&](Column target) {
-        auto &cur_queue = path_queue_[target];
+    auto add_to_label = [&](Column label) {
+        auto &cur_queue = path_queue_[label];
 
         for (const auto &aln : cur_queue) {
             if (*packaged_alignment == *aln)
@@ -128,28 +128,28 @@ inline void AlignmentAggregator<AlignmentCompare>::add_alignment(Alignment&& ali
         }
     };
 
-    add_to_target(ncol);
-    std::for_each(packaged_alignment->target_columns.begin(),
-                  packaged_alignment->target_columns.end(),
-                  add_to_target);
+    add_to_label(ncol);
+    std::for_each(packaged_alignment->label_columns.begin(),
+                  packaged_alignment->label_columns.end(),
+                  add_to_label);
 }
 
 template <class AlignmentCompare>
 inline auto AlignmentAggregator<AlignmentCompare>
-::get_min_path_score(const Vector<Column> &targets) const -> score_t {
+::get_min_path_score(const Vector<Column> &labels) const -> score_t {
     score_t global_min = !config_.chain_alignments
         ? get_max_path_score() * config_.rel_score_cutoff
         : std::numeric_limits<score_t>::min();
 
-    if (targets.empty())
+    if (labels.empty())
         return std::max(global_min, get_min_path_score());
 
     score_t min_score = std::numeric_limits<score_t>::max();
-    for (Column target : targets) {
+    for (Column label : labels) {
         if (min_score < global_min)
             break;
 
-        min_score = std::min(min_score, get_min_path_score(target));
+        min_score = std::min(min_score, get_min_path_score(label));
     }
 
     return std::max(global_min, min_score);
@@ -157,13 +157,13 @@ inline auto AlignmentAggregator<AlignmentCompare>
 
 template <class AlignmentCompare>
 inline auto AlignmentAggregator<AlignmentCompare>
-::get_max_path_score(const Vector<Column> &targets) const -> score_t {
-    if (targets.empty())
+::get_max_path_score(const Vector<Column> &labels) const -> score_t {
+    if (labels.empty())
         return get_max_path_score();
 
     score_t max_score = std::numeric_limits<score_t>::min();
-    for (Column target : targets) {
-        max_score = std::max(max_score, get_max_path_score(target));
+    for (Column label : labels) {
+        max_score = std::max(max_score, get_max_path_score(label));
     }
 
     return max_score;
@@ -171,8 +171,8 @@ inline auto AlignmentAggregator<AlignmentCompare>
 
 template <class AlignmentCompare>
 inline auto AlignmentAggregator<AlignmentCompare>
-::get_min_path_score(Column target) const -> score_t {
-    auto find = path_queue_.find(target);
+::get_min_path_score(Column label) const -> score_t {
+    auto find = path_queue_.find(label);
     return config_.chain_alignments || find == path_queue_.end()
             || find->second.size() < config_.num_alternative_paths
         ? config_.min_path_score
@@ -183,8 +183,8 @@ inline auto AlignmentAggregator<AlignmentCompare>
 
 template <class AlignmentCompare>
 inline auto AlignmentAggregator<AlignmentCompare>
-::get_max_path_score(Column target) const -> score_t {
-    auto find = path_queue_.find(target);
+::get_max_path_score(Column label) const -> score_t {
+    auto find = path_queue_.find(label);
     return find == path_queue_.end() ? config_.min_path_score
                                      : find->second.maximum()->get_score();
 }
@@ -199,7 +199,7 @@ inline std::vector<Alignment> AlignmentAggregator<AlignmentCompare>::get_alignme
     path_queue_.clear();
 
     std::vector<std::shared_ptr<Alignment>> alignment_ptrs;
-    for (auto &[target, queue] : queues) {
+    for (auto &[label, queue] : queues) {
         std::vector<std::shared_ptr<Alignment>> merged;
         boost::heap::sort_interval_heap(queue.data().begin(), queue.data().end(), cmp_);
         std::set_union(alignment_ptrs.begin(), alignment_ptrs.end(),
@@ -224,7 +224,7 @@ inline void AlignmentAggregator<AlignmentCompare>::construct_alignment_chains() 
         return;
 
     std::vector<Alignment> alignments[2];
-    for (const auto &[target, queue] : path_queue_) {
+    for (const auto &[label, queue] : path_queue_) {
         for (std::shared_ptr<Alignment> aln : queue) {
             if (aln->size()) {
                 auto &bucket = alignments[aln->get_orientation()];
@@ -245,8 +245,8 @@ inline void AlignmentAggregator<AlignmentCompare>::construct_alignment_chains() 
     auto push_to_queue = [&](Alignment&& chain) {
         auto packaged_alignment = std::make_shared<Alignment>(std::move(chain));
 
-        auto add_to_target = [&](Column target) {
-            auto &cur_queue = path_queue_[target];
+        auto add_to_label = [&](Column label) {
+            auto &cur_queue = path_queue_[label];
 
             for (const auto &aln : cur_queue) {
                 if (*packaged_alignment == *aln)
@@ -260,10 +260,10 @@ inline void AlignmentAggregator<AlignmentCompare>::construct_alignment_chains() 
             }
         };
 
-        add_to_target(ncol);
-        std::for_each(packaged_alignment->target_columns.begin(),
-                      packaged_alignment->target_columns.end(),
-                      add_to_target);
+        add_to_label(ncol);
+        std::for_each(packaged_alignment->label_columns.begin(),
+                      packaged_alignment->label_columns.end(),
+                      add_to_label);
     };
 
     for (bool orientation : { false, true }) {
@@ -333,14 +333,14 @@ inline void AlignmentAggregator<AlignmentCompare>
         if (next_begin <= chain_begin || next_end == chain_end)
             continue;
 
-        Vector<Column> target_columns;
-        if (chain.target_columns.size()) {
-            std::set_intersection(it->target_columns.begin(), it->target_columns.end(),
-                                  chain.target_columns.begin(),
-                                  chain.target_columns.end(),
-                                  std::back_inserter(target_columns));
+        Vector<Column> label_columns;
+        if (chain.label_columns.size()) {
+            std::set_intersection(it->label_columns.begin(), it->label_columns.end(),
+                                  chain.label_columns.begin(),
+                                  chain.label_columns.end(),
+                                  std::back_inserter(label_columns));
 
-            if (target_columns.empty())
+            if (label_columns.empty())
                 continue;
         }
 
@@ -380,10 +380,10 @@ inline void AlignmentAggregator<AlignmentCompare>
             assert(next_chain.get_score() == next_score);
             assert(next_chain.is_valid(graph_, &config_));
             if (next_chain.size()) {
-                if (target_columns.size() == chain.target_columns.size())
+                if (label_columns.size() == chain.label_columns.size())
                     called = true;
 
-                next_chain.target_columns = std::move(target_columns);
+                next_chain.label_columns = std::move(label_columns);
                 construct_alignment_chain(query, std::move(next_chain), it + 1,
                                           end, best_score, callback);
             }

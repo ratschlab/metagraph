@@ -119,11 +119,10 @@ class Alignment {
 
     bool is_valid(const DeBruijnGraph &graph, const DBGAlignerConfig *config = nullptr) const;
 
-    Vector<uint64_t> target_columns;
+    Vector<uint64_t> label_columns;
 
-    // for each column in target_columns, store a vector of path indices and
-    // corresponding coordinate ranges
-    std::vector<std::vector<std::pair<uint64_t, uint64_t>>> target_coordinates;
+    // for each column in target_columns, store a vector of coordinate ranges
+    std::vector<std::vector<std::pair<uint64_t, uint64_t>>> label_coordinates;
 
   private:
     Json::Value path_json(size_t node_size, std::string_view label = {}) const;

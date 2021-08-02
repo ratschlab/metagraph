@@ -25,7 +25,7 @@ inline std::vector<std::string> get_alignment_labels(const AnnotatedDBG &anno_gr
                                                      const Alignment &alignment) {
     const auto &label_encoder = anno_graph.get_annotation().get_label_encoder();
     auto labels = anno_graph.get_labels(alignment.get_sequence(), 1.0);
-    EXPECT_GE(labels.size(), alignment.target_columns.size());
+    EXPECT_GE(labels.size(), alignment.label_columns.size());
 
     std::unordered_set<uint64_t> enc_labels;
     for (const auto &label : labels) {
@@ -33,10 +33,10 @@ inline std::vector<std::string> get_alignment_labels(const AnnotatedDBG &anno_gr
     }
 
     std::vector<std::string> dec_labels;
-    for (uint64_t target : alignment.target_columns) {
-        EXPECT_TRUE(enc_labels.count(target))
-            << alignment << " " << label_encoder.decode(target);
-        dec_labels.emplace_back(label_encoder.decode(target));
+    for (uint64_t label : alignment.label_columns) {
+        EXPECT_TRUE(enc_labels.count(label))
+            << alignment << " " << label_encoder.decode(label);
+        dec_labels.emplace_back(label_encoder.decode(label));
     }
 
     return dec_labels;
@@ -80,21 +80,21 @@ TYPED_TEST(LabeledAlignerTest, SimpleTangleGraph) {
                                        { std::string("A"), std::string("TGCCT") } }} }
     }};
 
-    for (const auto &[query, targets] : exp_alignments) {
+    for (const auto &[query, labels] : exp_alignments) {
         auto alignments = aligner.align(query);
-        EXPECT_EQ(targets.size(), alignments.size()) << query;
+        EXPECT_EQ(labels.size(), alignments.size()) << query;
 
         for (const auto &alignment : alignments.data()) {
             bool found = false;
             for (const auto &label : get_alignment_labels(*anno_graph, alignment)) {
-                auto find = targets.find(label);
-                ASSERT_TRUE(find != targets.end()) << label;
+                auto find = labels.find(label);
+                ASSERT_TRUE(find != labels.end()) << label;
                 if (alignment.get_sequence() == find->second) {
                     found = true;
                     break;
                 }
             }
-            EXPECT_TRUE(found) << alignment << " " << alignment.target_columns.size();
+            EXPECT_TRUE(found) << alignment << " " << alignment.label_columns.size();
         }
     }
 }
@@ -129,21 +129,21 @@ TEST(LabeledAlignerTest, SimpleTangleGraphSuffixSeed) {
                                         { std::string("B"), std::string("AATGCCT") } }} }
     }};
 
-    for (const auto &[query, targets] : exp_alignments) {
+    for (const auto &[query, labels] : exp_alignments) {
         auto alignments = aligner.align(query);
-        EXPECT_EQ(targets.size(), alignments.size()) << query;
+        EXPECT_EQ(labels.size(), alignments.size()) << query;
 
         for (const auto &alignment : alignments.data()) {
             bool found = false;
             for (const auto &label : get_alignment_labels(*anno_graph, alignment)) {
-                auto find = targets.find(label);
-                ASSERT_TRUE(find != targets.end());
+                auto find = labels.find(label);
+                ASSERT_TRUE(find != labels.end());
                 if (alignment.get_sequence() == find->second) {
                     found = true;
                     break;
                 }
             }
-            EXPECT_TRUE(found) << alignment << " " << alignment.target_columns.size();
+            EXPECT_TRUE(found) << alignment << " " << alignment.label_columns.size();
         }
     }
 }
@@ -187,21 +187,21 @@ TYPED_TEST(LabeledAlignerTest, CanonicalTangleGraph) {
                                             { std::string("C"), std::string("AGTCGA") } }} }
         }};
 
-        for (const auto &[query, targets] : exp_alignments) {
+        for (const auto &[query, labels] : exp_alignments) {
             auto alignments = aligner.align(query);
-            EXPECT_EQ(targets.size(), alignments.size()) << query;
+            EXPECT_EQ(labels.size(), alignments.size()) << query;
 
             for (const auto &alignment : alignments.data()) {
                 bool found = false;
                 for (const auto &label : get_alignment_labels(*anno_graph, alignment)) {
-                    auto find = targets.find(label);
-                    ASSERT_TRUE(find != targets.end());
+                    auto find = labels.find(label);
+                    ASSERT_TRUE(find != labels.end());
                     if (alignment.get_sequence() == find->second) {
                         found = true;
                         break;
                     }
                 }
-                EXPECT_TRUE(found) << alignment << " " << alignment.target_columns.size();
+                EXPECT_TRUE(found) << alignment << " " << alignment.label_columns.size();
             }
         }
     }

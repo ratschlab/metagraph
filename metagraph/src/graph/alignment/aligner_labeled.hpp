@@ -49,13 +49,13 @@ class DynamicLabeledGraph {
 
     // get the annotations of a node if they have been fetched
     std::optional<LabelSet> get_labels(node_index node) const {
-        auto it = targets_.find(node);
-        if (it == targets_.end() || it->second.second == nannot) {
+        auto it = labels_.find(node);
+        if (it == labels_.end() || it->second.second == nannot) {
             // if the node hasn't been seen before, or if its annotations haven't
             // been flushed, return nothing
             return std::nullopt;
         } else {
-            return std::cref(targets_set_.data()[it->second.second]);
+            return std::cref(labels_set_.data()[it->second.second]);
         }
     }
 
@@ -64,15 +64,15 @@ class DynamicLabeledGraph {
         if (!multi_int_)
             return std::nullopt;
 
-        auto it = targets_.find(node);
-        if (it == targets_.end() || it->second.second == nannot) {
+        auto it = labels_.find(node);
+        if (it == labels_.end() || it->second.second == nannot) {
             // if the node hasn't been seen before, or if its annotations haven't
             // been flushed, return nothing
             return std::nullopt;
         } else {
-            assert(static_cast<size_t>(it - targets_.begin()) < target_coords_.size());
-            return std::make_pair(std::cref(targets_set_.data()[it->second.second]),
-                                  std::cref(target_coords_[it - targets_.begin()]));
+            assert(static_cast<size_t>(it - labels_.begin()) < label_coords_.size());
+            return std::make_pair(std::cref(labels_set_.data()[it->second.second]),
+                                  std::cref(label_coords_[it - labels_.begin()]));
         }
     }
 
@@ -80,8 +80,8 @@ class DynamicLabeledGraph {
         std::vector<Row> rows;
         rows.reserve(path.size());
         for (node_index n : path) {
-            auto find = targets_.find(n);
-            rows.push_back(find != targets_.end() ? find->second.first : nrow);
+            auto find = labels_.find(n);
+            rows.push_back(find != labels_.end() ? find->second.first : nrow);
         }
         return rows;
     }
@@ -94,13 +94,13 @@ class DynamicLabeledGraph {
     static constexpr size_t nannot = std::numeric_limits<size_t>::max();
 
     // keep a unique set of annotation rows
-    VectorSet<Vector<Column>, utils::VectorHash> targets_set_;
+    VectorSet<Vector<Column>, utils::VectorHash> labels_set_;
 
-    // map nodes to indexes in targets_set_
-    VectorMap<node_index, std::pair<Row, size_t>> targets_;
+    // map nodes to indexes in labels_set_
+    VectorMap<node_index, std::pair<Row, size_t>> labels_;
 
-    // map each annotation row to a set of coordinates
-    std::vector<Vector<Tuple>> target_coords_;
+    // map each element in labels_ to a set of coordinates
+    std::vector<Vector<Tuple>> label_coords_;
 
     // buffer of accessed nodes and their corresponding annotation rows
     std::vector<Row> added_rows_;
@@ -125,7 +125,7 @@ class ILabeledAligner : public ISeedAndExtendAligner<AlignmentCompare> {
             [&](std::string_view header, QueryAlignment&& alignments) {
                 auto it = std::remove_if(
                     alignments.data().begin(), alignments.data().end(),
-                    [](const auto &a) { return a.target_columns.empty(); }
+                    [](const auto &a) { return a.label_columns.empty(); }
                 );
                 alignments.data().erase(it, alignments.data().end());
                 callback(header, std::move(alignments));
@@ -176,7 +176,7 @@ class LabeledBacktrackingExtender : public DefaultColumnExtender {
         labeled_graph_.flush();
 
         // reset the per-node temporary label storage
-        diff_target_sets_.clear();
+        diff_label_sets_.clear();
 
         // run backtracking
         return DefaultColumnExtender::backtrack(min_path_score, window);
@@ -184,7 +184,7 @@ class LabeledBacktrackingExtender : public DefaultColumnExtender {
 
     // overrides for backtracking helpers
     virtual bool terminate_backtrack_start(const std::vector<Alignment> &) const override final { return false; }
-    virtual bool terminate_backtrack() const override final { return target_intersection_.empty(); }
+    virtual bool terminate_backtrack() const override final { return label_intersection_.empty(); }
     virtual bool skip_backtrack_start(size_t i) override final;
 
     virtual bool update_seed_filter(node_index node,
@@ -235,15 +235,15 @@ class LabeledBacktrackingExtender : public DefaultColumnExtender {
     Aggregator extensions_;
 
     // keep track of the label set for the current backtracking
-    Vector<Column> target_intersection_;
+    Vector<Column> label_intersection_;
     size_t last_path_size_;
 
-    Vector<Tuple> target_intersection_coords_;
+    Vector<Tuple> label_intersection_coords_;
 
     // After a node has been visited during backtracking, we keep track of which
     // of its labels haven't been considered yet. This way, if backtracking is
     // called from this node, then we can restrict it to these labels.
-    tsl::hopscotch_map<size_t, Vector<Column>> diff_target_sets_;
+    tsl::hopscotch_map<size_t, Vector<Column>> diff_label_sets_;
 
     // we don't want to chain alignments in the local set of alignments, so
     // this generates a modified config for the local aggregator

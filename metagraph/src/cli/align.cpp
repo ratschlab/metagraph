@@ -356,14 +356,15 @@ std::string format_alignment_labels(const DeBruijnGraph &graph,
     std::vector<std::string> labels;
 
     for (const auto &path : paths.data()) {
-        if (path.target_columns.empty()) {
+        if (path.label_columns.empty()) {
             labels.emplace_back("\t*");
         } else {
             auto &cur_label = labels.emplace_back("\t");
-            for (size_t i = 0; i < path.target_columns.size(); ++i) {
-                cur_label += label_encoder.decode(path.target_columns[i]);
-                if (path.target_coordinates.size()) {
-                    for (const auto &[first, last] : path.target_coordinates[i]) {
+            for (size_t i = 0; i < path.label_columns.size(); ++i) {
+                cur_label += label_encoder.decode(path.label_columns[i]);
+                if (path.label_coordinates.size()) {
+                    assert(path.label_coordinates.size() == path.label_columns.size());
+                    for (const auto &[first, last] : path.label_coordinates[i]) {
                         cur_label += fmt::format(":{}-{}", first, last);
                     }
                 }
