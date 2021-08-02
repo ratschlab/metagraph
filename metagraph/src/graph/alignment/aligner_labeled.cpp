@@ -231,7 +231,7 @@ bool LabeledBacktrackingExtender::skip_backtrack_start(size_t i) {
                 // otherwise take the full label set
                 label_intersection_ = *labels;
                 if (auto fetch = labeled_graph_.get_coordinates(node)) {
-                    assert(fetch->first.get() == *labels);
+                    assert(fetch->first.get() == label_intersection_);
                     label_intersection_coords_ = fetch->second.get();
                 }
             }
