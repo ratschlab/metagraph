@@ -1268,7 +1268,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 
             fprintf(stderr, "Available options for taxonomic classification:\n");
             fprintf(stderr, "\t   --lca-coverage-fraction [FLOAT] \tfraction of kmers that needs to be covered\n"
-                            "\t\t\t\t\t\tby the returned LCA, it's subtree and it's ancestors [0.66]\n");
+                            "\t\t\t\t\t\tby the returned LCA, its subtree and its ancestors [0.66]\n");
             fprintf(stderr, "\t-p --parallel [INT] \t\t\tuse multiple threads for computation [1]\n");
             fprintf(stderr, "\t   --discovery-fraction [FLOAT] \tfraction of labeled k-mers required for a valid annotation [0.7]\n");
             fprintf(stderr, "\t   --top-label-fraction [FLOAT] \tif greater than 0, use a faster tax_class algorithm\n"
