@@ -414,15 +414,19 @@ std::vector<Alignment> DefaultColumnExtender
     queue.emplace(best_score);
 
     while (queue.size()) {
-        size_t i = std::get<2>(queue.top());
+        std::vector<TableIt> next_nodes{ queue.top() };
         queue.pop();
 
-        // If a node has a single outgoing edge, which has the best score, then
-        // that node is taken without updating the heap. This loop ensures that
-        // that happens
-        bool nofork = true;
-        while (nofork) {
-            nofork = false;
+        // try all paths which have the same best partial alignment score
+        // (this performs a BFS-like search)
+        while (queue.size() && std::get<0>(queue.top()) == std::get<0>(next_nodes.back())) {
+            next_nodes.push_back(queue.top());
+            queue.pop();
+        }
+
+        while (next_nodes.size()) {
+            size_t i = std::get<2>(next_nodes.back());
+            next_nodes.pop_back();
 
             std::vector<std::pair<node_index, char>> outgoing;
             size_t next_offset = -1;
@@ -498,6 +502,7 @@ std::vector<Alignment> DefaultColumnExtender
             ssize_t begin = prev_begin;
             size_t end = std::min(prev_end, window.size()) + 1;
 
+            std::vector<TableIt> to_push;
             for (const auto &[next, c] : outgoing) {
                 assert(std::get<0>(best_score) > xdrop_cutoff);
 
@@ -588,13 +593,14 @@ std::vector<Alignment> DefaultColumnExtender
                 // if this node has not been reached by a different
                 // alignment with a better score, continue
                 if (this->update_seed_filter(next, vec_offset, s_begin, s_end)) {
-                    // if there is only one outgoing edge, which is the best,
-                    // don't update the node traversal heap
-                    if (outgoing.size() == 1 && max_val >= std::get<0>(queue.top())) {
-                        nofork = true;
-                        i = table.size() - 1;
+                    // if this next node is the only next option, or if it's
+                    // better than all other options, take it without pushing
+                    // to the queue
+                    if (outgoing.size() == 1 && (queue.empty() || next_score > queue.top())
+                            && (next_nodes.empty() || next_score > next_nodes.back())) {
+                        next_nodes.emplace_back(std::move(next_score));
                     } else {
-                        queue.emplace(next_score);
+                        queue.emplace(std::move(next_score));
                     }
                 }
             }
