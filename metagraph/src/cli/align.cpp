@@ -5,7 +5,6 @@
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
 #include "common/threads/threading.hpp"
-#include "common/utils/string_utils.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "graph/alignment/dbg_aligner.hpp"
@@ -301,18 +300,15 @@ void gfa_map_files(const Config *config,
 std::string format_alignment(std::string_view header,
                              const QueryAlignment &paths,
                              const DeBruijnGraph &graph,
-                             const Config &config,
-                             const std::vector<std::string> *labels = nullptr) {
+                             const Config &config) {
     std::string sout;
     if (!config.output_json) {
         sout += fmt::format("{}\t{}", header, paths.get_query());
         if (paths.empty()) {
-            sout += fmt::format("\t*\t*\t{}\t*\t*\t*{}",
-                                config.alignment_min_path_score,
-                                labels ? "\t*" : "");
+            sout += fmt::format("\t*\t*\t{}\t*\t*\t*", config.alignment_min_path_score);
         } else {
             for (size_t i = 0; i < paths.size(); ++i) {
-                sout += fmt::format("\t{}{}", paths[i], labels ? (*labels)[i] : "");
+                sout += fmt::format("\t{}", paths[i]);
             }
         }
 
@@ -325,12 +321,8 @@ std::string format_alignment(std::string_view header,
         for (size_t i = 0; i < paths.size(); ++i) {
             const auto &path = paths[i];
 
-            std::string_view label;
-            if (labels)
-                label = (*labels)[i];
-
             Json::Value json_line = path.to_json(paths.get_query(path.get_orientation()),
-                                                 graph, secondary, header, label);
+                                                 graph, secondary, header);
 
             sout += fmt::format("{}\n", Json::writeString(builder, json_line));
             secondary = true;
@@ -472,13 +464,14 @@ int align_to_graph(Config *config) {
                     aligner = build_aligner(*aln_graph, aligner_config);
                 }
 
-                aligner->align_batch(batch, [&](std::string_view header, auto&& paths) {
-                    std::string res = format_alignment(
-                        header, std::move(paths), *aln_graph, *config
-                    );
-                    std::lock_guard<std::mutex> lock(print_mutex);
-                    *out << res;
-                });
+                aligner->align_batch(batch,
+                    [&](std::string_view header, QueryAlignment&& paths) {
+                        std::string res = format_alignment(header, std::move(paths),
+                                                           *aln_graph, *config);
+                        std::lock_guard<std::mutex> lock(print_mutex);
+                        *out << res;
+                    }
+                );
             };
 
             ++num_batches;
