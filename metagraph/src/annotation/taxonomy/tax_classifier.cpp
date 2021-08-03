@@ -107,7 +107,7 @@ void TaxonomyClsAnno::read_tree(const std::string &tax_tree_filepath, ChildrenLi
             continue;
         }
 
-        if (considered_relevant_taxids.find(full_parents_list[taxid]) == considered_relevant_taxids.end()) {
+        if (not considered_relevant_taxids.count(full_parents_list[taxid])) {
             relevant_taxids.push_back(full_parents_list[taxid]);
             considered_relevant_taxids.insert(full_parents_list[taxid]);
         }
@@ -137,11 +137,13 @@ void TaxonomyClsAnno::dfs_statistics(const TaxId node,
     node_to_linearization_idx[node] = tree_linearization->size();
     tree_linearization->push_back(node);
     uint32_t depth = 0;
-    for (const TaxId &child : tree.at(node)) {
-        dfs_statistics(child, tree, tree_linearization);
-        tree_linearization->push_back(node);
-        if (node_depth[child] > depth) {
-            depth = node_depth[child];
+    if (tree.count(node)) {
+        for (const TaxId &child : tree.at(node)) {
+            dfs_statistics(child, tree, tree_linearization);
+            tree_linearization->push_back(node);
+            if (node_depth[child] > depth) {
+                depth = node_depth[child];
+            }
         }
     }
     node_depth[node] = depth + 1;
@@ -177,8 +179,26 @@ void TaxonomyClsAnno::rmq_preprocessing(const std::vector<TaxId> &tree_lineariza
     }
 }
 
-TaxId TaxonomyClsAnno::assign_class(const std::string &sequence) const {
-    throw std::runtime_error("Assign class not implemented. Received " + sequence);
+std::vector<TaxId> TaxonomyClsAnno::get_lca_taxids_for_seq(const std::string_view &sequence, bool reversed) const {
+    cerr << "Assign class not implemented reversed = " << reversed << "\n";
+    throw std::runtime_error("get_lca_taxids_for_seq TaxonomyClsAnno not implemented. Received seq size" + to_string(sequence.size()));
+    exit(0);
+}
+
+std::vector<TaxId> TaxonomyClsImportDB::get_lca_taxids_for_seq(const std::string_view &sequence, bool reversed) const {
+    cerr << "Assign class not implemented reversed = " << reversed << "\n";
+    throw std::runtime_error("get_lca_taxids_for_seq TaxonomyClsImportDB not implemented. Received seq size" + to_string(sequence.size()));
+    exit(0);
+}
+
+TaxId TaxonomyClsAnno::find_lca(const std::vector<TaxId> &taxids) const {
+    throw std::runtime_error("find_lca TaxonomyClsAnno not implemented. Received taxids size" + to_string(taxids.size()));
+    exit(0);
+}
+
+TaxId TaxonomyClsImportDB::find_lca(const std::vector<TaxId> &taxids) const {
+    throw std::runtime_error("find_lca TaxonomyClsImportDB not implemented. Received taxids size" + to_string(taxids.size()));
+    exit(0);
 }
 
 } // namespace annot

@@ -4,15 +4,13 @@
 
 #include <tsl/hopscotch_map.h>
 #include <tsl/hopscotch_set.h>
-#include <stdio.h>
-#include <stdlib.h>
 
 #include "annotation/taxonomy/tax_classifier.hpp"
 
 namespace mtg {
 namespace test {
 
-TEST (TaxonomyTest, DfsStatistics) {
+TEST (TaxonomyTest, ClsAnno_DfsStatistics) {
     mtg::annot::TaxonomyClsAnno *tax = new mtg::annot::TaxonomyClsAnno();
     tsl::hopscotch_map<uint32_t, std::vector<uint32_t>> tree {
                 {0, {1, 2, 3}},      // node 0 -> root
@@ -59,7 +57,7 @@ TEST (TaxonomyTest, DfsStatistics) {
     EXPECT_EQ(expected_node_to_linearization_idx, tax->node_to_linearization_idx);
 }
 
-TEST (TaxonomyTest, RmqPreprocessing) {
+TEST (TaxonomyTest, ClsAnno_RmqPreprocessing) {
     mtg::annot::TaxonomyClsAnno *tax = new mtg::annot::TaxonomyClsAnno();
 
     tax->node_depth = {

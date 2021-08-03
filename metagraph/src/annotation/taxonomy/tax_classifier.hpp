@@ -37,14 +37,12 @@ public:
 
     virtual ~TaxonomyBase() {};
 
-    // TODO implement
-    virtual TaxId assign_class(const std::string &sequence) const = 0;
+    TaxId assign_class(const std::string &sequence) const;
 
 PROTECTED_TESTABLE:
     void assign_label_type(const std::string &label, bool *require_accversion_to_taxid_map);
 
-    // TODO implement.
-    TaxId find_lca(const std::vector<TaxId> &taxids) const;
+    virtual TaxId find_lca(const std::vector<TaxId> &taxids) const = 0;
 
     std::string get_accession_version_from_label(const std::string &label) const;
 
@@ -57,7 +55,6 @@ PROTECTED_TESTABLE:
     */
     void read_accversion_to_taxid_map(const std::string &filepath, const graph::AnnotatedDBG *anno_matrix);
 
-    // TODO implement.
     /**
      * Update the current node_scores and best_lca by taking into account the weight of the start_node and all its ancestors.
      *
@@ -75,7 +72,13 @@ PROTECTED_TESTABLE:
                                tsl::hopscotch_map<TaxId, uint64_t> *node_scores,
                                tsl::hopscotch_set<TaxId> *nodes_already_propagated,
                                TaxId *best_lca,
-                               uint32_t *best_lca_dist_to_root);
+                               uint32_t *best_lca_dist_to_root) const;
+
+    /**
+     * Get the list of LCA taxid for each kmer in a given sequences.
+     * The sequence can be given in forward or in reversed orientation.
+     */
+    virtual std::vector<TaxId> get_lca_taxids_for_seq(const std::string_view &sequence, bool reversed) const = 0;
 
     LabelType label_type;
 
@@ -104,7 +107,10 @@ public:
     TaxonomyClsImportDB(const std::string &taxdb_filepath,
                         const double lca_coverage_rate,
                         const double kmers_discovery_rate);
-    TaxId assign_class(const std::string &sequence) const;
+
+PRIVATE_TESTABLE:
+    std::vector<TaxId> get_lca_taxids_for_seq(const std::string_view &sequence, bool reversed) const;
+    TaxId find_lca(const std::vector<TaxId> &taxids) const;
 };
 
 class TaxonomyClsAnno : public TaxonomyBase {
@@ -128,8 +134,7 @@ public:
     // todo implement
     void export_taxdb(const std::string &filepath) const;
 
-    // todo implement
-    TaxId assign_class(const std::string &sequence) const;
+    TaxId assign_class_toplabels(const std::string &sequence, const double label_fraction) const;
 
 PRIVATE_TESTABLE:
     /**
@@ -161,6 +166,10 @@ PRIVATE_TESTABLE:
     void dfs_statistics(const TaxId node,
                         const ChildrenList &tree,
                         std::vector<TaxId> *tree_linearization);
+
+    TaxId find_lca(const std::vector<TaxId> &taxids) const;
+
+    std::vector<TaxId> get_lca_taxids_for_seq(const std::string_view &sequence, bool reversed) const;
 
     /**
      * rmq_data[0] contains the taxonomic tree linearization

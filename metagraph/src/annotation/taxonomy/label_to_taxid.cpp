@@ -10,12 +10,11 @@ namespace annot {
 using mtg::common::logger;
 
 void TaxonomyBase::assign_label_type(const std::string &label, bool *require_accversion_to_taxid_map) {
-    if (utils::starts_with(label, ">gi|")) {
+    if (utils::starts_with(label, "gi|")) {
         // e.g.   >gi|1070643132|ref|NC_031224.1| Arthrobacter phage Mudcat, complete genome
         label_type = GEN_BANK;
         *require_accversion_to_taxid_map = true;
-    } else if (utils::starts_with(label, ">") &&
-                utils::starts_with(utils::split_string(label, ":")[1], "taxid|")) {
+    } else if (utils::starts_with(utils::split_string(label, ":")[1], "taxid|")) {
         // e.g.   >kraken:taxid|2016032|NC_047834.1 Alteromonas virus vB_AspP-H4/4, complete genome
         label_type = TAXID;
         *require_accversion_to_taxid_map = false;
@@ -71,8 +70,8 @@ void TaxonomyBase::read_accversion_to_taxid_map(const std::string &filepath,
 
     tsl::hopscotch_set<std::string> input_accessions;
     if (anno_matrix != NULL) {
-        for (const std::string &accversion : anno_matrix->get_annotation().get_all_labels()) {
-            input_accessions.insert(accversion);
+        for (const std::string &label : anno_matrix->get_annotation().get_all_labels()) {
+            input_accessions.insert(get_accession_version_from_label(label));
         }
     }
 
