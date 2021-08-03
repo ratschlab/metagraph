@@ -38,27 +38,31 @@ Alignment::Alignment(std::string_view query,
 
 std::ostream& operator<<(std::ostream& out, const Alignment &alignment) {
     out << fmt::format("{}\t{}\t{}\t{}\t{}\t{}",
-                       (alignment.get_orientation() ? "-" : "+"),
+                       alignment.get_orientation() ? "-" : "+",
                        alignment.get_sequence(),
                        alignment.get_score(),
                        alignment.get_cigar().get_num_matches(),
                        alignment.get_cigar().to_string(),
                        alignment.get_offset());
 
-    if (alignment.label_columns.size()) {
-        assert(alignment.label_encoder_);
+    const auto &label_columns = alignment.label_columns;
+    const auto &label_coordinates = alignment.label_cooordinates;
+
+    if (label_columns.size()) {
+        assert(alignment.label_encoder);
 
         std::vector<std::string> decoded_labels;
-        decoded_labels.reserve(alignment.label_columns.size());
-        assert(alignment.label_coordinates.empty()
-            || alignment.label_coordinates.size() == alignment.label_columns.size());
+        decoded_labels.reserve(label_columns.size());
+        assert(label_coordinates.empty() || label_coordinates.size() == label_columns.size());
 
         for (size_t i = 0; i < alignment.label_columns.size(); ++i) {
             decoded_labels.emplace_back(alignment.label_encoder->decode(
                 alignment.label_columns[i]
             ));
-            for (const auto &[first, last] : alignment.label_coordinates[i]) {
-                decoded_labels.back() += fmt::format(":{}-{}", first, last);
+            if (alignment.label_coordinates.size()) {
+                for (const auto &[first, last] : alignment.label_coordinates[i]) {
+                    decoded_labels.back() += fmt::format(":{}-{}", first, last);
+                }
             }
         }
 
