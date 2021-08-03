@@ -46,7 +46,7 @@ std::ostream& operator<<(std::ostream& out, const Alignment &alignment) {
                        alignment.get_offset());
 
     const auto &label_columns = alignment.label_columns;
-    const auto &label_coordinates = alignment.label_cooordinates;
+    const auto &label_coordinates = alignment.label_coordinates;
 
     if (label_columns.size()) {
         assert(alignment.label_encoder);
@@ -55,12 +55,10 @@ std::ostream& operator<<(std::ostream& out, const Alignment &alignment) {
         decoded_labels.reserve(label_columns.size());
         assert(label_coordinates.empty() || label_coordinates.size() == label_columns.size());
 
-        for (size_t i = 0; i < alignment.label_columns.size(); ++i) {
-            decoded_labels.emplace_back(alignment.label_encoder->decode(
-                alignment.label_columns[i]
-            ));
-            if (alignment.label_coordinates.size()) {
-                for (const auto &[first, last] : alignment.label_coordinates[i]) {
+        for (size_t i = 0; i < label_columns.size(); ++i) {
+            decoded_labels.emplace_back(alignment.label_encoder->decode(label_columns[i]));
+            if (label_coordinates.size()) {
+                for (const auto &[first, last] : label_coordinates[i]) {
                     decoded_labels.back() += fmt::format(":{}-{}", first, last);
                 }
             }
