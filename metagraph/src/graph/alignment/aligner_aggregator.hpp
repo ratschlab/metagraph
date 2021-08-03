@@ -1,8 +1,6 @@
 #ifndef __ALIGNER_AGGREGATOR_HPP__
 #define __ALIGNER_AGGREGATOR_HPP__
 
-#include <algorithm>
-
 #include <priority_deque.hpp>
 
 #include "aligner_alignment.hpp"
