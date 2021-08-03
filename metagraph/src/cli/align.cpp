@@ -305,14 +305,14 @@ std::string format_alignment(std::string_view header,
     if (!config.output_json) {
         sout += fmt::format("{}\t{}", header, paths.get_query());
         if (paths.empty()) {
-            sout += fmt::format("\t*\t*\t{}\t*\t*\t*", config.alignment_min_path_score);
+            sout += fmt::format("\t*\t*\t{}\t*\t*\t*\n", config.alignment_min_path_score);
         } else {
-            for (size_t i = 0; i < paths.size(); ++i) {
-                sout += fmt::format("\t{}", paths[i]);
+            for (const auto &path : paths.data()) {
+                sout += fmt::format("\t{}", path);
             }
+            sout += "\n";
         }
 
-        sout += "\n";
     } else {
         Json::StreamWriterBuilder builder;
         builder["indentation"] = "";
