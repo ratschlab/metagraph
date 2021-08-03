@@ -519,7 +519,7 @@ TaxId TaxonomyClsAnno::find_lca(const std::vector<TaxId> &taxids) const {
     // The node with maximum node_depth in 'linearization[left_idx : right_idx+1]' is the LCA of the given set.
 
     // Find the maximum node_depth between the 2 overlapping intervals of size 2^log_dist.
-    uint32_t log_dist = LOG2(right_idx - left_idx);
+    uint32_t log_dist = sdsl::bits::hi(right_idx - left_idx);
     if (rmq_data.size() <= log_dist) {
         logger->error("Internal error: the RMQ was not precomputed before the LCA queries.");
         std::exit(1);
