@@ -55,7 +55,8 @@ class Alignment {
               bool orientation = false,
               size_t offset = 0);
 
-    void append(Alignment&& other);
+    // return true if the internal labels were modified
+    bool append(Alignment&& other);
 
     size_t size() const { return nodes_.size(); }
     bool empty() const { return nodes_.empty(); }
@@ -124,6 +125,8 @@ class Alignment {
 
     bool is_valid(const DeBruijnGraph &graph, const DBGAlignerConfig *config = nullptr) const;
 
+    static bool coordinates_less(const Alignment &a, const Alignment &b);
+
     LabelSet label_columns;
 
     // for each column in target_columns, store a vector of coordinate ranges
@@ -145,6 +148,46 @@ class Alignment {
 };
 
 std::ostream& operator<<(std::ostream& out, const Alignment &alignment);
+
+struct AlignmentCoordinatesLess {
+    bool operator()(const Alignment &a, const Alignment &b) const {
+        auto a_begin = a.label_columns.begin();
+        auto a_end = a.label_columns.end();
+        auto a_c_begin = a.label_coordinates.begin();
+
+        auto b_begin = b.label_columns.begin();
+        auto b_end = b.label_columns.end();
+        auto b_c_begin = b.label_coordinates.begin();
+
+        while (a_begin != a_end && b_begin != b_end) {
+            if (*a_begin < *b_begin) {
+                auto a_begin_next = std::lower_bound(a_begin, a_end, *b_begin);
+                a_c_begin += a_begin_next - a_begin;
+                a_begin = a_begin_next;
+            } else if (*b_begin < *a_begin) {
+                auto b_begin_next = std::lower_bound(b_begin, b_end, *a_begin);
+                b_c_begin += b_begin_next - b_begin;
+                b_begin = b_begin_next;
+            } else {
+                if (a_c_begin->size()) {
+                    if (std::upper_bound(b_c_begin->begin(), b_c_begin->end(),
+                                         a_c_begin->front().second,
+                                         [](const auto &a_c, const auto &b_c) {
+                                             return a_c < b_c.first;
+                                         }) != b_c_begin->end()) {
+                        return true;
+                    }
+                }
+                ++a_begin;
+                ++a_c_begin;
+                ++b_begin;
+                ++b_c_begin;
+            }
+        }
+
+        return false;
+    }
+};
 
 struct LocalAlignmentLess {
     bool operator()(const Alignment &a, const Alignment &b) const {

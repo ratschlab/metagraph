@@ -125,7 +125,7 @@ namespace utils {
     // ranges in a2 and b2.
     template <class OutType, class SetOp,
               class InputIt1, class InputIt2, class InputIt3, class InputIt4,
-              class OutputIt1, class OutputIt2>
+              class OutputIt1, class OutputIt2, typename... Args>
     constexpr void indexed_set_op(InputIt1 a1_begin,
                                   InputIt1 a1_end,
                                   InputIt2 a2_begin,
@@ -133,8 +133,9 @@ namespace utils {
                                   InputIt3 b1_end,
                                   InputIt4 b2_begin,
                                   OutputIt1 out1,
-                                  OutputIt2 out2) {
-        SetOp set_op;
+                                  OutputIt2 out2,
+                                  Args&&... args) {
+        SetOp set_op(std::forward<Args>(args)...);
 
         while (a1_begin != a1_end && b1_begin != b1_end) {
             if (*a1_begin < *b1_begin) {

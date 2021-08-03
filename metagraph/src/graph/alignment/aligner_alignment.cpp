@@ -3,6 +3,7 @@
 #include "graph/representation/base/sequence_graph.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/canonical_dbg.hpp"
+#include "common/algorithms.hpp"
 #include "common/logger.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 #include "graph/representation/rc_dbg.hpp"
@@ -70,9 +71,91 @@ std::ostream& operator<<(std::ostream& out, const Alignment &alignment) {
     return out;
 }
 
-void Alignment::append(Alignment&& other) {
+struct MergeCoords {
+    template <class InputIt1, class InputIt2, class OutputIt>
+    void operator()(InputIt1 a_begin,
+                    InputIt1 a_end,
+                    InputIt2 b_begin,
+                    InputIt2 b_end,
+                    OutputIt out) const {
+        while (a_begin != a_end && b_begin != b_end) {
+            if (a_begin->second + 1 < b_begin->first) {
+                a_begin = std::lower_bound(a_begin, a_end, *b_begin,
+                                           [](const auto &a, const auto &b) {
+                    return a.second + 1 < b.first;
+                });
+            } else if (a_begin->second + 1 > b_begin->first) {
+                b_begin = std::lower_bound(b_begin, b_end, *a_begin,
+                                           [](const auto &b, const auto &a) {
+                    return a.second + 1 > b.first;
+                });
+            } else {
+                assert(a_begin->second + 1 == b_begin->first);
+                *out = std::make_pair(a_begin->first, b_begin->second);
+                ++out;
+                ++a_begin;
+                ++b_begin;
+            }
+        }
+    }
+};
+
+bool Alignment::append(Alignment&& other) {
     assert(query_.data() + query_.size() + other.get_clipping() == other.query_.data());
     assert(orientation_ == other.orientation_);
+
+    bool ret_val = false;
+
+    if (label_coordinates.size()) {
+        LabelSet merged_label_columns;
+        CoordinateSet merged_label_coordinates;
+        assert(!other.get_clipping());
+
+        // if the alignments fit together without gaps, make sure that the
+        // coordinates form a contiguous range
+        utils::indexed_set_op<std::vector<std::pair<uint64_t, uint64_t>>, MergeCoords>(
+            label_columns.begin(), label_columns.end(), label_coordinates.begin(),
+            other.label_columns.begin(), other.label_columns.end(),
+            other.label_coordinates.begin(),
+            std::back_inserter(merged_label_columns),
+            std::back_inserter(merged_label_coordinates)
+        );
+
+        if (merged_label_columns.empty()) {
+            *this = Alignment();
+            return true;
+        }
+
+        ret_val = merged_label_columns.size() < label_columns.size();
+
+        if (!ret_val) {
+            for (size_t i = 0; i < label_columns.size(); ++i) {
+                if (merged_label_coordinates[i].size() < label_coordinates[i].size()) {
+                    ret_val = true;
+                    break;
+                }
+            }
+        }
+
+        std::swap(label_columns, merged_label_columns);
+        std::swap(label_coordinates, merged_label_coordinates);
+
+    } else if (label_columns.size()) {
+        LabelSet merged_label_columns;
+        std::set_intersection(label_columns.begin(), label_columns.end(),
+                              other.label_columns.begin(), other.label_columns.end(),
+                              std::back_inserter(merged_label_columns));
+
+        if (merged_label_columns.empty()) {
+            *this = Alignment();
+            return true;
+        }
+
+        ret_val = merged_label_columns.size() < label_columns.size();
+
+        std::swap(label_columns, merged_label_columns);
+    }
+
 
     nodes_.insert(nodes_.end(), other.nodes_.begin(), other.nodes_.end());
     sequence_ += std::move(other.sequence_);
@@ -82,6 +165,8 @@ void Alignment::append(Alignment&& other) {
 
     // expand the query window to cover both alignments
     query_ = std::string_view(query_.data(), other.query_.end() - query_.begin());
+
+    return ret_val;
 }
 
 size_t Alignment::trim_offset() {
@@ -166,6 +251,13 @@ size_t Alignment::trim_query_prefix(size_t n,
         if (cigar_offset == it->second) {
             ++it;
             cigar_offset = 0;
+        }
+    }
+
+    size_t seq_trim = s_it - sequence_.begin();
+    for (auto &coords : label_coordinates) {
+        for (auto &[first, last] : coords) {
+            first += seq_trim;
         }
     }
 

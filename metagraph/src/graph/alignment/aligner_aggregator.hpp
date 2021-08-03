@@ -298,41 +298,6 @@ inline void AlignmentAggregator<AlignmentCompare>::construct_alignment_chains() 
     }
 }
 
-struct ConsecutiveCoords {
-    template <class InputIt1, class InputIt2, class OutputIt>
-    void operator()(InputIt1 a_begin,
-                    InputIt1 a_end,
-                    InputIt2 b_begin,
-                    InputIt2 b_end,
-                    OutputIt out) const {
-        while (a_begin + 1 < a_end) {
-            *out = *a_begin;
-            ++out;
-            ++a_begin;
-        }
-
-        if (a_begin != a_end) {
-            auto a_last = *a_begin;
-            ++a_begin;
-            *out = std::move(a_last);
-            ++out;
-
-            // find the first set of coordinates which is disjoint from the first range
-            b_begin = std::lower_bound(b_begin, b_end, a_last,
-                [](const auto &a, const auto &b) {
-                    return a.first < b.first || a.second < b.second;
-                }
-            );
-        }
-
-        while (b_begin != b_end) {
-            *out = *b_begin;
-            ++out;
-            ++b_begin;
-        }
-    }
-};
-
 template <class AlignmentCompare>
 inline void AlignmentAggregator<AlignmentCompare>
 ::construct_alignment_chain(std::string_view query,
@@ -369,33 +334,21 @@ inline void AlignmentAggregator<AlignmentCompare>
         if (next_begin <= chain_begin || next_end == chain_end)
             continue;
 
-        Alignment::LabelSet label_columns;
-        Alignment::CoordinateSet label_coordinates;
-        if (chain.label_coordinates.size()) {
-            // only put together a chain if the labels intersect and if there exist
-            // disjoint coordinates in the incoming alignment
-            assert(chain.label_columns.size() == chain.label_coordinates.size());
-            utils::indexed_set_op<std::vector<std::pair<uint64_t, uint64_t>>,
-                                  ConsecutiveCoords>(
-                chain.label_columns.begin(), chain.label_columns.end(),
-                chain.label_coordinates.begin(),
-                it->label_columns.begin(), it->label_columns.end(),
-                it->label_coordinates.begin(),
-                std::back_inserter(label_columns),
-                std::back_inserter(label_coordinates)
-            );
+        if (chain.label_columns.size()
+                && !utils::share_element(it->label_columns.begin(),
+                                         it->label_columns.end(),
+                                         chain.label_columns.begin(),
+                                         chain.label_columns.end())) {
+            continue;
+        }
 
-            if (label_columns.empty())
-                continue;
-
-        } else if (chain.label_columns.size()) {
-            std::set_intersection(it->label_columns.begin(), it->label_columns.end(),
-                                  chain.label_columns.begin(),
-                                  chain.label_columns.end(),
-                                  std::back_inserter(label_columns));
-
-            if (label_columns.empty())
-                continue;
+        if (chain.label_coordinates.size()
+                && (next_begin >= chain_end || !AlignmentCoordinatesLess()(chain, *it))) {
+            // if there is a gap in the query sequence, or if the coordinates
+            // do not allow for a chain to form, skip
+            // TODO: if there is a gap in the query, then the coordinates
+            //       may help fill in the gap
+            continue;
         }
 
         Alignment aln(*it);
@@ -424,21 +377,20 @@ inline void AlignmentAggregator<AlignmentCompare>
                 aln.insert_gap_prefix(-overlap, graph_, config_);
         }
 
+        if (aln.empty())
+            continue;
+
         score_t next_score = score + aln.get_score();
         if (next_score > best_score[next_end - query.data()]) {
             best_score[next_end - query.data()] = next_score;
 
             Alignment next_chain(chain);
             next_chain.trim_end_clipping();
-            next_chain.append(std::move(aln));
+            bool modified = next_chain.append(std::move(aln));
             assert(next_chain.get_score() == next_score);
             assert(next_chain.is_valid(graph_, &config_));
             if (next_chain.size()) {
-                if (label_columns.size() == chain.label_columns.size())
-                    called = true;
-
-                next_chain.label_columns = std::move(label_columns);
-                next_chain.label_coordinates = std::move(label_coordinates);
+                called |= modified;
                 construct_alignment_chain(query, std::move(next_chain), it + 1,
                                           end, best_score, callback);
             }
