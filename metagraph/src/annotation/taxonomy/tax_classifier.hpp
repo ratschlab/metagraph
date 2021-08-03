@@ -82,8 +82,7 @@ class TaxonomyClsAnno : public TaxonomyBase {
                     const std::string &label_taxid_map_filepath = "");
     TaxonomyClsAnno() {}
 
-    // todo implement
-    TaxId assign_class(const std::string &sequence) const;
+    TaxId assign_class_toplabels(const std::string &sequence, const double label_fraction) const;
 
  private:
     /**
@@ -115,6 +114,10 @@ class TaxonomyClsAnno : public TaxonomyBase {
     void dfs_statistics(TaxId node,
                         const ChildrenList &tree,
                         std::vector<TaxId> *tree_linearization);
+
+    TaxId find_lca(const std::vector<TaxId> &taxids) const;
+
+    std::vector<TaxId> get_lca_taxids_for_seq(const std::string_view &sequence, bool reversed) const;
 
     /**
      * rmq_data_[0] contains the taxonomic tree linearization

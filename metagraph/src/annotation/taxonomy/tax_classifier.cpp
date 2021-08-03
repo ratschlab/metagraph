@@ -307,5 +307,27 @@ void TaxonomyClsAnno::rmq_preprocessing(const std::vector<TaxId> &tree_lineariza
     }
 }
 
+std::vector<TaxId> TaxonomyClsAnno::get_lca_taxids_for_seq(const std::string_view &sequence, bool reversed) const {
+    cerr << "Assign class not implemented reversed = " << reversed << "\n";
+    throw std::runtime_error("get_lca_taxids_for_seq TaxonomyClsAnno not implemented. Received seq size" + to_string(sequence.size()));
+    exit(0);
+}
+
+std::vector<TaxId> TaxonomyClsImportDB::get_lca_taxids_for_seq(const std::string_view &sequence, bool reversed) const {
+    cerr << "Assign class not implemented reversed = " << reversed << "\n";
+    throw std::runtime_error("get_lca_taxids_for_seq TaxonomyClsImportDB not implemented. Received seq size" + to_string(sequence.size()));
+    exit(0);
+}
+
+TaxId TaxonomyClsAnno::find_lca(const std::vector<TaxId> &taxids) const {
+    throw std::runtime_error("find_lca TaxonomyClsAnno not implemented. Received taxids size" + to_string(taxids.size()));
+    exit(0);
+}
+
+TaxId TaxonomyClsImportDB::find_lca(const std::vector<TaxId> &taxids) const {
+    throw std::runtime_error("find_lca TaxonomyClsImportDB not implemented. Received taxids size" + to_string(taxids.size()));
+    exit(0);
+}
+
 } // namespace annot
 } // namespace mtg
