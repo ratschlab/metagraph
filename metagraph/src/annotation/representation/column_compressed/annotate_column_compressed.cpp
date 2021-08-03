@@ -428,6 +428,18 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
 }
 
 template <typename Label>
+size_t ColumnCompressed<Label>::read_num_labels(const std::string &filename) {
+    // load labels
+    auto fname = make_suffix(filename, kExtension);
+    std::ifstream in(filename, std::ios::binary);
+    std::ignore = load_number(in); // read num_rows
+    LabelEncoder<Label> label_encoder;
+    if (!label_encoder.load(in))
+        throw std::ofstream::failure("Can't load label encoder from " + fname);
+    return label_encoder.size();
+}
+
+template <typename Label>
 bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenames,
                                          const ColumnCallback &callback,
                                          size_t num_threads) {
@@ -438,22 +450,13 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
     // load labels
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (size_t i = 1; i < filenames.size(); ++i) {
-        auto filename = make_suffix(filenames[i - 1], kExtension);
-
-        std::ifstream in(filename, std::ios::binary);
-        if (!in.good()) {
-            logger->error("Can't read from {}", filename);
+        auto fname = make_suffix(filenames[i - 1], kExtension);
+        try {
+            offsets[i] = read_num_labels(fname);
+        } catch (...) {
+            logger->error("Can't load label encoder from {}", fname);
             error_occurred = true;
         }
-        std::ignore = load_number(in);
-
-        LabelEncoder<Label> label_encoder;
-        if (!label_encoder.load(in)) {
-            logger->error("Can't load label encoder from {}", filename);
-            error_occurred = true;
-        }
-
-        offsets[i] = label_encoder.size();
     }
 
     if (error_occurred)
@@ -519,22 +522,13 @@ void ColumnCompressed<Label>
     // load labels
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (size_t i = 1; i < filenames.size(); ++i) {
-        auto filename = make_suffix(filenames[i - 1], kExtension);
-
-        std::ifstream in(filename, std::ios::binary);
-        if (!in) {
-            logger->error("Can't read from {}", filename);
+        auto fname = make_suffix(filenames[i - 1], kExtension);
+        try {
+            offsets[i] = read_num_labels(fname);
+        } catch (...) {
+            logger->error("Can't load label encoder from {}", fname);
             error_occurred = true;
         }
-        std::ignore = load_number(in);
-
-        LabelEncoder<Label> label_encoder;
-        if (!label_encoder.load(in)) {
-            logger->error("Can't load label encoder from {}", filename);
-            error_occurred = true;
-        }
-
-        offsets[i] = label_encoder.size();
     }
 
     if (error_occurred)
