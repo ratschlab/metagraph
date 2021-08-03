@@ -41,11 +41,14 @@ bool check_labels(const DeBruijnGraph &graph,
     return true;
 }
 
+// Return true if the two sorted ranges share a common element
 // adapted from:
 // https://www.fluentcpp.com/2020/07/03/how-to-check-if-2-sorted-collections-have-a-common-element/
 template <class InputIt1, class InputIt2>
-constexpr bool share_element(InputIt1 first1, InputIt1 last1,
-                             InputIt2 first2, InputIt2 last2) {
+constexpr bool share_element(InputIt1 first1,
+                             InputIt1 last1,
+                             InputIt2 first2,
+                             InputIt2 last2) {
     assert(std::is_sorted(first1, last1));
     assert(std::is_sorted(first2, last2));
 
@@ -60,6 +63,48 @@ constexpr bool share_element(InputIt1 first1, InputIt1 last1,
     }
 
     return false;
+}
+
+// Intersect the sorted ranges a1 and b1 with corresponding sorted ranges of
+// sorted ranges a2 and b2 (of equal length).
+// i.e., For each shared element between a1 and b1, intersect the corresponding
+// ranges in a2 and b2.
+template <class OutType, class InputIt1, class InputIt2, class InputIt3, class InputIt4,
+          class OutputIt1, class OutputIt2>
+void indexed_set_intersect(InputIt1 a1_begin,
+                           InputIt1 a1_end,
+                           InputIt2 a2_begin,
+                           InputIt3 b1_begin,
+                           InputIt3 b1_end,
+                           InputIt4 b2_begin,
+                           OutputIt1 out1,
+                           OutputIt2 out2) {
+    while (a1_begin != a1_end && b1_begin != b1_end) {
+        if (*a1_begin < *b1_begin) {
+            auto a1_begin_next = std::lower_bound(a1_begin, a1_end, *b1_begin);
+            a2_begin += a1_begin_next - a1_begin;
+            a1_begin = a1_begin_next;
+        } else if (*b1_begin < *a1_begin) {
+            auto b1_begin_next = std::lower_bound(b1_begin, b1_end, *a1_begin);
+            b2_begin += b1_begin_next - b1_begin;
+            b1_begin = b1_begin_next;
+        } else {
+            OutType merged;
+            std::set_intersection(a2_begin->begin(), a2_begin->end(),
+                                  b2_begin->begin(), b2_begin->end(),
+                                  std::back_inserter(merged));
+            if (merged.size()) {
+                *out1 = *a1_begin;
+                ++out1;
+                *out2 = std::move(merged);
+                ++out2;
+            }
+            ++a1_begin;
+            ++b1_begin;
+            ++a2_begin;
+            ++b2_begin;
+        }
+    }
 }
 
 DynamicLabeledGraph::DynamicLabeledGraph(const AnnotatedDBG &anno_graph)
@@ -285,33 +330,14 @@ void LabeledBacktrackingExtender
                 label_set = &labels;
                 Vector<Column> label_inter;
                 Vector<Tuple> coord_inter;
-                auto it = label_intersection_.begin();
-                auto jt = labels.begin();
-                auto kt = label_intersection_coords_.begin();
-                auto lt = coords.begin();
-                while (it != label_intersection_.end() && jt != labels.end()) {
-                    if (*it < *jt) {
-                        auto it_next = std::lower_bound(it, label_intersection_.end(), *jt);
-                        kt += it_next - it;
-                        it = it_next;
-                    } else if (*jt < *it) {
-                        auto jt_next = std::lower_bound(jt, labels.end(), *it);
-                        lt += jt_next - jt;
-                        jt = jt_next;
-                    } else {
-                        Tuple coord_merge;
-                        std::set_intersection(lt->begin(), lt->end(), kt->begin(), kt->end(),
-                                              std::back_inserter(coord_merge));
-                        if (coord_merge.size()) {
-                            label_inter.push_back(*it);
-                            coord_inter.push_back(std::move(coord_merge));
-                        }
-                        ++it;
-                        ++jt;
-                        ++kt;
-                        ++lt;
-                    }
-                }
+                indexed_set_intersect<Tuple>(
+                    label_intersection_.begin(),
+                    label_intersection_.end(),
+                    label_intersection_coords_.begin(),
+                    labels.begin(), labels.end(), coords.begin(),
+                    std::back_inserter(label_inter),
+                    std::back_inserter(coord_inter)
+                );
 
                 std::swap(label_intersection_, label_inter);
                 std::swap(label_intersection_coords_, coord_inter);

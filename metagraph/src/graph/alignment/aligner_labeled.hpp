@@ -30,7 +30,7 @@ class DynamicLabeledGraph {
     typedef annot::binmat::BinaryMatrix::Row Row;
     typedef annot::matrix::MultiIntMatrix::Tuple Tuple;
 
-    typedef std::reference_wrapper<const Vector<Column>> LabelSet;
+    typedef std::reference_wrapper<const Alignment::LabelSet> LabelSet;
     typedef std::reference_wrapper<const Vector<Tuple>> CoordsSet;
 
     static constexpr Row nrow = std::numeric_limits<Row>::max();

@@ -12,6 +12,7 @@
 #include "aligner_cigar.hpp"
 #include "aligner_config.hpp"
 #include "graph/representation/base/sequence_graph.hpp"
+#include "annotation/binary_matrix/base/binary_matrix.hpp"
 #include "common/vector.hpp"
 
 
@@ -26,6 +27,9 @@ class Alignment {
   public:
     typedef DeBruijnGraph::node_index node_index;
     typedef DBGAlignerConfig::score_t score_t;
+    typedef annot::binmat::BinaryMatrix::Column Column;
+    typedef Vector<Column> LabelSet;
+    typedef std::vector<std::vector<std::pair<uint64_t, uint64_t>>> CoordinateSet;
 
     Alignment() {}
 
@@ -119,10 +123,10 @@ class Alignment {
 
     bool is_valid(const DeBruijnGraph &graph, const DBGAlignerConfig *config = nullptr) const;
 
-    Vector<uint64_t> label_columns;
+    LabelSet label_columns;
 
     // for each column in target_columns, store a vector of coordinate ranges
-    std::vector<std::vector<std::pair<uint64_t, uint64_t>>> label_coordinates;
+    CoordinateSet label_coordinates;
 
   private:
     Json::Value path_json(size_t node_size, std::string_view label = {}) const;
