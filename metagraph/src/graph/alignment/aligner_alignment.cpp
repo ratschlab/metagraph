@@ -45,6 +45,26 @@ std::ostream& operator<<(std::ostream& out, const Alignment &alignment) {
                        alignment.get_cigar().to_string(),
                        alignment.get_offset());
 
+    if (alignment.label_columns.size()) {
+        assert(alignment.label_encoder_);
+
+        std::vector<std::string> decoded_labels;
+        decoded_labels.reserve(alignment.label_columns.size());
+        assert(alignment.label_coordinates.empty()
+            || alignment.label_coordinates.size() == alignment.label_columns.size());
+
+        for (size_t i = 0; i < alignment.label_columns.size(); ++i) {
+            decoded_labels.emplace_back(alignment.label_encoder->decode(
+                alignment.label_columns[i]
+            ));
+            for (const auto &[first, last] : alignment.label_coordinates[i]) {
+                decoded_labels.back() += fmt::format(":{}-{}", first, last);
+            }
+        }
+
+        out << fmt::format("\t{}", fmt::join(decoded_labels, ";"));
+    }
+
     return out;
 }
 

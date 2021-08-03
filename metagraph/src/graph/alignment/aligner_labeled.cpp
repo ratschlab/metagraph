@@ -402,6 +402,8 @@ void LabeledBacktrackingExtender
             );
 
             assert(!alignment.get_offset());
+            alignment.label_encoder
+                = &labeled_graph_.get_anno_graph().get_annotation().get_label_encoder();
             alignment.label_columns = label_intersection_;
             assert(check_labels(*this->graph_, labeled_graph_.get_anno_graph(), alignment));
 

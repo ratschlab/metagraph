@@ -13,6 +13,7 @@
 #include "aligner_config.hpp"
 #include "graph/representation/base/sequence_graph.hpp"
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
+#include "annotation/representation/base/annotation.hpp"
 #include "common/vector.hpp"
 
 
@@ -127,6 +128,8 @@ class Alignment {
 
     // for each column in target_columns, store a vector of coordinate ranges
     CoordinateSet label_coordinates;
+
+    const annot::LabelEncoder<> *label_encoder = nullptr;
 
   private:
     Json::Value path_json(size_t node_size, std::string_view label = {}) const;

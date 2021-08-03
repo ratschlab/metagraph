@@ -347,36 +347,6 @@ std::string format_alignment(std::string_view header,
     return sout;
 }
 
-template <class LabelEncoder>
-std::string format_alignment_labels(const DeBruijnGraph &graph,
-                                    const LabelEncoder &label_encoder,
-                                    const Config &config,
-                                    std::string_view header,
-                                    QueryAlignment&& paths) {
-    std::vector<std::string> labels;
-
-    for (const auto &path : paths.data()) {
-        if (path.label_columns.empty()) {
-            labels.emplace_back("\t*");
-        } else {
-            auto &cur_label = labels.emplace_back("\t");
-            for (size_t i = 0; i < path.label_columns.size(); ++i) {
-                cur_label += label_encoder.decode(path.label_columns[i]);
-                if (path.label_coordinates.size()) {
-                    assert(path.label_coordinates.size() == path.label_columns.size());
-                    for (const auto &[first, last] : path.label_coordinates[i]) {
-                        cur_label += fmt::format(":{}-{}", first, last);
-                    }
-                }
-                cur_label += ";";
-            }
-            cur_label.pop_back();
-        }
-    }
-
-    return format_alignment(header, paths, graph, config, &labels);
-}
-
 int align_to_graph(Config *config) {
     assert(config);
 
@@ -492,28 +462,23 @@ int align_to_graph(Config *config) {
                 if (auto *canonical = dynamic_cast<CanonicalDBG*>(aln_graph.get()))
                     aln_graph = std::make_shared<CanonicalDBG>(*canonical);
 
+                std::shared_ptr<AnnotatedDBG> aln_anno_graph;
+                std::shared_ptr<IDBGAligner> aligner;
+
                 if (annotator) {
-                    AnnotatedDBG aln_anno_graph(aln_graph, annotator);
-                    const auto &label_encoder = annotator->get_label_encoder();
-                    build_aligner(aln_anno_graph, aligner_config)->align_batch(
-                        batch, [&](std::string_view header, auto&& paths) {
-                        std::string res = format_alignment_labels(
-                            *aln_graph, label_encoder, *config,
-                            header, std::move(paths)
-                        );
-                        std::lock_guard<std::mutex> lock(print_mutex);
-                        *out << res;
-                    });
+                    aln_anno_graph = std::make_shared<AnnotatedDBG>(aln_graph, annotator);
+                    aligner = build_aligner(*aln_anno_graph, aligner_config);
                 } else {
-                    build_aligner(*aln_graph, aligner_config)->align_batch(
-                        batch, [&](std::string_view header, auto&& paths) {
-                        std::string res = format_alignment(
-                            header, std::move(paths), *aln_graph, *config
-                        );
-                        std::lock_guard<std::mutex> lock(print_mutex);
-                        *out << res;
-                    });
+                    aligner = build_aligner(*aln_graph, aligner_config);
                 }
+
+                aligner->align_batch(batch, [&](std::string_view header, auto&& paths) {
+                    std::string res = format_alignment(
+                        header, std::move(paths), *aln_graph, *config
+                    );
+                    std::lock_guard<std::mutex> lock(print_mutex);
+                    *out << res;
+                });
             };
 
             ++num_batches;
