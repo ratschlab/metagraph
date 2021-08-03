@@ -123,11 +123,11 @@ class ILabeledAligner : public ISeedAndExtendAligner<AlignmentCompare> {
                              const IDBGAligner::AlignmentCallback &callback) const override {
         ISeedAndExtendAligner<AlignmentCompare>::align_batch(seq_batch,
             [&](std::string_view header, QueryAlignment&& alignments) {
-                auto it = std::remove_if(
-                    alignments.data().begin(), alignments.data().end(),
-                    [](const auto &a) { return a.label_columns.empty(); }
+                alignments.data().erase(
+                    std::remove_if(alignments.data().begin(), alignments.data().end(),
+                                   [](const auto &a) { return a.label_columns.empty(); }),
+                    alignments.data().end()
                 );
-                alignments.data().erase(it, alignments.data().end());
                 callback(header, std::move(alignments));
             }
         );
