@@ -41,72 +41,6 @@ bool check_labels(const DeBruijnGraph &graph,
     return true;
 }
 
-// Return true if the two sorted ranges share a common element
-// adapted from:
-// https://www.fluentcpp.com/2020/07/03/how-to-check-if-2-sorted-collections-have-a-common-element/
-template <class InputIt1, class InputIt2>
-constexpr bool share_element(InputIt1 first1,
-                             InputIt1 last1,
-                             InputIt2 first2,
-                             InputIt2 last2) {
-    assert(std::is_sorted(first1, last1));
-    assert(std::is_sorted(first2, last2));
-
-    while (first1 != last1 && first2 != last2) {
-        if (*first1 < *first2) {
-            first1 = std::lower_bound(first1, last1, *first2);
-        } else if (*first2 < *first1) {
-            first2 = std::lower_bound(first2, last2, *first1);
-        } else {
-            return true;
-        }
-    }
-
-    return false;
-}
-
-// Intersect the sorted ranges a1 and b1 with corresponding sorted ranges of
-// sorted ranges a2 and b2 (of equal length).
-// i.e., For each shared element between a1 and b1, intersect the corresponding
-// ranges in a2 and b2.
-template <class OutType, class InputIt1, class InputIt2, class InputIt3, class InputIt4,
-          class OutputIt1, class OutputIt2>
-void indexed_set_intersect(InputIt1 a1_begin,
-                           InputIt1 a1_end,
-                           InputIt2 a2_begin,
-                           InputIt3 b1_begin,
-                           InputIt3 b1_end,
-                           InputIt4 b2_begin,
-                           OutputIt1 out1,
-                           OutputIt2 out2) {
-    while (a1_begin != a1_end && b1_begin != b1_end) {
-        if (*a1_begin < *b1_begin) {
-            auto a1_begin_next = std::lower_bound(a1_begin, a1_end, *b1_begin);
-            a2_begin += a1_begin_next - a1_begin;
-            a1_begin = a1_begin_next;
-        } else if (*b1_begin < *a1_begin) {
-            auto b1_begin_next = std::lower_bound(b1_begin, b1_end, *a1_begin);
-            b2_begin += b1_begin_next - b1_begin;
-            b1_begin = b1_begin_next;
-        } else {
-            OutType merged;
-            std::set_intersection(a2_begin->begin(), a2_begin->end(),
-                                  b2_begin->begin(), b2_begin->end(),
-                                  std::back_inserter(merged));
-            if (merged.size()) {
-                *out1 = *a1_begin;
-                ++out1;
-                *out2 = std::move(merged);
-                ++out2;
-            }
-            ++a1_begin;
-            ++b1_begin;
-            ++a2_begin;
-            ++b2_begin;
-        }
-    }
-}
-
 DynamicLabeledGraph::DynamicLabeledGraph(const AnnotatedDBG &anno_graph)
       : anno_graph_(anno_graph),
         multi_int_(dynamic_cast<const MIM*>(&anno_graph_.get_annotation().get_matrix())) {
@@ -171,10 +105,10 @@ void LabeledBacktrackingExtender
             // If labels at the next node are not cached, always take the edge.
             // In this case, the label consistency will be checked later.
             // If they are cached, the existence of at least one common label is checked.
-            if (!next_labels || share_element(cached_labels->get().begin(),
-                                              cached_labels->get().end(),
-                                              next_labels->get().begin(),
-                                              next_labels->get().end())) {
+            if (!next_labels || utils::share_element(cached_labels->get().begin(),
+                                                     cached_labels->get().end(),
+                                                     next_labels->get().begin(),
+                                                     next_labels->get().end())) {
                 callback(next, c);
             }
         };
@@ -293,6 +227,13 @@ bool LabeledBacktrackingExtender::skip_backtrack_start(size_t i) {
     return label_intersection_.empty();
 }
 
+struct SetIntersection {
+    template <typename... Args>
+    void operator()(Args&&... args) const {
+        std::set_intersection(std::forward<Args>(args)...);
+    }
+};
+
 void LabeledBacktrackingExtender
 ::call_alignments(score_t cur_cell_score,
                   score_t end_score,
@@ -330,7 +271,7 @@ void LabeledBacktrackingExtender
                 label_set = &labels;
                 Vector<Column> label_inter;
                 Vector<Tuple> coord_inter;
-                indexed_set_intersect<Tuple>(
+                utils::indexed_set_op<Tuple, SetIntersection>(
                     label_intersection_.begin(),
                     label_intersection_.end(),
                     label_intersection_coords_.begin(),

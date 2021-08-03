@@ -1,10 +1,13 @@
 #ifndef __ALIGNER_AGGREGATOR_HPP__
 #define __ALIGNER_AGGREGATOR_HPP__
 
+#include <algorithm>
+
 #include <priority_deque.hpp>
 
 #include "aligner_alignment.hpp"
 #include "graph/representation/base/sequence_graph.hpp"
+#include "common/algorithms.hpp"
 #include "common/vector_map.hpp"
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
 
@@ -297,6 +300,41 @@ inline void AlignmentAggregator<AlignmentCompare>::construct_alignment_chains() 
     }
 }
 
+struct ConsecutiveCoords {
+    template <class InputIt1, class InputIt2, class OutputIt>
+    void operator()(InputIt1 a_begin,
+                    InputIt1 a_end,
+                    InputIt2 b_begin,
+                    InputIt2 b_end,
+                    OutputIt out) const {
+        while (a_begin + 1 < a_end) {
+            *out = *a_begin;
+            ++out;
+            ++a_begin;
+        }
+
+        if (a_begin != a_end) {
+            auto a_last = *a_begin;
+            ++a_begin;
+            *out = std::move(a_last);
+            ++out;
+
+            // find the first set of coordinates which is disjoint from the first range
+            b_begin = std::lower_bound(b_begin, b_end, a_last,
+                [](const auto &a, const auto &b) {
+                    return a.first < b.first || a.second < b.second;
+                }
+            );
+        }
+
+        while (b_begin != b_end) {
+            *out = *b_begin;
+            ++out;
+            ++b_begin;
+        }
+    }
+};
+
 template <class AlignmentCompare>
 inline void AlignmentAggregator<AlignmentCompare>
 ::construct_alignment_chain(std::string_view query,
@@ -333,8 +371,26 @@ inline void AlignmentAggregator<AlignmentCompare>
         if (next_begin <= chain_begin || next_end == chain_end)
             continue;
 
-        Vector<Column> label_columns;
-        if (chain.label_columns.size()) {
+        Alignment::LabelSet label_columns;
+        Alignment::CoordinateSet label_coordinates;
+        if (chain.label_coordinates.size()) {
+            // only put together a chain if the labels intersect and if there exist
+            // disjoint coordinates in the incoming alignment
+            assert(chain.label_columns.size() == chain.label_coordinates.size());
+            utils::indexed_set_op<std::vector<std::pair<uint64_t, uint64_t>>,
+                                  ConsecutiveCoords>(
+                chain.label_columns.begin(), chain.label_columns.end(),
+                chain.label_coordinates.begin(),
+                it->label_columns.begin(), it->label_columns.end(),
+                it->label_coordinates.begin(),
+                std::back_inserter(label_columns),
+                std::back_inserter(label_coordinates)
+            );
+
+            if (label_columns.empty())
+                continue;
+
+        } else if (chain.label_columns.size()) {
             std::set_intersection(it->label_columns.begin(), it->label_columns.end(),
                                   chain.label_columns.begin(),
                                   chain.label_columns.end(),
@@ -384,6 +440,7 @@ inline void AlignmentAggregator<AlignmentCompare>
                     called = true;
 
                 next_chain.label_columns = std::move(label_columns);
+                next_chain.label_coordinates = std::move(label_coordinates);
                 construct_alignment_chain(query, std::move(next_chain), it + 1,
                                           end, best_score, callback);
             }

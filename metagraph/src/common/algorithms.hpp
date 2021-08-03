@@ -97,6 +97,73 @@ namespace utils {
         return count;
     }
 
+    // Return true if the two sorted ranges share a common element
+    template <class InputIt1, class InputIt2>
+    constexpr bool share_element(InputIt1 first1,
+                                 InputIt1 last1,
+                                 InputIt2 first2,
+                                 InputIt2 last2) {
+        assert(std::is_sorted(first1, last1));
+        assert(std::is_sorted(first2, last2));
+
+        while (first1 != last1 && first2 != last2) {
+            if (*first1 < *first2) {
+                first1 = std::lower_bound(first1, last1, *first2);
+            } else if (*first2 < *first1) {
+                first2 = std::lower_bound(first2, last2, *first1);
+            } else {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    // Intersect the sorted ranges a1 and b1 with corresponding sorted ranges of
+    // sorted ranges a2 and b2 (of equal length).
+    // i.e., For each shared element between a1 and b1, intersect the corresponding
+    // ranges in a2 and b2.
+    template <class OutType, class SetOp,
+              class InputIt1, class InputIt2, class InputIt3, class InputIt4,
+              class OutputIt1, class OutputIt2>
+    constexpr void indexed_set_op(InputIt1 a1_begin,
+                                  InputIt1 a1_end,
+                                  InputIt2 a2_begin,
+                                  InputIt3 b1_begin,
+                                  InputIt3 b1_end,
+                                  InputIt4 b2_begin,
+                                  OutputIt1 out1,
+                                  OutputIt2 out2) {
+        SetOp set_op;
+
+        while (a1_begin != a1_end && b1_begin != b1_end) {
+            if (*a1_begin < *b1_begin) {
+                auto a1_begin_next = std::lower_bound(a1_begin, a1_end, *b1_begin);
+                a2_begin += a1_begin_next - a1_begin;
+                a1_begin = a1_begin_next;
+            } else if (*b1_begin < *a1_begin) {
+                auto b1_begin_next = std::lower_bound(b1_begin, b1_end, *a1_begin);
+                b2_begin += b1_begin_next - b1_begin;
+                b1_begin = b1_begin_next;
+            } else {
+                OutType merged;
+                set_op(a2_begin->begin(), a2_begin->end(),
+                       b2_begin->begin(), b2_begin->end(),
+                       std::back_inserter(merged));
+                if (merged.size()) {
+                    *out1 = *a1_begin;
+                    ++out1;
+                    *out2 = std::move(merged);
+                    ++out2;
+                }
+                ++a1_begin;
+                ++b1_begin;
+                ++a2_begin;
+                ++b2_begin;
+            }
+        }
+    }
+
     // Bitmap |new_indexes| marks positions of inserted values in the final vector
     template <class Vector, class Bitmap>
     void insert(Vector *vector,
