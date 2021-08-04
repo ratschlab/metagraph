@@ -1069,7 +1069,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Available options for stats:\n");
             fprintf(stderr, "\t   --print \t\tprint graph table to the screen [off]\n");
             fprintf(stderr, "\t   --print-internal \tprint internal graph representation to screen [off]\n");
-            fprintf(stderr, "\t   --print-counts-hist \tprint internal graph representation to screen [off]\n");
+            fprintf(stderr, "\t   --print-counts-hist \tprint histogram of k-mer weights as pairs (weight: num_kmers) [off]\n");
             fprintf(stderr, "\t   --count-dummy \tshow number of dummy source and sink edges [off]\n");
             fprintf(stderr, "\t-a --annotator [STR] \tannotation []\n");
             fprintf(stderr, "\t   --print-col-names \tprint names of the columns in annotation to screen [off]\n");
