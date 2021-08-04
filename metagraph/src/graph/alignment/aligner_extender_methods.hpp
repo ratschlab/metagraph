@@ -144,8 +144,7 @@ class DefaultColumnExtender : public SeedFilteringExtender {
 
     virtual void call_outgoing(node_index node,
                                size_t max_prefetch_distance,
-                               const std::function<void(node_index, char)> &callback,
-                               size_t table_idx);
+                               const std::function<void(node_index, char)> &callback);
 
     Alignment construct_alignment(Cigar cigar,
                                   size_t clipping,

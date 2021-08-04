@@ -161,13 +161,7 @@ class LabeledBacktrackingExtender : public DefaultColumnExtender {
 
   protected:
     virtual std::vector<Alignment> extend(score_t min_path_score,
-                                          bool force_fixed_seed) override final {
-        // the overridden backtrack populates extensions_, so this should return nothing
-        DefaultColumnExtender::extend(min_path_score, force_fixed_seed);
-
-        // fetch the alignments from extensions_
-        return extensions_.get_alignments();
-    }
+                                          bool force_fixed_seed) override final;
 
     // backtrack through the DP table to reconstruct alignments
     virtual std::vector<Alignment> backtrack(score_t min_path_score,
@@ -208,8 +202,7 @@ class LabeledBacktrackingExtender : public DefaultColumnExtender {
     // (when applicable)
     virtual void call_outgoing(node_index node,
                                size_t max_prefetch_distance,
-                               const std::function<void(node_index, char)> &callback,
-                               size_t table_idx) override final;
+                               const std::function<void(node_index, char)> &callback) override final;
 
     // this method calls multiple label-consistent alignments by backtracking
     virtual void call_alignments(score_t cur_cell_score,

@@ -326,8 +326,7 @@ void extend_ins_end(AlignedVector<score_t> &S,
 void DefaultColumnExtender
 ::call_outgoing(node_index node,
                 size_t /* max_prefetch_distance */,
-                const std::function<void(node_index, char)> &callback,
-                size_t /* table_idx */) {
+                const std::function<void(node_index, char)> &callback) {
     graph_->call_outgoing_kmers(node, [&](node_index next, char c) {
         if (c != boss::BOSS::kSentinel)
             callback(next, c);
@@ -495,7 +494,7 @@ std::vector<Alignment> DefaultColumnExtender
                     call_outgoing(node, window.size() + 1 - offset - S.size(),
                                   [&](node_index next, char c) {
                                       outgoing.emplace_back(next, c);
-                                  }, i);
+                                  });
                 }
             }
 

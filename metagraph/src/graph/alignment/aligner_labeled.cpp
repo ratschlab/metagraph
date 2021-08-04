@@ -22,20 +22,22 @@ using MIM = annot::matrix::MultiIntMatrix;
 
 bool check_labels(const DeBruijnGraph &graph,
                   const AnnotatedDBG &anno_graph,
-                  const Alignment &path) {
-    std::string query = path.get_sequence();
-    if (dynamic_cast<const RCDBG*>(&graph))
-        ::reverse_complement(query.begin(), query.end());
-
+                  const std::vector<Alignment> &alignments) {
     const auto &label_encoder = anno_graph.get_annotation().get_label_encoder();
-    tsl::hopscotch_set<annot::binmat::BinaryMatrix::Column> ref_labels;
-    for (const std::string &label : anno_graph.get_labels(query, 1.0)) {
-        ref_labels.emplace(label_encoder.encode(label));
-    }
+    for (const auto &alignment : alignments) {
+        std::string query = alignment.get_sequence();
+        if (dynamic_cast<const RCDBG*>(&graph))
+            ::reverse_complement(query.begin(), query.end());
 
-    for (annot::binmat::BinaryMatrix::Column label : path.label_columns) {
-        if (!ref_labels.count(label))
-            return false;
+        tsl::hopscotch_set<annot::binmat::BinaryMatrix::Column> ref_labels;
+        for (const std::string &label : anno_graph.get_labels(query, 1.0)) {
+            ref_labels.emplace(label_encoder.encode(label));
+        }
+
+        for (annot::binmat::BinaryMatrix::Column label : alignment.label_columns) {
+            if (!ref_labels.count(label))
+                return false;
+        }
     }
 
     return true;
@@ -93,9 +95,10 @@ void DynamicLabeledGraph::flush() {
 void LabeledBacktrackingExtender
 ::call_outgoing(node_index node,
                 size_t max_prefetch_distance,
-                const std::function<void(node_index, char /* last char */)> &callback,
-                size_t table_idx) {
+                const std::function<void(node_index, char /* last char */)> &callback) {
     std::function<void(node_index, char)> call = callback;
+
+    // TODO: checking for coordinate consistency here can be slow
 
     if (auto cached_labels = labeled_graph_.get_labels(node)) {
         // label consistency (weaker than coordinate consistency):
@@ -114,7 +117,7 @@ void LabeledBacktrackingExtender
         };
     }
 
-    DefaultColumnExtender::call_outgoing(node, max_prefetch_distance, call, table_idx);
+    DefaultColumnExtender::call_outgoing(node, max_prefetch_distance, call);
 }
 
 void DynamicLabeledGraph::add_path(const std::vector<node_index> &path,
@@ -164,6 +167,20 @@ void DynamicLabeledGraph::add_node(node_index node) {
     add_path({ node }, std::string(anno_graph_.get_graph().get_k(), '#'));
 }
 
+std::vector<Alignment> LabeledBacktrackingExtender
+::extend(score_t min_path_score, bool force_fixed_seed) {
+    // the overridden backtrack populates extensions_, so this should return nothing
+    DefaultColumnExtender::extend(min_path_score, force_fixed_seed);
+
+    // fetch the alignments from extensions_
+    auto alignments = extensions_.get_alignments();
+
+    // TODO: this can be very slow for column-based annotators
+    // assert(check_labels(*this->graph_, labeled_graph_.get_anno_graph(), alignments));
+
+    return alignments;
+}
+
 bool LabeledBacktrackingExtender::skip_backtrack_start(size_t i) {
     label_intersection_.clear();
     label_intersection_coords_.clear();
@@ -179,7 +196,8 @@ bool LabeledBacktrackingExtender::skip_backtrack_start(size_t i) {
                 const Vector<Column> &labels = fetch->first.get();
                 const Vector<Tuple> &coords = fetch->second.get();
                 assert(std::includes(labels.begin(), labels.end(),
-                                     label_intersection_.begin(), label_intersection_.end()));
+                                     label_intersection_.begin(),
+                                     label_intersection_.end()));
                 auto it = labels.begin();
                 for (Column label : label_intersection_) {
                     it = std::lower_bound(it, labels.end(), label);
@@ -199,7 +217,8 @@ bool LabeledBacktrackingExtender::skip_backtrack_start(size_t i) {
                     const Vector<Column> &coord_labels = fetch->first.get();
                     const Vector<Tuple> &coords = fetch->second.get();
                     assert(std::includes(coord_labels.begin(), coord_labels.end(),
-                                         label_intersection_.begin(), label_intersection_.end()));
+                                         label_intersection_.begin(),
+                                         label_intersection_.end()));
                     auto it = coord_labels.begin();
                     for (Column label : label_intersection_) {
                         it = std::lower_bound(it, coord_labels.end(), label);
@@ -346,7 +365,6 @@ void LabeledBacktrackingExtender
             alignment.label_encoder
                 = &labeled_graph_.get_anno_graph().get_annotation().get_label_encoder();
             alignment.label_columns = label_intersection_;
-            assert(check_labels(*this->graph_, labeled_graph_.get_anno_graph(), alignment));
 
             if (labeled_graph_.get_coordinate_matrix()) {
                 assert(label_intersection_.size() == label_intersection_coords_.size());
@@ -354,12 +372,13 @@ void LabeledBacktrackingExtender
                 for (size_t i = 0; i < label_intersection_coords_.size(); ++i) {
                     auto &cur_coords = alignment.label_coordinates[i];
                     for (uint64_t c : label_intersection_coords_[i]) {
-                        // alignment coordinates are 1-based
-                        ++c;
+                        // if we were aligning backwards, then c represents the
+                        // end coordinate, so shift it
                         if (coord_step == 1)
-                            c = c + graph_->get_k() - alignment.get_sequence().size();
+                            c -= path.size() - 1;
 
-                        cur_coords.emplace_back(c, c + alignment.get_sequence().size() - 1);
+                        // alignment coordinates are 1-based inclusive ranges
+                        cur_coords.emplace_back(c + 1, c + alignment.get_sequence().size());
                     }
                 }
             }
