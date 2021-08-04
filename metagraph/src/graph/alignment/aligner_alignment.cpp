@@ -59,8 +59,11 @@ std::ostream& operator<<(std::ostream& out, const Alignment &alignment) {
         for (size_t i = 0; i < label_columns.size(); ++i) {
             decoded_labels.emplace_back(alignment.label_encoder->decode(label_columns[i]));
             if (label_coordinates.size()) {
-                for (const auto &[first, last] : label_coordinates[i]) {
-                    decoded_labels.back() += fmt::format(":{}-{}", first, last);
+                for (uint64_t coord : label_coordinates[i]) {
+                    // alignment coordinates are 1-based inclusive ranges
+                    decoded_labels.back() += fmt::format(
+                        ":{}-{}", coord + 1, coord + alignment.get_sequence().size()
+                    );
                 }
             }
         }
@@ -72,6 +75,7 @@ std::ostream& operator<<(std::ostream& out, const Alignment &alignment) {
 }
 
 struct MergeCoords {
+    MergeCoords(size_t a_len) : a_len_(a_len) {}
     template <class InputIt1, class InputIt2, class OutputIt>
     void operator()(InputIt1 a_begin,
                     InputIt1 a_end,
@@ -79,25 +83,21 @@ struct MergeCoords {
                     InputIt2 b_end,
                     OutputIt out) const {
         while (a_begin != a_end && b_begin != b_end) {
-            if (a_begin->second + 1 < b_begin->first) {
-                a_begin = std::lower_bound(a_begin, a_end, *b_begin,
-                                           [](const auto &a, const auto &b) {
-                    return a.second + 1 < b.first;
-                });
-            } else if (a_begin->second + 1 > b_begin->first) {
-                b_begin = std::lower_bound(b_begin, b_end, *a_begin,
-                                           [](const auto &b, const auto &a) {
-                    return a.second + 1 > b.first;
-                });
+            if (*a_begin + a_len_ < *b_begin) {
+                a_begin = std::lower_bound(a_begin, a_end, *b_begin - a_len_);
+            } else if (*a_begin + a_len_ > *b_begin) {
+                b_begin = std::lower_bound(b_begin, b_end, *a_begin + a_len_);
             } else {
-                assert(a_begin->second + 1 == b_begin->first);
-                *out = std::make_pair(a_begin->first, b_begin->second);
+                assert(*a_begin + a_len_ == *b_begin);
+                *out = *a_begin;
                 ++out;
                 ++a_begin;
                 ++b_begin;
             }
         }
     }
+
+    size_t a_len_;
 };
 
 bool Alignment::append(Alignment&& other) {
@@ -113,12 +113,13 @@ bool Alignment::append(Alignment&& other) {
 
         // if the alignments fit together without gaps, make sure that the
         // coordinates form a contiguous range
-        utils::indexed_set_op<std::vector<std::pair<uint64_t, uint64_t>>, MergeCoords>(
+        utils::indexed_set_op<Tuple, MergeCoords>(
             label_columns.begin(), label_columns.end(), label_coordinates.begin(),
             other.label_columns.begin(), other.label_columns.end(),
             other.label_coordinates.begin(),
             std::back_inserter(merged_label_columns),
-            std::back_inserter(merged_label_coordinates)
+            std::back_inserter(merged_label_coordinates),
+            sequence_.size()
         );
 
         if (merged_label_columns.empty()) {
@@ -256,8 +257,8 @@ size_t Alignment::trim_query_prefix(size_t n,
 
     size_t seq_trim = s_it - sequence_.begin();
     for (auto &coords : label_coordinates) {
-        for (auto &[first, last] : coords) {
-            first += seq_trim;
+        for (auto &c : coords) {
+            c += seq_trim;
         }
     }
 

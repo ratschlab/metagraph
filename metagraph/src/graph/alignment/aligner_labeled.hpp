@@ -31,7 +31,7 @@ class DynamicLabeledGraph {
     typedef annot::matrix::MultiIntMatrix::Tuple Tuple;
 
     typedef std::reference_wrapper<const Alignment::LabelSet> LabelSet;
-    typedef std::reference_wrapper<const Vector<Tuple>> CoordsSet;
+    typedef std::reference_wrapper<const Alignment::CoordinateSet> CoordsSet;
 
     static constexpr Row nrow = std::numeric_limits<Row>::max();
 

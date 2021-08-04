@@ -13,6 +13,7 @@
 #include "aligner_config.hpp"
 #include "graph/representation/base/sequence_graph.hpp"
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
+#include "annotation/int_matrix/base/int_matrix.hpp"
 #include "annotation/representation/base/annotation.hpp"
 #include "common/vector.hpp"
 
@@ -29,8 +30,9 @@ class Alignment {
     typedef DeBruijnGraph::node_index node_index;
     typedef DBGAlignerConfig::score_t score_t;
     typedef annot::binmat::BinaryMatrix::Column Column;
+    typedef annot::matrix::MultiIntMatrix::Tuple Tuple;
     typedef Vector<Column> LabelSet;
-    typedef std::vector<std::vector<std::pair<uint64_t, uint64_t>>> CoordinateSet;
+    typedef Vector<Tuple> CoordinateSet;
 
     Alignment() {}
 
@@ -171,10 +173,8 @@ struct AlignmentCoordinatesLess {
             } else {
                 if (a_c_begin->size()) {
                     if (std::upper_bound(b_c_begin->begin(), b_c_begin->end(),
-                                         a_c_begin->front().second,
-                                         [](const auto &a_c, const auto &b_c) {
-                                             return a_c < b_c.first;
-                                         }) != b_c_begin->end()) {
+                                         a_c_begin->front() + a.get_sequence().size() - 1)
+                            != b_c_begin->end()) {
                         return true;
                     }
                 }

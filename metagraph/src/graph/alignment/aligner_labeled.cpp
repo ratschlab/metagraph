@@ -388,17 +388,15 @@ void LabeledBacktrackingExtender
 
             if (labeled_graph_.get_coordinate_matrix()) {
                 assert(label_intersection_.size() == label_intersection_coords_.size());
-                alignment.label_coordinates.resize(label_intersection_coords_.size());
-                for (size_t i = 0; i < label_intersection_coords_.size(); ++i) {
-                    auto &cur_coords = alignment.label_coordinates[i];
-                    for (uint64_t c : label_intersection_coords_[i]) {
-                        // if we were aligning backwards, then c represents the
-                        // end coordinate, so shift it
-                        if (coord_step == 1)
-                            c -= path.size() - 1;
+                alignment.label_coordinates = label_intersection_coords_;
 
-                        // alignment coordinates are 1-based inclusive ranges
-                        cur_coords.emplace_back(c + 1, c + alignment.get_sequence().size());
+                if (coord_step == 1) {
+                    // if we were aligning backwards, then c represents the
+                    // end coordinate, so shift it
+                    for (auto &tuple : alignment.label_coordinates) {
+                        for (uint64_t &c : tuple) {
+                            c -= path.size() - 1;
+                        }
                     }
                 }
             }
