@@ -192,6 +192,8 @@ bool LabeledBacktrackingExtender::skip_backtrack_start(size_t i) {
         if (label_find != diff_label_sets_.end()) {
             // extract a subset of the labels if this node was previously traversed
             label_intersection_ = label_find->second;
+
+            // extract coordinates for these labels
             if (auto fetch = labeled_graph_.get_coordinates(node)) {
                 const Vector<Column> &labels = fetch->first.get();
                 const Vector<Tuple> &coords = fetch->second.get();
@@ -270,14 +272,26 @@ void LabeledBacktrackingExtender
     assert(label_intersection_.size());
     assert(trace.size() >= this->graph_->get_k());
 
+    // Normally, we start from the end of the alignment and reconstruct the
+    // alignment backwards (shifting coordinates by -1).
+    // If we are aligning backwards, then the coordinates need to be shifted by
+    // 1 instead.
     ssize_t coord_step = dynamic_cast<const RCDBG*>(graph_) ? 1 : -1;
 
     size_t label_path_end = trace.size() - this->graph_->get_k() + 1;
     if (label_path_end > last_path_size_) {
         assert(label_path_end <= path.size());
         for (size_t i = last_path_size_; i < label_path_end; ++i) {
+            // update current coordinates
             for (auto &coords : label_intersection_coords_) {
                 for (uint64_t &c : coords) {
+                    if (!c && coord_step == -1) {
+                        // halt if the beginning of the sequence has been reached
+                        label_intersection_.clear();
+                        label_intersection_coords_.clear();
+                        return;
+                    }
+
                     c += coord_step;
                 }
             }
@@ -285,6 +299,7 @@ void LabeledBacktrackingExtender
             const Vector<Column> *label_set = nullptr;
 
             if (auto label_coords = labeled_graph_.get_coordinates(path[i])) {
+                // backtrack if coordinates are consistent
                 const Vector<Column> &labels = label_coords->first.get();
                 const Vector<Tuple> &coords = label_coords->second.get();
                 label_set = &labels;
@@ -306,6 +321,7 @@ void LabeledBacktrackingExtender
                     return;
 
             } else if (auto labels = labeled_graph_.get_labels(path[i])) {
+                // backtrack if labels are consistent
                 label_set = &labels->get();
                 Vector<Column> inter;
                 std::set_intersection(label_intersection_.begin(),
@@ -321,6 +337,8 @@ void LabeledBacktrackingExtender
 
             if (label_set && label_set->size() > label_intersection_.size()
                     && this->prev_starts.count(trace[i])) {
+                // if the new coordinate or label set is a subset, then store
+                // the difference to start backtracking from here later
                 Vector<Column> diff;
                 auto prev_labels = diff_label_sets_.find(trace[i]);
                 if (prev_labels == diff_label_sets_.end()) {
@@ -351,6 +369,8 @@ void LabeledBacktrackingExtender
     if (ops.data().back().first == Cigar::MATCH
             && window.size() >= this->config_.min_seed_length
             && end_score - cur_cell_score >= min_path_score) {
+        // if the current partial alignment is valid, then add it to the
+        // alignment aggregator
         score_t label_score = std::max(
             aggregator_.get_min_path_score(label_intersection_),
             extensions_.get_min_path_score(label_intersection_)
