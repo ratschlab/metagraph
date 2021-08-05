@@ -66,31 +66,22 @@ namespace utils {
         return mask;
     }
 
-    template <class AIt, class BIt>
-    uint64_t count_intersection(AIt first_begin, AIt first_end,
-                                BIt second_begin, BIt second_end) {
-        assert(std::is_sorted(first_begin, first_end));
-        assert(std::is_sorted(second_begin, second_end));
-        assert(std::adjacent_find(first_begin, first_end) == first_end);
-        assert(std::adjacent_find(second_begin, second_end) == second_end);
+    template <class InIt1, class InIt2>
+    constexpr uint64_t count_intersection(InIt1 a_begin, InIt1 a_end, InIt2 b_begin, InIt2 b_end) {
+        assert(std::is_sorted(a_begin, a_end));
+        assert(std::is_sorted(b_begin, b_end));
+        assert(std::adjacent_find(a_begin, a_end) == a_end);
+        assert(std::adjacent_find(b_begin, b_end) == b_end);
 
         uint64_t count = 0;
 
-        while (first_begin != first_end && second_begin != second_end) {
-            first_begin = std::lower_bound(first_begin, first_end, *second_begin);
-
-            if (first_begin == first_end)
-                break;
-
-            second_begin = std::lower_bound(second_begin, second_end, *first_begin);
-
-            if (second_begin == second_end)
-                break;
-
-            if (*first_begin == *second_begin) {
+        while (a_begin != a_end && b_begin != b_end) {
+            if (*a_begin < *b_begin) {
+                a_begin = std::lower_bound(a_begin, a_end, *b_begin);
+            } else if (*b_begin < *a_begin) {
+                b_begin = std::lower_bound(b_begin, b_end, *a_begin);
+            } else {
                 ++count;
-                ++first_begin;
-                ++second_begin;
             }
         }
 
@@ -98,19 +89,16 @@ namespace utils {
     }
 
     // Return true if the two sorted ranges share a common element
-    template <class InputIt1, class InputIt2>
-    constexpr bool share_element(InputIt1 first1,
-                                 InputIt1 last1,
-                                 InputIt2 first2,
-                                 InputIt2 last2) {
-        assert(std::is_sorted(first1, last1));
-        assert(std::is_sorted(first2, last2));
+    template <class InIt1, class InIt2>
+    constexpr bool share_element(InIt1 a_begin, InIt1 a_end, InIt2 b_begin, InIt2 b_end) {
+        assert(std::is_sorted(a_begin, a_end));
+        assert(std::is_sorted(b_begin, b_end));
 
-        while (first1 != last1 && first2 != last2) {
-            if (*first1 < *first2) {
-                first1 = std::lower_bound(first1, last1, *first2);
-            } else if (*first2 < *first1) {
-                first2 = std::lower_bound(first2, last2, *first1);
+        while (a_begin != a_end && b_begin != b_end) {
+            if (*a_begin < *b_begin) {
+                a_begin = std::lower_bound(a_begin, a_end, *b_begin);
+            } else if (*b_begin < *a_begin) {
+                b_begin = std::lower_bound(b_begin, b_end, *a_begin);
             } else {
                 return true;
             }
@@ -124,16 +112,16 @@ namespace utils {
     // i.e., For each shared element between a1 and b1, intersect the corresponding
     // ranges in a2 and b2.
     template <class OutType, class SetOp,
-              class InputIt1, class InputIt2, class InputIt3, class InputIt4,
-              class OutputIt1, class OutputIt2, typename... Args>
-    constexpr void indexed_set_op(InputIt1 a1_begin,
-                                  InputIt1 a1_end,
-                                  InputIt2 a2_begin,
-                                  InputIt3 b1_begin,
-                                  InputIt3 b1_end,
-                                  InputIt4 b2_begin,
-                                  OutputIt1 out1,
-                                  OutputIt2 out2,
+              class InIt1, class InIt2, class InIt3, class InIt4,
+              class OutIt1, class OutIt2, typename... Args>
+    constexpr void indexed_set_op(InIt1 a1_begin,
+                                  InIt1 a1_end,
+                                  InIt2 a2_begin,
+                                  InIt3 b1_begin,
+                                  InIt3 b1_end,
+                                  InIt4 b2_begin,
+                                  OutIt1 out1,
+                                  OutIt2 out2,
                                   Args&&... args) {
         SetOp set_op(std::forward<Args>(args)...);
 

@@ -75,13 +75,10 @@ std::ostream& operator<<(std::ostream& out, const Alignment &alignment) {
 }
 
 struct MergeCoords {
-    MergeCoords(size_t a_len) : a_len_(a_len) {}
-    template <class InputIt1, class InputIt2, class OutputIt>
-    void operator()(InputIt1 a_begin,
-                    InputIt1 a_end,
-                    InputIt2 b_begin,
-                    InputIt2 b_end,
-                    OutputIt out) const {
+    MergeCoords(size_t a_sequence_length) : a_len_(a_sequence_length) {}
+
+    template <class InIt1, class InIt2, class OutIt>
+    void operator()(InIt1 a_begin, InIt1 a_end, InIt2 b_begin, InIt2 b_end, OutIt out) const {
         while (a_begin != a_end && b_begin != b_end) {
             if (*a_begin + a_len_ < *b_begin) {
                 a_begin = std::lower_bound(a_begin, a_end, *b_begin - a_len_);
