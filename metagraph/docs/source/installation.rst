@@ -23,13 +23,15 @@ Docker container
 
 If docker is available on your system, you can immediately get started with::
 
-    docker run -v ${DATA_DIR_HOST}:/mnt ratschlab/metagraph \
+    docker run -v ${DATA_DIR_HOST}:/mnt ghcr.io/ratschlab/metagraph:latest \
         build -v -k 10 -o /mnt/transcripts_1000 /mnt/transcripts_1000.fa
 
 
 where you'd need to replace ``${DATA_DIR_HOST}`` with a directory on the host system to map it
 under ``/mnt`` in the container. This docker container uses the latest version of MetaGraph from
 the source `GitHub repository <https://github.com/ratschlab/metagraph>`_ (branch ``master``).
+See also the `image overview <https://github.com/ratschlab/metagraph/pkgs/container/metagraph>`_ for
+other versions of the metagraph image.
 
 
 Install from source
@@ -131,7 +133,7 @@ To compile MetaGraph, please follow these steps.
     git clone --recursive https://github.com/ratschlab/metagraph.git
 
 #. Change into the ``metagraph`` directory::
-    
+
     cd metagraph
 
 #. Make sure all submodules have been downloaded::
