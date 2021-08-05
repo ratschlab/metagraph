@@ -82,6 +82,8 @@ namespace utils {
                 b_begin = std::lower_bound(b_begin, b_end, *a_begin);
             } else {
                 ++count;
+                ++a_begin;
+                ++b_begin;
             }
         }
 
