@@ -1,14 +1,14 @@
 #include "gtest/gtest.h"
 
-#define TESTING
-
 #include <tsl/hopscotch_map.h>
 #include <tsl/hopscotch_set.h>
 
+#define private public
+#define protected public
+
 #include "annotation/taxonomy/tax_classifier.hpp"
 
-namespace mtg {
-namespace test {
+namespace {
 
 TEST (TaxonomyTest, ClsAnno_DfsStatistics) {
     mtg::annot::TaxonomyClsAnno *tax = new mtg::annot::TaxonomyClsAnno();
@@ -87,5 +87,4 @@ TEST (TaxonomyTest, ClsAnno_RmqPreprocessing) {
     EXPECT_EQ(expected_rmq, tax->rmq_data);
 }
 
-}
 }

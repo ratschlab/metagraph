@@ -1,14 +1,6 @@
 #ifndef __TAX_CLASSIFIER_HPP__
 #define __TAX_CLASSIFIER_HPP__
 
-#ifdef TESTING
-#define PRIVATE_TESTABLE public
-#define PROTECTED_TESTABLE public
-#else
-#define PRIVATE_TESTABLE private
-#define PROTECTED_TESTABLE protected
-#endif
-
 #include <tsl/hopscotch_set.h>
 #include <tsl/hopscotch_map.h>
 
@@ -21,7 +13,7 @@ using TaxId = std::uint32_t;
 using ChildrenList = tsl::hopscotch_map<TaxId, std::vector<TaxId>>;
 
 class TaxonomyBase {
-public:
+  public:
     using KmerId = annot::MultiLabelEncoded<std::string>::Index;
     using node_index = graph::SequenceGraph::node_index;
 
@@ -32,15 +24,21 @@ public:
     };
 
     TaxonomyBase() {};
-    TaxonomyBase(const double lca_coverage_rate, const double kmers_discovery_rate) :
-                 _lca_coverage_rate(lca_coverage_rate), _kmers_discovery_rate(kmers_discovery_rate) {};
-
-    virtual ~TaxonomyBase() {};
+    TaxonomyBase(const double lca_coverage_rate, const double kmers_discovery_rate)
+        : _lca_coverage_rate(lca_coverage_rate),
+          _kmers_discovery_rate(kmers_discovery_rate) {};
 
     TaxId assign_class(const std::string &sequence) const;
 
-PROTECTED_TESTABLE:
-    void assign_label_type(const std::string &label, bool *require_accversion_to_taxid_map);
+  protected:
+    /** Recognise the label type by parsing one sample_label.
+     *
+     * @param [input] sample_label
+     * @param [output] the returned boolean value is later used to decide if we need to parse the accession version to taxid lookup table:
+     *                  if false: then the taxid is part of the label;
+     *                  if true: then the taxid is not part of the label;
+     */
+    bool assign_label_type(const std::string &sample_label);
 
     virtual TaxId find_lca(const std::vector<TaxId> &taxids) const = 0;
 
@@ -102,19 +100,19 @@ PROTECTED_TESTABLE:
 };
 
 class TaxonomyClsImportDB : public TaxonomyBase {
-public:
+  public:
     // todo implement
     TaxonomyClsImportDB(const std::string &taxdb_filepath,
                         const double lca_coverage_rate,
                         const double kmers_discovery_rate);
 
-PRIVATE_TESTABLE:
+  private:
     std::vector<TaxId> get_lca_taxids_for_seq(const std::string_view &sequence, bool reversed) const;
     TaxId find_lca(const std::vector<TaxId> &taxids) const;
 };
 
 class TaxonomyClsAnno : public TaxonomyBase {
-public:
+  public:
     /**
      * TaxonomyCls constructor
      *
@@ -136,7 +134,7 @@ public:
 
     TaxId assign_class_toplabels(const std::string &sequence, const double label_fraction) const;
 
-PRIVATE_TESTABLE:
+  private:
     /**
      * Reads and returns the taxonomic tree as a list of children.
      *
