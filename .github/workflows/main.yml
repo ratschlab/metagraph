@@ -182,7 +182,7 @@ jobs:
     # adapted from https://docs.github.com/en/actions/guides/publishing-docker-images#publishing-images-to-github-packages
     if: github.ref == 'refs/heads/master'
     needs: [Linux]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     permissions:
       contents: read
       packages: write
