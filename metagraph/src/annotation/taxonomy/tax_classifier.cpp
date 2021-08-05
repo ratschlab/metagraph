@@ -134,45 +134,45 @@ TaxonomyClsAnno::TaxonomyClsAnno(const graph::AnnotatedDBG &anno,
                                  const double lca_coverage_rate,
                                  const double kmers_discovery_rate,
                                  const std::string &tax_tree_filepath,
-                                 const std::string &label_taxid_map_filepath) :
-                                 TaxonomyBase(lca_coverage_rate, kmers_discovery_rate), _anno_matrix(&anno) {
+                                 const std::string &label_taxid_map_filepath)
+             : TaxonomyBase(lca_coverage_rate, kmers_discovery_rate),
+               _anno_matrix(&anno) {
     if (!std::filesystem::exists(tax_tree_filepath)) {
-        logger->error("Can't open taxonomic tree file {}.", tax_tree_filepath);
-        std::exit(1);
+        logger->error("Can't open taxonomic tree file {}", tax_tree_filepath);
+        exit(1);
     }
 
-    bool require_accversion_to_taxid_map = false;
-    assign_label_type(_anno_matrix->get_annotation().get_all_labels()[0], &require_accversion_to_taxid_map);
+    bool require_accversion_to_taxid_map = assign_label_type(_anno_matrix->get_annotation().get_all_labels()[0]);
 
     Timer timer;
     if (require_accversion_to_taxid_map) {
-        logger->trace("Parsing label_taxid_map file..");
+        logger->trace("Parsing label_taxid_map file...");
         read_accversion_to_taxid_map(label_taxid_map_filepath, _anno_matrix);
-        logger->trace("Finished label_taxid_map file in {}s", timer.elapsed());
+        logger->trace("Finished label_taxid_map file in {} sec", timer.elapsed());
     }
 
     timer.reset();
-    logger->trace("Parsing taxonomic tree..");
+    logger->trace("Parsing taxonomic tree...");
     ChildrenList tree;
     read_tree(tax_tree_filepath, &tree);
-    logger->trace("Finished taxonomic tree read in {}s.", timer.elapsed());
+    logger->trace("Finished taxonomic tree read in {} sec.", timer.elapsed());
 
     timer.reset();
-    logger->trace("Calculating tree statistics..");
+    logger->trace("Calculating tree statistics...");
     std::vector<TaxId> tree_linearization;
     dfs_statistics(root_node, tree, &tree_linearization);
-    logger->trace("Finished tree statistics calculation in {}s.", timer.elapsed());
+    logger->trace("Finished tree statistics calculation in {} sec.", timer.elapsed());
 
     timer.reset();
-    logger->trace("Starting rmq preprocessing..");
+    logger->trace("Starting rmq preprocessing...");
     rmq_preprocessing(tree_linearization);
-    logger->trace("Finished rmq preprocessing in {}s.", timer.elapsed());
+    logger->trace("Finished rmq preprocessing in {} sec.", timer.elapsed());
 }
 
 void TaxonomyClsAnno::read_tree(const std::string &tax_tree_filepath, ChildrenList *tree) {
     std::ifstream f(tax_tree_filepath);
     if (!f.good()) {
-        logger->error("Failed to open Taxonomic Tree file {}.", tax_tree_filepath);
+        logger->error("Failed to open Taxonomic Tree file {}", tax_tree_filepath);
         exit(1);
     }
 
@@ -309,24 +309,24 @@ void TaxonomyClsAnno::rmq_preprocessing(const std::vector<TaxId> &tree_lineariza
 
 std::vector<TaxId> TaxonomyClsAnno::get_lca_taxids_for_seq(const std::string_view &sequence, bool reversed) const {
     cerr << "Assign class not implemented reversed = " << reversed << "\n";
-    throw std::runtime_error("get_lca_taxids_for_seq TaxonomyClsAnno not implemented. Received seq size" + to_string(sequence.size()));
-    exit(0);
+    throw std::runtime_error("get_lca_taxids_for_seq TaxonomyClsAnno not implemented. Received seq size"
+                             + to_string(sequence.size()));
 }
 
 std::vector<TaxId> TaxonomyClsImportDB::get_lca_taxids_for_seq(const std::string_view &sequence, bool reversed) const {
     cerr << "Assign class not implemented reversed = " << reversed << "\n";
-    throw std::runtime_error("get_lca_taxids_for_seq TaxonomyClsImportDB not implemented. Received seq size" + to_string(sequence.size()));
-    exit(0);
+    throw std::runtime_error("get_lca_taxids_for_seq TaxonomyClsImportDB not implemented. Received seq size"
+                             + to_string(sequence.size()));
 }
 
 TaxId TaxonomyClsAnno::find_lca(const std::vector<TaxId> &taxids) const {
-    throw std::runtime_error("find_lca TaxonomyClsAnno not implemented. Received taxids size" + to_string(taxids.size()));
-    exit(0);
+    throw std::runtime_error("find_lca TaxonomyClsAnno not implemented. Received taxids size"
+                             + to_string(taxids.size()));
 }
 
 TaxId TaxonomyClsImportDB::find_lca(const std::vector<TaxId> &taxids) const {
-    throw std::runtime_error("find_lca TaxonomyClsImportDB not implemented. Received taxids size" + to_string(taxids.size()));
-    exit(0);
+    throw std::runtime_error("find_lca TaxonomyClsImportDB not implemented. Received taxids size"
+                             + to_string(taxids.size()));
 }
 
 } // namespace annot
