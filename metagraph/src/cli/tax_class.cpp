@@ -61,7 +61,7 @@ int taxonomic_classification(Config *config) {
     Timer timer;
     logger->trace("Graph loading...");
     auto graph = load_critical_dbg(config->infbase);
-    logger->trace("Finished graph loading after {}s.", timer.elapsed());
+    logger->trace("Finished graph loading after {} sec.", timer.elapsed());
 
     timer.reset();
     logger->trace("Processing the classification...");
@@ -80,21 +80,22 @@ int taxonomic_classification(Config *config) {
     } else {
         // Use tax_class without any precomputed database.
         if (config->infbase_annotators.size() == 0) {
-            logger->error("The annotation matrix is missing from the command line, please use '-a' flag for the annotation matrix filepath.");
+            logger->error("The annotation matrix is missing from the command line, "
+                          "please use '-a' flag for the annotation matrix filepath.");
             std::exit(1);
         }
         timer.reset();
         logger->trace("Graph and Annotation loading...");
         graph = load_critical_dbg(config->infbase);
         anno_graph = initialize_annotated_dbg(graph, *config);
-        logger->trace("Finished graph annotation loading after {}s.", timer.elapsed());
+        logger->trace("Finished graph annotation loading after {} sec.", timer.elapsed());
 
         timer.reset();
         logger->trace("Constructing TaxonomyClsAnno...");
         taxonomy = std::make_unique<annot::TaxonomyClsAnno>(*anno_graph, config->lca_coverage_fraction,
                                                             config->discovery_fraction, config->taxonomic_tree,
                                                             config->label_taxid_map);
-        logger->trace("Finished TaxonomyDB construction after {}s.", timer.elapsed());
+        logger->trace("Finished TaxonomyDB construction after {} sec.", timer.elapsed());
 
         if (config->top_label_fraction > 0) {
             // Use tax_class version that is returning the LCA of the top labels among the kmers.
@@ -132,7 +133,7 @@ int taxonomic_classification(Config *config) {
         std::cout << result << std::endl;
     });
 
-    logger->trace("Finished all the queries in {}s.", timer.elapsed());
+    logger->trace("Finished all the queries in {} sec.", timer.elapsed());
     return 0;
 }
 
