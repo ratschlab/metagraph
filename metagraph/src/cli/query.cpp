@@ -298,6 +298,26 @@ void call_hull_sequences(const DeBruijnGraph &full_dbg,
     }
 }
 
+template <typename T>
+annot::LabelEncoder<> reencode_labels(const annot::LabelEncoder<> &encoder,
+                                      std::vector<T> *rows) {
+    assert(rows);
+    annot::LabelEncoder<std::string> new_encoder;
+    tsl::hopscotch_map<size_t, size_t> old_to_new;
+    for (auto &row : *rows) {
+        for (auto &v : row) {
+            auto &j = utils::get_first(v);
+            auto [it, inserted] = old_to_new.emplace(j, new_encoder.size());
+            if (inserted)
+                new_encoder.insert_and_encode(encoder.decode(j));
+
+            assert(encoder.decode(j) == new_encoder.decode(it->second));
+            j = it->second;
+        }
+    }
+    return new_encoder;
+}
+
 /**
  * @brief      Construct annotation submatrix with a subset of rows extracted
  *             from the full annotation matrix
@@ -337,12 +357,14 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
             row_ids[full_to_small[i].second] = row_indexes[i];
         }
 
+        auto label_encoder = reencode_labels(full_annotation.get_label_encoder(), &unique_rows);
+
         // copy annotations from the full graph to the query graph
         return std::make_unique<annot::UniqueRowAnnotator>(
             std::make_unique<UniqueRowBinmat>(std::move(unique_rows),
                                               std::move(row_ids),
-                                              full_annotation.num_labels()),
-            full_annotation.get_label_encoder()
+                                              label_encoder.size()),
+            std::move(label_encoder)
         );
     }
 
@@ -362,6 +384,8 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
 
         auto slice = mat->get_row_values(row_indexes);
 
+        auto label_encoder = reencode_labels(full_annotation.get_label_encoder(), &slice);
+
         Vector<CSRMatrix::RowValues> rows(num_rows);
 
         for (uint64_t i = 0; i < slice.size(); ++i) {
@@ -370,8 +394,8 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
 
         // copy annotations from the full graph to the query graph
         return std::make_unique<annot::IntRowAnnotator>(
-            std::make_unique<CSRMatrix>(std::move(rows), full_annotation.num_labels()),
-            full_annotation.get_label_encoder()
+            std::make_unique<CSRMatrix>(std::move(rows), label_encoder.size()),
+            std::move(label_encoder)
         );
     }
 
@@ -421,12 +445,14 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
         unique_rows.values_container()
     );
 
+    auto label_encoder = reencode_labels(full_annotation.get_label_encoder(), &annotation_rows);
+
     // copy annotations from the full graph to the query graph
     return std::make_unique<annot::UniqueRowAnnotator>(
         std::make_unique<UniqueRowBinmat>(std::move(annotation_rows),
                                           std::move(row_rank),
-                                          full_annotation.num_labels()),
-        full_annotation.get_label_encoder()
+                                          label_encoder.size()),
+        std::move(label_encoder)
     );
 }
 
