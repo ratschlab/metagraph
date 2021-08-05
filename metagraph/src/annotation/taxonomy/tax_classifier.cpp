@@ -281,7 +281,7 @@ std::vector<TaxId> TaxonomyClsAnno::get_lca_taxids_for_seq(const std::string_vie
 
     if (sequence.size() >= std::numeric_limits<uint32_t>::max()) {
         logger->error("The given sequence contains more than 2^32 bp.");
-        std::exit(1);
+        exit(1);
     }
 
     auto anno_graph = _anno_matrix->get_graph_ptr();
@@ -298,11 +298,13 @@ std::vector<TaxId> TaxonomyClsAnno::get_lca_taxids_for_seq(const std::string_vie
     const auto unique_matrix_rows = _anno_matrix->get_annotation().get_matrix().get_rows(kmer_val);
     //TODO make sure that this function works even if we have duplications in 'rows'. Then, delete this error catch.
     if (kmer_val.size() != unique_matrix_rows.size()) {
-        throw std::runtime_error("Internal error: There must be no duplications in the received set of 'rows' in 'call_annotated_rows'.");
+        throw std::runtime_error("Internal error: The tool doesn't know how to treat the case of "
+                                 "kmer duplications in the same read. Please contact the maintainers.");
     }
 
     if (unique_matrix_rows.size() >= std::numeric_limits<uint32_t>::max()) {
-        throw std::runtime_error("Internal error: There must be less than 2^32 unique rows. Reduce the query batch size.");
+        throw std::runtime_error("Internal error: There must be less than 2^32 unique rows. "
+                                 "Please reduce the query batch size.");
     }
 
     const auto &label_encoder = _anno_matrix->get_annotation().get_label_encoder();
@@ -341,7 +343,7 @@ TaxId TaxonomyBase::assign_class(const std::string &sequence) const {
 
     tsl::hopscotch_map<TaxId, uint64_t> num_kmers_per_node;
 
-    // total_discovered_kmers represents the number of nonzero kmers according to both forward and reversed read.
+    // num_discovered_kmers represents the number of nonzero kmers according to at least of the forward and reversed read options.
     uint32_t num_discovered_kmers = 0;
     const uint32_t num_total_kmers = forward_taxids.size();
 
@@ -442,7 +444,10 @@ void TaxonomyBase::update_scores_and_lca(const TaxId start_node,
         // Test if the current node's score would be a better LCA result.
         if ((*node_scores)[act_node] >= desired_number_kmers
             && (act_dist_to_root > *best_lca_dist_to_root
-                || (act_dist_to_root == *best_lca_dist_to_root && (*node_scores)[act_node] > (*node_scores)[*best_lca]))) {
+                || (act_dist_to_root == *best_lca_dist_to_root
+                    && (*node_scores)[act_node] > (*node_scores)[*best_lca])
+                )
+            ) {
             *best_lca = act_node;
             *best_lca_dist_to_root = act_dist_to_root;
         }
@@ -454,7 +459,10 @@ void TaxonomyBase::update_scores_and_lca(const TaxId start_node,
         uint64_t act_dist_to_root = processed_parents.size() - i;
         if ((*node_scores)[act_node] >= desired_number_kmers
             && (act_dist_to_root > *best_lca_dist_to_root
-                || (act_dist_to_root == *best_lca_dist_to_root && (*node_scores)[act_node] > (*node_scores)[*best_lca]))) {
+                || (act_dist_to_root == *best_lca_dist_to_root
+                    && (*node_scores)[act_node] > (*node_scores)[*best_lca])
+                )
+            ) {
             *best_lca = act_node;
             *best_lca_dist_to_root = act_dist_to_root;
         }
@@ -464,7 +472,7 @@ void TaxonomyBase::update_scores_and_lca(const TaxId start_node,
 TaxId TaxonomyClsAnno::find_lca(const std::vector<TaxId> &taxids) const {
     if (taxids.empty()) {
         logger->error("Internal error: Can't find LCA for an empty set of normalized taxids.");
-        std::exit(1);
+        exit(1);
     }
     uint64_t left_idx = node_to_linearization_idx.at(taxids[0]);
     uint64_t right_idx = node_to_linearization_idx.at(taxids[0]);
@@ -483,7 +491,7 @@ TaxId TaxonomyClsAnno::find_lca(const std::vector<TaxId> &taxids) const {
     uint32_t log_dist = sdsl::bits::hi(right_idx - left_idx);
     if (rmq_data.size() <= log_dist) {
         logger->error("Internal error: the RMQ was not precomputed before the LCA queries.");
-        std::exit(1);
+        exit(1);
     }
 
     uint32_t left_lca = rmq_data[log_dist][left_idx];
@@ -499,11 +507,6 @@ std::vector<TaxId> TaxonomyClsImportDB::get_lca_taxids_for_seq(const std::string
     cerr << "Assign class not implemented reversed = " << reversed << "\n";
     throw std::runtime_error("get_lca_taxids_for_seq TaxonomyClsImportDB not implemented. Received seq size"
                              + to_string(sequence.size()));
-}
-
-TaxId TaxonomyClsAnno::find_lca(const std::vector<TaxId> &taxids) const {
-    throw std::runtime_error("find_lca TaxonomyClsAnno not implemented. Received taxids size"
-                             + to_string(taxids.size()));
 }
 
 TaxId TaxonomyClsImportDB::find_lca(const std::vector<TaxId> &taxids) const {
