@@ -279,19 +279,22 @@ void LabeledBacktrackingExtender
     size_t label_path_end = trace.size() - this->graph_->get_k() + 1;
     assert(label_path_end <= path.size());
     assert(label_path_end >= last_path_size_);
+    constexpr uint64_t ncoord = std::numeric_limits<uint64_t>::max();
     for ( ; last_path_size_ < label_path_end; ++last_path_size_) {
         // update current coordinates
         for (auto &coords : label_intersection_coords_) {
             for (uint64_t &c : coords) {
                 if (!c && coord_step == -1) {
-                    // halt if the beginning of the sequence has been reached
-                    label_intersection_.clear();
-                    label_intersection_coords_.clear();
-                    return;
+                    c = ncoord;
+                } else {
+                    c += coord_step;
                 }
-
-                c += coord_step;
             }
+
+            // if any coordinates went out of bounds, remove them
+            coords.erase(std::remove_if(coords.begin(), coords.end(),
+                                        [&](const auto &a) { return a == ncoord; }),
+                         coords.end());
         }
 
         const Vector<Column> *label_set = nullptr;
