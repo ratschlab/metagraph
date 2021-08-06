@@ -77,19 +77,13 @@ DBGAlignerConfig initialize_aligner_config(const Config &config) {
     return aligner_config;
 }
 
-template <class Graph, template <class ... Types> class Aligner>
-inline std::unique_ptr<graph::align::IDBGAligner>
-build_aligner_infer_args(const Graph &graph, const DBGAlignerConfig &aligner_config) {
-    return std::make_unique<Aligner<>>(graph, aligner_config);
-}
-
-template <class Graph>
+template <class Graph, typename... AlignerArgs>
 std::unique_ptr<graph::align::IDBGAligner>
-build_aligner(const Graph &graph, const DBGAlignerConfig &aligner_config) {
-    if constexpr(std::is_same_v<Graph, AnnotatedDBG>) {
-        return build_aligner_infer_args<Graph, LabeledAligner>(graph, aligner_config);
+build_aligner(const Graph &graph, const graph::align::DBGAlignerConfig &aligner_config) {
+    if constexpr(std::is_same_v<Graph, mtg::graph::AnnotatedDBG>) {
+        return std::make_unique<LabeledAligner<AlignerArgs...>>(graph, aligner_config);
     } else {
-        return build_aligner_infer_args<Graph, DBGAligner>(graph, aligner_config);
+        return std::make_unique<DBGAligner<AlignerArgs...>>(graph, aligner_config);
     }
 }
 
@@ -466,8 +460,7 @@ int align_to_graph(Config *config) {
 
                 aligner->align_batch(batch,
                     [&](std::string_view header, QueryAlignment&& paths) {
-                        std::string res = format_alignment(header, std::move(paths),
-                                                           *aln_graph, *config);
+                        std::string res = format_alignment(header, paths, *aln_graph, *config);
                         std::lock_guard<std::mutex> lock(print_mutex);
                         *out << res;
                     }
