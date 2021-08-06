@@ -77,16 +77,6 @@ class AnnotationBuffer {
         return get_labels_and_coordinates(node).first;
     }
 
-    std::vector<Row> get_anno_rows(const std::vector<node_index> &path) const {
-        std::vector<Row> rows;
-        rows.reserve(path.size());
-        for (node_index n : path) {
-            auto find = labels_.find(n);
-            rows.push_back(find != labels_.end() ? find->second.first : nrow);
-        }
-        return rows;
-    }
-
   private:
     const AnnotatedDBG &anno_graph_;
     const annot::matrix::MultiIntMatrix *multi_int_;
