@@ -161,9 +161,11 @@ bool LabeledBacktrackingExtender::skip_backtrack_start(size_t i) {
         label_intersection_ = label_find->second;
 
         // extract coordinates for these labels
-        if (auto fetch = labeled_graph_.get_coordinates(node)) {
-            const Vector<Column> &labels = fetch->first.get();
-            const Vector<Tuple> &coords = fetch->second.get();
+        auto [fetch_labels, fetch_coords] = labeled_graph_.get_labels_and_coordinates(node);
+        if (fetch_coords) {
+            assert(fetch_labels);
+            const Vector<Column> &labels = fetch_labels->get();
+            const Vector<Tuple> &coords = fetch_coords->get();
             assert(std::includes(labels.begin(), labels.end(),
                                  label_intersection_.begin(),
                                  label_intersection_.end()));
@@ -174,32 +176,32 @@ bool LabeledBacktrackingExtender::skip_backtrack_start(size_t i) {
             }
         }
 
-    } else if (auto labels = labeled_graph_.get_labels(node)) {
-        if (this->seed_->label_columns.size()) {
-            // if the seed had labels, intersect with those
-            std::set_intersection(labels->get().begin(),
-                                  labels->get().end(),
-                                  this->seed_->label_columns.begin(),
-                                  this->seed_->label_columns.end(),
-                                  std::back_inserter(label_intersection_));
-            if (auto fetch = labeled_graph_.get_coordinates(node)) {
-                const Vector<Column> &coord_labels = fetch->first.get();
-                const Vector<Tuple> &coords = fetch->second.get();
-                assert(std::includes(coord_labels.begin(), coord_labels.end(),
-                                     label_intersection_.begin(),
-                                     label_intersection_.end()));
-                auto it = coord_labels.begin();
-                for (Column label : label_intersection_) {
-                    it = std::lower_bound(it, coord_labels.end(), label);
-                    label_intersection_coords_.push_back(coords[it - coord_labels.begin()]);
+    } else {
+        auto [fetch_labels, fetch_coords] = labeled_graph_.get_labels_and_coordinates(node);
+        if (fetch_labels) {
+            if (this->seed_->label_columns.size()) {
+                const Vector<Column> &labels = fetch_labels->get();
+                // if the seed had labels, intersect with those
+                std::set_intersection(labels.begin(), labels.end(),
+                                      this->seed_->label_columns.begin(),
+                                      this->seed_->label_columns.end(),
+                                      std::back_inserter(label_intersection_));
+                if (fetch_coords) {
+                    const Vector<Tuple> &coords = fetch_coords->get();
+                    assert(std::includes(labels.begin(), labels.end(),
+                                         label_intersection_.begin(),
+                                         label_intersection_.end()));
+                    auto it = labels.begin();
+                    for (Column label : label_intersection_) {
+                        it = std::lower_bound(it, labels.end(), label);
+                        label_intersection_coords_.push_back(coords[it - labels.begin()]);
+                    }
                 }
-            }
-        } else {
-            // otherwise take the full label set
-            label_intersection_ = *labels;
-            if (auto fetch = labeled_graph_.get_coordinates(node)) {
-                assert(fetch->first.get() == label_intersection_);
-                label_intersection_coords_ = fetch->second.get();
+            } else {
+                // otherwise take the full label set
+                label_intersection_ = fetch_labels->get();
+                if (fetch_coords)
+                    label_intersection_coords_ = fetch_coords->get();
             }
         }
     }
@@ -267,20 +269,20 @@ void LabeledBacktrackingExtender
 
         const Vector<Column> *label_set = nullptr;
 
-        if (auto label_coords = labeled_graph_.get_coordinates(path[last_path_size_])) {
+        auto [fetch_labels, fetch_coords]
+                = labeled_graph_.get_labels_and_coordinates(path[last_path_size_]);
+        if (fetch_coords) {
             // backtrack if coordinates are consistent
-            const Vector<Column> &labels = label_coords->first.get();
-            const Vector<Tuple> &coords = label_coords->second.get();
+            const Vector<Column> &labels = fetch_labels->get();
+            const Vector<Tuple> &coords = fetch_coords->get();
             label_set = &labels;
             Vector<Column> label_inter;
             Vector<Tuple> coord_inter;
             utils::indexed_set_op<Tuple, SetIntersection>(
-                label_intersection_.begin(),
-                label_intersection_.end(),
+                label_intersection_.begin(), label_intersection_.end(),
                 label_intersection_coords_.begin(),
                 labels.begin(), labels.end(), coords.begin(),
-                std::back_inserter(label_inter),
-                std::back_inserter(coord_inter)
+                std::back_inserter(label_inter), std::back_inserter(coord_inter)
             );
 
             std::swap(label_intersection_, label_inter);
@@ -289,14 +291,13 @@ void LabeledBacktrackingExtender
             if (label_intersection_.empty())
                 return;
 
-        } else if (auto labels = labeled_graph_.get_labels(path[last_path_size_])) {
+        } else if (fetch_labels) {
             // backtrack if labels are consistent
-            label_set = &labels->get();
+            const Vector<Column> &labels = fetch_labels->get();
+            label_set = &labels;
             Vector<Column> inter;
-            std::set_intersection(label_intersection_.begin(),
-                                  label_intersection_.end(),
-                                  labels->get().begin(), labels->get().end(),
-                                  std::back_inserter(inter));
+            std::set_intersection(label_intersection_.begin(), label_intersection_.end(),
+                                  labels.begin(), labels.end(), std::back_inserter(inter));
 
             std::swap(label_intersection_, inter);
 
@@ -312,18 +313,15 @@ void LabeledBacktrackingExtender
             auto prev_labels = diff_label_sets_.find(trace[last_path_size_]);
             if (prev_labels == diff_label_sets_.end()) {
                 std::set_difference(label_set->begin(), label_set->end(),
-                                    label_intersection_.begin(),
-                                    label_intersection_.end(),
+                                    label_intersection_.begin(), label_intersection_.end(),
                                     std::back_inserter(diff));
                 if (diff.size()) {
                     diff_label_sets_.emplace(trace[last_path_size_], std::move(diff));
                     this->prev_starts.erase(trace[last_path_size_]);
                 }
             } else {
-                std::set_difference(prev_labels->second.begin(),
-                                    prev_labels->second.end(),
-                                    label_intersection_.begin(),
-                                    label_intersection_.end(),
+                std::set_difference(prev_labels->second.begin(), prev_labels->second.end(),
+                                    label_intersection_.begin(), label_intersection_.end(),
                                     std::back_inserter(diff));
                 std::swap(prev_labels.value(), diff);
                 if (diff.size())

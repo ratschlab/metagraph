@@ -47,33 +47,34 @@ class AnnotationBuffer {
     void add_node(node_index node);
     void add_path(const std::vector<node_index> &path, std::string sequence);
 
-    // get the annotations of a node if they have been fetched
-    std::optional<LabelSet> get_labels(node_index node) const {
+    // get the annotations and coordinates of a node if they have been fetched
+    std::pair<std::optional<LabelSet>, std::optional<CoordsSet>>
+    get_labels_and_coordinates(node_index node) const {
+        std::pair<std::optional<LabelSet>, std::optional<CoordsSet>> ret_val {
+            std::nullopt, std::nullopt
+        };
+
         auto it = labels_.find(node);
-        if (it == labels_.end() || it->second.second == nannot) {
-            // if the node hasn't been seen before, or if its annotations haven't
-            // been flushed, return nothing
-            return std::nullopt;
-        } else {
-            return std::cref(labels_set_.data()[it->second.second]);
-        }
+
+        // if the node hasn't been seen before, or if its annotations haven't
+        // been flushed, return nothing
+        if (it == labels_.end() || it->second.second == nannot)
+            return ret_val;
+
+        ret_val.first = std::cref(labels_set_.data()[it->second.second]);
+
+        // if no coordinates are present, return just the labels
+        if (!multi_int_)
+            return ret_val;
+
+        assert(static_cast<size_t>(it - labels_.begin()) < label_coords_.size());
+        ret_val.second = std::cref(label_coords_[it - labels_.begin()]);
+        return ret_val;
     }
 
-    // get the annotations and coordinates of a node if they have been fetched
-    std::optional<std::pair<LabelSet, CoordsSet>> get_coordinates(node_index node) const {
-        if (!multi_int_)
-            return std::nullopt;
-
-        auto it = labels_.find(node);
-        if (it == labels_.end() || it->second.second == nannot) {
-            // if the node hasn't been seen before, or if its annotations haven't
-            // been flushed, return nothing
-            return std::nullopt;
-        } else {
-            assert(static_cast<size_t>(it - labels_.begin()) < label_coords_.size());
-            return std::make_pair(std::cref(labels_set_.data()[it->second.second]),
-                                  std::cref(label_coords_[it - labels_.begin()]));
-        }
+    // get the annotations of a node if they have been fetched
+    inline std::optional<LabelSet> get_labels(node_index node) const {
+        return get_labels_and_coordinates(node).first;
     }
 
     std::vector<Row> get_anno_rows(const std::vector<node_index> &path) const {
