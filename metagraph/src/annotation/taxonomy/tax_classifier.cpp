@@ -107,18 +107,18 @@ TaxonomyClsAnno::TaxonomyClsAnno(const graph::AnnotatedDBG &anno,
                                  const std::string &tax_tree_filepath,
                                  const std::string &label_taxid_map_filepath)
              : TaxonomyBase(lca_coverage_rate, kmers_discovery_rate),
-               _anno_matrix(&anno) {
+               anno_matrix_(&anno) {
     if (!std::filesystem::exists(tax_tree_filepath)) {
         logger->error("Can't open taxonomic tree file {}", tax_tree_filepath);
         exit(1);
     }
 
-    bool require_accversion_to_taxid_map = assign_label_type(_anno_matrix->get_annotation().get_all_labels()[0]);
+    bool require_accversion_to_taxid_map = assign_label_type(anno_matrix_->get_annotation().get_all_labels()[0]);
 
     Timer timer;
     if (require_accversion_to_taxid_map) {
         logger->trace("Parsing label_taxid_map file...");
-        read_accversion_to_taxid_map(label_taxid_map_filepath, _anno_matrix);
+        read_accversion_to_taxid_map(label_taxid_map_filepath, anno_matrix_);
         logger->trace("Finished label_taxid_map file in {} sec", timer.elapsed());
     }
 
@@ -175,9 +175,9 @@ void TaxonomyClsAnno::read_tree(const std::string &tax_tree_filepath, ChildrenLi
 
     if (accversion_to_taxid_map.size()) {
         // Store only the taxonomic nodes that exists in the annotation matrix.
-        for (const pair<std::string, TaxId> &it : accversion_to_taxid_map) {
-            relevant_taxids.push_back(it.second);
-            considered_relevant_taxids.insert(it.second);
+        for (const std::pair<std::string, TaxId> &pair : accversion_to_taxid_map) {
+            relevant_taxids.push_back(pair.second);
+            considered_relevant_taxids.insert(pair.second);
         }
     } else {
         // If 'this->accversion_to_taxid_map' is empty, store the entire taxonomic tree.
@@ -226,8 +226,10 @@ void TaxonomyClsAnno::dfs_statistics(const TaxId node,
     node_to_linearization_idx[node] = tree_linearization->size();
     tree_linearization->push_back(node);
     uint32_t depth = 0;
-    if (tree.count(node)) {
-        for (const TaxId &child : tree.at(node)) {
+
+    auto it = tree.find(node);
+    if (it != tree.end()) {
+        for (const TaxId &child : it->second) {
             dfs_statistics(child, tree, tree_linearization);
             tree_linearization->push_back(node);
             if (node_depth[child] > depth) {
@@ -255,8 +257,11 @@ void TaxonomyClsAnno::rmq_preprocessing(const std::vector<TaxId> &tree_lineariza
     uint32_t delta = 1;
     for (uint32_t row = 1; row < num_rmq_rows; ++row) {
         for (uint32_t i = 0; i + delta < tree_linearization.size(); ++i) {
-            // rmq_data[row][i] covers an interval of size delta=2^row and returns the node with the maximal depth among positions [i, i+2^row-1] in the linearization.
-            // According to 'this->dfs_statistics()': node_depth[leaf] = 1 and node_depth[root] = maximum distance to a leaf.
+            // rmq_data[row][i] covers an interval of size delta=2^row and returns the node with the maximal depth
+            // among positions [i, i+2^row-1] in the linearization.
+            // According to 'this->dfs_statistics()':
+            //     node_depth[leaf] = 1 and node_depth[root] = maximum distance to a leaf.
+
             if (node_depth[rmq_data[row - 1][i]] >
                 node_depth[rmq_data[row - 1][i + delta]]) {
                 rmq_data[row][i] = rmq_data[row - 1][i];

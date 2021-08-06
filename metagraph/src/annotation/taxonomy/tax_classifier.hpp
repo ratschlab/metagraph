@@ -34,9 +34,10 @@ class TaxonomyBase {
     /** Recognise the label type by parsing one sample_label.
      *
      * @param [input] sample_label
-     * @param [output] the returned boolean value is later used to decide if we need to parse the accession version to taxid lookup table:
-     *                  if false: then the taxid is part of the label;
-     *                  if true: then the taxid is not part of the label;
+     * @param [output] the returned boolean value is later used to decide if we need to parse the accession version
+     *                 to taxid lookup table:
+     *                 if false: then the taxid is part of the label;
+     *                 if true: then the taxid is not part of the label;
      */
     bool assign_label_type(const std::string &sample_label);
 
@@ -54,14 +55,17 @@ class TaxonomyBase {
     void read_accversion_to_taxid_map(const std::string &filepath, const graph::AnnotatedDBG *anno_matrix);
 
     /**
-     * Update the current node_scores and best_lca by taking into account the weight of the start_node and all its ancestors.
+     * Update the current node_scores and best_lca by taking into account the weight of the start_node and
+     * all its ancestors.
      *
      * @param [input] 'start_node' -> the starting node to update 'node_scores'.
      * @param [input] 'num_kmers_per_node[taxid]' -> the number of kmers 'k' with taxonomic_map[k]=taxid.
-     * @param [input] 'desired_number_kmers' -> the threshold score that a node has to exceed in order to be considered as a valid solution.
+     * @param [input] 'desired_number_kmers' -> the threshold score that a node has to exceed in order to be
+     *                                          considered as a valid solution.
      * @param [modified] 'node_scores' -> the current score for each node in the tree.
      * @param [modified] 'nodes_already_propagated' -> the set of nodes that were previously processed.
-     * @param [modified] 'best_lca' -> the current classification prediction (node that exceeds the `desired_number_kmers` threshold and is placed as close as possible to the leaves).
+     * @param [modified] 'best_lca' -> the current classification prediction (node that exceeds the
+     *                                 `desired_number_kmers` threshold and is placed as close as possible to the leaves).
      * @param [modified] 'best_lca_dist_to_root' -> the distance to the root for the current classification prediction.
      */
     void update_scores_and_lca(const TaxId start_node,
@@ -120,7 +124,8 @@ class TaxonomyClsAnno : public TaxonomyBase {
      * @param [input] lca_coverage_rate -> threshold used for taxonomic classification.
      * @param [input] kmers_discovery_rate -> threshold used for taxonomic classification.
      * @param [input] tax_tree_filepath ->  path to a taxonomic tree ("nodes.dmp" file).
-     * @param [input] label_taxid_map_filepath ->  path to acccession version to taxid lookup table (".accession2taxid" file). Mandatory if the label doesn't contain the 'taxid'.
+     * @param [input] label_taxid_map_filepath ->  path to acccession version to taxid lookup table (".accession2taxid").
+     *                                             Mandatory if the label doesn't contain the 'taxid'.
      */
     TaxonomyClsAnno(const graph::AnnotatedDBG &anno,
                     const double lca_coverage_rate,
@@ -128,6 +133,7 @@ class TaxonomyClsAnno : public TaxonomyBase {
                     const std::string &tax_tree_filepath,
                     const std::string &label_taxid_map_filepath = "");
     TaxonomyClsAnno() {};
+    virtual ~TaxonomyClsAnno() {};
 
     // todo implement
     void export_taxdb(const std::string &filepath) const;
@@ -183,7 +189,7 @@ class TaxonomyClsAnno : public TaxonomyBase {
      */
     tsl::hopscotch_map<TaxId, uint32_t> node_to_linearization_idx;
 
-    const graph::AnnotatedDBG *_anno_matrix = NULL;
+    const graph::AnnotatedDBG *anno_matrix_ = NULL;
 };
 
 } // namespace annot
