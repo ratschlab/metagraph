@@ -23,7 +23,7 @@ template <typename Key, class Hash = std::hash<Key>, typename IndexType = uint64
 using VectorSet = tsl::ordered_set<Key, Hash, EqualTo, Allocator, Container, IndexType>;
 
 
-class DynamicLabeledGraph {
+class AnnotationBuffer {
   public:
     typedef DeBruijnGraph::node_index node_index;
     typedef annot::binmat::BinaryMatrix::Column Column;
@@ -35,7 +35,7 @@ class DynamicLabeledGraph {
 
     static constexpr Row nrow = std::numeric_limits<Row>::max();
 
-    DynamicLabeledGraph(const AnnotatedDBG &anno_graph);
+    AnnotationBuffer(const AnnotatedDBG &anno_graph);
 
     const AnnotatedDBG& get_anno_graph() const { return anno_graph_; }
     const annot::matrix::MultiIntMatrix* get_coordinate_matrix() const { return multi_int_; }
@@ -135,17 +135,17 @@ class ILabeledAligner : public ISeedAndExtendAligner<AlignmentCompare> {
 
 
   protected:
-    mutable DynamicLabeledGraph labeled_graph_;
+    mutable AnnotationBuffer labeled_graph_;
 };
 
 
 class LabeledBacktrackingExtender : public DefaultColumnExtender {
   public:
-    typedef DynamicLabeledGraph::Column Column;
-    typedef DynamicLabeledGraph::Tuple Tuple;
+    typedef AnnotationBuffer::Column Column;
+    typedef AnnotationBuffer::Tuple Tuple;
     typedef AlignmentAggregator<LocalAlignmentLess> Aggregator;
 
-    LabeledBacktrackingExtender(DynamicLabeledGraph &labeled_graph,
+    LabeledBacktrackingExtender(AnnotationBuffer &labeled_graph,
                                 const DBGAlignerConfig &config,
                                 const Aggregator &aggregator,
                                 std::string_view query)
@@ -218,7 +218,7 @@ class LabeledBacktrackingExtender : public DefaultColumnExtender {
                                  const std::function<void(Alignment&&)> &callback) override final;
 
   private:
-    DynamicLabeledGraph &labeled_graph_;
+    AnnotationBuffer &labeled_graph_;
 
     // global set of alignments
     const Aggregator &aggregator_;

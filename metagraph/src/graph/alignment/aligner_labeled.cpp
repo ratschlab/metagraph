@@ -1,8 +1,5 @@
 #include "aligner_labeled.hpp"
 
-#include <tsl/hopscotch_set.h>
-
-#include "graph/representation/canonical_dbg.hpp"
 #include "graph/representation/rc_dbg.hpp"
 #include "graph/representation/succinct/boss.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
@@ -17,30 +14,7 @@ namespace align {
 using MIM = annot::matrix::MultiIntMatrix;
 
 
-bool check_labels(const DeBruijnGraph &graph,
-                  const AnnotatedDBG &anno_graph,
-                  const std::vector<Alignment> &alignments) {
-    const auto &label_encoder = anno_graph.get_annotation().get_label_encoder();
-    for (const auto &alignment : alignments) {
-        std::string query = alignment.get_sequence();
-        if (dynamic_cast<const RCDBG*>(&graph))
-            ::reverse_complement(query.begin(), query.end());
-
-        tsl::hopscotch_set<annot::binmat::BinaryMatrix::Column> ref_labels;
-        for (const std::string &label : anno_graph.get_labels(query, 1.0)) {
-            ref_labels.emplace(label_encoder.encode(label));
-        }
-
-        for (annot::binmat::BinaryMatrix::Column label : alignment.label_columns) {
-            if (!ref_labels.count(label))
-                return false;
-        }
-    }
-
-    return true;
-}
-
-DynamicLabeledGraph::DynamicLabeledGraph(const AnnotatedDBG &anno_graph)
+AnnotationBuffer::AnnotationBuffer(const AnnotatedDBG &anno_graph)
       : anno_graph_(anno_graph),
         multi_int_(dynamic_cast<const MIM*>(&anno_graph_.get_annotation().get_matrix())) {
     if (multi_int_ && anno_graph.get_graph().get_mode() == DeBruijnGraph::CANONICAL) {
@@ -52,7 +26,7 @@ DynamicLabeledGraph::DynamicLabeledGraph(const AnnotatedDBG &anno_graph)
     labels_set_.emplace(); // insert empty vector
 }
 
-void DynamicLabeledGraph::flush() {
+void AnnotationBuffer::flush() {
     auto push_node_labels = [&](auto node_it, auto&& labels) {
         assert(node_it != added_nodes_.end());
         auto label_it = labels_set_.emplace(std::forward<decltype(labels)>(labels)).first;
@@ -117,8 +91,7 @@ void LabeledBacktrackingExtender
     DefaultColumnExtender::call_outgoing(node, max_prefetch_distance, call);
 }
 
-void DynamicLabeledGraph::add_path(const std::vector<node_index> &path,
-                                   std::string query) {
+void AnnotationBuffer::add_path(const std::vector<node_index> &path, std::string query) {
     assert(anno_graph_.get_graph().get_mode() != DeBruijnGraph::PRIMARY
                 && "PRIMARY graphs must be wrapped into CANONICAL");
 
@@ -160,7 +133,7 @@ void DynamicLabeledGraph::add_path(const std::vector<node_index> &path,
     }
 }
 
-void DynamicLabeledGraph::add_node(node_index node) {
+void AnnotationBuffer::add_node(node_index node) {
     add_path({ node }, std::string(anno_graph_.get_graph().get_k(), '#'));
 }
 
@@ -170,12 +143,7 @@ std::vector<Alignment> LabeledBacktrackingExtender
     DefaultColumnExtender::extend(min_path_score, force_fixed_seed);
 
     // fetch the alignments from extensions_
-    auto alignments = extensions_.get_alignments();
-
-    // TODO: this can be very slow for column-based annotators
-    // assert(check_labels(*this->graph_, labeled_graph_.get_anno_graph(), alignments));
-
-    return alignments;
+    return extensions_.get_alignments();
 }
 
 bool LabeledBacktrackingExtender::skip_backtrack_start(size_t i) {
