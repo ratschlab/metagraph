@@ -19,6 +19,8 @@ class IExtender {
 
     virtual ~IExtender() {}
 
+    // If force_fixed_seed is true, then all alignments must have the seed as a
+    // prefix. Otherwise, only the first node of the seed is used as a starting node.
     std::vector<Alignment>
     get_extensions(const Alignment &seed, score_t min_path_score, bool force_fixed_seed) {
         return set_seed(seed) ? extend(min_path_score, force_fixed_seed)

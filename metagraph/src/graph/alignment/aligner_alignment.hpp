@@ -57,7 +57,12 @@ class Alignment {
               bool orientation = false,
               size_t offset = 0);
 
-    // return true if the internal labels were modified
+    // Append other to the end of the current alignment. In this process, alignment
+    // labels are intersected. If coordinates are present, then the append is only
+    // successful if at least one coordinate of other immediately proceeds the
+    // one of the coordinates in this. If this operation is unsuccessful, then
+    // *this == {} afterwards.
+    // Returns true if the label or coordinate set of this changed.
     bool append(Alignment&& other);
 
     size_t size() const { return nodes_.size(); }

@@ -89,7 +89,9 @@ class ISeedAndExtendAligner : public IDBGAligner {
                                const std::function<void(Alignment&&)> &callback,
                                const std::function<score_t(const Alignment&)> &get_min_path_score) const;
 
-    // Generates seeds and extends them
+    // Generates seeds and extends them. If force_fixed_seed is true, then
+    // all alignments must have the seed as a prefix. Otherwise, only the first
+    // node of the seed is used as an alignment starting node.
     void align_core(std::string_view query,
                     const ISeeder &seeder,
                     IExtender &extender,

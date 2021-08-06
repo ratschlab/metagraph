@@ -63,7 +63,7 @@ void ISeedAndExtendAligner<AlignmentCompare>
         auto seeder = build_seeder(this_query, is_reverse_complement, nodes);
         auto extender = build_extender(this_query, aggregator);
 
-        double num_explored_nodes = 0;
+        size_t num_explored_nodes = 0;
 
 #if ! _PROTEIN_GRAPH
         if (graph_.get_mode() == DeBruijnGraph::CANONICAL
@@ -105,9 +105,9 @@ void ISeedAndExtendAligner<AlignmentCompare>
         common::logger->trace(
             "{}\tlength: {}\texplored nodes: {}\tnodes/k-mer: {}\tlabels: {}\tnodes/k-mer/label: {}",
             header, query.size(), num_explored_nodes,
-            num_explored_nodes / nodes.size(),
+            static_cast<double>(num_explored_nodes) / nodes.size(),
             num_labels,
-            num_explored_nodes / nodes.size() / num_labels
+            static_cast<double>(num_explored_nodes) / nodes.size() / num_labels
         );
 
         callback(header, std::move(paths));
@@ -228,7 +228,7 @@ void ISeedAndExtendAligner<AlignmentCompare>
                         ? max_score * config_.rel_score_cutoff
                         : config_.min_cell_score;
             },
-            false
+            false /* alignments do not need to have the seed as a prefix */
         );
 
         std::sort(rc_of_alignments.begin(), rc_of_alignments.end(),
@@ -264,7 +264,7 @@ void ISeedAndExtendAligner<AlignmentCompare>
                 callback(std::move(path));
             },
             get_min_path_score,
-            true
+            true /* alignments must have the seed as a prefix */
         );
     };
 
