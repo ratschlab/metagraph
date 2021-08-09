@@ -64,6 +64,7 @@ void ISeedAndExtendAligner<AlignmentCompare>
         auto extender = build_extender(this_query, aggregator);
 
         size_t num_explored_nodes = 0;
+        size_t num_extensions = 0;
 
 #if ! _PROTEIN_GRAPH
         if (graph_.get_mode() == DeBruijnGraph::CANONICAL
@@ -84,17 +85,17 @@ void ISeedAndExtendAligner<AlignmentCompare>
                                   add_alignment, get_min_path_score);
 
             num_explored_nodes += extender_rc->num_explored_nodes();
+            num_extensions += extender_rc->num_extensions();
 
         } else {
-            align_core(this_query, *seeder, *extender, add_alignment,
-                       get_min_path_score, false);
+            align_core(*seeder, *extender, add_alignment, get_min_path_score, false);
         }
 #else
-        align_core(this_query, *seeder, *extender, add_alignment,
-                   get_min_path_score, false);
+        align_core(*seeder, *extender, add_alignment, get_min_path_score, false);
 #endif
 
         num_explored_nodes += extender->num_explored_nodes();
+        num_extensions += extender->num_extensions();
         size_t num_labels = aggregator.num_labels();
 
         for (auto&& alignment : aggregator.get_alignments()) {
@@ -103,8 +104,8 @@ void ISeedAndExtendAligner<AlignmentCompare>
         }
 
         common::logger->trace(
-            "{}\tlength: {}\texplored nodes: {}\tnodes/k-mer: {}\tlabels: {}\tnodes/k-mer/label: {}",
-            header, query.size(), num_explored_nodes,
+            "{}\tlength: {}\textensions: {}\texplored nodes: {}\texplored nodes/k-mer: {}\tlabels: {}\tnodes/k-mer/label: {}",
+            header, query.size(), num_extensions, num_explored_nodes,
             static_cast<double>(num_explored_nodes) / nodes.size(),
             num_labels,
             static_cast<double>(num_explored_nodes) / nodes.size() / num_labels
@@ -116,13 +117,12 @@ void ISeedAndExtendAligner<AlignmentCompare>
 
 template <class AlignmentCompare>
 void ISeedAndExtendAligner<AlignmentCompare>
-::align_core(std::string_view query,
-             const ISeeder &seeder,
+::align_core(const ISeeder &seeder,
              IExtender &extender,
              const std::function<void(Alignment&&)> &callback,
              const std::function<score_t(const Alignment&)> &get_min_path_score,
              bool force_fixed_seed) const {
-    for (Alignment &seed : seeder.get_seeds()) {
+    for (const Alignment &seed : seeder.get_seeds()) {
         if (seed.empty())
             continue;
 
@@ -130,17 +130,7 @@ void ISeedAndExtendAligner<AlignmentCompare>
 
         DEBUG_LOG("Min path score: {}\tSeed: {}", min_path_score, seed);
 
-        auto extensions = extender.get_extensions(seed, min_path_score, force_fixed_seed);
-
-        if (extensions.empty() && seed.get_score() >= min_path_score) {
-            seed.extend_query_end(query.data() + query.size());
-            seed.trim_offset();
-            DEBUG_LOG("Alignment (seed): {}", seed);
-            callback(std::move(seed));
-        }
-
-        for (Alignment &extension : extensions) {
-            DEBUG_LOG("Alignment (extension): {}", extension);
+        for (auto&& extension : extender.get_extensions(seed, min_path_score, force_fixed_seed)) {
             callback(std::move(extension));
         }
     }
@@ -172,16 +162,13 @@ void ISeedAndExtendAligner<AlignmentCompare>
             && !alignment.get_offset();
     };
 
-    auto get_forward_alignments = [&](std::string_view query,
-                                      std::string_view query_rc,
-                                      const ISeeder &seeder,
-                                      IExtender &extender) {
+    auto aln_fwd = [&](std::string_view query_rc, const ISeeder &seeder, IExtender &extender) {
         size_t farthest_reach = 0;
         score_t max_score = config_.min_cell_score;
         std::vector<Alignment> rc_of_alignments;
 
         DEBUG_LOG("Extending in forwards direction");
-        align_core(query, seeder, extender,
+        align_core(seeder, extender,
             [&](Alignment&& path) {
                 score_t min_path_score = get_min_path_score(path);
 
@@ -237,22 +224,15 @@ void ISeedAndExtendAligner<AlignmentCompare>
         return rc_of_alignments;
     };
 
-    ManualSeeder rc_of_reverse(get_forward_alignments(
-        reverse, forward, reverse_seeder, reverse_extender
-    ));
+    ManualSeeder rc_of_reverse(aln_fwd(forward, reverse_seeder, reverse_extender));
+    ManualSeeder rc_of_forward(aln_fwd(reverse, forward_seeder, forward_extender));
 
-    ManualSeeder rc_of_forward(get_forward_alignments(
-        forward, reverse, forward_seeder, forward_extender
-    ));
-
-    auto finish_alignment = [&](std::string_view query,
-                                std::string_view query_rc,
-                                const ManualSeeder &seeder,
-                                IExtender &extender) {
+    // Extend in the reverse direction
+    auto rev_ext = [&](std::string_view query, const ManualSeeder &seeder, IExtender &extender) {
         if (use_rcdbg)
             extender.set_graph(rc_dbg);
 
-        align_core(query_rc, seeder, extender,
+        align_core(seeder, extender,
             [&](Alignment&& path) {
                 if (use_rcdbg || is_reversible(path)) {
                     path.reverse_complement(rc_graph, query);
@@ -270,11 +250,11 @@ void ISeedAndExtendAligner<AlignmentCompare>
 
     if (rc_of_forward.data().size() && (rc_of_reverse.data().empty()
             || rc_of_forward.data()[0].get_score() >= rc_of_reverse.data()[0].get_score())) {
-        finish_alignment(forward, reverse, rc_of_forward, reverse_extender);
-        finish_alignment(reverse, forward, rc_of_reverse, forward_extender);
+        rev_ext(forward, rc_of_forward, reverse_extender);
+        rev_ext(reverse, rc_of_reverse, forward_extender);
     } else {
-        finish_alignment(reverse, forward, rc_of_reverse, forward_extender);
-        finish_alignment(forward, reverse, rc_of_forward, reverse_extender);
+        rev_ext(reverse, rc_of_reverse, forward_extender);
+        rev_ext(forward, rc_of_forward, reverse_extender);
     }
 }
 

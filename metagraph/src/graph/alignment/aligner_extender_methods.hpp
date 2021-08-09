@@ -31,6 +31,8 @@ class IExtender {
 
     virtual size_t num_explored_nodes() const = 0;
 
+    virtual size_t num_extensions() const = 0;
+
   protected:
     virtual const Alignment& get_seed() const = 0;
     virtual bool set_seed(const Alignment &seed) = 0;
@@ -43,20 +45,31 @@ class IExtender {
 
 class SeedFilteringExtender : public IExtender {
   public:
-    SeedFilteringExtender(std::string_view query) : query_size_(query.size()) {}
+    SeedFilteringExtender(const DBGAlignerConfig &config, std::string_view query)
+          : config_(config), query_size_(query.size()) {
+        assert(config_.check_config_scores());
+    }
 
     virtual ~SeedFilteringExtender() {}
 
-    virtual void set_graph(const DeBruijnGraph &) override { conv_checker_.clear(); }
+    virtual void set_graph(const DeBruijnGraph &) override {
+        explored_nodes_previous_ += conv_checker_.size();
+        conv_checker_.clear();
+    }
 
-    virtual size_t num_explored_nodes() const override { return conv_checker_.size(); }
+    virtual size_t num_explored_nodes() const override {
+        return explored_nodes_previous_ + conv_checker_.size();
+    }
 
   protected:
+    const DBGAlignerConfig &config_;
     const Alignment *seed_ = nullptr;
     size_t query_size_;
 
     typedef std::pair<size_t, AlignedVector<score_t>> ScoreVec;
     tsl::hopscotch_map<node_index, ScoreVec> conv_checker_;
+
+    size_t explored_nodes_previous_ = 0;
 
     virtual const Alignment& get_seed() const override final { return *seed_; }
     virtual bool set_seed(const Alignment &seed) override;
@@ -82,9 +95,10 @@ class DefaultColumnExtender : public SeedFilteringExtender {
         graph_ = &graph;
     }
 
+    virtual size_t num_extensions() const override final { return num_extensions_; }
+
   protected:
     const DeBruijnGraph *graph_;
-    const DBGAlignerConfig &config_;
     std::string_view query_;
 
     // During extension, a tree is constructed from the graph starting at the
@@ -107,6 +121,7 @@ class DefaultColumnExtender : public SeedFilteringExtender {
     size_t table_size_bytes_;
 
     tsl::hopscotch_set<size_t> prev_starts;
+    size_t num_extensions_ = 0;
 
     virtual std::vector<Alignment> extend(score_t min_path_score, bool force_fixed_seed) override;
 

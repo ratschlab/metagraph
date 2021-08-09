@@ -21,10 +21,7 @@ constexpr size_t kPadding = 5;
 DefaultColumnExtender::DefaultColumnExtender(const DeBruijnGraph &graph,
                                              const DBGAlignerConfig &config,
                                              std::string_view query)
-      : SeedFilteringExtender(query),
-        graph_(&graph), config_(config), query_(query) {
-    assert(config_.check_config_scores());
-
+      : SeedFilteringExtender(config, query), graph_(&graph), query_(query) {
     // compute exact-match scores for all suffixes of the query
     partial_sums_.reserve(query_.size() + 1);
     partial_sums_.resize(query_.size(), 0);
@@ -363,6 +360,8 @@ std::vector<Alignment> DefaultColumnExtender
 ::extend(score_t min_path_score, bool force_fixed_seed) {
     assert(this->seed_);
 
+    ++num_extensions_;
+
     table.clear();
     table_size_bytes_ = sizeof(table);
     prev_starts.clear();
@@ -638,11 +637,7 @@ Alignment DefaultColumnExtender::construct_alignment(Cigar cigar,
 
 std::vector<Alignment> DefaultColumnExtender
 ::backtrack(score_t min_path_score, std::string_view window) {
-    if (table.empty())
-        return {};
-
     std::vector<Alignment> extensions;
-
     size_t seed_clipping = this->seed_->get_clipping();
     ssize_t seed_offset = static_cast<ssize_t>(this->seed_->get_offset() - 1);
     ssize_t k_minus_1 = graph_->get_k() - 1;
@@ -782,6 +777,12 @@ std::vector<Alignment> DefaultColumnExtender
                 });
             }
         }
+    }
+
+    if (extensions.empty() && this->seed_->get_score() >= min_path_score) {
+        extensions.emplace_back(*this->seed_);
+        extensions.back().extend_query_end(query_.data() + query_.size());
+        extensions.back().trim_offset();
     }
 
     return extensions;
