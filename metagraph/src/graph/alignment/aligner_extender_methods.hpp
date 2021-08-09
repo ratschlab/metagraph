@@ -40,7 +40,10 @@ class IExtender {
 
 class SeedFilteringExtender : public IExtender {
   public:
-    SeedFilteringExtender(std::string_view query) : query_size_(query.size()) {}
+    SeedFilteringExtender(const DBGAlignerConfig &config, std::string_view query)
+          : config_(config), query_size_(query.size()) {
+        assert(config_.check_config_scores());
+    }
 
     virtual ~SeedFilteringExtender() {}
 
@@ -54,6 +57,7 @@ class SeedFilteringExtender : public IExtender {
     }
 
   protected:
+    const DBGAlignerConfig &config_;
     const Alignment *seed_ = nullptr;
     size_t query_size_;
 
@@ -90,7 +94,6 @@ class DefaultColumnExtender : public SeedFilteringExtender {
 
   protected:
     const DeBruijnGraph *graph_;
-    const DBGAlignerConfig &config_;
     std::string_view query_;
 
     // During extension, a tree is constructed from the graph starting at the
