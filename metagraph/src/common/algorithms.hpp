@@ -77,9 +77,9 @@ namespace utils {
 
         while (a_begin != a_end && b_begin != b_end) {
             if (*a_begin < *b_begin) {
-                a_begin = std::lower_bound(a_begin, a_end, *b_begin);
+                ++a_begin;
             } else if (*b_begin < *a_begin) {
-                b_begin = std::lower_bound(b_begin, b_end, *a_begin);
+                ++b_begin;
             } else {
                 ++count;
                 ++a_begin;
@@ -98,9 +98,9 @@ namespace utils {
 
         while (a_begin != a_end && b_begin != b_end) {
             if (*a_begin < *b_begin) {
-                a_begin = std::lower_bound(a_begin, a_end, *b_begin);
+                ++a_begin;
             } else if (*b_begin < *a_begin) {
-                b_begin = std::lower_bound(b_begin, b_end, *a_begin);
+                ++b_begin;
             } else {
                 return true;
             }
@@ -129,13 +129,11 @@ namespace utils {
 
         while (a1_begin != a1_end && b1_begin != b1_end) {
             if (*a1_begin < *b1_begin) {
-                auto a1_begin_next = std::lower_bound(a1_begin, a1_end, *b1_begin);
-                a2_begin += a1_begin_next - a1_begin;
-                a1_begin = a1_begin_next;
+                ++a1_begin;
+                ++a2_begin;
             } else if (*b1_begin < *a1_begin) {
-                auto b1_begin_next = std::lower_bound(b1_begin, b1_end, *a1_begin);
-                b2_begin += b1_begin_next - b1_begin;
-                b1_begin = b1_begin_next;
+                ++b1_begin;
+                ++b2_begin;
             } else {
                 OutType merged;
                 set_op(a2_begin->begin(), a2_begin->end(),

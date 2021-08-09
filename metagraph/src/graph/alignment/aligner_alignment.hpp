@@ -168,13 +168,11 @@ struct AlignmentCoordinatesLess {
 
         while (a_begin != a_end && b_begin != b_end) {
             if (*a_begin < *b_begin) {
-                auto a_begin_next = std::lower_bound(a_begin, a_end, *b_begin);
-                a_c_begin += a_begin_next - a_begin;
-                a_begin = a_begin_next;
+                ++a_begin;
+                ++a_c_begin;
             } else if (*b_begin < *a_begin) {
-                auto b_begin_next = std::lower_bound(b_begin, b_end, *a_begin);
-                b_c_begin += b_begin_next - b_begin;
-                b_begin = b_begin_next;
+                ++b_begin;
+                ++b_c_begin;
             } else {
                 if (a_c_begin->size()) {
                     if (std::upper_bound(b_c_begin->begin(), b_c_begin->end(),

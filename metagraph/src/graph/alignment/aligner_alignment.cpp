@@ -81,9 +81,9 @@ struct MergeCoords {
     void operator()(InIt1 a_begin, InIt1 a_end, InIt2 b_begin, InIt2 b_end, OutIt out) const {
         while (a_begin != a_end && b_begin != b_end) {
             if (*a_begin + a_len_ < *b_begin) {
-                a_begin = std::lower_bound(a_begin, a_end, *b_begin - a_len_);
+                ++a_begin;
             } else if (*a_begin + a_len_ > *b_begin) {
-                b_begin = std::lower_bound(b_begin, b_end, *a_begin + a_len_);
+                ++b_begin;
             } else {
                 assert(*a_begin + a_len_ == *b_begin);
                 *out = *a_begin;
