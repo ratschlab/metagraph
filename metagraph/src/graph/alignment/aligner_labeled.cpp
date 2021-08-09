@@ -63,32 +63,144 @@ void AnnotationBuffer::flush() {
     added_nodes_.clear();
 }
 
+struct HasNext {
+    HasNext(ssize_t diff) : diff_(diff) {}
+
+    template <class InIt1, class InIt2>
+    bool operator()(InIt1 a_begin, InIt1 a_end, InIt2 b_begin, InIt2 b_end) const {
+        while (a_begin != a_end && b_begin != b_end) {
+            if (*a_begin + diff_ < *b_begin) {
+                ++a_begin;
+            } else if (*a_begin + diff_ > *b_begin) {
+                ++b_begin;
+            } else {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    ssize_t diff_;
+};
+
 void LabeledBacktrackingExtender
 ::call_outgoing(node_index node,
                 size_t max_prefetch_distance,
-                const std::function<void(node_index, char /* last char */)> &callback) {
-    std::function<void(node_index, char)> call = callback;
+                const std::function<void(node_index, char /* last char */)> &callback,
+                size_t table_i) {
+    std::vector<std::pair<node_index, char>> outgoing;
+    labeled_graph_.add_node(node);
+    DefaultColumnExtender::call_outgoing(node, max_prefetch_distance,
+                                         [&](node_index next, char c) {
+        outgoing.emplace_back(next, c);
+        labeled_graph_.add_node(next);
+    }, table_i);
 
-    // TODO: checking for coordinate consistency here can be slow
+    if (outgoing.size() > 1)
+        labeled_graph_.flush();
 
-    if (auto cached_labels = labeled_graph_.get_labels(node)) {
-        // label consistency (weaker than coordinate consistency):
-        // checks if there is at least one label shared between adjacent nodes
-        call = [&](node_index next, char c) {
-            auto next_labels = labeled_graph_.get_labels(next);
-            // If labels at the next node are not cached, always take the edge.
-            // In this case, the label consistency will be checked later.
-            // If they are cached, the existence of at least one common label is checked.
-            if (!next_labels || utils::share_element(cached_labels->get().begin(),
-                                                     cached_labels->get().end(),
-                                                     next_labels->get().begin(),
-                                                     next_labels->get().end())) {
+    const Alignment &seed = *this->seed_;
+
+    auto [base_labels, base_coords] = labeled_graph_.get_labels_and_coordinates(node);
+
+    if (base_coords) {
+        // check label and coordinate consistency
+
+        // first, determine a base node from which to compare coordinates
+        // by default, node is used (the parent node of next)
+        ssize_t dist = 1;
+        if (seed.label_coordinates.size()) {
+            // if the seed has coordinates, use the seed as the base
+            base_labels = std::cref(seed.label_columns);
+            base_coords = std::cref(seed.label_coordinates);
+            ssize_t offset = std::get<6>(table[table_i]);
+            assert(offset >= static_cast<ssize_t>(graph_->get_k()));
+            dist = offset - seed.get_offset();
+        } else {
+            // otherwise, check the first node in the traversal
+            ssize_t k = graph_->get_k();
+            std::tie(base_labels, base_coords)
+                = labeled_graph_.get_labels_and_coordinates(std::get<3>(table[0]));
+            ssize_t base_offset = std::get<6>(table[0]);
+            if (!base_coords) {
+                // if the first node is not annotated, then check the last fork point
+                size_t base_table_i = xdrop_cutoffs_[std::get<9>(table[table_i])].first;
+                std::tie(base_labels, base_coords)
+                    = labeled_graph_.get_labels_and_coordinates(std::get<3>(table[base_table_i]));
+                base_offset = std::get<6>(table[base_table_i]);
+            }
+
+            if (base_coords) {
+                // determine the distance of each child node to the selected base node
+                dist = std::get<6>(table[table_i]) - base_offset + 1;
+                if (base_offset < k)
+                    dist -= k;
+            }
+
+            // if the seed has stored labels, but no stored coordinates, check
+            // the base node to make sure that it has intersecting labels with the seed
+            if (seed.label_columns.size()
+                    && !utils::share_element(base_labels->get().begin(),
+                                             base_labels->get().end(),
+                                             seed.label_columns.begin(),
+                                             seed.label_columns.end())) {
+                return;
+            }
+        }
+
+        for (const auto &[next, c] : outgoing) {
+            auto [next_labels, next_coords] = labeled_graph_.get_labels_and_coordinates(next);
+
+            // check coordinate consistency later if they are not cached now
+            if (!next_coords) {
+                callback(next, c);
+                continue;
+            }
+
+            // if we are traversing backwards, then negate the coordinate delta
+            ssize_t dist_sign = dynamic_cast<const RCDBG*>(graph_) ? -1 : 1;
+            if (utils::indexed_set_find<HasNext>(base_labels->get().begin(),
+                                                 base_labels->get().end(),
+                                                 base_coords->get().begin(),
+                                                 next_labels->get().begin(),
+                                                 next_labels->get().end(),
+                                                 next_coords->get().begin(),
+                                                 dist * dist_sign)) {
                 callback(next, c);
             }
-        };
-    }
+        }
+    } else if (base_labels) {
+        // label consistency (weaker than coordinate consistency):
+        // checks if there is at least one label shared between adjacent nodes
+        for (const auto &[next, c] : outgoing) {
+            auto next_labels = labeled_graph_.get_labels(next);
 
-    DefaultColumnExtender::call_outgoing(node, max_prefetch_distance, call);
+            // if not fetched, check later
+            if (!next_labels) {
+                callback(next, c);
+                continue;
+            }
+
+            if ((seed.label_columns.size()
+                    && !utils::share_element(seed.label_columns.begin(),
+                                             seed.label_columns.end(),
+                                             next_labels->get().begin(),
+                                             next_labels->get().end()))
+                    || !utils::share_element(base_labels->get().begin(),
+                                             base_labels->get().end(),
+                                             next_labels->get().begin(),
+                                             next_labels->get().end())) {
+                continue;
+            }
+
+            callback(next, c);
+        }
+    } else {
+        for (const auto &[next, c] : outgoing) {
+            callback(next, c);
+        }
+    }
 }
 
 void AnnotationBuffer::add_path(const std::vector<node_index> &path, std::string query) {
@@ -155,6 +267,7 @@ bool LabeledBacktrackingExtender::skip_backtrack_start(size_t i) {
 
     // if backtracking hasn't been started from here yet, get its labels
     node_index node = std::get<3>(this->table[i]);
+
     auto label_find = diff_label_sets_.find(i);
     if (label_find != diff_label_sets_.end()) {
         // extract a subset of the labels if this node was previously traversed
@@ -376,8 +489,6 @@ void LabeledBacktrackingExtender
 
     extensions_.add_alignment(std::move(alignment));
 }
-
-template class ILabeledAligner<>;
 
 } // namespace align
 } // namespace graph

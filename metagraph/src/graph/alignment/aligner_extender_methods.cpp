@@ -121,9 +121,9 @@ bool SeedFilteringExtender::update_seed_filter(node_index node,
     bool converged = true;
     score_t *v = vec.data() + query_start - start;
     for (size_t j = 0; j < size; ++j) {
-        if (s_begin[j] > v[j]) {
+        if (s_begin[j] > v[j] * config_.rel_score_cutoff) {
             converged = false;
-            v[j] = s_begin[j];
+            v[j] = std::max(v[j], s_begin[j]);
         }
     }
 
@@ -323,7 +323,8 @@ void extend_ins_end(AlignedVector<score_t> &S,
 void DefaultColumnExtender
 ::call_outgoing(node_index node,
                 size_t /* max_prefetch_distance */,
-                const std::function<void(node_index, char)> &callback) {
+                const std::function<void(node_index, char)> &callback,
+                size_t /* table_i */) {
     graph_->call_outgoing_kmers(node, [&](node_index next, char c) {
         if (c != boss::BOSS::kSentinel)
             callback(next, c);
@@ -335,7 +336,7 @@ void DefaultColumnExtender
 template <class Column, typename... RestArgs>
 Column alloc_column(size_t size, RestArgs... args) {
     Column column { {}, {}, {}, args... };
-    auto &[S, E, F, node, i_prev, c, offset, max_pos, trim] = column;
+    auto &[S, E, F, node, i_prev, c, offset, max_pos, trim, xdrop_cutoff_i] = column;
 
     // allocate and initialize enough space to allow the SIMD code to access these
     // vectors in 16 byte blocks without reading out of bounds
@@ -362,9 +363,22 @@ std::vector<Alignment> DefaultColumnExtender
 
     ++num_extensions_;
 
+    min_path_score = std::max(0, min_path_score);
+
     table.clear();
-    table_size_bytes_ = sizeof(table);
     prev_starts.clear();
+
+    assert(config_.xdrop > 0);
+
+    xdrop_cutoffs_.assign(1, std::make_pair(0u, std::max(-config_.xdrop, ninf + 1)));
+    assert(xdrop_cutoffs_[0] < 0);
+
+    if (!config_.global_xdrop)
+        scores_reached_.assign(1, 0);
+
+    typedef typename decltype(xdrop_cutoffs_)::value_type xdrop_cutoff_v;
+    table_size_bytes_ = sizeof(table) + sizeof(xdrop_cutoffs_) + sizeof(xdrop_cutoff_v)
+        + sizeof(scores_reached_) + sizeof(score_t);
 
     size_t start = this->seed_->get_clipping();
 
@@ -377,23 +391,19 @@ std::vector<Alignment> DefaultColumnExtender
 
     // initialize the root of the tree
     table.emplace_back(alloc_column<Column>(1, this->seed_->get_nodes().front(),
-                                            static_cast<size_t>(-1), '\0', seed_offset, 0, 0));
-
-    score_t xdrop_cutoff = std::max(-config_.xdrop, ninf + 1);
-    assert(config_.xdrop > 0);
-    assert(xdrop_cutoff < 0);
+                                            static_cast<size_t>(-1), '\0', seed_offset, 0, 0, 0u));
 
     {
-        auto &[S, E, F, node, i_prev, c, offset, max_pos, trim] = table[0];
+        auto &[S, E, F, node, i_prev, c, offset, max_pos, trim, xdrop_cutoff_i] = table[0];
         S[0] = 0;
-        extend_ins_end(S, E, F, window.size() + 1 - trim, xdrop_cutoff, config_);
+        extend_ins_end(S, E, F, window.size() + 1 - trim, xdrop_cutoffs_[xdrop_cutoff_i].second, config_);
 
         static_assert(std::is_same_v<decltype(table)::value_type, Column>);
         static_assert(std::is_same_v<decltype(S)::value_type, score_t>);
         static_assert(std::is_same_v<decltype(E)::value_type, score_t>);
         static_assert(std::is_same_v<decltype(F)::value_type, score_t>);
 
-        table_size_bytes_ = sizeof(Column) + S.capacity() * sizeof(score_t) * 3;
+        table_size_bytes_ = sizeof(Column) * table.capacity() + S.capacity() * sizeof(score_t) * 3;
     }
 
     // The nodes in the traversal (with corresponding score columns) are sorted by
@@ -431,16 +441,21 @@ std::vector<Alignment> DefaultColumnExtender
 
             size_t prev_begin = 0;
             size_t prev_end = window.size() + 1;
+            size_t prev_xdrop_cutoff_i = 0;
+            score_t prev_xdrop_cutoff = 0;
 
             {
-                const auto &[S, E, F, node, i_prev, c, offset, max_pos, trim] = table[i];
+                const auto &[S, E, F, node, i_prev, c, offset, max_pos, trim, xdrop_cutoff_i] = table[i];
                 next_offset = offset + 1;
+                prev_xdrop_cutoff_i = xdrop_cutoff_i;
+                prev_xdrop_cutoff = xdrop_cutoffs_[xdrop_cutoff_i].second;
+
+                size_t node_counter = config_.global_xdrop ? table.size() : offset - seed_offset + 1;
 
                 // if too many nodes have been explored, give up
-                if (static_cast<double>(table.size()) / window.size()
+                if (static_cast<double>(node_counter) / window.size()
                         >= config_.max_nodes_per_seq_char) {
-                    DEBUG_LOG("Alignment node limit reached, stopping extension");
-                    queue = std::priority_queue<TableIt>();
+                    DEBUG_LOG("Alignment node limit reached, stopping this branch");
                     continue;
                 }
 
@@ -452,27 +467,12 @@ std::vector<Alignment> DefaultColumnExtender
                 }
 
                 // determine maximal range within the xdrop score cutoff
-                auto in_range = [xdrop_cutoff](score_t s) { return s >= xdrop_cutoff; };
+                auto in_range = [prev_xdrop_cutoff](score_t s) { return s >= prev_xdrop_cutoff; };
 
                 prev_begin = std::find_if(S.begin(), S.end(), in_range) - S.begin() + trim;
                 prev_end = std::find_if(S.rbegin(), S.rend(), in_range).base() - S.begin() + trim;
 
                 if (prev_end <= prev_begin)
-                    continue;
-
-                // check if this node can be extended to get a better alignment
-                bool has_extension = false;
-                for (size_t j = prev_begin; j < prev_end; ++j) {
-                    assert(partial_sums_.at(start + j) == config_.match_score(window.substr(j)));
-                    score_t ext_score = S[j - trim] + partial_sums_.at(start + j);
-                    if ((config_.num_alternative_paths == 1 && ext_score > std::get<0>(best_score))
-                            || ext_score >= min_path_score) {
-                        has_extension = true;
-                        break;
-                    }
-                }
-
-                if (!has_extension)
                     continue;
 
                 size_t seed_pos = next_offset - this->seed_->get_offset();
@@ -493,7 +493,7 @@ std::vector<Alignment> DefaultColumnExtender
                     call_outgoing(node, window.size() + 1 - offset - S.size(),
                                   [&](node_index next, char c) {
                                       outgoing.emplace_back(next, c);
-                                  });
+                                  }, i);
                 }
             }
 
@@ -502,19 +502,30 @@ std::vector<Alignment> DefaultColumnExtender
 
             std::vector<TableIt> to_push;
             for (const auto &[next, c] : outgoing) {
-                assert(std::get<0>(best_score) > xdrop_cutoff);
+                bool forked_xdrop = !config_.global_xdrop && outgoing.size() > 1;
+                size_t xdrop_cutoffs_sizediff = xdrop_cutoffs_.capacity();
+                if (forked_xdrop) {
+                    xdrop_cutoffs_.emplace_back(table.size(), prev_xdrop_cutoff);
+                    xdrop_cutoffs_sizediff = xdrop_cutoffs_.capacity() - xdrop_cutoffs_sizediff;
+                } else {
+                    xdrop_cutoffs_sizediff = 0;
+                }
 
+                size_t table_sizediff = table.capacity();
                 table.emplace_back(alloc_column<Column>(
                     end - begin, next, i, c,
                     static_cast<ssize_t>(next_offset),
-                    begin, begin
+                    begin, begin,
+                    forked_xdrop ? xdrop_cutoffs_.size() - 1 : prev_xdrop_cutoff_i
                 ));
 
                 const auto &[S_prev, E_prev, F_prev, node_prev, i_prev, c_prev,
-                             offset_prev, max_pos_prev, trim_prev] = table[i];
+                             offset_prev, max_pos_prev, trim_prev, xdrop_cutoff_i_prev] = table[i];
 
-                auto &[S, E, F, node_cur, i_cur, c_stored, offset, max_pos, trim]
+                auto &[S, E, F, node_cur, i_cur, c_stored, offset, max_pos, trim, xdrop_cutoff_i]
                     = table.back();
+
+                score_t &xdrop_cutoff = xdrop_cutoffs_[xdrop_cutoff_i].second;
 
                 assert(i_cur == i);
                 assert(node_cur == next);
@@ -540,27 +551,66 @@ std::vector<Alignment> DefaultColumnExtender
                 // TODO: this can be done with SIMD, but it's not a bottleneck
                 ssize_t cur_offset = begin;
                 ssize_t diag_i = offset - seed_offset;
+                bool has_extension = false;
+                const score_t *partial_sums = &partial_sums_[start + trim];
+                score_t extension_cutoff = std::get<1>(best_score) * config_.rel_score_cutoff;
+                score_t max_diff = ninf;
+
+                size_t scores_reached_sizediff = 0;
+                bool scores_reached_cutoff = true;
+                if (!config_.global_xdrop) {
+                    scores_reached_sizediff = scores_reached_.capacity();
+                    scores_reached_.resize(S.size() + trim + 1, ninf);
+                    scores_reached_sizediff = scores_reached_.capacity() - scores_reached_sizediff;
+                }
+
                 for (size_t j = 0; j < S.size(); ++j, ++cur_offset) {
                     if (std::make_pair(S[j], std::abs(max_pos - diag_i))
                             > std::make_pair(S[max_pos - begin], std::abs(cur_offset - diag_i))) {
                         max_pos = j + begin;
                     }
+
+                    if (!config_.global_xdrop) {
+                        scores_reached_[trim + j] = std::max(scores_reached_[trim + j], S[j]);
+                        scores_reached_cutoff = (S[j] >= scores_reached_[trim + j] * config_.rel_score_cutoff);
+                    }
+
+                    // check if this node can be extended to get a better alignment
+                    assert(partial_sums[j] == config_.match_score(window.substr(j + trim)));
+                    if (!has_extension && S[j] + partial_sums[j] >= extension_cutoff
+                            && scores_reached_cutoff)
+                        has_extension = true;
+
+                    if (static_cast<size_t>(trim - trim_prev) < S_prev.size()
+                            && S[j] - S_prev[j + trim - trim_prev] > max_diff) {
+                        max_diff = S[j] - S_prev[j + trim - trim_prev];
+                    }
                 }
+
                 assert(max_pos >= trim);
                 assert(static_cast<size_t>(max_pos - trim) < S.size());
 
                 score_t max_val = S[max_pos - trim];
-                if (max_val < xdrop_cutoff) {
+                if (max_val < xdrop_cutoff || !has_extension) {
                     table.pop_back();
+                    if (forked_xdrop)
+                        xdrop_cutoffs_.pop_back();
+
                     continue;
                 }
+
+                table_sizediff = table.capacity() - table_sizediff;
 
                 static_assert(std::is_same_v<decltype(table)::value_type, Column>);
                 static_assert(std::is_same_v<decltype(S)::value_type, score_t>);
                 static_assert(std::is_same_v<decltype(E)::value_type, score_t>);
                 static_assert(std::is_same_v<decltype(F)::value_type, score_t>);
+                static_assert(std::is_same_v<decltype(scores_reached_)::value_type, score_t>);
 
-                table_size_bytes_ += sizeof(Column) + S.capacity() * sizeof(score_t) * 3;
+                table_size_bytes_ += sizeof(Column) * table_sizediff
+                    + S.capacity() * sizeof(score_t) * 3
+                    + sizeof(score_t) * scores_reached_sizediff
+                    + sizeof(xdrop_cutoff_v) * xdrop_cutoffs_sizediff;
 
                 // if the best score in this column is above the xdrop score
                 // then check if the extension can continue
@@ -573,17 +623,11 @@ std::vector<Alignment> DefaultColumnExtender
                 if (max_val > std::get<0>(best_score))
                     best_score = next_score;
 
-                size_t vec_offset = start + begin;
-                score_t *s_begin = S.data();
-                score_t *s_end = S.data() + S.size();
-
                 // skip the first index since it corresponds to the position
                 // before the query start
-                if (!begin) {
-                    ++s_begin;
-                } else {
-                    --vec_offset;
-                }
+                size_t vec_offset = start + begin - static_cast<bool>(begin);
+                score_t *s_begin = S.data() + !begin;
+                score_t *s_end = S.data() + S.size();
 
                 assert(s_begin <= s_end);
                 assert(vec_offset + (s_end - s_begin) <= query_.size());
@@ -594,8 +638,7 @@ std::vector<Alignment> DefaultColumnExtender
                     // if this next node is the only next option, or if it's
                     // better than all other options, take it without pushing
                     // to the queue
-                    if (outgoing.size() == 1 && (queue.empty() || next_score > queue.top())
-                            && (next_nodes.empty() || next_score > next_nodes.back())) {
+                    if (next_nodes.size() && max_val == std::get<0>(next_nodes[0])) {
                         next_nodes.emplace_back(std::move(next_score));
                     } else {
                         queue.emplace(std::move(next_score));
@@ -645,8 +688,8 @@ std::vector<Alignment> DefaultColumnExtender
     std::vector<std::tuple<score_t, ssize_t, ssize_t>> indices;
     indices.reserve(table.size());
     for (size_t i = 1; i < table.size(); ++i) {
-        const auto &[S, E, F, node, j_prev, c, offset, max_pos, trim] = table[i];
-        const auto &[S_p, E_p, F_p, node_p, j_prev_p, c_p, offset_p, max_pos_p, trim_p] = table[j_prev];
+        const auto &[S, E, F, node, j_prev, c, offset, max_pos, trim, xdrop_cutoff_i] = table[i];
+        const auto &[S_p, E_p, F_p, node_p, j_prev_p, c_p, offset_p, max_pos_p, trim_p, xdrop_cutoff_i_p] = table[j_prev];
 
         if (max_pos < trim_p + 1)
             continue;
@@ -690,8 +733,8 @@ std::vector<Alignment> DefaultColumnExtender
 
         while (j && !terminate_backtrack()) {
             assert(j != static_cast<size_t>(-1));
-            const auto &[S, E, F, node, j_prev, c, offset, max_pos, trim] = table[j];
-            const auto &[S_p, E_p, F_p, node_p, j_prev_p, c_p, offset_p, max_pos_p, trim_p] = table[j_prev];
+            const auto &[S, E, F, node, j_prev, c, offset, max_pos, trim, xdrop_cutoff_i] = table[j];
+            const auto &[S_p, E_p, F_p, node_p, j_prev_p, c_p, offset_p, max_pos_p, trim_p, xdrop_cutoff_i_p] = table[j_prev];
 
             assert(pos >= trim);
             assert(*std::max_element(S.begin(), S.end()) == S[max_pos - trim]);
@@ -724,8 +767,8 @@ std::vector<Alignment> DefaultColumnExtender
                 // deletion
                 Cigar::Operator last_op = Cigar::DELETION;
                 while (last_op == Cigar::DELETION && j) {
-                    const auto &[S, E, F, node, j_prev, c, offset, max_pos, trim] = table[j];
-                    const auto &[S_p, E_p, F_p, node_p, j_prev_p, c_p, offset_p, max_pos_p, trim_p] = table[j_prev];
+                    const auto &[S, E, F, node, j_prev, c, offset, max_pos, trim, xdrop_cutoff_i] = table[j];
+                    const auto &[S_p, E_p, F_p, node_p, j_prev_p, c_p, offset_p, max_pos_p, trim_p, xdrop_cutoff_i_p] = table[j_prev];
 
                     assert(pos >= trim_p);
 
@@ -768,7 +811,7 @@ std::vector<Alignment> DefaultColumnExtender
             }
 
             if (trace.size() >= this->graph_->get_k()) {
-                const auto &[S, E, F, node, j_prev, c, offset, max_pos, trim] = table[j];
+                const auto &[S, E, F, node, j_prev, c, offset, max_pos, trim, xdrop_cutoff_i] = table[j];
 
                 call_alignments(S[pos - trim], score, min_path_score, path, trace, ops,
                                 pos, align_offset, window.substr(pos, end_pos - pos), seq,

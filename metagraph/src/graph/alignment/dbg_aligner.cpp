@@ -96,7 +96,7 @@ void ISeedAndExtendAligner<AlignmentCompare>
 
         num_explored_nodes += extender->num_explored_nodes();
         num_extensions += extender->num_extensions();
-        size_t num_labels = aggregator.num_labels();
+        size_t num_labels = std::max(size_t { 1 }, aggregator.num_labels() - 1);
 
         for (auto&& alignment : aggregator.get_alignments()) {
             assert(alignment.is_valid(graph_, &config_));

@@ -153,6 +153,44 @@ namespace utils {
         }
     }
 
+    // Intersect the sorted ranges a1 and b1 with corresponding sorted ranges of
+    // sorted ranges a2 and b2 (of equal length).
+    // i.e., For each shared element between a1 and b1, intersect the corresponding
+    // ranges in a2 and b2.
+    template <class Check, class InIt1, class InIt2, class InIt3, class InIt4,
+              typename... Args>
+    constexpr bool indexed_set_find(InIt1 a1_begin,
+                                    InIt1 a1_end,
+                                    InIt2 a2_begin,
+                                    InIt3 b1_begin,
+                                    InIt3 b1_end,
+                                    InIt4 b2_begin,
+                                    Args&&... args) {
+        Check check(std::forward<Args>(args)...);
+
+        while (a1_begin != a1_end && b1_begin != b1_end) {
+            if (*a1_begin < *b1_begin) {
+                ++a1_begin;
+                ++a2_begin;
+            } else if (*b1_begin < *a1_begin) {
+                ++b1_begin;
+                ++b2_begin;
+            } else {
+                if (check(a2_begin->begin(), a2_begin->end(),
+                          b2_begin->begin(), b2_begin->end())) {
+                    return true;
+                }
+
+                ++a1_begin;
+                ++b1_begin;
+                ++a2_begin;
+                ++b2_begin;
+            }
+        }
+
+        return false;
+    }
+
     // Bitmap |new_indexes| marks positions of inserted values in the final vector
     template <class Vector, class Bitmap>
     void insert(Vector *vector,

@@ -904,6 +904,7 @@ TYPED_TEST(DBGAlignerTest, align_straight_long_xdrop) {
     auto graph = build_graph_batch<TypeParam>(k, { reference_1, reference_2 });
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -3, -3));
     config.xdrop = 30;
+    config.rel_score_cutoff = 0.8;
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
 
@@ -1282,7 +1283,7 @@ TYPED_TEST(DBGAlignerTest, align_low_similarity4) {
 
     EXPECT_TRUE(graph->find(match, 1.0));
 
-    for (double nodes_per_seq_char : { 10.0, std::numeric_limits<double>::max() }) {
+    for (double nodes_per_seq_char : { 10.0, 50.0 }) {
         for (size_t xdrop : { 27, 30 }) {
             for (double discovery_fraction : { 0.0, 1.0 }) {
                 DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -3, -3));
@@ -1302,7 +1303,6 @@ TYPED_TEST(DBGAlignerTest, align_low_similarity4) {
                 if (discovery_fraction == 0.0) {
                     ASSERT_EQ(2ull, paths.size());
                     EXPECT_NE(paths[0], paths[1]);
-                    EXPECT_FALSE(paths[0].get_orientation());
                     EXPECT_GE(paths[0].get_score(), paths[1].get_score());
                 } else {
                     EXPECT_EQ(0ull, paths.size());

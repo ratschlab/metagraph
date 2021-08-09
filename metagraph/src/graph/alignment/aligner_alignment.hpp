@@ -16,6 +16,7 @@
 #include "annotation/int_matrix/base/int_matrix.hpp"
 #include "annotation/representation/base/annotation.hpp"
 #include "common/vector.hpp"
+#include "common/algorithms.hpp"
 
 
 namespace mtg {
@@ -157,38 +158,26 @@ class Alignment {
 std::ostream& operator<<(std::ostream& out, const Alignment &alignment);
 
 struct AlignmentCoordinatesLess {
-    bool operator()(const Alignment &a, const Alignment &b) const {
-        auto a_begin = a.label_columns.begin();
-        auto a_end = a.label_columns.end();
-        auto a_c_begin = a.label_coordinates.begin();
+    struct CoordLess {
+        CoordLess(size_t seq_len) : len_(seq_len - 1) {}
 
-        auto b_begin = b.label_columns.begin();
-        auto b_end = b.label_columns.end();
-        auto b_c_begin = b.label_coordinates.begin();
-
-        while (a_begin != a_end && b_begin != b_end) {
-            if (*a_begin < *b_begin) {
-                ++a_begin;
-                ++a_c_begin;
-            } else if (*b_begin < *a_begin) {
-                ++b_begin;
-                ++b_c_begin;
-            } else {
-                if (a_c_begin->size()) {
-                    if (std::upper_bound(b_c_begin->begin(), b_c_begin->end(),
-                                         a_c_begin->front() + a.get_sequence().size() - 1)
-                            != b_c_begin->end()) {
-                        return true;
-                    }
-                }
-                ++a_begin;
-                ++a_c_begin;
-                ++b_begin;
-                ++b_c_begin;
-            }
+        template <typename InIt1, typename InIt2>
+        bool operator()(InIt1 a_c_begin, InIt1 a_c_end, InIt2 b_c_begin, InIt2 b_c_end) const {
+            return a_c_begin != a_c_end
+                && std::upper_bound(b_c_begin, b_c_end, *a_c_begin + len_) != b_c_end;
         }
 
-        return false;
+        size_t len_;
+    };
+
+    bool operator()(const Alignment &a, const Alignment &b) const {
+        return utils::indexed_set_find<CoordLess>(a.label_columns.begin(),
+                                                  a.label_columns.end(),
+                                                  a.label_coordinates.begin(),
+                                                  b.label_columns.begin(),
+                                                  b.label_columns.end(),
+                                                  b.label_coordinates.begin(),
+                                                  a.get_sequence().size());
     }
 };
 

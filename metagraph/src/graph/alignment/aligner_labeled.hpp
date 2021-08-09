@@ -8,6 +8,7 @@
 
 #include "dbg_aligner.hpp"
 #include "common/hashers/hash.hpp"
+#include "common/utils/template_utils.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
 #include "annotation/int_matrix/base/int_matrix.hpp"
@@ -99,37 +100,6 @@ class AnnotationBuffer {
 };
 
 
-template <class AlignmentCompare = LocalAlignmentLess>
-class ILabeledAligner : public ISeedAndExtendAligner<AlignmentCompare> {
-  public:
-    typedef IDBGAligner::node_index node_index;
-
-    ILabeledAligner(const AnnotatedDBG &anno_graph, const DBGAlignerConfig &config)
-          : ISeedAndExtendAligner<AlignmentCompare>(anno_graph.get_graph(), config),
-            labeled_graph_(anno_graph) {}
-
-    virtual ~ILabeledAligner() {}
-
-    virtual void align_batch(const std::vector<IDBGAligner::Query> &seq_batch,
-                             const IDBGAligner::AlignmentCallback &callback) const override {
-        ISeedAndExtendAligner<AlignmentCompare>::align_batch(seq_batch,
-            [&](std::string_view header, QueryAlignment&& alignments) {
-                alignments.data().erase(
-                    std::remove_if(alignments.data().begin(), alignments.data().end(),
-                                   [](const auto &a) { return a.label_columns.empty(); }),
-                    alignments.data().end()
-                );
-                callback(header, std::move(alignments));
-            }
-        );
-    }
-
-
-  protected:
-    mutable AnnotationBuffer labeled_graph_;
-};
-
-
 class LabeledBacktrackingExtender : public DefaultColumnExtender {
   public:
     typedef AnnotationBuffer::Column Column;
@@ -193,7 +163,8 @@ class LabeledBacktrackingExtender : public DefaultColumnExtender {
     // (when applicable)
     virtual void call_outgoing(node_index node,
                                size_t max_prefetch_distance,
-                               const std::function<void(node_index, char)> &callback) override final;
+                               const std::function<void(node_index, char)> &callback,
+                               size_t table_i) override final;
 
     // this method calls multiple label-consistent alignments by backtracking
     virtual void call_alignments(score_t cur_cell_score,
@@ -237,21 +208,29 @@ class LabeledBacktrackingExtender : public DefaultColumnExtender {
     }
 };
 
-
 template <class Extender = LabeledBacktrackingExtender,
           class Seeder = UniMEMSeeder,
           class AlignmentCompare = LocalAlignmentLess>
-class LabeledAligner : public ILabeledAligner<AlignmentCompare> {
+class LabeledAligner : public ISeedAndExtendAligner<AlignmentCompare> {
   public:
-    template <typename... Args>
-    LabeledAligner(Args&&... args)
-          : ILabeledAligner<AlignmentCompare>(std::forward<Args>(args)...) {}
+    typedef typename ISeedAndExtendAligner<AlignmentCompare>::score_t score_t;
+
+    LabeledAligner(const AnnotatedDBG &anno_graph, const DBGAlignerConfig &config)
+          : ISeedAndExtendAligner<AlignmentCompare>(anno_graph.get_graph(), config),
+            labeled_graph_(anno_graph) {
+        if (labeled_graph_.get_coordinate_matrix()) {
+            // do not use a global xdrop cutoff since we need separate cutoffs for each label
+            this->config_.global_xdrop = false;
+        }
+    }
 
   protected:
+    mutable AnnotationBuffer labeled_graph_;
+
     std::shared_ptr<IExtender>
     build_extender(std::string_view query,
                    const typename Extender::Aggregator &aggregator) const override final {
-        return std::make_shared<Extender>(this->labeled_graph_, this->get_config(), aggregator, query);
+        return std::make_shared<Extender>(labeled_graph_, this->config_, aggregator, query);
     }
 
     std::shared_ptr<ISeeder>
@@ -259,6 +238,113 @@ class LabeledAligner : public ILabeledAligner<AlignmentCompare> {
                  bool is_reverse_complement,
                  const std::vector<IDBGAligner::node_index> &nodes) const override final {
         return this->template build_seeder_impl<Seeder>(query, is_reverse_complement, nodes);
+    }
+
+    // Generates seeds and extends them
+    void align_core(const ISeeder &seeder,
+                    IExtender &extender,
+                    const std::function<void(Alignment&&)> &callback,
+                    const std::function<score_t(const Alignment&)> &get_min_path_score,
+                    bool force_fixed_seed) const override final {
+        auto seeds = seeder.get_seeds();
+
+        if (!force_fixed_seed && seeds.size())
+            filter_seeds(seeds);
+
+        for (const Alignment &seed : seeds) {
+            if (seed.empty())
+                continue;
+
+            score_t min_path_score = get_min_path_score(seed);
+
+            DEBUG_LOG("Min path score: {}\tSeed: {}", min_path_score, seed);
+
+            for (auto&& extension : extender.get_extensions(seed, min_path_score, force_fixed_seed)) {
+                callback(std::move(extension));
+            }
+        }
+    }
+
+  private:
+    void filter_seeds(std::vector<Alignment> &seeds) const {
+        for (const Alignment &seed : seeds) {
+            labeled_graph_.add_path(
+                seed.get_nodes(),
+                std::string(seed.get_nodes().size() + this->graph_.get_k() - 1, '#')
+            );
+        }
+
+        labeled_graph_.flush();
+
+        typedef AnnotationBuffer::Column Column;
+        typedef AnnotationBuffer::node_index node_index;
+
+        VectorMap<Column, uint64_t> label_counter;
+        for (const Alignment &seed : seeds) {
+            for (node_index node : seed.get_nodes()) {
+                if (auto labels = labeled_graph_.get_labels(node)) {
+                    for (uint64_t label : labels->get()) {
+                        ++label_counter[label];
+                    }
+                }
+            }
+        }
+
+        if (label_counter.empty())
+            return;
+
+        std::vector<std::pair<Column, uint64_t>> label_counts
+            = const_cast<std::vector<std::pair<Column, uint64_t>>&&>(label_counter.values_container());
+
+        std::sort(label_counts.begin(), label_counts.end(), utils::GreaterSecond());
+
+        double cutoff = static_cast<double>(label_counts[0].second)
+            * this->config_.rel_score_cutoff;
+        auto it = std::find_if(label_counts.begin() + 1, label_counts.end(),
+                               [cutoff](const auto &a) { return a.second < cutoff; });
+
+        if (it == label_counts.end())
+            return;
+
+        label_counts.erase(it, label_counts.end());
+
+        Vector<Column> labels;
+        labels.reserve(label_counts.size());
+        for (const auto &[label, count] : label_counts) {
+            labels.push_back(label);
+        }
+        std::sort(labels.begin(), labels.end());
+
+        for (Alignment &seed : seeds) {
+            const std::vector<node_index> &nodes = seed.get_nodes();
+            auto fetch_labels = labeled_graph_.get_labels(nodes[0]);
+            if (!fetch_labels)
+                continue;
+
+            std::set_intersection(fetch_labels->get().begin(),
+                                  fetch_labels->get().end(),
+                                  labels.begin(), labels.end(),
+                                  std::back_inserter(seed.label_columns));
+            for (size_t i = 1; i < nodes.size() && seed.label_columns.size(); ++i) {
+                if (auto next_fetch_labels = labeled_graph_.get_labels(nodes[i])) {
+                    Vector<Column> temp;
+                    std::set_intersection(next_fetch_labels->get().begin(),
+                                          next_fetch_labels->get().end(),
+                                          seed.label_columns.begin(),
+                                          seed.label_columns.end(),
+                                          std::back_inserter(temp));
+                    std::swap(temp, seed.label_columns);
+                } else {
+                    seed.label_columns.clear();
+                }
+            }
+        }
+
+        auto seed_it = std::remove_if(seeds.begin(), seeds.end(), [](const auto &a) {
+            return a.label_columns.empty();
+        });
+
+        seeds.erase(seed_it, seeds.end());
     }
 };
 

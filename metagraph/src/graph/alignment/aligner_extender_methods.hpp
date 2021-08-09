@@ -115,12 +115,14 @@ class DefaultColumnExtender : public SeedFilteringExtender {
                               char /* last char of node */,
                               ssize_t /* offset (distance from start of the first node) */,
                               ssize_t /* absolute index of maximal value*/,
-                              ssize_t /* trim (starting absolute index of array) */>;
+                              ssize_t /* trim (starting absolute index of array) */,
+                              size_t /* xdrop_cutoffs_ index */>;
     // e.g., the maximal value is located at S[std::get<7>(col) - std::get<8>(col)]
     std::vector<Column> table;
     size_t table_size_bytes_;
 
     tsl::hopscotch_set<size_t> prev_starts;
+    std::vector<std::pair<size_t, score_t>> xdrop_cutoffs_;
     size_t num_extensions_ = 0;
 
     virtual std::vector<Alignment> extend(score_t min_path_score, bool force_fixed_seed) override;
@@ -161,7 +163,8 @@ class DefaultColumnExtender : public SeedFilteringExtender {
 
     virtual void call_outgoing(node_index node,
                                size_t max_prefetch_distance,
-                               const std::function<void(node_index, char)> &callback);
+                               const std::function<void(node_index, char)> &callback,
+                               size_t table_i);
 
     Alignment construct_alignment(Cigar cigar,
                                   size_t clipping,
@@ -182,6 +185,8 @@ class DefaultColumnExtender : public SeedFilteringExtender {
     // a quick lookup table of char pair match/mismatch scores for the current query
     tsl::hopscotch_map<char, AlignedVector<score_t>> profile_score_;
     tsl::hopscotch_map<char, AlignedVector<Cigar::Operator>> profile_op_;
+
+    std::vector<score_t> scores_reached_;
 };
 
 } // namespace align

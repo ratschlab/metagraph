@@ -76,6 +76,7 @@ class DBGAlignerConfig {
 
     bool forward_and_reverse_complement = true;
     bool chain_alignments = false;
+    bool global_xdrop = true;
 
     bool alignment_edit_distance;
     int8_t alignment_match_score;

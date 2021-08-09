@@ -114,7 +114,7 @@ class Config {
     int8_t alignment_gap_extension_penalty = 2;
 
     int32_t alignment_min_path_score = 0;
-    int32_t alignment_xdrop = 27;
+    int32_t alignment_xdrop = 34;
 
     size_t alignment_num_alternative_paths = 1;
     size_t alignment_min_seed_length = 0;
