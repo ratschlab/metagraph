@@ -121,7 +121,7 @@ class Config {
     size_t alignment_max_seed_length = std::numeric_limits<size_t>::max();
     size_t alignment_max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
 
-    double alignment_rel_score_cutoff = 0.8;
+    double alignment_rel_score_cutoff = 0.95;
 
     double discovery_fraction = 0.7;
     double presence_fraction = 0.0;
@@ -132,7 +132,7 @@ class Config {
     double max_count_quantile = 1.0;
     double bloom_fpp = 1.0;
     double bloom_bpk = 4.0;
-    double alignment_max_nodes_per_seq_char = 12.0;
+    double alignment_max_nodes_per_seq_char = 2.0;
     double alignment_max_ram = 200;
     double alignment_min_exact_match = 0.0;
     double min_fraction = 0.0;
