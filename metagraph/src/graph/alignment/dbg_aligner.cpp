@@ -64,6 +64,7 @@ void ISeedAndExtendAligner<AlignmentCompare>
         auto extender = build_extender(this_query, aggregator);
 
         size_t num_explored_nodes = 0;
+        size_t num_extensions = 0;
 
 #if ! _PROTEIN_GRAPH
         if (graph_.get_mode() == DeBruijnGraph::CANONICAL
@@ -84,6 +85,7 @@ void ISeedAndExtendAligner<AlignmentCompare>
                                   add_alignment, get_min_path_score);
 
             num_explored_nodes += extender_rc->num_explored_nodes();
+            num_extensions += extender_rc->num_extensions();
 
         } else {
             align_core(this_query, *seeder, *extender, add_alignment, get_min_path_score);
@@ -93,6 +95,7 @@ void ISeedAndExtendAligner<AlignmentCompare>
 #endif
 
         num_explored_nodes += extender->num_explored_nodes();
+        num_extensions += extender->num_extensions();
 
         for (auto&& alignment : aggregator.get_alignments()) {
             assert(alignment.is_valid(graph_, &config_));
@@ -100,8 +103,8 @@ void ISeedAndExtendAligner<AlignmentCompare>
         }
 
         common::logger->trace(
-            "{}\tlength: {}\texplored nodes: {}\texplored nodes/k-mer: {}",
-            header, query.size(), num_explored_nodes,
+            "{}\tlength: {}\textensions: {}\texplored nodes: {}\texplored nodes/k-mer: {}",
+            header, query.size(), num_extensions, num_explored_nodes,
             static_cast<double>(num_explored_nodes) / nodes.size()
         );
 
