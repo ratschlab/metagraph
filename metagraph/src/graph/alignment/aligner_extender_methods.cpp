@@ -362,6 +362,8 @@ Column alloc_column(size_t size, RestArgs... args) {
 std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score) {
     assert(this->seed_);
 
+    ++num_extensions_;
+
     table.clear();
     table_size_bytes_ = sizeof(table);
     prev_starts.clear();
