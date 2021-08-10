@@ -233,34 +233,11 @@ class LabeledAligner : public ISeedAndExtendAligner<AlignmentCompare> {
     build_seeder(std::string_view query,
                  bool is_reverse_complement,
                  const std::vector<IDBGAligner::node_index> &nodes) const override final {
-        return this->template build_seeder_impl<Seeder>(query, is_reverse_complement, nodes);
-    }
-
-    // Generates seeds and extends them. If force_fixed_seed is true, then
-    // all alignments must have the seed as a prefix. Otherwise, only the first
-    // node of the seed is used as an alignment starting node.
-    void align_core(const ISeeder &seeder,
-                    IExtender &extender,
-                    const std::function<void(Alignment&&)> &callback,
-                    const std::function<score_t(const Alignment&)> &get_min_path_score,
-                    bool force_fixed_seed) const override final {
-        auto seeds = seeder.get_seeds();
-
-        if (!force_fixed_seed && seeds.size())
+        auto seeds = this->template build_seeder_impl<Seeder>(query, is_reverse_complement, nodes)->get_seeds();
+        if (seeds.size())
             filter_seeds(seeds);
 
-        for (const Alignment &seed : seeds) {
-            if (seed.empty())
-                continue;
-
-            score_t min_path_score = get_min_path_score(seed);
-
-            DEBUG_LOG("Min path score: {}\tSeed: {}", min_path_score, seed);
-
-            for (auto&& extension : extender.get_extensions(seed, min_path_score, force_fixed_seed)) {
-                callback(std::move(extension));
-            }
-        }
+        return std::make_shared<ManualSeeder>(std::move(seeds));
     }
 
   private:
