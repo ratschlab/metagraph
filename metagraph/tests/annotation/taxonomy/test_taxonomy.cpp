@@ -53,14 +53,14 @@ TEST(TaxonomyTest, ClsAnno_DfsStatistics) {
     std::vector<uint32_t> tree_linearization;
     tax->dfs_statistics(0, tree, &tree_linearization);
     EXPECT_EQ(expected_linearization, tree_linearization);
-    EXPECT_EQ(expected_node_depths, tax->node_depth);
-    EXPECT_EQ(expected_node_to_linearization_idx, tax->node_to_linearization_idx);
+    EXPECT_EQ(expected_node_depths, tax->node_depth_);
+    EXPECT_EQ(expected_node_to_linearization_idx, tax->node_to_linearization_idx_);
 }
 
 TEST(TaxonomyTest, ClsAnno_RmqPreprocessing) {
     std::unique_ptr<mtg::annot::TaxonomyClsAnno> tax = std::make_unique<mtg::annot::TaxonomyClsAnno>();
 
-    tax->node_depth = {
+    tax->node_depth_ = {
         {0, 4},
         {1, 3},
         {2, 1},
@@ -84,7 +84,7 @@ TEST(TaxonomyTest, ClsAnno_RmqPreprocessing) {
     };
 
     tax->rmq_preprocessing(linearization);
-    EXPECT_EQ(expected_rmq, tax->rmq_data);
+    EXPECT_EQ(expected_rmq, tax->rmq_data_);
 }
 
 }

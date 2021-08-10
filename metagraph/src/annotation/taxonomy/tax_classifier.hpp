@@ -3,7 +3,6 @@
 
 #include <tsl/hopscotch_set.h>
 #include <tsl/hopscotch_map.h>
-
 #include "graph/annotated_dbg.hpp"
 
 namespace mtg {
@@ -25,22 +24,12 @@ class TaxonomyBase {
 
     TaxonomyBase() {};
     TaxonomyBase(const double lca_coverage_rate, const double kmers_discovery_rate)
-        : _lca_coverage_rate(lca_coverage_rate),
-          _kmers_discovery_rate(kmers_discovery_rate) {};
+        : lca_coverage_rate_(lca_coverage_rate),
+          kmers_discovery_rate_(kmers_discovery_rate) {};
 
     TaxId assign_class(const std::string &sequence) const;
 
   protected:
-    /** Recognise the label type by parsing one sample_label.
-     *
-     * @param [input] sample_label
-     * @param [output] the returned boolean value is later used to decide if we need to parse the accession version
-     *                 to taxid lookup table:
-     *                 if false: then the taxid is part of the label;
-     *                 if true: then the taxid is not part of the label;
-     */
-    bool assign_label_type(const std::string &sample_label);
-
     virtual TaxId find_lca(const std::vector<TaxId> &taxids) const = 0;
 
     std::string get_accession_version_from_label(const std::string &label) const;
@@ -48,10 +37,12 @@ class TaxonomyBase {
     bool get_taxid_from_label(const std::string &label, TaxId *taxid) const;
 
     /** Reads the accession version to taxid lookup table.
-    *
-    * @param [input] filepath -> a ".accession2taxid" file.
-    * @param [input] anno_matrix -> pointer to the annotation matrix
-    */
+     * If 'anno_matrix' is mentioned, only the labels that exist in the given annotation matrix will be stored.
+     * If 'anno_matrix' is not mentioned, the entire content of 'filepath' will be read and stored.
+     *
+     * @param [input] filepath -> a ".accession2taxid" file.
+     * @param [optional input] anno_matrix -> pointer to the annotation matrix.
+     */
     void read_accversion_to_taxid_map(const std::string &filepath, const graph::AnnotatedDBG *anno_matrix);
 
     /**
@@ -82,25 +73,25 @@ class TaxonomyBase {
      */
     virtual std::vector<TaxId> get_lca_taxids_for_seq(const std::string_view &sequence, bool reversed) const = 0;
 
-    LabelType label_type;
+    LabelType label_type_ = LabelType::UNASSIGNED;
 
     /**
      * node_depth returns the depth for each node in the taxonomic tree.
      * The root is the unique node with maximal depth and all the leaves have depth equal to 1.
      */
-    tsl::hopscotch_map<TaxId, uint32_t> node_depth;
+    tsl::hopscotch_map<TaxId, uint32_t> node_depth_;
 
-    TaxId root_node;
+    TaxId root_node_;
 
     /**
      *  node_parent stores a taxonomic tree representation as a taxid to taxid parent list.
      */
-    tsl::hopscotch_map<TaxId, TaxId> node_parent;
+    tsl::hopscotch_map<TaxId, TaxId> node_parent_;
 
-    tsl::hopscotch_map<std::string, TaxId> accversion_to_taxid_map;
+    tsl::hopscotch_map<std::string, TaxId> accversion_to_taxid_map_;
 
-    double _lca_coverage_rate;
-    double _kmers_discovery_rate;
+    double lca_coverage_rate_;
+    double kmers_discovery_rate_;
 };
 
 class TaxonomyClsImportDB : public TaxonomyBase {
@@ -124,8 +115,8 @@ class TaxonomyClsAnno : public TaxonomyBase {
      * @param [input] lca_coverage_rate -> threshold used for taxonomic classification.
      * @param [input] kmers_discovery_rate -> threshold used for taxonomic classification.
      * @param [input] tax_tree_filepath ->  path to a taxonomic tree ("nodes.dmp" file).
-     * @param [input] label_taxid_map_filepath ->  path to acccession version to taxid lookup table (".accession2taxid").
-     *                                             Mandatory if the label doesn't contain the 'taxid'.
+     * @param [optional input] label_taxid_map_filepath ->  path to the acc_version to taxid lookup table (".accession2taxid").
+     *                                                      Mandatory if the taxid is not mentioned in the label string.
      */
     TaxonomyClsAnno(const graph::AnnotatedDBG &anno,
                     const double lca_coverage_rate,
@@ -138,6 +129,17 @@ class TaxonomyClsAnno : public TaxonomyBase {
     // todo implement
     void export_taxdb(const std::string &filepath) const;
 
+    /** assign_class_toplabels is a faster and less precise taxonomic classification approach.
+     * It takes into account only the labels with the highest frequency among the kmers in one read.
+     *
+     * Given a set of kmers taken from one read, a query on the annotation matrix will return all the labels that
+     * correspond to at least $label_fraction$ percent of the kmers.
+     * Then, returns the LCA of the taxid nodes where these frequent labels are mapping to.
+     *
+     * @param [input] sequence -> the given sequence to classify.
+     * @param [input] label_fraction -> threshold used for taxonomic classification.
+     * @return -> the classification result: a taxid node
+     */
     TaxId assign_class_toplabels(const std::string &sequence, const double label_fraction) const;
 
   private:
@@ -181,13 +183,13 @@ class TaxonomyClsAnno : public TaxonomyBase {
      * rmq_data[l][x] returns the node with the maximal depth among positions [x, x+2^l-1] in the linearization
      *          (e.g. rmq_data[3][6] return the node with max depth in [6, 13]).
      */
-    std::vector<std::vector<TaxId>> rmq_data;
+    std::vector<std::vector<TaxId>> rmq_data_;
 
     /**
      * node_to_linearization_idx[node] returns the index of the first occurrence of node
      * in the tree linearization order. This array will be further used inside a RMQ query.
      */
-    tsl::hopscotch_map<TaxId, uint32_t> node_to_linearization_idx;
+    tsl::hopscotch_map<TaxId, uint32_t> node_to_linearization_idx_;
 
     const graph::AnnotatedDBG *anno_matrix_ = NULL;
 };

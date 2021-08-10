@@ -1,13 +1,11 @@
 #include "tax_classifier.hpp"
 
-#include <cmath>
 #include <string>
 #include <vector>
 
 #include "annotation/representation/annotation_matrix/annotation_matrix.hpp"
 #include "common/unix_tools.hpp"
 #include "common/utils/string_utils.hpp"
-
 #include "common/logger.hpp"
 
 namespace mtg {
@@ -15,32 +13,17 @@ namespace annot {
 
 using mtg::common::logger;
 
-bool TaxonomyBase::assign_label_type(const std::string &sample_label) {
-    if (utils::starts_with(sample_label, "gi|")) {
-        // e.g.   >gi|1070643132|ref|NC_031224.1| Arthrobacter phage Mudcat, complete genome
-        label_type = GEN_BANK;
-        return true;
-    } else if (utils::starts_with(utils::split_string(sample_label, ":")[1], "taxid|")) {
-        // e.g.   >kraken:taxid|2016032|NC_047834.1 Alteromonas virus vB_AspP-H4/4, complete genome
-        label_type = TAXID;
-        return false;
-    }
-
-    logger->error("Can't determine the type of the given label {}. "
-                  "Make sure the labels are in a recognized format.", sample_label);
-    exit(1);
-}
-
 bool TaxonomyBase::get_taxid_from_label(const std::string &label, TaxId *taxid) const {
-    if (label_type == TAXID) {
+    if (label_type_ == TAXID) {
         *taxid = std::stoul(utils::split_string(label, "|")[1]);
         return true;
-    } else if (TaxonomyBase::label_type == GEN_BANK) {
+    } else if (label_type_ == GEN_BANK) {
         std::string acc_version = get_accession_version_from_label(label);
-        if (not accversion_to_taxid_map.count(acc_version)) {
+        auto it = accversion_to_taxid_map_.find(acc_version);
+        if (it == accversion_to_taxid_map_.end()) {
             return false;
         }
-        *taxid = accversion_to_taxid_map.at(acc_version);
+        *taxid = it->second;
         return true;
     }
 
@@ -49,9 +32,9 @@ bool TaxonomyBase::get_taxid_from_label(const std::string &label, TaxId *taxid) 
 }
 
 std::string TaxonomyBase::get_accession_version_from_label(const std::string &label) const {
-    if (label_type == TAXID) {
+    if (label_type_ == TAXID) {
         return utils::split_string(utils::split_string(label, "|")[2], " ")[0];
-    } else if (label_type == GEN_BANK) {
+    } else if (label_type_ == GEN_BANK) {
         return utils::split_string(label, "|")[3];;
     }
 
@@ -64,14 +47,16 @@ void TaxonomyBase::read_accversion_to_taxid_map(const std::string &filepath,
                                                 const graph::AnnotatedDBG *anno_matrix = NULL) {
     std::ifstream f(filepath);
     if (!f.good()) {
-        logger->error("Failed to open accession to taxid map table {}", filepath);
+        logger->error("Error: Failed to open accession to taxid map table {}. \n"
+                      "In the cases when the taxid is not specified in the label string, "
+                      "the acc_version to taxid lookup table filepath must be given as a flag.", filepath);
         exit(1);
     }
 
     std::string line;
     getline(f, line);
     if (!utils::starts_with(line, "accession\taccession.version\ttaxid\t")) {
-        logger->error("The accession to taxid map table is not in the standard (*.accession2taxid) format {}",
+        logger->error("Error: The accession to taxid map table is not in the standard (*.accession2taxid) format {}",
                       filepath);
         exit(1);
     }
@@ -85,18 +70,18 @@ void TaxonomyBase::read_accversion_to_taxid_map(const std::string &filepath,
 
     while (getline(f, line)) {
         if (line == "") {
-            logger->error("The accession to taxid map table contains empty lines. "
+            logger->error("Error: The accession to taxid map table contains empty lines. "
                           "Please make sure that this file was not manually modified {}", filepath);
             exit(1);
         }
         std::vector<std::string> parts = utils::split_string(line, "\t");
         if (parts.size() <= 2) {
-            logger->error("The accession to taxid map table contains incomplete lines. "
+            logger->error("Error: The accession to taxid map table contains incomplete lines. "
                           "Please make sure that this file was not manually modified {}", filepath);
             exit(1);
         }
         if (input_accessions.size() == 0 || input_accessions.count(parts[1])) {
-            accversion_to_taxid_map[parts[1]] = std::stoul(parts[2]);
+            accversion_to_taxid_map_[parts[1]] = std::stoul(parts[2]);
         }
     }
 }
@@ -109,11 +94,29 @@ TaxonomyClsAnno::TaxonomyClsAnno(const graph::AnnotatedDBG &anno,
              : TaxonomyBase(lca_coverage_rate, kmers_discovery_rate),
                anno_matrix_(&anno) {
     if (!std::filesystem::exists(tax_tree_filepath)) {
-        logger->error("Can't open taxonomic tree file {}", tax_tree_filepath);
+        logger->error("Error: Can't open taxonomic tree file {}", tax_tree_filepath);
         exit(1);
     }
 
-    bool require_accversion_to_taxid_map = assign_label_type(anno_matrix_->get_annotation().get_all_labels()[0]);
+    // Take one sample label and find the label type.
+    std::string sample_label = anno_matrix_->get_annotation().get_all_labels()[0];
+
+    // If true, require_accversion_to_taxid_map means that the taxid is not mentioned as part of the label. Thus, the program
+    // needs to parse an additional accession_version to taxid lookup file (optional argument: label_taxid_map_filepath).
+    bool require_accversion_to_taxid_map;
+    if (utils::starts_with(sample_label, "gi|")) {
+        // e.g.   >gi|1070643132|ref|NC_031224.1| Arthrobacter phage Mudcat, complete genome
+        label_type_ = GEN_BANK;
+        require_accversion_to_taxid_map = true;
+    } else if (utils::starts_with(utils::split_string(sample_label, ":")[1], "taxid|")) {
+        // e.g.   >kraken:taxid|2016032|NC_047834.1 Alteromonas virus vB_AspP-H4/4, complete genome
+        label_type_ = TAXID;
+        require_accversion_to_taxid_map = false;
+    } else {
+        logger->error("Error: Can't determine the type of the given label {}. "
+                      "Make sure the labels are in a recognized format.", sample_label);
+        exit(1);
+    }
 
     Timer timer;
     if (require_accversion_to_taxid_map) {
@@ -131,7 +134,7 @@ TaxonomyClsAnno::TaxonomyClsAnno(const graph::AnnotatedDBG &anno,
     timer.reset();
     logger->trace("Calculating tree statistics...");
     std::vector<TaxId> tree_linearization;
-    dfs_statistics(root_node, tree, &tree_linearization);
+    dfs_statistics(root_node_, tree, &tree_linearization);
     logger->trace("Finished tree statistics calculation in {} sec.", timer.elapsed());
 
     timer.reset();
@@ -143,7 +146,7 @@ TaxonomyClsAnno::TaxonomyClsAnno(const graph::AnnotatedDBG &anno,
 void TaxonomyClsAnno::read_tree(const std::string &tax_tree_filepath, ChildrenList *tree) {
     std::ifstream f(tax_tree_filepath);
     if (!f.good()) {
-        logger->error("Failed to open Taxonomic Tree file {}", tax_tree_filepath);
+        logger->error("Error: Failed to open Taxonomic Tree file {}", tax_tree_filepath);
         exit(1);
     }
 
@@ -151,14 +154,14 @@ void TaxonomyClsAnno::read_tree(const std::string &tax_tree_filepath, ChildrenLi
     tsl::hopscotch_map<TaxId, TaxId> full_parents_list;
     while (getline(f, line)) {
         if (line == "") {
-            logger->error("The Taxonomic Tree file contains empty lines. "
+            logger->error("Error: The Taxonomic Tree file contains empty lines. "
                           "Please make sure that this file was not manually modified: {}",
                           tax_tree_filepath);
             exit(1);
         }
         std::vector<std::string> parts = utils::split_string(line, "\t");
         if (parts.size() <= 2) {
-            logger->error("The Taxonomic tree filepath contains incomplete lines. "
+            logger->error("Error: The Taxonomic tree filepath contains incomplete lines. "
                           "Please make sure that this file was not manually modified: {}",
                           tax_tree_filepath);
             exit(1);
@@ -166,16 +169,16 @@ void TaxonomyClsAnno::read_tree(const std::string &tax_tree_filepath, ChildrenLi
         uint32_t act = std::stoul(parts[0]);
         uint32_t parent = std::stoul(parts[2]);
         full_parents_list[act] = parent;
-        node_parent[act] = parent;
+        node_parent_[act] = parent;
     }
 
     std::vector<TaxId> relevant_taxids;
     // 'considered_relevant_taxids' is used to make sure that there are no duplications in 'relevant_taxids'.
     tsl::hopscotch_set<TaxId> considered_relevant_taxids;
 
-    if (accversion_to_taxid_map.size()) {
+    if (accversion_to_taxid_map_.size()) {
         // Store only the taxonomic nodes that exists in the annotation matrix.
-        for (const std::pair<std::string, TaxId> &pair : accversion_to_taxid_map) {
+        for (const std::pair<std::string, TaxId> &pair : accversion_to_taxid_map_) {
             relevant_taxids.push_back(pair.second);
             considered_relevant_taxids.insert(pair.second);
         }
@@ -203,7 +206,7 @@ void TaxonomyClsAnno::read_tree(const std::string &tax_tree_filepath, ChildrenLi
 
         // Check if the current taxid is the root.
         if (taxid == full_parents_list[taxid]) {
-            root_node = taxid;
+            root_node_ = taxid;
         }
     }
     if (num_taxid_failed) {
@@ -213,7 +216,7 @@ void TaxonomyClsAnno::read_tree(const std::string &tax_tree_filepath, ChildrenLi
 
     // Construct the output tree.
     for (const TaxId &taxid : relevant_taxids) {
-        if (taxid == root_node) {
+        if (taxid == root_node_) {
             continue;
         }
         (*tree)[full_parents_list[taxid]].push_back(taxid);
@@ -223,7 +226,7 @@ void TaxonomyClsAnno::read_tree(const std::string &tax_tree_filepath, ChildrenLi
 void TaxonomyClsAnno::dfs_statistics(const TaxId node,
                                      const ChildrenList &tree,
                                      std::vector<TaxId> *tree_linearization) {
-    node_to_linearization_idx[node] = tree_linearization->size();
+    node_to_linearization_idx_[node] = tree_linearization->size();
     tree_linearization->push_back(node);
     uint32_t depth = 0;
 
@@ -232,25 +235,25 @@ void TaxonomyClsAnno::dfs_statistics(const TaxId node,
         for (const TaxId &child : it->second) {
             dfs_statistics(child, tree, tree_linearization);
             tree_linearization->push_back(node);
-            if (node_depth[child] > depth) {
-                depth = node_depth[child];
+            if (node_depth_[child] > depth) {
+                depth = node_depth_[child];
             }
         }
     }
-    node_depth[node] = depth + 1;
+    node_depth_[node] = depth + 1;
 }
 
 void TaxonomyClsAnno::rmq_preprocessing(const std::vector<TaxId> &tree_linearization) {
-    uint32_t num_rmq_rows = log2(tree_linearization.size()) + 1;
+    uint32_t num_rmq_rows = sdsl::bits::hi(tree_linearization.size()) + 1;
 
-    rmq_data.resize(num_rmq_rows);
+    rmq_data_.resize(num_rmq_rows);
     for (uint32_t i = 0; i < num_rmq_rows; ++i) {
-        rmq_data[i].resize(tree_linearization.size());
+        rmq_data_[i].resize(tree_linearization.size());
     }
 
     // Copy tree_linearization to rmq[0].
     for (uint32_t i = 0; i < tree_linearization.size(); ++i) {
-        rmq_data[0][i] = tree_linearization[i];
+        rmq_data_[0][i] = tree_linearization[i];
     }
 
     // Delta represents the size of the RMQ's sliding window (always a power of 2).
@@ -262,11 +265,11 @@ void TaxonomyClsAnno::rmq_preprocessing(const std::vector<TaxId> &tree_lineariza
             // According to 'this->dfs_statistics()':
             //     node_depth[leaf] = 1 and node_depth[root] = maximum distance to a leaf.
 
-            if (node_depth[rmq_data[row - 1][i]] >
-                node_depth[rmq_data[row - 1][i + delta]]) {
-                rmq_data[row][i] = rmq_data[row - 1][i];
+            if (node_depth_[rmq_data_[row - 1][i]] >
+                node_depth_[rmq_data_[row - 1][i + delta]]) {
+                rmq_data_[row][i] = rmq_data_[row - 1][i];
             } else {
-                rmq_data[row][i] = rmq_data[row - 1][i + delta];
+                rmq_data_[row][i] = rmq_data_[row - 1][i + delta];
             }
         }
         delta *= 2;
@@ -274,15 +277,13 @@ void TaxonomyClsAnno::rmq_preprocessing(const std::vector<TaxId> &tree_lineariza
 }
 
 std::vector<TaxId> TaxonomyClsAnno::get_lca_taxids_for_seq(const std::string_view &sequence, bool reversed) const {
-    cerr << "Assign class not implemented reversed = " << reversed << "\n";
     throw std::runtime_error("get_lca_taxids_for_seq TaxonomyClsAnno not implemented. Received seq size"
-                             + to_string(sequence.size()));
+                             + to_string(sequence.size()) + to_string(reversed));
 }
 
 std::vector<TaxId> TaxonomyClsImportDB::get_lca_taxids_for_seq(const std::string_view &sequence, bool reversed) const {
-    cerr << "Assign class not implemented reversed = " << reversed << "\n";
     throw std::runtime_error("get_lca_taxids_for_seq TaxonomyClsImportDB not implemented. Received seq size"
-                             + to_string(sequence.size()));
+                             + to_string(sequence.size()) + to_string(reversed));
 }
 
 TaxId TaxonomyClsAnno::find_lca(const std::vector<TaxId> &taxids) const {
