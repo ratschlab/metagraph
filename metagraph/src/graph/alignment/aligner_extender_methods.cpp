@@ -371,7 +371,7 @@ std::vector<Alignment> DefaultColumnExtender
     assert(config_.xdrop > 0);
 
     xdrop_cutoffs_.assign(1, std::make_pair(0u, std::max(-config_.xdrop, ninf + 1)));
-    assert(xdrop_cutoffs_[0] < 0);
+    assert(xdrop_cutoffs_[0].second < 0);
 
     if (!config_.global_xdrop)
         scores_reached_.assign(1, 0);
