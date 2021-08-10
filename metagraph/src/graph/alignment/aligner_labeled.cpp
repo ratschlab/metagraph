@@ -89,8 +89,11 @@ void LabeledBacktrackingExtender
                 size_t max_prefetch_distance,
                 const std::function<void(node_index, char /* last char */)> &callback,
                 size_t table_i) {
+    for ( ; last_buffered_table_i_ < table.size(); ++last_buffered_table_i_) {
+        labeled_graph_.add_node(std::get<3>(table[last_buffered_table_i_]));
+    }
+
     std::vector<std::pair<node_index, char>> outgoing;
-    labeled_graph_.add_node(node);
     DefaultColumnExtender::call_outgoing(node, max_prefetch_distance,
                                          [&](node_index next, char c) {
         outgoing.emplace_back(next, c);
@@ -249,15 +252,6 @@ void AnnotationBuffer::add_node(node_index node) {
     add_path({ node }, std::string(anno_graph_.get_graph().get_k(), '#'));
 }
 
-std::vector<Alignment> LabeledBacktrackingExtender
-::extend(score_t min_path_score, bool force_fixed_seed) {
-    // the overridden backtrack populates extensions_, so this should return nothing
-    DefaultColumnExtender::extend(min_path_score, force_fixed_seed);
-
-    // fetch the alignments from extensions_
-    return extensions_.get_alignments();
-}
-
 bool LabeledBacktrackingExtender::skip_backtrack_start(size_t i) {
     label_intersection_.clear();
     label_intersection_coords_.clear();
@@ -290,32 +284,12 @@ bool LabeledBacktrackingExtender::skip_backtrack_start(size_t i) {
         }
 
     } else {
+        // otherwise, take the full label set
         auto [fetch_labels, fetch_coords] = labeled_graph_.get_labels_and_coordinates(node);
         if (fetch_labels) {
-            if (this->seed_->label_columns.size()) {
-                const Vector<Column> &labels = fetch_labels->get();
-                // if the seed had labels, intersect with those
-                std::set_intersection(labels.begin(), labels.end(),
-                                      this->seed_->label_columns.begin(),
-                                      this->seed_->label_columns.end(),
-                                      std::back_inserter(label_intersection_));
-                if (fetch_coords) {
-                    const Vector<Tuple> &coords = fetch_coords->get();
-                    assert(std::includes(labels.begin(), labels.end(),
-                                         label_intersection_.begin(),
-                                         label_intersection_.end()));
-                    auto it = labels.begin();
-                    for (Column label : label_intersection_) {
-                        it = std::lower_bound(it, labels.end(), label);
-                        label_intersection_coords_.push_back(coords[it - labels.begin()]);
-                    }
-                }
-            } else {
-                // otherwise take the full label set
-                label_intersection_ = fetch_labels->get();
-                if (fetch_coords)
-                    label_intersection_coords_ = fetch_coords->get();
-            }
+            label_intersection_ = fetch_labels->get();
+            if (fetch_coords)
+                label_intersection_coords_ = fetch_coords->get();
         }
     }
 
@@ -376,7 +350,7 @@ void LabeledBacktrackingExtender
 
             // if any coordinates went out of bounds, remove them
             coords.erase(std::remove_if(coords.begin(), coords.end(),
-                                        [&](const auto &a) { return a == ncoord; }),
+                                        [ncoord](const auto &a) { return a == ncoord; }),
                          coords.end());
         }
 
@@ -470,15 +444,16 @@ void LabeledBacktrackingExtender
     // store the label and coordinate information
     alignment.label_encoder
         = &labeled_graph_.get_anno_graph().get_annotation().get_label_encoder();
+
     alignment.label_columns = label_intersection_;
 
     if (labeled_graph_.get_coordinate_matrix()) {
         assert(label_intersection_.size() == label_intersection_coords_.size());
         alignment.label_coordinates = label_intersection_coords_;
 
+        // if we were aligning backwards, then c represents the
+        // end coordinate, so shift it
         if (coord_step == 1) {
-            // if we were aligning backwards, then c represents the
-            // end coordinate, so shift it
             for (auto &tuple : alignment.label_coordinates) {
                 for (uint64_t &c : tuple) {
                     c -= path.size() - 1;
@@ -487,6 +462,8 @@ void LabeledBacktrackingExtender
         }
     }
 
+    // instead of calling back the alignment, we add it to the local alignment buffer
+    // after extension is done, the best ones are called back
     extensions_.add_alignment(std::move(alignment));
 }
 

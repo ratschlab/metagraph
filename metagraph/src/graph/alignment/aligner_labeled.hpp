@@ -122,7 +122,15 @@ class LabeledBacktrackingExtender : public DefaultColumnExtender {
 
   protected:
     virtual std::vector<Alignment> extend(score_t min_path_score,
-                                          bool force_fixed_seed) override final;
+                                          bool force_fixed_seed) override final {
+        last_buffered_table_i_ = 0;
+
+        // the overridden backtrack populates extensions_, so this should return nothing
+        DefaultColumnExtender::extend(min_path_score, force_fixed_seed);
+
+        // fetch the alignments from extensions_
+        return extensions_.get_alignments();
+    }
 
     // backtrack through the DP table to reconstruct alignments
     virtual std::vector<Alignment> backtrack(score_t min_path_score,
@@ -141,19 +149,6 @@ class LabeledBacktrackingExtender : public DefaultColumnExtender {
     virtual bool terminate_backtrack_start(const std::vector<Alignment> &) const override final { return false; }
     virtual bool terminate_backtrack() const override final { return label_intersection_.empty(); }
     virtual bool skip_backtrack_start(size_t i) override final;
-
-    virtual bool update_seed_filter(node_index node,
-                                    size_t query_start,
-                                    const score_t *s_begin,
-                                    const score_t *s_end) override final {
-        if (SeedFilteringExtender::update_seed_filter(node, query_start, s_begin, s_end)) {
-            // if this node was explored, add it to the buffer
-            labeled_graph_.add_node(node);
-            return true;
-        } else {
-            return false;
-        }
-    }
 
     // since multi-node seeds may span across different labels, we no longer
     // want the restriction that the seed must be a prefix of the extended alignment
@@ -192,6 +187,7 @@ class LabeledBacktrackingExtender : public DefaultColumnExtender {
     // keep track of the label set for the current backtracking
     Vector<Column> label_intersection_;
     size_t last_path_size_;
+    size_t last_buffered_table_i_;
 
     Vector<Tuple> label_intersection_coords_;
 
@@ -240,7 +236,9 @@ class LabeledAligner : public ISeedAndExtendAligner<AlignmentCompare> {
         return this->template build_seeder_impl<Seeder>(query, is_reverse_complement, nodes);
     }
 
-    // Generates seeds and extends them
+    // Generates seeds and extends them. If force_fixed_seed is true, then
+    // all alignments must have the seed as a prefix. Otherwise, only the first
+    // node of the seed is used as an alignment starting node.
     void align_core(const ISeeder &seeder,
                     IExtender &extender,
                     const std::function<void(Alignment&&)> &callback,
@@ -266,6 +264,8 @@ class LabeledAligner : public ISeedAndExtendAligner<AlignmentCompare> {
     }
 
   private:
+    // find the most frequent labels among the seeds and restrict graph traversal
+    // to those labeled paths during extension
     void filter_seeds(std::vector<Alignment> &seeds) const {
         for (const Alignment &seed : seeds) {
             labeled_graph_.add_path(
