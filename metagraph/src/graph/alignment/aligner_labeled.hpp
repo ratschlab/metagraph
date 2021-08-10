@@ -209,7 +209,9 @@ template <class Extender = LabeledBacktrackingExtender,
           class AlignmentCompare = LocalAlignmentLess>
 class LabeledAligner : public ISeedAndExtendAligner<AlignmentCompare> {
   public:
-    typedef typename ISeedAndExtendAligner<AlignmentCompare>::score_t score_t;
+    typedef Alignment::score_t score_t;
+    typedef Alignment::node_index node_index;
+    typedef Alignment::Column Column;
 
     LabeledAligner(const AnnotatedDBG &anno_graph, const DBGAlignerConfig &config)
           : ISeedAndExtendAligner<AlignmentCompare>(anno_graph.get_graph(), config),
@@ -252,9 +254,6 @@ class LabeledAligner : public ISeedAndExtendAligner<AlignmentCompare> {
         }
 
         labeled_graph_.flush();
-
-        typedef AnnotationBuffer::Column Column;
-        typedef AnnotationBuffer::node_index node_index;
 
         VectorMap<Column, uint64_t> label_counter;
         for (const Alignment &seed : seeds) {
