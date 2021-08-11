@@ -138,7 +138,7 @@ void LabeledBacktrackingExtender
                 // determine the distance of each child node to the selected base node
                 dist = std::get<6>(table[table_i]) - base_offset + 1;
                 if (base_offset < k)
-                    dist -= k;
+                    dist -= k - seed.get_offset();
             }
 
             // if the seed has stored labels, but no stored coordinates, check
