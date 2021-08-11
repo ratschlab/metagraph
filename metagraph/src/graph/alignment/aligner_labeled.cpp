@@ -113,13 +113,14 @@ void LabeledBacktrackingExtender
         // first, determine a base node from which to compare coordinates
         // by default, node is used (the parent node of next)
         ssize_t dist = 1;
+        bool rev_align = dynamic_cast<const RCDBG*>(graph_);
         if (seed.label_coordinates.size()) {
             // if the seed has coordinates, use the seed as the base
             base_labels = std::cref(seed.label_columns);
             base_coords = std::cref(seed.label_coordinates);
             ssize_t offset = std::get<6>(table[table_i]);
             assert(offset >= static_cast<ssize_t>(graph_->get_k()));
-            dist = offset - seed.get_offset();
+            dist = offset - seed.get_offset() + 1 - (seed.get_sequence().size() - 1) * rev_align;
         } else {
             // otherwise, check the first node in the traversal
             ssize_t k = graph_->get_k();
@@ -162,7 +163,7 @@ void LabeledBacktrackingExtender
             }
 
             // if we are traversing backwards, then negate the coordinate delta
-            ssize_t dist_sign = dynamic_cast<const RCDBG*>(graph_) ? -1 : 1;
+            ssize_t dist_sign = rev_align ? -1 : 1;
             if (utils::indexed_set_find<HasNext>(base_labels->get().begin(),
                                                  base_labels->get().end(),
                                                  base_coords->get().begin(),
