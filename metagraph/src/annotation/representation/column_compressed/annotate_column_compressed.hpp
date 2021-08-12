@@ -82,6 +82,7 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
                            const ColumnCallback &callback,
                            size_t num_threads = 1);
     static size_t read_num_labels(const std::string &filename);
+    static LabelEncoder<Label> load_label_encoder(const std::string &filename);
 
     using ValuesCallback = std::function<void(uint64_t offset,
                                               const Label &,

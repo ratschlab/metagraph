@@ -368,19 +368,7 @@ load_coords(StaticBinRelAnnotator<BaseMatrix, std::string>&& anno,
 
     #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
     for (size_t i = 0; i < files.size(); ++i) {
-        std::string file = utils::make_suffix(files[i], ColumnCompressed<>::kExtension);
-        std::ifstream le_in(file, std::ios::binary);
-        if (!le_in) {
-            logger->error("Can't read from {}", file);
-            exit(1);
-        }
-        std::ignore = load_number(le_in);
-
-        annot::LabelEncoder<std::string> label_encoder;
-        if (!label_encoder.load(le_in)) {
-            logger->error("Can't load label encoder from {}", file);
-            exit(1);
-        }
+        auto label_encoder = ColumnCompressed<>::load_label_encoder(files[i]);
 
         auto coords_fname = utils::remove_suffix(files[i], ColumnCompressed<>::kExtension)
                                                         + ColumnCompressed<>::kCoordExtension;
