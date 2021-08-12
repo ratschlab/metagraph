@@ -422,17 +422,8 @@ void LabeledBacktrackingExtender
 
     if (ops.data().back().first != Cigar::MATCH
             || window.size() < this->config_.min_seed_length
-            || alignment_score < min_path_score)
-        return;
-
-    // if the current partial alignment is valid, then add it to the
-    // alignment aggregator
-    score_t label_score = std::max(
-        aggregator_.get_min_path_score(label_intersection_),
-        extensions_.get_min_path_score(label_intersection_)
-    );
-
-    if (alignment_score < label_score)
+            || alignment_score < min_path_score
+            || alignment_score < extensions_.get_min_path_score(label_intersection_))
         return;
 
     Alignment alignment = this->construct_alignment(

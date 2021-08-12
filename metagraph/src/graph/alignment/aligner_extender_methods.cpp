@@ -5,6 +5,7 @@
 #include "common/logger.hpp"
 
 #include "graph/representation/succinct/dbg_succinct.hpp"
+#include "graph/representation/rc_dbg.hpp"
 
 
 namespace mtg {

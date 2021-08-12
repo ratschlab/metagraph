@@ -112,11 +112,10 @@ class LabeledBacktrackingExtender : public DefaultColumnExtender {
                                 std::string_view query)
           : DefaultColumnExtender(labeled_graph.get_anno_graph().get_graph(), config, query),
             labeled_graph_(labeled_graph),
-            aggregator_(aggregator),
             no_chain_config_(disable_chaining(this->config_)),
             extensions_(labeled_graph.get_anno_graph().get_graph(),
-                        aggregator_.get_query(false),
-                        aggregator_.get_query(true), no_chain_config_) {}
+                        aggregator.get_query(false),
+                        aggregator.get_query(true), no_chain_config_) {}
 
     virtual ~LabeledBacktrackingExtender() {}
 
@@ -176,9 +175,6 @@ class LabeledBacktrackingExtender : public DefaultColumnExtender {
 
   private:
     AnnotationBuffer &labeled_graph_;
-
-    // global set of alignments
-    const Aggregator &aggregator_;
 
     // local set of alignments
     DBGAlignerConfig no_chain_config_;
