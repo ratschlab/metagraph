@@ -847,10 +847,10 @@ const binmat::ColumnMajor& ColumnCompressed<Label>::get_matrix() const {
 }
 
 template <typename Label>
-binmat::ColumnMajor ColumnCompressed<Label>::release_matrix() {
+std::unique_ptr<binmat::ColumnMajor> ColumnCompressed<Label>::release_matrix() {
     flush();
     label_encoder_.clear();
-    return std::move(matrix_);
+    return std::make_unique<binmat::ColumnMajor>(std::move(matrix_));
 }
 
 template <typename Label>

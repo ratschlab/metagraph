@@ -23,6 +23,7 @@ namespace annot {
 template <typename Label = std::string>
 class ColumnCompressed : public MultiLabelEncoded<Label> {
   public:
+    typedef binmat::ColumnMajor binary_matrix_type;
     using Index = typename MultiLabelEncoded<Label>::Index;
     using VLabels = typename MultiLabelEncoded<Label>::VLabels;
 
@@ -120,7 +121,7 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
      * Returns the current annotation matrix. The data is moved into the return value,
      * which leaves the current object empty.
      */
-    binmat::ColumnMajor release_matrix();
+    std::unique_ptr<binmat::ColumnMajor> release_matrix();
 
     std::string file_extension() const override { return kExtension; }
 
