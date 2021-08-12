@@ -25,6 +25,7 @@ using mtg::common::get_verbose;
 typedef MultiLabelEncoded<std::string> Annotator;
 
 typedef matrix::TupleCSCMatrix<binmat::ColumnMajor> TupleCSC;
+typedef matrix::TupleCSCMatrix<binmat::BRWT> TupleBRWT;
 
 static const Eigen::IOFormat CSVFormat(Eigen::StreamPrecision,
                                        Eigen::DontAlignCols, " ", "\n");
@@ -355,6 +356,61 @@ ColumnCoordAnnotator load_coord_anno(const std::vector<std::string> &files) {
             std::make_unique<TupleCSC>(binmat::ColumnMajor(std::move(columns)),
                                        std::move(delimiters),
                                        std::move(column_values)),
+            std::move(label_encoder));
+}
+
+template <class BaseMatrix>
+StaticBinRelAnnotator<matrix::TupleCSCMatrix<BaseMatrix>, std::string>
+load_coords(StaticBinRelAnnotator<BaseMatrix, std::string>&& anno,
+            const std::vector<std::string> &files) {
+    std::vector<bit_vector_smart> delimiters(anno.num_labels());
+    std::vector<sdsl::int_vector<>> column_values(anno.num_labels());
+
+    #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
+    for (size_t i = 0; i < files.size(); ++i) {
+        std::string file = utils::make_suffix(files[i], ColumnCompressed<>::kExtension);
+        std::ifstream le_in(file, std::ios::binary);
+        if (!le_in) {
+            logger->error("Can't read from {}", file);
+            exit(1);
+        }
+        std::ignore = load_number(le_in);
+
+        annot::LabelEncoder<std::string> label_encoder;
+        if (!label_encoder.load(le_in)) {
+            logger->error("Can't load label encoder from {}", file);
+            exit(1);
+        }
+
+        auto coords_fname = utils::remove_suffix(files[i], ColumnCompressed<>::kExtension)
+                                                        + ColumnCompressed<>::kCoordExtension;
+        std::ifstream in(coords_fname, std::ios::binary);
+        size_t j = 0;
+        try {
+            TupleCSC::load_tuples(in, label_encoder.size(), [&](auto&& delims, auto&& values) {
+                size_t idx = anno.get_label_encoder().encode(label_encoder.decode(j));
+                if (delimiters[idx].size()) {
+                    logger->error("Merging coordinate annotations with overlapping"
+                                  " labels is not implemented");
+                    exit(1);
+                }
+                delimiters[idx] = std::move(delims);
+                column_values[idx] = std::move(values);
+                j++;
+            });
+        } catch (...) {
+            logger->error("Couldn't load coordinates from {}", coords_fname);
+            exit(1);
+        }
+        assert(j == label_encoder.size());
+    }
+
+    auto label_encoder = anno.get_label_encoder();
+
+    return StaticBinRelAnnotator<matrix::TupleCSCMatrix<BaseMatrix>, std::string>(
+            std::make_unique<matrix::TupleCSCMatrix<BaseMatrix>>(std::move(*anno.release_matrix()),
+                                                                 std::move(delimiters),
+                                                                 std::move(column_values)),
             std::move(label_encoder));
 }
 
@@ -703,7 +759,9 @@ int transform_annotation(Config *config) {
                 && config->anno_type != Config::RbBRWT
                 && config->anno_type != Config::IntBRWT
                 && config->anno_type != Config::ColumnCoord
+                && config->anno_type != Config::BRWTCoord
                 && config->anno_type != Config::RowDiffCoord
+                && config->anno_type != Config::RowDiffBRWTCoord
                 && config->anno_type != Config::RowDiff) {
             annotator = std::make_unique<ColumnCompressed<>>(0);
             logger->trace("Loading annotation from disk...");
@@ -725,6 +783,13 @@ int transform_annotation(Config *config) {
                 logger->trace("Annotation converted in {} sec", timer.elapsed());
 
                 column_coord.serialize(config->outfbase);
+                logger->trace("Serialized to {}", config->outfbase);
+                break;
+            }
+            case Config::BRWTCoord: {
+                auto brwt_coord = load_coords(std::move(*convert_to_MultiBRWT(files, *config)), files);
+                logger->trace("Annotation converted in {} sec", timer.elapsed());
+                brwt_coord.serialize(config->outfbase);
                 logger->trace("Serialized to {}", config->outfbase);
                 break;
             }
@@ -754,6 +819,39 @@ int transform_annotation(Config *config) {
                 logger->trace("RowDiff support bitmaps loaded");
 
                 RowDiffCoordAnnotator annotation(std::move(diff_matrix), label_encoder);
+
+                logger->trace("Annotation converted in {} sec", timer.elapsed());
+
+                annotation.serialize(config->outfbase);
+                logger->trace("Serialized to {}", config->outfbase);
+                break;
+            }
+            case Config::RowDiffBRWTCoord: {
+                assert(config->infbase.size());
+                const std::string anchors_file = config->infbase + annot::binmat::kRowDiffAnchorExt;
+                if (!std::filesystem::exists(anchors_file)) {
+                    logger->error("Anchor bitmap {} does not exist. Run the row_diff"
+                                  " transform followed by anchor optimization.", anchors_file);
+                    std::exit(1);
+                }
+                const std::string fork_succ_file = config->infbase + annot::binmat::kRowDiffForkSuccExt;
+                if (!std::filesystem::exists(fork_succ_file)) {
+                    logger->error("Fork successor bitmap {} does not exist", fork_succ_file);
+                    std::exit(1);
+                }
+
+                auto brwt_coord = load_coords(std::move(*convert_to_MultiBRWT(files, *config)), files);
+
+                auto label_encoder = brwt_coord.get_label_encoder();
+
+                auto diff_matrix = std::make_unique<matrix::TupleRowDiff<TupleBRWT>>(nullptr,
+                            std::move(*brwt_coord.release_matrix()));
+
+                diff_matrix->load_anchor(anchors_file);
+                diff_matrix->load_fork_succ(fork_succ_file);
+                logger->trace("RowDiff support bitmaps loaded");
+
+                RowDiffBRWTCoordAnnotator annotation(std::move(diff_matrix), label_encoder);
 
                 logger->trace("Annotation converted in {} sec", timer.elapsed());
 

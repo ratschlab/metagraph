@@ -55,7 +55,11 @@ typedef StaticBinRelAnnotator<matrix::CSRMatrix, std::string> IntRowAnnotator;
 
 typedef StaticBinRelAnnotator<matrix::TupleCSCMatrix<binmat::ColumnMajor>, std::string> ColumnCoordAnnotator;
 
+typedef StaticBinRelAnnotator<matrix::TupleCSCMatrix<binmat::BRWT>, std::string> MultiBRWTCoordAnnotator;
+
 typedef StaticBinRelAnnotator<matrix::TupleRowDiff<matrix::TupleCSCMatrix<binmat::ColumnMajor>>, std::string> RowDiffCoordAnnotator;
+
+typedef StaticBinRelAnnotator<matrix::TupleRowDiff<matrix::TupleCSCMatrix<binmat::BRWT>>, std::string> RowDiffBRWTCoordAnnotator;
 
 
 template <>
@@ -89,7 +93,11 @@ inline const std::string IntRowAnnotator::kExtension = ".int_csr.annodbg";
 template <>
 inline const std::string ColumnCoordAnnotator::kExtension = ".column_coord.annodbg";
 template <>
+inline const std::string MultiBRWTCoordAnnotator::kExtension = ".brwt_coord.annodbg";
+template <>
 inline const std::string RowDiffCoordAnnotator::kExtension = ".row_diff_coord.annodbg";
+template <>
+inline const std::string RowDiffBRWTCoordAnnotator::kExtension = ".row_diff_brwt_coord.annodbg";
 
 } // namespace annot
 } // namespace mtg
