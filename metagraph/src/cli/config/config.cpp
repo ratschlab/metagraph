@@ -819,9 +819,8 @@ DeBruijnGraph::Mode Config::string_to_graphmode(const std::string &string) {
 
 void Config::print_usage(const std::string &prog_name, IdentityType identity) {
     const char annotation_list[] = "\t\t( column, brwt, rb_brwt, int_brwt,\n"
-                                   "\t\t  column_coord, brwt_coord, row_diff_brwt_coord,\n"
+                                   "\t\t  column_coord, brwt_coord, row_diff_coord, row_diff_brwt_coord,\n"
                                    "\t\t  row_diff, row_diff_brwt, row_diff_sparse, row_diff_int_brwt,\n"
-                                   "\t\t  row_diff_coord,\n"
                                    "\t\t  row, flat, row_sparse, rbfish, bin_rel_wt, bin_rel_wt_sdsl )";
 
     switch (identity) {
