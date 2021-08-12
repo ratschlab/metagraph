@@ -1058,9 +1058,12 @@ int relax_multi_brwt(Config *config) {
 
     std::unique_ptr<MultiLabelEncoded<std::string>> annotator;
     Config::AnnotationType anno_type = parse_annotation_type(fname);
-    switch(anno_type) {
+    switch (anno_type) {
         case Config::BRWT:
             annotator = std::make_unique<MultiBRWTAnnotator>();
+            break;
+        case Config::RbBRWT:
+            annotator = std::make_unique<RbBRWTAnnotator>();
             break;
         case Config::RowDiffBRWT:
             annotator = std::make_unique<RowDiffBRWTAnnotator>();
@@ -1071,8 +1074,14 @@ int relax_multi_brwt(Config *config) {
         case Config::IntRowDiffBRWT:
             annotator = std::make_unique<IntRowDiffBRWTAnnotator>();
             break;
+        case Config::BRWTCoord:
+            annotator = std::make_unique<MultiBRWTCoordAnnotator>();
+            break;
+        case Config::RowDiffBRWTCoord:
+            annotator = std::make_unique<RowDiffBRWTCoordAnnotator>();
+            break;
         default:
-            logger->error("Relaxation only supported for BRWT and RowDiffBRWT");
+            logger->error("Relaxation for {} is not supported", Config::annotype_to_string(anno_type));
             exit(1);
     }
 
@@ -1086,8 +1095,19 @@ int relax_multi_brwt(Config *config) {
 
     logger->trace("Relaxing BRWT tree...");
 
-    const binmat::BRWT &matrix = anno_type == Config::BRWT
-            ? dynamic_cast<MultiBRWTAnnotator &>(*annotator).get_matrix()
+    const binmat::BinaryMatrix *mat = &annotator->get_matrix();
+
+    if (const auto *rb_brwt = dynamic_cast<RbBRWTAnnotator *>(annotator.get()))
+        mat = &rb_brwt->get_matrix().get_reduced_matrix();
+
+    if (const auto *rd_brwt_coord = dynamic_cast<RowDiffBRWTCoordAnnotator *>(annotator.get()))
+        mat = &rd_brwt_coord->get_matrix().diffs();
+
+    if (const auto *mat_coord = dynamic_cast<const matrix::MultiIntMatrix *>(mat))
+        mat = &mat_coord->get_binary_matrix();
+
+    const binmat::BRWT &matrix = dynamic_cast<const binmat::BRWT *>(mat)
+            ? dynamic_cast<const binmat::BRWT &>(*mat)
             : (anno_type == Config::IntBRWT
                 ? dynamic_cast<IntMultiBRWTAnnotator &>(*annotator).get_matrix().get_binary_matrix()
                 : (anno_type == Config::IntRowDiffBRWT

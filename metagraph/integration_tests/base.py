@@ -186,3 +186,8 @@ class TestingBase(unittest.TestCase):
                 os.remove(output + anno_file_extension[rd_type])
             else:
                 os.remove(output + anno_file_extension[anno_repr])
+
+        if final_anno.endswith('brwt') or final_anno.endswith('brwt_coord'):
+            command = f'{METAGRAPH} relax_brwt -o {output} -p {NUM_THREADS} {output}.{final_anno}.annodbg'
+            res = subprocess.run([command], shell=True)
+            assert (res.returncode == 0)
