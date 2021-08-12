@@ -191,31 +191,31 @@ void print_stats(const Annotator &annotation) {
     using namespace annot::binmat;
     using mtg::annot::matrix::MultiIntMatrix;
 
-    if (const auto *mat_coord = dynamic_cast<const MultiIntMatrix *>(&annotation.get_matrix())) {
+    const BinaryMatrix *mat = &annotation.get_matrix();
+
+    if (const auto *mat_coord = dynamic_cast<const MultiIntMatrix *>(mat)) {
         std::cout << "================== COORDINATES STATS ===================" << std::endl;
         std::cout << "coordinates: " << mat_coord->num_attributes() << std::endl;
+        mat = &mat_coord->get_binary_matrix();
     }
 
-    if (const auto *rbmat = dynamic_cast<const RainbowMatrix *>(&annotation.get_matrix())) {
+    if (const auto *rbmat = dynamic_cast<const RainbowMatrix *>(mat)) {
         std::cout << "================= RAINBOW MATRIX STATS =================" << std::endl;
         std::cout << "distinct rows: " << rbmat->num_distinct_rows() << std::endl;
 
-    } else if (const auto *brwt = dynamic_cast<const BRWT *>(&annotation.get_matrix())) {
+    } else if (const auto *brwt = dynamic_cast<const BRWT *>(mat)) {
         print_brwt_stats(*brwt);
 
-    } else if (const auto *brwt_rd
-               = dynamic_cast<const RowDiff<BRWT> *>(&annotation.get_matrix())) {
+    } else if (const auto *brwt_rd = dynamic_cast<const RowDiff<BRWT> *>(mat)) {
         std::cout << "underlying matrix: BRWT" << std::endl;
         print_brwt_stats(brwt_rd->diffs());
         print_anchor_stats(*brwt_rd);
 
-    } else if (const auto *rd
-               = dynamic_cast<const RowDiff<ColumnMajor> *>(&annotation.get_matrix())) {
+    } else if (const auto *rd = dynamic_cast<const RowDiff<ColumnMajor> *>(mat)) {
         std::cout << "underlying matrix: ColumnMajor" << std::endl;
         print_anchor_stats(*rd);
 
-    } else if (const auto *rs
-               = dynamic_cast<const RowDiff<RowSparse> *>(&annotation.get_matrix())) {
+    } else if (const auto *rs = dynamic_cast<const RowDiff<RowSparse> *>(mat)) {
         std::cout << "underlying matrix: RowSparse" << std::endl;
         print_anchor_stats(*rs);
     }

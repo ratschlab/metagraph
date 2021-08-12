@@ -52,6 +52,8 @@ class MultiIntMatrix : public IntMatrix {
 
     virtual std::vector<RowTuples>
     get_row_tuples(const std::vector<Row> &rows) const = 0;
+
+    virtual const BinaryMatrix& get_binary_matrix() const { return *this; };
 };
 
 } // namespace matrix
