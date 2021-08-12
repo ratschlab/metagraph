@@ -585,6 +585,7 @@ Config::Config(int argc, char *argv[]) {
                                     || anno_type == RowDiffBRWT
                                     || anno_type == IntRowDiffBRWT
                                     || anno_type == RowDiffRowSparse
+                                    || anno_type == RowDiffBRWTCoord
                                     || anno_type == RowDiffCoord;
         if (to_row_diff && !infbase.size()) {
             std::cerr << "Path to graph must be passed with '-i <GRAPH>'" << std::endl;

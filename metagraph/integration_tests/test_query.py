@@ -18,7 +18,9 @@ PROTEIN_MODE = os.readlink(METAGRAPH).endswith("_Protein")
 
 anno_file_extension = {'column': '.column.annodbg',
                        'column_coord': '.column_coord.annodbg',
+                       'brwt_coord': '.brwt_coord.annodbg',
                        'row_diff_coord': '.row_diff_coord.annodbg',
+                       'row_diff_brwt_coord': '.row_diff_brwt_coord.annodbg',
                        'row': '.row.annodbg',
                        'row_diff': '.row_diff.annodbg',
                        'row_sparse': '.row_sparse.annodbg',

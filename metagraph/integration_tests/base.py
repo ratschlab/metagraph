@@ -112,6 +112,7 @@ class TestingBase(unittest.TestCase):
             anno_repr = anno_repr[:-len('_noswap')]
 
         if (anno_repr in {'row_sparse', 'column_coord'} or
+                anno_repr.endswith('_coord') or
                 anno_repr.endswith('brwt') or
                 anno_repr.startswith('row_diff')):
             target_anno = anno_repr
