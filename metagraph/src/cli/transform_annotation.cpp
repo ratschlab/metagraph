@@ -1093,28 +1093,27 @@ int relax_multi_brwt(Config *config) {
     }
     logger->trace("Annotator loaded in {} sec", timer.elapsed());
 
-    logger->trace("Relaxing BRWT tree...");
-
     const binmat::BinaryMatrix *mat = &annotator->get_matrix();
 
-    if (const auto *rb_brwt = dynamic_cast<RbBRWTAnnotator *>(annotator.get()))
-        mat = &rb_brwt->get_matrix().get_reduced_matrix();
-
-    if (const auto *rd_brwt_coord = dynamic_cast<RowDiffBRWTCoordAnnotator *>(annotator.get()))
+    if (const auto *rd_brwt = dynamic_cast<RowDiffBRWTAnnotator *>(annotator.get())) {
+        mat = &rd_brwt->get_matrix().diffs();
+    } else if (const auto *int_rd_brwt = dynamic_cast<IntRowDiffBRWTAnnotator *>(annotator.get())) {
+        mat = &int_rd_brwt->get_matrix().diffs();
+    } else if (const auto *rd_brwt_coord = dynamic_cast<RowDiffBRWTCoordAnnotator *>(annotator.get())) {
         mat = &rd_brwt_coord->get_matrix().diffs();
+    }
 
-    if (const auto *mat_coord = dynamic_cast<const matrix::MultiIntMatrix *>(mat))
-        mat = &mat_coord->get_binary_matrix();
+    if (const auto *rb_brwt = dynamic_cast<const binmat::Rainbow<binmat::BRWT> *>(mat)) {
+        mat = &rb_brwt->get_reduced_matrix();
+    }
 
-    const binmat::BRWT &matrix = dynamic_cast<const binmat::BRWT *>(mat)
-            ? dynamic_cast<const binmat::BRWT &>(*mat)
-            : (anno_type == Config::IntBRWT
-                ? dynamic_cast<IntMultiBRWTAnnotator &>(*annotator).get_matrix().get_binary_matrix()
-                : (anno_type == Config::IntRowDiffBRWT
-                    ? dynamic_cast<IntRowDiffBRWTAnnotator &>(*annotator).get_matrix().diffs().get_binary_matrix()
-                    : dynamic_cast<RowDiffBRWTAnnotator &>(*annotator).get_matrix().diffs()));
-    relax_BRWT(const_cast<binmat::BRWT *>(&matrix), config->relax_arity_brwt,
-               get_num_threads());
+    if (const auto *int_mat = dynamic_cast<const matrix::IntMatrix *>(mat)) {
+        mat = &int_mat->get_binary_matrix();
+    }
+
+    logger->trace("Relaxing BRWT tree...");
+    relax_BRWT(&dynamic_cast<binmat::BRWT &>(const_cast<binmat::BinaryMatrix &>(*mat)),
+               config->relax_arity_brwt, get_num_threads());
 
     annotator->serialize(config->outfbase);
     logger->trace("BRWT relaxation done in {} sec", timer.elapsed());
