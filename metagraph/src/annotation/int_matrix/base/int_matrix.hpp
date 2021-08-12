@@ -27,6 +27,8 @@ class IntMatrix : public binmat::BinaryMatrix {
     virtual RowValues
     sum_row_values(const std::vector<std::pair<Row, size_t>> &index_counts,
                    size_t min_count = 1) const;
+
+    virtual const binmat::BinaryMatrix& get_binary_matrix() const { return *this; }
 };
 
 
@@ -52,8 +54,6 @@ class MultiIntMatrix : public IntMatrix {
 
     virtual std::vector<RowTuples>
     get_row_tuples(const std::vector<Row> &rows) const = 0;
-
-    virtual const BinaryMatrix& get_binary_matrix() const { return *this; };
 };
 
 } // namespace matrix
