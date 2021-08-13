@@ -185,10 +185,10 @@ class TaxonomyClsAnno : public TaxonomyBase {
                                               const annot::MultiLabelEncoded<std::string> *anno_matrix) const;
 
 
-    std::vector<TaxId> get_lca_taxids_for_seq_dd(const std::string_view &sequence, 
-                                              const bool reversed,
+    uint32_t get_lca_taxids_for_seq_dd(const std::string_view &sequence, 
                                               const mtg::graph::DBGBitmap &graph,
-                                              const annot::RowCompressed<std::string> *anno_matrix) const;
+                                              const annot::RowCompressed<std::string> *anno_matrix,
+                                              const pair<TaxId, std::string> tax_label) const;
 
     /**
      * rmq_data[0] contains the taxonomic tree linearization
@@ -203,8 +203,10 @@ class TaxonomyClsAnno : public TaxonomyBase {
      * in the tree linearization order. This array will be further used inside a RMQ query.
      */
     tsl::hopscotch_map<TaxId, uint32_t> node_to_linearization_idx;
+    tsl::hopscotch_map<TaxId, std::string> taxid_to_label;
 
     const graph::AnnotatedDBG *_anno_matrix = NULL;
+    ChildrenList tree;
 };
 
 } // namespace annot
