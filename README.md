@@ -22,7 +22,31 @@ At the same time, the provided workflows and their careful implementation, combi
 
 ## Install
 
-See [docs online](https://metagraph.ethz.ch/static/docs/index.html).
+### Conda
+
+Install the [latest release](https://github.com/ratschlab/metagraph/releases/latest) on Linux or Mac OS X with Anaconda:
+
+```
+conda install -c bioconda -c conda-forge metagraph
+```
+
+### Docker
+
+If docker is available on the system, immediately get started with
+
+```
+docker run -v ${HOME}:/mnt ghcr.io/ratschlab/metagraph:master build -v -k 10 \
+                            -o /mnt/transcripts_1000 \
+                            /mnt/transcripts_1000.fa
+```
+
+(Replace `${HOME}` with a directory on the host system to map it under `/mnt` in the container.)
+
+All different versions of the container are listed [here](https://github.com/ratschlab/metagraph/pkgs/container/metagraph).
+
+### Install From Sources
+
+To compile from source, see [documentation online](https://metagraph.ethz.ch/static/docs/installation.html#install-from-source) (e.g., for builds with custom configurations).
 
 
 ## Typical workflow
