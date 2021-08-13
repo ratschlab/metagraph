@@ -96,9 +96,17 @@ int taxonomic_classification(Config *config) {
 
 
     std::shared_ptr<mtg::graph::DBGBitmap> graph2 = load_critical_dbg_dd(config->infbase2);
-    config->infbase = config->infbase2;
-    config->infbase_annotators = config->infbase_annotators2;
-    std::unique_ptr<annot::RowCompressed<std::string>> anno_graph2 = initialize_annotation_dd(config->infbase_annotators2.at(0), *config);
+//    config->infbase = config->infbase2;
+//    config->infbase_annotators = config->infbase_annotators2;
+
+    uint64_t max_index_anno2 = graph2->max_index();
+
+    std::unique_ptr<annot::RowCompressed<std::string>> anno_graph2 = initialize_annotation_dd(config->infbase_annotators2.at(0), max_index_anno2);
+    bool loaded = anno_graph2->load(config->infbase_annotators2.at(0));
+    if (!loaded) {
+        logger->error("Cannot load annotations2, file corrupted");
+        exit(1);
+    }
 
     if (config->taxonomic_db != "") {
         throw std::runtime_error("internal error: taxonomic classification with taxDB is not implemented.");

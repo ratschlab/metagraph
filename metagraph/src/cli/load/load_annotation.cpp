@@ -166,6 +166,7 @@ initialize_annotation_dd(Config::AnnotationType anno_type,
         exit(1);
     }
     std::unique_ptr<annot::RowCompressed<std::string>> annotation;
+    std::cerr << "reset num_rows=" << num_rows << "\n";
     annotation.reset(new annot::RowCompressed<>(num_rows, row_compressed_sparse));
     return annotation;
 }

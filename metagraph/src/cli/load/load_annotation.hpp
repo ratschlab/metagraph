@@ -38,10 +38,8 @@ initialize_annotation(Config::AnnotationType anno_type,
 
 inline std::unique_ptr<annot::RowCompressed<std::string>>
 initialize_annotation_dd(Config::AnnotationType anno_type,
-                      const Config &config,
-                      uint64_t num_rows = 0) {
-    return initialize_annotation_dd(anno_type, config.sparse,
-                                 num_rows);
+                         const uint64_t max_index) {
+    return initialize_annotation_dd(anno_type, true, max_index);
 }
 
 template <typename... Args>
@@ -52,8 +50,8 @@ initialize_annotation(const std::string &filename, const Args &... args) {
 
 template <typename... Args>
 inline std::unique_ptr<annot::RowCompressed<std::string>>
-initialize_annotation_dd(const std::string &filename, const Args &... args) {
-    return initialize_annotation_dd(parse_annotation_type(filename), args...);
+initialize_annotation_dd(const std::string &filename, const uint64_t max_index22) {
+    return initialize_annotation_dd(parse_annotation_type(filename), max_index22);
 }
 
 } // namespace cli
