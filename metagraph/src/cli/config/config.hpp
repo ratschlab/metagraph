@@ -205,7 +205,9 @@ class Config {
         IntBRWT,
         IntRowDiffBRWT,
         ColumnCoord,
+        BRWTCoord,
         RowDiffCoord,
+        RowDiffBRWTCoord,
     };
 
     enum GraphType {
