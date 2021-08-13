@@ -313,8 +313,12 @@ Config::Config(int argc, char *argv[]) {
             rename_instructions_file = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "-a") || !strcmp(argv[i], "--annotator")) {
             infbase_annotators.emplace_back(get_value(i++));
+        } else if (!strcmp(argv[i], "-a2") || !strcmp(argv[i], "--annotator2")) {
+            infbase_annotators2.emplace_back(get_value(i++));
         } else if (!strcmp(argv[i], "-i") || !strcmp(argv[i], "--infile-base")) {
             infbase = std::string(get_value(i++));
+        } else if (!strcmp(argv[i], "-i2") || !strcmp(argv[i], "--infile-base2")) {
+            infbase2 = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--to-adj-list")) {
             to_adj_list = true;
         } else if (!strcmp(argv[i], "--to-fasta")) {

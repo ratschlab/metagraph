@@ -156,5 +156,19 @@ initialize_annotation(Config::AnnotationType anno_type,
     return annotation;
 }
 
+
+std::unique_ptr<annot::RowCompressed<std::string>>
+initialize_annotation_dd(Config::AnnotationType anno_type,
+                      bool row_compressed_sparse,
+                      uint64_t num_rows) {
+    if (anno_type != Config::RowCompressed) {
+        logger->error("initialize_annotation_dd for not Config::RowCompressed");
+        exit(1);
+    }
+    std::unique_ptr<annot::RowCompressed<std::string>> annotation;
+    annotation.reset(new annot::RowCompressed<>(num_rows, row_compressed_sparse));
+    return annotation;
+}
+
 } // namespace cli
 } // namespace mtg

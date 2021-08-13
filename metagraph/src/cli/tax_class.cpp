@@ -1,11 +1,23 @@
 #include "tax_class.hpp"
 
 #include "annotation/taxonomy/tax_classifier.hpp"
+#include "annotation/representation/annotation_matrix/annotation_matrix.hpp"
+#include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
+
+#include "graph/annotated_dbg.hpp"
+
+#include "graph/representation/hash/dbg_hash_ordered.hpp"
+#include "graph/representation/hash/dbg_hash_string.hpp"
+#include "graph/representation/hash/dbg_hash_fast.hpp"
+#include "graph/representation/bitmap/dbg_bitmap.hpp"
+#include "graph/representation/succinct/dbg_succinct.hpp"
+
 #include "common/threads/threading.hpp"
 #include "common/unix_tools.hpp"
 #include "config/config.hpp"
 #include "load/load_graph.hpp"
 #include "load/load_annotated_graph.hpp"
+#include "load/load_annotation.hpp"
 #include "seq_io/sequence_io.hpp"
 
 #include "common/logger.hpp"
@@ -75,6 +87,19 @@ int taxonomic_classification(Config *config) {
     std::unique_ptr<mtg::annot::TaxonomyClsAnno> taxonomy;
     std::unique_ptr<graph::AnnotatedDBG> anno_graph;
 
+
+    timer.reset();
+    logger->trace("Graph and Annotation loading...");
+    // graph = load_critical_dbg(config->infbase);
+    anno_graph = initialize_annotated_dbg(graph, *config);
+    logger->trace("Finished graph annotation loading after {} sec.", timer.elapsed());
+
+
+    std::shared_ptr<mtg::graph::DBGBitmap> graph2 = load_critical_dbg_dd(config->infbase2);
+    config->infbase = config->infbase2;
+    config->infbase_annotators = config->infbase_annotators2;
+    std::unique_ptr<annot::RowCompressed<std::string>> anno_graph2 = initialize_annotation_dd(config->infbase_annotators2.at(0), *config);
+
     if (config->taxonomic_db != "") {
         throw std::runtime_error("internal error: taxonomic classification with taxDB is not implemented.");
     } else {
@@ -84,11 +109,13 @@ int taxonomic_classification(Config *config) {
                           "please use '-a' flag for the annotation matrix filepath.");
             std::exit(1);
         }
-        timer.reset();
-        logger->trace("Graph and Annotation loading...");
-        graph = load_critical_dbg(config->infbase);
-        anno_graph = initialize_annotated_dbg(graph, *config);
-        logger->trace("Finished graph annotation loading after {} sec.", timer.elapsed());
+        std::cerr << "\n\nbefore load anno_matrix2\n" << std::endl;
+
+        
+        // std::shared_ptr<mtg::graph::DBGSuccinct> graph2 = std::make_shared<mtg::graph::DBGSuccinct>(graph2_dbg);
+
+
+        std::cerr << "\n\nafter load anno_matrix2\n" << std::endl;
 
         timer.reset();
         logger->trace("Constructing TaxonomyClsAnno...");
@@ -114,7 +141,7 @@ int taxonomic_classification(Config *config) {
             callback = [&](const std::vector<std::pair<std::string, std::string> > &seq_batch){
                 thread_pool.enqueue([&](std::vector<std::pair<std::string, std::string> > sequences){
                     for (std::pair<std::string, std::string> &seq : sequences) {
-                        append_new_result(seq.second, taxonomy->assign_class(seq.first), &pair_label_taxid, &tax_mutex);
+                        append_new_result(seq.second, taxonomy->assign_class(seq.first, *graph2, *anno_graph2), &pair_label_taxid, &tax_mutex);
                     }
                 }, std::move(seq_batch));
             };
@@ -125,15 +152,23 @@ int taxonomic_classification(Config *config) {
         execute_fasta_file(file, callback);
     }
     thread_pool.join();
+    uint64_t num_hits = 0;
 
-    print_all_results(pair_label_taxid, [](const std::string name_seq, const uint32_t &taxid) {
+    print_all_results(pair_label_taxid, [&](const std::string name_seq, const uint32_t &taxid) {
         std::string result = fmt::format(
                 "Sequence '{}' was classified with Tax ID '{}'\n",
                 name_seq, taxid);
         std::cout << result << std::endl;
+        if (utils::split_string(name_seq, "|")[1] == to_string(taxid)) {
+            num_hits += 1;
+        }
     });
 
     logger->trace("Finished all the queries in {} sec.", timer.elapsed());
+
+    std::cerr << "num hits = " << num_hits << "\n total results =" << pair_label_taxid.size() << "\n";
+    std::cerr << "hit rate = " << (double)num_hits / pair_label_taxid.size() << "\n";
+
     return 0;
 }
 

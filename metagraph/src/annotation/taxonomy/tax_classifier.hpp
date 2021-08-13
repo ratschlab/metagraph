@@ -5,6 +5,10 @@
 #include <tsl/hopscotch_map.h>
 
 #include "graph/annotated_dbg.hpp"
+#include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
+
+#include "graph/representation/succinct/dbg_succinct.hpp"
+#include "graph/representation/bitmap/dbg_bitmap.hpp"
 
 namespace mtg {
 namespace annot {
@@ -27,8 +31,6 @@ class TaxonomyBase {
     TaxonomyBase(const double lca_coverage_rate, const double kmers_discovery_rate)
         : _lca_coverage_rate(lca_coverage_rate),
           _kmers_discovery_rate(kmers_discovery_rate) {};
-
-    TaxId assign_class(const std::string &sequence) const;
 
   protected:
     /** Recognise the label type by parsing one sample_label.
@@ -76,7 +78,10 @@ class TaxonomyBase {
      * Get the list of LCA taxid for each kmer in a given sequences.
      * The sequence can be given in forward or in reversed orientation.
      */
-    virtual std::vector<TaxId> get_lca_taxids_for_seq(const std::string_view &sequence, bool reversed) const = 0;
+    // virtual std::vector<TaxId> get_lca_taxids_for_seq(const std::string_view &sequence, 
+    //                                           const bool reversed,
+    //                                           std::shared_ptr<const mtg::graph::SequenceGraph> graph_small,
+    //                                           annot::MultiLabelEncoded<std::string> anno_matrix) const = 0;
 
     LabelType label_type;
 
@@ -107,7 +112,10 @@ class TaxonomyClsImportDB : public TaxonomyBase {
                         const double kmers_discovery_rate);
 
   private:
-    std::vector<TaxId> get_lca_taxids_for_seq(const std::string_view &sequence, bool reversed) const;
+    // std::vector<TaxId> get_lca_taxids_for_seq(const std::string_view &sequence, 
+    //                                           const bool reversed,
+    //                                           std::shared_ptr<const mtg::graph::SequenceGraph>  graph,
+    //                                           annot::MultiLabelEncoded<std::string> anno_matrix) const;
     TaxId find_lca(const std::vector<TaxId> &taxids) const;
 };
 
@@ -133,6 +141,10 @@ class TaxonomyClsAnno : public TaxonomyBase {
     void export_taxdb(const std::string &filepath) const;
 
     TaxId assign_class_toplabels(const std::string &sequence, const double label_fraction) const;
+
+    TaxId assign_class(const std::string &sequence, 
+                       mtg::graph::DBGBitmap &graph_small,
+                       annot::RowCompressed<std::string> &anno_small) const;
 
   private:
     /**
@@ -167,7 +179,16 @@ class TaxonomyClsAnno : public TaxonomyBase {
 
     TaxId find_lca(const std::vector<TaxId> &taxids) const;
 
-    std::vector<TaxId> get_lca_taxids_for_seq(const std::string_view &sequence, bool reversed) const;
+    std::vector<TaxId> get_lca_taxids_for_seq(const std::string_view &sequence, 
+                                              const bool reversed,
+                                              const mtg::graph::SequenceGraph &graph,
+                                              const annot::MultiLabelEncoded<std::string> *anno_matrix) const;
+
+
+    std::vector<TaxId> get_lca_taxids_for_seq_dd(const std::string_view &sequence, 
+                                              const bool reversed,
+                                              const mtg::graph::DBGBitmap &graph,
+                                              const annot::RowCompressed<std::string> *anno_matrix) const;
 
     /**
      * rmq_data[0] contains the taxonomic tree linearization
