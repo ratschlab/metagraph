@@ -5,6 +5,9 @@
 
 #include "common/logger.hpp"
 #include "graph/representation/base/sequence_graph.hpp"
+#include "graph/representation/succinct/dbg_succinct.hpp"
+#include "graph/representation/bitmap/dbg_bitmap.hpp"
+
 #include "cli/config/config.hpp"
 
 
@@ -24,6 +27,7 @@ std::shared_ptr<Graph> load_critical_graph_from_file(const std::string &filename
 }
 
 std::shared_ptr<graph::DeBruijnGraph> load_critical_dbg(const std::string &filename);
+std::shared_ptr<graph::DBGBitmap> load_critical_dbg_dd(const std::string &filename);
 
 } // namespace cli
 } // namespace mtg

@@ -63,6 +63,7 @@ void VectorRowBinMat<RowType>::standardize_rows() {
 template <typename RowType>
 typename VectorRowBinMat<RowType>::SetBitPositions
 VectorRowBinMat<RowType>::get_row(Row row) const {
+    std::cerr << "vector_ size:" << vector_.size() << " req row=" << row << std::endl;
     assert(row < vector_.size());
     if constexpr(std::is_same_v<RowType, SetBitPositions>) {
         return vector_[row];

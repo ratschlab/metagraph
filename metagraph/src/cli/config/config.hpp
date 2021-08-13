@@ -144,10 +144,12 @@ class Config {
     std::vector<std::string> fnames;
     std::vector<std::string> anno_labels;
     std::vector<std::string> infbase_annotators;
+    std::vector<std::string> infbase_annotators2;
     std::vector<std::string> label_mask_in;
     std::vector<std::string> label_mask_out;
     std::string outfbase;
     std::string infbase;
+    std::string infbase2;
     std::string rename_instructions_file;
     std::string refpath;
     std::string suffix;

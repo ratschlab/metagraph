@@ -5,6 +5,10 @@
 #include <vector>
 
 #include "annotation/representation/annotation_matrix/annotation_matrix.hpp"
+#include "graph/representation/succinct/dbg_succinct.hpp"
+#include "graph/representation/bitmap/dbg_bitmap.hpp"
+#include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
+
 #include "common/unix_tools.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/utils/string_utils.hpp"
@@ -269,7 +273,10 @@ void TaxonomyClsAnno::rmq_preprocessing(const std::vector<TaxId> &tree_lineariza
     }
 }
 
-std::vector<TaxId> TaxonomyClsAnno::get_lca_taxids_for_seq(const std::string_view &sequence, bool reversed) const {
+std::vector<TaxId> TaxonomyClsAnno::get_lca_taxids_for_seq(const std::string_view &sequence, 
+                                                           const bool reversed,
+                                                           const mtg::graph::SequenceGraph &anno_graph,
+                                                           const annot::MultiLabelEncoded<std::string> *anno_matrix) const {
     // num_kmers represents the total number of kmers parsed until the current time.
     uint32_t num_kmers = 0;
 
@@ -284,18 +291,19 @@ std::vector<TaxId> TaxonomyClsAnno::get_lca_taxids_for_seq(const std::string_vie
         exit(1);
     }
 
-    auto anno_graph = _anno_matrix->get_graph_ptr();
-    anno_graph->map_to_nodes(sequence, [&](node_index i) {
+    // auto anno_graph = anno_matrix->get_graph_ptr();
+    anno_graph.map_to_nodes(sequence, [&](node_index i) {
         num_kmers++;
-        if (i <= 0 || i >= anno_graph->max_index()) {
+        if (i <= 0 || i >= anno_graph.max_index()) {
             return;
         }
         kmer_val.push_back(i - 1);
         kmer_idx.push_back(num_kmers - 1);
     });
 
+
     // Compute the LCA normalized taxid for each nonzero kmer in the given read.
-    const auto unique_matrix_rows = _anno_matrix->get_annotation().get_matrix().get_rows(kmer_val);
+    const auto unique_matrix_rows = anno_matrix->get_matrix().get_rows(kmer_val);
     //TODO make sure that this function works even if we have duplications in 'rows'. Then, delete this error catch.
     if (kmer_val.size() != unique_matrix_rows.size()) {
         throw std::runtime_error("Internal error: The tool doesn't know how to treat the case of "
@@ -307,7 +315,7 @@ std::vector<TaxId> TaxonomyClsAnno::get_lca_taxids_for_seq(const std::string_vie
                                  "Please reduce the query batch size.");
     }
 
-    const auto &label_encoder = _anno_matrix->get_annotation().get_label_encoder();
+    const auto &label_encoder = anno_matrix->get_label_encoder();
 
     TaxId taxid;
     uint64_t cnt_kmer_idx = 0;
@@ -322,9 +330,9 @@ std::vector<TaxId> TaxonomyClsAnno::get_lca_taxids_for_seq(const std::string_vie
         }
         if (curr_kmer_taxids.size() != 0) {
             if (not reversed) {
-                seq_taxids[kmer_idx[cnt_kmer_idx]] = find_lca(curr_kmer_taxids);
+                seq_taxids[kmer_idx[cnt_kmer_idx]] = this->find_lca(curr_kmer_taxids);
             } else {
-                seq_taxids[num_kmers - 1 - kmer_idx[cnt_kmer_idx]] = find_lca(curr_kmer_taxids);
+                seq_taxids[num_kmers - 1 - kmer_idx[cnt_kmer_idx]] = this->find_lca(curr_kmer_taxids);
             }
         }
         cnt_kmer_idx++;
@@ -334,12 +342,96 @@ std::vector<TaxId> TaxonomyClsAnno::get_lca_taxids_for_seq(const std::string_vie
     return seq_taxids;
 }
 
-TaxId TaxonomyBase::assign_class(const std::string &sequence) const {
-    std::vector<TaxId> forward_taxids = get_lca_taxids_for_seq(sequence, false);
+std::vector<TaxId> TaxonomyClsAnno::get_lca_taxids_for_seq_dd(const std::string_view &sequence, 
+                                                           const bool reversed,
+                                                           const mtg::graph::DBGBitmap &anno_graph,
+                                                           const annot::RowCompressed<std::string> *anno_matrix) const {
+    // num_kmers represents the total number of kmers parsed until the current time.
+    uint32_t num_kmers = 0;
+
+    // 'kmer_idx' and 'kmer_val' are storing the indexes and values of all the nonzero kmers in the given read.
+    // The list of kmers, 'kmer_val', will be further sent to "matrix.getrows()" method;
+    // The list of indexes, 'kmer_idx', will be used to associate one row from "matrix.getrows()" with the corresponding kmer index.
+    std::vector<uint32_t> kmer_idx;
+    std::vector<node_index> kmer_val;
+
+    if (sequence.size() >= std::numeric_limits<uint32_t>::max()) {
+        logger->error("The given sequence contains more than 2^32 bp.");
+        exit(1);
+    }
+
+    std::cerr << "before get_graph_ptr" << std::endl;
+    // auto anno_graph = anno_matrix->get_graph_ptr();
+    std::cerr << "after get_graph_ptr" << std::endl;
+    std::cerr << "\n\n before map to nodes" << std::endl;
+    anno_graph.map_to_nodes(sequence, [&](node_index i) {
+        num_kmers++;
+        if (i <= 0 || i >= anno_graph.max_index()) {
+            return;
+        }
+        kmer_val.push_back(i - 1);
+        kmer_idx.push_back(num_kmers - 1);
+    });
+
+    std::cerr << "after get nodes" << std::endl;
+
+    // Compute the LCA normalized taxid for each nonzero kmer in the given read.
+    const auto unique_matrix_rows = anno_matrix->get_matrix().get_rows(kmer_val);
+
+    std::cerr << "after unique_matrix_rows" << std::endl;
+    //TODO make sure that this function works even if we have duplications in 'rows'. Then, delete this error catch.
+    if (kmer_val.size() != unique_matrix_rows.size()) {
+        throw std::runtime_error("Internal error: The tool doesn't know how to treat the case of "
+                                 "kmer duplications in the same read. Please contact the maintainers.");
+    }
+    std::cerr << "after err1" << std::endl;
+
+    if (unique_matrix_rows.size() >= std::numeric_limits<uint32_t>::max()) {
+        throw std::runtime_error("Internal error: There must be less than 2^32 unique rows. "
+                                 "Please reduce the query batch size.");
+    }
+    std::cerr << "after err2" << std::endl;
+
+    const auto &label_encoder = anno_matrix->get_label_encoder();
+
+    std::cerr << "after get label_encoder" << std::endl;
+
+    TaxId taxid;
+    uint64_t cnt_kmer_idx = 0;
+    std::vector<TaxId> curr_kmer_taxids;
+    std::vector<TaxId> seq_taxids(num_kmers);
+
+    std::cerr << "here" << std::endl;
+    for (auto row : unique_matrix_rows) {
+        for (auto cell : row) {
+            if (get_taxid_from_label(label_encoder.decode(cell), &taxid)) {
+                curr_kmer_taxids.push_back(taxid);
+            }
+        }
+        if (curr_kmer_taxids.size() != 0) {
+            if (not reversed) {
+                seq_taxids[kmer_idx[cnt_kmer_idx]] = this->find_lca(curr_kmer_taxids);
+            } else {
+                seq_taxids[num_kmers - 1 - kmer_idx[cnt_kmer_idx]] = this->find_lca(curr_kmer_taxids);
+            }
+        }
+        cnt_kmer_idx++;
+        curr_kmer_taxids.clear();
+    }
+
+    return seq_taxids;
+}
+
+TaxId TaxonomyClsAnno::assign_class(const std::string &sequence,
+                                    mtg::graph::DBGBitmap &graph_small,
+                                    annot::RowCompressed<std::string> &anno_small) const {
+    std::cerr << "forward_taxids 31" << std::endl;
+    std::vector<TaxId> forward_taxids = get_lca_taxids_for_seq(sequence, false, *_anno_matrix->get_graph_ptr(), &_anno_matrix->get_annotation());
 
     std::string reversed_sequence(sequence);
     reverse_complement(reversed_sequence.begin(), reversed_sequence.end());
-    std::vector<TaxId> backward_taxids = get_lca_taxids_for_seq(reversed_sequence, true);
+    std::cerr << "backward_taxids 31" << std::endl;
+    std::vector<TaxId> backward_taxids = get_lca_taxids_for_seq(reversed_sequence, true, *_anno_matrix->get_graph_ptr(), &_anno_matrix->get_annotation());
 
     tsl::hopscotch_map<TaxId, uint64_t> num_kmers_per_node;
 
@@ -392,6 +484,65 @@ TaxId TaxonomyBase::assign_class(const std::string &sequence) const {
         this->update_scores_and_lca(start_node, num_kmers_per_node, desired_number_kmers, &node_scores,
                                     &nodes_already_propagated, &best_lca, &best_lca_dist_to_root);
     }
+
+    // std::cerr << sizeof(graph_small) + sizeof(anno_small) << "\n";
+
+    // Get small taxids
+
+    std::cerr << "\n\nbefore get lca for small\n" << std::endl;
+
+    std::vector<TaxId> forward_taxids_small = get_lca_taxids_for_seq_dd(sequence, false, graph_small, &anno_small);
+
+    std::cerr << "print forward_taxids_small\n";
+
+    for (uint64_t i = 0; i < forward_taxids_small.size(); ++i) {
+        std::cerr << forward_taxids_small[i] << " ";
+    }
+
+    std::cerr << "\n\n got forward get lca for small\n" << std::endl;
+
+    std::vector<TaxId> backward_taxids_small = get_lca_taxids_for_seq_dd(reversed_sequence, true, graph_small, &anno_small);
+
+    std::cerr << "print backward_taxids_small\n";
+
+    for (uint64_t i = 0; i < backward_taxids_small.size(); ++i) {
+        std::cerr << backward_taxids_small[i] << " ";
+    }
+
+    std::cerr << "\n\n got both get lca for small\n" << std::endl;
+
+    tsl::hopscotch_map<TaxId, uint64_t> num_kmers_per_node_small;
+
+    // Find the LCA taxid for each kmer without any dependency on the orientation of the read.
+    for (uint32_t i = 0; i < num_total_kmers; ++i) {
+        if (forward_taxids_small[i] == 0 && backward_taxids_small[i] == 0) {
+            continue;
+        }
+        TaxId curr_taxid;
+        if (backward_taxids_small[i] == 0) {
+            curr_taxid = forward_taxids_small[i];
+        } else if (forward_taxids_small[i] == 0) {
+            curr_taxid = backward_taxids_small[i];
+        } else {
+            // In case that both 'forward_taxid_small[i]' and 'backward_taxids_small[i]' are nonzero, compute the LCA.
+            TaxId forward_taxid = forward_taxids_small[i];
+            TaxId backward_taxid = backward_taxids_small[i];
+            if (forward_taxid == 0) {
+                curr_taxid = backward_taxid;
+            } else if (backward_taxid == 0) {
+                curr_taxid = forward_taxid;
+            } else {
+                curr_taxid = find_lca({forward_taxid, backward_taxid});
+            }
+        }
+        if (curr_taxid) {
+            num_discovered_kmers ++;
+            num_kmers_per_node_small[curr_taxid]++;
+        }
+    }
+
+    std::cerr << "nrkmer=" << num_total_kmers << " size num_kmers_per_node_small -> " << num_kmers_per_node_small.size() << "\n";
+
     return best_lca;
 }
 
@@ -503,11 +654,14 @@ TaxId TaxonomyClsAnno::find_lca(const std::vector<TaxId> &taxids) const {
     return right_lca;
 }
 
-std::vector<TaxId> TaxonomyClsImportDB::get_lca_taxids_for_seq(const std::string_view &sequence, bool reversed) const {
-    cerr << "Assign class not implemented reversed = " << reversed << "\n";
-    throw std::runtime_error("get_lca_taxids_for_seq TaxonomyClsImportDB not implemented. Received seq size"
-                             + to_string(sequence.size()));
-}
+// std::vector<TaxId> TaxonomyClsImportDB::get_lca_taxids_for_seq(const std::string_view &sequence, 
+//                                               const bool reversed,
+//                                               std::shared_ptr<const mtg::graph::SequenceGraph>  graph_small,
+//                                               annot::MultiLabelEncoded<std::string> anno_matrix) const {
+//     cerr << "Assign class not implemented reversed = " << reversed << " " << sizeof(anno_matrix) <<"\n";
+//     throw std::runtime_error("get_lca_taxids_for_seq TaxonomyClsImportDB not implemented. Received seq size"
+//                              + to_string(sequence.size()));
+// }
 
 TaxId TaxonomyClsImportDB::find_lca(const std::vector<TaxId> &taxids) const {
     throw std::runtime_error("find_lca TaxonomyClsImportDB not implemented. Received taxids size"
