@@ -3,6 +3,7 @@
 
 #include <tsl/hopscotch_set.h>
 #include <tsl/hopscotch_map.h>
+
 #include "graph/annotated_dbg.hpp"
 
 namespace mtg {
@@ -22,10 +23,11 @@ class TaxonomyBase {
         TAXID, // e.g. ">kraken:taxid|2016032|NC_047834.1 Alteromonas virus vB_AspP-H4/4, complete genome"
     };
 
-    TaxonomyBase() {};
-    TaxonomyBase(const double lca_coverage_rate, const double kmers_discovery_rate)
+    TaxonomyBase() {}
+    TaxonomyBase(double lca_coverage_rate, double kmers_discovery_rate)
         : lca_coverage_rate_(lca_coverage_rate),
-          kmers_discovery_rate_(kmers_discovery_rate) {};
+          kmers_discovery_rate_(kmers_discovery_rate) {}
+    virtual ~TaxonomyBase() {}
 
     TaxId assign_class(const std::string &sequence) const;
 
@@ -59,9 +61,9 @@ class TaxonomyBase {
      *                                 `desired_number_kmers` threshold and is placed as close as possible to the leaves).
      * @param [modified] 'best_lca_dist_to_root' -> the distance to the root for the current classification prediction.
      */
-    void update_scores_and_lca(const TaxId start_node,
+    void update_scores_and_lca(TaxId start_node,
                                const tsl::hopscotch_map<TaxId, uint64_t> &num_kmers_per_node,
-                               const uint64_t desired_number_kmers,
+                               uint64_t desired_number_kmers,
                                tsl::hopscotch_map<TaxId, uint64_t> *node_scores,
                                tsl::hopscotch_set<TaxId> *nodes_already_propagated,
                                TaxId *best_lca,
@@ -98,8 +100,8 @@ class TaxonomyClsImportDB : public TaxonomyBase {
   public:
     // todo implement
     TaxonomyClsImportDB(const std::string &taxdb_filepath,
-                        const double lca_coverage_rate,
-                        const double kmers_discovery_rate);
+                        double lca_coverage_rate,
+                        double kmers_discovery_rate);
 
   private:
     std::vector<TaxId> get_lca_taxids_for_seq(const std::string_view &sequence, bool reversed) const;
@@ -119,12 +121,11 @@ class TaxonomyClsAnno : public TaxonomyBase {
      *                                                      Mandatory if the taxid is not mentioned in the label string.
      */
     TaxonomyClsAnno(const graph::AnnotatedDBG &anno,
-                    const double lca_coverage_rate,
-                    const double kmers_discovery_rate,
+                    double lca_coverage_rate,
+                    double kmers_discovery_rate,
                     const std::string &tax_tree_filepath,
                     const std::string &label_taxid_map_filepath = "");
-    TaxonomyClsAnno() {};
-    virtual ~TaxonomyClsAnno() {};
+    TaxonomyClsAnno() {}
 
     // todo implement
     void export_taxdb(const std::string &filepath) const;
@@ -140,7 +141,7 @@ class TaxonomyClsAnno : public TaxonomyBase {
      * @param [input] label_fraction -> threshold used for taxonomic classification.
      * @return -> the classification result: a taxid node
      */
-    TaxId assign_class_toplabels(const std::string &sequence, const double label_fraction) const;
+    TaxId assign_class_toplabels(const std::string &sequence, double label_fraction) const;
 
   private:
     /**
@@ -169,7 +170,7 @@ class TaxonomyClsAnno : public TaxonomyBase {
      * @param [input] tree -> the taxonomic tree stored as a list of children.
      * @param [output] tree_linearization -> the linearization of the received tree.
      */
-    void dfs_statistics(const TaxId node,
+    void dfs_statistics(TaxId node,
                         const ChildrenList &tree,
                         std::vector<TaxId> *tree_linearization);
 

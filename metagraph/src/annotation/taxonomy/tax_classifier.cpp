@@ -81,14 +81,19 @@ void TaxonomyBase::read_accversion_to_taxid_map(const std::string &filepath,
             exit(1);
         }
         if (input_accessions.size() == 0 || input_accessions.count(parts[1])) {
+            // e.g. of nucl.accession2taxid file:
+            //
+            // A00001	A00001.1	10641	58418
+            //
+            // Thus, parts[1] represents the accession version and parts[2] the corresponding taxid.
             accversion_to_taxid_map_[parts[1]] = std::stoul(parts[2]);
         }
     }
 }
 
 TaxonomyClsAnno::TaxonomyClsAnno(const graph::AnnotatedDBG &anno,
-                                 const double lca_coverage_rate,
-                                 const double kmers_discovery_rate,
+                                 double lca_coverage_rate,
+                                 double kmers_discovery_rate,
                                  const std::string &tax_tree_filepath,
                                  const std::string &label_taxid_map_filepath)
              : TaxonomyBase(lca_coverage_rate, kmers_discovery_rate),
@@ -101,17 +106,12 @@ TaxonomyClsAnno::TaxonomyClsAnno(const graph::AnnotatedDBG &anno,
     // Take one sample label and find the label type.
     std::string sample_label = anno_matrix_->get_annotation().get_all_labels()[0];
 
-    // If true, require_accversion_to_taxid_map means that the taxid is not mentioned as part of the label. Thus, the program
-    // needs to parse an additional accession_version to taxid lookup file (optional argument: label_taxid_map_filepath).
-    bool require_accversion_to_taxid_map;
     if (utils::starts_with(sample_label, "gi|")) {
         // e.g.   >gi|1070643132|ref|NC_031224.1| Arthrobacter phage Mudcat, complete genome
         label_type_ = GEN_BANK;
-        require_accversion_to_taxid_map = true;
     } else if (utils::starts_with(utils::split_string(sample_label, ":")[1], "taxid|")) {
         // e.g.   >kraken:taxid|2016032|NC_047834.1 Alteromonas virus vB_AspP-H4/4, complete genome
         label_type_ = TAXID;
-        require_accversion_to_taxid_map = false;
     } else {
         logger->error("Error: Can't determine the type of the given label {}. "
                       "Make sure the labels are in a recognized format.", sample_label);
@@ -119,7 +119,7 @@ TaxonomyClsAnno::TaxonomyClsAnno(const graph::AnnotatedDBG &anno,
     }
 
     Timer timer;
-    if (require_accversion_to_taxid_map) {
+    if (label_type_ == GEN_BANK) {
         logger->trace("Parsing label_taxid_map file...");
         read_accversion_to_taxid_map(label_taxid_map_filepath, anno_matrix_);
         logger->trace("Finished label_taxid_map file in {} sec", timer.elapsed());
@@ -151,7 +151,6 @@ void TaxonomyClsAnno::read_tree(const std::string &tax_tree_filepath, ChildrenLi
     }
 
     std::string line;
-    tsl::hopscotch_map<TaxId, TaxId> full_parents_list;
     while (getline(f, line)) {
         if (line == "") {
             logger->error("Error: The Taxonomic Tree file contains empty lines. "
@@ -166,10 +165,12 @@ void TaxonomyClsAnno::read_tree(const std::string &tax_tree_filepath, ChildrenLi
                           tax_tree_filepath);
             exit(1);
         }
-        uint32_t act = std::stoul(parts[0]);
-        uint32_t parent = std::stoul(parts[2]);
-        full_parents_list[act] = parent;
-        node_parent_[act] = parent;
+        // e.g. of nodes.dmp file:
+        //
+        // 2	|	131567	|	superkingdom	|		|	0	|	0
+        //
+        // Thus, parts[0] represents the child taxid and parts[2] the parent taxid.
+        node_parent_[std::stoul(parts[0])] = std::stoul(parts[2]);
     }
 
     std::vector<TaxId> relevant_taxids;
@@ -178,52 +179,56 @@ void TaxonomyClsAnno::read_tree(const std::string &tax_tree_filepath, ChildrenLi
 
     if (accversion_to_taxid_map_.size()) {
         // Store only the taxonomic nodes that exists in the annotation matrix.
-        for (const std::pair<std::string, TaxId> &pair : accversion_to_taxid_map_) {
-            relevant_taxids.push_back(pair.second);
-            considered_relevant_taxids.insert(pair.second);
+        for (const auto &[_, taxid] : accversion_to_taxid_map_) {
+            relevant_taxids.push_back(taxid);
+            considered_relevant_taxids.insert(taxid);
         }
     } else {
         // If 'this->accversion_to_taxid_map' is empty, store the entire taxonomic tree.
-        for (auto it : full_parents_list) {
-            relevant_taxids.push_back(it.first);
-            considered_relevant_taxids.insert(it.first);
+        for (const auto &[child, _] : node_parent_) {
+            relevant_taxids.push_back(child);
+            considered_relevant_taxids.insert(child);
         }
     }
     assert(relevant_taxids.size());
 
     uint64_t num_taxid_failed = 0; // num_taxid_failed is used for logging only.
     for (uint32_t i = 0; i < relevant_taxids.size(); ++i) {
-        const TaxId taxid = relevant_taxids[i];
-        if (!full_parents_list.count(taxid)) {
+        TaxId taxid = relevant_taxids[i];
+        auto it_taxid_parent = node_parent_.find(taxid);
+        if (it_taxid_parent == node_parent_.end()) {
             num_taxid_failed += 1;
             continue;
         }
+        TaxId taxid_parent = it_taxid_parent->second;
 
-        if (not considered_relevant_taxids.count(full_parents_list[taxid])) {
-            relevant_taxids.push_back(full_parents_list[taxid]);
-            considered_relevant_taxids.insert(full_parents_list[taxid]);
+        if (not considered_relevant_taxids.count(taxid_parent)) {
+            relevant_taxids.push_back(taxid_parent);
+            considered_relevant_taxids.insert(taxid_parent);
         }
 
         // Check if the current taxid is the root.
-        if (taxid == full_parents_list[taxid]) {
+        if (taxid == taxid_parent) {
             root_node_ = taxid;
         }
     }
     if (num_taxid_failed) {
-        logger->warn("During the tax_tree_filepath {} parsing, {} taxids were not found out of {} total evaluations.",
+        logger->warn("During the tax_tree_filepath {} parsing, {} taxids were not found out of {} total evaluations",
                      tax_tree_filepath, num_taxid_failed, relevant_taxids.size());
     }
 
     // Construct the output tree.
     for (const TaxId &taxid : relevant_taxids) {
-        if (taxid == root_node_) {
+        if (taxid == root_node_)
             continue;
+        auto it_taxid_parent = node_parent_.find(taxid);
+        if (it_taxid_parent != node_parent_.end()) {
+            (*tree)[it_taxid_parent->second].push_back(taxid);
         }
-        (*tree)[full_parents_list[taxid]].push_back(taxid);
     }
 }
 
-void TaxonomyClsAnno::dfs_statistics(const TaxId node,
+void TaxonomyClsAnno::dfs_statistics(TaxId node,
                                      const ChildrenList &tree,
                                      std::vector<TaxId> *tree_linearization) {
     node_to_linearization_idx_[node] = tree_linearization->size();
