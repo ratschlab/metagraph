@@ -127,7 +127,7 @@ void LabeledBacktrackingExtender
             std::tie(base_labels, base_coords)
                 = labeled_graph_.get_labels_and_coordinates(std::get<3>(table[0]));
             ssize_t base_offset = std::get<6>(table[0]);
-            if (!base_coords) {
+            if (!base_coords || base_coords->get().empty()) {
                 // if the first node is not annotated, then check the last fork point
                 size_t base_table_i = xdrop_cutoffs_[std::get<9>(table[table_i])].first;
                 std::tie(base_labels, base_coords)
@@ -154,6 +154,11 @@ void LabeledBacktrackingExtender
         }
 
         for (const auto &[next, c] : outgoing) {
+            if (base_labels->get().empty()) {
+                callback(next, c);
+                continue;
+            }
+
             auto [next_labels, next_coords] = labeled_graph_.get_labels_and_coordinates(next);
 
             // check coordinate consistency later if they are not cached now
@@ -178,6 +183,11 @@ void LabeledBacktrackingExtender
         // label consistency (weaker than coordinate consistency):
         // checks if there is at least one label shared between adjacent nodes
         for (const auto &[next, c] : outgoing) {
+            if (base_labels->get().empty()) {
+                callback(next, c);
+                continue;
+            }
+
             auto next_labels = labeled_graph_.get_labels(next);
 
             // if not fetched, check later

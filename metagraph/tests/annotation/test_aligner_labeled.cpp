@@ -75,9 +75,9 @@ TYPED_TEST(LabeledAlignerTest, SimpleTangleGraph) {
     LabeledAligner<> aligner(*anno_graph, config);
 
     std::unordered_map<std::string, std::unordered_map<std::string, std::string>> exp_alignments {{
-        { std::string("CGAATGCAT"), {{ { std::string("C"), std::string("GAATGCAT") },
-                                       { std::string("B"), std::string("CGAATGCCT") },
-                                       { std::string("A"), std::string("TGCCT") } }} }
+        { std::string("CGAATGCAT"), {{ { std::string("C"), std::string("GAATGCAT") }, // 1S8=
+                                       { std::string("B"), std::string("CGAATGCCT") }, // 7=1X1=
+                                       { std::string("A"), std::string("TGCCT") } }} } // 4S3=1X1=
     }};
 
     for (const auto &[query, labels] : exp_alignments) {
@@ -124,9 +124,9 @@ TEST(LabeledAlignerTest, SimpleTangleGraphSuffixSeed) {
     LabeledAligner<> aligner(*anno_graph, config);
 
     std::unordered_map<std::string, std::unordered_map<std::string, std::string>> exp_alignments {{
-        { std::string("TGAAATGCAT"), {{ { std::string("C"), std::string("TGGAATGCAT") },
-                                        { std::string("A"), std::string("TGCCT") },
-                                        { std::string("B"), std::string("AATGCCT") } }} }
+        { std::string("TGAAATGCAT"), {{ { std::string("C"), std::string("TGGAATGCAT") }, // 2=1X7=
+                                        { std::string("A"), std::string("TGCCT") }, // 5S3=1X1=
+                                        { std::string("B"), std::string("AATGCCT") } }} } // 3S5=1X1=
     }};
 
     for (const auto &[query, labels] : exp_alignments) {
@@ -182,9 +182,9 @@ TYPED_TEST(LabeledAlignerTest, CanonicalTangleGraph) {
 
         std::unordered_map<std::string, std::unordered_map<std::string, std::string>> exp_alignments {{
             // r.c. TTTGAACTAA
-            { std::string("TTAGTTCAAA"), {{ { std::string("B"), std::string("TTAGTCGAAA") },
-                                            { std::string("A"), std::string("GTCGAAA") },
-                                            { std::string("C"), std::string("AGTCGA") } }} }
+            { std::string("TTAGTTCAAA"), {{ { std::string("B"), std::string("TTAGTCGAAA") }, // 5=2X3=
+                                            { std::string("A"), std::string("GTCGAAA") }, // 3S2=2X3=
+                                            { std::string("C"), std::string("AGTCGA") } }} } // 2S3=2X1=2S
         }};
 
         for (const auto &[query, labels] : exp_alignments) {
