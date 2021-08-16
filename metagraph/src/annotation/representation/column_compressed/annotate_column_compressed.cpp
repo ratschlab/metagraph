@@ -429,14 +429,19 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
 
 template <typename Label>
 size_t ColumnCompressed<Label>::read_num_labels(const std::string &filename) {
-    // load labels
+    return load_label_encoder(filename).size();
+}
+
+template <typename Label>
+LabelEncoder<Label>
+ColumnCompressed<Label>::load_label_encoder(const std::string &filename) {
     auto fname = make_suffix(filename, kExtension);
     std::ifstream in(filename, std::ios::binary);
     std::ignore = load_number(in); // read num_rows
     LabelEncoder<Label> label_encoder;
     if (!label_encoder.load(in))
         throw std::ofstream::failure("Can't load label encoder from " + fname);
-    return label_encoder.size();
+    return label_encoder;
 }
 
 template <typename Label>
@@ -543,15 +548,7 @@ void ColumnCompressed<Label>
         const auto &filename = make_suffix(filenames[i], kExtension);
         logger->trace("Loading labels from {}", filename);
         try {
-            std::ifstream in(filename, std::ios::binary);
-            if (!in)
-                throw std::ifstream::failure("can't open file");
-
-            std::ignore = load_number(in);
-
-            LabelEncoder<Label> label_encoder_load;
-            if (!label_encoder_load.load(in))
-                throw std::ifstream::failure("can't load label encoder");
+            LabelEncoder<Label> label_encoder_load = load_label_encoder(filename);
 
             if (!label_encoder_load.size()) {
                 logger->warn("No columns in {}", filename);
@@ -850,10 +847,10 @@ const binmat::ColumnMajor& ColumnCompressed<Label>::get_matrix() const {
 }
 
 template <typename Label>
-binmat::ColumnMajor ColumnCompressed<Label>::release_matrix() {
+std::unique_ptr<binmat::ColumnMajor> ColumnCompressed<Label>::release_matrix() {
     flush();
     label_encoder_.clear();
-    return std::move(matrix_);
+    return std::make_unique<binmat::ColumnMajor>(std::move(matrix_));
 }
 
 template <typename Label>
