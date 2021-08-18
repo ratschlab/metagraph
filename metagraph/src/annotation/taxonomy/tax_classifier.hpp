@@ -18,7 +18,6 @@ class TaxonomyBase {
     using node_index = graph::SequenceGraph::node_index;
 
     enum LabelType {
-        UNASSIGNED,
         GEN_BANK, // e.g. ">gi|1070643132|ref|NC_031224.1| Arthrobacter phage Mudcat, complete genome"
         TAXID, // e.g. ">kraken:taxid|2016032|NC_047834.1 Alteromonas virus vB_AspP-H4/4, complete genome"
     };
@@ -29,53 +28,21 @@ class TaxonomyBase {
           kmers_discovery_rate_(kmers_discovery_rate) {}
     virtual ~TaxonomyBase() {}
 
-    TaxId assign_class(const std::string &sequence) const;
-
   protected:
-    virtual TaxId find_lca(const std::vector<TaxId> &taxids) const = 0;
-
     std::string get_accession_version_from_label(const std::string &label) const;
 
     bool get_taxid_from_label(const std::string &label, TaxId *taxid) const;
 
     /** Reads the accession version to taxid lookup table.
-     * If 'anno_matrix' is mentioned, only the labels that exist in the given annotation matrix will be stored.
-     * If 'anno_matrix' is not mentioned, the entire content of 'filepath' will be read and stored.
+     * If 'anno_matrix' is not NULL, only the labels that exist in the given annotation matrix will be stored.
+     * If 'anno_matrix' is NULL, the entire content of 'filepath' will be read and stored.
      *
      * @param [input] filepath -> a ".accession2taxid" file.
      * @param [optional input] anno_matrix -> pointer to the annotation matrix.
      */
-    void read_accversion_to_taxid_map(const std::string &filepath, const graph::AnnotatedDBG *anno_matrix);
+    void read_accversion_to_taxid_map(const std::string &filepath, const graph::AnnotatedDBG *anno_matrix = NULL);
 
-    /**
-     * Update the current node_scores and best_lca by taking into account the weight of the start_node and
-     * all its ancestors.
-     *
-     * @param [input] 'start_node' -> the starting node to update 'node_scores'.
-     * @param [input] 'num_kmers_per_node[taxid]' -> the number of kmers 'k' with taxonomic_map[k]=taxid.
-     * @param [input] 'desired_number_kmers' -> the threshold score that a node has to exceed in order to be
-     *                                          considered as a valid solution.
-     * @param [modified] 'node_scores' -> the current score for each node in the tree.
-     * @param [modified] 'nodes_already_propagated' -> the set of nodes that were previously processed.
-     * @param [modified] 'best_lca' -> the current classification prediction (node that exceeds the
-     *                                 `desired_number_kmers` threshold and is placed as close as possible to the leaves).
-     * @param [modified] 'best_lca_dist_to_root' -> the distance to the root for the current classification prediction.
-     */
-    void update_scores_and_lca(TaxId start_node,
-                               const tsl::hopscotch_map<TaxId, uint64_t> &num_kmers_per_node,
-                               uint64_t desired_number_kmers,
-                               tsl::hopscotch_map<TaxId, uint64_t> *node_scores,
-                               tsl::hopscotch_set<TaxId> *nodes_already_propagated,
-                               TaxId *best_lca,
-                               uint32_t *best_lca_dist_to_root) const;
-
-    /**
-     * Get the list of LCA taxid for each kmer in a given sequences.
-     * The sequence can be given in forward or in reversed orientation.
-     */
-    virtual std::vector<TaxId> get_lca_taxids_for_seq(const std::string_view &sequence, bool reversed) const = 0;
-
-    LabelType label_type_ = LabelType::UNASSIGNED;
+    LabelType label_type_;
 
     /**
      * node_depth returns the depth for each node in the taxonomic tree.
@@ -96,18 +63,6 @@ class TaxonomyBase {
     double kmers_discovery_rate_;
 };
 
-class TaxonomyClsImportDB : public TaxonomyBase {
-  public:
-    // todo implement
-    TaxonomyClsImportDB(const std::string &taxdb_filepath,
-                        double lca_coverage_rate,
-                        double kmers_discovery_rate);
-
-  private:
-    std::vector<TaxId> get_lca_taxids_for_seq(const std::string_view &sequence, bool reversed) const;
-    TaxId find_lca(const std::vector<TaxId> &taxids) const;
-};
-
 class TaxonomyClsAnno : public TaxonomyBase {
   public:
     /**
@@ -121,27 +76,11 @@ class TaxonomyClsAnno : public TaxonomyBase {
      *                                                      Mandatory if the taxid is not mentioned in the label string.
      */
     TaxonomyClsAnno(const graph::AnnotatedDBG &anno,
-                    double lca_coverage_rate,
-                    double kmers_discovery_rate,
                     const std::string &tax_tree_filepath,
+                    double lca_coverage_rate = 0,
+                    double kmers_discovery_rate = 0,
                     const std::string &label_taxid_map_filepath = "");
     TaxonomyClsAnno() {}
-
-    // todo implement
-    void export_taxdb(const std::string &filepath) const;
-
-    /** assign_class_toplabels is a faster and less precise taxonomic classification approach.
-     * It takes into account only the labels with the highest frequency among the kmers in one read.
-     *
-     * Given a set of kmers taken from one read, a query on the annotation matrix will return all the labels that
-     * correspond to at least $label_fraction$ percent of the kmers.
-     * Then, returns the LCA of the taxid nodes where these frequent labels are mapping to.
-     *
-     * @param [input] sequence -> the given sequence to classify.
-     * @param [input] label_fraction -> threshold used for taxonomic classification.
-     * @return -> the classification result: a taxid node
-     */
-    TaxId assign_class_toplabels(const std::string &sequence, double label_fraction) const;
 
   private:
     /**
@@ -173,10 +112,6 @@ class TaxonomyClsAnno : public TaxonomyBase {
     void dfs_statistics(TaxId node,
                         const ChildrenList &tree,
                         std::vector<TaxId> *tree_linearization);
-
-    TaxId find_lca(const std::vector<TaxId> &taxids) const;
-
-    std::vector<TaxId> get_lca_taxids_for_seq(const std::string_view &sequence, bool reversed) const;
 
     /**
      * rmq_data[0] contains the taxonomic tree linearization

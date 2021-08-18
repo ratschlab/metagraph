@@ -75,7 +75,7 @@ TEST(TaxonomyTest, ClsAnno_RmqPreprocessing) {
     std::vector<uint32_t> linearization = {
         0, 1, 4, 7, 4, 8, 4, 1, 5, 1, 0, 2, 0, 3, 6, 3, 0
     };
-    std::vector<std::vector<uint32_t> > expected_rmq = {
+    std::vector<std::vector<uint32_t>> expected_rmq = {
         {0, 1, 4, 7, 4, 8, 4, 1, 5, 1, 0, 2, 0, 3, 6, 3, 0},
         {0, 1, 4, 4, 4, 4, 1, 1, 1, 0, 0, 0, 0, 3, 3, 0, 0},
         {0, 1, 4, 4, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},

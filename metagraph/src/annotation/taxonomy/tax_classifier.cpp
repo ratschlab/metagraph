@@ -14,17 +14,18 @@ namespace annot {
 using mtg::common::logger;
 
 bool TaxonomyBase::get_taxid_from_label(const std::string &label, TaxId *taxid) const {
-    if (label_type_ == TAXID) {
-        *taxid = std::stoul(utils::split_string(label, "|")[1]);
-        return true;
-    } else if (label_type_ == GEN_BANK) {
-        std::string acc_version = get_accession_version_from_label(label);
-        auto it = accversion_to_taxid_map_.find(acc_version);
-        if (it == accversion_to_taxid_map_.end()) {
-            return false;
-        }
-        *taxid = it->second;
-        return true;
+    switch (label_type_) {
+        case TAXID :
+            *taxid = std::stoul(utils::split_string(label, "|")[1]);
+            return true;
+        case GEN_BANK:
+            std::string acc_version = get_accession_version_from_label(label);
+            auto it = accversion_to_taxid_map_.find(acc_version);
+            if (it == accversion_to_taxid_map_.end()) {
+                return false;
+            }
+            *taxid = it->second;
+            return true;
     }
 
     logger->error("Error: Could not get the taxid for label {}", label);
@@ -32,10 +33,11 @@ bool TaxonomyBase::get_taxid_from_label(const std::string &label, TaxId *taxid) 
 }
 
 std::string TaxonomyBase::get_accession_version_from_label(const std::string &label) const {
-    if (label_type_ == TAXID) {
-        return utils::split_string(utils::split_string(label, "|")[2], " ")[0];
-    } else if (label_type_ == GEN_BANK) {
-        return utils::split_string(label, "|")[3];;
+    switch (label_type_) {
+        case TAXID:
+            return utils::split_string(utils::split_string(label, "|")[2], " ")[0];
+        case GEN_BANK:
+            return utils::split_string(label, "|")[3];
     }
 
     logger->error("Error: Could not get the accession version for label {}", label);
@@ -44,7 +46,7 @@ std::string TaxonomyBase::get_accession_version_from_label(const std::string &la
 
 // TODO improve this by parsing the compressed ".gz" version (or use https://github.com/pmenzel/taxonomy-tools)
 void TaxonomyBase::read_accversion_to_taxid_map(const std::string &filepath,
-                                                const graph::AnnotatedDBG *anno_matrix = NULL) {
+                                                const graph::AnnotatedDBG *anno_matrix) {
     std::ifstream f(filepath);
     if (!f.good()) {
         logger->error("Error: Failed to open accession to taxid map table {}. \n"
@@ -92,9 +94,9 @@ void TaxonomyBase::read_accversion_to_taxid_map(const std::string &filepath,
 }
 
 TaxonomyClsAnno::TaxonomyClsAnno(const graph::AnnotatedDBG &anno,
+                                 const std::string &tax_tree_filepath,
                                  double lca_coverage_rate,
                                  double kmers_discovery_rate,
-                                 const std::string &tax_tree_filepath,
                                  const std::string &label_taxid_map_filepath)
              : TaxonomyBase(lca_coverage_rate, kmers_discovery_rate),
                anno_matrix_(&anno) {
@@ -279,26 +281,6 @@ void TaxonomyClsAnno::rmq_preprocessing(const std::vector<TaxId> &tree_lineariza
         }
         delta *= 2;
     }
-}
-
-std::vector<TaxId> TaxonomyClsAnno::get_lca_taxids_for_seq(const std::string_view &sequence, bool reversed) const {
-    throw std::runtime_error("get_lca_taxids_for_seq TaxonomyClsAnno not implemented. Received seq size"
-                             + to_string(sequence.size()) + to_string(reversed));
-}
-
-std::vector<TaxId> TaxonomyClsImportDB::get_lca_taxids_for_seq(const std::string_view &sequence, bool reversed) const {
-    throw std::runtime_error("get_lca_taxids_for_seq TaxonomyClsImportDB not implemented. Received seq size"
-                             + to_string(sequence.size()) + to_string(reversed));
-}
-
-TaxId TaxonomyClsAnno::find_lca(const std::vector<TaxId> &taxids) const {
-    throw std::runtime_error("find_lca TaxonomyClsAnno not implemented. Received taxids size"
-                             + to_string(taxids.size()));
-}
-
-TaxId TaxonomyClsImportDB::find_lca(const std::vector<TaxId> &taxids) const {
-    throw std::runtime_error("find_lca TaxonomyClsImportDB not implemented. Received taxids size"
-                             + to_string(taxids.size()));
 }
 
 } // namespace annot
