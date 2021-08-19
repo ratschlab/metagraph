@@ -373,7 +373,7 @@ uint32_t TaxonomyClsAnno::get_lca_taxids_for_seq_dd(const std::string_view &sequ
         // kmer_val.push_back(i - 1);
         // kmer_idx.push_back(num_kmers - 1);
 
-        if (anno_matrix->get_matrix().get(i, label_encoder.encode(tax_label.second))) {
+        if (anno_matrix->get_matrix().get(i - 1, label_encoder.encode(tax_label.second))) {
             result++;
         }
     });
@@ -424,8 +424,8 @@ uint64_t better_result = 0;
 
 TaxId TaxonomyClsAnno::assign_class(const std::string &sequence,
                                     mtg::graph::DBGBitmap &graph_small,
-                                    annot::RowCompressed<std::string> &anno_small) const {
-//    std::cerr << "\n\n new sequence" << std::endl;
+                                    annot::RowCompressed<std::string> &anno_small,
+                                    const std::string &sequence_label) const {
     std::vector<TaxId> forward_taxids = get_lca_taxids_for_seq(sequence, false, *_anno_matrix->get_graph_ptr(), &_anno_matrix->get_annotation());
 
     std::string reversed_sequence(sequence);
@@ -488,10 +488,13 @@ TaxId TaxonomyClsAnno::assign_class(const std::string &sequence,
     std::vector<pair<TaxId, std::string>> child_taxids;
     std::stack<TaxId> subtree;
     subtree.push(best_lca);
+    tsl::hopscotch_set<TaxId> subtree_set;
+
 
     while(subtree.size()) {
         TaxId act = subtree.top();
         subtree.pop();
+        subtree_set.insert(act);
 
         if (tree.count(act)) {
             for (auto child : tree.at(act)) {
@@ -504,6 +507,9 @@ TaxId TaxonomyClsAnno::assign_class(const std::string &sequence,
             // std::cerr << "\t child taxid=" << act << "\n"; 
         }
     }
+
+
+
     // if (child_taxids.size()) {
     //     std::cerr << "num children " << child_taxids.size() << "\n";
     // }
@@ -523,6 +529,9 @@ TaxId TaxonomyClsAnno::assign_class(const std::string &sequence,
     std::vector<TaxId> best_children;
     uint32_t best_score = 0;
         
+    tsl::hopscotch_map<TaxId, uint64_t> tnode_num_kmers;
+
+
     int cnt_child = 0;
     for (auto child : child_taxids) {
         uint32_t score_fw = get_lca_taxids_for_seq_dd(sequence, graph_small, &anno_small, child);
@@ -532,6 +541,11 @@ TaxId TaxonomyClsAnno::assign_class(const std::string &sequence,
         //     std::cerr << "taxid=" << child.first << " label=" << child.second << "\n";
         //     std::cerr << "fw score=" << score_fw << " " << "bk score=" << score_bk << "\n\n";
         // }
+        if (score_fw > score_bk) {
+            tnode_num_kmers[child.first] = score_fw;
+        } else {
+            tnode_num_kmers[child.first] = score_bk;
+        }
 
         
         if (score_fw > best_score) {
@@ -550,7 +564,21 @@ TaxId TaxonomyClsAnno::assign_class(const std::string &sequence,
         } else if (score_bk == best_score) {
             best_children.push_back(child.first);
         }
+
+        if (tnode_num_kmers[child.first]) {
+            TaxId tnode = child.first;
+            std::cout << tnode << " ";
+            while (tnode != best_lca) {
+                tnode = node_parent.at(tnode);
+                std::cout << tnode << " ";
+            }
+
+            std::cout << "\t score=" << tnode_num_kmers[child.first] << " | best_lca=" << best_lca << "\n";
+        }
     }
+
+
+
     // if (best_children.size()) {
     //     std::cerr << "best_score=" << best_score << " #taxids=" << best_children.size() << "\n\n\n";
     // }
@@ -559,17 +587,59 @@ TaxId TaxonomyClsAnno::assign_class(const std::string &sequence,
     //     exit(1);
 
     if (best_children.size()) {
+        std::cout << "label=" << sequence_label << "\n";
         TaxId new_best_lca = find_lca(best_children);
+        std::cout << "old best = " << best_lca << "; new_best_lca = " << new_best_lca << "\n";
+
+        std::cout << "best_lca score_old=" << node_scores[best_lca] << "\n";
 
         if (new_best_lca != best_lca) {
             better_result ++;
         }
-        // std::cerr << "better_result=" << better_result << "\n\n\n\n";
 
-        // std::cerr << "best_lca=" << best_lca << " new_best_lca=" << new_best_lca << "\n";
+        TaxId tnode = new_best_lca;
+        std::cout << "path from new to old lca: ";
+        std::cout << tnode << " ";
+        
+        while (tnode != best_lca && tnode != root_node) {
+            tnode = node_parent.at(tnode);
+            if (best_lca != new_best_lca) {
+                std::cout << tnode << " ";
+            }
+        }
+
+        if (tnode == root_node && tnode != best_lca) {
+            std::cout << "best_children.size=" << best_children.size() << "\n";
+
+            for (uint i = 0; i < best_children.size(); ++i) {
+                std::cout << best_children[i] << " ";
+            }
+
+            std::cout << "\nerror!!!!\n" << std::endl;
+            exit(1);
+        }
+
+        TaxId expected_taxid = std::stoul(utils::split_string(sequence_label, "|")[1]);
+        tnode = expected_taxid;
+        std::cout << "\nexpected_taxid=" << expected_taxid << "\n";
+
+        if (taxid_to_label.count(expected_taxid)) {
+            std::cout << "existent label -> " << taxid_to_label.at(expected_taxid) << "\n";
+        } else {
+            std::cout << "no label for this taxid\n";
+        }
+
+        std::cout << tnode << " score=" << tnode_num_kmers[tnode] << "\n";
+        while (tnode != best_lca && tnode != root_node) {
+            tnode = node_parent.at(tnode);
+            std::cout << tnode << " score=" << tnode_num_kmers[tnode] << "\n";
+        }
+
+        std::cout << "\n\n\n";
         return new_best_lca;
     }
 
+    std::cout << "\n\n\n";
     return best_lca;
 
 //    std::cerr << "print forward_taxids_small\n";

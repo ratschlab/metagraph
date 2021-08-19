@@ -144,7 +144,8 @@ class TaxonomyClsAnno : public TaxonomyBase {
 
     TaxId assign_class(const std::string &sequence, 
                        mtg::graph::DBGBitmap &graph_small,
-                       annot::RowCompressed<std::string> &anno_small) const;
+                       annot::RowCompressed<std::string> &anno_small,
+                       const std::string &sequence_label) const;
 
   private:
     /**

@@ -149,7 +149,7 @@ int taxonomic_classification(Config *config) {
             callback = [&](const std::vector<std::pair<std::string, std::string> > &seq_batch){
                 thread_pool.enqueue([&](std::vector<std::pair<std::string, std::string> > sequences){
                     for (std::pair<std::string, std::string> &seq : sequences) {
-                        append_new_result(seq.second, taxonomy->assign_class(seq.first, *graph2, *anno_graph2), &pair_label_taxid, &tax_mutex);
+                        append_new_result(seq.second, taxonomy->assign_class(seq.first, *graph2, *anno_graph2, seq.second), &pair_label_taxid, &tax_mutex);
                     }
                 }, std::move(seq_batch));
             };
