@@ -144,8 +144,7 @@ class TaxonomyClsAnno : public TaxonomyBase {
 
     TaxId assign_class(const std::string &sequence, 
                        mtg::graph::DBGBitmap &graph_small,
-                       annot::RowCompressed<std::string> &anno_small,
-                       const std::string &sequence_label) const;
+                       annot::RowCompressed<std::string> &anno_small) const;
 
   private:
     /**
@@ -186,10 +185,10 @@ class TaxonomyClsAnno : public TaxonomyBase {
                                               const annot::MultiLabelEncoded<std::string> *anno_matrix) const;
 
 
-    uint32_t get_lca_taxids_for_seq_dd(const std::string_view &sequence, 
-                                              const mtg::graph::DBGBitmap &graph,
-                                              const annot::RowCompressed<std::string> *anno_matrix,
-                                              const pair<TaxId, std::string> tax_label) const;
+    uint32_t get_sumcol_anno_for_sequence(const std::string_view &sequence, 
+                                          const mtg::graph::DBGBitmap &graph,
+                                          const annot::RowCompressed<std::string> *anno_matrix,
+                                          const pair<TaxId, std::string> tax_label) const;
 
     /**
      * rmq_data[0] contains the taxonomic tree linearization

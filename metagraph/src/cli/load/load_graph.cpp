@@ -48,32 +48,6 @@ std::shared_ptr<DBGBitmap> load_critical_dbg_dd(const std::string &filename) {
         exit(1);
     }
     return load_critical_graph_from_file<DBGBitmap>(filename);
-    // switch (graph_type) {
-    //     case Config::GraphType::SUCCINCT:
-            
-
-        // case Config::GraphType::HASH:
-        //     return load_critical_graph_from_file<DBGHashOrdered>(filename);
-
-        // case Config::GraphType::HASH_PACKED:
-        //     return load_critical_graph_from_file<DBGHashOrdered>(filename);
-
-        // case Config::GraphType::HASH_STR:
-        //     return load_critical_graph_from_file<DBGHashString>(filename);
-
-        // case Config::GraphType::HASH_FAST:
-        //     return load_critical_graph_from_file<DBGHashFast>(filename);
-
-        // case Config::GraphType::BITMAP:
-        //     return load_critical_graph_from_file<graph::DBGBitmap>(filename);
-
-    //     case Config::GraphType::INVALID:
-    //         logger->error("Cannot load graph from file '{}', needs a valid file extension",
-    //                       filename);
-    //         exit(1);
-    // }
-    // assert(false);
-    // exit(1);
 }
 
 std::shared_ptr<DeBruijnGraph> load_critical_dbg(const std::string &filename) {

@@ -90,14 +90,10 @@ int taxonomic_classification(Config *config) {
 
     timer.reset();
     logger->trace("Graph and Annotation loading...");
-    // graph = load_critical_dbg(config->infbase);
     anno_graph = initialize_annotated_dbg(graph, *config);
     logger->trace("Finished graph annotation loading after {} sec.", timer.elapsed());
 
-
     std::shared_ptr<mtg::graph::DBGBitmap> graph2 = load_critical_dbg_dd(config->infbase2);
-//    config->infbase = config->infbase2;
-//    config->infbase_annotators = config->infbase_annotators2;
 
     uint64_t max_index_anno2 = graph2->max_index();
 
@@ -117,13 +113,6 @@ int taxonomic_classification(Config *config) {
                           "please use '-a' flag for the annotation matrix filepath.");
             std::exit(1);
         }
-        std::cerr << "\n\nbefore load anno_matrix2\n" << std::endl;
-
-        
-        // std::shared_ptr<mtg::graph::DBGSuccinct> graph2 = std::make_shared<mtg::graph::DBGSuccinct>(graph2_dbg);
-
-
-        std::cerr << "\n\nafter load anno_matrix2\n" << std::endl;
 
         timer.reset();
         logger->trace("Constructing TaxonomyClsAnno...");
@@ -149,7 +138,7 @@ int taxonomic_classification(Config *config) {
             callback = [&](const std::vector<std::pair<std::string, std::string> > &seq_batch){
                 thread_pool.enqueue([&](std::vector<std::pair<std::string, std::string> > sequences){
                     for (std::pair<std::string, std::string> &seq : sequences) {
-                        append_new_result(seq.second, taxonomy->assign_class(seq.first, *graph2, *anno_graph2, seq.second), &pair_label_taxid, &tax_mutex);
+                        append_new_result(seq.second, taxonomy->assign_class(seq.first, *graph2, *anno_graph2), &pair_label_taxid, &tax_mutex);
                     }
                 }, std::move(seq_batch));
             };
