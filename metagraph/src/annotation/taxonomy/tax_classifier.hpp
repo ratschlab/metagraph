@@ -31,8 +31,6 @@ class TaxonomyBase {
   protected:
     std::string get_accession_version_from_label(const std::string &label) const;
 
-    bool get_taxid_from_label(const std::string &label, TaxId *taxid) const;
-
     /** Reads the accession version to taxid lookup table.
      * If 'anno_matrix' is not NULL, only the labels that exist in the given annotation matrix will be stored.
      * If 'anno_matrix' is NULL, the entire content of 'filepath' will be read and stored.
@@ -45,7 +43,7 @@ class TaxonomyBase {
     LabelType label_type_;
 
     /**
-     * node_depth returns the depth for each node in the taxonomic tree.
+     * node_depth_ returns the depth for each node in the taxonomic tree.
      * The root is the unique node with maximal depth and all the leaves have depth equal to 1.
      */
     tsl::hopscotch_map<TaxId, uint32_t> node_depth_;
@@ -53,7 +51,7 @@ class TaxonomyBase {
     TaxId root_node_;
 
     /**
-     *  node_parent stores a taxonomic tree representation as a taxid to taxid parent list.
+     *  node_parent_ stores a taxonomic tree representation as a taxid to taxid parent list.
      */
     tsl::hopscotch_map<TaxId, TaxId> node_parent_;
 
@@ -114,15 +112,15 @@ class TaxonomyClsAnno : public TaxonomyBase {
                         std::vector<TaxId> *tree_linearization);
 
     /**
-     * rmq_data[0] contains the taxonomic tree linearization
+     * rmq_data_[0] contains the taxonomic tree linearization
      *          (e.g. for root 1 and edges={1-2; 1-3}, the linearization is "1 2 1 3 1").
-     * rmq_data[l][x] returns the node with the maximal depth among positions [x, x+2^l-1] in the linearization
-     *          (e.g. rmq_data[3][6] return the node with max depth in [6, 13]).
+     * rmq_data_[l][x] returns the node with the maximal depth among positions [x, x+2^l-1] in the linearization
+     *          (e.g. rmq_data_[3][6] return the node with max depth in [6, 13]).
      */
     std::vector<std::vector<TaxId>> rmq_data_;
 
     /**
-     * node_to_linearization_idx[node] returns the index of the first occurrence of node
+     * node_to_linearization_idx_[node] returns the index of the first occurrence of node
      * in the tree linearization order. This array will be further used inside a RMQ query.
      */
     tsl::hopscotch_map<TaxId, uint32_t> node_to_linearization_idx_;

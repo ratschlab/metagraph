@@ -13,25 +13,6 @@ namespace annot {
 
 using mtg::common::logger;
 
-bool TaxonomyBase::get_taxid_from_label(const std::string &label, TaxId *taxid) const {
-    switch (label_type_) {
-        case TAXID :
-            *taxid = std::stoul(utils::split_string(label, "|")[1]);
-            return true;
-        case GEN_BANK:
-            std::string acc_version = get_accession_version_from_label(label);
-            auto it = accversion_to_taxid_map_.find(acc_version);
-            if (it == accversion_to_taxid_map_.end()) {
-                return false;
-            }
-            *taxid = it->second;
-            return true;
-    }
-
-    logger->error("Error: Could not get the taxid for label {}", label);
-    exit(1);
-}
-
 std::string TaxonomyBase::get_accession_version_from_label(const std::string &label) const {
     switch (label_type_) {
         case TAXID:
