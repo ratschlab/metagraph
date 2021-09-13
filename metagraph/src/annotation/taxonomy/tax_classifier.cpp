@@ -8,11 +8,29 @@
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/utils/string_utils.hpp"
 #include "common/logger.hpp"
+#include "graph/representation/base/sequence_graph.hpp"
 
 namespace mtg {
 namespace annot {
 
 using mtg::common::logger;
+
+bool TaxonomyBase::get_taxid_from_label(const std::string &label, TaxId *taxid) const {
+    if (label_type_ == TAXID) {
+        *taxid = std::stoul(utils::split_string(label, "|")[1]);
+        return true;
+    } else if (label_type_ == GEN_BANK) {
+        auto it_acc_version_taxid = accversion_to_taxid_map_.find(get_accession_version_from_label(label));
+        if (it_acc_version_taxid == accversion_to_taxid_map_.end()) {
+            return false;
+        }
+        *taxid = it_acc_version_taxid->second;
+        return true;
+    }
+
+    logger->error("Error: Could not get the taxid for label {}", label);
+    exit(1);
+}
 
 std::string TaxonomyBase::get_accession_version_from_label(const std::string &label) const {
     switch (label_type_) {
@@ -131,49 +149,6 @@ void TaxonomyClsAnno::read_tree(const std::string &tax_tree_filepath, ChildrenLi
     std::ifstream f(tax_tree_filepath);
     if (!f.good()) {
         logger->error("Error: Failed to open Taxonomic Tree file {}", tax_tree_filepath);
-TaxonomyClsAnno::TaxonomyClsAnno(const graph::AnnotatedDBG &anno,
-                                 const double lca_coverage_rate,
-                                 const double kmers_discovery_rate,
-                                 const std::string &tax_tree_filepath,
-                                 const std::string &label_taxid_map_filepath)
-             : TaxonomyBase(lca_coverage_rate, kmers_discovery_rate),
-               _anno_matrix(&anno) {
-    if (!std::filesystem::exists(tax_tree_filepath)) {
-        logger->error("Can't open taxonomic tree file {}", tax_tree_filepath);
-        exit(1);
-    }
-
-    bool require_accversion_to_taxid_map = assign_label_type(_anno_matrix->get_annotation().get_all_labels()[0]);
-
-    Timer timer;
-    if (require_accversion_to_taxid_map) {
-        logger->trace("Parsing label_taxid_map file...");
-        read_accversion_to_taxid_map(label_taxid_map_filepath, _anno_matrix);
-        logger->trace("Finished label_taxid_map file in {} sec", timer.elapsed());
-    }
-
-    timer.reset();
-    logger->trace("Parsing taxonomic tree...");
-    ChildrenList tree;
-    read_tree(tax_tree_filepath, &tree);
-    logger->trace("Finished taxonomic tree read in {} sec.", timer.elapsed());
-
-    timer.reset();
-    logger->trace("Calculating tree statistics...");
-    std::vector<TaxId> tree_linearization;
-    dfs_statistics(root_node, tree, &tree_linearization);
-    logger->trace("Finished tree statistics calculation in {} sec.", timer.elapsed());
-
-    timer.reset();
-    logger->trace("Starting rmq preprocessing...");
-    rmq_preprocessing(tree_linearization);
-    logger->trace("Finished rmq preprocessing in {} sec.", timer.elapsed());
-}
-
-void TaxonomyClsAnno::read_tree(const std::string &tax_tree_filepath, ChildrenList *tree) {
-    std::ifstream f(tax_tree_filepath);
-    if (!f.good()) {
-        logger->error("Failed to open Taxonomic Tree file {}", tax_tree_filepath);
         exit(1);
     }
 
@@ -219,7 +194,7 @@ void TaxonomyClsAnno::read_tree(const std::string &tax_tree_filepath, ChildrenLi
     }
     assert(relevant_taxids.size());
 
-    uint64_t num_taxid_failed = 0; // num_taxid_failed is used for logging only.
+    uint32_t num_taxid_failed = 0; // num_taxid_failed is used for logging only.
     for (uint32_t i = 0; i < relevant_taxids.size(); ++i) {
         TaxId taxid = relevant_taxids[i];
         auto it_taxid_parent = node_parent_.find(taxid);
@@ -309,49 +284,47 @@ void TaxonomyClsAnno::rmq_preprocessing(const std::vector<TaxId> &tree_lineariza
 }
 
 std::vector<TaxId> TaxonomyClsAnno::get_lca_taxids_for_seq(const std::string_view &sequence, bool reversed) const {
-    // num_kmers represents the total number of kmers parsed until the current time.
+    // num_kmers represents the total number of kmers.
     uint32_t num_kmers = 0;
 
     // 'kmer_idx' and 'kmer_val' are storing the indexes and values of all the nonzero kmers in the given read.
-    // The list of kmers, 'kmer_val', will be further sent to "matrix.getrows()" method;
-    // The list of indexes, 'kmer_idx', will be used to associate one row from "matrix.getrows()" with the corresponding kmer index.
+    // The list of kmers (kmer_val) will be further sent to "matrix.getrows()" method;
+    // The list of indexes (kmer_idx) will be used to link each row from "matrix.getrows()" to the corresponding kmer index.
     std::vector<uint32_t> kmer_idx;
     std::vector<node_index> kmer_val;
 
     if (sequence.size() >= std::numeric_limits<uint32_t>::max()) {
-        logger->error("The given sequence contains more than 2^32 bp.");
+        logger->error("Error: The given sequence contains more than 2^32 bp.");
         exit(1);
     }
 
-    auto anno_graph = _anno_matrix->get_graph_ptr();
+    std::shared_ptr<const graph::SequenceGraph> anno_graph = anno_matrix_->get_graph_ptr();
     anno_graph->map_to_nodes(sequence, [&](node_index i) {
         num_kmers++;
-        if (i <= 0 || i >= anno_graph->max_index()) {
+        if (!i || i >= anno_graph->max_index())
             return;
-        }
         kmer_val.push_back(i - 1);
         kmer_idx.push_back(num_kmers - 1);
     });
 
-    // Compute the LCA normalized taxid for each nonzero kmer in the given read.
-    const auto unique_matrix_rows = _anno_matrix->get_annotation().get_matrix().get_rows(kmer_val);
+    // Compute the LCA taxid for each nonzero kmer in the given read.
+    const auto unique_matrix_rows = anno_matrix_->get_annotation().get_matrix().get_rows(kmer_val);
     //TODO make sure that this function works even if we have duplications in 'rows'. Then, delete this error catch.
     if (kmer_val.size() != unique_matrix_rows.size()) {
-        throw std::runtime_error("Internal error: The tool doesn't know how to treat the case of "
-                                 "kmer duplications in the same read. Please contact the maintainers.");
+        throw std::runtime_error("Error: The current implementation doesn't work in case of multiple occurrences"
+                                 " of the same kmer in one read.");
     }
 
     if (unique_matrix_rows.size() >= std::numeric_limits<uint32_t>::max()) {
-        throw std::runtime_error("Internal error: There must be less than 2^32 unique rows. "
+        throw std::runtime_error("Error: There must be less than 2^32 unique rows in one anno matrix query. "
                                  "Please reduce the query batch size.");
     }
-
-    const auto &label_encoder = _anno_matrix->get_annotation().get_label_encoder();
+    const auto &label_encoder = anno_matrix_->get_annotation().get_label_encoder();
 
     TaxId taxid;
-    uint64_t cnt_kmer_idx = 0;
+    uint32_t curr_kmer_identifier = 0;
     std::vector<TaxId> curr_kmer_taxids;
-    std::vector<TaxId> seq_taxids(num_kmers);
+    std::vector<TaxId> lca_taxids(num_kmers);
 
     for (auto row : unique_matrix_rows) {
         for (auto cell : row) {
@@ -361,16 +334,16 @@ std::vector<TaxId> TaxonomyClsAnno::get_lca_taxids_for_seq(const std::string_vie
         }
         if (curr_kmer_taxids.size() != 0) {
             if (not reversed) {
-                seq_taxids[kmer_idx[cnt_kmer_idx]] = find_lca(curr_kmer_taxids);
+                lca_taxids[kmer_idx[curr_kmer_identifier]] = find_lca(curr_kmer_taxids);
             } else {
-                seq_taxids[num_kmers - 1 - kmer_idx[cnt_kmer_idx]] = find_lca(curr_kmer_taxids);
+                lca_taxids[num_kmers - 1 - kmer_idx[curr_kmer_identifier]] = find_lca(curr_kmer_taxids);
             }
         }
-        cnt_kmer_idx++;
+        curr_kmer_identifier++;
         curr_kmer_taxids.clear();
     }
 
-    return seq_taxids;
+    return lca_taxids;
 }
 
 TaxId TaxonomyBase::assign_class(const std::string &sequence) const {
@@ -380,13 +353,15 @@ TaxId TaxonomyBase::assign_class(const std::string &sequence) const {
     reverse_complement(reversed_sequence.begin(), reversed_sequence.end());
     std::vector<TaxId> backward_taxids = get_lca_taxids_for_seq(reversed_sequence, true);
 
-    tsl::hopscotch_map<TaxId, uint64_t> num_kmers_per_node;
+    tsl::hopscotch_map<TaxId, uint32_t> num_kmers_per_taxid;
 
-    // num_discovered_kmers represents the number of nonzero kmers according to at least of the forward and reversed read options.
+    // num_discovered_kmers represents the number of nonzero kmers according to the forward and/or reversed read.
     uint32_t num_discovered_kmers = 0;
-    const uint32_t num_total_kmers = forward_taxids.size();
+    // num_total_kmers is equal to the total number of zero/nonzero kmers in the read: size_read - k + 1
+    uint32_t num_total_kmers = forward_taxids.size();
 
-    // Find the LCA taxid for each kmer without any dependency on the orientation of the read.
+    // Find the LCA taxid for each kmer without considering the orientation of the read.
+    // In case that both forward and reversed read have a nonzero kmer, then assign the LCA of those 2 kmers.
     for (uint32_t i = 0; i < num_total_kmers; ++i) {
         if (forward_taxids[i] == 0 && backward_taxids[i] == 0) {
             continue;
@@ -410,98 +385,97 @@ TaxId TaxonomyBase::assign_class(const std::string &sequence) const {
         }
         if (curr_taxid) {
             num_discovered_kmers ++;
-            num_kmers_per_node[curr_taxid]++;
+            num_kmers_per_taxid[curr_taxid]++;
         }
     }
 
-    if (num_discovered_kmers <= _kmers_discovery_rate * num_total_kmers) {
+    if (num_discovered_kmers <= kmers_discovery_rate_ * num_total_kmers) {
         return 0; // 0 is a wildcard for not enough discovered kmers.
     }
 
-    tsl::hopscotch_set<TaxId> nodes_already_propagated;
-    tsl::hopscotch_map<TaxId, uint64_t> node_scores;
+    tsl::hopscotch_set<TaxId> taxid_already_propagated;
+    tsl::hopscotch_map<TaxId, uint32_t> taxid_scores;
 
-    uint32_t desired_number_kmers = num_discovered_kmers * _lca_coverage_rate;
-    TaxId best_lca = root_node;
+    uint32_t min_required_kmers = num_discovered_kmers * lca_coverage_rate_;
+    TaxId best_lca = root_node_;
     uint32_t best_lca_dist_to_root = 1;
 
     // Update the nodes' score by iterating through all the nodes with nonzero kmers.
-    for (const pair<TaxId, uint64_t> &node_pair : num_kmers_per_node) {
-        TaxId start_node = node_pair.first;
-        this->update_scores_and_lca(start_node, num_kmers_per_node, desired_number_kmers, &node_scores,
-                                    &nodes_already_propagated, &best_lca, &best_lca_dist_to_root);
+    for (const auto &[taxid, _] : num_kmers_per_taxid) {
+        this->update_scores_and_lca(taxid, num_kmers_per_taxid, min_required_kmers, &taxid_scores,
+                                    &taxid_already_propagated, &best_lca, &best_lca_dist_to_root);
     }
     return best_lca;
 }
 
-
-void TaxonomyBase::update_scores_and_lca(const TaxId start_node,
-                                         const tsl::hopscotch_map<TaxId, uint64_t> &num_kmers_per_node,
-                                         const uint64_t desired_number_kmers,
-                                         tsl::hopscotch_map<TaxId, uint64_t> *node_scores,
-                                         tsl::hopscotch_set<TaxId> *nodes_already_propagated,
+void TaxonomyBase::update_scores_and_lca(TaxId start_taxid,
+                                         const tsl::hopscotch_map<TaxId, uint32_t> &num_kmers_per_taxid,
+                                         uint32_t min_required_kmers,
+                                         tsl::hopscotch_map<TaxId, uint32_t> *taxid_scores,
+                                         tsl::hopscotch_set<TaxId> *taxid_already_propagated,
                                          TaxId *best_lca,
                                          uint32_t *best_lca_dist_to_root) const {
-    if (nodes_already_propagated->count(start_node)) {
+    if (taxid_already_propagated->count(start_taxid)) {
         return;
     }
-    uint64_t score_from_processed_parents = 0;
-    uint64_t score_from_unprocessed_parents = num_kmers_per_node.at(start_node);
+    uint32_t score_from_processed_parents = 0;
+    uint32_t score_from_unprocessed_parents = num_kmers_per_taxid.at(start_taxid);
 
-    // processed_parents represents the set of nodes on the path start_node->root that have already been processed in the previous iterations.
+    // processed_parents represents the set of nodes on the path start_taxid->root that have already been processed in the previous iterations.
     std::vector<TaxId> processed_parents;
     std::vector<TaxId> unprocessed_parents;
 
-    TaxId act_node = start_node;
+    TaxId act_node = start_taxid;
     unprocessed_parents.push_back(act_node);
 
-    while (act_node != root_node) {
-        act_node = node_parent.at(act_node);
-        if (!nodes_already_propagated->count(act_node)) {
-            if (num_kmers_per_node.count(act_node)) {
-                score_from_unprocessed_parents += num_kmers_per_node.at(act_node);
+    while (act_node != root_node_) {
+        act_node = node_parent_.at(act_node);
+        auto num_kmers_act_node_it = num_kmers_per_taxid.find(act_node);
+        if (!taxid_already_propagated->count(act_node)) {
+            if (num_kmers_act_node_it != num_kmers_per_taxid.end()) {
+                score_from_unprocessed_parents += num_kmers_act_node_it->second;
             }
             unprocessed_parents.push_back(act_node);
         } else {
-            if (num_kmers_per_node.count(act_node)) {
-                score_from_processed_parents += num_kmers_per_node.at(act_node);
+            if (num_kmers_act_node_it != num_kmers_per_taxid.end()) {
+                score_from_processed_parents += num_kmers_act_node_it->second;
             }
             processed_parents.push_back(act_node);
         }
     }
     // The score of all the nodes in 'processed_parents' will be updated with 'score_from_unprocessed_parents' only.
     // The nodes in 'unprocessed_parents' will be updated with the sum 'score_from_processed_parents + score_from_unprocessed_parents'.
-    for (uint64_t i = 0; i < unprocessed_parents.size(); ++i) {
+    for (uint32_t i = 0; i < unprocessed_parents.size(); ++i) {
         TaxId &act_node = unprocessed_parents[i];
-        (*node_scores)[act_node] =
+        (*taxid_scores)[act_node] =
                 score_from_processed_parents + score_from_unprocessed_parents;
-        nodes_already_propagated->insert(act_node);
+        taxid_already_propagated->insert(act_node);
 
-        uint64_t act_dist_to_root =
+        uint32_t act_dist_to_root =
                 processed_parents.size() + unprocessed_parents.size() - i;
 
         // Test if the current node's score would be a better LCA result.
-        if ((*node_scores)[act_node] >= desired_number_kmers
+        if ((*taxid_scores)[act_node] >= min_required_kmers
             && (act_dist_to_root > *best_lca_dist_to_root
                 || (act_dist_to_root == *best_lca_dist_to_root
-                    && (*node_scores)[act_node] > (*node_scores)[*best_lca])
-                )
-            ) {
+                    && (*taxid_scores)[act_node] > (*taxid_scores)[*best_lca])
+            )
+                ) {
             *best_lca = act_node;
             *best_lca_dist_to_root = act_dist_to_root;
         }
     }
-    for (uint64_t i = 0; i < processed_parents.size(); ++i) {
+    for (uint32_t i = 0; i < processed_parents.size(); ++i) {
         TaxId &act_node = processed_parents[i];
-        (*node_scores)[act_node] += score_from_unprocessed_parents;
+        (*taxid_scores)[act_node] += score_from_unprocessed_parents;
 
-        uint64_t act_dist_to_root = processed_parents.size() - i;
-        if ((*node_scores)[act_node] >= desired_number_kmers
+        uint32_t act_dist_to_root = processed_parents.size() - i;
+        if ((*taxid_scores)[act_node] >= min_required_kmers
             && (act_dist_to_root > *best_lca_dist_to_root
                 || (act_dist_to_root == *best_lca_dist_to_root
-                    && (*node_scores)[act_node] > (*node_scores)[*best_lca])
-                )
-            ) {
+                    && (*taxid_scores)[act_node] > (*taxid_scores)[*best_lca])
+            )
+                ) {
             *best_lca = act_node;
             *best_lca_dist_to_root = act_dist_to_root;
         }
@@ -510,47 +484,62 @@ void TaxonomyBase::update_scores_and_lca(const TaxId start_node,
 
 TaxId TaxonomyClsAnno::find_lca(const std::vector<TaxId> &taxids) const {
     if (taxids.empty()) {
-        logger->error("Internal error: Can't find LCA for an empty set of normalized taxids.");
+        logger->error("Error: Can't find LCA for an empty set of normalized taxids.");
         exit(1);
     }
-    uint64_t left_idx = node_to_linearization_idx.at(taxids[0]);
-    uint64_t right_idx = node_to_linearization_idx.at(taxids[0]);
+    uint32_t left_idx = node_to_linearization_idx_.at(taxids[0]);
+    uint32_t right_idx = node_to_linearization_idx_.at(taxids[0]);
 
     for (const TaxId &taxid : taxids) {
-        if (node_to_linearization_idx.at(taxid) < left_idx) {
-            left_idx = node_to_linearization_idx.at(taxid);
+        uint32_t curr_idx = node_to_linearization_idx_.at(taxid);
+        if (curr_idx < left_idx) {
+            left_idx = curr_idx;
         }
-        if (node_to_linearization_idx.at(taxid) > right_idx) {
-            right_idx = node_to_linearization_idx.at(taxid);
+        if (curr_idx > right_idx) {
+            right_idx = curr_idx;
         }
     }
     // The node with maximum node_depth in 'linearization[left_idx : right_idx+1]' is the LCA of the given set.
 
     // Find the maximum node_depth between the 2 overlapping intervals of size 2^log_dist.
     uint32_t log_dist = sdsl::bits::hi(right_idx - left_idx);
-    if (rmq_data.size() <= log_dist) {
-        logger->error("Internal error: the RMQ was not precomputed before the LCA queries.");
+    if (rmq_data_.size() <= log_dist) {
+        logger->error("Error: the RMQ was not precomputed before the LCA queries.");
         exit(1);
     }
 
-    uint32_t left_lca = rmq_data[log_dist][left_idx];
-    uint32_t right_lca = rmq_data[log_dist][right_idx - (1 << log_dist) + 1];
+    uint32_t left_lca = rmq_data_[log_dist][left_idx];
+    uint32_t right_lca = rmq_data_[log_dist][right_idx - (1 << log_dist) + 1];
 
-    if (node_depth.at(left_lca) > node_depth.at(right_lca)) {
-        return left_lca;
+    return node_depth_.at(left_lca) > node_depth_.at(right_lca) ? left_lca : right_lca;
+}
+
+TaxId TaxonomyClsAnno::assign_class_toplabels(const std::string &sequence, double label_fraction) const {
+    // Get all the labels with a frequency higher than 'label_fraction' among the kmers in the forward read.
+    std::vector<std::string> labels_discovered = anno_matrix_->get_labels(sequence, label_fraction);
+
+    std::string reversed_sequence = sequence;
+    reverse_complement(reversed_sequence.begin(), reversed_sequence.end());
+    // Get all the labels with a frequency higher than 'label_fraction' among the kmers in the reversed read.
+    std::vector<std::string> labels_discovered_rev = anno_matrix_->get_labels(reversed_sequence, label_fraction);
+
+    // Usually, only one of the two sets ('labels_discovered', 'labels_discovered_rev') will be nonempty.
+
+    std::vector<TaxId> curr_taxids;
+    for (uint32_t i = 0; i < labels_discovered.size(); ++i) {
+        TaxId act;
+        if(get_taxid_from_label(labels_discovered[i], &act)) {
+            curr_taxids.push_back(act);
+        }
     }
-    return right_lca;
-}
-
-std::vector<TaxId> TaxonomyClsImportDB::get_lca_taxids_for_seq(const std::string_view &sequence, bool reversed) const {
-    cerr << "Assign class not implemented reversed = " << reversed << "\n";
-    throw std::runtime_error("get_lca_taxids_for_seq TaxonomyClsImportDB not implemented. Received seq size"
-                             + to_string(sequence.size()));
-}
-
-TaxId TaxonomyClsImportDB::find_lca(const std::vector<TaxId> &taxids) const {
-    throw std::runtime_error("find_lca TaxonomyClsImportDB not implemented. Received taxids size"
-                             + to_string(taxids.size()));
+    for (uint32_t i = 0; i < labels_discovered_rev.size(); ++i) {
+        TaxId act;
+        if(get_taxid_from_label(labels_discovered_rev[i], &act)) {
+            curr_taxids.push_back(act);
+        }
+    }
+    // Wildcard 0 for not being able to assign a taxid.
+    return curr_taxids.size() == 0 ? 0 : find_lca(curr_taxids);
 }
 
 } // namespace annot

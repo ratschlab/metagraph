@@ -2,6 +2,7 @@
 *.fai
 !metagraph/tests/data/*.fa
 !metagraph/tests/data/*.fai
+!metagraph/tests/data/taxonomic_data/*.fa
 metagraph/tests/data/*dump_test*
 projects/*/temp
 visualization/geolocation/data/*
