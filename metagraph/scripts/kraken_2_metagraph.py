@@ -142,6 +142,7 @@ def main(argv: [str]):
 
         if dist_to_root > 15:
             print("bigger dist to root", dist_to_root)
+            return 1
 
 
         curr_taxid = metagraph_results[label]

@@ -500,6 +500,9 @@ TaxId TaxonomyClsAnno::assign_class(const std::string &sequence,
     // Exit(1) if best_lca is not an ascendant for new_best_lca.
     TaxId tnode = best2_lca;
     while (tnode != best_lca && tnode != root_node) {
+        if (not node_parent.count(tnode)) {
+            return best_lca;
+        }
         tnode = node_parent.at(tnode);
     }
     if (tnode == root_node && tnode != best_lca) {
@@ -527,7 +530,13 @@ void TaxonomyBase::update_scores_and_lca(const TaxId start_node,
         return;
     }
     uint64_t score_from_processed_parents = 0;
-    uint64_t score_from_unprocessed_parents = num_kmers_per_node.at(start_node);
+    uint64_t score_from_unprocessed_parents;
+    if (num_kmers_per_node.count(start_node)) {
+        score_from_unprocessed_parents = num_kmers_per_node.at(start_node);
+    } else {
+        score_from_unprocessed_parents = 0;
+    }
+    
 
     // processed_parents represents the set of nodes on the path start_node->root that have already been processed in the previous iterations.
     std::vector<TaxId> processed_parents;
@@ -537,6 +546,10 @@ void TaxonomyBase::update_scores_and_lca(const TaxId start_node,
     unprocessed_parents.push_back(act_node);
 
     while (act_node != root_node) {
+        if (!node_parent.count(act_node)) {
+            return;
+        }
+
         act_node = node_parent.at(act_node);
         if (!nodes_already_propagated->count(act_node)) {
             if (num_kmers_per_node.count(act_node)) {
@@ -594,10 +607,14 @@ TaxId TaxonomyClsAnno::find_lca(const std::vector<TaxId> &taxids) const {
         logger->error("Internal error: Can't find LCA for an empty set of normalized taxids.");
         exit(1);
     }
-    uint64_t left_idx = node_to_linearization_idx.at(taxids[0]);
-    uint64_t right_idx = node_to_linearization_idx.at(taxids[0]);
+
+    uint64_t left_idx = 1000000000;
+    uint64_t right_idx = 0;
 
     for (const TaxId &taxid : taxids) {
+        if (not node_to_linearization_idx.count(taxid)) {
+            continue;
+        }
         if (node_to_linearization_idx.at(taxid) < left_idx) {
             left_idx = node_to_linearization_idx.at(taxid);
         }
@@ -605,6 +622,12 @@ TaxId TaxonomyClsAnno::find_lca(const std::vector<TaxId> &taxids) const {
             right_idx = node_to_linearization_idx.at(taxid);
         }
     }
+
+    if (right_idx == 0) {
+        return root_node;
+    }
+
+    assert(left_idx < 1000000000);
     // The node with maximum node_depth in 'linearization[left_idx : right_idx+1]' is the LCA of the given set.
 
     // Find the maximum node_depth between the 2 overlapping intervals of size 2^log_dist.
