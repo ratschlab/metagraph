@@ -1191,7 +1191,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
         } break;
         case QUERY: {
             fprintf(stderr, "Usage: %s query -i <GRAPH> -a <ANNOTATION> [options] FILE1 [[FILE2] ...]\n"
-                            "\tEach input file is given in FASTA or FASTQ format.\n\n", prog_name.c_str());
+                            "\tEach input file is given in FASTA or FASTQ format.\n"
+                            "\tOutput format: tsv with rows '<query id>\t<query name>\t<results ...>'.\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for query:\n");
 #if ! _PROTEIN_GRAPH
