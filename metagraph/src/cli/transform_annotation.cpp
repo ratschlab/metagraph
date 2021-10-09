@@ -312,7 +312,14 @@ load_coords(Annotator&& anno, const std::vector<std::string> &files) {
         size_t j = 0;
         try {
             TupleCSC::load_tuples(in, label_encoder.size(), [&](auto&& delims, auto&& values) {
-                size_t idx = anno.get_label_encoder().encode(label_encoder.decode(j));
+                size_t idx;
+                try {
+                    idx = anno.get_label_encoder().encode(label_encoder.decode(j));
+                } catch (...) {
+                    logger->error("Label '{}' from {} is missing in the target annotator",
+                                  label_encoder.decode(j), files[i]);
+                    exit(1);
+                }
                 if (delimiters[idx].size()) {
                     logger->error("Merging coordinate annotations with overlapping"
                                   " labels is not implemented");
@@ -322,6 +329,9 @@ load_coords(Annotator&& anno, const std::vector<std::string> &files) {
                 column_values[idx] = std::move(values);
                 j++;
             });
+        } catch (const std::exception &e) {
+            logger->error("Couldn't load coordinates from {}\nException: {}", coords_fname, e.what());
+            exit(1);
         } catch (...) {
             logger->error("Couldn't load coordinates from {}", coords_fname);
             exit(1);
