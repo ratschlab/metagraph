@@ -543,7 +543,7 @@ Config::Config(int argc, char *argv[]) {
 
     if (identity == ANNOTATE
             && !filename_anno && !annotate_sequence_headers && !anno_labels.size()) {
-        std::cerr << "Error: No annotation to add" << std::endl;
+        std::cerr << "Error: no annotation labels passed (see flags --anno-filename --anno-header --anno-label)" << std::endl;
         print_usage_and_exit = true;
     }
 
