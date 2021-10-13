@@ -18,7 +18,7 @@ using mtg::common::logger;
 
 BRWTBottomUpBuilder::Partitioner
 BRWTBottomUpBuilder::get_basic_partitioner(size_t arity) {
-    assert(arity > 1u);
+    assert(arity > 0u);
 
     return [arity](const VectorPtrs &vectors) {
         if (!vectors.size())
@@ -201,7 +201,7 @@ BRWT BRWTBottomUpBuilder::build(
         size_t num_threads) {
 
     if (!linkage.size()) {
-        logger->trace("Passed no linkage rules. Assembling Multi-BRWT without internal nodes...");
+        logger->warn("Passed no linkage rules. Assembling Multi-BRWT without internal nodes...");
 
         std::vector<std::unique_ptr<bit_vector>> columns;
 

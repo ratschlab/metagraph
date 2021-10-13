@@ -9,6 +9,7 @@ import os
 import numpy as np
 from helpers import get_test_class_name
 from base import TestingBase, METAGRAPH, TEST_DATA_DIR, graph_file_extension
+import hashlib
 
 
 """Test graph construction"""
@@ -534,6 +535,123 @@ class TestQuery(TestingBase):
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 687712)
+
+
+@parameterized_class(('graph_repr', 'anno_repr'),
+    input_values=product(
+        [repr for repr in GRAPH_TYPES if not (repr == 'bitmap' and PROTEIN_MODE)],
+        ANNO_TYPES + ['row_diff_brwt_separate',
+                      'row_diff_brwt_no_fork_opt',
+                      'row_diff_brwt_no_anchor_opt']
+    ) + product(['succinct_bloom', 'succinct_mask'], ['flat']),
+    class_name_func=get_test_class_name
+)
+class TestQuery1Column(TestingBase):
+    @classmethod
+    def setUpClass(cls):
+        cls.tempdir = TemporaryDirectory()
+
+        cls.with_bloom = False
+        if cls.graph_repr == 'succinct_bloom':
+            cls.graph_repr = 'succinct'
+            cls.with_bloom = True
+
+        cls.mask_dummy = False
+        if cls.graph_repr == 'succinct_mask':
+            cls.graph_repr = 'succinct'
+            cls.mask_dummy = True
+
+        construct_command = '{exe} build {mask_dummy} -p {num_threads} \
+                --graph {repr} -k 20 -o {outfile} {input}'.format(
+            exe=METAGRAPH,
+            mask_dummy='--mask-dummy' if cls.mask_dummy else '',
+            num_threads=NUM_THREADS,
+            repr=cls.graph_repr,
+            outfile=cls.tempdir.name + '/graph',
+            input=TEST_DATA_DIR + '/transcripts_100.fa'
+        )
+
+        res = subprocess.run([construct_command], shell=True)
+        assert(res.returncode == 0)
+
+        stats_command = '{exe} stats {graph}'.format(
+            exe=METAGRAPH,
+            graph=cls.tempdir.name + '/graph' + graph_file_extension[cls.graph_repr],
+        )
+        res = subprocess.run(stats_command.split(), stdout=PIPE)
+        assert(res.returncode == 0)
+        params_str = res.stdout.decode().split('\n')[2:]
+        assert('k: 20' == params_str[0])
+        if cls.graph_repr != 'succinct' or cls.mask_dummy:
+            assert('nodes (k): 46960' == params_str[1])
+        assert('mode: basic' == params_str[2])
+
+        if cls.with_bloom:
+            convert_command = '{exe} transform -o {outfile} --initialize-bloom {bloom_param} {input}'.format(
+                exe=METAGRAPH,
+                outfile=cls.tempdir.name + '/graph',
+                bloom_param='--bloom-fpp 0.1',
+                input=cls.tempdir.name + '/graph' + graph_file_extension[cls.graph_repr],
+            )
+            res = subprocess.run([convert_command], shell=True)
+            assert(res.returncode == 0)
+
+        def check_suffix(anno_repr, suffix):
+            match = anno_repr.endswith(suffix)
+            if match:
+                anno_repr = anno_repr[:-len(suffix)]
+            return anno_repr, match
+
+        cls.anno_repr, separate = check_suffix(cls.anno_repr, '_separate')
+        cls.anno_repr, no_fork_opt = check_suffix(cls.anno_repr, '_no_fork_opt')
+        cls.anno_repr, no_anchor_opt = check_suffix(cls.anno_repr, '_no_anchor_opt')
+
+        cls._annotate_graph(
+            TEST_DATA_DIR + '/transcripts_100.fa',
+            cls.tempdir.name + '/graph' + graph_file_extension[cls.graph_repr],
+            cls.tempdir.name + '/annotation',
+            cls.anno_repr,
+            separate,
+            no_fork_opt,
+            no_anchor_opt,
+            anno_type='label 1'
+        )
+
+        # check annotation
+        anno_stats_command = '{exe} stats -a {annotation}'.format(
+            exe=METAGRAPH,
+            annotation=cls.tempdir.name + '/annotation' + anno_file_extension[cls.anno_repr],
+        )
+        res = subprocess.run(anno_stats_command.split(), stdout=PIPE)
+        assert(res.returncode == 0)
+        params_str = res.stdout.decode().split('\n')[2:]
+        assert('labels:  1' == params_str[0])
+        if cls.graph_repr != 'hashfast' and (cls.graph_repr != 'succinct' or cls.mask_dummy):
+            assert('objects: 46960' == params_str[1])
+
+        if cls.anno_repr.endswith('_noswap'):
+            cls.anno_repr = cls.anno_repr[:-len('_noswap')]
+
+        assert('representation: ' + cls.anno_repr == params_str[3])
+
+    def test_query(self):
+        query_command = f'{METAGRAPH} query \
+                            -i {self.tempdir.name}/graph{graph_file_extension[self.graph_repr]} \
+                            -a {self.tempdir.name}/annotation{anno_file_extension[self.anno_repr]} \
+                            --discovery-fraction 1.0 \
+                            {TEST_DATA_DIR}/transcripts_1000.fa'
+        res = subprocess.run(query_command.split(), stdout=PIPE)
+        self.assertEqual(res.returncode, 0)
+        self.assertEqual(hashlib.sha224(res.stdout).hexdigest(), '254d173abb255a81a4ab8a685201a73de8dbad4546c378e0a645d454')
+
+        query_command = f'{METAGRAPH} query --count-labels \
+                            -i {self.tempdir.name}/graph{graph_file_extension[self.graph_repr]} \
+                            -a {self.tempdir.name}/annotation{anno_file_extension[self.anno_repr]} \
+                            --discovery-fraction 1.0 \
+                            {TEST_DATA_DIR}/transcripts_1000.fa'
+        res = subprocess.run(query_command.split(), stdout=PIPE)
+        self.assertEqual(res.returncode, 0)
+        self.assertEqual(hashlib.sha224(res.stdout).hexdigest(), '1bd6c24373812064c3e17e73533de7b1e30baa3cca3a64b460e83cb4')
 
 
 @parameterized_class(('graph_repr', 'anno_repr'),

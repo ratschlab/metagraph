@@ -104,7 +104,8 @@ class TestingBase(unittest.TestCase):
 
     @staticmethod
     def _annotate_graph(input, graph_path, output, anno_repr,
-                        separate=False, no_fork_opt=False, no_anchor_opt=False):
+                        separate=False, no_fork_opt=False, no_anchor_opt=False,
+                        anno_type='header'):
         target_anno = anno_repr
 
         noswap = anno_repr.endswith('_noswap')
@@ -121,7 +122,7 @@ class TestingBase(unittest.TestCase):
             target_anno = anno_repr
             anno_repr = 'row'
 
-        command = f'{METAGRAPH} annotate -p {NUM_THREADS} --anno-header \
+        command = f'{METAGRAPH} annotate -p {NUM_THREADS} --anno-{anno_type}\
                     -i {graph_path} --anno-type {anno_repr} \
                     -o {output} {input}'
 
