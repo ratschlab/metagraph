@@ -115,6 +115,8 @@ Config::Config(int argc, char *argv[]) {
             print_graph_internal_repr = true;
         } else if (!strcmp(argv[i], "--print-counts-hist")) {
             print_counts_hist = true;
+        } else if (!strcmp(argv[i], "--print-degree-stats")) {
+            print_degree_stats = true;
         } else if (!strcmp(argv[i], "--coordinates")) {
             coordinates = true;
         } else if (!strcmp(argv[i], "--num-kmers-in-seq")) {

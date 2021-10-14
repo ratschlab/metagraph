@@ -23,6 +23,7 @@ class Config {
     bool print_graph_internal_repr = false;
     bool print_column_names = false;
     bool print_counts_hist = false;
+    bool print_degree_stats = false;
     bool forward_and_reverse = false;
     bool complete = false;
     bool dynamic = false;

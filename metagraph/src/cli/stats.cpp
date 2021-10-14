@@ -1,5 +1,7 @@
 #include "stats.hpp"
 
+#include <random>
+
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
 #include "common/serialization.hpp"
@@ -22,6 +24,61 @@ using mtg::common::logger;
 using mtg::common::get_verbose;
 
 typedef annot::MultiLabelEncoded<std::string> Annotator;
+
+void print_degree_stats(const graph::DeBruijnGraph &graph,
+                        size_t sample_length,
+                        size_t num_samples = 1000) {
+    std::cout << "====================== FORK STATS ======================" << std::endl;
+    std::random_device rd;
+    std::mt19937_64 gen(42);
+    std::uniform_int_distribution<uint64_t> distrib(1, graph.max_index());
+    double mean_average_outdegree = 0;
+    #pragma omp parallel for num_threads(get_num_threads())
+    for (size_t i = 0; i < num_samples; ++i) {
+        graph::DeBruijnGraph::node_index start;
+
+        #pragma omp critical
+        start = distrib(gen);
+
+        std::string seq = graph.get_node_sequence(start);
+
+        size_t dist = 0;
+        size_t num_nodes = 0;
+        while (dist < sample_length) {
+            ++dist;
+            std::vector<std::pair<graph::DeBruijnGraph::node_index, char>> nodes;
+            graph.call_outgoing_kmers(start, [&](graph::DeBruijnGraph::node_index next, char c) {
+                if (c != graph::boss::BOSS::kSentinel)
+                    nodes.emplace_back(next, c);
+            });
+            num_nodes += nodes.size();
+            if (nodes.empty()) {
+                break;
+            } else {
+                std::uniform_int_distribution<size_t> out_distrib(0, nodes.size() - 1);
+                size_t idx;
+
+                #pragma omp critical
+                idx = out_distrib(gen);
+
+                start = nodes[idx].first;
+                seq += nodes[idx].second;
+            }
+        }
+
+        double average_outdegree = static_cast<double>(num_nodes) / dist;
+
+        #pragma omp critical
+        {
+            std::cout << average_outdegree << "\t" << seq << std::endl;
+            mean_average_outdegree += average_outdegree;
+        }
+    }
+
+    std::cout << "sequence length: " << sample_length << "\n";
+    std::cout << "number of samples: " << num_samples << "\n";
+    std::cout << "mean avg. outdegree: " << mean_average_outdegree / num_samples << "\n";
+}
 
 
 void print_boss_stats(const graph::boss::BOSS &boss_graph,
@@ -241,6 +298,11 @@ int print_stats(Config *config) {
         graph->load_extension<graph::NodeWeights>(file);
 
         logger->info("Statistics for graph '{}'", file);
+
+        if (config->print_degree_stats) {
+            print_degree_stats(*graph, config->distance);
+            return 0;
+        }
 
         print_stats(*graph, config->print_counts_hist);
 
