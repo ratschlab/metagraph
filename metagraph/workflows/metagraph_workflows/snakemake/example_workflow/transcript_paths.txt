@@ -1,2 +1,0 @@
-example_data/metasub_fake_data.fa
-example_data/transcripts_100.fa

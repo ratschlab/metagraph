@@ -32,7 +32,7 @@ def output_dir(tmpdir):
 @pytest.fixture
 def sample_list_path(tmpdir):
     list_path = tmpdir / 'transcript_paths.txt'
-    utils.create_transcript_path_list(WORKFLOW_ROOT / 'example_data', list_path)
+    utils.create_transcript_path_list(WORKFLOW_ROOT / 'test_data', list_path)
     return list_path
 
 
