@@ -1,6 +1,6 @@
 import pytest
 
-from metagraph_workflows import rule_utils
+import metagraph_workflows.utils
 
 @pytest.mark.parametrize("case, expected",
     [
@@ -12,4 +12,4 @@ from metagraph_workflows import rule_utils
     ]
 )
 def test_get_sample_name(case, expected):
-    assert rule_utils.get_sample_name(case) == expected
+    assert metagraph_workflows.utils.get_sample_name(case) == expected

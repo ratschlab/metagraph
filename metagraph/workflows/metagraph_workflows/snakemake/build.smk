@@ -1,5 +1,6 @@
+
 from metagraph_workflows.resource_management import BuildGraphResources, ResourceConfig, BuildGraphResourcesWithKmerEstimates, PrimarizeCanonicalGraphSingleSampleResources
-from metagraph_workflows import cfg_utils, constants, rule_utils
+from metagraph_workflows import constants, utils
 
 if build_primary:
     ruleorder: build_joint_primary > build
@@ -17,10 +18,10 @@ rule build:
         disk_mb=BuildGraphResources(BUILD_RULE, config).get_disk(),
     params:
         k=config['k'],
-        tempdir_opt=cfg_utils.temp_dir_config(config),
+        tempdir_opt=utils.temp_dir_config(config),
         mem_buffer=BuildGraphResources(BUILD_RULE, config).get_mem_buffer_gib(),
         disk_cap=BuildGraphResources(BUILD_RULE, config).get_disk_cap(),
-    log: cfg_utils.get_log_path(BUILD_RULE, config)
+    log: utils.get_log_path(BUILD_RULE, config)
     shell:
         """
         cat {input} | {time_cmd} {metagraph_cmd} build {verbose_opt} \
@@ -56,7 +57,7 @@ rule stage_samples:
     params:
         staging_script_path=config[constants.SAMPLE_STAGING_SCRIPT_PATH],
         additional_options=config[constants.SAMPLE_STAGING_SCRIPT_ADDITIONAL_OPTIONS],
-    log: cfg_utils.get_log_path(STAGE_SAMPLES_RULE, config, ['sample_id'])
+    log: utils.get_log_path(STAGE_SAMPLES_RULE, config, ['sample_id'])
     shell:
         """
         bash {params.staging_script_path} {wildcards.sample_id} {output} {params.additional_options} > {log} 2>&1
@@ -64,7 +65,7 @@ rule stage_samples:
 
 EXTRACT_KMER_COUNTS_RULE="extract_kmer_counts"
 rule extract_kmer_counts:
-    input: rule_utils.get_build_single_sample_input(config,orig_samples_path,seq_ids_dict)
+    input: utils.get_build_single_sample_input(config,orig_samples_path,seq_ids_dict)
     output:
         summary = kmc_dir / "{sample_id}.json",
         kmc_pre=temp(kmc_dir/"{sample_id}.kmc_pre"),
@@ -79,7 +80,7 @@ rule extract_kmer_counts:
         max_bins=config[constants.KMC_MAX_BINS],
         mem_buffer=lambda wildcards, resources: max(int((resources.mem_mb * (1.0 / config[constants.KMC_MEM_OVERHEAD_FACTOR])) / 1024), 1),
         base=lambda wildcards: kmc_dir/wildcards['sample_id'],
-    log: cfg_utils.get_log_path(EXTRACT_KMER_COUNTS_RULE, config, ['sample_id'])
+    log: utils.get_log_path(EXTRACT_KMER_COUNTS_RULE, config, ['sample_id'])
     shell:
         """        
         KMC_BINS=$(( $(ulimit -n) - 10))
@@ -113,7 +114,7 @@ kmer_estimates=True
 BUILD_CANONICAL_GRAPH_SINGLE_SAMPLE_RULE="build_canonical_graph_single_sample"
 rule build_canonical_graph_single_sample:
     input:
-        seq=rule_utils.get_build_single_sample_input(config, orig_samples_path, seq_ids_dict),
+        seq=utils.get_build_single_sample_input(config, orig_samples_path, seq_ids_dict),
         kmer=kmc_dir/"{sample_id}.json" if kmer_estimates else []
     output:
         graph=temp(canonical_graphs_dir/"{sample_id}.dbg"),
@@ -125,11 +126,11 @@ rule build_canonical_graph_single_sample:
     priority: 50
     params:
         k=config['k'],
-        tempdir_opt=cfg_utils.temp_dir_config(config),
+        tempdir_opt=utils.temp_dir_config(config),
         temp_file=wdir,
         mem_buffer=BuildGraphResourcesWithKmerEstimates(BUILD_CANONICAL_GRAPH_SINGLE_SAMPLE_RULE, config).get_mem_buffer_gib(),
         disk_cap=BuildGraphResourcesWithKmerEstimates(BUILD_CANONICAL_GRAPH_SINGLE_SAMPLE_RULE, config).get_disk_cap(),
-    log: cfg_utils.get_log_path(BUILD_CANONICAL_GRAPH_SINGLE_SAMPLE_RULE, config, ['sample_id'])
+    log: utils.get_log_path(BUILD_CANONICAL_GRAPH_SINGLE_SAMPLE_RULE, config, ['sample_id'])
     shell:
         """
         
@@ -162,7 +163,7 @@ rule primarize_canonical_graph_single_sample:
     resources:
         mem_mb=PrimarizeCanonicalGraphSingleSampleResources(config).get_mem(),
     priority: 100
-    log: cfg_utils.get_log_path(PRIMARIZE_CANONICAL_GRAPH_SINGLE_SAMPLE_RULE, config, ['sample_id'])
+    log: utils.get_log_path(PRIMARIZE_CANONICAL_GRAPH_SINGLE_SAMPLE_RULE, config, ['sample_id'])
     shell:
         """
         echo "{input}" | {time_cmd} {metagraph_cmd} transform {verbose_opt} \
@@ -175,7 +176,7 @@ rule primarize_canonical_graph_single_sample:
 
 BUILD_JOINT_GRAPH_RULE="build_joint_graph"
 rule build_joint_graph:
-    input: rule_utils.get_build_joint_input(config, contigs_dir, seq_ids_dict, seqs_file_list_path)
+    input: utils.get_build_joint_input(config, contigs_dir, seq_ids_dict, seqs_file_list_path)
     output: temp(canonical_graph_path)
     threads: max_threads
     resources:
@@ -184,10 +185,10 @@ rule build_joint_graph:
     params:
         k=config['k'],
         separate_build=str(bool(config[constants.PRIMARIZE_SAMPLES_SEPARATELY])).lower(),
-        tempdir_opt=cfg_utils.temp_dir_config(config),
+        tempdir_opt=utils.temp_dir_config(config),
         mem_buffer=BuildGraphResources(BUILD_JOINT_GRAPH_RULE, config).get_mem_buffer_gib(),
         disk_cap=BuildGraphResources(BUILD_JOINT_GRAPH_RULE, config).get_disk_cap(),
-    log: cfg_utils.get_log_path(BUILD_JOINT_GRAPH_RULE, config)
+    log: utils.get_log_path(BUILD_JOINT_GRAPH_RULE, config)
     shell:
         """
         if {params.separate_build}; then
@@ -215,7 +216,7 @@ rule primarize_joint_graph:
     threads: max_threads
     resources:
         mem_mb=ResourceConfig(PRIMARIZE_JOINT_GRAPH_RULE, config).get_mem(),
-    log: cfg_utils.get_log_path(PRIMARIZE_JOINT_GRAPH_RULE, config)
+    log: utils.get_log_path(PRIMARIZE_JOINT_GRAPH_RULE, config)
     shell:
         """
         echo "{input}" | {time_cmd} {metagraph_cmd} transform {verbose_opt} \
@@ -236,10 +237,10 @@ rule build_joint_primary:
         disk_mb=BuildGraphResources(BUILD_JOINT_PRIMARY_RULE, config).get_disk(),
     params:
         k=config['k'],
-        tempdir_opt=cfg_utils.temp_dir_config(config),
+        tempdir_opt=utils.temp_dir_config(config),
         mem_buffer=BuildGraphResources(BUILD_JOINT_PRIMARY_RULE, config).get_mem_buffer_gib(),
         disk_cap=BuildGraphResources(BUILD_JOINT_PRIMARY_RULE, config).get_disk_cap()
-    log: cfg_utils.get_log_path(BUILD_JOINT_PRIMARY_RULE, config)
+    log: utils.get_log_path(BUILD_JOINT_PRIMARY_RULE, config)
     shell:
         """
         {time_cmd} {metagraph_cmd} build {verbose_opt} \

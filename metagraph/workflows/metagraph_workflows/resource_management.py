@@ -6,10 +6,9 @@ from pathlib import Path
 
 
 from metagraph_workflows import constants
-from metagraph_workflows.cfg_utils import get_rule_specific_config
 from metagraph_workflows.constants import MEM_MB_KEY, DISK_MB_KEY, \
     MEM_BUFFER_MB_KEY, THREADS_KEY
-from metagraph_workflows.utils import logger
+from metagraph_workflows.utils import logger, get_rule_specific_config
 
 BASE_MEM = 1 * 1024
 FALLBACK_MAX_MEM = 4 * 1024

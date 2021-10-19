@@ -1,13 +1,13 @@
-from metagraph_workflows import rule_utils, constants, cfg_utils
+import metagraph_workflows.utils
+from metagraph_workflows import constants, utils
+from metagraph_workflows.utils import take_value_or_default
 from metagraph_workflows.common import AnnotationLabelsSource, AnnotationFormats
 from metagraph_workflows.resource_management import TransformRdStage0Resources, TransformRdStage1Resources, TransformRdStage2Resources, ResourceConfig
 
-include: "common.smk"
-
-wdir=cfg_utils.get_wdir(config)
+wdir=utils.get_wdir(config)
 
 graph=config['base_name']
-build_primary=take_value_or_default('build_primary_graph', False)
+build_primary=take_value_or_default('build_primary_graph', False, config)
 
 annotation_formats = config['annotation_formats'] if isinstance(config['annotation_formats'], list) else [config['annotation_formats']]
 
@@ -20,12 +20,12 @@ annotation_labels_opt = AnnotationLabelsSource(config['annotation_labels_source'
 
 
 metagraph_cmd=config['metagraph_cmd']
-time_cmd=cfg_utils.get_gnu_time_command(config)
+time_cmd=utils.get_gnu_time_command(config)
 
-max_threads=take_value_or_default(constants.MAX_THREADS, workflow.cores)
+max_threads=take_value_or_default(constants.MAX_THREADS, workflow.cores, config)
 
 # TODO
-max_memory_mb=take_value_or_default('max_memory_mb', 4000)
+max_memory_mb=take_value_or_default('max_memory_mb', 4000, config)
 
 verbose_opt=' -v '
 
@@ -38,13 +38,13 @@ annotation_path_done=annotation_cols_path/DONE
 
 columns_file=wdir/'columns.txt'
 
-seqs_file_list_path=get_seqs_file_list_path()
+seqs_file_list_path=utils.get_seqs_file_list_path(wdir, config)
 
 contigs_dir=wdir/'contigs'
 
 seq_ids_dict = {}
 if not config[constants.SAMPLE_IDS_PATH]:
-    seq_ids_dict = rule_utils.derive_sample_dictionary(seqs_file_list_path)
+    seq_ids_dict = utils.derive_sample_dictionary(seqs_file_list_path)
 
 localrules: generate_column_list
 
@@ -59,18 +59,18 @@ include: 'build.smk'
 ANNOTATE_RULE="annotate"
 rule annotate:
     input:
-        seqs=rule_utils.get_build_joint_input(config, contigs_dir, seq_ids_dict, seqs_file_list_path),
+        seqs=utils.get_build_joint_input(config, contigs_dir, seq_ids_dict, seqs_file_list_path),
         dbg_graph=graph_path,
     output:
         done=touch(annotation_path_done),
-        column_anno_files=rule_utils.generate_col_paths(annotation_cols_path, seqs_file_list_path, config)
+        column_anno_files=utils.generate_col_paths(annotation_cols_path, seqs_file_list_path, config)
     threads: max_threads
     resources:
         mem_mb=ResourceConfig(ANNOTATE_RULE, config).get_mem(),
     params:
         separate_build=str(bool(config[constants.PRIMARIZE_SAMPLES_SEPARATELY])).lower(),
-        tempdir_opt=cfg_utils.temp_dir_config(config),
-    log: cfg_utils.get_log_path(ANNOTATE_RULE, config)
+        tempdir_opt=utils.temp_dir_config(config),
+    log: utils.get_log_path(ANNOTATE_RULE, config)
     shell:
         """
         if {params.separate_build}; then
@@ -114,7 +114,7 @@ rule generate_brwt_linkage:
         mem_mb=ResourceConfig(GENERATE_BRWT_LINKAGE_RULE, config).get_mem(),
     params:
         subsample=config[constants.BRWT_LINKAGE_SUBSAMPLE],
-    log: cfg_utils.get_log_path(GENERATE_BRWT_LINKAGE_RULE, config)
+    log: utils.get_log_path(GENERATE_BRWT_LINKAGE_RULE, config)
     shell:
         """        
         cat {input.columns_file} | {time_cmd} {metagraph_cmd} transform_anno {verbose_opt} \
@@ -138,8 +138,8 @@ rule transform_annotation:
     resources:
         mem_mb=ResourceConfig(TRANSFORM_ANNOTATION_RULE, config).get_mem(),
     params:
-        tempdir_opt=cfg_utils.temp_dir_config(config),
-    log: cfg_utils.get_log_path(TRANSFORM_ANNOTATION_RULE, config, ['anno_type'])
+        tempdir_opt=utils.temp_dir_config(config),
+    log: utils.get_log_path(TRANSFORM_ANNOTATION_RULE, config, ['anno_type'])
     shell:
         """        
         cat {input.columns_file} | {time_cmd} {metagraph_cmd} transform_anno {verbose_opt} \
@@ -161,8 +161,8 @@ rule annotate_brwt:
         mem_mb=ResourceConfig(ANNOTATE_BRWT_RULE, config).get_mem(),
     params:
         parallel_nodes=config[constants.BRWT_PARALLEL_NODES],
-        tempdir_opt=cfg_utils.temp_dir_config(config),
-    log: cfg_utils.get_log_path(ANNOTATE_BRWT_RULE, config)
+        tempdir_opt=utils.temp_dir_config(config),
+    log: utils.get_log_path(ANNOTATE_BRWT_RULE, config)
     shell:
         """        
         cat {input.columns_file} | {time_cmd} {metagraph_cmd} transform_anno {verbose_opt} \
@@ -185,8 +185,8 @@ rule relax_brwt:
         mem_mb=ResourceConfig(RELAX_BRWT_RULE, config).get_mem(),
     params:
         relax_arity=config[constants.BRWT_RELAX_ARITY],
-        tempdir_opt=cfg_utils.temp_dir_config(config),
-    log: cfg_utils.get_log_path(RELAX_BRWT_RULE, config, ['brwt_fmt'])
+        tempdir_opt=utils.temp_dir_config(config),
+    log: utils.get_log_path(RELAX_BRWT_RULE, config, ['brwt_fmt'])
     shell:
         """        
         {time_cmd} {metagraph_cmd} relax_brwt \
@@ -213,8 +213,8 @@ rule transform_rd_stage0:
         mem_mb=TransformRdStage0Resources(config).get_mem()
     params:
         mem_buffer=TransformRdStage0Resources(config).get_mem_buffer_gib(),
-        tempdir_opt=cfg_utils.temp_dir_config(config),
-    log: cfg_utils.get_log_path(TRANSFORM_RD_STAGE0_RULE,config)
+        tempdir_opt=utils.temp_dir_config(config),
+    log: utils.get_log_path(TRANSFORM_RD_STAGE0_RULE,config)
     shell:
         """
         COLS_DIR=$(dirname {output.columns_rd_row_count})
@@ -247,8 +247,8 @@ rule transform_rd_stage1:
         mem_mb=TransformRdStage1Resources(config).get_mem()
     params:
         mem_buffer=TransformRdStage1Resources(config).get_mem_buffer_gib(),
-        tempdir_opt=cfg_utils.temp_dir_config(config),
-    log: cfg_utils.get_log_path(TRANSFORM_RD_STAGE1_RULE, config)
+        tempdir_opt=utils.temp_dir_config(config),
+    log: utils.get_log_path(TRANSFORM_RD_STAGE1_RULE, config)
     shell:
         """
         cat {input.columns_file} | {time_cmd} {metagraph_cmd} transform_anno {verbose_opt} \
@@ -275,8 +275,8 @@ rule transform_rd_stage2:
         mem_mb=TransformRdStage2Resources(config).get_mem(),
     params:
         mem_buffer=TransformRdStage2Resources(config).get_mem_buffer_gib(),
-        tempdir_opt=cfg_utils.temp_dir_config(config),
-    log: cfg_utils.get_log_path(TRANSFORM_RD_STAGE2_RULE, config)
+        tempdir_opt=utils.temp_dir_config(config),
+    log: utils.get_log_path(TRANSFORM_RD_STAGE2_RULE, config)
     shell:
         """
         cat {input.columns_file} | {time_cmd} {metagraph_cmd} transform_anno {verbose_opt} \
@@ -303,8 +303,8 @@ rule annotate_row_diff_brwt:
         mem_mb=ResourceConfig(ANNOTATE_ROW_DIFF_BRWT_RULE, config).get_mem(),
     params:
         parallel_nodes=config[constants.BRWT_PARALLEL_NODES],
-        tempdir_opt=cfg_utils.temp_dir_config(config),
-    log: cfg_utils.get_log_path(ANNOTATE_ROW_DIFF_BRWT_RULE, config)
+        tempdir_opt=utils.temp_dir_config(config),
+    log: utils.get_log_path(ANNOTATE_ROW_DIFF_BRWT_RULE, config)
     shell:
         """
         echo $(find $(dirname {input.rd_cols_done}) -name \*.annodbg)
@@ -330,8 +330,8 @@ rule relax_row_diff_brwt:
         mem_mb=ResourceConfig(RELAX_ROW_DIFF_BRWT_RULE, config).get_mem(),
     params:
         relax_arity = config[constants.BRWT_RELAX_ARITY],
-        tempdir_opt=cfg_utils.temp_dir_config(config),
-    log: cfg_utils.get_log_path(RELAX_ROW_DIFF_BRWT_RULE, config)
+        tempdir_opt=utils.temp_dir_config(config),
+    log: utils.get_log_path(RELAX_ROW_DIFF_BRWT_RULE, config)
     shell:
         """        
         {time_cmd} {metagraph_cmd} relax_brwt \
