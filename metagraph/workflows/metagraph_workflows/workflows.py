@@ -7,8 +7,8 @@ import shlex
 
 import snakemake
 
-from .common import AnnotationLabelsSource, AnnotationFormats
-from .constants import SEQS_FILE_LIST_PATH, SEQS_DIR_PATH
+from .workflow_configs import SEQS_FILE_LIST_PATH, SEQS_DIR_PATH, \
+    AnnotationLabelsSource, AnnotationFormats
 
 WORKFLOW_ROOT = Path(__file__).parent / 'snakemake'
 

@@ -1,6 +1,6 @@
 
 from metagraph_workflows.resource_management import BuildGraphResources, ResourceConfig, BuildGraphResourcesWithKmerEstimates, PrimarizeCanonicalGraphSingleSampleResources
-from metagraph_workflows import constants, utils
+from metagraph_workflows import workflow_configs, utils
 
 if build_primary:
     ruleorder: build_joint_primary > build
@@ -51,12 +51,12 @@ orig_samples_path=wdir/'orig_samples'
 
 STAGE_SAMPLES_RULE="stage_samples"
 rule stage_samples:
-    output: temp(orig_samples_path/f"{{sample_id}}{config[constants.SAMPLE_STAGING_FILE_ENDING]}")
+    output: temp(orig_samples_path /f"{{sample_id}}{config[workflow_configs.SAMPLE_STAGING_FILE_ENDING]}")
     resources:
         parallel_staging=1
     params:
-        staging_script_path=config[constants.SAMPLE_STAGING_SCRIPT_PATH],
-        additional_options=config[constants.SAMPLE_STAGING_SCRIPT_ADDITIONAL_OPTIONS],
+        staging_script_path=config[workflow_configs.SAMPLE_STAGING_SCRIPT_PATH],
+        additional_options=config[workflow_configs.SAMPLE_STAGING_SCRIPT_ADDITIONAL_OPTIONS],
     log: utils.get_log_path(STAGE_SAMPLES_RULE, config, ['sample_id'])
     shell:
         """
@@ -73,12 +73,12 @@ rule extract_kmer_counts:
         temp_dir=temp(directory(kmc_dir/"temp_{sample_id}.kmc")),
     threads: ResourceConfig(EXTRACT_KMER_COUNTS_RULE, config).get_threads(max_threads)
     resources:
-        mem_mb=lambda wildcards, threads: int((threads * config[constants.KMC_MEM_MB_PER_THREAD]) * config[constants.KMC_MEM_OVERHEAD_FACTOR])
+        mem_mb=lambda wildcards, threads: int((threads * config[workflow_configs.KMC_MEM_MB_PER_THREAD]) * config[workflow_configs.KMC_MEM_OVERHEAD_FACTOR])
     priority: 10
     params:
         k=config['k'],
-        max_bins=config[constants.KMC_MAX_BINS],
-        mem_buffer=lambda wildcards, resources: max(int((resources.mem_mb * (1.0 / config[constants.KMC_MEM_OVERHEAD_FACTOR])) / 1024), 1),
+        max_bins=config[workflow_configs.KMC_MAX_BINS],
+        mem_buffer=lambda wildcards, resources: max(int((resources.mem_mb * (1.0 / config[workflow_configs.KMC_MEM_OVERHEAD_FACTOR])) / 1024), 1),
         base=lambda wildcards: kmc_dir/wildcards['sample_id'],
     log: utils.get_log_path(EXTRACT_KMER_COUNTS_RULE, config, ['sample_id'])
     shell:
@@ -184,7 +184,7 @@ rule build_joint_graph:
         disk_mb=BuildGraphResources(BUILD_JOINT_GRAPH_RULE, config).get_disk(),
     params:
         k=config['k'],
-        separate_build=str(bool(config[constants.PRIMARIZE_SAMPLES_SEPARATELY])).lower(),
+        separate_build=str(bool(config[workflow_configs.PRIMARIZE_SAMPLES_SEPARATELY])).lower(),
         tempdir_opt=utils.temp_dir_config(config),
         mem_buffer=BuildGraphResources(BUILD_JOINT_GRAPH_RULE, config).get_mem_buffer_gib(),
         disk_cap=BuildGraphResources(BUILD_JOINT_GRAPH_RULE, config).get_disk_cap(),

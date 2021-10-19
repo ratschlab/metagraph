@@ -1,7 +1,8 @@
 import metagraph_workflows.utils
-from metagraph_workflows import constants, utils
+from metagraph_workflows import workflow_configs, utils
 from metagraph_workflows.utils import take_value_or_default
-from metagraph_workflows.common import AnnotationLabelsSource, AnnotationFormats
+from metagraph_workflows.workflow_configs import AnnotationLabelsSource, \
+    AnnotationFormats
 from metagraph_workflows.resource_management import TransformRdStage0Resources, TransformRdStage1Resources, TransformRdStage2Resources, ResourceConfig
 
 wdir=utils.get_wdir(config)
@@ -22,7 +23,7 @@ annotation_labels_opt = AnnotationLabelsSource(config['annotation_labels_source'
 metagraph_cmd=config['metagraph_cmd']
 time_cmd=utils.get_gnu_time_command(config)
 
-max_threads=take_value_or_default(constants.MAX_THREADS, workflow.cores, config)
+max_threads=take_value_or_default(workflow_configs.MAX_THREADS, workflow.cores, config)
 
 # TODO
 max_memory_mb=take_value_or_default('max_memory_mb', 4000, config)
@@ -43,7 +44,7 @@ seqs_file_list_path=utils.get_seqs_file_list_path(wdir, config)
 contigs_dir=wdir/'contigs'
 
 seq_ids_dict = {}
-if not config[constants.SAMPLE_IDS_PATH]:
+if not config[workflow_configs.SAMPLE_IDS_PATH]:
     seq_ids_dict = utils.derive_sample_dictionary(seqs_file_list_path)
 
 localrules: generate_column_list
@@ -68,7 +69,7 @@ rule annotate:
     resources:
         mem_mb=ResourceConfig(ANNOTATE_RULE, config).get_mem(),
     params:
-        separate_build=str(bool(config[constants.PRIMARIZE_SAMPLES_SEPARATELY])).lower(),
+        separate_build=str(bool(config[workflow_configs.PRIMARIZE_SAMPLES_SEPARATELY])).lower(),
         tempdir_opt=utils.temp_dir_config(config),
     log: utils.get_log_path(ANNOTATE_RULE, config)
     shell:
@@ -113,7 +114,7 @@ rule generate_brwt_linkage:
     resources:
         mem_mb=ResourceConfig(GENERATE_BRWT_LINKAGE_RULE, config).get_mem(),
     params:
-        subsample=config[constants.BRWT_LINKAGE_SUBSAMPLE],
+        subsample=config[workflow_configs.BRWT_LINKAGE_SUBSAMPLE],
     log: utils.get_log_path(GENERATE_BRWT_LINKAGE_RULE, config)
     shell:
         """        
@@ -160,7 +161,7 @@ rule annotate_brwt:
     resources:
         mem_mb=ResourceConfig(ANNOTATE_BRWT_RULE, config).get_mem(),
     params:
-        parallel_nodes=config[constants.BRWT_PARALLEL_NODES],
+        parallel_nodes=config[workflow_configs.BRWT_PARALLEL_NODES],
         tempdir_opt=utils.temp_dir_config(config),
     log: utils.get_log_path(ANNOTATE_BRWT_RULE, config)
     shell:
@@ -184,7 +185,7 @@ rule relax_brwt:
     resources:
         mem_mb=ResourceConfig(RELAX_BRWT_RULE, config).get_mem(),
     params:
-        relax_arity=config[constants.BRWT_RELAX_ARITY],
+        relax_arity=config[workflow_configs.BRWT_RELAX_ARITY],
         tempdir_opt=utils.temp_dir_config(config),
     log: utils.get_log_path(RELAX_BRWT_RULE, config, ['brwt_fmt'])
     shell:
@@ -302,7 +303,7 @@ rule annotate_row_diff_brwt:
     resources:
         mem_mb=ResourceConfig(ANNOTATE_ROW_DIFF_BRWT_RULE, config).get_mem(),
     params:
-        parallel_nodes=config[constants.BRWT_PARALLEL_NODES],
+        parallel_nodes=config[workflow_configs.BRWT_PARALLEL_NODES],
         tempdir_opt=utils.temp_dir_config(config),
     log: utils.get_log_path(ANNOTATE_ROW_DIFF_BRWT_RULE, config)
     shell:
@@ -329,7 +330,7 @@ rule relax_row_diff_brwt:
     resources:
         mem_mb=ResourceConfig(RELAX_ROW_DIFF_BRWT_RULE, config).get_mem(),
     params:
-        relax_arity = config[constants.BRWT_RELAX_ARITY],
+        relax_arity = config[workflow_configs.BRWT_RELAX_ARITY],
         tempdir_opt=utils.temp_dir_config(config),
     log: utils.get_log_path(RELAX_ROW_DIFF_BRWT_RULE, config)
     shell:

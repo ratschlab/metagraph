@@ -5,8 +5,8 @@ from pathlib import Path
 
 
 
-from metagraph_workflows import constants
-from metagraph_workflows.constants import MEM_MB_KEY, DISK_MB_KEY, \
+from metagraph_workflows import workflow_configs
+from metagraph_workflows.workflow_configs import MEM_MB_KEY, DISK_MB_KEY, \
     MEM_BUFFER_MB_KEY, THREADS_KEY
 from metagraph_workflows.utils import logger, get_rule_specific_config
 
@@ -21,11 +21,11 @@ FALLBACK_MAX_DISK = 10 * 1024
 TBD_VALUE = -1
 
 def _get_max_memory(config):
-    return config.get(constants.MAX_MEMORY_MB, FALLBACK_MAX_MEM)
+    return config.get(workflow_configs.MAX_MEMORY_MB, FALLBACK_MAX_MEM)
 
 
 def _get_max_disk(config):
-    return config.get(constants.MAX_DISK_MB, FALLBACK_MAX_DISK)
+    return config.get(workflow_configs.MAX_DISK_MB, FALLBACK_MAX_DISK)
 
 
 def columns_size_mb(columns_file):
@@ -91,7 +91,7 @@ class SupportsMemBufferSize(ResourceConfig):
                                                   MEM_BUFFER_MB_KEY, self.config)
 
             if not mem_cap_mb:
-                mem_cap_mb = min(self._mem_buf_estimate(wildcards, resources, input, threads), self.config[constants.MAX_BUFFER_SIZE_MB])
+                mem_cap_mb = min(self._mem_buf_estimate(wildcards, resources, input, threads), self.config[workflow_configs.MAX_BUFFER_SIZE_MB])
 
                 if mem_cap_mb == TBD_VALUE:
                     return TBD_VALUE

@@ -2,13 +2,13 @@ import pytest
 import math
 
 from metagraph_workflows import resource_management as rm
-from metagraph_workflows import constants
+from metagraph_workflows import workflow_configs
 
 @pytest.fixture()
 def config():
     return {
-        constants.MAX_MEMORY_MB: 16000,
-        constants.MAX_BUFFER_SIZE_MB: 50000
+        workflow_configs.MAX_MEMORY_MB: 16000,
+        workflow_configs.MAX_BUFFER_SIZE_MB: 50000
     }
 
 

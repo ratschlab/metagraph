@@ -8,7 +8,8 @@ import pytest
 import metagraph_workflows
 from metagraph_workflows import utils
 from metagraph_workflows import workflows
-from metagraph_workflows.common import AnnotationFormats, AnnotationLabelsSource
+from metagraph_workflows.workflow_configs import AnnotationLabelsSource, \
+    AnnotationFormats
 
 WORKFLOW_ROOT = Path(metagraph_workflows.__file__).parent / 'snakemake'
 
