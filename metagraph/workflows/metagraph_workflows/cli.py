@@ -36,7 +36,7 @@ def run_build_workflow(
         verbose: bool = False,
         dryrun: bool = False,
         additional_snakemake_args: Optional[Dict[str, Any]] = None
-) -> bool:
+) -> None:
     # TODO: support str argumt?
 
     snakefile_path = Path(WORKFLOW_ROOT / 'Snakefile')
@@ -83,7 +83,9 @@ def run_build_workflow(
                                          **additional_args
                                          )
 
-    return was_successful
+    if not was_successful:
+        raise RuntimeError("The snakemake workflow did not terminate correctly. "
+                           "See output or log files in the output directory for more details.")
 
 
 def setup_build_parser(parser):
@@ -160,7 +162,7 @@ def _parse_additional_snakemake_args(arg: str) -> Dict[str, Any]:
 
 
 def init_build(args):
-    was_successful = run_build_workflow(
+    run_build_workflow(
         args.output_dir,
         seqs_file_list_path=args.seqs_file_list_path,
         seqs_dir_path=args.seqs_dir_path,
@@ -176,10 +178,6 @@ def init_build(args):
         dryrun=args.dryrun,
         additional_snakemake_args=_parse_additional_snakemake_args(args.additional_snakemake_args)
     )
-
-    if not was_successful:
-        logging.error("Workflow did not run successfully")
-        sys.exit(1)
 
 
 def main(args=tuple(sys.argv[1:])):
