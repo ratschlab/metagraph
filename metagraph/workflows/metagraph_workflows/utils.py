@@ -122,7 +122,8 @@ def get_gnu_time_command(config):
         if proc.returncode == 0:
             return f"{cmd} --verbose"
         else:
-            logger.error(f"Command {' '.join(test_cmd)} for GNU time could not be executed successfully: {proc.stderr}")
+            logger.warning(f"Command {' '.join(test_cmd)} for GNU time could not be executed successfully: {proc.stderr}."
+                           f" No timing information collected")
     else:
         logger.warning("No GNU Time command provided.")
 
