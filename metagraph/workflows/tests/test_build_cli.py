@@ -6,8 +6,7 @@ from pathlib import Path
 import pytest
 
 import metagraph_workflows
-from metagraph_workflows import utils
-from metagraph_workflows import workflows
+from metagraph_workflows import cli, utils
 from metagraph_workflows.workflow_configs import AnnotationLabelsSource, \
     AnnotationFormats
 
@@ -61,7 +60,7 @@ def test_build_workflow(primary, annotation_format, annotation_label_src, sample
 
 
 def test_workflow_invocation_via_python(sample_list_path, output_dir):
-    assert workflows.run_build_workflow(output_dir, seqs_file_list_path=sample_list_path)
+    assert cli.run_build_workflow(output_dir, seqs_file_list_path=sample_list_path)
 
 
 def test_workflow_invocation_additional_args(sample_list_path, output_dir):
