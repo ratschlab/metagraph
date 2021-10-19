@@ -18,17 +18,17 @@ test_requirements = ['pytest']
 setup(
     author="Marc Zimmermann",
     author_email='marc.zimmermann@inf.ethz.ch',
+    maintainer="Mikhail Karasikov",
+    maintainer_email='mikhaika@inf.ethz.ch',
     classifiers=[
         'Development Status :: 2 - Pre-Alpha',
         'Intended Audience :: Developers',
         'License :: OSI Approved :: MIT License',
         'Natural Language :: English',
-        "Programming Language :: Python :: 2",
-        'Programming Language :: Python :: 2.7',
         'Programming Language :: Python :: 3',
-        'Programming Language :: Python :: 3.4',
-        'Programming Language :: Python :: 3.5',
         'Programming Language :: Python :: 3.6',
+        'Programming Language :: Python :: 3.7',
+        'Programming Language :: Python :: 3.8',
     ],
     description="Metagraph workflows",
     entry_points={
@@ -46,7 +46,7 @@ setup(
     setup_requires=setup_requirements,
     test_suite='tests',
     tests_require=test_requirements,
-    url='https://github.com/ratschlab/metagraph_workflows',
+    url='https://github.com/ratschlab/metagraph',
     version='0.1.0',
     zip_safe=False,
 )
