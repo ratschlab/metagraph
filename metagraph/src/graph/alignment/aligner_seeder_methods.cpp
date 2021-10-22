@@ -61,6 +61,9 @@ auto ExactSeeder::get_seeds() const -> std::vector<Seed> {
 
     std::vector<Seed> seeds;
 
+    if (config_.max_seed_length < k)
+        return seeds;
+
     const char *query_end = query_.data() + query_.size();
 
     for (size_t i = 0; i < query_nodes_.size(); ++i) {
@@ -95,7 +98,7 @@ void suffix_to_prefix(const DBGSuccinct &dbg_succ,
     auto call_nodes_in_range = [&](const BOSSEdgeRange &final_range) {
         const auto &[first, last, seed_length] = final_range;
         assert(seed_length == boss.get_k());
-        for (boss::BOSS::edge_index i = boss.pred_last(first - 1) + 1; i <= last; ++i) {
+        for (boss::BOSS::edge_index i = first; i <= last; ++i) {
             DBGSuccinct::node_index node = dbg_succ.boss_to_kmer_index(i);
             if (node)
                 callback(node);
@@ -131,17 +134,19 @@ void suffix_to_prefix(const DBGSuccinct &dbg_succ,
 }
 
 template <class BaseSeeder>
-auto SuffixSeeder<BaseSeeder>::get_seeds() const -> std::vector<Seed> {
+void SuffixSeeder<BaseSeeder>::generate_seeds() {
     // this method assumes that seeds from the BaseSeeder are exact match only
     static_assert(std::is_base_of_v<ExactSeeder, BaseSeeder>);
 
-    if (this->config_.min_seed_length >= this->graph_.get_k())
-        return this->BaseSeeder::get_seeds();
+    if (this->config_.min_seed_length >= this->graph_.get_k()) {
+        seeds_ = this->BaseSeeder::get_seeds();
+        return;
+    }
 
     const DBGSuccinct &dbg_succ = get_base_dbg_succ(this->graph_);
 
     if (this->query_.size() < this->config_.min_seed_length)
-        return {};
+        return;
 
     std::vector<std::vector<Seed>> suffix_seeds(
         this->query_.size() - this->config_.min_seed_length + 1
@@ -181,52 +186,52 @@ auto SuffixSeeder<BaseSeeder>::get_seeds() const -> std::vector<Seed> {
         if (match_score <= this->config_.min_cell_score)
             return;
 
+        if (seed_length > min_seed_length[i])
+            suffix_seeds[i].clear();
+
+        min_seed_length[i] = seed_length;
+
         assert(seed_length == min_seed_length[i]);
         suffix_seeds[i].emplace_back(seed_seq, std::vector<node_index>{ alt_node },
                                      std::string(seed_seq), match_score, i,
                                      this->orientation_, this->graph_.get_k() - seed_length);
         suffix_seeds[i].back().extend_query_end(query_end);
         assert(suffix_seeds[i].back().is_valid(this->graph_, &this->config_));
+
+        for (++i; i < min_seed_length.size() && seed_length > min_seed_length[i]; ++i) {
+            min_seed_length[i] = seed_length--;
+            suffix_seeds[i].clear();
+        }
     };
 
     // find sub-k matches in the forward orientation
-    // size_t last_seed_size = min_seed_length[0];
+    size_t last_full_id = this->query_.size() >= this->graph_.get_k()
+        ? this->query_.size() - this->graph_.get_k() + 1
+        : min_seed_length.size();
     for (size_t i = 0; i < min_seed_length.size(); ++i) {
-        if (i >= this->query_nodes_.size() || !this->query_nodes_[i]) {
-            if (i) {
-                size_t new_min_seed_length = std::max(min_seed_length[i - 1] - 1,
-                                                      min_seed_length[i]);
-                if (new_min_seed_length > min_seed_length[i]) {
-                    min_seed_length[i] = new_min_seed_length;
-                    suffix_seeds[i].clear();
-                }
-            }
+        size_t max_seed_length = std::min({ this->config_.max_seed_length,
+                                            this->graph_.get_k() - 1,
+                                            this->query_.size() - i });
+        size_t seed_length = 0;
+        std::vector<node_index> alt_nodes;
 
-            size_t max_seed_length = std::min({ this->config_.max_seed_length,
-                                                this->graph_.get_k() - 1,
-                                                this->query_.size() - i });
-            if (max_seed_length >= min_seed_length[i]) {
-                dbg_succ.call_nodes_with_suffix_matching_longest_prefix(
-                    this->query_.substr(i, max_seed_length),
-                    [&](node_index alt_node, size_t seed_length) {
-                        if (seed_length > min_seed_length[i])
-                            suffix_seeds[i].clear();
+        dbg_succ.call_nodes_with_suffix_matching_longest_prefix(
+            this->query_.substr(i, max_seed_length),
+            [&](node_index alt_node, size_t len) {
+                seed_length = len;
+                alt_nodes.push_back(alt_node);
+            },
+            min_seed_length[i]
+        );
 
-                        min_seed_length[i] = seed_length;
-                        append_suffix_seed(i, alt_node, seed_length);
-                    },
-                    min_seed_length[i]
-                );
+        if (i >= last_full_id && alt_nodes.size() == 1
+                && min_seed_length[last_full_id - 1] == this->graph_.get_k()
+                && suffix_seeds[last_full_id - 1].size() == 1
+                && alt_nodes[0] == suffix_seeds[last_full_id - 1][0].get_nodes()[0])
+            continue;
 
-                if (i + 1 < min_seed_length.size()) {
-                    size_t new_min_seed_length = std::max(min_seed_length[i + 1],
-                                                          min_seed_length[i]);
-                    if (new_min_seed_length > min_seed_length[i + 1]) {
-                        min_seed_length[i + 1] = new_min_seed_length;
-                        suffix_seeds[i + 1].clear();
-                    }
-                }
-            }
+        for (node_index alt_node : alt_nodes) {
+            append_suffix_seed(i, alt_node, seed_length);
         }
     }
 
@@ -282,35 +287,21 @@ auto SuffixSeeder<BaseSeeder>::get_seeds() const -> std::vector<Seed> {
                 continue;
             }
 
-            if (seed_length > min_seed_length[j]) {
-                min_seed_length[j] = seed_length;
-                suffix_seeds[j].clear();
-            }
-
-            // clear out shorter seeds
-            size_t s = seed_length;
-            for (size_t m = j + 1;
-                    m < min_seed_length.size() && s > min_seed_length[m];
-                    ++m) {
-                assert(suffix_seeds[m].empty()
-                    || min_seed_length[m] == this->graph_.get_k()
-                                                - suffix_seeds[m][0].get_offset());
-                min_seed_length[m] = s--;
-                suffix_seeds[m].clear();
-            }
-
-            // e.g., match: ***ATG, want ATG***
-            suffix_to_prefix(dbg_succ, std::make_tuple(first, last, seed_length),
-                             [&](node_index prefix_node) {
-                append_suffix_seed(
-                    j, canonical->reverse_complement(prefix_node), seed_length
-                );
-            });
+            // e.g., matched: ***ATG, want ATG***
+            suffix_to_prefix(
+                dbg_succ,
+                std::make_tuple(boss.pred_last(first - 1) + 1, last, seed_length),
+                [&](node_index match) {
+                    append_suffix_seed(j, canonical->reverse_complement(match), seed_length);
+                }
+            );
         }
     }
 
     // aggregate all seeds
-    std::vector<Seed> output_seeds;
+    seeds_.clear();
+    this->num_matching_ = 0;
+    size_t last_end = 0;
     for (size_t i = 0; i < suffix_seeds.size(); ++i) {
         std::vector<Seed> &pos_seeds = suffix_seeds[i];
         if (pos_seeds.empty())
@@ -331,18 +322,26 @@ auto SuffixSeeder<BaseSeeder>::get_seeds() const -> std::vector<Seed> {
         if (!pos_seeds[0].get_offset()) {
             assert(min_seed_length[i] == this->graph_.get_k());
             assert(pos_seeds.size() == 1);
-            output_seeds.emplace_back(std::move(pos_seeds[0]));
+            seeds_.emplace_back(std::move(pos_seeds[0]));
         } else {
             assert(min_seed_length[i] == this->graph_.get_k() - pos_seeds[0].get_offset());
             if (pos_seeds.size() <= this->config_.max_num_seeds_per_locus) {
                 for (auto&& seed : pos_seeds) {
-                    output_seeds.emplace_back(std::move(seed));
+                    seeds_.emplace_back(std::move(seed));
                 }
             }
         }
+        if (!pos_seeds[0].get_offset() || pos_seeds.size() <= this->config_.max_num_seeds_per_locus) {
+            size_t begin = seeds_.back().get_clipping();
+            size_t end = begin + seeds_.back().get_query().size();
+            if (begin < last_end) {
+                this->num_matching_ += end - begin - (last_end - begin);
+            } else {
+                this->num_matching_ += end - begin;
+            }
+            last_end = end;
+        }
     }
-
-    return output_seeds;
 }
 
 auto MEMSeeder::get_seeds() const -> std::vector<Seed> {
