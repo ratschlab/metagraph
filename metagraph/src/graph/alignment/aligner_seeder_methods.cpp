@@ -61,17 +61,21 @@ auto ExactSeeder::get_seeds() const -> std::vector<Seed> {
 
     std::vector<Seed> seeds;
 
+    const char *query_end = query_.data() + query_.size();
+
     for (size_t i = 0; i < query_nodes_.size(); ++i) {
         if (query_nodes_[i] != DeBruijnGraph::npos) {
             assert(i + k <= query_.size());
 
-            score_t match_score = partial_sum_[i + k] - partial_sum_[i];
+            score_t match_score = partial_sum_[i + k] - partial_sum_[i]
+                + !i * config_.left_end_bonus + (i + 1 == query_nodes_.size()) * config_.right_end_bonus;
 
             if (match_score > config_.min_cell_score) {
                 seeds.emplace_back(query_.substr(i, k),
                                    std::vector<node_index>{ query_nodes_[i] },
                                    std::string(query_.substr(i, k)), match_score,
                                    i, orientation_);
+                seeds.back().extend_query_end(query_end);
                 assert(seeds.back().is_valid(graph_, &config_));
             }
         }
@@ -163,12 +167,16 @@ auto SuffixSeeder<BaseSeeder>::get_seeds() const -> std::vector<Seed> {
         suffix_seeds[i].emplace_back(std::move(seed));
     }
 
+    const char *query_end = this->query_.data() + this->query_.size();
+
     // when a seed is found, append it to the seed vector
     auto append_suffix_seed = [&](size_t i, node_index alt_node, size_t seed_length) {
         assert(i < suffix_seeds.size());
 
         std::string_view seed_seq = this->query_.substr(i, seed_length);
-        score_t match_score = this->config_.match_score(seed_seq);
+        score_t match_score = this->config_.match_score(seed_seq)
+            + !i * this->config_.left_end_bonus
+            + (i + seed_seq.size() == this->query_.size()) * this->config_.right_end_bonus;
 
         if (match_score <= this->config_.min_cell_score)
             return;
@@ -177,6 +185,7 @@ auto SuffixSeeder<BaseSeeder>::get_seeds() const -> std::vector<Seed> {
         suffix_seeds[i].emplace_back(seed_seq, std::vector<node_index>{ alt_node },
                                      std::string(seed_seq), match_score, i,
                                      this->orientation_, this->graph_.get_k() - seed_length);
+        suffix_seeds[i].back().extend_query_end(query_end);
         assert(suffix_seeds[i].back().is_valid(this->graph_, &this->config_));
     };
 
@@ -356,6 +365,8 @@ auto MEMSeeder::get_seeds() const -> std::vector<Seed> {
 
     std::vector<Seed> seeds;
 
+    const char *query_end = query_.data() + query_.size();
+
     // find start of MEM
     auto it = query_node_flags.begin();
     while ((it = std::find_if(it, query_node_flags.end(),
@@ -384,7 +395,9 @@ auto MEMSeeder::get_seeds() const -> std::vector<Seed> {
             const char *begin_it = query_.data() + i;
             const char *end_it = begin_it + mem_length;
 
-            score_t match_score = partial_sum_[end_it - query_.data()] - partial_sum_[i];
+            score_t match_score = partial_sum_[end_it - query_.data()] - partial_sum_[i]
+                + (!i) * config_.left_end_bonus
+                + (i + mem_length == this->query_.size()) * config_.right_end_bonus;
 
             auto node_begin_it = query_nodes_.begin() + i;
             auto node_end_it = node_begin_it + (next - it);
@@ -395,6 +408,7 @@ auto MEMSeeder::get_seeds() const -> std::vector<Seed> {
                                    std::vector<node_index>{ node_begin_it, node_end_it },
                                    std::string(begin_it, begin_it + mem_length),
                                    match_score, i, orientation_);
+                seeds.back().extend_query_end(query_end);
                 assert(seeds.back().is_valid(graph_, &config_));
             }
         }

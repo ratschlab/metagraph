@@ -73,6 +73,8 @@ class DBGAlignerConfig {
 
     int8_t gap_opening_penalty;
     int8_t gap_extension_penalty;
+    int8_t left_end_bonus = 0;
+    int8_t right_end_bonus = 0;
 
     bool forward_and_reverse_complement = true;
     bool chain_alignments = false;

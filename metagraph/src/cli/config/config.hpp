@@ -112,6 +112,7 @@ class Config {
     int8_t alignment_mm_transversion_score = 3;
     int8_t alignment_gap_opening_penalty = 5;
     int8_t alignment_gap_extension_penalty = 2;
+    int8_t alignment_end_bonus = 5;
 
     int32_t alignment_min_path_score = 0;
     int32_t alignment_xdrop = 27;

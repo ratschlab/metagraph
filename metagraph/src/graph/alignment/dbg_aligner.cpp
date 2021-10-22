@@ -197,8 +197,6 @@ void ISeedAndExtendAligner<AlignmentCompare>
                 // Remove any character skipping from the end so that the
                 // alignment can proceed
                 assert(rev.get_end_clipping());
-                rev.trim_end_clipping();
-
                 assert(rev.is_valid(rc_graph, &config_));
 
                 // Pass the reverse complement of the forward alignment

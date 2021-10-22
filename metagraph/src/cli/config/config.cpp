@@ -242,6 +242,8 @@ Config::Config(int argc, char *argv[]) {
             alignment_gap_opening_penalty = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--align-gap-extension-penalty")) {
             alignment_gap_extension_penalty = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--align-end-bonus")) {
+            alignment_end_bonus = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--align-alternative-alignments")) {
             alignment_num_alternative_paths = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--align-min-path-score")) {
@@ -985,6 +987,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --align-mm-transversion-penalty [INT]\tpositive transversion penalty (DNA only) [3]\n");
             fprintf(stderr, "\t   --align-gap-open-penalty [INT]\t\tpositive gap opening penalty [5]\n");
             fprintf(stderr, "\t   --align-gap-extension-penalty [INT]\t\tpositive gap extension penalty [2]\n");
+            fprintf(stderr, "\t   --align-end-bonus [INT]\t\tscore bonus for each endpoint of the query covered by an alignment [5]\n");
             fprintf(stderr, "\t   --align-edit-distance \t\t\tuse unit costs for scoring matrix [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "Advanced options for seeding:\n");
@@ -1239,6 +1242,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --align-mm-transversion-penalty [INT]\tpositive transversion penalty (DNA only) [3]\n");
             fprintf(stderr, "\t   --align-gap-open-penalty [INT]\t\tpositive gap opening penalty [5]\n");
             fprintf(stderr, "\t   --align-gap-extension-penalty [INT]\t\tpositive gap extension penalty [2]\n");
+            fprintf(stderr, "\t   --align-end-bonus [INT]\t\tscore bonus for each endpoint of the query covered by an alignment [5]\n");
             fprintf(stderr, "\t   --align-edit-distance \t\t\tuse unit costs for scoring matrix [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "Advanced options for seeding:\n");

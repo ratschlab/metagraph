@@ -384,7 +384,7 @@ std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score) {
 
     {
         auto &[S, E, F, node, i_prev, c, offset, max_pos, trim] = table[0];
-        S[0] = 0;
+        S[0] = config_.left_end_bonus && !seed_->get_clipping() ? config_.left_end_bonus : 0;
         extend_ins_end(S, E, F, window.size() + 1 - trim, xdrop_cutoff, config_);
 
         static_assert(std::is_same_v<decltype(table)::value_type, Column>);
@@ -639,6 +639,7 @@ std::vector<Alignment> DefaultColumnExtender
     size_t seed_clipping = this->seed_->get_clipping();
     ssize_t seed_offset = static_cast<ssize_t>(this->seed_->get_offset() - 1);
     ssize_t k_minus_1 = graph_->get_k() - 1;
+    ssize_t last_pos = window.size();
 
     std::vector<std::tuple<score_t, ssize_t, ssize_t>> indices;
     indices.reserve(table.size());
@@ -655,7 +656,8 @@ std::vector<Alignment> DefaultColumnExtender
                 && offset >= k_minus_1
                 && S[pos] == S_p[pos_p] + profile_score_.find(c)->second[seed_clipping + max_pos]
                 && profile_op_.find(c)->second[seed_clipping + max_pos] == Cigar::MATCH) {
-            indices.emplace_back(S[pos], -std::abs(max_pos - offset + seed_offset),
+            score_t end_bonus = max_pos == last_pos ? config_.right_end_bonus : 0;
+            indices.emplace_back(S[pos] + end_bonus, -std::abs(max_pos - offset + seed_offset),
                                  -static_cast<ssize_t>(i));
         }
     }
