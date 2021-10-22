@@ -16,28 +16,33 @@ with open('requirements.txt') as f:
 test_requirements = ['pytest']
 
 setup(
-    author="ratschlab",
-    author_email='grlab@ratschlab.org',
+    author="Marc Zimmermann",
+    author_email='marc.zimmermann@inf.ethz.ch',
+    maintainer="Mikhail Karasikov",
+    maintainer_email='mikhaika@inf.ethz.ch',
     classifiers=[
         'Development Status :: 2 - Pre-Alpha',
         'Intended Audience :: Developers',
         'License :: OSI Approved :: MIT License',
         'Natural Language :: English',
-        "Programming Language :: Python :: 2",
-        'Programming Language :: Python :: 2.7',
         'Programming Language :: Python :: 3',
-        'Programming Language :: Python :: 3.4',
-        'Programming Language :: Python :: 3.5',
         'Programming Language :: Python :: 3.6',
+        'Programming Language :: Python :: 3.7',
+        'Programming Language :: Python :: 3.8',
     ],
-    description="Metagraph Toolkit",
+    description="Metagraph workflows",
+    entry_points={
+        'console_scripts': [
+            'metagraph-workflows=metagraph_workflows.cli:main'
+        ],
+    },
     install_requires=requirements,
     license="MIT license",
     long_description=readme,
     include_package_data=True,
-    keywords='metagraph',
-    name='metagraph',
-    packages=find_packages(include=['metagraph']),
+    keywords='metagraph_workflows',
+    name='metagraph_workflows',
+    packages=find_packages(include=['metagraph_workflows']),
     setup_requires=setup_requirements,
     test_suite='tests',
     tests_require=test_requirements,

@@ -215,6 +215,42 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
+
+  Metagraph-Workflows:
+    name: Test metagraph workflows
+    runs-on: ubuntu-20.04
+    needs: [Linux]
+
+    steps:
+        - uses: actions/checkout@v2
+
+        - name: Set up Python 3.8
+          uses: actions/setup-python@v1
+          with:
+              python-version: 3.8
+
+        - name: fetch static binary
+          uses: actions/download-artifact@v2
+          with:
+              path: artifacts
+
+        - name: setup metagraph binary
+          run: |
+            sudo ln -s $(pwd)/artifacts/metagraph_DNA_linux_x86/metagraph_DNA /usr/local/bin/metagraph
+            sudo chmod +rx /usr/local/bin/metagraph
+            /usr/local/bin/metagraph --help
+            metagraph --help
+
+        - name: Install python dependencies
+          run: |
+              python -m pip install --upgrade pip
+              pip install pytest
+              pip install -r metagraph/workflows/requirements.txt
+        - name: Test metagraph-workflows pytest
+          run: |
+              cd metagraph/workflows
+              pytest
+
   Release:
     name: Create Release
     if: contains(github.ref, 'tags/v')
