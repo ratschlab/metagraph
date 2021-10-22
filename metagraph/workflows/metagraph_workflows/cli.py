@@ -141,11 +141,6 @@ def _convert_type(v: str) -> Any:
     except:
         pass
 
-    try:
-        return int(v)
-    except:
-        pass
-
     return v
 
 
