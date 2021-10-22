@@ -8,5 +8,5 @@ recursive-exclude * *.py[co]
 recursive-include docs *.rst conf.py Makefile make.bat *.jpg *.png *.gif
 
 recursive-include metagraph_workflows/snakemake *.smk Snakefile default.yml
-recursive-include metagraph_workflows/snakemake/example_data *.fa
+recursive-include metagraph_workflows/snakemake/test_data *.fa
 recursive-exclude **/.snakemake *
