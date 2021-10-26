@@ -152,23 +152,31 @@ int assemble(Config *config) {
         );
     }
 
-    seq_io::FastaWriter writer(config->outfbase, config->header,
-                               config->enumerate_out_sequences,
-                               get_num_threads() > 1);
+    std::unique_ptr<seq_io::FastaWriter> writer;
+    if (config->outfbase != "/dev/null") {
+        writer = std::make_unique<seq_io::FastaWriter>(config->outfbase, config->header,
+                                                       config->enumerate_out_sequences,
+                                                       get_num_threads() > 1);
+    }
+
     std::mutex write_mutex;
 
     if (config->unitigs || config->min_tip_size > 1) {
         graph->call_unitigs([&](const auto &unitig, auto&&) {
-                                std::lock_guard<std::mutex> lock(write_mutex);
-                                writer.write(unitig);
+                                if (writer) {
+                                    std::lock_guard<std::mutex> lock(write_mutex);
+                                    writer->write(unitig);
+                                }
                             },
                             get_num_threads(),
                             config->min_tip_size,
                             config->kmers_in_single_form);
     } else {
         graph->call_sequences([&](const auto &contig, auto&&) {
-                                  std::lock_guard<std::mutex> lock(write_mutex);
-                                  writer.write(contig);
+                                  if (writer) {
+                                      std::lock_guard<std::mutex> lock(write_mutex);
+                                      writer->write(contig);
+                                  }
                               },
                               get_num_threads(),
                               config->kmers_in_single_form);
