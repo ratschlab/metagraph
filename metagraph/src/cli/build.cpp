@@ -161,10 +161,19 @@ int build_graph(Config *config) {
                     utils::make_suffix(config->outfbase, DBGSuccinct::kExtension));
         }
 
-        if (!config->mark_dummy_kmers && !config->node_suffix_length) {
+        if (config->inplace) {
+            if (config->mark_dummy_kmers) {
+                logger->warn("Graph is being constructed inplace, dummy k-mers will"
+                             " not be marked. Run \'transform --clear-dummy\' manually.");
+            }
+            if (config->node_suffix_length) {
+                logger->warn("Graph is being constructed inplace, k-mer suffixes will"
+                             " not be indexed. Run \'transform --index-ranges ...\' manually.");
+            }
             DBGSuccinct::serialize(std::move(graph_data), config->outfbase,
                                    config->graph_mode, config->state);
-            logger->trace("Graph construction finished in {} sec", timer.elapsed());
+            logger->trace("Graph construction and serialization finished in {} sec",
+                          timer.elapsed());
             return 0;
         }
 

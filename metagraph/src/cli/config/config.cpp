@@ -338,6 +338,8 @@ Config::Config(int argc, char *argv[]) {
             count_dummy = true;
         } else if (!strcmp(argv[i], "--clear-dummy")) {
             clear_dummy = true;
+        } else if (!strcmp(argv[i], "--inplace")) {
+            inplace = true;
         } else if (!strcmp(argv[i], "--index-ranges")) {
             node_suffix_length = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--no-postprocessing")) {
@@ -885,6 +887,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --graph [STR] \tgraph representation: succinct / bitmap / hash / hashstr / hashfast [succinct]\n");
             fprintf(stderr, "\t   --state [STR] \tstate of succinct graph: small / dynamic / stat / fast [stat]\n");
+            fprintf(stderr, "\t   --inplace \t\tconstruct succinct graph inplace and serialize without loading to RAM [off]\n");
             fprintf(stderr, "\t   --count-kmers \tcount k-mers and build weighted graph [off]\n");
             fprintf(stderr, "\t   --count-width \tnumber of bits used to represent k-mer abundance [8]\n");
             fprintf(stderr, "\t   --index-ranges [INT]\tindex all node ranges in BOSS for suffixes of given length [%zu]\n", kDefaultIndexSuffixLen);
