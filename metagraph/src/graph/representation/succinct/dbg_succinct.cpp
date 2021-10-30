@@ -6,7 +6,6 @@
 #include <string>
 #include <filesystem>
 
-#include "graph/representation/succinct/boss_chunk.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/serialization.hpp"
 #include "common/logger.hpp"
@@ -793,14 +792,13 @@ void DBGSuccinct::serialize(boss::BOSS::Chunk&& chunk,
     std::filesystem::remove(prefix + kDummyMaskExtension);
 
     const std::string &fname = prefix + kExtension;
-    boss::BOSS::serialize(std::move(chunk), fname);
-    std::ofstream out(fname, std::ios::binary | std::ios::ate);
+    std::ofstream out(fname, std::ios::binary);
+    boss::BOSS::serialize(std::move(chunk), out);
     serialize_number(out, static_cast<int>(mode));
     serialize_number(out, 0); // suffix ranges are not indexed
     if (!out.good())
         throw std::ios_base::failure("Can't write to file " + fname);
 }
-
 
 void DBGSuccinct::switch_state(BOSS::State new_state) {
     if (get_state() == new_state)

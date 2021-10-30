@@ -256,18 +256,14 @@ void BOSS::serialize(std::ofstream &outstream) const {
     outstream.flush();
 }
 
-void BOSS::serialize(Chunk&& chunk, const std::string &filename) {
-    const std::string &fname = utils::remove_suffix(filename, kExtension) + kExtension;
-
-    std::ofstream out(fname, std::ios::binary);
-    if (!out)
-        throw std::ofstream::failure("Error: Can't write to file " + fname);
+void BOSS::serialize(Chunk&& chunk, std::ofstream &out) {
+    if (!out.good())
+        throw std::ofstream::failure("Error: Can't write to file");
 
     // write F values, k, and state
     serialize_number_vector_raw(out, chunk.F_);
     serialize_number(out, chunk.k_);
     serialize_number(out, State::STAT);
-    out.flush();
 
     // write Wavelet Tree
     // TODO: optimize
@@ -275,7 +271,6 @@ void BOSS::serialize(Chunk&& chunk, const std::string &filename) {
         wavelet_tree_stat W(chunk.get_W_width(), chunk.W_);
         chunk.W_.close(true); // remove the file
         W.serialize(out);
-        out.flush();
     }
 
     // write Last array
@@ -287,8 +282,9 @@ void BOSS::serialize(Chunk&& chunk, const std::string &filename) {
         in.close();
         chunk.last_.close(true); // remove the file
         bit_vector_stat(std::move(last)).serialize(out);
-        out.flush();
     }
+
+    out.flush();
 }
 
 bool BOSS::load(const std::string &filename) {

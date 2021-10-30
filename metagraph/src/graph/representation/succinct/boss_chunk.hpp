@@ -10,7 +10,6 @@
 
 namespace mtg {
 namespace graph {
-
 namespace boss {
 
 /**
