@@ -162,7 +162,8 @@ int build_graph(Config *config) {
         }
 
         if (!config->mark_dummy_kmers && !config->node_suffix_length) {
-            DBGSuccinct::serialize(std::move(graph_data), config->outfbase, config->graph_mode);
+            DBGSuccinct::serialize(std::move(graph_data), config->outfbase,
+                                   config->graph_mode, config->state);
             logger->trace("Graph construction finished in {} sec", timer.elapsed());
             return 0;
         }
@@ -350,6 +351,14 @@ int build_graph(Config *config) {
             dbg_succ->get_boss().index_suffix_ranges(suffix_length);
 
             logger->trace("Indexing of node ranges took {} sec", timer.elapsed());
+        }
+
+        if (config->state != dbg_succ->get_state()) {
+            logger->trace("Converting graph to state {}", Config::state_to_string(config->state));
+            timer.reset();
+            dbg_succ->switch_state(config->state);
+
+            logger->trace("Conversion done in {} sec", timer.elapsed());
         }
     }
 

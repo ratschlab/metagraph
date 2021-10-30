@@ -124,7 +124,8 @@ class DBGSuccinct : public DeBruijnGraph {
     // FYI: Note that suffix ranges will not be indexed.
     static void serialize(boss::BOSS::Chunk&& chunk,
                           const std::string &filename_base,
-                          Mode mode);
+                          Mode mode,
+                          boss::BOSS::State state = boss::BOSS::State::STAT);
     virtual std::string file_extension() const override final { return kExtension; }
     std::string bloom_filter_file_extension() const { return kBloomFilterExtension; }
 

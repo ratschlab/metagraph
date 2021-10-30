@@ -96,6 +96,15 @@ BOSS::~BOSS() {
     delete last_;
 }
 
+template <uint8_t t_width>
+sdsl::int_vector<t_width> to_vector(sdsl::int_vector_buffer<t_width> &buf) {
+    buf.flush();
+    sdsl::int_vector<t_width> result;
+    std::ifstream in(buf.filename(), std::ios::binary);
+    result.load(in);
+    return result;
+}
+
 void BOSS::initialize(Chunk *chunk) {
     delete W_;
     delete last_;
@@ -103,13 +112,7 @@ void BOSS::initialize(Chunk *chunk) {
     // TODO: optimize
     W_ = new wavelet_tree_stat(chunk->get_W_width(), chunk->W_);
 
-    {
-        chunk->last_.flush();
-        sdsl::bit_vector last;
-        std::ifstream in(chunk->last_.filename(), std::ios::binary);
-        last.load(in);
-        last_ = new bit_vector_stat(std::move(last));
-    }
+    last_ = new bit_vector_stat(to_vector(chunk->last_));
 
     F_ = chunk->F_;
     recompute_NF();
@@ -245,43 +248,58 @@ void BOSS::serialize(std::ofstream &outstream) const {
     serialize_number_vector_raw(outstream, F_);
     serialize_number(outstream, k_);
     serialize_number(outstream, state);
-    outstream.flush();
 
     // write Wavelet Tree
     W_->serialize(outstream);
-    outstream.flush();
 
     // write last array
     last_->serialize(outstream);
     outstream.flush();
 }
 
-void BOSS::serialize(Chunk&& chunk, std::ofstream &out) {
+void BOSS::serialize(Chunk&& chunk, std::ofstream &out, State state) {
     if (!out.good())
         throw std::ofstream::failure("Error: Can't write to file");
 
     // write F values, k, and state
     serialize_number_vector_raw(out, chunk.F_);
     serialize_number(out, chunk.k_);
-    serialize_number(out, State::STAT);
+    serialize_number(out, state);
 
     // write Wavelet Tree
     // TODO: optimize
-    {
-        wavelet_tree_stat W(chunk.get_W_width(), chunk.W_);
-        chunk.W_.close(true); // remove the file
-        W.serialize(out);
-    }
+#define SERIALIZE_W(wt_type) { \
+        wt_type W(chunk.get_W_width(), chunk.W_); \
+        chunk.W_.close(true); \
+        W.serialize(out); }
 
-    // write Last array
-    {
-        chunk.last_.flush();
-        sdsl::bit_vector last;
-        std::ifstream in(chunk.last_.filename(), std::ios::binary);
-        last.load(in);
-        in.close();
-        chunk.last_.close(true); // remove the file
-        bit_vector_stat(std::move(last)).serialize(out);
+#define SERIALIZE_LAST(bv_type) \
+        bv_type(to_vector(chunk.last_)).serialize(out); \
+        chunk.last_.close(true);
+
+    switch (state) {
+        case State::DYN:
+            {
+                // the interface in wavelet_tree_dyn doesn't support building
+                // from non-const vector buffer
+                wavelet_tree_dyn W(chunk.get_W_width(), to_vector(chunk.W_));
+                chunk.W_.close(true);
+                W.serialize(out);
+            }
+            SERIALIZE_LAST(bit_vector_dyn);
+            break;
+        case State::STAT:
+            SERIALIZE_W(wavelet_tree_stat);
+            SERIALIZE_LAST(bit_vector_stat);
+            break;
+        case State::FAST:
+            SERIALIZE_W(wavelet_tree_fast);
+            SERIALIZE_LAST(bit_vector_stat);
+            break;
+        case State::SMALL:
+            SERIALIZE_W(wavelet_tree_small);
+            SERIALIZE_LAST(bit_vector_small);
+            break;
     }
 
     out.flush();

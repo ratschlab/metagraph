@@ -785,7 +785,7 @@ void DBGSuccinct::serialize(const std::string &filename) const {
 
 void DBGSuccinct::serialize(boss::BOSS::Chunk&& chunk,
                             const std::string &filename,
-                            Mode mode) {
+                            Mode mode, BOSS::State state) {
     const std::string &prefix = utils::remove_suffix(filename, kExtension);
 
     std::filesystem::remove(prefix + kBloomFilterExtension);
@@ -793,7 +793,7 @@ void DBGSuccinct::serialize(boss::BOSS::Chunk&& chunk,
 
     const std::string &fname = prefix + kExtension;
     std::ofstream out(fname, std::ios::binary);
-    boss::BOSS::serialize(std::move(chunk), out);
+    boss::BOSS::serialize(std::move(chunk), out, state);
     serialize_number(out, static_cast<int>(mode));
     serialize_number(out, 0); // suffix ranges are not indexed
     if (!out.good())
