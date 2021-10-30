@@ -120,7 +120,8 @@ class DBGSuccinct : public DeBruijnGraph {
     virtual bool load_without_mask(const std::string &filename_base) final;
     virtual bool load(const std::string &filename_base) override;
     virtual void serialize(const std::string &filename_base) const override;
-    // initialize DBGSuccinct and dump to disk without loading everything in RAM
+    // Initialize DBGSuccinct and dump to disk without loading to RAM.
+    // FYI: Note that suffix ranges will not be indexed.
     static void serialize(boss::BOSS::Chunk&& chunk,
                           const std::string &filename_base,
                           Mode mode);

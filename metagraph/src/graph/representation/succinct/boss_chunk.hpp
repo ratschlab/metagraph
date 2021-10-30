@@ -11,8 +11,6 @@
 namespace mtg {
 namespace graph {
 
-class DBGSuccinct;
-
 namespace boss {
 
 /**
@@ -21,7 +19,6 @@ namespace boss {
  */
 class BOSS::Chunk {
     friend BOSS;
-    friend DBGSuccinct;
 
   public:
     typedef uint8_t TAlphabet;
@@ -80,7 +77,9 @@ class BOSS::Chunk {
     bool load(const std::string &filename_base);
     void serialize(const std::string &filename_base);
 
-    void initialize_boss(BOSS *graph, sdsl::int_vector_buffer<> *weights = nullptr);
+    // FYI: these can be called only once
+    void initialize_boss(BOSS *graph);
+    sdsl::int_vector_buffer<> get_weights() { return std::move(weights_); }
 
     /**
      * Merge BOSS chunks loaded from the files passed in #chunk_filenames and construct

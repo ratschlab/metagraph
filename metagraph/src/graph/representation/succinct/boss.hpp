@@ -602,8 +602,8 @@ class BOSS {
   public:
     class Chunk;
     void initialize(Chunk *chunk);
-    // Initialize a BOSS table from Chunk and dump to disk without loading in RAM.
-    // Note that suffix ranges will not be indexed.
+    // Initialize a BOSS table from Chunk and dump to disk without loading to RAM.
+    // FYI: Note that suffix ranges will not be indexed.
     static void serialize(Chunk&& chunk, const std::string &filename_base);
 };
 

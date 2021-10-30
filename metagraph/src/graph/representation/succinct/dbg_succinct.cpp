@@ -7,7 +7,6 @@
 #include <filesystem>
 
 #include "graph/representation/succinct/boss_chunk.hpp"
-#include "graph/graph_extensions/node_weights.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/serialization.hpp"
 #include "common/logger.hpp"
@@ -740,7 +739,7 @@ bool DBGSuccinct::load(const std::string &filename) {
 }
 
 void DBGSuccinct::serialize(const std::string &filename) const {
-    const std::string &prefix = remove_suffix(filename, kExtension);
+    const std::string &prefix = utils::remove_suffix(filename, kExtension);
 
     // Clear any existing Bloom filters
     std::filesystem::remove(prefix + kBloomFilterExtension);
@@ -788,7 +787,7 @@ void DBGSuccinct::serialize(const std::string &filename) const {
 void DBGSuccinct::serialize(boss::BOSS::Chunk&& chunk,
                             const std::string &filename,
                             Mode mode) {
-    const std::string &prefix = remove_suffix(filename, kExtension);
+    const std::string &prefix = utils::remove_suffix(filename, kExtension);
 
     std::filesystem::remove(prefix + kBloomFilterExtension);
     std::filesystem::remove(prefix + kDummyMaskExtension);
@@ -800,9 +799,6 @@ void DBGSuccinct::serialize(boss::BOSS::Chunk&& chunk,
     serialize_number(out, 0); // suffix ranges are not indexed
     if (!out.good())
         throw std::ios_base::failure("Can't write to file " + fname);
-
-    if (chunk.weights_.size())
-        NodeWeights::serialize(std::move(chunk.weights_), fname);
 }
 
 

@@ -257,7 +257,7 @@ void BOSS::serialize(std::ofstream &outstream) const {
 }
 
 void BOSS::serialize(Chunk&& chunk, const std::string &filename) {
-    const std::string &fname = remove_suffix(filename, kExtension) + kExtension;
+    const std::string &fname = utils::remove_suffix(filename, kExtension) + kExtension;
 
     std::ofstream out(fname, std::ios::binary);
     if (!out)

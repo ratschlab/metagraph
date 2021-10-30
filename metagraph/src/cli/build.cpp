@@ -156,21 +156,19 @@ int build_graph(Config *config) {
 
         assert(graph_data.size());
 
+        if (config->count_kmers) {
+            NodeWeights::serialize(graph_data.get_weights(),
+                    utils::make_suffix(config->outfbase, DBGSuccinct::kExtension));
+        }
+
         if (!config->mark_dummy_kmers && !config->node_suffix_length) {
             DBGSuccinct::serialize(std::move(graph_data), config->outfbase, config->graph_mode);
             logger->trace("Graph construction finished in {} sec", timer.elapsed());
             return 0;
-
-        } else if (config->count_kmers) {
-            sdsl::int_vector_buffer<> kmer_counts;
-            graph_data.initialize_boss(boss_graph.get(), &kmer_counts);
-            graph.reset(new DBGSuccinct(boss_graph.release(), config->graph_mode));
-            NodeWeights::serialize(std::move(kmer_counts),
-                    utils::make_suffix(config->outfbase, DBGSuccinct::kExtension));
-        } else {
-            graph_data.initialize_boss(boss_graph.get());
-            graph.reset(new DBGSuccinct(boss_graph.release(), config->graph_mode));
         }
+
+        graph_data.initialize_boss(boss_graph.get());
+        graph.reset(new DBGSuccinct(boss_graph.release(), config->graph_mode));
 
     } else if (config->graph_type == Config::GraphType::BITMAP && !config->dynamic) {
 
