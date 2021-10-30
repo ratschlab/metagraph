@@ -67,7 +67,7 @@ class Config {
     // For DNA4, index nodes for all possible suffixes of length 10.
     // In general, the default value is: 20/log2(|Sigma|)
     static const size_t kDefaultIndexSuffixLen;
-    unsigned int node_suffix_length = 0;
+    unsigned int node_suffix_length = kDefaultIndexSuffixLen;
     unsigned int distance = 0;
     unsigned int parallel_each = 1;
     unsigned int parallel_nodes = -1;  // if not set, redefined by |parallel|
