@@ -33,8 +33,8 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<Label> {
     // Dump columns to separate files in human-readable format
     bool dump_columns(const std::string &prefix, uint64_t num_threads = 1) const;
 
-    uint64_t num_objects() const override;
-    uint64_t num_relations() const override;
+    uint64_t num_objects() const override { return matrix_->num_rows(); }
+    uint64_t num_relations() const override { return matrix_->num_relations(); }
 
     void set(Index, const VLabels &) override { except_dyn(); }
     void add_labels(const std::vector<Index> &, const VLabels &) override { except_dyn(); }
@@ -44,7 +44,7 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<Label> {
 
     std::unique_ptr<BinaryMatrixType> release_matrix()  { return std::move(matrix_); };
 
-    std::string file_extension() const override;
+    std::string file_extension() const override { return kExtension; }
 
     static const std::string kExtension;
 

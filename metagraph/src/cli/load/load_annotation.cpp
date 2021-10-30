@@ -21,6 +21,18 @@ Config::AnnotationType parse_annotation_type(const std::string &filename) {
     if (utils::ends_with(filename, annot::ColumnCompressed<>::kExtension)) {
         return Config::AnnotationType::ColumnCompressed;
 
+    } else if (utils::ends_with(filename, annot::ColumnCoordAnnotator::kExtension)) {
+        return Config::AnnotationType::ColumnCoord;
+
+    } else if (utils::ends_with(filename, annot::MultiBRWTCoordAnnotator::kExtension)) {
+        return Config::AnnotationType::BRWTCoord;
+
+    } else if (utils::ends_with(filename, annot::RowDiffCoordAnnotator::kExtension)) {
+        return Config::AnnotationType::RowDiffCoord;
+
+    } else if (utils::ends_with(filename, annot::RowDiffBRWTCoordAnnotator::kExtension)) {
+        return Config::AnnotationType::RowDiffBRWTCoord;
+
     } else if (utils::ends_with(filename, annot::RowDiffColumnAnnotator::kExtension)) {
         return Config::AnnotationType::RowDiff;
 
@@ -56,6 +68,9 @@ Config::AnnotationType parse_annotation_type(const std::string &filename) {
 
     } else if (utils::ends_with(filename, annot::IntMultiBRWTAnnotator::kExtension)) {
         return Config::AnnotationType::IntBRWT;
+
+    } else if (utils::ends_with(filename, annot::IntRowDiffBRWTAnnotator::kExtension)) {
+        return Config::AnnotationType::IntRowDiffBRWT;
 
     } else {
         logger->error("Unknown annotation format in '{}'", filename);
@@ -128,6 +143,26 @@ initialize_annotation(Config::AnnotationType anno_type,
         }
         case Config::IntBRWT: {
             annotation.reset(new annot::IntMultiBRWTAnnotator());
+            break;
+        }
+        case Config::IntRowDiffBRWT: {
+            annotation.reset(new annot::IntRowDiffBRWTAnnotator());
+            break;
+        }
+        case Config::ColumnCoord: {
+            annotation.reset(new annot::ColumnCoordAnnotator());
+            break;
+        }
+        case Config::BRWTCoord: {
+            annotation.reset(new annot::MultiBRWTCoordAnnotator());
+            break;
+        }
+        case Config::RowDiffCoord: {
+            annotation.reset(new annot::RowDiffCoordAnnotator());
+            break;
+        }
+        case Config::RowDiffBRWTCoord: {
+            annotation.reset(new annot::RowDiffBRWTCoordAnnotator());
             break;
         }
     }

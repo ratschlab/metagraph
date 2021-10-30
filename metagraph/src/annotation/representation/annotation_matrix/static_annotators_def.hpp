@@ -13,7 +13,11 @@
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "annotation/binary_matrix/row_sparse/row_sparse.hpp"
 #include "annotation/binary_matrix/row_vector/unique_row_binmat.hpp"
-#include "annotation/int_matrix/extended/csc_matrix.hpp"
+#include "annotation/int_matrix/rank_extended/csc_matrix.hpp"
+#include "annotation/int_matrix/row_diff/int_row_diff.hpp"
+#include "annotation/int_matrix/row_diff/tuple_row_diff.hpp"
+#include "annotation/int_matrix/csr_matrix/csr_matrix.hpp"
+#include "annotation/int_matrix/rank_extended/tuple_csc_matrix.hpp"
 
 
 namespace mtg {
@@ -41,7 +45,21 @@ typedef StaticBinRelAnnotator<binmat::RowDiff<binmat::BRWT>, std::string> RowDif
 
 typedef StaticBinRelAnnotator<binmat::RowDiff<binmat::RowSparse>, std::string> RowDiffRowSparseAnnotator;
 
-typedef StaticBinRelAnnotator<matrix::CSCMatrix<binmat::BRWT, sdsl::dac_vector_dp<>>, std::string> IntMultiBRWTAnnotator;
+typedef sdsl::dac_vector_dp<> CountsVector;
+
+typedef StaticBinRelAnnotator<matrix::CSCMatrix<binmat::BRWT, CountsVector>, std::string> IntMultiBRWTAnnotator;
+
+typedef StaticBinRelAnnotator<matrix::IntRowDiff<matrix::CSCMatrix<binmat::BRWT, CountsVector>>, std::string> IntRowDiffBRWTAnnotator;
+
+typedef StaticBinRelAnnotator<matrix::CSRMatrix, std::string> IntRowAnnotator;
+
+typedef StaticBinRelAnnotator<matrix::TupleCSCMatrix<binmat::ColumnMajor>, std::string> ColumnCoordAnnotator;
+
+typedef StaticBinRelAnnotator<matrix::TupleCSCMatrix<binmat::BRWT>, std::string> MultiBRWTCoordAnnotator;
+
+typedef StaticBinRelAnnotator<matrix::TupleRowDiff<matrix::TupleCSCMatrix<binmat::ColumnMajor>>, std::string> RowDiffCoordAnnotator;
+
+typedef StaticBinRelAnnotator<matrix::TupleRowDiff<matrix::TupleCSCMatrix<binmat::BRWT>>, std::string> RowDiffBRWTCoordAnnotator;
 
 
 template <>
@@ -68,6 +86,18 @@ template <>
 inline const std::string RowDiffRowSparseAnnotator::kExtension = ".row_diff_sparse.annodbg";
 template <>
 inline const std::string IntMultiBRWTAnnotator::kExtension = ".int_brwt.annodbg";
+template <>
+inline const std::string IntRowDiffBRWTAnnotator::kExtension = ".row_diff_int_brwt.annodbg";
+template <>
+inline const std::string IntRowAnnotator::kExtension = ".int_csr.annodbg";
+template <>
+inline const std::string ColumnCoordAnnotator::kExtension = ".column_coord.annodbg";
+template <>
+inline const std::string MultiBRWTCoordAnnotator::kExtension = ".brwt_coord.annodbg";
+template <>
+inline const std::string RowDiffCoordAnnotator::kExtension = ".row_diff_coord.annodbg";
+template <>
+inline const std::string RowDiffBRWTCoordAnnotator::kExtension = ".row_diff_brwt_coord.annodbg";
 
 } // namespace annot
 } // namespace mtg

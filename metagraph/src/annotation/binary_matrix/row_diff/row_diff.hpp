@@ -27,9 +27,15 @@ const std::string kRowDiffForkSuccExt = ".rd_succ";
 const size_t RD_PATH_RESERVE_SIZE = 2;
 
 
-class IRowDiff : public BinaryMatrix {
+class IRowDiff {
   public:
     virtual ~IRowDiff() {}
+
+    const graph::DBGSuccinct* graph() const { return graph_; }
+    void set_graph(const graph::DBGSuccinct *graph) { graph_ = graph; }
+
+  protected:
+    const graph::DBGSuccinct *graph_ = nullptr;
 };
 
 /**
@@ -54,7 +60,7 @@ class IRowDiff : public BinaryMatrix {
 // does not instantiate the virtual methods in this class, so I had to move definitions
 // to the header (gcc works fine)
 template <class BaseMatrix>
-class RowDiff : public IRowDiff {
+class RowDiff : public IRowDiff, public BinaryMatrix {
   public:
     using anchor_bv_type = bit_vector_small;
     using fork_succ_bv_type = bit_vector_small;
@@ -62,19 +68,14 @@ class RowDiff : public IRowDiff {
     RowDiff() {}
 
     RowDiff(const graph::DBGSuccinct *graph, BaseMatrix &&diff)
-        : graph_(graph), diffs_(std::move(diff)) {}
-
-    uint64_t num_columns() const override { return diffs_.num_columns(); }
-
-    const graph::DBGSuccinct* graph() const { return graph_; }
+          : diffs_(std::move(diff)) { graph_ = graph; }
 
     /**
-     * Returns the number of set bits in the matrix.
+     * Returns the number of set bits in the row-diff transformed matrix.
      */
     uint64_t num_relations() const override { return diffs_.num_relations(); }
-
+    uint64_t num_columns() const override { return diffs_.num_columns(); }
     uint64_t num_rows() const override { return diffs_.num_rows(); }
-    void set_graph(const graph::DBGSuccinct *graph) { graph_ = graph; }
 
     bool get(Row row, Column column) const override;
 
@@ -90,9 +91,6 @@ class RowDiff : public IRowDiff {
     bool load(std::istream &f) override;
     void serialize(std::ostream &f) const override;
 
-    void serialize(const std::string &filename) const;
-    bool load(const std::string &filename);
-
     void load_fork_succ(const std::string &filename);
     void load_anchor(const std::string &filename);
     const anchor_bv_type& anchor() const { return anchor_; }
@@ -100,12 +98,8 @@ class RowDiff : public IRowDiff {
     const BaseMatrix& diffs() const { return diffs_; }
     BaseMatrix& diffs() { return diffs_; }
 
-    Vector<uint64_t> get_diff(uint64_t node_id) const { return diffs_.get_row(node_id); }
-
   private:
     static void add_diff(const Vector<uint64_t> &diff, Vector<uint64_t> *row);
-
-    const graph::DBGSuccinct *graph_ = nullptr;
 
     BaseMatrix diffs_;
     anchor_bv_type anchor_;
@@ -114,6 +108,7 @@ class RowDiff : public IRowDiff {
 
 template <class BaseMatrix>
 bool RowDiff<BaseMatrix>::get(Row row, Column column) const {
+    assert(graph_ && "graph must be loaded");
     assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
     assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());
 
@@ -128,9 +123,11 @@ bool RowDiff<BaseMatrix>::get(Row row, Column column) const {
  */
 template <class BaseMatrix>
 std::vector<BinaryMatrix::Row> RowDiff<BaseMatrix>::get_column(Column column) const {
+    assert(graph_ && "graph must be loaded");
     assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
     assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());
 
+    // TODO: implement a more efficient algorithm
     std::vector<Row> result;
     for (Row row = 0; row < num_rows(); ++row) {
         if (get(row, column))
@@ -141,10 +138,11 @@ std::vector<BinaryMatrix::Row> RowDiff<BaseMatrix>::get_column(Column column) co
 
 template <class BaseMatrix>
 BinaryMatrix::SetBitPositions RowDiff<BaseMatrix>::get_row(Row row) const {
+    assert(graph_ && "graph must be loaded");
     assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
     assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());
 
-    Vector<uint64_t> result = get_diff(row);
+    Vector<uint64_t> result = diffs_.get_row(row);
     std::sort(result.begin(), result.end());
 
     uint64_t boss_edge = graph_->kmer_to_boss_index(
@@ -158,7 +156,7 @@ BinaryMatrix::SetBitPositions RowDiff<BaseMatrix>::get_row(Row row) const {
         row = graph::AnnotatedSequenceGraph::graph_to_anno_index(
                 graph_->boss_to_kmer_index(boss_edge));
 
-        auto diff_row = get_diff(row);
+        auto diff_row = diffs_.get_row(row);
         std::sort(diff_row.begin(), diff_row.end());
         add_diff(diff_row, &result);
     }
@@ -169,6 +167,7 @@ BinaryMatrix::SetBitPositions RowDiff<BaseMatrix>::get_row(Row row) const {
 template <class BaseMatrix>
 std::vector<BinaryMatrix::SetBitPositions>
 RowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
+    assert(graph_ && "graph must be loaded");
     assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
     assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());
 
@@ -179,6 +178,10 @@ RowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
     // map row index to its index in |rd_rows|
     VectorMap<Row, size_t> node_to_rd;
     node_to_rd.reserve(row_ids.size() * RD_PATH_RESERVE_SIZE);
+
+    // keeps how many times rows in |rd_rows| will be queried
+    std::vector<size_t> times_traversed;
+    times_traversed.reserve(row_ids.size() * RD_PATH_RESERVE_SIZE);
 
     // Truncated row-diff paths, indexes to |rd_rows|.
     // The last index in each path points to an anchor or to a row which had
@@ -205,10 +208,13 @@ RowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
             // The annotation for that node will have been reconstructed earlier
             // than for other nodes in this path as well. Thus, we will start
             // reconstruction from that node and don't need its successors.
-            if (!is_new)
+            if (!is_new) {
+                times_traversed[it.value()]++;
                 break;
+            }
 
             rd_ids.push_back(row);
+            times_traversed.push_back(1);
 
             if (anchor_[row])
                 break;
@@ -220,6 +226,7 @@ RowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
     node_to_rd = VectorMap<Row, size_t>();
 
     std::vector<SetBitPositions> rd_rows = diffs_.get_rows(rd_ids);
+    common::logger->trace("Queried batch of {} diffed rows", rd_ids.size());
 
     rd_ids = std::vector<Row>();
 
@@ -233,9 +240,16 @@ RowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
             std::sort(rd_rows[*it].begin(), rd_rows[*it].end());
             add_diff(rd_rows[*it], &result);
             // replace diff row with full reconstructed annotation
-            rd_rows[*it] = result;
+            if (--times_traversed[*it]) {
+                rd_rows[*it] = result;
+            } else {
+                // free memory
+                rd_rows[*it] = {};
+            }
         }
     }
+    common::logger->trace("Reconstructed annotations for {} rows", rows.size());
+    assert(times_traversed == std::vector<size_t>(rd_rows.size(), 0));
 
     return rows;
 }

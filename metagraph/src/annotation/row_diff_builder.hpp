@@ -13,7 +13,8 @@ namespace mtg {
 namespace annot {
 
 void count_labels_per_row(const std::vector<std::string> &source_files,
-                          const std::string &row_count_fname);
+                          const std::string &row_count_fname,
+                          bool with_coordinates = false);
 
 void build_pred_succ(const std::string &graph_filename,
                      const std::string &outfbase,
@@ -34,7 +35,10 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                                const std::filesystem::path &swap_dir,
                                const std::string &row_reduction_fname,
                                uint64_t buf_size_bytes,
-                               bool compute_row_reduction = true);
+                               bool compute_row_reduction = true,
+                               bool with_values = false,
+                               bool with_coordinates = false,
+                               size_t num_coords_per_seq = 0);
 
 } // namespace annot
 } // namespace mtg

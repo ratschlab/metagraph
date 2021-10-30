@@ -14,7 +14,7 @@
 namespace mtg {
 namespace annot {
 
-using utils::remove_suffix;
+using utils::make_suffix;
 
 
 template <typename Label>
@@ -130,8 +130,7 @@ bool RowCompressed<Label>::has_labels(Index i, const VLabels &labels) const {
 
 template <typename Label>
 void RowCompressed<Label>::serialize(const std::string &filename) const {
-    std::ofstream outstream(remove_suffix(filename, kExtension) + kExtension,
-                            std::ios::binary);
+    std::ofstream outstream(make_suffix(filename, kExtension), std::ios::binary);
     if (!outstream.good()) {
         throw std::ofstream::failure("Bad stream");
     }
@@ -141,8 +140,7 @@ void RowCompressed<Label>::serialize(const std::string &filename) const {
 
 template <typename Label>
 bool RowCompressed<Label>::merge_load(const std::vector<std::string> &filenames) {
-    std::ifstream instream(remove_suffix(filenames.at(0), kExtension) + kExtension,
-                           std::ios::binary);
+    std::ifstream instream(make_suffix(filenames.at(0), kExtension), std::ios::binary);
     if (!instream.good())
         return false;
 
@@ -167,8 +165,7 @@ bool RowCompressed<Label>::merge_load(const std::vector<std::string> &filenames)
             if (filename == filenames[0])
                 continue;
 
-            std::ifstream instream(remove_suffix(filename, kExtension) + kExtension,
-                                   std::ios::binary);
+            std::ifstream instream(make_suffix(filename, kExtension), std::ios::binary);
             if (!instream.good())
                 return false;
 
@@ -228,7 +225,7 @@ uint64_t RowCompressed<Label>::num_relations() const {
 template <typename Label>
 std::unique_ptr<LabelEncoder<Label>>
 RowCompressed<Label>::load_label_encoder(const std::string &filebase) {
-    auto filename = remove_suffix(filebase, kExtension) + kExtension;
+    auto filename = make_suffix(filebase, kExtension);
 
     std::ifstream instream(filename, std::ios::binary);
     if (!instream.good())
@@ -276,7 +273,7 @@ void RowCompressed<Label>::load_shape(const std::string &filename,
 template <typename Label>
 binmat::StreamRows<binmat::BinaryMatrix::SetBitPositions>
 RowCompressed<Label>::get_row_streamer(const std::string &filebase) {
-    std::string filename = remove_suffix(filebase, kExtension) + kExtension;
+    std::string filename = make_suffix(filebase, kExtension);
     std::ifstream instream(filename, std::ios::binary);
     // skip header
     load_label_encoder(instream);
@@ -289,7 +286,7 @@ void RowCompressed<Label>
 ::serialize(const std::string &filebase,
             const LabelEncoder<Label> &label_encoder,
             const std::function<void(binmat::BinaryMatrix::RowCallback)> &call_rows) {
-    auto filename = remove_suffix(filebase, kExtension) + kExtension;
+    auto filename = make_suffix(filebase, kExtension);
 
     std::ofstream outstream(filename, std::ios::binary);
     if (!outstream.good())

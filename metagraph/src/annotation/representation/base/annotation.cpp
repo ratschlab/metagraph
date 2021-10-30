@@ -123,6 +123,20 @@ void MultiLabelAnnotation<IndexType, LabelType>
     exit(1);
 }
 
+template <typename IndexType, typename LabelType>
+void MultiLabelAnnotation<IndexType, LabelType>
+::add_label_coord(Index, const VLabels &, uint64_t) {
+    logger->error("Adding relation attributes is not implemented for this annotator");
+    exit(1);
+}
+
+template <typename IndexType, typename LabelType>
+void MultiLabelAnnotation<IndexType, LabelType>
+::add_label_coords(const std::vector<std::pair<Index, uint64_t>> &, const VLabels &) {
+    logger->error("Adding relation attributes is not implemented for this annotator");
+    exit(1);
+}
+
 template class MultiLabelEncoded<std::string>;
 
 template class LabelEncoder<std::string>;

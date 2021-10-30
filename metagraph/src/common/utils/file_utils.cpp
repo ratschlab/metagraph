@@ -18,8 +18,17 @@ namespace utils {
 
 using mtg::common::logger;
 
+std::filesystem::path SWAP_PATH;
 std::vector<std::string> TMP_DIRS;
 std::mutex TMP_DIRS_MUTEX;
+
+void set_swap_path(std::filesystem::path dir_path) {
+    SWAP_PATH = dir_path;
+}
+
+std::filesystem::path get_swap_path() {
+    return SWAP_PATH;
+}
 
 void cleanup_tmp_dir_on_signal(int sig) {
     logger->trace("Got signal {}. Exiting...", sig);

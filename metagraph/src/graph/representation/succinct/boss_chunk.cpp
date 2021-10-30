@@ -298,8 +298,7 @@ BOSS::Chunk::build_boss_from_chunks(const std::vector<std::string> &chunk_filena
     Chunk full_chunk;
 
     for (size_t i = 0; i < chunk_filenames.size(); ++i) {
-        auto filename = utils::remove_suffix(chunk_filenames[i], kFileExtension)
-                                                        + kFileExtension;
+        auto filename = utils::make_suffix(chunk_filenames[i], kFileExtension);
 
         Chunk graph_chunk(1, 0, swap_dir);
         if (!graph_chunk.load(filename)) {
@@ -329,8 +328,7 @@ BOSS::Chunk::build_boss_from_chunks(const std::vector<std::string> &chunk_filena
 }
 
 bool BOSS::Chunk::load(const std::string &infbase) {
-    std::string fname
-        = utils::remove_suffix(infbase, kFileExtension) + kFileExtension;
+    std::string fname = utils::make_suffix(infbase, kFileExtension);
 
     try {
         W_.close(true);
@@ -372,8 +370,7 @@ bool BOSS::Chunk::load(const std::string &infbase) {
 }
 
 void BOSS::Chunk::serialize(const std::string &outbase) {
-    std::string fname
-        = utils::remove_suffix(outbase, kFileExtension) + kFileExtension;
+    std::string fname = utils::make_suffix(outbase, kFileExtension);
 
     W_.flush();
     fs::copy(W_.filename(), fname + ".W", fs::copy_options::overwrite_existing);

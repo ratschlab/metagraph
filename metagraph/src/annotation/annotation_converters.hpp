@@ -104,6 +104,9 @@ void convert_to_row_annotator(const ColumnCompressed<Label> &annotator,
  * @param out_dir directory where the transformed columns will be dumped. Filenames are
  * kept, extension is changed from 'column.annodbg' to 'row_diff.annodbg'
  * @param swap_dir directory for temporary files
+ * @param with_values row-diff transform with k-mer counts/attributes
+ * @param with_coordinates row-diff transform with k-mer coordinates/attributes
+ * @param num_coords_per_seq assume a constant length of each sequence (0: off)
  */
 enum class RowDiffStage { COUNT_LABELS = 0, COMPUTE_REDUCTION, CONVERT };
 void convert_to_row_diff(const std::vector<std::string> &files,
@@ -113,7 +116,10 @@ void convert_to_row_diff(const std::vector<std::string> &files,
                          std::filesystem::path out_dir,
                          std::filesystem::path swap_dir,
                          RowDiffStage construction_stage,
-                         std::filesystem::path count_vector_fname = "");
+                         std::filesystem::path count_vector_fname = "",
+                         bool with_values = false,
+                         bool with_coordinates = false,
+                         size_t num_coords_per_seq = 0);
 
 void convert_row_diff_to_col_compressed(const std::vector<std::string> &files,
                                         const std::string &outfbase);

@@ -4,6 +4,7 @@
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "annotation/binary_matrix/row_sparse/row_sparse.hpp"
+#include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "common/logger.hpp"
@@ -16,64 +17,57 @@ namespace mtg {
 namespace cli {
 
 using namespace mtg::graph;
-
 using mtg::common::logger;
 
 
 std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnGraph> graph,
                                                        const Config &config) {
+    assert(graph.get() == &graph->get_base_graph());
+
+    uint64_t max_index = graph->max_index();
+    const auto *dbg_graph = dynamic_cast<const DBGSuccinct*>(graph.get());
+
     if (graph->get_mode() == DeBruijnGraph::PRIMARY) {
         graph = std::make_shared<CanonicalDBG>(graph);
         logger->trace("Primary graph was wrapped into canonical");
     }
-
-    uint64_t max_index = graph->max_index();
-    if (const auto *canonical = dynamic_cast<const CanonicalDBG*>(graph.get()))
-        max_index = canonical->get_graph().max_index();
 
     auto annotation_temp = config.infbase_annotators.size()
             ? initialize_annotation(config.infbase_annotators.at(0), config, 0)
             : initialize_annotation(config.anno_type, config, max_index);
 
     if (config.infbase_annotators.size()) {
-        if (!annotation_temp->load(config.infbase_annotators.at(0))) {
+        bool loaded = false;
+        if (auto *cc = dynamic_cast<annot::ColumnCompressed<>*>(annotation_temp.get())) {
+            loaded = cc->merge_load(config.infbase_annotators);
+        } else {
+            if (config.infbase_annotators.size() > 1) {
+                logger->warn("Cannot merge annotations of this type. Only the first"
+                             " file {} will be loaded.", config.infbase_annotators.at(0));
+            }
+            loaded = annotation_temp->load(config.infbase_annotators.at(0));
+        }
+        if (!loaded) {
             logger->error("Cannot load annotations for graph {}, file corrupted",
                           config.infbase);
             exit(1);
         }
-        const Config::AnnotationType input_anno_type
-                = parse_annotation_type(config.infbase_annotators.at(0));
+
         // row_diff annotation is special, as it must know the graph structure
-        if (input_anno_type == Config::AnnotationType::RowDiff
-            || input_anno_type == Config::AnnotationType::RowDiffBRWT
-            || input_anno_type == Config::AnnotationType::RowDiffRowSparse) {
-            auto dbg_graph = dynamic_cast<const DBGSuccinct *>(graph.get());
-
+        using namespace annot::binmat;
+        BinaryMatrix &matrix = const_cast<BinaryMatrix &>(annotation_temp->get_matrix());
+        if (IRowDiff *row_diff = dynamic_cast<IRowDiff*>(&matrix)) {
             if (!dbg_graph) {
-                if (auto *canonical = dynamic_cast<CanonicalDBG *>(graph.get()))
-                    dbg_graph = dynamic_cast<const DBGSuccinct *>(&canonical->get_graph());
-            }
-
-            if (!dbg_graph) {
-                logger->error(
-                        "Only succinct de Bruijn graph representations are "
-                        "supported for row-diff annotations");
+                logger->error("Only succinct de Bruijn graph representations"
+                              " are supported for row-diff annotations");
                 std::exit(1);
             }
-            // this is really ugly, but the alternative is to add a set_graph method to
-            // all annotations
-            using namespace annot::binmat;
-            BinaryMatrix &matrix = const_cast<BinaryMatrix &>(annotation_temp->get_matrix());
-            if (input_anno_type == Config::AnnotationType::RowDiff) {
-                dynamic_cast<RowDiff<ColumnMajor> &>(matrix).set_graph(dbg_graph);
-                std::string anchor_fname = config.infbase + kRowDiffAnchorExt;
-                dynamic_cast<RowDiff<ColumnMajor> &>(matrix).load_anchor(anchor_fname);
-                std::string fork_succ_fname = config.infbase + kRowDiffForkSuccExt;
-                dynamic_cast<RowDiff<ColumnMajor> &>(matrix).load_fork_succ(fork_succ_fname);
-            } else if (input_anno_type == Config::AnnotationType::RowDiffRowSparse) {
-                dynamic_cast<RowDiff<RowSparse> &>(matrix).set_graph(dbg_graph);
-            } else {
-                dynamic_cast<RowDiff<BRWT> &>(matrix).set_graph(dbg_graph);
+
+            row_diff->set_graph(dbg_graph);
+
+            if (auto *row_diff_column = dynamic_cast<RowDiff<ColumnMajor> *>(&matrix)) {
+                row_diff_column->load_anchor(config.infbase + kRowDiffAnchorExt);
+                row_diff_column->load_fork_succ(config.infbase + kRowDiffForkSuccExt);
             }
         }
     }
