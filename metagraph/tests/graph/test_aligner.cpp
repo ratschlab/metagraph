@@ -322,6 +322,49 @@ TYPED_TEST(DBGAlignerTest, align_straight_forward_and_reverse_complement) {
     }
 }
 
+TYPED_TEST(DBGAlignerTest, align_straight_forward_and_reverse_complement_batch) {
+    size_t k = 4;
+    std::string reference = "AGCTTCGAGGCCAA";
+    std::string query = reference;
+    reverse_complement(query.begin(), query.end());
+
+    auto graph = build_graph_batch<TypeParam>(k, { reference });
+
+    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    auto config_fwd_and_rev = config;
+
+    DBGAligner<> aligner(*graph, config_fwd_and_rev);
+    std::vector<IDBGAligner::Query> query_batch { { "", query, true } };
+    aligner.align_batch(query_batch, [&](std::string_view, auto&& paths) {
+        ASSERT_EQ(1ull, paths.size());
+        auto path = paths[0];
+
+        EXPECT_EQ(query.size() - k + 1, path.size());
+        EXPECT_EQ(reference, path.get_sequence());
+        EXPECT_EQ(config.match_score(query), path.get_score());
+        EXPECT_EQ("14=", path.get_cigar().to_string());
+        EXPECT_EQ(14u, path.get_cigar().get_num_matches());
+        EXPECT_TRUE(is_exact_match(path));
+        EXPECT_EQ(0u, path.get_clipping());
+        EXPECT_EQ(0u, path.get_end_clipping());
+        EXPECT_EQ(0u, path.get_offset());
+        EXPECT_TRUE(path.is_valid(*graph, &config));
+    });
+
+    auto paths = aligner.align(query, true);
+    auto path = paths[0];
+    EXPECT_EQ(query.size() - k + 1, path.size());
+    EXPECT_EQ(reference, path.get_sequence());
+    EXPECT_EQ(config.match_score(query), path.get_score());
+    EXPECT_EQ("14=", path.get_cigar().to_string());
+    EXPECT_EQ(14u, path.get_cigar().get_num_matches());
+    EXPECT_TRUE(is_exact_match(path));
+    EXPECT_EQ(0u, path.get_clipping());
+    EXPECT_EQ(0u, path.get_end_clipping());
+    EXPECT_EQ(0u, path.get_offset());
+    EXPECT_TRUE(path.is_valid(*graph, &config));
+}
+
 #endif
 
 

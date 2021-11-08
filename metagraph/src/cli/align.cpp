@@ -386,7 +386,6 @@ int align_to_graph(Config *config) {
     for (const auto &file : files) {
         logger->trace("Align sequences from file {}", file);
         seq_io::FastaParser fasta_parser(file, config->forward_and_reverse);
-        bool is_reverse_complement = false;
 
         Timer data_reading_timer;
 
@@ -418,8 +417,7 @@ int align_to_graph(Config *config) {
                                                   config->fasta_anno_comment_delim,
                                                   true)
                             : std::string(it->name.s);
-                seq_batch.emplace_back(std::move(header), it->seq.s, is_reverse_complement);
-                is_reverse_complement ^= config->forward_and_reverse;
+                seq_batch.emplace_back(std::move(header), it->seq.s, false);
                 num_bytes_read += it->seq.l;
             }
 
