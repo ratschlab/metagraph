@@ -1,2 +1,3 @@
 metagraph/external-libraries/* linguist-vendored
 projects/* linguist-documentation
+*.ipynb linguist-documentation

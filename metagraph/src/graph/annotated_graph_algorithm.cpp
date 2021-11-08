@@ -62,13 +62,14 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                           size_t num_threads);
 
 
-MaskedDeBruijnGraph mask_nodes_by_label(const AnnotatedDBG &anno_graph,
-                                        const std::vector<Label> &labels_in,
-                                        const std::vector<Label> &labels_out,
-                                        const std::vector<Label> &labels_in_post,
-                                        const std::vector<Label> &labels_out_post,
-                                        const DifferentialAssemblyConfig &config,
-                                        size_t num_threads) {
+std::shared_ptr<MaskedDeBruijnGraph>
+mask_nodes_by_label(const AnnotatedDBG &anno_graph,
+                    const std::vector<Label> &labels_in,
+                    const std::vector<Label> &labels_out,
+                    const std::vector<Label> &labels_in_post,
+                    const std::vector<Label> &labels_out_post,
+                    const DifferentialAssemblyConfig &config,
+                    size_t num_threads) {
     auto graph_ptr = std::dynamic_pointer_cast<const DeBruijnGraph>(
         anno_graph.get_graph_ptr()
     );
@@ -111,7 +112,7 @@ MaskedDeBruijnGraph mask_nodes_by_label(const AnnotatedDBG &anno_graph,
         if (config.label_mask_in_kmer_fraction == 0.0
                 && config.label_mask_out_kmer_fraction == 1.0) {
             logger->trace("Bypassing background filtration");
-            return std::move(*masked_graph);
+            return masked_graph;
         }
 
         logger->trace("Filtering by node");
@@ -123,7 +124,7 @@ MaskedDeBruijnGraph mask_nodes_by_label(const AnnotatedDBG &anno_graph,
                 && out_count <= config.label_mask_out_kmer_fraction * sum;
         }, num_threads);
 
-        return std::move(*masked_graph);
+        return masked_graph;
     }
 
     logger->trace("Filtering by unitig");
@@ -210,7 +211,7 @@ MaskedDeBruijnGraph mask_nodes_by_label(const AnnotatedDBG &anno_graph,
 
     update_masked_graph_by_unitig(*masked_graph, get_kept_intervals, num_threads);
 
-    return std::move(*masked_graph);
+    return masked_graph;
 }
 
 std::shared_ptr<MaskedDeBruijnGraph>

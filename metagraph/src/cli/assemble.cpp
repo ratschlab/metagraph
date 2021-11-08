@@ -42,7 +42,7 @@ void check_and_sort_labels(const AnnotatedDBG &anno_graph,
 }
 
 
-std::unique_ptr<MaskedDeBruijnGraph>
+std::shared_ptr<MaskedDeBruijnGraph>
 mask_graph_from_labels(const AnnotatedDBG &anno_graph,
                        const std::vector<std::string> &label_mask_in,
                        const std::vector<std::string> &label_mask_out,
@@ -85,12 +85,9 @@ mask_graph_from_labels(const AnnotatedDBG &anno_graph,
     logger->trace("Masked out: {}", fmt::join(label_mask_out, " "));
     logger->trace("Masked out (post-processing): {}", fmt::join(label_mask_out_post, " "));
 
-    return std::make_unique<MaskedDeBruijnGraph>(mask_nodes_by_label(
-        anno_graph,
-        label_mask_in, label_mask_out,
-        label_mask_in_post, label_mask_out_post,
-        diff_config, num_threads
-    ));
+    return mask_nodes_by_label(anno_graph, label_mask_in, label_mask_out,
+                               label_mask_in_post, label_mask_out_post,
+                               diff_config, num_threads);
 }
 
 DifferentialAssemblyConfig parse_diff_config(const Json::Value &experiment,
@@ -256,7 +253,7 @@ int assemble(Config *config) {
 
         logger->trace("Writing graph to GFA...");
 
-        std::ofstream gfa_file(utils::remove_suffix(config->outfbase, ".gfa") + ".gfa");
+        std::ofstream gfa_file(utils::make_suffix(config->outfbase, ".gfa"));
         std::mutex str_mutex;
 
         gfa_file << "H\tVN:Z:1.0" << std::endl;

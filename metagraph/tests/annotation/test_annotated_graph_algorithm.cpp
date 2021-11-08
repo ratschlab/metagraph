@@ -68,7 +68,7 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabel) {
                                                   {}, {},
                                                   config, num_threads);
 
-            masked_dbg.call_kmers([&](auto, const std::string &kmer) {
+            masked_dbg->call_kmers([&](auto, const std::string &kmer) {
                 auto cur_labels = anno_graph->get_labels(kmer, 0.0);
                 obs_labels.insert(cur_labels.begin(), cur_labels.end());
                 obs_kmers.insert(kmer);
@@ -123,7 +123,7 @@ void test_mask_unitigs(double inlabel_fraction,
                                                   {}, {},
                                                   config, num_threads);
 
-            masked_dbg.call_kmers([&](auto, const std::string &kmer) { obs_kmers.insert(kmer); });
+            masked_dbg->call_kmers([&](auto, const std::string &kmer) { obs_kmers.insert(kmer); });
 
             EXPECT_EQ(ref_kmers, obs_kmers)
                 << k << " "
@@ -220,7 +220,7 @@ void test_mask_unitigs_canonical(double inlabel_fraction,
                                                   {}, {},
                                                   config, num_threads);
 
-            masked_dbg.call_kmers([&](auto, const std::string &kmer) { obs_kmers.insert(kmer); });
+            masked_dbg->call_kmers([&](auto, const std::string &kmer) { obs_kmers.insert(kmer); });
 
             EXPECT_EQ(ref_kmers, obs_kmers)
                 << k << " "

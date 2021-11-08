@@ -4,24 +4,20 @@
 #include "gtest/gtest.h"
 
 #include "../test_helpers.hpp"
-#include "test_annotated_dbg_helpers.hpp"
 
 #include "common/threads/threading.hpp"
 #include "common/vectors/bit_vector_dyn.hpp"
 #include "common/vectors/vector_algorithm.hpp"
-
-#include "graph/representation/succinct/dbg_succinct.hpp"
+#include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
+#include "graph/representation/bitmap/dbg_bitmap.hpp"
 #include "graph/representation/hash/dbg_hash_string.hpp"
 #include "graph/representation/hash/dbg_hash_ordered.hpp"
 #include "graph/representation/hash/dbg_hash_fast.hpp"
-#include "graph/representation/bitmap/dbg_bitmap.hpp"
 
-#include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
-
-// this next #include includes AnnotatedDBG. we need access to its protected
-// members to modify the underlying annotator
 #define protected public
+#define private public
 #include "annotation/annotation_converters.hpp"
+#include "test_annotated_dbg_helpers.hpp"
 
 
 namespace {
@@ -29,7 +25,6 @@ namespace {
 using namespace mtg;
 using namespace mtg::test;
 using namespace mtg::graph;
-using namespace mtg::annot;
 
 void check_labels(const AnnotatedDBG &anno_graph,
                   const std::string &sequence,
@@ -86,8 +81,8 @@ std::vector<uint64_t> edge_to_row_idx(const bitmap &edge_mask) {
 
 TEST(AnnotatedDBG, ExtendGraphWithSimplePath) {
     for (size_t k = 1; k < 10; ++k) {
-        auto graph = std::make_shared<DBGSuccinct>(k + 1);
-        AnnotatedDBG anno_graph(graph, std::make_unique<ColumnCompressed<>>(1));
+        AnnotatedDBG anno_graph(std::make_shared<DBGSuccinct>(k + 1),
+                                std::make_unique<annot::ColumnCompressed<>>(1));
 
         ASSERT_EQ(anno_graph.get_graph().num_nodes(),
                   anno_graph.get_annotation().num_objects());
@@ -95,7 +90,7 @@ TEST(AnnotatedDBG, ExtendGraphWithSimplePath) {
         std::string sequence(100, 'A');
 
         bit_vector_dyn inserted_nodes(anno_graph.get_graph().max_index() + 1, 0);
-        graph->add_sequence(sequence,
+        anno_graph.graph_->add_sequence(sequence,
             [&](auto new_node) { inserted_nodes.insert_bit(new_node, true); }
         );
 
@@ -136,7 +131,7 @@ TEST(AnnotatedDBG, ExtendGraphAddPath) {
         uint64_t num_nodes = graph->num_nodes();
         AnnotatedDBG anno_graph(
             graph,
-            std::make_unique<ColumnCompressed<>>(graph->max_index())
+            std::make_unique<annot::ColumnCompressed<>>(graph->max_index())
         );
         EXPECT_EQ(num_nodes, anno_graph.get_graph().num_nodes());
 
@@ -156,7 +151,7 @@ TEST(AnnotatedDBG, ExtendGraphAddPath) {
         check_labels(anno_graph, seq_first, { "First" }, { "Second", "Third" });
 
         bit_vector_dyn inserted_nodes(anno_graph.get_graph().max_index() + 1, 0);
-        graph->add_sequence(seq_second,
+        anno_graph.graph_->add_sequence(seq_second,
             [&](auto new_node) { inserted_nodes.insert_bit(new_node, true); }
         );
 
@@ -205,7 +200,7 @@ TEST(AnnotatedDBG, Transform) {
         uint64_t num_nodes = graph->num_nodes();
         auto anno_graph = std::make_unique<AnnotatedDBG>(
             graph,
-            std::make_unique<ColumnCompressed<>>(graph->max_index())
+            std::make_unique<annot::ColumnCompressed<>>(graph->max_index())
         );
         EXPECT_EQ(num_nodes, anno_graph->get_graph().num_nodes());
 
@@ -225,7 +220,7 @@ TEST(AnnotatedDBG, Transform) {
         check_labels(*anno_graph, seq_first, { "First" }, { "Second", "Third" });
 
         bit_vector_dyn inserted_nodes(anno_graph->get_graph().max_index() + 1, 0);
-        graph->add_sequence(seq_second,
+        anno_graph->graph_->add_sequence(seq_second,
             [&](auto new_node) { inserted_nodes.insert_bit(new_node, true); }
         );
 
@@ -242,9 +237,11 @@ TEST(AnnotatedDBG, Transform) {
         anno_graph = std::make_unique<AnnotatedDBG>(
             graph,
             std::unique_ptr<AnnotatedDBG::Annotator>(
-                convert<RowFlatAnnotator>(
-                    dynamic_cast<ColumnCompressed<>&&>(*anno_graph->annotator_)
-                ).release()
+                annot::convert<annot::RowFlatAnnotator>(
+                    std::move(dynamic_cast<annot::ColumnCompressed<>&>(
+                        *anno_graph->annotator_
+                    )
+                )).release()
             )
         );
 
@@ -287,7 +284,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPaths) {
         uint64_t num_nodes = graph->num_nodes();
         AnnotatedDBG anno_graph(
             graph,
-            std::make_unique<ColumnCompressed<>>(graph->max_index())
+            std::make_unique<annot::ColumnCompressed<>>(graph->max_index())
         );
         EXPECT_EQ(num_nodes, anno_graph.get_graph().num_nodes());
 
@@ -307,10 +304,10 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPaths) {
         EXPECT_FALSE(anno_graph.label_exists("Fourth"));
 
         bit_vector_dyn inserted_nodes(anno_graph.get_graph().max_index() + 1, 0);
-        graph->add_sequence(seq_second,
+        anno_graph.graph_->add_sequence(seq_second,
             [&](auto new_node) { inserted_nodes.insert_bit(new_node, true); }
         );
-        graph->add_sequence(seq_third,
+        anno_graph.graph_->add_sequence(seq_third,
             [&](auto new_node) { inserted_nodes.insert_bit(new_node, true); }
         );
 
@@ -398,7 +395,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsParallel) {
         ThreadPool thread_pool(10);
         AnnotatedDBG anno_graph(
             graph,
-            std::make_unique<ColumnCompressed<>>(graph->max_index())
+            std::make_unique<annot::ColumnCompressed<>>(graph->max_index())
         );
         EXPECT_EQ(num_nodes, anno_graph.get_graph().num_nodes());
 
@@ -424,10 +421,10 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsParallel) {
                   anno_graph.get_labels(seq_first, 1));
 
         bit_vector_dyn inserted_nodes(anno_graph.get_graph().max_index() + 1, 0);
-        graph->add_sequence(seq_second,
+        anno_graph.graph_->add_sequence(seq_second,
             [&](auto new_node) { inserted_nodes.insert_bit(new_node, true); }
         );
-        graph->add_sequence(seq_third,
+        anno_graph.graph_->add_sequence(seq_third,
             [&](auto new_node) { inserted_nodes.insert_bit(new_node, true); }
         );
 
@@ -520,7 +517,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsWithoutDummy) {
         uint64_t num_nodes = graph->num_nodes();
         AnnotatedDBG anno_graph(
             graph,
-            std::make_unique<ColumnCompressed<>>(graph->max_index())
+            std::make_unique<annot::ColumnCompressed<>>(graph->max_index())
         );
         EXPECT_EQ(num_nodes, anno_graph.get_graph().num_nodes());
 
@@ -544,10 +541,10 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsWithoutDummy) {
                   anno_graph.get_labels(seq_first, 1));
 
         bit_vector_dyn inserted_nodes(anno_graph.get_graph().max_index() + 1, 0);
-        graph->add_sequence(seq_second,
+        anno_graph.graph_->add_sequence(seq_second,
             [&](auto new_node) { inserted_nodes.insert_bit(new_node, true); }
         );
-        graph->add_sequence(seq_third,
+        anno_graph.graph_->add_sequence(seq_third,
             [&](auto new_node) { inserted_nodes.insert_bit(new_node, true); }
         );
 
@@ -639,7 +636,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsWithoutDummyParallel) {
         ThreadPool thread_pool(10);
         AnnotatedDBG anno_graph(
             graph,
-            std::make_unique<ColumnCompressed<>>(graph->max_index())
+            std::make_unique<annot::ColumnCompressed<>>(graph->max_index())
         );
 
         EXPECT_TRUE(anno_graph.get_annotation().num_objects() + k
@@ -668,10 +665,10 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsWithoutDummyParallel) {
                   anno_graph.get_labels(seq_first, 1));
 
         bit_vector_dyn inserted_nodes(anno_graph.get_graph().max_index() + 1, 0);
-        graph->add_sequence(seq_second,
+        anno_graph.graph_->add_sequence(seq_second,
             [&](auto new_node) { inserted_nodes.insert_bit(new_node, true); }
         );
-        graph->add_sequence(seq_third,
+        anno_graph.graph_->add_sequence(seq_third,
             [&](auto new_node) { inserted_nodes.insert_bit(new_node, true); }
         );
 
@@ -767,7 +764,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsPruneDummy) {
 
         AnnotatedDBG anno_graph(
             graph,
-            std::make_unique<ColumnCompressed<>>(graph->max_index())
+            std::make_unique<annot::ColumnCompressed<>>(graph->max_index())
         );
 
         EXPECT_FALSE(anno_graph.label_exists("First"));
@@ -790,10 +787,10 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsPruneDummy) {
                   anno_graph.get_labels(seq_first, 1));
 
         bit_vector_dyn inserted_nodes(anno_graph.get_graph().max_index() + 1, 0);
-        graph->add_sequence(seq_second,
+        anno_graph.graph_->add_sequence(seq_second,
             [&](auto new_node) { inserted_nodes.insert_bit(new_node, true); }
         );
-        graph->add_sequence(seq_third,
+        anno_graph.graph_->add_sequence(seq_third,
             [&](auto new_node) { inserted_nodes.insert_bit(new_node, true); }
         );
 
@@ -884,7 +881,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsPruneDummyParallel) {
         ThreadPool thread_pool(10);
         AnnotatedDBG anno_graph(
             graph,
-            std::make_unique<ColumnCompressed<>>(graph->max_index())
+            std::make_unique<annot::ColumnCompressed<>>(graph->max_index())
         );
 
         EXPECT_FALSE(anno_graph.label_exists("First"));
@@ -913,10 +910,10 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsPruneDummyParallel) {
                   anno_graph.get_labels(seq_first, 1));
 
         bit_vector_dyn inserted_nodes(anno_graph.get_graph().max_index() + 1, 0);
-        graph->add_sequence(seq_second,
+        anno_graph.graph_->add_sequence(seq_second,
             [&](auto new_node) { inserted_nodes.insert_bit(new_node, true); }
         );
-        graph->add_sequence(seq_third,
+        anno_graph.graph_->add_sequence(seq_third,
             [&](auto new_node) { inserted_nodes.insert_bit(new_node, true); }
         );
 
@@ -994,26 +991,26 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsPruneDummyParallel) {
 
 template <typename GraphAnnotationPair>
 class AnnotatedDBGTest : public ::testing::Test {};
-typedef ::testing::Types<std::pair<DBGBitmap, ColumnCompressed<>>,
-                         std::pair<DBGHashString, ColumnCompressed<>>,
-                         std::pair<DBGHashOrdered, ColumnCompressed<>>,
-                         std::pair<DBGHashFast, ColumnCompressed<>>,
-                         std::pair<DBGSuccinct, ColumnCompressed<>>,
-                         std::pair<DBGBitmap, RowFlatAnnotator>,
-                         std::pair<DBGHashString, RowFlatAnnotator>,
-                         std::pair<DBGHashOrdered, RowFlatAnnotator>,
-                         std::pair<DBGHashFast, RowFlatAnnotator>,
-                         std::pair<DBGSuccinct, RowFlatAnnotator>
+typedef ::testing::Types<std::pair<DBGBitmap, annot::ColumnCompressed<>>,
+                         std::pair<DBGHashString, annot::ColumnCompressed<>>,
+                         std::pair<DBGHashOrdered, annot::ColumnCompressed<>>,
+                         std::pair<DBGHashFast, annot::ColumnCompressed<>>,
+                         std::pair<DBGSuccinct, annot::ColumnCompressed<>>,
+                         std::pair<DBGBitmap, annot::RowFlatAnnotator>,
+                         std::pair<DBGHashString, annot::RowFlatAnnotator>,
+                         std::pair<DBGHashOrdered, annot::RowFlatAnnotator>,
+                         std::pair<DBGHashFast, annot::RowFlatAnnotator>,
+                         std::pair<DBGSuccinct, annot::RowFlatAnnotator>
                         > GraphAnnotationPairTypes;
 TYPED_TEST_SUITE(AnnotatedDBGTest, GraphAnnotationPairTypes);
 
 
 template <typename GraphAnnotationPair>
 class AnnotatedDBGWithNTest : public ::testing::Test {};
-typedef ::testing::Types<std::pair<DBGHashString, ColumnCompressed<>>,
-                         std::pair<DBGSuccinct, ColumnCompressed<>>,
-                         std::pair<DBGHashString, RowFlatAnnotator>,
-                         std::pair<DBGSuccinct, RowFlatAnnotator>
+typedef ::testing::Types<std::pair<DBGHashString, annot::ColumnCompressed<>>,
+                         std::pair<DBGSuccinct, annot::ColumnCompressed<>>,
+                         std::pair<DBGHashString, annot::RowFlatAnnotator>,
+                         std::pair<DBGSuccinct, annot::RowFlatAnnotator>
                         > GraphWithNAnnotationPairTypes;
 TYPED_TEST_SUITE(AnnotatedDBGWithNTest, GraphWithNAnnotationPairTypes);
 
@@ -1021,12 +1018,12 @@ TYPED_TEST_SUITE(AnnotatedDBGWithNTest, GraphWithNAnnotationPairTypes);
 #if ! _PROTEIN_GRAPH
 template <typename GraphAnnotationPair>
 class AnnotatedDBGNoNTest : public ::testing::Test {};
-typedef ::testing::Types<std::pair<DBGBitmap, ColumnCompressed<>>,
-                         std::pair<DBGHashOrdered, ColumnCompressed<>>,
-                         std::pair<DBGHashFast, ColumnCompressed<>>,
-                         std::pair<DBGBitmap, RowFlatAnnotator>,
-                         std::pair<DBGHashOrdered, RowFlatAnnotator>,
-                         std::pair<DBGHashFast, RowFlatAnnotator>
+typedef ::testing::Types<std::pair<DBGBitmap, annot::ColumnCompressed<>>,
+                         std::pair<DBGHashOrdered, annot::ColumnCompressed<>>,
+                         std::pair<DBGHashFast, annot::ColumnCompressed<>>,
+                         std::pair<DBGBitmap, annot::RowFlatAnnotator>,
+                         std::pair<DBGHashOrdered, annot::RowFlatAnnotator>,
+                         std::pair<DBGHashFast, annot::RowFlatAnnotator>
                         > GraphNoNAnnotationPairTypes;
 TYPED_TEST_SUITE(AnnotatedDBGNoNTest, GraphNoNAnnotationPairTypes);
 #endif
@@ -1885,7 +1882,7 @@ TYPED_TEST(AnnotatedDBGNoNTest, get_top_labels) {
 #endif
 
 TEST(AnnotatedDBG, score_kmer_presence_mask) {
-    auto anno_graph = build_anno_graph<DBGSuccinct, ColumnCompressed<>>(31);
+    auto anno_graph = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(31, {}, {});
     std::vector<std::pair<sdsl::bit_vector, int32_t>> results {
        { sdsl::bit_vector(), 0},
        { sdsl::bit_vector({

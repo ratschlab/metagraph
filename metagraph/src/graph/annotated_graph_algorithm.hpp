@@ -40,7 +40,7 @@ struct DifferentialAssemblyConfig {
  * return a MaskedDeBruijnGraph with the nodes of anno_graph masked according to
  * the parameters specified by config.
  */
-MaskedDeBruijnGraph
+std::shared_ptr<MaskedDeBruijnGraph>
 mask_nodes_by_label(const AnnotatedDBG &anno_graph,
                     const std::vector<typename AnnotatedDBG::Annotator::Label> &labels_in,
                     const std::vector<typename AnnotatedDBG::Annotator::Label> &labels_out,

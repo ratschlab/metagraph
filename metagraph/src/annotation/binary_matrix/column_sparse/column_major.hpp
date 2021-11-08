@@ -14,15 +14,19 @@ namespace binmat {
 class ColumnMajor : public BinaryMatrix {
   public:
     ColumnMajor() {}
-    ColumnMajor(std::vector<std::unique_ptr<bit_vector>>&& columns);
-    ColumnMajor(ColumnMajor&& other);
+    ColumnMajor(std::vector<std::unique_ptr<bit_vector>>&& columns)
+        : columns_(std::move(columns)) {}
 
-    uint64_t num_columns() const override { return columns_->size(); }
+    uint64_t num_columns() const override { return columns_.size(); }
     uint64_t num_rows() const override;
 
     bool get(Row row, Column column) const override;
     SetBitPositions get_row(Row row) const override;
     std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const override;
+    // query row and get ranks of each set bit in its column
+    Vector<std::pair<Column, uint64_t>> get_column_ranks(Row row) const;
+    std::vector<Vector<std::pair<Column, uint64_t>>>
+    get_column_ranks(const std::vector<Row> &rows) const;
     std::vector<Row> get_column(Column column) const override;
     // get all selected rows appended with -1 and concatenated
     std::vector<Column> slice_rows(const std::vector<Row> &rows) const override;
@@ -44,22 +48,11 @@ class ColumnMajor : public BinaryMatrix {
              size_t min_count = 1,
              size_t count_cap = std::numeric_limits<size_t>::max()) const override;
 
-    void update_pointer(const std::vector<std::unique_ptr<bit_vector>> &columns) {
-        columns_ = &columns;
-    }
-
-    const auto& data() const { return *columns_; }
-
-    /**
-     * Returns the columns vector and pilfers the existing columns.
-     */
-    std::vector<std::unique_ptr<bit_vector>> release_columns() {
-        return std::move(data_);
-    }
+    auto& data() { return columns_; }
+    const auto& data() const { return columns_; }
 
   private:
-    std::vector<std::unique_ptr<bit_vector>> data_;
-    const std::vector<std::unique_ptr<bit_vector>> *columns_ = &data_;
+    std::vector<std::unique_ptr<bit_vector>> columns_;
 };
 
 } // namespace binmat

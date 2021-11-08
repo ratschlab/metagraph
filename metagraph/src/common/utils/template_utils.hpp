@@ -1,6 +1,7 @@
 #ifndef __TEMPLATE_UTILS_HPP__
 #define __TEMPLATE_UTILS_HPP__
 
+#include <cstddef>
 #include <type_traits>
 #include <utility>
 

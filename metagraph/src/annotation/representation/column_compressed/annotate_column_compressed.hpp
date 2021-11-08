@@ -17,12 +17,13 @@ namespace annot {
 
 /**
  * Multithreading:
- *  The non-const methods must be called sequentially.
+ *  The non-const methods must be called sequentially (except add_label_counts).
  *  Then, any subset of the public const methods can be called concurrently.
  */
 template <typename Label = std::string>
 class ColumnCompressed : public MultiLabelEncoded<Label> {
   public:
+    typedef binmat::ColumnMajor binary_matrix_type;
     using Index = typename MultiLabelEncoded<Label>::Index;
     using VLabels = typename MultiLabelEncoded<Label>::VLabels;
 
@@ -59,15 +60,21 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
     void add_labels(const std::vector<Index> &indices,
                     const VLabels &labels) override;
     // for each label and index 'indices[i]' add count 'counts[i]'
+    // thread-safe
     void add_label_counts(const std::vector<Index> &indices,
                           const VLabels &labels,
                           const std::vector<uint64_t> &counts) override;
+    // for each label and index 'i' add numeric attribute 'coord'
+    void add_label_coord(Index i, const VLabels &labels, uint64_t coord) override;
+    void add_label_coords(const std::vector<std::pair<Index, uint64_t>> &coords,
+                          const VLabels &labels) override;
 
     bool has_label(Index i, const Label &label) const override;
     bool has_labels(Index i, const VLabels &labels) const override;
 
     void serialize(const std::string &filename) const override;
     bool load(const std::string &filename) override;
+    // the order of the columns may be changed when merging multiple annotators
     bool merge_load(const std::vector<std::string> &filenames);
     using ColumnCallback = std::function<void(uint64_t offset,
                                               const Label &,
@@ -75,6 +82,8 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
     static bool merge_load(const std::vector<std::string> &filenames,
                            const ColumnCallback &callback,
                            size_t num_threads = 1);
+    static size_t read_num_labels(const std::string &filename);
+    static LabelEncoder<Label> load_label_encoder(const std::string &filename);
 
     using ValuesCallback = std::function<void(uint64_t offset,
                                               const Label &,
@@ -112,12 +121,13 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
      * Returns the current annotation matrix. The data is moved into the return value,
      * which leaves the current object empty.
      */
-    binmat::ColumnMajor release_matrix();
+    std::unique_ptr<binmat::ColumnMajor> release_matrix();
 
     std::string file_extension() const override { return kExtension; }
 
     static constexpr auto kExtension = ".column.annodbg";
     static constexpr auto kCountExtension = ".column.annodbg.counts";
+    static constexpr auto kCoordExtension = ".column.annodbg.coords";
 
   private:
     void set(Index i, size_t j, bool value);
@@ -126,14 +136,16 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
     bitmap_builder& decompress_builder(size_t j);
     bitmap_dyn& decompress_bitmap(size_t j);
     const bitmap& get_column(size_t j) const;
+    void serialize_counts(const std::string &filename) const;
+    void serialize_coordinates(const std::string &filename) const;
 
     uint64_t num_rows_;
 
     const std::string swap_dir_;
     const uint64_t buffer_size_bytes_;
 
-    std::vector<std::unique_ptr<bit_vector>> bitmatrix_;
-    mutable binmat::ColumnMajor annotation_matrix_view_;
+    binmat::ColumnMajor matrix_;
+    std::vector<std::unique_ptr<bit_vector>> &bitmatrix_ { matrix_.data() };
 
     mutable std::mutex bitmap_conversion_mu_;
     mutable bool flushed_ = true;
@@ -142,9 +154,11 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
                               bitmap_builder*,
                               caches::LRUCachePolicy<size_t>> cached_columns_;
 
+    mutable std::mutex counts_mu_;
     uint8_t count_width_;
     uint64_t max_count_;
     std::vector<sdsl::int_vector<>> relation_counts_;
+    std::vector<Vector<std::pair<Index, uint64_t>>> coords_;
 
     using MultiLabelEncoded<Label>::label_encoder_;
 };

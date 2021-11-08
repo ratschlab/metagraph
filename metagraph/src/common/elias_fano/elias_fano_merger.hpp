@@ -185,9 +185,52 @@ class Transformed {
  * Merges Elias-Fano sorted compressed files into a single stream.
  */
 template <typename T>
-void merge_files(const std::vector<std::string> &sources,
+void merge_files(std::vector<std::string> sources,
                  const std::function<void(const T &)> &on_new_item,
-                 bool remove_sources = true) {
+                 bool remove_sources = true,
+                 size_t max_sources_open = -1) {
+    if (!sources.size())
+        return;
+
+    // if there are too many chunks, merge them into larger ones
+    assert(max_sources_open >= 2);
+    while (sources.size() > max_sources_open) {
+        // chunk 0 may be special (e.g. storing only fwd bits) and hence
+        // never pre-merged
+        std::vector<std::string> new_chunks = { sources.at(0) };
+        size_t i = 1;
+        while (i < sources.size()) {
+            std::vector<std::string> to_merge;
+            while (i < sources.size() && to_merge.size() < max_sources_open) {
+                to_merge.push_back(sources[i++]);
+            }
+
+            if (to_merge.size() < 2) {
+                // nothing to merge
+                new_chunks.push_back(to_merge.at(0));
+                continue;
+            }
+
+            assert(to_merge.size() <= max_sources_open);
+
+            new_chunks.push_back(to_merge.at(0) + "_premerged");
+            std::vector<T> buf;
+            buf.reserve(1024 * 1024);
+
+            merge_files<T>(to_merge, [&](T i) {
+                buf.push_back(i);
+                if (buf.size() == buf.capacity()) {
+                    EliasFanoEncoderBuffered<T>::append_block(buf, new_chunks.back());
+                    buf.resize(0);
+                }
+            });
+            if (buf.size()) {
+                EliasFanoEncoderBuffered<T>::append_block(buf, new_chunks.back());
+            }
+        }
+        sources.swap(new_chunks);
+    }
+
     MergeDecoder<T> decoder(sources, remove_sources);
     if (decoder.empty())
         return;

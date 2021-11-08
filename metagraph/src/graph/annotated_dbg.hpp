@@ -9,6 +9,7 @@
 
 #include "representation/base/sequence_graph.hpp"
 #include "annotation/representation/base/annotation.hpp"
+#include "common/vector.hpp"
 
 
 namespace mtg {
@@ -34,6 +35,9 @@ class AnnotatedSequenceGraph {
     // thread-safe, can be called from multiple threads concurrently
     virtual void annotate_sequence(std::string_view sequence,
                                    const std::vector<Label> &labels);
+    // thread-safe, can be called from multiple threads concurrently
+    virtual void annotate_sequences(
+        const std::vector<std::pair<std::string, std::vector<Label>>> &data);
 
     virtual void call_annotated_nodes(const Label &label,
                                       std::function<void(node_index)> callback) const;
@@ -72,20 +76,35 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
 
     using AnnotatedSequenceGraph::get_labels;
 
-    virtual const DeBruijnGraph& get_graph() const override final { return dbg_; }
+    const DeBruijnGraph& get_graph() const { return dbg_; }
 
-    virtual bool check_compatibility() const override final;
+    bool check_compatibility() const;
 
-    // add k-mer counts to the annotation
+    // add k-mer counts to the annotation, thread-safe for concurrent calls
     void add_kmer_counts(std::string_view sequence,
                          const std::vector<Label> &labels,
                          std::vector<uint64_t>&& kmer_counts);
 
+    // add k-mer coordinates to the annotation, the binary annotation must exist
+    void add_kmer_coord(std::string_view sequence,
+                        const std::vector<Label> &labels,
+                        uint64_t start);
+
+    // add k-mer coordinates to the annotation, the binary annotation must exist
+    void add_kmer_coords(
+        const std::vector<std::tuple<std::string, std::vector<Label>, uint64_t>> &data);
+
+    // annotate k-mer and their coordinates (combines annotate_sequences and add_kmer_coords)
+    void annotate_kmer_coords(
+        const std::vector<std::tuple<std::string, std::vector<Label>, uint64_t>> &data);
+
     /*********************** Special queries **********************/
 
-    // return labels that occur at least in |presence_ratio| k-mers
+    // return labels that occur at least in |discovery_fraction| k-mers
+    // but skip the sequence if fewer than |presence_fraction| k-mers are matched against the graph
     std::vector<Label> get_labels(std::string_view sequence,
-                                  double presence_ratio) const;
+                                  double discovery_fraction = 0.0,
+                                  double presence_fraction = 0.0) const;
 
     std::vector<Label> get_labels(const std::vector<std::pair<row_index, size_t>> &index_counts,
                                   size_t min_count) const;
@@ -96,7 +115,8 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
     std::vector<std::pair<Label, size_t>>
     get_top_labels(std::string_view sequence,
                    size_t num_top_labels,
-                   double presence_ratio = 0.0,
+                   double discovery_fraction = 0.0,
+                   double presence_fraction = 0.0,
                    bool with_kmer_counts = false) const;
 
     // The returned counts are weighted by the annotated relation counts if
@@ -107,10 +127,30 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
                    size_t min_count = 0,
                    bool with_kmer_counts = false) const;
 
+    std::vector<std::pair<Label, std::vector<size_t>>>
+    get_label_count_quantiles(std::string_view sequence,
+                              size_t num_top_labels,
+                              double discovery_fraction,
+                              double presence_fraction,
+                              const std::vector<double> &count_quantiles) const;
+
+    std::vector<std::pair<Label, std::vector<SmallVector<uint64_t>>>>
+    get_kmer_coordinates(std::string_view sequence,
+                         size_t num_top_labels,
+                         double discovery_fraction,
+                         double presence_fraction) const;
+
+    std::vector<std::pair<Label, std::vector<SmallVector<uint64_t>>>>
+    get_kmer_coordinates(const std::vector<node_index> &path,
+                         size_t num_top_labels,
+                         double discovery_fraction,
+                         double presence_fraction) const;
+
     std::vector<std::pair<Label, sdsl::bit_vector>>
     get_top_label_signatures(std::string_view sequence,
                              size_t num_top_labels,
-                             double presence_ratio = 0.0) const;
+                             double discovery_fraction = 0.0,
+                             double presence_fraction = 0.0) const;
 
     int32_t score_kmer_presence_mask(const sdsl::bit_vector &kmer_presence_mask,
                                      int32_t match_score = 1,
