@@ -163,12 +163,12 @@ int build_graph(Config *config) {
 
         if (config->inplace) {
             if (config->mark_dummy_kmers) {
-                logger->warn("Graph is being constructed inplace, dummy k-mers will"
-                             " not be marked. Run \'transform --clear-dummy\' manually.");
+                logger->warn("Graph is being constructed in-place, dummy k-mers will"
+                             " not be marked. Run \'transform --clear-dummy\' manually after construction.");
             }
             if (config->node_suffix_length) {
-                logger->warn("Graph is being constructed inplace, k-mer suffixes will"
-                             " not be indexed. Run \'transform --index-ranges ...\' manually.");
+                logger->warn("Graph is being constructed in-place, k-mer suffixes will"
+                             " not be indexed. Run \'transform --index-ranges ...\' manually after construction.");
             }
             DBGSuccinct::serialize(std::move(graph_data), config->outfbase,
                                    config->graph_mode, config->state);
