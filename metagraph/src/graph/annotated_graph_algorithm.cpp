@@ -348,7 +348,8 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 }
 
 /**
- * Return an int_vector<>, bitmap pair, each of length anno_graph.get_graph().get_base_graph().max_index().
+ * Return an int_vector<>, bitmap pair, each of length
+ * anno_graph.get_graph().get_base_graph().max_index() + 1.
  * For an index i, the int_vector will contain a packed integer representing the
  * number of labels in labels_in and labels_out which the k-mer of index i is
  * annotated with. The least significant half of each integer represents the count
@@ -361,10 +362,8 @@ construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
                                   const std::vector<Label> &labels_in,
                                   const std::vector<Label> &labels_out,
                                   size_t num_threads) {
-    const DeBruijnGraph &graph = anno_graph.get_graph().get_base_graph();
-
     size_t width = sdsl::bits::hi(std::max(labels_in.size(), labels_out.size())) + 1;
-    sdsl::bit_vector indicator(graph.max_index() + 1, false);
+    sdsl::bit_vector indicator(anno_graph.get_graph().get_base_graph().max_index() + 1, false);
 
     // the in and out counts are stored interleaved
     sdsl::int_vector<> counts = aligned_int_vector(indicator.size() * 2, 0, width, 16);
@@ -410,15 +409,12 @@ construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
 
     std::atomic_thread_fence(std::memory_order_acquire);
 
-    std::unique_ptr<bitmap> union_mask = std::make_unique<bitmap_vector>(
-        std::move(indicator)
-    );
-
     // TODO: this function doesn't work if MAKE_BOSS is false and the complements
     //       of k-mers should also be present
     static_assert(MAKE_BOSS);
 
-    return std::make_pair(std::move(counts), std::move(union_mask));
+    return std::make_pair(std::move(counts),
+                          std::make_unique<bitmap_vector>(std::move(indicator)));
 }
 
 
