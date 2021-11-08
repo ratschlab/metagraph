@@ -25,8 +25,8 @@ using mtg::graph::AnnotatedDBG;
 using mtg::graph::DifferentialAssemblyConfig;
 
 
-void check_and_sort_labels(const AnnotatedDBG &anno_graph,
-                     std::vector<std::string> &label_set) {
+void check_and_sort_labels(std::vector<std::string> &label_set,
+                           const AnnotatedDBG &anno_graph) {
     bool detected_missing_labels = false;
     for (const std::string &label : label_set) {
         if (!anno_graph.label_exists(label)) {
@@ -145,8 +145,8 @@ void call_masked_graphs(const AnnotatedDBG &anno_graph,
                 shared_background_labels.push_back(out_label.asString());
             }
 
-            check_and_sort_labels(anno_graph, shared_foreground_labels);
-            check_and_sort_labels(anno_graph, shared_background_labels);
+            check_and_sort_labels(shared_foreground_labels, anno_graph);
+            check_and_sort_labels(shared_background_labels, anno_graph);
         }
 
         if (!group["experiments"])
@@ -169,8 +169,8 @@ void call_masked_graphs(const AnnotatedDBG &anno_graph,
                 background_labels.push_back(out_label.asString());
             }
 
-            check_and_sort_labels(anno_graph, foreground_labels);
-            check_and_sort_labels(anno_graph, background_labels);
+            check_and_sort_labels(foreground_labels, anno_graph);
+            check_and_sort_labels(background_labels, anno_graph);
 
             callback(*mask_graph_from_labels(anno_graph,
                                              foreground_labels, background_labels,
