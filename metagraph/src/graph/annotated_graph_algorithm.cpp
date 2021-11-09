@@ -3,7 +3,6 @@
 #include <tsl/hopscotch_set.h>
 
 #include "common/logger.hpp"
-#include "common/seq_tools/reverse_complement.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 #include "common/vectors/bitmap.hpp"
 #include "graph/representation/masked_graph.hpp"
@@ -15,7 +14,6 @@ namespace graph {
 using mtg::common::logger;
 
 typedef AnnotatedDBG::node_index node_index;
-typedef AnnotatedDBG::row_index row_index;
 typedef AnnotatedDBG::Annotator::Label Label;
 
 typedef std::function<size_t()> LabelCountCallback;
@@ -37,23 +35,29 @@ construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
                                   size_t num_labels,
                                   size_t num_threads);
 
-// Regions of a masked graph which should be kept (i.e., masked in)
+// Regions of a graph mask which should be kept (i.e., masked in)
 typedef std::vector<std::pair<size_t, size_t>> Intervals;
 
-// Returns a vector of kept regions given an assembled sequence and corresponding path
+// Returns a vector of kept regions given a unitig and its corresponding path
 typedef std::function<Intervals(const std::string&, const std::vector<node_index>&)> GetKeptIntervals;
 
-// Returns true if the node is kept (i.e., masked in)
+// Returns true if a node is kept (i.e., masked in)
 typedef std::function<bool(node_index)> KeepNode;
 
+// Assemble unitigs from the masked graph, then use get_kept_intervals to generate
+// regions which should be masked in. Update the graph mask accordingly.
 void update_masked_graph_by_unitig(MaskedDeBruijnGraph &masked_graph,
                                    const GetKeptIntervals &get_kept_intervals,
                                    size_t num_threads);
 
+// Iterate through all nodes in the masked graph, then use keep_node to decide
+// which should be masked in. Update the graph mask accordingly.
 void update_masked_graph_by_node(MaskedDeBruijnGraph &masked_graph,
                                  const KeepNode &keep_node,
                                  size_t num_threads);
 
+// Given an initial mask and counts, generate a masked graph. If add_complement
+// is true, then add the reverse complements of all nodes to the graph as well.
 std::shared_ptr<MaskedDeBruijnGraph>
 make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                           sdsl::int_vector<> &counts,
