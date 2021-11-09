@@ -269,18 +269,13 @@ void BOSS::Chunk::extend(Chunk &other) {
     assert(!weights_.size() || weights_.size() == W_.size());
 }
 
-void BOSS::Chunk::initialize_boss(BOSS *graph, sdsl::int_vector_buffer<> *weights) {
+void BOSS::Chunk::initialize_boss(BOSS *graph) {
     assert(last_.size() == W_.size());
     assert(!weights_.size() || weights_.size() == W_.size());
 
     graph->initialize(this);
 
     assert(graph->is_valid());
-
-    if (weights) {
-        *weights = sdsl::int_vector_buffer<>();
-        weights->swap(weights_);
-    }
 }
 
 BOSS*
@@ -322,7 +317,9 @@ BOSS::Chunk::build_boss_from_chunks(const std::vector<std::string> &chunk_filena
         }
     }
 
-    full_chunk.initialize_boss(graph, weights);
+    full_chunk.initialize_boss(graph);
+    if (weights)
+        *weights = full_chunk.get_weights();
 
     return graph;
 }

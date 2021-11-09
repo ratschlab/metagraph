@@ -27,6 +27,8 @@ build_params = {'succinct': ('succinct', '""'),
                 'hashfast': ('hashfast', '""'),
                 'hashstr': ('hashstr', '""')}
 
+succinct_states = {'stat', 'fast', 'small', 'dynamic'}
+
 BUILDS = [name for name, _ in build_params.items()]
 
 
@@ -60,6 +62,24 @@ class TestBuild(unittest.TestCase):
         self.assertEqual('k: 20', params_str[0])
         self.assertEqual('nodes (k): 591997', params_str[1])
         self.assertEqual('mode: basic', params_str[2])
+
+    @parameterized.expand(succinct_states)
+    def test_build_succinct_inplace(self, state):
+        construct_command = f'{METAGRAPH} build -k 20 --graph succinct --state {state} \
+                                            --inplace \
+                                            -o {self.tempdir.name}/graph \
+                                            {TEST_DATA_DIR}/transcripts_1000.fa'
+
+        res = subprocess.run([construct_command], shell=True)
+        self.assertEqual(res.returncode, 0)
+
+        res = self.__get_stats(self.tempdir.name + '/graph' + graph_file_extension['succinct'])
+        self.assertEqual(res.returncode, 0)
+        params_str = res.stdout.decode().split('\n')[2:]
+        self.assertEqual('k: 20', params_str[0])
+        self.assertEqual('nodes (k): 597931', params_str[1])
+        self.assertEqual('mode: basic', params_str[2])
+        self.assertEqual('state: ' + state, params_str[8])
 
     @parameterized.expand(['succinct'])
     def test_simple_bloom_graph(self, build):
