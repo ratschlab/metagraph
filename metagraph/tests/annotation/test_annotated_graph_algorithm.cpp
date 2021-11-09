@@ -165,12 +165,13 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskUnitigsByLabel) {
 
 #if ! _PROTEIN_GRAPH
 template <class Graph, class Annotation = ColumnCompressed<>>
-void test_mask_unitigs_canonical(double inlabel_fraction,
-                                 double outlabel_fraction,
-                                 double other_label_fraction,
-                                 const std::unordered_set<std::string> &ref_kmers,
-                                 bool add_complement,
-                                 DeBruijnGraph::Mode mode) {
+std::unordered_set<std::string>
+test_mask_unitigs_canonical(double inlabel_fraction,
+                            double outlabel_fraction,
+                            double other_label_fraction,
+                            const std::unordered_set<std::string> &ref_kmers,
+                            bool add_complement,
+                            DeBruijnGraph::Mode mode) {
     for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
         const std::vector<std::string> ingroup { "B", "C" };
         const std::vector<std::string> outgroup { "A" };
@@ -222,66 +223,109 @@ void test_mask_unitigs_canonical(double inlabel_fraction,
 
             masked_dbg->call_kmers([&](auto, const std::string &kmer) { obs_kmers.insert(kmer); });
 
-            EXPECT_EQ(ref_kmers, obs_kmers)
-                << k << " "
-                << inlabel_fraction << " "
-                << outlabel_fraction << " "
-                << other_label_fraction << " "
-                << add_complement << " "
-                << mode << " "
-                << num_threads;
+            if (ref_kmers != obs_kmers)
+                return obs_kmers;
+        }
+    }
+
+    return ref_kmers;
+}
+
+TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskUnitigsByLabelAddCanonical) {
+    for (DeBruijnGraph::Mode mode : { DeBruijnGraph::BASIC,
+                                      DeBruijnGraph::CANONICAL,
+                                      DeBruijnGraph::PRIMARY }) {
+        std::string mode_str = mode == DeBruijnGraph::BASIC
+            ? "BASIC"
+            : (mode == DeBruijnGraph::CANONICAL ? "CANONICAL" : "PRIMARY");
+
+        for (double other_frac : std::vector<double>{ 1.0, 0.0 }) {
+            std::unordered_set<std::string> ref_kmers;
+
+            EXPECT_EQ((test_mask_unitigs_canonical<typename TypeParam::first_type,
+                                                   typename TypeParam::second_type>(
+                1.0, 0.0, other_frac, ref_kmers, true, mode
+            )), ref_kmers) << other_frac << " " << mode_str;
+
+            EXPECT_EQ((test_mask_unitigs_canonical<typename TypeParam::first_type,
+                                                   typename TypeParam::second_type>(
+                1.0, 0.25, other_frac, ref_kmers, true, mode
+            )), ref_kmers) << other_frac << " " << mode_str;
+
+
+            EXPECT_EQ((test_mask_unitigs_canonical<typename TypeParam::first_type,
+                                                   typename TypeParam::second_type>(
+                1.0, 0.49, other_frac, ref_kmers, true, mode
+            )), ref_kmers) << other_frac << " " << mode_str;
+
+            ref_kmers.insert("GAATG");
+            ref_kmers.insert("AATGC");
+
+            if (mode == DeBruijnGraph::CANONICAL || mode == DeBruijnGraph::PRIMARY) {
+                ref_kmers.insert("CATTC");
+                ref_kmers.insert("GCATT");
+            }
+
+            EXPECT_EQ((test_mask_unitigs_canonical<typename TypeParam::first_type,
+                                                   typename TypeParam::second_type>(
+                1.0, 0.50, other_frac, ref_kmers, true, mode
+            )), ref_kmers) << other_frac << " " << mode_str;
+
+            EXPECT_EQ((test_mask_unitigs_canonical<typename TypeParam::first_type,
+                                                   typename TypeParam::second_type>(
+                1.0, 0.75, other_frac, ref_kmers, true, mode
+            )), ref_kmers) << other_frac << " " << mode_str;
+
+            EXPECT_EQ((test_mask_unitigs_canonical<typename TypeParam::first_type,
+                                                   typename TypeParam::second_type>(
+                1.0, 1.0, other_frac, ref_kmers, true, mode
+            )), ref_kmers) << other_frac << " " << mode_str;
         }
     }
 }
 
 TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskUnitigsByLabelCanonical) {
-    std::vector<std::pair<bool, DeBruijnGraph::Mode>> params {
-        { true, DeBruijnGraph::BASIC },
-        { false, DeBruijnGraph::CANONICAL },
-        { true, DeBruijnGraph::CANONICAL },
-        { false, DeBruijnGraph::PRIMARY },
-        { true, DeBruijnGraph::PRIMARY },
-    };
-    for (const auto &[add_complement, mode] : params) {
+    for (DeBruijnGraph::Mode mode : { DeBruijnGraph::CANONICAL,
+                                      DeBruijnGraph::PRIMARY }) {
+        std::string mode_str = mode == DeBruijnGraph::CANONICAL ? "CANONICAL" : "PRIMARY";
         for (double other_frac : std::vector<double>{ 1.0, 0.0 }) {
             std::unordered_set<std::string> ref_kmers;
-            test_mask_unitigs_canonical<typename TypeParam::first_type,
-                                        typename TypeParam::second_type>(
-                1.0, 0.0, other_frac, ref_kmers, add_complement, mode
-            );
 
-            test_mask_unitigs_canonical<typename TypeParam::first_type,
-                                        typename TypeParam::second_type>(
-                1.0, 0.25, other_frac, ref_kmers, add_complement, mode
-            );
+            EXPECT_EQ((test_mask_unitigs_canonical<typename TypeParam::first_type,
+                                                   typename TypeParam::second_type>(
+                1.0, 0.0, other_frac, ref_kmers, false, mode
+            )), ref_kmers) << other_frac << " " << mode_str;
+
+            EXPECT_EQ((test_mask_unitigs_canonical<typename TypeParam::first_type,
+                                                   typename TypeParam::second_type>(
+                1.0, 0.25, other_frac, ref_kmers, false, mode
+            )), ref_kmers) << other_frac << " " << mode_str;
 
 
-            test_mask_unitigs_canonical<typename TypeParam::first_type,
-                                        typename TypeParam::second_type>(
-                1.0, 0.49, other_frac, ref_kmers, add_complement, mode
-            );
+            EXPECT_EQ((test_mask_unitigs_canonical<typename TypeParam::first_type,
+                                                   typename TypeParam::second_type>(
+                1.0, 0.49, other_frac, ref_kmers, false, mode
+            )), ref_kmers) << other_frac << " " << mode_str;
 
+            ref_kmers.insert("GAATG");
+            ref_kmers.insert("AATGC");
             ref_kmers.insert("CATTC");
             ref_kmers.insert("GCATT");
-            if (mode == DeBruijnGraph::CANONICAL || add_complement) {
-                ref_kmers.insert("GAATG");
-                ref_kmers.insert("AATGC");
-            }
 
-            test_mask_unitigs_canonical<typename TypeParam::first_type,
-                                        typename TypeParam::second_type>(
-                1.0, 0.50, other_frac, ref_kmers, add_complement, mode
-            );
+            EXPECT_EQ((test_mask_unitigs_canonical<typename TypeParam::first_type,
+                                                   typename TypeParam::second_type>(
+                1.0, 0.50, other_frac, ref_kmers, false, mode
+            )), ref_kmers) << other_frac << " " << mode_str;
 
-            test_mask_unitigs_canonical<typename TypeParam::first_type,
-                                        typename TypeParam::second_type>(
-                1.0, 0.75, other_frac, ref_kmers, add_complement, mode
-            );
+            EXPECT_EQ((test_mask_unitigs_canonical<typename TypeParam::first_type,
+                                                   typename TypeParam::second_type>(
+                1.0, 0.75, other_frac, ref_kmers, false, mode
+            )), ref_kmers) << other_frac << " " << mode_str;
 
-            test_mask_unitigs_canonical<typename TypeParam::first_type,
-                                        typename TypeParam::second_type>(
-                1.0, 1.0, other_frac, ref_kmers, add_complement, mode
-            );
+            EXPECT_EQ((test_mask_unitigs_canonical<typename TypeParam::first_type,
+                                                   typename TypeParam::second_type>(
+                1.0, 1.0, other_frac, ref_kmers, false, mode
+            )), ref_kmers) << other_frac << " " << mode_str;
         }
     }
 }

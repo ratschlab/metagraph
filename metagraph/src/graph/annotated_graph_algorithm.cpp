@@ -7,15 +7,11 @@
 #include "common/vectors/vector_algorithm.hpp"
 #include "common/vectors/bitmap.hpp"
 #include "graph/representation/masked_graph.hpp"
-#include "graph/representation/succinct/dbg_succinct.hpp"
-#include "graph/representation/succinct/boss_construct.hpp"
 
 
 namespace mtg {
 namespace graph {
 
-using mtg::graph::boss::BOSS;
-using mtg::graph::boss::BOSSConstructor;
 using mtg::common::logger;
 
 typedef AnnotatedDBG::node_index node_index;
@@ -23,8 +19,6 @@ typedef AnnotatedDBG::row_index row_index;
 typedef AnnotatedDBG::Annotator::Label Label;
 
 typedef std::function<size_t()> LabelCountCallback;
-
-constexpr bool MAKE_BOSS = true;
 
 
 /**
@@ -36,19 +30,26 @@ constexpr bool MAKE_BOSS = true;
  * labels_out.
  * The returned bitmap is a binarization of the int_vector
  */
-std::pair<sdsl::int_vector<>, std::unique_ptr<bitmap>>
+std::pair<sdsl::int_vector<>, sdsl::bit_vector>
 construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
                                   const std::vector<Label> &labels_in,
                                   const std::vector<Label> &labels_out,
+                                  size_t num_labels,
                                   size_t num_threads);
 
+// Regions of a masked graph which should be kept (i.e., masked in)
+typedef std::vector<std::pair<size_t, size_t>> Intervals;
 
-template <class GetKeptIntervals>
+// Returns a vector of kept regions given an assembled sequence and corresponding path
+typedef std::function<Intervals(const std::string&, const std::vector<node_index>&)> GetKeptIntervals;
+
+// Returns true if the node is kept (i.e., masked in)
+typedef std::function<bool(node_index)> KeepNode;
+
 void update_masked_graph_by_unitig(MaskedDeBruijnGraph &masked_graph,
                                    const GetKeptIntervals &get_kept_intervals,
                                    size_t num_threads);
 
-template <class KeepNode>
 void update_masked_graph_by_node(MaskedDeBruijnGraph &masked_graph,
                                  const KeepNode &keep_node,
                                  size_t num_threads);
@@ -56,9 +57,8 @@ void update_masked_graph_by_node(MaskedDeBruijnGraph &masked_graph,
 std::shared_ptr<MaskedDeBruijnGraph>
 make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                           sdsl::int_vector<> &counts,
-                          std::unique_ptr<bitmap>&& mask,
+                          sdsl::bit_vector&& mask,
                           bool add_complement,
-                          bool make_boss,
                           size_t num_threads);
 
 
@@ -70,6 +70,7 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
                     const std::vector<Label> &labels_out_post,
                     const DifferentialAssemblyConfig &config,
                     size_t num_threads) {
+    size_t num_labels = anno_graph.get_annotation().num_labels();
     auto graph_ptr = std::dynamic_pointer_cast<const DeBruijnGraph>(
         anno_graph.get_graph_ptr()
     );
@@ -78,37 +79,99 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
 
     // Construct initial masked graph from union of labels in labels_in
     auto count_vector = construct_diff_label_count_vector(
-        anno_graph, labels_in, labels_out, num_threads
+        anno_graph, labels_in, labels_out,
+        std::max(labels_in.size() + labels_in_post.size(), labels_out.size() + labels_out_post.size()),
+        num_threads
     );
-    auto &[counts, union_mask] = count_vector;
+    auto &[counts, init_mask] = count_vector;
 
     // in and out counts are stored interleaved in the counts vector
-    assert(counts.size() == union_mask->size() * 2);
+    assert(counts.size() == init_mask.size() * 2);
 
-    auto masked_graph = make_initial_masked_graph(graph_ptr,
-                                                  counts, std::move(union_mask),
-                                                  config.add_complement, MAKE_BOSS,
-                                                  num_threads);
+    bool check_other = config.label_mask_other_unitig_fraction != 1.0;
+    sdsl::bit_vector union_mask;
+
+    sdsl::bit_vector other_mask(init_mask.size() * check_other, false);
+    auto masked_graph = make_initial_masked_graph(graph_ptr, counts, std::move(init_mask),
+                                                  config.add_complement, num_threads);
+
+    if (check_other || labels_in_post.size() || labels_out_post.size())
+        union_mask = dynamic_cast<const bitmap_vector&>(masked_graph->get_mask()).data();
+
+    // check all other labels and post labels
+    if (check_other || labels_in_post.size() || labels_out_post.size()) {
+        tsl::hopscotch_set<std::string> labels_in_set(labels_in.begin(),
+                                                      labels_in.end());
+        tsl::hopscotch_set<std::string> labels_out_set(labels_out.begin(),
+                                                       labels_out.end());
+        tsl::hopscotch_set<std::string> labels_in_post_set(labels_in_post.begin(),
+                                                           labels_in_post.end());
+        tsl::hopscotch_set<std::string> labels_out_post_set(labels_out_post.begin(),
+                                                            labels_out_post.end());
+
+        std::mutex vector_backup_mutex;
+        constexpr std::memory_order memorder = std::memory_order_relaxed;
+        std::atomic_thread_fence(std::memory_order_release);
+
+        auto mask_or = [&](sdsl::bit_vector &a,
+                           const sdsl::bit_vector &b,
+                           const std::vector<node_index> &id_map) {
+            call_ones(b, [&](size_t i) {
+                if (id_map[i])
+                    set_bit(a.data(), id_map[i], num_threads > 1, memorder);
+            });
+        };
+
+        auto count_merge = [&](sdsl::bit_vector &a,
+                               sdsl::int_vector<> &counts,
+                               const sdsl::bit_vector &b,
+                               const std::vector<node_index> &id_map,
+                               size_t offset = 0) {
+            call_ones(b, [&](size_t i) {
+                if (id_map[i]) {
+                    set_bit(a.data(), id_map[i], num_threads > 1, memorder);
+                    atomic_fetch_and_add(counts,
+                                         id_map[i] * 2 + offset, 1,
+                                         vector_backup_mutex, memorder);
+                }
+            });
+        };
+
+        logger->trace("Checking shared and other labels");
+        masked_graph->call_sequences([&](const std::string &contig, const std::vector<node_index> &path) {
+            for (const auto &[label, sig] : anno_graph.get_top_label_signatures(contig, num_labels)) {
+                if (labels_in_set.count(label) || labels_out_set.count(label))
+                    continue;
+
+                bool found_in_post = labels_in_post_set.count(label);
+                bool found_out_post = labels_out_post_set.count(label);
+                if (!found_in_post && !found_out_post) {
+                    if (check_other) {
+                        mask_or(other_mask, sig, path);
+                    }
+
+                    continue;
+                }
+
+                if (found_in_post)
+                    count_merge(union_mask, counts, sig, path);
+
+                if (found_out_post)
+                    count_merge(union_mask, counts, sig, path, 1);
+            }
+        }, num_threads);
+
+        std::atomic_thread_fence(std::memory_order_acquire);
+
+        masked_graph->set_mask(new bitmap_vector(std::move(union_mask)));
+    }
 
     // Filter unitigs from masked graph based on filtration criteria
     logger->trace("Filtering out background");
 
-    tsl::hopscotch_set<std::string> masked_labels;
-    tsl::hopscotch_set<std::string> labels_in_post_set(labels_in_post.begin(),
-                                                       labels_in_post.end());
-    tsl::hopscotch_set<std::string> labels_out_post_set(labels_out_post.begin(),
-                                                        labels_out_post.end());
-
-    bool check_other = config.label_mask_other_unitig_fraction != 1.0;
-
-    if (check_other) {
-        masked_labels.insert(labels_in.begin(), labels_in.end());
-        masked_labels.insert(labels_out.begin(), labels_out.end());
-        masked_labels.insert(labels_in_post.begin(), labels_in_post.end());
-        masked_labels.insert(labels_out_post.begin(), labels_out_post.end());
-    } else if (config.label_mask_in_unitig_fraction == 0.0
+    if (config.label_mask_in_unitig_fraction == 0.0
             && config.label_mask_out_unitig_fraction == 1.0
-            && labels_in_post.empty() && labels_out_post.empty()) {
+            && config.label_mask_other_unitig_fraction == 1.0) {
         if (config.label_mask_in_kmer_fraction == 0.0
                 && config.label_mask_out_kmer_fraction == 1.0) {
             logger->trace("Bypassing background filtration");
@@ -129,87 +192,59 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
 
     logger->trace("Filtering by unitig");
 
-    size_t num_labels = anno_graph.get_annotation().num_labels();
+    update_masked_graph_by_unitig(*masked_graph,
+        [&](const std::string &, const std::vector<node_index> &path) -> Intervals {
+            // return a set of intervals to keep in the graph
+            const auto &counts = count_vector.first;
+            size_t min_label_in_count = config.label_mask_in_kmer_fraction
+                                            * (labels_in.size() + labels_in_post.size());
+            size_t max_label_out_count = config.label_mask_out_kmer_fraction
+                                            * (labels_out.size() + labels_out_post.size());
 
-    auto get_kept_intervals = [&](const auto &unitig, const auto &path)
-            -> std::vector<std::pair<size_t, size_t>> {
-        sdsl::int_vector<> &counts = count_vector.first;
-        sdsl::bit_vector in_mask(path.size(), false);
-        sdsl::bit_vector out_mask(path.size(), false);
-        sdsl::bit_vector other_mask(check_other ? path.size() : 0, false);
+            size_t in_kmer_count = 0;
 
-        size_t min_label_in_count = config.label_mask_in_kmer_fraction
-                                        * (labels_in.size() + labels_in_post.size());
-        size_t max_label_out_count = config.label_mask_out_kmer_fraction
-                                        * (labels_out.size() + labels_out_post.size());
+            size_t begin = path.size();
+            size_t end = 0;
+            for (size_t i = 0; i < path.size(); ++i) {
+                if (counts[2 * path[i]] >= min_label_in_count) {
+                    if (begin == path.size())
+                        begin = i;
 
-        size_t in_kmer_count = 0;
-        size_t out_kmer_count = 0;
+                    end = std::max(end, i + 1);
 
-        for (size_t i = 0; i < path.size(); ++i) {
-            if (counts[2 * path[i]] >= min_label_in_count) {
-                in_mask[i] = true;
-                ++in_kmer_count;
-            }
-
-            if (counts[2 * path[i] + 1] > max_label_out_count) {
-                out_mask[i] = true;
-                ++out_kmer_count;
-            }
-        }
-
-        if (check_other || labels_in_post.size() || labels_out_post.size()) {
-            for (auto &[label, sig] : anno_graph.get_top_label_signatures(unitig, num_labels)) {
-                if (check_other && !masked_labels.count(label)) {
-                    bitmap_vector(std::move(sig)).add_to(&other_mask);
-                    continue;
-                }
-
-                if (labels_in_post_set.count(label)) {
-                    call_ones(sig, [&](size_t i) {
-                        if (++counts[2 * path[i]] >= min_label_in_count) {
-                            in_mask[i] = true;
-                            ++in_kmer_count;
-                        }
-                    });
-                }
-
-                if (labels_out_post_set.count(label)) {
-                    call_ones(sig, [&](size_t i) {
-                        if (++counts[2 * path[i] + 1] > max_label_out_count) {
-                            out_mask[i] = true;
-                            ++out_kmer_count;
-                        }
-                    });
+                    ++in_kmer_count;
                 }
             }
-        }
 
-        size_t begin = next_bit(in_mask, 0);
+            if (begin >= end)
+                return {};
 
-        if (begin == in_mask.size())
-            return {};
+            size_t size = end - begin;
+            size_t label_in_cutoff = std::ceil(config.label_mask_in_unitig_fraction * size);
+            if (in_kmer_count < label_in_cutoff)
+                return {};
 
-        size_t end = prev_bit(in_mask, in_mask.size() - 1) + 1;
-        assert(end > begin);
+            size_t out_kmer_count = 0;
+            size_t other_kmer_count = 0;
+            size_t label_out_cutoff = std::floor(config.label_mask_out_unitig_fraction * size);
+            size_t other_cutoff = std::floor(config.label_mask_other_unitig_fraction * size);
 
-        out_kmer_count -= count_ones(out_mask, 0, begin) + count_ones(out_mask, end, out_mask.size());
-        size_t other_kmer_count = check_other ? count_ones(other_mask, begin, end) : 0;
+            for (size_t i = begin; i < end; ++i) {
+                if (counts[2 * path[i] + 1] > max_label_out_count
+                        && ++out_kmer_count > label_out_cutoff) {
+                    return {};
+                }
 
-        size_t cur_size = end - begin;
-        size_t label_in_cutoff = std::ceil(config.label_mask_in_unitig_fraction * cur_size);
-        size_t label_out_cutoff = std::floor(config.label_mask_out_unitig_fraction * cur_size);
-        size_t other_cutoff = std::floor(config.label_mask_other_unitig_fraction * cur_size);
+                if (check_other && other_mask[path[i]]
+                        && ++other_kmer_count > other_cutoff) {
+                    return {};
+                }
+            }
 
-        if (in_kmer_count >= label_in_cutoff && out_kmer_count <= label_out_cutoff
-                && other_kmer_count <= other_cutoff)
             return { std::make_pair(begin, end) };
-
-
-        return {};
-    };
-
-    update_masked_graph_by_unitig(*masked_graph, get_kept_intervals, num_threads);
+        },
+        num_threads
+    );
 
     return masked_graph;
 }
@@ -217,132 +252,53 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
 std::shared_ptr<MaskedDeBruijnGraph>
 make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                           sdsl::int_vector<> &counts,
-                          std::unique_ptr<bitmap>&& mask,
+                          sdsl::bit_vector&& mask,
                           bool add_complement,
-                          bool make_boss,
                           size_t num_threads) {
     // counts is a double-length vector storing the in-label and out-label
     // counts interleaved
-    assert(counts.size() == mask->size() * 2);
+    assert(counts.size() == mask.size() * 2);
 
-    graph_ptr = std::shared_ptr<const DeBruijnGraph>(
-        std::shared_ptr<const DeBruijnGraph>(), &graph_ptr->get_base_graph()
-    );
-
+    add_complement |= graph_ptr->get_mode() == DeBruijnGraph::CANONICAL;
     auto masked_graph = std::make_shared<MaskedDeBruijnGraph>(
         graph_ptr,
-        std::move(mask),
-        true,
-        graph_ptr->get_mode()
+        add_complement
+            ? std::make_unique<bitmap_vector>(mask)
+            : std::make_unique<bitmap_vector>(std::move(mask)),
+        true
     );
 
     logger->trace("Constructed masked graph with {} nodes", masked_graph->num_nodes());
 
-    bool masked_canonical = add_complement
-        || graph_ptr->get_mode() == DeBruijnGraph::CANONICAL;
-
-    if (make_boss
-            || (add_complement && graph_ptr->get_mode() != DeBruijnGraph::CANONICAL)) {
-        // we can't guarantee that the reverse complement is present, so
-        // construct a new subgraph
-        logger->trace("Constructing BOSS from labeled subgraph");
-        std::vector<std::pair<std::string, sdsl::int_vector<>>> contigs;
-        std::mutex add_mutex;
-        BOSSConstructor constructor(
-            graph_ptr->get_k() - 1,
-            masked_canonical,
-            0 /* count width */, "" /* suffix */, 1 /* num_threads */,
-            masked_graph->num_nodes() * 32
-        );
-        masked_graph->call_sequences([&](const std::string &seq, const auto &path) {
-            sdsl::int_vector<> path_counts(path.size() * 2, 0, counts.width());
-            auto it = path_counts.begin();
-            for (node_index i : path) {
-                *it = counts[i * 2];
-                ++it;
-
-                *it = counts[i * 2 + 1];
-                ++it;
-            }
-
-            std::lock_guard<std::mutex> lock(add_mutex);
-            contigs.emplace_back(seq, std::move(path_counts));
-            constructor.add_sequence(seq);
-        }, num_threads, masked_canonical);
-
-        auto dbg_succ = std::make_shared<DBGSuccinct>(
-            new BOSS(&constructor),
-            masked_canonical ? DeBruijnGraph::CANONICAL : DeBruijnGraph::BASIC
-        );
-
-        // instead of keeping multiple masks (one for valid nodes and another
-        // for the masked graph), transfer the valid node mask to the masked graph
-        dbg_succ->mask_dummy_kmers(num_threads, false);
-        std::unique_ptr<bit_vector> dummy_mask(dbg_succ->release_mask());
-        graph_ptr = dbg_succ;
-        sdsl::bit_vector new_indicator(graph_ptr->max_index() + 1, false);
-        dummy_mask->add_to(&new_indicator);
-        masked_graph = std::make_shared<MaskedDeBruijnGraph>(
-            graph_ptr,
-            std::make_unique<bitmap_vector>(std::move(new_indicator)),
-            true,
-            masked_canonical ? DeBruijnGraph::CANONICAL : DeBruijnGraph::BASIC
-        );
-
-        logger->trace("Reconstructing count vector");
-        counts = aligned_int_vector((graph_ptr->max_index() + 1) * 2,
-                                    0, counts.width(), 16);
-
-        std::atomic_thread_fence(std::memory_order_release);
-
+    if (add_complement) {
+        logger->trace("Adding reverse complements");
         std::mutex vector_backup_mutex;
         constexpr std::memory_order memorder = std::memory_order_relaxed;
+        std::atomic_thread_fence(std::memory_order_release);
+        masked_graph->call_sequences([&](const std::string &seq, const std::vector<node_index> &path) {
+            std::string rc_seq = seq;
+            std::vector<DeBruijnGraph::node_index> rc_path = path;
+            reverse_complement_seq_path(*graph_ptr, rc_seq, rc_path);
 
-        #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
-        for (size_t l = 0; l < contigs.size(); ++l) {
-            auto &[seq, seq_counts] = contigs[l];
-            size_t j = 0;
-            graph_ptr->map_to_nodes_sequentially(seq, [&](node_index i) {
-                atomic_exchange(counts, i * 2, contigs[l].second[j],
-                                vector_backup_mutex, memorder);
-                atomic_exchange(counts, i * 2 + 1, contigs[l].second[j + 1],
-                                vector_backup_mutex, memorder);
-                j += 2;
-            });
-            assert(j == seq_counts.size());
-        }
+            auto it = rc_path.rbegin();
+            for (size_t i = 0; i < path.size(); ++i, ++it) {
+                if (*it) {
+                    uint64_t in_count = atomic_fetch(counts, path[i] * 2, vector_backup_mutex, memorder);
+                    uint64_t out_count = atomic_fetch(counts, path[i] * 2 + 1, vector_backup_mutex, memorder);
+                    atomic_fetch_and_add(counts, *it * 2, in_count, vector_backup_mutex, memorder);
+                    atomic_fetch_and_add(counts, *it * 2 + 1, out_count, vector_backup_mutex, memorder);
 
-        if (masked_canonical) {
-            #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
-            for (size_t l = 0; l < contigs.size(); ++l) {
-                auto &[seq, seq_counts] = contigs[l];
-                reverse_complement(seq.begin(), seq.end());
-
-                // counts stores counts for in labels and out labels interleaved,
-                // so to add values properly, it should be reshaped first
-                size_t j = seq_counts.size();
-                graph_ptr->map_to_nodes_sequentially(seq, [&](node_index i) {
-                    uint64_t old_val = atomic_exchange(counts, i * 2 + 1,
-                                                       contigs[l].second[--j],
-                                                       vector_backup_mutex, memorder);
-                    std::ignore = old_val;
-                    assert(!old_val);
-
-                    old_val = atomic_exchange(counts, i * 2, contigs[l].second[--j],
-                                              vector_backup_mutex, memorder);
-                    std::ignore = old_val;
-                    assert(!old_val);
-                });
-                assert(!j);
+                    set_bit(mask.data(), *it, in_count, memorder);
+                }
             }
-        }
+        }, num_threads, true);
 
         std::atomic_thread_fence(std::memory_order_acquire);
 
-        logger->trace("Constructed BOSS with {} nodes", graph_ptr->num_nodes());
-    }
+        masked_graph->set_mask(new bitmap_vector(std::move(mask)));
 
-    assert(counts.size() == (graph_ptr->max_index() + 1) * 2);
+        logger->trace("Updated masked graph has {} nodes", masked_graph->num_nodes());
+    }
 
     return masked_graph;
 }
@@ -357,13 +313,14 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> graph_ptr,
  * labels_out.
  * The returned bitmap is a binarization of the int_vector
  */
-std::pair<sdsl::int_vector<>, std::unique_ptr<bitmap>>
+std::pair<sdsl::int_vector<>, sdsl::bit_vector>
 construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
                                   const std::vector<Label> &labels_in,
                                   const std::vector<Label> &labels_out,
+                                  size_t num_labels,
                                   size_t num_threads) {
-    size_t width = sdsl::bits::hi(std::max(labels_in.size(), labels_out.size())) + 1;
-    sdsl::bit_vector indicator(anno_graph.get_graph().get_base_graph().max_index() + 1, false);
+    size_t width = sdsl::bits::hi(num_labels) + 1;
+    sdsl::bit_vector indicator(anno_graph.get_graph().max_index() + 1, false);
 
     // the in and out counts are stored interleaved
     sdsl::int_vector<> counts = aligned_int_vector(indicator.size() * 2, 0, width, 16);
@@ -409,16 +366,10 @@ construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
 
     std::atomic_thread_fence(std::memory_order_acquire);
 
-    // TODO: this function doesn't work if MAKE_BOSS is false and the complements
-    //       of k-mers should also be present
-    static_assert(MAKE_BOSS);
-
-    return std::make_pair(std::move(counts),
-                          std::make_unique<bitmap_vector>(std::move(indicator)));
+    return std::make_pair(std::move(counts), std::move(indicator));
 }
 
 
-template <class GetKeptIntervals>
 void update_masked_graph_by_unitig(MaskedDeBruijnGraph &masked_graph,
                                    const GetKeptIntervals &get_kept_intervals,
                                    size_t num_threads) {
@@ -432,7 +383,7 @@ void update_masked_graph_by_unitig(MaskedDeBruijnGraph &masked_graph,
 
     std::atomic_thread_fence(std::memory_order_release);
 
-    masked_graph.call_unitigs([&](const std::string &unitig, const auto &path) {
+    masked_graph.call_unitigs([&](const std::string &unitig, const std::vector<node_index> &path) {
         total_unitigs.fetch_add(1, memorder);
 
         size_t last = 0;
@@ -461,7 +412,6 @@ void update_masked_graph_by_unitig(MaskedDeBruijnGraph &masked_graph,
                       / kept_unitigs);
 }
 
-template <class KeepNode>
 void update_masked_graph_by_node(MaskedDeBruijnGraph &masked_graph,
                                  const KeepNode &keep_node,
                                  size_t num_threads) {
