@@ -27,9 +27,20 @@ class TaxonomyBase {
         : lca_coverage_rate_(lca_coverage_rate),
           kmers_discovery_rate_(kmers_discovery_rate) {}
     virtual ~TaxonomyBase() {}
+    TaxId assign_class(const std::string &sequence) const;
 
   protected:
+    virtual TaxId find_lca(const std::vector<TaxId> &taxids) const = 0;
+
     std::string get_accession_version_from_label(const std::string &label) const;
+
+    /** Parse a given label in order to return the associated taxid.
+     *
+     * @param [input] 'label' -> to get taxid from
+     * @param [output] 'taxid' -> save the found taxid
+     * @return true only if the taxid search was successful.
+     */
+    bool get_taxid_from_label(const std::string &label, TaxId *taxid) const;
 
     /** Reads the accession version to taxid lookup table.
      * If 'anno_matrix' is not NULL, only the labels that exist in the given annotation matrix will be stored.
@@ -39,6 +50,33 @@ class TaxonomyBase {
      * @param [optional input] anno_matrix -> pointer to the annotation matrix.
      */
     void read_accversion_to_taxid_map(const std::string &filepath, const graph::AnnotatedDBG *anno_matrix = NULL);
+
+    /**
+     * Update the current node_scores and best_lca by taking into account the weight of the start_node and all its ancestors.
+     *
+     * @param [input] 'start_taxnode' -> the starting taxnode to update 'taxid_scores'.
+     * @param [input] 'num_kmers_per_taxid[taxid]' -> the number of kmers 'k' with taxonomic_map[k]=taxid.
+     * @param [input] 'min_required_kmers' -> the threshold score representing the minimal number of kmers that have to be linked
+     *                                        to a certain (potential solution) taxnode/LCA, its subtree or its ancestors.
+     * @param [modified] 'taxid_scores' -> the current score for each taxnode in the taxonomic tree.
+     * @param [modified] 'taxid_already_propagated' -> the set of taxnodes that were previously processed.
+     * @param [modified] 'best_lca' -> the current classification prediction (taxnode that exceeds the `min_required_kmers`
+     *                                 threshold and is placed as close as possible to the leaves).
+     * @param [modified] 'best_lca_dist_to_root' -> the distance to the root for the current classification prediction.
+     */
+    void update_scores_and_lca(TaxId start_taxid,
+                               const tsl::hopscotch_map<TaxId, uint32_t> &num_kmers_per_taxid,
+                               uint32_t min_required_kmers,
+                               tsl::hopscotch_map<TaxId, uint32_t> *taxid_scores,
+                               tsl::hopscotch_set<TaxId> *taxid_already_propagated,
+                               TaxId *best_lca,
+                               uint32_t *best_lca_dist_to_root) const;
+
+    /**
+     * Get the list of LCA taxids associated to each kmer in a given sequences.
+     * The sequence can be given in forward or in reversed orientation.
+     */
+    virtual std::vector<TaxId> get_lca_taxids_for_seq(const std::string_view &sequence, bool reversed) const = 0;
 
     LabelType label_type_;
 
@@ -80,6 +118,8 @@ class TaxonomyClsAnno : public TaxonomyBase {
                     const std::string &label_taxid_map_filepath = "");
     TaxonomyClsAnno() {}
 
+    TaxId assign_class_toplabels(const std::string &sequence, double label_fraction) const;
+
   private:
     /**
      * Reads and returns the taxonomic tree as a list of children.
@@ -110,6 +150,10 @@ class TaxonomyClsAnno : public TaxonomyBase {
     void dfs_statistics(TaxId node,
                         const ChildrenList &tree,
                         std::vector<TaxId> *tree_linearization);
+
+    TaxId find_lca(const std::vector<TaxId> &taxids) const;
+
+    std::vector<TaxId> get_lca_taxids_for_seq(const std::string_view &sequence, bool reversed) const;
 
     /**
      * rmq_data_[0] contains the taxonomic tree linearization
