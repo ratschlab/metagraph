@@ -127,15 +127,13 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
         };
 
         auto count_merge = [&](sdsl::bit_vector &a,
-                               sdsl::int_vector<> &counts,
                                const sdsl::bit_vector &b,
                                const std::vector<node_index> &id_map,
                                size_t offset = 0) {
             call_ones(b, [&](size_t i) {
                 if (id_map[i]) {
                     set_bit(a.data(), id_map[i], num_threads > 1, memorder);
-                    atomic_fetch_and_add(counts,
-                                         id_map[i] * 2 + offset, 1,
+                    atomic_fetch_and_add(count_vector.first, id_map[i] * 2 + offset, 1,
                                          vector_backup_mutex, memorder);
                 }
             });
@@ -158,10 +156,10 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
                 }
 
                 if (found_in_post)
-                    count_merge(union_mask, counts, sig, path);
+                    count_merge(union_mask, sig, path);
 
                 if (found_out_post)
-                    count_merge(union_mask, counts, sig, path, 1);
+                    count_merge(union_mask, sig, path, 1);
             }
         }, num_threads);
 
