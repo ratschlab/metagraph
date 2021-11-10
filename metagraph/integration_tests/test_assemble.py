@@ -234,7 +234,7 @@ class TestDiffAssembly(TestingBase):
             repr=cls.graph_repr,
             k=k,
             outfile=cls.tempdir.name + '/graph',
-            input=TEST_DATA_DIR + '/metasub_fake_data.fa'
+            input=TEST_DATA_DIR + '/metasub_fake_data_simple.fa'
         )
         res = subprocess.run([construct_command], shell=True)
         assert(res.returncode == 0)
@@ -260,7 +260,7 @@ class TestDiffAssembly(TestingBase):
         cls.anno_repr, no_anchor_opt = check_suffix(cls.anno_repr, '_no_anchor_opt')
 
         cls._annotate_graph(
-            TEST_DATA_DIR + '/metasub_fake_data.fa',
+            TEST_DATA_DIR + '/metasub_fake_data_simple.fa',
             cls.tempdir.name + '/graph' + graph_file_extension[cls.graph_repr],
             cls.tempdir.name + '/annotation',
             cls.anno_repr,
