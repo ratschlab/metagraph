@@ -20,13 +20,14 @@ typedef std::function<size_t()> LabelCountCallback;
 
 
 /**
- * Return an int_vector<>, bitmap pair, each of length anno_graph.get_graph().get_base_graph().max_index().
+ * Return an int_vector<>, bit_vector pair, each of length anno_graph.get_graph().max_index().
  * For an index i, the int_vector will contain a packed integer representing the
  * number of labels in labels_in and labels_out which the k-mer of index i is
  * annotated with. The least significant half of each integer represents the count
  * from labels_in, while the most significant half represents the count from
- * labels_out.
- * The returned bitmap is a binarization of the int_vector
+ * labels_out. The width of the int_vector<> is computed to be wide enough to contain
+ * counts up to num_labels.
+ * The returned bit_vector is a binarization of the int_vector
  */
 std::pair<sdsl::int_vector<>, sdsl::bit_vector>
 construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
@@ -252,6 +253,11 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
     return masked_graph;
 }
 
+
+/**
+ * Helpers
+ */
+
 std::shared_ptr<MaskedDeBruijnGraph>
 make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                           sdsl::int_vector<> &counts,
@@ -306,16 +312,6 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     return masked_graph;
 }
 
-/**
- * Return an int_vector<>, bitmap pair, each of length
- * anno_graph.get_graph().get_base_graph().max_index() + 1.
- * For an index i, the int_vector will contain a packed integer representing the
- * number of labels in labels_in and labels_out which the k-mer of index i is
- * annotated with. The least significant half of each integer represents the count
- * from labels_in, while the most significant half represents the count from
- * labels_out.
- * The returned bitmap is a binarization of the int_vector
- */
 std::pair<sdsl::int_vector<>, sdsl::bit_vector>
 construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
                                   const std::vector<Label> &labels_in,
