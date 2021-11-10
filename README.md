@@ -157,7 +157,7 @@ Requires `M*V/8 + Size(BRWT)` bytes of RAM, where `M` is the number of rows in t
                         -o diff_assembled.fa
 ```
 
-See `metagraph/tests/data/example.diff.json` for a sample file.
+See `metagraph/tests/data/example.diff.json` and `metagraph/tests/data/example_simple.diff.json` for sample files.
 
 ### Get stats
 Stats for graph

@@ -300,3 +300,32 @@ class TestDiffAssembly(TestingBase):
         self.assertEqual(len(results['>metasub_by_kmer']), 1)
         self.assertEqual(results['>metasub_other'][0], 'CTTGGATCACACTCTTCTCAGAGCCCAGGCCAGGGGCCCCCAAGAAAGGCTCTGGTGGAGAACCTGTGCATGAAGGCTGTCAACCAGTCCATAGGCAGGGCCATCAGGCACCAAAGGGATTCTGCCAGCATAGTGCTCCTGGACCAGTGATACACCCGGCACCCTGTCCTGGACATGCTGTTGGCCTGGATCTGAGCCCTCGTGGAGGTCAAAGCCACCTTTGGTTCTGCCATTGCTGCTGTGTGGAAGTTCACTCAAGTAGGCCTCTTCCTG')
         self.assertEqual(results['>metasub_by_kmer'][0], 'CTTGGATCACACTCTTCTCAGAGCCCAGGCCAGGGGCCCCCAAGAAAGGCTCTGGTGGAGAACCTGTGCATGAAGGCTGTCAACCAGTCCATAGGCAGGGCCATCAGGCACCAAAGGGATTCTGCCAGCATAGTGCTCCTGGACCAGTGATACACCCGGCACCCTGTCCTGGACATGCTGTTGGCCTGGATCTGAGCCCTCGTGGAGGTCAAAGCCACCTTTGGTTCTGCCATTGCTGCTGTGTGGAAGTTCACTCAAGTAGGCCTCTTCCTGACAGGCAGCTGCACCACTGCCTGGCGCTGTGCCCTTCCTTTGCTCTGCCCGCTGGAGACGGTGTTTGTCATGGGCCTGGTCTGCAGG')
+
+    def test_diff_assembly_simple(self):
+        assemble_command = '{exe} assemble -p {num_threads} \
+                -a {annotation} -o {outfile} \
+                --diff-assembly-rules {mask} {graph}'.format(
+            exe=METAGRAPH,
+            num_threads=NUM_THREADS,
+            outfile=self.tempdir.name + '/diff_contigs',
+            graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
+            annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
+            mask=TEST_DATA_DIR + '/example_simple.diff.json'
+        )
+        res = subprocess.run([assemble_command], shell=True)
+        self.assertEqual(res.returncode, 0)
+
+        results = dict()
+        with gzip.open(self.tempdir.name + '/diff_contigs.fasta.gz', 'rt') as f:
+            for head, seq in itertools.zip_longest(*[f]*2):
+                head = head.rstrip()
+                seq = seq.rstrip()
+                if head not in results:
+                    results[head] = [seq]
+                else:
+                    results[head].append(seq)
+
+        self.assertEqual(len(results), 1)
+        self.assertTrue('>metasub_by_kmer' in results)
+        self.assertEqual(len(results['>metasub_by_kmer']), 1)
+        self.assertEqual(results['>metasub_by_kmer'][0], 'CTTGGATCACACTCTTCTCAGAGCCCAGGCCAGGGGCCCCCAAGAAAGGCTCTGGTGGAGAACCTGTGCATGAAGGCTGTCAACCAGTCCATAGGCAGGGCCATCAGGCACCAAAGGGATTCTGCCAGCATAGTGCTCCTGGACCAGTGATACACCCGGCACCCTGTCCTGGACATGCTGTTGGCCTGGATCTGAGCCCTCGTGGAGGTCAAAGCCACCTTTGGTTCTGCCATTGCTGCTGTGTGGAAGTTCACTCAAGTAGGCCTCTTCCTGACAGGCAGCTGCACCACTGCCTGGCGCTGTGCCCTTCCTTTGCTCTGCCCGCTGGAGACGGTGTTTGTCATGGGCCTGGTCTGCAGG')
