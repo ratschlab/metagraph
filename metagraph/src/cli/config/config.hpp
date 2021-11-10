@@ -48,6 +48,7 @@ class Config {
     bool batch_align = false;
     bool count_labels = false;
     bool suppress_unlabeled = false;
+    bool inplace = false;
     bool clear_dummy = false;
     bool count_dummy = false;
     bool greedy_brwt = false;
