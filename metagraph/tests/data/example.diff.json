@@ -2,7 +2,11 @@
     "groups": [
         {
             "shared_labels": {
-                "__comment__": "these are shared by all experiments in this group",
+                "__comment__": [
+                    "These are shared by all experiments in this group.",
+                    "These labels are only considered after unitigs are constructed",
+                    "from the experiment-specific labels specified below.",
+                ],
                 "in": [],
                 "out": []
             },

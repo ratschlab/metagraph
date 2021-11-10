@@ -284,7 +284,7 @@ Config::Config(int argc, char *argv[]) {
             host_address = get_value(i++);
         }else if (!strcmp(argv[i], "--suffix")) {
             suffix = get_value(i++);
-        } else if (!strcmp(argv[i], "--label-mask-file")) {
+        } else if (!strcmp(argv[i], "--diff-assembly-rules")) {
             label_mask_file = get_value(i++);
         } else if (!strcmp(argv[i], "--initialize-bloom")) {
             initialize_bloom = true;
@@ -1061,7 +1061,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t-a --annotator [STR] \t\tannotator to load []\n");
-            fprintf(stderr, "\t   --label-mask-file [STR] \tJSON file describing labels to mask in and out and their relative fractions []\n");
+            fprintf(stderr, "\t   --diff-assembly-rules [STR] \tJSON file describing labels to mask in and out and their relative fractions []\n");
             fprintf(stderr, "\t                       \t\tSee the README for the specification.\n");
         } break;
         case STATS: {

@@ -272,7 +272,7 @@ class TestDiffAssembly(TestingBase):
     def test_diff_assembly(self):
         assemble_command = '{exe} assemble -p {num_threads} \
                 -a {annotation} -o {outfile} \
-                --label-mask-file {mask} {graph}'.format(
+                --diff-assembly-rules {mask} {graph}'.format(
             exe=METAGRAPH,
             num_threads=NUM_THREADS,
             outfile=self.tempdir.name + '/diff_contigs',

@@ -70,8 +70,8 @@ std::shared_ptr<MaskedDeBruijnGraph>
 mask_nodes_by_label(const AnnotatedDBG &anno_graph,
                     const std::vector<Label> &labels_in,
                     const std::vector<Label> &labels_out,
-                    const std::vector<Label> &labels_in_post,
-                    const std::vector<Label> &labels_out_post,
+                    const std::vector<Label> &labels_in_round2,
+                    const std::vector<Label> &labels_out_round2,
                     const DifferentialAssemblyConfig &config,
                     size_t num_threads) {
     size_t num_labels = anno_graph.get_annotation().num_labels();
@@ -84,7 +84,8 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
     // Construct initial masked graph from union of labels in labels_in
     auto count_vector = construct_diff_label_count_vector(
         anno_graph, labels_in, labels_out,
-        std::max(labels_in.size() + labels_in_post.size(), labels_out.size() + labels_out_post.size()),
+        std::max(labels_in.size() + labels_in_round2.size(),
+                 labels_out.size() + labels_out_round2.size()),
         num_threads
     );
     auto &[counts, init_mask] = count_vector;
@@ -99,19 +100,19 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
     auto masked_graph = make_initial_masked_graph(graph_ptr, counts, std::move(init_mask),
                                                   config.add_complement, num_threads);
 
-    if (check_other || labels_in_post.size() || labels_out_post.size())
+    if (check_other || labels_in_round2.size() || labels_out_round2.size())
         union_mask = dynamic_cast<const bitmap_vector&>(masked_graph->get_mask()).data();
 
     // check all other labels and post labels
-    if (check_other || labels_in_post.size() || labels_out_post.size()) {
+    if (check_other || labels_in_round2.size() || labels_out_round2.size()) {
         tsl::hopscotch_set<std::string> labels_in_set(labels_in.begin(),
                                                       labels_in.end());
         tsl::hopscotch_set<std::string> labels_out_set(labels_out.begin(),
                                                        labels_out.end());
-        tsl::hopscotch_set<std::string> labels_in_post_set(labels_in_post.begin(),
-                                                           labels_in_post.end());
-        tsl::hopscotch_set<std::string> labels_out_post_set(labels_out_post.begin(),
-                                                            labels_out_post.end());
+        tsl::hopscotch_set<std::string> labels_in_round2_set(labels_in_round2.begin(),
+                                                           labels_in_round2.end());
+        tsl::hopscotch_set<std::string> labels_out_round2_set(labels_out_round2.begin(),
+                                                            labels_out_round2.end());
 
         std::mutex vector_backup_mutex;
         constexpr std::memory_order memorder = std::memory_order_relaxed;
@@ -145,9 +146,9 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
                 if (labels_in_set.count(label) || labels_out_set.count(label))
                     continue;
 
-                bool found_in_post = labels_in_post_set.count(label);
-                bool found_out_post = labels_out_post_set.count(label);
-                if (!found_in_post && !found_out_post) {
+                bool found_in_round2 = labels_in_round2_set.count(label);
+                bool found_out_round2 = labels_out_round2_set.count(label);
+                if (!found_in_round2 && !found_out_round2) {
                     if (check_other) {
                         mask_or(other_mask, sig, path);
                     }
@@ -155,10 +156,10 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
                     continue;
                 }
 
-                if (found_in_post)
+                if (found_in_round2)
                     count_merge(union_mask, sig, path);
 
-                if (found_out_post)
+                if (found_out_round2)
                     count_merge(union_mask, sig, path, 1);
             }
         }, num_threads);
@@ -199,9 +200,9 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
             // return a set of intervals to keep in the graph
             const auto &counts = count_vector.first;
             size_t min_label_in_count = config.label_mask_in_kmer_fraction
-                                            * (labels_in.size() + labels_in_post.size());
+                                            * (labels_in.size() + labels_in_round2.size());
             size_t max_label_out_count = config.label_mask_out_kmer_fraction
-                                            * (labels_out.size() + labels_out_post.size());
+                                            * (labels_out.size() + labels_out_round2.size());
 
             size_t in_kmer_count = 0;
 

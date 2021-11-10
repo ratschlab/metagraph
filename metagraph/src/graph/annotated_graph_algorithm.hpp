@@ -38,14 +38,22 @@ struct DifferentialAssemblyConfig {
 /**
  * Given an AnnotatedDBG and sets of foreground (in) and background (out) labels,
  * return a MaskedDeBruijnGraph with the nodes of anno_graph masked according to
- * the parameters specified by config.
+ * the parameters specified by config. In round 1, a masked graph is constructed
+ * containing the nodes corresponding to labels_in and labels_out, with a vector
+ * counting how many of labels_in and labels_out correspond to each node,
+ * respectively.
+ * In round 2, if any of the sequences of the initial masked graph have the
+ * labels in labels_in_round2 or labels_out_round2, or if they have other labels,
+ * the count vector is updated accordingly.
+ * In round 3, the config rules are used to discard (i.e., mask out) nodes from
+ * the masked graph. The resulting graph is returned.
  */
 std::shared_ptr<MaskedDeBruijnGraph>
 mask_nodes_by_label(const AnnotatedDBG &anno_graph,
                     const std::vector<typename AnnotatedDBG::Annotator::Label> &labels_in,
                     const std::vector<typename AnnotatedDBG::Annotator::Label> &labels_out,
-                    const std::vector<typename AnnotatedDBG::Annotator::Label> &labels_in_post,
-                    const std::vector<typename AnnotatedDBG::Annotator::Label> &labels_out_post,
+                    const std::vector<typename AnnotatedDBG::Annotator::Label> &labels_in_round2,
+                    const std::vector<typename AnnotatedDBG::Annotator::Label> &labels_out_round2,
                     const DifferentialAssemblyConfig &config,
                     size_t num_threads = 1);
 
