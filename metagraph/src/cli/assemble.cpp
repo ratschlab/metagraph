@@ -2,6 +2,7 @@
 
 #include <json/json.h>
 #include <spdlog/fmt/fmt.h>
+#include <tsl/hopscotch_set.h>
 
 #include "common/algorithms.hpp"
 #include "common/logger.hpp"
@@ -25,8 +26,8 @@ using mtg::graph::AnnotatedDBG;
 using mtg::graph::DifferentialAssemblyConfig;
 
 
-void check_and_sort_labels(std::vector<std::string> &label_set,
-                           const AnnotatedDBG &anno_graph) {
+void check_labels(const tsl::hopscotch_set<std::string> &label_set,
+                  const AnnotatedDBG &anno_graph) {
     bool detected_missing_labels = false;
     for (const std::string &label : label_set) {
         if (!anno_graph.label_exists(label)) {
@@ -37,57 +38,6 @@ void check_and_sort_labels(std::vector<std::string> &label_set,
 
     if (detected_missing_labels)
         exit(1);
-
-    std::sort(label_set.begin(), label_set.end());
-}
-
-
-std::shared_ptr<MaskedDeBruijnGraph>
-mask_graph_from_labels(const AnnotatedDBG &anno_graph,
-                       const std::vector<std::string> &label_mask_in,
-                       const std::vector<std::string> &label_mask_out,
-                       const std::vector<std::string> &label_mask_in_post,
-                       const std::vector<std::string> &label_mask_out_post,
-                       const DifferentialAssemblyConfig &diff_config,
-                       size_t num_threads) {
-    auto graph = std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph.get_graph_ptr());
-
-    if (!graph.get())
-        throw std::runtime_error("Masking only supported for DeBruijnGraph");
-
-    std::vector<const std::vector<std::string>*> label_sets {
-        &label_mask_in, &label_mask_out,
-        &label_mask_in_post, &label_mask_out_post
-    };
-
-    bool has_overlap = false;
-    for (const auto *label_set : label_sets) {
-        for (const auto *other_label_set : label_sets) {
-            if (label_set == other_label_set)
-                continue;
-
-            if (utils::count_intersection(label_set->begin(), label_set->end(),
-                                          other_label_set->begin(), other_label_set->end())) {
-                has_overlap = true;
-                break;
-            }
-        }
-
-        if (has_overlap)
-            break;
-    }
-
-    if (has_overlap)
-        logger->warn("Overlapping label sets");
-
-    logger->trace("Masked in: {}", fmt::join(label_mask_in, " "));
-    logger->trace("Masked in (post-processing): {}", fmt::join(label_mask_in_post, " "));
-    logger->trace("Masked out: {}", fmt::join(label_mask_out, " "));
-    logger->trace("Masked out (post-processing): {}", fmt::join(label_mask_out_post, " "));
-
-    return mask_nodes_by_label(anno_graph, label_mask_in, label_mask_out,
-                               label_mask_in_post, label_mask_out_post,
-                               diff_config, num_threads);
 }
 
 DifferentialAssemblyConfig parse_diff_config(const Json::Value &experiment,
@@ -116,6 +66,9 @@ typedef std::function<void(const graph::MaskedDeBruijnGraph&,
 void call_masked_graphs(const AnnotatedDBG &anno_graph,
                         Config *config,
                         const CallMaskedGraphHeader &callback) {
+    if (!std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph.get_graph_ptr()).get())
+        throw std::runtime_error("Masking only supported for DeBruijnGraph");
+
     assert(!config->label_mask_file.empty());
 
     std::ifstream fin(config->label_mask_file);
@@ -127,26 +80,34 @@ void call_masked_graphs(const AnnotatedDBG &anno_graph,
     Json::Value diff_json;
     fin >> diff_json;
 
-    std::vector<std::string> foreground_labels;
-    std::vector<std::string> background_labels;
-    std::vector<std::string> shared_foreground_labels;
-    std::vector<std::string> shared_background_labels;
+    tsl::hopscotch_set<std::string> foreground_labels;
+    tsl::hopscotch_set<std::string> background_labels;
+    tsl::hopscotch_set<std::string> shared_foreground_labels;
+    tsl::hopscotch_set<std::string> shared_background_labels;
 
     for (const Json::Value &group : diff_json["groups"]) {
         if (group["shared_labels"]) {
             shared_foreground_labels.clear();
             shared_background_labels.clear();
+            bool has_overlap = false;
 
             for (const Json::Value &in_label : group["shared_labels"]["in"]) {
-                shared_foreground_labels.push_back(in_label.asString());
+                if (!shared_foreground_labels.emplace(in_label.asString()).second)
+                    has_overlap = true;
             }
 
             for (const Json::Value &out_label : group["shared_labels"]["out"]) {
-                shared_background_labels.push_back(out_label.asString());
+                const auto [it, inserted] = shared_background_labels.emplace(out_label.asString());
+                if (!inserted || shared_foreground_labels.count(*it))
+                    has_overlap = true;
+
             }
 
-            check_and_sort_labels(shared_foreground_labels, anno_graph);
-            check_and_sort_labels(shared_background_labels, anno_graph);
+            if (has_overlap)
+                logger->warn("Shared label sets overlap");
+
+            check_labels(shared_foreground_labels, anno_graph);
+            check_labels(shared_background_labels, anno_graph);
         }
 
         if (!group["experiments"])
@@ -160,25 +121,40 @@ void call_masked_graphs(const AnnotatedDBG &anno_graph,
 
             foreground_labels.clear();
             background_labels.clear();
+            bool has_overlap = false;
 
             for (const Json::Value &in_label : experiment["in"]) {
-                foreground_labels.push_back(in_label.asString());
+                const auto [it, inserted] = foreground_labels.emplace(in_label.asString());
+                if (!inserted || shared_foreground_labels.count(*it) || shared_background_labels.count(*it))
+                    has_overlap = true;
             }
 
             for (const Json::Value &out_label : experiment["out"]) {
-                background_labels.push_back(out_label.asString());
+                const auto [it, inserted] = background_labels.emplace(out_label.asString());
+                if (!inserted || foreground_labels.count(*it)
+                        || shared_foreground_labels.count(*it)
+                        || shared_background_labels.count(*it)) {
+                    has_overlap = true;
+                }
             }
 
-            check_and_sort_labels(foreground_labels, anno_graph);
-            check_and_sort_labels(background_labels, anno_graph);
+            if (has_overlap)
+                logger->warn("Label sets overlap");
 
-            callback(*mask_graph_from_labels(anno_graph,
-                                             foreground_labels, background_labels,
-                                             shared_foreground_labels,
-                                             shared_background_labels,
-                                             diff_config, num_threads),
-                     experiment["name"].asString()
-                        + (config->enumerate_out_sequences ? "." : ""));
+            check_labels(foreground_labels, anno_graph);
+            check_labels(background_labels, anno_graph);
+
+            std::string exp_name = experiment["name"].asString()
+                                    + (config->enumerate_out_sequences ? "." : "");
+
+            logger->trace("Running assembly: {}", exp_name);
+
+            callback(*mask_nodes_by_label(anno_graph,
+                                          foreground_labels,
+                                          background_labels,
+                                          shared_foreground_labels,
+                                          shared_background_labels,
+                                          diff_config, num_threads), exp_name);
         }
     }
 }

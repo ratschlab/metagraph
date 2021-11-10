@@ -31,8 +31,8 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabel) {
     typedef typename TypeParam::first_type Graph;
     typedef typename TypeParam::second_type Annotation;
     for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
-        const std::vector<std::string> ingroup { "B", "C" };
-        const std::vector<std::string> outgroup { "A" };
+        const tsl::hopscotch_set<std::string> ingroup { "B", "C" };
+        const tsl::hopscotch_set<std::string> outgroup { "A" };
 
         size_t max_k = std::min(max_test_k<Graph>(), (size_t)15);
         for (size_t k = 3; k < max_k; ++k) {
@@ -86,8 +86,8 @@ void test_mask_unitigs(double inlabel_fraction,
                        double other_label_fraction,
                        const std::unordered_set<std::string> &ref_kmers) {
     for (size_t num_threads : {1, 4}) {
-        const std::vector<std::string> ingroup { "B", "C" };
-        const std::vector<std::string> outgroup { "A" };
+        const tsl::hopscotch_set<std::string> ingroup { "B", "C" };
+        const tsl::hopscotch_set<std::string> outgroup { "A" };
         size_t k = 3;
 
         {
@@ -173,8 +173,8 @@ test_mask_unitigs_canonical(double inlabel_fraction,
                             bool add_complement,
                             DeBruijnGraph::Mode mode) {
     for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
-        const std::vector<std::string> ingroup { "B", "C" };
-        const std::vector<std::string> outgroup { "A" };
+        const tsl::hopscotch_set<std::string> ingroup { "B", "C" };
+        const tsl::hopscotch_set<std::string> outgroup { "A" };
         size_t k = 5;
 
         {

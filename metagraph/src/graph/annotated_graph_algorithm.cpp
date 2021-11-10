@@ -1,7 +1,5 @@
 #include "annotated_graph_algorithm.hpp"
 
-#include <tsl/hopscotch_set.h>
-
 #include "common/logger.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 #include "common/vectors/bitmap.hpp"
@@ -33,8 +31,8 @@ constexpr std::memory_order MEM_ORDER = std::memory_order_relaxed;
  */
 std::pair<sdsl::int_vector<>, sdsl::bit_vector>
 construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
-                                  const std::vector<Label> &labels_in,
-                                  const std::vector<Label> &labels_out,
+                                  const tsl::hopscotch_set<Label> &labels_in,
+                                  const tsl::hopscotch_set<Label> &labels_out,
                                   size_t num_labels,
                                   size_t num_threads);
 
@@ -71,10 +69,10 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
 std::shared_ptr<MaskedDeBruijnGraph>
 mask_nodes_by_label(const AnnotatedDBG &anno_graph,
-                    const std::vector<Label> &labels_in,
-                    const std::vector<Label> &labels_out,
-                    const std::vector<Label> &labels_in_round2,
-                    const std::vector<Label> &labels_out_round2,
+                    const tsl::hopscotch_set<Label> &labels_in,
+                    const tsl::hopscotch_set<Label> &labels_out,
+                    const tsl::hopscotch_set<Label> &labels_in_round2,
+                    const tsl::hopscotch_set<Label> &labels_out_round2,
                     const DifferentialAssemblyConfig &config,
                     size_t num_threads) {
     size_t num_labels = anno_graph.get_annotation().num_labels();
@@ -109,15 +107,6 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
     // check all other labels and post labels
     if (check_other || labels_in_round2.size() || labels_out_round2.size()) {
         bool parallel = num_threads > 1;
-        tsl::hopscotch_set<std::string> labels_in_set(labels_in.begin(),
-                                                      labels_in.end());
-        tsl::hopscotch_set<std::string> labels_out_set(labels_out.begin(),
-                                                       labels_out.end());
-        tsl::hopscotch_set<std::string> labels_in_round2_set(labels_in_round2.begin(),
-                                                           labels_in_round2.end());
-        tsl::hopscotch_set<std::string> labels_out_round2_set(labels_out_round2.begin(),
-                                                            labels_out_round2.end());
-
         std::mutex vector_backup_mutex;
         std::atomic_thread_fence(std::memory_order_release);
 
@@ -146,11 +135,11 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
         logger->trace("Checking shared and other labels");
         masked_graph->call_sequences([&](const std::string &contig, const std::vector<node_index> &path) {
             for (const auto &[label, sig] : anno_graph.get_top_label_signatures(contig, num_labels)) {
-                if (labels_in_set.count(label) || labels_out_set.count(label))
+                if (labels_in.count(label) || labels_out.count(label))
                     continue;
 
-                bool found_in_round2 = labels_in_round2_set.count(label);
-                bool found_out_round2 = labels_out_round2_set.count(label);
+                bool found_in_round2 = labels_in_round2.count(label);
+                bool found_out_round2 = labels_out_round2.count(label);
                 if (!found_in_round2 && !found_out_round2) {
                     if (check_other) {
                         mask_or(other_mask, sig, path);
@@ -315,8 +304,8 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
 std::pair<sdsl::int_vector<>, sdsl::bit_vector>
 construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
-                                  const std::vector<Label> &labels_in,
-                                  const std::vector<Label> &labels_out,
+                                  const tsl::hopscotch_set<Label> &labels_in,
+                                  const tsl::hopscotch_set<Label> &labels_out,
                                   size_t num_labels,
                                   size_t num_threads) {
     size_t width = sdsl::bits::hi(num_labels) + 1;
@@ -328,13 +317,15 @@ construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
     const auto &label_encoder = anno_graph.get_annotation().get_label_encoder();
     const auto &binmat = anno_graph.get_annotation().get_matrix();
 
-    std::vector<uint64_t> label_in_codes(labels_in.size());
-    std::vector<uint64_t> label_out_codes(labels_out.size());
-    for (size_t i = 0; i < labels_in.size(); ++i) {
-        label_in_codes[i] = label_encoder.encode(labels_in[i]);
+    std::vector<uint64_t> label_in_codes;
+    label_in_codes.reserve(labels_in.size());
+    std::vector<uint64_t> label_out_codes;
+    label_out_codes.reserve(labels_out.size());
+    for (const std::string &label_in : labels_in) {
+        label_in_codes.push_back(label_encoder.encode(label_in));
     }
-    for (size_t i = 0; i < labels_out.size(); ++i) {
-        label_out_codes[i] = label_encoder.encode(labels_out[i]);
+    for (const std::string &label_out : labels_out) {
+        label_out_codes.push_back(label_encoder.encode(label_out));
     }
 
     std::mutex vector_backup_mutex;

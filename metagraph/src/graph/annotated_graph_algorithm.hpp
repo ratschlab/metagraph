@@ -3,6 +3,8 @@
 
 #include <vector>
 
+#include <tsl/hopscotch_set.h>
+
 #include "graph/annotated_dbg.hpp"
 
 
@@ -50,10 +52,10 @@ struct DifferentialAssemblyConfig {
  */
 std::shared_ptr<MaskedDeBruijnGraph>
 mask_nodes_by_label(const AnnotatedDBG &anno_graph,
-                    const std::vector<typename AnnotatedDBG::Annotator::Label> &labels_in,
-                    const std::vector<typename AnnotatedDBG::Annotator::Label> &labels_out,
-                    const std::vector<typename AnnotatedDBG::Annotator::Label> &labels_in_round2,
-                    const std::vector<typename AnnotatedDBG::Annotator::Label> &labels_out_round2,
+                    const tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> &labels_in,
+                    const tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> &labels_out,
+                    const tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> &labels_in_round2,
+                    const tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> &labels_out_round2,
                     const DifferentialAssemblyConfig &config,
                     size_t num_threads = 1);
 
