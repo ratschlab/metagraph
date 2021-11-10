@@ -49,7 +49,7 @@
         },
         {
             "shared_labels": {
-                "in": ["kl_sample;metasub_name=nan;city=kuala_lumpur;latitude=3.11318;longitude=101.68186;surface_material=metal"],
+                "in": ["kl_sample"],
                 "out": []
             },
             "experiments": [
