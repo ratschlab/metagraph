@@ -73,7 +73,7 @@ void call_masked_graphs(const AnnotatedDBG &anno_graph,
 
     std::ifstream fin(config->label_mask_file);
     if (!fin.good())
-        throw std::iostream::failure("Failed to read assembly experiment JSON");
+        throw std::iostream::failure("Failed to read assembly config JSON from " + config->label_mask_file);
 
     size_t num_threads = std::max(1u, get_num_threads());
 
