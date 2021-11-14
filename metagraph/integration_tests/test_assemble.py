@@ -270,16 +270,11 @@ class TestDiffAssembly(TestingBase):
         )
 
     def test_diff_assembly(self):
-        assemble_command = '{exe} assemble -p {num_threads} \
-                -a {annotation} -o {outfile} \
-                --diff-assembly-rules {mask} {graph}'.format(
-            exe=METAGRAPH,
-            num_threads=NUM_THREADS,
-            outfile=self.tempdir.name + '/diff_contigs',
-            graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
-            annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
-            mask=TEST_DATA_DIR + '/example.diff.json'
-        )
+        assemble_command = f'{METAGRAPH} assemble -p {NUM_THREADS} \
+                -a {self.tempdir.name}/annotation{anno_file_extension[self.anno_repr]} \
+                -o {self.tempdir.name}/diff_contigs \
+                --diff-assembly-rules {TEST_DATA_DIR}/example.diff.json \
+                {self.tempdir.name}/graph{graph_file_extension[self.graph_repr]}'
         res = subprocess.run([assemble_command], shell=True)
         self.assertEqual(res.returncode, 0)
 
