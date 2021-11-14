@@ -141,9 +141,8 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
                 bool found_in_round2 = labels_in_round2.count(label);
                 bool found_out_round2 = labels_out_round2.count(label);
                 if (!found_in_round2 && !found_out_round2) {
-                    if (check_other) {
+                    if (check_other)
                         mask_or(other_mask, sig, path);
-                    }
 
                     continue;
                 }
