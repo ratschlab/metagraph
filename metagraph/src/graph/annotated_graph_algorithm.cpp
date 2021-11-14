@@ -20,14 +20,14 @@ constexpr std::memory_order MO_RELAXED = std::memory_order_relaxed;
 
 
 /**
- * Return an int_vector<>, bit_vector pair, each of length anno_graph.get_graph().max_index().
- * For an index i, the int_vector will contain a packed integer representing the
+ * Return an int_vector<>, bit_vector pair, of lengths anno_graph.get_graph().max_index() * 2
+ * and anno_graph.get_graph().max_index(), respectively.
+ * For an index i, the int_vector at indices 2*i and 2*i + 1 represent the
  * number of labels in labels_in and labels_out which the k-mer of index i is
- * annotated with. The least significant half of each integer represents the count
- * from labels_in, while the most significant half represents the count from
- * labels_out. The width of the int_vector<> is computed to be wide enough to contain
- * counts up to num_labels.
- * The returned bit_vector is a binarization of the int_vector
+ * annotated with, respectively. The width of the int_vector<> is computed to be
+ * wide enough to contain counts up to num_labels.
+ * The returned bit_vector is a k-mer mask indicating those k-mers which are annotated
+ * with at least one in-label or out-label.
  */
 std::pair<sdsl::int_vector<>, sdsl::bit_vector>
 construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
