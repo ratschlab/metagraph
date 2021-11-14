@@ -32,7 +32,7 @@ void check_labels(const tsl::hopscotch_set<std::string> &label_set,
     for (const std::string &label : label_set) {
         if (!anno_graph.label_exists(label)) {
             detected_missing_labels = true;
-            logger->trace("Label {} is not found in annotation", label);
+            logger->error("Label {} is not found in annotation", label);
         }
     }
 
@@ -40,22 +40,22 @@ void check_labels(const tsl::hopscotch_set<std::string> &label_set,
         exit(1);
 }
 
-DifferentialAssemblyConfig parse_diff_config(const Json::Value &experiment,
-                                             bool canonical) {
+DifferentialAssemblyConfig diff_assembly_config(const Json::Value &experiment,
+                                                const DeBruijnGraph &graph) {
     DifferentialAssemblyConfig diff_config;
-    diff_config.add_complement = canonical;
+    diff_config.add_complement = graph.get_mode() == DeBruijnGraph::CANONICAL;
     diff_config.label_mask_in_kmer_fraction = experiment.get("in_min_fraction", 1.0).asDouble();
     diff_config.label_mask_in_unitig_fraction = experiment.get("unitig_in_min_fraction", 0.0).asDouble();
     diff_config.label_mask_out_kmer_fraction = experiment.get("out_max_fraction", 0.0).asDouble();
     diff_config.label_mask_out_unitig_fraction = experiment.get("unitig_out_max_fraction", 1.0).asDouble();
     diff_config.label_mask_other_unitig_fraction = experiment.get("unitig_other_max_fraction", 1.0).asDouble();
 
-    logger->trace("Per-kmer mask in fraction: {}", diff_config.label_mask_in_kmer_fraction);
-    logger->trace("Per-unitig mask in fraction: {}", diff_config.label_mask_in_unitig_fraction);
-    logger->trace("Per-kmer mask out fraction: {}", diff_config.label_mask_out_kmer_fraction);
-    logger->trace("Per-unitig mask out fraction: {}", diff_config.label_mask_out_unitig_fraction);
-    logger->trace("Per-unitig other label fraction: {}", diff_config.label_mask_other_unitig_fraction);
-    logger->trace("Include reverse complements: {}", diff_config.add_complement);
+    logger->trace("Per-kmer mask in fraction:\t\t{}", diff_config.label_mask_in_kmer_fraction);
+    logger->trace("Per-unitig mask in fraction:\t\t{}", diff_config.label_mask_in_unitig_fraction);
+    logger->trace("Per-kmer mask out fraction:\t\t{}", diff_config.label_mask_out_kmer_fraction);
+    logger->trace("Per-unitig mask out fraction:\t\t{}", diff_config.label_mask_out_unitig_fraction);
+    logger->trace("Per-unitig other label fraction:\t{}", diff_config.label_mask_other_unitig_fraction);
+    logger->trace("Include reverse complements:\t\t{}", diff_config.add_complement);
 
     return diff_config;
 }
@@ -69,11 +69,11 @@ void call_masked_graphs(const AnnotatedDBG &anno_graph,
     if (!std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph.get_graph_ptr()).get())
         throw std::runtime_error("Masking only supported for DeBruijnGraph");
 
-    assert(!config->label_mask_file.empty());
+    assert(!config->assembly_config_file.empty());
 
-    std::ifstream fin(config->label_mask_file);
+    std::ifstream fin(config->assembly_config_file);
     if (!fin.good())
-        throw std::iostream::failure("Failed to read assembly config JSON from " + config->label_mask_file);
+        throw std::iostream::failure("Failed to read assembly config JSON from " + config->assembly_config_file);
 
     size_t num_threads = std::max(1u, get_num_threads());
 
@@ -114,9 +114,8 @@ void call_masked_graphs(const AnnotatedDBG &anno_graph,
             throw std::runtime_error("Missing experiments in group");
 
         for (const Json::Value &experiment : group["experiments"]) {
-            DifferentialAssemblyConfig diff_config = parse_diff_config(
-                experiment,
-                anno_graph.get_graph().get_mode() == DeBruijnGraph::CANONICAL
+            DifferentialAssemblyConfig diff_config = diff_assembly_config(
+                experiment, anno_graph.get_graph()
             );
 
             foreground_labels.clear();
@@ -177,7 +176,7 @@ int assemble(Config *config) {
     if (config->infbase_annotators.size()) {
         config->infbase = files.at(0);
 
-        assert(config->label_mask_file.size());
+        assert(config->assembly_config_file.size());
         auto anno_graph = initialize_annotated_dbg(graph, *config);
 
         logger->trace("Generating masked graphs...");

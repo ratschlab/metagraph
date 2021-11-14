@@ -285,7 +285,7 @@ Config::Config(int argc, char *argv[]) {
         }else if (!strcmp(argv[i], "--suffix")) {
             suffix = get_value(i++);
         } else if (!strcmp(argv[i], "--diff-assembly-rules")) {
-            label_mask_file = get_value(i++);
+            assembly_config_file = get_value(i++);
         } else if (!strcmp(argv[i], "--initialize-bloom")) {
             initialize_bloom = true;
         } else if (!strcmp(argv[i], "--bloom-fpp")) {
@@ -540,8 +540,8 @@ Config::Config(int argc, char *argv[]) {
     }
 
     if ((identity == ASSEMBLE || identity == TRANSFORM)
-            && (infbase_annotators.size() && label_mask_file.empty())) {
-        std::cerr << "Error: annotator passed, but no label mask file provided" << std::endl;
+            && (infbase_annotators.size() && assembly_config_file.empty())) {
+        std::cerr << "Error: annotator passed, but no differential assembly rule config file provided" << std::endl;
         print_usage_and_exit = true;
     }
 

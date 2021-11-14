@@ -151,7 +151,7 @@ class Config {
     std::string fasta_anno_comment_delim = UNINITIALIZED_STR;
     std::string header = "";
     std::string host_address;
-    std::string label_mask_file;
+    std::string assembly_config_file;
     std::string linkage_file;
     std::string intersected_columns;
 
