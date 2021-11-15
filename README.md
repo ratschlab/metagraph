@@ -8,11 +8,11 @@ At the same time, the provided workflows and their careful implementation, combi
 #### Main features:
 * Large-scale indexing of sequences
 * Python API for querying in the server mode
-* Support for representing k-mer counts or expression values
-* Sequence alignment against very large annotated graphs
+* Support for encoding and querying **k-mer counts** or expression values and **k-mer coordinates** (positions in source sequences).
+* **Sequence alignment** against very large annotated graphs
 * Scalable cleaning of very large de Bruijn graphs (to remove sequencing errors)
 * Support for custom alphabets (e.g., {A,C,G,T,N} or amino acids)
-* Algorithms for differential assembly
+* Algorithms for **differential assembly**
 
 #### Design choices in MetaGraph:
 * Use of succinct data structures and efficient representation schemes for extremely high scalability
