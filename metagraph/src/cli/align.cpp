@@ -419,14 +419,9 @@ int align_to_graph(Config *config) {
             }
 
             auto process_batch = [&,graph](SeqBatch batch) {
-                // make a shared_ptr in a thread-safe way
-                std::shared_ptr<DeBruijnGraph> aln_graph(
-                    std::shared_ptr<DeBruijnGraph>{}, graph.get()
-                );
-
                 // the graph should only be cached if the base graph is in PRIMARY mode,
                 // or if it's not CANONICAL and backwards traversal will be required
-                aln_graph = make_cached_graph(graph, *config);
+                auto aln_graph = make_cached_graph(*graph, *config);
 
                 auto aligner = build_aligner(*aln_graph, aligner_config);
 

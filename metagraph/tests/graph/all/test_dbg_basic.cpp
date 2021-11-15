@@ -25,12 +25,7 @@ TYPED_TEST_SUITE(MutableDeBruijnGraphTest, MutableGraphTypes);
 
 
 TYPED_TEST(DeBruijnGraphTest, GraphDefaultConstructor) {
-    TypeParam *graph = nullptr;
-
-    ASSERT_NO_THROW({ graph = new TypeParam(2); });
-    ASSERT_NE(nullptr, graph);
-    delete graph;
-    ASSERT_NO_THROW(TypeParam(2));
+    ASSERT_NO_THROW(build_graph<TypeParam>(2));
 }
 
 TYPED_TEST(DeBruijnGraphTest, InitializeEmpty) {
@@ -204,7 +199,7 @@ TYPED_TEST(DeBruijnGraphTest, CheckGraph) {
 
 TYPED_TEST(DeBruijnGraphTest, CheckGraphInputWithN) {
     EXPECT_TRUE(check_graph<TypeParam>("ACGTN", DeBruijnGraph::BASIC, false));
-    EXPECT_EQ(TypeParam(3).alphabet().find('N') != std::string::npos,
+    EXPECT_EQ(build_graph<TypeParam>(3)->alphabet().find('N') != std::string::npos,
               check_graph<TypeParam>("ACGTN", DeBruijnGraph::BASIC, true));
 }
 
@@ -241,7 +236,7 @@ TYPED_TEST(DeBruijnGraphTest, TestNonASCIIStrings) {
                                          "АСАСАСАСАСАСА",
                                          "плохая строка",
                                          "АСАСАСАСАСАСА" };
-    if (TypeParam(2).alphabet().find('N') == std::string::npos) {
+    if (build_graph<TypeParam>(2)->alphabet().find('N') == std::string::npos) {
         EXPECT_EQ(0u, build_graph<TypeParam>(6, sequences)->num_nodes());
         EXPECT_EQ(0u, build_graph_batch<TypeParam>(6, sequences)->num_nodes());
     } else {

@@ -10,6 +10,8 @@
 namespace mtg {
 namespace graph {
 
+class DBGSuccinctCached;
+
 class DBGSuccinct : public DeBruijnGraph {
   public:
     friend class MaskedDeBruijnGraph;
@@ -182,6 +184,8 @@ class DBGSuccinct : public DeBruijnGraph {
                                  uint32_t max_num_hash_functions = -1);
 
     const mtg::kmer::KmerBloomFilter<>* get_bloom_filter() const { return bloom_filter_.get(); }
+
+    std::shared_ptr<DBGSuccinctCached> get_cached_view(size_t cache_size = 1024) const;
 
     static constexpr auto kExtension = ".dbg";
     static constexpr auto kDummyMaskExtension = ".edgemask";

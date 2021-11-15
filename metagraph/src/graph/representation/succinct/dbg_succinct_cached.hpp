@@ -10,7 +10,6 @@
 namespace mtg {
 namespace graph {
 
-
 // A wrapper which caches computed node sequences for DBGSuccinct graphs.
 // This allows for faster get_node_sequence and call_incoming_kmers calls.
 class DBGSuccinctCached;
@@ -22,12 +21,6 @@ class DBGSuccinctCached : public DBGWrapper<DBGSuccinct> {
   public:
     typedef boss::BOSS::edge_index edge_index;
     typedef boss::BOSS::TAlphabet TAlphabet;
-
-    template <typename Graph>
-    explicit DBGSuccinctCached(Graph&& graph, size_t cache_size = 1024)
-          : DBGWrapper(std::forward<Graph>(graph)), boss_(&graph_->get_boss()),
-            cache_size_(cache_size), rev_comp_prev_cache_(cache_size_),
-            rev_comp_next_cache_(cache_size_) {}
 
     virtual ~DBGSuccinctCached() {}
 
@@ -133,6 +126,12 @@ class DBGSuccinctCached : public DBGWrapper<DBGSuccinct> {
     mutable common::LRUCache<node_index, std::pair<edge_index, size_t>> rev_comp_prev_cache_;
     mutable common::LRUCache<node_index, std::pair<edge_index, size_t>> rev_comp_next_cache_;
 
+    template <typename Graph>
+    explicit DBGSuccinctCached(Graph&& graph, size_t cache_size = 1024)
+          : DBGWrapper(std::forward<Graph>(graph)), boss_(&graph_->get_boss()),
+            cache_size_(cache_size), rev_comp_prev_cache_(cache_size_),
+            rev_comp_next_cache_(cache_size_) {}
+
     virtual TAlphabet complement(TAlphabet c) const = 0;
     virtual std::string decode(const std::vector<TAlphabet> &v) const = 0;
 };
@@ -148,8 +147,8 @@ class DBGSuccinctCachedImpl : public DBGSuccinctCached {
 
   public:
     template <typename Graph>
-    DBGSuccinctCachedImpl(Graph graph, size_t cache_size)
-          : DBGSuccinctCached(graph, cache_size), decoded_cache_(cache_size_) {}
+    DBGSuccinctCachedImpl(Graph&& graph, size_t cache_size)
+          : DBGSuccinctCached(std::forward<Graph>(graph), cache_size), decoded_cache_(cache_size_) {}
 
     virtual void put_decoded_node(node_index node, std::string_view seq) const override final {
         assert(node > 0 && node <= num_nodes());

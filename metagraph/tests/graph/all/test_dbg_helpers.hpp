@@ -11,6 +11,7 @@
 #include "graph/representation/hash/dbg_hash_ordered.hpp"
 #include "graph/representation/hash/dbg_hash_fast.hpp"
 #include "graph/representation/bitmap/dbg_bitmap.hpp"
+#include "graph/representation/succinct/dbg_succinct_cached.hpp"
 
 
 namespace mtg {
@@ -42,13 +43,6 @@ class DBGSuccinctIndexed : public DBGSuccinct {
   public:
     template <typename... Args>
     DBGSuccinctIndexed(Args&&... args)
-          : DBGSuccinct(std::forward<Args>(args)...) {}
-};
-
-class DBGSuccinctCachedWrapped : public DBGSuccinct {
-  public:
-    template <typename... Args>
-    DBGSuccinctCachedWrapped(Args&&... args)
           : DBGSuccinct(std::forward<Args>(args)...) {}
 };
 
@@ -101,7 +95,7 @@ typedef ::testing::Types<DBGBitmap,
                          DBGSuccinctBloomFPR<1, 10>,
                          DBGSuccinctBloom<4, 1>,
                          DBGSuccinctBloom<4, 50>,
-                         DBGSuccinctCachedWrapped> GraphTypes;
+                         DBGSuccinctCached> GraphTypes;
 
 template <typename Graph>
 class MutableDeBruijnGraphTest : public ::testing::Test { };
@@ -135,7 +129,7 @@ typedef ::testing::Types<DBGBitmap,
                          DBGSuccinctBloomFPR<1, 10>,
                          DBGSuccinctBloom<4, 1>,
                          DBGSuccinctBloom<4, 50>,
-                         DBGSuccinctCachedWrapped> StableGraphTypes;
+                         DBGSuccinctCached> StableGraphTypes;
 
 typedef ::testing::Types<DBGHashFast, DBGSuccinct> FewGraphTypes;
 
