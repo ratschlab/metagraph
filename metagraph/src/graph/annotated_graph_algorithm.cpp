@@ -407,7 +407,7 @@ void update_masked_graph_by_node(MaskedDeBruijnGraph &masked_graph,
     size_t total_nodes = masked_graph.num_nodes();
 
     const auto &in_mask = dynamic_cast<const bitmap_vector&>(masked_graph.get_mask()).data();
-    sdsl::bit_vector mask(in_mask);
+    sdsl::bit_vector mask = in_mask;
 
     std::atomic_thread_fence(std::memory_order_release);
     call_ones(in_mask, [&](node_index node) {
