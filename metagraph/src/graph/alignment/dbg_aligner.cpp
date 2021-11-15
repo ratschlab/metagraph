@@ -79,8 +79,8 @@ void ISeedAndExtendAligner<AlignmentCompare>
             auto seeder_rc = build_seeder(reverse, !is_reverse_complement, nodes_rc);
             auto extender_rc = build_extender(reverse, aggregator);
 
-            align_both_directions(paths.get_query(false), paths.get_query(true),
-                                  *seeder, *seeder_rc, *extender, *extender_rc,
+            align_both_directions(this_query, reverse, *seeder, *seeder_rc,
+                                  *extender, *extender_rc,
                                   add_alignment, get_min_path_score);
 
             num_explored_nodes += extender_rc->num_explored_nodes();

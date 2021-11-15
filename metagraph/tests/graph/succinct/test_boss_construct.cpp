@@ -199,8 +199,8 @@ TEST(WeightedBOSSConstruct, ConstructionDummyKmersZeroWeightChunks) {
 
             BOSS::Chunk chunk = constructor->build_chunk();
 
-            sdsl::int_vector_buffer<> weights;
-            chunk.initialize_boss(&constructed, &weights);
+            chunk.initialize_boss(&constructed);
+            sdsl::int_vector_buffer<> weights = chunk.get_weights();
 
             ASSERT_EQ(constructed.num_edges() + 1, weights.size());
 

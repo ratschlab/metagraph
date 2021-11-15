@@ -14,7 +14,7 @@ def _load_json_data(filename):
 
 @pytest.mark.parametrize("file_name,align,expected_shape", [
     ('search_response.json', False, (4, 15)),
-    ('search_with_align_response.json', True, (354, 18))
+    ('search_with_align_response.json', True, (354, 15))
 ])
 def test_df_from_search_result(file_name, align, expected_shape):
     json_obj = _load_json_data(file_name)
@@ -26,9 +26,6 @@ def test_df_from_search_result(file_name, align, expected_shape):
                           'city_total_population', 'continent', 'latitude', 'longitude',
                           'metasub_name', 'num_reads', 'sample_type', 'station',
                           'surface_material', 'seq_description']
-
-    if align:
-        expected_cols = expected_cols + ['sequence', 'score', 'cigar']
 
     assert list(df.columns) == expected_cols
 

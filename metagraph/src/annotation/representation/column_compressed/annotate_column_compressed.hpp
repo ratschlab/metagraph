@@ -23,6 +23,7 @@ namespace annot {
 template <typename Label = std::string>
 class ColumnCompressed : public MultiLabelEncoded<Label> {
   public:
+    typedef binmat::ColumnMajor binary_matrix_type;
     using Index = typename MultiLabelEncoded<Label>::Index;
     using VLabels = typename MultiLabelEncoded<Label>::VLabels;
 
@@ -73,6 +74,7 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
 
     void serialize(const std::string &filename) const override;
     bool load(const std::string &filename) override;
+    // the order of the columns may be changed when merging multiple annotators
     bool merge_load(const std::vector<std::string> &filenames);
     using ColumnCallback = std::function<void(uint64_t offset,
                                               const Label &,
@@ -80,6 +82,8 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
     static bool merge_load(const std::vector<std::string> &filenames,
                            const ColumnCallback &callback,
                            size_t num_threads = 1);
+    static size_t read_num_labels(const std::string &filename);
+    static LabelEncoder<Label> load_label_encoder(const std::string &filename);
 
     using ValuesCallback = std::function<void(uint64_t offset,
                                               const Label &,
@@ -117,7 +121,7 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
      * Returns the current annotation matrix. The data is moved into the return value,
      * which leaves the current object empty.
      */
-    binmat::ColumnMajor release_matrix();
+    std::unique_ptr<binmat::ColumnMajor> release_matrix();
 
     std::string file_extension() const override { return kExtension; }
 

@@ -24,8 +24,14 @@ Config::AnnotationType parse_annotation_type(const std::string &filename) {
     } else if (utils::ends_with(filename, annot::ColumnCoordAnnotator::kExtension)) {
         return Config::AnnotationType::ColumnCoord;
 
+    } else if (utils::ends_with(filename, annot::MultiBRWTCoordAnnotator::kExtension)) {
+        return Config::AnnotationType::BRWTCoord;
+
     } else if (utils::ends_with(filename, annot::RowDiffCoordAnnotator::kExtension)) {
         return Config::AnnotationType::RowDiffCoord;
+
+    } else if (utils::ends_with(filename, annot::RowDiffBRWTCoordAnnotator::kExtension)) {
+        return Config::AnnotationType::RowDiffBRWTCoord;
 
     } else if (utils::ends_with(filename, annot::RowDiffColumnAnnotator::kExtension)) {
         return Config::AnnotationType::RowDiff;
@@ -147,8 +153,16 @@ initialize_annotation(Config::AnnotationType anno_type,
             annotation.reset(new annot::ColumnCoordAnnotator());
             break;
         }
+        case Config::BRWTCoord: {
+            annotation.reset(new annot::MultiBRWTCoordAnnotator());
+            break;
+        }
         case Config::RowDiffCoord: {
             annotation.reset(new annot::RowDiffCoordAnnotator());
+            break;
+        }
+        case Config::RowDiffBRWTCoord: {
+            annotation.reset(new annot::RowDiffBRWTCoordAnnotator());
             break;
         }
     }

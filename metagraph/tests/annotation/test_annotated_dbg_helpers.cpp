@@ -30,7 +30,7 @@ build_anno_graph(uint64_t k,
         anno_graph->annotate_sequence(std::string(sequences[i]), { labels[i] });
     }
 
-    if (!std::is_same<Annotation, annot::ColumnCompressed<>>::value)
+    if (!std::is_same<Annotation, annot::ColumnCompressed<>>::value) {
         anno_graph = std::make_unique<AnnotatedDBG>(
             graph,
             std::unique_ptr<AnnotatedDBG::Annotator>(
@@ -41,6 +41,7 @@ build_anno_graph(uint64_t k,
                 ))
             )
         );
+    }
 
     return anno_graph;
 }

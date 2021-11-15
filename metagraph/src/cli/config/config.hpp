@@ -22,6 +22,7 @@ class Config {
     bool print_graph = false;
     bool print_graph_internal_repr = false;
     bool print_column_names = false;
+    bool print_counts_hist = false;
     bool forward_and_reverse = false;
     bool complete = false;
     bool dynamic = false;
@@ -47,6 +48,7 @@ class Config {
     bool batch_align = false;
     bool count_labels = false;
     bool suppress_unlabeled = false;
+    bool inplace = false;
     bool clear_dummy = false;
     bool count_dummy = false;
     bool greedy_brwt = false;
@@ -204,7 +206,9 @@ class Config {
         IntBRWT,
         IntRowDiffBRWT,
         ColumnCoord,
+        BRWTCoord,
         RowDiffCoord,
+        RowDiffBRWTCoord,
     };
 
     enum GraphType {

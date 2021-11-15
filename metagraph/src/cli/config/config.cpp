@@ -113,6 +113,8 @@ Config::Config(int argc, char *argv[]) {
             print_column_names = true;
         } else if (!strcmp(argv[i], "--print-internal")) {
             print_graph_internal_repr = true;
+        } else if (!strcmp(argv[i], "--print-counts-hist")) {
+            print_counts_hist = true;
         } else if (!strcmp(argv[i], "--coordinates")) {
             coordinates = true;
         } else if (!strcmp(argv[i], "--num-kmers-in-seq")) {
@@ -336,6 +338,8 @@ Config::Config(int argc, char *argv[]) {
             count_dummy = true;
         } else if (!strcmp(argv[i], "--clear-dummy")) {
             clear_dummy = true;
+        } else if (!strcmp(argv[i], "--inplace")) {
+            inplace = true;
         } else if (!strcmp(argv[i], "--index-ranges")) {
             node_suffix_length = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--no-postprocessing")) {
@@ -541,7 +545,7 @@ Config::Config(int argc, char *argv[]) {
 
     if (identity == ANNOTATE
             && !filename_anno && !annotate_sequence_headers && !anno_labels.size()) {
-        std::cerr << "Error: No annotation to add" << std::endl;
+        std::cerr << "Error: no annotation labels passed (see flags --anno-filename --anno-header --anno-label)" << std::endl;
         print_usage_and_exit = true;
     }
 
@@ -583,6 +587,7 @@ Config::Config(int argc, char *argv[]) {
                                     || anno_type == RowDiffBRWT
                                     || anno_type == IntRowDiffBRWT
                                     || anno_type == RowDiffRowSparse
+                                    || anno_type == RowDiffBRWTCoord
                                     || anno_type == RowDiffCoord;
         if (to_row_diff && !infbase.size()) {
             std::cerr << "Path to graph must be passed with '-i <GRAPH>'" << std::endl;
@@ -707,8 +712,12 @@ std::string Config::annotype_to_string(AnnotationType state) {
             return "row_diff_int_brwt";
         case ColumnCoord:
             return "column_coord";
+        case BRWTCoord:
+            return "brwt_coord";
         case RowDiffCoord:
             return "row_diff_coord";
+        case RowDiffBRWTCoord:
+            return "row_diff_brwt_coord";
     }
     throw std::runtime_error("Never happens");
 }
@@ -744,8 +753,12 @@ Config::AnnotationType Config::string_to_annotype(const std::string &string) {
         return AnnotationType::IntRowDiffBRWT;
     } else if (string == "column_coord") {
         return AnnotationType::ColumnCoord;
+    } else if (string == "brwt_coord") {
+        return AnnotationType::BRWTCoord;
     } else if (string == "row_diff_coord") {
         return AnnotationType::RowDiffCoord;
+    } else if (string == "row_diff_brwt_coord") {
+        return AnnotationType::RowDiffBRWTCoord;
     } else {
         std::cerr << "Error: unknown annotation representation" << std::endl;
         exit(1);
@@ -808,7 +821,7 @@ DeBruijnGraph::Mode Config::string_to_graphmode(const std::string &string) {
 
 void Config::print_usage(const std::string &prog_name, IdentityType identity) {
     const char annotation_list[] = "\t\t( column, brwt, rb_brwt, int_brwt,\n"
-                                   "\t\t  column_coord,\n"
+                                   "\t\t  column_coord, brwt_coord, row_diff_coord, row_diff_brwt_coord,\n"
                                    "\t\t  row_diff, row_diff_brwt, row_diff_sparse, row_diff_int_brwt,\n"
                                    "\t\t  row, flat, row_sparse, rbfish, bin_rel_wt, bin_rel_wt_sdsl )";
 
@@ -873,6 +886,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --reference [STR] \tbasename of reference sequence (for parsing VCF files) []\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --graph [STR] \tgraph representation: succinct / bitmap / hash / hashstr / hashfast [succinct]\n");
+            fprintf(stderr, "\t   --state [STR] \tstate of succinct graph: small / dynamic / stat / fast [stat]\n");
+            fprintf(stderr, "\t   --inplace \t\tconstruct succinct graph in-place and serialize without loading to RAM [off]\n");
             fprintf(stderr, "\t   --count-kmers \tcount k-mers and build weighted graph [off]\n");
             fprintf(stderr, "\t   --count-width \tnumber of bits used to represent k-mer abundance [8]\n");
             fprintf(stderr, "\t   --index-ranges [INT]\tindex all node ranges in BOSS for suffixes of given length [%zu]\n", kDefaultIndexSuffixLen);
@@ -937,7 +952,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Usage: %s align -i <GRAPH> [options] FASTQ1 [[FASTQ2] ...]\n\n", prog_name.c_str());
 
 #if ! _PROTEIN_GRAPH
-            fprintf(stderr, "\t   --fwd-and-reverse \t\tfor each input sequence, align its reverse complement as well [off]\n");
+            fprintf(stderr, "\t   --fwd-and-reverse \t\tfor each input sequence, report a separate alignment for its reverse complement as well [off]\n");
 #endif
             fprintf(stderr, "\t   --header-comment-delim [STR]\tdelimiter for joining fasta header with comment [off]\n");
             fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
@@ -1018,7 +1033,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --index-ranges [INT]\tindex all node ranges in BOSS for suffixes of given length [%zu]\n", kDefaultIndexSuffixLen);
             fprintf(stderr, "\t   --clear-dummy \terase all redundant dummy edges and build an edgemask for non-redundant [off]\n");
             fprintf(stderr, "\t   --prune-tips [INT] \tprune all dead ends of this length and shorter [0]\n");
-            fprintf(stderr, "\t   --state [STR] \tchange state of succinct graph: small / dynamic / fast [stat]\n");
+            fprintf(stderr, "\t   --state [STR] \tchange state of succinct graph: small / dynamic / stat / fast [stat]\n");
             fprintf(stderr, "\t   --to-adj-list \twrite adjacency list to file [off]\n");
             fprintf(stderr, "\t   --to-fasta \t\textract sequences from graph and dump to compressed FASTA file [off]\n");
             fprintf(stderr, "\t   --enumerate \t\tenumerate sequences in FASTA [off]\n");
@@ -1067,6 +1082,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Available options for stats:\n");
             fprintf(stderr, "\t   --print \t\tprint graph table to the screen [off]\n");
             fprintf(stderr, "\t   --print-internal \tprint internal graph representation to screen [off]\n");
+            fprintf(stderr, "\t   --print-counts-hist \tprint histogram of k-mer weights as pairs (weight: num_kmers) [off]\n");
             fprintf(stderr, "\t   --count-dummy \tshow number of dummy source and sink edges [off]\n");
             fprintf(stderr, "\t-a --annotator [STR] \tannotation []\n");
             fprintf(stderr, "\t   --print-col-names \tprint names of the columns in annotation to screen [off]\n");
@@ -1179,7 +1195,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
         } break;
         case QUERY: {
             fprintf(stderr, "Usage: %s query -i <GRAPH> -a <ANNOTATION> [options] FILE1 [[FILE2] ...]\n"
-                            "\tEach input file is given in FASTA or FASTQ format.\n\n", prog_name.c_str());
+                            "\tEach input file is given in FASTA or FASTQ format.\n"
+                            "\tOutput format: tsv with rows '<query id>\t<query name>\t<results ...>'.\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for query:\n");
 #if ! _PROTEIN_GRAPH

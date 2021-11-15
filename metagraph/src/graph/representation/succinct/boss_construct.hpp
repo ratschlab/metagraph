@@ -37,7 +37,9 @@ class BOSSConstructor : public IGraphConstructor<BOSS> {
     void build_graph(BOSS *graph, sdsl::int_vector_buffer<> *weights) {
         auto chunk = constructor_->build_chunk();
         // initialize graph from the chunk built
-        chunk.initialize_boss(graph, weights);
+        chunk.initialize_boss(graph);
+        if (weights)
+            *weights = chunk.get_weights();
     }
 
     uint64_t get_k() const { return constructor_->get_k(); }
