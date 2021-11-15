@@ -38,12 +38,11 @@ BinaryMatrix::slice_rows(const std::vector<Row> &row_ids) const {
 }
 
 void BinaryMatrix::call_columns(const std::vector<Column> &column_ids,
-                                const std::function<void(Column, const bitmap&)> &callback,
+                                const std::function<void(size_t, const bitmap&)> &callback,
                                 size_t num_threads) const {
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (size_t k = 0; k < column_ids.size(); ++k) {
-        Column j = column_ids[k];
-        callback(j, bitmap_generator(get_column(j), num_rows()));
+        callback(k, bitmap_generator(get_column(column_ids[k]), num_rows()));
     }
 }
 

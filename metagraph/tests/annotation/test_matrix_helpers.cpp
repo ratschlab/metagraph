@@ -217,8 +217,8 @@ void test_matrix(const TypeParam &matrix, const BitVectorPtrArray &columns) {
         std::iota(indices.begin(), indices.end(), 0);
 
         std::vector<std::vector<BinaryMatrix::Row>> column_map(m);
-        matrix.call_columns(indices, [&](auto j, const bitmap &rows) {
-            rows.call_ones([&](auto i) { column_map[j].push_back(i); });
+        matrix.call_columns(indices, [&](auto col_idx, const bitmap &rows) {
+            rows.call_ones([&](auto i) { column_map[indices[col_idx]].push_back(i); });
         });
         std::vector<uint64_t> slice;
         for (size_t j = 0; j < column_map.size(); ++j) {

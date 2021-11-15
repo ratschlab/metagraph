@@ -38,8 +38,10 @@ class BinaryMatrix {
     // get all selected rows appended with -1 and concatenated
     virtual std::vector<Column> slice_rows(const std::vector<Row> &rows) const;
 
+    // For each column id in columns, run callback on its respective index in columns
+    // and a bitmap represnting the column
     virtual void call_columns(const std::vector<Column> &columns,
-                              const std::function<void(Column, const bitmap&)> &callback,
+                              const std::function<void(size_t, const bitmap&)> &callback,
                               size_t num_threads = 1) const;
 
     virtual bool load(std::istream &in) = 0;

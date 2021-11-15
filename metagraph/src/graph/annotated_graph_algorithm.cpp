@@ -322,37 +322,30 @@ construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
     const auto &label_encoder = anno_graph.get_annotation().get_label_encoder();
     const auto &binmat = anno_graph.get_annotation().get_matrix();
 
-    std::vector<uint64_t> label_in_codes;
-    label_in_codes.reserve(labels_in.size());
-    std::vector<uint64_t> label_out_codes;
-    label_out_codes.reserve(labels_out.size());
+    std::vector<uint64_t> label_codes;
+    label_codes.reserve(labels_in.size() + labels_out.size());
+    std::vector<bool> is_label_out;
+    is_label_out.reserve(label_codes.size());
     for (const std::string &label_in : labels_in) {
-        label_in_codes.push_back(label_encoder.encode(label_in));
+        label_codes.push_back(label_encoder.encode(label_in));
+        is_label_out.push_back(false);
     }
     for (const std::string &label_out : labels_out) {
-        label_out_codes.push_back(label_encoder.encode(label_out));
+        label_codes.push_back(label_encoder.encode(label_out));
+        is_label_out.push_back(true);
     }
 
     std::mutex vector_backup_mutex;
     std::atomic_thread_fence(std::memory_order_release);
     bool parallel = num_threads > 1;
-    binmat.call_columns(label_in_codes,
-        [&](auto, const bitmap &rows) {
-            rows.call_ones([&](auto r) {
-                node_index i = AnnotatedDBG::anno_to_graph_index(r);
-                set_bit(indicator.data(), i, parallel, MO_RELAXED);
-                atomic_fetch_and_add(counts, i * 2, 1, vector_backup_mutex, MO_RELAXED);
-            });
-        },
-        num_threads
-    );
 
-    binmat.call_columns(label_out_codes,
-        [&](auto, const bitmap &rows) {
+    binmat.call_columns(label_codes,
+        [&](auto col_idx, const bitmap &rows) {
+            bool id_offset = is_label_out[col_idx];
             rows.call_ones([&](auto r) {
                 node_index i = AnnotatedDBG::anno_to_graph_index(r);
                 set_bit(indicator.data(), i, parallel, MO_RELAXED);
-                atomic_fetch_and_add(counts, i * 2 + 1, 1, vector_backup_mutex, MO_RELAXED);
+                atomic_fetch_and_add(counts, i * 2 + id_offset, 1, vector_backup_mutex, MO_RELAXED);
             });
         },
         num_threads
