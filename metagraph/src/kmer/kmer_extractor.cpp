@@ -403,7 +403,7 @@ template <typename KMER>
 KMER KmerExtractorBOSS::sequence_to_kmer(std::string_view sequence,
                                          bool canonical_mode) {
     // encode sequence
-    std::vector<TAlphabet> seq(sequence.size(), alphabet.size());
+    std::vector<TAlphabet> seq(sequence.size(), 0);
 
     std::transform(sequence.begin(), sequence.end(), seq.begin(), [](char c) {
         return c != alphabet[0] ? encode(c) : 0;
