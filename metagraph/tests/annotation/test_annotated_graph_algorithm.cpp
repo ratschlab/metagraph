@@ -30,7 +30,7 @@ TYPED_TEST_SUITE(MaskedDeBruijnGraphAlgorithm, GraphAnnoTypes);
 TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabel) {
     typedef typename TypeParam::first_type Graph;
     typedef typename TypeParam::second_type Annotation;
-    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+    for (size_t num_threads : { 1, 4 }) {
         const tsl::hopscotch_set<std::string> ingroup { "B", "C" };
         const tsl::hopscotch_set<std::string> outgroup { "A" };
 
@@ -77,6 +77,50 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabel) {
             EXPECT_EQ(ref_labels, obs_labels) << k;
             EXPECT_EQ(ref_kmers, obs_kmers) << k;
         }
+    }
+}
+
+TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskIndicesByLabelOverlap) {
+    typedef typename TypeParam::first_type Graph;
+    typedef typename TypeParam::second_type Annotation;
+    for (size_t num_threads : { 1, 4 }) {
+        size_t k = 5;
+        const tsl::hopscotch_set<std::string> ingroup { "A", "B", "C" };
+        const tsl::hopscotch_set<std::string> outgroup { "A", "B", "C" };
+
+        const std::vector<std::string> sequences {
+            "TTTTTAAAAATTTTTTTTTT",
+            "CCCCCAAAAACCCCCCCCCC",
+            "GGGGGAAAAAGGGGGGGGGG"
+        };
+        const std::vector<std::string> labels { "A", "B", "C" };
+
+        auto anno_graph = build_anno_graph<Graph, Annotation>(k, sequences, labels);
+
+        std::unordered_set<std::string> obs_kmers;
+        const std::unordered_set<std::string> ref_kmers {
+            "TTTTT", "TTTTA", "TTTAA", "TTAAA", "TAAAA", "AAAAT", "AAATT", "AATTT", "ATTTT",
+            "CCCCC", "CCCCA", "CCCAA", "CCAAA", "CAAAA", "AAAAC", "AAACC", "AACCC", "ACCCC",
+            "GGGGG", "GGGGA", "GGGAA", "GGAAA", "GAAAA", "AAAAG", "AAAGG", "AAGGG", "AGGGG",
+        };
+        DifferentialAssemblyConfig config {
+            .label_mask_in_unitig_fraction = 0.0,
+            .label_mask_in_kmer_fraction = 0.0,
+            .label_mask_out_unitig_fraction = 1.0,
+            .label_mask_out_kmer_fraction = 0.99,
+            .label_mask_other_unitig_fraction = 1.0
+        };
+
+        auto masked_dbg = mask_nodes_by_label(*anno_graph,
+                                              ingroup, outgroup,
+                                              {}, {},
+                                              config, num_threads);
+
+        masked_dbg->call_kmers([&](auto, const std::string &kmer) {
+            obs_kmers.insert(kmer);
+        });
+
+        EXPECT_EQ(ref_kmers, obs_kmers);
     }
 }
 
@@ -151,7 +195,6 @@ TYPED_TEST(MaskedDeBruijnGraphAlgorithm, MaskUnitigsByLabel) {
         test_mask_unitigs<typename TypeParam::first_type,
                           typename TypeParam::second_type>(1.0, 0.25, other_frac, ref_kmers);
 
-
         test_mask_unitigs<typename TypeParam::first_type,
                           typename TypeParam::second_type>(1.0, 0.50, other_frac, ref_kmers);
 
@@ -172,7 +215,7 @@ test_mask_unitigs_canonical(double inlabel_fraction,
                             const std::unordered_set<std::string> &ref_kmers,
                             bool add_complement,
                             DeBruijnGraph::Mode mode) {
-    for (size_t num_threads = 1; num_threads < 5; num_threads += 3) {
+    for (size_t num_threads : { 1, 4 }) {
         const tsl::hopscotch_set<std::string> ingroup { "B", "C" };
         const tsl::hopscotch_set<std::string> outgroup { "A" };
         size_t k = 5;

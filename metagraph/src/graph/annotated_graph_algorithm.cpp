@@ -68,6 +68,8 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
                     size_t num_threads) {
     bool parallel = num_threads > 1;
     size_t num_labels = anno_graph.get_annotation().num_labels();
+    size_t num_in_labels = labels_in.size() + labels_in_round2.size();
+    size_t num_out_labels = labels_out.size() + labels_out_round2.size();
     auto graph_ptr = std::dynamic_pointer_cast<const DeBruijnGraph>(
         anno_graph.get_graph_ptr()
     );
@@ -77,8 +79,7 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
     // Construct initial masked graph from union of labels in labels_in
     auto count_vector = construct_diff_label_count_vector(
         anno_graph, labels_in, labels_out,
-        std::max(labels_in.size() + labels_in_round2.size(),
-                 labels_out.size() + labels_out_round2.size()),
+        std::max(num_in_labels, num_out_labels),
         num_threads
     );
     auto &[counts, init_mask] = count_vector;
@@ -151,15 +152,12 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
     // Filter unitigs from masked graph based on filtration criteria
     logger->trace("Filtering out background");
 
+    size_t min_label_in_count = std::ceil(config.label_mask_in_kmer_fraction * num_in_labels);
+    size_t max_label_out_count = std::floor(config.label_mask_out_kmer_fraction * num_out_labels);
+
     if (config.label_mask_in_unitig_fraction == 0.0
             && config.label_mask_out_unitig_fraction == 1.0
             && config.label_mask_other_unitig_fraction == 1.0) {
-        if (config.label_mask_in_kmer_fraction == 0.0
-                && config.label_mask_out_kmer_fraction == 1.0) {
-            logger->trace("Bypassing background filtration");
-            return masked_graph;
-        }
-
         logger->trace("Filtering by node");
         size_t total_nodes = masked_graph->num_nodes();
         const auto &in_mask = dynamic_cast<const bitmap_vector&>(masked_graph->get_mask()).data();
@@ -170,10 +168,8 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
         call_ones(in_mask, [&](node_index node) {
             uint64_t in_count = count_vector.first[node * 2];
             uint64_t out_count = count_vector.first[node * 2 + 1];
-            uint64_t sum = in_count + out_count;
 
-            if (in_count >= config.label_mask_in_kmer_fraction * sum
-                    && out_count <= config.label_mask_out_kmer_fraction * sum) {
+            if (in_count >= min_label_in_count && out_count <= max_label_out_count) {
                 ++kept_nodes;
             } else {
                 mask[node] = false;
@@ -193,17 +189,13 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
         [&](const std::string &, const std::vector<node_index> &path) -> Intervals {
             // return a set of intervals to keep in the graph
             const auto &counts = count_vector.first;
-            size_t min_label_in_count = config.label_mask_in_kmer_fraction
-                                            * (labels_in.size() + labels_in_round2.size());
-            size_t max_label_out_count = config.label_mask_out_kmer_fraction
-                                            * (labels_out.size() + labels_out_round2.size());
 
             size_t in_kmer_count = 0;
 
             size_t begin = path.size();
             size_t end = 0;
             for (size_t i = 0; i < path.size(); ++i) {
-                if (counts[2 * path[i]] >= min_label_in_count) {
+                if (counts[path[i] * 2] >= min_label_in_count) {
                     if (begin == path.size())
                         begin = i;
 
@@ -226,8 +218,9 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
             size_t label_out_cutoff = std::floor(config.label_mask_out_unitig_fraction * size);
             size_t other_cutoff = std::floor(config.label_mask_other_unitig_fraction * size);
 
+
             for (size_t i = begin; i < end; ++i) {
-                if (counts[2 * path[i] + 1] > max_label_out_count
+                if (counts[path[i] * 2 + 1] > max_label_out_count
                         && ++out_kmer_count > label_out_cutoff) {
                     return {};
                 }
