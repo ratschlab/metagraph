@@ -26,7 +26,7 @@ constexpr std::memory_order MO_RELAXED = std::memory_order_relaxed;
  * number of labels in labels_in and labels_out which the k-mer of index i is
  * annotated with, respectively. The width of the int_vector<> is computed to be
  * wide enough to contain counts up to num_labels.
- * The returned bit_vector is a k-mer mask indicating those k-mers which are annotated
+ * The returned bit_vector is a k-mer mask indicating those k-mers annotated
  * with at least one in-label or out-label.
  */
 std::pair<sdsl::int_vector<>, sdsl::bit_vector>
