@@ -320,22 +320,17 @@ construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
     const auto &binmat = anno_graph.get_annotation().get_matrix();
 
     tsl::hopscotch_map<uint64_t, uint8_t> code_to_indicator;
-    std::vector<uint64_t> label_codes;
-    label_codes.reserve(labels_in.size() + labels_out.size());
     for (const std::string &label_in : labels_in) {
-        uint64_t code = label_encoder.encode(label_in);
-        auto [it, inserted] = code_to_indicator.emplace(code, 1);
-        if (inserted)
-            label_codes.push_back(code);
+        code_to_indicator[label_encoder.encode(label_in)] = 1;
     }
     for (const std::string &label_out : labels_out) {
-        uint64_t code = label_encoder.encode(label_out);
-        auto [it, inserted] = code_to_indicator.emplace(code, 2);
-        if (inserted) {
-            label_codes.push_back(code);
-        } else {
-            it.value() = 3;
-        }
+        code_to_indicator[label_encoder.encode(label_out)] |= 2;
+    }
+
+    std::vector<uint64_t> label_codes;
+    label_codes.reserve(code_to_indicator.size());
+    for (const auto &[code, indicator] : code_to_indicator) {
+        label_codes.push_back(code);
     }
 
     std::mutex vector_backup_mutex;
