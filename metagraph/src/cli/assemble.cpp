@@ -91,16 +91,11 @@ void call_masked_graphs(const AnnotatedDBG &anno_graph,
             shared_background_labels.clear();
 
             for (const Json::Value &in_label : group["shared_labels"]["in"]) {
-                const auto [it, inserted] = shared_foreground_labels.emplace(in_label.asString());
-                if (!inserted)
-                    logger->warn("Duplicate label: {}", *it);
+                shared_foreground_labels.emplace(in_label.asString());
             }
 
             for (const Json::Value &out_label : group["shared_labels"]["out"]) {
-                const auto [it, inserted] = shared_background_labels.emplace(out_label.asString());
-                if (!inserted || shared_foreground_labels.count(*it))
-                    logger->warn("Label sets overlap: {}", *it);
-
+                shared_background_labels.emplace(out_label.asString());
             }
 
             check_labels(shared_foreground_labels, anno_graph);
@@ -119,18 +114,11 @@ void call_masked_graphs(const AnnotatedDBG &anno_graph,
             background_labels.clear();
 
             for (const Json::Value &in_label : experiment["in"]) {
-                const auto [it, inserted] = foreground_labels.emplace(in_label.asString());
-                if (!inserted || shared_foreground_labels.count(*it) || shared_background_labels.count(*it))
-                    logger->warn("Label sets overlap: {}", *it);
+                foreground_labels.emplace(in_label.asString());
             }
 
             for (const Json::Value &out_label : experiment["out"]) {
-                const auto [it, inserted] = background_labels.emplace(out_label.asString());
-                if (!inserted || foreground_labels.count(*it)
-                        || shared_foreground_labels.count(*it)
-                        || shared_background_labels.count(*it)) {
-                    logger->warn("Label sets overlap: {}", *it);
-                }
+                background_labels.emplace(out_label.asString());
             }
 
             check_labels(foreground_labels, anno_graph);

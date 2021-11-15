@@ -126,16 +126,13 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
         logger->trace("Checking shared and other labels");
         masked_graph->call_sequences([&](const std::string &contig, const std::vector<node_index> &path) {
             for (const auto &[label, sig] : anno_graph.get_top_label_signatures(contig, num_labels)) {
-                if (labels_in.count(label) || labels_out.count(label))
-                    continue;
-
+                bool found_in = labels_in.count(label);
+                bool found_out = labels_out.count(label);
                 bool found_in_round2 = labels_in_round2.count(label);
                 bool found_out_round2 = labels_out_round2.count(label);
-                if (!found_in_round2 && !found_out_round2) {
-                    if (check_other)
-                        mask_or(other_mask, sig, path);
-
-                    continue;
+                if (!found_in && !found_out
+                        && !found_in_round2 && !found_out_round2 && check_other) {
+                    mask_or(other_mask, sig, path);
                 }
 
                 if (found_in_round2)
@@ -322,17 +319,23 @@ construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
     const auto &label_encoder = anno_graph.get_annotation().get_label_encoder();
     const auto &binmat = anno_graph.get_annotation().get_matrix();
 
+    tsl::hopscotch_map<uint64_t, uint8_t> code_to_indicator;
     std::vector<uint64_t> label_codes;
     label_codes.reserve(labels_in.size() + labels_out.size());
-    std::vector<bool> is_label_out;
-    is_label_out.reserve(label_codes.size());
     for (const std::string &label_in : labels_in) {
-        label_codes.push_back(label_encoder.encode(label_in));
-        is_label_out.push_back(false);
+        uint64_t code = label_encoder.encode(label_in);
+        auto [it, inserted] = code_to_indicator.emplace(code, 1);
+        if (inserted)
+            label_codes.push_back(code);
     }
     for (const std::string &label_out : labels_out) {
-        label_codes.push_back(label_encoder.encode(label_out));
-        is_label_out.push_back(true);
+        uint64_t code = label_encoder.encode(label_out);
+        auto [it, inserted] = code_to_indicator.emplace(code, 2);
+        if (inserted) {
+            label_codes.push_back(code);
+        } else {
+            it.value() = 3;
+        }
     }
 
     std::mutex vector_backup_mutex;
@@ -341,11 +344,15 @@ construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
 
     binmat.call_columns(label_codes,
         [&](auto col_idx, const bitmap &rows) {
-            bool id_offset = is_label_out[col_idx];
+            uint8_t col_indicator = code_to_indicator[label_codes[col_idx]];
             rows.call_ones([&](auto r) {
                 node_index i = AnnotatedDBG::anno_to_graph_index(r);
                 set_bit(indicator.data(), i, parallel, MO_RELAXED);
-                atomic_fetch_and_add(counts, i * 2 + id_offset, 1, vector_backup_mutex, MO_RELAXED);
+                if (col_indicator & 1)
+                    atomic_fetch_and_add(counts, i * 2, 1, vector_backup_mutex, MO_RELAXED);
+
+                if (col_indicator & 2)
+                    atomic_fetch_and_add(counts, i * 2 + 1, 1, vector_backup_mutex, MO_RELAXED);
             });
         },
         num_threads
