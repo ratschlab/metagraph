@@ -89,22 +89,19 @@ void call_masked_graphs(const AnnotatedDBG &anno_graph,
         if (group["shared_labels"]) {
             shared_foreground_labels.clear();
             shared_background_labels.clear();
-            bool has_overlap = false;
 
             for (const Json::Value &in_label : group["shared_labels"]["in"]) {
-                if (!shared_foreground_labels.emplace(in_label.asString()).second)
-                    has_overlap = true;
+                const auto [it, inserted] = shared_foreground_labels.emplace(in_label.asString());
+                if (!inserted)
+                    logger->warn("Duplicate label: {}", *it);
             }
 
             for (const Json::Value &out_label : group["shared_labels"]["out"]) {
                 const auto [it, inserted] = shared_background_labels.emplace(out_label.asString());
                 if (!inserted || shared_foreground_labels.count(*it))
-                    has_overlap = true;
+                    logger->warn("Label sets overlap: {}", *it);
 
             }
-
-            if (has_overlap)
-                logger->warn("Shared label sets overlap");
 
             check_labels(shared_foreground_labels, anno_graph);
             check_labels(shared_background_labels, anno_graph);
@@ -120,12 +117,11 @@ void call_masked_graphs(const AnnotatedDBG &anno_graph,
 
             foreground_labels.clear();
             background_labels.clear();
-            bool has_overlap = false;
 
             for (const Json::Value &in_label : experiment["in"]) {
                 const auto [it, inserted] = foreground_labels.emplace(in_label.asString());
                 if (!inserted || shared_foreground_labels.count(*it) || shared_background_labels.count(*it))
-                    has_overlap = true;
+                    logger->warn("Label sets overlap: {}", *it);
             }
 
             for (const Json::Value &out_label : experiment["out"]) {
@@ -133,12 +129,9 @@ void call_masked_graphs(const AnnotatedDBG &anno_graph,
                 if (!inserted || foreground_labels.count(*it)
                         || shared_foreground_labels.count(*it)
                         || shared_background_labels.count(*it)) {
-                    has_overlap = true;
+                    logger->warn("Label sets overlap: {}", *it);
                 }
             }
-
-            if (has_overlap)
-                logger->warn("Label sets overlap");
 
             check_labels(foreground_labels, anno_graph);
             check_labels(background_labels, anno_graph);

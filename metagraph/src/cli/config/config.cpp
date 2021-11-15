@@ -561,8 +561,10 @@ Config::Config(int argc, char *argv[]) {
             || identity == CLEAN
             || identity == ASSEMBLE
             || identity == RELAX_BRWT)
-                    && fnames.size() != 1)
+                    && fnames.size() != 1) {
+        std::cerr << "Error: exactly one graph must be provided for this mode" << std::endl;
         print_usage_and_exit = true;
+    }
 
     if ((identity == TRANSFORM
             || identity == BUILD
@@ -1066,7 +1068,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\n");
             fprintf(stderr, "\t-a --annotator [STR] \t\tannotator to load []\n");
             fprintf(stderr, "\t   --diff-assembly-rules [STR] \tJSON file describing labels to mask in and out and their relative fractions []\n");
-            fprintf(stderr, "\t                       \t\tSee the README for the specification.\n");
+            fprintf(stderr, "\t                       \t\tSee the manual for the specification.\n");
         } break;
         case STATS: {
             fprintf(stderr, "Usage: %s stats [options] GRAPH1 [[GRAPH2] ...]\n\n", prog_name.c_str());
