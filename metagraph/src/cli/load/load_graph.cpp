@@ -10,7 +10,6 @@
 #include "graph/representation/bitmap/dbg_bitmap.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/succinct/dbg_succinct_cached.hpp"
-#include "graph/representation/canonical_dbg.hpp"
 #include "cli/config/config.hpp"
 
 
@@ -74,8 +73,8 @@ std::shared_ptr<DeBruijnGraph> load_critical_dbg(const std::string &filename) {
 }
 
 template <class Graph>
-std::shared_ptr<DeBruijnGraph> primary_to_canonical(std::shared_ptr<Graph> graph,
-                                                    size_t cache_size) {
+std::shared_ptr<CanonicalDBG> primary_to_canonical(std::shared_ptr<Graph> graph,
+                                                   size_t cache_size) {
     if (graph->get_mode() != DeBruijnGraph::PRIMARY) {
         logger->error("Only primary mode graphs can be wrapped into canonical mode.");
         exit(1);
@@ -85,8 +84,8 @@ std::shared_ptr<DeBruijnGraph> primary_to_canonical(std::shared_ptr<Graph> graph
     return std::make_shared<CanonicalDBG>(graph, cache_size);
 }
 
-template std::shared_ptr<DeBruijnGraph> primary_to_canonical(std::shared_ptr<const DeBruijnGraph>, size_t);
-template std::shared_ptr<DeBruijnGraph> primary_to_canonical(std::shared_ptr<DeBruijnGraph>, size_t);
+template std::shared_ptr<CanonicalDBG> primary_to_canonical(std::shared_ptr<const DeBruijnGraph>, size_t);
+template std::shared_ptr<CanonicalDBG> primary_to_canonical(std::shared_ptr<DeBruijnGraph>, size_t);
 
 std::shared_ptr<const DeBruijnGraph> make_cached_graph(const DeBruijnGraph &graph,
                                                        const Config &config,
