@@ -54,7 +54,7 @@ void update_masked_graph_by_unitig(MaskedDeBruijnGraph &masked_graph,
 // Iterate through all nodes in the masked graph, then use keep_node to decide
 // which should be masked in. Update the graph mask accordingly.
 void update_masked_graph_by_node(MaskedDeBruijnGraph &masked_graph,
-                                 const KeepNode &keep_node,
+                                 const std::function<bool(node_index)> &keep_node,
                                  size_t num_threads);
 
 // Given an initial mask and counts, generate a masked graph. If add_complement
