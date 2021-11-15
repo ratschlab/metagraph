@@ -42,20 +42,11 @@ typedef std::vector<std::pair<size_t, size_t>> Intervals;
 // Returns a vector of kept regions given a unitig and its corresponding path
 typedef std::function<Intervals(const std::string&, const std::vector<node_index>&)> GetKeptIntervals;
 
-// Returns true if a node is kept (i.e., masked in)
-typedef std::function<bool(node_index)> KeepNode;
-
 // Assemble unitigs from the masked graph, then use get_kept_intervals to generate
 // regions which should be masked in. Update the graph mask accordingly.
 void update_masked_graph_by_unitig(MaskedDeBruijnGraph &masked_graph,
                                    const GetKeptIntervals &get_kept_intervals,
                                    size_t num_threads);
-
-// Iterate through all nodes in the masked graph, then use keep_node to decide
-// which should be masked in. Update the graph mask accordingly.
-void update_masked_graph_by_node(MaskedDeBruijnGraph &masked_graph,
-                                 const std::function<bool(node_index)> &keep_node,
-                                 size_t num_threads);
 
 // Given an initial mask and counts, generate a masked graph. If add_complement
 // is true, then add the reverse complements of all nodes to the graph as well.
@@ -75,6 +66,7 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
                     const tsl::hopscotch_set<Label> &labels_out_round2,
                     const DifferentialAssemblyConfig &config,
                     size_t num_threads) {
+    bool parallel = num_threads > 1;
     size_t num_labels = anno_graph.get_annotation().num_labels();
     auto graph_ptr = std::dynamic_pointer_cast<const DeBruijnGraph>(
         anno_graph.get_graph_ptr()
@@ -106,7 +98,6 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
 
     // check all other labels and post labels
     if (check_other || labels_in_round2.size() || labels_out_round2.size()) {
-        bool parallel = num_threads > 1;
         std::mutex vector_backup_mutex;
         std::atomic_thread_fence(std::memory_order_release);
 
@@ -173,13 +164,28 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
         }
 
         logger->trace("Filtering by node");
-        update_masked_graph_by_node(*masked_graph, [&](node_index node) {
+        size_t total_nodes = masked_graph->num_nodes();
+        const auto &in_mask = dynamic_cast<const bitmap_vector&>(masked_graph->get_mask()).data();
+        sdsl::bit_vector mask = in_mask;
+
+        // TODO: make this part multithreaded
+        size_t kept_nodes = 0;
+        call_ones(in_mask, [&](node_index node) {
             uint64_t in_count = count_vector.first[node * 2];
             uint64_t out_count = count_vector.first[node * 2 + 1];
             uint64_t sum = in_count + out_count;
-            return in_count >= config.label_mask_in_kmer_fraction * sum
-                && out_count <= config.label_mask_out_kmer_fraction * sum;
-        }, num_threads);
+
+            if (in_count >= config.label_mask_in_kmer_fraction * sum
+                    && out_count <= config.label_mask_out_kmer_fraction * sum) {
+                ++kept_nodes;
+            } else {
+                mask[node] = false;
+            }
+        });
+
+        masked_graph->set_mask(new bitmap_vector(std::move(mask)));
+
+        logger->trace("Kept {} out of {} nodes", kept_nodes, total_nodes);
 
         return masked_graph;
     }
@@ -397,31 +403,6 @@ void update_masked_graph_by_unitig(MaskedDeBruijnGraph &masked_graph,
                   kept_unitigs, total_unitigs,
                   static_cast<double>(num_kept_nodes + kept_unitigs * (masked_graph.get_k() - 1))
                       / kept_unitigs);
-}
-
-void update_masked_graph_by_node(MaskedDeBruijnGraph &masked_graph,
-                                 const KeepNode &keep_node,
-                                 size_t num_threads) {
-    bool parallel = num_threads > 1;
-    std::atomic<size_t> kept_nodes(0);
-    size_t total_nodes = masked_graph.num_nodes();
-
-    const auto &in_mask = dynamic_cast<const bitmap_vector&>(masked_graph.get_mask()).data();
-    sdsl::bit_vector mask = in_mask;
-
-    std::atomic_thread_fence(std::memory_order_release);
-    call_ones(in_mask, [&](node_index node) {
-        if (keep_node(node)) {
-            kept_nodes.fetch_add(1, MO_RELAXED);
-        } else {
-            unset_bit(mask.data(), node, parallel, MO_RELAXED);
-        }
-    }, parallel, MO_RELAXED);
-    std::atomic_thread_fence(std::memory_order_acquire);
-
-    masked_graph.set_mask(new bitmap_vector(std::move(mask)));
-
-    logger->trace("Kept {} out of {} nodes", kept_nodes, total_nodes);
 }
 
 } // namespace graph
