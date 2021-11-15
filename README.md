@@ -8,7 +8,7 @@ At the same time, the provided workflows and their careful implementation, combi
 #### Main features:
 * Large-scale indexing of sequences
 * Python API for querying in the server mode
-* Support for encoding and querying **k-mer counts** or expression values and **k-mer coordinates** (positions in source sequences).
+* Encoding **k-mer counts** or expression values and **k-mer coordinates** (positions in source sequences)
 * **Sequence alignment** against very large annotated graphs
 * Scalable cleaning of very large de Bruijn graphs (to remove sequencing errors)
 * Support for custom alphabets (e.g., {A,C,G,T,N} or amino acids)
