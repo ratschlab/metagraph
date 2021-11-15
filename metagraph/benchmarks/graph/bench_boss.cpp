@@ -19,6 +19,17 @@ constexpr uint64_t NUM_DISTINCT_INDEXES = 1 << 21;
 constexpr uint64_t PATH_SIZE = 1 << 7;
 constexpr uint64_t CACHE_SIZE = 1 << 10;
 
+std::shared_ptr<DBGSuccinctCached>
+make_cached_dbgsuccinct(std::shared_ptr<const DBGSuccinct> graph, size_t cache_size = 1024) {
+    if (graph->get_k() * mtg::kmer::KmerExtractorBOSS::bits_per_char <= 64) {
+        return std::make_shared<DBGSuccinctCachedImpl<mtg::kmer::KmerExtractorBOSS::Kmer64>>(graph, cache_size);
+    } else if (graph->get_k() * mtg::kmer::KmerExtractorBOSS::bits_per_char <= 128) {
+        return std::make_shared<DBGSuccinctCachedImpl<mtg::kmer::KmerExtractorBOSS::Kmer128>>(graph, cache_size);
+    } else {
+        return std::make_shared<DBGSuccinctCachedImpl<mtg::kmer::KmerExtractorBOSS::Kmer256>>(graph, cache_size);
+    }
+}
+
 template <typename Graph = DBGSuccinct, typename OutGraph = DBGSuccinct>
 std::shared_ptr<OutGraph> load_graph(benchmark::State &state) {
     auto graph = std::make_shared<DBGSuccinct>(2);

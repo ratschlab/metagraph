@@ -5,6 +5,7 @@
 #include "kmer/kmer_bloom_filter.hpp"
 #include "graph/representation/base/sequence_graph.hpp"
 #include "boss.hpp"
+#include "dbg_succinct_cached.hpp"
 
 
 namespace mtg {

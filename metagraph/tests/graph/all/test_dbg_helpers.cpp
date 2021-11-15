@@ -53,6 +53,17 @@ get_primary_contigs(size_t k, const std::vector<std::string> &sequences) {
     return contigs;
 }
 
+std::shared_ptr<DBGSuccinctCached>
+make_cached_dbgsuccinct(std::shared_ptr<const DBGSuccinct> graph, size_t cache_size = 1024) {
+    if (graph->get_k() * kmer::KmerExtractorBOSS::bits_per_char <= 64) {
+        return std::make_shared<DBGSuccinctCachedImpl<kmer::KmerExtractorBOSS::Kmer64>>(graph, cache_size);
+    } else if (graph->get_k() * kmer::KmerExtractorBOSS::bits_per_char <= 128) {
+        return std::make_shared<DBGSuccinctCachedImpl<kmer::KmerExtractorBOSS::Kmer128>>(graph, cache_size);
+    } else {
+        return std::make_shared<DBGSuccinctCachedImpl<kmer::KmerExtractorBOSS::Kmer256>>(graph, cache_size);
+    }
+}
+
 template <class Graph>
 std::shared_ptr<DeBruijnGraph>
 build_graph(uint64_t k,

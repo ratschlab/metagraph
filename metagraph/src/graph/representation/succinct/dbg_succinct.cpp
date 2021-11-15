@@ -6,8 +6,6 @@
 #include <string>
 #include <filesystem>
 
-#include "dbg_succinct_cached.hpp"
-
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/serialization.hpp"
 #include "common/logger.hpp"
