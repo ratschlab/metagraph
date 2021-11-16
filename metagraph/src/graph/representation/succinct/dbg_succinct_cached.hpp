@@ -116,6 +116,9 @@ class DBGSuccinctCachedViewImpl : public DBGSuccinctCachedView {
     virtual void call_outgoing_kmers(node_index node,
                                      const OutgoingEdgeCallback &callback) const override final;
 
+    virtual void call_incoming_kmers(node_index node,
+                                     const IncomingEdgeCallback &callback) const override final;
+
     virtual node_index traverse(node_index node, char next_char) const override final;
 
     virtual void traverse(node_index start,
@@ -124,9 +127,6 @@ class DBGSuccinctCachedViewImpl : public DBGSuccinctCachedView {
                           const std::function<void(node_index)> &callback,
                           const std::function<bool()> &terminate
                               = [](){ return false; }) const override final;
-
-    virtual void call_incoming_kmers(node_index node,
-                                     const IncomingEdgeCallback &callback) const override final;
 
     virtual void map_to_nodes_sequentially(std::string_view sequence,
                                            const std::function<void(node_index)> &callback,
