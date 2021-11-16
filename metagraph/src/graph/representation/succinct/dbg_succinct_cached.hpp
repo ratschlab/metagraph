@@ -148,7 +148,7 @@ class DBGSuccinctCachedViewImpl : public DBGSuccinctCachedView {
 
     CacheValue get_kmer_pair(edge_index i, bool check_second = false) const {
         assert(i);
-        auto kmer = decoded_cache_.TryGet(i);
+        std::optional<CacheValue> kmer = decoded_cache_.TryGet(i);
 
         // if the result of bwd^{k - 1}(i) is desired and not cached, then
         // clear the k-mer so it can be recomputed below
@@ -157,15 +157,25 @@ class DBGSuccinctCachedViewImpl : public DBGSuccinctCachedView {
 
         if (!kmer) {
             // get the node sequence and possibly the last node accessed while computing
-            auto [seq, last_node] = boss_->get_node_seq_with_end_node(i, check_second);
+            auto [seq, last_traversed_node, steps_remaining]
+                = boss_->get_node_seq_with_last_traversed_node(i);
+
+            std::optional<edge_index> last_node;
+
+            if (steps_remaining) {
+                if (check_second) {
+                    last_node = boss_->get_minus_k_value(last_traversed_node,
+                                                         steps_remaining).second;
+                }
+            } else {
+                last_node = last_traversed_node;
+            }
 
             // append the last character and cache the result
             seq.push_back(boss_->get_W(i) % boss_->alph_size);
 
             // cache the result
-            kmer = CacheValue{ to_kmer(seq),
-                               last_node ? std::optional<edge_index> { last_node }
-                                         : std::nullopt };
+            kmer = CacheValue{ to_kmer(seq), std::move(last_node) };
             put_kmer(i, *kmer);
         }
 
