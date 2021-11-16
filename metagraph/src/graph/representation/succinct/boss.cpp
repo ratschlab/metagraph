@@ -925,7 +925,7 @@ std::tuple<std::vector<TAlphabet>, edge_index, size_t> BOSS
                 ret[i] = index - next_index * (alph_size - 1) + 1;
                 index = next_index;
             }
-            return std::make_tuple(std::move(ret), x, indexed_suffix_length_);
+            return std::make_tuple(std::move(ret), x, indexed_suffix_length_ - 1);
         }
     }
 
