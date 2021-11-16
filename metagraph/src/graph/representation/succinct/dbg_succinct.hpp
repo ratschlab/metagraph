@@ -186,7 +186,7 @@ class DBGSuccinct : public DeBruijnGraph {
 
     const mtg::kmer::KmerBloomFilter<>* get_bloom_filter() const { return bloom_filter_.get(); }
 
-    std::shared_ptr<DBGSuccinctCachedView> get_cached_view(size_t cache_size = 1024) const;
+    std::shared_ptr<DBGSuccinctCachedView> get_cached_view(size_t cache_size = 100'000) const;
 
     static constexpr auto kExtension = ".dbg";
     static constexpr auto kDummyMaskExtension = ".edgemask";

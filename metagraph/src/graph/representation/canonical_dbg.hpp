@@ -19,7 +19,7 @@ namespace graph {
 class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
   public:
     template <typename Graph>
-    explicit CanonicalDBG(Graph&& graph, size_t cache_size = 1024);
+    explicit CanonicalDBG(Graph&& graph, size_t cache_size = 100'000);
 
     // copy constructors
     CanonicalDBG(const CanonicalDBG &canonical)

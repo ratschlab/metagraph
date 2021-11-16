@@ -28,12 +28,12 @@ std::shared_ptr<graph::DeBruijnGraph> load_critical_dbg(const std::string &filen
 
 template <class Graph>
 std::shared_ptr<graph::CanonicalDBG> primary_to_canonical(std::shared_ptr<Graph> graph,
-                                                          size_t cache_size = 1024);
+                                                          size_t cache_size = 100'000);
 
 std::shared_ptr<const graph::DeBruijnGraph>
 make_cached_graph(const graph::DeBruijnGraph &graph,
                   const Config &config,
-                  size_t cache_size = 1024);
+                  size_t cache_size = 100'000);
 
 } // namespace cli
 } // namespace mtg
