@@ -30,9 +30,6 @@ class DBGSuccinctCachedView : public DBGWrapper<DBGSuccinct> {
     // cache the result
     virtual void put_decoded_edge(edge_index edge, std::string_view seq) const = 0;
 
-    // get the encoding of the first character of this node's sequence
-    virtual TAlphabet get_first_value(edge_index i) const = 0;
-
     void call_and_cache_outgoing_from_rev_comp(node_index node,
                                                std::string &rev_comp_suffix,
                                                const std::function<void(node_index, TAlphabet)> &callback) const;
@@ -116,6 +113,9 @@ class DBGSuccinctCachedView : public DBGWrapper<DBGSuccinct> {
 
     edge_index get_rev_comp_boss_next_node(node_index node) const;
     edge_index get_rev_comp_boss_prev_node(node_index node) const;
+
+    // get the encoding of the first character of this node's sequence
+    virtual TAlphabet get_first_value(edge_index i) const = 0;
 };
 
 
@@ -146,6 +146,13 @@ class DBGSuccinctCachedViewImpl : public DBGSuccinctCachedView {
      */
     virtual void put_decoded_edge(edge_index edge, std::string_view seq) const override final;
 
+  private:
+    // KmerType is the encoded k-mer
+    // edge_index is the boss node whose last character is the first character of the k-mer
+    typedef std::pair<KmerType, std::optional<edge_index>> CacheValue;
+
+    mutable common::LRUCache<edge_index, CacheValue> decoded_cache_;
+
     virtual TAlphabet get_first_value(edge_index i) const override final {
         assert(i);
 
@@ -166,13 +173,6 @@ class DBGSuccinctCachedViewImpl : public DBGSuccinctCachedView {
 
         return c;
     }
-
-  private:
-    // KmerType is the encoded k-mer
-    // edge_index is the boss node whose last character is the first character of the k-mer
-    typedef std::pair<KmerType, std::optional<edge_index>> CacheValue;
-
-    mutable common::LRUCache<edge_index, CacheValue> decoded_cache_;
 
     // cache a computed result
     inline void put_kmer(edge_index key, CacheValue value) const {
