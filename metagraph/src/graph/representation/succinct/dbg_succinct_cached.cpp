@@ -420,6 +420,22 @@ void DBGSuccinctCachedView
     graph_->adjacent_incoming_nodes(node, callback);
 }
 
+auto DBGSuccinctCachedView::traverse(node_index node, char next_char) const -> node_index {
+    return graph_->traverse(node, next_char);
+}
+
+auto DBGSuccinctCachedView::traverse_back(node_index node, char prev_char) const -> node_index {
+    return graph_->traverse_back(node, prev_char);
+}
+
+void DBGSuccinctCachedView::traverse(node_index start,
+                                     const char *begin,
+                                     const char *end,
+                                     const std::function<void(node_index)> &callback,
+                                     const std::function<bool()> &terminate) const {
+    graph_->traverse(start, begin, end, callback, terminate);
+}
+
 
 template class DBGSuccinctCachedViewImpl<kmer::KmerExtractorBOSS::Kmer64>;
 template class DBGSuccinctCachedViewImpl<kmer::KmerExtractorBOSS::Kmer128>;
