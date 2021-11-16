@@ -13,8 +13,7 @@
                     "name": "metasub_by_kmer",
                     "in_min_fraction": 1.0,
                     "out_max_fraction": 0.1,
-                    "in": ["kl_sample",
-                           "zh_sample"],
+                    "in": ["kl_sample", "zh_sample"],
                     "out": []
                 },
             ]
