@@ -14,9 +14,9 @@ using mtg::graph::boss::BOSS;
 
 const std::string filename = "./benchmark_graph.dbg";
 
-constexpr uint64_t NUM_DISTINCT_INDEXES = 1 << 21;
-constexpr uint64_t PATH_SIZE = 1 << 7;
-constexpr uint64_t CACHE_SIZE = 1 << 10;
+constexpr uint64_t NUM_DISTINCT_INDEXES = 2'097'152;
+constexpr uint64_t PATH_SIZE = 128;
+constexpr uint64_t CACHE_SIZE = 1024;
 
 std::shared_ptr<DBGSuccinctCachedView>
 make_cached_dbgsuccinct(std::shared_ptr<const DBGSuccinct> graph, size_t cache_size = 1024) {
