@@ -17,6 +17,7 @@ class DBGSuccinct;
  * This allows for faster get_node_sequence and call_incoming_kmers calls.
  * Traversal operations and map_to_nodes_sequentially are overridden to fill
  * the cache alongside their normal functions.
+ * This wrapper stores ~144 bytes per cached node.
  */
 class DBGSuccinctCachedView : public DBGWrapper<DBGSuccinct> {
   public:
@@ -86,14 +87,6 @@ class DBGSuccinctCachedView : public DBGWrapper<DBGSuccinct> {
 
     virtual node_index traverse_back(node_index node, char prev_char) const override final;
 
-    // TODO: patch this override to also cache values. For now, it simply delegates
-    virtual void traverse(node_index start,
-                          const char *begin,
-                          const char *end,
-                          const std::function<void(node_index)> &callback,
-                          const std::function<bool()> &terminate
-                              = [](){ return false; }) const override final;
-
   protected:
     const boss::BOSS *boss_;
     size_t cache_size_;
@@ -118,7 +111,14 @@ class DBGSuccinctCachedViewImpl : public DBGSuccinctCachedView {
      * Methods from DeBruijnGraph
      */
     virtual std::string get_node_sequence(node_index node) const override final;
+
     virtual node_index traverse(node_index node, char next_char) const override final;
+    virtual void traverse(node_index start,
+                          const char *begin,
+                          const char *end,
+                          const std::function<void(node_index)> &callback,
+                          const std::function<bool()> &terminate
+                              = [](){ return false; }) const override final;
 
     virtual void call_outgoing_kmers(node_index node,
                                      const OutgoingEdgeCallback &callback) const override final;
@@ -158,8 +158,6 @@ class DBGSuccinctCachedViewImpl : public DBGSuccinctCachedView {
     }
 
   private:
-    typedef kmer::KmerExtractorBOSS KmerExtractor;
-
     // KmerType is the encoded k-mer
     // edge_index is the boss node whose last character is the first character of the k-mer
     typedef std::pair<KmerType, std::optional<edge_index>> CacheValue;
@@ -219,20 +217,20 @@ class DBGSuccinctCachedViewImpl : public DBGSuccinctCachedView {
     }
 
     virtual std::string decode(const std::vector<TAlphabet> &v) const override final {
-        return KmerExtractor::decode(v);
+        return kmer::KmerExtractorBOSS::decode(v);
     }
 
-    inline static constexpr TAlphabet encode(char c) { return KmerExtractor::encode(c); }
+    inline static constexpr TAlphabet encode(char c) { return kmer::KmerExtractorBOSS::encode(c); }
     inline static constexpr KmerType to_kmer(std::string_view seq) {
-        return KmerExtractor::sequence_to_kmer<KmerType>(seq);
+        return kmer::KmerExtractorBOSS::sequence_to_kmer<KmerType>(seq);
     }
     inline static constexpr KmerType to_kmer(const std::vector<TAlphabet> &seq) {
         // TODO: avoid decode step
-        return to_kmer(KmerExtractor::decode(seq));
+        return to_kmer(kmer::KmerExtractorBOSS::decode(seq));
     }
 
     virtual TAlphabet complement(TAlphabet c) const override final {
-        return KmerExtractor::complement(c);
+        return kmer::KmerExtractorBOSS::complement(c);
     }
 };
 

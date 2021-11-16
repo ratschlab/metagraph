@@ -8,8 +8,10 @@ namespace graph {
 
 template <typename Graph>
 DBGSuccinctCachedView::DBGSuccinctCachedView(Graph&& graph, size_t cache_size)
-      : DBGWrapper(std::forward<Graph>(graph)), boss_(&graph_->get_boss()),
-        cache_size_(cache_size), rev_comp_prev_cache_(cache_size_),
+      : DBGWrapper(std::forward<Graph>(graph)),
+        boss_(&graph_->get_boss()),
+        cache_size_(cache_size),
+        rev_comp_prev_cache_(cache_size_),
         rev_comp_next_cache_(cache_size_) {}
 
 template DBGSuccinctCachedView::DBGSuccinctCachedView(const DBGSuccinct&, size_t);
@@ -18,81 +20,8 @@ template DBGSuccinctCachedView::DBGSuccinctCachedView(std::shared_ptr<const DBGS
 
 
 /**
- * Delegated methods
+ * Overridden methods
  */
-#define DELEGATE_METHOD_IMPL(RETURN_TYPE, METHOD, ARG_TYPE, ARG_NAME) \
-auto DBGSuccinctCachedView::METHOD(ARG_TYPE ARG_NAME) const -> RETURN_TYPE { \
-    return graph_->METHOD(ARG_NAME); \
-} \
-
-DELEGATE_METHOD_IMPL(void, call_kmers, const std::function<void(node_index, const std::string&)> &, callback)
-DELEGATE_METHOD_IMPL(void, call_source_nodes, const std::function<void(node_index)> &, callback)
-
-DELEGATE_METHOD_IMPL(uint64_t, num_nodes, , )
-DELEGATE_METHOD_IMPL(uint64_t, max_index, , )
-DELEGATE_METHOD_IMPL(size_t, outdegree, node_index, node)
-DELEGATE_METHOD_IMPL(bool, has_single_outgoing, node_index, node)
-DELEGATE_METHOD_IMPL(bool, has_multiple_outgoing, node_index, node)
-DELEGATE_METHOD_IMPL(size_t, indegree, node_index, node)
-DELEGATE_METHOD_IMPL(bool, has_no_incoming, node_index, node)
-DELEGATE_METHOD_IMPL(bool, has_single_incoming, node_index, node)
-DELEGATE_METHOD_IMPL(node_index, kmer_to_node, std::string_view, kmer)
-
-void DBGSuccinctCachedView::call_nodes(const std::function<void(node_index)> &callback,
-                                       const std::function<bool()> &stop_early) const {
-    graph_->call_nodes(callback, stop_early);
-}
-
-void DBGSuccinctCachedView::call_sequences(const CallPath &callback,
-                                           size_t num_threads,
-                                           bool kmers_in_single_form ) const {
-    graph_->call_sequences(callback, num_threads, kmers_in_single_form);
-}
-
-void DBGSuccinctCachedView::call_unitigs(const CallPath &callback,
-                                         size_t num_threads,
-                                         size_t min_tip_size,
-                                         bool kmers_in_single_form) const {
-    graph_->call_unitigs(callback, num_threads, min_tip_size, kmers_in_single_form);
-}
-
-bool DBGSuccinctCachedView
-::find(std::string_view sequence, double discovery_fraction) const {
-    return graph_->find(sequence, discovery_fraction);
-}
-
-void DBGSuccinctCachedView::map_to_nodes(std::string_view sequence,
-                                         const std::function<void(node_index)> &callback,
-                                         const std::function<bool()> &terminate) const {
-    graph_->map_to_nodes(sequence, callback, terminate);
-}
-
-void DBGSuccinctCachedView
-::adjacent_outgoing_nodes(node_index node,
-                          const std::function<void(node_index)> &callback) const {
-    graph_->adjacent_outgoing_nodes(node, callback);
-}
-
-void DBGSuccinctCachedView
-::adjacent_incoming_nodes(node_index node,
-                          const std::function<void(node_index)> &callback) const {
-    graph_->adjacent_incoming_nodes(node, callback);
-}
-
-auto DBGSuccinctCachedView
-::traverse_back(node_index node, char prev_char) const -> node_index {
-    // TODO: implemented a cached version of this later if needed
-    return graph_->traverse_back(node, prev_char);
-}
-
-void DBGSuccinctCachedView::traverse(node_index start,
-                                     const char *begin,
-                                     const char *end,
-                                     const std::function<void(node_index)> &callback,
-                                     const std::function<bool()> &terminate) const {
-    graph_->traverse(start, begin, end, callback, terminate);
-}
-
 bool DBGSuccinctCachedView::operator==(const DeBruijnGraph &other) const {
     if (get_k() != other.get_k()
             || num_nodes() != other.num_nodes()
@@ -342,7 +271,7 @@ std::string DBGSuccinctCachedViewImpl<KmerType>::get_node_sequence(node_index no
     assert(node > 0 && node <= num_nodes());
 
     // get the sequence from either the cache, or the underlying graph
-    auto ret_val = KmerExtractor::kmer_to_sequence<KmerType>(
+    auto ret_val = kmer::KmerExtractorBOSS::kmer_to_sequence<KmerType>(
         get_kmer_pair(graph_->kmer_to_boss_index(node)).first, get_k()
     );
 
@@ -443,6 +372,86 @@ void DBGSuccinctCachedViewImpl<KmerType>
         },
         terminate
     );
+}
+
+
+/**
+ * Delegated methods
+ */
+#define DELEGATE_METHOD_IMPL(RETURN_TYPE, METHOD, ARG_TYPE, ARG_NAME) \
+auto DBGSuccinctCachedView::METHOD(ARG_TYPE ARG_NAME) const -> RETURN_TYPE { \
+    return graph_->METHOD(ARG_NAME); \
+} \
+
+DELEGATE_METHOD_IMPL(void, call_kmers, const std::function<void(node_index, const std::string&)> &, callback)
+DELEGATE_METHOD_IMPL(void, call_source_nodes, const std::function<void(node_index)> &, callback)
+
+DELEGATE_METHOD_IMPL(uint64_t, num_nodes, , )
+DELEGATE_METHOD_IMPL(uint64_t, max_index, , )
+DELEGATE_METHOD_IMPL(size_t, outdegree, node_index, node)
+DELEGATE_METHOD_IMPL(bool, has_single_outgoing, node_index, node)
+DELEGATE_METHOD_IMPL(bool, has_multiple_outgoing, node_index, node)
+DELEGATE_METHOD_IMPL(size_t, indegree, node_index, node)
+DELEGATE_METHOD_IMPL(bool, has_no_incoming, node_index, node)
+DELEGATE_METHOD_IMPL(bool, has_single_incoming, node_index, node)
+DELEGATE_METHOD_IMPL(node_index, kmer_to_node, std::string_view, kmer)
+
+void DBGSuccinctCachedView::call_nodes(const std::function<void(node_index)> &callback,
+                                       const std::function<bool()> &stop_early) const {
+    graph_->call_nodes(callback, stop_early);
+}
+
+void DBGSuccinctCachedView::call_sequences(const CallPath &callback,
+                                           size_t num_threads,
+                                           bool kmers_in_single_form ) const {
+    graph_->call_sequences(callback, num_threads, kmers_in_single_form);
+}
+
+void DBGSuccinctCachedView::call_unitigs(const CallPath &callback,
+                                         size_t num_threads,
+                                         size_t min_tip_size,
+                                         bool kmers_in_single_form) const {
+    graph_->call_unitigs(callback, num_threads, min_tip_size, kmers_in_single_form);
+}
+
+bool DBGSuccinctCachedView
+::find(std::string_view sequence, double discovery_fraction) const {
+    return graph_->find(sequence, discovery_fraction);
+}
+
+void DBGSuccinctCachedView::map_to_nodes(std::string_view sequence,
+                                         const std::function<void(node_index)> &callback,
+                                         const std::function<bool()> &terminate) const {
+    graph_->map_to_nodes(sequence, callback, terminate);
+}
+
+void DBGSuccinctCachedView
+::adjacent_outgoing_nodes(node_index node,
+                          const std::function<void(node_index)> &callback) const {
+    graph_->adjacent_outgoing_nodes(node, callback);
+}
+
+void DBGSuccinctCachedView
+::adjacent_incoming_nodes(node_index node,
+                          const std::function<void(node_index)> &callback) const {
+    graph_->adjacent_incoming_nodes(node, callback);
+}
+
+auto DBGSuccinctCachedView
+::traverse_back(node_index node, char prev_char) const -> node_index {
+    // TODO: implemented a cached version of this later if needed
+    return graph_->traverse_back(node, prev_char);
+}
+
+template <typename KmerType>
+void DBGSuccinctCachedViewImpl<KmerType>
+::traverse(node_index start,
+           const char *begin,
+           const char *end,
+           const std::function<void(node_index)> &callback,
+           const std::function<bool()> &terminate) const {
+    // TODO: implement a cached version if needed later
+    graph_->traverse(start, begin, end, callback, terminate);
 }
 
 template class DBGSuccinctCachedViewImpl<kmer::KmerExtractorBOSS::Kmer64>;
