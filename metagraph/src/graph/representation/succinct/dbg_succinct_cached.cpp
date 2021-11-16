@@ -43,9 +43,12 @@ bool DBGSuccinctCachedView::operator==(const DeBruijnGraph &other) const {
 
 void DBGSuccinctCachedView
 ::call_and_cache_outgoing_from_rev_comp(node_index node,
-                                        std::string &rev_comp_suffix,
                                         const std::function<void(node_index, TAlphabet)> &callback) const {
     if (edge_index e = get_rev_comp_boss_next_node(node)) {
+        //        rshift    rc
+        // ATGGCT -> TGGCT* -> *AGCCA
+        std::string rev_comp_suffix = get_node_sequence(node).substr(1) + std::string(1, '\0');
+        ::reverse_complement(rev_comp_suffix.begin(), rev_comp_suffix.end());
         boss_->call_incoming_to_target(boss_->bwd(e), boss_->get_node_last_value(e),
                                        [&](edge_index incoming_edge) {
             TAlphabet c = get_first_value(incoming_edge);
@@ -60,9 +63,12 @@ void DBGSuccinctCachedView
 
 void DBGSuccinctCachedView
 ::call_and_cache_incoming_to_rev_comp(node_index node,
-                                      std::string &rev_comp_prefix,
                                       const std::function<void(node_index, TAlphabet)> &callback) const {
     if (edge_index e = get_rev_comp_boss_prev_node(node)) {
+        //        lshift    rc
+        // AGCCAT -> *AGCCA -> TGGCT*
+        std::string rev_comp_prefix = std::string(1, '\0') + get_node_sequence(node).substr(0, get_k() - 1);
+        ::reverse_complement(rev_comp_prefix.begin(), rev_comp_prefix.end());
         boss_->call_outgoing(e, [&](edge_index adjacent_edge) {
             TAlphabet c = boss_->get_W(adjacent_edge) % boss_->alph_size;
             rev_comp_prefix.back() = boss_->decode(c);

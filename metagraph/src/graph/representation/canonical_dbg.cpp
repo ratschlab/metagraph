@@ -177,68 +177,70 @@ void CanonicalDBG::append_next_rc_nodes(node_index node,
 
     const auto &alphabet = graph_->alphabet();
 
+    // for each n, check for nAGCCA. If found, define and store the index for
+    // TGGCTrc(n) as index(nAGCCA) + offset_
+
+    // callback for DBGSuccinct and DBGSuccinctCachedView
+    auto next_callback_succ = [&](node_index next, boss::BOSS::TAlphabet c) {
+        if (c == boss::BOSS::kSentinelCode)
+            return;
+
+        c = kmer::KmerExtractorBOSS::complement(c);
+
+        if (children[c] == npos) {
+            children[c] = next + offset_;
+
+            return;
+        }
+
+        if (k_odd_) {
+            logger->error(
+                "Primary graph contains both forward and reverse complement: {} {} -> {} {}\t{} {}",
+                node, graph_->get_node_sequence(node),
+                children[c], graph_->get_node_sequence(children[c]),
+                next, graph_->get_node_sequence(next));
+            exit(1);
+        }
+
+        is_palindrome_cache_.Put(next, true);
+    };
+
+    if (const auto *cached = dynamic_cast<const DBGSuccinctCachedView*>(graph_.get())) {
+        cached->call_and_cache_outgoing_from_rev_comp(node, next_callback_succ);
+        return;
+    }
+
     //        rshift    rc
     // ATGGCT -> TGGCT* -> *AGCCA
     std::string rev_seq = get_node_sequence(node).substr(1) + std::string(1, '\0');
     ::reverse_complement(rev_seq.begin(), rev_seq.end());
     assert(rev_seq[0] == '\0');
 
-    // for each n, check for nAGCCA. If found, define and store the index for
-    // TGGCTrc(n) as index(nAGCCA) + offset_
     if (const auto *dbg_succ = get_dbg_succ(*graph_)) {
         const auto &boss = dbg_succ->get_boss();
+        dbg_succ->call_nodes_with_suffix_matching_longest_prefix(
+            std::string_view(&rev_seq[1], get_k() - 1),
+            [&](node_index next, uint64_t /* match_length */) {
+                next_callback_succ(
+                    next,
+                    boss.get_minus_k_value(dbg_succ->kmer_to_boss_index(next),
+                                           get_k() - 2).first
+                );
+            },
+            get_k() - 1
+        );
 
-        auto next_callback = [&](node_index next, boss::BOSS::TAlphabet c) {
-            if (c == boss::BOSS::kSentinelCode)
-                return;
+        return;
+    }
 
-            c = kmer::KmerExtractorBOSS::complement(c);
-
-            if (children[c] == npos) {
+    for (size_t c = 0; c < alphabet.size(); ++c) {
+        // Do the checks by directly mapping the sequences of the desired k-mers.
+        // For non-DBGSuccinct graphs, this should be fast enough.
+        if (alphabet[c] != boss::BOSS::kSentinel && children[c] == npos) {
+            rev_seq[0] = complement(alphabet[c]);
+            node_index next = graph_->kmer_to_node(rev_seq);
+            if (next != npos)
                 children[c] = next + offset_;
-
-                return;
-            }
-
-            if (k_odd_) {
-                logger->error(
-                    "Primary graph contains both forward and reverse complement: {} {} -> {} {}\t{} {}",
-                    node, graph_->get_node_sequence(node),
-                    children[c], graph_->get_node_sequence(children[c]),
-                    next, graph_->get_node_sequence(next));
-                exit(1);
-            }
-
-            is_palindrome_cache_.Put(next, true);
-        };
-
-        if (const auto *cached = dynamic_cast<const DBGSuccinctCachedView*>(graph_.get())) {
-            cached->call_and_cache_outgoing_from_rev_comp(node, rev_seq, next_callback);
-
-        } else {
-            dbg_succ->call_nodes_with_suffix_matching_longest_prefix(
-                std::string_view(&rev_seq[1], get_k() - 1),
-                [&](node_index next, uint64_t /* match_length */) {
-                    next_callback(
-                        next,
-                        boss.get_minus_k_value(dbg_succ->kmer_to_boss_index(next),
-                                               get_k() - 2).first
-                    );
-                },
-                get_k() - 1
-            );
-        }
-
-    } else {
-        for (size_t c = 0; c < alphabet.size(); ++c) {
-            // Do the checks by directly mapping the sequences of the desired k-mers.
-            // For non-DBGSuccinct graphs, this should be fast enough.
-            if (alphabet[c] != boss::BOSS::kSentinel && children[c] == npos) {
-                rev_seq[0] = complement(alphabet[c]);
-                node_index next = graph_->kmer_to_node(rev_seq);
-                if (next != npos)
-                    children[c] = next + offset_;
-            }
         }
     }
 }
@@ -301,70 +303,71 @@ void CanonicalDBG::append_prev_rc_nodes(node_index node,
 
     const auto &alphabet = graph_->alphabet();
 
+    // for each n, check for TGGCTn. If found, define and store the index for
+    // rc(n)AGCCA as index(TGGCTn) + offset_
+
+    // callback for DBGSuccinct and DBGSuccinctCachedView
+    auto prev_callback_succ = [&](node_index prev, boss::BOSS::TAlphabet c) {
+        if (prev == npos || c == boss::BOSS::kSentinelCode)
+            return;
+
+        c = kmer::KmerExtractorBOSS::complement(c);
+
+        if (parents[c] == npos) {
+            parents[c] = prev + offset_;
+
+            return;
+        }
+
+        if (k_odd_) {
+            logger->error(
+                "Primary graph contains both forward and reverse complement: {} {} -> {} {}\t{} {}",
+                node, graph_->get_node_sequence(node),
+                parents[c], graph_->get_node_sequence(parents[c]),
+                prev, graph_->get_node_sequence(prev)
+            );
+            exit(1);
+        }
+
+        is_palindrome_cache_.Put(prev, true);
+    };
+
+    if (const auto *cached = dynamic_cast<const DBGSuccinctCachedView*>(graph_.get())) {
+        cached->call_and_cache_incoming_to_rev_comp(node, prev_callback_succ);
+        return;
+    }
+
     //        lshift    rc
     // AGCCAT -> *AGCCA -> TGGCT*
     std::string rev_seq = std::string(1, '\0') + get_node_sequence(node).substr(0, get_k() - 1);
     ::reverse_complement(rev_seq.begin(), rev_seq.end());
     assert(rev_seq.back() == '\0');
 
-    // for each n, check for TGGCTn. If found, define and store the index for
-    // rc(n)AGCCA as index(TGGCTn) + offset_
     if (const auto *dbg_succ = get_dbg_succ(*graph_)) {
         // Find the BOSS node TGGCT and iterate through all of its outdoing edges.
         // Then, convert the edge indices to get the DBGSuccinct node indices
-        const auto *cached = dynamic_cast<const DBGSuccinctCachedView*>(graph_.get());
         const auto &boss = dbg_succ->get_boss();
-
-        auto prev_callback = [&](node_index prev, boss::BOSS::TAlphabet c) {
-            if (prev == npos || c == boss::BOSS::kSentinelCode)
-                return;
-
-            c = kmer::KmerExtractorBOSS::complement(c);
-
-            if (parents[c] == npos) {
-                parents[c] = prev + offset_;
-
-                return;
-            }
-
-            if (k_odd_) {
-                logger->error(
-                    "Primary graph contains both forward and reverse complement: {} {} -> {} {}\t{} {}",
-                    node, graph_->get_node_sequence(node),
-                    parents[c], graph_->get_node_sequence(parents[c]),
-                    prev, graph_->get_node_sequence(prev)
-                );
-                exit(1);
-            }
-
-            is_palindrome_cache_.Put(prev, true);
-        };
-
-        if (cached) {
-            cached->call_and_cache_incoming_to_rev_comp(node, rev_seq, prev_callback);
-
-        } else {
-            auto encoded = boss.encode(std::string_view(rev_seq.data(), get_k() - 1));
-            auto [edge, edge_2, end] = boss.index_range(encoded.begin(), encoded.end());
-            assert(end != encoded.end() || edge == edge_2);
-            if (end == encoded.end()) {
-                boss.call_outgoing(edge, [&](boss::BOSS::edge_index adjacent_edge) {
-                    prev_callback(dbg_succ->boss_to_kmer_index(adjacent_edge),
-                                  boss.get_W(adjacent_edge) % boss.alph_size);
-                });
-            }
+        auto encoded = boss.encode(std::string_view(rev_seq.data(), get_k() - 1));
+        auto [edge, edge_2, end] = boss.index_range(encoded.begin(), encoded.end());
+        assert(end != encoded.end() || edge == edge_2);
+        if (end == encoded.end()) {
+            boss.call_outgoing(edge, [&](boss::BOSS::edge_index adjacent_edge) {
+                prev_callback_succ(dbg_succ->boss_to_kmer_index(adjacent_edge),
+                                   boss.get_W(adjacent_edge) % boss.alph_size);
+            });
         }
 
-    } else {
-        for (size_t c = 0; c < alphabet.size(); ++c) {
-            // Do the checks by directly mapping the sequences of the desired k-mers.
-            // For non-DBGSuccinct graphs, this should be fast enough.
-            if (alphabet[c] != boss::BOSS::kSentinel && parents[c] == npos) {
-                rev_seq.back() = complement(alphabet[c]);
-                node_index prev = graph_->kmer_to_node(rev_seq);
-                if (prev != npos)
-                    parents[c] = prev + offset_;
-            }
+        return;
+    }
+
+    for (size_t c = 0; c < alphabet.size(); ++c) {
+        // Do the checks by directly mapping the sequences of the desired k-mers.
+        // For non-DBGSuccinct graphs, this should be fast enough.
+        if (alphabet[c] != boss::BOSS::kSentinel && parents[c] == npos) {
+            rev_seq.back() = complement(alphabet[c]);
+            node_index prev = graph_->kmer_to_node(rev_seq);
+            if (prev != npos)
+                parents[c] = prev + offset_;
         }
     }
 }

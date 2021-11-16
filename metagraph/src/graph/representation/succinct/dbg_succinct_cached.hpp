@@ -31,11 +31,9 @@ class DBGSuccinctCachedView : public DBGWrapper<DBGSuccinct> {
     virtual void put_decoded_edge(edge_index edge, std::string_view seq) const = 0;
 
     void call_and_cache_outgoing_from_rev_comp(node_index node,
-                                               std::string &rev_comp_suffix,
                                                const std::function<void(node_index, TAlphabet)> &callback) const;
 
     void call_and_cache_incoming_to_rev_comp(node_index node,
-                                             std::string &rev_comp_prefix,
                                              const std::function<void(node_index, TAlphabet)> &callback) const;
 
 
