@@ -41,6 +41,7 @@ class Config {
     bool print_signature = false;
     bool query_presence = false;
     bool query_coords = false;
+    bool expand_coords = false;
     bool filter_present = false;
     bool dump_text_anno = false;
     bool sparse = false;
