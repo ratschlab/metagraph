@@ -18,6 +18,18 @@ constexpr uint64_t NUM_DISTINCT_INDEXES = 2'097'152;
 constexpr uint64_t PATH_SIZE = 128;
 constexpr uint64_t CACHE_SIZE = 1024;
 
+std::shared_ptr<DBGSuccinct> load_graph(benchmark::State &state) {
+    auto graph = std::make_shared<DBGSuccinct>(2);
+    if (!std::getenv("GRAPH")) {
+        state.SkipWithError("Set environment variable GRAPH");
+    } else if (!graph->load(std::getenv("GRAPH"))) {
+        state.SkipWithError((std::string("Can't load the graph from ")
+                                + std::getenv("GRAPH")).c_str());
+    }
+    return graph;
+}
+
+
 std::shared_ptr<DBGSuccinctCachedView>
 make_cached_dbgsuccinct(std::shared_ptr<const DBGSuccinct> graph, size_t cache_size = 1024) {
     if (graph->get_k() * mtg::kmer::KmerExtractorBOSS::bits_per_char <= 64) {
@@ -29,34 +41,23 @@ make_cached_dbgsuccinct(std::shared_ptr<const DBGSuccinct> graph, size_t cache_s
     }
 }
 
-template <typename Graph = DBGSuccinct, typename OutGraph = DBGSuccinct>
-std::shared_ptr<OutGraph> load_graph(benchmark::State &state) {
-    auto graph = std::make_shared<DBGSuccinct>(2);
-    if (!std::getenv("GRAPH")) {
-        state.SkipWithError("Set environment variable GRAPH");
-    } else if (!graph->load(std::getenv("GRAPH"))) {
-        state.SkipWithError((std::string("Can't load the graph from ")
-                                + std::getenv("GRAPH")).c_str());
-    }
+template <class OutGraph>
+std::shared_ptr<DeBruijnGraph> wrap_graph(std::shared_ptr<DBGSuccinct> graph) {
+    static_assert(std::is_same_v<OutGraph, CanonicalDBG>
+        || std::is_same_v<OutGraph, DBGSuccinctCachedView>);
 
-    if constexpr(std::is_same_v<OutGraph, DBGSuccinct>) {
-        return graph;
+    if constexpr(std::is_same_v<OutGraph, CanonicalDBG>) {
+        return std::make_shared<CanonicalDBG>(graph);
     } else {
-        static_assert(std::is_same_v<OutGraph, DeBruijnGraph>);
-        if constexpr(std::is_same_v<Graph, CanonicalDBG>) {
-            return std::make_shared<CanonicalDBG>(
-                std::dynamic_pointer_cast<DeBruijnGraph>(graph)
-            );
-        } else if constexpr(std::is_same_v<Graph, DBGSuccinctCachedView>) {
-            std::shared_ptr<DeBruijnGraph> wrapped_graph
-                = make_cached_dbgsuccinct(graph, CACHE_SIZE);
-            if (graph->get_mode() == DeBruijnGraph::PRIMARY)
-                wrapped_graph = std::make_shared<CanonicalDBG>(wrapped_graph);
+        std::shared_ptr<DeBruijnGraph> wrapped_graph
+            = make_cached_dbgsuccinct(graph, CACHE_SIZE);
+        if (graph->get_mode() == DeBruijnGraph::PRIMARY)
+            wrapped_graph = std::make_shared<CanonicalDBG>(wrapped_graph);
 
-            return wrapped_graph;
-        }
+        return wrapped_graph;
     }
 }
+
 
 // generate a deterministic sequence of pseudo-random numbers
 std::vector<uint64_t> random_numbers(size_t size, uint64_t min, uint64_t max) {
@@ -128,9 +129,9 @@ DEFINE_BOSS_BENCHMARK(succ_last,           succ_last,           get_last, size);
 DEFINE_BOSS_BENCHMARK(bwd,                 bwd,                 get_W,    size);
 
 
-#define DEFINE_BOSS_CACHED_CYCLE_BENCHMARK(NAME, OPERATION, GRAPH_TYPE, OUT_TYPE, ...) \
+#define DEFINE_BOSS_CACHED_CYCLE_BENCHMARK(NAME, OPERATION, GRAPH_TYPE, ...) \
 static void BM_BOSS_##NAME(benchmark::State& state) { \
-    auto graph = load_graph<GRAPH_TYPE, OUT_TYPE>(state); \
+    auto graph = wrap_graph<GRAPH_TYPE>(load_graph(state)); \
  \
     auto indexes = random_numbers(NUM_DISTINCT_INDEXES, 1, graph->num_nodes()); \
     size_t i = 0; \
@@ -141,9 +142,9 @@ static void BM_BOSS_##NAME(benchmark::State& state) { \
 } \
 BENCHMARK(BM_BOSS_##NAME) -> Unit(benchmark::kMicrosecond); \
 
-#define DEFINE_BOSS_CACHED_PATH_BENCHMARK(NAME, OPERATION, GRAPH_TYPE, OUT_TYPE) \
+#define DEFINE_BOSS_CACHED_PATH_BENCHMARK(NAME, OPERATION, GRAPH_TYPE) \
 static void BM_BOSS_##NAME(benchmark::State& state) { \
-    auto graph = load_graph<GRAPH_TYPE, OUT_TYPE>(state); \
+    auto graph = wrap_graph<GRAPH_TYPE>(load_graph(state)); \
  \
     size_t size = NUM_DISTINCT_INDEXES >> 2; \
     auto indexes = random_traversal_numbers(*graph, size, PATH_SIZE); \
@@ -158,10 +159,10 @@ static void BM_BOSS_##NAME(benchmark::State& state) { \
 } \
 BENCHMARK(BM_BOSS_##NAME) -> Unit(benchmark::kMicrosecond); \
 
-DEFINE_BOSS_CACHED_CYCLE_BENCHMARK(get_node_sequence_uncached_distinct, get_node_sequence, CanonicalDBG, DeBruijnGraph);
-DEFINE_BOSS_CACHED_CYCLE_BENCHMARK(get_node_sequence_cached_distinct, get_node_sequence, DBGSuccinctCachedView, DeBruijnGraph);
-DEFINE_BOSS_CACHED_PATH_BENCHMARK(call_outgoing_kmers_uncached_path, call_outgoing_kmers, CanonicalDBG, DeBruijnGraph);
-DEFINE_BOSS_CACHED_PATH_BENCHMARK(call_outgoing_kmers_cached_path, call_outgoing_kmers, DBGSuccinctCachedView, DeBruijnGraph);
+DEFINE_BOSS_CACHED_CYCLE_BENCHMARK(get_node_sequence_uncached_distinct, get_node_sequence, CanonicalDBG);
+DEFINE_BOSS_CACHED_CYCLE_BENCHMARK(get_node_sequence_cached_distinct, get_node_sequence, DBGSuccinctCachedView);
+DEFINE_BOSS_CACHED_PATH_BENCHMARK(call_outgoing_kmers_uncached_path, call_outgoing_kmers, CanonicalDBG);
+DEFINE_BOSS_CACHED_PATH_BENCHMARK(call_outgoing_kmers_cached_path, call_outgoing_kmers, DBGSuccinctCachedView);
 
 
 static void BM_BOSS_get_W_and_fwd(benchmark::State &state) {
