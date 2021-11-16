@@ -14,12 +14,12 @@ class DBGSuccinct;
 
 // A wrapper which caches computed node sequences for DBGSuccinct graphs.
 // This allows for faster get_node_sequence and call_incoming_kmers calls.
-class DBGSuccinctCached : public DBGWrapper<DBGSuccinct> {
+class DBGSuccinctCachedView : public DBGWrapper<DBGSuccinct> {
   public:
     typedef boss::BOSS::edge_index edge_index;
     typedef boss::BOSS::TAlphabet TAlphabet;
 
-    virtual ~DBGSuccinctCached() {}
+    virtual ~DBGSuccinctCachedView() {}
 
     // if the sequence of a node has been constructed externally, cache the result
     virtual void put_decoded_node(node_index node, std::string_view seq) const = 0;
@@ -88,7 +88,7 @@ class DBGSuccinctCached : public DBGWrapper<DBGSuccinct> {
     mutable common::LRUCache<node_index, std::pair<edge_index, size_t>> rev_comp_next_cache_;
 
     template <typename Graph>
-    explicit DBGSuccinctCached(Graph&& graph, size_t cache_size = 1024);
+    explicit DBGSuccinctCachedView(Graph&& graph, size_t cache_size = 1024);
 
     virtual TAlphabet complement(TAlphabet c) const = 0;
     virtual std::string decode(const std::vector<TAlphabet> &v) const = 0;
@@ -96,7 +96,7 @@ class DBGSuccinctCached : public DBGWrapper<DBGSuccinct> {
 
 
 template <typename KmerType>
-class DBGSuccinctCachedImpl : public DBGSuccinctCached {
+class DBGSuccinctCachedViewImpl : public DBGSuccinctCachedView {
     typedef kmer::KmerExtractorBOSS KmerExtractor;
 
     // KmerType is the encoded k-mer
@@ -105,7 +105,7 @@ class DBGSuccinctCachedImpl : public DBGSuccinctCached {
 
   public:
     template <typename Graph>
-    DBGSuccinctCachedImpl(Graph&& graph, size_t cache_size);
+    DBGSuccinctCachedViewImpl(Graph&& graph, size_t cache_size);
 
     virtual void put_decoded_node(node_index node, std::string_view seq) const override final;
 
@@ -157,13 +157,15 @@ class DBGSuccinctCachedImpl : public DBGSuccinctCached {
 
         if (!kmer) {
             // get the node sequence and possibly the last node accessed while computing
-            auto [seq, last_node_opt] = boss_->get_node_seq_with_end_node(i, check_second);
+            auto [seq, last_node] = boss_->get_node_seq_with_end_node(i, check_second);
 
             // append the last character and cache the result
             seq.push_back(boss_->get_W(i) % boss_->alph_size);
 
             // cache the result
-            kmer = CacheValue{ to_kmer(seq), last_node_opt };
+            kmer = CacheValue{ to_kmer(seq),
+                               last_node ? std::optional<edge_index> { last_node }
+                                         : std::nullopt };
             put_kmer(i, *kmer);
         }
 

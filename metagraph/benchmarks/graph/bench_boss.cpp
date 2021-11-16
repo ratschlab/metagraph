@@ -19,14 +19,14 @@ constexpr uint64_t NUM_DISTINCT_INDEXES = 1 << 21;
 constexpr uint64_t PATH_SIZE = 1 << 7;
 constexpr uint64_t CACHE_SIZE = 1 << 10;
 
-std::shared_ptr<DBGSuccinctCached>
+std::shared_ptr<DBGSuccinctCachedView>
 make_cached_dbgsuccinct(std::shared_ptr<const DBGSuccinct> graph, size_t cache_size = 1024) {
     if (graph->get_k() * mtg::kmer::KmerExtractorBOSS::bits_per_char <= 64) {
-        return std::make_shared<DBGSuccinctCachedImpl<mtg::kmer::KmerExtractorBOSS::Kmer64>>(graph, cache_size);
+        return std::make_shared<DBGSuccinctCachedViewImpl<mtg::kmer::KmerExtractorBOSS::Kmer64>>(graph, cache_size);
     } else if (graph->get_k() * mtg::kmer::KmerExtractorBOSS::bits_per_char <= 128) {
-        return std::make_shared<DBGSuccinctCachedImpl<mtg::kmer::KmerExtractorBOSS::Kmer128>>(graph, cache_size);
+        return std::make_shared<DBGSuccinctCachedViewImpl<mtg::kmer::KmerExtractorBOSS::Kmer128>>(graph, cache_size);
     } else {
-        return std::make_shared<DBGSuccinctCachedImpl<mtg::kmer::KmerExtractorBOSS::Kmer256>>(graph, cache_size);
+        return std::make_shared<DBGSuccinctCachedViewImpl<mtg::kmer::KmerExtractorBOSS::Kmer256>>(graph, cache_size);
     }
 }
 
@@ -48,7 +48,7 @@ std::shared_ptr<OutGraph> load_graph(benchmark::State &state) {
             return std::make_shared<CanonicalDBG>(
                 std::dynamic_pointer_cast<DeBruijnGraph>(graph)
             );
-        } else if constexpr(std::is_same_v<Graph, DBGSuccinctCached>) {
+        } else if constexpr(std::is_same_v<Graph, DBGSuccinctCachedView>) {
             std::shared_ptr<DeBruijnGraph> wrapped_graph
                 = make_cached_dbgsuccinct(graph, CACHE_SIZE);
             if (graph->get_mode() == DeBruijnGraph::PRIMARY)
@@ -160,9 +160,9 @@ static void BM_BOSS_##NAME(benchmark::State& state) { \
 BENCHMARK(BM_BOSS_##NAME) -> Unit(benchmark::kMicrosecond); \
 
 DEFINE_BOSS_CACHED_CYCLE_BENCHMARK(get_node_sequence_uncached_distinct, get_node_sequence, CanonicalDBG, DeBruijnGraph);
-DEFINE_BOSS_CACHED_CYCLE_BENCHMARK(get_node_sequence_cached_distinct, get_node_sequence, DBGSuccinctCached, DeBruijnGraph);
+DEFINE_BOSS_CACHED_CYCLE_BENCHMARK(get_node_sequence_cached_distinct, get_node_sequence, DBGSuccinctCachedView, DeBruijnGraph);
 DEFINE_BOSS_CACHED_PATH_BENCHMARK(call_outgoing_kmers_uncached_path, call_outgoing_kmers, CanonicalDBG, DeBruijnGraph);
-DEFINE_BOSS_CACHED_PATH_BENCHMARK(call_outgoing_kmers_cached_path, call_outgoing_kmers, DBGSuccinctCached, DeBruijnGraph);
+DEFINE_BOSS_CACHED_PATH_BENCHMARK(call_outgoing_kmers_cached_path, call_outgoing_kmers, DBGSuccinctCachedView, DeBruijnGraph);
 
 
 static void BM_BOSS_get_W_and_fwd(benchmark::State &state) {

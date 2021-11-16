@@ -280,7 +280,7 @@ class BOSS {
      * character of the sequence. If force_get_end_node is false, then the last
      * traversed node will only be returned if it is computed.
      */
-    std::pair<std::vector<TAlphabet>, std::optional<edge_index>>
+    std::pair<std::vector<TAlphabet>, edge_index>
     get_node_seq_with_end_node(edge_index i, bool force_get_end_node = false) const;
 
     /**

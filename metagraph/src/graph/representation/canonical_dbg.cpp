@@ -96,7 +96,7 @@ void CanonicalDBG
     // map the forward
     const auto *dbg_succ = get_dbg_succ(*graph_);
     if (dbg_succ && get_k() % 2) {
-        const auto *cached = dynamic_cast<const DBGSuccinctCached*>(graph_.get());
+        const auto *cached = dynamic_cast<const DBGSuccinctCachedView*>(graph_.get());
 
         // if it's a boss table with odd k (without palindromic k-mers),
         // we can skip k-mers that have been found in the rev-compl sequence
@@ -185,7 +185,7 @@ void CanonicalDBG::append_next_rc_nodes(node_index node,
     // for each n, check for nAGCCA. If found, define and store the index for
     // TGGCTrc(n) as index(nAGCCA) + offset_
     if (const auto *dbg_succ = get_dbg_succ(*graph_)) {
-        const auto *cached = dynamic_cast<const DBGSuccinctCached*>(graph_.get());
+        const auto *cached = dynamic_cast<const DBGSuccinctCachedView*>(graph_.get());
         const auto &boss = dbg_succ->get_boss();
 
         auto next_callback = [&](node_index next, uint64_t /* match length */) {
@@ -317,7 +317,7 @@ void CanonicalDBG::append_prev_rc_nodes(node_index node,
     if (const auto *dbg_succ = get_dbg_succ(*graph_)) {
         // Find the BOSS node TGGCT and iterate through all of its outdoing edges.
         // Then, convert the edge indices to get the DBGSuccinct node indices
-        const auto *cached = dynamic_cast<const DBGSuccinctCached*>(graph_.get());
+        const auto *cached = dynamic_cast<const DBGSuccinctCachedView*>(graph_.get());
         const auto &boss = dbg_succ->get_boss();
 
         boss::BOSS::edge_index edge = 0;
