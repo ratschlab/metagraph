@@ -2,6 +2,7 @@
 
 #include <ips4o.hpp>
 #include <tsl/ordered_set.h>
+#include <mutex>
 
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
@@ -38,123 +39,347 @@ using mtg::graph::boss::BOSSConstructor;
 
 typedef typename mtg::graph::DeBruijnGraph::node_index node_index;
 
+// JSON Field Keys
+const std::string SEQ_DESCRIPTION_JSON_FIELD = "seq_description";
+const std::string KMER_COUNT_FIELD = "kmer_count";
+const std::string LABEL_COUNT_FIELD = "label_count";
+const std::string KMER_COORDINATE_FIELD = "kmer_coords";
+const std::string SIGNATURE_FIELD = "signature";
+const std::string KMER_COUNT_QUANTILE_FIELD = "kmer_count_quantile";
+const std::string SCORE_JSON_FIELD = "score";
+const std::string SEQUENCE_JSON_FIELD = "sequence";
+const std::string ALIGNMENT_JSON_FIELD = "alignments";
+const std::string CIGAR_JSON_FIELD = "cigar";
 
-QueryExecutor::QueryExecutor(const Config &config,
-                             const graph::AnnotatedDBG &anno_graph,
-                             std::unique_ptr<graph::align::DBGAlignerConfig>&& aligner_config,
-                             ThreadPool &thread_pool)
-      : config_(config),
-        anno_graph_(anno_graph),
-        aligner_config_(std::move(aligner_config)),
-        thread_pool_(thread_pool) { }
 
-std::string QueryExecutor::execute_query(const std::string &seq_name,
-                                         const std::string &sequence,
-                                         bool count_labels,
-                                         bool print_signature,
-                                         bool suppress_unlabeled,
-                                         size_t num_top_labels,
-                                         double discovery_fraction,
-                                         double presence_fraction,
-                                         std::string anno_labels_delimiter,
-                                         const AnnotatedDBG &anno_graph,
-                                         bool with_kmer_counts,
-                                         const std::vector<double> &count_quantiles,
-                                         bool query_coords) {
-    std::string output;
-    output.reserve(1'000);
+/**
+ * Given a vector of kmer label matched coordinates, collapse continuous ranges of coordinates
+ * to start-end tuples.
+ *
+ * @param coords    the vector of tuples as stored in a SeqSearchResult
+ *                  originally returned from AnnotatedDBG::get_kmer_coordinates
+ * @return vector of 'begin-end' range string representations
+ */
+std::vector<std::string> get_collapsed_coord_ranges(
+        const std::vector<SmallVector<uint64_t>> &tuples) {
+    // Build output
+    std::vector<std::string> ranges;
 
-    if (print_signature) {
-        auto top_labels
-            = anno_graph.get_top_label_signatures(sequence,
-                                                  num_top_labels,
-                                                  discovery_fraction,
-                                                  presence_fraction);
+    // Keep track of the beginning of the range (just use a sentinel)
+    uint64_t begin = 0;
+    uint64_t current = 0;
+    bool in_range = false;
 
-        if (!top_labels.size() && suppress_unlabeled)
-            return "";
+    for (const auto &coords : tuples) {
+        if (coords.empty()) continue;
 
-        output += seq_name;
+        // TODO: Look for example where row_tuples are multiple values?
+        uint64_t coord = coords[0];
 
-        for (const auto &[label, kmer_presence_mask] : top_labels) {
+        if (in_range) {
+            // Check if we should continue the range
+            if (coord == current + 1) {
+                current = coord;
+            } else {
+                // End the range and output
+                if (begin == current) {
+                    ranges.push_back(fmt::format(":{}", begin));
+                } else {
+                    ranges.push_back(fmt::format(":{}-{}", begin, current));
+                }
+
+                // Start a new range
+                begin = coord;
+                current = coord;
+            }
+        } else {
+            // Start a new range
+            begin = coord;
+            current = coord;
+            in_range = true;
+        }
+    }
+
+    // Add the last range
+    if (begin == current) {
+        ranges.push_back(fmt::format("{}", begin));
+    } else {
+        ranges.push_back(fmt::format("{}-{}", begin, current));
+    }
+
+    return ranges;
+}
+
+
+/**
+ * Convert string values into proper JSON values with types (i.e., 'nan' -> null,
+ * strings representing numbers -> numbers).
+ *
+ * @param v value string
+ * @return  Json::Value representing value string v
+ */
+Json::Value adjust_for_types(const std::string &v) {
+    if (v == "nan")
+        return Json::nullValue;
+
+    try {
+        return Json::Value(std::stof(v));
+    } catch(...) {}
+
+    return Json::Value(v);
+}
+
+
+/**
+ * Given a label string in the format '<sample_name>(;<property_name>=<property_value>)*'
+ * return a JSON representation of the label with its properties.
+ *
+ * @param label     label as a string
+ * @return JSON object in the format of
+ *  {
+ *      "sample": <sample_name>,
+ *      "properties": {
+ *          <property_name>: <property_value>,
+ *          ...
+ *      }
+ *  }
+ */
+Json::Value get_label_as_json(const std::string &label) {
+    Json::Value label_root;
+
+    // Split by ';' TODO: check this and see why substring was necessary
+    std::vector<std::string> label_parts = utils::split_string(label, ";");
+
+    // First field is always the sample
+    label_root["sample"] = label_parts[0];
+
+    // Fill properties if existant
+    Json::Value properties = Json::objectValue;
+    for (auto lit = ++label_parts.begin(); lit != label_parts.end(); ++lit) {
+        std::vector<std::string> key_value = utils::split_string(*lit, "=");
+        properties[key_value[0]] = adjust_for_types(key_value[1]);
+    }
+
+    if (properties.size() > 0) {
+        label_root["properties"] = properties;
+    }
+
+    return label_root;
+}
+
+
+Json::Value SeqSearchResult::to_json(bool count_kmers,
+                                     bool expand_coords,
+                                     const graph::AnnotatedDBG &anno_graph) const {
+    Json::Value root;
+
+    // Add seq information
+    root[SEQ_DESCRIPTION_JSON_FIELD] = sequence.name;
+
+    // Add alignment information if there is any
+    if (sequence.alignment.has_value()) {
+        const auto &alignment = sequence.alignment.value();
+
+        // Recover alignment sequence sequence string
+        root[SEQUENCE_JSON_FIELD] = Json::Value(sequence.sequence);
+
+        // Alignment metrics
+        root[SCORE_JSON_FIELD] = Json::Value(alignment.score);
+        root[CIGAR_JSON_FIELD] = Json::Value(alignment.cigar);
+    }
+
+    // Add discovered labels and extra results
+    root["results"] = Json::Value(Json::arrayValue);
+
+    // Different action depending on the result type
+    if (std::holds_alternative<label_vec>(result)) {
+        // Standard labels only
+        for (const auto &label : std::get<label_vec>(result)) {
+            root["results"].append(get_label_as_json(label));
+        }
+    } else if (std::holds_alternative<label_count_vec>(result)) {
+        // Labels with count data
+        for (const auto &[label, count] : std::get<label_count_vec>(result)) {
+            Json::Value label_obj = get_label_as_json(label);
+
+            std::string count_key = (count_kmers) ? KMER_COUNT_FIELD : LABEL_COUNT_FIELD;
+            label_obj[count_key] = Json::Value((long long) count);
+
+            root["results"].append(label_obj);
+        }
+    } else if (std::holds_alternative<label_sig_vec>(result)) {
+        // Count signatures
+        for (const auto &[label, kmer_presence_mask] : std::get<label_sig_vec>(result)) {
+            Json::Value label_obj = get_label_as_json(label);
+
+            Json::Value sig_obj = Json::objectValue;
+            sig_obj["num_present"] = Json::Value(sdsl::util::cnt_one_bits(kmer_presence_mask));
+            sig_obj["presence_mask"] = Json::Value(sdsl::util::to_string(kmer_presence_mask));
+            sig_obj["score"] =
+                    Json::Value(anno_graph.score_kmer_presence_mask(kmer_presence_mask));
+
+            label_obj[SIGNATURE_FIELD] = sig_obj;
+            root["results"].append(label_obj);
+        }
+    } else if (std::holds_alternative<label_quantile_vec>(result)) {
+        // Count quantiles
+        for (const auto &[label, quantiles] : std::get<label_quantile_vec>(result)) {
+            Json::Value label_obj = get_label_as_json(label);
+            Json::Value quantile_array = Json::arrayValue;
+
+            for (size_t quantile : quantiles) {
+                quantile_array.append(Json::Value((long long) quantile));
+            }
+
+            label_obj[KMER_COUNT_QUANTILE_FIELD] = quantile_array;
+            root["results"].append(label_obj);
+        }
+    } else if (std::holds_alternative<label_coord_vec>(result)) {
+        // Kmer coordinates
+        for (const auto &[label, tuples] : std::get<label_coord_vec>(result)) {
+            Json::Value label_obj = get_label_as_json(label);
+            Json::Value coord_array = Json::arrayValue;
+
+            // Each tuple is represented as a folly::SmallVector<uint64_t> instance
+            if (expand_coords) {
+                for (const auto &coords : tuples) {
+                    coord_array.append(Json::Value(fmt::format("{}", fmt::join(coords, ","))));
+                }
+            } else {
+                for (const auto &range : get_collapsed_coord_ranges(tuples)) {
+                    coord_array.append(range);
+                }
+            }
+
+
+            label_obj[KMER_COORDINATE_FIELD] = coord_array;
+            root["results"].append(label_obj);
+        }
+    }
+
+    return root;
+}
+
+
+std::string SeqSearchResult::to_string(const std::string delimiter,
+                                       bool suppress_unlabeled,
+                                       bool expand_coords,
+                                       const graph::AnnotatedDBG &anno_graph) const {
+    // Return the size of the result type vector using std::visit (ducktyping variant)
+    if (!std::visit([] (auto&& vec) { return vec.size(); }, result) && suppress_unlabeled) {
+        // If empty and unlabeled sequences are supressed then return empty string
+        return "";
+    }
+
+    // Get modified name if sequence has an alignment result
+    std::string mod_seq_name = sequence.name;
+
+    if (sequence.alignment.has_value()) {
+        const QuerySequence::Alignment &alignment = sequence.alignment.value();
+        mod_seq_name = fmt::format(ALIGNED_SEQ_HEADER_FORMAT, sequence.name, sequence.sequence,
+                                   alignment.score, alignment.cigar);
+    }
+
+    // Print sequence ID and name
+    std::string output = fmt::format("{}\t{}", sequence.id, mod_seq_name);
+
+    // ... with diff result output depending on the type of result being stored.
+    if (std::holds_alternative<label_vec>(result)) {
+        // Standard labels only
+        output += fmt::format("\t{}",
+                              utils::join_strings(std::get<label_vec>(result),
+                                                  delimiter));
+    } else if (std::holds_alternative<label_count_vec>(result)) {
+        // Labels with count data
+        for (const auto &[label, count] : std::get<label_count_vec>(result)) {
+            output += fmt::format("\t<{}>:{}", label, count);
+        }
+    } else if (std::holds_alternative<label_sig_vec>(result)) {
+        // Count signatures
+        for (const auto &[label, kmer_presence_mask] : std::get<label_sig_vec>(result)) {
             output += fmt::format("\t<{}>:{}:{}:{}", label,
                                   sdsl::util::cnt_one_bits(kmer_presence_mask),
                                   sdsl::util::to_string(kmer_presence_mask),
                                   anno_graph.score_kmer_presence_mask(kmer_presence_mask));
         }
-
-        output += '\n';
-
-    } else if (query_coords) {
-        auto result = anno_graph.get_kmer_coordinates(sequence,
-                                                      num_top_labels,
-                                                      discovery_fraction,
-                                                      presence_fraction);
-
-        if (!result.size() && suppress_unlabeled)
-            return "";
-
-        output += seq_name;
-
-        for (const auto &[label, tuples] : result) {
-            output += "\t<" + label + ">";
-            for (const auto &coords : tuples) {
-                output += fmt::format(":{}", fmt::join(coords, ","));
-            }
-        }
-
-        output += '\n';
-
-    } else if (count_quantiles.size()) {
-        auto result = anno_graph.get_label_count_quantiles(sequence,
-                                                           num_top_labels,
-                                                           discovery_fraction,
-                                                           presence_fraction,
-                                                           count_quantiles);
-
-        if (!result.size() && suppress_unlabeled)
-            return "";
-
-        output += seq_name;
-
-        for (const auto &[label, quantiles] : result) {
+    } else if (std::holds_alternative<label_quantile_vec>(result)) {
+        // Count quantiles
+        for (const auto &[label, quantiles] : std::get<label_quantile_vec>(result)) {
             output += fmt::format("\t<{}>:{}", label, fmt::join(quantiles, ":"));
         }
+    } else if (std::holds_alternative<label_coord_vec>(result)) {
+        // Kmer coordinates
+        for (const auto &[label, tuples] : std::get<label_coord_vec>(result)) {
+            output += "\t<" + label + ">";
 
-        output += '\n';
-
-    } else if (count_labels || with_kmer_counts) {
-        auto top_labels = anno_graph.get_top_labels(sequence,
-                                                    num_top_labels,
-                                                    discovery_fraction,
-                                                    presence_fraction,
-                                                    with_kmer_counts);
-
-        if (!top_labels.size() && suppress_unlabeled)
-            return "";
-
-        output += seq_name;
-
-        for (const auto &[label, count] : top_labels) {
-            output += fmt::format("\t<{}>:{}", label, count);
+            if (expand_coords) {
+                for (const auto &coords : tuples) {
+                    output += fmt::format(":{}", fmt::join(coords, ","));
+                }
+            } else {
+                output += fmt::format(":{}",
+                                      fmt::join(get_collapsed_coord_ranges(tuples), ":"));
+            }
         }
-
-        output += '\n';
-
-    } else {
-        auto labels_discovered = anno_graph.get_labels(sequence, discovery_fraction,
-                                                                 presence_fraction);
-
-        if (!labels_discovered.size() && suppress_unlabeled)
-            return "";
-
-        output += seq_name;
-        output += '\t';
-        output += utils::join_strings(labels_discovered, anno_labels_delimiter);
-        output += '\n';
     }
 
     return output;
+}
+
+
+SeqSearchResult QueryExecutor::execute_query(QuerySequence&& sequence,
+                                             bool count_labels,
+                                             bool print_signature,
+                                             size_t num_top_labels,
+                                             double discovery_fraction,
+                                             double presence_fraction,
+                                             const graph::AnnotatedDBG &anno_graph,
+                                             bool with_kmer_counts,
+                                             const std::vector<double> &count_quantiles,
+                                             bool query_coords) {
+    // Perform a different action depending on the type (specified by config flags)
+    SeqSearchResult::result_type result;
+
+    if (print_signature) {
+        // Get labels with presence/absence signatures
+        result = anno_graph.get_top_label_signatures(sequence.sequence,
+                                                     num_top_labels,
+                                                     discovery_fraction,
+                                                     presence_fraction);
+    } else if (query_coords) {
+        // Get labels with query coordinates
+        result = anno_graph.get_kmer_coordinates(sequence.sequence,
+                                                 num_top_labels,
+                                                 discovery_fraction,
+                                                 presence_fraction);
+    } else if (count_quantiles.size()) {
+        // Get labels with count quantiles
+        result = anno_graph.get_label_count_quantiles(sequence.sequence,
+                                                      num_top_labels,
+                                                      discovery_fraction,
+                                                      presence_fraction,
+                                                      count_quantiles);
+    } else if (count_labels || with_kmer_counts) {
+        // Get labels with label counts / kmer counts
+        result = anno_graph.get_top_labels(sequence.sequence,
+                                           num_top_labels,
+                                           discovery_fraction,
+                                           presence_fraction,
+                                           with_kmer_counts);
+    } else {
+        // Default, just get labels
+        result = anno_graph.get_labels(sequence.sequence,
+                                       discovery_fraction,
+                                       presence_fraction);
+    }
+
+    // Clear sequence if we did not align to save space
+    if (!sequence.alignment.has_value()) {
+        sequence.sequence = "";
+    }
+
+    // Create seq search instance and move sequence into it
+    return SeqSearchResult(std::move(sequence), std::move(result));
 }
 
 void call_suffix_match_sequences(const DBGSuccinct &dbg_succ,
@@ -909,7 +1134,16 @@ int query_graph(Config *config) {
     for (const auto &file : files) {
         Timer curr_timer;
 
-        executor.query_fasta(file, [](const std::string &result) { std::cout << result; });
+        // Callback, which captures the config pointer and a const reference to the anno_graph
+        // instance pointed to by our unique_ptr...
+        executor.query_fasta(file,
+                [config, &anno_graph
+                        = std::as_const(*anno_graph)](const SeqSearchResult &result) {
+            std::cout << result.to_string(config->anno_labels_delimiter,
+                                          config->suppress_unlabeled,
+                                          config->expand_coords,
+                                          anno_graph) << "\n";
+        });
         logger->trace("File '{}' was processed in {} sec, total time: {}", file,
                       curr_timer.elapsed(), timer.elapsed());
     }
@@ -917,9 +1151,20 @@ int query_graph(Config *config) {
     return 0;
 }
 
-void align_sequence(std::string &name, std::string &seq,
-                    const AnnotatedDBG &anno_graph,
-                    const align::DBGAlignerConfig &aligner_config) {
+
+/**
+ * Align a sequence to the annotated DBG before querying. Modify the sequence in place and return
+ * alignment information (score and cigar string).
+ *
+ * @param seq               reference to sequence string (which will be modified if alignment found)
+ * @param anno_graph        reference to annotated DBG we align to
+ * @param aligner_config    alignment config
+ *
+ * @return Alignment struct instance with score and cigar string
+ */
+QuerySequence::Alignment align_sequence(std::string &seq,
+                                        const AnnotatedDBG &anno_graph,
+                                        const align::DBGAlignerConfig &aligner_config) {
     const DeBruijnGraph &graph = anno_graph.get_graph();
     auto alignments = build_aligner(graph, aligner_config)->align(seq);
 
@@ -927,48 +1172,50 @@ void align_sequence(std::string &name, std::string &seq,
 
     if (alignments.size()) {
         auto &match = alignments[0];
-        // sequence for querying -- the best alignment
+        // modify sequence for querying with the best alignment
         if (match.get_offset()) {
             seq = graph.get_node_sequence(match.get_nodes()[0]).substr(0, match.get_offset())
-                    + match.get_sequence();
+                  + match.get_sequence();
         } else {
             seq = const_cast<std::string&&>(match.get_sequence());
         }
 
-        name = fmt::format(ALIGNED_SEQ_HEADER_FORMAT, name, seq,
-                           match.get_score(), match.get_cigar().to_string());
-
+        return QuerySequence::Alignment(match.get_score(), match.get_cigar().to_string());
     } else {
-        // no alignment was found
-        // the original sequence will be queried
-        name = fmt::format(ALIGNED_SEQ_HEADER_FORMAT, name, seq,
-                           0, fmt::format("{}S", seq.length()));
+        return QuerySequence::Alignment(0, fmt::format("{}S", seq.length()));
     }
 }
 
-std::string query_sequence(size_t id, std::string name, std::string seq,
-                           const AnnotatedDBG &anno_graph,
-                           const Config &config,
-                           const align::DBGAlignerConfig *aligner_config) {
-    if (aligner_config)
-        align_sequence(name, seq, anno_graph, *aligner_config);
 
-    return QueryExecutor::execute_query(fmt::format_int(id).str() + '\t' + name, seq,
-                                        config.count_labels, config.print_signature,
-                                        config.suppress_unlabeled, config.num_top_labels,
-                                        config.discovery_fraction, config.presence_fraction,
-                                        config.anno_labels_delimiter,
-                                        anno_graph, config.count_kmers, config.count_quantiles,
-                                        config.query_coords);
+SeqSearchResult query_sequence(QuerySequence&& sequence,
+                               const AnnotatedDBG &anno_graph,
+                               const Config &config,
+                               const align::DBGAlignerConfig *aligner_config) {
+    // Align sequence and modify sequence struct to store alignment results
+    if (aligner_config) {
+        sequence.alignment = align_sequence(sequence.sequence, anno_graph, *aligner_config);
+    };
+
+    // Get sequence search result by executing query
+    SeqSearchResult result = QueryExecutor::execute_query(std::move(sequence),
+            config.count_labels, config.print_signature,
+            config.num_top_labels, config.discovery_fraction,
+            config.presence_fraction, anno_graph,
+            config.count_kmers, config.count_quantiles,
+            config.query_coords);
+
+    return result;
 }
 
+
 void QueryExecutor::query_fasta(const string &file,
-                                const std::function<void(const std::string &)> &callback) {
+                                const std::function<void(const SeqSearchResult &)> &callback) {
     logger->trace("Parsing sequences from file '{}'", file);
 
     seq_io::FastaParser fasta_parser(file, config_.forward_and_reverse);
 
     if (config_.fast) {
+        // TODO: Implement batch mode for query_coords queries
         if (config_.query_coords) {
             logger->error("Querying coordinates in batch mode is not supported");
             exit(1);
@@ -979,13 +1226,18 @@ void QueryExecutor::query_fasta(const string &file,
     }
 
     // Query sequences independently
-
     size_t seq_count = 0;
 
     for (const seq_io::kseq_t &kseq : fasta_parser) {
         thread_pool_.enqueue([&](const auto&... args) {
-            callback(query_sequence(args..., anno_graph_,
-                                    config_, aligner_config_.get()));
+            // Create a QuerySequence instance and pass to query_sequence
+            QuerySequence sequence(args...);
+
+            // Callback with the SeqSearchResult
+            callback(query_sequence(std::move(sequence),
+                                    anno_graph_,
+                                    config_,
+                                    aligner_config_.get()));
         }, seq_count++, std::string(kseq.name.s), std::string(kseq.seq.s));
     }
 
@@ -995,7 +1247,7 @@ void QueryExecutor::query_fasta(const string &file,
 
 void QueryExecutor
 ::batched_query_fasta(seq_io::FastaParser &fasta_parser,
-                      const std::function<void(const std::string &)> &callback) {
+                      const std::function<void(const SeqSearchResult &)> &callback) {
     auto it = fasta_parser.begin();
     auto end = fasta_parser.end();
 
@@ -1007,33 +1259,39 @@ void QueryExecutor
         Timer batch_timer;
 
         uint64_t num_bytes_read = 0;
+
         // A generator that can be called multiple times until all sequences
-        // are called.
-        std::vector<std::pair<std::string, std::string>> seq_batch;
+        // are called
+        std::vector<QuerySequence> seq_batch;
         num_bytes_read = 0;
+
         for ( ; it != end && num_bytes_read <= batch_size; ++it) {
-            seq_batch.emplace_back(it->name.s, it->seq.s);
+            seq_batch.emplace_back(seq_count++, it->name.s, it->seq.s);
             num_bytes_read += it->seq.l;
         }
 
+        // Align sequences ahead of time on full graph if we don't have batch_align
         if (aligner_config_ && !config_.batch_align) {
             logger->trace("Aligning sequences from batch against the full graph...");
             batch_timer.reset();
 
             #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
             for (size_t i = 0; i < seq_batch.size(); ++i) {
-                align_sequence(seq_batch[i].first, seq_batch[i].second,
-                               anno_graph_, *aligner_config_);
+                // Set alignment for this seq_batch
+                seq_batch[i].alignment = align_sequence(seq_batch[i].sequence,
+                                                        anno_graph_,
+                                                        *aligner_config_);
             }
             logger->trace("Sequences alignment took {} sec", batch_timer.elapsed());
             batch_timer.reset();
         }
 
+        // Construct the query graph for this batch
         auto query_graph = construct_query_graph(
             anno_graph_,
             [&](auto callback) {
-                for (const auto &[name, seq] : seq_batch) {
-                    callback(seq);
+                for (const auto &seq : seq_batch) {
+                    callback(seq.sequence);
                 }
             },
             get_num_threads(),
@@ -1047,12 +1305,11 @@ void QueryExecutor
 
         #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
         for (size_t i = 0; i < seq_batch.size(); ++i) {
-            callback(query_sequence(seq_count + i, seq_batch[i].first, seq_batch[i].second,
-                                    *query_graph, config_,
+            callback(query_sequence(std::move(seq_batch[i]),
+                                    *query_graph,
+                                    config_,
                                     config_.batch_align ? aligner_config_.get() : NULL));
         }
-
-        seq_count += seq_batch.size();
 
         logger->trace("Batch of {} bytes from '{}' queried in {} sec", num_bytes_read,
                       fasta_parser.get_filename(), batch_timer.elapsed());

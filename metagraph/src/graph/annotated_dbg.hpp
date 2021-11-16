@@ -46,6 +46,10 @@ class AnnotatedSequenceGraph {
 
     virtual bool check_compatibility() const;
 
+    bool supports_kmer_count_queries() const;
+
+    bool supports_kmer_coord_queries() const;
+
     virtual const SequenceGraph& get_graph() const { return *graph_; }
     std::shared_ptr<const SequenceGraph> get_graph_ptr() const { return graph_; }
 
