@@ -42,28 +42,36 @@ bool DBGSuccinctCachedView::operator==(const DeBruijnGraph &other) const {
 }
 
 void DBGSuccinctCachedView
-::call_and_cache_incoming_to_target(edge_index e,
-                                    std::string &decoded_suffix,
-                                    const std::function<void(edge_index, TAlphabet)> &callback) const {
-    boss_->call_incoming_to_target(boss_->bwd(e), boss_->get_node_last_value(e),
-                                   [&](edge_index incoming_edge) {
-        TAlphabet c = get_first_value(incoming_edge);
-        decoded_suffix[0] = boss_->decode(c);
-        put_decoded_edge(incoming_edge, decoded_suffix);
-        callback(incoming_edge, c);
-    });
+::call_and_cache_outgoing_from_rev_comp(node_index node,
+                                        std::string &rev_comp_suffix,
+                                        const std::function<void(node_index, TAlphabet)> &callback) const {
+    if (edge_index e = get_rev_comp_boss_next_node(node)) {
+        boss_->call_incoming_to_target(boss_->bwd(e), boss_->get_node_last_value(e),
+                                       [&](edge_index incoming_edge) {
+            TAlphabet c = get_first_value(incoming_edge);
+            rev_comp_suffix[0] = boss_->decode(c);
+            put_decoded_edge(incoming_edge, rev_comp_suffix);
+            auto kmer_index = graph_->boss_to_kmer_index(incoming_edge);
+            if (kmer_index != npos)
+                callback(kmer_index, c);
+        });
+    }
 }
 
 void DBGSuccinctCachedView
-::call_and_cache_outgoing(edge_index e,
-                          std::string &decoded_prefix,
-                          const std::function<void(edge_index, TAlphabet)> &callback) const {
-    boss_->call_outgoing(e, [&](edge_index adjacent_edge) {
-        TAlphabet c = boss_->get_W(adjacent_edge) % boss_->alph_size;
-        decoded_prefix.back() = boss_->decode(c);
-        put_decoded_edge(adjacent_edge, decoded_prefix);
-        callback(adjacent_edge, c);
-    });
+::call_and_cache_incoming_to_rev_comp(node_index node,
+                                      std::string &rev_comp_prefix,
+                                      const std::function<void(node_index, TAlphabet)> &callback) const {
+    if (edge_index e = get_rev_comp_boss_prev_node(node)) {
+        boss_->call_outgoing(e, [&](edge_index adjacent_edge) {
+            TAlphabet c = boss_->get_W(adjacent_edge) % boss_->alph_size;
+            rev_comp_prefix.back() = boss_->decode(c);
+            put_decoded_edge(adjacent_edge, rev_comp_prefix);
+            auto kmer_index = graph_->boss_to_kmer_index(adjacent_edge);
+            if (kmer_index != npos)
+                callback(kmer_index, c);
+        });
+    }
 }
 
 auto DBGSuccinctCachedView

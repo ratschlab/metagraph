@@ -33,16 +33,13 @@ class DBGSuccinctCachedView : public DBGWrapper<DBGSuccinct> {
     // get the encoding of the first character of this node's sequence
     virtual TAlphabet get_first_value(edge_index i) const = 0;
 
-    edge_index get_rev_comp_boss_next_node(node_index node) const;
-    edge_index get_rev_comp_boss_prev_node(node_index node) const;
+    void call_and_cache_outgoing_from_rev_comp(node_index node,
+                                               std::string &rev_comp_suffix,
+                                               const std::function<void(node_index, TAlphabet)> &callback) const;
 
-    void call_and_cache_incoming_to_target(edge_index e,
-                                           std::string &decoded_suffix,
-                                           const std::function<void(edge_index, TAlphabet)> &callback) const;
-
-    void call_and_cache_outgoing(edge_index e,
-                                 std::string &decoded_prefix,
-                                 const std::function<void(edge_index, TAlphabet)> &callback) const;
+    void call_and_cache_incoming_to_rev_comp(node_index node,
+                                             std::string &rev_comp_prefix,
+                                             const std::function<void(node_index, TAlphabet)> &callback) const;
 
 
     /**
@@ -116,6 +113,9 @@ class DBGSuccinctCachedView : public DBGWrapper<DBGSuccinct> {
 
     virtual TAlphabet complement(TAlphabet c) const = 0;
     virtual std::string decode(const std::vector<TAlphabet> &v) const = 0;
+
+    edge_index get_rev_comp_boss_next_node(node_index node) const;
+    edge_index get_rev_comp_boss_prev_node(node_index node) const;
 };
 
 
