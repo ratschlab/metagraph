@@ -42,8 +42,8 @@ bool DBGSuccinctCachedView::operator==(const DeBruijnGraph &other) const {
 }
 
 void DBGSuccinctCachedView
-::call_and_cache_outgoing_from_rev_comp(node_index node,
-                                        const std::function<void(node_index, TAlphabet)> &callback) const {
+::call_outgoing_from_rev_comp(node_index node,
+                              const std::function<void(node_index, TAlphabet)> &callback) const {
     if (edge_index e = get_rev_comp_boss_next_node(node)) {
         //        rshift    rc
         // ATGGCT -> TGGCT* -> *AGCCA
@@ -62,8 +62,8 @@ void DBGSuccinctCachedView
 }
 
 void DBGSuccinctCachedView
-::call_and_cache_incoming_to_rev_comp(node_index node,
-                                      const std::function<void(node_index, TAlphabet)> &callback) const {
+::call_incoming_to_rev_comp(node_index node,
+                            const std::function<void(node_index, TAlphabet)> &callback) const {
     if (edge_index e = get_rev_comp_boss_prev_node(node)) {
         //        lshift    rc
         // AGCCAT -> *AGCCA -> TGGCT*

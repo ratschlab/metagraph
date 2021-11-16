@@ -206,7 +206,7 @@ void CanonicalDBG::append_next_rc_nodes(node_index node,
     };
 
     if (const auto *cached = dynamic_cast<const DBGSuccinctCachedView*>(graph_.get())) {
-        cached->call_and_cache_outgoing_from_rev_comp(node, next_callback_succ);
+        cached->call_outgoing_from_rev_comp(node, next_callback_succ);
         return;
     }
 
@@ -333,7 +333,7 @@ void CanonicalDBG::append_prev_rc_nodes(node_index node,
     };
 
     if (const auto *cached = dynamic_cast<const DBGSuccinctCachedView*>(graph_.get())) {
-        cached->call_and_cache_incoming_to_rev_comp(node, prev_callback_succ);
+        cached->call_incoming_to_rev_comp(node, prev_callback_succ);
         return;
     }
 
