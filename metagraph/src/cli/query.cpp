@@ -203,7 +203,7 @@ Json::Value SeqSearchResult::to_json(bool count_kmers,
             Json::Value label_obj = get_label_as_json(label);
 
             std::string count_key = (count_kmers) ? KMER_COUNT_FIELD : LABEL_COUNT_FIELD;
-            label_obj[count_key] = Json::Value((long long) count);
+            label_obj[count_key] = Json::Value((Json::Int64) count);
 
             root["results"].append(label_obj);
         }
@@ -228,7 +228,7 @@ Json::Value SeqSearchResult::to_json(bool count_kmers,
             Json::Value quantile_array = Json::arrayValue;
 
             for (size_t quantile : quantiles) {
-                quantile_array.append(Json::Value((long long) quantile));
+                quantile_array.append(Json::Value((Json::Int64) quantile));
             }
 
             label_obj[KMER_COUNT_QUANTILE_FIELD] = quantile_array;
