@@ -298,23 +298,6 @@ void DBGSuccinctCachedViewImpl<KmerType>
 }
 
 template <typename KmerType>
-auto DBGSuccinctCachedViewImpl<KmerType>
-::traverse(node_index node, char next_char) const -> node_index {
-    assert(node > 0 && node <= num_nodes());
-
-    if (node_index next = graph_->traverse(node, next_char)) {
-        edge_index i = graph_->kmer_to_boss_index(node);
-        if (auto kmer = decoded_cache_.TryGet(i))
-            update_node_next(*kmer, graph_->kmer_to_boss_index(next), next_char);
-
-        return next;
-
-    } else {
-        return npos;
-    }
-}
-
-template <typename KmerType>
 void DBGSuccinctCachedViewImpl<KmerType>
 ::call_incoming_kmers(node_index node,
                       const IncomingEdgeCallback &callback) const {
@@ -437,22 +420,6 @@ void DBGSuccinctCachedView
     graph_->adjacent_incoming_nodes(node, callback);
 }
 
-auto DBGSuccinctCachedView
-::traverse_back(node_index node, char prev_char) const -> node_index {
-    // TODO: implemented a cached version of this later if needed
-    return graph_->traverse_back(node, prev_char);
-}
-
-template <typename KmerType>
-void DBGSuccinctCachedViewImpl<KmerType>
-::traverse(node_index start,
-           const char *begin,
-           const char *end,
-           const std::function<void(node_index)> &callback,
-           const std::function<bool()> &terminate) const {
-    // TODO: implement a cached version if needed later
-    graph_->traverse(start, begin, end, callback, terminate);
-}
 
 template class DBGSuccinctCachedViewImpl<kmer::KmerExtractorBOSS::Kmer64>;
 template class DBGSuccinctCachedViewImpl<kmer::KmerExtractorBOSS::Kmer128>;

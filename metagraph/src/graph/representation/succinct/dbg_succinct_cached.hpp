@@ -85,7 +85,16 @@ class DBGSuccinctCachedView : public DBGWrapper<DBGSuccinct> {
     adjacent_incoming_nodes(node_index node,
                             const std::function<void(node_index)> &callback) const override final;
 
+    // TODO: these can be overloaded to cache values, but this functionality is not
+    //       needed now.
+    virtual node_index traverse(node_index node, char next_char) const override final;
     virtual node_index traverse_back(node_index node, char prev_char) const override final;
+    virtual void traverse(node_index start,
+                          const char *begin,
+                          const char *end,
+                          const std::function<void(node_index)> &callback,
+                          const std::function<bool()> &terminate
+                              = [](){ return false; }) const override final;
 
   protected:
     const boss::BOSS *boss_;
@@ -111,14 +120,6 @@ class DBGSuccinctCachedViewImpl : public DBGSuccinctCachedView {
      * Methods from DeBruijnGraph
      */
     virtual std::string get_node_sequence(node_index node) const override final;
-
-    virtual node_index traverse(node_index node, char next_char) const override final;
-    virtual void traverse(node_index start,
-                          const char *begin,
-                          const char *end,
-                          const std::function<void(node_index)> &callback,
-                          const std::function<bool()> &terminate
-                              = [](){ return false; }) const override final;
 
     virtual void call_outgoing_kmers(node_index node,
                                      const OutgoingEdgeCallback &callback) const override final;
