@@ -41,6 +41,31 @@ bool DBGSuccinctCachedView::operator==(const DeBruijnGraph &other) const {
     return false;
 }
 
+void DBGSuccinctCachedView
+::call_and_cache_incoming_to_target(edge_index e,
+                                    std::string &decoded_suffix,
+                                    const std::function<void(edge_index, TAlphabet)> &callback) const {
+    boss_->call_incoming_to_target(boss_->bwd(e), boss_->get_node_last_value(e),
+                                   [&](edge_index incoming_edge) {
+        TAlphabet c = get_first_value(incoming_edge);
+        decoded_suffix[0] = boss_->decode(c);
+        put_decoded_edge(incoming_edge, decoded_suffix);
+        callback(incoming_edge, c);
+    });
+}
+
+void DBGSuccinctCachedView
+::call_and_cache_outgoing(edge_index e,
+                          std::string &decoded_prefix,
+                          const std::function<void(edge_index, TAlphabet)> &callback) const {
+    boss_->call_outgoing(e, [&](edge_index adjacent_edge) {
+        TAlphabet c = boss_->get_W(adjacent_edge) % boss_->alph_size;
+        decoded_prefix.back() = boss_->decode(c);
+        put_decoded_edge(adjacent_edge, decoded_prefix);
+        callback(adjacent_edge, c);
+    });
+}
+
 auto DBGSuccinctCachedView
 ::get_rev_comp_boss_next_node(node_index node) const -> edge_index {
     // 78% effective
@@ -257,13 +282,13 @@ DBGSuccinctCachedViewImpl<KmerType>
         decoded_cache_(cache_size_) {}
 
 template <typename KmerType>
-void DBGSuccinctCachedViewImpl<KmerType>::put_decoded_node(node_index node,
+void DBGSuccinctCachedViewImpl<KmerType>::put_decoded_edge(edge_index edge,
                                                            std::string_view seq) const {
-    assert(node > 0 && node <= num_nodes());
+    assert(edge > 0 && edge <= boss_->num_edges());
     assert(seq.size() == graph_->get_k());
-    assert(graph_->get_node_sequence(node) == seq);
+    assert(graph_->get_node_sequence(graph_->boss_to_kmer_index(edge)) == seq);
 
-    put_kmer(graph_->kmer_to_boss_index(node), CacheValue{ to_kmer(seq), std::nullopt });
+    put_kmer(edge, CacheValue{ to_kmer(seq), std::nullopt });
 }
 
 template <typename KmerType>

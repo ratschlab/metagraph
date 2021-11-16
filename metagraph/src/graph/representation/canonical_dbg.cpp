@@ -113,7 +113,7 @@ void CanonicalDBG
             [&](boss::BOSS::edge_index edge) {
                 path.push_back(dbg_succ->boss_to_kmer_index(edge));
                 if (cached && path.back())
-                    cached->put_decoded_node(path.back(), std::string_view(jt, get_k()));
+                    cached->put_decoded_edge(edge, std::string_view(jt, get_k()));
 
                 ++it;
                 ++jt;
@@ -186,24 +186,16 @@ void CanonicalDBG::append_next_rc_nodes(node_index node,
     // for each n, check for nAGCCA. If found, define and store the index for
     // TGGCTrc(n) as index(nAGCCA) + offset_
     if (const auto *dbg_succ = get_dbg_succ(*graph_)) {
-        const auto *cached = dynamic_cast<const DBGSuccinctCachedView*>(graph_.get());
         const auto &boss = dbg_succ->get_boss();
 
-        auto next_callback = [&](node_index next, uint64_t /* match length */) {
-            auto edge = dbg_succ->kmer_to_boss_index(next);
-            boss::BOSS::TAlphabet c = cached
-                ? cached->get_first_value(edge)
-                : boss.get_minus_k_value(edge, get_k() - 2).first;
+        auto next_callback = [&](node_index next, boss::BOSS::TAlphabet c) {
             if (c == boss::BOSS::kSentinelCode)
                 return;
 
-            rev_seq[0] = boss.decode(c);
             c = kmer::KmerExtractorBOSS::complement(c);
 
             if (children[c] == npos) {
                 children[c] = next + offset_;
-                if (cached)
-                    cached->put_decoded_node(next, rev_seq);
 
                 return;
             }
@@ -220,20 +212,28 @@ void CanonicalDBG::append_next_rc_nodes(node_index node,
             is_palindrome_cache_.Put(next, true);
         };
 
-        if (cached) {
+        if (const auto *cached = dynamic_cast<const DBGSuccinctCachedView*>(graph_.get())) {
             if (auto e = cached->get_rev_comp_boss_next_node(node)) {
-                boss.call_incoming_to_target(boss.bwd(e), boss.get_node_last_value(e),
-                    [&](boss::BOSS::edge_index incoming_edge_idx) {
+                cached->call_and_cache_incoming_to_target(
+                    e, rev_seq,
+                    [&](boss::BOSS::edge_index incoming_edge_idx, boss::BOSS::TAlphabet c) {
                         auto kmer_index = dbg_succ->boss_to_kmer_index(incoming_edge_idx);
                         if (kmer_index != npos)
-                            next_callback(kmer_index, get_k() - 1);
+                            next_callback(kmer_index, c);
                     }
                 );
             }
         } else {
             dbg_succ->call_nodes_with_suffix_matching_longest_prefix(
                 std::string_view(&rev_seq[1], get_k() - 1),
-                next_callback, get_k() - 1
+                [&](node_index next, uint64_t /* match_length */) {
+                    next_callback(
+                        next,
+                        boss.get_minus_k_value(dbg_succ->kmer_to_boss_index(next),
+                                               get_k() - 2).first
+                    );
+                },
+                get_k() - 1
             );
         }
 
@@ -337,37 +337,43 @@ void CanonicalDBG::append_prev_rc_nodes(node_index node,
         }
 
         if (edge) {
-            boss.call_outgoing(edge, [&](auto adjacent_edge) {
-                node_index prev = dbg_succ->boss_to_kmer_index(adjacent_edge);
-                if (prev) {
-                    boss::BOSS::TAlphabet c = boss.get_W(adjacent_edge) % boss.alph_size;
-                    if (c == boss::BOSS::kSentinelCode)
-                        return;
+            auto prev_callback = [&](node_index prev, boss::BOSS::TAlphabet c) {
+                if (prev == npos || c == boss::BOSS::kSentinelCode)
+                    return;
 
-                    rev_seq.back() = boss.decode(c);
-                    c = kmer::KmerExtractorBOSS::complement(c);
+                c = kmer::KmerExtractorBOSS::complement(c);
 
-                    if (parents[c] == npos) {
-                        parents[c] = prev + offset_;
-                        if (cached)
-                            cached->put_decoded_node(prev, rev_seq);
+                if (parents[c] == npos) {
+                    parents[c] = prev + offset_;
 
-                        return;
-                    }
-
-                    if (k_odd_) {
-                        logger->error(
-                            "Primary graph contains both forward and reverse complement: {} {} -> {} {}\t{} {}",
-                            node, graph_->get_node_sequence(node),
-                            parents[c], graph_->get_node_sequence(parents[c]),
-                            prev, graph_->get_node_sequence(prev)
-                        );
-                        exit(1);
-                    }
-
-                    is_palindrome_cache_.Put(prev, true);
+                    return;
                 }
-            });
+
+                if (k_odd_) {
+                    logger->error(
+                        "Primary graph contains both forward and reverse complement: {} {} -> {} {}\t{} {}",
+                        node, graph_->get_node_sequence(node),
+                        parents[c], graph_->get_node_sequence(parents[c]),
+                        prev, graph_->get_node_sequence(prev)
+                    );
+                    exit(1);
+                }
+
+                is_palindrome_cache_.Put(prev, true);
+            };
+
+            if (cached) {
+                cached->call_and_cache_outgoing(
+                    edge, rev_seq, [&](boss::BOSS::edge_index adjacent_edge,
+                                       boss::BOSS::TAlphabet c) {
+                    prev_callback(dbg_succ->boss_to_kmer_index(adjacent_edge), c);
+                });
+            } else {
+                boss.call_outgoing(edge, [&](boss::BOSS::edge_index adjacent_edge) {
+                    prev_callback(dbg_succ->boss_to_kmer_index(adjacent_edge),
+                                  boss.get_W(adjacent_edge) % boss.alph_size);
+                });
+            }
         }
 
     } else {

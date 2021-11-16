@@ -26,14 +26,23 @@ class DBGSuccinctCachedView : public DBGWrapper<DBGSuccinct> {
 
     virtual ~DBGSuccinctCachedView() {}
 
-    // if the sequence of a node has been constructed externally, cache the result
-    virtual void put_decoded_node(node_index node, std::string_view seq) const = 0;
+    // if the sequence of a BOSS edge and edge label has been constructed externally,
+    // cache the result
+    virtual void put_decoded_edge(edge_index edge, std::string_view seq) const = 0;
 
     // get the encoding of the first character of this node's sequence
     virtual TAlphabet get_first_value(edge_index i) const = 0;
 
     edge_index get_rev_comp_boss_next_node(node_index node) const;
     edge_index get_rev_comp_boss_prev_node(node_index node) const;
+
+    void call_and_cache_incoming_to_target(edge_index e,
+                                           std::string &decoded_suffix,
+                                           const std::function<void(edge_index, TAlphabet)> &callback) const;
+
+    void call_and_cache_outgoing(edge_index e,
+                                 std::string &decoded_prefix,
+                                 const std::function<void(edge_index, TAlphabet)> &callback) const;
 
 
     /**
@@ -135,7 +144,7 @@ class DBGSuccinctCachedViewImpl : public DBGSuccinctCachedView {
     /**
      * Methods from DBGSuccinctCachedView
      */
-    virtual void put_decoded_node(node_index node, std::string_view seq) const override final;
+    virtual void put_decoded_edge(edge_index edge, std::string_view seq) const override final;
 
     virtual TAlphabet get_first_value(edge_index i) const override final {
         assert(i);
