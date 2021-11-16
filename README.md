@@ -153,11 +153,11 @@ Requires `M*V/8 + Size(BRWT)` bytes of RAM, where `M` is the number of rows in t
 ./metagraph assemble -v <GRAPH_DIR>/graph.dbg \
                         --unitigs \
                         -a <GRAPH_DIR>/annotation.column.annodbg \
-                        --label-mask-in LABEL_1 \
-                        --label-mask-in LABEL_2 \
-                        --label-mask-out LABEL_3 \
+                        --diff-assembly-rules diff_assembly_rules.json \
                         -o diff_assembled.fa
 ```
+
+See [`metagraph/tests/data/example.diff.json`](metagraph/tests/data/example.diff.json) and [`metagraph/tests/data/example_simple.diff.json`](metagraph/tests/data/example_simple.diff.json) for sample files.
 
 ### Get stats
 Stats for graph

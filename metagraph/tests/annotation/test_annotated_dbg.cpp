@@ -4,12 +4,20 @@
 #include "gtest/gtest.h"
 
 #include "../test_helpers.hpp"
-#include "test_annotated_dbg_helpers.hpp"
 
 #include "common/threads/threading.hpp"
 #include "common/vectors/bit_vector_dyn.hpp"
 #include "common/vectors/vector_algorithm.hpp"
+#include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
+#include "graph/representation/bitmap/dbg_bitmap.hpp"
+#include "graph/representation/hash/dbg_hash_string.hpp"
+#include "graph/representation/hash/dbg_hash_ordered.hpp"
+#include "graph/representation/hash/dbg_hash_fast.hpp"
+
+#define protected public
+#define private public
 #include "annotation/annotation_converters.hpp"
+#include "test_annotated_dbg_helpers.hpp"
 
 
 namespace {
@@ -1874,7 +1882,7 @@ TYPED_TEST(AnnotatedDBGNoNTest, get_top_labels) {
 #endif
 
 TEST(AnnotatedDBG, score_kmer_presence_mask) {
-    auto anno_graph = build_anno_graph<DBGSuccinct>(31, {}, {});
+    auto anno_graph = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(31, {}, {});
     std::vector<std::pair<sdsl::bit_vector, int32_t>> results {
        { sdsl::bit_vector(), 0},
        { sdsl::bit_vector({
