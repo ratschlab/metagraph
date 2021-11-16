@@ -12,8 +12,12 @@ namespace graph {
 
 class DBGSuccinct;
 
-// A wrapper which caches computed node sequences for DBGSuccinct graphs.
-// This allows for faster get_node_sequence and call_incoming_kmers calls.
+/**
+ * A wrapper which caches computed node sequences for DBGSuccinct graphs.
+ * This allows for faster get_node_sequence and call_incoming_kmers calls.
+ * Traversal operations and map_to_nodes_sequentially are overridden to fill
+ * the cache alongside their normal functions.
+ */
 class DBGSuccinctCachedView : public DBGWrapper<DBGSuccinct> {
   public:
     typedef boss::BOSS::edge_index edge_index;
@@ -30,11 +34,12 @@ class DBGSuccinctCachedView : public DBGWrapper<DBGSuccinct> {
     edge_index get_rev_comp_boss_next_node(node_index node) const;
     edge_index get_rev_comp_boss_prev_node(node_index node) const;
 
-    virtual bool operator==(const DeBruijnGraph &other) const override final;
 
     /**
-     * Delegated methods
+     * Methods from DeBruijnGraph
      */
+    virtual bool operator==(const DeBruijnGraph &other) const override final;
+
     #define DELEGATE_METHOD(RETURN_TYPE, METHOD, ARG_TYPE, ARG_NAME) \
     virtual RETURN_TYPE METHOD(ARG_TYPE ARG_NAME) const override final;
 
@@ -81,6 +86,14 @@ class DBGSuccinctCachedView : public DBGWrapper<DBGSuccinct> {
 
     virtual node_index traverse_back(node_index node, char prev_char) const override final;
 
+    // TODO: patch this override to also cache values. For now, it simply delegates
+    virtual void traverse(node_index start,
+                          const char *begin,
+                          const char *end,
+                          const std::function<void(node_index)> &callback,
+                          const std::function<bool()> &terminate
+                              = [](){ return false; }) const override final;
+
   protected:
     const boss::BOSS *boss_;
     size_t cache_size_;
@@ -88,7 +101,7 @@ class DBGSuccinctCachedView : public DBGWrapper<DBGSuccinct> {
     mutable common::LRUCache<node_index, std::pair<edge_index, size_t>> rev_comp_next_cache_;
 
     template <typename Graph>
-    explicit DBGSuccinctCachedView(Graph&& graph, size_t cache_size = 1024);
+    explicit DBGSuccinctCachedView(Graph&& graph, size_t cache_size);
 
     virtual TAlphabet complement(TAlphabet c) const = 0;
     virtual std::string decode(const std::vector<TAlphabet> &v) const = 0;
@@ -97,21 +110,15 @@ class DBGSuccinctCachedView : public DBGWrapper<DBGSuccinct> {
 
 template <typename KmerType>
 class DBGSuccinctCachedViewImpl : public DBGSuccinctCachedView {
-    typedef kmer::KmerExtractorBOSS KmerExtractor;
-
-    // KmerType is the encoded k-mer
-    // edge_index is the boss node whose last character is the first character of the k-mer
-    typedef std::pair<KmerType, std::optional<edge_index>> CacheValue;
-
   public:
     template <typename Graph>
     DBGSuccinctCachedViewImpl(Graph&& graph, size_t cache_size);
 
-    virtual void put_decoded_node(node_index node, std::string_view seq) const override final;
-
+    /**
+     * Methods from DeBruijnGraph
+     */
     virtual std::string get_node_sequence(node_index node) const override final;
-
-    virtual TAlphabet get_first_value(edge_index i) const override final;
+    virtual node_index traverse(node_index node, char next_char) const override final;
 
     virtual void call_outgoing_kmers(node_index node,
                                      const OutgoingEdgeCallback &callback) const override final;
@@ -119,25 +126,48 @@ class DBGSuccinctCachedViewImpl : public DBGSuccinctCachedView {
     virtual void call_incoming_kmers(node_index node,
                                      const IncomingEdgeCallback &callback) const override final;
 
-    virtual node_index traverse(node_index node, char next_char) const override final;
-
-    virtual void traverse(node_index start,
-                          const char *begin,
-                          const char *end,
-                          const std::function<void(node_index)> &callback,
-                          const std::function<bool()> &terminate
-                              = [](){ return false; }) const override final;
-
     virtual void map_to_nodes_sequentially(std::string_view sequence,
                                            const std::function<void(node_index)> &callback,
                                            const std::function<bool()> &terminate
                                                = [](){ return false; }) const override final;
 
+    /**
+     * Methods from DBGSuccinctCachedView
+     */
+    virtual void put_decoded_node(node_index node, std::string_view seq) const override final;
+
+    virtual TAlphabet get_first_value(edge_index i) const override final {
+        assert(i);
+
+        // Take k - 1 traversal steps to construct the node sequence. This way,
+        // the last node visited and its parent can be cached for subsequence calls.
+        auto kmer_pair = get_kmer_pair(i, true);
+        assert(kmer_pair.second);
+
+        TAlphabet c = kmer_pair.first[1];
+
+        edge_index bwd_i = boss_->bwd(i);
+        auto fetch_bwd = decoded_cache_.TryGet(bwd_i);
+        if (!fetch_bwd) {
+            kmer_pair.second = boss_->bwd(*kmer_pair.second);
+            kmer_pair.first.to_prev(get_k(), boss_->get_node_last_value(*kmer_pair.second));
+            put_kmer(bwd_i, std::move(kmer_pair));
+        }
+
+        return c;
+    }
+
   private:
+    typedef kmer::KmerExtractorBOSS KmerExtractor;
+
+    // KmerType is the encoded k-mer
+    // edge_index is the boss node whose last character is the first character of the k-mer
+    typedef std::pair<KmerType, std::optional<edge_index>> CacheValue;
+
     mutable common::LRUCache<edge_index, CacheValue> decoded_cache_;
 
     // cache a computed result
-    void put_kmer(edge_index key, CacheValue value) const {
+    inline void put_kmer(edge_index key, CacheValue value) const {
         assert(key);
         assert(!value.second || value.first[1] == boss_->get_node_last_value(*value.second));
         assert(value.first[1] == boss_->get_minus_k_value(key, get_k() - 2).first);
@@ -146,16 +176,13 @@ class DBGSuccinctCachedViewImpl : public DBGSuccinctCachedView {
         decoded_cache_.Put(key, std::move(value));
     }
 
-    CacheValue get_kmer_pair(edge_index i, bool check_second = false) const {
+    inline CacheValue get_kmer_pair(edge_index i, bool check_second = false) const {
         assert(i);
         std::optional<CacheValue> kmer = decoded_cache_.TryGet(i);
 
-        // if the result of bwd^{k - 1}(i) is desired and not cached, then
-        // clear the k-mer so it can be recomputed below
-        if (check_second && kmer && !kmer->second)
-            kmer = std::nullopt;
-
-        if (!kmer) {
+        // if the kmer is not cached, or if the result of bwd^{k - 1}(i) is desired
+        // and not cached, then recompute both
+        if (!kmer || (check_second && !kmer->second)) {
             // get the node sequence and possibly the last node accessed while computing
             auto [seq, last_traversed_node, steps_remaining]
                 = boss_->get_node_seq_with_last_traversed_node(i);
@@ -182,7 +209,7 @@ class DBGSuccinctCachedViewImpl : public DBGSuccinctCachedView {
         return *kmer;
     }
 
-    void update_node_next(CacheValue kmer, edge_index next, char c) const {
+    inline void update_node_next(CacheValue kmer, edge_index next, char c) const {
         assert(c != boss::BOSS::kSentinel);
 
         // update the k-mer with the next character

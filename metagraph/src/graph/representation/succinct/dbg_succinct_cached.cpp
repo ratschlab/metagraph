@@ -85,6 +85,14 @@ auto DBGSuccinctCachedView
     return graph_->traverse_back(node, prev_char);
 }
 
+void DBGSuccinctCachedView::traverse(node_index start,
+                                     const char *begin,
+                                     const char *end,
+                                     const std::function<void(node_index)> &callback,
+                                     const std::function<bool()> &terminate) const {
+    graph_->traverse(start, begin, end, callback, terminate);
+}
+
 bool DBGSuccinctCachedView::operator==(const DeBruijnGraph &other) const {
     if (get_k() != other.get_k()
             || num_nodes() != other.num_nodes()
@@ -343,29 +351,6 @@ std::string DBGSuccinctCachedViewImpl<KmerType>::get_node_sequence(node_index no
 }
 
 template <typename KmerType>
-auto DBGSuccinctCachedViewImpl<KmerType>
-::get_first_value(edge_index i) const -> TAlphabet {
-    assert(i);
-
-    // Take k - 1 traversal steps to construct the node sequence. This way,
-    // the last node visited and its parent can be cached for subsequence calls.
-    auto kmer_pair = get_kmer_pair(i, true);
-    assert(kmer_pair.second);
-
-    TAlphabet c = kmer_pair.first[1];
-
-    edge_index bwd_i = boss_->bwd(i);
-    auto fetch_bwd = decoded_cache_.TryGet(bwd_i);
-    if (!fetch_bwd) {
-        kmer_pair.second = boss_->bwd(*kmer_pair.second);
-        kmer_pair.first.to_prev(get_k(), boss_->get_node_last_value(*kmer_pair.second));
-        put_kmer(bwd_i, std::move(kmer_pair));
-    }
-
-    return c;
-}
-
-template <typename KmerType>
 void DBGSuccinctCachedViewImpl<KmerType>
 ::call_outgoing_kmers(node_index node,
                       const OutgoingEdgeCallback &callback) const {
@@ -398,16 +383,6 @@ auto DBGSuccinctCachedViewImpl<KmerType>
     } else {
         return npos;
     }
-}
-
-template <typename KmerType>
-void DBGSuccinctCachedViewImpl<KmerType>
-::traverse(node_index start,
-           const char *begin,
-           const char *end,
-           const std::function<void(node_index)> &callback,
-           const std::function<bool()> &terminate) const {
-    graph_->traverse(start, begin, end, callback, terminate);
 }
 
 template <typename KmerType>
