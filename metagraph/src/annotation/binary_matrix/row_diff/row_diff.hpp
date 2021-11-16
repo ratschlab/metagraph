@@ -125,12 +125,18 @@ template <class BaseMatrix>
 std::vector<BinaryMatrix::Row> RowDiff<BaseMatrix>::get_column(Column column) const {
     assert(graph_ && "graph must be loaded");
     assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
-    assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());
 
-    // TODO: implement a more efficient algorithm
+    const graph::boss::BOSS &boss = graph_->get_boss();
+    assert(!fork_succ_.size() || fork_succ_.size() == boss.get_last().size());
+
     std::vector<Row> result;
+    // TODO: implement a more efficient algorithm
     for (Row row = 0; row < num_rows(); ++row) {
-        if (get(row, column))
+        auto edge = graph_->kmer_to_boss_index(
+            graph::AnnotatedSequenceGraph::anno_to_graph_index(row)
+        );
+
+        if (boss.get_W(edge) && get(row, column))
             result.push_back(row);
     }
     return result;

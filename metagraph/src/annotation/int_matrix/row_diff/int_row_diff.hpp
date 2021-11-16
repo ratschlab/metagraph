@@ -99,12 +99,18 @@ template <class BaseMatrix>
 std::vector<IntMatrix::Row> IntRowDiff<BaseMatrix>::get_column(Column j) const {
     assert(graph_ && "graph must be loaded");
     assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
-    assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());
+
+    const graph::boss::BOSS &boss = graph_->get_boss();
+    assert(!fork_succ_.size() || fork_succ_.size() == boss.get_last().size());
 
     // TODO: implement a more efficient algorithm
     std::vector<Row> result;
     for (Row i = 0; i < num_rows(); ++i) {
-        if (get(i, j))
+        auto edge = graph_->kmer_to_boss_index(
+            graph::AnnotatedSequenceGraph::anno_to_graph_index(i)
+        );
+
+        if (boss.get_W(edge) && get(i, j))
             result.push_back(i);
     }
     return result;

@@ -1,0 +1,22 @@
+{
+    "groups": [
+        {
+            "experiments": [
+                {
+                    "__comment__": [
+                        "This is an example of the k-mer-based mode.",
+                        "A k-mer is an in-k-mer if it has at least in_min_fraction",
+                        "(default value 1.0) in-labels.",
+                        "A k-mer is an out-k-mer if it has more than out_max_fraction",
+                        "(default value 0.0) out-labels.",
+                    ],
+                    "name": "metasub_by_kmer",
+                    "in_min_fraction": 1.0,
+                    "out_max_fraction": 0.1,
+                    "in": ["kl_sample", "zh_sample"],
+                    "out": []
+                },
+            ]
+        },
+    ]
+}
