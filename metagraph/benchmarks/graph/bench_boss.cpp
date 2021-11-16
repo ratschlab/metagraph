@@ -3,7 +3,6 @@
 #include <benchmark/benchmark.h>
 
 #include "graph/representation/succinct/dbg_succinct.hpp"
-#include "graph/representation/succinct/dbg_succinct_cached.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 
 

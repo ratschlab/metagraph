@@ -8,8 +8,6 @@
 #include <lru_cache_policy.hpp>
 
 #include "graph/representation/base/dbg_wrapper.hpp"
-#include "graph/representation/succinct/dbg_succinct.hpp"
-#include "common/logger.hpp"
 
 namespace mtg {
 namespace graph {

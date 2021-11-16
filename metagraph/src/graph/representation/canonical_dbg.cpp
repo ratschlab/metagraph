@@ -1,8 +1,9 @@
 #include "canonical_dbg.hpp"
 
-#include "graph/representation/succinct/dbg_succinct_cached.hpp"
+#include "graph/representation/succinct/dbg_succinct.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 #include "kmer/kmer_extractor.hpp"
+#include "common/logger.hpp"
 
 
 namespace mtg {
