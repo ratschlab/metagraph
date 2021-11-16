@@ -277,8 +277,8 @@ class BOSS {
     /**
      * Given an edge index i, this function returns the k-mer sequence of its
      * source node, and the node whose last character corresponds to the first
-     * character of the sequence. If force_get_end_node is false, then the last
-     * traversed node will only be returned if it is computed.
+     * character of the sequence. If force_get_end_node is false and the graph
+     * is indexed, then the node will not be computed and 0 will be returned.
      */
     std::pair<std::vector<TAlphabet>, edge_index>
     get_node_seq_with_end_node(edge_index i, bool force_get_end_node = false) const;
@@ -570,12 +570,11 @@ class BOSS {
     /**
      * Given an edge index i, this function returns the k-mer sequence of its
      * source node, and the node whose last character corresponds to the first
-     * character of the sequence. If the graph is suffix indexed and the third
-     * returned value is true, then the returned node is the last node visited after
-     * k - indexed_suffix_length_ bwd steps.
+     * character of the sequence. If the graph is suffix indexed, then the
+     * returned node is the last node visited after k - indexed_suffix_length_ bwd steps.
      */
-    std::tuple<std::vector<TAlphabet>, edge_index, bool>
-    get_node_seq_with_end_node_indexed(edge_index i) const;
+    std::pair<std::vector<TAlphabet>, edge_index>
+    get_node_seq_with_last_traversed_node(edge_index i) const;
 
     /**
      * Given a (k+1)-mer, this function returns the index

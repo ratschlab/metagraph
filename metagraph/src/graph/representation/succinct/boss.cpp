@@ -894,11 +894,11 @@ bool BOSS::compare_node_suffix(edge_index first, const TAlphabet *second) const 
 /**
  * Given an edge index i, this function returns the k-mer sequence of its
  * source node, and the node whose last character corresponds to the first
- * character of the sequence. If the graph is suffix indexed, then the returned
- * node is the last node visited after k - indexed_suffix_length_ bwd steps.
+ * character of the sequence. If the graph is suffix indexed, then the
+ * returned node is the last node visited after k - indexed_suffix_length_ bwd steps.
  */
-std::tuple<std::vector<TAlphabet>, edge_index, bool> BOSS
-::get_node_seq_with_end_node_indexed(edge_index x) const {
+std::pair<std::vector<TAlphabet>, edge_index> BOSS
+::get_node_seq_with_last_traversed_node(edge_index x) const {
     CHECK_INDEX(x);
 
     std::vector<TAlphabet> ret(k_);
@@ -927,7 +927,7 @@ std::tuple<std::vector<TAlphabet>, edge_index, bool> BOSS
                 ret[i] = index - next_index * (alph_size - 1) + 1;
                 index = next_index;
             }
-            return std::make_tuple(std::move(ret), x, true);
+            return std::make_pair(std::move(ret), x);
         }
     }
 
@@ -940,7 +940,7 @@ std::tuple<std::vector<TAlphabet>, edge_index, bool> BOSS
         ret[--i] = get_node_last_value(x);
     }
 
-    return std::make_tuple(std::move(ret), x, false);
+    return std::make_pair(std::move(ret), x);
 }
 
 /**
@@ -948,42 +948,41 @@ std::tuple<std::vector<TAlphabet>, edge_index, bool> BOSS
  * source node.
  */
 std::vector<TAlphabet> BOSS::get_node_seq(edge_index i) const {
-    return std::get<0>(get_node_seq_with_end_node_indexed(i));
+    return get_node_seq_with_last_traversed_node(i).first;
 }
 
 /**
  * Given an edge index i, this function returns the k-mer sequence of its
  * source node, and the node whose last character corresponds to the first
- * character of the sequence. If force_get_end_node is false, then the last
- * traversed node will only be returned if it is computed.
+ * character of the sequence. If force_get_end_node is false and the graph
+ * is indexed, then the node will not be computed and 0 will be returned.
  */
 std::pair<std::vector<TAlphabet>, edge_index> BOSS
 ::get_node_seq_with_end_node(edge_index i, bool force_get_end_node) const {
-    auto [seq, last_node, partially_traversed] = get_node_seq_with_end_node_indexed(i);
+    auto ret_val = get_node_seq_with_last_traversed_node(i);
 
-    if (partially_traversed) {
+    if (indexed_suffix_length_) {
         if (force_get_end_node) {
             // if the full traversal was not done due to the suffix range index, but
             // the last node from traversal is still requested, then complete the traversal
             // to get that node
-            assert(indexed_suffix_length_);
-
-            auto it = seq.rend() - indexed_suffix_length_;
-            assert(*it == get_node_last_value(last_node));
-            for (++it; it != seq.rend(); ++it) {
-                last_node = bwd(last_node);
-                assert(*it == get_node_last_value(last_node));
+            auto it = ret_val.first.rend() - indexed_suffix_length_;
+            assert(*it == get_node_last_value(ret_val.second));
+            for (++it; it != ret_val.first.rend(); ++it) {
+                ret_val.second = bwd(ret_val.second);
+                assert(*it == get_node_last_value(ret_val.second));
             }
 
         } else {
-            last_node = 0;
+            ret_val.second = 0;
         }
     }
 
-    assert(!last_node || seq[0] == get_node_last_value(last_node));
-    assert(!last_node || std::make_pair(seq[0], last_node) == get_minus_k_value(i, k_ - 1));
+    assert(!ret_val.second || ret_val.first[0] == get_node_last_value(ret_val.second));
+    assert(!ret_val.second
+        || std::make_pair(ret_val.first[0], ret_val.second) == get_minus_k_value(i, k_ - 1));
 
-    return std::make_pair(std::move(seq), last_node);
+    return ret_val;
 }
 
 /**
