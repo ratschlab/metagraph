@@ -18,9 +18,13 @@ template <class Graph>
 std::shared_ptr<Graph> load_critical_graph_from_file(const std::string &filename) {
     auto graph = std::make_shared<Graph>(2);
     if (!graph->load(filename)) {
-        mtg::common::logger->error("Cannot load graph from file '{}'", filename);
+        common::logger->error("Cannot load graph from file '{}'", filename);
         exit(1);
     }
+
+    if (graph->get_mode() == graph::DeBruijnGraph::PRIMARY && !(graph->get_k() % 2))
+        common::logger->warn("PRIMARY mode graphs of even order k are less efficient to query. Consider using an odd order k.");
+
     return graph;
 }
 
