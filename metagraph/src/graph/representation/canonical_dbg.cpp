@@ -96,7 +96,7 @@ void CanonicalDBG
 
     // map the forward
     const auto *dbg_succ = get_dbg_succ(*graph_);
-    if (dbg_succ && get_k() % 2) {
+    if (dbg_succ && k_odd_) {
         const auto *cached = dynamic_cast<const DBGSuccinctCachedView*>(graph_.get());
 
         // if it's a boss table with odd k (without palindromic k-mers),
@@ -217,15 +217,13 @@ void CanonicalDBG::append_next_rc_nodes(node_index node,
     assert(rev_seq[0] == '\0');
 
     if (const auto *dbg_succ = get_dbg_succ(*graph_)) {
-        const auto &boss = dbg_succ->get_boss();
         dbg_succ->call_nodes_with_suffix_matching_longest_prefix(
             std::string_view(&rev_seq[1], get_k() - 1),
             [&](node_index next, uint64_t /* match_length */) {
-                next_callback_succ(
-                    next,
-                    boss.get_minus_k_value(dbg_succ->kmer_to_boss_index(next),
-                                           get_k() - 2).first
-                );
+                next_callback_succ(next,
+                                   dbg_succ->get_boss().get_minus_k_value(
+                                       dbg_succ->kmer_to_boss_index(next), get_k() - 2
+                                   ).first);
             },
             get_k() - 1
         );
