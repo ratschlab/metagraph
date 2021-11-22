@@ -71,8 +71,7 @@ std::shared_ptr<DeBruijnGraph> load_critical_dbg(const std::string &filename) {
     exit(1);
 }
 
-template <class Graph>
-std::shared_ptr<CanonicalDBG> primary_to_canonical(std::shared_ptr<Graph> graph,
+std::shared_ptr<CanonicalDBG> primary_to_canonical(std::shared_ptr<DeBruijnGraph> graph,
                                                    size_t cache_size) {
     if (graph->get_mode() != DeBruijnGraph::PRIMARY) {
         logger->error("Only primary mode graphs can be wrapped into canonical mode.");
@@ -83,21 +82,18 @@ std::shared_ptr<CanonicalDBG> primary_to_canonical(std::shared_ptr<Graph> graph,
     return std::make_shared<CanonicalDBG>(graph, cache_size);
 }
 
-template std::shared_ptr<CanonicalDBG> primary_to_canonical(std::shared_ptr<const DeBruijnGraph>, size_t);
-template std::shared_ptr<CanonicalDBG> primary_to_canonical(std::shared_ptr<DeBruijnGraph>, size_t);
-
-std::shared_ptr<const DeBruijnGraph> make_cached_graph(const DeBruijnGraph &graph,
-                                                       const Config &config,
-                                                       size_t cache_size) {
-    std::shared_ptr<const DeBruijnGraph> ret_graph(std::shared_ptr<const DeBruijnGraph>{}, &graph);
+std::shared_ptr<DeBruijnGraph> make_cached_graph(DeBruijnGraph &graph,
+                                                 const Config &config,
+                                                 size_t cache_size) {
+    std::shared_ptr<DeBruijnGraph> ret_graph(std::shared_ptr<DeBruijnGraph>{}, &graph);
 
     // if alignment in both directions is not required, then there's no need to cache
     if (ret_graph->get_mode() != DeBruijnGraph::CANONICAL && config.align_only_forwards)
         return ret_graph;
 
-    auto base_graph = ret_graph;
+    std::shared_ptr<const DeBruijnGraph> base_graph = ret_graph;
 
-    if (auto canonical = std::dynamic_pointer_cast<const CanonicalDBG>(ret_graph))
+    if (auto canonical = std::dynamic_pointer_cast<CanonicalDBG>(ret_graph))
         base_graph = canonical->get_graph_ptr();
 
     if (auto dbg_succ = std::dynamic_pointer_cast<const DBGSuccinct>(base_graph)) {
