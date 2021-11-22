@@ -21,8 +21,6 @@ const std::string test_dump_basename = test_data_dir + "/dump_test_graph";
 const size_t kBitsPerCount = 8;
 
 TYPED_TEST_SUITE(DeBruijnGraphTest, GraphTypes);
-TYPED_TEST_SUITE(MutableDeBruijnGraphTest, MutableGraphTypes);
-
 
 TYPED_TEST(DeBruijnGraphTest, GraphDefaultConstructor) {
     ASSERT_NO_THROW(build_graph<TypeParam>(2));
@@ -39,7 +37,7 @@ TYPED_TEST(DeBruijnGraphTest, InitializeEmpty) {
     EXPECT_FALSE(graph->find("GCTAGCTAGCTACGATCAGCTAGTACATG"));
 }
 
-TYPED_TEST(MutableDeBruijnGraphTest, SerializeEmpty) {
+TYPED_TEST(DeBruijnGraphTest, SerializeEmpty) {
     {
         auto graph = build_graph<TypeParam>(12);
         ASSERT_EQ(0u, graph->num_nodes());
@@ -47,21 +45,21 @@ TYPED_TEST(MutableDeBruijnGraphTest, SerializeEmpty) {
         EXPECT_TRUE(check_graph_nodes(*graph));
     }
 
-    TypeParam graph(2);
+    auto graph = build_graph<TypeParam>(2);
 
-    ASSERT_TRUE(graph.load(test_dump_basename));
+    ASSERT_TRUE(graph->load(test_dump_basename));
 
-    EXPECT_EQ(0u, graph.num_nodes());
-    EXPECT_EQ(12u, graph.get_k());
+    EXPECT_EQ(0u, graph->num_nodes());
+    EXPECT_EQ(12u, graph->get_k());
 
-    EXPECT_FALSE(graph.find("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
-    EXPECT_FALSE(graph.find("TTTTTTTTTTTTTTTTTTTTTTTTTTTTT"));
-    EXPECT_FALSE(graph.find("CATGTACTAGCTGATCGTAGCTAGCTAGC"));
-    EXPECT_FALSE(graph.find("GCTAGCTAGCTACGATCAGCTAGTACATG"));
-    EXPECT_TRUE(check_graph_nodes(graph));
+    EXPECT_FALSE(graph->find("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
+    EXPECT_FALSE(graph->find("TTTTTTTTTTTTTTTTTTTTTTTTTTTTT"));
+    EXPECT_FALSE(graph->find("CATGTACTAGCTGATCGTAGCTAGCTAGC"));
+    EXPECT_FALSE(graph->find("GCTAGCTAGCTACGATCAGCTAGTACATG"));
+    EXPECT_TRUE(check_graph_nodes(*graph));
 }
 
-TYPED_TEST(MutableDeBruijnGraphTest, Serialize) {
+TYPED_TEST(DeBruijnGraphTest, Serialize) {
     {
         auto graph = build_graph<TypeParam>(12, {
             "AAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
@@ -79,19 +77,19 @@ TYPED_TEST(MutableDeBruijnGraphTest, Serialize) {
         EXPECT_TRUE(check_graph_nodes(*graph));
     }
 
-    TypeParam graph(2);
+    auto graph = build_graph<TypeParam>(2);
 
-    ASSERT_TRUE(graph.load(test_dump_basename));
+    ASSERT_TRUE(graph->load(test_dump_basename));
 
-    EXPECT_EQ(12u, graph.get_k());
+    EXPECT_EQ(12u, graph->get_k());
 
-    EXPECT_TRUE(graph.find("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
-    EXPECT_FALSE(graph.find("TTTTTTTTTTTTTTTTTTTTTTTTTTTTT"));
-    EXPECT_TRUE(graph.find("CATGTACTAGCTGATCGTAGCTAGCTAGC"));
-    EXPECT_FALSE(graph.find("GCTAGCTAGCTACGATCAGCTAGTACATG"));
-    EXPECT_FALSE(graph.find("CATGTTTTTTTAATATATATATTTTTAGC"));
-    EXPECT_FALSE(graph.find("GCTAAAAATATATATATTAAAAAAACATG"));
-    EXPECT_TRUE(check_graph_nodes(graph));
+    EXPECT_TRUE(graph->find("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
+    EXPECT_FALSE(graph->find("TTTTTTTTTTTTTTTTTTTTTTTTTTTTT"));
+    EXPECT_TRUE(graph->find("CATGTACTAGCTGATCGTAGCTAGCTAGC"));
+    EXPECT_FALSE(graph->find("GCTAGCTAGCTACGATCAGCTAGTACATG"));
+    EXPECT_FALSE(graph->find("CATGTTTTTTTAATATATATATTTTTAGC"));
+    EXPECT_FALSE(graph->find("GCTAAAAATATATATATTAAAAAAACATG"));
+    EXPECT_TRUE(check_graph_nodes(*graph));
 }
 
 template <class Graph>
@@ -110,21 +108,21 @@ void test_graph_serialization(size_t k_max) {
             graph->serialize(test_dump_basename);
         }
         {
-            Graph graph(2);
+            auto graph = build_graph<Graph>(2);
 
-            ASSERT_TRUE(graph.load(test_dump_basename)) << "k: " << k;
+            ASSERT_TRUE(graph->load(test_dump_basename)) << "k: " << k;
 
-            EXPECT_EQ(k, graph.get_k());
+            EXPECT_EQ(k, graph->get_k());
 
-            EXPECT_TRUE(graph.find(std::string(k, 'A')));
-            EXPECT_TRUE(graph.find(std::string(k, 'C')));
-            EXPECT_TRUE(graph.find(std::string(k - 1, 'C') + 'G'));
-            EXPECT_FALSE(graph.find(std::string(k, 'G')));
+            EXPECT_TRUE(graph->find(std::string(k, 'A')));
+            EXPECT_TRUE(graph->find(std::string(k, 'C')));
+            EXPECT_TRUE(graph->find(std::string(k - 1, 'C') + 'G'));
+            EXPECT_FALSE(graph->find(std::string(k, 'G')));
         }
     }
 }
 
-TYPED_TEST(MutableDeBruijnGraphTest, SerializeAnyK) {
+TYPED_TEST(DeBruijnGraphTest, SerializeAnyK) {
     TEST_COUT << "Max k: " << max_test_k<TypeParam>();
     test_graph_serialization<TypeParam>(max_test_k<TypeParam>());
 }

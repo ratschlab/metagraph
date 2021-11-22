@@ -129,6 +129,19 @@ class MaskedDeBruijnGraph : public DBGWrapper<DeBruijnGraph> {
         });
     }
 
+    virtual void serialize(const std::string &) const override final {
+        throw std::runtime_error("serialize not supported for MaskedDeBruijnGraph");
+    }
+
+    virtual bool load(const std::string &) override final {
+        throw std::runtime_error("koad not supported for MaskedDeBruijnGraph");
+    }
+
+    virtual void add_sequence(std::string_view,
+                              const std::function<void(node_index)>&) override final {
+        throw std::runtime_error("add_sequence not supported for MaskedDeBruijnGraph");
+    }
+
   private:
     std::unique_ptr<bitmap> kmers_in_graph_;
     bool only_valid_nodes_in_mask_;

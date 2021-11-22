@@ -288,6 +288,10 @@ class DBGSuccinct : public DeBruijnGraph {
                               const std::function<bool()> &terminate
                                   = [](){ return false; }) const override final;
 
+        virtual void serialize(const std::string &filename_base) const override final {
+            graph_->serialize(filename_base);
+        }
+
       protected:
         const boss::BOSS *boss_;
         size_t cache_size_;

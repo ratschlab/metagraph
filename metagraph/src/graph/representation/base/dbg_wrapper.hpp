@@ -64,22 +64,6 @@ class DBGWrapper : public DeBruijnGraph {
     virtual uint64_t max_index() const override { return graph_->max_index(); }
 
     /**
-     * Not implemented
-     */
-    virtual void serialize(const std::string &) const override final {
-        throw std::runtime_error("serialize not implemented on graph wrappers");
-    }
-
-    virtual bool load(const std::string &) override final {
-        throw std::runtime_error("load not implemented on graph wrappers");
-    }
-
-    virtual void add_sequence(std::string_view,
-                              const std::function<void(node_index)> &) override final {
-        throw std::runtime_error("add_sequence not implemented on graph wrappers");
-    }
-
-    /**
      * The Graph defaults of these are likely to break in a wrapped graph,
      * so these should be implemented.
      */

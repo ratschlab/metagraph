@@ -131,6 +131,19 @@ class RCDBG : public DBGWrapper<DeBruijnGraph> {
             callback(node, rseq);
         });
     }
+
+    virtual void serialize(const std::string &filename_base) const override final {
+        graph_->serialize(filename_base);
+    }
+
+    virtual bool load(const std::string &filename_base) override final {
+        return const_cast<DeBruijnGraph*>(graph_.get())->load(filename_base);
+    }
+
+    virtual void add_sequence(std::string_view sequence,
+                              const std::function<void(node_index)> &on_insertion) override final {
+        const_cast<DeBruijnGraph*>(graph_.get())->add_sequence(sequence, on_insertion);
+    }
 };
 
 } // namespace mtg

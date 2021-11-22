@@ -108,6 +108,25 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
 
     virtual bool operator==(const DeBruijnGraph &other) const override final;
 
+    virtual void serialize(const std::string &filename_base) const override final {
+        graph_->serialize(filename_base);
+    }
+
+    virtual bool load(const std::string &filename_base) override final {
+        if (const_cast<DeBruijnGraph*>(graph_.get())->load(filename_base)) {
+            flush();
+            return true;
+        }
+
+        return false;
+    }
+
+    virtual void add_sequence(std::string_view sequence,
+                              const std::function<void(node_index)> &on_insertion) override final {
+        const_cast<DeBruijnGraph*>(graph_.get())->add_sequence(sequence, on_insertion);
+        flush();
+    }
+
   private:
     size_t cache_size_;
 

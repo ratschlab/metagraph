@@ -37,6 +37,25 @@ class DBGSuccinctCachedViewImpl : public DBGSuccinct::CachedView {
      */
     virtual void put_decoded_edge(edge_index edge, std::string_view seq) const override final;
 
+    virtual bool load(const std::string &filename_base) override final {
+        if (const_cast<DBGSuccinct*>(graph_.get())->load(filename_base)) {
+            rev_comp_next_cache_.Clear();
+            rev_comp_prev_cache_.Clear();
+            decoded_cache_.Clear();
+            return true;
+        }
+
+        return false;
+    }
+
+    virtual void add_sequence(std::string_view sequence,
+                              const std::function<void(node_index)> &on_insertion) override final {
+        const_cast<DBGSuccinct*>(graph_.get())->add_sequence(sequence, on_insertion);
+        rev_comp_next_cache_.Clear();
+        rev_comp_prev_cache_.Clear();
+        decoded_cache_.Clear();
+    }
+
   private:
     // KmerType is the encoded k-mer
     // edge_index is the boss node whose last character is the first character of the k-mer
