@@ -5,24 +5,10 @@
 namespace mtg {
 namespace graph {
 
-
-template <typename Graph>
-DBGSuccinctCachedView::DBGSuccinctCachedView(Graph&& graph, size_t cache_size)
-      : DBGWrapper(std::forward<Graph>(graph)),
-        boss_(&graph_->get_boss()),
-        cache_size_(cache_size),
-        rev_comp_prev_cache_(cache_size_),
-        rev_comp_next_cache_(cache_size_) {}
-
-template DBGSuccinctCachedView::DBGSuccinctCachedView(const DBGSuccinct&, size_t);
-template DBGSuccinctCachedView::DBGSuccinctCachedView(const std::shared_ptr<const DBGSuccinct>&, size_t);
-template DBGSuccinctCachedView::DBGSuccinctCachedView(std::shared_ptr<const DBGSuccinct>&, size_t);
-
-
 /**
  * Overridden methods
  */
-bool DBGSuccinctCachedView::operator==(const DeBruijnGraph &other) const {
+bool DBGSuccinct::CachedView::operator==(const DeBruijnGraph &other) const {
     if (get_k() != other.get_k()
             || num_nodes() != other.num_nodes()
             || get_mode() != other.get_mode())
@@ -30,7 +16,7 @@ bool DBGSuccinctCachedView::operator==(const DeBruijnGraph &other) const {
 
     const auto *other_succ = dynamic_cast<const DBGSuccinct*>(&other);
     if (!other_succ) {
-        if (const auto *other_cached = dynamic_cast<const DBGSuccinctCachedView*>(&other))
+        if (const auto *other_cached = dynamic_cast<const DBGSuccinct::CachedView*>(&other))
             other_succ = &other_cached->get_graph();
     }
 
@@ -41,7 +27,7 @@ bool DBGSuccinctCachedView::operator==(const DeBruijnGraph &other) const {
     return false;
 }
 
-void DBGSuccinctCachedView
+void DBGSuccinct::CachedView
 ::call_outgoing_from_rev_comp(node_index node,
                               const std::function<void(node_index, TAlphabet)> &callback) const {
     if (edge_index e = get_rev_comp_boss_next_node(node)) {
@@ -61,7 +47,7 @@ void DBGSuccinctCachedView
     }
 }
 
-void DBGSuccinctCachedView
+void DBGSuccinct::CachedView
 ::call_incoming_to_rev_comp(node_index node,
                             const std::function<void(node_index, TAlphabet)> &callback) const {
     if (edge_index e = get_rev_comp_boss_prev_node(node)) {
@@ -80,7 +66,7 @@ void DBGSuccinctCachedView
     }
 }
 
-auto DBGSuccinctCachedView
+auto DBGSuccinct::CachedView
 ::get_rev_comp_boss_next_node(node_index node) const -> edge_index {
     // 78% effective
     edge_index ret_val = 0;
@@ -196,7 +182,7 @@ auto DBGSuccinctCachedView
     return ret_val;
 }
 
-auto DBGSuccinctCachedView
+auto DBGSuccinct::CachedView
 ::get_rev_comp_boss_prev_node(node_index node) const -> edge_index {
     // 8% effective
     edge_index ret_val = 0;
@@ -286,14 +272,6 @@ auto DBGSuccinctCachedView
 
     return ret_val;
 }
-
-
-template <typename KmerType>
-template <typename Graph>
-DBGSuccinctCachedViewImpl<KmerType>
-::DBGSuccinctCachedViewImpl(Graph&& graph, size_t cache_size)
-      : DBGSuccinctCachedView(std::forward<Graph>(graph), cache_size),
-        decoded_cache_(cache_size_) {}
 
 template <typename KmerType>
 void DBGSuccinctCachedViewImpl<KmerType>::put_decoded_edge(edge_index edge,
@@ -401,7 +379,7 @@ void DBGSuccinctCachedViewImpl<KmerType>
  * Delegated methods
  */
 #define DELEGATE_METHOD_IMPL(RETURN_TYPE, METHOD, ARG_TYPE, ARG_NAME) \
-auto DBGSuccinctCachedView::METHOD(ARG_TYPE ARG_NAME) const -> RETURN_TYPE { \
+auto DBGSuccinct::CachedView::METHOD(ARG_TYPE ARG_NAME) const -> RETURN_TYPE { \
     return graph_->METHOD(ARG_NAME); \
 } \
 
@@ -418,60 +396,60 @@ DELEGATE_METHOD_IMPL(bool, has_no_incoming, node_index, node)
 DELEGATE_METHOD_IMPL(bool, has_single_incoming, node_index, node)
 DELEGATE_METHOD_IMPL(node_index, kmer_to_node, std::string_view, kmer)
 
-void DBGSuccinctCachedView::call_nodes(const std::function<void(node_index)> &callback,
-                                       const std::function<bool()> &stop_early) const {
+void DBGSuccinct::CachedView::call_nodes(const std::function<void(node_index)> &callback,
+                                         const std::function<bool()> &stop_early) const {
     graph_->call_nodes(callback, stop_early);
 }
 
-void DBGSuccinctCachedView::call_sequences(const CallPath &callback,
-                                           size_t num_threads,
-                                           bool kmers_in_single_form ) const {
+void DBGSuccinct::CachedView::call_sequences(const CallPath &callback,
+                                             size_t num_threads,
+                                             bool kmers_in_single_form ) const {
     graph_->call_sequences(callback, num_threads, kmers_in_single_form);
 }
 
-void DBGSuccinctCachedView::call_unitigs(const CallPath &callback,
-                                         size_t num_threads,
-                                         size_t min_tip_size,
-                                         bool kmers_in_single_form) const {
+void DBGSuccinct::CachedView::call_unitigs(const CallPath &callback,
+                                           size_t num_threads,
+                                           size_t min_tip_size,
+                                           bool kmers_in_single_form) const {
     graph_->call_unitigs(callback, num_threads, min_tip_size, kmers_in_single_form);
 }
 
-bool DBGSuccinctCachedView
+bool DBGSuccinct::CachedView
 ::find(std::string_view sequence, double discovery_fraction) const {
     return graph_->find(sequence, discovery_fraction);
 }
 
-void DBGSuccinctCachedView::map_to_nodes(std::string_view sequence,
-                                         const std::function<void(node_index)> &callback,
-                                         const std::function<bool()> &terminate) const {
+void DBGSuccinct::CachedView::map_to_nodes(std::string_view sequence,
+                                           const std::function<void(node_index)> &callback,
+                                           const std::function<bool()> &terminate) const {
     graph_->map_to_nodes(sequence, callback, terminate);
 }
 
-void DBGSuccinctCachedView
+void DBGSuccinct::CachedView
 ::adjacent_outgoing_nodes(node_index node,
                           const std::function<void(node_index)> &callback) const {
     graph_->adjacent_outgoing_nodes(node, callback);
 }
 
-void DBGSuccinctCachedView
+void DBGSuccinct::CachedView
 ::adjacent_incoming_nodes(node_index node,
                           const std::function<void(node_index)> &callback) const {
     graph_->adjacent_incoming_nodes(node, callback);
 }
 
-auto DBGSuccinctCachedView::traverse(node_index node, char next_char) const -> node_index {
+auto DBGSuccinct::CachedView::traverse(node_index node, char next_char) const -> node_index {
     return graph_->traverse(node, next_char);
 }
 
-auto DBGSuccinctCachedView::traverse_back(node_index node, char prev_char) const -> node_index {
+auto DBGSuccinct::CachedView::traverse_back(node_index node, char prev_char) const -> node_index {
     return graph_->traverse_back(node, prev_char);
 }
 
-void DBGSuccinctCachedView::traverse(node_index start,
-                                     const char *begin,
-                                     const char *end,
-                                     const std::function<void(node_index)> &callback,
-                                     const std::function<bool()> &terminate) const {
+void DBGSuccinct::CachedView::traverse(node_index start,
+                                       const char *begin,
+                                       const char *end,
+                                       const std::function<void(node_index)> &callback,
+                                       const std::function<bool()> &terminate) const {
     graph_->traverse(start, begin, end, callback, terminate);
 }
 
@@ -479,18 +457,6 @@ void DBGSuccinctCachedView::traverse(node_index start,
 template class DBGSuccinctCachedViewImpl<kmer::KmerExtractorBOSS::Kmer64>;
 template class DBGSuccinctCachedViewImpl<kmer::KmerExtractorBOSS::Kmer128>;
 template class DBGSuccinctCachedViewImpl<kmer::KmerExtractorBOSS::Kmer256>;
-
-template DBGSuccinctCachedViewImpl<kmer::KmerExtractorBOSS::Kmer64>::DBGSuccinctCachedViewImpl(const DBGSuccinct&, size_t);
-template DBGSuccinctCachedViewImpl<kmer::KmerExtractorBOSS::Kmer128>::DBGSuccinctCachedViewImpl(const DBGSuccinct&, size_t);
-template DBGSuccinctCachedViewImpl<kmer::KmerExtractorBOSS::Kmer256>::DBGSuccinctCachedViewImpl(const DBGSuccinct&, size_t);
-
-template DBGSuccinctCachedViewImpl<kmer::KmerExtractorBOSS::Kmer64>::DBGSuccinctCachedViewImpl(const std::shared_ptr<const DBGSuccinct>&, size_t);
-template DBGSuccinctCachedViewImpl<kmer::KmerExtractorBOSS::Kmer128>::DBGSuccinctCachedViewImpl(const std::shared_ptr<const DBGSuccinct>&, size_t);
-template DBGSuccinctCachedViewImpl<kmer::KmerExtractorBOSS::Kmer256>::DBGSuccinctCachedViewImpl(const std::shared_ptr<const DBGSuccinct>&, size_t);
-
-template DBGSuccinctCachedViewImpl<kmer::KmerExtractorBOSS::Kmer64>::DBGSuccinctCachedViewImpl(std::shared_ptr<const DBGSuccinct>&, size_t);
-template DBGSuccinctCachedViewImpl<kmer::KmerExtractorBOSS::Kmer128>::DBGSuccinctCachedViewImpl(std::shared_ptr<const DBGSuccinct>&, size_t);
-template DBGSuccinctCachedViewImpl<kmer::KmerExtractorBOSS::Kmer256>::DBGSuccinctCachedViewImpl(std::shared_ptr<const DBGSuccinct>&, size_t);
 
 } // namespace graph
 } // namespace mtg

@@ -6,6 +6,7 @@
 #include <string>
 #include <filesystem>
 
+#include "dbg_succinct_cached.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/serialization.hpp"
 #include "common/logger.hpp"
@@ -1029,7 +1030,7 @@ void DBGSuccinct::print(std::ostream &out) const {
     }
 }
 
-std::shared_ptr<DBGSuccinctCachedView> DBGSuccinct::get_cached_view(size_t cache_size) const {
+auto DBGSuccinct::get_cached_view(size_t cache_size) const -> std::shared_ptr<CachedView> {
     if (get_k() * kmer::KmerExtractorBOSS::bits_per_char <= 64) {
         return std::make_shared<DBGSuccinctCachedViewImpl<kmer::KmerExtractorBOSS::Kmer64>>(
             *this, cache_size

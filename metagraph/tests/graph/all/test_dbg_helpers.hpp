@@ -94,7 +94,7 @@ typedef ::testing::Types<DBGBitmap,
                          DBGSuccinctBloomFPR<1, 10>,
                          DBGSuccinctBloom<4, 1>,
                          DBGSuccinctBloom<4, 50>,
-                         DBGSuccinctCachedView> GraphTypes;
+                         DBGSuccinct::CachedView> GraphTypes;
 
 template <typename Graph>
 class MutableDeBruijnGraphTest : public ::testing::Test { };
@@ -128,7 +128,7 @@ typedef ::testing::Types<DBGBitmap,
                          DBGSuccinctBloomFPR<1, 10>,
                          DBGSuccinctBloom<4, 1>,
                          DBGSuccinctBloom<4, 50>,
-                         DBGSuccinctCachedView> StableGraphTypes;
+                         DBGSuccinct::CachedView> StableGraphTypes;
 
 typedef ::testing::Types<DBGHashFast, DBGSuccinct> FewGraphTypes;
 

@@ -97,7 +97,7 @@ void CanonicalDBG
     // map the forward
     const auto *dbg_succ = get_dbg_succ(*graph_);
     if (dbg_succ && k_odd_) {
-        const auto *cached = dynamic_cast<const DBGSuccinctCachedView*>(graph_.get());
+        const auto *cached = dynamic_cast<const DBGSuccinct::CachedView*>(graph_.get());
 
         // if it's a boss table with odd k (without palindromic k-mers),
         // we can skip k-mers that have been found in the rev-compl sequence
@@ -180,7 +180,7 @@ void CanonicalDBG::append_next_rc_nodes(node_index node,
     // for each n, check for nAGCCA. If found, define and store the index for
     // TGGCTrc(n) as index(nAGCCA) + offset_
 
-    // callback for DBGSuccinct and DBGSuccinctCachedView
+    // callback for DBGSuccinct and DBGSuccinct::CachedView
     auto next_callback_succ = [&](node_index next, boss::BOSS::TAlphabet c) {
         if (c == boss::BOSS::kSentinelCode)
             return;
@@ -205,7 +205,7 @@ void CanonicalDBG::append_next_rc_nodes(node_index node,
         is_palindrome_cache_.Put(next, true);
     };
 
-    if (const auto *cached = dynamic_cast<const DBGSuccinctCachedView*>(graph_.get())) {
+    if (const auto *cached = dynamic_cast<const DBGSuccinct::CachedView*>(graph_.get())) {
         cached->call_outgoing_from_rev_comp(node, next_callback_succ);
         return;
     }
@@ -304,7 +304,7 @@ void CanonicalDBG::append_prev_rc_nodes(node_index node,
     // for each n, check for TGGCTn. If found, define and store the index for
     // rc(n)AGCCA as index(TGGCTn) + offset_
 
-    // callback for DBGSuccinct and DBGSuccinctCachedView
+    // callback for DBGSuccinct and DBGSuccinct::CachedView
     auto prev_callback_succ = [&](node_index prev, boss::BOSS::TAlphabet c) {
         if (prev == npos || c == boss::BOSS::kSentinelCode)
             return;
@@ -330,7 +330,7 @@ void CanonicalDBG::append_prev_rc_nodes(node_index node,
         is_palindrome_cache_.Put(prev, true);
     };
 
-    if (const auto *cached = dynamic_cast<const DBGSuccinctCachedView*>(graph_.get())) {
+    if (const auto *cached = dynamic_cast<const DBGSuccinct::CachedView*>(graph_.get())) {
         cached->call_incoming_to_rev_comp(node, prev_callback_succ);
         return;
     }
