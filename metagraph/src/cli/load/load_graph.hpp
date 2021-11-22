@@ -10,6 +10,11 @@
 
 
 namespace mtg {
+
+namespace graph {
+    class DBGSuccinct;
+}
+
 namespace cli {
 
 Config::GraphType parse_graph_type(const std::string &filename);
@@ -32,10 +37,6 @@ std::shared_ptr<graph::DeBruijnGraph> load_critical_dbg(const std::string &filen
 
 std::shared_ptr<graph::CanonicalDBG>
 primary_to_canonical(std::shared_ptr<graph::DeBruijnGraph> graph, size_t cache_size = 100'000);
-
-std::shared_ptr<graph::DeBruijnGraph> make_cached_graph(graph::DeBruijnGraph &graph,
-                                                        const Config &config,
-                                                        size_t cache_size = 100'000);
 
 } // namespace cli
 } // namespace mtg

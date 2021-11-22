@@ -82,32 +82,5 @@ std::shared_ptr<CanonicalDBG> primary_to_canonical(std::shared_ptr<DeBruijnGraph
     return std::make_shared<CanonicalDBG>(graph, cache_size);
 }
 
-std::shared_ptr<DeBruijnGraph> make_cached_graph(DeBruijnGraph &graph,
-                                                 const Config &config,
-                                                 size_t cache_size) {
-    std::shared_ptr<DeBruijnGraph> ret_graph(std::shared_ptr<DeBruijnGraph>{}, &graph);
-
-    // if alignment in both directions is not required, then there's no need to cache
-    if (ret_graph->get_mode() != DeBruijnGraph::CANONICAL && config.align_only_forwards)
-        return ret_graph;
-
-    std::shared_ptr<const DeBruijnGraph> base_graph = ret_graph;
-
-    if (auto canonical = std::dynamic_pointer_cast<CanonicalDBG>(ret_graph))
-        base_graph = canonical->get_graph_ptr();
-
-    if (auto dbg_succ = std::dynamic_pointer_cast<const DBGSuccinct>(base_graph)) {
-        ret_graph = dbg_succ->get_cached_view(cache_size);
-    } else {
-        // graphs other than DBGSuccinct can't be cached
-        return ret_graph;
-    }
-
-    if (ret_graph->get_mode() == DeBruijnGraph::PRIMARY)
-        ret_graph = primary_to_canonical(ret_graph, cache_size);
-
-    return ret_graph;
-}
-
 } // namespace cli
 } // namespace mtg

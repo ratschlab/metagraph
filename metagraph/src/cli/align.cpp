@@ -83,7 +83,7 @@ template std::unique_ptr<IDBGAligner> build_aligner<DeBruijnGraph>(const DeBruij
 
 void map_sequences_in_file(const std::string &file,
                            const DeBruijnGraph &graph,
-                           const DBGSuccinct *dbg,
+                           const DBGSuccinct &dbg,
                            const Config &config,
                            const Timer &timer,
                            ThreadPool *thread_pool = nullptr,
@@ -130,11 +130,11 @@ void map_sequences_in_file(const std::string &file,
         } else if (config.query_presence || config.count_kmers) {
             // TODO: make more efficient
             // TODO: canonicalization
-            if (dbg->get_mode() == DeBruijnGraph::PRIMARY)
+            if (dbg.get_mode() == DeBruijnGraph::PRIMARY)
                 logger->warn("Sub-k-mers will be mapped to unwrapped primary graph");
 
             for (size_t i = 0; i + graph.get_k() <= read_stream->seq.l; ++i) {
-                dbg->call_nodes_with_suffix_matching_longest_prefix(
+                dbg.call_nodes_with_suffix_matching_longest_prefix(
                     std::string_view(read_stream->seq.s + i, config.alignment_length),
                     [&](auto node, auto) {
                         if (graphindices.empty())
@@ -192,7 +192,7 @@ void map_sequences_in_file(const std::string &file,
                 // TODO: canonicalization
                 std::string_view subseq(read_stream->seq.s + i, config.alignment_length);
 
-                dbg->call_nodes_with_suffix_matching_longest_prefix(
+                dbg.call_nodes_with_suffix_matching_longest_prefix(
                     subseq,
                     [&](auto node, auto) {
                         *out << subseq << ": " << node << "\n";
@@ -340,13 +340,20 @@ int align_to_graph(Config *config) {
 
     // For graphs which still feature a mask, this speeds up mapping and allows
     // for dummy nodes to be matched by suffix seeding
-    auto *dbg_succ = dynamic_cast<DBGSuccinct*>(graph.get());
+    auto dbg_succ = std::dynamic_pointer_cast<DBGSuccinct>(graph);
     if (dbg_succ)
         dbg_succ->reset_mask();
 
     Timer timer;
     ThreadPool thread_pool(get_num_threads());
     std::mutex print_mutex;
+
+    // A DBGSuccinct graph should only be cached if
+    // 1) backward traversal will be required on a non-CANONICAL graph ||
+    // 2) the base graph is in PRIMARY mode.
+    bool graph_needs_caching
+        = dbg_succ && graph->get_mode() != DeBruijnGraph::CANONICAL
+            && (!config->align_only_forwards || graph->get_mode() == DeBruijnGraph::PRIMARY);
 
     if (graph->get_mode() == DeBruijnGraph::PRIMARY)
         graph = primary_to_canonical(graph);
@@ -369,7 +376,7 @@ int align_to_graph(Config *config) {
         for (const auto &file : files) {
             logger->trace("Map sequences from file {}", file);
 
-            map_sequences_in_file(file, *graph, dbg_succ, *config, timer,
+            map_sequences_in_file(file, *graph, *dbg_succ, *config, timer,
                                   &thread_pool, &print_mutex);
         }
 
@@ -419,9 +426,13 @@ int align_to_graph(Config *config) {
             }
 
             auto process_batch = [&,graph](SeqBatch batch) {
-                // the graph should only be cached if the base graph is in PRIMARY mode,
-                // or if it's not CANONICAL and backwards traversal will be required
-                auto aln_graph = make_cached_graph(*graph, *config);
+                // make an aliased shared_ptr in a thread-safe way
+                auto aln_graph = graph_needs_caching
+                    ? dbg_succ->get_cached_view()
+                    : std::shared_ptr<const DeBruijnGraph>(std::shared_ptr<DeBruijnGraph>{}, graph.get());
+
+                if (aln_graph->get_mode() == DeBruijnGraph::PRIMARY)
+                    aln_graph = std::make_shared<CanonicalDBG>(aln_graph, 100'000);
 
                 auto aligner = build_aligner(*aln_graph, aligner_config);
 
