@@ -23,7 +23,7 @@ std::shared_ptr<Graph> load_critical_graph_from_file(const std::string &filename
     }
 
     if (graph->get_mode() == graph::DeBruijnGraph::PRIMARY && !(graph->get_k() % 2))
-        common::logger->warn("PRIMARY mode graphs of even order k are less efficient to query. Consider using an odd order k.");
+        common::logger->warn("PRIMARY mode graphs of even order k are less efficient to query. Consider using an odd value of k.");
 
     return graph;
 }
