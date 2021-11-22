@@ -53,17 +53,6 @@ get_primary_contigs(size_t k, const std::vector<std::string> &sequences) {
     return contigs;
 }
 
-std::shared_ptr<DBGSuccinct::CachedView>
-make_cached_dbgsuccinct(std::shared_ptr<const DBGSuccinct> graph, size_t cache_size = 1024) {
-    if (graph->get_k() * kmer::KmerExtractorBOSS::bits_per_char <= 64) {
-        return std::make_shared<DBGSuccinctCachedViewImpl<kmer::KmerExtractorBOSS::Kmer64>>(graph, cache_size);
-    } else if (graph->get_k() * kmer::KmerExtractorBOSS::bits_per_char <= 128) {
-        return std::make_shared<DBGSuccinctCachedViewImpl<kmer::KmerExtractorBOSS::Kmer128>>(graph, cache_size);
-    } else {
-        return std::make_shared<DBGSuccinctCachedViewImpl<kmer::KmerExtractorBOSS::Kmer256>>(graph, cache_size);
-    }
-}
-
 template <class Graph>
 std::shared_ptr<DeBruijnGraph>
 build_graph(uint64_t k,
@@ -261,9 +250,14 @@ std::shared_ptr<DeBruijnGraph>
 build_graph<DBGSuccinct::CachedView>(uint64_t k,
                                      std::vector<std::string> sequences,
                                      DeBruijnGraph::Mode mode) {
-    return make_cached_dbgsuccinct(std::dynamic_pointer_cast<DBGSuccinct>(
+    auto base_graph = std::dynamic_pointer_cast<DBGSuccinct>(
         build_graph<DBGSuccinct>(k, sequences, mode)
-    ));
+    );
+    auto cached = base_graph->get_cached_view();
+
+    // reset the underlying pointer to use base_graph instead of an alias of it
+    cached->set_graph(base_graph);
+    return cached;
 }
 
 
@@ -417,9 +411,14 @@ std::shared_ptr<DeBruijnGraph>
 build_graph_batch<DBGSuccinct::CachedView>(uint64_t k,
                                            std::vector<std::string> sequences,
                                            DeBruijnGraph::Mode mode) {
-    return make_cached_dbgsuccinct(std::dynamic_pointer_cast<DBGSuccinct>(
+    auto base_graph = std::dynamic_pointer_cast<DBGSuccinct>(
         build_graph_batch<DBGSuccinct>(k, sequences, mode)
-    ));
+    );
+    auto cached = base_graph->get_cached_view();
+
+    // reset the underlying pointer to use base_graph instead of an alias of it
+    cached->set_graph(base_graph);
+    return cached;
 }
 
 

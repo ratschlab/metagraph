@@ -44,6 +44,7 @@ class DBGWrapper : public DeBruijnGraph {
      */
     virtual const Graph& get_graph() const { return *graph_; }
     virtual std::shared_ptr<const Graph> get_graph_ptr() const { return graph_; }
+    virtual void set_graph(std::shared_ptr<const Graph> graph) = 0;
 
     /**
      * Methods shared by all wrappers

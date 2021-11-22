@@ -33,7 +33,7 @@ class DBGSuccinctCachedViewImpl : public DBGSuccinct::CachedView {
                                                = [](){ return false; }) const override final;
 
     /**
-     * Methods from DBGSuccinctCachedView
+     * Methods from DBGSuccinct::CachedView
      */
     virtual void put_decoded_edge(edge_index edge, std::string_view seq) const override final;
 
@@ -46,6 +46,13 @@ class DBGSuccinctCachedViewImpl : public DBGSuccinct::CachedView {
         }
 
         return false;
+    }
+
+    virtual void set_graph(std::shared_ptr<const DBGSuccinct> graph) override final {
+        graph_ = graph;
+        rev_comp_next_cache_.Clear();
+        rev_comp_prev_cache_.Clear();
+        decoded_cache_.Clear();
     }
 
     virtual void add_sequence(std::string_view sequence,

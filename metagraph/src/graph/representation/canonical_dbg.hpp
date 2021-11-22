@@ -121,6 +121,11 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
         return false;
     }
 
+    virtual void set_graph(std::shared_ptr<const DeBruijnGraph> graph) override final {
+        graph_ = graph;
+        flush();
+    }
+
     virtual void add_sequence(std::string_view sequence,
                               const std::function<void(node_index)> &on_insertion) override final {
         const_cast<DeBruijnGraph*>(graph_.get())->add_sequence(sequence, on_insertion);

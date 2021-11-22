@@ -140,6 +140,10 @@ class RCDBG : public DBGWrapper<DeBruijnGraph> {
         return const_cast<DeBruijnGraph*>(graph_.get())->load(filename_base);
     }
 
+    virtual void set_graph(std::shared_ptr<const DeBruijnGraph> graph) override final {
+        graph_ = graph;
+    }
+
     virtual void add_sequence(std::string_view sequence,
                               const std::function<void(node_index)> &on_insertion) override final {
         const_cast<DeBruijnGraph*>(graph_.get())->add_sequence(sequence, on_insertion);

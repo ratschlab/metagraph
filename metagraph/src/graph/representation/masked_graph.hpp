@@ -142,6 +142,10 @@ class MaskedDeBruijnGraph : public DBGWrapper<DeBruijnGraph> {
         throw std::runtime_error("add_sequence not supported for MaskedDeBruijnGraph");
     }
 
+    virtual void set_graph(std::shared_ptr<const DeBruijnGraph>) override final {
+        throw std::runtime_error("set_graph not supported for MaskedDeBruijnGraph");
+    }
+
   private:
     std::unique_ptr<bitmap> kmers_in_graph_;
     bool only_valid_nodes_in_mask_;
