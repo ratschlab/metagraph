@@ -100,6 +100,16 @@ class DBGSuccinctCachedViewImpl : public DBGSuccinct::CachedView {
         assert(value.first[1] == boss_->get_minus_k_value(key, get_k() - 2).first);
         assert(!value.second || *value.second
             == boss_->get_minus_k_value(key, get_k() - 2).second);
+
+        if (value.second) {
+            if (std::optional<CacheValue> kmer = decoded_cache_.TryGet(key)) {
+                if (kmer->second) {
+                    assert(kmer->second == value.second);
+                    return;
+                }
+            }
+        }
+
         decoded_cache_.Put(key, std::move(value));
     }
 

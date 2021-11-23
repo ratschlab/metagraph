@@ -575,11 +575,11 @@ void CanonicalDBG::reverse_complement(std::string &seq,
 void CanonicalDBG
 ::call_outgoing_from_rev_comp(node_index node,
                               const std::function<void(node_index, TAlphabet)> &callback) const {
-    if (edge_index e = get_rev_comp_boss_next_node(node)) {
+    if (node_index rc_node = get_rev_comp_node_next(node)) {
         const auto &cached = dynamic_cast<const DBGSuccinct::CachedView&>(*graph_);
         const DBGSuccinct &dbg_succ = cached.get_graph();
         const boss::BOSS &boss = dbg_succ.get_boss();
-        cached.call_incoming_kmers(dbg_succ.boss_to_kmer_index(e), [&](node_index next, char c) {
+        cached.call_incoming_kmers(rc_node, [&](node_index next, char c) {
             callback(next, boss.encode(c));
         });
     }
@@ -588,6 +588,7 @@ void CanonicalDBG
 void CanonicalDBG
 ::call_incoming_to_rev_comp(node_index node,
                             const std::function<void(node_index, TAlphabet)> &callback) const {
+    // TODO: rewrite this s.t. it can be handled with cached.call_outgoing_kmers
     if (edge_index e = get_rev_comp_boss_prev_node(node)) {
         const auto &cached = dynamic_cast<const DBGSuccinct::CachedView&>(*graph_);
         const DBGSuccinct &dbg_succ = cached.get_graph();
@@ -608,7 +609,7 @@ void CanonicalDBG
 }
 
 auto CanonicalDBG
-::get_rev_comp_boss_next_node(node_index node) const -> edge_index {
+::get_rev_comp_node_next(node_index node) const -> node_index {
     const auto &cached = dynamic_cast<const DBGSuccinct::CachedView&>(*graph_);
     const DBGSuccinct &dbg_succ = cached.get_graph();
     const boss::BOSS &boss = dbg_succ.get_boss();
@@ -618,7 +619,7 @@ auto CanonicalDBG
     if (auto fetch = rev_comp_next_cache_.TryGet(node)) {
         std::tie(ret_val, chars_unmatched) = *fetch;
         if (!ret_val && !chars_unmatched)
-            return 0;
+            return npos;
     } else {
         //   AGAGGATCTCGTATGCCGTCTTCTGCTTGAG
         //->  GAGGATCTCGTATGCCGTCTTCTGCTTGAG
@@ -626,7 +627,7 @@ auto CanonicalDBG
         std::string rev_seq = cached.get_node_sequence(node).substr(1, get_k() - 1);
         if (rev_seq[0] == boss::BOSS::kSentinel) {
             rev_comp_next_cache_.Put(node, std::make_pair(0, 0));
-            return 0;
+            return npos;
         }
 
         ::reverse_complement(rev_seq.begin(), rev_seq.end());
@@ -723,7 +724,7 @@ auto CanonicalDBG
     }
 #endif
 
-    return ret_val;
+    return dbg_succ.boss_to_kmer_index(ret_val);
 }
 
 auto CanonicalDBG
