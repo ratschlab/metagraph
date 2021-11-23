@@ -134,7 +134,7 @@ class MaskedDeBruijnGraph : public DBGWrapper<DeBruijnGraph> {
     }
 
     virtual bool load(const std::string &) override final {
-        throw std::runtime_error("koad not supported for MaskedDeBruijnGraph");
+        throw std::runtime_error("load not supported for MaskedDeBruijnGraph");
     }
 
     virtual void add_sequence(std::string_view,
