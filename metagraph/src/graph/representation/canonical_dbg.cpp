@@ -322,16 +322,26 @@ void CanonicalDBG::append_prev_rc_nodes(node_index node,
         is_palindrome_cache_.Put(prev, true);
     };
 
-    if (dynamic_cast<const DBGSuccinct::CachedView*>(graph_.get())) {
-        call_incoming_to_rev_comp(node, prev_callback_succ);
-        return;
-    }
-
     //        lshift    rc
     // AGCCAT -> *AGCCA -> TGGCT*
     std::string rev_seq = std::string(1, '\0') + get_node_sequence(node).substr(0, get_k() - 1);
     ::reverse_complement(rev_seq.begin(), rev_seq.end());
     assert(rev_seq.back() == '\0');
+
+    if (const auto &cached = dynamic_cast<const DBGSuccinct::CachedView*>(graph_.get())) {
+        // TODO: rewrite this s.t. it can be handled with cached.call_outgoing_kmers
+        if (edge_index edge = get_rev_comp_boss_prev_node(node)) {
+            const DBGSuccinct &dbg_succ = cached->get_graph();
+            const boss::BOSS &boss = dbg_succ.get_boss();
+            boss.call_outgoing(edge, [&](edge_index adjacent_edge) {
+                TAlphabet c = boss.get_W(adjacent_edge) % boss.alph_size;
+                rev_seq.back() = boss.decode(c);
+                cached->put_decoded_edge(adjacent_edge, rev_seq);
+                prev_callback_succ(dbg_succ.boss_to_kmer_index(adjacent_edge), c);
+            });
+        }
+        return;
+    }
 
     if (const auto *dbg_succ = get_dbg_succ(*graph_)) {
         // Find the BOSS node TGGCT and iterate through all of its outdoing edges.
@@ -570,29 +580,6 @@ void CanonicalDBG::reverse_complement(std::string &seq,
         return i ? reverse_complement(i) : i;
     });
     std::swap(path, rev_path);
-}
-
-void CanonicalDBG
-::call_incoming_to_rev_comp(node_index node,
-                            const std::function<void(node_index, TAlphabet)> &callback) const {
-    // TODO: rewrite this s.t. it can be handled with cached.call_outgoing_kmers
-    if (edge_index e = get_rev_comp_boss_prev_node(node)) {
-        const auto &cached = dynamic_cast<const DBGSuccinct::CachedView&>(*graph_);
-        const DBGSuccinct &dbg_succ = cached.get_graph();
-        const boss::BOSS &boss = dbg_succ.get_boss();
-        //        lshift    rc
-        // AGCCAT -> *AGCCA -> TGGCT*
-        std::string rev_comp_prefix = std::string(1, '\0') + cached.get_node_sequence(node).substr(0, get_k() - 1);
-        ::reverse_complement(rev_comp_prefix.begin(), rev_comp_prefix.end());
-        boss.call_outgoing(e, [&](edge_index adjacent_edge) {
-            TAlphabet c = boss.get_W(adjacent_edge) % boss.alph_size;
-            rev_comp_prefix.back() = boss.decode(c);
-            cached.put_decoded_edge(adjacent_edge, rev_comp_prefix);
-            auto kmer_index = dbg_succ.boss_to_kmer_index(adjacent_edge);
-            if (kmer_index != npos)
-                callback(kmer_index, c);
-        });
-    }
 }
 
 auto CanonicalDBG::get_rev_comp_node(node_index node) const -> node_index {

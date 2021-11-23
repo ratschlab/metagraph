@@ -160,9 +160,6 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
 
     node_index get_rev_comp_node(node_index node) const;
     edge_index get_rev_comp_boss_prev_node(node_index node) const;
-
-    void call_incoming_to_rev_comp(node_index node,
-                                   const std::function<void(node_index, TAlphabet)> &callback) const;
 };
 
 } // namespace graph
