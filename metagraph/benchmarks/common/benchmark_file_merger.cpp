@@ -40,7 +40,7 @@ std::vector<std::string> create_sources(size_t num_sources) {
 }
 
 static void BM_merge_files(benchmark::State &state) {
-    if (state.thread_index == 0) {
+    if (state.thread_index() == 0) {
         sources = create_sources(state.range(0));
     }
     utils::TempFile tempfile;
@@ -57,7 +57,7 @@ static void BM_merge_files(benchmark::State &state) {
 }
 
 static void BM_merge_files_pairs(benchmark::State &state) {
-    if (state.thread_index == 0) {
+    if (state.thread_index() == 0) {
         sources = create_sources(state.range(0));
     }
     utils::TempFile tempfile;
