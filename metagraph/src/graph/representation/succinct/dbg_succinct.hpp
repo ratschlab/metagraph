@@ -69,20 +69,10 @@ class DBGSuccinct : public DeBruijnGraph {
     // For each k-mer satisfying the skip condition, run the callback on npos.
     // Guarantees that nodes are called in the same order as the input sequence.
     // In canonical mode, non-canonical k-mers are NOT mapped to canonical ones
-    virtual void map_to_nodes_sequentially_checked(std::string_view sequence,
-                                                   const std::function<void(node_index)> &callback,
-                                                   const std::function<bool()> &terminate = [](){ return false; },
-                                                   const std::function<bool()> &skip = [](){ return false; }) const;
-
-    // Traverse graph mapping sequence to the graph nodes
-    // and run callback for each node until the termination condition is satisfied.
-    // Guarantees that nodes are called in the same order as the input sequence.
-    // In canonical mode, non-canonical k-mers are NOT mapped to canonical ones
     virtual void map_to_nodes_sequentially(std::string_view sequence,
                                            const std::function<void(node_index)> &callback,
-                                           const std::function<bool()> &terminate = [](){ return false; }) const override final {
-        map_to_nodes_sequentially_checked(sequence, callback, terminate);
-    }
+                                           const std::function<bool()> &terminate = [](){ return false; },
+                                           const std::function<bool()> &skip = [](){ return false; }) const override final;
 
     virtual void call_sequences(const CallPath &callback,
                                 size_t num_threads = 1,
@@ -236,19 +226,6 @@ class DBGSuccinct : public DeBruijnGraph {
                                        const std::function<void(node_index, TAlphabet)> &callback) const;
 
         /**
-         * Methods from DBGSuccinct
-         */
-        // Traverse graph mapping sequence to the graph nodes
-        // and run callback for each node until the termination condition is satisfied.
-        // All k-mers for which the skip condition is satisfied are skipped.
-        // Guarantees that nodes are called in the same order as the input sequence.
-        // In canonical mode, non-canonical k-mers are NOT mapped to canonical ones
-        virtual void map_to_nodes_sequentially_checked(std::string_view sequence,
-                                                       const std::function<void(node_index)> &callback,
-                                                       const std::function<bool()> &terminate = [](){ return false; },
-                                                       const std::function<bool()> &skip = [](){ return false; }) const = 0;
-
-        /**
          * Methods from DeBruijnGraph
          */
         virtual bool operator==(const DeBruijnGraph &other) const override final;
@@ -288,13 +265,6 @@ class DBGSuccinct : public DeBruijnGraph {
                                   const std::function<void(node_index)> &callback,
                                   const std::function<bool()> &terminate
                                       = [](){ return false; }) const override final;
-
-        virtual void map_to_nodes_sequentially(std::string_view sequence,
-                                               const std::function<void(node_index)> &callback,
-                                               const std::function<bool()> &terminate
-                                                   = [](){ return false; }) const override final {
-            map_to_nodes_sequentially_checked(sequence, callback, terminate);
-        }
 
         virtual void
         adjacent_outgoing_nodes(node_index node,

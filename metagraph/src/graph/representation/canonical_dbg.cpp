@@ -56,7 +56,8 @@ void CanonicalDBG::flush() {
 void CanonicalDBG
 ::map_to_nodes_sequentially(std::string_view sequence,
                             const std::function<void(node_index)> &callback,
-                            const std::function<bool()> &terminate) const {
+                            const std::function<bool()> &terminate,
+                            const std::function<bool()> &skip) const {
     if (sequence.size() < get_k())
         return;
 
@@ -73,7 +74,8 @@ void CanonicalDBG
                 stop = true;
             }
         },
-        [&]() { return stop; }
+        [&]() { return stop; },
+        skip
     );
 
     for (node_index node : path) {
@@ -106,7 +108,7 @@ void CanonicalDBG
         auto it = rev_path.rbegin() + 1;
 
         auto map_remaining = [&](const auto &graph) {
-            graph.map_to_nodes_sequentially_checked(sequence.substr(1),
+            graph.map_to_nodes_sequentially(sequence.substr(1),
                 [&](node_index next) {
                     path.push_back(next);
                     ++it;
@@ -134,6 +136,11 @@ void CanonicalDBG
     for (auto jt = path.begin(); jt != path.end(); ++jt, ++it) {
         if (terminate())
             return;
+
+        if (skip()) {
+            callback(npos);
+            continue;
+        }
 
         if (*jt != npos) {
             callback(*jt);

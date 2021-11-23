@@ -20,10 +20,10 @@ class DBGSuccinctCachedViewImpl : public DBGSuccinct::CachedView {
      * Methods from DBGSuccinct
      */
     virtual void
-    map_to_nodes_sequentially_checked(std::string_view sequence,
-                                      const std::function<void(node_index)> &callback,
-                                      const std::function<bool()> &terminate = [](){ return false; },
-                                      const std::function<bool()> &skip = [](){ return false; }) const override final;
+    map_to_nodes_sequentially(std::string_view sequence,
+                              const std::function<void(node_index)> &callback,
+                              const std::function<bool()> &terminate = [](){ return false; },
+                              const std::function<bool()> &skip = [](){ return false; }) const override final;
 
     /**
      * Methods from DeBruijnGraph

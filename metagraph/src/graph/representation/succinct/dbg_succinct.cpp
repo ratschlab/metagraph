@@ -248,11 +248,10 @@ std::string DBGSuccinct::get_node_sequence(node_index node) const {
 // For each k-mer satisfying the skip condition, run the callback on npos.
 // Guarantees that nodes are called in the same order as the input sequence.
 // In canonical mode, non-canonical k-mers are not mapped to canonical ones
-void DBGSuccinct
-::map_to_nodes_sequentially_checked(std::string_view sequence,
-                                    const std::function<void(node_index)> &callback,
-                                    const std::function<bool()> &terminate,
-                                    const std::function<bool()> &skip) const {
+void DBGSuccinct::map_to_nodes_sequentially(std::string_view sequence,
+                                            const std::function<void(node_index)> &callback,
+                                            const std::function<bool()> &terminate,
+                                            const std::function<bool()> &skip) const {
     if (sequence.size() < get_k())
         return;
 

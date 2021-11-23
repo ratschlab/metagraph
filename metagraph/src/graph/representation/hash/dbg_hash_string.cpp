@@ -48,9 +48,10 @@ void DBGHashString::map_to_nodes(std::string_view sequence,
 void DBGHashString
 ::map_to_nodes_sequentially(std::string_view sequence,
                             const std::function<void(node_index)> &callback,
-                            const std::function<bool()> &terminate) const {
+                            const std::function<bool()> &terminate,
+                            const std::function<bool()> &skip) const {
     for (size_t i = 0; i + k_ <= sequence.size() && !terminate(); ++i) {
-        callback(kmer_to_node(sequence.substr(i, k_)));
+        callback(!skip() ? kmer_to_node(sequence.substr(i, k_)) : npos);
     }
 }
 

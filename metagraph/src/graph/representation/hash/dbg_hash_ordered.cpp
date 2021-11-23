@@ -52,10 +52,12 @@ class DBGHashOrderedImpl : public DBGHashOrdered::DBGHashOrderedInterface {
     // Traverse graph mapping sequence to the graph nodes
     // and run callback for each node until the termination condition is satisfied.
     // Guarantees that nodes are called in the same order as the input sequence.
+    // All k-mers for which the skip condition is satisfied are skipped.
     // In canonical mode, non-canonical k-mers are NOT mapped to canonical ones
     void map_to_nodes_sequentially(std::string_view sequence,
                                    const std::function<void(node_index)> &callback,
-                                   const std::function<bool()> &terminate) const;
+                                   const std::function<bool()> &terminate,
+                                   const std::function<bool()> &skip) const;
 
     void call_outgoing_kmers(node_index node,
                              const OutgoingEdgeCallback &callback) const;
@@ -191,7 +193,8 @@ template <typename KMER>
 void DBGHashOrderedImpl<KMER>::map_to_nodes_sequentially(
                               std::string_view sequence,
                               const std::function<void(node_index)> &callback,
-                              const std::function<bool()> &terminate) const {
+                              const std::function<bool()> &terminate,
+                              const std::function<bool()> &skip) const {
 #if _DBGHash_LINEAR_PATH_OPTIMIZATIONS
     uint64_t n_nodes = num_nodes();
     node_index prev_index = n_nodes;
@@ -202,7 +205,7 @@ void DBGHashOrderedImpl<KMER>::map_to_nodes_sequentially(
             return;
 
 #if _DBGHash_LINEAR_PATH_OPTIMIZATIONS
-        if (!is_valid) {
+        if (!is_valid || skip()) {
             prev_index = n_nodes;
             callback(npos);
         } else if (prev_index < n_nodes && get_kmer(prev_index + 1) == kmer) {
@@ -212,7 +215,7 @@ void DBGHashOrderedImpl<KMER>::map_to_nodes_sequentially(
             callback(prev_index = get_index(kmer));
         }
 #else
-        callback(is_valid ? get_index(kmer) : npos);
+        callback(is_valid && !skip() ? get_index(kmer) : npos);
 #endif
     }
 }

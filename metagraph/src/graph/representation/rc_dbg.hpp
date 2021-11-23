@@ -28,8 +28,8 @@ class RCDBG : public DBGWrapper<DeBruijnGraph> {
     virtual void
     map_to_nodes_sequentially(std::string_view sequence,
                               const std::function<void(node_index)> &callback,
-                              const std::function<bool()> &terminate
-                                  = [](){ return false; }) const override final {
+                              const std::function<bool()> &terminate = [](){ return false; },
+                              const std::function<bool()> &skip = []() { return false; }) const override final {
         if (terminate())
             return;
 
@@ -38,7 +38,7 @@ class RCDBG : public DBGWrapper<DeBruijnGraph> {
         std::vector<node_index> nodes = map_sequence_to_nodes(*graph_, rc);
 
         for (auto it = nodes.rbegin(); it != nodes.rend() && !terminate(); ++it) {
-            callback(*it);
+            callback(!skip() ? *it : npos);
         }
     }
 

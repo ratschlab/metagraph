@@ -340,15 +340,15 @@ void DBGSuccinctCachedViewImpl<KmerType>
 
 template <typename KmerType>
 void DBGSuccinctCachedViewImpl<KmerType>
-::map_to_nodes_sequentially_checked(std::string_view sequence,
-                                    const std::function<void(node_index)> &callback,
-                                    const std::function<bool()> &terminate,
-                                    const std::function<bool()> &skip) const {
+::map_to_nodes_sequentially(std::string_view sequence,
+                            const std::function<void(node_index)> &callback,
+                            const std::function<bool()> &terminate,
+                            const std::function<bool()> &skip) const {
     size_t k = get_k();
     const char *begin = sequence.data();
     const char *last = begin + k - 1;
     std::optional<KmerType> prev{std::nullopt};
-    graph_->map_to_nodes_sequentially_checked(sequence,
+    graph_->map_to_nodes_sequentially(sequence,
         [&](node_index i) {
             if (i) {
                 if (prev) {

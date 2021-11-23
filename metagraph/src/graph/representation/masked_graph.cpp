@@ -224,13 +224,15 @@ void MaskedDeBruijnGraph::map_to_nodes(std::string_view sequence,
 void MaskedDeBruijnGraph
 ::map_to_nodes_sequentially(std::string_view sequence,
                             const std::function<void(node_index)> &callback,
-                            const std::function<bool()> &terminate) const {
+                            const std::function<bool()> &terminate,
+                            const std::function<bool()> &skip) const {
     graph_->map_to_nodes_sequentially(
         sequence,
         [&](const node_index &index) {
             callback(index && in_subgraph(index) ? index : npos);
         },
-        terminate
+        terminate,
+        skip
     );
 }
 
