@@ -602,17 +602,8 @@ void CanonicalDBG
         const auto &cached = dynamic_cast<const DBGSuccinct::CachedView&>(*graph_);
         const DBGSuccinct &dbg_succ = cached.get_graph();
         const boss::BOSS &boss = dbg_succ.get_boss();
-        //        lshift    rc
-        // AGCCAT -> *AGCCA -> TGGCT*
-        std::string rev_comp_prefix = std::string(1, '\0') + cached.get_node_sequence(node).substr(0, get_k() - 1);
-        ::reverse_complement(rev_comp_prefix.begin(), rev_comp_prefix.end());
-        boss.call_outgoing(e, [&](edge_index adjacent_edge) {
-            TAlphabet c = boss.get_W(adjacent_edge) % boss.alph_size;
-            rev_comp_prefix.back() = boss.decode(c);
-            cached.put_decoded_edge(adjacent_edge, rev_comp_prefix);
-            auto kmer_index = dbg_succ.boss_to_kmer_index(adjacent_edge);
-            if (kmer_index != npos)
-                callback(kmer_index, c);
+        cached.call_outgoing_kmers(dbg_succ.boss_to_kmer_index(e), [&](node_index prev, char c) {
+            callback(prev, boss.encode(c));
         });
     }
 }
