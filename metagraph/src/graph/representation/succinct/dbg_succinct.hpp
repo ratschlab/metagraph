@@ -235,6 +235,18 @@ class DBGSuccinct : public DeBruijnGraph {
         void call_incoming_to_rev_comp(node_index node,
                                        const std::function<void(node_index, TAlphabet)> &callback) const;
 
+        /**
+         * Methods from DBGSuccinct
+         */
+        // Traverse graph mapping sequence to the graph nodes
+        // and run callback for each node until the termination condition is satisfied.
+        // All k-mers for which the skip condition is satisfied are skipped.
+        // Guarantees that nodes are called in the same order as the input sequence.
+        // In canonical mode, non-canonical k-mers are NOT mapped to canonical ones
+        virtual void map_to_nodes_sequentially_checked(std::string_view sequence,
+                                                       const std::function<void(node_index)> &callback,
+                                                       const std::function<bool()> &terminate = [](){ return false; },
+                                                       const std::function<bool()> &skip = [](){ return false; }) const = 0;
 
         /**
          * Methods from DeBruijnGraph
@@ -277,15 +289,12 @@ class DBGSuccinct : public DeBruijnGraph {
                                   const std::function<bool()> &terminate
                                       = [](){ return false; }) const override final;
 
-        // Traverse graph mapping sequence to the graph nodes
-        // and run callback for each node until the termination condition is satisfied.
-        // All k-mers for which the skip condition is satisfied are skipped.
-        // Guarantees that nodes are called in the same order as the input sequence.
-        // In canonical mode, non-canonical k-mers are NOT mapped to canonical ones
-        virtual void map_to_nodes_sequentially_checked(std::string_view sequence,
-                                                       const std::function<void(node_index)> &callback,
-                                                       const std::function<bool()> &terminate = [](){ return false; },
-                                                       const std::function<bool()> &skip = [](){ return false; }) const = 0;
+        virtual void map_to_nodes_sequentially(std::string_view sequence,
+                                               const std::function<void(node_index)> &callback,
+                                               const std::function<bool()> &terminate
+                                                   = [](){ return false; }) const override final {
+            map_to_nodes_sequentially_checked(sequence, callback, terminate);
+        }
 
         virtual void
         adjacent_outgoing_nodes(node_index node,
