@@ -133,12 +133,18 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
     // cache whether a given node is a palindrome (it's equal to its reverse complement)
     mutable common::LRUCache<node_index, bool> is_palindrome_cache_;
 
-    // cache the BOSS node corresponding to the reverse complement of the k - 1 prefix,
-    // and the number of matching characters
+    // Cache a BOSS node (potentially 0) and a lower bound on the number of unmatched
+    // nucleotides of the prefix of the key node.
+    // If the lower bound is greater than 1, then the stored BOSS node is 0.
+    // If the lower bound is equal to 1, then the BOSS node corresponding to the
+    // reverse complement of the k - 1 prefix of the key node is stored.
     mutable common::LRUCache<node_index, std::pair<edge_index, size_t>> rev_comp_prefix_cache_;
 
-    // cache the BOSS node corresponding to the reverse complement of the k - 1 suffix,
-    // and the number of matching characters
+    // Cache a BOSS node (potentially 0) and a lower bound on the number of unmatched
+    // nucleotides of the suffix of the key node.
+    // If the lower bound is greater than 1, then the stored BOSS node is 0.
+    // If the lower bound is equal to 1, then the BOSS node corresponding to the
+    // reverse complement of the k - 1 suffix of the key node is stored.
     mutable common::LRUCache<node_index, std::pair<edge_index, size_t>> rev_comp_suffix_cache_;
 
     size_t offset_;
