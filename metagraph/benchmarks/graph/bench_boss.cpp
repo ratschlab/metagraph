@@ -30,11 +30,17 @@ std::shared_ptr<DBGSuccinct> load_graph(benchmark::State &state) {
 }
 
 template <class OutGraph>
-std::shared_ptr<DeBruijnGraph> wrap_graph(std::shared_ptr<DBGSuccinct> graph) {
+std::shared_ptr<DeBruijnGraph> wrap_graph(benchmark::State &state,
+                                          std::shared_ptr<DBGSuccinct> graph) {
     static_assert(std::is_same_v<OutGraph, CanonicalDBG>
         || std::is_same_v<OutGraph, DBGSuccinct::CachedView>);
 
     if constexpr(std::is_same_v<OutGraph, CanonicalDBG>) {
+        if (graph->get_mode() != DeBruijnGraph::PRIMARY) {
+            state.SkipWithError("Benchmarked graph must be in PRIMARY mode");
+            return {};
+        }
+
         return std::make_shared<CanonicalDBG>(graph);
     } else {
         std::shared_ptr<DeBruijnGraph> wrapped_graph = graph->get_cached_view(CACHE_SIZE);
@@ -119,7 +125,9 @@ DEFINE_BOSS_BENCHMARK(bwd,                 bwd,                 get_W,    size);
 #define DEFINE_BOSS_CACHED_CYCLE_BENCHMARK(NAME, OPERATION, GRAPH_TYPE, ...) \
 static void BM_BOSS_##NAME(benchmark::State& state) { \
     auto base_graph = load_graph(state); \
-    auto graph = wrap_graph<GRAPH_TYPE>(base_graph); \
+    auto graph = wrap_graph<GRAPH_TYPE>(state, base_graph); \
+    if (!graph) \
+        return; \
  \
     auto indexes = random_numbers(NUM_DISTINCT_INDEXES, 1, graph->num_nodes()); \
     size_t i = 0; \
@@ -133,7 +141,9 @@ BENCHMARK(BM_BOSS_##NAME) -> Unit(benchmark::kMicrosecond); \
 #define DEFINE_BOSS_CACHED_PATH_BENCHMARK(NAME, OPERATION, GRAPH_TYPE) \
 static void BM_BOSS_##NAME(benchmark::State& state) { \
     auto base_graph = load_graph(state); \
-    auto graph = wrap_graph<GRAPH_TYPE>(base_graph); \
+    auto graph = wrap_graph<GRAPH_TYPE>(state, base_graph); \
+    if (!graph) \
+        return; \
  \
     size_t size = NUM_DISTINCT_INDEXES >> 2; \
     auto indexes = random_traversal_numbers(*graph, size, PATH_SIZE); \
