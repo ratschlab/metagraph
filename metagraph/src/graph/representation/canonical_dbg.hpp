@@ -137,14 +137,6 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
   private:
     size_t cache_size_;
 
-    // cache the results of call_outgoing_kmers
-    mutable caches::fixed_sized_cache<node_index, std::vector<node_index>,
-                                      caches::LRUCachePolicy<node_index>> child_node_cache_;
-
-    // cache the results of call_incoming_kmers
-    mutable caches::fixed_sized_cache<node_index, std::vector<node_index>,
-                                      caches::LRUCachePolicy<node_index>> parent_node_cache_;
-
     // cache whether a given node is a palindrome (it's equal to its reverse complement)
     mutable caches::fixed_sized_cache<node_index, bool,
                                       caches::LRUCachePolicy<node_index>> is_palindrome_cache_;

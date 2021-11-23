@@ -18,8 +18,7 @@ inline const DBGSuccinct* get_dbg_succ(const DeBruijnGraph &graph) {
 template <typename Graph>
 CanonicalDBG::CanonicalDBG(Graph&& graph, size_t cache_size)
       : DBGWrapper<DeBruijnGraph>(std::forward<Graph>(graph)),
-        cache_size_(cache_size), child_node_cache_(cache_size_),
-        parent_node_cache_(cache_size_), is_palindrome_cache_(cache_size_) {
+        cache_size_(cache_size), is_palindrome_cache_(cache_size_) {
     static_assert(!std::is_same_v<Graph, std::shared_ptr<CanonicalDBG>>);
     static_assert(!std::is_same_v<Graph, std::shared_ptr<const CanonicalDBG>>);
     flush();
@@ -37,8 +36,6 @@ void CanonicalDBG::flush() {
         exit(1);
     }
 
-    child_node_cache_.Clear();
-    parent_node_cache_.Clear();
     is_palindrome_cache_.Clear();
 
     offset_ = graph_->max_index();
@@ -256,26 +253,18 @@ void CanonicalDBG
 
     const auto &alphabet = graph_->alphabet();
 
-    std::vector<node_index> children;
-    if (auto fetch = child_node_cache_.TryGet(node)) {
-        children = std::move(*fetch);
+    std::vector<node_index> children(alphabet.size(), npos);
+    size_t max_num_edges_left = children.size() - has_sentinel_;
 
-    } else {
-        children.resize(alphabet.size(), npos);
-        size_t max_num_edges_left = children.size() - has_sentinel_;
+    graph_->call_outgoing_kmers(node, [&](node_index next, char c) {
+        if (c != boss::BOSS::kSentinel) {
+            children[alphabet_encoder_[c]] = next;
+            --max_num_edges_left;
+        }
+    });
 
-        graph_->call_outgoing_kmers(node, [&](node_index next, char c) {
-            if (c != boss::BOSS::kSentinel) {
-                children[alphabet_encoder_[c]] = next;
-                --max_num_edges_left;
-            }
-        });
-
-        if (max_num_edges_left)
-            append_next_rc_nodes(node, children);
-
-        child_node_cache_.Put(node, children);
-    }
+    if (max_num_edges_left)
+        append_next_rc_nodes(node, children);
 
     for (size_t c = 0; c < children.size(); ++c) {
         if (children[c] != npos) {
@@ -383,26 +372,18 @@ void CanonicalDBG
 
     const auto &alphabet = graph_->alphabet();
 
-    std::vector<node_index> parents;
-    if (auto fetch = parent_node_cache_.TryGet(node)) {
-        parents = std::move(*fetch);
+    std::vector<node_index> parents(alphabet.size(), npos);
+    size_t max_num_edges_left = parents.size() - has_sentinel_;
 
-    } else {
-        parents.resize(alphabet.size(), npos);
-        size_t max_num_edges_left = parents.size() - has_sentinel_;
+    graph_->call_incoming_kmers(node, [&](node_index prev, char c) {
+        if (c != boss::BOSS::kSentinel) {
+            parents[alphabet_encoder_[c]] = prev;
+            --max_num_edges_left;
+        }
+    });
 
-        graph_->call_incoming_kmers(node, [&](node_index prev, char c) {
-            if (c != boss::BOSS::kSentinel) {
-                parents[alphabet_encoder_[c]] = prev;
-                --max_num_edges_left;
-            }
-        });
-
-        if (max_num_edges_left)
-            append_prev_rc_nodes(node, parents);
-
-        parent_node_cache_.Put(node, parents);
-    }
+    if (max_num_edges_left)
+        append_prev_rc_nodes(node, parents);
 
     for (size_t c = 0; c < parents.size(); ++c) {
         if (parents[c] != npos) {
