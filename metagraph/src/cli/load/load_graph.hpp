@@ -10,11 +10,6 @@
 
 
 namespace mtg {
-
-namespace graph {
-    class DBGSuccinct;
-}
-
 namespace cli {
 
 Config::GraphType parse_graph_type(const std::string &filename);
