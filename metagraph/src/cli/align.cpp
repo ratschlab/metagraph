@@ -83,13 +83,14 @@ template std::unique_ptr<IDBGAligner> build_aligner<DeBruijnGraph>(const DeBruij
 
 void map_sequences_in_file(const std::string &file,
                            const DeBruijnGraph &graph,
-                           const DBGSuccinct &dbg,
+                           std::shared_ptr<const DBGSuccinct> dbg,
                            const Config &config,
                            const Timer &timer,
                            ThreadPool *thread_pool = nullptr,
                            std::mutex *print_mutex = nullptr) {
     // TODO: multithreaded
     std::ignore = std::tie(thread_pool, print_mutex);
+    assert(config.alignment_length == graph.get_k() || dbg);
 
     std::unique_ptr<std::ofstream> ofile;
     if (config.outfbase.size())
@@ -127,21 +128,26 @@ void map_sequences_in_file(const std::string &file,
                                [&](const auto &node) {
                                    graphindices.emplace_back(node);
                                });
-        } else if (config.query_presence || config.count_kmers) {
+        } else {
             // TODO: make more efficient
             // TODO: canonicalization
-            if (dbg.get_mode() == DeBruijnGraph::PRIMARY)
+            if (dbg->get_mode() == DeBruijnGraph::PRIMARY)
                 logger->warn("Sub-k-mers will be mapped to unwrapped primary graph");
 
-            for (size_t i = 0; i + graph.get_k() <= read_stream->seq.l; ++i) {
-                dbg.call_nodes_with_suffix_matching_longest_prefix(
+            for (size_t i = 0; i + config.alignment_length <= read_stream->seq.l; ++i) {
+                bool found = false;
+                dbg->call_nodes_with_suffix_matching_longest_prefix(
                     std::string_view(read_stream->seq.s + i, config.alignment_length),
                     [&](auto node, auto) {
-                        if (graphindices.empty())
+                        if (!found) {
+                            found = true;
                             graphindices.emplace_back(node);
+                        }
                     },
                     config.alignment_length
                 );
+                if (!found)
+                    graphindices.emplace_back(DeBruijnGraph::npos);
             }
         }
 
@@ -179,27 +185,11 @@ void map_sequences_in_file(const std::string &file,
             return;
         }
 
-        if (config.alignment_length == graph.get_k()) {
-            for (size_t i = 0; i < graphindices.size(); ++i) {
-                assert(i + config.alignment_length <= read_stream->seq.l);
-                *out << std::string_view(read_stream->seq.s + i, config.alignment_length)
-                     << ": " << graphindices[i] << "\n";
-            }
-        } else {
-            // map input subsequences to multiple nodes
-            for (size_t i = 0; i + graph.get_k() <= read_stream->seq.l; ++i) {
-                // TODO: make more efficient
-                // TODO: canonicalization
-                std::string_view subseq(read_stream->seq.s + i, config.alignment_length);
-
-                dbg.call_nodes_with_suffix_matching_longest_prefix(
-                    subseq,
-                    [&](auto node, auto) {
-                        *out << subseq << ": " << node << "\n";
-                    },
-                    config.alignment_length
-                );
-            }
+        // mapping of each k-mer to a graph node
+        for (size_t i = 0; i < graphindices.size(); ++i) {
+            assert(i + config.alignment_length <= read_stream->seq.l);
+            *out << std::string_view(read_stream->seq.s + i, config.alignment_length)
+                 << ": " << graphindices[i] << "\n";
         }
 
     }, config.forward_and_reverse);
@@ -376,7 +366,7 @@ int align_to_graph(Config *config) {
         for (const auto &file : files) {
             logger->trace("Map sequences from file {}", file);
 
-            map_sequences_in_file(file, *graph, *dbg_succ, *config, timer,
+            map_sequences_in_file(file, *graph, dbg_succ, *config, timer,
                                   &thread_pool, &print_mutex);
         }
 
