@@ -83,13 +83,14 @@ template std::unique_ptr<IDBGAligner> build_aligner<DeBruijnGraph>(const DeBruij
 
 void map_sequences_in_file(const std::string &file,
                            const DeBruijnGraph &graph,
-                           std::shared_ptr<const DBGSuccinct> dbg,
                            const Config &config,
                            const Timer &timer,
                            ThreadPool *thread_pool = nullptr,
                            std::mutex *print_mutex = nullptr) {
     // TODO: multithreaded
     std::ignore = std::tie(thread_pool, print_mutex);
+
+    const DBGSuccinct *dbg = dynamic_cast<const DBGSuccinct*>(&graph);
     assert(config.alignment_length == graph.get_k() || dbg);
 
     std::unique_ptr<std::ofstream> ofile;
@@ -366,8 +367,7 @@ int align_to_graph(Config *config) {
         for (const auto &file : files) {
             logger->trace("Map sequences from file {}", file);
 
-            map_sequences_in_file(file, *graph, dbg_succ, *config, timer,
-                                  &thread_pool, &print_mutex);
+            map_sequences_in_file(file, *graph, *config, timer, &thread_pool, &print_mutex);
         }
 
         thread_pool.join();
