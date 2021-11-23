@@ -74,6 +74,7 @@ void DBGSuccinctCachedViewImpl<KmerType>
                       const IncomingEdgeCallback &callback) const {
     assert(node > 0 && node <= num_nodes());
 
+    std::string seq = std::string(1, '\0') + get_node_sequence(node).substr(0, get_k() - 1);
     edge_index edge = graph_->kmer_to_boss_index(node);
 
     boss_->call_incoming_to_target(boss_->bwd(edge), boss_->get_node_last_value(edge),
@@ -85,9 +86,11 @@ void DBGSuccinctCachedViewImpl<KmerType>
 
             // get the first character from either the cache, or the graph
             TAlphabet s = get_first_value(incoming_boss_edge);
+            seq[0] = boss_->decode(s);
+            put_decoded_edge(incoming_boss_edge, seq);
 
             if (prev != npos && s != boss::BOSS::kSentinelCode)
-                callback(prev, boss_->decode(s));
+                callback(prev, seq[0]);
         }
     );
 }
