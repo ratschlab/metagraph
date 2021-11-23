@@ -19,7 +19,7 @@ CanonicalDBG::CanonicalDBG(Graph&& graph, size_t cache_size)
       : DBGWrapper<DeBruijnGraph>(std::forward<Graph>(graph)),
         is_palindrome_cache_(cache_size),
         rev_comp_prev_cache_(cache_size),
-        rev_comp_next_cache_(cache_size) {
+        rev_comp_cache_(cache_size) {
     static_assert(!std::is_same_v<Graph, std::shared_ptr<CanonicalDBG>>);
     static_assert(!std::is_same_v<Graph, std::shared_ptr<const CanonicalDBG>>);
     flush();
@@ -38,7 +38,7 @@ void CanonicalDBG::flush() {
     }
 
     is_palindrome_cache_.Clear();
-    rev_comp_next_cache_.Clear();
+    rev_comp_cache_.Clear();
     rev_comp_prev_cache_.Clear();
 
     offset_ = graph_->max_index();
@@ -179,15 +179,14 @@ void CanonicalDBG::append_next_rc_nodes(node_index node,
     // TGGCTrc(n) as index(nAGCCA) + offset_
 
     // callback for DBGSuccinct and DBGSuccinct::CachedView
-    auto next_callback_succ = [&](node_index next, boss::BOSS::TAlphabet c) {
-        if (c == boss::BOSS::kSentinelCode)
+    auto next_callback_succ = [&](node_index next, char c) {
+        if (c == boss::BOSS::kSentinel)
             return;
 
-        c = kmer::KmerExtractorBOSS::complement(c);
+        boss::BOSS::TAlphabet s = alphabet_encoder_[complement(c)];
 
-        if (children[c] == npos) {
-            children[c] = next + offset_;
-
+        if (children[s] == npos) {
+            children[s] = next + offset_;
             return;
         }
 
@@ -195,7 +194,7 @@ void CanonicalDBG::append_next_rc_nodes(node_index node,
             logger->error(
                 "Primary graph contains both forward and reverse complement: {} {} -> {} {}\t{} {}",
                 node, graph_->get_node_sequence(node),
-                children[c], graph_->get_node_sequence(children[c]),
+                children[s], graph_->get_node_sequence(children[s]),
                 next, graph_->get_node_sequence(next));
             exit(1);
         }
@@ -204,7 +203,9 @@ void CanonicalDBG::append_next_rc_nodes(node_index node,
     };
 
     if (dynamic_cast<const DBGSuccinct::CachedView*>(graph_.get())) {
-        call_outgoing_from_rev_comp(node, next_callback_succ);
+        if (node_index rc_node = get_rev_comp_node(node))
+            graph_->call_incoming_kmers(rc_node, next_callback_succ);
+
         return;
     }
 
@@ -215,13 +216,14 @@ void CanonicalDBG::append_next_rc_nodes(node_index node,
     assert(rev_seq[0] == '\0');
 
     if (const auto *dbg_succ = get_dbg_succ(*graph_)) {
+        const boss::BOSS &boss = dbg_succ->get_boss();
         dbg_succ->call_nodes_with_suffix_matching_longest_prefix(
             std::string_view(&rev_seq[1], get_k() - 1),
             [&](node_index next, uint64_t /* match_length */) {
                 next_callback_succ(next,
-                                   dbg_succ->get_boss().get_minus_k_value(
+                                   boss.decode(boss.get_minus_k_value(
                                        dbg_succ->kmer_to_boss_index(next), get_k() - 2
-                                   ).first);
+                                   ).first));
             },
             get_k() - 1
         );
@@ -570,21 +572,6 @@ void CanonicalDBG::reverse_complement(std::string &seq,
     std::swap(path, rev_path);
 }
 
-
-
-void CanonicalDBG
-::call_outgoing_from_rev_comp(node_index node,
-                              const std::function<void(node_index, TAlphabet)> &callback) const {
-    if (node_index rc_node = get_rev_comp_node_next(node)) {
-        const auto &cached = dynamic_cast<const DBGSuccinct::CachedView&>(*graph_);
-        const DBGSuccinct &dbg_succ = cached.get_graph();
-        const boss::BOSS &boss = dbg_succ.get_boss();
-        cached.call_incoming_kmers(rc_node, [&](node_index next, char c) {
-            callback(next, boss.encode(c));
-        });
-    }
-}
-
 void CanonicalDBG
 ::call_incoming_to_rev_comp(node_index node,
                             const std::function<void(node_index, TAlphabet)> &callback) const {
@@ -608,15 +595,14 @@ void CanonicalDBG
     }
 }
 
-auto CanonicalDBG
-::get_rev_comp_node_next(node_index node) const -> node_index {
+auto CanonicalDBG::get_rev_comp_node(node_index node) const -> node_index {
     const auto &cached = dynamic_cast<const DBGSuccinct::CachedView&>(*graph_);
     const DBGSuccinct &dbg_succ = cached.get_graph();
     const boss::BOSS &boss = dbg_succ.get_boss();
     // 78% effective
     edge_index ret_val = 0;
     size_t chars_unmatched = 0;
-    if (auto fetch = rev_comp_next_cache_.TryGet(node)) {
+    if (auto fetch = rev_comp_cache_.TryGet(node)) {
         std::tie(ret_val, chars_unmatched) = *fetch;
         if (!ret_val && !chars_unmatched)
             return npos;
@@ -626,7 +612,7 @@ auto CanonicalDBG
         //->  CTCAAGCAGAAGACGGCATACGAGATCCTC
         std::string rev_seq = cached.get_node_sequence(node).substr(1, get_k() - 1);
         if (rev_seq[0] == boss::BOSS::kSentinel) {
-            rev_comp_next_cache_.Put(node, std::make_pair(0, 0));
+            rev_comp_cache_.Put(node, std::make_pair(0, 0));
             return npos;
         }
 
@@ -647,7 +633,7 @@ auto CanonicalDBG
         boss.call_incoming_to_target(start, cached.complement(encoded.front()),
                                      [&](edge_index adj) {
             if (node_index a = dbg_succ.boss_to_kmer_index(adj))
-                rev_comp_next_cache_.Put(a, stored_val);
+                rev_comp_cache_.Put(a, stored_val);
         });
     }
 
@@ -664,7 +650,7 @@ auto CanonicalDBG
         size_t next_chars_unmatched = chars_unmatched - 1;
         auto stored_val = std::make_pair(0, next_chars_unmatched);
         cached.adjacent_outgoing_nodes(node, [&](node_index next) {
-            rev_comp_next_cache_.Put(next, stored_val);
+            rev_comp_cache_.Put(next, stored_val);
 #ifndef NDEBUG
             std::string test_seq = dbg_succ.get_node_sequence(next).substr(1, get_k() - 1);
             ::reverse_complement(test_seq.begin(), test_seq.end());
@@ -701,7 +687,7 @@ auto CanonicalDBG
                 if (boss.get_last(prev_edge)) {
                     TAlphabet s = cached.complement(cached.get_first_value(prev_edge));
                     if (parents[s].first)
-                        rev_comp_next_cache_.Put(parents[s].first, std::make_pair(prev_edge, 0));
+                        rev_comp_cache_.Put(parents[s].first, std::make_pair(prev_edge, 0));
                 }
             });
         }
