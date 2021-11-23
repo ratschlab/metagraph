@@ -4,10 +4,9 @@
 #include <cassert>
 #include <array>
 
-#include <cache.hpp>
-#include <lru_cache_policy.hpp>
-
 #include "graph/representation/base/dbg_wrapper.hpp"
+#include "graph/representation/succinct/dbg_succinct.hpp"
+#include "common/caches.hpp"
 
 namespace mtg {
 namespace graph {
@@ -128,9 +127,19 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
     }
 
   private:
+    typedef boss::BOSS::edge_index edge_index;
+    typedef boss::BOSS::TAlphabet TAlphabet;
+
     // cache whether a given node is a palindrome (it's equal to its reverse complement)
-    mutable caches::fixed_sized_cache<node_index, bool,
-                                      caches::LRUCachePolicy<node_index>> is_palindrome_cache_;
+    mutable common::LRUCache<node_index, bool> is_palindrome_cache_;
+
+    // cache the BOSS node corresponding to the reverse complement of the k - 1 prefix,
+    // and the number of matching characters
+    mutable common::LRUCache<node_index, std::pair<edge_index, size_t>> rev_comp_prev_cache_;
+
+    // cache the BOSS node corresponding to the reverse complement of the k - 1 suffix,
+    // and the number of matching characters
+    mutable common::LRUCache<node_index, std::pair<edge_index, size_t>> rev_comp_next_cache_;
 
     size_t offset_;
     bool k_odd_;
@@ -148,6 +157,15 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
     // find all child nodes of node in the CanonicalDBG which are represented
     // in the reverse complement orientation in the underlying primary graph
     void append_next_rc_nodes(node_index node, std::vector<node_index> &children) const;
+
+    edge_index get_rev_comp_boss_next_node(node_index node) const;
+    edge_index get_rev_comp_boss_prev_node(node_index node) const;
+
+    void call_outgoing_from_rev_comp(node_index node,
+                                     const std::function<void(node_index, TAlphabet)> &callback) const;
+
+    void call_incoming_to_rev_comp(node_index node,
+                                   const std::function<void(node_index, TAlphabet)> &callback) const;
 };
 
 } // namespace graph

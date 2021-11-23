@@ -13,61 +13,9 @@ class DBGSuccinctCachedViewImpl : public DBGSuccinct::CachedView {
   public:
     template <typename Graph>
     DBGSuccinctCachedViewImpl(Graph&& graph, size_t cache_size)
-          : DBGSuccinct::CachedView(std::forward<Graph>(graph), cache_size),
+          : DBGSuccinct::CachedView(std::forward<Graph>(graph)),
+            boss_(&graph_->get_boss()),
             decoded_cache_(cache_size) {}
-
-    /**
-     * Methods from DBGSuccinct
-     */
-    virtual void
-    map_to_nodes_sequentially(std::string_view sequence,
-                              const std::function<void(node_index)> &callback,
-                              const std::function<bool()> &terminate = [](){ return false; },
-                              const std::function<bool()> &skip = [](){ return false; }) const override final;
-
-    /**
-     * Methods from DeBruijnGraph
-     */
-    virtual std::string get_node_sequence(node_index node) const override final;
-
-    virtual void call_outgoing_kmers(node_index node,
-                                     const OutgoingEdgeCallback &callback) const override final;
-
-    virtual void call_incoming_kmers(node_index node,
-                                     const IncomingEdgeCallback &callback) const override final;
-
-    virtual bool load(const std::string &filename_base) override final {
-        if (const_cast<DBGSuccinct*>(graph_.get())->load(filename_base)) {
-            rev_comp_next_cache_.Clear();
-            rev_comp_prev_cache_.Clear();
-            decoded_cache_.Clear();
-            return true;
-        }
-
-        return false;
-    }
-
-    virtual void set_graph(std::shared_ptr<const DBGSuccinct> graph) override final {
-        graph_ = graph;
-        rev_comp_next_cache_.Clear();
-        rev_comp_prev_cache_.Clear();
-        decoded_cache_.Clear();
-    }
-
-    virtual void add_sequence(std::string_view sequence,
-                              const std::function<void(node_index)> &on_insertion) override final {
-        const_cast<DBGSuccinct*>(graph_.get())->add_sequence(sequence, on_insertion);
-        rev_comp_next_cache_.Clear();
-        rev_comp_prev_cache_.Clear();
-        decoded_cache_.Clear();
-    }
-
-  private:
-    // KmerType is the encoded k-mer
-    // edge_index is the boss node whose last character is the first character of the k-mer
-    typedef std::pair<KmerType, std::optional<edge_index>> CacheValue;
-
-    mutable common::LRUCache<edge_index, CacheValue> decoded_cache_;
 
     virtual TAlphabet get_first_value(edge_index i) const override final {
         assert(i);
@@ -91,6 +39,59 @@ class DBGSuccinctCachedViewImpl : public DBGSuccinct::CachedView {
     }
 
     virtual void put_decoded_edge(edge_index edge, std::string_view seq) const override final;
+
+    virtual TAlphabet complement(TAlphabet c) const override final {
+        return kmer::KmerExtractorBOSS::complement(c);
+    }
+
+    /**
+     * Methods from DBGSuccinct
+     */
+    virtual void
+    map_to_nodes_sequentially(std::string_view sequence,
+                              const std::function<void(node_index)> &callback,
+                              const std::function<bool()> &terminate = [](){ return false; },
+                              const std::function<bool()> &skip = [](){ return false; }) const override final;
+
+    /**
+     * Methods from DeBruijnGraph
+     */
+    virtual std::string get_node_sequence(node_index node) const override final;
+
+    virtual void call_outgoing_kmers(node_index node,
+                                     const OutgoingEdgeCallback &callback) const override final;
+
+    virtual void call_incoming_kmers(node_index node,
+                                     const IncomingEdgeCallback &callback) const override final;
+
+    virtual bool load(const std::string &filename_base) override final {
+        if (const_cast<DBGSuccinct*>(graph_.get())->load(filename_base)) {
+            decoded_cache_.Clear();
+            return true;
+        }
+
+        return false;
+    }
+
+    virtual void set_graph(std::shared_ptr<const DBGSuccinct> graph) override final {
+        graph_ = graph;
+        decoded_cache_.Clear();
+    }
+
+    virtual void add_sequence(std::string_view sequence,
+                              const std::function<void(node_index)> &on_insertion) override final {
+        const_cast<DBGSuccinct*>(graph_.get())->add_sequence(sequence, on_insertion);
+        decoded_cache_.Clear();
+    }
+
+  private:
+    const boss::BOSS *boss_;
+
+    // KmerType is the encoded k-mer
+    // edge_index is the boss node whose last character is the first character of the k-mer
+    typedef std::pair<KmerType, std::optional<edge_index>> CacheValue;
+
+    mutable common::LRUCache<edge_index, CacheValue> decoded_cache_;
 
     // cache a computed result
     inline void put_kmer(edge_index key, CacheValue value) const {
@@ -144,10 +145,6 @@ class DBGSuccinctCachedViewImpl : public DBGSuccinct::CachedView {
         put_kmer(next, std::move(kmer));
     }
 
-    virtual std::string decode(const std::vector<TAlphabet> &v) const override final {
-        return kmer::KmerExtractorBOSS::decode(v);
-    }
-
     inline static constexpr TAlphabet encode(char c) { return kmer::KmerExtractorBOSS::encode(c); }
     inline static constexpr KmerType to_kmer(std::string_view seq) {
         return kmer::KmerExtractorBOSS::sequence_to_kmer<KmerType>(seq);
@@ -155,10 +152,6 @@ class DBGSuccinctCachedViewImpl : public DBGSuccinct::CachedView {
     inline static constexpr KmerType to_kmer(const std::vector<TAlphabet> &seq) {
         // TODO: avoid decode step
         return to_kmer(kmer::KmerExtractorBOSS::decode(seq));
-    }
-
-    virtual TAlphabet complement(TAlphabet c) const override final {
-        return kmer::KmerExtractorBOSS::complement(c);
     }
 };
 

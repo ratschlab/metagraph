@@ -219,11 +219,14 @@ class DBGSuccinct : public DeBruijnGraph {
 
         virtual ~CachedView() {}
 
-        void call_outgoing_from_rev_comp(node_index node,
-                                         const std::function<void(node_index, TAlphabet)> &callback) const;
+        // get the encoding of the first character of this node's sequence
+        virtual TAlphabet get_first_value(edge_index i) const = 0;
 
-        void call_incoming_to_rev_comp(node_index node,
-                                       const std::function<void(node_index, TAlphabet)> &callback) const;
+        // if the sequence of a BOSS edge and edge label has been constructed externally,
+        // cache the result
+        virtual void put_decoded_edge(edge_index edge, std::string_view seq) const = 0;
+
+        virtual TAlphabet complement(TAlphabet c) const = 0;
 
         /**
          * Methods from DeBruijnGraph
@@ -231,7 +234,9 @@ class DBGSuccinct : public DeBruijnGraph {
         virtual bool operator==(const DeBruijnGraph &other) const override final;
 
         #define DELEGATE_METHOD(RETURN_TYPE, METHOD, ARG_TYPE, ARG_NAME) \
-        virtual RETURN_TYPE METHOD(ARG_TYPE ARG_NAME) const override final;
+        virtual RETURN_TYPE METHOD(ARG_TYPE ARG_NAME) const override final { \
+            return graph_->METHOD(ARG_NAME); \
+        }
 
         DELEGATE_METHOD(void, call_kmers, const std::function<void(node_index, const std::string&)> &, callback)
         DELEGATE_METHOD(void, call_source_nodes, const std::function<void(node_index)> &, callback)
@@ -248,71 +253,70 @@ class DBGSuccinct : public DeBruijnGraph {
 
         virtual void call_nodes(const std::function<void(node_index)> &callback,
                                 const std::function<bool()> &stop_early
-                                    = [](){ return false; }) const override final;
+                                    = [](){ return false; }) const override final {
+            graph_->call_nodes(callback, stop_early);
+        }
 
         virtual void call_sequences(const CallPath &callback,
                                     size_t num_threads = 1,
-                                    bool kmers_in_single_form = false) const override final;
+                                    bool kmers_in_single_form = false) const override final {
+            graph_->call_sequences(callback, num_threads, kmers_in_single_form);
+        }
 
         virtual void call_unitigs(const CallPath &callback,
                                   size_t num_threads = 1,
                                   size_t min_tip_size = 1,
-                                  bool kmers_in_single_form = false) const override final;
+                                  bool kmers_in_single_form = false) const override final {
+            graph_->call_unitigs(callback, num_threads, min_tip_size, kmers_in_single_form);
+        }
 
-        virtual bool find(std::string_view sequence, double discovery_fraction = 1) const override final;
+        virtual bool find(std::string_view sequence, double discovery_fraction = 1) const override final {
+            return graph_->find(sequence, discovery_fraction);
+        }
 
         virtual void map_to_nodes(std::string_view sequence,
                                   const std::function<void(node_index)> &callback,
                                   const std::function<bool()> &terminate
-                                      = [](){ return false; }) const override final;
+                                      = [](){ return false; }) const override final {
+            graph_->map_to_nodes(sequence, callback, terminate);
+        }
 
         virtual void
         adjacent_outgoing_nodes(node_index node,
-                                const std::function<void(node_index)> &callback) const override final;
+                                const std::function<void(node_index)> &callback) const override final {
+            graph_->adjacent_outgoing_nodes(node, callback);
+        }
 
         virtual void
         adjacent_incoming_nodes(node_index node,
-                                const std::function<void(node_index)> &callback) const override final;
-
-        // TODO: these can be overloaded to cache values, but this functionality is not
-        //       needed now.
-        virtual node_index traverse(node_index node, char next_char) const override final;
-        virtual node_index traverse_back(node_index node, char prev_char) const override final;
-        virtual void traverse(node_index start,
-                              const char *begin,
-                              const char *end,
-                              const std::function<void(node_index)> &callback,
-                              const std::function<bool()> &terminate
-                                  = [](){ return false; }) const override final;
+                                const std::function<void(node_index)> &callback) const override final {
+            graph_->adjacent_incoming_nodes(node, callback);
+        }
 
         virtual void serialize(const std::string &filename_base) const override final {
             graph_->serialize(filename_base);
         }
 
+        // TODO: these can be overloaded to cache values, but this functionality is not
+        //       needed now.
+        virtual node_index traverse(node_index node, char next_char) const override final {
+            return graph_->traverse(node, next_char);
+        }
+        virtual node_index traverse_back(node_index node, char prev_char) const override final {
+            return graph_->traverse_back(node, prev_char);
+        }
+        virtual void traverse(node_index start,
+                              const char *begin,
+                              const char *end,
+                              const std::function<void(node_index)> &callback,
+                              const std::function<bool()> &terminate
+                                  = [](){ return false; }) const override final {
+            graph_->traverse(start, begin, end, callback, terminate);
+        }
+
       protected:
-        const boss::BOSS *boss_;
-        mutable common::LRUCache<node_index, std::pair<edge_index, size_t>> rev_comp_prev_cache_;
-        mutable common::LRUCache<node_index, std::pair<edge_index, size_t>> rev_comp_next_cache_;
-
         template <typename Graph>
-        explicit CachedView(Graph&& graph, size_t cache_size)
-              : DBGWrapper(std::forward<Graph>(graph)),
-                boss_(&graph_->get_boss()),
-                rev_comp_prev_cache_(cache_size),
-                rev_comp_next_cache_(cache_size) {}
-
-        virtual TAlphabet complement(TAlphabet c) const = 0;
-        virtual std::string decode(const std::vector<TAlphabet> &v) const = 0;
-
-        edge_index get_rev_comp_boss_next_node(node_index node) const;
-        edge_index get_rev_comp_boss_prev_node(node_index node) const;
-
-        // get the encoding of the first character of this node's sequence
-        virtual TAlphabet get_first_value(edge_index i) const = 0;
-
-        // if the sequence of a BOSS edge and edge label has been constructed externally,
-        // cache the result
-        virtual void put_decoded_edge(edge_index edge, std::string_view seq) const = 0;
+        explicit CachedView(Graph&& graph) : DBGWrapper(std::forward<Graph>(graph)) {}
     };
 };
 
