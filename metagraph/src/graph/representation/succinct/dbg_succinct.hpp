@@ -291,7 +291,6 @@ class DBGSuccinct : public DeBruijnGraph {
 
       protected:
         const boss::BOSS *boss_;
-        size_t cache_size_;
         mutable common::LRUCache<node_index, std::pair<edge_index, size_t>> rev_comp_prev_cache_;
         mutable common::LRUCache<node_index, std::pair<edge_index, size_t>> rev_comp_next_cache_;
 
@@ -299,9 +298,8 @@ class DBGSuccinct : public DeBruijnGraph {
         explicit CachedView(Graph&& graph, size_t cache_size)
               : DBGWrapper(std::forward<Graph>(graph)),
                 boss_(&graph_->get_boss()),
-                cache_size_(cache_size),
-                rev_comp_prev_cache_(cache_size_),
-                rev_comp_next_cache_(cache_size_) {}
+                rev_comp_prev_cache_(cache_size),
+                rev_comp_next_cache_(cache_size) {}
 
         virtual TAlphabet complement(TAlphabet c) const = 0;
         virtual std::string decode(const std::vector<TAlphabet> &v) const = 0;

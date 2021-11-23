@@ -18,7 +18,7 @@ inline const DBGSuccinct* get_dbg_succ(const DeBruijnGraph &graph) {
 template <typename Graph>
 CanonicalDBG::CanonicalDBG(Graph&& graph, size_t cache_size)
       : DBGWrapper<DeBruijnGraph>(std::forward<Graph>(graph)),
-        cache_size_(cache_size), is_palindrome_cache_(cache_size_) {
+        is_palindrome_cache_(cache_size) {
     static_assert(!std::is_same_v<Graph, std::shared_ptr<CanonicalDBG>>);
     static_assert(!std::is_same_v<Graph, std::shared_ptr<const CanonicalDBG>>);
     flush();

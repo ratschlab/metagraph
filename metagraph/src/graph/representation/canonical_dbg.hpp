@@ -21,13 +21,6 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
     template <typename Graph>
     explicit CanonicalDBG(Graph&& graph, size_t cache_size = 100'000);
 
-    // copy constructors
-    CanonicalDBG(const CanonicalDBG &canonical)
-          : CanonicalDBG(canonical.graph_, canonical.cache_size_) {}
-
-    CanonicalDBG(CanonicalDBG &canonical)
-          : CanonicalDBG(canonical.graph_, canonical.cache_size_) {}
-
     // caches cannot be resized or moved, so disable these constructors
     CanonicalDBG& operator=(const CanonicalDBG &canonical) = delete;
     CanonicalDBG(CanonicalDBG&&) = delete;
@@ -135,8 +128,6 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
     }
 
   private:
-    size_t cache_size_;
-
     // cache whether a given node is a palindrome (it's equal to its reverse complement)
     mutable caches::fixed_sized_cache<node_index, bool,
                                       caches::LRUCachePolicy<node_index>> is_palindrome_cache_;

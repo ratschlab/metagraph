@@ -14,7 +14,7 @@ class DBGSuccinctCachedViewImpl : public DBGSuccinct::CachedView {
     template <typename Graph>
     DBGSuccinctCachedViewImpl(Graph&& graph, size_t cache_size)
           : DBGSuccinct::CachedView(std::forward<Graph>(graph), cache_size),
-            decoded_cache_(cache_size_) {}
+            decoded_cache_(cache_size) {}
 
     /**
      * Methods from DBGSuccinct
