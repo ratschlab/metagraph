@@ -107,22 +107,14 @@ void CanonicalDBG
         path.push_back(npos);
         auto it = rev_path.rbegin() + 1;
 
-        auto map_remaining = [&](const auto &graph) {
-            graph.map_to_nodes_sequentially(sequence.substr(1),
-                [&](node_index next) {
-                    path.push_back(next);
-                    ++it;
-                },
-                []() { return false; },
-                [&]() { return *it; }
-            );
-        };
-
-        if (const auto *cached = dynamic_cast<const DBGSuccinct::CachedView*>(graph_.get())) {
-            map_remaining(*cached);
-        } else {
-            map_remaining(*dbg_succ);
-        }
+        graph_->map_to_nodes_sequentially(sequence.substr(1),
+            [&](node_index next) {
+                path.push_back(next);
+                ++it;
+            },
+            []() { return false; },
+            [&]() { return *it; }
+        );
 
         assert(it == rev_path.rend());
 
@@ -575,7 +567,7 @@ auto CanonicalDBG::get_rev_comp_suffix_node(node_index node) const -> node_index
         //   AGAGGATCTCGTATGCCGTCTTCTGCTTGAG
         //->  GAGGATCTCGTATGCCGTCTTCTGCTTGAG
         //->  CTCAAGCAGAAGACGGCATACGAGATCCTC
-        std::string rev_seq = cached.get_node_sequence(node).substr(1, get_k() - 1);
+        std::string rev_seq = graph_->get_node_sequence(node).substr(1, get_k() - 1);
         if (rev_seq[0] == boss::BOSS::kSentinel) {
             rev_comp_suffix_cache_.Put(node, std::make_pair(0, 0));
             return npos;
@@ -594,8 +586,8 @@ auto CanonicalDBG::get_rev_comp_suffix_node(node_index node) const -> node_index
 
         auto stored_val = std::make_pair(ret_val, chars_unmatched);
         edge_index start = boss.pred_W(dbg_succ.kmer_to_boss_index(node),
-                                       cached.complement(encoded.front()));
-        boss.call_incoming_to_target(start, cached.complement(encoded.front()),
+                                       kmer::KmerExtractorBOSS::complement(encoded.front()));
+        boss.call_incoming_to_target(start, kmer::KmerExtractorBOSS::complement(encoded.front()),
                                      [&](edge_index adj) {
             if (node_index a = dbg_succ.boss_to_kmer_index(adj))
                 rev_comp_suffix_cache_.Put(a, stored_val);
@@ -614,7 +606,7 @@ auto CanonicalDBG::get_rev_comp_suffix_node(node_index node) const -> node_index
         // or something shorter
         size_t next_chars_unmatched = chars_unmatched - 1;
         auto stored_val = std::make_pair(0, next_chars_unmatched);
-        cached.adjacent_outgoing_nodes(node, [&](node_index next) {
+        graph_->adjacent_outgoing_nodes(node, [&](node_index next) {
             rev_comp_suffix_cache_.Put(next, stored_val);
 #ifndef NDEBUG
             std::string test_seq = dbg_succ.get_node_sequence(next).substr(1, get_k() - 1);
@@ -634,7 +626,7 @@ auto CanonicalDBG::get_rev_comp_suffix_node(node_index node) const -> node_index
         std::vector<std::pair<node_index, edge_index>> parents(alphabet().size());
         size_t parents_count = 0;
         edge_index start = 0;
-        cached.call_outgoing_kmers(node, [&](node_index next, char c) {
+        graph_->call_outgoing_kmers(node, [&](node_index next, char c) {
             if (c != boss::BOSS::kSentinel) {
                 parents[boss.encode(c)].first = next;
                 edge_index next_edge = dbg_succ.kmer_to_boss_index(next);
@@ -650,7 +642,7 @@ auto CanonicalDBG::get_rev_comp_suffix_node(node_index node) const -> node_index
             TAlphabet w = boss.get_node_last_value(ret_val);
             boss.call_incoming_to_target(ret_prev, w, [&](edge_index prev_edge) {
                 if (boss.get_last(prev_edge)) {
-                    TAlphabet s = cached.complement(cached.get_first_value(prev_edge));
+                    TAlphabet s = kmer::KmerExtractorBOSS::complement(cached.get_first_value(prev_edge));
                     if (parents[s].first)
                         rev_comp_suffix_cache_.Put(parents[s].first, std::make_pair(prev_edge, 0));
                 }
@@ -710,7 +702,7 @@ auto CanonicalDBG
         //   AGAGGATCTCGTATGCCGTCTTCTGCTTGAG
         //-> AGAGGATCTCGTATGCCGTCTTCTGCTTGA
         //-> TCAAGCAGAAGACGGCATACGAGATCCTCT
-        rev_seq = cached->get_node_sequence(node).substr(0, get_k() - 1);
+        rev_seq = graph_->get_node_sequence(node).substr(0, get_k() - 1);
         if (rev_seq[0] == boss::BOSS::kSentinel) {
             rev_comp_prefix_cache_.Put(node, std::make_pair(0, 0));
             return 0;
@@ -754,7 +746,7 @@ auto CanonicalDBG
         size_t parents_count = 0;
         if (dbg_succ.boss_to_kmer_index(ret_val)) {
             if (rev_seq.empty()) {
-                rev_seq = cached->get_node_sequence(node).substr(0, get_k() - 1);
+                rev_seq = graph_->get_node_sequence(node).substr(0, get_k() - 1);
                 ::reverse_complement(rev_seq.begin(), rev_seq.end());
             }
             rev_seq.push_back('\0');
@@ -770,8 +762,8 @@ auto CanonicalDBG
         }
 
         if (parents_count) {
-            cached->call_incoming_kmers(node, [&](node_index prev, char c) {
-                TAlphabet s = cached->complement(boss.encode(c));
+            graph_->call_incoming_kmers(node, [&](node_index prev, char c) {
+                TAlphabet s = kmer::KmerExtractorBOSS::complement(boss.encode(c));
                 if (parents[s].second)
                     rev_comp_prefix_cache_.Put(prev, std::make_pair(parents[s].second, 0));
             });

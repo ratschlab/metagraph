@@ -1,7 +1,5 @@
 #include "dbg_succinct_cached.hpp"
 
-#include "common/seq_tools/reverse_complement.hpp"
-
 namespace mtg {
 namespace graph {
 

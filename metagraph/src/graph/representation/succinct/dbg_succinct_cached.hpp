@@ -40,10 +40,6 @@ class DBGSuccinctCachedViewImpl : public DBGSuccinct::CachedView {
 
     virtual void put_decoded_edge(edge_index edge, std::string_view seq) const override final;
 
-    virtual TAlphabet complement(TAlphabet c) const override final {
-        return kmer::KmerExtractorBOSS::complement(c);
-    }
-
     /**
      * Methods from DBGSuccinct
      */

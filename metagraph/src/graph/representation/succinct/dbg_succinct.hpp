@@ -226,8 +226,6 @@ class DBGSuccinct : public DeBruijnGraph {
         // cache the result
         virtual void put_decoded_edge(edge_index edge, std::string_view seq) const = 0;
 
-        virtual TAlphabet complement(TAlphabet c) const = 0;
-
         /**
          * Methods from DeBruijnGraph
          */
