@@ -66,11 +66,23 @@ class DBGSuccinct : public DeBruijnGraph {
 
     // Traverse graph mapping sequence to the graph nodes
     // and run callback for each node until the termination condition is satisfied.
+    // For each k-mer satisfying the skip condition, run the callback on npos.
+    // Guarantees that nodes are called in the same order as the input sequence.
+    // In canonical mode, non-canonical k-mers are NOT mapped to canonical ones
+    virtual void map_to_nodes_sequentially_checked(std::string_view sequence,
+                                                   const std::function<void(node_index)> &callback,
+                                                   const std::function<bool()> &terminate = [](){ return false; },
+                                                   const std::function<bool()> &skip = [](){ return false; }) const;
+
+    // Traverse graph mapping sequence to the graph nodes
+    // and run callback for each node until the termination condition is satisfied.
     // Guarantees that nodes are called in the same order as the input sequence.
     // In canonical mode, non-canonical k-mers are NOT mapped to canonical ones
     virtual void map_to_nodes_sequentially(std::string_view sequence,
                                            const std::function<void(node_index)> &callback,
-                                           const std::function<bool()> &terminate = [](){ return false; }) const override final;
+                                           const std::function<bool()> &terminate = [](){ return false; }) const override final {
+        map_to_nodes_sequentially_checked(sequence, callback, terminate);
+    }
 
     virtual void call_sequences(const CallPath &callback,
                                 size_t num_threads = 1,
@@ -217,10 +229,6 @@ class DBGSuccinct : public DeBruijnGraph {
 
         virtual ~CachedView() {}
 
-        // if the sequence of a BOSS edge and edge label has been constructed externally,
-        // cache the result
-        virtual void put_decoded_edge(edge_index edge, std::string_view seq) const = 0;
-
         void call_outgoing_from_rev_comp(node_index node,
                                          const std::function<void(node_index, TAlphabet)> &callback) const;
 
@@ -269,6 +277,16 @@ class DBGSuccinct : public DeBruijnGraph {
                                   const std::function<bool()> &terminate
                                       = [](){ return false; }) const override final;
 
+        // Traverse graph mapping sequence to the graph nodes
+        // and run callback for each node until the termination condition is satisfied.
+        // All k-mers for which the skip condition is satisfied are skipped.
+        // Guarantees that nodes are called in the same order as the input sequence.
+        // In canonical mode, non-canonical k-mers are NOT mapped to canonical ones
+        virtual void map_to_nodes_sequentially_checked(std::string_view sequence,
+                                                       const std::function<void(node_index)> &callback,
+                                                       const std::function<bool()> &terminate = [](){ return false; },
+                                                       const std::function<bool()> &skip = [](){ return false; }) const = 0;
+
         virtual void
         adjacent_outgoing_nodes(node_index node,
                                 const std::function<void(node_index)> &callback) const override final;
@@ -314,6 +332,10 @@ class DBGSuccinct : public DeBruijnGraph {
 
         // get the encoding of the first character of this node's sequence
         virtual TAlphabet get_first_value(edge_index i) const = 0;
+
+        // if the sequence of a BOSS edge and edge label has been constructed externally,
+        // cache the result
+        virtual void put_decoded_edge(edge_index edge, std::string_view seq) const = 0;
     };
 };
 

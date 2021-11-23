@@ -245,11 +245,14 @@ std::string DBGSuccinct::get_node_sequence(node_index node) const {
 
 // Traverse graph mapping sequence to the graph nodes
 // and run callback for each node until the termination condition is satisfied.
+// For each k-mer satisfying the skip condition, run the callback on npos.
 // Guarantees that nodes are called in the same order as the input sequence.
 // In canonical mode, non-canonical k-mers are not mapped to canonical ones
-void DBGSuccinct::map_to_nodes_sequentially(std::string_view sequence,
-                                            const std::function<void(node_index)> &callback,
-                                            const std::function<bool()> &terminate) const {
+void DBGSuccinct
+::map_to_nodes_sequentially_checked(std::string_view sequence,
+                                    const std::function<void(node_index)> &callback,
+                                    const std::function<bool()> &terminate,
+                                    const std::function<bool()> &skip) const {
     if (sequence.size() < get_k())
         return;
 
@@ -260,11 +263,12 @@ void DBGSuccinct::map_to_nodes_sequentially(std::string_view sequence,
         [&](BOSS::edge_index i) { callback(boss_to_kmer_index(i)); },
         terminate,
         [&]() {
-            if (!is_missing())
-                return false;
+            if (is_missing() || skip()) {
+                callback(npos);
+                return true;
+            }
 
-            callback(npos);
-            return true;
+            return false;
         }
     );
 }

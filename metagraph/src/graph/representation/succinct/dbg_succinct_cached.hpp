@@ -17,6 +17,14 @@ class DBGSuccinctCachedViewImpl : public DBGSuccinct::CachedView {
             decoded_cache_(cache_size_) {}
 
     /**
+     * Methods from DBGSuccinct
+     */
+    virtual void map_to_nodes_sequentially_checked(std::string_view sequence,
+                                                   const std::function<void(node_index)> &callback,
+                                                   const std::function<bool()> &terminate = [](){ return false; },
+                                                   const std::function<bool()> &skip = [](){ return false; }) const override final;
+
+    /**
      * Methods from DeBruijnGraph
      */
     virtual std::string get_node_sequence(node_index node) const override final;
@@ -30,12 +38,9 @@ class DBGSuccinctCachedViewImpl : public DBGSuccinct::CachedView {
     virtual void map_to_nodes_sequentially(std::string_view sequence,
                                            const std::function<void(node_index)> &callback,
                                            const std::function<bool()> &terminate
-                                               = [](){ return false; }) const override final;
-
-    /**
-     * Methods from DBGSuccinct::CachedView
-     */
-    virtual void put_decoded_edge(edge_index edge, std::string_view seq) const override final;
+                                               = [](){ return false; }) const override final {
+        map_to_nodes_sequentially_checked(sequence, callback, terminate);
+    }
 
     virtual bool load(const std::string &filename_base) override final {
         if (const_cast<DBGSuccinct*>(graph_.get())->load(filename_base)) {
@@ -90,6 +95,8 @@ class DBGSuccinctCachedViewImpl : public DBGSuccinct::CachedView {
 
         return c;
     }
+
+    virtual void put_decoded_edge(edge_index edge, std::string_view seq) const override final;
 
     // cache a computed result
     inline void put_kmer(edge_index key, CacheValue value) const {

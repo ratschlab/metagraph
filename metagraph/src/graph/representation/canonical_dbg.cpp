@@ -97,39 +97,30 @@ void CanonicalDBG
     // map the forward
     const auto *dbg_succ = get_dbg_succ(*graph_);
     if (dbg_succ && k_odd_) {
-        const auto *cached = dynamic_cast<const DBGSuccinct::CachedView*>(graph_.get());
-
         // if it's a boss table with odd k (without palindromic k-mers),
         // we can skip k-mers that have been found in the rev-compl sequence
-        const auto &boss = dbg_succ->get_boss();
+
         // the initial forward mapping stopped on this k-mer,
         // hence it's missing and we skip it
         path.push_back(npos);
         auto it = rev_path.rbegin() + 1;
-        auto is_missing = get_missing_kmer_skipper(dbg_succ->get_bloom_filter(),
-                                                   sequence.substr(1));
-        auto jt = sequence.begin() + 1;
-        boss.map_to_edges(sequence.substr(1),
-            [&](boss::BOSS::edge_index edge) {
-                path.push_back(dbg_succ->boss_to_kmer_index(edge));
-                if (cached && path.back())
-                    cached->put_decoded_edge(edge, std::string_view(jt, get_k()));
 
-                ++it;
-                ++jt;
-            },
-            []() { return false; },
-            [&]() {
-                if (is_missing() || *it) {
-                    path.push_back(npos);
+        auto map_remaining = [&](const auto &graph) {
+            graph.map_to_nodes_sequentially_checked(sequence.substr(1),
+                [&](node_index next) {
+                    path.push_back(next);
                     ++it;
-                    ++jt;
-                    return true;
-                } else {
-                    return false;
-                }
-            }
-        );
+                },
+                []() { return false; },
+                [&]() { return *it; }
+            );
+        };
+
+        if (const auto *cached = dynamic_cast<const DBGSuccinct::CachedView*>(graph_.get())) {
+            map_remaining(*cached);
+        } else {
+            map_remaining(*dbg_succ);
+        }
 
         assert(it == rev_path.rend());
 
