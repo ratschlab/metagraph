@@ -41,11 +41,13 @@ class DBGSuccinctCachedViewImpl : public DBGSuccinct::CachedView {
     /**
      * Methods from DBGSuccinct
      */
+    static constexpr auto ALWAYS_FALSE = []() { return false; };
+
     virtual void
     map_to_nodes_sequentially(std::string_view sequence,
                               const std::function<void(node_index)> &callback,
-                              const std::function<bool()> &terminate = [](){ return false; },
-                              const std::function<bool()> &skip = [](){ return false; }) const override final;
+                              const std::function<bool()> &terminate = ALWAYS_FALSE,
+                              const std::function<bool()> &skip = ALWAYS_FALSE) const override final;
 
     /**
      * Methods from DeBruijnGraph
