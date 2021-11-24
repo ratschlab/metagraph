@@ -282,18 +282,16 @@ void CanonicalDBG::append_prev_rc_nodes(node_index node,
      *  AAGCCA                    TGGCTT
      */
 
-    const DBGSuccinct *dbg_succ = get_dbg_succ(*graph_);
-
     // for each n, check for TGGCTn. If found, define and store the index for
     // rc(n)AGCCA as index(TGGCTn) + offset_
 
-    if (dbg_succ || dynamic_cast<const DBGSuccinct::CachedView*>(graph_.get())) {
+    if (const DBGSuccinct *dbg_succ = get_dbg_succ(*graph_)) {
         if (edge_index edge = get_rev_comp_prefix_node(node)) {
             const boss::BOSS &boss = dbg_succ->get_boss();
             boss.call_outgoing(edge, [&](boss::BOSS::edge_index adjacent_edge) {
                 assert(dbg_succ);
                 node_index prev = dbg_succ->boss_to_kmer_index(adjacent_edge);
-                TAlphabet c = boss.get_W(adjacent_edge) % boss.alph_size;
+                boss::BOSS::TAlphabet c = boss.get_W(adjacent_edge) % boss.alph_size;
 
                 if (prev == npos || c == boss::BOSS::kSentinelCode)
                     return;
@@ -639,10 +637,10 @@ auto CanonicalDBG::get_rev_comp_suffix_node(node_index node) const -> node_index
 
         if (parents_count) {
             edge_index ret_prev = boss.bwd(ret_val);
-            TAlphabet w = boss.get_node_last_value(ret_val);
+            boss::BOSS::TAlphabet w = boss.get_node_last_value(ret_val);
             boss.call_incoming_to_target(ret_prev, w, [&](edge_index prev_edge) {
                 if (boss.get_last(prev_edge)) {
-                    TAlphabet s = kmer::KmerExtractorBOSS::complement(cached.get_first_value(prev_edge));
+                    boss::BOSS::TAlphabet s = kmer::KmerExtractorBOSS::complement(cached.get_first_value(prev_edge));
                     if (parents[s].first)
                         rev_comp_suffix_cache_.Put(parents[s].first, std::make_pair(prev_edge, 0));
                 }
@@ -751,7 +749,7 @@ auto CanonicalDBG
             }
             rev_seq.push_back('\0');
             boss.call_outgoing(ret_val, [&](edge_index next_edge) {
-                TAlphabet w = boss.get_W(next_edge) % boss.alph_size;
+                boss::BOSS::TAlphabet w = boss.get_W(next_edge) % boss.alph_size;
                 rev_seq.back() = boss.decode(w);
                 cached->put_decoded_edge(next_edge, rev_seq);
                 if (w) {
@@ -763,7 +761,7 @@ auto CanonicalDBG
 
         if (parents_count) {
             graph_->call_incoming_kmers(node, [&](node_index prev, char c) {
-                TAlphabet s = kmer::KmerExtractorBOSS::complement(boss.encode(c));
+                boss::BOSS::TAlphabet s = kmer::KmerExtractorBOSS::complement(boss.encode(c));
                 if (parents[s].second)
                     rev_comp_prefix_cache_.Put(prev, std::make_pair(parents[s].second, 0));
             });

@@ -128,7 +128,6 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
 
   private:
     typedef boss::BOSS::edge_index edge_index;
-    typedef boss::BOSS::TAlphabet TAlphabet;
 
     // cache whether a given node is a palindrome (it's equal to its reverse complement)
     mutable common::LRUCache<node_index, bool> is_palindrome_cache_;
