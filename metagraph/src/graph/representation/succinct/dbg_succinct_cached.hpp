@@ -38,8 +38,6 @@ class DBGSuccinctCachedViewImpl : public DBGSuccinct::CachedView {
         return c;
     }
 
-    virtual void put_decoded_edge(edge_index edge, std::string_view seq) const override final;
-
     /**
      * Methods from DBGSuccinct
      */

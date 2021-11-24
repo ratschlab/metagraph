@@ -26,16 +26,6 @@ bool DBGSuccinct::CachedView::operator==(const DeBruijnGraph &other) const {
 }
 
 template <typename KmerType>
-void DBGSuccinctCachedViewImpl<KmerType>::put_decoded_edge(edge_index edge,
-                                                           std::string_view seq) const {
-    assert(edge > 0 && edge <= boss_->num_edges());
-    assert(seq.size() == graph_->get_k());
-    assert(graph_->get_node_sequence(graph_->boss_to_kmer_index(edge)) == seq);
-
-    put_kmer(edge, CacheValue{ to_kmer(seq), std::nullopt });
-}
-
-template <typename KmerType>
 std::string DBGSuccinctCachedViewImpl<KmerType>::get_node_sequence(node_index node) const {
     assert(node > 0 && node <= num_nodes());
 

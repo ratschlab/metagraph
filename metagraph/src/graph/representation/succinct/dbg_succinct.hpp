@@ -222,10 +222,6 @@ class DBGSuccinct : public DeBruijnGraph {
         // get the encoding of the first character of this node's sequence
         virtual TAlphabet get_first_value(edge_index i) const = 0;
 
-        // if the sequence of a BOSS edge and edge label has been constructed externally,
-        // cache the result
-        virtual void put_decoded_edge(edge_index edge, std::string_view seq) const = 0;
-
         /**
          * Methods from DeBruijnGraph
          */
