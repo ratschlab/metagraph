@@ -46,10 +46,20 @@ void DBGSuccinctCachedViewImpl<KmerType>
 
     edge_index i = graph_->kmer_to_boss_index(node);
     auto kmer = decoded_cache_.TryGet(i);
+
+    // TODO: we don't need this yet, but at some point update the stored second
+    // value while traversing forwards
+    if (kmer)
+        kmer->second = std::nullopt;
+
     graph_->call_outgoing_kmers(node, [&](node_index next, char c) {
         if (c != boss::BOSS::kSentinel) {
-            if (kmer)
-                update_node_next(*kmer, graph_->kmer_to_boss_index(next), c);
+            if (kmer) {
+                // update the decoded k-mer with the next character, then cache it
+                CacheValue next_kmer = *kmer;
+                next_kmer.first.to_next(get_k(), encode(c));
+                put_kmer(graph_->kmer_to_boss_index(next), std::move(next_kmer));
+            }
 
             callback(next, c);
         }

@@ -140,15 +140,6 @@ class DBGSuccinctCachedViewImpl : public DBGSuccinct::CachedView {
         return *kmer;
     }
 
-    inline void update_node_next(CacheValue kmer, edge_index next, char c) const {
-        assert(c != boss::BOSS::kSentinel);
-
-        // update the k-mer with the next character
-        kmer.first.to_next(get_k(), encode(c));
-        kmer.second = std::nullopt;
-        put_kmer(next, std::move(kmer));
-    }
-
     inline static constexpr TAlphabet encode(char c) { return kmer::KmerExtractorBOSS::encode(c); }
 };
 
