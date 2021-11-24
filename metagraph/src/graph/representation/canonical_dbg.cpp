@@ -672,21 +672,6 @@ auto CanonicalDBG
 ::get_rev_comp_prefix_node(node_index node) const -> edge_index {
     const DBGSuccinct &dbg_succ = *get_dbg_succ(*graph_);
     const boss::BOSS &boss = dbg_succ.get_boss();
-    const auto *cached = dynamic_cast<const DBGSuccinct::CachedView*>(graph_.get());
-
-    if (!cached) {
-        //        lshift    rc
-        // AGCCAT -> *AGCCA -> TGGCT*
-        std::string rev_seq = get_node_sequence(node).substr(0, get_k() - 1);
-        ::reverse_complement(rev_seq.begin(), rev_seq.end());
-
-        // Find the BOSS node TGGCT and iterate through all of its outdoing edges.
-        // Then, convert the edge indices to get the DBGSuccinct node indices
-        auto encoded = boss.encode(rev_seq);
-        auto [edge, edge_2, end] = boss.index_range(encoded.begin(), encoded.end());
-        assert(end != encoded.end() || edge == edge_2);
-        return (end == encoded.end()) ? edge : 0;
-    }
 
     // 8% effective
     edge_index ret_val = 0;
@@ -751,7 +736,11 @@ auto CanonicalDBG
             boss.call_outgoing(ret_val, [&](edge_index next_edge) {
                 boss::BOSS::TAlphabet w = boss.get_W(next_edge) % boss.alph_size;
                 rev_seq.back() = boss.decode(w);
-                cached->put_decoded_edge(next_edge, rev_seq);
+
+                // TODO: is there a way to replace this call?
+                if (const auto *cached = dynamic_cast<const DBGSuccinct::CachedView*>(graph_.get()))
+                    cached->put_decoded_edge(next_edge, rev_seq);
+
                 if (w) {
                     parents[w].second = boss.fwd(boss.pred_W(ret_val, w), w);
                     ++parents_count;
