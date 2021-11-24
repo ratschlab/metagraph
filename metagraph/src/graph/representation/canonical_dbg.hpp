@@ -163,7 +163,7 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
     // in the reverse complement orientation in the underlying primary graph
     void append_next_rc_nodes(node_index node, std::vector<node_index> &children) const;
 
-    node_index get_rev_comp_suffix_node(node_index node) const;
+    edge_index get_rev_comp_suffix_node(node_index node) const;
     edge_index get_rev_comp_prefix_node(node_index node) const;
 };
 
