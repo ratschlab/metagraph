@@ -97,10 +97,9 @@ void CanonicalDBG
     std::vector<node_index> rev_path = map_sequence_to_nodes(*graph_, rev_seq);
 
     // map the forward
-    const auto *dbg_succ = get_dbg_succ(*graph_);
-    if (dbg_succ && k_odd_) {
-        // if it's a boss table with odd k (without palindromic k-mers),
-        // we can skip k-mers that have been found in the rev-compl sequence
+    if (k_odd_) {
+        // if k is odd (without palindromic k-mers), we can skip k-mers that have
+        // been found in the rev-compl sequence
 
         // the initial forward mapping stopped on this k-mer,
         // hence it's missing and we skip it
@@ -180,6 +179,9 @@ void CanonicalDBG::append_next_rc_nodes(node_index node,
                     if (next == npos)
                         return;
 
+                    // TODO: this is the only place where get_first_value is called.
+                    // Try to find a way to restructure this using call_incoming_kmers
+                    // so that get_first_value can be made private.
                     boss::BOSS::TAlphabet s = cached
                         ? cached->get_first_value(incoming_boss_edge)
                         : boss.get_minus_k_value(incoming_boss_edge, get_k() - 2).first;
@@ -282,6 +284,8 @@ void CanonicalDBG::append_prev_rc_nodes(node_index node,
 
     if (const DBGSuccinct *dbg_succ = get_dbg_succ(*graph_)) {
         if (edge_index edge = get_rev_comp_prefix_node(node)) {
+            // TODO: if graph is DBGSuccinct::CachedView, this bypasses the update_node_next
+            // call. Find a way to do this using graph_->call_outgoing_kmers instead
             const boss::BOSS &boss = dbg_succ->get_boss();
             boss.call_outgoing(edge, [&](boss::BOSS::edge_index adjacent_edge) {
                 assert(dbg_succ);

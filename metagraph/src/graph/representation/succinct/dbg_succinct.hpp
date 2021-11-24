@@ -21,7 +21,7 @@ class DBGSuccinct : public DeBruijnGraph {
      * This allows for faster get_node_sequence and call_incoming_kmers calls.
      * Traversal operations and map_to_nodes_sequentially are overridden to fill
      * the cache alongside their normal functions.
-     * This wrapper stores ~144 bytes per cached node.
+     * Bytes stored per k-mer: ~56 (k<=21), ~64 (k<=42), ~80 (k<=85)
      */
     class CachedView;
 

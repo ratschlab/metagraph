@@ -133,7 +133,7 @@ class DBGSuccinctCachedViewImpl : public DBGSuccinct::CachedView {
             seq.push_back(boss_->get_W(i) % boss_->alph_size);
 
             // cache the result
-            kmer = CacheValue{ to_kmer(seq), std::move(last_node) };
+            kmer = CacheValue{ KmerType(seq), std::move(last_node) };
             put_kmer(i, *kmer);
         }
 
@@ -150,13 +150,6 @@ class DBGSuccinctCachedViewImpl : public DBGSuccinct::CachedView {
     }
 
     inline static constexpr TAlphabet encode(char c) { return kmer::KmerExtractorBOSS::encode(c); }
-    inline static constexpr KmerType to_kmer(std::string_view seq) {
-        return kmer::KmerExtractorBOSS::sequence_to_kmer<KmerType>(seq);
-    }
-    inline static constexpr KmerType to_kmer(const std::vector<TAlphabet> &seq) {
-        // TODO: avoid decode step
-        return to_kmer(kmer::KmerExtractorBOSS::decode(seq));
-    }
 };
 
 

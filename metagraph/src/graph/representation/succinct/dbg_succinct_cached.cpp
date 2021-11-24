@@ -100,7 +100,9 @@ void DBGSuccinctCachedViewImpl<KmerType>
                     prev->to_next(k, encode(*last), encode(*(last - 1)));
                 } else {
                     // initialize a new k-mer
-                    prev = to_kmer(std::string_view(begin, k));
+                    prev = kmer::KmerExtractorBOSS::sequence_to_kmer<KmerType>(
+                        std::string_view(begin, k)
+                    );
                 }
 
                 // cache the result
