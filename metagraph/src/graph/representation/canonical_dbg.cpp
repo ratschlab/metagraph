@@ -563,8 +563,6 @@ auto CanonicalDBG::get_rev_comp_suffix_node(node_index node) const -> edge_index
         //   AGAGGATCTCGTATGCCGTCTTCTGCTTGAG
         //->  GAGGATCTCGTATGCCGTCTTCTGCTTGAG
         //->  CTCAAGCAGAAGACGGCATACGAGATCCTC
-        // want AGAGGATCTCGTATGCCGTCTTCTGCTTGAG -> GAGGATCTCGTATGCCGTCTTCTGCTTGAGN
-        // <->   CTCAAGCAGAAGACGGCATACGAGATCCTC -> nCTCAAGCAGAAGACGGCATACGAGATCCTC
         std::string rev_seq = graph_->get_node_sequence(node).substr(1, get_k() - 1);
         if (rev_seq[0] == boss::BOSS::kSentinel) {
             rev_comp_suffix_cache_.Put(node, std::make_pair(0, 0));
@@ -619,38 +617,6 @@ auto CanonicalDBG::get_rev_comp_suffix_node(node_index node) const -> edge_index
             }
 #endif
         });
-    } else if (ret_val) {
-        // traverse node forward by X, then ret_val back by comp(X)
-        std::vector<std::pair<node_index, edge_index>> parents(alphabet().size());
-        size_t parents_count = 0;
-        edge_index start = 0;
-        graph_->call_outgoing_kmers(node, [&](node_index next, char c) {
-            if (c != boss::BOSS::kSentinel) {
-                parents[boss.encode(c)].first = next;
-                edge_index next_edge = dbg_succ.kmer_to_boss_index(next);
-                if (boss.get_last(next_edge))
-                    start = next_edge;
-
-                ++parents_count;
-            }
-        });
-
-        if (parents_count) {
-            if (const auto *cached = dynamic_cast<const DBGSuccinct::CachedView*>(graph_.get())) {
-                edge_index ret_prev = boss.bwd(ret_val);
-                boss::BOSS::TAlphabet w = boss.get_node_last_value(ret_val);
-                boss.call_incoming_to_target(ret_prev, w, [&](edge_index prev_edge) {
-                    if (boss.get_last(prev_edge)) {
-                        // TODO: is there a way to replace this call to get_first_value?
-                        boss::BOSS::TAlphabet s
-                            = kmer::KmerExtractorBOSS::complement(cached->get_first_value(prev_edge));
-
-                        if (parents[s].first)
-                            rev_comp_suffix_cache_.Put(parents[s].first, std::make_pair(prev_edge, 0));
-                    }
-                });
-            }
-        }
     }
 
 #ifndef NDEBUG
@@ -726,40 +692,6 @@ auto CanonicalDBG::get_rev_comp_prefix_node(node_index node) const -> edge_index
     //        CAAGCAGAAGACGGCATACGAGATCCTCTx
     //       we can use the LCS array to delete the first character from the match
     //       and work from there
-
-    if (ret_val) {
-        // traverse ret_val forward by X, then node back by comp(X)
-        std::vector<std::pair<node_index, edge_index>> parents(alphabet().size());
-        size_t parents_count = 0;
-        if (dbg_succ.boss_to_kmer_index(ret_val)) {
-            if (rev_seq.empty()) {
-                rev_seq = graph_->get_node_sequence(node).substr(0, get_k() - 1);
-                ::reverse_complement(rev_seq.begin(), rev_seq.end());
-            }
-            rev_seq.push_back('\0');
-            boss.call_outgoing(ret_val, [&](edge_index next_edge) {
-                boss::BOSS::TAlphabet w = boss.get_W(next_edge) % boss.alph_size;
-                rev_seq.back() = boss.decode(w);
-
-                // TODO: is there a way to replace this call?
-                if (const auto *cached = dynamic_cast<const DBGSuccinct::CachedView*>(graph_.get()))
-                    cached->put_decoded_edge(next_edge, rev_seq);
-
-                if (w) {
-                    parents[w].second = boss.fwd(boss.pred_W(ret_val, w), w);
-                    ++parents_count;
-                }
-            });
-        }
-
-        if (parents_count) {
-            graph_->call_incoming_kmers(node, [&](node_index prev, char c) {
-                boss::BOSS::TAlphabet s = kmer::KmerExtractorBOSS::complement(boss.encode(c));
-                if (parents[s].second)
-                    rev_comp_prefix_cache_.Put(prev, std::make_pair(parents[s].second, 0));
-            });
-        }
-    }
 
 #ifndef NDEBUG
     std::string test_seq = dbg_succ.get_node_sequence(node);
