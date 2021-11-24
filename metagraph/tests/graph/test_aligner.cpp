@@ -1732,6 +1732,7 @@ TEST(DBGAlignerTest, align_extended_insert_after_match) {
     check_extend(graph, aligner.get_config(), paths, query);
 }
 
+#if ! _PROTEIN_GRAPH
 TEST(DBGAlignerTest, align_suffix_seed_no_full_seeds) {
     size_t k = 31;
     std::string reference = "CTGCTGCGCCATCGCAACCCACGGTTGCTTTTTGAGTCGCTGCTCACGTTAGCCATCACACTGACGTTAAGCTGGCTTTCGATGCTGTATC";
@@ -1757,5 +1758,6 @@ TEST(DBGAlignerTest, align_suffix_seed_no_full_seeds) {
         check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
     }
 }
+#endif
 
 } // namespace
