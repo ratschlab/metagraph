@@ -48,7 +48,7 @@ class GraphClientJson:
                 f"discovery_threshold should be between 0 and 1 inclusive. Got {discovery_threshold}")
 
         if align:
-            json_obj = self.align(sequence, **align_params)
+            alignments = self.align(sequence, **align_params)
 
             def to_fasta(df):
                 fasta = []
@@ -56,14 +56,25 @@ class GraphClientJson:
                     fasta.append(f">{df.loc[i, 'seq_description']}\n{df.loc[i, 'sequence']}")
                 return '\n'.join(fasta)
 
-            sequence = to_fasta(helpers.df_from_align_result(json_obj))
+            sequence = to_fasta(helpers.df_from_align_result(alignments))
 
         param_dict = {"count_labels": True,
                       "discovery_fraction": discovery_threshold,
                       "num_labels": top_labels,
                       "with_signature": with_signature}
 
-        return self._json_seq_query(sequence, param_dict, "search")
+        search_results = self._json_seq_query(sequence, param_dict, "search")
+
+        if align:
+            if len(alignments) == len(search_results):
+                # Zip best alignment results
+                for alignment, search_result in zip(alignments, search_results):
+                    if 'alignments' in alignment and len(alignment['alignments']) > 0:
+                        search_result['best_alignment'] = alignment['alignments'][0]
+                    else:
+                        search_result['best_alignment'] = {}
+
+        return search_results
 
     def align(self, sequence: Union[str, Iterable[str]],
               min_exact_match: float = DEFAULT_DISCOVERY_THRESHOLD,
