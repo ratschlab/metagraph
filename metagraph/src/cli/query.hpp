@@ -134,8 +134,7 @@ public:
      * @param expand_coords     do not collapse continuous ranges of coords (query_coords)
      * @return  Json::Value instance representing sequence result
      */
-    Json::Value to_json(bool counts_kmers,
-                        bool expand_coords,
+    Json::Value to_json(bool expand_coords,
                         const graph::AnnotatedDBG &anno_graph) const;
 
     /**

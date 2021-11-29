@@ -127,8 +127,11 @@ std::string process_search_request(const std::string &received_message,
     // Create full JSON object
     Json::Value search_response(Json::arrayValue);
     for (const auto &seq_result : search_results) {
-        search_response.append(seq_result.to_json(config.count_kmers, config.expand_coords,
-                                                  anno_graph));
+        const auto seq_response = seq_result.to_json(config.expand_coords, anno_graph);
+
+        if (seq_response["results"].size()) {
+            search_response.append(seq_response);
+        }
     }
 
     // Return JSON string

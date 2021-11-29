@@ -42,7 +42,6 @@ typedef typename mtg::graph::DeBruijnGraph::node_index node_index;
 // JSON Field Keys
 const std::string SEQ_DESCRIPTION_JSON_FIELD = "seq_description";
 const std::string KMER_COUNT_FIELD = "kmer_count";
-const std::string LABEL_COUNT_FIELD = "label_count";
 const std::string KMER_COORDINATE_FIELD = "kmer_coords";
 const std::string SIGNATURE_FIELD = "signature";
 const std::string KMER_COUNT_QUANTILE_FIELD = "kmer_count_quantile";
@@ -83,9 +82,9 @@ std::vector<std::string> get_collapsed_coord_ranges(
             } else {
                 // End the range and output
                 if (begin == current) {
-                    ranges.push_back(fmt::format(":{}", begin));
+                    ranges.push_back(fmt::format("{}", begin));
                 } else {
-                    ranges.push_back(fmt::format(":{}-{}", begin, current));
+                    ranges.push_back(fmt::format("{}-{}", begin, current));
                 }
 
                 // Start a new range
@@ -168,8 +167,7 @@ Json::Value get_label_as_json(const std::string &label) {
 }
 
 
-Json::Value SeqSearchResult::to_json(bool count_kmers,
-                                     bool expand_coords,
+Json::Value SeqSearchResult::to_json(bool expand_coords,
                                      const graph::AnnotatedDBG &anno_graph) const {
     Json::Value root;
 
@@ -202,8 +200,7 @@ Json::Value SeqSearchResult::to_json(bool count_kmers,
         for (const auto &[label, count] : std::get<label_count_vec>(result)) {
             Json::Value label_obj = get_label_as_json(label);
 
-            std::string count_key = (count_kmers) ? KMER_COUNT_FIELD : LABEL_COUNT_FIELD;
-            label_obj[count_key] = Json::Value((Json::Int64) count);
+            label_obj[KMER_COUNT_FIELD] = Json::Value((Json::Int64) count);
 
             root["results"].append(label_obj);
         }
@@ -213,7 +210,11 @@ Json::Value SeqSearchResult::to_json(bool count_kmers,
             Json::Value label_obj = get_label_as_json(label);
 
             Json::Value sig_obj = Json::objectValue;
-            sig_obj["num_present"] = Json::Value(sdsl::util::cnt_one_bits(kmer_presence_mask));
+
+            // Add kmer_counts calculated using bitmask
+            label_obj[KMER_COUNT_FIELD] = Json::Value(sdsl::util::cnt_one_bits(kmer_presence_mask));
+
+            // Store the presence mask and score in a separate object
             sig_obj["presence_mask"] = Json::Value(sdsl::util::to_string(kmer_presence_mask));
             sig_obj["score"] =
                     Json::Value(anno_graph.score_kmer_presence_mask(kmer_presence_mask));
