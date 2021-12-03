@@ -386,6 +386,7 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
 
     label_encoder_.clear();
 
+    std::mutex mu;
     bool no_errors = true;
 
     bool merge_successful = merge_load(filenames,
@@ -395,25 +396,24 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
                           static_cast<double>(num_set_bits) / column->size(),
                           num_set_bits);
 
-            #pragma omp critical
-            {
-                // set |num_rows_| with the first column inserted
-                if (!bitmatrix_.size())
-                    num_rows_ = column->size();
+            std::lock_guard<std::mutex> lock(mu);
 
-                if (column->size() == num_rows_) {
-                    size_t col = label_encoder_.insert_and_encode(label);
-                    assert(col <= bitmatrix_.size());
+            // set |num_rows_| with the first column inserted
+            if (!bitmatrix_.size())
+                num_rows_ = column->size();
 
-                    if (col == bitmatrix_.size()) {
-                        bitmatrix_.emplace_back(std::move(column));
-                    } else {
-                        assert(bitmatrix_.at(col).get());
-                        decompress_bitmap(col) |= *column;
-                    }
+            if (column->size() == num_rows_) {
+                size_t col = label_encoder_.insert_and_encode(label);
+                assert(col <= bitmatrix_.size());
+
+                if (col == bitmatrix_.size()) {
+                    bitmatrix_.emplace_back(std::move(column));
                 } else {
-                    no_errors = false;
+                    assert(bitmatrix_.at(col).get());
+                    decompress_bitmap(col) |= *column;
                 }
+            } else {
+                no_errors = false;
             }
         },
         filenames.size() > 1u ? get_num_threads() : 0

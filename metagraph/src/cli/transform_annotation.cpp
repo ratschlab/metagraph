@@ -58,6 +58,7 @@ binmat::LinkageMatrix cluster_columns(const std::vector<std::string> &files,
     logger->trace("Loading annotation and sampling subcolumns of size {}",
                   num_rows_subsampled);
 
+    std::mutex mu;
     ThreadPool subsampling_pool(get_num_threads(), 1);
 
     // Load columns from disk
@@ -65,8 +66,10 @@ binmat::LinkageMatrix cluster_columns(const std::vector<std::string> &files,
                          std::unique_ptr<bit_vector> &&column) {
         subsampling_pool.enqueue([&, i, label, column{std::move(column)}]() {
             T *subvector;
-            #pragma omp critical
+
             {
+                std::lock_guard<std::mutex> lock(mu);
+
                 if (row_indexes.empty()) {
                     num_rows = column->size();
                     if (std::is_same_v<T, sdsl::bit_vector>)
@@ -262,6 +265,7 @@ convert_to_IntMultiBRWT(const std::vector<std::string> &files,
 
     logger->trace("Converted to Multi-BRWT in {} sec", timer.elapsed());
 
+    std::mutex mu;
     std::vector<CountsVector> column_values;
     ColumnCompressed<>::load_column_values(files,
         [&](size_t j, const std::string &label, sdsl::int_vector<>&& values) {
@@ -271,13 +275,13 @@ convert_to_IntMultiBRWT(const std::vector<std::string> &files,
                 exit(1);
             }
             CountsVector values_compressed(std::move(values));
-            #pragma omp critical
-            {
-                while (j >= column_values.size()) {
-                    column_values.push_back(sdsl::int_vector<>());
-                }
-                column_values[j] = std::move(values_compressed);
+
+            std::lock_guard<std::mutex> lock(mu);
+
+            while (j >= column_values.size()) {
+                column_values.push_back(sdsl::int_vector<>());
             }
+            column_values[j] = std::move(values_compressed);
         },
         get_num_threads()
     );
@@ -512,21 +516,22 @@ int transform_annotation(Config *config) {
         ProgressBar progress_bar(num_columns, "Intersect columns",
                                  std::cerr, !get_verbose());
         ThreadPool thread_pool(get_num_threads(), 1);
+        std::mutex mu_sum;
         std::mutex mu;
         auto on_column = [&](uint64_t, const auto &, auto&& col) {
-            #pragma omp critical
-            {
-                if (!sum.size()) {
-                    sum.resize(col->size());
-                } else if (sum.size() != col->size()) {
-                    logger->error("Input columns have inconsistent size ({} != {})",
-                                  sum.size(), col->size());
-                    exit(1);
-                }
+            std::lock_guard<std::mutex> lock(mu);
+
+            if (!sum.size()) {
+                sum.resize(col->size());
+            } else if (sum.size() != col->size()) {
+                logger->error("Input columns have inconsistent size ({} != {})",
+                              sum.size(), col->size());
+                exit(1);
             }
+
             thread_pool.enqueue([&,col{std::move(col)}]() {
                 col->call_ones([&](uint64_t i) {
-                    atomic_fetch_and_add(sum, i, 1, mu, __ATOMIC_RELAXED);
+                    atomic_fetch_and_add(sum, i, 1, mu_sum, __ATOMIC_RELAXED);
                 });
                 ++progress_bar;
             });
