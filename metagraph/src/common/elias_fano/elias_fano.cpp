@@ -32,8 +32,10 @@ void concat(const std::vector<std::string> &files, const std::string &result) {
             }
             concat_command += " >> " + files[0] + suffix;
 
-            if (std::system(concat_command.c_str()))
-                throw std::runtime_error("Error while cat-ing files: " + concat_command);
+            if (std::system(concat_command.c_str())) {
+                logger->error("Error while cat-ing files: {}", concat_command);
+                std::exit(EXIT_FAILURE);
+            }
         }
 
         std::filesystem::rename(files[0] + suffix, result + suffix);
@@ -539,7 +541,8 @@ bool EliasFanoDecoder<T>::init() {
     upper_pos_ = 0;
     source_.read(reinterpret_cast<char *>(&size_), sizeof(size_t));
     if (source_.bad()) {
-        throw std::runtime_error("Error while reading from " + source_name_);
+        logger->error("Error while reading from {}", source_name_);
+        std::exit(EXIT_FAILURE);
     } else if (source_.eof()) {
         source_.close();
         source_upper_.close();

@@ -137,9 +137,11 @@ class EliasFanoDecoder<std::pair<T, C>> {
         C second;
         source_second_.read(reinterpret_cast<char *>(&second), sizeof(C));
         if (!first.has_value()) {
-            if (!source_second_.eof())
-                throw std::ios_base::failure("EliasFanoDecoder " + source_second_name_ +
-                                                + " error: file is not read to the end");
+            if (!source_second_.eof()) {
+                logger->error("EliasFanoDecoder error: file {} is not read to the end",
+                              source_second_name_);
+                std::exit(EXIT_FAILURE);
+            }
             source_second_.close();
             if (remove_source_)
                 std::filesystem::remove(source_second_name_);
