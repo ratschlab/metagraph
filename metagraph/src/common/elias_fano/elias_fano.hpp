@@ -12,6 +12,8 @@
 #include <sdsl/uint128_t.hpp>
 #include <sdsl/uint256_t.hpp>
 
+#include "common/logger.hpp"
+
 
 namespace mtg {
 namespace elias_fano {
@@ -138,8 +140,8 @@ class EliasFanoDecoder<std::pair<T, C>> {
         source_second_.read(reinterpret_cast<char *>(&second), sizeof(C));
         if (!first.has_value()) {
             if (!source_second_.eof()) {
-                logger->error("EliasFanoDecoder error: file {} is not read to the end",
-                              source_second_name_);
+                common::logger->error("EliasFanoDecoder error: file {} is not read to the end",
+                                      source_second_name_);
                 std::exit(EXIT_FAILURE);
             }
             source_second_.close();
