@@ -18,7 +18,7 @@ using mtg::common::logger;
 
 BRWTBottomUpBuilder::Partitioner
 BRWTBottomUpBuilder::get_basic_partitioner(size_t arity) {
-    assert(arity > 1u);
+    assert(arity > 0u);
 
     return [arity](const VectorPtrs &vectors) {
         if (!vectors.size())
@@ -200,8 +200,35 @@ BRWT BRWTBottomUpBuilder::build(
         size_t num_nodes_parallel,
         size_t num_threads) {
 
-    if (!linkage.size())
-        return BRWT();
+    if (!linkage.size()) {
+        logger->warn("Passed no linkage rules. Assembling Multi-BRWT without internal nodes...");
+
+        std::vector<std::unique_ptr<bit_vector>> columns;
+
+        std::mutex mu;
+        uint64_t num_rows = 0;
+        get_columns([&](uint64_t i, std::unique_ptr<bit_vector>&& column) {
+            std::unique_lock<std::mutex> lock(mu);
+
+            uint64_t size = column->size();
+            if (!num_rows)
+                num_rows = size;
+
+            if (size != num_rows) {
+                logger->error("Can't merge columns of different size");
+                exit(1);
+            }
+
+            while (i >= columns.size()) {
+                columns.emplace_back();
+            }
+            assert(!columns[i]);
+            columns[i] = std::move(column);
+        });
+
+        return build(std::move(columns), get_basic_partitioner(columns.size()),
+                     num_nodes_parallel, num_threads);
+    }
 
     std::function<void(BRWT&& node, uint64_t id)> dump_node;
     std::function<BRWT(uint64_t id)> get_node;

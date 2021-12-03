@@ -1035,6 +1035,10 @@ void DBGSuccinct::add_rd_successors_at_forks(size_t num_threads,
         if (i < 2 || boss_graph_->is_single_outgoing(i) || (*rd_succ)[boss_to_kmer_index(i)])
             continue;
 
+        // // make nodes with multiple incoming edges have only one successor
+        // if (indegree(boss_to_kmer_index(i)) > 1)
+        //     continue;
+
         // (*rd_succ)[i] = true;
         // continue;
         // TODO: test this

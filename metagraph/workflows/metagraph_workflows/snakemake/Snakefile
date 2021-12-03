@@ -1,0 +1,344 @@
+import metagraph_workflows.utils
+from metagraph_workflows import workflow_configs, utils
+from metagraph_workflows.utils import take_value_or_default
+from metagraph_workflows.workflow_configs import AnnotationLabelsSource, \
+    AnnotationFormats
+from metagraph_workflows.resource_management import TransformRdStage0Resources, TransformRdStage1Resources, TransformRdStage2Resources, ResourceConfig
+
+wdir=utils.get_wdir(config)
+
+graph=config['base_name']
+build_primary=take_value_or_default('build_primary_graph', False, config)
+
+annotation_formats = config['annotation_formats'] if isinstance(config['annotation_formats'], list) else [config['annotation_formats']]
+
+# validate values
+for af in annotation_formats:
+    AnnotationFormats(af)
+    # TODO: make a nicer error
+
+annotation_labels_opt = AnnotationLabelsSource(config['annotation_labels_source']).to_annotation_cmd_option()
+
+
+metagraph_cmd=config['metagraph_cmd']
+time_cmd=utils.get_gnu_time_command(config)
+
+max_threads=take_value_or_default(workflow_configs.MAX_THREADS, workflow.cores, config)
+
+# TODO
+max_memory_mb=take_value_or_default('max_memory_mb', 4000, config)
+
+verbose_opt=' -v '
+
+DONE="DONE"
+
+## Paths
+graph_path=wdir/f'{graph}.dbg'
+annotation_cols_path=wdir/'columns'
+annotation_path_done=annotation_cols_path/DONE
+
+columns_file=wdir/'columns.txt'
+
+seqs_file_list_path=utils.get_seqs_file_list_path(wdir, config)
+
+contigs_dir=wdir/'contigs'
+
+seq_ids_dict = {}
+if not config[workflow_configs.SAMPLE_IDS_PATH]:
+    seq_ids_dict = utils.derive_sample_dictionary(seqs_file_list_path)
+
+localrules: generate_column_list
+
+rule all:
+     input:
+        graph_path,
+        [wdir/f'{graph}.{anno_type}.annodbg' for anno_type in annotation_formats]
+
+
+include: 'build.smk'
+
+ANNOTATE_RULE="annotate"
+rule annotate:
+    input:
+        seqs=utils.get_build_joint_input(config, contigs_dir, seq_ids_dict, seqs_file_list_path),
+        dbg_graph=graph_path,
+    output:
+        done=touch(annotation_path_done),
+        column_anno_files=utils.generate_col_paths(annotation_cols_path, seqs_file_list_path, config)
+    threads: max_threads
+    resources:
+        mem_mb=ResourceConfig(ANNOTATE_RULE, config).get_mem(),
+    params:
+        separate_build=str(bool(config[workflow_configs.PRIMARIZE_SAMPLES_SEPARATELY])).lower(),
+        tempdir_opt=utils.temp_dir_config(config),
+    log: utils.get_log_path(ANNOTATE_RULE, config)
+    shell:
+        """
+        if {params.separate_build}; then
+            SEQ_PATHS={wdir}/seqs_paths.txt
+            echo "{input}" | tr ' ' '\n' > $SEQ_PATHS
+        else
+            SEQ_PATHS="{input.seqs}"
+        fi
+        
+        OUT_DIR=$(dirname {output.done})
+        mkdir -p $OUT_DIR
+        cat $SEQ_PATHS | {time_cmd} {metagraph_cmd} annotate \
+          {verbose_opt} \
+          --parallel {threads} \
+          -i {input.dbg_graph} \
+          {annotation_labels_opt} \
+          --anno-type column \
+          --separately \
+          -o $OUT_DIR {params.tempdir_opt} > {log} 2>&1
+        """
+
+GENERATE_COLUMN_LIST_RULE="generate_column_list"
+rule generate_column_list:
+    input: rules.annotate.output.column_anno_files
+    output: columns_file
+    run:
+        with open(output[0], 'w') as f:
+            f.write('\n'.join([str(l) for l in input]))
+
+
+max_path_length=None
+
+GENERATE_BRWT_LINKAGE_RULE="generate_brwt_linkage"
+rule generate_brwt_linkage:
+    input:
+        columns_file=columns_file,
+    output:
+        linkage=wdir/f"{graph}.linkage.txt"
+    threads: max_threads
+    resources:
+        mem_mb=ResourceConfig(GENERATE_BRWT_LINKAGE_RULE, config).get_mem(),
+    params:
+        subsample=config[workflow_configs.BRWT_LINKAGE_SUBSAMPLE],
+    log: utils.get_log_path(GENERATE_BRWT_LINKAGE_RULE, config)
+    shell:
+        """        
+        cat {input.columns_file} | {time_cmd} {metagraph_cmd} transform_anno {verbose_opt} \
+            --anno-type brwt \
+            --linkage \
+            --greedy \
+            --subsample {params.subsample} \
+            --parallel {threads} \
+            -o {output.linkage} > {log} 2>&1
+        """
+
+ruleorder: relax_brwt > transform_annotation # more specific rule has priority
+
+TRANSFORM_ANNOTATION_RULE="transform_annotation"
+rule transform_annotation:
+    input:
+        columns_file=columns_file,
+    output:
+        annotations=wdir/f'{graph}.{{anno_type}}.annodbg',
+    threads: max_threads
+    resources:
+        mem_mb=ResourceConfig(TRANSFORM_ANNOTATION_RULE, config).get_mem(),
+    params:
+        tempdir_opt=utils.temp_dir_config(config),
+    log: utils.get_log_path(TRANSFORM_ANNOTATION_RULE, config, ['anno_type'])
+    shell:
+        """        
+        cat {input.columns_file} | {time_cmd} {metagraph_cmd} transform_anno {verbose_opt} \
+            --anno-type {wildcards.anno_type} \
+            --parallel {threads} \
+            -o {output.annotations} {params.tempdir_opt} > {log} 2>&1
+        """
+
+
+ANNOTATE_BRWT_RULE="annotate_brwt"
+rule annotate_brwt:
+    input:
+        linkage=wdir/f"{graph}.linkage.txt",
+        columns_file=columns_file,
+    output:
+        annotations=wdir/f'{graph}.brwt.annodbg',
+    threads: max_threads
+    resources:
+        mem_mb=ResourceConfig(ANNOTATE_BRWT_RULE, config).get_mem(),
+    params:
+        parallel_nodes=config[workflow_configs.BRWT_PARALLEL_NODES],
+        tempdir_opt=utils.temp_dir_config(config),
+    log: utils.get_log_path(ANNOTATE_BRWT_RULE, config)
+    shell:
+        """        
+        cat {input.columns_file} | {time_cmd} {metagraph_cmd} transform_anno {verbose_opt} \
+            --anno-type brwt \
+            --parallel-nodes {params.parallel_nodes} \
+            --greedy \
+            --parallel {threads} \
+            -o {output.annotations} {params.tempdir_opt} > {log} 2>&1
+        """
+
+
+RELAX_BRWT_RULE="relax_brwt"
+rule relax_brwt:
+    input:
+        brwt_annots=wdir/f'{graph}.{{brwt_fmt}}.annodbg',
+    output:
+        annotations=wdir/f'{graph}.relax.{{brwt_fmt}}.annodbg',
+    threads: max_threads
+    resources:
+        mem_mb=ResourceConfig(RELAX_BRWT_RULE, config).get_mem(),
+    params:
+        relax_arity=config[workflow_configs.BRWT_RELAX_ARITY],
+        tempdir_opt=utils.temp_dir_config(config),
+    log: utils.get_log_path(RELAX_BRWT_RULE, config, ['brwt_fmt'])
+    shell:
+        """        
+        {time_cmd} {metagraph_cmd} relax_brwt \
+            -o {output.annotations} \
+            {verbose_opt} \
+            --relax-arity {params.relax_arity} \
+            --parallel {threads} \
+            {input.brwt_annots} {params.tempdir_opt} > {log} 2>&1
+        """
+
+rd_cols_dir = wdir/'rd_cols'
+
+from metagraph_workflows.resource_management import TransformRdStage0Resources
+
+TRANSFORM_RD_STAGE0_RULE="transform_rd_stage0"
+rule transform_rd_stage0:
+    input:
+        dbg_graph=graph_path,
+        columns_file=columns_file,
+    output:
+        columns_rd_row_count=rd_cols_dir/'vector.row_count'
+    threads: max_threads
+    resources:
+        mem_mb=TransformRdStage0Resources(config).get_mem()
+    params:
+        mem_buffer=TransformRdStage0Resources(config).get_mem_buffer_gib(),
+        tempdir_opt=utils.temp_dir_config(config),
+    log: utils.get_log_path(TRANSFORM_RD_STAGE0_RULE,config)
+    shell:
+        """
+        COLS_DIR=$(dirname {output.columns_rd_row_count})
+        mkdir -p $COLS_DIR
+        
+        cat {input.columns_file} | {time_cmd} {metagraph_cmd} transform_anno {verbose_opt} \
+            --anno-type row_diff \
+            --row-diff-stage 0 \
+            -i {input.dbg_graph} \
+            --parallel {threads} \
+            --mem-cap-gb {params.mem_buffer} \
+            -o {output.columns_rd_row_count} {params.tempdir_opt} > {log} 2>&1
+        """
+
+TRANSFORM_RD_STAGE1_RULE="transform_rd_stage1"
+rule transform_rd_stage1:
+    input:
+        dbg_graph=graph_path,
+        columns_file=columns_file,
+        columns_rd_row_count=rd_cols_dir/'vector.row_count'
+    output:
+        pred=wdir / f'{graph}.dbg.pred',
+        pred_boundary=wdir / f'{graph}.dbg.pred_boundary',
+        rd_succ=wdir / f'{graph}.dbg.rd_succ',
+        succ=wdir / f'{graph}.dbg.succ',
+        succ_boundary=wdir / f'{graph}.dbg.succ_boundary',
+        cols_rd_vectors=rd_cols_dir / 'vectors.row_reduction'
+    threads: max_threads
+    resources:
+        mem_mb=TransformRdStage1Resources(config).get_mem()
+    params:
+        mem_buffer=TransformRdStage1Resources(config).get_mem_buffer_gib(),
+        tempdir_opt=utils.temp_dir_config(config),
+    log: utils.get_log_path(TRANSFORM_RD_STAGE1_RULE, config)
+    shell:
+        """
+        cat {input.columns_file} | {time_cmd} {metagraph_cmd} transform_anno {verbose_opt} \
+            --anno-type row_diff \
+            --row-diff-stage 1 \
+            -i {input.dbg_graph} \
+            --parallel {threads} \
+            --mem-cap-gb {params.mem_buffer} \
+            -o {output.cols_rd_vectors} {params.tempdir_opt} > {log} 2>&1
+        """
+
+
+TRANSFORM_RD_STAGE2_RULE="transform_rd_stage2"
+rule transform_rd_stage2:
+    input:
+        dbg_graph=graph_path,
+        columns_file=columns_file,
+        cols_rd_vectors=rd_cols_dir / 'vectors.row_reduction'
+    output:
+        anchors=wdir/f'{graph}.dbg.anchors',
+        rd_cols_done=touch(rd_cols_dir/DONE)
+    threads: max_threads
+    resources:
+        mem_mb=TransformRdStage2Resources(config).get_mem(),
+    params:
+        mem_buffer=TransformRdStage2Resources(config).get_mem_buffer_gib(),
+        tempdir_opt=utils.temp_dir_config(config),
+    log: utils.get_log_path(TRANSFORM_RD_STAGE2_RULE, config)
+    shell:
+        """
+        cat {input.columns_file} | {time_cmd} {metagraph_cmd} transform_anno {verbose_opt} \
+            --anno-type row_diff \
+            --row-diff-stage 2 \
+            -i {input.dbg_graph} \
+            --parallel {threads} \
+            --mem-cap-gb {params.mem_buffer} \
+            -o {output.rd_cols_done} {params.tempdir_opt} > {log} 2>&1
+        """
+
+
+ANNOTATE_ROW_DIFF_BRWT_RULE="annotate_row_diff_brwt"
+rule annotate_row_diff_brwt:
+    input:
+        anchors=rules.transform_rd_stage2.output.anchors,
+        rd_cols_done=rules.transform_rd_stage2.output.rd_cols_done,
+        dbg_graph=graph_path
+    output:
+        annotations=wdir/f'{graph}.row_diff_brwt.annodbg',
+        linkage=wdir / f'{graph}.row_diff_brwt.annodbg.linkage',
+    threads: max_threads
+    resources:
+        mem_mb=ResourceConfig(ANNOTATE_ROW_DIFF_BRWT_RULE, config).get_mem(),
+    params:
+        parallel_nodes=config[workflow_configs.BRWT_PARALLEL_NODES],
+        tempdir_opt=utils.temp_dir_config(config),
+    log: utils.get_log_path(ANNOTATE_ROW_DIFF_BRWT_RULE, config)
+    shell:
+        """
+        echo $(find $(dirname {input.rd_cols_done}) -name \*.annodbg)
+        find $(dirname {input.rd_cols_done}) -name \*.annodbg | {time_cmd} {metagraph_cmd} transform_anno {verbose_opt} \
+            --anno-type row_diff_brwt \
+            --greedy \
+            --fast \
+            --parallel-nodes {params.parallel_nodes} \
+            --parallel {threads} \
+            -i {input.dbg_graph} \
+            -o {output.annotations} {params.tempdir_opt} > {log} 2>&1
+        """
+
+
+RELAX_ROW_DIFF_BRWT_RULE="relax_row_diff_brwt"
+rule relax_row_diff_brwt:
+    input:
+        brwt_annots=rules.annotate_row_diff_brwt.output.annotations,
+    output:
+        annotations_relaxed=wdir/f'{graph}.relax.row_diff_brwt.annodbg',
+    threads: max_threads
+    resources:
+        mem_mb=ResourceConfig(RELAX_ROW_DIFF_BRWT_RULE, config).get_mem(),
+    params:
+        relax_arity = config[workflow_configs.BRWT_RELAX_ARITY],
+        tempdir_opt=utils.temp_dir_config(config),
+    log: utils.get_log_path(RELAX_ROW_DIFF_BRWT_RULE, config)
+    shell:
+        """        
+        {time_cmd} {metagraph_cmd} relax_brwt \
+            -o {output.annotations_relaxed} \
+            {verbose_opt} \
+            --relax-arity {params.relax_arity} \
+            --parallel {threads} \
+            {input.brwt_annots} {params.tempdir_opt} > {log} 2>&1
+        """

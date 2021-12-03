@@ -48,7 +48,7 @@ class IntRowDiff : public binmat::IRowDiff, public IntMatrix {
   public:
     using anchor_bv_type = bit_vector_small;
     using fork_succ_bv_type = bit_vector_small;
-    static_assert(std::is_convertible<IntRowDiff*, IntMatrix*>::value);
+    static_assert(std::is_convertible<BaseMatrix*, IntMatrix*>::value);
 
     IntRowDiff() {}
 

@@ -17,7 +17,7 @@ namespace cli {
 class Config;
 
 
-void print_stats(const graph::DeBruijnGraph &graph);
+void print_stats(const graph::DeBruijnGraph &graph, bool print_counts_hist = false);
 
 void print_boss_stats(const graph::boss::BOSS &boss_graph,
                       bool count_dummy = false,

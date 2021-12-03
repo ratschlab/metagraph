@@ -22,6 +22,7 @@ class Config {
     bool print_graph = false;
     bool print_graph_internal_repr = false;
     bool print_column_names = false;
+    bool print_counts_hist = false;
     bool forward_and_reverse = false;
     bool complete = false;
     bool dynamic = false;
@@ -52,10 +53,9 @@ class Config {
     bool greedy_brwt = false;
     bool cluster_linkage = false;
     bool separately = false;
-    bool files_sequentially = false;
     bool map_sequences = false;
     bool align_sequences = false;
-    bool align_both_strands = false;
+    bool align_only_forwards = false;
     bool filter_by_kmer = false;
     bool output_json = false;
     bool aggregate_columns = false;
@@ -69,6 +69,7 @@ class Config {
     static const size_t kDefaultIndexSuffixLen;
     unsigned int node_suffix_length = kDefaultIndexSuffixLen;
     unsigned int distance = 0;
+    unsigned int parallel_each = 1;
     unsigned int parallel_nodes = -1;  // if not set, redefined by |parallel|
     unsigned int num_bins_per_thread = 1;
     unsigned int parts_total = 1;
@@ -104,6 +105,7 @@ class Config {
 
     // Alignment options
     bool alignment_edit_distance = false;
+    bool alignment_chain = false;
 
     int8_t alignment_match_score = 2;
     int8_t alignment_mm_transition_score = 3;
@@ -111,7 +113,6 @@ class Config {
     int8_t alignment_gap_opening_penalty = 5;
     int8_t alignment_gap_extension_penalty = 2;
 
-    int32_t alignment_min_cell_score = 0;
     int32_t alignment_min_path_score = 0;
     int32_t alignment_xdrop = 27;
 
@@ -120,7 +121,10 @@ class Config {
     size_t alignment_max_seed_length = std::numeric_limits<size_t>::max();
     size_t alignment_max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
 
+    double alignment_rel_score_cutoff = 0.8;
+
     double discovery_fraction = 0.7;
+    double presence_fraction = 0.0;
     double label_mask_in_fraction = 1.0;
     double label_mask_out_fraction = 0.0;
     double label_other_fraction = 1.0;
@@ -130,7 +134,7 @@ class Config {
     double bloom_bpk = 4.0;
     double alignment_max_nodes_per_seq_char = 12.0;
     double alignment_max_ram = 200;
-    double alignment_min_exact_match = 0.7;
+    double alignment_min_exact_match = 0.0;
     double min_fraction = 0.0;
     double max_fraction = 1.0;
     std::vector<double> count_slice_quantiles;
@@ -201,6 +205,9 @@ class Config {
         IntBRWT,
         IntRowDiffBRWT,
         ColumnCoord,
+        BRWTCoord,
+        RowDiffCoord,
+        RowDiffBRWTCoord,
     };
 
     enum GraphType {

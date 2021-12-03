@@ -31,10 +31,6 @@ setup(
         'Programming Language :: Python :: 3.6',
     ],
     description="Metagraph Toolkit",
-    entry_points={
-        'console_scripts': [
-        ],
-    },
     install_requires=requirements,
     license="MIT license",
     long_description=readme,

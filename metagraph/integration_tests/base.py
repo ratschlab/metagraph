@@ -104,9 +104,16 @@ class TestingBase(unittest.TestCase):
 
     @staticmethod
     def _annotate_graph(input, graph_path, output, anno_repr,
-                        separate=False, no_fork_opt=False, no_anchor_opt=False):
+                        separate=False, no_fork_opt=False, no_anchor_opt=False,
+                        anno_type='header'):
         target_anno = anno_repr
+
+        noswap = anno_repr.endswith('_noswap')
+        if noswap:
+            anno_repr = anno_repr[:-len('_noswap')]
+
         if (anno_repr in {'row_sparse', 'column_coord'} or
+                anno_repr.endswith('_coord') or
                 anno_repr.endswith('brwt') or
                 anno_repr.startswith('row_diff')):
             target_anno = anno_repr
@@ -115,7 +122,7 @@ class TestingBase(unittest.TestCase):
             target_anno = anno_repr
             anno_repr = 'row'
 
-        command = f'{METAGRAPH} annotate -p {NUM_THREADS} --anno-header \
+        command = f'{METAGRAPH} annotate -p {NUM_THREADS} --anno-{anno_type}\
                     -i {graph_path} --anno-type {anno_repr} \
                     -o {output} {input}'
 
@@ -141,6 +148,8 @@ class TestingBase(unittest.TestCase):
                     {output + anno_file_extension[anno_repr]}'
 
         other_args = ' --count-kmers' if with_counts else ''
+        other_args += ' --coordinates' if final_anno.endswith('_coord') else ''
+        other_args += ' --disk-swap \"\"' if noswap else ''
 
         if target_anno == 'row_diff':
             command += ' -i ' + graph_path
@@ -170,7 +179,7 @@ class TestingBase(unittest.TestCase):
             assert(res.returncode == 0)
 
             if final_anno != target_anno:
-                rd_type = 'column' if with_counts else 'row_diff'
+                rd_type = 'column' if with_counts or final_anno.endswith('_coord') else 'row_diff'
                 command = f'{METAGRAPH} transform_anno --anno-type {final_anno} --greedy -o {output} ' \
                                    f'-i {graph_path} -p {NUM_THREADS} {output}.{rd_type}.annodbg'
                 res = subprocess.run([command], shell=True)
@@ -178,3 +187,8 @@ class TestingBase(unittest.TestCase):
                 os.remove(output + anno_file_extension[rd_type])
             else:
                 os.remove(output + anno_file_extension[anno_repr])
+
+        if final_anno.endswith('brwt') or final_anno.endswith('brwt_coord'):
+            command = f'{METAGRAPH} relax_brwt -o {output} -p {NUM_THREADS} {output}.{final_anno}.annodbg'
+            res = subprocess.run([command], shell=True)
+            assert (res.returncode == 0)

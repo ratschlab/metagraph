@@ -69,7 +69,7 @@ void print_boss_stats(const graph::boss::BOSS &boss_graph,
     std::cout << "========================================================" << std::endl;
 }
 
-void print_stats(const graph::DeBruijnGraph &graph) {
+void print_stats(const graph::DeBruijnGraph &graph, bool print_counts_hist) {
     std::cout << "====================== GRAPH STATS =====================" << std::endl;
     std::cout << "k: " << graph.get_k() << std::endl;
     std::cout << "nodes (k): " << graph.num_nodes() << std::endl;
@@ -78,6 +78,14 @@ void print_stats(const graph::DeBruijnGraph &graph) {
     if (auto weights = graph.get_extension<graph::NodeWeights>()) {
         double sum_weights = 0;
         uint64_t num_non_zero_weights = 0;
+        std::vector<uint64_t> hist;
+        auto add_to_hist = [&](uint64_t c) {
+            assert(c && "All k-mers in graph must have non-zero weights");
+            while (c >= hist.size()) {
+                hist.push_back(0);
+            }
+            hist[c]++;
+        };
         if (const auto *dbg_succ = dynamic_cast<const graph::DBGSuccinct*>(&graph)) {
             // In DBGSuccinct some of the nodes may be masked out
             // TODO: Fix this by using non-contiguous indexing in graph
@@ -86,6 +94,8 @@ void print_stats(const graph::DeBruijnGraph &graph) {
                 if (uint64_t weight = (*weights)[i]) {
                     sum_weights += weight;
                     num_non_zero_weights++;
+                    if (print_counts_hist)
+                        add_to_hist(weight);
                 }
             }
         } else {
@@ -97,11 +107,23 @@ void print_stats(const graph::DeBruijnGraph &graph) {
                 if (uint64_t weight = (*weights)[i]) {
                     sum_weights += weight;
                     num_non_zero_weights++;
+                    if (print_counts_hist)
+                        add_to_hist(weight);
                 }
             });
         }
         std::cout << "nnz weights: " << num_non_zero_weights << std::endl;
         std::cout << "avg weight: " << static_cast<double>(sum_weights) / num_non_zero_weights << std::endl;
+        if (print_counts_hist) {
+            std::cout << "weights histogram:\n";
+            if (hist.size() > 1u && hist[1])
+                std::cout << fmt::format("{}:{}", 1, hist[1]);
+            for (size_t i = 2; i < hist.size(); i++) {
+                if (hist[i])
+                    std::cout << fmt::format(",{}:{}", i, hist[i]);
+            }
+            std::cout << std::endl;
+        }
 
         if (get_verbose()) {
             if (const auto *dbg_succ = dynamic_cast<const graph::DBGSuccinct*>(&graph)) {
@@ -135,7 +157,6 @@ void print_bloom_filter_stats(const kmer::KmerBloomFilter<KmerHasher> *kmer_bloo
 
 template <class Matrix>
 void print_anchor_stats(const Matrix& m) {
-    std::cout << "=================== Anchor STATS ===================" << std::endl;
     uint64_t num_anchors = m.anchor().num_set_bits();
     if (num_anchors != 0) {
         std::cout << "num anchors: " << m.anchor().num_set_bits() << std::endl;
@@ -167,36 +188,43 @@ void print_stats(const Annotator &annotation) {
               << utils::split_string(annotation.file_extension(), ".").at(0) << std::endl;
 
     using namespace annot::binmat;
-    using mtg::annot::matrix::MultiIntMatrix;
 
-    if (const auto *mat_coord = dynamic_cast<const MultiIntMatrix *>(&annotation.get_matrix())) {
+    const BinaryMatrix *mat = &annotation.get_matrix();
+
+#define CHECK_IF_DIFFED_AND_PRINT_STATS(RD_TYPE, NAME) \
+    if (const auto *rd = dynamic_cast<const RD_TYPE *>(mat)) { \
+        std::cout << "=================== DIFF ANNOTATION ====================" << std::endl; \
+        print_anchor_stats(*rd); \
+        std::cout << "underlying matrix: " NAME << std::endl; \
+        mat = &rd->diffs(); \
+    }
+
+    CHECK_IF_DIFFED_AND_PRINT_STATS(RowDiff<ColumnMajor>, "ColumnMajor");
+    CHECK_IF_DIFFED_AND_PRINT_STATS(RowDiff<RowSparse>, "RowSparse");
+    CHECK_IF_DIFFED_AND_PRINT_STATS(RowDiff<BRWT>, "Multi-BRWT");
+
+    CHECK_IF_DIFFED_AND_PRINT_STATS(typename annot::IntRowDiffBRWTAnnotator::binary_matrix_type, "Multi-BRWT");
+
+    CHECK_IF_DIFFED_AND_PRINT_STATS(typename annot::RowDiffCoordAnnotator::binary_matrix_type, "ColumnMajor");
+    CHECK_IF_DIFFED_AND_PRINT_STATS(typename annot::RowDiffBRWTCoordAnnotator::binary_matrix_type, "Multi-BRWT");
+
+    if (const auto *mat_coord = dynamic_cast<const annot::matrix::MultiIntMatrix *>(mat)) {
         std::cout << "================== COORDINATES STATS ===================" << std::endl;
         std::cout << "coordinates: " << mat_coord->num_attributes() << std::endl;
+        mat = &mat_coord->get_binary_matrix();
+    } else if (const auto *int_mat = dynamic_cast<const annot::matrix::IntMatrix *>(mat)) {
+        mat = &int_mat->get_binary_matrix();
     }
 
-    if (const auto *rbmat = dynamic_cast<const RainbowMatrix *>(&annotation.get_matrix())) {
+    if (const auto *rbmat = dynamic_cast<const RainbowMatrix *>(mat)) {
         std::cout << "================= RAINBOW MATRIX STATS =================" << std::endl;
         std::cout << "distinct rows: " << rbmat->num_distinct_rows() << std::endl;
-
-    } else if (const auto *brwt = dynamic_cast<const BRWT *>(&annotation.get_matrix())) {
-        print_brwt_stats(*brwt);
-
-    } else if (const auto *brwt_rd
-               = dynamic_cast<const RowDiff<BRWT> *>(&annotation.get_matrix())) {
-        std::cout << "underlying matrix: BRWT" << std::endl;
-        print_brwt_stats(brwt_rd->diffs());
-        print_anchor_stats(*brwt_rd);
-
-    } else if (const auto *rd
-               = dynamic_cast<const RowDiff<ColumnMajor> *>(&annotation.get_matrix())) {
-        std::cout << "underlying matrix: ColumnMajor" << std::endl;
-        print_anchor_stats(*rd);
-
-    } else if (const auto *rs
-               = dynamic_cast<const RowDiff<RowSparse> *>(&annotation.get_matrix())) {
-        std::cout << "underlying matrix: RowSparse" << std::endl;
-        print_anchor_stats(*rs);
+        if (const auto *rb_brwt = dynamic_cast<const Rainbow<BRWT> *>(mat))
+            mat = &rb_brwt->get_reduced_matrix();
     }
+
+    if (const auto *brwt = dynamic_cast<const BRWT *>(mat))
+        print_brwt_stats(*brwt);
 
     std::cout << "========================================================" << std::endl;
 }
@@ -214,7 +242,7 @@ int print_stats(Config *config) {
 
         logger->info("Statistics for graph '{}'", file);
 
-        print_stats(*graph);
+        print_stats(*graph, config->print_counts_hist);
 
         if (auto dbg_succ = dynamic_cast<graph::DBGSuccinct*>(graph.get())) {
             const auto &boss_graph = dbg_succ->get_boss();

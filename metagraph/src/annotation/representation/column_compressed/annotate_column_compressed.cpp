@@ -161,6 +161,18 @@ void ColumnCompressed<Label>::add_label_coord(Index i, const VLabels &labels, ui
     }
 }
 
+// for each label and index 'i' add numeric attribute 'coord'
+template <typename Label>
+void ColumnCompressed<Label>::add_label_coords(const std::vector<std::pair<Index, uint64_t>> &coords,
+                                               const VLabels &labels) {
+    coords_.resize(num_labels());
+
+    for (const auto &label : labels) {
+        const size_t j = label_encoder_.encode(label);
+        coords_[j].insert(coords_[j].end(), coords.begin(), coords.end());
+    }
+}
+
 template <typename Label>
 bool ColumnCompressed<Label>::has_label(Index i, const Label &label) const {
     try {
@@ -416,6 +428,23 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
 }
 
 template <typename Label>
+size_t ColumnCompressed<Label>::read_num_labels(const std::string &filename) {
+    return load_label_encoder(filename).size();
+}
+
+template <typename Label>
+LabelEncoder<Label>
+ColumnCompressed<Label>::load_label_encoder(const std::string &filename) {
+    auto fname = make_suffix(filename, kExtension);
+    std::ifstream in(filename, std::ios::binary);
+    std::ignore = load_number(in); // read num_rows
+    LabelEncoder<Label> label_encoder;
+    if (!label_encoder.load(in))
+        throw std::ofstream::failure("Can't load label encoder from " + fname);
+    return label_encoder;
+}
+
+template <typename Label>
 bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenames,
                                          const ColumnCallback &callback,
                                          size_t num_threads) {
@@ -426,22 +455,13 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
     // load labels
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (size_t i = 1; i < filenames.size(); ++i) {
-        auto filename = make_suffix(filenames[i - 1], kExtension);
-
-        std::ifstream in(filename, std::ios::binary);
-        if (!in.good()) {
-            logger->error("Can't read from {}", filename);
+        auto fname = make_suffix(filenames[i - 1], kExtension);
+        try {
+            offsets[i] = read_num_labels(fname);
+        } catch (...) {
+            logger->error("Can't load label encoder from {}", fname);
             error_occurred = true;
         }
-        std::ignore = load_number(in);
-
-        LabelEncoder<Label> label_encoder;
-        if (!label_encoder.load(in)) {
-            logger->error("Can't load label encoder from {}", filename);
-            error_occurred = true;
-        }
-
-        offsets[i] = label_encoder.size();
     }
 
     if (error_occurred)
@@ -507,22 +527,13 @@ void ColumnCompressed<Label>
     // load labels
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (size_t i = 1; i < filenames.size(); ++i) {
-        auto filename = make_suffix(filenames[i - 1], kExtension);
-
-        std::ifstream in(filename, std::ios::binary);
-        if (!in) {
-            logger->error("Can't read from {}", filename);
+        auto fname = make_suffix(filenames[i - 1], kExtension);
+        try {
+            offsets[i] = read_num_labels(fname);
+        } catch (...) {
+            logger->error("Can't load label encoder from {}", fname);
             error_occurred = true;
         }
-        std::ignore = load_number(in);
-
-        LabelEncoder<Label> label_encoder;
-        if (!label_encoder.load(in)) {
-            logger->error("Can't load label encoder from {}", filename);
-            error_occurred = true;
-        }
-
-        offsets[i] = label_encoder.size();
     }
 
     if (error_occurred)
@@ -537,15 +548,7 @@ void ColumnCompressed<Label>
         const auto &filename = make_suffix(filenames[i], kExtension);
         logger->trace("Loading labels from {}", filename);
         try {
-            std::ifstream in(filename, std::ios::binary);
-            if (!in)
-                throw std::ifstream::failure("can't open file");
-
-            std::ignore = load_number(in);
-
-            LabelEncoder<Label> label_encoder_load;
-            if (!label_encoder_load.load(in))
-                throw std::ifstream::failure("can't load label encoder");
+            LabelEncoder<Label> label_encoder_load = load_label_encoder(filename);
 
             if (!label_encoder_load.size()) {
                 logger->warn("No columns in {}", filename);
@@ -844,10 +847,10 @@ const binmat::ColumnMajor& ColumnCompressed<Label>::get_matrix() const {
 }
 
 template <typename Label>
-binmat::ColumnMajor ColumnCompressed<Label>::release_matrix() {
+std::unique_ptr<binmat::ColumnMajor> ColumnCompressed<Label>::release_matrix() {
     flush();
     label_encoder_.clear();
-    return std::move(matrix_);
+    return std::make_unique<binmat::ColumnMajor>(std::move(matrix_));
 }
 
 template <typename Label>

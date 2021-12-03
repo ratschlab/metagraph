@@ -7,6 +7,13 @@
 
 namespace utils {
 
+bool starts_with(const std::string &str, const std::string &prefix) {
+    if (prefix.size() > str.size()) {
+        return false;
+    }
+    return prefix == std::string_view(str).substr(0, prefix.size());
+}
+
 bool ends_with(const std::string &str, const std::string &suffix) {
     auto actual_suffix = str.substr(
         std::max(0, static_cast<int>(str.size())

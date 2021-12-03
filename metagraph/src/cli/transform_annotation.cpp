@@ -24,6 +24,9 @@ using mtg::common::get_verbose;
 
 typedef MultiLabelEncoded<std::string> Annotator;
 
+typedef matrix::TupleCSCMatrix<binmat::ColumnMajor> TupleCSC;
+typedef matrix::TupleCSCMatrix<binmat::BRWT> TupleBRWT;
+
 static const Eigen::IOFormat CSVFormat(Eigen::StreamPrecision,
                                        Eigen::DontAlignCols, " ", "\n");
 
@@ -291,6 +294,59 @@ convert_to_IntMultiBRWT(const std::vector<std::string> &files,
                 std::make_unique<matrix::CSCMatrix<binmat::BRWT, CountsVector>>(
                         std::move(*multi_brwt), std::move(column_values)),
                 brwt_annotator->get_label_encoder());
+}
+
+template <class Annotator>
+StaticBinRelAnnotator<matrix::TupleCSCMatrix<typename Annotator::binary_matrix_type>, std::string>
+load_coords(Annotator&& anno, const std::vector<std::string> &files) {
+    std::vector<bit_vector_smart> delimiters(anno.num_labels());
+    std::vector<sdsl::int_vector<>> column_values(anno.num_labels());
+
+    #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
+    for (size_t i = 0; i < files.size(); ++i) {
+        auto label_encoder = ColumnCompressed<>::load_label_encoder(files[i]);
+
+        auto coords_fname = utils::remove_suffix(files[i], ColumnCompressed<>::kExtension)
+                                                        + ColumnCompressed<>::kCoordExtension;
+        std::ifstream in(coords_fname, std::ios::binary);
+        size_t j = 0;
+        try {
+            TupleCSC::load_tuples(in, label_encoder.size(), [&](auto&& delims, auto&& values) {
+                size_t idx;
+                try {
+                    idx = anno.get_label_encoder().encode(label_encoder.decode(j));
+                } catch (...) {
+                    logger->error("Label '{}' from {} is missing in the target annotator",
+                                  label_encoder.decode(j), files[i]);
+                    exit(1);
+                }
+                if (delimiters[idx].size()) {
+                    logger->error("Merging coordinate annotations with overlapping"
+                                  " labels is not implemented");
+                    exit(1);
+                }
+                delimiters[idx] = std::move(delims);
+                column_values[idx] = std::move(values);
+                j++;
+            });
+        } catch (const std::exception &e) {
+            logger->error("Couldn't load coordinates from {}\nException: {}", coords_fname, e.what());
+            exit(1);
+        } catch (...) {
+            logger->error("Couldn't load coordinates from {}", coords_fname);
+            exit(1);
+        }
+        assert(j == label_encoder.size());
+    }
+
+    auto label_encoder = anno.get_label_encoder();
+
+    return StaticBinRelAnnotator<matrix::TupleCSCMatrix<typename Annotator::binary_matrix_type>, std::string>(
+            std::make_unique<matrix::TupleCSCMatrix<typename Annotator::binary_matrix_type>>(
+                    std::move(*anno.release_matrix()),
+                    std::move(delimiters),
+                    std::move(column_values)),
+            std::move(label_encoder));
 }
 
 
@@ -637,6 +693,8 @@ int transform_annotation(Config *config) {
         if (config->anno_type != Config::BRWT
                 && config->anno_type != Config::RbBRWT
                 && config->anno_type != Config::IntBRWT
+                && config->anno_type != Config::BRWTCoord
+                && config->anno_type != Config::RowDiffBRWTCoord
                 && config->anno_type != Config::RowDiff) {
             annotator = std::make_unique<ColumnCompressed<>>(0);
             logger->trace("Loading annotation from disk...");
@@ -653,23 +711,82 @@ int transform_annotation(Config *config) {
                 break;
             }
             case Config::ColumnCoord: {
-                auto label_encoder = annotator->get_label_encoder();
-                auto tuple_matrix = std::make_unique<matrix::TupleCSCMatrix<binmat::ColumnMajor>>(
-                                            annotator->release_matrix());
-                if (files.size() > 1) {
-                    logger->error("Merging coordinates from multiple columns is not supported");
-                    exit(1);
-                }
-                auto coords_fname = utils::remove_suffix(files.at(0),
-                                                         ColumnCompressed<>::kExtension)
-                                        + ColumnCompressed<>::kCoordExtension;
-                std::ifstream in(coords_fname);
-                tuple_matrix->load_tuples(in);
-
-                ColumnCoordAnnotator column_coord(std::move(tuple_matrix), label_encoder);
-
+                ColumnCoordAnnotator column_coord = load_coords(std::move(*annotator), files);
                 logger->trace("Annotation converted in {} sec", timer.elapsed());
                 column_coord.serialize(config->outfbase);
+                logger->trace("Serialized to {}", config->outfbase);
+                break;
+            }
+            case Config::BRWTCoord: {
+                auto brwt_coord = load_coords(std::move(*convert_to_MultiBRWT(files, *config)), files);
+                logger->trace("Annotation converted in {} sec", timer.elapsed());
+                brwt_coord.serialize(config->outfbase);
+                logger->trace("Serialized to {}", config->outfbase);
+                break;
+            }
+            case Config::RowDiffCoord: {
+                assert(config->infbase.size());
+                const std::string anchors_file = config->infbase + annot::binmat::kRowDiffAnchorExt;
+                if (!std::filesystem::exists(anchors_file)) {
+                    logger->error("Anchor bitmap {} does not exist. Run the row_diff"
+                                  " transform followed by anchor optimization.", anchors_file);
+                    std::exit(1);
+                }
+                const std::string fork_succ_file = config->infbase + annot::binmat::kRowDiffForkSuccExt;
+                if (!std::filesystem::exists(fork_succ_file)) {
+                    logger->error("Fork successor bitmap {} does not exist", fork_succ_file);
+                    std::exit(1);
+                }
+
+                ColumnCoordAnnotator column_coord = load_coords(std::move(*annotator), files);
+
+                auto label_encoder = column_coord.get_label_encoder();
+
+                auto diff_matrix = std::make_unique<matrix::TupleRowDiff<TupleCSC>>(nullptr,
+                            std::move(*column_coord.release_matrix()));
+
+                diff_matrix->load_anchor(anchors_file);
+                diff_matrix->load_fork_succ(fork_succ_file);
+                logger->trace("RowDiff support bitmaps loaded");
+
+                RowDiffCoordAnnotator annotation(std::move(diff_matrix), label_encoder);
+
+                logger->trace("Annotation converted in {} sec", timer.elapsed());
+
+                annotation.serialize(config->outfbase);
+                logger->trace("Serialized to {}", config->outfbase);
+                break;
+            }
+            case Config::RowDiffBRWTCoord: {
+                assert(config->infbase.size());
+                const std::string anchors_file = config->infbase + annot::binmat::kRowDiffAnchorExt;
+                if (!std::filesystem::exists(anchors_file)) {
+                    logger->error("Anchor bitmap {} does not exist. Run the row_diff"
+                                  " transform followed by anchor optimization.", anchors_file);
+                    std::exit(1);
+                }
+                const std::string fork_succ_file = config->infbase + annot::binmat::kRowDiffForkSuccExt;
+                if (!std::filesystem::exists(fork_succ_file)) {
+                    logger->error("Fork successor bitmap {} does not exist", fork_succ_file);
+                    std::exit(1);
+                }
+
+                auto brwt_coord = load_coords(std::move(*convert_to_MultiBRWT(files, *config)), files);
+
+                auto label_encoder = brwt_coord.get_label_encoder();
+
+                auto diff_matrix = std::make_unique<matrix::TupleRowDiff<TupleBRWT>>(nullptr,
+                            std::move(*brwt_coord.release_matrix()));
+
+                diff_matrix->load_anchor(anchors_file);
+                diff_matrix->load_fork_succ(fork_succ_file);
+                logger->trace("RowDiff support bitmaps loaded");
+
+                RowDiffBRWTCoordAnnotator annotation(std::move(diff_matrix), label_encoder);
+
+                logger->trace("Annotation converted in {} sec", timer.elapsed());
+
+                annotation.serialize(config->outfbase);
                 logger->trace("Serialized to {}", config->outfbase);
                 break;
             }
@@ -774,20 +891,15 @@ int transform_annotation(Config *config) {
                 auto int_annotation = convert_to_IntMultiBRWT(files, *config, timer);
                 logger->trace("Annotation converted in {} sec", timer.elapsed());
 
+                auto label_encoder = int_annotation.get_label_encoder();
                 using CSCMatrix = matrix::CSCMatrix<binmat::BRWT, CountsVector>;
-
-                IntRowDiffBRWTAnnotator annotation(
-                        std::make_unique<matrix::IntRowDiff<CSCMatrix>>(nullptr,
-                                std::move(*int_annotation.release_matrix())),
-                        int_annotation.get_label_encoder());
-
-                const_cast<matrix::IntRowDiff<CSCMatrix> &>(annotation.get_matrix())
-                        .load_anchor(anchors_file);
-                const_cast<matrix::IntRowDiff<CSCMatrix> &>(annotation.get_matrix())
-                        .load_fork_succ(fork_succ_file);
-
+                auto matrix = std::make_unique<matrix::IntRowDiff<CSCMatrix>>(nullptr,
+                                std::move(*int_annotation.release_matrix()));
+                matrix->load_anchor(anchors_file);
+                matrix->load_fork_succ(fork_succ_file);
                 logger->trace("RowDiff support bitmaps loaded");
 
+                IntRowDiffBRWTAnnotator annotation(std::move(matrix), std::move(label_encoder));
                 annotation.serialize(config->outfbase);
                 logger->trace("Serialized to {}", config->outfbase);
                 break;
@@ -956,9 +1068,12 @@ int relax_multi_brwt(Config *config) {
 
     std::unique_ptr<MultiLabelEncoded<std::string>> annotator;
     Config::AnnotationType anno_type = parse_annotation_type(fname);
-    switch(anno_type) {
+    switch (anno_type) {
         case Config::BRWT:
             annotator = std::make_unique<MultiBRWTAnnotator>();
+            break;
+        case Config::RbBRWT:
+            annotator = std::make_unique<RbBRWTAnnotator>();
             break;
         case Config::RowDiffBRWT:
             annotator = std::make_unique<RowDiffBRWTAnnotator>();
@@ -969,8 +1084,14 @@ int relax_multi_brwt(Config *config) {
         case Config::IntRowDiffBRWT:
             annotator = std::make_unique<IntRowDiffBRWTAnnotator>();
             break;
+        case Config::BRWTCoord:
+            annotator = std::make_unique<MultiBRWTCoordAnnotator>();
+            break;
+        case Config::RowDiffBRWTCoord:
+            annotator = std::make_unique<RowDiffBRWTCoordAnnotator>();
+            break;
         default:
-            logger->error("Relaxation only supported for BRWT and RowDiffBRWT");
+            logger->error("Relaxation for {} is not supported", Config::annotype_to_string(anno_type));
             exit(1);
     }
 
@@ -982,17 +1103,27 @@ int relax_multi_brwt(Config *config) {
     }
     logger->trace("Annotator loaded in {} sec", timer.elapsed());
 
-    logger->trace("Relaxing BRWT tree...");
+    const binmat::BinaryMatrix *mat = &annotator->get_matrix();
 
-    const binmat::BRWT &matrix = anno_type == Config::BRWT
-            ? dynamic_cast<MultiBRWTAnnotator &>(*annotator).get_matrix()
-            : (anno_type == Config::IntBRWT
-                ? dynamic_cast<IntMultiBRWTAnnotator &>(*annotator).get_matrix().get_binary_matrix()
-                : (anno_type == Config::IntRowDiffBRWT
-                    ? dynamic_cast<IntRowDiffBRWTAnnotator &>(*annotator).get_matrix().diffs().get_binary_matrix()
-                    : dynamic_cast<RowDiffBRWTAnnotator &>(*annotator).get_matrix().diffs()));
-    relax_BRWT(const_cast<binmat::BRWT *>(&matrix), config->relax_arity_brwt,
-               get_num_threads());
+    if (const auto *rd_brwt = dynamic_cast<RowDiffBRWTAnnotator *>(annotator.get())) {
+        mat = &rd_brwt->get_matrix().diffs();
+    } else if (const auto *int_rd_brwt = dynamic_cast<IntRowDiffBRWTAnnotator *>(annotator.get())) {
+        mat = &int_rd_brwt->get_matrix().diffs();
+    } else if (const auto *rd_brwt_coord = dynamic_cast<RowDiffBRWTCoordAnnotator *>(annotator.get())) {
+        mat = &rd_brwt_coord->get_matrix().diffs();
+    }
+
+    if (const auto *rb_brwt = dynamic_cast<const binmat::Rainbow<binmat::BRWT> *>(mat)) {
+        mat = &rb_brwt->get_reduced_matrix();
+    }
+
+    if (const auto *int_mat = dynamic_cast<const matrix::IntMatrix *>(mat)) {
+        mat = &int_mat->get_binary_matrix();
+    }
+
+    logger->trace("Relaxing BRWT tree...");
+    relax_BRWT(&dynamic_cast<binmat::BRWT &>(const_cast<binmat::BinaryMatrix &>(*mat)),
+               config->relax_arity_brwt, get_num_threads());
 
     annotator->serialize(config->outfbase);
     logger->trace("BRWT relaxation done in {} sec", timer.elapsed());

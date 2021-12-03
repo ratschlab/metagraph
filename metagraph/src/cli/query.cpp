@@ -46,10 +46,7 @@ QueryExecutor::QueryExecutor(const Config &config,
       : config_(config),
         anno_graph_(anno_graph),
         aligner_config_(std::move(aligner_config)),
-        thread_pool_(thread_pool) {
-    if (aligner_config_ && aligner_config_->forward_and_reverse_complement)
-        throw std::runtime_error("Error: align_both_strands must be off when querying");
-}
+        thread_pool_(thread_pool) { }
 
 std::string QueryExecutor::execute_query(const std::string &seq_name,
                                          const std::string &sequence,
@@ -58,6 +55,7 @@ std::string QueryExecutor::execute_query(const std::string &seq_name,
                                          bool suppress_unlabeled,
                                          size_t num_top_labels,
                                          double discovery_fraction,
+                                         double presence_fraction,
                                          std::string anno_labels_delimiter,
                                          const AnnotatedDBG &anno_graph,
                                          bool with_kmer_counts,
@@ -70,7 +68,8 @@ std::string QueryExecutor::execute_query(const std::string &seq_name,
         auto top_labels
             = anno_graph.get_top_label_signatures(sequence,
                                                   num_top_labels,
-                                                  discovery_fraction);
+                                                  discovery_fraction,
+                                                  presence_fraction);
 
         if (!top_labels.size() && suppress_unlabeled)
             return "";
@@ -89,7 +88,8 @@ std::string QueryExecutor::execute_query(const std::string &seq_name,
     } else if (query_coords) {
         auto result = anno_graph.get_kmer_coordinates(sequence,
                                                       num_top_labels,
-                                                      discovery_fraction);
+                                                      discovery_fraction,
+                                                      presence_fraction);
 
         if (!result.size() && suppress_unlabeled)
             return "";
@@ -109,6 +109,7 @@ std::string QueryExecutor::execute_query(const std::string &seq_name,
         auto result = anno_graph.get_label_count_quantiles(sequence,
                                                            num_top_labels,
                                                            discovery_fraction,
+                                                           presence_fraction,
                                                            count_quantiles);
 
         if (!result.size() && suppress_unlabeled)
@@ -126,6 +127,7 @@ std::string QueryExecutor::execute_query(const std::string &seq_name,
         auto top_labels = anno_graph.get_top_labels(sequence,
                                                     num_top_labels,
                                                     discovery_fraction,
+                                                    presence_fraction,
                                                     with_kmer_counts);
 
         if (!top_labels.size() && suppress_unlabeled)
@@ -140,7 +142,8 @@ std::string QueryExecutor::execute_query(const std::string &seq_name,
         output += '\n';
 
     } else {
-        auto labels_discovered = anno_graph.get_labels(sequence, discovery_fraction);
+        auto labels_discovered = anno_graph.get_labels(sequence, discovery_fraction,
+                                                                 presence_fraction);
 
         if (!labels_discovered.size() && suppress_unlabeled)
             return "";
@@ -295,6 +298,26 @@ void call_hull_sequences(const DeBruijnGraph &full_dbg,
     }
 }
 
+template <typename T>
+annot::LabelEncoder<> reencode_labels(const annot::LabelEncoder<> &encoder,
+                                      std::vector<T> *rows) {
+    assert(rows);
+    annot::LabelEncoder<std::string> new_encoder;
+    tsl::hopscotch_map<size_t, size_t> old_to_new;
+    for (auto &row : *rows) {
+        for (auto &v : row) {
+            auto &j = utils::get_first(v);
+            auto [it, inserted] = old_to_new.emplace(j, new_encoder.size());
+            if (inserted)
+                new_encoder.insert_and_encode(encoder.decode(j));
+
+            assert(encoder.decode(j) == new_encoder.decode(it->second));
+            j = it->second;
+        }
+    }
+    return new_encoder;
+}
+
 /**
  * @brief      Construct annotation submatrix with a subset of rows extracted
  *             from the full annotation matrix
@@ -334,12 +357,14 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
             row_ids[full_to_small[i].second] = row_indexes[i];
         }
 
+        auto label_encoder = reencode_labels(full_annotation.get_label_encoder(), &unique_rows);
+
         // copy annotations from the full graph to the query graph
         return std::make_unique<annot::UniqueRowAnnotator>(
             std::make_unique<UniqueRowBinmat>(std::move(unique_rows),
                                               std::move(row_ids),
-                                              full_annotation.num_labels()),
-            full_annotation.get_label_encoder()
+                                              label_encoder.size()),
+            std::move(label_encoder)
         );
     }
 
@@ -359,6 +384,8 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
 
         auto slice = mat->get_row_values(row_indexes);
 
+        auto label_encoder = reencode_labels(full_annotation.get_label_encoder(), &slice);
+
         Vector<CSRMatrix::RowValues> rows(num_rows);
 
         for (uint64_t i = 0; i < slice.size(); ++i) {
@@ -367,8 +394,8 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
 
         // copy annotations from the full graph to the query graph
         return std::make_unique<annot::IntRowAnnotator>(
-            std::make_unique<CSRMatrix>(std::move(rows), full_annotation.num_labels()),
-            full_annotation.get_label_encoder()
+            std::make_unique<CSRMatrix>(std::move(rows), label_encoder.size()),
+            std::move(label_encoder)
         );
     }
 
@@ -418,12 +445,14 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
         unique_rows.values_container()
     );
 
+    auto label_encoder = reencode_labels(full_annotation.get_label_encoder(), &annotation_rows);
+
     // copy annotations from the full graph to the query graph
     return std::make_unique<annot::UniqueRowAnnotator>(
         std::make_unique<UniqueRowBinmat>(std::move(annotation_rows),
                                           std::move(row_rank),
-                                          full_annotation.num_labels()),
-        full_annotation.get_label_encoder()
+                                          label_encoder.size()),
+        std::move(label_encoder)
     );
 }
 
@@ -869,7 +898,7 @@ int query_graph(Config *config) {
                 && "only the best alignment is used in query");
 
         aligner_config.reset(new align::DBGAlignerConfig(
-            initialize_aligner_config(graph->get_k(), *config)
+            initialize_aligner_config(*config)
         ));
     }
 
@@ -888,10 +917,10 @@ int query_graph(Config *config) {
 }
 
 void align_sequence(std::string &name, std::string &seq,
-                    const DeBruijnGraph &graph,
+                    const AnnotatedDBG &anno_graph,
                     const align::DBGAlignerConfig &aligner_config) {
-    auto alignments
-        = build_aligner(graph, aligner_config)->align(seq);
+    const DeBruijnGraph &graph = anno_graph.get_graph();
+    auto alignments = build_aligner(graph, aligner_config)->align(seq);
 
     assert(alignments.size() <= 1 && "Only the best alignment is needed");
 
@@ -899,7 +928,7 @@ void align_sequence(std::string &name, std::string &seq,
         auto &match = alignments[0];
         // sequence for querying -- the best alignment
         if (match.get_offset()) {
-            seq = graph.get_node_sequence(match[0]).substr(0, match.get_offset())
+            seq = graph.get_node_sequence(match.get_nodes()[0]).substr(0, match.get_offset())
                     + match.get_sequence();
         } else {
             seq = const_cast<std::string&&>(match.get_sequence());
@@ -920,14 +949,14 @@ std::string query_sequence(size_t id, std::string name, std::string seq,
                            const AnnotatedDBG &anno_graph,
                            const Config &config,
                            const align::DBGAlignerConfig *aligner_config) {
-    if (aligner_config) {
-        align_sequence(name, seq, anno_graph.get_graph(), *aligner_config);
-    }
+    if (aligner_config)
+        align_sequence(name, seq, anno_graph, *aligner_config);
 
     return QueryExecutor::execute_query(fmt::format_int(id).str() + '\t' + name, seq,
                                         config.count_labels, config.print_signature,
                                         config.suppress_unlabeled, config.num_top_labels,
-                                        config.discovery_fraction, config.anno_labels_delimiter,
+                                        config.discovery_fraction, config.presence_fraction,
+                                        config.anno_labels_delimiter,
                                         anno_graph, config.count_kmers, config.count_quantiles,
                                         config.query_coords);
 }
@@ -971,7 +1000,7 @@ void QueryExecutor
 
     const uint64_t batch_size = config_.query_batch_size_in_bytes;
 
-    std::atomic<size_t> seq_count = 0;
+    size_t seq_count = 0;
 
     while (it != end) {
         Timer batch_timer;
@@ -993,7 +1022,7 @@ void QueryExecutor
             #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
             for (size_t i = 0; i < seq_batch.size(); ++i) {
                 align_sequence(seq_batch[i].first, seq_batch[i].second,
-                               anno_graph_.get_graph(), *aligner_config_);
+                               anno_graph_, *aligner_config_);
             }
             logger->trace("Sequences alignment took {} sec", batch_timer.elapsed());
             batch_timer.reset();
@@ -1017,10 +1046,12 @@ void QueryExecutor
 
         #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
         for (size_t i = 0; i < seq_batch.size(); ++i) {
-            callback(query_sequence(seq_count++, seq_batch[i].first, seq_batch[i].second,
+            callback(query_sequence(seq_count + i, seq_batch[i].first, seq_batch[i].second,
                                     *query_graph, config_,
                                     config_.batch_align ? aligner_config_.get() : NULL));
         }
+
+        seq_count += seq_batch.size();
 
         logger->trace("Batch of {} bytes from '{}' queried in {} sec", num_bytes_read,
                       fasta_parser.get_filename(), batch_timer.elapsed());
