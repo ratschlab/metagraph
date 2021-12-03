@@ -52,7 +52,7 @@ class SortedSetDiskBase {
 
     virtual ~SortedSetDiskBase() {
         // make sure the data was processed
-        async_worker_.join();
+        async_merger_.join();
         // remove the files that have not been requested to merge
         elias_fano::remove_chunks(get_file_names());
     }
@@ -67,8 +67,9 @@ class SortedSetDiskBase {
 
     /**
      * Returns the files to be merged - useful if the caller prefers to do the merging.
+     * After the call, these files will have to be merged and removed by the caller.
      */
-    std::vector<std::string> files_to_merge();
+    std::vector<std::string> get_chunks(bool free_buffer = true);
 
     /**
      * Clears the set and the buffer.
@@ -178,7 +179,7 @@ class SortedSetDiskBase {
     /**
      * Thread for merging data from disk.
      */
-    ThreadPool async_worker_ = ThreadPool(1, 1);
+    ThreadPool async_merger_ = ThreadPool(1, 1);
 
     ChunkedWaitQueue<T> merge_queue_;
 

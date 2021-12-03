@@ -608,8 +608,8 @@ void add_reverse_complements(size_t k,
 
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (size_t j = 0; j < rc_set.size(); ++j) {
-        // start merging original with reverse_complements kmers
-        std::vector<std::string> chunks_to_merge = rc_set[j]->files_to_merge();
+        // start merging original with reverse-complement kmers
+        std::vector<std::string> chunks_to_merge = rc_set[j]->get_chunks();
         chunks_to_merge.push_back(real_F_W[j]);
 
         Encoder<T_INT_REAL> out(real_F_W[j] + "_new", ENCODER_BUFFER_SIZE);
@@ -676,7 +676,7 @@ BOSS::Chunk construct_boss_chunk_disk(KmerCollector &kmer_collector,
     const uint64_t buffer_size = kmer_collector.buffer_size();
 
     auto &container = kmer_collector.container();
-    const std::vector<std::string> chunk_fnames = container.files_to_merge();
+    const std::vector<std::string> chunk_fnames = container.get_chunks();
 
     // split each chunk by F and W
     std::vector<std::vector<std::string>> chunks_split(chunk_fnames.size());
@@ -684,9 +684,6 @@ BOSS::Chunk construct_boss_chunk_disk(KmerCollector &kmer_collector,
     for (size_t i = 0; i < chunk_fnames.size(); ++i) {
         chunks_split[i] = split<T_REAL>(k, chunk_fnames[i]);
     }
-
-    // release old chunks and the buffer
-    container.clear();
 
     // for a DNA alphabet, this will contain 16 chunks, split by kmer[0] and kmer[1]
     std::vector<std::string> real_F_W(std::pow(KmerExtractor2Bit().alphabet.size(), 2));

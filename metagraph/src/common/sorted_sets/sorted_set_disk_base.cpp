@@ -58,7 +58,7 @@ ChunkedWaitQueue<T>& SortedSetDiskBase<T>::data(bool free_buffer) {
 }
 
 template <typename T>
-std::vector<std::string> SortedSetDiskBase<T>::files_to_merge() {
+std::vector<std::string> SortedSetDiskBase<T>::get_chunks(bool free_buffer) {
     std::unique_lock<std::mutex> exclusive_lock(mutex_);
     std::unique_lock<std::shared_timed_mutex> multi_insert_lock(multi_insert_mutex_);
     // write any residual data left
@@ -66,7 +66,15 @@ std::vector<std::string> SortedSetDiskBase<T>::files_to_merge() {
         sort_and_dedupe();
         dump_to_file(true /* is_done */);
     }
-    return get_file_names();
+    if (free_buffer) {
+        Vector<T>().swap(data_); // free up the (usually very large) buffer
+    }
+    assert(data_.empty());
+    auto chunks = get_file_names();
+    chunk_count_ = 0;
+    l1_chunk_count_ = 0;
+    total_chunk_size_bytes_ = 0;
+    return chunks;
 }
 
 template <typename T>
@@ -85,11 +93,11 @@ void SortedSetDiskBase<T>::clear() {
 template <typename T>
 void SortedSetDiskBase<T>::start_merging_async() {
     // wait until the previous merging job is done
-    async_worker_.join();
+    async_merger_.join();
     // now the queue can be reinitialized and used in the next merge
     merge_queue_.reset();
     const std::vector<std::string> file_names = get_file_names();
-    async_worker_.enqueue([file_names, this]() {
+    async_merger_.enqueue([file_names, this]() {
         std::function<void(const T &)> on_new_item
                 = [this](const T &v) { merge_queue_.push(v); };
         elias_fano::merge_files(file_names, on_new_item);
