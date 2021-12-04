@@ -40,7 +40,11 @@ void concat(const std::vector<std::string> &files, const std::string &result) {
 
         std::filesystem::rename(files[0] + suffix, result + suffix);
         for (const std::string &f : files) {
-            std::filesystem::remove(f + suffix);
+            std::string fname = f + suffix;
+            if (!std::filesystem::exists(fname))
+                logger->error("Trying to remove non-existent file: {}", fname);
+
+            std::filesystem::remove(fname);
         }
     }
 }
@@ -52,6 +56,10 @@ void remove_chunks(const std::vector<std::string> &files) {
             suffixes.push_back(".count");
 
         for (const std::string &suffix : suffixes) {
+            std::string fname = f + suffix;
+            if (!std::filesystem::exists(fname))
+                logger->error("Trying to remove non-existent file: {}", fname);
+
             std::filesystem::remove(f + suffix);
         }
     }
@@ -547,6 +555,12 @@ bool EliasFanoDecoder<T>::init() {
         source_.close();
         source_upper_.close();
         if (remove_source_) {
+            if (!std::filesystem::exists(source_name_))
+                logger->error("Trying to remove non-existent file: {}", source_name_);
+
+            if (!std::filesystem::exists(source_name_ + ".up"))
+                logger->error("Trying to remove non-existent file: {}.up", source_name_);
+
             std::filesystem::remove(source_name_);
             std::filesystem::remove(source_name_ + ".up");
         }
