@@ -55,8 +55,7 @@ class TestingBase(unittest.TestCase):
             input=input
         )
 
-        res = subprocess.run([construct_command], shell=True, stdout=PIPE,
-                             stderr=PIPE)
+        res = subprocess.run([construct_command], shell=True)
         assert res.returncode == 0
 
         if mode == 'primary':
@@ -70,8 +69,7 @@ class TestingBase(unittest.TestCase):
                 input=output
             )
 
-            res = subprocess.run([transform_command], shell=True, stdout=PIPE,
-                                 stderr=PIPE)
+            res = subprocess.run([transform_command], shell=True)
             assert res.returncode == 0
 
             construct_command = '{exe} build --mode primary -p {num_threads} {extra_params} \
@@ -85,8 +83,7 @@ class TestingBase(unittest.TestCase):
                 input='{}.fasta.gz'.format(output)
             )
 
-            res = subprocess.run([construct_command], shell=True, stdout=PIPE,
-                                 stderr=PIPE)
+            res = subprocess.run([construct_command], shell=True)
             assert res.returncode == 0
 
     @staticmethod
