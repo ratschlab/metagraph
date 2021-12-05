@@ -2,7 +2,6 @@
 
 #include <sdsl/uint128_t.hpp>
 #include <sdsl/uint256_t.hpp>
-#include <omp.h>
 
 #include "common/elias_fano/elias_fano.hpp"
 #include "common/elias_fano/elias_fano_merger.hpp"
