@@ -39,8 +39,8 @@ void concat(const std::vector<std::string> &files, const std::string &result) {
         }
 
         std::filesystem::rename(files[0] + suffix, result + suffix);
-        for (const std::string &f : files) {
-            std::string fname = f + suffix;
+        for (size_t i = 1; i < files.size(); ++i) {
+            std::string fname = files[i] + suffix;
             if (!std::filesystem::exists(fname))
                 logger->error("Trying to remove non-existent file: {}", fname);
 

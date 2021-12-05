@@ -2,6 +2,7 @@
 
 #include <sdsl/uint128_t.hpp>
 #include <sdsl/uint256_t.hpp>
+#include <omp.h>
 
 #include "common/elias_fano/elias_fano.hpp"
 #include "common/elias_fano/elias_fano_merger.hpp"
@@ -43,7 +44,7 @@ ChunkedWaitQueue<T>& SortedSetDiskBase<T>::data(bool free_buffer) {
         // write any residual data left
         if (!data_.empty()) {
             sort_and_dedupe();
-            dump_to_file(true /* is_done */);
+            dump_to_file();
         }
         if (free_buffer) {
             Vector<T>().swap(data_); // free up the (usually very large) buffer
@@ -64,7 +65,7 @@ std::vector<std::string> SortedSetDiskBase<T>::get_chunks(bool free_buffer) {
     // write any residual data left
     if (!data_.empty()) {
         sort_and_dedupe();
-        dump_to_file(true /* is_done */);
+        dump_to_file();
     }
     if (free_buffer) {
         Vector<T>().swap(data_); // free up the (usually very large) buffer
@@ -117,19 +118,18 @@ void SortedSetDiskBase<T>::shrink_data() {
 }
 
 template <typename T>
-void SortedSetDiskBase<T>::dump_to_file(bool is_done) {
+void SortedSetDiskBase<T>::dump_to_file() {
     assert(!data_.empty());
 
     std::string file_name = chunk_file_prefix_ + std::to_string(chunk_count_);
 
     // split chunk into |num_blocks_| blocks and dump to disk in parallel
-    #pragma omp parallel for num_threads(num_blocks_) schedule(static, 1)
-    for (size_t t = 0; t < num_blocks_; ++t) {
-        std::string block_name = file_name + "_block_" + std::to_string(t);
+    #pragma omp parallel num_threads(num_blocks_)
+    {
+        std::string block_name = file_name + "_block_" + std::to_string(omp_get_thread_num());
         elias_fano::EliasFanoEncoderBuffered<T> encoder(block_name, ENCODER_BUFFER_SIZE);
-        const size_t block_size = (data_.size() + num_blocks_ - 1) / num_blocks_;
-        const size_t block_end = std::min(data_.size(), (t + 1) * block_size);
-        for (size_t i = t * block_size; i < block_end; ++i) {
+        #pragma omp for schedule(static)
+        for (size_t i = 0; i < data_.size(); ++i) {
             encoder.add(data_[i]);
         }
         total_chunk_size_bytes_ += encoder.finish();
@@ -139,12 +139,8 @@ void SortedSetDiskBase<T>::dump_to_file(bool is_done) {
 
     data_.resize(0);
 
-    if (is_done) {
-        async_merge_l1_.remove_waiting_tasks();
-    } else if (total_chunk_size_bytes_ > disk_cap_bytes_) {
-        async_merge_l1_.remove_waiting_tasks();
+    if (total_chunk_size_bytes_ > disk_cap_bytes_) {
         std::string all_merged_file = merged_all_name(chunk_file_prefix_, merged_all_count_);
-        // increment chunk_count, so that get_file_names() returns correct values
         merge_all(all_merged_file, get_file_names());
 
         total_chunk_size_bytes_ = elias_fano::chunk_size(all_merged_file);
@@ -200,9 +196,6 @@ std::string SortedSetDiskBase<T>::merge_blocks(const std::string &chunk_file_pre
                                                uint32_t chunk,
                                                size_t num_blocks) {
     std::string chunk_name = chunk_file_prefix + std::to_string(chunk);
-    if (!std::filesystem::exists(chunk_name + "_block_" + std::to_string(0)))
-        return chunk_name; // already merged
-
     std::vector<std::string> block_names(num_blocks);
     for (size_t t = 0; t < num_blocks; ++t) {
         block_names[t] = chunk_name + "_block_" + std::to_string(t);
@@ -217,7 +210,7 @@ void SortedSetDiskBase<T>::merge_l1(const std::string &chunk_file_prefix,
                                     uint32_t chunk_end,
                                     std::atomic<uint32_t> *l1_chunk_count,
                                     std::atomic<size_t> *total_size,
-                                    size_t blocks_per_chunk) {
+                                    size_t num_blocks) {
     assert(chunk_begin < chunk_end);
     const std::string &merged_l1_file_name
             = merged_l1_name(chunk_file_prefix, chunk_begin / (chunk_end - chunk_begin));
@@ -227,7 +220,7 @@ void SortedSetDiskBase<T>::merge_l1(const std::string &chunk_file_prefix,
 
     std::vector<std::string> chunks;
     for (uint32_t i = chunk_begin; i < chunk_end; ++i) {
-        std::string chunk_name = merge_blocks(chunk_file_prefix, i, blocks_per_chunk);
+        std::string chunk_name = merge_blocks(chunk_file_prefix, i, num_blocks);
         chunks.push_back(chunk_name);
         *total_size -= static_cast<int64_t>(elias_fano::chunk_size(chunk_name));
     }
