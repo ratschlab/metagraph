@@ -107,8 +107,7 @@ class SortedSetDiskBase {
         if (data_.size() + batch_size > data_.capacity()) { // time to write to disk
             std::unique_lock<std::shared_timed_mutex> multi_insert_lock(multi_insert_mutex_);
             shrink_data();
-
-            dump_to_file(false /* is_done */);
+            dump_to_file();
         }
 
         size_t offset = data_.size();
@@ -146,9 +145,8 @@ class SortedSetDiskBase {
      * Dumps the given data to a file, synchronously. If the maximum allowed disk size
      * is reached, all chunks will be merged into a single chunk in an effort to reduce
      * disk space.
-     * @param is_done if this is the last chunk being dumped
      */
-    void dump_to_file(bool is_done);
+    void dump_to_file();
 
     void try_reserve(size_t size, size_t min_size = 0);
 
@@ -206,7 +204,7 @@ class SortedSetDiskBase {
                          uint32_t chunk_end,
                          std::atomic<uint32_t> *l1_chunk_count,
                          std::atomic<size_t> *total_size,
-                         size_t blocks_per_chunk);
+                         size_t num_blocks);
 
     static std::string merge_blocks(const std::string &chunk_file_prefix,
                                     uint32_t chunk,

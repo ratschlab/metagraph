@@ -39,8 +39,8 @@ void concat(const std::vector<std::string> &files, const std::string &result) {
         }
 
         std::filesystem::rename(files[0] + suffix, result + suffix);
-        for (const std::string &f : files) {
-            std::filesystem::remove(f + suffix);
+        for (size_t i = 1; i < files.size(); ++i) {
+            std::filesystem::remove(files[i] + suffix);
         }
     }
 }
