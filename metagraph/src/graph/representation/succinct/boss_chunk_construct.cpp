@@ -184,6 +184,7 @@ void add_reverse_complements(size_t k, size_t num_threads, Vector<T> *kmers) {
     logger->trace("Adding reverse-complement k-mers...");
     const std::vector<TAlphabet> complement_code = KmerExtractor2Bit().complement_code();
     const uint32_t BUF_SIZE = std::min(kmers->size() / num_threads, 10000UL);
+    std::mutex mu;
     #pragma omp parallel num_threads(num_threads)
     {
         std::vector<T> buffer;
@@ -193,11 +194,9 @@ void add_reverse_complements(size_t k, size_t num_threads, Vector<T> *kmers) {
             const T &rc = rev_comp(k + 1, *kmer, complement_code);
             if (get_first(rc) != get_first(*kmer)) {
                 if (buffer.size() == buffer.capacity()) {
-                    #pragma omp critical
-                    {
-                        // this is guaranteed to not reallocate
-                        kmers->insert(kmers->end(), buffer.begin(), buffer.end());
-                    }
+                    std::lock_guard<std::mutex> lock(mu);
+                    // this is guaranteed to not reallocate
+                    kmers->insert(kmers->end(), buffer.begin(), buffer.end());
                     buffer.resize(0);
                 }
                 buffer.push_back(std::move(rc));
@@ -212,10 +211,8 @@ void add_reverse_complements(size_t k, size_t num_threads, Vector<T> *kmers) {
                 }
             }
         }
-        #pragma omp critical
-        {
-            kmers->insert(kmers->end(), buffer.begin(), buffer.end());
-        }
+        std::lock_guard<std::mutex> lock(mu);
+        kmers->insert(kmers->end(), buffer.begin(), buffer.end());
     }
     logger->trace("Sorting all real kmers...");
     ips4o::parallel::sort(kmers->begin(), kmers->end(), utils::LessFirst(), num_threads);
