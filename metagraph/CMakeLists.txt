@@ -244,7 +244,6 @@ include_directories(
   external-libraries/hopscotch-map/include
   external-libraries/ordered-map/include
   external-libraries/binrel_wt/include
-  external-libraries/jsoncpp/include
   external-libraries/asio/asio/include
   external-libraries/cpp_progress_bar
   external-libraries/nvbio/contrib/priority-deque

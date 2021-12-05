@@ -157,15 +157,28 @@ int build_graph(Config *config) {
         assert(graph_data.size());
 
         if (config->count_kmers) {
-            sdsl::int_vector_buffer<> kmer_counts;
-            graph_data.initialize_boss(boss_graph.get(), &kmer_counts);
-            graph.reset(new DBGSuccinct(boss_graph.release(), config->graph_mode));
-            NodeWeights::serialize(std::move(kmer_counts),
+            NodeWeights::serialize(graph_data.get_weights(),
                     utils::make_suffix(config->outfbase, DBGSuccinct::kExtension));
-        } else {
-            graph_data.initialize_boss(boss_graph.get());
-            graph.reset(new DBGSuccinct(boss_graph.release(), config->graph_mode));
         }
+
+        if (config->inplace) {
+            if (config->mark_dummy_kmers) {
+                logger->warn("Graph is being constructed in-place, dummy k-mers will"
+                             " not be marked. Run \'transform --clear-dummy\' manually after construction.");
+            }
+            if (config->node_suffix_length) {
+                logger->warn("Graph is being constructed in-place, k-mer suffixes will"
+                             " not be indexed. Run \'transform --index-ranges ...\' manually after construction.");
+            }
+            DBGSuccinct::serialize(std::move(graph_data), config->outfbase,
+                                   config->graph_mode, config->state);
+            logger->trace("Graph construction and serialization finished in {} sec",
+                          timer.elapsed());
+            return 0;
+        }
+
+        graph_data.initialize_boss(boss_graph.get());
+        graph.reset(new DBGSuccinct(boss_graph.release(), config->graph_mode));
 
     } else if (config->graph_type == Config::GraphType::BITMAP && !config->dynamic) {
 
@@ -347,6 +360,14 @@ int build_graph(Config *config) {
             dbg_succ->get_boss().index_suffix_ranges(suffix_length);
 
             logger->trace("Indexing of node ranges took {} sec", timer.elapsed());
+        }
+
+        if (config->state != dbg_succ->get_state()) {
+            logger->trace("Converting graph to state {}", Config::state_to_string(config->state));
+            timer.reset();
+            dbg_succ->switch_state(config->state);
+
+            logger->trace("Conversion done in {} sec", timer.elapsed());
         }
     }
 

@@ -48,6 +48,7 @@ class Config {
     bool batch_align = false;
     bool count_labels = false;
     bool suppress_unlabeled = false;
+    bool inplace = false;
     bool clear_dummy = false;
     bool count_dummy = false;
     bool greedy_brwt = false;
@@ -125,9 +126,6 @@ class Config {
 
     double discovery_fraction = 0.7;
     double presence_fraction = 0.0;
-    double label_mask_in_fraction = 1.0;
-    double label_mask_out_fraction = 0.0;
-    double label_other_fraction = 1.0;
     double min_count_quantile = 0.0;
     double max_count_quantile = 1.0;
     double bloom_fpp = 1.0;
@@ -143,8 +141,6 @@ class Config {
     std::vector<std::string> fnames;
     std::vector<std::string> anno_labels;
     std::vector<std::string> infbase_annotators;
-    std::vector<std::string> label_mask_in;
-    std::vector<std::string> label_mask_out;
     std::string outfbase;
     std::string infbase;
     std::string rename_instructions_file;
@@ -155,6 +151,7 @@ class Config {
     std::string fasta_anno_comment_delim = UNINITIALIZED_STR;
     std::string header = "";
     std::string host_address;
+    std::string assembly_config_file;
     std::string linkage_file;
     std::string intersected_columns;
 

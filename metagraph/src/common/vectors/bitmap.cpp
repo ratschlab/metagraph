@@ -369,3 +369,38 @@ void bitmap_lazy::call_ones_in_range(uint64_t begin, uint64_t end,
             callback(i);
     }
 }
+
+
+////////////////////////////////////////////////////////////////
+//                         bitmap_generator                   //
+////////////////////////////////////////////////////////////////
+
+bitmap_generator::bitmap_generator(size_t size, bool value)
+      : bitmap_generator([value,size](const auto &index_callback) {
+                             if (value) {
+                                 for (size_t i = 0; i < size; ++i) {
+                                     index_callback(i);
+                                 }
+                             }
+                         },
+                         size, size * value) {}
+
+bitmap_generator
+::bitmap_generator(std::function<void(const VoidCall<uint64_t>&)>&& generator,
+                   size_t size,
+                   size_t num_set_bits) noexcept
+      : size_(size), num_set_bits_(num_set_bits), generator_(std::move(generator)) {}
+
+void bitmap_generator::add_to(sdsl::bit_vector *other) const {
+    assert(other);
+    assert(other->size() == size());
+    call_ones([other](auto i) { (*other)[i] = true; });
+}
+
+void bitmap_generator::call_ones_in_range(uint64_t begin, uint64_t end,
+                                          const VoidCall<uint64_t> &callback) const {
+    if (begin || end != size_)
+        throw std::runtime_error("This is inefficient and should not be called");
+
+    generator_(callback);
+}
