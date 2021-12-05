@@ -124,12 +124,13 @@ void SortedSetDiskBase<T>::dump_to_file() {
     std::string file_name = chunk_file_prefix_ + std::to_string(chunk_count_);
 
     // split chunk into |num_blocks_| blocks and dump to disk in parallel
-    #pragma omp parallel num_threads(num_blocks_)
-    {
-        std::string block_name = file_name + "_block_" + std::to_string(omp_get_thread_num());
+    #pragma omp parallel for num_threads(num_blocks_) schedule(static, 1)
+    for (size_t t = 0; t < num_blocks_; ++t) {
+        std::string block_name = file_name + "_block_" + std::to_string(t);
         elias_fano::EliasFanoEncoderBuffered<T> encoder(block_name, ENCODER_BUFFER_SIZE);
-        #pragma omp for schedule(static)
-        for (size_t i = 0; i < data_.size(); ++i) {
+        const size_t block_size = (data_.size() + num_blocks_ - 1) / num_blocks_;
+        const size_t block_end = std::min(data_.size(), (t + 1) * block_size);
+        for (size_t i = t * block_size; i < block_end; ++i) {
             encoder.add(data_[i]);
         }
         total_chunk_size_bytes_ += encoder.finish();

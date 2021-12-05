@@ -30,7 +30,7 @@ void concat(const std::vector<std::string> &files, const std::string &result) {
             for (uint32_t i = 1; i < files.size(); ++i) {
                 concat_command += files[i] + suffix + " ";
             }
-            concat_command += " >> " + files[0] + suffix;
+            concat_command += ">> " + files[0] + suffix;
 
             if (std::system(concat_command.c_str())) {
                 logger->error("Error while cat-ing files: {}", concat_command);
