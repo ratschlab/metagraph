@@ -442,7 +442,9 @@ void read_extended_fasta_file_critical(const std::string &filebase,
             // read the features of k-mers in sequence |read_stream|
             if (gzread(features_p, counts.data(), sizeof(T) * counts.size())
                     != static_cast<int>(sizeof(T) * counts.size())) {
-                std::cerr << "ERROR: Cannot read k-mer features" << std::endl;
+                std::cerr << "ERROR: Cannot read k-mer features from file " << filename << std::endl;
+                int gz_err;
+                std::cerr << "ERROR: " << gzerror(features_p, &gz_err) << std::endl;
                 exit(1);
             }
 
