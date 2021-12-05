@@ -365,6 +365,7 @@ convert_row_diff_to_RowDiffSparse(const std::vector<std::string> &filenames) {
     std::vector<std::unique_ptr<bit_vector>> columns;
     LabelEncoder<std::string> label_encoder;
 
+    std::mutex mu;
     uint64_t total_num_set_bits = 0;
     bool load_successful = merge_load_row_diff(
         filenames,
@@ -374,21 +375,20 @@ convert_row_diff_to_RowDiffSparse(const std::vector<std::string> &filenames) {
                           static_cast<double>(num_set_bits) / column->size(),
                           num_set_bits);
 
-            #pragma omp critical
-            {
-                if (columns.size() && column->size() != columns.back()->size()) {
-                    logger->error("Column {} has {} rows, previous column has {} rows",
-                                  label, column->size(), columns.back()->size());
-                    exit(1);
-                }
-                size_t col = label_encoder.insert_and_encode(label);
-                if (col != columns.size()) {
-                    logger->error("Duplicate columns {}", label);
-                    exit(1);
-                }
-                columns.push_back(std::move(column));
-                total_num_set_bits += num_set_bits;
+            std::lock_guard<std::mutex> lock(mu);
+
+            if (columns.size() && column->size() != columns.back()->size()) {
+                logger->error("Column {} has {} rows, previous column has {} rows",
+                              label, column->size(), columns.back()->size());
+                exit(1);
             }
+            size_t col = label_encoder.insert_and_encode(label);
+            if (col != columns.size()) {
+                logger->error("Duplicate columns {}", label);
+                exit(1);
+            }
+            columns.push_back(std::move(column));
+            total_num_set_bits += num_set_bits;
         },
         get_num_threads()
     );
