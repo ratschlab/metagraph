@@ -573,8 +573,21 @@ bool EliasFanoDecoder<T>::init() {
     lower_bits_mask_ = (T(1) << num_lower_bits_) - 1UL;
     source_.read(reinterpret_cast<char *>(&num_lower_bytes_), sizeof(size_t));
     source_.read(reinterpret_cast<char *>(&num_upper_bytes_), sizeof(size_t));
+
+    if (!source_.good()) {
+        logger->error("Failed reading header from {}", source_name_);
+        std::exit(EXIT_FAILURE);
+    }
+
     size_t low_bytes_read = std::min(sizeof(lower_), num_lower_bytes_);
+
     source_.read(reinterpret_cast<char *>(lower_), low_bytes_read);
+
+    if (!source_.good()) {
+        logger->error("Failed reading lower bytes from {}", source_name_);
+        std::exit(EXIT_FAILURE);
+    }
+
     num_lower_bytes_ -= low_bytes_read;
 
     // Reserve a bit extra space for unaligned reads and set all to
@@ -583,8 +596,8 @@ bool EliasFanoDecoder<T>::init() {
     source_upper_.read(reinterpret_cast<char *>(upper_.data()), num_upper_bytes_);
     assert(static_cast<uint32_t>(source_upper_.gcount()) == num_upper_bytes_);
 
-    if (!source_.good() || !source_upper_.good()) {
-        logger->error("Failed reading from {}", source_name_);
+    if (!source_upper_.good()) {
+        logger->error("Failed reading upper bytes from {}", source_name_ + ".up");
         std::exit(EXIT_FAILURE);
     }
 
