@@ -214,6 +214,7 @@ class TestBuild(unittest.TestCase):
 
     # TODO: add 'hashstr' once the canonical mode is implemented for it
     @parameterized.expand([repr for repr in BUILDS if repr != 'hashstr'])
+    @unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
     def test_build_tiny_k_parallel_canonical(self, build):
         representation, tmp_dir = build_params[build]
 
