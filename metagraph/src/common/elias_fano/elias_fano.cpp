@@ -523,6 +523,10 @@ size_t EliasFanoDecoder<T>::decompress_next_block() {
                     const uint32_t to_read = std::min(sizeof(lower_) - sizeof(T), num_lower_bytes_);
                     lower_[0] = lower_[lower_idx_];
                     source_.read(reinterpret_cast<char *>(&lower_[1]), to_read);
+                    if (!source_.good()) {
+                        logger->error("Failed reading {} bytes from {}", to_read, source_name_);
+                        std::exit(EXIT_FAILURE);
+                    }
                     num_lower_bytes_ -= to_read;
                     lower_idx_ = 0;
                 }
@@ -549,7 +553,7 @@ bool EliasFanoDecoder<T>::init() {
     upper_pos_ = 0;
     source_.read(reinterpret_cast<char *>(&size_), sizeof(size_t));
     if (source_.bad()) {
-        logger->error("Error while reading from {}", source_name_);
+        logger->error("Error while reading size from {}", source_name_);
         std::exit(EXIT_FAILURE);
     } else if (source_.eof()) {
         source_.close();
@@ -568,14 +572,28 @@ bool EliasFanoDecoder<T>::init() {
         return false;
     }
     source_.read(reinterpret_cast<char *>(&offset_), sizeof(T));
+    if (!source_.good()) {
+        logger->error("Failed reading offset from {}", source_name_);
+        std::exit(EXIT_FAILURE);
+    }
+
     source_.read(reinterpret_cast<char *>(&num_lower_bits_), 1);
     assert(num_lower_bits_ < 8 * sizeof(T));
+    if (!source_.good()) {
+        logger->error("Failed reading number of lower bits from {}", source_name_);
+        std::exit(EXIT_FAILURE);
+    }
+
     lower_bits_mask_ = (T(1) << num_lower_bits_) - 1UL;
     source_.read(reinterpret_cast<char *>(&num_lower_bytes_), sizeof(size_t));
-    source_.read(reinterpret_cast<char *>(&num_upper_bytes_), sizeof(size_t));
-
     if (!source_.good()) {
-        logger->error("Failed reading header from {}", source_name_);
+        logger->error("Failed reading number of lower bytes from {}", source_name_);
+        std::exit(EXIT_FAILURE);
+    }
+
+    source_.read(reinterpret_cast<char *>(&num_upper_bytes_), sizeof(size_t));
+    if (!source_.good()) {
+        logger->error("Failed reading number of upper bytes from {}", source_name_);
         std::exit(EXIT_FAILURE);
     }
 
