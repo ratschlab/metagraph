@@ -516,7 +516,10 @@ size_t EliasFanoDecoder<T>::decompress_next_block() {
                 if (lower_idx_ == READ_BUF_SIZE - 1 && num_lower_bytes_ > 0) {
                     const uint32_t to_read = std::min(sizeof(lower_) - sizeof(T), num_lower_bytes_);
                     lower_[0] = lower_[lower_idx_];
-                    source_.read(reinterpret_cast<char *>(&lower_[1]), to_read);
+                    if (!source_.read(reinterpret_cast<char *>(&lower_[1]), to_read)) {
+                        logger->error("Error while reading lower bits from {}", source_name_);
+                        std::exit(EXIT_FAILURE);
+                    }
                     num_lower_bytes_ -= to_read;
                     lower_idx_ = 0;
                 }
