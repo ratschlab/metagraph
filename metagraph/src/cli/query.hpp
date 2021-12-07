@@ -9,10 +9,13 @@
 #include <utility>
 #include <variant>
 #include <optional>
+
 #include <json/json.h>
 #include <sdsl/int_vector.hpp>
+
 #include "common/vector.hpp"
 #include "graph/alignment/aligner_alignment.hpp"
+
 
 class ThreadPool;
 
@@ -64,7 +67,7 @@ struct QuerySequence {
         std::string cigar;                              // Cigar string
 
         Alignment(graph::align::DBGAlignerConfig::score_t score, std::string&& cigar)
-            : score(score), cigar(std::move(cigar)) {};
+          : score(score), cigar(std::move(cigar)) {}
     };
 
     size_t id;                          // Sequence ID
@@ -77,7 +80,7 @@ struct QuerySequence {
      * Sets alignment to std::nullopt
      */
     QuerySequence(size_t id, const std::string &name, const std::string &sequence)
-        : id(id), name(name), sequence(std::move(sequence)) {
+      : id(id), name(name), sequence(std::move(sequence)) {
         alignment = std::nullopt;
     }
 };
@@ -92,23 +95,19 @@ struct QuerySequence {
  * nor (2) perform any of the search itself.
  */
 class SeqSearchResult {
+  public:
+    typedef std::string Label;
+    typedef std::vector<Label> LabelVec;
+    typedef std::vector<std::pair<Label, size_t>> LabelCountVec;
+    typedef std::vector<std::pair<Label, sdsl::bit_vector>> LabelSigVec;
+    typedef std::vector<std::pair<Label, std::vector<size_t>>> LabelQuantileVec;
+    typedef std::vector<std::pair<Label, std::vector<SmallVector<uint64_t>>>> LabelCoordVec;
 
-public:
-
-    typedef std::string label;
-    typedef std::vector<label> label_vec;
-    typedef std::vector<std::pair<label, size_t>> label_count_vec;
-    typedef std::vector<std::pair<label, sdsl::bit_vector>> label_sig_vec;
-    typedef std::vector<std::pair<label, std::vector<size_t>>> label_quantile_vec;
-    typedef std::vector<std::pair<label, std::vector<SmallVector<uint64_t>>>> label_coord_vec;
-
-    typedef std::variant<
-            label_vec,
-            label_count_vec,
-            label_sig_vec,
-            label_quantile_vec,
-            label_coord_vec
-            > result_type;
+    typedef std::variant<LabelVec,
+                         LabelCountVec,
+                         LabelSigVec,
+                         LabelQuantileVec,
+                         LabelCoordVec> result_type;
 
     /**
      * Construct an instance of SeqSearchResult by providing QuerySequence instance describing
@@ -118,8 +117,8 @@ public:
      * @param result    rvalue reference to result_type (WILL BE MOVED)
      */
     SeqSearchResult(QuerySequence&& sequence, result_type&& result)
-            : sequence(std::move(sequence)),
-            result(std::move(result)) {};
+          : sequence(std::move(sequence)),
+            result(std::move(result)) {}
 
     /** Const reference getters */
     const QuerySequence& get_sequence() const { return sequence; }
@@ -153,8 +152,7 @@ public:
                           bool expand_coords,
                           const graph::AnnotatedDBG &anno_graph) const;
 
-private:
-
+  private:
     QuerySequence sequence;     // query sequence this result represents
     result_type result;         // result vector of labels and additional info
 
@@ -162,16 +160,14 @@ private:
 
 
 class QueryExecutor {
-
-public:
-
+  public:
     QueryExecutor(const Config &config,
                   const graph::AnnotatedDBG &anno_graph,
                   std::unique_ptr<graph::align::DBGAlignerConfig>&& aligner_config,
-                  ThreadPool &thread_pool) :
-                  config_(config), anno_graph_(anno_graph),
+                  ThreadPool &thread_pool)
+                : config_(config), anno_graph_(anno_graph),
                   aligner_config_(std::move(aligner_config)),
-                  thread_pool_(thread_pool) {};
+                  thread_pool_(thread_pool) {}
 
     /**
      * Query sequences from a FASTA file on the stored QueryExecutor::anno_graph.
@@ -196,8 +192,7 @@ public:
                                          const std::vector<double> &count_quantiles = {},
                                          bool query_coords = false);
 
-private:
-
+  private:
     const Config &config_;
     const graph::AnnotatedDBG &anno_graph_;
     std::unique_ptr<graph::align::DBGAlignerConfig> aligner_config_;

@@ -1,8 +1,9 @@
 #include "query.hpp"
 
+#include <mutex>
+
 #include <ips4o.hpp>
 #include <tsl/ordered_set.h>
-#include <mutex>
 
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
@@ -59,8 +60,8 @@ const std::string CIGAR_JSON_FIELD = "cigar";
  *                  originally returned from AnnotatedDBG::get_kmer_coordinates
  * @return vector of 'begin-end' range string representations
  */
-std::vector<std::string> get_collapsed_coord_ranges(
-        const std::vector<SmallVector<uint64_t>> &tuples) {
+std::vector<std::string>
+get_collapsed_coord_ranges(const std::vector<SmallVector<uint64_t>> &tuples) {
     // Build output
     std::vector<std::string> ranges;
 
@@ -190,23 +191,23 @@ Json::Value SeqSearchResult::to_json(bool expand_coords,
     root["results"] = Json::Value(Json::arrayValue);
 
     // Different action depending on the result type
-    if (std::holds_alternative<label_vec>(result)) {
+    if (std::holds_alternative<LabelVec>(result)) {
         // Standard labels only
-        for (const auto &label : std::get<label_vec>(result)) {
+        for (const auto &label : std::get<LabelVec>(result)) {
             root["results"].append(get_label_as_json(label));
         }
-    } else if (std::holds_alternative<label_count_vec>(result)) {
+    } else if (std::holds_alternative<LabelCountVec>(result)) {
         // Labels with count data
-        for (const auto &[label, count] : std::get<label_count_vec>(result)) {
+        for (const auto &[label, count] : std::get<LabelCountVec>(result)) {
             Json::Value label_obj = get_label_as_json(label);
 
             label_obj[KMER_COUNT_FIELD] = Json::Value((Json::Int64) count);
 
             root["results"].append(label_obj);
         }
-    } else if (std::holds_alternative<label_sig_vec>(result)) {
+    } else if (std::holds_alternative<LabelSigVec>(result)) {
         // Count signatures
-        for (const auto &[label, kmer_presence_mask] : std::get<label_sig_vec>(result)) {
+        for (const auto &[label, kmer_presence_mask] : std::get<LabelSigVec>(result)) {
             Json::Value label_obj = get_label_as_json(label);
 
             Json::Value sig_obj = Json::objectValue;
@@ -222,9 +223,9 @@ Json::Value SeqSearchResult::to_json(bool expand_coords,
             label_obj[SIGNATURE_FIELD] = sig_obj;
             root["results"].append(label_obj);
         }
-    } else if (std::holds_alternative<label_quantile_vec>(result)) {
+    } else if (std::holds_alternative<LabelQuantileVec>(result)) {
         // Count quantiles
-        for (const auto &[label, quantiles] : std::get<label_quantile_vec>(result)) {
+        for (const auto &[label, quantiles] : std::get<LabelQuantileVec>(result)) {
             Json::Value label_obj = get_label_as_json(label);
             Json::Value quantile_array = Json::arrayValue;
 
@@ -235,9 +236,9 @@ Json::Value SeqSearchResult::to_json(bool expand_coords,
             label_obj[KMER_COUNT_QUANTILE_FIELD] = quantile_array;
             root["results"].append(label_obj);
         }
-    } else if (std::holds_alternative<label_coord_vec>(result)) {
+    } else if (std::holds_alternative<LabelCoordVec>(result)) {
         // Kmer coordinates
-        for (const auto &[label, tuples] : std::get<label_coord_vec>(result)) {
+        for (const auto &[label, tuples] : std::get<LabelCoordVec>(result)) {
             Json::Value label_obj = get_label_as_json(label);
             Json::Value coord_array = Json::arrayValue;
 
@@ -285,32 +286,32 @@ std::string SeqSearchResult::to_string(const std::string delimiter,
     std::string output = fmt::format("{}\t{}", sequence.id, mod_seq_name);
 
     // ... with diff result output depending on the type of result being stored.
-    if (std::holds_alternative<label_vec>(result)) {
+    if (std::holds_alternative<LabelVec>(result)) {
         // Standard labels only
         output += fmt::format("\t{}",
-                              utils::join_strings(std::get<label_vec>(result),
+                              utils::join_strings(std::get<LabelVec>(result),
                                                   delimiter));
-    } else if (std::holds_alternative<label_count_vec>(result)) {
+    } else if (std::holds_alternative<LabelCountVec>(result)) {
         // Labels with count data
-        for (const auto &[label, count] : std::get<label_count_vec>(result)) {
+        for (const auto &[label, count] : std::get<LabelCountVec>(result)) {
             output += fmt::format("\t<{}>:{}", label, count);
         }
-    } else if (std::holds_alternative<label_sig_vec>(result)) {
+    } else if (std::holds_alternative<LabelSigVec>(result)) {
         // Count signatures
-        for (const auto &[label, kmer_presence_mask] : std::get<label_sig_vec>(result)) {
+        for (const auto &[label, kmer_presence_mask] : std::get<LabelSigVec>(result)) {
             output += fmt::format("\t<{}>:{}:{}:{}", label,
                                   sdsl::util::cnt_one_bits(kmer_presence_mask),
                                   sdsl::util::to_string(kmer_presence_mask),
                                   anno_graph.score_kmer_presence_mask(kmer_presence_mask));
         }
-    } else if (std::holds_alternative<label_quantile_vec>(result)) {
+    } else if (std::holds_alternative<LabelQuantileVec>(result)) {
         // Count quantiles
-        for (const auto &[label, quantiles] : std::get<label_quantile_vec>(result)) {
+        for (const auto &[label, quantiles] : std::get<LabelQuantileVec>(result)) {
             output += fmt::format("\t<{}>:{}", label, fmt::join(quantiles, ":"));
         }
-    } else if (std::holds_alternative<label_coord_vec>(result)) {
+    } else if (std::holds_alternative<LabelCoordVec>(result)) {
         // Kmer coordinates
-        for (const auto &[label, tuples] : std::get<label_coord_vec>(result)) {
+        for (const auto &[label, tuples] : std::get<LabelCoordVec>(result)) {
             output += "\t<" + label + ">";
 
             if (expand_coords) {
@@ -1138,8 +1139,8 @@ int query_graph(Config *config) {
         // Callback, which captures the config pointer and a const reference to the anno_graph
         // instance pointed to by our unique_ptr...
         executor.query_fasta(file,
-                [config, &anno_graph
-                        = std::as_const(*anno_graph)](const SeqSearchResult &result) {
+                             [config, &anno_graph = std::as_const(*anno_graph)]
+                             (const SeqSearchResult &result) {
             std::cout << result.to_string(config->anno_labels_delimiter,
                                           config->suppress_unlabeled,
                                           config->expand_coords,
@@ -1246,9 +1247,9 @@ void QueryExecutor::query_fasta(const string &file,
     thread_pool_.join();
 }
 
-void QueryExecutor
-::batched_query_fasta(seq_io::FastaParser &fasta_parser,
-                      const std::function<void(const SeqSearchResult &)> &callback) {
+void
+QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
+                                   const std::function<void(const SeqSearchResult &)> &callback) {
     auto it = fasta_parser.begin();
     auto end = fasta_parser.end();
 
