@@ -16,7 +16,6 @@
 #include "common/vector.hpp"
 #include "graph/alignment/aligner_alignment.hpp"
 
-
 class ThreadPool;
 
 namespace mtg {
