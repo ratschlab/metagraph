@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cassert>
 #include <cstring>
+#include <chrono>
+#include <thread>
 #include <filesystem>
 
 #include <sdsl/uint128_t.hpp>
@@ -571,55 +573,67 @@ bool EliasFanoDecoder<T>::init() {
         size_ = static_cast<size_t>(-1);
         return false;
     }
-    source_.read(reinterpret_cast<char *>(&offset_), sizeof(T));
-    if (!source_.good()) {
-        logger->error("Failed reading offset from {}", source_name_);
+    if (!source_ || !source_upper_) {
+        logger->error("Error while reading from {}", source_name_);
         std::exit(EXIT_FAILURE);
     }
+    const auto source_pos = source_.tellg();
+    const auto source_up_pos = source_upper_.tellg();
 
-    source_.read(reinterpret_cast<char *>(&num_lower_bits_), 1);
-    assert(num_lower_bits_ < 8 * sizeof(T));
-    if (!source_.good()) {
-        logger->error("Failed reading number of lower bits from {}", source_name_);
-        std::exit(EXIT_FAILURE);
+    while (num_retries_ <= max_num_retries_) {
+        source_.read(reinterpret_cast<char *>(&offset_), sizeof(T));
+        source_.read(reinterpret_cast<char *>(&num_lower_bits_), 1);
+        assert(num_lower_bits_ < 8 * sizeof(T));
+        lower_bits_mask_ = (T(1) << num_lower_bits_) - 1UL;
+        source_.read(reinterpret_cast<char *>(&num_lower_bytes_), sizeof(size_t));
+        source_.read(reinterpret_cast<char *>(&num_upper_bytes_), sizeof(size_t));
+        size_t low_bytes_read = std::min(sizeof(lower_), num_lower_bytes_);
+        source_.read(reinterpret_cast<char *>(lower_), low_bytes_read);
+        num_lower_bytes_ -= low_bytes_read;
+
+        // Reserve a bit extra space for unaligned reads and set all to
+        // zero to silence Valgrind uninitilized memory warnings
+        upper_.resize((num_upper_bytes_ + 7) / 8, 0);
+        source_upper_.read(reinterpret_cast<char *>(upper_.data()), num_upper_bytes_);
+        assert(static_cast<uint32_t>(source_upper_.gcount()) == num_upper_bytes_);
+
+        if (source_ && source_upper_)
+            return true;
+
+        // reading failed -> retry
+        while (num_retries_++ < max_num_retries_) {
+            logger->warn("Failed reading from {}. Retry #{}...", source_name_, num_retries_);
+            using namespace std::chrono_literals;
+            std::this_thread::sleep_for(500ms);
+
+            source_ = std::ifstream(source_name_, std::ios::binary);
+            if (!source_) {
+                logger->error("Unable to open {}", source_name_);
+                continue;
+            }
+            source_.seekg(source_pos);
+            if (!source_) {
+                logger->error("Unable to seek in {}", source_name_);
+                continue;
+            }
+
+            source_upper_ = std::ifstream(source_name_ + ".up", std::ios::binary);
+            if (!source_upper_) {
+                logger->error("Unable to open {}", source_name_ + ".up");
+                continue;
+            }
+            source_upper_.seekg(source_up_pos);
+            if (!source_upper_) {
+                logger->error("Unable to seek in {}", source_name_ + ".up");
+                continue;
+            }
+
+            break;
+        }
     }
 
-    lower_bits_mask_ = (T(1) << num_lower_bits_) - 1UL;
-    source_.read(reinterpret_cast<char *>(&num_lower_bytes_), sizeof(size_t));
-    if (!source_.good()) {
-        logger->error("Failed reading number of lower bytes from {}", source_name_);
-        std::exit(EXIT_FAILURE);
-    }
-
-    source_.read(reinterpret_cast<char *>(&num_upper_bytes_), sizeof(size_t));
-    if (!source_.good()) {
-        logger->error("Failed reading number of upper bytes from {}", source_name_);
-        std::exit(EXIT_FAILURE);
-    }
-
-    size_t low_bytes_read = std::min(sizeof(lower_), num_lower_bytes_);
-
-    source_.read(reinterpret_cast<char *>(lower_), low_bytes_read);
-
-    if (!source_.good()) {
-        logger->error("Failed reading lower bytes from {}", source_name_);
-        std::exit(EXIT_FAILURE);
-    }
-
-    num_lower_bytes_ -= low_bytes_read;
-
-    // Reserve a bit extra space for unaligned reads and set all to
-    // zero to silence Valgrind uninitilized memory warnings
-    upper_.resize((num_upper_bytes_ + 7) / 8, 0);
-    source_upper_.read(reinterpret_cast<char *>(upper_.data()), num_upper_bytes_);
-    assert(static_cast<uint32_t>(source_upper_.gcount()) == num_upper_bytes_);
-
-    if (!source_upper_.good()) {
-        logger->error("Failed reading upper bytes from {}", source_name_ + ".up");
-        std::exit(EXIT_FAILURE);
-    }
-
-    return true;
+    logger->error("Failed reading from {} after {} retries", source_name_, max_num_retries_);
+    std::exit(EXIT_FAILURE);
 }
 
 // ------------------------- EliasFandDecoder<std::pair> --------------------------------
