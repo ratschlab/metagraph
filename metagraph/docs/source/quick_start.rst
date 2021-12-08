@@ -99,6 +99,12 @@ To transform a ``succinct`` graph to a more compressed and smaller representatio
 
     metagraph transform -v --state small -p 4 -o graph_small graph.dbg
 
+
+.. _to-sequences:
+
+Transform to sequences
+""""""""""""""""""""""
+
 To transform a graph back to sequences, it can be traversed to extract all its contigs/unitigs::
 
     metagraph transform -v --to-fasta -o contigs -p 4 graph.dbg

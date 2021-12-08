@@ -1,5 +1,5 @@
-MetaGraph - User Manual
-=======================
+User Manual
+===========
 
 Welcome to the user manual of `MetaGraph <https://metagraph.ethz.ch>`_!
 
@@ -8,7 +8,6 @@ framework, a software platform for indexing and analysis of very large sequence 
 
 .. toctree::
    :maxdepth: 3
-   :caption: Contents:
 
    installation.rst
    quick_start.rst
