@@ -71,15 +71,15 @@ std::vector<BinaryMatrix::Row> RowDiff<BaseMatrix>::get_column(Column column) co
 
             rows.emplace_back(row);
             std::vector<bool> vals(rows.size(), diffs_.get(row, column));
+            if (vals.back())
+                result.emplace_back(row);
+
             auto it = rows.rbegin() + 1;
             auto jt = vals.rbegin() + 1;
             for ( ; it != rows.rend(); ++it, ++jt) {
                 *jt = *(jt - 1) ^ diffs_.get(*it, column);
-            }
-
-            for (size_t i = 0; i < rows.size(); ++i) {
-                if (vals[i])
-                    result.emplace_back(rows[i]);
+                if (*jt)
+                    result.emplace_back(*it);
             }
 
             auto populate = [&](uint64_t start_row) {
