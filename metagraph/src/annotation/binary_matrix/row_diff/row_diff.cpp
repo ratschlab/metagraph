@@ -108,10 +108,10 @@ std::vector<BinaryMatrix::Row> RowDiff<BaseMatrix>::get_column(Column column) co
 
                     graph_->call_incoming_kmers(node, [&](auto prev_node, char c) {
                         uint64_t row = graph::AnnotatedSequenceGraph::graph_to_anno_index(prev_node);
-                        if (c != boss.kSentinel && row) {
+                        auto boss_prev_edge = graph_->kmer_to_boss_index(prev_node);
+                        if (c != boss.kSentinel && boss_prev_edge) {
                             if (!anchor_[row] && !diffs_.get(row, column)) {
-                                assert(graph_->kmer_to_boss_index(node)
-                                    == boss.row_diff_successor(graph_->kmer_to_boss_index(prev_node), rd_succ));
+                                assert(boss_edge == boss.row_diff_successor(boss_prev_edge, rd_succ));
                                 assert(get(row, column));
                                 decoded.emplace(row, true);
                                 stack.emplace_back(prev_node);
@@ -154,20 +154,26 @@ std::vector<BinaryMatrix::Row> RowDiff<BaseMatrix>::get_column(Column column) co
     for (Row row = 0; row < num_rows(); ++row) {
         uint64_t node = graph::AnnotatedSequenceGraph::anno_to_graph_index(row);
         if (boss.get_W(graph_->kmer_to_boss_index(node))) {
+            auto find = decoded.find(row);
             if (get(row, column)) {
-                if (!decoded[row]) {
+                if (find == decoded.end()) {
                     std::string node_seq = graph_->get_node_sequence(node);
                     if (node_seq[0] != boss.kSentinel) {
-                        common::logger->error("Missing node {} {}", node, node_seq);
-                        assert(decoded[row]);
+                        common::logger->error("Unexplored node: {} {} {}", node, diffs_.get(row, column), node_seq);
+                        assert(find != decoded.end());
+                    }
+                } else if (!find->second) {
+                    std::string node_seq = graph_->get_node_sequence(node);
+                    if (node_seq[0] != boss.kSentinel) {
+                        common::logger->error("Mislabeled node as missing: {} {} {}", node, diffs_.get(row, column), node_seq);
+                        assert(find->second);
                     }
                 }
             } else {
-                auto find = decoded.find(row);
                 if (find != decoded.end() && find->second) {
                     std::string node_seq = graph_->get_node_sequence(node);
                     if (node_seq[0] != boss.kSentinel) {
-                        common::logger->error("Miscalled node {} {}", node, node_seq);
+                        common::logger->error("Mislabeled node as present: {} {} {}", node, diffs_.get(row, column), node_seq);
                         assert(find == decoded.end() || !find->second);
                     }
                 }
