@@ -41,6 +41,15 @@ using mtg::graph::boss::BOSSConstructor;
 typedef typename mtg::graph::DeBruijnGraph::node_index node_index;
 
 
+std::string get_range(const std::tuple<uint64_t, uint64_t, uint64_t> &range) {
+    const auto &[pos, first, last] = range;
+    if (first == last) {
+        return fmt::format("{}-{}", pos, first);
+    } else {
+        return fmt::format("{}-{}-{}", pos, first, last);
+    }
+}
+
 /**
  * Given a vector of kmer label matched coordinates, collapse continuous ranges of coordinates
  * to start-end tuples.
@@ -52,51 +61,46 @@ typedef typename mtg::graph::DeBruijnGraph::node_index node_index;
 std::vector<std::string>
 get_collapsed_coord_ranges(const std::vector<SmallVector<uint64_t>> &tuples) {
     // Build output
-    std::vector<std::string> ranges;
+    std::vector<std::string> range_strings;
 
-    // Keep track of the beginning of the range (just use a sentinel)
-    uint64_t begin = 0;
-    uint64_t current = 0;
-    bool in_range = false;
+    // Keep track of the ranges: start position, first coord, last coord
+    std::vector<std::tuple<uint64_t, uint64_t, uint64_t>> ranges;
+    std::vector<std::tuple<uint64_t, uint64_t, uint64_t>> next_ranges;
 
-    for (const auto &coords : tuples) {
-        if (coords.empty()) continue;
+    for (size_t i = 0; i < tuples.size(); ++i) {
+        const auto &coords = tuples[i];
+        assert(std::is_sorted(coords.begin(), coords.end()));
 
-        // TODO: Look for example where row_tuples are multiple values?
-        uint64_t coord = coords[0];
+        size_t j = 0;
+        next_ranges.resize(0);
 
-        if (in_range) {
-            // Check if we should continue the range
-            if (coord == current + 1) {
-                current = coord;
-            } else {
-                // End the range and output
-                if (begin == current) {
-                    ranges.push_back(fmt::format("{}", begin));
-                } else {
-                    ranges.push_back(fmt::format("{}-{}", begin, current));
-                }
-
-                // Start a new range
-                begin = coord;
-                current = coord;
+        for (uint64_t coord : coords) {
+            while (j < ranges.size() && std::get<2>(ranges[j]) + 1 < coord) {
+                // end of range
+                range_strings.push_back(get_range(ranges[j++]));
             }
-        } else {
-            // Start a new range
-            begin = coord;
-            current = coord;
-            in_range = true;
+
+            if (j < ranges.size() && std::get<2>(ranges[j]) + 1 == coord) {
+                // extend range
+                next_ranges.push_back(ranges[j++]);
+                std::get<2>(next_ranges.back())++;
+            } else {
+                // start new range
+                next_ranges.emplace_back(i, coord, coord);
+            }
         }
+        while (j < ranges.size()) {
+            range_strings.push_back(get_range(ranges[j++]));
+        }
+
+        ranges.swap(next_ranges);
     }
 
-    // Add the last range
-    if (begin == current) {
-        ranges.push_back(fmt::format("{}", begin));
-    } else {
-        ranges.push_back(fmt::format("{}-{}", begin, current));
+    for (const auto &range : ranges) {
+        range_strings.push_back(get_range(range));
     }
 
-    return ranges;
+    return range_strings;
 }
 
 
