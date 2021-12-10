@@ -42,6 +42,7 @@ void concat(const std::vector<std::string> &files, const std::string &result) {
 
         std::filesystem::rename(files[0] + suffix, result + suffix);
         for (size_t i = 1; i < files.size(); ++i) {
+            assert(std::filesystem::exists(files[i] + suffix));
             std::filesystem::remove(files[i] + suffix);
         }
     }
@@ -54,6 +55,10 @@ void remove_chunks(const std::vector<std::string> &files) {
             suffixes.push_back(".count");
 
         for (const std::string &suffix : suffixes) {
+            std::string fname = f + suffix;
+            if (!std::filesystem::exists(fname))
+                logger->warn("Attempt to remove non-existent file {}", fname);
+
             std::filesystem::remove(f + suffix);
         }
     }
@@ -517,7 +522,8 @@ size_t EliasFanoDecoder<T>::decompress_next_block() {
                     const uint32_t to_read = std::min(sizeof(lower_) - sizeof(T), num_lower_bytes_);
                     lower_[0] = lower_[lower_idx_];
                     if (!source_.read(reinterpret_cast<char *>(&lower_[1]), to_read)) {
-                        logger->error("Error while reading lower bits from {}", source_name_);
+                        logger->error("Error while reading next {} lower bits from {}",
+                                      to_read * 8, source_name_);
                         std::exit(EXIT_FAILURE);
                     }
                     num_lower_bytes_ -= to_read;
