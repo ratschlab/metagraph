@@ -8,6 +8,7 @@
 #include "common/utils/template_utils.hpp"
 #include "graph/alignment/dbg_aligner.hpp"
 #include "graph/annotated_dbg.hpp"
+#include "annotation/int_matrix/base/int_matrix.hpp"
 #include "seq_io/sequence_io.hpp"
 #include "config/config.hpp"
 #include "load/load_graph.hpp"
@@ -67,7 +68,8 @@ std::string process_search_request(const std::string &received_message,
     config.print_signature = json.get("with_signature", config.print_signature).asBool();
 
     // Automatically show count and position data if a count-aware index is available.
-    if (anno_graph.supports_kmer_coord_queries()) {
+    if (dynamic_cast<const annot::matrix::MultiIntMatrix *>(
+                    &anno_graph.get_annotation().get_matrix())) {
         config.query_coords = true;
 
         // Disable batch query mode if query_coords is activated
@@ -77,7 +79,8 @@ std::string process_search_request(const std::string &received_message,
             logger->trace("Attempted to query coords in batch mode."
                           "Defaulted to independent query mode.");
         }
-    } else if (anno_graph.supports_kmer_count_queries()) {
+    } else if (dynamic_cast<const annot::matrix::IntMatrix *>(
+                    &anno_graph.get_annotation().get_matrix())) {
         config.count_kmers = true;
     }
 

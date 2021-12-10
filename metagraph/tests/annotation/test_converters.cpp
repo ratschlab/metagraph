@@ -92,7 +92,7 @@ class MergeAnnotators : public ::testing::Test {
 
     virtual void TearDown() {
         ASSERT_TRUE(merged_annotation);
-        for(uint64_t i = 0; i < num_rows; ++i) {
+        for (uint64_t i = 0; i < num_rows; ++i) {
             auto row_expected = merged_annotation_expected->get(i);
             auto row = merged_annotation->get(i);
             EXPECT_EQ(row_expected, row);
@@ -148,7 +148,7 @@ class ConvertFromColumnCompressed : public ::testing::Test {
 
 std::unique_ptr<graph::DBGSuccinct> create_graph(uint32_t k, std::vector<string> sequences) {
     auto graph = std::make_unique<graph::DBGSuccinct>(k);
-    for(const auto &s : sequences) {
+    for (const auto &s : sequences) {
         graph->add_sequence(s);
     }
     graph->mask_dummy_kmers(1, false);
@@ -203,7 +203,7 @@ TEST(RowDiff, succ) {
 
         sdsl::int_vector_buffer<1> succ_boundary(succ_boundary_file, std::ios::in);
         ASSERT_EQ(expected_succ_boundary.size(), succ_boundary.size());
-        for(uint32_t i = 0; i < expected_succ_boundary.size(); ++i) {
+        for (uint32_t i = 0; i < expected_succ_boundary.size(); ++i) {
             EXPECT_EQ(expected_succ_boundary[i], succ_boundary[i]) << max_depth << " " << i;
         }
 
@@ -215,7 +215,7 @@ TEST(RowDiff, succ) {
 
         sdsl::int_vector_buffer<1> pred_boundary(pred_boundary_file, std::ios::in);
         ASSERT_EQ(expected_pred_boundary.size(), pred_boundary.size());
-        for(uint32_t i = 0; i < expected_pred_boundary.size(); ++i) {
+        for (uint32_t i = 0; i < expected_pred_boundary.size(); ++i) {
             EXPECT_EQ(expected_pred_boundary[i], pred_boundary[i]) << max_depth << " " << i;
         }
     }
@@ -427,7 +427,7 @@ void test_row_diff_separate_columns(uint32_t k,
 
     std::map<std::string, std::vector<uint64_t>> col_annotations;
     for (uint32_t anno_idx = 0; anno_idx < graph->num_nodes(); ++anno_idx) {
-        for(const auto& label : annotations[anno_idx]) {
+        for (const auto &label : annotations[anno_idx]) {
             col_annotations[label].push_back(anno_idx);
         }
     }

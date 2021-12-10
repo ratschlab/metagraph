@@ -103,25 +103,6 @@ void AnnotatedSequenceGraph
     }
 }
 
-/**
- * Returns true iff kmer counts are indexed in the annotator.
- */
-bool AnnotatedSequenceGraph::supports_kmer_count_queries() const {
-    // Annotator must be an instance of IntMatrix
-    // TODO: Is this the most robust method of checking?
-    const auto *int_matrix = dynamic_cast<const IntMatrix *>(&annotator_->get_matrix());
-    return (bool) int_matrix;
-}
-
-/**
- * Returns true iff kmer coords are indexed in the annotator.
- */
-bool AnnotatedSequenceGraph::supports_kmer_coord_queries() const {
-    // Annotator must be an instance of MultiIntMatrix
-    const auto *tuple_matrix = dynamic_cast<const MultiIntMatrix *>(&annotator_->get_matrix());
-    return (bool) tuple_matrix;
-}
-
 void AnnotatedDBG::add_kmer_counts(std::string_view sequence,
                                    const std::vector<Label> &labels,
                                    std::vector<uint64_t>&& kmer_counts) {

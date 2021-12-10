@@ -36,7 +36,7 @@ namespace cli {
 
 class Config;
 
-using StringGenerator = std::function<void(std::function<void(const std::string &)>)>;
+typedef std::function<void(std::function<void(const std::string &)>)> StringGenerator;
 
 /**
  * Construct a query graph and augment it with neighboring paths around it
@@ -79,9 +79,7 @@ struct QuerySequence {
      * Sets alignment to std::nullopt
      */
     QuerySequence(size_t id, const std::string &name, const std::string &sequence)
-      : id(id), name(name), sequence(std::move(sequence)) {
-        alignment = std::nullopt;
-    }
+      : id(id), name(name), sequence(std::move(sequence)) {}
 };
 
 
@@ -165,7 +163,6 @@ class SeqSearchResult {
   private:
     QuerySequence sequence;     // query sequence this result represents
     result_type result;         // result vector of labels and additional info
-
 };
 
 
@@ -210,7 +207,6 @@ class QueryExecutor {
 
     void batched_query_fasta(mtg::seq_io::FastaParser &fasta_parser,
                              const std::function<void(const SeqSearchResult &)> &callback);
-
 };
 
 
