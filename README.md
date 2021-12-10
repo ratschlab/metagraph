@@ -20,6 +20,9 @@ At the same time, the provided workflows and their careful implementation, combi
 * Modular support of different graph and annotation representations
 * Use of generic and extensible interfaces to support adding custom index representations / algorithms with little code overhead.
 
+## Documentation
+Online documentation is available at https://metagraph.ethz.ch/static/docs/index.html. Offline sources are [here](metagraph/docs/source).
+
 ## Install
 
 ### Conda
@@ -46,7 +49,7 @@ All different versions of the container are listed [here](https://github.com/rat
 
 ### Install From Sources
 
-To compile from source, see [documentation online](https://metagraph.ethz.ch/static/docs/installation.html#install-from-source) (e.g., for builds with custom configurations).
+To compile from source (e.g., for builds with custom alphabet or other configurations), see [documentation online](https://metagraph.ethz.ch/static/docs/installation.html#install-from-source).
 
 
 ## Typical workflow
