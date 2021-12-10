@@ -3,6 +3,8 @@
 #include <filesystem>
 #include <fstream>
 
+#include <tsl/hopscotch_map.h>
+
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
 #include "annotation/binary_matrix/multi_brwt/brwt.hpp"
 #include "annotation/binary_matrix/row_sparse/row_sparse.hpp"
@@ -53,7 +55,7 @@ std::vector<BinaryMatrix::Row> RowDiff<BaseMatrix>::get_column(Column column) co
     const graph::boss::BOSS &boss = graph_->get_boss();
     assert(!fork_succ_.size() || fork_succ_.size() == boss.get_last().size());
 
-    std::vector<Row> result;
+    tsl::hopscotch_map<Row, bool> decoded;
 
     diffs_.call_columns({ column }, [&](size_t, const bitmap &starts) {
         starts.call_ones([&](uint64_t row) {
@@ -62,24 +64,31 @@ std::vector<BinaryMatrix::Row> RowDiff<BaseMatrix>::get_column(Column column) co
                     graph::AnnotatedSequenceGraph::anno_to_graph_index(row));
             const bit_vector &rd_succ = fork_succ_.size() ? fork_succ_ : boss.get_last();
 
-            while (!anchor_[row]) {
+            auto find = decoded.find(row);
+            while (!anchor_[row] && find == decoded.end()) {
                 rows.emplace_back(row);
                 boss_edge = boss.row_diff_successor(boss_edge, rd_succ);
                 row = graph::AnnotatedSequenceGraph::graph_to_anno_index(
                         graph_->boss_to_kmer_index(boss_edge));
+                find = decoded.find(row);
             }
 
             rows.emplace_back(row);
-            std::vector<bool> vals(rows.size(), diffs_.get(row, column));
-            if (vals.back())
-                result.emplace_back(row);
+            assert(find == decoded.end() || find->second == get(row, column));
+            std::vector<bool> vals(
+                rows.size(),
+                find != decoded.end() ? find->second : diffs_.get(row, column)
+            );
+
+            if (vals.back() && find == decoded.end())
+                decoded.emplace(row, vals.back());
 
             auto it = rows.rbegin() + 1;
             auto jt = vals.rbegin() + 1;
             for ( ; it != rows.rend(); ++it, ++jt) {
                 *jt = *(jt - 1) ^ diffs_.get(*it, column);
-                if (*jt)
-                    result.emplace_back(*it);
+                assert(get(*it, column) == *jt);
+                decoded.emplace(*it, *jt);
             }
 
             auto populate = [&](uint64_t start_row) {
@@ -90,13 +99,21 @@ std::vector<BinaryMatrix::Row> RowDiff<BaseMatrix>::get_column(Column column) co
                     uint64_t node = stack.back();
                     stack.pop_back();
 
+                    auto boss_edge = graph_->kmer_to_boss_index(node);
+                    auto boss_last_edge = boss.succ_last(boss_edge);
+                    if (boss_edge != boss_last_edge
+                            && rd_succ.rank1(boss_last_edge) != rd_succ.rank1(boss_edge)) {
+                        continue;
+                    }
+
                     graph_->call_incoming_kmers(node, [&](auto prev_node, char c) {
                         uint64_t row = graph::AnnotatedSequenceGraph::graph_to_anno_index(prev_node);
                         if (c != boss.kSentinel && row) {
-                            if (!anchor_[row]
-                                    && rd_succ[graph_->kmer_to_boss_index(prev_node)]
-                                    && !diffs_.get(row, column)) {
-                                result.emplace_back(row);
+                            if (!anchor_[row] && !diffs_.get(row, column)) {
+                                assert(graph_->kmer_to_boss_index(node)
+                                    == boss.row_diff_successor(graph_->kmer_to_boss_index(prev_node), rd_succ));
+                                assert(get(row, column));
+                                decoded.emplace(row, true);
                                 stack.emplace_back(prev_node);
                             }
                         }
@@ -127,14 +144,44 @@ std::vector<BinaryMatrix::Row> RowDiff<BaseMatrix>::get_column(Column column) co
                         }
                     }
                 }
-            } else if (rows[0]) {
+            } else if (vals[0]) {
                 populate(rows[0]);
             }
         });
     });
 
+#ifndef NDEBUG
+    for (Row row = 0; row < num_rows(); ++row) {
+        uint64_t node = graph::AnnotatedSequenceGraph::anno_to_graph_index(row);
+        if (boss.get_W(graph_->kmer_to_boss_index(node))) {
+            if (get(row, column)) {
+                if (!decoded[row]) {
+                    std::string node_seq = graph_->get_node_sequence(node);
+                    if (node_seq[0] != boss.kSentinel) {
+                        common::logger->error("Missing node {} {}", node, node_seq);
+                        assert(decoded[row]);
+                    }
+                }
+            } else {
+                auto find = decoded.find(row);
+                if (find != decoded.end() && find->second) {
+                    std::string node_seq = graph_->get_node_sequence(node);
+                    if (node_seq[0] != boss.kSentinel) {
+                        common::logger->error("Miscalled node {} {}", node, node_seq);
+                        assert(find == decoded.end() || !find->second);
+                    }
+                }
+            }
+        }
+    }
+#endif
+
+    std::vector<Row> result;
+    for (const auto &[row, val] : decoded) {
+        if (val)
+            result.emplace_back(row);
+    }
     std::sort(result.begin(), result.end());
-    result.erase(std::unique(result.begin(), result.end()), result.end());
     return result;
 }
 
