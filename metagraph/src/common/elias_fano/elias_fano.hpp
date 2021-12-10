@@ -12,6 +12,8 @@
 #include <sdsl/uint128_t.hpp>
 #include <sdsl/uint256_t.hpp>
 
+#include "common/logger.hpp"
+
 
 namespace mtg {
 namespace elias_fano {
@@ -57,6 +59,10 @@ class EliasFanoDecoder {
 
     /** Decompressed the next block into buffer and returns the number of elements in it */
     size_t decompress_next_block();
+
+    /** If reading fails, retry |max_num_retries_| times until crashing */
+    size_t num_retries_ = 0;
+    static constexpr size_t max_num_retries_ = 100;
 
     /** Index of current element */
     size_t position_ = 0;
@@ -137,9 +143,11 @@ class EliasFanoDecoder<std::pair<T, C>> {
         C second;
         source_second_.read(reinterpret_cast<char *>(&second), sizeof(C));
         if (!first.has_value()) {
-            if (!source_second_.eof())
-                throw std::ios_base::failure("EliasFanoDecoder " + source_second_name_ +
-                                                + " error: file is not read to the end");
+            if (!source_second_.eof()) {
+                common::logger->error("EliasFanoDecoder error: file {} is not read to the end",
+                                      source_second_name_);
+                std::exit(EXIT_FAILURE);
+            }
             source_second_.close();
             if (remove_source_)
                 std::filesystem::remove(source_second_name_);
