@@ -40,17 +40,6 @@ using mtg::graph::boss::BOSSConstructor;
 
 typedef typename mtg::graph::DeBruijnGraph::node_index node_index;
 
-// JSON Field Keys
-const std::string SEQ_DESCRIPTION_JSON_FIELD = "seq_description";
-const std::string KMER_COUNT_FIELD = "kmer_count";
-const std::string KMER_COORDINATE_FIELD = "kmer_coords";
-const std::string SIGNATURE_FIELD = "signature";
-const std::string KMER_COUNT_QUANTILE_FIELD = "kmer_count_quantile";
-const std::string SCORE_JSON_FIELD = "score";
-const std::string SEQUENCE_JSON_FIELD = "sequence";
-const std::string ALIGNMENT_JSON_FIELD = "alignments";
-const std::string CIGAR_JSON_FIELD = "cigar";
-
 
 /**
  * Given a vector of kmer label matched coordinates, collapse continuous ranges of coordinates
@@ -168,7 +157,7 @@ Json::Value get_label_as_json(const std::string &label) {
 }
 
 
-Json::Value SeqSearchResult::to_json(bool expand_coords,
+Json::Value SeqSearchResult::to_json(bool verbose_coords,
                                      const graph::AnnotatedDBG &anno_graph) const {
     Json::Value root;
 
@@ -243,7 +232,7 @@ Json::Value SeqSearchResult::to_json(bool expand_coords,
             Json::Value coord_array = Json::arrayValue;
 
             // Each tuple is represented as a folly::SmallVector<uint64_t> instance
-            if (expand_coords) {
+            if (verbose_coords) {
                 for (const auto &coords : tuples) {
                     coord_array.append(Json::Value(fmt::format("{}", fmt::join(coords, ","))));
                 }
@@ -265,7 +254,7 @@ Json::Value SeqSearchResult::to_json(bool expand_coords,
 
 std::string SeqSearchResult::to_string(const std::string delimiter,
                                        bool suppress_unlabeled,
-                                       bool expand_coords,
+                                       bool verbose_coords,
                                        const graph::AnnotatedDBG &anno_graph) const {
     // Return the size of the result type vector using std::visit (ducktyping variant)
     if (!std::visit([] (auto&& vec) { return vec.size(); }, result) && suppress_unlabeled) {
@@ -314,7 +303,7 @@ std::string SeqSearchResult::to_string(const std::string delimiter,
         for (const auto &[label, tuples] : std::get<LabelCoordVec>(result)) {
             output += "\t<" + label + ">";
 
-            if (expand_coords) {
+            if (verbose_coords) {
                 for (const auto &coords : tuples) {
                     output += fmt::format(":{}", fmt::join(coords, ","));
                 }
@@ -1143,7 +1132,7 @@ int query_graph(Config *config) {
                              (const SeqSearchResult &result) {
             std::cout << result.to_string(config->anno_labels_delimiter,
                                           config->suppress_unlabeled,
-                                          config->expand_coords,
+                                          config->verbose_coords,
                                           anno_graph) << "\n";
         });
         logger->trace("File '{}' was processed in {} sec, total time: {}", file,

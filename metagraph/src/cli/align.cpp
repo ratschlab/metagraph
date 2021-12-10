@@ -386,7 +386,6 @@ int align_to_graph(Config *config) {
     for (const auto &file : files) {
         logger->trace("Align sequences from file {}", file);
         seq_io::FastaParser fasta_parser(file, config->forward_and_reverse);
-        bool is_reverse_complement = false;
 
         Timer data_reading_timer;
 
@@ -402,6 +401,8 @@ int align_to_graph(Config *config) {
         auto end = fasta_parser.end();
 
         size_t num_batches = 0;
+
+        bool is_reverse_complement = false;
 
         while (it != end) {
             uint64_t num_bytes_read = 0;
@@ -419,8 +420,9 @@ int align_to_graph(Config *config) {
                                                   true)
                             : std::string(it->name.s);
                 seq_batch.emplace_back(std::move(header), it->seq.s, is_reverse_complement);
-                is_reverse_complement ^= config->forward_and_reverse;
                 num_bytes_read += it->seq.l;
+                // alternate between forward and rc sequences if |forward_and_reverse| is true
+                is_reverse_complement ^= config->forward_and_reverse;
             }
 
             auto process_batch = [&,graph](SeqBatch batch) {

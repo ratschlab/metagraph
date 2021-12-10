@@ -108,6 +108,17 @@ class SeqSearchResult {
                          LabelQuantileVec,
                          LabelCoordVec> result_type;
 
+    // JSON Field Keys
+    static constexpr auto SEQ_DESCRIPTION_JSON_FIELD = "seq_description";
+    static constexpr auto KMER_COUNT_FIELD = "kmer_count";
+    static constexpr auto KMER_COORDINATE_FIELD = "kmer_coords";
+    static constexpr auto SIGNATURE_FIELD = "signature";
+    static constexpr auto KMER_COUNT_QUANTILE_FIELD = "kmer_count_quantile";
+    static constexpr auto SCORE_JSON_FIELD = "score";
+    static constexpr auto SEQUENCE_JSON_FIELD = "sequence";
+    static constexpr auto ALIGNMENT_JSON_FIELD = "alignments";
+    static constexpr auto CIGAR_JSON_FIELD = "cigar";
+
     /**
      * Construct an instance of SeqSearchResult by providing QuerySequence instance describing
      * sequence and result from that query on an annotated DBG. Will move both into this instance.
@@ -129,10 +140,10 @@ class SeqSearchResult {
      *
      * @param counts_kmers      should counts be labeled kmer (t) or label (f) counts?
      * @param anno_graph        reference to annotated dbg for kmer presence mask scoring
-     * @param expand_coords     do not collapse continuous ranges of coords (query_coords)
+     * @param verbose_coords    do not collapse continuous ranges of coords (query_coords)
      * @return  Json::Value instance representing sequence result
      */
-    Json::Value to_json(bool expand_coords,
+    Json::Value to_json(bool verbose_coords,
                         const graph::AnnotatedDBG &anno_graph) const;
 
     /**
@@ -143,12 +154,12 @@ class SeqSearchResult {
      *
      * @param delimiter             the delimiter between labels for that sequence
      * @param suppress_unlabeled    do not print seq_name if sequence is unlabeled
-     * @param expand_coords         do not collapse continuous ranges of coords (query_coords)
+     * @param verbose_coords        do not collapse continuous ranges of coords (query_coords)
      * @param anno_graph            reference to annotated dbg for kmer presence mask scoring
      */
     std::string to_string(std::string delimiter,
                           bool suppress_unlabeled,
-                          bool expand_coords,
+                          bool verbose_coords,
                           const graph::AnnotatedDBG &anno_graph) const;
 
   private:

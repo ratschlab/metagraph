@@ -25,12 +25,6 @@ using mtg::graph::AnnotatedDBG;
 
 using HttpServer = SimpleWeb::Server<SimpleWeb::HTTP>;
 
-const std::string SEQ_DESCRIPTION_JSON_FIELD = "seq_description";
-const std::string KMER_COORDINATE_FIELD = "kmer_coords";
-const std::string SCORE_JSON_FIELD = "score";
-const std::string SEQUENCE_JSON_FIELD = "sequence";
-const std::string ALIGNMENT_JSON_FIELD = "alignments";
-const std::string CIGAR_JSON_FIELD = "cigar";
 
 std::string process_search_request(const std::string &received_message,
                                    const graph::AnnotatedDBG &anno_graph,
@@ -127,7 +121,7 @@ std::string process_search_request(const std::string &received_message,
     // Create full JSON object
     Json::Value search_response(Json::arrayValue);
     for (const auto &seq_result : search_results) {
-        const auto seq_response = seq_result.to_json(config.expand_coords, anno_graph);
+        const auto seq_response = seq_result.to_json(config.verbose_coords, anno_graph);
 
         if (seq_response["results"].size()) {
             search_response.append(seq_response);
@@ -139,6 +133,7 @@ std::string process_search_request(const std::string &received_message,
     return Json::writeString(builder, search_response);
 }
 
+// TODO: implement alignment_result.to_json as in process_search_request
 std::string process_align_request(const std::string &received_message,
                                   const graph::DeBruijnGraph &graph,
                                   const Config &config_orig) {
@@ -185,21 +180,21 @@ std::string process_align_request(const std::string &received_message,
         const auto paths = aligner->align(read_stream->seq.s);
 
         Json::Value align_entry;
-        align_entry[SEQ_DESCRIPTION_JSON_FIELD] = read_stream->name.s;
+        align_entry[SeqSearchResult::SEQ_DESCRIPTION_JSON_FIELD] = read_stream->name.s;
 
         // not supporting reverse complement yet
         Json::Value alignments = Json::Value(Json::arrayValue);
 
         for (const auto &path : paths.data()) {
             Json::Value a;
-            a[SCORE_JSON_FIELD] = path.get_score();
-            a[SEQUENCE_JSON_FIELD] = path.get_sequence();
-            a[CIGAR_JSON_FIELD] = path.get_cigar().to_string();
+            a[SeqSearchResult::SCORE_JSON_FIELD] = path.get_score();
+            a[SeqSearchResult::SEQUENCE_JSON_FIELD] = path.get_sequence();
+            a[SeqSearchResult::CIGAR_JSON_FIELD] = path.get_cigar().to_string();
 
             alignments.append(a);
         };
 
-        align_entry[ALIGNMENT_JSON_FIELD] = alignments;
+        align_entry[SeqSearchResult::ALIGNMENT_JSON_FIELD] = alignments;
 
         root.append(align_entry);
     });

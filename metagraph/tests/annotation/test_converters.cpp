@@ -148,7 +148,7 @@ class ConvertFromColumnCompressed : public ::testing::Test {
 
 std::unique_ptr<graph::DBGSuccinct> create_graph(uint32_t k, std::vector<string> sequences) {
     auto graph = std::make_unique<graph::DBGSuccinct>(k);
-    for(const auto& s: sequences) {
+    for(const auto &s : sequences) {
         graph->add_sequence(s);
     }
     graph->mask_dummy_kmers(1, false);
