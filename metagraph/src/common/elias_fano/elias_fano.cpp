@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cassert>
 #include <cstring>
+#include <chrono>
+#include <thread>
 #include <filesystem>
 
 #include <sdsl/uint128_t.hpp>
@@ -30,15 +32,18 @@ void concat(const std::vector<std::string> &files, const std::string &result) {
             for (uint32_t i = 1; i < files.size(); ++i) {
                 concat_command += files[i] + suffix + " ";
             }
-            concat_command += " >> " + files[0] + suffix;
+            concat_command += ">> " + files[0] + suffix;
 
-            if (std::system(concat_command.c_str()))
-                throw std::runtime_error("Error while cat-ing files: " + concat_command);
+            if (std::system(concat_command.c_str())) {
+                logger->error("Error while cat-ing files: {}", concat_command);
+                std::exit(EXIT_FAILURE);
+            }
         }
 
         std::filesystem::rename(files[0] + suffix, result + suffix);
-        for (const std::string &f : files) {
-            std::filesystem::remove(f + suffix);
+        for (size_t i = 1; i < files.size(); ++i) {
+            assert(std::filesystem::exists(files[i] + suffix));
+            std::filesystem::remove(files[i] + suffix);
         }
     }
 }
@@ -50,6 +55,10 @@ void remove_chunks(const std::vector<std::string> &files) {
             suffixes.push_back(".count");
 
         for (const std::string &suffix : suffixes) {
+            std::string fname = f + suffix;
+            if (!std::filesystem::exists(fname))
+                logger->warn("Attempt to remove non-existent file {}", fname);
+
             std::filesystem::remove(f + suffix);
         }
     }
@@ -512,7 +521,11 @@ size_t EliasFanoDecoder<T>::decompress_next_block() {
                 if (lower_idx_ == READ_BUF_SIZE - 1 && num_lower_bytes_ > 0) {
                     const uint32_t to_read = std::min(sizeof(lower_) - sizeof(T), num_lower_bytes_);
                     lower_[0] = lower_[lower_idx_];
-                    source_.read(reinterpret_cast<char *>(&lower_[1]), to_read);
+                    if (!source_.read(reinterpret_cast<char *>(&lower_[1]), to_read)) {
+                        logger->error("Error while reading next {} lower bits from {}",
+                                      to_read * 8, source_name_);
+                        std::exit(EXIT_FAILURE);
+                    }
                     num_lower_bytes_ -= to_read;
                     lower_idx_ = 0;
                 }
@@ -538,9 +551,7 @@ bool EliasFanoDecoder<T>::init() {
     memset(lower_, 0, sizeof(lower_));
     upper_pos_ = 0;
     source_.read(reinterpret_cast<char *>(&size_), sizeof(size_t));
-    if (source_.bad()) {
-        throw std::runtime_error("Error while reading from " + source_name_);
-    } else if (source_.eof()) {
+    if (source_.eof()) {
         source_.close();
         source_upper_.close();
         if (remove_source_) {
@@ -550,28 +561,67 @@ bool EliasFanoDecoder<T>::init() {
         size_ = static_cast<size_t>(-1);
         return false;
     }
-    source_.read(reinterpret_cast<char *>(&offset_), sizeof(T));
-    source_.read(reinterpret_cast<char *>(&num_lower_bits_), 1);
-    assert(num_lower_bits_ < 8 * sizeof(T));
-    lower_bits_mask_ = (T(1) << num_lower_bits_) - 1UL;
-    source_.read(reinterpret_cast<char *>(&num_lower_bytes_), sizeof(size_t));
-    source_.read(reinterpret_cast<char *>(&num_upper_bytes_), sizeof(size_t));
-    size_t low_bytes_read = std::min(sizeof(lower_), num_lower_bytes_);
-    source_.read(reinterpret_cast<char *>(lower_), low_bytes_read);
-    num_lower_bytes_ -= low_bytes_read;
-
-    // Reserve a bit extra space for unaligned reads and set all to
-    // zero to silence Valgrind uninitilized memory warnings
-    upper_.resize((num_upper_bytes_ + 7) / 8, 0);
-    source_upper_.read(reinterpret_cast<char *>(upper_.data()), num_upper_bytes_);
-    assert(static_cast<uint32_t>(source_upper_.gcount()) == num_upper_bytes_);
-
-    if (!source_.good() || !source_upper_.good()) {
-        logger->error("Failed reading from {}", source_name_);
+    if (!source_ || !source_upper_) {
+        logger->error("Error while reading from {}", source_name_);
         std::exit(EXIT_FAILURE);
     }
+    const auto source_pos = source_.tellg();
+    const auto source_up_pos = source_upper_.tellg();
 
-    return true;
+    while (num_retries_ <= max_num_retries_) {
+        source_.read(reinterpret_cast<char *>(&offset_), sizeof(T));
+        source_.read(reinterpret_cast<char *>(&num_lower_bits_), 1);
+        assert(num_lower_bits_ < 8 * sizeof(T));
+        lower_bits_mask_ = (T(1) << num_lower_bits_) - 1UL;
+        source_.read(reinterpret_cast<char *>(&num_lower_bytes_), sizeof(size_t));
+        source_.read(reinterpret_cast<char *>(&num_upper_bytes_), sizeof(size_t));
+        size_t low_bytes_read = std::min(sizeof(lower_), num_lower_bytes_);
+        source_.read(reinterpret_cast<char *>(lower_), low_bytes_read);
+        num_lower_bytes_ -= low_bytes_read;
+
+        // Reserve a bit extra space for unaligned reads and set all to
+        // zero to silence Valgrind uninitilized memory warnings
+        upper_.resize((num_upper_bytes_ + 7) / 8, 0);
+        source_upper_.read(reinterpret_cast<char *>(upper_.data()), num_upper_bytes_);
+        assert(static_cast<uint32_t>(source_upper_.gcount()) == num_upper_bytes_);
+
+        if (source_ && source_upper_)
+            return true;
+
+        // reading failed -> retry
+        while (num_retries_++ < max_num_retries_) {
+            logger->warn("Failed reading from {}. Retry #{}...", source_name_, num_retries_);
+            using namespace std::chrono_literals;
+            std::this_thread::sleep_for(500ms);
+
+            source_ = std::ifstream(source_name_, std::ios::binary);
+            if (!source_) {
+                logger->error("Unable to open {}", source_name_);
+                continue;
+            }
+            source_.seekg(source_pos);
+            if (!source_) {
+                logger->error("Unable to seek in {}", source_name_);
+                continue;
+            }
+
+            source_upper_ = std::ifstream(source_name_ + ".up", std::ios::binary);
+            if (!source_upper_) {
+                logger->error("Unable to open {}", source_name_ + ".up");
+                continue;
+            }
+            source_upper_.seekg(source_up_pos);
+            if (!source_upper_) {
+                logger->error("Unable to seek in {}", source_name_ + ".up");
+                continue;
+            }
+
+            break;
+        }
+    }
+
+    logger->error("Failed reading from {} after {} retries", source_name_, max_num_retries_);
+    std::exit(EXIT_FAILURE);
 }
 
 // ------------------------- EliasFandDecoder<std::pair> --------------------------------
