@@ -67,7 +67,9 @@ std::string process_search_request(const std::string &received_message,
     config.fast = json.get("fast", config.fast).asBool();
     config.print_signature = json.get("with_signature", config.print_signature).asBool();
 
-    // Automatically show count and position data if a count-aware index is available.
+    // For now, automatically show count and position data if a count-aware index is available.
+    // TODO: make clients specify if counts or coordinates should be queried. Then,
+    // return a proper error message if this query type is not supported by the annotation.
     if (dynamic_cast<const annot::matrix::MultiIntMatrix *>(
                     &anno_graph.get_annotation().get_matrix())) {
         config.query_coords = true;
@@ -75,9 +77,8 @@ std::string process_search_request(const std::string &received_message,
         // Disable batch query mode if query_coords is activated
         if (config.fast) {
             config.fast = false;
-
-            logger->trace("Attempted to query coords in batch mode."
-                          "Defaulted to independent query mode.");
+            logger->warn("Attempted to query k-mer coordinates in batch mode."
+                         "Defaulted to basic query mode.");
         }
     } else if (dynamic_cast<const annot::matrix::IntMatrix *>(
                     &anno_graph.get_annotation().get_matrix())) {
@@ -116,10 +117,10 @@ std::string process_search_request(const std::string &received_message,
     );
 
     // Ensure JSON results are sorted by their ID
-    std::sort(search_results.begin(), search_results.end(), [](const SeqSearchResult &lhs,
-            const SeqSearchResult &rhs) {
-        return lhs.get_sequence().id < rhs.get_sequence().id;
-    });
+    std::sort(search_results.begin(), search_results.end(),
+              [](const SeqSearchResult &lhs, const SeqSearchResult &rhs) {
+                  return lhs.get_sequence().id < rhs.get_sequence().id;
+              });
 
     // Create full JSON object
     Json::Value search_response(Json::arrayValue);

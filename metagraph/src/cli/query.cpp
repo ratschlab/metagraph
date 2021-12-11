@@ -169,15 +169,13 @@ Json::Value SeqSearchResult::to_json(bool verbose_coords,
     root[SEQ_DESCRIPTION_JSON_FIELD] = sequence.name;
 
     // Add alignment information if there is any
-    if (sequence.alignment.has_value()) {
-        const auto &alignment = sequence.alignment.value();
-
+    if (alignment) {
         // Recover alignment sequence sequence string
         root[SEQUENCE_JSON_FIELD] = Json::Value(sequence.sequence);
 
         // Alignment metrics
-        root[SCORE_JSON_FIELD] = Json::Value(alignment.score);
-        root[CIGAR_JSON_FIELD] = Json::Value(alignment.cigar);
+        root[SCORE_JSON_FIELD] = Json::Value(alignment->score);
+        root[CIGAR_JSON_FIELD] = Json::Value(alignment->cigar);
     }
 
     // Add discovered labels and extra results
@@ -269,10 +267,9 @@ std::string SeqSearchResult::to_string(const std::string delimiter,
     // Get modified name if sequence has an alignment result
     std::string mod_seq_name = sequence.name;
 
-    if (sequence.alignment.has_value()) {
-        const QuerySequence::Alignment &alignment = sequence.alignment.value();
+    if (alignment) {
         mod_seq_name = fmt::format(ALIGNED_SEQ_HEADER_FORMAT, sequence.name, sequence.sequence,
-                                   alignment.score, alignment.cigar);
+                                   alignment->score, alignment->cigar);
     }
 
     // Print sequence ID and name
@@ -366,11 +363,6 @@ SeqSearchResult QueryExecutor::execute_query(QuerySequence&& sequence,
         result = anno_graph.get_labels(sequence.sequence,
                                        discovery_fraction,
                                        presence_fraction);
-    }
-
-    // Clear sequence if we did not align to save space
-    if (!sequence.alignment.has_value()) {
-        sequence.sequence = "";
     }
 
     // Create seq search instance and move sequence into it
@@ -1151,17 +1143,17 @@ int query_graph(Config *config) {
  * Align a sequence to the annotated DBG before querying. Modify the sequence in place and return
  * alignment information (score and cigar string).
  *
- * @param seq               reference to sequence string (which will be modified if alignment found)
+ * @param seq               pointer to sequence string (which will be modified if alignment found)
  * @param anno_graph        reference to annotated DBG we align to
  * @param aligner_config    alignment config
  *
  * @return Alignment struct instance with score and cigar string
  */
-QuerySequence::Alignment align_sequence(std::string &seq,
-                                        const AnnotatedDBG &anno_graph,
-                                        const align::DBGAlignerConfig &aligner_config) {
+Alignment align_sequence(std::string *seq,
+                         const AnnotatedDBG &anno_graph,
+                         const align::DBGAlignerConfig &aligner_config) {
     const DeBruijnGraph &graph = anno_graph.get_graph();
-    auto alignments = build_aligner(graph, aligner_config)->align(seq);
+    auto alignments = build_aligner(graph, aligner_config)->align(*seq);
 
     assert(alignments.size() <= 1 && "Only the best alignment is needed");
 
@@ -1169,15 +1161,15 @@ QuerySequence::Alignment align_sequence(std::string &seq,
         auto &match = alignments[0];
         // modify sequence for querying with the best alignment
         if (match.get_offset()) {
-            seq = graph.get_node_sequence(match.get_nodes()[0]).substr(0, match.get_offset())
+            *seq = graph.get_node_sequence(match.get_nodes()[0]).substr(0, match.get_offset())
                   + match.get_sequence();
         } else {
-            seq = const_cast<std::string&&>(match.get_sequence());
+            *seq = const_cast<std::string&&>(match.get_sequence());
         }
 
-        return QuerySequence::Alignment(match.get_score(), match.get_cigar().to_string());
+        return { match.get_score(), match.get_cigar().to_string() };
     } else {
-        return QuerySequence::Alignment(0, fmt::format("{}S", seq.length()));
+        return { 0, fmt::format("{}S", seq->length()) };
     }
 }
 
@@ -1187,9 +1179,9 @@ SeqSearchResult query_sequence(QuerySequence&& sequence,
                                const Config &config,
                                const align::DBGAlignerConfig *aligner_config) {
     // Align sequence and modify sequence struct to store alignment results
-    if (aligner_config) {
-        sequence.alignment = align_sequence(sequence.sequence, anno_graph, *aligner_config);
-    };
+    std::optional<Alignment> alignment;
+    if (aligner_config)
+        alignment = align_sequence(&sequence.sequence, anno_graph, *aligner_config);
 
     // Get sequence search result by executing query
     SeqSearchResult result = QueryExecutor::execute_query(std::move(sequence),
@@ -1198,6 +1190,9 @@ SeqSearchResult query_sequence(QuerySequence&& sequence,
             config.presence_fraction, anno_graph,
             config.count_kmers, config.count_quantiles,
             config.query_coords);
+
+    if (aligner_config)
+        result.get_alignment() = alignment;
 
     return result;
 }
@@ -1212,7 +1207,7 @@ void QueryExecutor::query_fasta(const string &file,
     if (config_.fast) {
         // TODO: Implement batch mode for query_coords queries
         if (config_.query_coords) {
-            logger->error("Querying coordinates in batch mode is not supported");
+            logger->error("Querying coordinates in batch mode is currently not supported");
             exit(1);
         }
         // Construct a query graph and query against it
@@ -1224,16 +1219,13 @@ void QueryExecutor::query_fasta(const string &file,
     size_t seq_count = 0;
 
     for (const seq_io::kseq_t &kseq : fasta_parser) {
-        thread_pool_.enqueue([&](const auto&... args) {
-            // Create a QuerySequence instance and pass to query_sequence
-            QuerySequence sequence(args...);
-
+        thread_pool_.enqueue([&](QuerySequence &sequence) {
             // Callback with the SeqSearchResult
             callback(query_sequence(std::move(sequence),
                                     anno_graph_,
                                     config_,
                                     aligner_config_.get()));
-        }, seq_count++, std::string(kseq.name.s), std::string(kseq.seq.s));
+        }, QuerySequence { seq_count++, std::string(kseq.name.s), std::string(kseq.seq.s) });
     }
 
     // wait while all threads finish processing the current file
@@ -1258,24 +1250,26 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
         // A generator that can be called multiple times until all sequences
         // are called
         std::vector<QuerySequence> seq_batch;
+        std::vector<Alignment> alignments_batch;
         num_bytes_read = 0;
 
         for ( ; it != end && num_bytes_read <= batch_size; ++it) {
-            seq_batch.emplace_back(seq_count++, it->name.s, it->seq.s);
+            seq_batch.push_back(QuerySequence { seq_count++, it->name.s, it->seq.s });
             num_bytes_read += it->seq.l;
         }
 
         // Align sequences ahead of time on full graph if we don't have batch_align
         if (aligner_config_ && !config_.batch_align) {
+            alignments_batch.resize(seq_batch.size());
             logger->trace("Aligning sequences from batch against the full graph...");
             batch_timer.reset();
 
             #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
             for (size_t i = 0; i < seq_batch.size(); ++i) {
                 // Set alignment for this seq_batch
-                seq_batch[i].alignment = align_sequence(seq_batch[i].sequence,
-                                                        anno_graph_,
-                                                        *aligner_config_);
+                alignments_batch[i] = align_sequence(&seq_batch[i].sequence,
+                                                     anno_graph_,
+                                                     *aligner_config_);
             }
             logger->trace("Sequences alignment took {} sec", batch_timer.elapsed());
             batch_timer.reset();
@@ -1300,10 +1294,14 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
 
         #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
         for (size_t i = 0; i < seq_batch.size(); ++i) {
-            callback(query_sequence(std::move(seq_batch[i]),
-                                    *query_graph,
-                                    config_,
-                                    config_.batch_align ? aligner_config_.get() : NULL));
+            SeqSearchResult search_result
+                = query_sequence(std::move(seq_batch[i]), *query_graph, config_,
+                                 config_.batch_align ? aligner_config_.get() : NULL);
+
+            if (alignments_batch.size())
+                search_result.get_alignment() = std::move(alignments_batch[i]);
+
+            callback(search_result);
         }
 
         logger->trace("Batch of {} bytes from '{}' queried in {} sec", num_bytes_read,

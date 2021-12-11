@@ -36,7 +36,7 @@ namespace cli {
 
 class Config;
 
-typedef std::function<void(std::function<void(const std::string &)>)> StringGenerator;
+using StringGenerator = std::function<void(std::function<void(const std::string &)>)>;
 
 /**
  * Construct a query graph and augment it with neighboring paths around it
@@ -44,7 +44,6 @@ typedef std::function<void(std::function<void(const std::string &)>)> StringGene
  * @param anno_graph annotated de Bruijn graph (the index)
  * @param call_sequences generate sequences to be queried against anno_graph
  * @param num_threads number of threads to use
- * @param canonical if true, the returned query graph is a canonical graph
  * @param config a pointer to a Config to determine parameters of the hull
  */
 std::unique_ptr<graph::AnnotatedDBG>
@@ -54,32 +53,17 @@ construct_query_graph(const graph::AnnotatedDBG &anno_graph,
                       const Config *config = nullptr);
 
 
-/**
- * Simple struct to wrap a query sequence.
- */
+// Simple struct to wrap a query sequence
 struct QuerySequence {
-    /**
-     * Simple struct to wrap alignment results for a query sequence
-     */
-    struct Alignment {
-        graph::align::DBGAlignerConfig::score_t score;  // Alignment score
-        std::string cigar;                              // Cigar string
+    size_t id;            // Sequence ID
+    std::string name;     // Sequence name
+    std::string sequence; // Sequence string representation
+};
 
-        Alignment(graph::align::DBGAlignerConfig::score_t score, std::string&& cigar)
-          : score(score), cigar(std::move(cigar)) {}
-    };
-
-    size_t id;                          // Sequence ID
-    std::string name;                   // Sequence name
-    std::string sequence;               // Sequence string representation
-    std::optional<Alignment> alignment; // Optional wrapper for alignment struct
-
-    /**
-     * Simple constructor for QuerySequence which moves sequence into struct.
-     * Sets alignment to std::nullopt
-     */
-    QuerySequence(size_t id, const std::string &name, const std::string &sequence)
-      : id(id), name(name), sequence(std::move(sequence)) {}
+// Simple struct to wrap alignment results for a query sequence
+struct Alignment {
+    graph::align::DBGAlignerConfig::score_t score;
+    std::string cigar;
 };
 
 
@@ -124,12 +108,15 @@ class SeqSearchResult {
      * @param sequence  rvalue reference to QuerySequence (WILL BE MOVED)
      * @param result    rvalue reference to result_type (WILL BE MOVED)
      */
-    SeqSearchResult(QuerySequence&& sequence, result_type&& result)
-          : sequence(std::move(sequence)),
-            result(std::move(result)) {}
+    SeqSearchResult(QuerySequence&& sequence,
+                    result_type&& result,
+                    std::optional<Alignment>&& alignment = {})
+          : sequence(std::move(sequence)), alignment(alignment), result(std::move(result)) {}
 
     /** Const reference getters */
     const QuerySequence& get_sequence() const { return sequence; }
+    const std::optional<Alignment>& get_alignment() const { return alignment; }
+    std::optional<Alignment>& get_alignment() { return alignment; }
     const result_type& get_result() const { return result; }
 
     /**
@@ -161,8 +148,9 @@ class SeqSearchResult {
                           const graph::AnnotatedDBG &anno_graph) const;
 
   private:
-    QuerySequence sequence;     // query sequence this result represents
-    result_type result;         // result vector of labels and additional info
+    QuerySequence sequence;             // query sequence this result represents
+    std::optional<Alignment> alignment; // optional wrapper for alignment struct
+    result_type result;                 // result vector of labels and additional info
 };
 
 
@@ -172,9 +160,9 @@ class QueryExecutor {
                   const graph::AnnotatedDBG &anno_graph,
                   std::unique_ptr<graph::align::DBGAlignerConfig>&& aligner_config,
                   ThreadPool &thread_pool)
-                : config_(config), anno_graph_(anno_graph),
-                  aligner_config_(std::move(aligner_config)),
-                  thread_pool_(thread_pool) {}
+      : config_(config), anno_graph_(anno_graph),
+        aligner_config_(std::move(aligner_config)),
+        thread_pool_(thread_pool) {}
 
     /**
      * Query sequences from a FASTA file on the stored QueryExecutor::anno_graph.
