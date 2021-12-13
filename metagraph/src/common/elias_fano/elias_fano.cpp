@@ -42,11 +42,8 @@ void concat(const std::vector<std::string> &files, const std::string &result) {
 
         std::filesystem::rename(files[0] + suffix, result + suffix);
         for (size_t i = 1; i < files.size(); ++i) {
-            std::string fname = files[i] + suffix;
-            if (!std::filesystem::exists(fname))
-                logger->error("Trying to remove non-existent file: {}", fname);
-
-            std::filesystem::remove(fname);
+            assert(std::filesystem::exists(files[i] + suffix));
+            std::filesystem::remove(files[i] + suffix);
         }
     }
 }
@@ -60,7 +57,7 @@ void remove_chunks(const std::vector<std::string> &files) {
         for (const std::string &suffix : suffixes) {
             std::string fname = f + suffix;
             if (!std::filesystem::exists(fname))
-                logger->error("Trying to remove non-existent file: {}", fname);
+                logger->warn("Attempt to remove non-existent file {}", fname);
 
             std::filesystem::remove(f + suffix);
         }
@@ -525,7 +522,8 @@ size_t EliasFanoDecoder<T>::decompress_next_block() {
                     const uint32_t to_read = std::min(sizeof(lower_) - sizeof(T), num_lower_bytes_);
                     lower_[0] = lower_[lower_idx_];
                     if (!source_.read(reinterpret_cast<char *>(&lower_[1]), to_read)) {
-                        logger->error("Error while reading {} lower bytes from {}", to_read, source_name_);
+                        logger->error("Error while reading next {} lower bits from {}",
+                                      to_read * 8, source_name_);
                         std::exit(EXIT_FAILURE);
                     }
                     num_lower_bytes_ -= to_read;
@@ -553,19 +551,10 @@ bool EliasFanoDecoder<T>::init() {
     memset(lower_, 0, sizeof(lower_));
     upper_pos_ = 0;
     source_.read(reinterpret_cast<char *>(&size_), sizeof(size_t));
-    if (source_.bad()) {
-        logger->error("Error while reading size from {}", source_name_);
-        std::exit(EXIT_FAILURE);
-    } else if (source_.eof()) {
+    if (source_.eof()) {
         source_.close();
         source_upper_.close();
         if (remove_source_) {
-            if (!std::filesystem::exists(source_name_))
-                logger->error("Trying to remove non-existent file: {}", source_name_);
-
-            if (!std::filesystem::exists(source_name_ + ".up"))
-                logger->error("Trying to remove non-existent file: {}.up", source_name_);
-
             std::filesystem::remove(source_name_);
             std::filesystem::remove(source_name_ + ".up");
         }
