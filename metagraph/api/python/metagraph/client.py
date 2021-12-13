@@ -48,6 +48,13 @@ class GraphClientJson:
                 f"discovery_threshold should be between 0 and 1 inclusive. Got {discovery_threshold}")
 
         if align:
+            # Warn if number of alignments is specified > 1
+            if 'max_alternative_alignments' in align_params and \
+                    align_params['max_alternative_alignments'] > 1:
+                align_params['max_alternative_alignments'] = 1
+                warnings.warn(f"Requested max alternative alignments > 1, treating as 1.",
+                              RuntimeWarning)
+
             alignments = self.align(sequence, **align_params)
 
             def to_fasta(df):
@@ -66,13 +73,14 @@ class GraphClientJson:
         search_results = self._json_seq_query(sequence, param_dict, "search")
 
         if align:
-            if len(alignments) == len(search_results):
-                # Zip best alignment results
-                for alignment, search_result in zip(alignments, search_results):
-                    if 'alignments' in alignment and len(alignment['alignments']) > 0:
-                        search_result['best_alignment'] = alignment['alignments'][0]
-                    else:
-                        search_result['best_alignment'] = {}
+            assert(len(alignments) == len(search_results))
+
+            # Zip best alignment results
+            for alignment, search_result in zip(alignments, search_results):
+                if 'alignments' in alignment and len(alignment['alignments']) > 0:
+                    search_result['best_alignment'] = alignment['alignments'][0]
+                else:
+                    search_result['best_alignment'] = {}
 
         return search_results
 
