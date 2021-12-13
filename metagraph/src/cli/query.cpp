@@ -509,6 +509,7 @@ void add_hull_contigs(const DeBruijnGraph &full_dbg,
                       std::vector<std::pair<std::string, std::vector<node_index>>> *contigs) {
     tsl::hopscotch_map<node_index, uint32_t> distance_traversed_until_node;
 
+    std::mutex mu;
     std::vector<std::pair<std::string, std::vector<node_index>>> contig_buffer;
 
     #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
@@ -542,18 +543,18 @@ void add_hull_contigs(const DeBruijnGraph &full_dbg,
             // when a node which has already been accessed is visited,
             // only continue traversing if the previous access was in a
             // longer path (i.e., it cut off earlier)
-            bool extend;
+
             // TODO: check the number of forks too (shorter paths may have more forks)
-            #pragma omp critical
-            {
-                auto [it, inserted]
-                    = distance_traversed_until_node.emplace(last_node, depth);
+            std::lock_guard<std::mutex> lock(mu);
 
-                extend = inserted || depth < it->second;
+            auto [it, inserted]
+                = distance_traversed_until_node.emplace(last_node, depth);
 
-                if (!inserted && depth < it->second)
-                    it.value() = depth;
-            }
+            bool extend = inserted || depth < it->second;
+
+            if (!inserted && depth < it->second)
+                it.value() = depth;
+
             return extend;
         };
 
