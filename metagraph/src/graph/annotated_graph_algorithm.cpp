@@ -4,6 +4,7 @@
 #include "common/vectors/vector_algorithm.hpp"
 #include "common/vectors/bitmap.hpp"
 #include "graph/representation/masked_graph.hpp"
+#include "graph/representation/canonical_dbg.hpp"
 
 
 namespace mtg {
@@ -58,7 +59,7 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                           size_t num_threads);
 
 
-std::shared_ptr<MaskedDeBruijnGraph>
+std::shared_ptr<DeBruijnGraph>
 mask_nodes_by_label(const AnnotatedDBG &anno_graph,
                     const tsl::hopscotch_set<Label> &labels_in,
                     const tsl::hopscotch_set<Label> &labels_out,
@@ -180,6 +181,9 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
 
         logger->trace("Kept {} out of {} nodes", kept_nodes, total_nodes);
 
+        if (masked_graph->get_mode() == DeBruijnGraph::PRIMARY)
+            return std::make_shared<CanonicalDBG>(masked_graph);
+
         return masked_graph;
     }
 
@@ -236,6 +240,9 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
         num_threads
     );
 
+    if (masked_graph->get_mode() == DeBruijnGraph::PRIMARY)
+        return std::make_shared<CanonicalDBG>(masked_graph);
+
     return masked_graph;
 }
 
@@ -254,13 +261,20 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     // counts interleaved
     assert(counts.size() == mask.size() * 2);
 
-    add_complement |= graph_ptr->get_mode() == DeBruijnGraph::CANONICAL;
+    auto base_graph = graph_ptr;
+    if (auto canonical = std::dynamic_pointer_cast<const CanonicalDBG>(graph_ptr))
+        base_graph = canonical->get_graph_ptr();
+
+    add_complement |= base_graph->get_mode() == DeBruijnGraph::CANONICAL;
     auto masked_graph = std::make_shared<MaskedDeBruijnGraph>(
-        graph_ptr,
+        base_graph,
         add_complement
             ? std::make_unique<bitmap_vector>(mask)
             : std::make_unique<bitmap_vector>(std::move(mask)),
-        true
+        true,
+        base_graph->get_mode() == DeBruijnGraph::PRIMARY
+            ? DeBruijnGraph::PRIMARY
+            : DeBruijnGraph::BASIC
     );
 
     logger->trace("Constructed masked graph with {} nodes", masked_graph->num_nodes());
@@ -304,7 +318,7 @@ construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
                                   size_t num_labels,
                                   size_t num_threads) {
     size_t width = sdsl::bits::hi(num_labels) + 1;
-    sdsl::bit_vector indicator(anno_graph.get_graph().max_index() + 1, false);
+    sdsl::bit_vector indicator(anno_graph.get_graph().get_base_graph().max_index() + 1, false);
 
     // the in and out counts are stored interleaved
     sdsl::int_vector<> counts = aligned_int_vector(indicator.size() * 2, 0, width, 16);

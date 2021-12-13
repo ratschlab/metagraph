@@ -50,7 +50,7 @@ struct DifferentialAssemblyConfig {
  * In round 3, the config rules are used to discard (i.e., mask out) nodes from
  * the masked graph. The resulting graph is returned.
  */
-std::shared_ptr<MaskedDeBruijnGraph>
+std::shared_ptr<DeBruijnGraph>
 mask_nodes_by_label(const AnnotatedDBG &anno_graph,
                     const tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> &labels_in,
                     const tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> &labels_out,

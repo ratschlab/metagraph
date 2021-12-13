@@ -60,12 +60,12 @@ DifferentialAssemblyConfig diff_assembly_config(const Json::Value &experiment,
     return diff_config;
 }
 
-typedef std::function<void(const graph::MaskedDeBruijnGraph&,
-                           const std::string& /* header */)> CallMaskedGraphHeader;
+typedef std::function<void(const graph::DeBruijnGraph&,
+                           const std::string& /* header */)> CallGraphHeader;
 
 void call_masked_graphs(const AnnotatedDBG &anno_graph,
                         Config *config,
-                        const CallMaskedGraphHeader &callback) {
+                        const CallGraphHeader &callback) {
     if (!std::dynamic_pointer_cast<const DeBruijnGraph>(anno_graph.get_graph_ptr()).get())
         throw std::runtime_error("Masking only supported for DeBruijnGraph");
 
@@ -171,7 +171,7 @@ int assemble(Config *config) {
         size_t num_threads = std::max(1u, get_num_threads());
 
         call_masked_graphs(*anno_graph, config,
-            [&](const graph::MaskedDeBruijnGraph &graph, const std::string &header) {
+            [&](const graph::DeBruijnGraph &graph, const std::string &header) {
                 seq_io::FastaWriter writer(config->outfbase, header,
                                            config->enumerate_out_sequences,
                                            num_threads > 1, /* async write */

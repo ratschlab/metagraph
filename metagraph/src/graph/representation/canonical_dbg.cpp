@@ -1,6 +1,7 @@
 #include "canonical_dbg.hpp"
 
 #include "graph/representation/succinct/dbg_succinct.hpp"
+#include "graph/representation/masked_graph.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 #include "kmer/kmer_extractor.hpp"
 
@@ -23,6 +24,7 @@ CanonicalDBG::CanonicalDBG(Graph&& graph, size_t cache_size)
 template CanonicalDBG::CanonicalDBG(std::shared_ptr<DeBruijnGraph>&&, size_t);
 template CanonicalDBG::CanonicalDBG(std::shared_ptr<const DeBruijnGraph>&&, size_t);
 template CanonicalDBG::CanonicalDBG(std::shared_ptr<DeBruijnGraph>&, size_t);
+template CanonicalDBG::CanonicalDBG(std::shared_ptr<MaskedDeBruijnGraph>&, size_t);
 template CanonicalDBG::CanonicalDBG(std::shared_ptr<const DeBruijnGraph>&, size_t);
 template CanonicalDBG::CanonicalDBG(std::shared_ptr<DBGSuccinct>&, size_t);
 
