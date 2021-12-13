@@ -1033,17 +1033,17 @@ void DBGSuccinct::print(std::ostream &out) const {
     }
 }
 
-auto DBGSuccinct::get_cached_view(size_t cache_size) const -> std::shared_ptr<CachedView> {
+auto DBGSuccinct::get_cached_view(size_t cache_size) const -> std::unique_ptr<CachedView> {
     if (get_k() * kmer::KmerExtractorBOSS::bits_per_char <= 64) {
-        return std::make_shared<DBGSuccinctCachedViewImpl<kmer::KmerExtractorBOSS::Kmer64>>(
+        return std::make_unique<DBGSuccinctCachedViewImpl<kmer::KmerExtractorBOSS::Kmer64>>(
             *this, cache_size
         );
     } else if (get_k() * kmer::KmerExtractorBOSS::bits_per_char <= 128) {
-        return std::make_shared<DBGSuccinctCachedViewImpl<kmer::KmerExtractorBOSS::Kmer128>>(
+        return std::make_unique<DBGSuccinctCachedViewImpl<kmer::KmerExtractorBOSS::Kmer128>>(
             *this, cache_size
         );
     } else {
-        return std::make_shared<DBGSuccinctCachedViewImpl<kmer::KmerExtractorBOSS::Kmer256>>(
+        return std::make_unique<DBGSuccinctCachedViewImpl<kmer::KmerExtractorBOSS::Kmer256>>(
             *this, cache_size
         );
     }
