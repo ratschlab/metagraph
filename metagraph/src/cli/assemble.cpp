@@ -43,7 +43,7 @@ void check_labels(const tsl::hopscotch_set<std::string> &label_set,
 DifferentialAssemblyConfig diff_assembly_config(const Json::Value &experiment,
                                                 const DeBruijnGraph &graph) {
     DifferentialAssemblyConfig diff_config;
-    diff_config.add_complement = graph.get_mode() == DeBruijnGraph::CANONICAL;
+    diff_config.add_complement = graph.get_base_graph().get_mode() == DeBruijnGraph::CANONICAL;
     diff_config.label_mask_in_kmer_fraction = experiment.get("in_min_fraction", 1.0).asDouble();
     diff_config.label_mask_in_unitig_fraction = experiment.get("unitig_in_min_fraction", 0.0).asDouble();
     diff_config.label_mask_out_kmer_fraction = experiment.get("out_max_fraction", 0.0).asDouble();
