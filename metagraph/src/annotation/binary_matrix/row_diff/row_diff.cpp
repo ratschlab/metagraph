@@ -120,7 +120,7 @@ std::vector<BinaryMatrix::Row> RowDiff<BaseMatrix>::get_column(Column column) co
 
                     graph_->adjacent_incoming_nodes(node, [&](auto prev_node) {
                         uint64_t row = graph::AnnotatedSequenceGraph::graph_to_anno_index(prev_node);
-                        if (!anchor_[row] && !diffs_.get(row, column)) {
+                        if (!diffs_.get(row, column) && !anchor_[row]) {
                             assert(boss_edge
                                 == boss.row_diff_successor(graph_->kmer_to_boss_index(prev_node), rd_succ));
                             assert(!boss.get_minus_k_value(graph_->kmer_to_boss_index(prev_node), boss.get_k() - 1).first
