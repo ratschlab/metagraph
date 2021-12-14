@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+
 import multiprocessing
 from typing import Dict, Tuple, List, Iterable, Union, Any
 from concurrent.futures import ThreadPoolExecutor
