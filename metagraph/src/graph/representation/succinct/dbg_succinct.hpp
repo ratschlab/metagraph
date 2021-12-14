@@ -19,8 +19,13 @@ class DBGSuccinct : public DeBruijnGraph {
     /**
      * A wrapper which caches computed node sequences for DBGSuccinct graphs.
      * This allows for faster get_node_sequence and call_incoming_kmers calls.
-     * Traversal operations and map_to_nodes_sequentially are overridden to fill
-     * the cache alongside their normal functions.
+     *
+     * In particular, for each cached node, it stores its decoded k-mer sequence
+     * and the BOSS node whose last character is the first character of the k-mer.
+     *
+     * call_incoming_kmers, call_outgoing_kmers, and map_to_nodes_sequentially
+     * are overridden to fill the cache alongside their normal functions.
+     *
      * Bytes stored per k-mer: ~56 (k<=21), ~64 (k<=42), ~80 (k<=85)
      */
     class CachedView;
