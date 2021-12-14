@@ -2,7 +2,7 @@
 
 import multiprocessing
 from typing import Dict, Tuple, List, Iterable, Union, Any
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, Future, wait
 
 import pandas as pd
 import requests
@@ -198,18 +198,18 @@ class MultiGraphClient:
                discovery_threshold: float = DEFAULT_DISCOVERY_THRESHOLD,
                with_signature: bool = False,
                align: bool = False,
-               **align_params) -> Dict[str, pd.DataFrame]:
+               **align_params) -> Dict[str, Union[pd.DataFrame, Future]]:
         """
         Make search requests with each graph client.
 
-        :param parallel: perform requests in parallel
+        :param parallel: perform requests in parallel, and instead return Future instances
         :param align_params: see parameters for alignment in align()
         :return: Dict mapping graph names to pd.DataFrame results
         """
 
-        result = {}
-
         if not parallel:
+            result = {}
+
             # Do this iteratively and return once done
             for name, graph_client in self.graphs.items():
                 result[name] = graph_client.search(sequence, top_labels,
@@ -232,29 +232,26 @@ class MultiGraphClient:
 
         print(f'Made {len(self.graphs)} requests with {num_processes} threads...')
 
-        # Wait for shutdown and pending futures
-        executor.shutdown(wait=True)
-
-        # Now we can safely retrieve values (errors will propagate)
-        result = {name: fs.result() for name, fs in futures.items()}
-        return result
+        # Shutdown executor but do not stop futures
+        executor.shutdown(wait=False)
+        return futures
 
     def align(self, sequence: Union[str, Iterable[str]],
               parallel=True,
               min_exact_match: float = DEFAULT_DISCOVERY_THRESHOLD,
               max_alternative_alignments: int = 1,
               max_num_nodes_per_seq_char: float = DEFAULT_NUM_NODES_PER_SEQ_CHAR) -> Dict[
-        str, pd.DataFrame]:
+        str, Union[pd.DataFrame, Future]]:
         """
         Make align requests with each graph client.
 
-        :param parallel: perform requests in parallel
+        :param parallel: perform requests in parallel, and instead return Future instances
         :return: Dict mapping graph names to pd.DataFrame results
         """
 
-        result = {}
-
         if not parallel:
+            result = {}
+
             # Do this iteratively and return once done
             for name, graph_client in self.graphs.items():
                 result[name] = graph_client.align(sequence, min_exact_match,
@@ -262,10 +259,6 @@ class MultiGraphClient:
                                                   max_num_nodes_per_seq_char)
 
             return result
-        for name, graph_client in self.graphs.items():
-            result[name] = graph_client.align(sequence, min_exact_match,
-                                              max_alternative_alignments,
-                                              max_num_nodes_per_seq_char)
 
         # Otherwise, let's query in parallel with a multiprocessing pool
         num_processes = min(multiprocessing.cpu_count(), len(self.graphs))
@@ -281,13 +274,9 @@ class MultiGraphClient:
 
         print(f'Made {len(self.graphs)} requests with {num_processes} threads...')
 
-        # Wait for shutdown and pending futures
-        executor.shutdown(wait=True)
-
-        # Now we can safely retrieve values (errors will propagate)
-        result = {name: fs.result() for name, fs in futures.items()}
-
-        return result
+        # Shutdown executor but do not stop futures
+        executor.shutdown(wait=False)
+        return futures
 
     def column_labels(self) -> Dict[str, List[str]]:
         ret = {}
@@ -295,3 +284,19 @@ class MultiGraphClient:
             ret[name] = graph_client.column_labels()
 
         return ret
+
+    def wait_for_result(futures: Dict[str, Future]) -> Dict[str, Union[pd.DataFrame, Exception]]:
+        """
+        Wait for all futures to finish running and return a proper result dict.
+        If any of the calls resulted in an exception, return that in the result instead.
+
+        :param futures: Dictionary mapping graph names to Future instances
+        :return Dictionary mapping graph names to result DataFrames (or Execeptions)
+        """
+        wait(futures.values())
+
+        result = {}
+        for name, fs in futures.items():
+            result[name] = fs.exception() if fs.exception() else fs.result()
+
+        return result
