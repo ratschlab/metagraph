@@ -190,7 +190,7 @@ Config::Config(int argc, char *argv[]) {
             }
         } else if (!strcmp(argv[i], "--aggregate-columns")) {
             aggregate_columns = true;
-        } else if (!strcmp(argv[i], "--intersected-anno")) {
+        } else if (!strcmp(argv[i], "--compute-overlap")) {
             intersected_columns = get_value(i++);
         } else if (!strcmp(argv[i], "--min-fraction")) {
             min_fraction = std::stod(get_value(i++));
@@ -1150,7 +1150,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --min-fraction [FLOAT] \texclude k-mers appearing in fewer than this fraction of columns [0.0]\n");
             fprintf(stderr, "\t   --max-count [INT] \t\texclude k-mers appearing in more than this number of columns [inf]\n");
             fprintf(stderr, "\t   --max-fraction [FLOAT] \texclude k-mers appearing in more than this fraction of columns [1.0]\n");
-            fprintf(stderr, "\t   --intersected-anno [STR] \tannotation with columns to intersect with ANNOTATOR (count shared bits) [off]\n");
+            fprintf(stderr, "\t   --compute-overlap [STR] \tanother annotation to compute the number of shared bits with columns from ANNOTATOR [off]\n");
             fprintf(stderr, "\t   --rename-cols [STR] \tfile with rules for renaming annotation labels []\n");
             fprintf(stderr, "\t                       \texample: 'L_1 L_1_renamed\n");
             fprintf(stderr, "\t                       \t          L_2 L_2_renamed\n");
