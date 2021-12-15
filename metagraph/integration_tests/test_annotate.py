@@ -47,7 +47,7 @@ class TestAnnotate(TestingBase):
         res = subprocess.run([construct_command], shell=True)
         self.assertEqual(res.returncode, 0)
 
-        res = self._get_stats(self.tempdir.name + '/graph' + graph_file_extension[cls.graph_repr])
+        res = self._get_stats(self.tempdir.name + '/graph' + graph_file_extension[graph_repr])
         self.assertEqual(res.returncode, 0)
         out = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 20', out[0])
@@ -91,7 +91,7 @@ class TestAnnotate(TestingBase):
         res = subprocess.run([construct_command], shell=True)
         self.assertEqual(res.returncode, 0)
 
-        res = self._get_stats(self.tempdir.name + '/graph' + graph_file_extension[cls.graph_repr])
+        res = self._get_stats(self.tempdir.name + '/graph' + graph_file_extension[graph_repr])
         self.assertEqual(res.returncode, 0)
         out = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 20', out[0])
@@ -131,7 +131,7 @@ class TestAnnotate(TestingBase):
         res = subprocess.run([construct_command], shell=True)
         self.assertEqual(res.returncode, 0)
 
-        res = self._get_stats(self.tempdir.name + '/graph' + graph_file_extension[cls.graph_repr])
+        res = self._get_stats(self.tempdir.name + '/graph' + graph_file_extension[graph_repr])
         self.assertEqual(res.returncode, 0)
         out = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 11', out[0])
@@ -171,7 +171,7 @@ class TestAnnotate(TestingBase):
         res = subprocess.run([construct_command], shell=True)
         self.assertEqual(res.returncode, 0)
 
-        res = self._get_stats(self.tempdir.name + '/graph' + graph_file_extension[cls.graph_repr])
+        res = self._get_stats(self.tempdir.name + '/graph' + graph_file_extension[graph_repr])
         self.assertEqual(res.returncode, 0)
         out = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 11', out[0])
@@ -231,7 +231,7 @@ class TestAnnotate(TestingBase):
         res = subprocess.run([construct_command], shell=True)
         self.assertEqual(res.returncode, 0)
 
-        res = self._get_stats(self.tempdir.name + '/graph' + graph_file_extension[cls.graph_repr])
+        res = self._get_stats(self.tempdir.name + '/graph' + graph_file_extension[graph_repr])
         self.assertEqual(res.returncode, 0)
         out = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 11', out[0])
@@ -291,7 +291,7 @@ class TestAnnotate(TestingBase):
         res = subprocess.run([construct_command], shell=True)
         self.assertEqual(res.returncode, 0)
 
-        res = self._get_stats(self.tempdir.name + '/graph' + graph_file_extension[cls.graph_repr])
+        res = self._get_stats(self.tempdir.name + '/graph' + graph_file_extension[graph_repr])
         self.assertEqual(res.returncode, 0)
         out = res.stdout.decode().split('\n')[2:]
         self.assertEqual('k: 20', out[0])
