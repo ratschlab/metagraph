@@ -159,8 +159,10 @@ Graph cleaning
 
 For removing sequencing errors, MetaGraph provides routines for graph cleaning and k-mer
 filtering. These are based on the assumption that
-k-mers with relatively low abundance (k-mer counts) in the input data are likely due to sequencing errors, and
-hence should be dropped to keep the graph free of the non-existent k-mers.
+k-mers with relatively low abundance (low k-mer counts) in the input data were likely generated due to sequencing errors, and
+hence should be dropped. Moreover, to make the cleaning procedure more robust, the decision about filtering out a k-mer can be
+made based on the median abundance of the unitig this k-mer belongs to. That is, k-mers with low abundance are preserved if
+they are situated in a unitig with sufficiently many highly abundant k-mers.
 
 ::
 
@@ -178,12 +180,12 @@ For cleaning graphs constructed from high-throughput Illumina reads, the recomme
 ``--prune-tips <2k> --prune-unitigs 0 --fallback 2``, which implements the cleaning procedure proposed in `McCortex <https://github.com/mcveanlab/mccortex>`_ (Turner et al., 2018) and includes the following steps:
 
 1. Prune all tips shorter than *2k*, where *k* is the k-mer length.
-2. Compute a threshold for the minimum k-mer abundance as follows. Assume the number of k-mers with sequencing errors (erroneous k-mers) follows a Poisson distribution with a Gamma distributed mean. Also assume that all k-mers with abundance 3 or less are due to sequencing errors. Based on these numbers, fit a Poisson distribution and pick the threshold such that the estimated erroneous k-mers make up at most 0.1% of the total k-mer coverage at that abundance level. If the picked threshold keeps less than 20% of the total coverage, deem the automatic estimation procedure unsuccessful and use the fallback value of 2 instead (set by flag ``--fallback``).
-3. Traverse the graph (where all short tips have already been removed in step 1) and fetch all unitigs with the median k-mer abundance greater or equal to the threshold defined in step 2.
+2. Compute a threshold for the minimum k-mer abundance as follows. Assume the number of k-mers with sequencing errors (erroneous k-mers) follows a Poisson distribution with a Gamma distributed mean. Also, assume that all k-mers with abundance 3 or less are generated due to sequencing errors. Based on these numbers, fit a Poisson distribution and pick a threshold such that k-mers predicted to be erroneous make up at most 0.1% of the total k-mer coverage at that abundance level. If the chosen threshold keeps less than 20% of the total coverage, deem the automatic estimation procedure unsuccessful and use the fallback value of 2 instead (set by flag ``--fallback``).
+3. Traverse the graph (where all short tips have already been removed in step 1) and fetch all unitigs with a median k-mer abundance greater or equal to the threshold defined in step 2.
 
-Once clean contigs (unitigs) are extracted from a de Bruijn graph, construct a clean de Bruijn graph from them.
+Once all clean contigs (or unitigs) are extracted from a de Bruijn graph, construct a clean de Bruijn graph from them.
 
-.. tip:: In case of indexing multiple read sets, the recommended workflow is to build a *sample de Bruijn graph* from each read set separately and clean these sample graphs independently (that is, extract clean contigs from each of them). Next, build a joint de Bruijn graph from all these clean contigs and finally annotate it using the generated clean contig sets instead of the original raw read sets.
+.. tip:: When indexing multiple read sets, the recommended workflow is to build a *sample de Bruijn graph* from each read set separately and clean these sample graphs independently (that is, extract clean contigs from each of them). Next, build a joint de Bruijn graph from all these clean contigs and finally annotate it using the generated clean contig sets instead of the original raw read sets.
 
 
 Annotate graph
