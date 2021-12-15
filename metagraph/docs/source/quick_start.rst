@@ -174,7 +174,7 @@ they are situated in a unitig with sufficiently many highly abundant k-mers.
 
     zless SRR403017_clean_contigs.fasta.gz
 
-.. note:: The default parameters in ``metagraph clean`` correspond to no cleaning. That is, an equivalent of ``metagraph transform --to-fasta``, which extracts from the input de Bruijn graph contigs including all its k-mers.
+.. note:: The default parameters in ``metagraph clean`` correspond to no cleaning. That is, an equivalent of ``metagraph transform --to-fasta``, which extracts from the input de Bruijn graph all contigs, without removing any k-mers.
 
 For cleaning graphs constructed from high-throughput Illumina reads, the recommended parameters are
 ``--prune-tips <2k> --prune-unitigs 0 --fallback 2``, which implements the cleaning procedure proposed in `McCortex <https://github.com/mcveanlab/mccortex>`_ (Turner et al., 2018) and includes the following steps:
