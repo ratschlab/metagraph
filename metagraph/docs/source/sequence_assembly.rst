@@ -13,7 +13,7 @@ See how to assemble simple contigs and unitigs in :ref:`transform to sequences<t
 Differential assembly
 ---------------------
 
-MetaGraph allows for sequences to be assembled from a defined subgraph of an input annotated de Bruijn graph. In particular, a subset of labels may be defined as a *foreground* or **in-group**, while another may be defined as the *background* or **out-group**. From these, sequences can be assembled from a subgraph predominently containing foreground k-mers and excluding background k-mers.
+MetaGraph allows for sequences to be assembled from a defined subgraph of an input annotated de Bruijn graph. In particular, a subset of labels may be defined as a *foreground* or **in-group**, while another may be defined as the *background* or **out-group**. From these, sequences can be assembled from a subgraph predominantly containing foreground k-mers and excluding background k-mers.
 
 These subgraphs can be defined using a JSON configuration file. Examples are provided `here <https://github.com/ratschlab/metagraph/blob/master/metagraph/tests/data/example.diff.json>`__ and `here <https://github.com/ratschlab/metagraph/blob/master/metagraph/tests/data/example_simple.diff.json>`__.
 
@@ -27,7 +27,3 @@ Differential assembly parameters
 In the third stage of differential assembly, several parameters defined in the config JSON files are used to determine which k-mers from the initial subgraph are filtered out. A k-mer is considered to be an *in-k-mer* if it is annotated with ``in_min_fraction`` of the foreground labels (of the experiment plus the group's shared labels). Analogously, a k-mer is considered to be an *out-k-mer* if it is annotated with more than ``out_max_fraction`` of the background labels. Next, the numbers of in- and out-k-mers are considered in each unitig of the initial subgraph. An entire unitig is discarded from the subgraph if less than ``unitig_in_min_fraction`` of its constituent k-mers are in-k-mers, if more than ``unitig_out_max_fraction`` of these k-mers are out-k-mers, or if more than ``unitig_other_max_fraction`` of the constituent k-mers contain other (non-in- or non-out-) labels.
 
 Each sequence which is extracted from an experiment is labeled with the ``name`` defined for that experiment.
-
-Parameters
-----------
-
