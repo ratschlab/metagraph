@@ -181,9 +181,6 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
 
         logger->trace("Kept {} out of {} nodes", kept_nodes, total_nodes);
 
-        if (masked_graph->get_mode() == DeBruijnGraph::PRIMARY)
-            return std::make_shared<CanonicalDBG>(masked_graph);
-
         return masked_graph;
     }
 
@@ -239,9 +236,6 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
         },
         num_threads
     );
-
-    if (masked_graph->get_mode() == DeBruijnGraph::PRIMARY)
-        return std::make_shared<CanonicalDBG>(masked_graph);
 
     return masked_graph;
 }

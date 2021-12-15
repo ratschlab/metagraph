@@ -5,6 +5,7 @@
 
 #include "graph/annotated_graph_algorithm.hpp"
 #include "graph/representation/masked_graph.hpp"
+#include "common/seq_tools/reverse_complement.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 
@@ -264,7 +265,14 @@ test_mask_unitigs_canonical(double inlabel_fraction,
                                                   {}, {},
                                                   config, num_threads);
 
-            masked_dbg->call_kmers([&](auto, const std::string &kmer) { obs_kmers.insert(kmer); });
+            masked_dbg->call_kmers([&](auto, std::string kmer) {
+                obs_kmers.insert(kmer);
+                if (mode == DeBruijnGraph::PRIMARY) {
+                    reverse_complement(kmer.begin(), kmer.end());
+                    ASSERT_EQ(0u, obs_kmers.count(kmer));
+                    obs_kmers.insert(kmer);
+                }
+            });
 
             if (ref_kmers != obs_kmers)
                 return obs_kmers;
