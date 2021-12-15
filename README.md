@@ -1,8 +1,52 @@
 # Metagenome Graph Project
 
+MetaGraph is a tool for scalable construction of annotated genome graphs and sequence-to-graph alignment.
+
+The default index representations in MetaGraph are extremely scalable and support building graphs with trillions of nodes and millions of annotation labels.
+At the same time, the provided workflows and their careful implementation, combined with low-level optimizations of the core data structures, enable exceptional query and alignment performance.
+
+#### Main features:
+* Large-scale indexing of sequences
+* Python API for querying in the server mode
+* Encoding **k-mer counts** or expression values and **k-mer coordinates** (positions in source sequences)
+* **Sequence alignment** against very large annotated graphs
+* Scalable cleaning of very large de Bruijn graphs (to remove sequencing errors)
+* Support for custom alphabets (e.g., {A,C,G,T,N} or amino acids)
+* Algorithms for **differential assembly**
+
+#### Design choices in MetaGraph:
+* Use of succinct data structures and efficient representation schemes for extremely high scalability
+* Algorithmic choices that work efficiently with succinct data structures (e.g., always prefer batched operations)
+* Modular support of different graph and annotation representations
+* Use of generic and extensible interfaces to support adding custom index representations / algorithms with little code overhead.
+
 ## Install
 
-See [installation instructions](metagraph/docs/source/installation.rst) or [docs online](https://metagraph.ethz.ch/static/docs/index.html).
+### Conda
+
+Install the [latest release](https://github.com/ratschlab/metagraph/releases/latest) on Linux or Mac OS X with Anaconda:
+
+```
+conda install -c bioconda -c conda-forge metagraph
+```
+
+### Docker
+
+If docker is available on the system, immediately get started with
+
+```
+docker run -v ${HOME}:/mnt ghcr.io/ratschlab/metagraph:master build -v -k 10 \
+                            -o /mnt/transcripts_1000 \
+                            /mnt/transcripts_1000.fa
+```
+
+(Replace `${HOME}` with a directory on the host system to map it under `/mnt` in the container.)
+
+All different versions of the container are listed [here](https://github.com/ratschlab/metagraph/pkgs/container/metagraph).
+
+### Install From Sources
+
+To compile from source, see [documentation online](https://metagraph.ethz.ch/static/docs/installation.html#install-from-source) (e.g., for builds with custom configurations).
 
 
 ## Typical workflow
@@ -109,11 +153,11 @@ Requires `M*V/8 + Size(BRWT)` bytes of RAM, where `M` is the number of rows in t
 ./metagraph assemble -v <GRAPH_DIR>/graph.dbg \
                         --unitigs \
                         -a <GRAPH_DIR>/annotation.column.annodbg \
-                        --label-mask-in LABEL_1 \
-                        --label-mask-in LABEL_2 \
-                        --label-mask-out LABEL_3 \
+                        --diff-assembly-rules diff_assembly_rules.json \
                         -o diff_assembled.fa
 ```
+
+See [`metagraph/tests/data/example.diff.json`](metagraph/tests/data/example.diff.json) and [`metagraph/tests/data/example_simple.diff.json`](metagraph/tests/data/example_simple.diff.json) for sample files.
 
 ### Get stats
 Stats for graph

@@ -269,6 +269,7 @@ compute_or(const std::vector<const bit_vector *> &columns,
     std::vector<std::pair<uint64_t *, uint64_t *>>
             results((vector_size + block_size - 1) / block_size);
 
+    std::mutex mu;
     std::vector<std::shared_future<void>> futures;
     std::atomic<uint64_t> num_set_bits = 0;
 
@@ -285,8 +286,8 @@ compute_or(const std::vector<const bit_vector *> &columns,
             std::pair<uint64_t *, uint64_t *> buffer_pos;
             std::pair<uint64_t *, uint64_t *> buffer_merge;
 
-            #pragma omp critical
             {
+                std::lock_guard<std::mutex> lock(mu);
                 // reserve space for 3 buffers of size |buffer_size| each
                 result.first = result.second = buffer;
                 buffer_pos.first = buffer_pos.second = buffer + buffer_size;

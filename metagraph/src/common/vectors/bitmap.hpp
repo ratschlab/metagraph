@@ -187,4 +187,37 @@ class bitmap_lazy : public bitmap {
     size_t num_set_bits_;
 };
 
+class bitmap_generator : public bitmap {
+  public:
+    explicit bitmap_generator(size_t size = 0, bool value = false);
+
+    bitmap_generator(std::vector<uint64_t>&& set_bits, size_t size) noexcept
+          : size_(size), num_set_bits_(set_bits.size()),
+            generator_([s=std::move(set_bits)](const VoidCall<uint64_t> &callback) {
+                           std::for_each(s.begin(), s.end(), callback);
+                       }) {}
+
+    bitmap_generator(std::function<void(const VoidCall<uint64_t>&)>&& generator,
+                     size_t size,
+                     size_t num_set_bits = -1) noexcept;
+
+    bool operator[](uint64_t) const { throw std::runtime_error("Not implemented"); }
+    uint64_t get_int(uint64_t, uint32_t) const { throw std::runtime_error("Not implemented"); }
+
+    uint64_t size() const { return size_; }
+    uint64_t num_set_bits() const { return num_set_bits_; }
+
+    void add_to(sdsl::bit_vector *other) const;
+
+    // This is inefficient when begin > 0 and end < size_. This will throw an
+    // exception if it is called in that way.
+    void call_ones_in_range(uint64_t begin, uint64_t end,
+                            const VoidCall<uint64_t> &callback) const;
+
+  private:
+    size_t size_;
+    size_t num_set_bits_;
+    std::function<void(const VoidCall<uint64_t>&)> generator_;
+};
+
 #endif // __BITMAP_HPP__

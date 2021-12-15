@@ -256,8 +256,8 @@ int clean_graph(Config *config) {
             assert(config->count_slice_quantiles[i - 1] < config->count_slice_quantiles[i]);
 
             auto filebase = utils::remove_suffix(config->outfbase, ".gz", ".fasta")
-                    + "." + std::to_string(config->count_slice_quantiles[i - 1])
-                    + "." + std::to_string(config->count_slice_quantiles[i]);
+                    + fmt::format(".{}.{}", config->count_slice_quantiles[i - 1],
+                                            config->count_slice_quantiles[i]);
 
             if (!count_hist_v.size()) {
                 dump_contigs_to_fasta(filebase, [](auto, auto) {});

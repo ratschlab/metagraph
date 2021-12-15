@@ -10,12 +10,8 @@ namespace mtg {
 namespace annot {
 
 using utils::remove_suffix;
+using utils::make_suffix;
 
-
-template <class BinaryMatrixType, typename Label>
-std::string
-StaticBinRelAnnotator<BinaryMatrixType, Label>
-::file_extension() const { return kExtension; }
 
 template <class BinaryMatrixType, typename Label>
 bool
@@ -55,8 +51,7 @@ template <class BinaryMatrixType, typename Label>
 void
 StaticBinRelAnnotator<BinaryMatrixType, Label>
 ::serialize(const std::string &filename) const {
-    std::ofstream outstream(remove_suffix(filename, kExtension) + kExtension,
-                            std::ios::binary);
+    std::ofstream outstream(make_suffix(filename, kExtension), std::ios::binary);
     if (!outstream.good()) {
         throw std::ofstream::failure("Bad stream");
     }
@@ -66,8 +61,7 @@ StaticBinRelAnnotator<BinaryMatrixType, Label>
 
 template <class BinaryMatrixType, typename Label>
 bool StaticBinRelAnnotator<BinaryMatrixType, Label>::load(const std::string &filename) {
-    std::ifstream instream(remove_suffix(filename, kExtension) + kExtension,
-                           std::ios::binary);
+    std::ifstream instream(make_suffix(filename, kExtension), std::ios::binary);
     if (!instream.good())
         return false;
 
@@ -77,16 +71,6 @@ bool StaticBinRelAnnotator<BinaryMatrixType, Label>::load(const std::string &fil
     } catch (...) {
         return false;
     }
-}
-
-template <class BinaryMatrixType, typename Label>
-uint64_t StaticBinRelAnnotator<BinaryMatrixType, Label>::num_objects() const {
-    return matrix_->num_rows();
-}
-
-template <class BinaryMatrixType, typename Label>
-uint64_t StaticBinRelAnnotator<BinaryMatrixType, Label>::num_relations() const {
-    return matrix_->num_relations();
 }
 
 template <class BinaryMatrixType, typename Label>
@@ -188,7 +172,7 @@ bool merge_load_row_diff(const std::vector<std::string> &filenames,
             if (!label_encoder.size())
                 common::logger->warn("No labels in {}", filenames[i]);
 
-            std::vector<std::unique_ptr<bit_vector>> cols = matrix.diffs().release_columns();
+            std::vector<std::unique_ptr<bit_vector>> &cols = matrix.diffs().data();
 
             for (uint32_t j = 0; j < cols.size(); ++j) {
                 callback(offsets[i] + j, label_encoder.decode(j), std::move(cols[j]));
@@ -224,9 +208,17 @@ template class StaticBinRelAnnotator<binmat::RowSparse, std::string>;
 
 template class StaticBinRelAnnotator<binmat::RowDiff<binmat::RowSparse>, std::string>;
 
-template class StaticBinRelAnnotator<matrix::CSCMatrix<binmat::BRWT, sdsl::dac_vector_dp<>>, std::string>;
+template class StaticBinRelAnnotator<matrix::CSCMatrix<binmat::BRWT, CountsVector>, std::string>;
 
-template class StaticBinRelAnnotator<matrix::IntRowDiff<matrix::CSCMatrix<binmat::BRWT, sdsl::dac_vector_dp<>>>, std::string>;
+template class StaticBinRelAnnotator<matrix::IntRowDiff<matrix::CSCMatrix<binmat::BRWT, CountsVector>>, std::string>;
+
+template class StaticBinRelAnnotator<matrix::CSRMatrix, std::string>;
+
+template class StaticBinRelAnnotator<matrix::TupleCSCMatrix<binmat::ColumnMajor>, std::string>;
+template class StaticBinRelAnnotator<matrix::TupleCSCMatrix<binmat::BRWT>, std::string>;
+
+template class StaticBinRelAnnotator<matrix::TupleRowDiff<matrix::TupleCSCMatrix<binmat::ColumnMajor>>, std::string>;
+template class StaticBinRelAnnotator<matrix::TupleRowDiff<matrix::TupleCSCMatrix<binmat::BRWT>>, std::string>;
 
 } // namespace annot
 } // namespace mtg

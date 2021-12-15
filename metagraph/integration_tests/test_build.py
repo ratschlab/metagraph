@@ -27,6 +27,8 @@ build_params = {'succinct': ('succinct', '""'),
                 'hashfast': ('hashfast', '""'),
                 'hashstr': ('hashstr', '""')}
 
+succinct_states = {'stat', 'fast', 'small', 'dynamic'}
+
 BUILDS = [name for name, _ in build_params.items()]
 
 
@@ -60,6 +62,24 @@ class TestBuild(unittest.TestCase):
         self.assertEqual('k: 20', params_str[0])
         self.assertEqual('nodes (k): 591997', params_str[1])
         self.assertEqual('mode: basic', params_str[2])
+
+    @parameterized.expand(succinct_states)
+    def test_build_succinct_inplace(self, state):
+        construct_command = f'{METAGRAPH} build -k 20 --graph succinct --state {state} \
+                                            --inplace \
+                                            -o {self.tempdir.name}/graph \
+                                            {TEST_DATA_DIR}/transcripts_1000.fa'
+
+        res = subprocess.run([construct_command], shell=True)
+        self.assertEqual(res.returncode, 0)
+
+        res = self.__get_stats(self.tempdir.name + '/graph' + graph_file_extension['succinct'])
+        self.assertEqual(res.returncode, 0)
+        params_str = res.stdout.decode().split('\n')[2:]
+        self.assertEqual('k: 20', params_str[0])
+        self.assertEqual('nodes (k): 597931', params_str[1])
+        self.assertEqual('mode: basic', params_str[2])
+        self.assertEqual('state: ' + state, params_str[8])
 
     @parameterized.expand(['succinct'])
     def test_simple_bloom_graph(self, build):
@@ -162,6 +182,47 @@ class TestBuild(unittest.TestCase):
                 '-o', self.tempdir.name + '/graph',
                 TEST_DATA_DIR + '/transcripts_1000.fa']
         construct_command = ' '.join(args)
+
+        res = subprocess.run([construct_command], shell=True)
+        self.assertEqual(res.returncode, 0)
+
+        res = self.__get_stats(self.tempdir.name + '/graph' + graph_file_extension[representation])
+        self.assertEqual(res.returncode, 0)
+        params_str = res.stdout.decode().split('\n')[2:]
+        self.assertEqual('k: 2', params_str[0])
+        self.assertEqual('nodes (k): 16', params_str[1])
+        self.assertEqual('mode: canonical', params_str[2])
+
+    @parameterized.expand(BUILDS)
+    def test_build_tiny_k_parallel(self, build):
+        representation, tmp_dir = build_params[build]
+
+        construct_command = f'{METAGRAPH} build --mask-dummy --graph {representation} \
+                                -k 2 -p 100 --disk-swap {tmp_dir} \
+                                -o {self.tempdir.name}/graph \
+                                {TEST_DATA_DIR}/transcripts_1000.fa'
+
+        res = subprocess.run([construct_command], shell=True)
+        self.assertEqual(res.returncode, 0)
+
+        res = self.__get_stats(self.tempdir.name + '/graph' + graph_file_extension[representation])
+        self.assertEqual(res.returncode, 0)
+        params_str = res.stdout.decode().split('\n')[2:]
+        self.assertEqual('k: 2', params_str[0])
+        self.assertEqual('nodes (k): 16', params_str[1])
+        self.assertEqual('mode: basic', params_str[2])
+
+    # TODO: add 'hashstr' once the canonical mode is implemented for it
+    @parameterized.expand([repr for repr in BUILDS if repr != 'hashstr'])
+    @unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
+    def test_build_tiny_k_parallel_canonical(self, build):
+        representation, tmp_dir = build_params[build]
+
+        construct_command = f'{METAGRAPH} build --mask-dummy --graph {representation} \
+                                --mode canonical \
+                                -k 2 -p 100 --disk-swap {tmp_dir} \
+                                -o {self.tempdir.name}/graph \
+                                {TEST_DATA_DIR}/transcripts_1000.fa'
 
         res = subprocess.run([construct_command], shell=True)
         self.assertEqual(res.returncode, 0)

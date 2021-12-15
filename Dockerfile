@@ -87,7 +87,7 @@ FROM ubuntu:20.04
 ARG CODE_BASE
 
 # the image used in production. It contains a basic runtime environment for metagraph without build tools along with
-# the metagraph binary and python API code. This image is published on dockerhub (`ratschlab/metagraph`).
+# the metagraph binary and python API code. This image is published on github's container registry (`ghcr.io/ratschlab/metagraph`).
 
 RUN apt-get update && apt-get install -y \
     libatomic1 \

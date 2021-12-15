@@ -289,14 +289,10 @@ convert_row_diff_to_BRWT(RowDiffColumnAnnotator &&annotator,
                          BRWTBottomUpBuilder::Partitioner partitioning,
                          size_t num_parallel_nodes,
                          size_t num_threads) {
-    // we are going to take the columns from the annotator and thus
-    // have to replace them with empty columns to keep the structure valid
     const graph::DBGSuccinct* graph = annotator.get_matrix().graph();
-    std::vector<std::unique_ptr<bit_vector>> columns
-            = annotator.release_matrix()->diffs().release_columns();
 
     auto matrix = std::make_unique<BRWT>(
-            BRWTBottomUpBuilder::build(std::move(columns),
+            BRWTBottomUpBuilder::build(std::move(annotator.release_matrix()->diffs().data()),
                                        partitioning,
                                        num_parallel_nodes,
                                        num_threads)
@@ -369,6 +365,7 @@ convert_row_diff_to_RowDiffSparse(const std::vector<std::string> &filenames) {
     std::vector<std::unique_ptr<bit_vector>> columns;
     LabelEncoder<std::string> label_encoder;
 
+    std::mutex mu;
     uint64_t total_num_set_bits = 0;
     bool load_successful = merge_load_row_diff(
         filenames,
@@ -378,21 +375,20 @@ convert_row_diff_to_RowDiffSparse(const std::vector<std::string> &filenames) {
                           static_cast<double>(num_set_bits) / column->size(),
                           num_set_bits);
 
-            #pragma omp critical
-            {
-                if (columns.size() && column->size() != columns.back()->size()) {
-                    logger->error("Column {} has {} rows, previous column has {} rows",
-                                  label, column->size(), columns.back()->size());
-                    exit(1);
-                }
-                size_t col = label_encoder.insert_and_encode(label);
-                if (col != columns.size()) {
-                    logger->error("Duplicate columns {}", label);
-                    exit(1);
-                }
-                columns.push_back(std::move(column));
-                total_num_set_bits += num_set_bits;
+            std::lock_guard<std::mutex> lock(mu);
+
+            if (columns.size() && column->size() != columns.back()->size()) {
+                logger->error("Column {} has {} rows, previous column has {} rows",
+                              label, column->size(), columns.back()->size());
+                exit(1);
             }
+            size_t col = label_encoder.insert_and_encode(label);
+            if (col != columns.size()) {
+                logger->error("Duplicate columns {}", label);
+                exit(1);
+            }
+            columns.push_back(std::move(column));
+            total_num_set_bits += num_set_bits;
         },
         get_num_threads()
     );
@@ -1147,7 +1143,11 @@ void convert_to_row_diff(const std::vector<std::string> &files,
                          fs::path swap_dir,
                          RowDiffStage construction_stage,
                          fs::path count_vector_fname,
-                         bool with_values) {
+                         bool with_values,
+                         bool with_coordinates,
+                         size_t num_coords_per_seq) {
+    assert(!with_values || !with_coordinates);
+
     if (out_dir.empty())
         out_dir = "./";
 
@@ -1197,6 +1197,16 @@ void convert_to_row_diff(const std::vector<std::string> &files,
                     // is missing for a non-empty annotation, the error will be thrown later
                     // in convert_batch_to_row_diff, so we skip it here in any case.
                 }
+            } else if (with_coordinates) {
+                // also add k-mer coordinates
+                try {
+                    const auto &coord_fname
+                        = utils::remove_suffix(files[i], ColumnCompressed<>::kExtension)
+                                                    + ColumnCompressed<>::kCoordExtension;
+                    file_size += fs::file_size(coord_fname);
+                } catch (...) {
+                    // Attribute vectors may be missing for empty annotations
+                }
             }
             if (file_size > mem_bytes) {
                 logger->warn("Not enough memory to process {}, requires {} MB, skipped",
@@ -1224,12 +1234,12 @@ void convert_to_row_diff(const std::vector<std::string> &files,
                       file_batch.size());
 
         if (construction_stage == RowDiffStage::COUNT_LABELS) {
-            count_labels_per_row(file_batch, count_vector_fname);
+            count_labels_per_row(file_batch, count_vector_fname, with_coordinates);
         } else {
             convert_batch_to_row_diff(graph_fname,
                     file_batch, out_dir, swap_dir, count_vector_fname, ROW_DIFF_BUFFER_BYTES,
                     construction_stage == RowDiffStage::COMPUTE_REDUCTION,
-                    with_values);
+                    with_values, with_coordinates, num_coords_per_seq);
         }
 
         logger->trace("Batch processed in {} sec", timer.elapsed());
@@ -1273,12 +1283,12 @@ void wrap_in_row_diff(MultiLabelEncoded<std::string> &&anno,
                     "Please specify the anchor file location via `-i <anchor_location>'");
             std::exit(1);
         }
-        std::string anchors_file = utils::remove_suffix(graph_file, kRowDiffAnchorExt) + kRowDiffAnchorExt;
+        std::string anchors_file = utils::make_suffix(graph_file, kRowDiffAnchorExt);
         if (!fs::exists(anchors_file)) {
             logger->error("Couldn't find anchor file at {}", anchors_file);
             std::exit(1);
         }
-        std::string fork_succ_file = utils::remove_suffix(graph_file, kRowDiffForkSuccExt) + kRowDiffForkSuccExt;
+        std::string fork_succ_file = utils::make_suffix(graph_file, kRowDiffForkSuccExt);
         if (!std::filesystem::exists(fork_succ_file)) {
             logger->error("Couldn't find fork successor bitmap at {}", fork_succ_file);
             std::exit(1);

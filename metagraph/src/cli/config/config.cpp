@@ -113,6 +113,15 @@ Config::Config(int argc, char *argv[]) {
             print_column_names = true;
         } else if (!strcmp(argv[i], "--print-internal")) {
             print_graph_internal_repr = true;
+        } else if (!strcmp(argv[i], "--print-counts-hist")) {
+            print_counts_hist = true;
+        } else if (!strcmp(argv[i], "--coordinates")) {
+            coordinates = true;
+        } else if (!strcmp(argv[i], "--num-kmers-in-seq")) {
+            // FYI: experimental
+            std::cerr << "WARNING: Flag --num-kmers-in-seq is experimental and"
+                         " should only be used for experimental purposes" << std::endl;
+            num_kmers_in_seq = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--count-kmers")) {
             count_kmers = true;
         } else if (!strcmp(argv[i], "--count-width")) {
@@ -151,6 +160,8 @@ Config::Config(int argc, char *argv[]) {
             set_num_threads(atoi(get_value(i++)));
         } else if (!strcmp(argv[i], "--parallel-nodes")) {
             parallel_nodes = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--threads-each")) {
+            parallel_each = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--max-path-length")) {
             max_path_length = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--parts-total")) {
@@ -173,6 +184,10 @@ Config::Config(int argc, char *argv[]) {
             for (const auto &border : utils::split_string(get_value(i++), " ")) {
                 count_slice_quantiles.push_back(std::stod(border));
             }
+        } else if (!strcmp(argv[i], "--count-quantiles")) {
+            for (const auto &p : utils::split_string(get_value(i++), " ")) {
+                count_quantiles.push_back(std::stod(p));
+            }
         } else if (!strcmp(argv[i], "--aggregate-columns")) {
             aggregate_columns = true;
         } else if (!strcmp(argv[i], "--intersected-anno")) {
@@ -191,8 +206,14 @@ Config::Config(int argc, char *argv[]) {
             dump_text_anno = true;
         } else if (!strcmp(argv[i], "--discovery-fraction")) {
             discovery_fraction = std::stof(get_value(i++));
+        } else if (!strcmp(argv[i], "--align-rel-score-cutoff")) {
+            alignment_rel_score_cutoff = std::stof(get_value(i++));
+        } else if (!strcmp(argv[i], "--presence-fraction")) {
+            presence_fraction = std::stof(get_value(i++));
         } else if (!strcmp(argv[i], "--query-presence")) {
             query_presence = true;
+        } else if (!strcmp(argv[i], "--query-coords")) {
+            query_coords = true;
         } else if (!strcmp(argv[i], "--filter-present")) {
             filter_present = true;
         } else if (!strcmp(argv[i], "--count-labels")) {
@@ -203,10 +224,12 @@ Config::Config(int argc, char *argv[]) {
             map_sequences = true;
         } else if (!strcmp(argv[i], "--align")) {
             align_sequences = true;
-        } else if (!strcmp(argv[i], "--align-both-strands")) {
-            align_both_strands = true;
+        } else if (!strcmp(argv[i], "--align-only-forwards")) {
+            align_only_forwards = true;
         } else if (!strcmp(argv[i], "--align-edit-distance")) {
             alignment_edit_distance = true;
+        } else if (!strcmp(argv[i], "--align-chain")) {
+            alignment_chain = true;
         } else if (!strcmp(argv[i], "--max-hull-depth")) {
             max_hull_depth = atoll(get_value(i++));
         } else if (!strcmp(argv[i], "--batch-align")) {
@@ -225,8 +248,6 @@ Config::Config(int argc, char *argv[]) {
             alignment_gap_extension_penalty = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--align-alternative-alignments")) {
             alignment_num_alternative_paths = atoi(get_value(i++));
-        } else if (!strcmp(argv[i], "--align-min-cell-score")) {
-            alignment_min_cell_score = atol(get_value(i++));
         } else if (!strcmp(argv[i], "--align-min-path-score")) {
             alignment_min_path_score = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--align-xdrop")) {
@@ -259,8 +280,6 @@ Config::Config(int argc, char *argv[]) {
             anno_labels_delimiter = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--separately")) {
             separately = true;
-        } else if (!strcmp(argv[i], "--sequentially")) {
-            files_sequentially = true;
         } else if (!strcmp(argv[i], "--num-top-labels")) {
             num_top_labels = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--port")) {
@@ -269,6 +288,8 @@ Config::Config(int argc, char *argv[]) {
             host_address = get_value(i++);
         }else if (!strcmp(argv[i], "--suffix")) {
             suffix = get_value(i++);
+        } else if (!strcmp(argv[i], "--diff-assembly-rules")) {
+            assembly_config_file = get_value(i++);
         } else if (!strcmp(argv[i], "--initialize-bloom")) {
             initialize_bloom = true;
         } else if (!strcmp(argv[i], "--bloom-fpp")) {
@@ -323,6 +344,8 @@ Config::Config(int argc, char *argv[]) {
             count_dummy = true;
         } else if (!strcmp(argv[i], "--clear-dummy")) {
             clear_dummy = true;
+        } else if (!strcmp(argv[i], "--inplace")) {
+            inplace = true;
         } else if (!strcmp(argv[i], "--index-ranges")) {
             node_suffix_length = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--no-postprocessing")) {
@@ -353,18 +376,6 @@ Config::Config(int argc, char *argv[]) {
             print_welcome_message();
             print_usage(argv[0], identity);
             exit(0);
-        } else if (!strcmp(argv[i], "--label-mask-in")) {
-            label_mask_in.emplace_back(get_value(i++));
-        } else if (!strcmp(argv[i], "--label-mask-out")) {
-            label_mask_out.emplace_back(get_value(i++));
-        } else if (!strcmp(argv[i], "--label-mask-in-fraction")) {
-            label_mask_in_fraction = std::stof(get_value(i++));
-        } else if (!strcmp(argv[i], "--label-mask-out-fraction")) {
-            label_mask_out_fraction = std::stof(get_value(i++));
-        } else if (!strcmp(argv[i], "--label-other-fraction")) {
-            label_other_fraction = std::stof(get_value(i++));
-        } else if (!strcmp(argv[i], "--filter-by-kmer")) {
-            filter_by_kmer = true;
         } else if (!strcmp(argv[i], "--disk-swap")) {
             tmp_dir = get_value(i++);
         } else if (!strcmp(argv[i], "--disk-cap-gb")) {
@@ -456,8 +467,10 @@ Config::Config(int argc, char *argv[]) {
     }
 #endif
 
-    if (tmp_dir == "OUTFBASE_TEMP_DIR")
+    if (tmp_dir == "OUTFBASE_TEMP_DIR") {
         tmp_dir = std::filesystem::path(outfbase).remove_filename();
+    }
+    utils::set_swap_path(tmp_dir);
 
     if (identity != CONCATENATE
             && identity != STATS
@@ -474,11 +487,6 @@ Config::Config(int argc, char *argv[]) {
                   << " or use the -i and -l options" << std::endl;
         print_usage_and_exit = true;
     }
-
-    // No need to align in the both strands mode if we align
-    // both forward and reverse complement sequences anyway.
-    if (forward_and_reverse)
-        align_both_strands = false;
 
     if (alignment_min_seed_length > alignment_max_seed_length) {
         std::cerr << "Error: min_seed_length must be <= max_seed_length" << std::endl;
@@ -531,7 +539,13 @@ Config::Config(int argc, char *argv[]) {
 
     if (identity == ANNOTATE
             && !filename_anno && !annotate_sequence_headers && !anno_labels.size()) {
-        std::cerr << "Error: No annotation to add" << std::endl;
+        std::cerr << "Error: no annotation labels passed (see flags --anno-filename --anno-header --anno-label)" << std::endl;
+        print_usage_and_exit = true;
+    }
+
+    if ((identity == ASSEMBLE || identity == TRANSFORM)
+            && (infbase_annotators.size() && assembly_config_file.empty())) {
+        std::cerr << "Error: annotator passed, but no differential assembly rule config file provided" << std::endl;
         print_usage_and_exit = true;
     }
 
@@ -551,8 +565,10 @@ Config::Config(int argc, char *argv[]) {
             || identity == CLEAN
             || identity == ASSEMBLE
             || identity == RELAX_BRWT)
-                    && fnames.size() != 1)
+                    && fnames.size() != 1) {
+        std::cerr << "Error: exactly one graph must be provided for this mode" << std::endl;
         print_usage_and_exit = true;
+    }
 
     if ((identity == TRANSFORM
             || identity == BUILD
@@ -572,7 +588,9 @@ Config::Config(int argc, char *argv[]) {
         const bool to_row_diff = anno_type == RowDiff
                                     || anno_type == RowDiffBRWT
                                     || anno_type == IntRowDiffBRWT
-                                    || anno_type == RowDiffRowSparse;
+                                    || anno_type == RowDiffRowSparse
+                                    || anno_type == RowDiffBRWTCoord
+                                    || anno_type == RowDiffCoord;
         if (to_row_diff && !infbase.size()) {
             std::cerr << "Path to graph must be passed with '-i <GRAPH>'" << std::endl;
             print_usage_and_exit = true;
@@ -589,6 +607,9 @@ Config::Config(int argc, char *argv[]) {
         print_usage_and_exit = true;
 
     if (discovery_fraction < 0 || discovery_fraction > 1)
+        print_usage_and_exit = true;
+
+    if (presence_fraction < 0 || presence_fraction > 1)
         print_usage_and_exit = true;
 
     if (min_count >= max_count) {
@@ -691,6 +712,14 @@ std::string Config::annotype_to_string(AnnotationType state) {
             return "int_brwt";
         case IntRowDiffBRWT:
             return "row_diff_int_brwt";
+        case ColumnCoord:
+            return "column_coord";
+        case BRWTCoord:
+            return "brwt_coord";
+        case RowDiffCoord:
+            return "row_diff_coord";
+        case RowDiffBRWTCoord:
+            return "row_diff_brwt_coord";
     }
     throw std::runtime_error("Never happens");
 }
@@ -724,6 +753,14 @@ Config::AnnotationType Config::string_to_annotype(const std::string &string) {
         return AnnotationType::IntBRWT;
     } else if (string == "row_diff_int_brwt") {
         return AnnotationType::IntRowDiffBRWT;
+    } else if (string == "column_coord") {
+        return AnnotationType::ColumnCoord;
+    } else if (string == "brwt_coord") {
+        return AnnotationType::BRWTCoord;
+    } else if (string == "row_diff_coord") {
+        return AnnotationType::RowDiffCoord;
+    } else if (string == "row_diff_brwt_coord") {
+        return AnnotationType::RowDiffBRWTCoord;
     } else {
         std::cerr << "Error: unknown annotation representation" << std::endl;
         exit(1);
@@ -786,6 +823,7 @@ DeBruijnGraph::Mode Config::string_to_graphmode(const std::string &string) {
 
 void Config::print_usage(const std::string &prog_name, IdentityType identity) {
     const char annotation_list[] = "\t\t( column, brwt, rb_brwt, int_brwt,\n"
+                                   "\t\t  column_coord, brwt_coord, row_diff_coord, row_diff_brwt_coord,\n"
                                    "\t\t  row_diff, row_diff_brwt, row_diff_sparse, row_diff_int_brwt,\n"
                                    "\t\t  row, flat, row_sparse, rbfish, bin_rel_wt, bin_rel_wt_sdsl )";
 
@@ -850,6 +888,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --reference [STR] \tbasename of reference sequence (for parsing VCF files) []\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --graph [STR] \tgraph representation: succinct / bitmap / hash / hashstr / hashfast [succinct]\n");
+            fprintf(stderr, "\t   --state [STR] \tstate of succinct graph: small / dynamic / stat / fast [stat]\n");
+            fprintf(stderr, "\t   --inplace \t\tconstruct succinct graph in-place and serialize without loading to RAM [off]\n");
             fprintf(stderr, "\t   --count-kmers \tcount k-mers and build weighted graph [off]\n");
             fprintf(stderr, "\t   --count-width \tnumber of bits used to represent k-mer abundance [8]\n");
             fprintf(stderr, "\t   --index-ranges [INT]\tindex all node ranges in BOSS for suffixes of given length [%zu]\n", kDefaultIndexSuffixLen);
@@ -914,7 +954,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Usage: %s align -i <GRAPH> [options] FASTQ1 [[FASTQ2] ...]\n\n", prog_name.c_str());
 
 #if ! _PROTEIN_GRAPH
-            fprintf(stderr, "\t   --fwd-and-reverse \t\tfor each input sequence, align its reverse complement as well [off]\n");
+            fprintf(stderr, "\t   --fwd-and-reverse \t\tfor each input sequence, report a separate alignment for its reverse complement as well [off]\n");
 #endif
             fprintf(stderr, "\t   --header-comment-delim [STR]\tdelimiter for joining fasta header with comment [off]\n");
             fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
@@ -933,12 +973,17 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Available options for alignment:\n");
             fprintf(stderr, "\t-o --outfile-base [STR]\t\t\t\tbasename of output file []\n");
             fprintf(stderr, "\t   --json \t\t\t\t\toutput alignment in JSON format [off]\n");
-            fprintf(stderr, "\t   --align-both-strands \t\t\treturn best alignments for either input sequence or its reverse complement [off]\n");
+            fprintf(stderr, "\t   --align-only-forwards \t\t\tdo not align backwards from a seed on basic-mode graphs [off]\n");
             fprintf(stderr, "\t   --align-alternative-alignments \t\tthe number of alternative paths to report per seed [1]\n");
+            fprintf(stderr, "\t   --align-chain \t\t\t\tperform multiple local alignments and chain them together into a single alignment. Useful for long error-prone reads. [off]\n");
+            fprintf(stderr, "\t         \t\t\t\t\t\tA '$' inserted into the reference sequence indicates a jump in the graph.\n");
+            fprintf(stderr, "\t         \t\t\t\t\t\tA 'G' in the reported CIGAR string indicates inserted graph nodes.\n");
             fprintf(stderr, "\t   --align-min-path-score [INT]\t\t\tthe minimum score that a reported path can have [0]\n");
-            fprintf(stderr, "\t   --align-edit-distance \t\t\tuse unit costs for scoring matrix [off]\n");
             fprintf(stderr, "\t   --align-max-nodes-per-seq-char [FLOAT]\tmaximum number of nodes to consider per sequence character [12.0]\n");
             fprintf(stderr, "\t   --align-max-ram [FLOAT]\t\t\tmaximum amount of RAM used per alignment in MB [200.0]\n");
+            fprintf(stderr, "\t   --align-xdrop [INT]\t\t\t\tthe maximum difference between the current score and the best alignment score [27]\n");
+            fprintf(stderr, "\t   \t\t\t\t\t\t\tNote that this parameter should be scaled accordingly when changing the default scoring parameters.\n");
+            fprintf(stderr, "\t   --align-rel-score-cutoff [FLOAT]\t\tmin score relative to the current best alignment to use as a lower bound for subsequent extensions [0.8]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "Advanced options for scoring:\n");
             fprintf(stderr, "\t   --align-match-score [INT]\t\t\tpositive match score [2]\n");
@@ -946,13 +991,12 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --align-mm-transversion-penalty [INT]\tpositive transversion penalty (DNA only) [3]\n");
             fprintf(stderr, "\t   --align-gap-open-penalty [INT]\t\tpositive gap opening penalty [5]\n");
             fprintf(stderr, "\t   --align-gap-extension-penalty [INT]\t\tpositive gap extension penalty [2]\n");
-            fprintf(stderr, "\t   --align-min-cell-score [INT]\t\t\tthe minimum value that a cell in the alignment table can hold [0]\n");
-            fprintf(stderr, "\t   --align-xdrop [INT]\t\t\t\tthe maximum difference between the current and the best alignment [27]\n");
+            fprintf(stderr, "\t   --align-edit-distance \t\t\tuse unit costs for scoring matrix [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "Advanced options for seeding:\n");
             fprintf(stderr, "\t   --align-min-seed-length [INT]\t\tthe minimum length of a seed [graph k]\n");
             fprintf(stderr, "\t   --align-max-seed-length [INT]\t\tthe maximum length of a seed [graph k]\n");
-            fprintf(stderr, "\t   --align-min-exact-match [FLOAT] \t\tfraction of matching nucleotides required to align sequence [0.7]\n");
+            fprintf(stderr, "\t   --align-min-exact-match [FLOAT] \t\tfraction of matching nucleotides required to align sequence [0.0]\n");
             fprintf(stderr, "\t   --align-max-num-seeds-per-locus [INT]\tthe maximum number of allowed inexact seeds per locus [inf]\n");
         } break;
         case COMPARE: {
@@ -991,7 +1035,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --index-ranges [INT]\tindex all node ranges in BOSS for suffixes of given length [%zu]\n", kDefaultIndexSuffixLen);
             fprintf(stderr, "\t   --clear-dummy \terase all redundant dummy edges and build an edgemask for non-redundant [off]\n");
             fprintf(stderr, "\t   --prune-tips [INT] \tprune all dead ends of this length and shorter [0]\n");
-            fprintf(stderr, "\t   --state [STR] \tchange state of succinct graph: small / dynamic / fast [stat]\n");
+            fprintf(stderr, "\t   --state [STR] \tchange state of succinct graph: small / dynamic / stat / fast [stat]\n");
             fprintf(stderr, "\t   --to-adj-list \twrite adjacency list to file [off]\n");
             fprintf(stderr, "\t   --to-fasta \t\textract sequences from graph and dump to compressed FASTA file [off]\n");
             fprintf(stderr, "\t   --enumerate \t\tenumerate sequences in FASTA [off]\n");
@@ -1026,13 +1070,9 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --header [STR] \theader for sequences in FASTA output []\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
             fprintf(stderr, "\n");
-            fprintf(stderr, "\t-a --annotator [STR] \t\t\tannotator to load []\n");
-            fprintf(stderr, "\t   --label-mask-in [STR] \t\tlabel to include in masked graph\n");
-            fprintf(stderr, "\t   --label-mask-out [STR] \t\tlabel to exclude from masked graph\n");
-            fprintf(stderr, "\t   --label-mask-in-fraction [FLOAT] \tminimum fraction of mask-in labels among the set of masked labels [1.0]\n");
-            fprintf(stderr, "\t   --label-mask-out-fraction [FLOAT] \tmaximum fraction of mask-out labels among the set of masked labels [0.0]\n");
-            fprintf(stderr, "\t   --label-other-fraction [FLOAT] \tmaximum fraction of other labels allowed [1.0]\n");
-            fprintf(stderr, "\t   --filter-by-kmer \t\t\tmask out graph k-mers individually [off]\n");
+            fprintf(stderr, "\t-a --annotator [STR] \t\tannotator to load []\n");
+            fprintf(stderr, "\t   --diff-assembly-rules [STR] \tJSON file describing labels to mask in and out and their relative fractions []\n");
+            fprintf(stderr, "\t                       \t\tSee the manual for the specification.\n");
         } break;
         case STATS: {
             fprintf(stderr, "Usage: %s stats [options] GRAPH1 [[GRAPH2] ...]\n\n", prog_name.c_str());
@@ -1040,6 +1080,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Available options for stats:\n");
             fprintf(stderr, "\t   --print \t\tprint graph table to the screen [off]\n");
             fprintf(stderr, "\t   --print-internal \tprint internal graph representation to screen [off]\n");
+            fprintf(stderr, "\t   --print-counts-hist \tprint histogram of k-mer weights as pairs (weight: num_kmers) [off]\n");
             fprintf(stderr, "\t   --count-dummy \tshow number of dummy source and sink edges [off]\n");
             fprintf(stderr, "\t-a --annotator [STR] \tannotation []\n");
             fprintf(stderr, "\t   --print-col-names \tprint names of the columns in annotation to screen [off]\n");
@@ -1066,7 +1107,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --mem-cap-gb [FLOAT]\tbuffer size in GB (per column in construction) [1]\n");
             fprintf(stderr, "\t-o --outfile-base [STR] basename of output file (or directory, for --separately) []\n");
             fprintf(stderr, "\t   --separately \tannotate each file independently and dump to the same directory [off]\n");
-            fprintf(stderr, "\t   --sequentially \tannotate files sequentially (each may use multiple threads) [off]\n");
+            fprintf(stderr, "\t   --threads-each [INT]\tnumber of threads to use when annotating each file with --separately [1]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --anno-filename \t\tinclude filenames as annotation labels [off]\n");
             fprintf(stderr, "\t   --anno-header \t\textract annotation labels from headers of sequences in files [off]\n");
@@ -1076,6 +1117,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --count-kmers \tadd k-mer counts to the annotation [off]\n");
             fprintf(stderr, "\t   --count-width \tnumber of bits used to represent k-mer abundance [8]\n");
+            fprintf(stderr, "\t   --coordinates \tannotate coordinates as multi-integer attributes [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
             // fprintf(stderr, "\t   --fast \t\t\tannotate in fast regime (leads to repeated labels and bigger annotation) [off]\n");
@@ -1138,6 +1180,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --max-path-length [INT] \tmaximum path length in row_diff annotation [100]\n");
             fprintf(stderr, "\t-i --infile-base [STR] \t\tgraph for generating succ/pred/anchors (for row_diff types) []\n");
             fprintf(stderr, "\t   --count-kmers \t\tadd k-mer counts to the row_diff annotation [off]\n");
+            fprintf(stderr, "\t   --coordinates \t\tadd k-mer coordinates to the row_diff annotation [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --parallel-nodes [INT] \tnumber of nodes processed in parallel in brwt tree [n_threads]\n");
             fprintf(stderr, "\n");
@@ -1153,7 +1196,8 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
         } break;
         case QUERY: {
             fprintf(stderr, "Usage: %s query -i <GRAPH> -a <ANNOTATION> [options] FILE1 [[FILE2] ...]\n"
-                            "\tEach input file is given in FASTA or FASTQ format.\n\n", prog_name.c_str());
+                            "\tEach input file is given in FASTA or FASTQ format.\n"
+                            "\tOutput format: tsv with rows '<query id>\t<query name>\t<results ...>'.\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for query:\n");
 #if ! _PROTEIN_GRAPH
@@ -1164,9 +1208,14 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --count-labels \t\tcount labels for k-mers from querying sequences [off]\n");
             fprintf(stderr, "\t   --count-kmers \t\tweight k-mers with their annotated counts (requires count annotation) [off]\n");
+            fprintf(stderr, "\t   --count-quantiles [FLOAT ...] \tk-mer count quantiles to compute for each label [off]\n"
+                            "\t                                 \t\tExample: --count-quantiles '0 0.33 0.5 0.66 1'\n"
+                            "\t                                 \t\t(0 corresponds to MIN, 1 corresponds to MAX)\n");
+            fprintf(stderr, "\t   --query-coords \t\tquery k-mer coordinates (requires coord annotation) [off]\n");
             fprintf(stderr, "\t   --print-signature \t\tprint vectors indicating present/absent k-mers [off]\n");
             fprintf(stderr, "\t   --num-top-labels \t\tmaximum number of frequent labels to print [off]\n");
             fprintf(stderr, "\t   --discovery-fraction [FLOAT] fraction of labeled k-mers required for annotation [0.7]\n");
+            fprintf(stderr, "\t   --presence-fraction [FLOAT] \tfraction of k-mers required to be present in the graph [0.0]\n");
             fprintf(stderr, "\t   --labels-delimiter [STR]\tdelimiter for annotation labels [\":\"]\n");
             fprintf(stderr, "\t   --suppress-unlabeled \tdo not show results for sequences missing in graph [off]\n");
             // fprintf(stderr, "\t-d --distance [INT] \tmax allowed alignment distance [0]\n");
@@ -1177,12 +1226,13 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --batch-size \tquery batch size (number of base pairs) [100000000]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "Available options for --align:\n");
-            fprintf(stderr, "\t   --align-both-strands \t\t\treturn best alignments for either input sequence or its reverse complement [off]\n");
+            fprintf(stderr, "\t   --align-only-forwards \t\t\tdo not align backwards from a seed on basic-mode graphs [off]\n");
             // fprintf(stderr, "\t   --align-alternative-alignments \tthe number of alternative paths to report per seed [1]\n");
             fprintf(stderr, "\t   --align-min-path-score [INT]\t\t\tthe minimum score that a reported path can have [0]\n");
-            fprintf(stderr, "\t   --align-edit-distance \t\t\tuse unit costs for scoring matrix [off]\n");
             fprintf(stderr, "\t   --align-max-nodes-per-seq-char [FLOAT]\tmaximum number of nodes to consider per sequence character [12.0]\n");
-            fprintf(stderr, "\t   --align-max-ram [FLOAT]\t\tmaximum amount of RAM used per alignment in MB [200.0]\n");
+            fprintf(stderr, "\t   --align-max-ram [FLOAT]\t\t\tmaximum amount of RAM used per alignment in MB [200.0]\n");
+            fprintf(stderr, "\t   --align-xdrop [INT]\t\t\t\tthe maximum difference between the current score and the best alignment score [27]\n");
+            fprintf(stderr, "\t   \t\t\t\t\t\t\tNote that this parameter should be scaled accordingly when changing the default scoring parameters.\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --batch-align \t\talign against query graph [off]\n");
             fprintf(stderr, "\t   --max-hull-forks [INT]\tmaximum number of forks to take when expanding query graph [4]\n");
@@ -1194,13 +1244,12 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --align-mm-transversion-penalty [INT]\tpositive transversion penalty (DNA only) [3]\n");
             fprintf(stderr, "\t   --align-gap-open-penalty [INT]\t\tpositive gap opening penalty [5]\n");
             fprintf(stderr, "\t   --align-gap-extension-penalty [INT]\t\tpositive gap extension penalty [2]\n");
-            fprintf(stderr, "\t   --align-min-cell-score [INT]\t\t\tthe minimum value that a cell in the alignment table can hold [0]\n");
-            fprintf(stderr, "\t   --align-xdrop [INT]\t\t\t\tthe maximum difference between the current and the best alignment [27]\n");
+            fprintf(stderr, "\t   --align-edit-distance \t\t\tuse unit costs for scoring matrix [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "Advanced options for seeding:\n");
             fprintf(stderr, "\t   --align-min-seed-length [INT]\t\tthe minimum length of a seed [graph k]\n");
             fprintf(stderr, "\t   --align-max-seed-length [INT]\t\tthe maximum length of a seed [graph k]\n");
-            fprintf(stderr, "\t   --align-min-exact-match [FLOAT] fraction of matching nucleotides required to align sequence [0.7]\n");
+            fprintf(stderr, "\t   --align-min-exact-match [FLOAT] fraction of matching nucleotides required to align sequence [0.0]\n");
             fprintf(stderr, "\t   --align-max-num-seeds-per-locus [INT]\tthe maximum number of allowed inexact seeds per locus [inf]\n");
         } break;
         case SERVER_QUERY: {

@@ -30,6 +30,7 @@ class bit_vector_sd : public bit_vector {
     inline std::unique_ptr<bit_vector> copy() const override;
 
     inline uint64_t rank1(uint64_t id) const override;
+    inline uint64_t conditional_rank1(uint64_t id) const override;
     inline uint64_t select0(uint64_t id) const override;
     inline uint64_t select1(uint64_t id) const override;
 
@@ -176,9 +177,32 @@ std::unique_ptr<bit_vector> bit_vector_sd::copy() const {
 
 uint64_t bit_vector_sd::rank1(uint64_t id) const {
     //the rank method in SDSL does not include id in the count
-    size_t idx = id >= this->size() ? this->size() : id + 1;
-    return !inverted_ ? rk1_(idx)
-                      : idx - rk1_(idx);
+    id = id >= this->size() ? this->size() : id + 1;
+    return !inverted_ ? rk1_(id)
+                      : id - rk1_(id);
+}
+
+uint64_t bit_vector_sd::conditional_rank1(uint64_t i) const {
+    assert(i <= vector_.size());
+    uint64_t high_val = (i >> (vector_.wl));
+    uint64_t sel_high = vector_.high_0_select(high_val + 1);
+    uint64_t rank_low = sel_high - high_val; //
+    if (!rank_low)
+        return !inverted_ ? 0 : i + 1;
+    uint64_t val_low = i & sdsl::bits::lo_set[vector_.wl];
+    // now since rank_low > 0 => sel_high > 0
+    do {
+        if (!sel_high)
+            return !inverted_ ? 0 : i + 1;
+        --sel_high;
+        --rank_low;
+    } while (vector_.high[sel_high] && vector_.low[rank_low] > val_low);
+
+    if (vector_.high[sel_high] && vector_.low[rank_low] == val_low) {
+        return !inverted_ ? rank_low + 1 : 0;
+    } else {
+        return !inverted_ ? 0 : i - rank_low;
+    }
 }
 
 uint64_t bit_vector_sd::select0(uint64_t id) const {

@@ -220,9 +220,8 @@ DBGBitmap* DBGBitmapConstructor
             if (chunk_idx >= chunk_filenames.size())
                 return DBGBitmap::Chunk();
 
-            auto chunk_filename = chunk_filenames.at(chunk_idx);
-            chunk_filename = utils::remove_suffix(chunk_filename, DBGBitmap::kChunkFileExtension)
-                                + DBGBitmap::kChunkFileExtension;
+            auto chunk_filename = utils::make_suffix(chunk_filenames.at(chunk_idx),
+                                                     DBGBitmap::kChunkFileExtension);
 
             std::ifstream chunk_in(chunk_filename, std::ios::binary);
 
