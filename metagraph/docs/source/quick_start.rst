@@ -161,7 +161,7 @@ For removing sequencing errors, MetaGraph provides routines for graph cleaning a
 filtering. These are based on the assumption that
 k-mers with relatively low abundance (low k-mer counts) in the input data were likely generated due to sequencing errors, and
 hence should be dropped. Moreover, to make the cleaning procedure more robust, the decision about filtering out a k-mer can be
-based on the median abundance of the unitig this k-mer belongs to. That is, k-mers with low abundance are preserved if
+based on the median abundance of the unitig to which this k-mer belongs. That is, k-mers with low abundance are preserved if
 they are situated in a unitig with sufficiently many highly abundant k-mers.
 
 ::
