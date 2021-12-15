@@ -2,7 +2,8 @@ rm -r build
 make html
 make html
 
-HOST=srv-metagraph@lab.bmi.inf.ethz.ch
+# don't forget to set up your ~/.ssh/config accordingly
+HOST=metagraph-docs
 
 ssh $HOST <<'ENDSSH'
 rm -r ~/projects2019-dna_web_search/static/docs
