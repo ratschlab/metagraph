@@ -7,6 +7,7 @@ from tempfile import TemporaryDirectory
 import glob
 import os
 import gzip
+from base import TestingBase
 
 
 """Test graph construction"""
@@ -31,7 +32,7 @@ build_params = {'succinct': ('succinct', '""'),
 BUILDS = [name for name, _ in build_params.items()]
 
 
-class TestBuildWeighted(unittest.TestCase):
+class TestBuildWeighted(TestingBase):
     def setUp(self):
         self.tempdir = TemporaryDirectory()
 
