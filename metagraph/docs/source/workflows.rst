@@ -3,7 +3,7 @@ Indexing workflows
 ==================
 
 Since each indexing workflow in `MetaGraph <https://metagraph.ethz.ch>`_ comprises
-several steps, here we provide pipelines to make the process easier and more straightforward
+several steps, we provide automated pipelines to make the process easier and more straightforward
 for the most common scenarios.
 
 
