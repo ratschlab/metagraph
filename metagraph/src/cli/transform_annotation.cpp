@@ -529,6 +529,7 @@ int transform_annotation(Config *config) {
 
                 if (!sum.size()) {
                     sum.resize(col->size());
+                    sdsl::util::set_to_value(sum, 0);
                 } else if (sum.size() != col->size()) {
                     logger->error("Input columns have inconsistent size ({} != {})",
                                   sum.size(), col->size());
@@ -553,6 +554,7 @@ int transform_annotation(Config *config) {
 
                 if (!sum.size()) {
                     sum.resize(col->size());
+                    sdsl::util::set_to_value(sum, 0);
                 } else if (sum.size() != col->size()) {
                     logger->error("Input columns have inconsistent size ({} != {})",
                                   sum.size(), col->size());
