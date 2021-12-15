@@ -4,6 +4,7 @@
 #include <fstream>
 
 #include <tsl/hopscotch_map.h>
+#include <progress_bar.hpp>
 
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
 #include "annotation/binary_matrix/multi_brwt/brwt.hpp"
@@ -60,7 +61,10 @@ std::vector<BinaryMatrix::Row> RowDiff<BaseMatrix>::get_column(Column column) co
     tsl::hopscotch_map<Row, bool> decoded;
 
     diffs_.call_columns({ column }, [&](size_t, const bitmap &starts) {
+        ProgressBar progress_bar(starts.num_set_bits(), "Decoding column",
+                                 std::cerr, !common::get_verbose());
         starts.call_ones([&](uint64_t row) {
+            ++progress_bar;
             std::vector<uint64_t> rows;
             uint64_t boss_edge = graph_->kmer_to_boss_index(
                     graph::AnnotatedSequenceGraph::anno_to_graph_index(row));
@@ -206,7 +210,7 @@ std::vector<BinaryMatrix::Row> RowDiff<BaseMatrix>::get_column(Column column) co
             result.emplace_back(row);
     }
     std::sort(result.begin(), result.end());
-    common::logger->trace("Done getting column {}", column);
+    common::logger->trace("Done decoding {} elements from column {}", decoded.size(), column);
     return result;
 }
 
