@@ -52,6 +52,8 @@ std::vector<BinaryMatrix::Row> RowDiff<BaseMatrix>::get_column(Column column) co
     assert(graph_ && "graph must be loaded");
     assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
 
+    common::logger->trace("Getting column {}", column);
+
     const graph::boss::BOSS &boss = graph_->get_boss();
     assert(!fork_succ_.size() || fork_succ_.size() == boss.get_last().size());
 
@@ -204,6 +206,7 @@ std::vector<BinaryMatrix::Row> RowDiff<BaseMatrix>::get_column(Column column) co
             result.emplace_back(row);
     }
     std::sort(result.begin(), result.end());
+    common::logger->trace("Done getting column {}", column);
     return result;
 }
 
