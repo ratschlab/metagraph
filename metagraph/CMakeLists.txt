@@ -174,7 +174,12 @@ execute_process(COMMAND ${CMAKE_COMMAND} -G "${CMAKE_GENERATOR}" .
 if(result)
   message(FATAL_ERROR "CMake step for KMC failed: ${result}")
 endif()
-execute_process(COMMAND ${CMAKE_COMMAND} --build . --config Release -- -j
+include(ProcessorCount)
+ProcessorCount(N)
+if(N EQUAL 0)
+  set(N 1)
+endif()
+execute_process(COMMAND ${CMAKE_COMMAND} --build . --config Release -- -j${N}
   RESULT_VARIABLE result
   WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/KMC
 )
