@@ -610,11 +610,11 @@ int transform_annotation(Config *config) {
                     exit(1);
                 }
 
-                thread_pool.enqueue([&,col{std::move(col)},values{std::move(values)}]() {
-                    assert(col->num_set_bits() == values.size());
-                    for (uint64_t r = 0; r < values.size(); ++r) {
-                        if (values[r] >= config->min_value && values[r] <= config->max_value)
-                            atomic_fetch_and_add(sum, col->select1(r + 1), 1, mu_sum, __ATOMIC_RELAXED);
+                thread_pool.enqueue([&,c{std::move(col)},v{std::move(values)}]() {
+                    assert(c->num_set_bits() == v.size());
+                    for (uint64_t r = 0; r < v.size(); ++r) {
+                        if (v[r] >= config->min_value && v[r] <= config->max_value)
+                            atomic_fetch_and_add(sum, c->select1(r + 1), 1, mu_sum, __ATOMIC_RELAXED);
                     }
                     ++progress_bar;
                 });
