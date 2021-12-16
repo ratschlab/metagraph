@@ -46,8 +46,6 @@ inline int64_t decode_diff(uint64_t c) {
 template <class BaseMatrix>
 class IntRowDiff : public binmat::IRowDiff, public IntMatrix {
   public:
-    using anchor_bv_type = bit_vector_small;
-    using fork_succ_bv_type = bit_vector_small;
     static_assert(std::is_convertible<BaseMatrix*, IntMatrix*>::value);
 
     IntRowDiff() {}
@@ -68,10 +66,6 @@ class IntRowDiff : public binmat::IRowDiff, public IntMatrix {
     bool load(std::istream &in) override;
     void serialize(std::ostream &out) const override;
 
-    void load_fork_succ(const std::string &filename);
-    void load_anchor(const std::string &filename);
-
-    const anchor_bv_type& anchor() const { return anchor_; }
     const BaseMatrix& diffs() const { return diffs_; }
     BaseMatrix& diffs() { return diffs_; }
 
@@ -80,8 +74,6 @@ class IntRowDiff : public binmat::IRowDiff, public IntMatrix {
     static void add_diff(const RowValues &diff, RowValues *row);
 
     BaseMatrix diffs_;
-    anchor_bv_type anchor_;
-    fork_succ_bv_type fork_succ_;
 };
 
 
@@ -266,34 +258,6 @@ void IntRowDiff<BaseMatrix>::add_diff(const RowValues &diff, RowValues *row) {
     std::copy(it2, diff.end(), std::back_inserter(result));
 
     row->swap(result);
-}
-
-template <class BaseMatrix>
-void IntRowDiff<BaseMatrix>::load_anchor(const std::string &filename) {
-    if (!std::filesystem::exists(filename)) {
-        common::logger->error("Can't read anchor file: {}", filename);
-        std::exit(1);
-    }
-    std::ifstream in(filename, ios::binary);
-    if (!in.good()) {
-        common::logger->error("Could not open anchor file {}", filename);
-        std::exit(1);
-    }
-    anchor_.load(in);
-}
-
-template <class BaseMatrix>
-void IntRowDiff<BaseMatrix>::load_fork_succ(const std::string &filename) {
-    if (!std::filesystem::exists(filename)) {
-        common::logger->error("Can't read fork successor file: {}", filename);
-        std::exit(1);
-    }
-    std::ifstream in(filename, ios::binary);
-    if (!in.good()) {
-        common::logger->error("Could not open fork successor file {}", filename);
-        std::exit(1);
-    }
-    fork_succ_.load(in);
 }
 
 } // namespace matrix

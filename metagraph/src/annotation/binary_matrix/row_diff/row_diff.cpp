@@ -11,8 +11,7 @@ namespace mtg {
 namespace annot {
 namespace binmat {
 
-template <class BaseMatrix>
-void RowDiff<BaseMatrix>::load_anchor(const std::string &filename) {
+void IRowDiff::load_anchor(const std::string &filename) {
     if (!std::filesystem::exists(filename)) {
         common::logger->error("Can't read anchor file: {}", filename);
         std::exit(1);
@@ -23,11 +22,9 @@ void RowDiff<BaseMatrix>::load_anchor(const std::string &filename) {
         std::exit(1);
     }
     anchor_.load(f);
-    f.close();
 }
 
-template <class BaseMatrix>
-void RowDiff<BaseMatrix>::load_fork_succ(const std::string &filename) {
+void IRowDiff::load_fork_succ(const std::string &filename) {
     if (!std::filesystem::exists(filename)) {
         common::logger->error("Can't read fork successor file: {}", filename);
         std::exit(1);
@@ -38,15 +35,7 @@ void RowDiff<BaseMatrix>::load_fork_succ(const std::string &filename) {
         std::exit(1);
     }
     fork_succ_.load(f);
-    f.close();
 }
-
-template
-class RowDiff<ColumnMajor>;
-template
-class RowDiff<BRWT>;
-template
-class RowDiff<RowSparse>;
 
 } // namespace binmat
 } // namespace annot

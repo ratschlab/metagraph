@@ -25,8 +25,6 @@ namespace matrix {
 template <class BaseMatrix>
 class TupleRowDiff : public binmat::IRowDiff, public MultiIntMatrix {
   public:
-    using anchor_bv_type = bit_vector_small;
-    using fork_succ_bv_type = bit_vector_small;
     static_assert(std::is_convertible<BaseMatrix*, MultiIntMatrix*>::value);
     static const int SHIFT = 1; // coordinates increase by 1 at each edge
 
@@ -48,10 +46,6 @@ class TupleRowDiff : public binmat::IRowDiff, public MultiIntMatrix {
     bool load(std::istream &in) override;
     void serialize(std::ostream &out) const override;
 
-    void load_fork_succ(const std::string &filename);
-    void load_anchor(const std::string &filename);
-
-    const anchor_bv_type& anchor() const { return anchor_; }
     const BaseMatrix& diffs() const { return diffs_; }
     BaseMatrix& diffs() { return diffs_; }
 
@@ -60,8 +54,6 @@ class TupleRowDiff : public binmat::IRowDiff, public MultiIntMatrix {
     static void add_diff(const RowTuples &diff, RowTuples *row);
 
     BaseMatrix diffs_;
-    anchor_bv_type anchor_;
-    fork_succ_bv_type fork_succ_;
 };
 
 
@@ -256,34 +248,6 @@ void TupleRowDiff<BaseMatrix>::add_diff(const RowTuples &diff, RowTuples *row) {
             c -= SHIFT;
         }
     }
-}
-
-template <class BaseMatrix>
-void TupleRowDiff<BaseMatrix>::load_anchor(const std::string &filename) {
-    if (!std::filesystem::exists(filename)) {
-        common::logger->error("Can't read anchor file: {}", filename);
-        std::exit(1);
-    }
-    std::ifstream in(filename, ios::binary);
-    if (!in.good()) {
-        common::logger->error("Could not open anchor file {}", filename);
-        std::exit(1);
-    }
-    anchor_.load(in);
-}
-
-template <class BaseMatrix>
-void TupleRowDiff<BaseMatrix>::load_fork_succ(const std::string &filename) {
-    if (!std::filesystem::exists(filename)) {
-        common::logger->error("Can't read fork successor file: {}", filename);
-        std::exit(1);
-    }
-    std::ifstream in(filename, ios::binary);
-    if (!in.good()) {
-        common::logger->error("Could not open fork successor file {}", filename);
-        std::exit(1);
-    }
-    fork_succ_.load(in);
 }
 
 } // namespace matrix

@@ -28,13 +28,23 @@ const size_t RD_PATH_RESERVE_SIZE = 2;
 
 class IRowDiff {
   public:
+    typedef bit_vector_small anchor_bv_type;
+    typedef bit_vector_small fork_succ_bv_type;
+
     virtual ~IRowDiff() {}
 
     const graph::DBGSuccinct* graph() const { return graph_; }
     void set_graph(const graph::DBGSuccinct *graph) { graph_ = graph; }
 
+    void load_fork_succ(const std::string &filename);
+    void load_anchor(const std::string &filename);
+
+    const anchor_bv_type& anchor() const { return anchor_; }
+
   protected:
     const graph::DBGSuccinct *graph_ = nullptr;
+    anchor_bv_type anchor_;
+    fork_succ_bv_type fork_succ_;
 };
 
 /**
@@ -61,9 +71,6 @@ class IRowDiff {
 template <class BaseMatrix>
 class RowDiff : public IRowDiff, public BinaryMatrix {
   public:
-    using anchor_bv_type = bit_vector_small;
-    using fork_succ_bv_type = bit_vector_small;
-
     RowDiff() {}
 
     RowDiff(const graph::DBGSuccinct *graph, BaseMatrix &&diff)
@@ -90,10 +97,6 @@ class RowDiff : public IRowDiff, public BinaryMatrix {
     bool load(std::istream &f) override;
     void serialize(std::ostream &f) const override;
 
-    void load_fork_succ(const std::string &filename);
-    void load_anchor(const std::string &filename);
-    const anchor_bv_type& anchor() const { return anchor_; }
-
     const BaseMatrix& diffs() const { return diffs_; }
     BaseMatrix& diffs() { return diffs_; }
 
@@ -101,8 +104,6 @@ class RowDiff : public IRowDiff, public BinaryMatrix {
     static void add_diff(const Vector<uint64_t> &diff, Vector<uint64_t> *row);
 
     BaseMatrix diffs_;
-    anchor_bv_type anchor_;
-    fork_succ_bv_type fork_succ_;
 };
 
 template <class BaseMatrix>
