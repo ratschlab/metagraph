@@ -92,6 +92,14 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
                                    const ValuesCallback &callback,
                                    size_t num_threads = 1);
 
+    using ColumnsValuesCallback = std::function<void(uint64_t offset,
+                                                     const Label &,
+                                                     std::unique_ptr<bit_vector>&&,
+                                                     sdsl::int_vector<>&&)>;
+    static void load_columns_and_values(const std::vector<std::string> &filenames,
+                                        const ColumnsValuesCallback &callback,
+                                        size_t num_threads = 1);
+
     // Dump columns to separate files in human-readable format
     bool dump_columns(const std::string &prefix, size_t num_threads = 1) const;
 

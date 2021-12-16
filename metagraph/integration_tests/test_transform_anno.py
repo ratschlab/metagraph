@@ -18,6 +18,7 @@ TEST_DATA_DIR = os.path.dirname(os.path.realpath(__file__)) + '/../tests/data'
 
 NUM_THREADS = 4
 
+
 class TestColumnOperations(TestingBase):
     @classmethod
     def setUpClass(cls):
@@ -69,6 +70,74 @@ class TestColumnOperations(TestingBase):
         res = subprocess.run(command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         self.assertEqual(156421, len(res.stdout.decode()))
+
+    def _check_aggregation_min(self, min_count, expected_density):
+        command = f'{METAGRAPH} transform_anno {self.annotation} -p {NUM_THREADS} \
+            --aggregate-columns --min-count {min_count} -o aggregated'
+
+        res = subprocess.run(command.split(), stdout=PIPE)
+        self.assertEqual(res.returncode, 0)
+
+        res = self._get_stats(f'-a aggregated{anno_file_extension[self.anno_repr]}')
+        self.assertEqual(res.returncode, 0)
+        out = res.stdout.decode().split('\n')[2:]
+        self.assertEqual('labels:  1', out[0])
+        self.assertEqual('objects: 46960', out[1])
+        self.assertEqual(f'density: {expected_density}', out[2])
+        self.assertEqual(f'representation: {self.anno_repr}', out[3])
+
+    def test_aggregate_columns(self):
+        self._check_aggregation_min(0, 1)
+        self._check_aggregation_min(1, 1)
+        self._check_aggregation_min(5, 0.0715077)
+        self._check_aggregation_min(10, 0.00344974)
+        self._check_aggregation_min(20, 0)
+
+    def _check_aggregation_min_max_value(self, min_count, max_value, expected_density):
+        command = f'{METAGRAPH} transform_anno {self.annotation} -p {NUM_THREADS} \
+            --aggregate-columns --min-count {min_count} --max-value {max_value} -o aggregated'
+
+        res = subprocess.run(command.split(), stdout=PIPE)
+        self.assertEqual(res.returncode, 0)
+
+        res = self._get_stats(f'-a aggregated{anno_file_extension[self.anno_repr]}')
+        self.assertEqual(res.returncode, 0)
+        out = res.stdout.decode().split('\n')[2:]
+        self.assertEqual('labels:  1', out[0])
+        self.assertEqual('objects: 46960', out[1])
+        self.assertEqual(f'density: {expected_density}', out[2])
+        self.assertEqual(f'representation: {self.anno_repr}', out[3])
+
+    def test_aggregate_columns_filtered(self):
+        self._check_aggregation_min_max_value(0, 0, 0)
+        self._check_aggregation_min_max_value(1, 0, 0)
+        self._check_aggregation_min_max_value(2, 0, 0)
+        self._check_aggregation_min_max_value(3, 0, 0)
+        self._check_aggregation_min_max_value(5, 0, 0)
+
+        self._check_aggregation_min_max_value(0, 1, 0.99704)
+        self._check_aggregation_min_max_value(1, 1, 0.99704)
+        self._check_aggregation_min_max_value(2, 1, 0.392994)
+        self._check_aggregation_min_max_value(3, 1, 0.183305)
+        self._check_aggregation_min_max_value(5, 1, 0.0715077)
+
+        self._check_aggregation_min_max_value(0, 2, 0.998807)
+        self._check_aggregation_min_max_value(1, 2, 0.998807)
+        self._check_aggregation_min_max_value(2, 2, 0.394825)
+        self._check_aggregation_min_max_value(3, 2, 0.183986)
+        self._check_aggregation_min_max_value(5, 2, 0.0715077)
+
+        self._check_aggregation_min_max_value(0, 5, 0.998999)
+        self._check_aggregation_min_max_value(1, 5, 0.998999)
+        self._check_aggregation_min_max_value(2, 5, 0.395315)
+        self._check_aggregation_min_max_value(3, 5, 0.184817)
+        self._check_aggregation_min_max_value(5, 5, 0.0715077)
+
+        self._check_aggregation_min_max_value(0, 1000, 1)
+        self._check_aggregation_min_max_value(1, 1000, 1)
+        self._check_aggregation_min_max_value(2, 1000, 0.395336)
+        self._check_aggregation_min_max_value(3, 1000, 0.184817)
+        self._check_aggregation_min_max_value(5, 1000, 0.0715077)
 
 
 if __name__ == '__main__':

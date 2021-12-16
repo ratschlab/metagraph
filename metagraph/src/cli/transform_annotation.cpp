@@ -503,6 +503,9 @@ int transform_annotation(Config *config) {
             exit(1);
         }
 
+        const bool filter_values = config->min_value > 1
+                                    || config->max_value
+                                        < std::numeric_limits<unsigned int>::max();
         const uint64_t min_cols
             = std::max((uint64_t)std::ceil(num_columns * config->min_fraction),
                        (uint64_t)config->min_count);
@@ -511,36 +514,67 @@ int transform_annotation(Config *config) {
                        (uint64_t)config->max_count);
 
         // TODO: set width to log2(max_cols + 1) but make sure atomic
-        //       increments can't lead to overflow
+        //       increments don't overflow
         sdsl::int_vector<> sum(0, 0, sdsl::bits::hi(num_columns) + 1);
-        ProgressBar progress_bar(num_columns, "Intersect columns",
-                                 std::cerr, !get_verbose());
+        ProgressBar progress_bar(num_columns, "Intersect columns", std::cerr, !get_verbose());
         ThreadPool thread_pool(get_num_threads(), 1);
         std::mutex mu_sum;
         std::mutex mu;
-        auto on_column = [&](uint64_t, const auto &, auto&& col) {
-            std::lock_guard<std::mutex> lock(mu);
 
-            if (!sum.size()) {
-                sum.resize(col->size());
-            } else if (sum.size() != col->size()) {
-                logger->error("Input columns have inconsistent size ({} != {})",
-                              sum.size(), col->size());
+        if (filter_values) {
+            auto on_column = [&](uint64_t, const std::string &,
+                                 std::unique_ptr<bit_vector>&& col,
+                                 sdsl::int_vector<>&& values) {
+                std::lock_guard<std::mutex> lock(mu);
+
+                if (!sum.size()) {
+                    sum.resize(col->size());
+                    sdsl::util::set_to_value(sum, 0);
+                } else if (sum.size() != col->size()) {
+                    logger->error("Input columns have inconsistent size ({} != {})",
+                                  sum.size(), col->size());
+                    exit(1);
+                }
+
+                thread_pool.enqueue([&,col(std::move(col)),values(std::move(values))]() {
+                    assert(col->num_set_bits() == values.size());
+                    for (uint64_t r = 0; r < values.size(); ++r) {
+                        if (values[r] >= config->min_value && values[r] <= config->max_value)
+                            atomic_fetch_and_add(sum, col->select1(r + 1), 1, mu_sum, __ATOMIC_RELAXED);
+                    }
+                    ++progress_bar;
+                });
+            };
+
+            ColumnCompressed<>::load_columns_and_values(files, on_column, get_num_threads());
+
+        } else {
+            auto on_column = [&](uint64_t, const auto &, auto&& col) {
+                std::lock_guard<std::mutex> lock(mu);
+
+                if (!sum.size()) {
+                    sum.resize(col->size());
+                    sdsl::util::set_to_value(sum, 0);
+                } else if (sum.size() != col->size()) {
+                    logger->error("Input columns have inconsistent size ({} != {})",
+                                  sum.size(), col->size());
+                    exit(1);
+                }
+
+                thread_pool.enqueue([&,col{std::move(col)}]() {
+                    col->call_ones([&](uint64_t i) {
+                        atomic_fetch_and_add(sum, i, 1, mu_sum, __ATOMIC_RELAXED);
+                    });
+                    ++progress_bar;
+                });
+            };
+
+            if (!ColumnCompressed<>::merge_load(files, on_column, get_num_threads())) {
+                logger->error("Couldn't load annotations");
                 exit(1);
             }
-
-            thread_pool.enqueue([&,col{std::move(col)}]() {
-                col->call_ones([&](uint64_t i) {
-                    atomic_fetch_and_add(sum, i, 1, mu_sum, __ATOMIC_RELAXED);
-                });
-                ++progress_bar;
-            });
-        };
-
-        if (!ColumnCompressed<>::merge_load(files, on_column, get_num_threads())) {
-            logger->error("Couldn't load annotations");
-            exit(1);
         }
+
         thread_pool.join();
         std::atomic_thread_fence(std::memory_order_acquire);
 
