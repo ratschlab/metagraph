@@ -230,6 +230,8 @@ void TupleRowDiff<BaseMatrix>::add_diff(const RowTuples &diff, RowTuples *row) {
                     std::set_symmetric_difference(it->second.begin(), it->second.end(),
                                                   it2->second.begin(), it2->second.end(),
                                                   std::back_inserter(result.back().second));
+                    if (result.back().second.empty())
+                        result.pop_back();
                 }
                 ++it;
                 ++it2;
