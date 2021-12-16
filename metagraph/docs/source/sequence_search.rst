@@ -3,7 +3,7 @@
 Sequence search
 ===============
 
-[TODO -- This page is in development]
+.. attention:: This page is in development
 
 MetaGraph allows for query sequences to be searched against the graph alone, returning
 the closest path in the graph, or against the annotated graph, returning a set of associated

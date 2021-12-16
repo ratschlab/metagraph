@@ -5,6 +5,7 @@ from subprocess import PIPE
 from tempfile import TemporaryDirectory
 import glob
 import os
+from base import TestingBase
 
 
 """Test graph construction"""
@@ -32,14 +33,9 @@ succinct_states = {'stat', 'fast', 'small', 'dynamic'}
 BUILDS = [name for name, _ in build_params.items()]
 
 
-class TestBuild(unittest.TestCase):
+class TestBuild(TestingBase):
     def setUp(self):
         self.tempdir = TemporaryDirectory()
-
-    def __get_stats(self, graph_filename):
-        stats_command = METAGRAPH + ' stats ' + graph_filename
-        res = subprocess.run(stats_command.split(), stdout=PIPE)
-        return res
 
     @parameterized.expand([repr for repr in BUILDS if not (repr == 'bitmap' and PROTEIN_MODE)])
     def test_simple_all_graphs(self, build):
@@ -56,12 +52,12 @@ class TestBuild(unittest.TestCase):
         res = subprocess.run([construct_command], shell=True)
         self.assertEqual(res.returncode, 0)
 
-        res = self.__get_stats(self.tempdir.name + '/graph' + graph_file_extension[representation])
+        res = self._get_stats(self.tempdir.name + '/graph' + graph_file_extension[representation])
         self.assertEqual(res.returncode, 0)
-        params_str = res.stdout.decode().split('\n')[2:]
-        self.assertEqual('k: 20', params_str[0])
-        self.assertEqual('nodes (k): 591997', params_str[1])
-        self.assertEqual('mode: basic', params_str[2])
+        out = res.stdout.decode().split('\n')[2:]
+        self.assertEqual('k: 20', out[0])
+        self.assertEqual('nodes (k): 591997', out[1])
+        self.assertEqual('mode: basic', out[2])
 
     @parameterized.expand(succinct_states)
     def test_build_succinct_inplace(self, state):
@@ -73,13 +69,13 @@ class TestBuild(unittest.TestCase):
         res = subprocess.run([construct_command], shell=True)
         self.assertEqual(res.returncode, 0)
 
-        res = self.__get_stats(self.tempdir.name + '/graph' + graph_file_extension['succinct'])
+        res = self._get_stats(self.tempdir.name + '/graph' + graph_file_extension['succinct'])
         self.assertEqual(res.returncode, 0)
-        params_str = res.stdout.decode().split('\n')[2:]
-        self.assertEqual('k: 20', params_str[0])
-        self.assertEqual('nodes (k): 597931', params_str[1])
-        self.assertEqual('mode: basic', params_str[2])
-        self.assertEqual('state: ' + state, params_str[8])
+        out = res.stdout.decode().split('\n')[2:]
+        self.assertEqual('k: 20', out[0])
+        self.assertEqual('nodes (k): 597931', out[1])
+        self.assertEqual('mode: basic', out[2])
+        self.assertEqual('state: ' + state, out[8])
 
     @parameterized.expand(['succinct'])
     def test_simple_bloom_graph(self, build):
@@ -96,12 +92,12 @@ class TestBuild(unittest.TestCase):
         res = subprocess.run([construct_command], shell=True)
         self.assertEqual(res.returncode, 0)
 
-        res = self.__get_stats(self.tempdir.name + '/graph' + graph_file_extension[representation])
+        res = self._get_stats(self.tempdir.name + '/graph' + graph_file_extension[representation])
         self.assertEqual(res.returncode, 0)
-        params_str = res.stdout.decode().split('\n')[2:]
-        self.assertEqual('k: 20', params_str[0])
-        self.assertEqual('nodes (k): 591997', params_str[1])
-        self.assertEqual('mode: basic', params_str[2])
+        out = res.stdout.decode().split('\n')[2:]
+        self.assertEqual('k: 20', out[0])
+        self.assertEqual('nodes (k): 591997', out[1])
+        self.assertEqual('mode: basic', out[2])
 
         convert_command = '{exe} transform -o {outfile} --initialize-bloom {bloom_param} {input}'.format(
             exe=METAGRAPH,
@@ -142,12 +138,12 @@ class TestBuild(unittest.TestCase):
         res = subprocess.run([construct_command], shell=True)
         self.assertEqual(res.returncode, 0)
 
-        res = self.__get_stats(self.tempdir.name + '/graph' + graph_file_extension[representation])
+        res = self._get_stats(self.tempdir.name + '/graph' + graph_file_extension[representation])
         self.assertEqual(res.returncode, 0)
-        params_str = res.stdout.decode().split('\n')[2:]
-        self.assertEqual('k: 20', params_str[0])
-        self.assertEqual('nodes (k): 1159851', params_str[1])
-        self.assertEqual('mode: canonical', params_str[2])
+        out = res.stdout.decode().split('\n')[2:]
+        self.assertEqual('k: 20', out[0])
+        self.assertEqual('nodes (k): 1159851', out[1])
+        self.assertEqual('mode: canonical', out[2])
 
     @parameterized.expand(BUILDS)
     def test_build_tiny_k(self, build):
@@ -163,12 +159,12 @@ class TestBuild(unittest.TestCase):
         res = subprocess.run([construct_command], shell=True)
         self.assertEqual(res.returncode, 0)
 
-        res = self.__get_stats(self.tempdir.name + '/graph' + graph_file_extension[representation])
+        res = self._get_stats(self.tempdir.name + '/graph' + graph_file_extension[representation])
         self.assertEqual(res.returncode, 0)
-        params_str = res.stdout.decode().split('\n')[2:]
-        self.assertEqual('k: 2', params_str[0])
-        self.assertEqual('nodes (k): 16', params_str[1])
-        self.assertEqual('mode: basic', params_str[2])
+        out = res.stdout.decode().split('\n')[2:]
+        self.assertEqual('k: 2', out[0])
+        self.assertEqual('nodes (k): 16', out[1])
+        self.assertEqual('mode: basic', out[2])
 
     # TODO: add 'hashstr' once the canonical mode is implemented for it
     @parameterized.expand([repr for repr in BUILDS if repr != 'hashstr'])
@@ -186,12 +182,53 @@ class TestBuild(unittest.TestCase):
         res = subprocess.run([construct_command], shell=True)
         self.assertEqual(res.returncode, 0)
 
-        res = self.__get_stats(self.tempdir.name + '/graph' + graph_file_extension[representation])
+        res = self._get_stats(self.tempdir.name + '/graph' + graph_file_extension[representation])
         self.assertEqual(res.returncode, 0)
-        params_str = res.stdout.decode().split('\n')[2:]
-        self.assertEqual('k: 2', params_str[0])
-        self.assertEqual('nodes (k): 16', params_str[1])
-        self.assertEqual('mode: canonical', params_str[2])
+        out = res.stdout.decode().split('\n')[2:]
+        self.assertEqual('k: 2', out[0])
+        self.assertEqual('nodes (k): 16', out[1])
+        self.assertEqual('mode: canonical', out[2])
+
+    @parameterized.expand(BUILDS)
+    def test_build_tiny_k_parallel(self, build):
+        representation, tmp_dir = build_params[build]
+
+        construct_command = f'{METAGRAPH} build --mask-dummy --graph {representation} \
+                                -k 2 -p 100 --disk-swap {tmp_dir} \
+                                -o {self.tempdir.name}/graph \
+                                {TEST_DATA_DIR}/transcripts_1000.fa'
+
+        res = subprocess.run([construct_command], shell=True)
+        self.assertEqual(res.returncode, 0)
+
+        res = self._get_stats(self.tempdir.name + '/graph' + graph_file_extension[representation])
+        self.assertEqual(res.returncode, 0)
+        out = res.stdout.decode().split('\n')[2:]
+        self.assertEqual('k: 2', out[0])
+        self.assertEqual('nodes (k): 16', out[1])
+        self.assertEqual('mode: basic', out[2])
+
+    # TODO: add 'hashstr' once the canonical mode is implemented for it
+    @parameterized.expand([repr for repr in BUILDS if repr != 'hashstr'])
+    @unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
+    def test_build_tiny_k_parallel_canonical(self, build):
+        representation, tmp_dir = build_params[build]
+
+        construct_command = f'{METAGRAPH} build --mask-dummy --graph {representation} \
+                                --mode canonical \
+                                -k 2 -p 100 --disk-swap {tmp_dir} \
+                                -o {self.tempdir.name}/graph \
+                                {TEST_DATA_DIR}/transcripts_1000.fa'
+
+        res = subprocess.run([construct_command], shell=True)
+        self.assertEqual(res.returncode, 0)
+
+        res = self._get_stats(self.tempdir.name + '/graph' + graph_file_extension[representation])
+        self.assertEqual(res.returncode, 0)
+        out = res.stdout.decode().split('\n')[2:]
+        self.assertEqual('k: 2', out[0])
+        self.assertEqual('nodes (k): 16', out[1])
+        self.assertEqual('mode: canonical', out[2])
 
     @parameterized.expand(BUILDS)
     def test_build_from_kmc(self, build):
@@ -208,12 +245,12 @@ class TestBuild(unittest.TestCase):
         res = subprocess.run([construct_command], shell=True)
         self.assertEqual(res.returncode, 0)
 
-        res = self.__get_stats(self.tempdir.name + '/graph' + graph_file_extension[representation])
+        res = self._get_stats(self.tempdir.name + '/graph' + graph_file_extension[representation])
         self.assertEqual(res.returncode, 0)
-        params_str = res.stdout.decode().split('\n')[2:]
-        self.assertEqual('k: 11', params_str[0])
-        self.assertEqual('nodes (k): 469983', params_str[1])
-        self.assertEqual('mode: basic', params_str[2])
+        out = res.stdout.decode().split('\n')[2:]
+        self.assertEqual('k: 11', out[0])
+        self.assertEqual('nodes (k): 469983', out[1])
+        self.assertEqual('mode: basic', out[2])
 
     @parameterized.expand(BUILDS)
     def test_build_from_kmc_both(self, build):
@@ -230,12 +267,12 @@ class TestBuild(unittest.TestCase):
         res = subprocess.run([construct_command], shell=True)
         self.assertEqual(res.returncode, 0)
 
-        res = self.__get_stats(self.tempdir.name + '/graph' + graph_file_extension[representation])
+        res = self._get_stats(self.tempdir.name + '/graph' + graph_file_extension[representation])
         self.assertEqual(res.returncode, 0)
-        params_str = res.stdout.decode().split('\n')[2:]
-        self.assertEqual('k: 11', params_str[0])
-        self.assertEqual('nodes (k): 802920', params_str[1])
-        self.assertEqual('mode: basic', params_str[2])
+        out = res.stdout.decode().split('\n')[2:]
+        self.assertEqual('k: 11', out[0])
+        self.assertEqual('nodes (k): 802920', out[1])
+        self.assertEqual('mode: basic', out[2])
 
     @parameterized.expand([repr for repr in BUILDS if repr != 'hashstr'])
     @unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
@@ -254,12 +291,12 @@ class TestBuild(unittest.TestCase):
         res = subprocess.run([construct_command], shell=True)
         self.assertEqual(res.returncode, 0)
 
-        res = self.__get_stats(self.tempdir.name + '/graph' + graph_file_extension[representation])
+        res = self._get_stats(self.tempdir.name + '/graph' + graph_file_extension[representation])
         self.assertEqual(res.returncode, 0)
-        params_str = res.stdout.decode().split('\n')[2:]
-        self.assertEqual('k: 11', params_str[0])
-        self.assertEqual('nodes (k): 802920', params_str[1])
-        self.assertEqual('mode: canonical', params_str[2])
+        out = res.stdout.decode().split('\n')[2:]
+        self.assertEqual('k: 11', out[0])
+        self.assertEqual('nodes (k): 802920', out[1])
+        self.assertEqual('mode: canonical', out[2])
 
     @parameterized.expand([repr for repr in BUILDS if repr != 'hashstr'])
     @unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
@@ -278,12 +315,12 @@ class TestBuild(unittest.TestCase):
         res = subprocess.run([construct_command], shell=True)
         self.assertEqual(res.returncode, 0)
 
-        res = self.__get_stats(self.tempdir.name + '/graph' + graph_file_extension[representation])
+        res = self._get_stats(self.tempdir.name + '/graph' + graph_file_extension[representation])
         self.assertEqual(res.returncode, 0)
-        params_str = res.stdout.decode().split('\n')[2:]
-        self.assertEqual('k: 11', params_str[0])
-        self.assertEqual('nodes (k): 802920', params_str[1])
-        self.assertEqual('mode: canonical', params_str[2])
+        out = res.stdout.decode().split('\n')[2:]
+        self.assertEqual('k: 11', out[0])
+        self.assertEqual('nodes (k): 802920', out[1])
+        self.assertEqual('mode: canonical', out[2])
 
     @parameterized.expand(['succinct', 'succinct_disk'])
     @unittest.skipUnless(DNA_MODE, "Need to adapt suffixes for other alphabets")
@@ -317,13 +354,13 @@ class TestBuild(unittest.TestCase):
         self.assertEqual(res.returncode, 0)
 
         # Check graph
-        res = self.__get_stats(self.tempdir.name + '/graph_from_chunks'
+        res = self._get_stats(self.tempdir.name + '/graph_from_chunks'
                                + graph_file_extension[representation])
         self.assertEqual(res.returncode, 0)
-        params_str = res.stdout.decode().split('\n')[2:]
-        self.assertEqual('k: 11', params_str[0])
-        self.assertEqual('nodes (k): 469983', params_str[1])
-        self.assertEqual('mode: basic', params_str[2])
+        out = res.stdout.decode().split('\n')[2:]
+        self.assertEqual('k: 11', out[0])
+        self.assertEqual('nodes (k): 469983', out[1])
+        self.assertEqual('mode: basic', out[2])
 
     @parameterized.expand(['succinct', 'succinct_disk'])
     @unittest.skipUnless(DNA_MODE, "Need to adapt suffixes for other alphabets")
@@ -357,13 +394,13 @@ class TestBuild(unittest.TestCase):
         self.assertEqual(res.returncode, 0)
 
         # Check graph
-        res = self.__get_stats(self.tempdir.name + '/graph_from_chunks'
+        res = self._get_stats(self.tempdir.name + '/graph_from_chunks'
                                + graph_file_extension[representation])
         self.assertEqual(res.returncode, 0)
-        params_str = res.stdout.decode().split('\n')[2:]
-        self.assertEqual('k: 11', params_str[0])
-        self.assertEqual('nodes (k): 802920', params_str[1])
-        self.assertEqual('mode: canonical', params_str[2])
+        out = res.stdout.decode().split('\n')[2:]
+        self.assertEqual('k: 11', out[0])
+        self.assertEqual('nodes (k): 802920', out[1])
+        self.assertEqual('mode: canonical', out[2])
 
 
 if __name__ == '__main__':
