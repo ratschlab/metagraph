@@ -1409,7 +1409,6 @@ void convert_batch_to_row_diff_coord(const std::string &pred_succ_fprefix,
     // edges, for each of the sources, per chunk. set_rows_fwd is already sorted
     std::vector<std::vector<std::vector<T>>> set_rows_bwd(sources.size());
     std::vector<std::vector<std::vector<T>>> set_rows_fwd(sources.size());
-    std::vector<std::vector<uint64_t>> row_diff_bits(sources.size());
     std::vector<std::vector<uint64_t>> row_diff_coords(sources.size());
     std::vector<std::vector<uint64_t>> num_coords_anchored(sources.size());
     std::vector<std::vector<uint64_t>> num_chunks(sources.size());
@@ -1430,7 +1429,6 @@ void convert_batch_to_row_diff_coord(const std::string &pred_succ_fprefix,
     for (size_t s = 0; s < sources.size(); ++s) {
         set_rows_fwd[s].resize(sources[s].num_labels());
         set_rows_bwd[s].resize(sources[s].num_labels());
-        row_diff_bits[s].assign(sources[s].num_labels(), 0);
         row_diff_coords[s].assign(sources[s].num_labels(), 0);
         num_coords_anchored[s].assign(sources[s].num_labels(), 0);
         // The first chunk will contain forward bits, all sorted.
@@ -1487,7 +1485,6 @@ void convert_batch_to_row_diff_coord(const std::string &pred_succ_fprefix,
                             v.resize(0);
                         }
                     }
-                    row_diff_bits[s][j]++;
                 }
 
                 if (!curr_value.size() || !rd_succ[to_node(row_idx)])
@@ -1501,8 +1498,9 @@ void convert_batch_to_row_diff_coord(const std::string &pred_succ_fprefix,
                                                [&](uint64_t c) { return c % num_coords_per_seq; }))) {
                         auto &v = set_rows_bwd[s][j];
                         // indicate that there are no coordinates for the predecessor
+                        // FYI: in case of multiple successors at forks, this adds duplicate
+                        //      DUMMY_COORD from each fork-successor the empty predecessor.
                         v.emplace_back(*pred_p, DUMMY_COORD);
-                        row_diff_bits[s][j]++;
 
                         if (v.size() == v.capacity()) {
                             std::sort(v.begin(), v.end());
@@ -1575,10 +1573,9 @@ void convert_batch_to_row_diff_coord(const std::string &pred_succ_fprefix,
             // diff values may be negative, hence we need wider integers
             sdsl::int_vector<> diff_coords(row_diff_coords[l_idx][j]);
             auto coords_it = diff_coords.begin();
-            sdsl::bit_vector diff_delims(diff_coords.size() + row_diff_bits[l_idx][j] + 1, 0);
-            auto delims_it = diff_delims.begin();
-
-            auto call_ones = [&](const std::function<void(uint64_t)> &call) {
+            std::vector<uint64_t> ids;
+            std::vector<bool> diff_delims;
+            {
                 std::vector<std::string> filenames;
                 // skip chunk with fwd bits which have already been counted if stage 1
                 for (uint32_t chunk = 0; chunk < num_chunks[l_idx][j]; ++chunk) {
@@ -1589,22 +1586,23 @@ void convert_batch_to_row_diff_coord(const std::string &pred_succ_fprefix,
                 elias_fano::merge_files<T>(filenames, [&](T pair) {
                     const auto &[i, coord] = pair;
                     if (i != last) {
-                        call(i);
+                        ids.push_back(i);
                         last = i;
-                        *delims_it++ = 1;
+                        diff_delims.push_back(1);
                     }
                     if (coord != DUMMY_COORD) {
                         *coords_it++ = coord;
-                        ++delims_it;
+                        diff_delims.push_back(0);
                     }
                 }, true, chunks_open_per_thread);
-                *delims_it++ = 1;
+                diff_delims.push_back(1);
                 assert(coords_it == diff_coords.end());
-                assert(delims_it == diff_delims.end());
-            };
-            columns[j] = std::make_unique<bit_vector_smart>(call_ones, num_rows,
-                                                            row_diff_bits[l_idx][j]);
-            bit_vector_smart(std::move(diff_delims)).serialize(out_coord);
+                assert(diff_delims.size() == diff_coords.size() + ids.size() + 1);
+            }
+            columns[j] = std::make_unique<bit_vector_smart>(
+                    [&](auto callback) { std::for_each(ids.begin(), ids.end(), callback); },
+                    num_rows, ids.size());
+            bit_vector_smart(to_sdsl(diff_delims)).serialize(out_coord);
             sdsl::util::bit_compress(diff_coords);
             diff_coords.serialize(out_coord);
         }
