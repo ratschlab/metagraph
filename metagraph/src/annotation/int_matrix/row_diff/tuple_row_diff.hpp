@@ -37,8 +37,6 @@ class TupleRowDiff : public binmat::IRowDiff, public MultiIntMatrix {
 
     bool get(Row i, Column j) const override;
     std::vector<Row> get_column(Column j) const override;
-    SetBitPositions get_row(Row i) const override;
-    std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const override;
     RowTuples get_row_tuples(Row i) const override;
     std::vector<RowTuples> get_row_tuples(const std::vector<Row> &rows) const override;
 
@@ -92,33 +90,6 @@ std::vector<MultiIntMatrix::Row> TupleRowDiff<BaseMatrix>::get_column(Column j) 
         if (boss.get_W(edge) && get(i, j))
             result.push_back(i);
     }
-    return result;
-}
-
-template <class BaseMatrix>
-MultiIntMatrix::SetBitPositions TupleRowDiff<BaseMatrix>::get_row(Row i) const {
-    RowTuples row = get_row_tuples(i);
-    SetBitPositions result(row.size());
-    for (size_t k = 0; k < row.size(); ++k) {
-        result[k] = row[k].first;
-    }
-    return result;
-}
-
-template <class BaseMatrix>
-std::vector<MultiIntMatrix::SetBitPositions>
-TupleRowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
-    std::vector<SetBitPositions> result;
-    result.reserve(row_ids.size());
-
-    for (auto&& row : get_row_tuples(row_ids)) {
-        result.emplace_back(row.size());
-        for (size_t k = 0; k < row.size(); ++k) {
-            result.back()[k] = row[k].first;
-        }
-        row = RowTuples();
-    }
-
     return result;
 }
 

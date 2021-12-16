@@ -57,8 +57,6 @@ class IntRowDiff : public binmat::IRowDiff, public IntMatrix {
 
     bool get(Row i, Column j) const override;
     std::vector<Row> get_column(Column j) const override;
-    SetBitPositions get_row(Row i) const override;
-    std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const override;
     // query integer values
     RowValues get_row_values(Row i) const override;
     std::vector<RowValues> get_row_values(const std::vector<Row> &rows) const override;
@@ -116,35 +114,8 @@ std::vector<IntMatrix::Row> IntRowDiff<BaseMatrix>::get_column(Column j) const {
 }
 
 template <class BaseMatrix>
-IntMatrix::SetBitPositions IntRowDiff<BaseMatrix>::get_row(Row i) const {
-    RowValues row = get_row_values(i);
-    SetBitPositions result(row.size());
-    for (size_t k = 0; k < row.size(); ++k) {
-        result[k] = row[k].first;
-    }
-    return result;
-}
-
-template <class BaseMatrix>
 IntMatrix::RowValues IntRowDiff<BaseMatrix>::get_row_values(Row row) const {
     return get_row_values(std::vector<Row>{ row })[0];
-}
-
-template <class BaseMatrix>
-std::vector<IntMatrix::SetBitPositions>
-IntRowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
-    std::vector<SetBitPositions> result;
-    result.reserve(row_ids.size());
-
-    for (auto&& row : get_row_values(row_ids)) {
-        result.emplace_back(row.size());
-        for (size_t k = 0; k < row.size(); ++k) {
-            result.back()[k] = row[k].first;
-        }
-        row = RowValues();
-    }
-
-    return result;
 }
 
 template <class BaseMatrix>
