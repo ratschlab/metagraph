@@ -22,9 +22,6 @@ namespace mtg {
 namespace annot {
 namespace matrix {
 
-const size_t RD_PATH_RESERVE_SIZE = 2;
-
-
 /**
  * Convert deltas to positive integer for enable compression:
  *      0  -> X (not allowed, zero diffs must be skipped)
@@ -117,6 +114,8 @@ IntRowDiff<BaseMatrix>::get_row_values(const std::vector<Row> &row_ids) const {
     assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
     assert(!fork_succ_.size() || fork_succ_.size() == graph_->num_nodes() + 1);
 
+    const size_t RD_PATH_RESERVE_SIZE = 2;
+
     // diff rows annotating nodes along the row-diff paths
     std::vector<Row> rd_ids;
     rd_ids.reserve(row_ids.size() * RD_PATH_RESERVE_SIZE);
@@ -196,8 +195,6 @@ IntRowDiff<BaseMatrix>::get_row_values(const std::vector<Row> &row_ids) const {
             add_diff(rd_rows[succ], &rd_rows[node]);
         }
         rows[i] = rd_rows[rd_path.back().second];
-        assert(std::all_of(rows[i].begin(), rows[i].end(),
-                           [](auto &p) { return p.second; }));
         assert(std::all_of(rows[i].begin(), rows[i].end(),
                            [](auto &p) { return (int64_t)p.second > 0; }));
     }
