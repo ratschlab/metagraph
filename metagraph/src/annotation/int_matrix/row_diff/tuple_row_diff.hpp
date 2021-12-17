@@ -171,13 +171,32 @@ TupleRowDiff<BaseMatrix>::get_row_tuples(const std::vector<Row> &row_ids) const 
 
     for (size_t i = 0; i < row_ids.size(); ++i) {
         const auto &rd_path = rd_paths_trunc[i];
+        uint64_t last_node = -1;
         // propagate back and reconstruct full annotations for predecessors
         for (size_t j = 0; j + 1 < rd_path.size(); ++j) {
             auto [node, succ] = rd_path[j];
+            if (last_node == succ) {
+                for (auto &[j, tuple] : rd_rows[last_node]) {
+                    assert(std::is_sorted(tuple.begin(), tuple.end()));
+                    for (uint64_t &c : tuple) {
+                        c -= SHIFT;
+                    }
+                }
+            }
             // reconstruct annotation by adding the diff (full succ + diff)
             add_diff(rd_rows[succ], &rd_rows[node]);
+            last_node = node;
         }
         auto &row = rd_rows[rd_path.back().second];
+        if (last_node != (uint64_t)-1) {
+            assert(last_node == rd_path.back().second);
+            for (auto &[j, tuple] : rd_rows[last_node]) {
+                assert(std::is_sorted(tuple.begin(), tuple.end()));
+                for (uint64_t &c : tuple) {
+                    c -= SHIFT;
+                }
+            }
+        }
         rows[i].reserve(std::count_if(row.begin(), row.end(),
                                       [](const auto &v) { return !v.second.empty(); }));
         for (auto&& v : row) {
@@ -257,12 +276,6 @@ void TupleRowDiff<BaseMatrix>::add_diff(const RowTuples &diff, RowTuples *row) {
     }
 
     assert(std::is_sorted(row->begin(), row->end()));
-    for (auto &[j, tuple] : *row) {
-        assert(std::is_sorted(tuple.begin(), tuple.end()));
-        for (uint64_t &c : tuple) {
-            c -= SHIFT;
-        }
-    }
 }
 
 } // namespace matrix

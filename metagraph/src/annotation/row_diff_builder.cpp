@@ -1271,6 +1271,7 @@ void convert_batch_to_row_diff_coord(const std::string &pred_succ_fprefix,
             while (!delims[s][j][++t]) {
                 result.push_back(coords[s][j][t - rk]);
             }
+            assert(result.size());
         }
         assert(std::is_sorted(result.begin(), result.end()));
         return result;
