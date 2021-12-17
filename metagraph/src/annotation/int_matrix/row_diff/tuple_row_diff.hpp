@@ -51,6 +51,7 @@ class TupleRowDiff : public binmat::IRowDiff, public MultiIntMatrix {
 
   private:
     static void decode_diffs(RowTuples *diffs);
+    static void shift_coords(RowTuples *diffs);
     static void add_diff(const RowTuples &diff, RowTuples *row);
 
     BaseMatrix diffs_;
@@ -175,28 +176,17 @@ TupleRowDiff<BaseMatrix>::get_row_tuples(const std::vector<Row> &row_ids) const 
         // propagate back and reconstruct full annotations for predecessors
         for (size_t j = 0; j + 1 < rd_path.size(); ++j) {
             auto [node, succ] = rd_path[j];
-            if (last_node == succ) {
-                for (auto &[j, tuple] : rd_rows[last_node]) {
-                    assert(std::is_sorted(tuple.begin(), tuple.end()));
-                    for (uint64_t &c : tuple) {
-                        c -= SHIFT;
-                    }
-                }
-            }
+            if (last_node == succ)
+                shift_coords(&rd_rows[last_node]);
             // reconstruct annotation by adding the diff (full succ + diff)
             add_diff(rd_rows[succ], &rd_rows[node]);
             last_node = node;
         }
-        auto &row = rd_rows[rd_path.back().second];
         if (last_node != (uint64_t)-1) {
             assert(last_node == rd_path.back().second);
-            for (auto &[j, tuple] : rd_rows[last_node]) {
-                assert(std::is_sorted(tuple.begin(), tuple.end()));
-                for (uint64_t &c : tuple) {
-                    c -= SHIFT;
-                }
-            }
+            shift_coords(&rd_rows[last_node]);
         }
+        auto &row = rd_rows[rd_path.back().second];
         rows[i].reserve(std::count_if(row.begin(), row.end(),
                                       [](const auto &v) { return !v.second.empty(); }));
         for (auto&& v : row) {
@@ -230,6 +220,16 @@ template <class BaseMatrix>
 void TupleRowDiff<BaseMatrix>::decode_diffs(RowTuples *diffs) {
     std::ignore = diffs;
     // no encoding
+}
+
+template <class BaseMatrix>
+void TupleRowDiff<BaseMatrix>::shift_coords(RowTuples *diffs) {
+    for (auto &[j, tuple] : *diffs) {
+        assert(std::is_sorted(tuple.begin(), tuple.end()));
+        for (uint64_t &c : tuple) {
+            c -= SHIFT;
+        }
+    }
 }
 
 template <class BaseMatrix>
