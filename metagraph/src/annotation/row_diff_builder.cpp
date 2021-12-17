@@ -1263,10 +1263,22 @@ void convert_batch_to_row_diff_coord(const std::string &pred_succ_fprefix,
 
     rd_succ_bv_type rd_succ;
 
-    // get bit at position |i| or its value
-    auto get_value = [&](const bit_vector &col,
-                         size_t s, size_t j,
-                         const uint64_t *it, const uint64_t *end) {
+    // get coordinates at position |i|
+    auto get_value = [&](const bit_vector &col, size_t s, size_t j, uint64_t i) {
+        std::vector<uint64_t> result;
+        if (uint64_t rk = col.conditional_rank1(i)) {
+            uint64_t t = delims[s][j].select1(rk);
+            while (!delims[s][j][++t]) {
+                result.push_back(coords[s][j][t - rk]);
+            }
+        }
+        assert(std::is_sorted(result.begin(), result.end()));
+        return result;
+    };
+
+    auto get_succ = [&](const bit_vector &col,
+                        size_t s, size_t j,
+                        const uint64_t *it, const uint64_t *end) {
         std::vector<uint64_t> result;
         uint64_t rk;
         for ( ; it != end; ++it) {
@@ -1348,8 +1360,8 @@ void convert_batch_to_row_diff_coord(const std::string &pred_succ_fprefix,
                         return;
 
                     // get annotated coordinates for this k-mer
-                    const auto curr_value = get_value(source_col, s, j, &row_idx, &row_idx + 1);
-                    const auto diff = get_diff(curr_value, get_value(source_col, s, j, succ_begin, succ_end));
+                    const auto curr_value = get_value(source_col, s, j, row_idx);
+                    const auto diff = get_diff(curr_value, get_succ(source_col, s, j, succ_begin, succ_end));
                     // reduction (zero diff)
                     __atomic_add_fetch(&row_nbits_block[chunk_idx],
                                        curr_value.size() - diff.size(), __ATOMIC_RELAXED);
@@ -1448,7 +1460,7 @@ void convert_batch_to_row_diff_coord(const std::string &pred_succ_fprefix,
 
     // We use this dummy index for an optimization where we don't store diff
     // for non-anchor k-mers with no coordinates.
-    uint64_t DUMMY_COORD = -1;
+    const uint64_t DUMMY_COORD = -1;
 
     traverse_anno_chunked(
             num_rows, pred_succ_fprefix, sources,
@@ -1458,22 +1470,22 @@ void convert_batch_to_row_diff_coord(const std::string &pred_succ_fprefix,
                     const uint64_t *succ_begin, const uint64_t *succ_end,
                     const uint64_t *pred_begin, const uint64_t *pred_end) {
                 // get annotated coordinates for this k-mer
-                const auto curr_value = get_value(source_col, s, j, &row_idx, &row_idx + 1);
+                const auto curr_value = get_value(source_col, s, j, row_idx);
 
                 bool is_anchor = anchor[row_idx];
 
                 if (is_anchor)
                     num_coords_anchored[s][j] += curr_value.size();
 
-                const auto diff = is_anchor
+                const auto value = is_anchor
                     ? curr_value
-                    : get_diff(curr_value, get_value(source_col, s, j, succ_begin, succ_end));
+                    : get_diff(curr_value, get_succ(source_col, s, j, succ_begin, succ_end));
 
-                if (diff.size()) {
+                if (value.size()) {
                     // must write the coordinates/diff
                     auto &v = set_rows_fwd[s][j];
 
-                    for (uint64_t coord : diff) {
+                    for (uint64_t coord : value) {
                         assert((!v.size() || v.back() != std::make_pair(row_idx, coord))
                                && "coordinates must be unique and can't repeat");
                         v.emplace_back(row_idx, coord);
@@ -1594,7 +1606,7 @@ void convert_batch_to_row_diff_coord(const std::string &pred_succ_fprefix,
                         *coords_it++ = coord;
                         diff_delims.push_back(0);
                     }
-                }, true, chunks_open_per_thread);
+                }, true, chunks_open_per_thread, false);
                 diff_delims.push_back(1);
                 assert(coords_it == diff_coords.end());
                 assert(diff_delims.size() == diff_coords.size() + ids.size() + 1);

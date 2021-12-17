@@ -177,7 +177,14 @@ TupleRowDiff<BaseMatrix>::get_row_tuples(const std::vector<Row> &row_ids) const 
             // reconstruct annotation by adding the diff (full succ + diff)
             add_diff(rd_rows[succ], &rd_rows[node]);
         }
-        rows[i] = rd_rows[rd_path.back().second];
+        auto &row = rd_rows[rd_path.back().second];
+        rows[i].reserve(std::count_if(row.begin(), row.end(),
+                                      [](const auto &v) { return !v.second.empty(); }));
+        for (auto&& v : row) {
+            if (v.second.size())
+                rows[i].push_back(std::move(v));
+        }
+        row = rows[i];
         assert(std::all_of(rows[i].begin(), rows[i].end(),
                            [](auto &p) { return p.second.size(); }));
     }
@@ -222,11 +229,14 @@ void TupleRowDiff<BaseMatrix>::add_diff(const RowTuples &diff, RowTuples *row) {
                 result.push_back(*it);
                 ++it;
             } else if (it->first > it2->first) {
-                result.push_back(*it2);
+                if (it2->second.size())
+                    result.push_back(*it2);
                 ++it2;
             } else {
-                if (it2->second.size()) {
-                    result.emplace_back(it->first, Tuple{});
+                result.emplace_back(it->first, Tuple{});
+                if (it->second.size()) {
+                    assert(std::is_sorted(it->second.begin(), it->second.end()));
+                    assert(std::is_sorted(it2->second.begin(), it2->second.end()));
                     std::set_symmetric_difference(it->second.begin(), it->second.end(),
                                                   it2->second.begin(), it2->second.end(),
                                                   std::back_inserter(result.back().second));
@@ -238,7 +248,10 @@ void TupleRowDiff<BaseMatrix>::add_diff(const RowTuples &diff, RowTuples *row) {
             }
         }
         std::copy(it, row->end(), std::back_inserter(result));
-        std::copy(it2, diff.end(), std::back_inserter(result));
+        for ( ; it2 != diff.end(); ++it2) {
+            if (it2->second.size())
+                result.push_back(*it2);
+        }
 
         row->swap(result);
     }
