@@ -849,7 +849,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
         v.resize(0);
     };
 
-    std::function<std::function<void(const std::function<void(uint64_t)> &)>(size_t, size_t)> call_diffs;
+    std::function<std::vector<T>(size_t, size_t)> get_diff_values;
     if (swap_disk) {
         uint64_t total_num_labels = 0;
         for (size_t s = 0; s < sources.size(); ++s) {
@@ -878,46 +878,61 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
             exit(1);
         }
 
-        call_diffs = [&,chunks_open_per_thread](size_t s, size_t j) {
-            return [&,s,j](const std::function<void(uint64_t)> &call) {
-                std::vector<std::string> filenames;
-                // for stage 1, fwd bits are already counted, so we skip that chunk
-                for (uint32_t chunk = compute_row_reduction ? 1 : 0;
-                                    chunk < num_chunks[s][j]; ++chunk) {
-                    filenames.push_back(tmp_file(s, j, chunk));
-                }
+        get_diff_values = [&,chunks_open_per_thread](size_t s, size_t j) {
+            std::vector<std::string> filenames;
+            // for stage 1, fwd bits are already counted, so we skip that chunk
+            for (uint32_t chunk = compute_row_reduction ? 1 : 0;
+                                chunk < num_chunks[s][j]; ++chunk) {
+                filenames.push_back(tmp_file(s, j, chunk));
+            }
 
-                const bool remove_chunks = true;
-                uint64_t r = 0;
+            std::vector<T> buffer;
+            const bool remove_chunks = true;
+            if constexpr(with_values) {
                 elias_fano::merge_files<T>(filenames, [&](T v) {
-                    call(utils::get_first(v));
-                    if constexpr(with_values) {
-                        assert(v.second && "zero diffs must have been skipped");
-                        values[s][j][r++] = matrix::encode_diff(v.second);
+                    assert(v.second && "zero diffs must have been skipped");
+                    if (buffer.size() && buffer.back().first == v.first) {
+                        buffer.back().second += v.second;
+                    } else {
+                        buffer.push_back(v);
                     }
                 }, remove_chunks, chunks_open_per_thread);
-            };
+            } else {
+                elias_fano::merge_files<T>(filenames, [&](T v) { buffer.push_back(v); },
+                                           remove_chunks, chunks_open_per_thread, true /* dedupe */);
+            }
+            return buffer;
         };
     } else {
         logger->info("Diff-transform in memory without disk swap");
 
-        call_diffs = [&](size_t s, size_t j) {
-            return [&,s,j](const std::function<void(uint64_t)> &call) {
-                auto &v = set_rows_fwd[s][j];
-                v.insert(v.end(), set_rows_bwd[s][j].begin(), set_rows_bwd[s][j].end());
-                set_rows_bwd[s][j] = {};
+        get_diff_values = [&](size_t s, size_t j) {
+            auto &buffer = set_rows_fwd[s][j];
+            assert(std::is_sorted(buffer.begin(), buffer.end()));
 
-                std::sort(v.begin(), v.end());
+            buffer.insert(buffer.end(), set_rows_bwd[s][j].begin(), set_rows_bwd[s][j].end());
+            set_rows_bwd[s][j] = {};
 
+            std::sort(buffer.begin(), buffer.end());
+
+            if constexpr(with_values) {
                 uint64_t r = 0;
-                for (size_t i = 0; i < v.size(); ++i) {
-                    call(utils::get_first(v[i]));
-                    if constexpr(with_values) {
-                        assert(v[i].second && "zero diffs must have been skipped");
-                        values[s][j][r++] = matrix::encode_diff(v[i].second);
+                for (size_t i = 1; i < buffer.size(); ++i) {
+                    assert(buffer[i].second && "zero diffs must have been skipped");
+                    if (buffer[i].first == buffer[r].first) {
+                        buffer[r].second += buffer[i].second;
+                    } else {
+                        buffer[++r] = buffer[i];
                     }
                 }
-            };
+                if (buffer.size())
+                    buffer.resize(r + 1);
+
+            } else {
+                buffer.erase(std::unique(buffer.begin(), buffer.end()), buffer.end());
+            }
+
+            return std::move(buffer);
         };
     }
 
@@ -1143,14 +1158,22 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
         std::vector<std::unique_ptr<bit_vector>> columns(label_encoders[l_idx].size());
 
         for (size_t j = 0; j < label_encoders[l_idx].size(); ++j) {
+            std::vector<T> buffer = get_diff_values(l_idx, j);
             if constexpr(with_values) {
                 // diff values may be negative, hence we need wider integers
-                values[l_idx][j] = sdsl::int_vector<>(row_diff_bits[l_idx][j], 0,
+                values[l_idx][j] = sdsl::int_vector<>(buffer.size(), 0,
                                                       std::min(values[l_idx][j].width() + 1, 64));
+                for (size_t i = 0; i < buffer.size(); ++i) {
+                    values[l_idx][j][i] = matrix::encode_diff(buffer[i].second);
+                }
             }
-
-            columns[j] = std::make_unique<bit_vector_smart>(call_diffs(l_idx, j), num_rows,
-                                                            row_diff_bits[l_idx][j]);
+            columns[j] = std::make_unique<bit_vector_smart>(
+                            [&](auto call_index) {
+                                for (const auto &v : buffer) {
+                                    call_index(utils::get_first(v));
+                                }
+                            },
+                            num_rows, buffer.size());
         }
 
         if (compute_row_reduction) {
