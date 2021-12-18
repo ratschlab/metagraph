@@ -26,7 +26,6 @@ void print_welcome_message() {
     fprintf(stderr, "#############################\n");
     fprintf(stderr, "### Welcome to MetaGraph! ###\n");
     fprintf(stderr, "#############################\n\n");
-    fprintf(stderr, "Metagraph: comprehensive metagenome graph representation -- Version 0.1\n\n");
 }
 
 Config::Config(int argc, char *argv[]) {
