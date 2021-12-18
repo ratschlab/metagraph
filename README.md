@@ -1,5 +1,12 @@
 # Metagenome Graph Project
 
+[![GitHub release (latest by date)](https://img.shields.io/github/v/release/ratschlab/metagraph)](https://github.com/ratschlab/metagraph/releases)
+[![bioconda downloads](https://img.shields.io/conda/dn/bioconda/metagraph?color=blue)](https://bioconda.github.io/recipes/metagraph/README.html)
+[![install with conda](https://img.shields.io/badge/install%20with-conda-brightgreen.svg?style=flat)](#conda)
+[![install with docker](https://img.shields.io/badge/install%20with-docker-brightgreen)](#docker)
+[![install from source](https://img.shields.io/badge/install%20from-source-lightgrey)](#install-from-sources)
+[![documentation](https://img.shields.io/badge/-online%20docs-grey)](https://metagraph.ethz.ch/static/docs/index.html)
+
 MetaGraph is a tool for scalable construction of annotated genome graphs and sequence-to-graph alignment.
 
 The default index representations in MetaGraph are extremely scalable and support building graphs with trillions of nodes and millions of annotation labels.
