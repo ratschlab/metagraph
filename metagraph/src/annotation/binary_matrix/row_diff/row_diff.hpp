@@ -42,6 +42,10 @@ class IRowDiff {
     const anchor_bv_type& anchor() const { return anchor_; }
 
   protected:
+    // get row-diff paths starting at |row_ids|
+    std::pair<std::vector<BinaryMatrix::Row>, std::vector<std::vector<std::pair<size_t, size_t>>>>
+    get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids) const;
+
     const graph::DBGSuccinct *graph_ = nullptr;
     anchor_bv_type anchor_;
     fork_succ_bv_type fork_succ_;
