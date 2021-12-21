@@ -1204,6 +1204,21 @@ void QueryExecutor::query_fasta(const string &file,
 
     seq_io::FastaParser fasta_parser(file, config_.forward_and_reverse);
 
+    // Only query_coords/count_kmers if using coord/count aware index.
+    if (this->config_.query_coords && !(dynamic_cast<const annot::matrix::MultiIntMatrix *>(
+            &this->anno_graph_.get_annotation().get_matrix()))) {
+        logger->error("Annotation does not support k-mer coordinate queries. "
+                      "First transform this annotation to include coordinate data.");
+        exit(1);
+    }
+
+    if (this->config_.count_kmers && !(dynamic_cast<const annot::matrix::IntMatrix *>(
+            &this->anno_graph_.get_annotation().get_matrix()))) {
+        logger->error("Annotation does not support k-mer count queries. "
+                      "First transform this annotation to include count data.");
+        exit(1);
+    }
+
     if (config_.fast) {
         // TODO: Implement batch mode for query_coords queries
         if (config_.query_coords) {

@@ -1,3 +1,5 @@
+#include <regex>
+
 #include <json/json.h>
 #include <server_http.hpp>
 
@@ -66,23 +68,26 @@ std::string process_search_request(const std::string &received_message,
     config.num_top_labels = json.get("num_labels", config.num_top_labels).asInt();
     config.fast = json.get("fast", config.fast).asBool();
     config.print_signature = json.get("with_signature", config.print_signature).asBool();
+    config.query_coords = json.get("query_coords", config.query_coords).asBool();
+    config.count_kmers = json.get("count_kmers", config.count_kmers).asBool();
 
-    // For now, automatically show count and position data if a count-aware index is available.
-    // TODO: make clients specify if counts or coordinates should be queried. Then,
-    // return a proper error message if this query type is not supported by the annotation.
-    if (dynamic_cast<const annot::matrix::MultiIntMatrix *>(
-                    &anno_graph.get_annotation().get_matrix())) {
-        config.query_coords = true;
+    // Throw client an error if they try to query coordinates/kmer-counts on unsupported indexes
+    if (config.count_kmers && !(dynamic_cast<const annot::matrix::IntMatrix *>(
+            &anno_graph.get_annotation().get_matrix()))) {
+        throw std::invalid_argument("Annotation does not support k-mer count queries");
+    }
 
-        // Disable batch query mode if query_coords is activated
-        if (config.fast) {
-            config.fast = false;
-            logger->warn("Attempted to query k-mer coordinates in batch mode."
-                         "Defaulted to basic query mode.");
+    if (config.query_coords) {
+        if (dynamic_cast<const annot::matrix::MultiIntMatrix *>(
+                &anno_graph.get_annotation().get_matrix())) {
+            if (config.fast) {
+                config.fast = false;
+                logger->warn("Attempted to query k-mer coordinates in batch mode. "
+                             "Defaulted to basic query mode.");
+            }
+        } else {
+            throw std::invalid_argument("Annotation does not support k-mer coordinate queries.");
         }
-    } else if (dynamic_cast<const annot::matrix::IntMatrix *>(
-                    &anno_graph.get_annotation().get_matrix())) {
-        config.count_kmers = true;
     }
 
     std::unique_ptr<graph::align::DBGAlignerConfig> aligner_config;
@@ -127,9 +132,7 @@ std::string process_search_request(const std::string &received_message,
     for (const auto &seq_result : search_results) {
         const auto seq_response = seq_result.to_json(config.verbose_coords, anno_graph);
 
-        if (seq_response["results"].size()) {
-            search_response.append(seq_response);
-        }
+        search_response.append(seq_response);
     }
 
     // Return JSON string
@@ -181,22 +184,27 @@ std::string process_align_request(const std::string &received_message,
     // TODO: make parallel?
     seq_io::read_fasta_from_string(fasta.asString(),
                                    [&](seq_io::kseq_t *read_stream) {
-        const auto paths = aligner->align(read_stream->seq.s);
-
         Json::Value align_entry;
         align_entry[SeqSearchResult::SEQ_DESCRIPTION_JSON_FIELD] = read_stream->name.s;
 
         // not supporting reverse complement yet
         Json::Value alignments = Json::Value(Json::arrayValue);
 
-        for (const auto &path : paths.data()) {
-            Json::Value a;
-            a[SeqSearchResult::SCORE_JSON_FIELD] = path.get_score();
-            a[SeqSearchResult::SEQUENCE_JSON_FIELD] = path.get_sequence();
-            a[SeqSearchResult::CIGAR_JSON_FIELD] = path.get_cigar().to_string();
+        // Only align if we have a non-empty sequence
+        // TODO: Investigate why calling aligner->align on empty sequence fails
+        std::string_view seq = read_stream->seq.s;
+        if (!seq.empty()) {
+            const auto paths = aligner->align(seq);
 
-            alignments.append(a);
-        };
+            for (const auto &path : paths.data()) {
+                Json::Value a;
+                a[SeqSearchResult::SCORE_JSON_FIELD] = path.get_score();
+                a[SeqSearchResult::SEQUENCE_JSON_FIELD] = path.get_sequence();
+                a[SeqSearchResult::CIGAR_JSON_FIELD] = path.get_cigar().to_string();
+
+                alignments.append(a);
+            };
+        }
 
         align_entry[SeqSearchResult::ALIGNMENT_JSON_FIELD] = alignments;
 

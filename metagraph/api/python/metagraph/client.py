@@ -39,6 +39,8 @@ class GraphClientJson:
                top_labels: int = DEFAULT_TOP_LABELS,
                discovery_threshold: float = DEFAULT_DISCOVERY_THRESHOLD,
                with_signature: bool = False,
+               query_coords: bool = False,
+               count_kmers: bool = False,
                align: bool = False,
                **align_params) -> Tuple[JsonDict, str]:
         """See parameters for alignment `align_params` in align()"""
@@ -54,21 +56,26 @@ class GraphClientJson:
                 align_params['max_alternative_alignments'] = 1
                 warnings.warn(f"Requested max alternative alignments > 1, treating as 1.",
                               RuntimeWarning)
-
             alignments = self.align(sequence, **align_params)
 
-            def to_fasta(df):
-                fasta = []
-                for i in range(df.shape[0]):
-                    fasta.append(f">{df.loc[i, 'seq_description']}\n{df.loc[i, 'sequence']}")
-                return '\n'.join(fasta)
+            # For each input sequence, retrieve the best (first) aligned sequence
+            aligned_sequences = []
 
-            sequence = to_fasta(helpers.df_from_align_result(alignments))
+            for alignment in alignments:
+                if len(alignment['alignments']) == 0:
+                    # Produce an empty sequence if there are no alignments
+                    aligned_sequences.append('')
+                else:
+                    aligned_sequences.append(alignment['alignments'][0]['sequence'])
+
+            sequence = aligned_sequences
 
         param_dict = {"count_labels": True,
                       "discovery_fraction": discovery_threshold,
                       "num_labels": top_labels,
-                      "with_signature": with_signature}
+                      "with_signature": with_signature,
+                      "query_coords": query_coords,
+                      "count_kmers": count_kmers}
 
         search_results = self._json_seq_query(sequence, param_dict, "search")
 
@@ -81,6 +88,9 @@ class GraphClientJson:
                     search_result['best_alignment'] = alignment['alignments'][0]
                 else:
                     search_result['best_alignment'] = {}
+
+        else:
+            search_results = self._json_seq_query(sequence, param_dict, "search")
 
         return search_results
 
@@ -161,12 +171,15 @@ class GraphClient:
                top_labels: int = DEFAULT_TOP_LABELS,
                discovery_threshold: float = DEFAULT_DISCOVERY_THRESHOLD,
                with_signature: bool = False,
+               query_coords: bool = False,
+               count_kmers: bool = False,
                align: bool = False,
                **align_params) -> pd.DataFrame:
         """See parameters for alignment `align_params` in align()"""
 
         json_obj = self._json_client.search(sequence, top_labels,
                                             discovery_threshold, with_signature,
+                                            query_coords, count_kmers,
                                             align, **align_params)
 
         return helpers.df_from_search_result(json_obj)
@@ -205,6 +218,8 @@ class MultiGraphClient:
                top_labels: int = DEFAULT_TOP_LABELS,
                discovery_threshold: float = DEFAULT_DISCOVERY_THRESHOLD,
                with_signature: bool = False,
+               query_coords: bool = False,
+               count_kmers: bool = False,
                align: bool = False,
                **align_params) -> Dict[str, pd.DataFrame]:
         """See parameters for alignment `align_params` in align()"""
@@ -213,6 +228,7 @@ class MultiGraphClient:
         for name, graph_client in self.graphs.items():
             result[name] = graph_client.search(sequence, top_labels,
                                                discovery_threshold, with_signature,
+                                               query_coords, count_kmers,
                                                align, **align_params)
 
         return result
