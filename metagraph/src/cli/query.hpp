@@ -48,7 +48,7 @@ using StringGenerator = std::function<void(std::function<void(const std::string 
  * @return vector of 'begin-end' range string representations
  */
 std::vector<std::string>
-get_collapsed_coord_ranges(const std::vector<SmallVector<uint64_t>> &tuples);
+collapse_coord_ranges(const std::vector<SmallVector<uint64_t>> &tuples);
 
 
 /**

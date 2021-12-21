@@ -41,6 +41,7 @@ using mtg::graph::boss::BOSSConstructor;
 typedef typename mtg::graph::DeBruijnGraph::node_index node_index;
 
 
+// Format a range of coordinates (start, first_coord, last_coord) to a string representation
 std::string get_range(const std::tuple<uint64_t, uint64_t, uint64_t> &range) {
     const auto &[pos, first, last] = range;
     if (first == last) {
@@ -59,7 +60,7 @@ std::string get_range(const std::tuple<uint64_t, uint64_t, uint64_t> &range) {
  * @return vector of 'begin-end' range string representations
  */
 std::vector<std::string>
-get_collapsed_coord_ranges(const std::vector<SmallVector<uint64_t>> &tuples) {
+collapse_coord_ranges(const std::vector<SmallVector<uint64_t>> &tuples) {
     // Build output
     std::vector<std::string> range_strings;
 
@@ -239,7 +240,7 @@ Json::Value SeqSearchResult::to_json(bool verbose_coords,
                     coord_array.append(Json::Value(fmt::format("{}", fmt::join(coords, ","))));
                 }
             } else {
-                for (const auto &range : get_collapsed_coord_ranges(tuples)) {
+                for (const auto &range : collapse_coord_ranges(tuples)) {
                     coord_array.append(range);
                 }
             }
@@ -309,8 +310,7 @@ std::string SeqSearchResult::to_string(const std::string delimiter,
                     output += fmt::format(":{}", fmt::join(coords, ","));
                 }
             } else {
-                output += fmt::format(":{}",
-                                      fmt::join(get_collapsed_coord_ranges(tuples), ":"));
+                output += fmt::format(":{}", fmt::join(collapse_coord_ranges(tuples), ":"));
             }
         }
     }
