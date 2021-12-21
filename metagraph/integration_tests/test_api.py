@@ -191,7 +191,7 @@ class TestAPIRaw(TestAPIBase):
         )
 
     def test_api_raw_align_no_sequence(self):
-        fasta_str = '\n'.join(">query\n")
+        fasta_str = ">query\n"
         payload = json.dumps({"FASTA": fasta_str, "min_exact_match": 0})
 
         ret = self.raw_post_request('align', payload).json()
