@@ -22,6 +22,9 @@ TEST(get_collapsed_coord_ranges, sample) {
     v1.push_back(3);
 
     std::vector<SmallVector<uint64_t> v = { v1, v2 };
+    res = get_collapsed_coord_ranges(v);
+
+    std::cout << res << std::endl;
 }
 
 }
