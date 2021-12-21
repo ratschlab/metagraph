@@ -4,10 +4,13 @@ import shlex
 import time
 import unittest
 import subprocess
-
 import socket
 import requests
+
+import pandas as pd
+
 from metagraph.client import GraphClientJson, MultiGraphClient
+from concurrent.futures import Future
 from parameterized import parameterized, parameterized_class
 
 from base import TestingBase, METAGRAPH, TEST_DATA_DIR
@@ -361,3 +364,80 @@ class TestAPIClientWithProperties(TestAPIBase):
     def test_api_search_property_df_empty(self):
         df = self.graph_client.search("THISSEQUENCEDOESNOTEXIST", parallel=False)[self.graph_name]
         self.assertTrue(df.empty)
+
+
+@parameterized_class(('mode',), input_values=[('canonical',), ('primary',)])
+@unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
+class TestAPIClientParallel(TestAPIBase):
+    """
+    Testing whether or not parallel requests work
+    """
+    graph_names = ['test_graph', 'test_graph_2']
+
+    sample_query = 'CCTCTGTGGAATCCAATCTGTCTTCCATCCTGCGTGGCCGAGGG'
+    sample_query_expected_rows = 99
+
+    sample_align = ['TCGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGA']
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass(TEST_DATA_DIR + '/transcripts_100.fa', mode=cls.mode)
+
+        cls.graph_client = MultiGraphClient()
+
+        # Here just query the same endpoint twice to test client
+        cls.graph_client.add_graph(cls.host, cls.port, cls.graph_names[0])
+        cls.graph_client.add_graph(cls.host, cls.port, cls.graph_names[1])
+
+    def test_api_parallel_query_df(self):
+        futures = self.graph_client.search(self.sample_query, parallel=True,
+                                           discovery_threshold=0.01)
+
+        self.assertEqual(len(futures), 2)
+
+        for graph in self.graph_names:
+            self.assertIn(graph, futures)
+            self.assertIsInstance(futures[graph], Future)
+
+        dfs = MultiGraphClient.wait_for_result(futures)
+
+        for graph in self.graph_names:
+            self.assertIn(graph, dfs)
+            self.assertIsInstance(dfs[graph], pd.DataFrame)
+            self.assertEqual((self.sample_query_expected_rows, 3), dfs[graph].shape)
+
+    def test_api_parallel_align_df(self):
+        repetitions = 4
+        alignment_cnt = 3
+
+        futures = self.graph_client.align(self.sample_align * repetitions, parallel=True,
+                                          max_alternative_alignments=alignment_cnt)
+
+        self.assertEqual(len(futures), 2)
+
+        for graph in self.graph_names:
+            self.assertIn(graph, futures)
+            self.assertIsInstance(futures[graph], Future)
+
+        dfs = MultiGraphClient.wait_for_result(futures)
+
+        for graph in self.graph_names:
+            self.assertIn(graph, dfs)
+            self.assertIsInstance(dfs[graph], pd.DataFrame)
+            self.assertIn('cigar', dfs[graph].columns)
+            self.assertEqual(len(dfs[graph]), repetitions *  alignment_cnt)
+
+    def test_api_parallel_query_error(self):
+        futures = self.graph_client.search(self.sample_query, parallel=True,
+                                           discovery_threshold=1.2)
+
+        self.assertEqual(len(futures), 2)
+
+        for graph in self.graph_names:
+            self.assertIn(graph, futures)
+            self.assertIsInstance(futures[graph], Future)
+
+        dfs = MultiGraphClient.wait_for_result(futures)
+
+        for graph in self.graph_names:
+            self.assertIsInstance(dfs[graph], ValueError)
