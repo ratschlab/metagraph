@@ -1,5 +1,12 @@
 # Metagenome Graph Project
 
+[![GitHub release (latest by date)](https://img.shields.io/github/v/release/ratschlab/metagraph)](https://github.com/ratschlab/metagraph/releases)
+[![bioconda downloads](https://img.shields.io/conda/dn/bioconda/metagraph?color=blue)](https://bioconda.github.io/recipes/metagraph/README.html)
+[![install with conda](https://img.shields.io/badge/install%20with-conda-brightgreen.svg?style=flat)](#conda)
+[![install with docker](https://img.shields.io/badge/install%20with-docker-brightgreen)](#docker)
+[![install from source](https://img.shields.io/badge/install%20from-source-lightgrey)](#install-from-sources)
+[![documentation](https://img.shields.io/badge/-online%20docs-grey)](https://metagraph.ethz.ch/static/docs/index.html)
+
 MetaGraph is a tool for scalable construction of annotated genome graphs and sequence-to-graph alignment.
 
 The default index representations in MetaGraph are extremely scalable and support building graphs with trillions of nodes and millions of annotation labels.
@@ -19,6 +26,9 @@ At the same time, the provided workflows and their careful implementation, combi
 * Algorithmic choices that work efficiently with succinct data structures (e.g., always prefer batched operations)
 * Modular support of different graph and annotation representations
 * Use of generic and extensible interfaces to support adding custom index representations / algorithms with little code overhead.
+
+## Documentation
+Online documentation is available at https://metagraph.ethz.ch/static/docs/index.html. Offline sources are [here](metagraph/docs/source).
 
 ## Install
 
@@ -46,7 +56,7 @@ All different versions of the container are listed [here](https://github.com/rat
 
 ### Install From Sources
 
-To compile from source, see [documentation online](https://metagraph.ethz.ch/static/docs/installation.html#install-from-source) (e.g., for builds with custom configurations).
+To compile from source (e.g., for builds with custom alphabet or other configurations), see [documentation online](https://metagraph.ethz.ch/static/docs/installation.html#install-from-source).
 
 
 ## Typical workflow

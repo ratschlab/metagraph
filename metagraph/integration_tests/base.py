@@ -6,7 +6,7 @@ from tempfile import TemporaryDirectory
 
 script_path = os.path.dirname(os.path.realpath(__file__))
 
-METAGRAPH = './metagraph'
+METAGRAPH = f'{os.getcwd()}/metagraph'
 
 TEST_DATA_DIR = os.path.join(script_path, '..', 'tests', 'data')
 
@@ -102,7 +102,7 @@ class TestingBase(unittest.TestCase):
     @staticmethod
     def _annotate_graph(input, graph_path, output, anno_repr,
                         separate=False, no_fork_opt=False, no_anchor_opt=False,
-                        anno_type='header'):
+                        anno_type='header', extra_params=''):
         target_anno = anno_repr
 
         noswap = anno_repr.endswith('_noswap')
@@ -120,7 +120,7 @@ class TestingBase(unittest.TestCase):
             anno_repr = 'row'
 
         command = f'{METAGRAPH} annotate -p {NUM_THREADS} --anno-{anno_type}\
-                    -i {graph_path} --anno-type {anno_repr} \
+                    -i {graph_path} --anno-type {anno_repr} {extra_params} \
                     -o {output} {input}'
 
         if target_anno.endswith('_coord'):

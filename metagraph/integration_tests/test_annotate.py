@@ -5,6 +5,7 @@ from subprocess import PIPE
 from tempfile import TemporaryDirectory
 import glob
 import os
+from base import TestingBase
 
 
 """Test graph annotation"""
@@ -27,7 +28,7 @@ GRAPH_TYPES = [graph_type for graph_type, _ in graph_file_extension.items()]
 NUM_THREADS = 4
 
 
-class TestAnnotate(unittest.TestCase):
+class TestAnnotate(TestingBase):
     def setUp(self):
         self.tempdir = TemporaryDirectory()
 
@@ -46,16 +47,12 @@ class TestAnnotate(unittest.TestCase):
         res = subprocess.run([construct_command], shell=True)
         self.assertEqual(res.returncode, 0)
 
-        stats_command = '{exe} stats {graph}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/graph' + graph_file_extension[graph_repr],
-        )
-        res = subprocess.run(stats_command.split(), stdout=PIPE)
+        res = self._get_stats(self.tempdir.name + '/graph' + graph_file_extension[graph_repr])
         self.assertEqual(res.returncode, 0)
-        params_str = res.stdout.decode().split('\n')[2:]
-        self.assertEqual('k: 20', params_str[0])
-        self.assertEqual('nodes (k): 46960', params_str[1])
-        self.assertEqual('mode: basic', params_str[2])
+        out = res.stdout.decode().split('\n')[2:]
+        self.assertEqual('k: 20', out[0])
+        self.assertEqual('nodes (k): 46960', out[1])
+        self.assertEqual('mode: basic', out[2])
 
         for anno_repr in ['row', 'column']:
             # build annotation
@@ -69,17 +66,13 @@ class TestAnnotate(unittest.TestCase):
             self.assertEqual(res.returncode, 0)
 
             # check annotation
-            anno_stats_command = '{exe} stats -a {annotation}'.format(
-                exe=METAGRAPH,
-                annotation=self.tempdir.name + '/annotation' + anno_file_extension[anno_repr],
-            )
-            res = subprocess.run(anno_stats_command.split(), stdout=PIPE)
+            res = self._get_stats(f'-a {self.tempdir.name}/annotation{anno_file_extension[anno_repr]}')
             self.assertEqual(res.returncode, 0)
-            params_str = res.stdout.decode().split('\n')[2:]
-            self.assertEqual('labels:  100', params_str[0])
-            self.assertEqual('objects: 46960', params_str[1])
-            self.assertEqual('density: 0.0185072', params_str[2])
-            self.assertEqual('representation: ' + anno_repr, params_str[3])
+            out = res.stdout.decode().split('\n')[2:]
+            self.assertEqual('labels:  100', out[0])
+            self.assertEqual('objects: 46960', out[1])
+            self.assertEqual('density: 0.0185072', out[2])
+            self.assertEqual('representation: ' + anno_repr, out[3])
 
     # TODO: add 'hashstr' once the canonical mode is implemented for it
     @parameterized.expand(['succinct', 'bitmap', 'hash'])  # , 'hashstr']:
@@ -98,16 +91,12 @@ class TestAnnotate(unittest.TestCase):
         res = subprocess.run([construct_command], shell=True)
         self.assertEqual(res.returncode, 0)
 
-        stats_command = '{exe} stats {graph}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/graph' + graph_file_extension[graph_repr],
-        )
-        res = subprocess.run(stats_command.split(), stdout=PIPE)
+        res = self._get_stats(self.tempdir.name + '/graph' + graph_file_extension[graph_repr])
         self.assertEqual(res.returncode, 0)
-        params_str = res.stdout.decode().split('\n')[2:]
-        self.assertEqual('k: 20', params_str[0])
-        self.assertEqual('nodes (k): 91584', params_str[1])
-        self.assertEqual('mode: canonical', params_str[2])
+        out = res.stdout.decode().split('\n')[2:]
+        self.assertEqual('k: 20', out[0])
+        self.assertEqual('nodes (k): 91584', out[1])
+        self.assertEqual('mode: canonical', out[2])
 
         for anno_repr in ['row', 'column']:
             # build annotation
@@ -120,17 +109,13 @@ class TestAnnotate(unittest.TestCase):
             self.assertEqual(res.returncode, 0)
 
             # check annotation
-            anno_stats_command = '{exe} stats -a {annotation}'.format(
-                exe=METAGRAPH,
-                annotation=self.tempdir.name + '/annotation' + anno_file_extension[anno_repr],
-            )
-            res = subprocess.run(anno_stats_command.split(), stdout=PIPE)
+            res = self._get_stats(f'-a {self.tempdir.name}/annotation{anno_file_extension[anno_repr]}')
             self.assertEqual(res.returncode, 0)
-            params_str = res.stdout.decode().split('\n')[2:]
-            self.assertEqual('labels:  100', params_str[0])
-            self.assertEqual('objects: 91584', params_str[1])
-            self.assertEqual('density: 0.00948888', params_str[2])
-            self.assertEqual('representation: ' + anno_repr, params_str[3])
+            out = res.stdout.decode().split('\n')[2:]
+            self.assertEqual('labels:  100', out[0])
+            self.assertEqual('objects: 91584', out[1])
+            self.assertEqual('density: 0.00948888', out[2])
+            self.assertEqual('representation: ' + anno_repr, out[3])
 
     @parameterized.expand(GRAPH_TYPES)
     def test_simple_all_graphs_from_kmc(self, graph_repr):
@@ -146,16 +131,12 @@ class TestAnnotate(unittest.TestCase):
         res = subprocess.run([construct_command], shell=True)
         self.assertEqual(res.returncode, 0)
 
-        stats_command = '{exe} stats {graph}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/graph' + graph_file_extension[graph_repr],
-        )
-        res = subprocess.run(stats_command.split(), stdout=PIPE)
+        res = self._get_stats(self.tempdir.name + '/graph' + graph_file_extension[graph_repr])
         self.assertEqual(res.returncode, 0)
-        params_str = res.stdout.decode().split('\n')[2:]
-        self.assertEqual('k: 11', params_str[0])
-        self.assertEqual('nodes (k): 469983', params_str[1])
-        self.assertEqual('mode: basic', params_str[2])
+        out = res.stdout.decode().split('\n')[2:]
+        self.assertEqual('k: 11', out[0])
+        self.assertEqual('nodes (k): 469983', out[1])
+        self.assertEqual('mode: basic', out[2])
 
         for anno_repr in ['row', 'column']:
             # build annotation
@@ -168,17 +149,13 @@ class TestAnnotate(unittest.TestCase):
             self.assertEqual(res.returncode, 0)
 
             # check annotation
-            anno_stats_command = '{exe} stats -a {annotation}'.format(
-                exe=METAGRAPH,
-                annotation=self.tempdir.name + '/annotation' + anno_file_extension[anno_repr],
-            )
-            res = subprocess.run(anno_stats_command.split(), stdout=PIPE)
+            res = self._get_stats(f'-a {self.tempdir.name}/annotation{anno_file_extension[anno_repr]}')
             self.assertEqual(res.returncode, 0)
-            params_str = res.stdout.decode().split('\n')[2:]
-            self.assertEqual('labels:  1', params_str[0])
-            self.assertEqual('objects: 469983', params_str[1])
-            self.assertEqual('density: 1', params_str[2])
-            self.assertEqual('representation: ' + anno_repr, params_str[3])
+            out = res.stdout.decode().split('\n')[2:]
+            self.assertEqual('labels:  1', out[0])
+            self.assertEqual('objects: 469983', out[1])
+            self.assertEqual('density: 1', out[2])
+            self.assertEqual('representation: ' + anno_repr, out[3])
 
     @parameterized.expand(GRAPH_TYPES)
     def test_simple_all_graphs_from_kmc_both(self, graph_repr):
@@ -194,16 +171,12 @@ class TestAnnotate(unittest.TestCase):
         res = subprocess.run([construct_command], shell=True)
         self.assertEqual(res.returncode, 0)
 
-        stats_command = '{exe} stats {graph}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/graph' + graph_file_extension[graph_repr],
-        )
-        res = subprocess.run(stats_command.split(), stdout=PIPE)
+        res = self._get_stats(self.tempdir.name + '/graph' + graph_file_extension[graph_repr])
         self.assertEqual(res.returncode, 0)
-        params_str = res.stdout.decode().split('\n')[2:]
-        self.assertEqual('k: 11', params_str[0])
-        self.assertEqual('nodes (k): 802920', params_str[1])
-        self.assertEqual('mode: basic', params_str[2])
+        out = res.stdout.decode().split('\n')[2:]
+        self.assertEqual('k: 11', out[0])
+        self.assertEqual('nodes (k): 802920', out[1])
+        self.assertEqual('mode: basic', out[2])
 
         for anno_repr in ['row', 'column']:
             # build annotation
@@ -216,17 +189,13 @@ class TestAnnotate(unittest.TestCase):
             self.assertEqual(res.returncode, 0)
 
             # check annotation
-            anno_stats_command = '{exe} stats -a {annotation}'.format(
-                exe=METAGRAPH,
-                annotation=self.tempdir.name + '/annotation_single' + anno_file_extension[anno_repr],
-            )
-            res = subprocess.run(anno_stats_command.split(), stdout=PIPE)
+            res = self._get_stats(f'-a {self.tempdir.name}/annotation_single{anno_file_extension[anno_repr]}')
             self.assertEqual(res.returncode, 0)
-            params_str = res.stdout.decode().split('\n')[2:]
-            self.assertEqual('labels:  1', params_str[0])
-            self.assertEqual('objects: 802920', params_str[1])
-            self.assertEqual('density: 0.585342', params_str[2])
-            self.assertEqual('representation: ' + anno_repr, params_str[3])
+            out = res.stdout.decode().split('\n')[2:]
+            self.assertEqual('labels:  1', out[0])
+            self.assertEqual('objects: 802920', out[1])
+            self.assertEqual('density: 0.585342', out[2])
+            self.assertEqual('representation: ' + anno_repr, out[3])
 
             # both strands
             annotate_command = f'{METAGRAPH} annotate --anno-label LabelName -p {NUM_THREADS} \
@@ -238,17 +207,13 @@ class TestAnnotate(unittest.TestCase):
             self.assertEqual(res.returncode, 0)
 
             # check annotation
-            anno_stats_command = '{exe} stats -a {annotation}'.format(
-                exe=METAGRAPH,
-                annotation=self.tempdir.name + '/annotation_both' + anno_file_extension[anno_repr],
-            )
-            res = subprocess.run(anno_stats_command.split(), stdout=PIPE)
+            res = self._get_stats(f'-a {self.tempdir.name}/annotation_both{anno_file_extension[anno_repr]}')
             self.assertEqual(res.returncode, 0)
-            params_str = res.stdout.decode().split('\n')[2:]
-            self.assertEqual('labels:  1', params_str[0])
-            self.assertEqual('objects: 802920', params_str[1])
-            self.assertEqual('density: 1', params_str[2])
-            self.assertEqual('representation: ' + anno_repr, params_str[3])
+            out = res.stdout.decode().split('\n')[2:]
+            self.assertEqual('labels:  1', out[0])
+            self.assertEqual('objects: 802920', out[1])
+            self.assertEqual('density: 1', out[2])
+            self.assertEqual('representation: ' + anno_repr, out[3])
 
     # TODO: add 'hashstr' once the canonical mode is implemented for it
     @parameterized.expand(['succinct', 'bitmap', 'hash'])  # , 'hashstr']:
@@ -266,16 +231,12 @@ class TestAnnotate(unittest.TestCase):
         res = subprocess.run([construct_command], shell=True)
         self.assertEqual(res.returncode, 0)
 
-        stats_command = '{exe} stats {graph}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/graph' + graph_file_extension[graph_repr],
-        )
-        res = subprocess.run(stats_command.split(), stdout=PIPE)
+        res = self._get_stats(self.tempdir.name + '/graph' + graph_file_extension[graph_repr])
         self.assertEqual(res.returncode, 0)
-        params_str = res.stdout.decode().split('\n')[2:]
-        self.assertEqual('k: 11', params_str[0])
-        self.assertEqual('nodes (k): 802920', params_str[1])
-        self.assertEqual('mode: canonical', params_str[2])
+        out = res.stdout.decode().split('\n')[2:]
+        self.assertEqual('k: 11', out[0])
+        self.assertEqual('nodes (k): 802920', out[1])
+        self.assertEqual('mode: canonical', out[2])
 
         for anno_repr in ['row', 'column']:
             # build annotation
@@ -288,17 +249,13 @@ class TestAnnotate(unittest.TestCase):
             self.assertEqual(res.returncode, 0)
 
             # check annotation
-            anno_stats_command = '{exe} stats -a {annotation}'.format(
-                exe=METAGRAPH,
-                annotation=self.tempdir.name + '/annotation_single' + anno_file_extension[anno_repr],
-            )
-            res = subprocess.run(anno_stats_command.split(), stdout=PIPE)
+            res = self._get_stats(f'-a {self.tempdir.name}/annotation_single{anno_file_extension[anno_repr]}')
             self.assertEqual(res.returncode, 0)
-            params_str = res.stdout.decode().split('\n')[2:]
-            self.assertEqual('labels:  1', params_str[0])
-            self.assertEqual('objects: 802920', params_str[1])
-            self.assertEqual('density: 0.5', params_str[2])
-            self.assertEqual('representation: ' + anno_repr, params_str[3])
+            out = res.stdout.decode().split('\n')[2:]
+            self.assertEqual('labels:  1', out[0])
+            self.assertEqual('objects: 802920', out[1])
+            self.assertEqual('density: 0.5', out[2])
+            self.assertEqual('representation: ' + anno_repr, out[3])
 
             # both strands
             annotate_command = f'{METAGRAPH} annotate --anno-label LabelName -p {NUM_THREADS} \
@@ -310,17 +267,13 @@ class TestAnnotate(unittest.TestCase):
             self.assertEqual(res.returncode, 0)
 
             # check annotation
-            anno_stats_command = '{exe} stats -a {annotation}'.format(
-                exe=METAGRAPH,
-                annotation=self.tempdir.name + '/annotation_both' + anno_file_extension[anno_repr],
-            )
-            res = subprocess.run(anno_stats_command.split(), stdout=PIPE)
+            res = self._get_stats(f'-a {self.tempdir.name}/annotation_both{anno_file_extension[anno_repr]}')
             self.assertEqual(res.returncode, 0)
-            params_str = res.stdout.decode().split('\n')[2:]
-            self.assertEqual('labels:  1', params_str[0])
-            self.assertEqual('objects: 802920', params_str[1])
-            self.assertEqual('density: 0.5', params_str[2])
-            self.assertEqual('representation: ' + anno_repr, params_str[3])
+            out = res.stdout.decode().split('\n')[2:]
+            self.assertEqual('labels:  1', out[0])
+            self.assertEqual('objects: 802920', out[1])
+            self.assertEqual('density: 0.5', out[2])
+            self.assertEqual('representation: ' + anno_repr, out[3])
 
     def test_annotate_with_disk_swap(self):
         graph_repr = 'succinct'
@@ -338,16 +291,12 @@ class TestAnnotate(unittest.TestCase):
         res = subprocess.run([construct_command], shell=True)
         self.assertEqual(res.returncode, 0)
 
-        stats_command = '{exe} stats {graph}'.format(
-            exe=METAGRAPH,
-            graph=self.tempdir.name + '/graph' + graph_file_extension[graph_repr],
-        )
-        res = subprocess.run(stats_command.split(), stdout=PIPE)
+        res = self._get_stats(self.tempdir.name + '/graph' + graph_file_extension[graph_repr])
         self.assertEqual(res.returncode, 0)
-        params_str = res.stdout.decode().split('\n')[2:]
-        self.assertEqual('k: 20', params_str[0])
-        self.assertEqual('nodes (k): 46960', params_str[1])
-        self.assertEqual('mode: basic', params_str[2])
+        out = res.stdout.decode().split('\n')[2:]
+        self.assertEqual('k: 20', out[0])
+        self.assertEqual('nodes (k): 46960', out[1])
+        self.assertEqual('mode: basic', out[2])
 
         # build annotation
         annotate_command = f'{METAGRAPH} annotate --anno-header \
@@ -360,17 +309,13 @@ class TestAnnotate(unittest.TestCase):
         self.assertEqual(res.returncode, 0)
 
         # check annotation
-        anno_stats_command = '{exe} stats -a {annotation}'.format(
-            exe=METAGRAPH,
-            annotation=self.tempdir.name + '/annotation' + anno_file_extension[anno_repr],
-        )
-        res = subprocess.run(anno_stats_command.split(), stdout=PIPE)
+        res = self._get_stats(f'-a {self.tempdir.name}/annotation{anno_file_extension[anno_repr]}')
         self.assertEqual(res.returncode, 0)
-        params_str = res.stdout.decode().split('\n')[2:]
-        self.assertEqual('labels:  100', params_str[0])
-        self.assertEqual('objects: 46960', params_str[1])
-        self.assertEqual('density: 0.0185072', params_str[2])
-        self.assertEqual('representation: ' + anno_repr, params_str[3])
+        out = res.stdout.decode().split('\n')[2:]
+        self.assertEqual('labels:  100', out[0])
+        self.assertEqual('objects: 46960', out[1])
+        self.assertEqual('density: 0.0185072', out[2])
+        self.assertEqual('representation: ' + anno_repr, out[3])
 
     @parameterized.expand(GRAPH_TYPES)
     def test_annotate_coordinates(self, graph_repr):
