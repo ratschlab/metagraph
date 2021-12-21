@@ -447,12 +447,12 @@ class TestAPIClientWithCounts(TestAPIBase):
         cls.graph_client = MultiGraphClient()
         cls.graph_client.add_graph(cls.host, cls.port, cls.graph_name)
 
-    def test_api_simple_query_coords_df(self):
-        ret = self.graph_client.search(self.sample_query, discovery_threshold=0.01)
+    def test_api_simple_query_counts_df(self):
+        ret = self.graph_client.search(self.sample_query, discovery_threshold=0.01, count_kmers=True)
         df = ret[self.graph_name]
 
         self.assertEqual((self.sample_query_expected_rows, 3), df.shape)
-        self.assertIn('kmer_coords', df.columns)
+        self.assertIn('kmer_counts', df.columns)
 
     @unittest.expectedFailure
     def test_api_search_no_coordinate_support(self):
