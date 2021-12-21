@@ -38,6 +38,19 @@ class Config;
 
 using StringGenerator = std::function<void(std::function<void(const std::string &)>)>;
 
+
+/**
+ * Given a vector of kmer label matched coordinates, collapse continuous ranges of coordinates
+ * to start-end tuples.
+ *
+ * @param coords    the vector of tuples as stored in a SeqSearchResult
+ *                  originally returned from AnnotatedDBG::get_kmer_coordinates
+ * @return vector of 'begin-end' range string representations
+ */
+std::vector<std::string>
+get_collapsed_coord_ranges(const std::vector<SmallVector<uint64_t>> &tuples);
+
+
 /**
  * Construct a query graph and augment it with neighboring paths around it
  * if `config` is specified.
