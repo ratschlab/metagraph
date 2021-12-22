@@ -234,23 +234,35 @@ void ColumnCompressed<Label>::serialize_counts(const std::string &filename) cons
 
     for (size_t j = 0; j < relation_counts_.size(); ++j) {
         if (!relation_counts_[j].size()) {
-            sdsl::int_vector<>(bitmatrix_[j]->num_set_bits(), 0, count_width_).serialize(out);
+            sdsl::int_vector<>(bitmatrix_[j]->num_set_bits(), 0, 1).serialize(out);
 
         } else {
             assert(relation_counts_[j].size() == bitmatrix_[j]->num_set_bits()
                 && "Binary relation matrix must not be changed while adding relation counts");
 
+            // pack counts
+            uint64_t max_count = 0;
             for (uint64_t v : relation_counts_[j]) {
                 num_counts++;
                 sum_counts += v;
+                max_count = std::max(max_count, v);
             }
 
-            relation_counts_[j].serialize(out);
+            const uint8_t packed_width = sdsl::bits::hi(max_count) + 1;
+            if (packed_width == relation_counts_[j].width()) {
+                relation_counts_[j].serialize(out);
+            } else {
+                // TODO: use int_vector_buffer<>
+                sdsl::int_vector<> packed_counts(relation_counts_[j].size(), 0, packed_width);
+                std::copy(relation_counts_[j].begin(), relation_counts_[j].end(),
+                          packed_counts.begin());
+                packed_counts.serialize(out);
+            }
         }
     }
 
     for (size_t j = relation_counts_.size(); j < bitmatrix_.size(); ++j) {
-        sdsl::int_vector<>(bitmatrix_[j]->num_set_bits(), 0, count_width_).serialize(out);
+        sdsl::int_vector<>(bitmatrix_[j]->num_set_bits(), 0, 1).serialize(out);
     }
 
     logger->info("Num relation counts: {}", num_counts);
