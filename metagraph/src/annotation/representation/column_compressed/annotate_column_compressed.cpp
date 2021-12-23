@@ -266,7 +266,7 @@ void ColumnCompressed<Label>::serialize_counts(const std::string &filename) cons
     }
 
     logger->info("Num relation counts: {}", num_counts);
-    logger->info("Total relation count: {}", sum_counts);
+    logger->info("Relation counts sum: {}", sum_counts);
 }
 
 template <typename Label>

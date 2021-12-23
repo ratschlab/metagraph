@@ -1079,6 +1079,9 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Available options for stats:\n");
             fprintf(stderr, "\t   --print \t\tprint graph table to the screen [off]\n");
             fprintf(stderr, "\t   --print-internal \tprint internal graph representation to screen [off]\n");
+            fprintf(stderr, "\t   --count-quantiles [FLOAT ...] \tk-mer count quantiles to compute for each label [off]\n"
+                            "\t                                 \t\tExample: --count-quantiles '0 0.33 0.5 0.66 1'\n"
+                            "\t                                 \t\t(0 corresponds to MIN, 1 corresponds to MAX)\n");
             fprintf(stderr, "\t   --print-counts-hist \tprint histogram of k-mer weights as pairs (weight: num_kmers) [off]\n");
             fprintf(stderr, "\t   --count-dummy \tshow number of dummy source and sink edges [off]\n");
             fprintf(stderr, "\t-a --annotator [STR] \tannotation []\n");
