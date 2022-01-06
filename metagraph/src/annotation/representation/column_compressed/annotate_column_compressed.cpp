@@ -234,6 +234,7 @@ void ColumnCompressed<Label>::serialize_counts(const std::string &filename) cons
 
     for (size_t j = 0; j < relation_counts_.size(); ++j) {
         if (!relation_counts_[j].size()) {
+            // there were no counts for the column, so we're writing a vector of zeros
             sdsl::int_vector<>(bitmatrix_[j]->num_set_bits(), 0, 1).serialize(out);
 
         } else {
