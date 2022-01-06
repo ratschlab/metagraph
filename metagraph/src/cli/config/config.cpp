@@ -72,6 +72,11 @@ Config::Config(int argc, char *argv[]) {
         identity = ASSEMBLE;
     } else if (!strcmp(argv[1], "relax_brwt")) {
         identity = RELAX_BRWT;
+    } else if (!strcmp(argv[1], "--advanced")) {
+        advanced = true;
+        print_welcome_message();
+        print_usage(argv[0]);
+        exit(0);
     } else if (!strcmp(argv[1], "-h") || !strcmp(argv[1], "--help")) {
         print_welcome_message();
         print_usage(argv[0]);
@@ -108,6 +113,8 @@ Config::Config(int argc, char *argv[]) {
             common::set_verbose(true);
         } else if (!strcmp(argv[i], "--print")) {
             print_graph = true;
+        } else if (!strcmp(argv[i], "--advanced")) {
+            advanced = true;
         } else if (!strcmp(argv[i], "--print-col-names")) {
             print_column_names = true;
         } else if (!strcmp(argv[i], "--print-internal")) {
@@ -838,6 +845,9 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\tclean\t\tclean an existing graph and extract sequences from it\n");
             fprintf(stderr, "\t\t\tin fast[a|q] formats\n\n");
 
+            fprintf(stderr, "\ttransform\tgiven a graph, transform it to other formats\n\n");
+
+if (advanced) {
             fprintf(stderr, "\textend\t\textend an existing graph with new sequences from\n");
             fprintf(stderr, "\t\t\tfiles in fast[a|q] formats\n\n");
 
@@ -848,29 +858,27 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t\t\tconstruction and output the resulting graph structure\n\n");
 
             fprintf(stderr, "\tcompare\t\tcheck whether two given graphs are identical\n\n");
-
+}
             fprintf(stderr, "\talign\t\talign sequences provided in fast[a|q] files to graph\n\n");
-
-            fprintf(stderr, "\tstats\t\tprint graph statistics for given graph(s)\n\n");
 
             fprintf(stderr, "\tannotate\tgiven a graph and a fast[a|q] file, annotate\n");
             fprintf(stderr, "\t\t\tthe respective kmers\n\n");
-
+if (advanced) {
             fprintf(stderr, "\tcoordinate\tgiven a graph and a fast[a|q] file, annotate\n");
             fprintf(stderr, "\t\t\tkmers with their respective coordinates in genomes\n\n");
 
             fprintf(stderr, "\tmerge_anno\tmerge annotation columns\n\n");
-
-            fprintf(stderr, "\ttransform\tgiven a graph, transform it to other formats\n\n");
+}
+            fprintf(stderr, "\trelax_brwt\toptimize the tree structure in brwt annotator\n\n");
 
             fprintf(stderr, "\ttransform_anno\tchange representation of the graph annotation\n\n");
 
             fprintf(stderr, "\tassemble\tgiven a graph, extract sequences from it\n\n");
 
-            fprintf(stderr, "\trelax_brwt\toptimize the tree structure in brwt annotator\n\n");
-
             fprintf(stderr, "\tquery\t\tannotate sequences from fast[a|q] files\n\n");
             fprintf(stderr, "\tserver_query\tannotate received sequences and send annotations back\n\n");
+
+            fprintf(stderr, "\tstats\t\tprint graph statistics for given graph(s) or annotation\n\n");
 
             return;
         }
@@ -898,21 +906,29 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 #endif
             fprintf(stderr, "\t   --complete \t\tconstruct a complete graph (only for Bitmap graph) [off]\n");
             fprintf(stderr, "\t   --mem-cap-gb [INT] \tpreallocated buffer size in GB [1]\n");
+if (advanced) {
             fprintf(stderr, "\t   --dynamic \t\tuse dynamic build method [off]\n");
             fprintf(stderr, "\t-l --len-suffix [INT] \tk-mer suffix length for building graph from chunks [0]\n");
             fprintf(stderr, "\t   --suffix \t\tbuild graph chunk only for k-mers with the suffix given [off]\n");
+}
             fprintf(stderr, "\t-o --outfile-base [STR]\tbasename of output file []\n");
+if (advanced) {
             fprintf(stderr, "\t   --mask-dummy \tbuild mask for dummy k-mers (only for Succinct graph) [off]\n");
+}
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
             fprintf(stderr, "\t   --disk-swap [STR] \tdirectory to use for temporary files [off]\n");
+if (advanced) {
             fprintf(stderr, "\t   --disk-cap-gb [INT] \tmax temp disk space to use before forcing a merge, in GB [inf]\n");
+}
         } break;
         case CLEAN: {
             fprintf(stderr, "Usage: %s clean -o <outfile-base> [options] GRAPH\n\n", prog_name.c_str());
             fprintf(stderr, "Available options for clean:\n");
             fprintf(stderr, "\t   --min-count [INT] \t\tmin k-mer abundance, including [1]\n");
             fprintf(stderr, "\t   --max-count [INT] \t\tmax k-mer abundance, excluding [inf]\n");
+if (advanced) {
             fprintf(stderr, "\t   --num-singletons [INT] \treset the number of count 1 k-mers in histogram (0: off) [0]\n");
+}
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --prune-tips [INT] \t\tprune all dead ends shorter than this value [1]\n");
             fprintf(stderr, "\t   --prune-unitigs [INT] \tprune all unitigs with median k-mer counts smaller\n"
@@ -1100,7 +1116,9 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --anno-type [STR] \ttarget annotation representation: column / row [column]\n");
             fprintf(stderr, "\t-a --annotator [STR] \tannotator to update []\n");
+if (advanced) {
             fprintf(stderr, "\t   --sparse \t\tuse the row-major sparse matrix to annotate graph [off]\n");
+}
             fprintf(stderr, "\t   --cache \t\tnumber of columns in cache (for column representation only) [10]\n");
             fprintf(stderr, "\t   --disk-swap [STR] \tdirectory to use for temporary files [off]\n");
             fprintf(stderr, "\t   --mem-cap-gb [FLOAT]\tbuffer size in GB (per column in construction) [1]\n");
@@ -1203,7 +1221,9 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --fwd-and-reverse \tfor each input sequence, query its reverse complement as well [off]\n");
 #endif
             fprintf(stderr, "\t   --align \t\talign sequences instead of mapping k-mers [off]\n");
+if (advanced) {
             fprintf(stderr, "\t   --sparse \t\tuse row-major sparse matrix for row annotation [off]\n");
+}
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --count-labels \t\tcount labels for k-mers from querying sequences [off]\n");
             fprintf(stderr, "\t   --count-kmers \t\tweight k-mers with their annotated counts (requires count annotation) [off]\n");
@@ -1267,6 +1287,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 
     fprintf(stderr, "\n\tGeneral options:\n");
     fprintf(stderr, "\t-v --verbose \t\tswitch on verbose output [off]\n");
+    fprintf(stderr, "\t   --advanced \t\tshow other advanced and legacy options [off]\n");
     fprintf(stderr, "\t-h --help \t\tprint usage info\n");
     fprintf(stderr, "\n");
 }
