@@ -342,3 +342,67 @@ To load up a MetaGraph index in the server mode for querying it with the Python 
 Using Python API
 ^^^^^^^^^^^^^^^^
 See :ref:`api`
+
+
+Column operations
+-----------------
+MetaGraph supports operations aggregating multiple annotations columns to compute statistics
+for k-mers and their counts, e.g.::
+
+    metagraph transform_anno --aggregate-columns -o out \
+                                --min-count 2 --max-count 2 \
+                                A.column.annodbg \
+                                B.column.annodbg
+
+to construct a new annotation column ``out.column.annodbg`` which computes AND between columns A and B.
+
+Despite the simplistic appearance of this command, it can also compute many other complex operations.
+Below we provide a few common examples of such aggregating operations.
+
+Examples
+^^^^^^^^
+1. Select all "unique" k-mers, that is, appearing only in a single annotation column among columns in annotation ``annotation.column.annodbg``::
+
+    metagraph transform_anno --aggregate-columns -o out \
+                             --max-count 1 annotation.column.annodbg
+
+2. Select all "common" k-mers, that is, appearing in at least 95% of annotation columns::
+
+    metagraph transform_anno --aggregate-columns -o out \
+                             --min-fraction 0.95 annotation.column.annodbg
+
+.. note:: This command (``metagraph transform_anno --aggregate-columns ...``) only supports annotations
+    in the ColumnCompressed format, that is, constructed by the ``metagraph annotate`` command.
+    If the input columns have associated counts (e.g., constructed with ``metagraph annotate --count-kmers ...``),
+    they can be loaded and used by the aggregator as well.
+
+Aggregating function
+^^^^^^^^^^^^^^^^^^^^
+In general, the following formula is used for aggregation:
+
+.. math::
+
+    \text{min-count} <= \sum_i 1\{\text{min-value} <= c_i <= \text{max-value}\} <= \text{max-count},
+
+where :math:`c_i` is the count for the current k-mer (if no counts are associated with the column, :math:`c_i = 1` for every set bit and :math:`0` otherwise).
+If this sum falls within specified :math:`\text{min-count}` and :math:`\text{max-count}`, the bit in the aggregated column
+for this k-mer is set to 1, and the value of the sum is written as the count associated with that bit.
+
+In other words, the output aggregated column is always supplemented with a count vector, which can be
+interpreted as normal k-mer counts.
+For instance, consider the following example.
+
+1. Suppose, first we want to compute in how many columns each k-mer occurs::
+
+    metagraph transform_anno --aggregate-columns -o out annotation.column.annodbg
+
+2. Then we can inspect the histogram of k-mer frequencies to, say, find an appropriate threshold for maximum frequency::
+
+    metagraph stats -a out.column.annodbg --print-counts-hist
+
+3. Finally, after inspecting the histogram and selecting a reasonable threshold (suppose, we decided to filter out all k-mers that occur in more than 10 columns), we can apply it to the aggregated column as to a normal original column with counts::
+
+    metagraph transform_anno --aggregate-columns -o rare_kmers \
+                             --max-value 10 out.column.annodbg
+
+which generates the final column ``rare_kmers.column.annodbg`` with the mask indicating all k-mers occurring in 10 or fewer input columns in the original file ``annotation.column.annodbg``.
