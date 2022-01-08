@@ -78,9 +78,10 @@ occurring at least 5 times in the input::
     ./KMC/kmc -ci5 -t4 -k$K -m5 -fm SRR403017.fasta.gz SRR403017.cutoff_5 ./KMC
     metagraph build -v -p 4 -k $K --mem-cap-gb 10 -o graph SRR403017.cutoff_5.kmc_pre
 
-.. note:: In the above example, we use ``./KMC`` as the directory where KMC will store its
-          intermediate caches. Depending on your input data, this directory should be at a location
-          with a sufficient amount of free intermediate storage space.
+.. note::
+    In the above example, we use ``./KMC`` as the directory where KMC will store its
+    intermediate caches. Depending on your input data, this directory should be at a location
+    with a sufficient amount of free intermediate storage space.
 
 Construct with disk swap
 """"""""""""""""""""""""
@@ -174,7 +175,8 @@ they are situated in a unitig with sufficiently many highly abundant k-mers.
 
     zless SRR403017_clean_contigs.fasta.gz
 
-.. note:: The default parameters in ``metagraph clean`` correspond to no cleaning. That is, an equivalent of ``metagraph transform --to-fasta``, which extracts from the input de Bruijn graph all contigs, without removing any k-mers.
+.. note::
+    The default parameters in ``metagraph clean`` correspond to no cleaning. That is, an equivalent of ``metagraph transform --to-fasta``, which extracts from the input de Bruijn graph all contigs, without removing any k-mers.
 
 For cleaning graphs constructed from high-throughput Illumina reads, the recommended parameters are
 ``--prune-tips <2k> --prune-unitigs 0 --fallback 2``, which implements the cleaning procedure proposed in `McCortex <https://github.com/mcveanlab/mccortex>`_ (Turner et al., 2018) and includes the following steps:
@@ -371,7 +373,8 @@ Examples
     metagraph transform_anno --aggregate-columns -o out \
                              --min-fraction 0.95 annotation.column.annodbg
 
-.. note:: This command (``metagraph transform_anno --aggregate-columns ...``) only supports annotations
+.. note::
+    This command (``metagraph transform_anno --aggregate-columns ...``) only supports annotations
     in the ColumnCompressed format, that is, constructed by the ``metagraph annotate`` command.
     If the input columns have associated counts (e.g., constructed with ``metagraph annotate --count-kmers ...``),
     they can be loaded and used by the aggregator as well.
