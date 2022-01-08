@@ -115,6 +115,8 @@ Config::Config(int argc, char *argv[]) {
             print_graph = true;
         } else if (!strcmp(argv[i], "--advanced")) {
             advanced = true;
+            if (argc == 3)
+                print_usage_and_exit = true;
         } else if (!strcmp(argv[i], "--print-col-names")) {
             print_column_names = true;
         } else if (!strcmp(argv[i], "--print-internal")) {
@@ -411,7 +413,8 @@ Config::Config(int argc, char *argv[]) {
             fnames.erase(it--);
     }
 
-    if (!fnames.size() && identity != STATS
+    if (!print_usage_and_exit && !fnames.size()
+                      && identity != STATS
                       && identity != SERVER_QUERY
                       && !(identity == BUILD && complete)
                       && !(identity == CONCATENATE && !infbase.empty())) {
