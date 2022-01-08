@@ -39,7 +39,7 @@ flags are available.
 Sequence-to-graph alignment
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Additional Parameters
+Additional parameters
 ^^^^^^^^^^^^^^^^^^^^^
 
 Query sequences against the index
