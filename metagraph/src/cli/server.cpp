@@ -1,5 +1,3 @@
-#include <regex>
-
 #include <json/json.h>
 #include <server_http.hpp>
 
@@ -69,24 +67,24 @@ std::string process_search_request(const std::string &received_message,
     config.fast = json.get("fast", config.fast).asBool();
     config.print_signature = json.get("with_signature", config.print_signature).asBool();
     config.query_coords = json.get("query_coords", config.query_coords).asBool();
-    config.count_kmers = json.get("count_kmers", config.count_kmers).asBool();
+    config.count_kmers = json.get("query_counts", config.count_kmers).asBool();
 
     // Throw client an error if they try to query coordinates/kmer-counts on unsupported indexes
     if (config.count_kmers && !(dynamic_cast<const annot::matrix::IntMatrix *>(
-            &anno_graph.get_annotation().get_matrix()))) {
+                                        &anno_graph.get_annotation().get_matrix()))) {
         throw std::invalid_argument("Annotation does not support k-mer count queries");
     }
 
     if (config.query_coords) {
-        if (dynamic_cast<const annot::matrix::MultiIntMatrix *>(
-                &anno_graph.get_annotation().get_matrix())) {
-            if (config.fast) {
-                config.fast = false;
-                logger->warn("Attempted to query k-mer coordinates in batch mode. "
-                             "Defaulted to basic query mode.");
-            }
-        } else {
-            throw std::invalid_argument("Annotation does not support k-mer coordinate queries.");
+        if (!dynamic_cast<const annot::matrix::MultiIntMatrix *>(
+                        &anno_graph.get_annotation().get_matrix())) {
+            throw std::invalid_argument("Annotation does not support k-mer coordinate queries");
+        }
+
+        if (config.fast) {
+            config.fast = false;
+            logger->warn("Attempted to query k-mer coordinates in batch mode. "
+                         "Defaulted to basic query mode.");
         }
     }
 
@@ -130,9 +128,7 @@ std::string process_search_request(const std::string &received_message,
     // Create full JSON object
     Json::Value search_response(Json::arrayValue);
     for (const auto &seq_result : search_results) {
-        const auto seq_response = seq_result.to_json(config.verbose_coords, anno_graph);
-
-        search_response.append(seq_response);
+        search_response.append(seq_result.to_json(config.verbose_coords, anno_graph));
     }
 
     // Return JSON string

@@ -15,13 +15,13 @@ Install MetaGraph API in Python::
 
     pip install -U "git+https://github.com/ratschlab/metagraph.git#subdirectory=metagraph/api/python"
 
-Sequence Search
+Sequence search
 ---------------
-The Python client has a ``search`` method which allows us to query a index running on a server.
+The Python client has a ``search`` method which allows querying an index running on a server.
 The method accepts a single sequence or list of sequences represented with strings.
 
-Basic search in MetaSUB
-^^^^^^^^^^^^^^^^^^^^^^^
+Example of search in MetaSUB
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 For basic usage, the method accepts the following keyword arguments:
 
 - ``top_labels``: the maximum number of matched labels to retrieve [default: 100]
@@ -72,16 +72,15 @@ Search with alignment
 ^^^^^^^^^^^^^^^^^^^^^
 It is possible to first align a sequence and use the aligned sequence to query the index.
 This can be done by setting ``align=True`` (default False).
-If ``align == True``, then all alignment options (explained in the alignment section below) are accepted.
+If the ``align`` flag is set, all the alignment options (explained in the alignment section below) are accepted::
 
-::
     metasub.search(query, discovery_threshold=0.0, top_labels=200,
                    align=True, min_exact_match=0.8, max_num_nodes_per_seq_char=10.0)
 
 Searching count and coordinate indexes
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Metagraph supports k-mer count-aware and coordinate-aware indexes. If you are querying such an index,
-you can also set ``count_kmers=True`` or ``query_coords=True`` respectively. If you try to query an
+you can also set ``query_counts=True`` or ``query_coords=True``, respectively. If you try to query an
 index which does not support either of these query types, the server will return an error.
 
 Alignment
@@ -96,6 +95,7 @@ Additionally, the method accepts the following keyword arguments:
 - ``max_num_nodes_per_seq_char``: maximum number of nodes to consider during extension [default: 10.0]
 
 ::
+
     metasub.align(query, min_exact_match=0.8)
 
 Search multiple graphs in parallel
@@ -108,6 +108,7 @@ If ``parallel=False``, all graphs will simply be queried in sequence and the res
 be ``instances of pandas.DataFrame``.
 
 ::
+
     from metagraph.client import MultiGraphClient
 
     multi = MultiGraphClient()

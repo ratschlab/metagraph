@@ -225,7 +225,7 @@ class TestAPIRaw(TestAPIBase):
     def test_api_raw_search_no_count_support(self):
         fasta_str = ">query\nCCTCTGTGGAATCCAATCTGTCTTCCATCCTGCGTGGCCGAGGG"
         payload = json.dumps({"FASTA": fasta_str, 'num_labels': 5, 'min_exact_match': 0.1,
-                              'count_kmers': True})
+                              'query_counts': True})
 
         ret = self.raw_post_request('search', payload)
 
@@ -326,7 +326,7 @@ class TestAPIClient(TestAPIBase):
     @unittest.expectedFailure
     def test_api_search_no_count_support(self):
         ret = self.graph_client.search(self.sample_query, parallel=False,
-                                       discovery_threshold=0.01, count_kmers=True)
+                                       discovery_threshold=0.01, query_counts=True)
 
 
 @parameterized_class(('mode',), input_values=[('canonical',), ('primary',)])
@@ -459,7 +459,7 @@ class TestAPIClientWithCounts(TestAPIBase):
         cls.graph_client.add_graph(cls.host, cls.port, cls.graph_name)
 
     def test_api_simple_query_counts_df(self):
-        ret = self.graph_client.search(self.sample_query, discovery_threshold=0.01, parallel=False, count_kmers=True)
+        ret = self.graph_client.search(self.sample_query, discovery_threshold=0.01, parallel=False, query_counts=True)
         df = ret[self.graph_name]
 
         self.assertEqual((self.sample_query_expected_rows, 3), df.shape)

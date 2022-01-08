@@ -10,6 +10,20 @@ namespace {
 
 using namespace mtg;
 
+TEST(collapse_coord_ranges, empty) {
+    std::vector<SmallVector<uint64_t>> tuples = {};
+
+    EXPECT_EQ(std::vector<std::string>(),
+              cli::collapse_coord_ranges(tuples));
+}
+
+TEST(collapse_coord_ranges, single) {
+    std::vector<SmallVector<uint64_t>> tuples = { { 1, 3, 5 } };
+
+    EXPECT_EQ(std::vector<std::string>({ "0-1", "0-3", "0-5" }),
+              cli::collapse_coord_ranges(tuples));
+}
+
 TEST(collapse_coord_ranges, standard) {
     std::vector<SmallVector<uint64_t>> tuples = { { 1, 2, 3 },
                                                   { 2, 3, 4 } };
@@ -49,13 +63,6 @@ TEST(collapse_coord_ranges, disjoint) {
 
     EXPECT_EQ(std::vector<std::string>({ "0-1", "0-2", "0-3", "1-5-7", "1-6-8", "1-7-9" }),
               cli::collapse_coord_ranges(longer));
-}
-
-TEST(collapse_coord_ranges, empty) {
-    std::vector<SmallVector<uint64_t>> tuples = {};
-
-    EXPECT_EQ(std::vector<std::string>(),
-              cli::collapse_coord_ranges(tuples));
 }
 
 } // namespace

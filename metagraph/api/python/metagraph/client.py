@@ -41,8 +41,8 @@ class GraphClientJson:
                top_labels: int = DEFAULT_TOP_LABELS,
                discovery_threshold: float = DEFAULT_DISCOVERY_THRESHOLD,
                with_signature: bool = False,
+               query_counts: bool = False,
                query_coords: bool = False,
-               count_kmers: bool = False,
                align: bool = False,
                **align_params) -> Tuple[JsonDict, str]:
         """See parameters for alignment `align_params` in align()"""
@@ -76,13 +76,13 @@ class GraphClientJson:
                       "discovery_fraction": discovery_threshold,
                       "num_labels": top_labels,
                       "with_signature": with_signature,
-                      "query_coords": query_coords,
-                      "count_kmers": count_kmers}
+                      "query_counts": query_counts,
+                      "query_coords": query_coords}
 
         search_results = self._json_seq_query(sequence, param_dict, "search")
 
         if align:
-            assert(len(alignments) == len(search_results))
+            assert len(alignments) == len(search_results)
 
             # Zip best alignment results
             for alignment, search_result in zip(alignments, search_results):
@@ -173,15 +173,15 @@ class GraphClient:
                top_labels: int = DEFAULT_TOP_LABELS,
                discovery_threshold: float = DEFAULT_DISCOVERY_THRESHOLD,
                with_signature: bool = False,
+               query_counts: bool = False,
                query_coords: bool = False,
-               count_kmers: bool = False,
                align: bool = False,
                **align_params) -> pd.DataFrame:
         """See parameters for alignment `align_params` in align()"""
 
         json_obj = self._json_client.search(sequence, top_labels,
                                             discovery_threshold, with_signature,
-                                            query_coords, count_kmers,
+                                            query_counts, query_coords,
                                             align, **align_params)
 
         return helpers.df_from_search_result(json_obj)
@@ -229,8 +229,8 @@ class MultiGraphClient:
                top_labels: int = DEFAULT_TOP_LABELS,
                discovery_threshold: float = DEFAULT_DISCOVERY_THRESHOLD,
                with_signature: bool = False,
+               query_counts: bool = False,
                query_coords: bool = False,
-               count_kmers: bool = False,
                align: bool = False,
                **align_params) -> Dict[str, Union[pd.DataFrame, Future]]:
         """
@@ -248,7 +248,7 @@ class MultiGraphClient:
             for name, graph_client in self.graphs.items():
                 result[name] = graph_client.search(sequence, top_labels,
                                                    discovery_threshold, with_signature,
-                                                   query_coords, count_kmers,
+                                                   query_counts, query_coords,
                                                    align, **align_params)
 
             return result
@@ -263,7 +263,7 @@ class MultiGraphClient:
         for name, graph_client in self.graphs.items():
             futures[name] = executor.submit(graph_client.search, sequence,
                                             top_labels, discovery_threshold, with_signature,
-                                            query_coords, count_kmers,
+                                            query_counts, query_coords,
                                             align, **align_params)
 
         print(f'Made {len(self.graphs)} requests with {num_processes} threads...')

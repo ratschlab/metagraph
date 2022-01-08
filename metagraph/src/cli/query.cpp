@@ -149,8 +149,12 @@ Json::Value get_label_as_json(const std::string &label) {
 
     // Fill properties if existant
     Json::Value properties = Json::objectValue;
-    for (auto lit = ++label_parts.begin(); lit != label_parts.end(); ++lit) {
-        std::vector<std::string> key_value = utils::split_string(*lit, "=");
+    for (size_t i = 1; i < label_parts.size(); ++i) {
+        std::vector<std::string> key_value = utils::split_string(label_parts[i], "=");
+        if (key_value.size() != 2) {
+            logger->error("Can't read key-value pair in part {} of label {}", label_parts[i], label);
+            throw std::runtime_error("Label formatting error");
+        }
         properties[key_value[0]] = adjust_for_types(key_value[1]);
     }
 
@@ -249,6 +253,9 @@ Json::Value SeqSearchResult::to_json(bool verbose_coords,
             label_obj[KMER_COORDINATE_FIELD] = coord_array;
             root["results"].append(label_obj);
         }
+    } else {
+        assert(false);
+        throw std::runtime_error("UNKNOWN TYPE");
     }
 
     return root;
@@ -313,6 +320,9 @@ std::string SeqSearchResult::to_string(const std::string delimiter,
                 output += fmt::format(":{}", fmt::join(collapse_coord_ranges(tuples), ":"));
             }
         }
+    } else {
+        assert(false);
+        throw std::runtime_error("UNKNOWN TYPE");
     }
 
     return output;
@@ -1236,10 +1246,8 @@ void QueryExecutor::query_fasta(const string &file,
     for (const seq_io::kseq_t &kseq : fasta_parser) {
         thread_pool_.enqueue([&](QuerySequence &sequence) {
             // Callback with the SeqSearchResult
-            callback(query_sequence(std::move(sequence),
-                                    anno_graph_,
-                                    config_,
-                                    aligner_config_.get()));
+            callback(query_sequence(std::move(sequence), anno_graph_,
+                                    config_, aligner_config_.get()));
         }, QuerySequence { seq_count++, std::string(kseq.name.s), std::string(kseq.seq.s) });
     }
 
@@ -1283,8 +1291,7 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
             for (size_t i = 0; i < seq_batch.size(); ++i) {
                 // Set alignment for this seq_batch
                 alignments_batch[i] = align_sequence(&seq_batch[i].sequence,
-                                                     anno_graph_,
-                                                     *aligner_config_);
+                                                     anno_graph_, *aligner_config_);
             }
             logger->trace("Sequences alignment took {} sec", batch_timer.elapsed());
             batch_timer.reset();
