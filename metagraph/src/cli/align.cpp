@@ -402,6 +402,8 @@ int align_to_graph(Config *config) {
 
         size_t num_batches = 0;
 
+        bool is_reverse_complement = false;
+
         while (it != end) {
             uint64_t num_bytes_read = 0;
 
@@ -417,8 +419,10 @@ int align_to_graph(Config *config) {
                                                   config->fasta_anno_comment_delim,
                                                   true)
                             : std::string(it->name.s);
-                seq_batch.emplace_back(std::move(header), it->seq.s, false);
+                seq_batch.emplace_back(std::move(header), it->seq.s, is_reverse_complement);
                 num_bytes_read += it->seq.l;
+                // alternate between forward and rc sequences if |forward_and_reverse| is true
+                is_reverse_complement ^= config->forward_and_reverse;
             }
 
             auto process_batch = [&,graph](SeqBatch batch) {

@@ -509,7 +509,7 @@ class TestQuery(TestingBase):
 
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
-        self.assertEqual(len(res.stdout), 1619883)
+        self.assertEqual(len(res.stdout), 139268)
 
         query_command = f'{METAGRAPH} query --query-coords \
                             -i {self.tempdir.name}/graph{graph_file_extension[self.graph_repr]} \
@@ -518,8 +518,29 @@ class TestQuery(TestingBase):
 
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
-        self.assertEqual(len(res.stdout), 492788)
+        self.assertEqual(len(res.stdout), 31522)
 
+    def test_query_coordinates_expanded(self):
+        if not self.anno_repr.endswith('_coord'):
+            self.skipTest('annotation does not support coordinates')
+
+        query_command = f'{METAGRAPH} query --query-coords --verbose-coords \
+                            -i {self.tempdir.name}/graph{graph_file_extension[self.graph_repr]} \
+                            -a {self.tempdir.name}/annotation{anno_file_extension[self.anno_repr]} \
+                            --discovery-fraction 0.05 {TEST_DATA_DIR}/transcripts_100.fa'
+
+        res = subprocess.run(query_command.split(), stdout=PIPE)
+        self.assertEqual(res.returncode, 0)
+        self.assertEqual(len(res.stdout), 1619883)
+
+        query_command = f'{METAGRAPH} query --query-coords --verbose-coords \
+                            -i {self.tempdir.name}/graph{graph_file_extension[self.graph_repr]} \
+                            -a {self.tempdir.name}/annotation{anno_file_extension[self.anno_repr]} \
+                            --discovery-fraction 0.95 {TEST_DATA_DIR}/transcripts_100.fa'
+
+        res = subprocess.run(query_command.split(), stdout=PIPE)
+        self.assertEqual(res.returncode, 0)
+        self.assertEqual(len(res.stdout), 492788)
 
 
 @parameterized_class(('graph_repr', 'anno_repr'),
@@ -586,7 +607,7 @@ class TestQueryTinyLinear(TestingBase):
         if not self.anno_repr.endswith('_coord'):
             self.skipTest('annotation does not support coordinates')
 
-        query_command = f'{METAGRAPH} query --query-coords \
+        query_command = f'{METAGRAPH} query --query-coords  --verbose-coords \
                             -i {self.tempdir.name}/graph{graph_file_extension[self.graph_repr]} \
                             -a {self.tempdir.name}/annotation{anno_file_extension[self.anno_repr]} \
                             --discovery-fraction 0.05 {self.fasta_graph}'
