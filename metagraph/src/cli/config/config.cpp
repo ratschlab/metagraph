@@ -72,6 +72,11 @@ Config::Config(int argc, char *argv[]) {
         identity = ASSEMBLE;
     } else if (!strcmp(argv[1], "relax_brwt")) {
         identity = RELAX_BRWT;
+    } else if (!strcmp(argv[1], "--advanced")) {
+        advanced = true;
+        print_welcome_message();
+        print_usage(argv[0]);
+        exit(0);
     } else if (!strcmp(argv[1], "-h") || !strcmp(argv[1], "--help")) {
         print_welcome_message();
         print_usage(argv[0]);
@@ -108,6 +113,10 @@ Config::Config(int argc, char *argv[]) {
             common::set_verbose(true);
         } else if (!strcmp(argv[i], "--print")) {
             print_graph = true;
+        } else if (!strcmp(argv[i], "--advanced")) {
+            advanced = true;
+            if (argc == 3)
+                print_usage_and_exit = true;
         } else if (!strcmp(argv[i], "--print-col-names")) {
             print_column_names = true;
         } else if (!strcmp(argv[i], "--print-internal")) {
@@ -406,7 +415,8 @@ Config::Config(int argc, char *argv[]) {
             fnames.erase(it--);
     }
 
-    if (!fnames.size() && identity != STATS
+    if (!print_usage_and_exit && !fnames.size()
+                      && identity != STATS
                       && identity != SERVER_QUERY
                       && !(identity == BUILD && complete)
                       && !(identity == CONCATENATE && !infbase.empty())) {
@@ -840,6 +850,9 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\tclean\t\tclean an existing graph and extract sequences from it\n");
             fprintf(stderr, "\t\t\tin fast[a|q] formats\n\n");
 
+            fprintf(stderr, "\ttransform\tgiven a graph, transform it to other formats\n\n");
+
+if (advanced) {
             fprintf(stderr, "\textend\t\textend an existing graph with new sequences from\n");
             fprintf(stderr, "\t\t\tfiles in fast[a|q] formats\n\n");
 
@@ -850,29 +863,27 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t\t\tconstruction and output the resulting graph structure\n\n");
 
             fprintf(stderr, "\tcompare\t\tcheck whether two given graphs are identical\n\n");
-
+}
             fprintf(stderr, "\talign\t\talign sequences provided in fast[a|q] files to graph\n\n");
-
-            fprintf(stderr, "\tstats\t\tprint graph statistics for given graph(s)\n\n");
 
             fprintf(stderr, "\tannotate\tgiven a graph and a fast[a|q] file, annotate\n");
             fprintf(stderr, "\t\t\tthe respective kmers\n\n");
-
+if (advanced) {
             fprintf(stderr, "\tcoordinate\tgiven a graph and a fast[a|q] file, annotate\n");
             fprintf(stderr, "\t\t\tkmers with their respective coordinates in genomes\n\n");
 
             fprintf(stderr, "\tmerge_anno\tmerge annotation columns\n\n");
-
-            fprintf(stderr, "\ttransform\tgiven a graph, transform it to other formats\n\n");
+}
+            fprintf(stderr, "\trelax_brwt\toptimize the tree structure in brwt annotator\n\n");
 
             fprintf(stderr, "\ttransform_anno\tchange representation of the graph annotation\n\n");
 
             fprintf(stderr, "\tassemble\tgiven a graph, extract sequences from it\n\n");
 
-            fprintf(stderr, "\trelax_brwt\toptimize the tree structure in brwt annotator\n\n");
-
             fprintf(stderr, "\tquery\t\tannotate sequences from fast[a|q] files\n\n");
             fprintf(stderr, "\tserver_query\tannotate received sequences and send annotations back\n\n");
+
+            fprintf(stderr, "\tstats\t\tprint graph statistics for given graph(s) or annotation\n\n");
 
             return;
         }
@@ -900,21 +911,29 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 #endif
             fprintf(stderr, "\t   --complete \t\tconstruct a complete graph (only for Bitmap graph) [off]\n");
             fprintf(stderr, "\t   --mem-cap-gb [INT] \tpreallocated buffer size in GB [1]\n");
+if (advanced) {
             fprintf(stderr, "\t   --dynamic \t\tuse dynamic build method [off]\n");
             fprintf(stderr, "\t-l --len-suffix [INT] \tk-mer suffix length for building graph from chunks [0]\n");
             fprintf(stderr, "\t   --suffix \t\tbuild graph chunk only for k-mers with the suffix given [off]\n");
+}
             fprintf(stderr, "\t-o --outfile-base [STR]\tbasename of output file []\n");
+if (advanced) {
             fprintf(stderr, "\t   --mask-dummy \tbuild mask for dummy k-mers (only for Succinct graph) [off]\n");
+}
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
             fprintf(stderr, "\t   --disk-swap [STR] \tdirectory to use for temporary files [off]\n");
+if (advanced) {
             fprintf(stderr, "\t   --disk-cap-gb [INT] \tmax temp disk space to use before forcing a merge, in GB [inf]\n");
+}
         } break;
         case CLEAN: {
             fprintf(stderr, "Usage: %s clean -o <outfile-base> [options] GRAPH\n\n", prog_name.c_str());
             fprintf(stderr, "Available options for clean:\n");
             fprintf(stderr, "\t   --min-count [INT] \t\tmin k-mer abundance, including [1]\n");
             fprintf(stderr, "\t   --max-count [INT] \t\tmax k-mer abundance, excluding [inf]\n");
+if (advanced) {
             fprintf(stderr, "\t   --num-singletons [INT] \treset the number of count 1 k-mers in histogram (0: off) [0]\n");
+}
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --prune-tips [INT] \t\tprune all dead ends shorter than this value [1]\n");
             fprintf(stderr, "\t   --prune-unitigs [INT] \tprune all unitigs with median k-mer counts smaller\n"
@@ -953,11 +972,12 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
         } break;
         case ALIGN: {
             fprintf(stderr, "Usage: %s align -i <GRAPH> [options] FASTQ1 [[FASTQ2] ...]\n\n", prog_name.c_str());
-
+if (advanced) {
 #if ! _PROTEIN_GRAPH
             fprintf(stderr, "\t   --fwd-and-reverse \t\tfor each input sequence, report a separate alignment for its reverse complement as well [off]\n");
 #endif
             fprintf(stderr, "\t   --header-comment-delim [STR]\tdelimiter for joining fasta header with comment [off]\n");
+}
             fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --map \t\t\tmap k-mers to graph exactly instead of aligning.\n");
@@ -969,19 +989,25 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --query-presence \t\ttest sequences for presence, report as 0 or 1 [off]\n");
             fprintf(stderr, "\t   --filter-present \t\treport only present input sequences as FASTA [off]\n");
+if (advanced) {
             fprintf(stderr, "\t   --batch-size \t\tquery batch size (number of base pairs) [100000000]\n");
+}
             fprintf(stderr, "\n");
             fprintf(stderr, "Available options for alignment:\n");
             fprintf(stderr, "\t-o --outfile-base [STR]\t\t\t\tbasename of output file []\n");
             fprintf(stderr, "\t   --json \t\t\t\t\toutput alignment in JSON format [off]\n");
+if (advanced) {
             fprintf(stderr, "\t   --align-only-forwards \t\t\tdo not align backwards from a seed on basic-mode graphs [off]\n");
+}
             fprintf(stderr, "\t   --align-alternative-alignments \t\tthe number of alternative paths to report per seed [1]\n");
             fprintf(stderr, "\t   --align-chain \t\t\t\tperform multiple local alignments and chain them together into a single alignment. Useful for long error-prone reads. [off]\n");
             fprintf(stderr, "\t         \t\t\t\t\t\tA '$' inserted into the reference sequence indicates a jump in the graph.\n");
             fprintf(stderr, "\t         \t\t\t\t\t\tA 'G' in the reported CIGAR string indicates inserted graph nodes.\n");
+if (advanced) {
             fprintf(stderr, "\t   --align-min-path-score [INT]\t\t\tthe minimum score that a reported path can have [0]\n");
             fprintf(stderr, "\t   --align-max-nodes-per-seq-char [FLOAT]\tmaximum number of nodes to consider per sequence character [12.0]\n");
             fprintf(stderr, "\t   --align-max-ram [FLOAT]\t\t\tmaximum amount of RAM used per alignment in MB [200.0]\n");
+}
             fprintf(stderr, "\t   --align-xdrop [INT]\t\t\t\tthe maximum difference between the current score and the best alignment score [27]\n");
             fprintf(stderr, "\t   \t\t\t\t\t\t\tNote that this parameter should be scaled accordingly when changing the default scoring parameters.\n");
             fprintf(stderr, "\t   --align-rel-score-cutoff [FLOAT]\t\tmin score relative to the current best alignment to use as a lower bound for subsequent extensions [0.8]\n");
@@ -997,8 +1023,10 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "Advanced options for seeding:\n");
             fprintf(stderr, "\t   --align-min-seed-length [INT]\t\tthe minimum length of a seed [graph k]\n");
             fprintf(stderr, "\t   --align-max-seed-length [INT]\t\tthe maximum length of a seed [graph k]\n");
-            fprintf(stderr, "\t   --align-min-exact-match [FLOAT] \t\tfraction of matching nucleotides required to align sequence [0.0]\n");
+if (advanced) {
+            fprintf(stderr, "\t   --align-min-exact-match [FLOAT] \t\tfraction of matching nucleotides required to align sequence [0.0]\n");            
             fprintf(stderr, "\t   --align-max-num-seeds-per-locus [INT]\tthe maximum number of allowed inexact seeds per locus [inf]\n");
+}
         } break;
         case COMPARE: {
             fprintf(stderr, "Usage: %s compare [options] GRAPH1 GRAPH2\n\n", prog_name.c_str());
@@ -1105,7 +1133,9 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --anno-type [STR] \ttarget annotation representation: column / row [column]\n");
             fprintf(stderr, "\t-a --annotator [STR] \tannotator to update []\n");
+if (advanced) {
             fprintf(stderr, "\t   --sparse \t\tuse the row-major sparse matrix to annotate graph [off]\n");
+}
             fprintf(stderr, "\t   --cache \t\tnumber of columns in cache (for column representation only) [10]\n");
             fprintf(stderr, "\t   --disk-swap [STR] \tdirectory to use for temporary files [off]\n");
             fprintf(stderr, "\t   --mem-cap-gb [FLOAT]\tbuffer size in GB (per column in construction) [1]\n");
@@ -1208,7 +1238,9 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
             fprintf(stderr, "\t   --fwd-and-reverse \tfor each input sequence, query its reverse complement as well [off]\n");
 #endif
             fprintf(stderr, "\t   --align \t\talign sequences instead of mapping k-mers [off]\n");
+if (advanced) {
             fprintf(stderr, "\t   --sparse \t\tuse row-major sparse matrix for row annotation [off]\n");
+}
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --count-labels \t\tcount labels for k-mers from querying sequences [off]\n");
             fprintf(stderr, "\t   --count-kmers \t\tweight k-mers with their annotated counts (requires count annotation) [off]\n");
@@ -1273,6 +1305,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
 
     fprintf(stderr, "\n\tGeneral options:\n");
     fprintf(stderr, "\t-v --verbose \t\tswitch on verbose output [off]\n");
+    fprintf(stderr, "\t   --advanced \t\tshow other advanced and legacy options [off]\n");
     fprintf(stderr, "\t-h --help \t\tprint usage info\n");
     fprintf(stderr, "\n");
 }
