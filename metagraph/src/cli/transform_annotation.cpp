@@ -581,21 +581,29 @@ int transform_annotation(Config *config) {
         logger->trace("Selecting k-mers annotated in {} <= * <= {} (out of {}) columns",
                       min_cols, max_cols, num_columns);
 
+        size_t j = 0;
         sdsl::bit_vector mask(sum.size(), false);
         for (uint64_t i = 0; i < sum.size(); ++i) {
             if (sum[i] >= min_cols && sum[i] <= max_cols) {
                 mask[i] = true;
+                sum[j++] = sum[i];
             }
         }
+        sum.resize(j);
+        sdsl::util::bit_compress(sum);
+
+        auto outfname = utils::remove_suffix(config->outfbase, ColumnCompressed<>::kExtension);
+        std::ofstream out_counts(outfname + ColumnCompressed<>::kCountExtension,
+                                 std::ios::binary);
+        sum.serialize(out_counts);
         sum = sdsl::int_vector<>();
 
         const std::string &col_name = config->anno_labels.size()
                                         ? config->anno_labels[0]
                                         : "mask";
+        outfname += ColumnCompressed<>::kExtension;
         ColumnCompressed<> aggregated_column(std::move(mask), col_name);
 
-        const auto &outfname = utils::make_suffix(config->outfbase,
-                                                  ColumnCompressed<>::kExtension);
         aggregated_column.serialize(outfname);
         logger->trace("Columns are aggregated and the resulting column '{}'"
                       " serialized to {}", col_name, outfname);
