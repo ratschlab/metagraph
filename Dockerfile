@@ -108,6 +108,4 @@ COPY metagraph/api/python ${CODE_BASE}/api/python
 
 RUN pip3 install ${CODE_BASE}/api/python
 
-USER nobody
-
 ENTRYPOINT ["metagraph"]
