@@ -127,7 +127,7 @@ class TestQuery(TestingBase):
         if cls.anno_repr.endswith('_noswap'):
             cls.anno_repr = cls.anno_repr[:-len('_noswap')]
 
-        assert('representation: ' + cls.anno_repr == out[3])
+        assert(f'representation: {cls.anno_repr}' == out[3])
 
     def test_query(self):
         query_command = '{exe} query -i {graph} -a {annotation} --discovery-fraction 1.0 {input}'.format(
@@ -509,7 +509,7 @@ class TestQuery(TestingBase):
 
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
-        self.assertEqual(len(res.stdout), 2155983)
+        self.assertEqual(len(res.stdout), 139268)
 
         query_command = f'{METAGRAPH} query --query-coords \
                             -i {self.tempdir.name}/graph{graph_file_extension[self.graph_repr]} \
@@ -518,7 +518,107 @@ class TestQuery(TestingBase):
 
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
-        self.assertEqual(len(res.stdout), 687712)
+        self.assertEqual(len(res.stdout), 31522)
+
+    def test_query_coordinates_expanded(self):
+        if not self.anno_repr.endswith('_coord'):
+            self.skipTest('annotation does not support coordinates')
+
+        query_command = f'{METAGRAPH} query --query-coords --verbose-coords \
+                            -i {self.tempdir.name}/graph{graph_file_extension[self.graph_repr]} \
+                            -a {self.tempdir.name}/annotation{anno_file_extension[self.anno_repr]} \
+                            --discovery-fraction 0.05 {TEST_DATA_DIR}/transcripts_100.fa'
+
+        res = subprocess.run(query_command.split(), stdout=PIPE)
+        self.assertEqual(res.returncode, 0)
+        self.assertEqual(len(res.stdout), 1619883)
+
+        query_command = f'{METAGRAPH} query --query-coords --verbose-coords \
+                            -i {self.tempdir.name}/graph{graph_file_extension[self.graph_repr]} \
+                            -a {self.tempdir.name}/annotation{anno_file_extension[self.anno_repr]} \
+                            --discovery-fraction 0.95 {TEST_DATA_DIR}/transcripts_100.fa'
+
+        res = subprocess.run(query_command.split(), stdout=PIPE)
+        self.assertEqual(res.returncode, 0)
+        self.assertEqual(len(res.stdout), 492788)
+
+
+@parameterized_class(('graph_repr', 'anno_repr'),
+    input_values=product(['succinct'], ANNO_TYPES),
+    class_name_func=get_test_class_name
+)
+class TestQueryTinyLinear(TestingBase):
+    @classmethod
+    def setUpClass(cls):
+        cls.tempdir = TemporaryDirectory()
+
+        cls.fasta_graph = cls.tempdir.name + '/file_graph.fa'
+        with open(cls.fasta_graph, 'w') as f:
+            f.write(f'>L\nAAAACCCCGGGGTTTT\n')
+
+        cls.fasta_anno = cls.tempdir.name + '/file_anno.fa'
+        with open(cls.fasta_anno, 'w') as f:
+            f.write(f'>L1\nAAAACCCCGGGGTTTT\n')
+            f.write(f'>L2\nAAAACCCCGGGGTTTT\n')
+            f.write(f'>L3\nCCCCGGGG\n')
+
+        cls.mask_dummy = False
+        if cls.graph_repr == 'succinct_mask':
+            cls.graph_repr = 'succinct'
+            cls.mask_dummy = True
+
+        cls._build_graph(cls.fasta_graph, cls.tempdir.name + '/graph', 5, cls.graph_repr, 'basic', '--mask-dummy')
+
+        res = cls._get_stats(f'{cls.tempdir.name}/graph{graph_file_extension[cls.graph_repr]}')
+        assert(res.returncode == 0)
+        out = res.stdout.decode().split('\n')[2:]
+        assert('k: 5' == out[0])
+        assert('nodes (k): 12' == out[1])
+        assert('mode: basic' == out[2])
+
+        def check_suffix(anno_repr, suffix):
+            match = anno_repr.endswith(suffix)
+            if match:
+                anno_repr = anno_repr[:-len(suffix)]
+            return anno_repr, match
+
+        cls.anno_repr, separate = check_suffix(cls.anno_repr, '_separate')
+        cls.anno_repr, no_fork_opt = check_suffix(cls.anno_repr, '_no_fork_opt')
+        cls.anno_repr, no_anchor_opt = check_suffix(cls.anno_repr, '_no_anchor_opt')
+
+        cls._annotate_graph(cls.fasta_anno,
+                cls.tempdir.name + '/graph' + graph_file_extension[cls.graph_repr],
+                cls.tempdir.name + '/annotation', cls.anno_repr,
+                separate, no_fork_opt, no_anchor_opt)
+
+        # check annotation
+        res = cls._get_stats(f'-a {cls.tempdir.name}/annotation{anno_file_extension[cls.anno_repr]}')
+        assert(res.returncode == 0)
+        out = res.stdout.decode().split('\n')[2:]
+        assert('labels:  3' == out[0])
+        assert('objects: 12' == out[1])
+
+        if cls.anno_repr.endswith('_noswap'):
+            cls.anno_repr = cls.anno_repr[:-len('_noswap')]
+
+        assert(f'representation: {cls.anno_repr}' == out[3])
+
+    def test_query_coordinates(self):
+        if not self.anno_repr.endswith('_coord'):
+            self.skipTest('annotation does not support coordinates')
+
+        query_command = f'{METAGRAPH} query --query-coords  --verbose-coords \
+                            -i {self.tempdir.name}/graph{graph_file_extension[self.graph_repr]} \
+                            -a {self.tempdir.name}/annotation{anno_file_extension[self.anno_repr]} \
+                            --discovery-fraction 0.05 {self.fasta_graph}'
+
+        res = subprocess.run(query_command.split(), stdout=PIPE)
+        self.assertEqual(res.returncode, 0)
+        self.assertEqual(set(res.stdout.decode().strip().split('\t')),
+                         {'0', 'L',
+                            '<L1>:0:1:2:3:4:5:6:7:8:9:10:11',
+                            '<L2>:0:1:2:3:4:5:6:7:8:9:10:11',
+                            '<L3>:::::0:1:2:3::::'})
 
 
 @parameterized_class(('graph_repr', 'anno_repr'),

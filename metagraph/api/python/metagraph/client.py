@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 
+import multiprocessing
 from typing import Dict, Tuple, List, Iterable, Union, Any
+from concurrent.futures import ThreadPoolExecutor, Future, wait
 
 import pandas as pd
 import requests
@@ -39,6 +41,8 @@ class GraphClientJson:
                top_labels: int = DEFAULT_TOP_LABELS,
                discovery_threshold: float = DEFAULT_DISCOVERY_THRESHOLD,
                with_signature: bool = False,
+               query_counts: bool = False,
+               query_coords: bool = False,
                align: bool = False,
                **align_params) -> Tuple[JsonDict, str]:
         """See parameters for alignment `align_params` in align()"""
@@ -48,22 +52,49 @@ class GraphClientJson:
                 f"discovery_threshold should be between 0 and 1 inclusive. Got {discovery_threshold}")
 
         if align:
-            json_obj = self.align(sequence, **align_params)
+            # Warn if number of alignments is specified > 1
+            if 'max_alternative_alignments' in align_params and \
+                    align_params['max_alternative_alignments'] > 1:
+                align_params['max_alternative_alignments'] = 1
+                warnings.warn(f"Requested max alternative alignments > 1, treating as 1.",
+                              RuntimeWarning)
+            alignments = self.align(sequence, **align_params)
 
-            def to_fasta(df):
-                fasta = []
-                for i in range(df.shape[0]):
-                    fasta.append(f">{df.loc[i, 'seq_description']}\n{df.loc[i, 'sequence']}")
-                return '\n'.join(fasta)
+            # For each input sequence, retrieve the best (first) aligned sequence
+            aligned_sequences = []
 
-            sequence = to_fasta(helpers.df_from_align_result(json_obj))
+            for alignment in alignments:
+                if len(alignment['alignments']) == 0:
+                    # Produce an empty sequence if there are no alignments
+                    aligned_sequences.append('')
+                else:
+                    aligned_sequences.append(alignment['alignments'][0]['sequence'])
+
+            sequence = aligned_sequences
 
         param_dict = {"count_labels": True,
                       "discovery_fraction": discovery_threshold,
                       "num_labels": top_labels,
-                      "with_signature": with_signature}
+                      "with_signature": with_signature,
+                      "query_counts": query_counts,
+                      "query_coords": query_coords}
 
-        return self._json_seq_query(sequence, param_dict, "search")
+        search_results = self._json_seq_query(sequence, param_dict, "search")
+
+        if align:
+            assert len(alignments) == len(search_results)
+
+            # Zip best alignment results
+            for alignment, search_result in zip(alignments, search_results):
+                if 'alignments' in alignment and len(alignment['alignments']) > 0:
+                    search_result['best_alignment'] = alignment['alignments'][0]
+                else:
+                    search_result['best_alignment'] = {}
+
+        else:
+            search_results = self._json_seq_query(sequence, param_dict, "search")
+
+        return search_results
 
     def align(self, sequence: Union[str, Iterable[str]],
               min_exact_match: float = DEFAULT_DISCOVERY_THRESHOLD,
@@ -142,12 +173,15 @@ class GraphClient:
                top_labels: int = DEFAULT_TOP_LABELS,
                discovery_threshold: float = DEFAULT_DISCOVERY_THRESHOLD,
                with_signature: bool = False,
+               query_counts: bool = False,
+               query_coords: bool = False,
                align: bool = False,
                **align_params) -> pd.DataFrame:
         """See parameters for alignment `align_params` in align()"""
 
         json_obj = self._json_client.search(sequence, top_labels,
                                             discovery_threshold, with_signature,
+                                            query_counts, query_coords,
                                             align, **align_params)
 
         return helpers.df_from_search_result(json_obj)
@@ -170,47 +204,115 @@ class GraphClient:
 
 
 class MultiGraphClient:
-    # TODO: make things asynchronously. this should be the added value of this class
+    """
+    A version of the graph client that can add multiple graph servers and also supports
+    asynchronous querying using a thread pool.
+    """
     def __init__(self):
+        """ Create an instance of MultiGraphClient. """
         self.graphs = {}
 
     def add_graph(self, host: str, port: int, name: str = None, api_path: str = None) -> None:
+        """ Adds graph client to list of graphs to query on request """
+
         graph_client = GraphClient(host, port, name, api_path=api_path)
         self.graphs[graph_client.name] = graph_client
 
     def list_graphs(self) -> Dict[str, Tuple[str, int]]:
-        return {lbl: (inst.host, inst.port) for (lbl, inst) in
+        """ List the details of the currently added graph clients """
+
+        return {lbl: (inst._json_client.host, inst._json_client.port) for (lbl, inst) in
                 self.graphs.items()}
 
     def search(self, sequence: Union[str, Iterable[str]],
+               parallel=True,
                top_labels: int = DEFAULT_TOP_LABELS,
                discovery_threshold: float = DEFAULT_DISCOVERY_THRESHOLD,
                with_signature: bool = False,
+               query_counts: bool = False,
+               query_coords: bool = False,
                align: bool = False,
-               **align_params) -> Dict[str, pd.DataFrame]:
-        """See parameters for alignment `align_params` in align()"""
+               **align_params) -> Dict[str, Union[pd.DataFrame, Future]]:
+        """
+        Make search requests with each graph client.
 
-        result = {}
+        :param parallel: perform requests in parallel, and instead return Future instances
+        :param align_params: see parameters for alignment in align()
+        :return: Dict mapping graph names to pd.DataFrame results
+        """
+
+        if not parallel:
+            result = {}
+
+            # Do this iteratively and return once done
+            for name, graph_client in self.graphs.items():
+                result[name] = graph_client.search(sequence, top_labels,
+                                                   discovery_threshold, with_signature,
+                                                   query_counts, query_coords,
+                                                   align, **align_params)
+
+            return result
+
+        # Otherwise, let's query in parallel with a multiprocessing pool
+        num_processes = min(multiprocessing.cpu_count(), len(self.graphs))
+
+        futures = {}
+        executor = ThreadPoolExecutor(max_workers=num_processes)
+
+        # Populate async results dict with concurrent.futures.Future instances
         for name, graph_client in self.graphs.items():
-            result[name] = graph_client.search(sequence, top_labels,
-                                               discovery_threshold, with_signature,
-                                               align, **align_params)
+            futures[name] = executor.submit(graph_client.search, sequence,
+                                            top_labels, discovery_threshold, with_signature,
+                                            query_counts, query_coords,
+                                            align, **align_params)
 
-        return result
+        print(f'Made {len(self.graphs)} requests with {num_processes} threads...')
+
+        # Shutdown executor but do not stop futures
+        executor.shutdown(wait=False)
+        return futures
 
     def align(self, sequence: Union[str, Iterable[str]],
+              parallel=True,
               min_exact_match: float = DEFAULT_DISCOVERY_THRESHOLD,
               max_alternative_alignments: int = 1,
               max_num_nodes_per_seq_char: float = DEFAULT_NUM_NODES_PER_SEQ_CHAR) -> Dict[
-        str, pd.DataFrame]:
-        result = {}
-        for name, graph_client in self.graphs.items():
-            # TODO: do this async
-            result[name] = graph_client.align(sequence, min_exact_match,
-                                              max_alternative_alignments,
-                                              max_num_nodes_per_seq_char)
+        str, Union[pd.DataFrame, Future]]:
+        """
+        Make align requests with each graph client.
 
-        return result
+        :param parallel: perform requests in parallel, and instead return Future instances
+        :return: Dict mapping graph names to pd.DataFrame results
+        """
+
+        if not parallel:
+            result = {}
+
+            # Do this iteratively and return once done
+            for name, graph_client in self.graphs.items():
+                result[name] = graph_client.align(sequence, min_exact_match,
+                                                  max_alternative_alignments,
+                                                  max_num_nodes_per_seq_char)
+
+            return result
+
+        # Otherwise, let's query in parallel with a multiprocessing pool
+        num_processes = min(multiprocessing.cpu_count(), len(self.graphs))
+
+        futures = {}
+        executor = ThreadPoolExecutor(max_workers=num_processes)
+
+        # Populate async results dict with concurrent.futures.Future instances
+        for name, graph_client in self.graphs.items():
+            futures[name] = executor.submit(graph_client.align, sequence, min_exact_match,
+                                            max_alternative_alignments,
+                                            max_num_nodes_per_seq_char)
+
+        print(f'Made {len(self.graphs)} requests with {num_processes} threads...')
+
+        # Shutdown executor but do not stop futures
+        executor.shutdown(wait=False)
+        return futures
 
     def column_labels(self) -> Dict[str, List[str]]:
         ret = {}
@@ -218,3 +320,19 @@ class MultiGraphClient:
             ret[name] = graph_client.column_labels()
 
         return ret
+
+    def wait_for_result(futures: Dict[str, Future]) -> Dict[str, Union[pd.DataFrame, Exception]]:
+        """
+        Wait for all futures to finish running and return a proper result dict.
+        If any of the calls resulted in an exception, return that in the result instead.
+
+        :param futures: Dictionary mapping graph names to Future instances
+        :return Dictionary mapping graph names to result DataFrames (or Execeptions)
+        """
+        wait(futures.values())
+
+        result = {}
+        for name, fs in futures.items():
+            result[name] = fs.exception() if fs.exception() else fs.result()
+
+        return result

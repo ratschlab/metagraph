@@ -1,5 +1,12 @@
 # Metagenome Graph Project
 
+[![GitHub release (latest by date)](https://img.shields.io/github/v/release/ratschlab/metagraph)](https://github.com/ratschlab/metagraph/releases)
+[![bioconda downloads](https://img.shields.io/conda/dn/bioconda/metagraph?color=blue)](https://bioconda.github.io/recipes/metagraph/README.html)
+[![install with conda](https://img.shields.io/badge/install%20with-conda-brightgreen.svg?style=flat)](#conda)
+[![install with docker](https://img.shields.io/badge/install%20with-docker-brightgreen)](#docker)
+[![install from source](https://img.shields.io/badge/install%20from-source-lightgrey)](#install-from-sources)
+[![documentation](https://img.shields.io/badge/-online%20docs-grey)](https://metagraph.ethz.ch/static/docs/index.html)
+
 MetaGraph is a tool for scalable construction of annotated genome graphs and sequence-to-graph alignment.
 
 The default index representations in MetaGraph are extremely scalable and support building graphs with trillions of nodes and millions of annotation labels.
@@ -38,14 +45,24 @@ conda install -c bioconda -c conda-forge metagraph
 If docker is available on the system, immediately get started with
 
 ```
-docker run -v ${HOME}:/mnt ghcr.io/ratschlab/metagraph:master build -v -k 10 \
-                            -o /mnt/transcripts_1000 \
-                            /mnt/transcripts_1000.fa
+docker pull ghcr.io/ratschlab/metagraph:master
+docker run -v ${HOME}:/mnt ghcr.io/ratschlab/metagraph:master \
+    build -v -k 10 -o /mnt/transcripts_1000 /mnt/transcripts_1000.fa
+```
+and replace `${HOME}` with a directory on the host system to map it under `/mnt` in the container.
+
+To run the binary compiled for the `Protein` alphabet, just add `--entrypoint metagraph_Protein`:
+```
+docker run -v ${HOME}:/mnt --entrypoint metagraph_Protein ghcr.io/ratschlab/metagraph:master \
+    build -v -k 10 -o /mnt/graph /mnt/protein.fa
 ```
 
-(Replace `${HOME}` with a directory on the host system to map it under `/mnt` in the container.)
+As you see, running MetaGraph from docker containers is very easy. Also, the following command (or similar) may be handy to see what directory is mounted in the container or other sort of debugging of the command:
+```
+docker run -v ${HOME}:/mnt --entrypoint ls ghcr.io/ratschlab/metagraph:master /mnt
+```
 
-All different versions of the container are listed [here](https://github.com/ratschlab/metagraph/pkgs/container/metagraph).
+All different versions of the container image are listed [here](https://github.com/ratschlab/metagraph/pkgs/container/metagraph).
 
 ### Install From Sources
 

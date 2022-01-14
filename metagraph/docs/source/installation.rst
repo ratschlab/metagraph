@@ -23,15 +23,28 @@ Docker container
 
 If docker is available on your system, you can immediately get started with::
 
-    docker run -v ${DATA_DIR_HOST}:/mnt ghcr.io/ratschlab/metagraph:latest \
+    docker run -v ${DATA_DIR_HOST}:/mnt ghcr.io/ratschlab/metagraph:master \
         build -v -k 10 -o /mnt/transcripts_1000 /mnt/transcripts_1000.fa
 
 
-where you'd need to replace ``${DATA_DIR_HOST}`` with a directory on the host system to map it
+where ``${DATA_DIR_HOST}`` should be replaced with a directory on the host system to map it
 under ``/mnt`` in the container. This docker container uses the latest version of MetaGraph from
 the source `GitHub repository <https://github.com/ratschlab/metagraph>`_ (branch ``master``).
 See also the `image overview <https://github.com/ratschlab/metagraph/pkgs/container/metagraph>`_ for
-other versions of the metagraph image.
+other versions of the image.
+
+By default, it executes the binary compiled for the DNA alphabet.
+To run the binary compiled for the `Protein` alphabet, just add ``--entrypoint metagraph_Protein``::
+
+    docker run --entrypoint metagraph_Protein \
+               -v ${DATA_DIR_HOST}:/mnt ghcr.io/ratschlab/metagraph:master \
+        build -v -k 10 -o /mnt/graph /mnt/protein.fa
+
+As you see, running MetaGraph from docker containers is very easy.
+Also, the following command (or similar) may be handy to see what directory is mounted in the
+container or other sort of debugging of the command::
+
+    docker run -v ${DATA_DIR_HOST}:/mnt --entrypoint ls ghcr.io/ratschlab/metagraph:master /mnt
 
 
 Install from source

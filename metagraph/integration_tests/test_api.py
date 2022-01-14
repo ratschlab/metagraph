@@ -4,10 +4,13 @@ import shlex
 import time
 import unittest
 import subprocess
-
 import socket
 import requests
+
+import pandas as pd
+
 from metagraph.client import GraphClientJson, MultiGraphClient
+from concurrent.futures import Future
 from parameterized import parameterized, parameterized_class
 
 from base import TestingBase, METAGRAPH, TEST_DATA_DIR
@@ -17,14 +20,15 @@ PROTEIN_MODE = os.readlink(METAGRAPH).endswith("_Protein")
 
 class TestAPIBase(TestingBase):
     @classmethod
-    def setUpClass(cls, fasta_path, mode='basic'):
+    def setUpClass(cls, fasta_path, mode='basic', anno_repr='column'):
         super().setUpClass()
 
         graph_path = cls.tempdir.name + '/graph.dbg'
-        annotation_path = cls.tempdir.name + '/annotation.column.annodbg'
+        annotation_path_base = cls.tempdir.name + '/annotation'
+        annotation_path = annotation_path_base + f'.{anno_repr}.annodbg'
 
         cls._build_graph(fasta_path, graph_path, 6, 'succinct', mode=mode)
-        cls._annotate_graph(fasta_path, graph_path, annotation_path, 'column')
+        cls._annotate_graph(fasta_path, graph_path, annotation_path_base, anno_repr)
 
         cls.host = '127.0.0.1'
         os.environ['NO_PROXY'] = cls.host
@@ -141,9 +145,11 @@ class TestAPIRaw(TestAPIBase):
                     "num_labels": 1,
                     })
         ret = self.raw_post_request('search', payload)
+        json_ret = ret.json()
 
         self.assertEqual(ret.status_code, 200)
-        self.assertEqual(ret.json(), [])
+        self.assertEqual(len(json_ret), 1)
+        self.assertEqual(json_ret[0]['results'], [])
 
     @parameterized.expand([(1,1), (3,1)])
     def test_api_raw_align_sequence(self, repetitions, dummy_arg):
@@ -184,6 +190,14 @@ class TestAPIRaw(TestAPIBase):
             [f"query{i}" for i in range(repetitions)]
         )
 
+    def test_api_raw_align_no_sequence(self):
+        fasta_str = ">query\n"
+        payload = json.dumps({"FASTA": fasta_str, "min_exact_match": 0})
+
+        ret = self.raw_post_request('align', payload).json()
+
+        self.assertEqual(ret[0]['alignments'], [])
+
     def test_api_raw_align_empty_fasta_desc(self):
         fasta_str = ">\nTCGATCGA"
         payload = json.dumps({"FASTA": fasta_str, "min_exact_match": 0})
@@ -197,6 +211,26 @@ class TestAPIRaw(TestAPIBase):
         ret = self.raw_post_request('search', payload).json()
 
         self.assertEqual(ret[0]['seq_description'], '')
+
+    def test_api_raw_search_no_coordinate_support(self):
+        fasta_str = ">query\nCCTCTGTGGAATCCAATCTGTCTTCCATCCTGCGTGGCCGAGGG"
+        payload = json.dumps({"FASTA": fasta_str, 'num_labels': 5, 'min_exact_match': 0.1,
+                              'query_coords': True})
+
+        ret = self.raw_post_request('search', payload)
+
+        self.assertEqual(ret.status_code, 400)
+        self.assertIn("Annotation does not support k-mer coordinate queries", ret.json()['error'])
+
+    def test_api_raw_search_no_count_support(self):
+        fasta_str = ">query\nCCTCTGTGGAATCCAATCTGTCTTCCATCCTGCGTGGCCGAGGG"
+        payload = json.dumps({"FASTA": fasta_str, 'num_labels': 5, 'min_exact_match': 0.1,
+                              'query_counts': True})
+
+        ret = self.raw_post_request('search', payload)
+
+        self.assertEqual(ret.status_code, 400)
+        self.assertIn("Annotation does not support k-mer count queries", ret.json()['error'])
 
 
 @parameterized_class(('mode',), input_values=[('canonical',), ('primary',)])
@@ -216,27 +250,39 @@ class TestAPIClient(TestAPIBase):
 
     def test_api_multiple_query_df(self):
         repetitions = 5
-        ret = self.graph_client.search([self.sample_query] * repetitions, discovery_threshold=0.01)
+        ret = self.graph_client.search([self.sample_query] * repetitions, parallel=False,
+                                       discovery_threshold=0.01)
         df = ret[self.graph_name]
         self.assertEqual((self.sample_query_expected_rows * repetitions, 3), df.shape)
 
     def test_api_simple_query_df(self):
-        ret = self.graph_client.search(self.sample_query, discovery_threshold=0.01)
+        ret = self.graph_client.search(self.sample_query, parallel=False,
+                                       discovery_threshold=0.01)
         df = ret[self.graph_name]
 
         self.assertEqual((self.sample_query_expected_rows, 3), df.shape)
 
     def test_api_simple_query_with_signature_df(self):
-        ret = self.graph_client.search(self.sample_query, discovery_threshold=0.01, with_signature=True)
+        ret = self.graph_client.search(self.sample_query, parallel=False,
+                                       discovery_threshold=0.01, with_signature=True)
         df = ret[self.graph_name]
 
         self.assertEqual((self.sample_query_expected_rows, 4), df.shape)
 
     def test_api_simple_query_align_df(self):
-        ret = self.graph_client.search(self.sample_query, discovery_threshold=0.01, align=True, min_exact_match=0.01)
+        ret = self.graph_client.search(self.sample_query, parallel=False,
+                                       discovery_threshold=0.01, align=True, min_exact_match=0.01)
         df = ret[self.graph_name]
 
         self.assertEqual((self.sample_query_expected_rows, 3), df.shape)
+
+    def test_api_simple_query_align_no_result(self):
+        # If aligned sequence does not have result when searched, make sure client doesn't fail
+        sample_align_query = self.sample_query[:2] + 'GG' + self.sample_query[4:]
+        ret = self.graph_client.search(sample_align_query, parallel=False, discovery_threshold=1.0,
+                                       align=True)
+        df = ret[self.graph_name]
+        self.assertTrue(df.empty)
 
     def test_api_client_column_labels(self):
         ret = self.graph_client.column_labels()
@@ -252,7 +298,8 @@ class TestAPIClient(TestAPIBase):
         repetitions = 4
         alignment_cnt = 3
         seq = ["TCGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGA"]
-        ret = self.graph_client.align(seq * repetitions, max_alternative_alignments=alignment_cnt)
+        ret = self.graph_client.align(seq * repetitions, parallel=False,
+                                      max_alternative_alignments=alignment_cnt)
 
         align_res = ret[self.graph_name]
         self.assertIn('cigar', align_res.columns)
@@ -264,11 +311,22 @@ class TestAPIClient(TestAPIBase):
         repetitions = 4
         alignment_cnt = 3
         seq = ["TCGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGA"]
-        ret = self.graph_client.align(seq * repetitions, max_alternative_alignments=alignment_cnt, min_exact_match=1.0)
+        ret = self.graph_client.align(seq * repetitions, parallel=False,
+                                      max_alternative_alignments=alignment_cnt, min_exact_match=1.0)
 
         align_res = ret[self.graph_name]
         self.assertIn('cigar', align_res.columns)
         self.assertEqual(len(align_res), 0)
+
+    @unittest.expectedFailure
+    def test_api_search_no_coordinate_support(self):
+        ret = self.graph_client.search(self.sample_query, parallel=False,
+                                       discovery_threshold=0.01, query_coords=True)
+
+    @unittest.expectedFailure
+    def test_api_search_no_count_support(self):
+        ret = self.graph_client.search(self.sample_query, parallel=False,
+                                       discovery_threshold=0.01, query_counts=True)
 
 
 @parameterized_class(('mode',), input_values=[('canonical',), ('primary',)])
@@ -296,7 +354,6 @@ class TestAPIJson(TestAPIBase):
     # do various queries
     def test_api_simple_query(self):
         res_list = self.graph_client.search(self.sample_query, discovery_threshold=0.01)
-
         self.assertEqual(len(res_list), 1)
 
         res_obj = res_list[0]['results']
@@ -344,7 +401,7 @@ class TestAPIClientWithProperties(TestAPIBase):
         cls.graph_client.add_graph(cls.host, cls.port, cls.graph_name)
 
     def test_api_search_property_df(self):
-        df = self.graph_client.search(self.sample_query)[self.graph_name]
+        df = self.graph_client.search(self.sample_query, parallel=False)[self.graph_name]
 
         self.assertIn('kmer_count', df.columns)
         self.assertEqual(df['kmer_count'].dtype, int)
@@ -353,5 +410,138 @@ class TestAPIClientWithProperties(TestAPIBase):
         self.assertEqual(df.shape, (3, 10))
 
     def test_api_search_property_df_empty(self):
-        df = self.graph_client.search("THISSEQUENCEDOESNOTEXIST")[self.graph_name]
+        df = self.graph_client.search("THISSEQUENCEDOESNOTEXIST", parallel=False)[self.graph_name]
         self.assertTrue(df.empty)
+
+
+@parameterized_class(('mode',), input_values=[('canonical',), ('primary',)])
+@unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
+class TestAPIClientWithCoordinates(TestAPIBase):
+    """
+    Testing whether API works well given coordinate aware annotations
+    """
+    graph_name = 'test_client_coord'
+
+    sample_query = 'CCTCTGTGGAATCCAATCTGTCTTCCATCCTGCGTGGCCGAGGG'
+    sample_query_expected_rows = 99
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass(TEST_DATA_DIR + '/transcripts_100.fa', mode=cls.mode, anno_repr='row_diff_brwt_coord')
+
+        cls.graph_client = MultiGraphClient()
+        cls.graph_client.add_graph(cls.host, cls.port, cls.graph_name)
+
+    def test_api_simple_query_coords_df(self):
+        ret = self.graph_client.search(self.sample_query, discovery_threshold=0.01, parallel=False, query_coords=True)
+        df = ret[self.graph_name]
+
+        self.assertEqual((self.sample_query_expected_rows, 3), df.shape)
+        self.assertIn('kmer_coords', df.columns)
+
+
+@parameterized_class(('mode',), input_values=[('canonical',), ('primary',)])
+@unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
+class TestAPIClientWithCounts(TestAPIBase):
+    """
+    Testing whether API works well given k-mer count aware annotations
+    """
+    graph_name = 'test_client_count'
+
+    sample_query = 'CCTCTGTGGAATCCAATCTGTCTTCCATCCTGCGTGGCCGAGGG'
+    sample_query_expected_rows = 99
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass(TEST_DATA_DIR + '/transcripts_100.fa', mode=cls.mode, anno_repr='row_diff_int_brwt')
+
+        cls.graph_client = MultiGraphClient()
+        cls.graph_client.add_graph(cls.host, cls.port, cls.graph_name)
+
+    def test_api_simple_query_counts_df(self):
+        ret = self.graph_client.search(self.sample_query, discovery_threshold=0.01, parallel=False, query_counts=True)
+        df = ret[self.graph_name]
+
+        self.assertEqual((self.sample_query_expected_rows, 3), df.shape)
+        self.assertIn('kmer_count', df.columns)
+
+    @unittest.expectedFailure
+    def test_api_search_no_coordinate_support(self):
+        ret = self.graph_client.search(self.sample_query, discovery_threshold=0.01, parallel=False, query_coords=True)
+
+
+@parameterized_class(('mode',), input_values=[('canonical',), ('primary',)])
+@unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
+class TestAPIClientParallel(TestAPIBase):
+    """
+    Testing whether or not parallel requests work
+    """
+    graph_names = ['test_graph', 'test_graph_2']
+
+    sample_query = 'CCTCTGTGGAATCCAATCTGTCTTCCATCCTGCGTGGCCGAGGG'
+    sample_query_expected_rows = 99
+
+    sample_align = ['TCGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGA']
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass(TEST_DATA_DIR + '/transcripts_100.fa', mode=cls.mode)
+
+        cls.graph_client = MultiGraphClient()
+
+        # Here just query the same endpoint twice to test client
+        cls.graph_client.add_graph(cls.host, cls.port, cls.graph_names[0])
+        cls.graph_client.add_graph(cls.host, cls.port, cls.graph_names[1])
+
+    def test_api_parallel_query_df(self):
+        futures = self.graph_client.search(self.sample_query, parallel=True,
+                                           discovery_threshold=0.01)
+
+        self.assertEqual(len(futures), 2)
+
+        for graph in self.graph_names:
+            self.assertIn(graph, futures)
+            self.assertIsInstance(futures[graph], Future)
+
+        dfs = MultiGraphClient.wait_for_result(futures)
+
+        for graph in self.graph_names:
+            self.assertIn(graph, dfs)
+            self.assertIsInstance(dfs[graph], pd.DataFrame)
+            self.assertEqual((self.sample_query_expected_rows, 3), dfs[graph].shape)
+
+    def test_api_parallel_align_df(self):
+        repetitions = 4
+        alignment_cnt = 3
+
+        futures = self.graph_client.align(self.sample_align * repetitions, parallel=True,
+                                          max_alternative_alignments=alignment_cnt)
+
+        self.assertEqual(len(futures), 2)
+
+        for graph in self.graph_names:
+            self.assertIn(graph, futures)
+            self.assertIsInstance(futures[graph], Future)
+
+        dfs = MultiGraphClient.wait_for_result(futures)
+
+        for graph in self.graph_names:
+            self.assertIn(graph, dfs)
+            self.assertIsInstance(dfs[graph], pd.DataFrame)
+            self.assertIn('cigar', dfs[graph].columns)
+            self.assertEqual(len(dfs[graph]), repetitions *  alignment_cnt)
+
+    def test_api_parallel_query_error(self):
+        futures = self.graph_client.search(self.sample_query, parallel=True,
+                                           discovery_threshold=1.2)
+
+        self.assertEqual(len(futures), 2)
+
+        for graph in self.graph_names:
+            self.assertIn(graph, futures)
+            self.assertIsInstance(futures[graph], Future)
+
+        dfs = MultiGraphClient.wait_for_result(futures)
+
+        for graph in self.graph_names:
+            self.assertIsInstance(dfs[graph], ValueError)

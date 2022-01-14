@@ -1,5 +1,8 @@
 #include "stats.hpp"
 
+#include <ips4o/ips4o.hpp>
+
+#include "common/algorithms.hpp"
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
 #include "common/serialization.hpp"
@@ -177,7 +180,25 @@ void print_brwt_stats(const annot::binmat::BRWT& brwt) {
     }
 }
 
-void print_stats(const Annotator &annotation) {
+void print_annotation_stats(const std::string &fname, const Config &config) {
+    std::unique_ptr<annot::MultiLabelEncoded<std::string>> anno_p
+            = initialize_annotation(fname, config);
+    auto &annotation = *anno_p;
+
+    if (!annotation.load(fname)) {
+        logger->error("Cannot load annotations from file '{}'", fname);
+        exit(1);
+    }
+
+    using RowDiffCol = annot::binmat::RowDiff<annot::binmat::ColumnMajor>;
+    if (auto *rd = dynamic_cast<const RowDiffCol *>(&annotation.get_matrix())) {
+        std::string anchors_fname = utils::make_suffix(config.infbase,
+                                                       annot::binmat::kRowDiffAnchorExt);
+        if (!config.infbase.empty() && std::filesystem::exists(anchors_fname)) {
+            const_cast<RowDiffCol *>(rd)->load_anchor(anchors_fname);
+        }
+    }
+
     std::cout << "=================== ANNOTATION STATS ===================" << std::endl;
     std::cout << "labels:  " << annotation.num_labels() << std::endl;
     std::cout << "objects: " << annotation.num_objects() << std::endl;
@@ -226,6 +247,70 @@ void print_stats(const Annotator &annotation) {
     if (const auto *brwt = dynamic_cast<const BRWT *>(mat))
         print_brwt_stats(*brwt);
 
+    if (config.print_counts_hist || config.count_quantiles.size()) {
+        std::cout << "===================== COUNTS STATS =====================" << std::endl;
+        if (!dynamic_cast<const annot::ColumnCompressed<> *>(&annotation)) {
+            logger->error("Printing statistics for counts is currently only supported for"
+                          " ColumnCompressed annotations");
+            exit(1);
+        }
+        // the annotation is not needed anymore -> free memory
+        anno_p.reset();
+
+        std::cout << fmt::format("Column-index\tLabel\tNum-counts");
+
+        for (double q : config.count_quantiles) {
+            if (q < 0. or q > 1.) {
+                logger->error("Count quantiles must be in interval [0, 1], got {}", q);
+                exit(1);
+            }
+            std::cout << fmt::format("\tQuantile({})", q);
+        }
+        if (config.print_counts_hist)
+            std::cout << fmt::format("\tHistogram(count:multiplicity[,...])");
+
+        std::cout << std::endl;
+
+        annot::ColumnCompressed<>::load_column_values({ fname },
+            [&](size_t j, const std::string &label, sdsl::int_vector<>&& counts) {
+
+                // compute count histogram
+                std::vector<std::pair<uint64_t, uint64_t>> count_hist_v;
+                {
+                    tsl::hopscotch_map<uint64_t, uint64_t> counts_hist;
+                    for (auto c : counts) {
+                        counts_hist[c]++;
+                    }
+                    count_hist_v.assign(counts_hist.begin(), counts_hist.end());
+                }
+
+                ips4o::parallel::sort(count_hist_v.begin(), count_hist_v.end(),
+                                      utils::LessFirst(), get_num_threads());
+
+                std::cout << fmt::format("{}\t{}\t{}", j, label, counts.size());
+
+                for (double q : config.count_quantiles) {
+                    if (count_hist_v.size()) {
+                        std::cout << fmt::format("\t{}", utils::get_quantile(count_hist_v, q));
+                    } else {
+                        std::cout << "\tnan";
+                    }
+                }
+
+                if (config.print_counts_hist) {
+                    std::cout << "\t";
+                    if (count_hist_v.size())
+                        std::cout << fmt::format("{}:{}", count_hist_v[0].first, count_hist_v[0].second);
+                    for (size_t i = 2; i < count_hist_v.size(); i++) {
+                        std::cout << fmt::format(",{}:{}", count_hist_v[i].first, count_hist_v[i].second);
+                    }
+                }
+
+                std::cout << std::endl;
+            }
+        );
+    }
+
     std::cout << "========================================================" << std::endl;
 }
 
@@ -261,9 +346,6 @@ int print_stats(Config *config) {
     }
 
     for (const std::string &file : config->infbase_annotators) {
-        std::unique_ptr<annot::MultiLabelEncoded<std::string>> annotation
-                = initialize_annotation(file, *config);
-
         if (config->print_column_names) {
             annot::LabelEncoder<std::string> label_encoder;
 
@@ -273,7 +355,7 @@ int print_stats(Config *config) {
                 std::ifstream instream(file, std::ios::binary);
 
                 // TODO: make this more reliable
-                if (dynamic_cast<const annot::ColumnCompressed<> *>(annotation.get())) {
+                if (parse_annotation_type(file) == Config::ColumnCompressed) {
                     // Column compressed dumps the number of rows first
                     // skipping it...
                     load_number(instream);
@@ -295,22 +377,8 @@ int print_stats(Config *config) {
             continue;
         }
 
-        if (!annotation->load(file)) {
-            logger->error("Cannot load annotations from file '{}'", file);
-            exit(1);
-        }
-
-        using RowDiffCol = annot::binmat::RowDiff<annot::binmat::ColumnMajor>;
-        if (auto *rd = dynamic_cast<const RowDiffCol *>(&annotation->get_matrix())) {
-            std::string anchors_file = utils::make_suffix(config->infbase,
-                                                          annot::binmat::kRowDiffAnchorExt);
-            if (!config->infbase.empty() && std::filesystem::exists(anchors_file)) {
-                const_cast<RowDiffCol *>(rd)->load_anchor(anchors_file);
-            }
-        }
-
         logger->info("Statistics for annotation '{}'", file);
-        print_stats(*annotation);
+        print_annotation_stats(file, *config);
     }
 
     return 0;

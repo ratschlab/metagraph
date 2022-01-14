@@ -266,7 +266,8 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                         uint64_t num_kmers = sequence.size() - k + 1;
                         batcher.push_and_pay(sequence.size(),
                                              std::move(sequence), std::move(labels), coord);
-                        coord += num_kmers;
+                        if (!config.annotate_sequence_headers)
+                            coord += num_kmers;
                     }
                 }
             );
