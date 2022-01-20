@@ -12,6 +12,11 @@
 #include "aligner_cigar.hpp"
 #include "aligner_config.hpp"
 #include "graph/representation/base/sequence_graph.hpp"
+#include "annotation/binary_matrix/base/binary_matrix.hpp"
+#include "annotation/int_matrix/base/int_matrix.hpp"
+#include "annotation/representation/base/annotation.hpp"
+#include "common/vector.hpp"
+#include "common/algorithms.hpp"
 
 
 namespace mtg {
@@ -25,8 +30,12 @@ class Alignment {
   public:
     typedef DeBruijnGraph::node_index node_index;
     typedef DBGAlignerConfig::score_t score_t;
+    typedef annot::binmat::BinaryMatrix::Column Column;
+    typedef annot::matrix::MultiIntMatrix::Tuple Tuple;
+    typedef Vector<Column> LabelSet;
+    typedef Vector<Tuple> CoordinateSet;
 
-    Alignment() {}
+    Alignment() : score_(0), orientation_(false), offset_(0) {}
 
     Alignment(std::string_view query,
               std::vector<node_index>&& nodes,
@@ -49,7 +58,13 @@ class Alignment {
               bool orientation = false,
               size_t offset = 0);
 
-    void append(Alignment&& other);
+    // Append other to the end of the current alignment. In this process, alignment
+    // labels are intersected. If coordinates are present, then the append is only
+    // successful if at least one coordinate of other immediately proceeds the
+    // one of the coordinates in this. If this operation is unsuccessful, then
+    // *this == {} afterwards.
+    // Returns true if the label or coordinate set of this changed.
+    bool append(Alignment&& other);
 
     size_t size() const { return nodes_.size(); }
     bool empty() const { return nodes_.empty(); }
@@ -78,7 +93,25 @@ class Alignment {
 
     size_t trim_offset();
 
-    size_t trim_query_prefix(size_t n, const DeBruijnGraph &graph, const DBGAlignerConfig &config);
+    size_t trim_query_prefix(size_t n,
+                             const DeBruijnGraph &graph,
+                             const DBGAlignerConfig &config,
+                             bool trim_excess_deletions = true);
+
+    size_t trim_query_suffix(size_t n,
+                             const DeBruijnGraph &graph,
+                             const DBGAlignerConfig &config,
+                             bool trim_excess_deletions = true);
+
+    size_t trim_reference_prefix(size_t n,
+                                 const DeBruijnGraph &graph,
+                                 const DBGAlignerConfig &config,
+                                 bool trim_excess_insertions = true);
+
+    size_t trim_reference_suffix(size_t n,
+                                 const DeBruijnGraph &graph,
+                                 const DBGAlignerConfig &config,
+                                 bool trim_excess_insertions = true);
 
     // When chaining together two alignments, use this method to adapt the prefix
     // of this alignment so it can be appended to the first one.
@@ -89,6 +122,7 @@ class Alignment {
 
     const std::string& get_sequence() const { return sequence_; }
     const Cigar& get_cigar() const { return cigar_; }
+    Cigar& get_cigar() { return cigar_; }
     bool get_orientation() const { return orientation_; }
     size_t get_offset() const { return offset_; }
     Cigar::LengthType get_clipping() const { return cigar_.get_clipping(); }
@@ -117,6 +151,18 @@ class Alignment {
                                                       const DeBruijnGraph &graph);
 
     bool is_valid(const DeBruijnGraph &graph, const DBGAlignerConfig *config = nullptr) const;
+
+    static bool coordinates_less(const Alignment &a, const Alignment &b);
+
+    LabelSet label_columns;
+    score_t extra_penalty = 0;
+
+    // for each column in target_columns, store a vector of coordinate ranges
+    CoordinateSet label_coordinates;
+
+    const annot::LabelEncoder<> *label_encoder = nullptr;
+
+    std::string format_coords() const;
 
   private:
     Json::Value path_json(size_t node_size, std::string_view label = {}) const;

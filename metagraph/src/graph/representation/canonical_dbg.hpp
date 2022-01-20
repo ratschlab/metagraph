@@ -43,12 +43,6 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
     void reverse_complement(std::string &seq, std::vector<node_index> &path) const;
     node_index reverse_complement(node_index node) const;
 
-    inline node_index get_base_node(node_index node) const {
-        assert(node);
-        assert(node <= offset_ * 2);
-        return node > offset_ ? node - offset_ : node;
-    }
-
     /**
      * Methods from DeBruijnGraph
      */
@@ -110,10 +104,18 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
 
   private:
     size_t cache_size_;
+    virtual node_index get_base_node(node_index node) const override final {
+        assert(node <= offset_ * 2);
+        return node > offset_ ? node - offset_ : node;
+    }
 
     // cache the results of call_outgoing_kmers
     mutable caches::fixed_sized_cache<node_index, std::vector<node_index>,
                                       caches::LRUCachePolicy<node_index>> child_node_cache_;
+
+    virtual std::pair<std::vector<node_index>, bool /* is reversed */>
+    get_base_path(const std::vector<node_index> &path,
+                  const std::string &sequence) const override final;
 
     // cache the results of call_incoming_kmers
     mutable caches::fixed_sized_cache<node_index, std::vector<node_index>,

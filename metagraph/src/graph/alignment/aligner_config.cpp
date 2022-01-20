@@ -59,12 +59,12 @@ DBGAlignerConfig::score_t DBGAlignerConfig
 ::score_cigar(std::string_view reference,
               std::string_view query,
               const Cigar &cigar) const {
-    score_t score = 0;
-
     assert(cigar.is_valid(reference, query));
 
     if (cigar.empty())
-        return score;
+        return 0;
+
+    score_t score = (!cigar.get_clipping() ? left_end_bonus : 0) + (!cigar.get_end_clipping() ? right_end_bonus : 0);
 
     auto ref_it = reference.begin();
     auto alt_it = query.begin();
@@ -127,6 +127,8 @@ void DBGAlignerConfig::set_scoring_matrix() {
         #endif
 
         score_matrix_ = unit_scoring_matrix(1, alphabet, alphabet_encoding);
+        left_end_bonus = 0;
+        right_end_bonus = 0;
 
     } else {
         #if _PROTEIN_GRAPH

@@ -8,6 +8,7 @@
 #include "aligner_aggregator.hpp"
 #include "aligner_seeder_methods.hpp"
 #include "aligner_extender_methods.hpp"
+#include "aligner_chainer.hpp"
 #include "graph/representation/base/sequence_graph.hpp"
 
 
@@ -52,9 +53,12 @@ class ISeedAndExtendAligner : public IDBGAligner {
   protected:
     typedef AlignmentAggregator<AlignmentCompare> Aggregator;
     const DeBruijnGraph &graph_;
+    DBGAlignerConfig config_;
 
     virtual std::shared_ptr<IExtender>
-    build_extender(std::string_view query, const Aggregator &aggregator) const = 0;
+    build_extender(std::string_view query,
+                   const Aggregator &aggregator,
+                   const DBGAlignerConfig &config) const = 0;
 
     virtual std::shared_ptr<ISeeder>
     build_seeder(std::string_view query,
@@ -71,30 +75,41 @@ class ISeedAndExtendAligner : public IDBGAligner {
         );
     }
 
-  private:
-    DBGAlignerConfig config_;
+    // Generates seeds and extends them. If force_fixed_seed is true, then
+    // all alignments must have the seed as a prefix. Otherwise, only the first
+    // node of the seed is used as an alignment starting node.
+    virtual void align_core(const ISeeder &seeder,
+                            IExtender &extender,
+                            const std::function<void(Alignment&&)> &callback,
+                            const std::function<score_t(const Alignment&)> &get_min_path_score,
+                            bool force_fixed_seed) const;
 
+  private:
     // Align the forward and reverse complement of the query sequence in both
     // directions and return the overall best alignment. e.g., for the forward query
     // 1. Find all seeds of its reverse complement
     // 2. Given a seed, extend forwards to get alignment A
     // 3. Reverse complement the alignment to get A', treat it like a new seed
     // 4. Extend A' forwards to get the final alignment A''
-    void align_both_directions(std::string_view forward,
-                               std::string_view reverse,
-                               const ISeeder &forward_seeder,
-                               const ISeeder &reverse_seeder,
-                               IExtender &forward_extender,
-                               IExtender &reverse_extender,
-                               const std::function<void(Alignment&&)> &callback,
-                               const std::function<score_t(const Alignment&)> &get_min_path_score) const;
+    std::tuple<size_t, size_t, size_t>
+    align_both_directions(std::string_view forward,
+                          std::string_view reverse,
+                          const ISeeder &forward_seeder,
+                          const ISeeder &reverse_seeder,
+                          IExtender &forward_extender,
+                          IExtender &reverse_extender,
+                          const std::function<void(Alignment&&)> &callback,
+                          const std::function<score_t(const Alignment&)> &get_min_path_score) const;
 
-    // Generates seeds and extends them
-    void align_core(std::string_view query,
-                    const ISeeder &seeder,
-                    IExtender &extender,
-                    const std::function<void(Alignment&&)> &callback,
-                    const std::function<score_t(const Alignment&)> &get_min_path_score) const;
+    // Construct a full alignment from a chain by aligning the query agaisnt
+    // the graph in the regions of the query in between the chain seeds.
+    void extend_chain(std::string_view query,
+                      std::string_view query_rc,
+                      Chain&& chain,
+                      score_t score,
+                      size_t &num_extensions,
+                      size_t &num_explored_nodes,
+                      const std::function<void(Alignment&&)> &callback) const;
 };
 
 template <class Extender = DefaultColumnExtender,
@@ -109,8 +124,8 @@ class DBGAligner : public ISeedAndExtendAligner<AlignmentCompare> {
   private:
     typedef typename ISeedAndExtendAligner<AlignmentCompare>::Aggregator Aggregator;
     std::shared_ptr<IExtender>
-    build_extender(std::string_view query, const Aggregator&) const override final {
-        return std::make_shared<Extender>(this->graph_, this->get_config(), query);
+    build_extender(std::string_view query, const Aggregator&, const DBGAlignerConfig &config) const override final {
+        return std::make_shared<Extender>(this->graph_, config, query);
     }
 
     std::shared_ptr<ISeeder>

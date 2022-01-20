@@ -91,6 +91,12 @@ class DBGWrapper : public DeBruijnGraph {
 
     virtual void call_kmers(const std::function<void(node_index, const std::string&)> &callback) const override = 0;
 
+    virtual node_index get_base_node(node_index node) const override = 0;
+
+    virtual std::pair<std::vector<node_index>, bool /* is reversed */>
+    get_base_path(const std::vector<node_index> &path,
+                  const std::string &sequence) const override = 0;
+
   protected:
     std::shared_ptr<const Graph> graph_;
 };

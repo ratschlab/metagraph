@@ -8,6 +8,8 @@
 #include <numeric>
 #include <string_view>
 
+#include "graph/representation/base/sequence_graph.hpp"
+
 
 namespace mtg {
 namespace graph {
@@ -66,6 +68,9 @@ class DBGAlignerConfig {
     score_t min_path_score = 0;
     score_t xdrop = std::numeric_limits<score_t>::max();
 
+    DeBruijnGraph::node_index terminal_node = DeBruijnGraph::npos;
+    size_t target_distance = 0;
+
     double min_exact_match = 0.0;
     double max_nodes_per_seq_char = std::numeric_limits<double>::max();
     double max_ram_per_alignment = std::numeric_limits<double>::max();
@@ -73,9 +78,17 @@ class DBGAlignerConfig {
 
     int8_t gap_opening_penalty;
     int8_t gap_extension_penalty;
+    int8_t left_end_bonus = 0;
+    int8_t right_end_bonus = 0;
 
     bool forward_and_reverse_complement = true;
     bool chain_alignments = false;
+    bool post_chain_alignments = false;
+    bool global_xdrop = true;
+    bool semiglobal = false;
+    bool allow_left_trim = true;
+    bool trim_offset_after_extend = true;
+    bool no_backtrack = false;
 
     bool alignment_edit_distance;
     int8_t alignment_match_score;

@@ -6,11 +6,13 @@
 #include "common/unix_tools.hpp"
 #include "common/threads/threading.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
-#include "graph/representation/canonical_dbg.hpp"
 #include "graph/alignment/dbg_aligner.hpp"
+#include "graph/alignment/aligner_labeled.hpp"
+#include "graph/annotated_dbg.hpp"
 #include "seq_io/sequence_io.hpp"
 #include "config/config.hpp"
 #include "load/load_graph.hpp"
+#include "load/load_annotated_graph.hpp"
 
 namespace mtg {
 namespace cli {
@@ -45,6 +47,9 @@ DBGAlignerConfig initialize_aligner_config(const Config &config) {
     aligner_config.alignment_mm_transversion_score = config.alignment_mm_transversion_score;
     aligner_config.rel_score_cutoff = config.alignment_rel_score_cutoff;
     aligner_config.chain_alignments = config.alignment_chain;
+    aligner_config.post_chain_alignments = config.alignment_post_chain;
+    aligner_config.left_end_bonus = config.alignment_end_bonus;
+    aligner_config.right_end_bonus = config.alignment_end_bonus;
 
     logger->trace("Alignment settings:");
     logger->trace("\t Alignments to report: {}", aligner_config.num_alternative_paths);
@@ -74,23 +79,32 @@ DBGAlignerConfig initialize_aligner_config(const Config &config) {
     return aligner_config;
 }
 
-template <class Graph>
+template <class Graph, typename... AlignerArgs>
 std::unique_ptr<graph::align::IDBGAligner>
-build_aligner(const Graph &graph, const DBGAlignerConfig &aligner_config) {
-    return std::make_unique<DBGAligner<>>(graph, aligner_config);
+build_aligner(const Graph &graph, const graph::align::DBGAlignerConfig &aligner_config) {
+    if constexpr(std::is_same_v<Graph, mtg::graph::AnnotatedDBG>) {
+        return std::make_unique<LabeledAligner<AlignerArgs...>>(graph, aligner_config);
+    } else {
+        return std::make_unique<DBGAligner<AlignerArgs...>>(graph, aligner_config);
+    }
 }
 
 template std::unique_ptr<IDBGAligner> build_aligner<DeBruijnGraph>(const DeBruijnGraph &, const DBGAlignerConfig &);
+template std::unique_ptr<IDBGAligner> build_aligner<AnnotatedDBG>(const AnnotatedDBG &, const DBGAlignerConfig &);
+template std::unique_ptr<IDBGAligner> build_aligner<AnnotatedDBG, LabeledExtender>(const AnnotatedDBG &, const DBGAlignerConfig &);
+
 
 void map_sequences_in_file(const std::string &file,
                            const DeBruijnGraph &graph,
-                           const DBGSuccinct *dbg,
                            const Config &config,
                            const Timer &timer,
                            ThreadPool *thread_pool = nullptr,
                            std::mutex *print_mutex = nullptr) {
     // TODO: multithreaded
     std::ignore = std::tie(thread_pool, print_mutex);
+
+    const DBGSuccinct *dbg = dynamic_cast<const DBGSuccinct*>(&graph);
+    assert(config.alignment_length == graph.get_k() || dbg);
 
     std::unique_ptr<std::ofstream> ofile;
     if (config.outfbase.size())
@@ -128,21 +142,26 @@ void map_sequences_in_file(const std::string &file,
                                [&](const auto &node) {
                                    graphindices.emplace_back(node);
                                });
-        } else if (config.query_presence || config.count_kmers) {
+        } else {
             // TODO: make more efficient
             // TODO: canonicalization
             if (dbg->get_mode() == DeBruijnGraph::PRIMARY)
                 logger->warn("Sub-k-mers will be mapped to unwrapped primary graph");
 
-            for (size_t i = 0; i + graph.get_k() <= read_stream->seq.l; ++i) {
+            for (size_t i = 0; i + config.alignment_length <= read_stream->seq.l; ++i) {
+                bool found = false;
                 dbg->call_nodes_with_suffix_matching_longest_prefix(
                     std::string_view(read_stream->seq.s + i, config.alignment_length),
                     [&](auto node, auto) {
-                        if (graphindices.empty())
+                        if (!found) {
+                            found = true;
                             graphindices.emplace_back(node);
+                        }
                     },
                     config.alignment_length
                 );
+                if (!found)
+                    graphindices.emplace_back(DeBruijnGraph::npos);
             }
         }
 
@@ -180,27 +199,11 @@ void map_sequences_in_file(const std::string &file,
             return;
         }
 
-        if (config.alignment_length == graph.get_k()) {
-            for (size_t i = 0; i < graphindices.size(); ++i) {
-                assert(i + config.alignment_length <= read_stream->seq.l);
-                *out << std::string_view(read_stream->seq.s + i, config.alignment_length)
-                     << ": " << graphindices[i] << "\n";
-            }
-        } else {
-            // map input subsequences to multiple nodes
-            for (size_t i = 0; i + graph.get_k() <= read_stream->seq.l; ++i) {
-                // TODO: make more efficient
-                // TODO: canonicalization
-                std::string_view subseq(read_stream->seq.s + i, config.alignment_length);
-
-                dbg->call_nodes_with_suffix_matching_longest_prefix(
-                    subseq,
-                    [&](auto node, auto) {
-                        *out << subseq << ": " << node << "\n";
-                    },
-                    config.alignment_length
-                );
-            }
+        // mapping of each k-mer to a graph node
+        for (size_t i = 0; i < graphindices.size(); ++i) {
+            assert(i + config.alignment_length <= read_stream->seq.l);
+            *out << std::string_view(read_stream->seq.s + i, config.alignment_length)
+                 << ": " << graphindices[i] << "\n";
         }
 
     }, config.forward_and_reverse);
@@ -290,14 +293,14 @@ std::string format_alignment(std::string_view header,
     if (!config.output_json) {
         sout += fmt::format("{}\t{}", header, paths.get_query());
         if (paths.empty()) {
-            sout += fmt::format("\t*\t*\t{}\t*\t*\t*", config.alignment_min_path_score);
+            sout += fmt::format("\t*\t*\t{}\t*\t*\t*\n", config.alignment_min_path_score);
         } else {
             for (const auto &path : paths.data()) {
                 sout += fmt::format("\t{}", path);
             }
+            sout += "\n";
         }
 
-        sout += "\n";
     } else {
         Json::StreamWriterBuilder builder;
         builder["indentation"] = "";
@@ -333,6 +336,7 @@ int align_to_graph(Config *config) {
 
     // initialize graph
     auto graph = load_critical_dbg(config->infbase);
+    auto base_graph = graph;
 
     if (utils::ends_with(config->outfbase, ".gfa")) {
         gfa_map_files(config, files, *graph);
@@ -341,7 +345,7 @@ int align_to_graph(Config *config) {
 
     // For graphs which still feature a mask, this speeds up mapping and allows
     // for dummy nodes to be matched by suffix seeding
-    auto *dbg_succ = dynamic_cast<DBGSuccinct*>(graph.get());
+    auto dbg_succ = std::dynamic_pointer_cast<DBGSuccinct>(graph);
     if (dbg_succ)
         dbg_succ->reset_mask();
 
@@ -349,10 +353,8 @@ int align_to_graph(Config *config) {
     ThreadPool thread_pool(get_num_threads());
     std::mutex print_mutex;
 
-    if (graph->get_mode() == DeBruijnGraph::PRIMARY) {
-        logger->trace("Primary graph wrapped into canonical");
-        graph = std::make_shared<CanonicalDBG>(graph);
-    }
+    if (graph->get_mode() == DeBruijnGraph::PRIMARY)
+        graph = primary_to_canonical(graph);
 
     if (config->map_sequences) {
         if (!config->alignment_length) {
@@ -372,8 +374,7 @@ int align_to_graph(Config *config) {
         for (const auto &file : files) {
             logger->trace("Map sequences from file {}", file);
 
-            map_sequences_in_file(file, *graph, dbg_succ, *config, timer,
-                                  &thread_pool, &print_mutex);
+            map_sequences_in_file(file, *graph, *config, timer, &thread_pool, &print_mutex);
         }
 
         thread_pool.join();
@@ -382,6 +383,12 @@ int align_to_graph(Config *config) {
     }
 
     DBGAlignerConfig aligner_config = initialize_aligner_config(*config);
+
+    std::shared_ptr<AnnotatedDBG::Annotator> annotator;
+    if (config->infbase_annotators.size()) {
+        assert(config->infbase_annotators.size() == 1);
+        annotator = initialize_annotated_dbg(base_graph, *config)->get_annotation_ptr();
+    }
 
     for (const auto &file : files) {
         logger->trace("Align sequences from file {}", file);
@@ -426,21 +433,29 @@ int align_to_graph(Config *config) {
             }
 
             auto process_batch = [&,graph](SeqBatch batch) {
-                // make a shared_ptr in a thread-safe way
-                std::shared_ptr<DeBruijnGraph> aln_graph(
-                    std::shared_ptr<DeBruijnGraph>{}, graph.get()
+                // make an aliased shared_ptr in a thread-safe way
+                auto aln_graph = std::shared_ptr<DeBruijnGraph>(std::shared_ptr<DeBruijnGraph>{}, graph.get());
+
+                if (aln_graph->get_mode() == DeBruijnGraph::PRIMARY)
+                    aln_graph = std::make_shared<CanonicalDBG>(aln_graph, 100'000);
+
+                std::shared_ptr<AnnotatedDBG> aln_anno_graph;
+                std::shared_ptr<IDBGAligner> aligner;
+
+                if (annotator) {
+                    aln_anno_graph = std::make_shared<AnnotatedDBG>(aln_graph, annotator);
+                    aligner = build_aligner(*aln_anno_graph, aligner_config);
+                } else {
+                    aligner = build_aligner(*aln_graph, aligner_config);
+                }
+
+                aligner->align_batch(batch,
+                    [&](std::string_view header, QueryAlignment&& paths) {
+                        std::string res = format_alignment(header, paths, *aln_graph, *config);
+                        std::lock_guard<std::mutex> lock(print_mutex);
+                        *out << res;
+                    }
                 );
-
-                if (auto *canonical = dynamic_cast<CanonicalDBG*>(aln_graph.get()))
-                    aln_graph = std::make_shared<CanonicalDBG>(*canonical);
-
-                auto aligner = build_aligner(*aln_graph, aligner_config);
-
-                aligner->align_batch(batch, [&](std::string_view header, auto&& paths) {
-                    std::string res = format_alignment(header, paths, *aln_graph, *config);
-                    std::lock_guard<std::mutex> lock(print_mutex);
-                    *out << res;
-                });
             };
 
             ++num_batches;

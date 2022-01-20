@@ -232,7 +232,7 @@ class TestQuery(TestingBase):
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         if DNA_MODE:
-            self.assertEqual(len(res.stdout), 12248)
+            self.assertEqual(len(res.stdout), 12249)
         else:
             self.assertEqual(len(res.stdout), 12244)
 
@@ -245,7 +245,7 @@ class TestQuery(TestingBase):
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         if DNA_MODE:
-            self.assertEqual(len(res.stdout), 12354)
+            self.assertEqual(len(res.stdout), 12355)
         else:
             self.assertEqual(len(res.stdout), 12350)
 
@@ -260,7 +260,7 @@ class TestQuery(TestingBase):
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         if DNA_MODE:
-            self.assertEqual(len(res.stdout), 12248)
+            self.assertEqual(len(res.stdout), 12249)
         else:
             self.assertEqual(len(res.stdout), 12244)
 
@@ -274,7 +274,7 @@ class TestQuery(TestingBase):
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         if DNA_MODE:
-            self.assertEqual(len(res.stdout), 12354)
+            self.assertEqual(len(res.stdout), 12355)
         else:
             self.assertEqual(len(res.stdout), 12350)
 
@@ -290,7 +290,7 @@ class TestQuery(TestingBase):
         )
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
-        self.assertEqual(len(res.stdout), 24565)
+        self.assertEqual(len(res.stdout), 24567)
 
         query_command = '{exe} query --fwd-and-reverse --align --count-labels -i {graph} -a {annotation} -p {num_theads} --discovery-fraction 0.0 --align-min-exact-match 0.0 {input}'.format(
             exe=METAGRAPH,
@@ -301,7 +301,7 @@ class TestQuery(TestingBase):
         )
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
-        self.assertEqual(len(res.stdout), 24777)
+        self.assertEqual(len(res.stdout), 24779)
 
     def test_batch_query(self):
         query_command = '{exe} query --fast -i {graph} -a {annotation} --discovery-fraction 1.0 {input}'.format(
@@ -406,7 +406,7 @@ class TestQuery(TestingBase):
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         if DNA_MODE:
-            self.assertEqual(len(res.stdout), 12248)
+            self.assertEqual(len(res.stdout), 12249)
         else:
             self.assertEqual(len(res.stdout), 12244)
 
@@ -419,7 +419,7 @@ class TestQuery(TestingBase):
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         if DNA_MODE:
-            self.assertEqual(len(res.stdout), 12354)
+            self.assertEqual(len(res.stdout), 12355)
         else:
             self.assertEqual(len(res.stdout), 12350)
 
@@ -434,7 +434,7 @@ class TestQuery(TestingBase):
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         if DNA_MODE:
-            self.assertEqual(len(res.stdout), 12248)
+            self.assertEqual(len(res.stdout), 12249)
         else:
             self.assertEqual(len(res.stdout), 12244)
 
@@ -448,7 +448,7 @@ class TestQuery(TestingBase):
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         if DNA_MODE:
-            self.assertEqual(len(res.stdout), 12354)
+            self.assertEqual(len(res.stdout), 12355)
         else:
             self.assertEqual(len(res.stdout), 12350)
 
@@ -464,7 +464,7 @@ class TestQuery(TestingBase):
         )
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
-        self.assertEqual(len(res.stdout), 24565)
+        self.assertEqual(len(res.stdout), 24567)
 
         query_command = '{exe} query --fast --fwd-and-reverse --align --count-labels -i {graph} -a {annotation} -p {num_theads} --discovery-fraction 0.0 --align-min-exact-match 0.0 {input}'.format(
             exe=METAGRAPH,
@@ -475,7 +475,7 @@ class TestQuery(TestingBase):
         )
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
-        self.assertEqual(len(res.stdout), 24777)
+        self.assertEqual(len(res.stdout), 24779)
 
     def test_batch_query_with_tiny_batch(self):
         query_command = '{exe} query --fast --batch-size 100 -i {graph} -a {annotation} --discovery-fraction 1.0 {input}'.format(
@@ -1034,7 +1034,7 @@ class TestQueryCanonical(TestingBase):
         )
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
-        self.assertEqual(len(res.stdout), 12839)
+        self.assertEqual(len(res.stdout), 12840)
 
         query_command = '{exe} query --align --count-labels -i {graph} -a {annotation} --discovery-fraction 0.0 --align-min-exact-match 0.0 {input}'.format(
             exe=METAGRAPH,
@@ -1044,7 +1044,7 @@ class TestQueryCanonical(TestingBase):
         )
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
-        self.assertEqual(len(res.stdout), 12969)
+        self.assertEqual(len(res.stdout), 12970)
 
     def test_batch_query(self):
         query_command = '{exe} query --fast -i {graph} -a {annotation} --discovery-fraction 1.0 {input}'.format(
@@ -1076,7 +1076,7 @@ class TestQueryCanonical(TestingBase):
         )
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
-        self.assertEqual(len(res.stdout), 12839)
+        self.assertEqual(len(res.stdout), 12840)
 
         query_command = '{exe} query --align --fast --count-labels -i {graph} -a {annotation} --discovery-fraction 0.0 --align-min-exact-match 0.0 {input}'.format(
             exe=METAGRAPH,
@@ -1086,7 +1086,7 @@ class TestQueryCanonical(TestingBase):
         )
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
-        self.assertEqual(len(res.stdout), 12969)
+        self.assertEqual(len(res.stdout), 12970)
 
     def test_batch_query_with_tiny_batch(self):
         query_command = '{exe} query --fast --batch-size 100 -i {graph} -a {annotation} --discovery-fraction 1.0 {input}'.format(
@@ -1204,7 +1204,7 @@ class TestQueryPrimary(TestingBase):
         )
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
-        self.assertEqual(len(res.stdout), 12839)
+        self.assertEqual(len(res.stdout), 12840)
 
         query_command = '{exe} query --align --count-labels -i {graph} -a {annotation} --discovery-fraction 0.0 --align-min-exact-match 0.0 {input}'.format(
             exe=METAGRAPH,
@@ -1214,7 +1214,7 @@ class TestQueryPrimary(TestingBase):
         )
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
-        self.assertEqual(len(res.stdout), 12969)
+        self.assertEqual(len(res.stdout), 12970)
 
     def test_batch_query(self):
         query_command = '{exe} query --fast -i {graph} -a {annotation} --discovery-fraction 1.0 {input}'.format(
@@ -1246,7 +1246,7 @@ class TestQueryPrimary(TestingBase):
         )
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
-        self.assertEqual(len(res.stdout), 12839)
+        self.assertEqual(len(res.stdout), 12840)
 
         query_command = '{exe} query --align --fast --count-labels -i {graph} -a {annotation} --discovery-fraction 0.0 --align-min-exact-match 0.0 {input}'.format(
             exe=METAGRAPH,
@@ -1256,7 +1256,7 @@ class TestQueryPrimary(TestingBase):
         )
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
-        self.assertEqual(len(res.stdout), 12969)
+        self.assertEqual(len(res.stdout), 12970)
 
     def test_batch_query_with_tiny_batch(self):
         query_command = '{exe} query --fast --batch-size 100 -i {graph} -a {annotation} --discovery-fraction 1.0 {input}'.format(

@@ -229,6 +229,12 @@ class DeBruijnGraph : public SequenceGraph {
     virtual void call_source_nodes(const std::function<void(node_index)> &callback) const;
 
     virtual const DeBruijnGraph& get_base_graph() const { return *this; }
+
+    virtual node_index get_base_node(node_index node) const;
+
+    virtual std::pair<std::vector<node_index>, bool /* is reversed */>
+    get_base_path(const std::vector<node_index> &path,
+                  const std::string &sequence) const;
 };
 
 

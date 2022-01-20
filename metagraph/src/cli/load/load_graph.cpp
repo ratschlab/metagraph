@@ -71,5 +71,16 @@ std::shared_ptr<DeBruijnGraph> load_critical_dbg(const std::string &filename) {
     exit(1);
 }
 
+std::shared_ptr<CanonicalDBG> primary_to_canonical(std::shared_ptr<DeBruijnGraph> graph,
+                                                   size_t cache_size) {
+    if (graph->get_mode() != DeBruijnGraph::PRIMARY) {
+        logger->error("Only primary mode graphs can be wrapped into canonical mode.");
+        exit(1);
+    }
+
+    logger->trace("Primary graph wrapped into canonical");
+    return std::make_shared<CanonicalDBG>(graph, cache_size);
+}
+
 } // namespace cli
 } // namespace mtg

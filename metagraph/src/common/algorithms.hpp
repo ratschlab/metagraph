@@ -66,37 +66,137 @@ namespace utils {
         return mask;
     }
 
-    template <class AIt, class BIt>
-    uint64_t count_intersection(AIt first_begin, AIt first_end,
-                                BIt second_begin, BIt second_end) {
-        assert(std::is_sorted(first_begin, first_end));
-        assert(std::is_sorted(second_begin, second_end));
-        assert(std::set<typename AIt::value_type>(first_begin, first_end).size()
-                    == static_cast<uint64_t>(std::distance(first_begin, first_end)));
-        assert(std::set<typename BIt::value_type>(second_begin, second_end).size()
-                    == static_cast<uint64_t>(std::distance(second_begin, second_end)));
+    template <class InIt1, class InIt2>
+    constexpr uint64_t count_intersection(InIt1 a_begin, InIt1 a_end, InIt2 b_begin, InIt2 b_end) {
+        assert(std::is_sorted(a_begin, a_end));
+        assert(std::is_sorted(b_begin, b_end));
+        assert(std::adjacent_find(a_begin, a_end) == a_end);
+        assert(std::adjacent_find(b_begin, b_end) == b_end);
 
         uint64_t count = 0;
 
-        while (first_begin != first_end && second_begin != second_end) {
-            first_begin = std::lower_bound(first_begin, first_end, *second_begin);
-
-            if (first_begin == first_end)
-                break;
-
-            second_begin = std::lower_bound(second_begin, second_end, *first_begin);
-
-            if (second_begin == second_end)
-                break;
-
-            if (*first_begin == *second_begin) {
+        while (a_begin != a_end && b_begin != b_end) {
+            if (*a_begin < *b_begin) {
+                ++a_begin;
+            } else if (*b_begin < *a_begin) {
+                ++b_begin;
+            } else {
                 ++count;
-                ++first_begin;
-                ++second_begin;
+                ++a_begin;
+                ++b_begin;
             }
         }
 
         return count;
+    }
+
+    // Return true if the two sorted ranges share a common element
+    template <class InIt1, class InIt2>
+    constexpr bool share_element(InIt1 a_begin, InIt1 a_end, InIt2 b_begin, InIt2 b_end) {
+        assert(std::is_sorted(a_begin, a_end));
+        assert(std::is_sorted(b_begin, b_end));
+
+        while (a_begin != a_end && b_begin != b_end) {
+            if (*a_begin < *b_begin) {
+                ++a_begin;
+            } else if (*b_begin < *a_begin) {
+                ++b_begin;
+            } else {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    // Intersect the sorted ranges a1 and b1 with corresponding sorted ranges of
+    // sorted ranges a2 and b2 (of equal length).
+    // i.e., For each shared element between a1 and b1, intersect the corresponding
+    // ranges in a2 and b2.
+    template <class OutType, class SetOp,
+              class InIt1, class InIt2, class InIt3, class InIt4,
+              class OutIt1, class OutIt2, typename... Args>
+    constexpr std::tuple<size_t, size_t, size_t> indexed_set_op(InIt1 a1_begin,
+                                                                InIt1 a1_end,
+                                                                InIt2 a2_begin,
+                                                                InIt3 b1_begin,
+                                                                InIt3 b1_end,
+                                                                InIt4 b2_begin,
+                                                                OutIt1 out1,
+                                                                OutIt2 out2,
+                                                                Args&&... args) {
+        size_t a_size = 0;
+        size_t b_size = 0;
+        size_t new_size = 0;
+        SetOp set_op(std::forward<Args>(args)...);
+
+        while (a1_begin != a1_end && b1_begin != b1_end) {
+            if (*a1_begin < *b1_begin) {
+                ++a1_begin;
+                ++a2_begin;
+            } else if (*b1_begin < *a1_begin) {
+                ++b1_begin;
+                ++b2_begin;
+            } else {
+                a_size += a2_begin->size();
+                b_size += b2_begin->size();
+                OutType merged;
+                set_op(a2_begin->begin(), a2_begin->end(),
+                       b2_begin->begin(), b2_begin->end(),
+                       std::back_inserter(merged));
+                if (merged.size()) {
+                    new_size += merged.size();
+                    *out1 = *a1_begin;
+                    ++out1;
+                    *out2 = std::move(merged);
+                    ++out2;
+                }
+                ++a1_begin;
+                ++b1_begin;
+                ++a2_begin;
+                ++b2_begin;
+            }
+        }
+
+        return std::make_tuple(a_size, b_size, new_size);
+    }
+
+    // Intersect the sorted ranges a1 and b1 with corresponding sorted ranges of
+    // sorted ranges a2 and b2 (of equal length).
+    // i.e., For each shared element between a1 and b1, intersect the corresponding
+    // ranges in a2 and b2.
+    template <class Check, class InIt1, class InIt2, class InIt3, class InIt4,
+              typename... Args>
+    constexpr bool indexed_set_find(InIt1 a1_begin,
+                                    InIt1 a1_end,
+                                    InIt2 a2_begin,
+                                    InIt3 b1_begin,
+                                    InIt3 b1_end,
+                                    InIt4 b2_begin,
+                                    Args&&... args) {
+        Check check(std::forward<Args>(args)...);
+
+        while (a1_begin != a1_end && b1_begin != b1_end) {
+            if (*a1_begin < *b1_begin) {
+                ++a1_begin;
+                ++a2_begin;
+            } else if (*b1_begin < *a1_begin) {
+                ++b1_begin;
+                ++b2_begin;
+            } else {
+                if (check(a2_begin->begin(), a2_begin->end(),
+                          b2_begin->begin(), b2_begin->end())) {
+                    return true;
+                }
+
+                ++a1_begin;
+                ++b1_begin;
+                ++a2_begin;
+                ++b2_begin;
+            }
+        }
+
+        return false;
     }
 
     // Bitmap |new_indexes| marks positions of inserted values in the final vector
