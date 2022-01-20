@@ -161,6 +161,21 @@ class LabeledExtender : public DefaultColumnExtender {
     virtual ~LabeledExtender() {}
 
   protected:
+    virtual std::vector<Alignment> backtrack(score_t min_path_score,
+                                             std::string_view window) override {
+        // extract all labels for explored nodes
+        labeled_graph_.flush();
+
+        // run backtracking
+        return DefaultColumnExtender::backtrack(min_path_score, window);
+    }
+
+    virtual std::vector<Alignment> extend(score_t min_path_score,
+                                          bool force_fixed_seed) override {
+        last_buffered_table_i_ = 0;
+        return DefaultColumnExtender::extend(min_path_score, force_fixed_seed);
+    }
+
     AnnotationBuffer &labeled_graph_;
     size_t last_buffered_table_i_;
 };
