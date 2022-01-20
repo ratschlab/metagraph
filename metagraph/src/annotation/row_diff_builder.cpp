@@ -868,8 +868,8 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                 elias_fano::merge_files<T>(filenames, [&](T v) {
                     call(utils::get_first(v));
                     if constexpr(with_values) {
-                        assert(v.second && "zero diffs must have been skipped");
-                        values[s][j][r++] = matrix::encode_diff(v.second);
+                        if (!compute_row_reduction)
+                            values[s][j][r++] = matrix::encode_diff(v.second);
                     }
                 }, remove_chunks, chunks_open_per_thread);
             };
@@ -889,8 +889,8 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                 for (size_t i = 0; i < v.size(); ++i) {
                     call(utils::get_first(v[i]));
                     if constexpr(with_values) {
-                        assert(v[i].second && "zero diffs must have been skipped");
-                        values[s][j][r++] = matrix::encode_diff(v[i].second);
+                        if (!compute_row_reduction)
+                            values[s][j][r++] = matrix::encode_diff(v[i].second);
                     }
                 }
             };
@@ -1024,7 +1024,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                     if (curr_value && !source_col[*pred_p] && (compute_row_reduction || !anchor[*pred_p])) {
                         auto &v = set_rows_bwd[source_idx][j];
                         if constexpr(with_values) {
-                            v.emplace_back(*pred_p, -curr_value);
+                            v.emplace_back(*pred_p, 0);
                         } else {
                             v.push_back(*pred_p);
                         }
@@ -1104,7 +1104,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
         std::vector<std::unique_ptr<bit_vector>> columns(label_encoders[l_idx].size());
 
         for (size_t j = 0; j < label_encoders[l_idx].size(); ++j) {
-            if constexpr(with_values) {
+            if (!compute_row_reduction && with_values) {
                 // diff values may be negative, hence we need wider integers
                 values[l_idx][j] = sdsl::int_vector<>(row_diff_bits[l_idx][j], 0,
                                                       std::min(values[l_idx][j].width() + 1, 64));

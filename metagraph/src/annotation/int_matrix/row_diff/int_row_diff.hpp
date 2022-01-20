@@ -33,12 +33,11 @@ namespace matrix {
  *      ...
  */
 inline uint64_t encode_diff(int64_t x) {
-    assert(x);
-    return (std::abs(x) - 1) * 2 + (x < 0);
+    return std::abs(x) * 2 - (x < 0);
 }
 
 inline int64_t decode_diff(uint64_t c) {
-    return !(c & 1) ? c / 2 + 1 : -((c + 1) / 2);
+    return !(c & 1) ? c / 2 : -((c + 1) / 2);
 }
 
 template <class BaseMatrix>
@@ -189,8 +188,8 @@ void IntRowDiff<BaseMatrix>::add_diff(const RowValues &diff, RowValues *row) {
             result.push_back(*it2);
             ++it2;
         } else {
-            if (uint64_t sum = it->second + it2->second)
-                result.emplace_back(it->first, sum);
+            if (it2->second)
+                result.emplace_back(it->first, it->second + it2->second);
             ++it;
             ++it2;
         }
