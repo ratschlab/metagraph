@@ -3,6 +3,7 @@
 #include "graph/representation/rc_dbg.hpp"
 #include "graph/representation/succinct/boss.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
+#include "graph/graph_extensions/node_lcs.hpp"
 #include "annotation/int_matrix/base/int_matrix.hpp"
 #include "common/algorithms.hpp"
 
@@ -92,6 +93,336 @@ struct HasNext {
 
     ssize_t diff_;
 };
+
+template <class AIt, class BIt, class OutIt, class OutIt2>
+void set_intersection_difference(AIt a_begin,
+                                 AIt a_end,
+                                 BIt b_begin,
+                                 BIt b_end,
+                                 OutIt intersection_out,
+                                 OutIt2 diff_out) {
+    while (a_begin != a_end) {
+        if (b_begin == b_end || *a_begin < *b_begin) {
+            *diff_out = *a_begin;
+            ++diff_out;
+            ++a_begin;
+        } else if (*a_begin > *b_begin) {
+            ++b_begin;
+        } else {
+            *intersection_out = *a_begin;
+            ++intersection_out;
+            ++a_begin;
+            ++b_begin;
+        }
+    }
+}
+
+void LabeledExtender
+::call_outgoing(node_index node,
+                size_t max_prefetch_distance,
+                const std::function<void(node_index, char /* last char */, score_t)> &callback,
+                size_t table_i,
+                bool force_fixed_seed) {
+    bool in_seed = std::get<6>(table[table_i]) + 1 - this->seed_->get_offset()
+                    < this->seed_->get_sequence().size();
+    size_t next_offset = std::get<6>(table[table_i]) + 1;
+    assert(node == std::get<3>(table[table_i]));
+
+    if (in_seed && (next_offset < graph_->get_k() || force_fixed_seed || this->fixed_seed())) {
+        DefaultColumnExtender::call_outgoing(node, max_prefetch_distance,
+                                             [&](node_index next, char c, score_t score) {
+            callback(next, c, score);
+            node_labels_.emplace_back();
+            label_changed_.emplace_back(false);
+        }, table_i, force_fixed_seed);
+
+        return;
+    }
+
+    assert(graph_->get_node_sequence(node).back() == std::get<5>(table[table_i]));
+    for ( ; last_buffered_table_i_ < table.size(); ++last_buffered_table_i_) {
+        labeled_graph_.add_node(std::get<3>(table[last_buffered_table_i_]));
+    }
+
+    std::vector<std::tuple<node_index, char, score_t, node_index>> outgoing;
+    DefaultColumnExtender::call_outgoing(node, max_prefetch_distance,
+                                         [&](node_index next, char c, score_t score) {
+        outgoing.emplace_back(next, c, score, labeled_graph_.add_node(next));
+    }, table_i, force_fixed_seed);
+
+    node_labels_.resize(table.size());
+    label_changed_.resize(node_labels_.size());
+
+    if (outgoing.size() > 1)
+        labeled_graph_.flush();
+
+    const std::optional<Vector<Column>> &base_labels = node_labels_[table_i]
+        ? node_labels_[table_i]
+        : node_labels_[std::get<10>(table[table_i])];
+
+    const DBGSuccinct *dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph_->get_base_graph());
+
+    size_t expand_seed = dbg_succ
+        ? dbg_succ->get_boss().get_k()
+            - std::min(dbg_succ->get_boss().get_k(), config_.label_change_search_width)
+        : graph_->get_k();
+
+    std::shared_ptr<NodeLCS> lcs = expand_seed < graph_->get_k()
+        ? dbg_succ->get_extension<NodeLCS>()
+        : nullptr;
+
+    std::vector<std::tuple<Vector<Column>, Vector<Column>, double>> inter_diff(outgoing.size());
+    size_t found_diff = 0;
+    size_t found_subset = 0;
+    for (size_t i = 0; i < outgoing.size(); ++i) {
+        const auto &[next, c, score, next_base] = outgoing[i];
+        if (auto next_labels = labeled_graph_.get_labels_and_coordinates(next).first) {
+            auto &[inter, diff, lclogprob] = inter_diff[i];
+            if (base_labels) {
+                set_intersection_difference(next_labels->get().begin(),
+                                            next_labels->get().end(),
+                                            base_labels->begin(), base_labels->end(),
+                                            std::back_inserter(inter),
+                                            std::back_inserter(diff));
+
+                if (inter.size() || !lcs) {
+                    ++found_subset;
+                } else {
+                    ++found_diff;
+                }
+
+            } else {
+                inter = next_labels->get();
+                ++found_subset;
+            }
+        } else {
+            ++found_subset;
+        }
+    }
+
+    assert(found_diff + found_subset == outgoing.size());
+    double sum_diff_probs = 0.0;
+
+    if (found_diff) {
+        assert(dbg_succ);
+        assert(lcs);
+
+        const boss::BOSS &boss = dbg_succ->get_boss();
+
+        node_index node_base = labeled_graph_.get_base_node(node);
+        assert(node_base);
+        boss::BOSS::edge_index edge_base = dbg_succ->kmer_to_boss_index(node_base);
+        boss::BOSS::edge_index last_edge_base = boss.succ_last(edge_base);
+        std::pair<boss::BOSS::edge_index, boss::BOSS::edge_index> node_range {
+            boss.pred_last(last_edge_base - 1) + 1, last_edge_base
+        };
+        node_range = lcs->expand(node_range.first, node_range.second,
+                                 boss.get_k(), boss.get_k() - expand_seed);
+        assert((*lcs)[node_range.first] < expand_seed);
+        assert(node_range.second + 1 == lcs->data().size()
+            || (*lcs)[node_range.second + 1] < expand_seed);
+
+        std::pair<boss::BOSS::edge_index, boss::BOSS::edge_index> next_range;
+        if (node == node_base && graph_->is_base_node(node_base)) {
+            // $$$ATGC X -> $$ATGCX
+            next_range = node_range;
+            assert(boss.encode(std::get<5>(table[table_i]))
+                    == boss.get_W(dbg_succ->kmer_to_boss_index(node)) % boss.alph_size);
+            bool check = boss.tighten_range(&next_range.first, &next_range.second,
+                                            boss.encode(std::get<5>(table[table_i])));
+            std::ignore = check;
+            assert(check);
+        } else {
+            // $$$ATGC X -> $$ZYATG C
+            next_range.second = boss.succ_last(boss.bwd(last_edge_base));
+            next_range.first = boss.pred_last(next_range.second - 1) + 1;
+            if (expand_seed + 2 < boss.get_k()) {
+                next_range = lcs->expand(next_range.first, next_range.second,
+                                         boss.get_k(), boss.get_k() - (expand_seed + 2));
+            }
+        }
+
+        for (auto i = node_range.first; i <= node_range.second; ++i) {
+            if (node_index n = dbg_succ->boss_to_kmer_index(i))
+                labeled_graph_.add_node(n);
+        }
+
+        for (auto i = next_range.first; i <= next_range.second; ++i) {
+            if (node_index n = dbg_succ->boss_to_kmer_index(i))
+                labeled_graph_.add_node(n);
+        }
+
+        labeled_graph_.flush();
+
+        boss::BOSS::TAlphabet cur_edge_label = boss.get_W(edge_base) % boss.alph_size;
+
+        for (size_t j = 0; j < inter_diff.size(); ++j) {
+            auto &[inter, diff, lclogprob] = inter_diff[j];
+            if (inter.size() || diff.empty() || !found_diff)
+                continue;
+
+#ifndef NDEBUG
+            const auto &[next, c, score, next_base] = outgoing[j];
+            assert(next != next_base || node != node_base || (
+                next_range.first <= dbg_succ->kmer_to_boss_index(next)
+                && next_range.second >= dbg_succ->kmer_to_boss_index(next)
+            ));
+#endif
+
+            /**
+             * IL: independent label
+             * score = log2(P(traversing IL)) - log2(P(IL in node) * P(IL in next))
+             *       = log2(P(traversing IL | IL in node, IL in next))
+             */
+            tsl::hopscotch_map<Column, std::pair<size_t, size_t>> shared_label_counts;
+            tsl::hopscotch_set<Column> exclude { inter.begin(), inter.end() };
+            for (Column c : diff) {
+                exclude.emplace(c);
+            }
+
+            size_t node_inc_count = 0;
+            size_t node_exc_count = 0;
+            auto update_node_count = [&](boss::BOSS::edge_index i) {
+                if (node_index n = dbg_succ->boss_to_kmer_index(i)) {
+                    if (auto labels = labeled_graph_.get_labels_and_coordinates(n).first) {
+                        for (Column col : labels->get()) {
+                            if (!exclude.count(col)) {
+                                ++shared_label_counts[col].first;
+                                ++node_exc_count;
+                            } else {
+                                ++node_inc_count;
+                            }
+                        }
+                    }
+                }
+            };
+            for (auto i = boss.succ_W(node_range.first, cur_edge_label);
+                    i <= node_range.second;
+                    i = boss.succ_W(i + 1, cur_edge_label)) {
+                update_node_count(i);
+            }
+            for (auto i = boss.succ_W(node_range.first, cur_edge_label + boss.alph_size);
+                    i <= node_range.second;
+                    i = boss.succ_W(i + 1, cur_edge_label + boss.alph_size)) {
+                update_node_count(i);
+            }
+
+            size_t next_inc_count = 0;
+            size_t next_exc_count = 0;
+            for (auto i = next_range.first; i <= next_range.second; ++i) {
+                if (node_index n = dbg_succ->boss_to_kmer_index(i)) {
+                    if (auto labels = labeled_graph_.get_labels_and_coordinates(n).first) {
+                        for (Column col : labels->get()) {
+                            if (!exclude.count(col)) {
+                                ++shared_label_counts[col].second;
+                                ++next_exc_count;
+                            } else {
+                                ++next_inc_count;
+                            }
+                        }
+                    }
+                }
+            }
+
+            constexpr double pseudocount = 0.1;
+            double numer = pseudocount * pseudocount * shared_label_counts.size();
+            for (const auto &[col, count_pair] : shared_label_counts) {
+                numer += pseudocount * (count_pair.first + count_pair.second)
+                            + count_pair.first * count_pair.second;
+            }
+
+            double denom_pseudocount = pseudocount * shared_label_counts.size();
+            double node_total_count = denom_pseudocount + node_inc_count + node_exc_count;
+            double next_total_count = denom_pseudocount + next_inc_count + next_exc_count;
+            lclogprob = log2(numer) - log2(node_total_count) - log2(next_total_count);
+            assert(lclogprob < 0);
+
+            sum_diff_probs += 1.0 - std::pow(2.0, lclogprob);
+            lclogprob = std::floor(lclogprob - log2(static_cast<double>(outgoing.size())));
+            DEBUG_LOG("Label change score: {}", lclogprob);
+        }
+
+        sum_diff_probs = std::floor(log2((sum_diff_probs + 1.0)
+                            / static_cast<double>(outgoing.size())));
+        DEBUG_LOG("Label preservation score: {}", sum_diff_probs);
+    }
+
+    for (size_t i = 0; i < inter_diff.size(); ++i) {
+        const auto &[next, c, score, next_base] = outgoing[i];
+        auto &[inter, diff, lclogprob] = inter_diff[i];
+
+        label_changed_.emplace_back(diff.size());
+        if (diff.empty()) {
+            node_labels_.emplace_back(std::move(inter));
+            callback(next, c, score + sum_diff_probs);
+        } else {
+            node_labels_.emplace_back(std::move(diff));
+            callback(next, c, score + (found_diff ? lclogprob : -config_.extra_penalty));
+        }
+    }
+
+    assert(node_labels_.size() == table.size() + outgoing.size());
+}
+
+void LabeledExtender
+::call_alignments(score_t cur_cell_score,
+                  score_t end_score,
+                  score_t min_path_score,
+                  const std::vector<node_index> &path,
+                  const std::vector<size_t> &trace,
+                  size_t table_i,
+                  const Cigar &ops,
+                  size_t clipping,
+                  size_t offset,
+                  std::string_view window,
+                  const std::string &match,
+                  score_t extra_penalty,
+                  const std::function<void(Alignment&&)> &callback) {
+    DefaultColumnExtender::call_alignments(cur_cell_score, end_score, min_path_score,
+                                           path, trace, table_i, ops, clipping,
+                                           offset, window, match, extra_penalty,
+                                           [&](Alignment&& aln) {
+        // store the label and coordinate information
+        aln.label_encoder
+            = &labeled_graph_.get_anno_graph().get_annotation().get_label_encoder();
+
+        auto get_annotation = [&](size_t table_i, node_index node) -> Vector<Column> {
+            if (std::optional<Vector<Column>> fetch_labels = node_labels_[table_i])
+                return *fetch_labels;
+
+            auto labels = labeled_graph_.get_labels_and_coordinates(node).first;
+            assert(labels);
+            size_t last_fork_i = std::get<10>(this->table[table_i]);
+            if (std::optional<Vector<Column>> fetch_labels = node_labels_[last_fork_i]) {
+                Vector<Column> inter;
+                std::set_intersection(labels->get().begin(), labels->get().end(),
+                                      fetch_labels->begin(), fetch_labels->end(),
+                                      std::back_inserter(inter));
+                return inter;
+            }
+
+            return labels->get();
+        };
+
+        aln.label_columns = get_annotation(trace[0], aln.get_nodes().back());
+
+        if (extra_penalty) {
+            auto it = trace.begin() + 1;
+            for (auto jt = aln.get_nodes().rbegin() + 1;
+                    jt != aln.get_nodes().rend(); ++it, ++jt) {
+                if (label_changed_[*(it - 1)]) {
+                    auto next = get_annotation(*it, *jt);
+                    Vector<Column> label_union;
+                    std::set_union(aln.label_columns.begin(), aln.label_columns.end(),
+                                   next.begin(), next.end(), std::back_inserter(label_union));
+                    std::swap(label_union, aln.label_columns);
+                }
+            }
+        }
+
+        callback(std::move(aln));
+    });
+}
 
 void LabeledBacktrackingExtender
 ::call_outgoing(node_index node,

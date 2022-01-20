@@ -35,7 +35,8 @@ typedef ::testing::Types<DBGBitmap,
                          DBGHashOrdered,
                          DBGHashFast,
                          DBGSuccinct,
-                         DBGSuccinctBloom<4, 1>> CanonicalGraphTypes;
+                         DBGSuccinctBloom<4, 1>,
+                         DBGSuccinct::CachedView> CanonicalGraphTypes;
 
 TYPED_TEST_SUITE(CanonicalDBGTest, CanonicalGraphTypes);
 
@@ -46,7 +47,7 @@ TYPED_TEST(CanonicalDBGTest, CheckGraph) {
 
 TYPED_TEST(CanonicalDBGTest, CheckGraphInputWithN) {
     EXPECT_TRUE(check_graph<TypeParam>("ACGTN", DeBruijnGraph::PRIMARY, false));
-    EXPECT_EQ(TypeParam(3).alphabet().find('N') != std::string::npos,
+    EXPECT_EQ(build_graph<TypeParam>(3, {}, DeBruijnGraph::PRIMARY)->alphabet().find('N') != std::string::npos,
               check_graph<TypeParam>("ACGTN", DeBruijnGraph::PRIMARY, true));
 }
 

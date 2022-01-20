@@ -44,6 +44,7 @@ class DBGWrapper : public DeBruijnGraph {
      */
     virtual const Graph& get_graph() const { return *graph_; }
     virtual std::shared_ptr<const Graph> get_graph_ptr() const { return graph_; }
+    virtual void set_graph(std::shared_ptr<const Graph> graph) = 0;
 
     /**
      * Methods shared by all wrappers
@@ -64,22 +65,6 @@ class DBGWrapper : public DeBruijnGraph {
     virtual uint64_t max_index() const override { return graph_->max_index(); }
 
     /**
-     * Not implemented
-     */
-    virtual void serialize(const std::string &) const override final {
-        throw std::runtime_error("serialize not implemented on graph wrappers");
-    }
-
-    virtual bool load(const std::string &) override final {
-        throw std::runtime_error("load not implemented on graph wrappers");
-    }
-
-    virtual void add_sequence(std::string_view,
-                              const std::function<void(node_index)> &) override final {
-        throw std::runtime_error("add_sequence not implemented on graph wrappers");
-    }
-
-    /**
      * The Graph defaults of these are likely to break in a wrapped graph,
      * so these should be implemented.
      */
@@ -90,6 +75,8 @@ class DBGWrapper : public DeBruijnGraph {
                                 = [](){ return false; }) const override = 0;
 
     virtual void call_kmers(const std::function<void(node_index, const std::string&)> &callback) const override = 0;
+
+    virtual bool is_base_node(node_index node) const override = 0;
 
     virtual std::pair<std::vector<node_index>, bool /* is reversed */>
     get_base_path(const std::vector<node_index> &path,

@@ -4,10 +4,9 @@
 #include <cassert>
 #include <array>
 
-#include <cache.hpp>
-#include <lru_cache_policy.hpp>
-
 #include "graph/representation/base/dbg_wrapper.hpp"
+#include "graph/representation/succinct/dbg_succinct.hpp"
+#include "common/caches.hpp"
 
 namespace mtg {
 namespace graph {
@@ -20,13 +19,6 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
   public:
     template <typename Graph>
     explicit CanonicalDBG(Graph&& graph, size_t cache_size = 100'000);
-
-    // copy constructors
-    CanonicalDBG(const CanonicalDBG &canonical)
-          : CanonicalDBG(canonical.graph_, canonical.cache_size_) {}
-
-    CanonicalDBG(CanonicalDBG &canonical)
-          : CanonicalDBG(canonical.graph_, canonical.cache_size_) {}
 
     // caches cannot be resized or moved, so disable these constructors
     CanonicalDBG& operator=(const CanonicalDBG &canonical) = delete;
@@ -54,10 +46,12 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
 
     // Traverse graph mapping sequence to the graph nodes
     // and run callback for each node until the termination condition is satisfied.
-    // Guarantees that nodes are called in the same order as the input sequence
+    // Guarantees that nodes are called in the same order as the input sequence.
+    // All k-mers for which the skip condition is satisfied are skipped.
     virtual void map_to_nodes_sequentially(std::string_view sequence,
                                            const std::function<void(node_index)> &callback,
-                                           const std::function<bool()> &terminate = [](){ return false; }) const override final;
+                                           const std::function<bool()> &terminate = [](){ return false; },
+                                           const std::function<bool()> &skip = [](){ return false; }) const override final;
 
     // Given a node index, call the target nodes of all edges outgoing from it.
     virtual void adjacent_outgoing_nodes(node_index node,
@@ -107,24 +101,57 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
         return node > offset_ ? node - offset_ : node;
     }
 
+    virtual bool is_base_node(node_index node) const override final {
+        return node <= offset_ && graph_->is_base_node(node);
+    }
+
     virtual std::pair<std::vector<node_index>, bool /* is reversed */>
     get_base_path(const std::vector<node_index> &path,
                   const std::string &sequence) const override final;
 
+    virtual void serialize(const std::string &filename_base) const override final {
+        graph_->serialize(filename_base);
+    }
+
+    virtual bool load(const std::string &filename_base) override final {
+        if (const_cast<DeBruijnGraph*>(graph_.get())->load(filename_base)) {
+            flush();
+            return true;
+        }
+
+        return false;
+    }
+
+    virtual void set_graph(std::shared_ptr<const DeBruijnGraph> graph) override final {
+        graph_ = graph;
+        flush();
+    }
+
+    virtual void add_sequence(std::string_view sequence,
+                              const std::function<void(node_index)> &on_insertion) override final {
+        const_cast<DeBruijnGraph*>(graph_.get())->add_sequence(sequence, on_insertion);
+        flush();
+    }
+
   private:
-    size_t cache_size_;
-
-    // cache the results of call_outgoing_kmers
-    mutable caches::fixed_sized_cache<node_index, std::vector<node_index>,
-                                      caches::LRUCachePolicy<node_index>> child_node_cache_;
-
-    // cache the results of call_incoming_kmers
-    mutable caches::fixed_sized_cache<node_index, std::vector<node_index>,
-                                      caches::LRUCachePolicy<node_index>> parent_node_cache_;
+    typedef boss::BOSS::edge_index edge_index;
 
     // cache whether a given node is a palindrome (it's equal to its reverse complement)
-    mutable caches::fixed_sized_cache<node_index, bool,
-                                      caches::LRUCachePolicy<node_index>> is_palindrome_cache_;
+    mutable common::LRUCache<node_index, bool> is_palindrome_cache_;
+
+    // Cache a BOSS node (potentially 0) and a lower bound on the number of unmatched
+    // nucleotides of the prefix of the key node.
+    // If the lower bound is greater than 1, then the stored BOSS node is 0.
+    // If the lower bound is equal to 1, then the BOSS node corresponding to the
+    // reverse complement of the k - 1 prefix of the key node is stored.
+    mutable common::LRUCache<node_index, std::pair<edge_index, size_t>> rev_comp_prefix_cache_;
+
+    // Cache a BOSS node (potentially 0) and a lower bound on the number of unmatched
+    // nucleotides of the suffix of the key node.
+    // If the lower bound is greater than 1, then the stored BOSS node is 0.
+    // If the lower bound is equal to 1, then the BOSS node corresponding to the
+    // reverse complement of the k - 1 suffix of the key node is stored.
+    mutable common::LRUCache<node_index, std::pair<edge_index, size_t>> rev_comp_suffix_cache_;
 
     size_t offset_;
     bool k_odd_;
@@ -142,6 +169,9 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
     // find all child nodes of node in the CanonicalDBG which are represented
     // in the reverse complement orientation in the underlying primary graph
     void append_next_rc_nodes(node_index node, std::vector<node_index> &children) const;
+
+    edge_index get_rev_comp_suffix_node(node_index node) const;
+    edge_index get_rev_comp_prefix_node(node_index node) const;
 };
 
 } // namespace graph

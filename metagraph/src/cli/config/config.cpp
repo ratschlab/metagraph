@@ -163,6 +163,8 @@ Config::Config(int argc, char *argv[]) {
             num_columns_cached = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--fast")) {
             fast = true;
+        } else if (!strcmp(argv[i], "--lcs")) {
+            lcs = true;
         } else if (!strcmp(argv[i], "--batch-size")) {
             query_batch_size_in_bytes = atoll(get_value(i++));
         } else if (!strcmp(argv[i], "-p") || !strcmp(argv[i], "--parallel")) {
@@ -245,6 +247,8 @@ Config::Config(int argc, char *argv[]) {
             alignment_chain = true;
         } else if (!strcmp(argv[i], "--align-post-chain")) {
             alignment_post_chain = true;
+        } else if (!strcmp(argv[i], "--align-no-cache")) {
+            alignment_no_cache = true;
         } else if (!strcmp(argv[i], "--max-hull-depth")) {
             max_hull_depth = atoll(get_value(i++));
         } else if (!strcmp(argv[i], "--batch-align")) {
@@ -263,6 +267,10 @@ Config::Config(int argc, char *argv[]) {
             alignment_gap_extension_penalty = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--align-end-bonus")) {
             alignment_end_bonus = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--align-label-change-penalty")) {
+            alignment_label_change_penalty = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--align-mix-labels")) {
+            alignment_mix_labels = true;
         } else if (!strcmp(argv[i], "--align-alternative-alignments")) {
             alignment_num_alternative_paths = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--align-min-path-score")) {
@@ -1031,8 +1039,10 @@ if (advanced) {
             fprintf(stderr, "\t   --align-mm-transversion-penalty [INT]\tpositive transversion penalty (DNA only) [3]\n");
             fprintf(stderr, "\t   --align-gap-open-penalty [INT]\t\tpositive gap opening penalty [6]\n");
             fprintf(stderr, "\t   --align-gap-extension-penalty [INT]\t\tpositive gap extension penalty [2]\n");
+            fprintf(stderr, "\t   --align-label-change-penalty [INT]\t\tpenalty for changing the labels in an alignment [1]\n");
             fprintf(stderr, "\t   --align-end-bonus [INT]\t\tscore bonus for each endpoint of the query covered by an alignment [5]\n");
             fprintf(stderr, "\t   --align-edit-distance \t\t\tuse unit costs for scoring matrix [off]\n");
+            fprintf(stderr, "\t   --align-mix-labels \t\t\tallow for walks which switch labels [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "Advanced options for seeding:\n");
             fprintf(stderr, "\t   --align-min-seed-length [INT]\t\tthe minimum length of a seed [graph k]\n");

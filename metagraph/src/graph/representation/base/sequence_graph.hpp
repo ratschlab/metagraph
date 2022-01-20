@@ -42,10 +42,12 @@ class SequenceGraph {
 
     // Traverse graph mapping sequence to the graph nodes
     // and run callback for each node until the termination condition is satisfied.
-    // Guarantees that nodes are called in the same order as the input sequence
+    // Guarantees that nodes are called in the same order as the input sequence.
+    // All k-mers for which the skip condition is satisfied are skipped.
     virtual void map_to_nodes_sequentially(std::string_view sequence,
                                            const std::function<void(node_index)> &callback,
-                                           const std::function<bool()> &terminate = [](){ return false; }) const = 0;
+                                           const std::function<bool()> &terminate = [](){ return false; },
+                                           const std::function<bool()> &skip = []() { return false; }) const = 0;
 
     // Given a node index, call the target nodes of all edges outgoing from it.
     virtual void adjacent_outgoing_nodes(node_index node,
@@ -153,10 +155,12 @@ class DeBruijnGraph : public SequenceGraph {
     // Traverse graph mapping sequence to the graph nodes
     // and run callback for each node until the termination condition is satisfied.
     // Guarantees that nodes are called in the same order as the input sequence.
+    // All k-mers for which the skip condition is satisfied are skipped.
     // In canonical mode, non-canonical k-mers are not mapped to canonical ones
     virtual void map_to_nodes_sequentially(std::string_view sequence,
                                            const std::function<void(node_index)> &callback,
-                                           const std::function<bool()> &terminate = [](){ return false; }) const = 0;
+                                           const std::function<bool()> &terminate = [](){ return false; },
+                                           const std::function<bool()> &skip = []() { return false; }) const = 0;
 
     // Given a starting node and a sequence of edge labels, traverse the graph
     // forward. The traversal is terminated once terminate() returns true or
@@ -230,6 +234,8 @@ class DeBruijnGraph : public SequenceGraph {
     virtual void call_source_nodes(const std::function<void(node_index)> &callback) const;
 
     virtual const DeBruijnGraph& get_base_graph() const { return *this; }
+
+    virtual bool is_base_node(node_index node) const;
 
     virtual std::pair<std::vector<node_index>, bool /* is reversed */>
     get_base_path(const std::vector<node_index> &path,

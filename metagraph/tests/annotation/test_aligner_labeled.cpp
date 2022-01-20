@@ -219,4 +219,185 @@ TYPED_TEST(LabeledAlignerTest, CanonicalTangleGraph) {
 }
 #endif
 
+TYPED_TEST(LabeledAlignerTest, LabelMixingSwitch) {
+    size_t k = 4;
+    /*  A    A    A    B    B    B    B    B
+        CGAA-GAAC-AACG-ACGC-CGCC-GCCT-CCTC-CTCA
+    */
+    const std::vector<std::string> sequences {
+        "CGAACG",
+        "ACGCCTCA",
+    };
+    const std::vector<std::string> labels { "A", "B" };
+
+    auto anno_graph = build_anno_graph<typename TypeParam::first_type,
+                                       typename TypeParam::second_type>(k, sequences, labels);
+
+    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -1));
+    config.extra_penalty = 8;
+    config.left_end_bonus = 5;
+    config.right_end_bonus = 5;
+    LabeledAligner<LabeledExtender> aligner(*anno_graph, config);
+
+    std::unordered_map<std::string, std::unordered_map<std::string, std::string>> exp_alignments {{
+        { std::string("CGAACGCCTCA"), {{ { std::string("A"), std::string("CGAACGCCTCA") },
+                                         { std::string("B"), std::string("CGAACGCCTCA") },
+                                      }} }
+    }};
+
+    for (const auto &[query, labels] : exp_alignments) {
+        auto alignments = aligner.align(query);
+
+        for (const auto &alignment : alignments.data()) {
+            bool found = false;
+            for (const auto &label : get_alignment_labels(*anno_graph, alignment, false)) {
+                auto find = labels.find(label);
+                ASSERT_TRUE(find != labels.end()) << label;
+                if (alignment.get_sequence() == find->second) {
+                    found = true;
+                    break;
+                }
+            }
+            EXPECT_TRUE(found) << alignment << " " << alignment.label_columns.size();
+        }
+    }
+}
+
+TYPED_TEST(LabeledAlignerTest, LabelMixingSwitchNegativePenalty) {
+    size_t k = 4;
+    /*  A    A    A    B    B    B    B    B
+        CGAA-GAAC-AACG-ACGC-CGCC-GCCT-CCTC-CTCA
+    */
+    const std::vector<std::string> sequences {
+        "CGAACG",
+        "ACGCCTCA",
+    };
+    const std::vector<std::string> labels { "A", "B" };
+
+    auto anno_graph = build_anno_graph<typename TypeParam::first_type,
+                                       typename TypeParam::second_type>(k, sequences, labels);
+
+    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -1));
+    config.extra_penalty = -8;
+    config.left_end_bonus = 5;
+    config.right_end_bonus = 5;
+    LabeledAligner<LabeledExtender> aligner(*anno_graph, config);
+
+    std::unordered_map<std::string, std::unordered_map<std::string, std::string>> exp_alignments {{
+        { std::string("CGAACGCCTCA"), {{ { std::string("A"), std::string("CGAACGCCTCA") },
+                                         { std::string("B"), std::string("CGAACGCCTCA") },
+                                      }} }
+    }};
+
+    for (const auto &[query, labels] : exp_alignments) {
+        auto alignments = aligner.align(query);
+
+        for (const auto &alignment : alignments.data()) {
+            bool found = false;
+            for (const auto &label : get_alignment_labels(*anno_graph, alignment, false)) {
+                auto find = labels.find(label);
+                ASSERT_TRUE(find != labels.end()) << label;
+                if (alignment.get_sequence() == find->second) {
+                    found = true;
+                    break;
+                }
+            }
+            EXPECT_TRUE(found) << alignment << " " << alignment.label_columns.size();
+        }
+    }
+}
+
+TYPED_TEST(LabeledAlignerTest, LabelMixing) {
+    size_t k = 3;
+    /*          A   A   A            B   B
+                AAC-ACG-CGC         CTT-TTT
+        AB  AB /           \AB  AB /
+        CGA-GAA             GCC-CCT
+               \ B   B   B /       \A   A
+                AAT-ATG-TGC         CTC-TCA
+    */
+    const std::vector<std::string> sequences {
+        "CGAACGCCTCA",
+        "CGAATGCCTTT"
+    };
+    const std::vector<std::string> labels { "A", "B" };
+
+    auto anno_graph = build_anno_graph<typename TypeParam::first_type,
+                                       typename TypeParam::second_type>(k, sequences, labels);
+
+    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -1));
+    config.extra_penalty = 2;
+    LabeledAligner<LabeledExtender> aligner(*anno_graph, config);
+
+    std::unordered_map<std::string, std::unordered_map<std::string, std::string>> exp_alignments {{
+        { std::string("CGAATGCCTCA"), {{ { std::string("A"), std::string("CGAATGCCTCA") },
+                                         { std::string("B"), std::string("CGAATGCCTCA") },
+                                      }} }
+    }};
+
+    for (const auto &[query, labels] : exp_alignments) {
+        auto alignments = aligner.align(query);
+
+        for (const auto &alignment : alignments.data()) {
+            bool found = false;
+            for (const auto &label : get_alignment_labels(*anno_graph, alignment, false)) {
+                auto find = labels.find(label);
+                ASSERT_TRUE(find != labels.end()) << label;
+                if (alignment.get_sequence() == find->second) {
+                    found = true;
+                    break;
+                }
+            }
+            EXPECT_TRUE(found) << alignment << " " << alignment.label_columns.size();
+        }
+    }
+}
+
+TYPED_TEST(LabeledAlignerTest, LabelMixingLoop) {
+    size_t k = 3;
+    /*          A   A   A            B   B
+                AAC-ACG-CGC         CTT-TTT
+        AB  AB /           \AB  AB /
+        CGA-GAA             GCC-CCT
+               \ B   B   B /       \A   A
+                AAT-ATG-TGC         CTC-TCC
+    */
+    const std::vector<std::string> sequences {
+        "CGAACGCCTCC",
+        "CGAATGCCTTT"
+    };
+    const std::vector<std::string> labels { "A", "B" };
+
+    auto anno_graph = build_anno_graph<typename TypeParam::first_type,
+                                       typename TypeParam::second_type>(k, sequences, labels);
+
+    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -1));
+    config.extra_penalty = 2;
+    LabeledAligner<LabeledExtender> aligner(*anno_graph, config);
+
+    std::unordered_map<std::string, std::unordered_map<std::string, std::string>> exp_alignments {{
+        { std::string("CGAATGCCTCC"), {{ { std::string("A"), std::string("CGAATGCCTCC") },
+                                         { std::string("B"), std::string("CGAATGCCTCC") },
+                                      }} }
+    }};
+
+    for (const auto &[query, labels] : exp_alignments) {
+        auto alignments = aligner.align(query);
+
+        for (const auto &alignment : alignments.data()) {
+            bool found = false;
+            for (const auto &label : get_alignment_labels(*anno_graph, alignment, false)) {
+                auto find = labels.find(label);
+                ASSERT_TRUE(find != labels.end()) << label;
+                if (alignment.get_sequence() == find->second) {
+                    found = true;
+                    break;
+                }
+            }
+            EXPECT_TRUE(found) << alignment << " " << alignment.label_columns.size();
+        }
+    }
+}
+
+
 } // namespace

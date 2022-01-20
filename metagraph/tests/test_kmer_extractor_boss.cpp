@@ -47,37 +47,30 @@ TEST(ExtractKmers, encode_decode) {
 #endif
 }
 
-KmerExtractorBOSS::Kmer64 to_kmer(const KmerExtractorBOSS &encoder,
-                                  const std::string &kmer) {
-    Vector<KmerExtractorBOSS::Kmer64> kmers;
-    encoder.sequence_to_kmers(kmer, kmer.size(), {}, &kmers);
-    return kmers.at(0);
-}
-
 TEST(ExtractKmers, encode_decode_kmer) {
     KmerExtractorBOSS encoder;
     std::string kmer;
 
     kmer = "ACGT";
-    EXPECT_EQ(kmer, encoder.kmer_to_sequence(to_kmer(encoder, kmer), kmer.length())) << kmer;
+    EXPECT_EQ(kmer, encoder.kmer_to_sequence(encoder.sequence_to_kmer<KmerExtractorBOSS::Kmer64>(kmer), kmer.length())) << kmer;
     kmer = "AAAAAAAAA";
-    EXPECT_EQ(kmer, encoder.kmer_to_sequence(to_kmer(encoder, kmer), kmer.length())) << kmer;
+    EXPECT_EQ(kmer, encoder.kmer_to_sequence(encoder.sequence_to_kmer<KmerExtractorBOSS::Kmer64>(kmer), kmer.length())) << kmer;
     kmer = "TTTTTTTTT";
-    EXPECT_EQ(kmer, encoder.kmer_to_sequence(to_kmer(encoder, kmer), kmer.length())) << kmer;
+    EXPECT_EQ(kmer, encoder.kmer_to_sequence(encoder.sequence_to_kmer<KmerExtractorBOSS::Kmer64>(kmer), kmer.length())) << kmer;
 #if _DNA_GRAPH
     kmer = "ANANANANANA";
-    ASSERT_THROW(encoder.kmer_to_sequence(to_kmer(encoder, kmer), kmer.length()), std::exception) << kmer;
+    ASSERT_THROW(encoder.kmer_to_sequence(encoder.sequence_to_kmer<KmerExtractorBOSS::Kmer64>(kmer), kmer.length()), std::exception) << kmer;
     kmer = "ANANATANANA";
-    ASSERT_THROW(encoder.kmer_to_sequence(to_kmer(encoder, kmer), kmer.length()), std::exception) << kmer;
+    ASSERT_THROW(encoder.kmer_to_sequence(encoder.sequence_to_kmer<KmerExtractorBOSS::Kmer64>(kmer), kmer.length()), std::exception) << kmer;
     kmer = "ANANANANGNT";
-    ASSERT_THROW(encoder.kmer_to_sequence(to_kmer(encoder, kmer), kmer.length()), std::exception) << kmer;
+    ASSERT_THROW(encoder.kmer_to_sequence(encoder.sequence_to_kmer<KmerExtractorBOSS::Kmer64>(kmer), kmer.length()), std::exception) << kmer;
 #else
     kmer = "ANANANANANA";
-    EXPECT_EQ(kmer, encoder.kmer_to_sequence(to_kmer(encoder, kmer), kmer.length())) << kmer;
+    EXPECT_EQ(kmer, encoder.kmer_to_sequence(encoder.sequence_to_kmer<KmerExtractorBOSS::Kmer64>(kmer), kmer.length())) << kmer;
     kmer = "ANANATANANA";
-    EXPECT_EQ(kmer, encoder.kmer_to_sequence(to_kmer(encoder, kmer), kmer.length())) << kmer;
+    EXPECT_EQ(kmer, encoder.kmer_to_sequence(encoder.sequence_to_kmer<KmerExtractorBOSS::Kmer64>(kmer), kmer.length())) << kmer;
     kmer = "ANANANANGNT";
-    EXPECT_EQ(kmer, encoder.kmer_to_sequence(to_kmer(encoder, kmer), kmer.length())) << kmer;
+    EXPECT_EQ(kmer, encoder.kmer_to_sequence(encoder.sequence_to_kmer<KmerExtractorBOSS::Kmer64>(kmer), kmer.length())) << kmer;
 #endif
 }
 

@@ -8,6 +8,7 @@
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/alignment/dbg_aligner.hpp"
 #include "graph/alignment/aligner_labeled.hpp"
+#include "graph/graph_extensions/node_lcs.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "seq_io/sequence_io.hpp"
 #include "config/config.hpp"
@@ -50,6 +51,8 @@ DBGAlignerConfig initialize_aligner_config(const Config &config) {
     aligner_config.post_chain_alignments = config.alignment_post_chain;
     aligner_config.left_end_bonus = config.alignment_end_bonus;
     aligner_config.right_end_bonus = config.alignment_end_bonus;
+    aligner_config.extra_penalty = config.alignment_label_change_penalty;
+    aligner_config.label_change_search_width = config.alignment_label_change_search_width;
 
     logger->trace("Alignment settings:");
     logger->trace("\t Alignments to report: {}", aligner_config.num_alternative_paths);
@@ -324,12 +327,32 @@ int align_to_graph(Config *config) {
     // For graphs which still feature a mask, this speeds up mapping and allows
     // for dummy nodes to be matched by suffix seeding
     auto dbg_succ = std::dynamic_pointer_cast<DBGSuccinct>(graph);
-    if (dbg_succ)
+    if (dbg_succ) {
         dbg_succ->reset_mask();
+        if (config->lcs) {
+            common::logger->trace("Load graph LCS file");
+            if (!dbg_succ->load_extension<NodeLCS>(config->infbase)) {
+                common::logger->error("Could not load LCS file");
+                exit(1);
+            }
+
+            if (!graph->get_extension<NodeLCS>()) {
+                common::logger->error("Could not fetch LCS extension");
+                exit(1);
+            }
+        }
+    }
 
     Timer timer;
     ThreadPool thread_pool(get_num_threads());
     std::mutex print_mutex;
+
+    // A DBGSuccinct graph should only be cached if
+    // 1) backward traversal will be required on a non-CANONICAL graph ||
+    // 2) the base graph is in PRIMARY mode.
+    bool graph_needs_caching
+        = !config->alignment_no_cache && dbg_succ && graph->get_mode() != DeBruijnGraph::CANONICAL
+            && (!config->align_only_forwards || graph->get_mode() == DeBruijnGraph::PRIMARY);
 
     if (config->map_sequences) {
         if (graph->get_mode() == DeBruijnGraph::PRIMARY)
@@ -417,10 +440,16 @@ int align_to_graph(Config *config) {
                     std::shared_ptr<DeBruijnGraph>{}, graph.get()
                 );
 
-                if (aln_graph->get_mode() == DeBruijnGraph::PRIMARY)
-                    aln_graph = primary_to_canonical(aln_graph);
-
                 std::unique_ptr<IDBGAligner> aligner;
+
+                if (graph_needs_caching)
+                    aln_graph = dbg_succ->get_cached_view();
+
+                if (aln_graph->get_mode() == DeBruijnGraph::PRIMARY) {
+                    aln_graph = primary_to_canonical(
+                        aln_graph, config->alignment_no_cache ? 0 : 100'000
+                    );
+                }
 
                 if (anno_dbg) {
                     aligner = std::make_unique<LabeledAligner<>>(

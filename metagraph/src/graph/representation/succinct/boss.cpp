@@ -667,7 +667,7 @@ BOSS::get_minus_k_value(edge_index i, size_t k) const {
     for (; k > 0; --k) {
         i = bwd(i);
     }
-    return std::make_pair(get_node_last_value(i), bwd(i));
+    return std::make_pair(get_node_last_value(i), i);
 }
 
 /**
@@ -893,9 +893,14 @@ bool BOSS::compare_node_suffix(edge_index first, const TAlphabet *second) const 
 
 /**
  * Given an edge index i, this function returns the k-mer sequence of its
- * source node.
+ * source node, and the last node which was accessed during sequence extraction.
+ * If fewer than k bwd traversal steps were taken (when the graph is suffix indexed),
+ * then the third returned value indicates the number of additional bwd operations
+ * required for the resulting node's last value to match the first character
+ * of the returned sequence.
  */
-std::vector<TAlphabet> BOSS::get_node_seq(edge_index x) const {
+std::tuple<std::vector<TAlphabet>, edge_index, size_t> BOSS
+::get_node_seq_with_last_traversed_node(edge_index x) const {
     CHECK_INDEX(x);
 
     std::vector<TAlphabet> ret(k_);
@@ -924,7 +929,7 @@ std::vector<TAlphabet> BOSS::get_node_seq(edge_index x) const {
                 ret[i] = index - next_index * (alph_size - 1) + 1;
                 index = next_index;
             }
-            return ret;
+            return std::make_tuple(std::move(ret), x, indexed_suffix_length_ - 1);
         }
     }
 
@@ -937,7 +942,15 @@ std::vector<TAlphabet> BOSS::get_node_seq(edge_index x) const {
         ret[--i] = get_node_last_value(x);
     }
 
-    return ret;
+    return std::make_tuple(std::move(ret), x, 0);
+}
+
+/**
+ * Given an edge index i, this function returns the k-mer sequence of its
+ * source node.
+ */
+std::vector<TAlphabet> BOSS::get_node_seq(edge_index i) const {
+    return std::get<0>(get_node_seq_with_last_traversed_node(i));
 }
 
 /**

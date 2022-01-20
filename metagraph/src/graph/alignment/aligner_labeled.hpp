@@ -155,6 +155,22 @@ class LabeledExtender : public DefaultColumnExtender {
     virtual ~LabeledExtender() {}
 
   protected:
+    virtual bool set_seed(const Alignment &seed) override {
+        if (DefaultColumnExtender::set_seed(seed)) {
+            node_labels_.resize(1);
+            label_changed_.resize(1);
+            if (seed.label_columns.size()) {
+                node_labels_[0] = seed.label_columns;
+            } else {
+                node_labels_[0] = std::nullopt;
+            }
+
+            return true;
+        }
+
+        return false;
+    }
+
     virtual std::vector<Alignment> backtrack(score_t min_path_score,
                                              std::string_view window) override {
         // extract all labels for explored nodes
@@ -170,8 +186,40 @@ class LabeledExtender : public DefaultColumnExtender {
         return DefaultColumnExtender::extend(min_path_score, force_fixed_seed);
     }
 
+    // this override ensures that outgoing nodes which change labels are penalized
+    virtual void call_outgoing(node_index node,
+                               size_t max_prefetch_distance,
+                               const std::function<void(node_index, char, score_t)> &callback,
+                               size_t table_i,
+                               bool force_fixed_seed = false) override;
+
+    virtual void call_alignments(score_t cur_cell_score,
+                                 score_t end_score,
+                                 score_t min_path_score,
+                                 const std::vector<node_index> &path,
+                                 const std::vector<size_t> &trace,
+                                 size_t table_i,
+                                 const Cigar &ops,
+                                 size_t clipping,
+                                 size_t offset,
+                                 std::string_view window,
+                                 const std::string &match,
+                                 score_t extra_penalty,
+                                 const std::function<void(Alignment&&)> &callback) override;
+
+    virtual void pop(size_t i) override {
+        assert(node_labels_.size() == label_changed_.size());
+        assert(i < node_labels_.size());
+        DefaultColumnExtender::pop(i);
+        node_labels_.erase(node_labels_.begin() + i);
+        label_changed_.erase(label_changed_.begin() + i);
+    }
+
     AnnotationBuffer &labeled_graph_;
     size_t last_buffered_table_i_;
+
+    std::vector<std::optional<Vector<Column>>> node_labels_;
+    std::vector<bool> label_changed_;
 };
 
 class LabeledBacktrackingExtender : public LabeledExtender {

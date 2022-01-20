@@ -93,7 +93,8 @@ typedef ::testing::Types<DBGBitmap,
                          DBGSuccinctBloomFPR<1, 1>,
                          DBGSuccinctBloomFPR<1, 10>,
                          DBGSuccinctBloom<4, 1>,
-                         DBGSuccinctBloom<4, 50>> GraphTypes;
+                         DBGSuccinctBloom<4, 50>,
+                         DBGSuccinct::CachedView> GraphTypes;
 
 // in stable graphs the order of input sequences
 // does not change the order of k-mers and their indexes
@@ -109,7 +110,8 @@ typedef ::testing::Types<DBGBitmap,
                          DBGSuccinctBloomFPR<1, 1>,
                          DBGSuccinctBloomFPR<1, 10>,
                          DBGSuccinctBloom<4, 1>,
-                         DBGSuccinctBloom<4, 50>> StableGraphTypes;
+                         DBGSuccinctBloom<4, 50>,
+                         DBGSuccinct::CachedView> StableGraphTypes;
 
 typedef ::testing::Types<DBGHashFast, DBGSuccinct> FewGraphTypes;
 

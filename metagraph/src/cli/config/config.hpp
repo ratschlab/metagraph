@@ -63,6 +63,7 @@ class Config {
     bool output_json = false;
     bool aggregate_columns = false;
     bool coordinates = false;
+    bool lcs = false;
     bool advanced = false;
 
     unsigned int k = 3;
@@ -120,6 +121,9 @@ class Config {
     int8_t alignment_gap_opening_penalty = 6;
     int8_t alignment_gap_extension_penalty = 2;
     int8_t alignment_end_bonus = 5;
+    int8_t alignment_label_change_penalty = 1;
+    bool alignment_mix_labels = false;
+    bool alignment_no_cache = false;
 
     int32_t alignment_min_path_score = 0;
     int32_t alignment_xdrop = 27;
@@ -128,6 +132,7 @@ class Config {
     size_t alignment_min_seed_length = 0;
     size_t alignment_max_seed_length = std::numeric_limits<size_t>::max();
     size_t alignment_max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
+    size_t alignment_label_change_search_width = 5;
 
     double alignment_rel_score_cutoff = 0.95;
 

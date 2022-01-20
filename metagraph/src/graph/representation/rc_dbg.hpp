@@ -28,8 +28,8 @@ class RCDBG : public DBGWrapper<DeBruijnGraph> {
     virtual void
     map_to_nodes_sequentially(std::string_view sequence,
                               const std::function<void(node_index)> &callback,
-                              const std::function<bool()> &terminate
-                                  = [](){ return false; }) const override final {
+                              const std::function<bool()> &terminate = [](){ return false; },
+                              const std::function<bool()> &skip = []() { return false; }) const override final {
         if (terminate())
             return;
 
@@ -38,7 +38,7 @@ class RCDBG : public DBGWrapper<DeBruijnGraph> {
         std::vector<node_index> nodes = graph::map_to_nodes_sequentially(*graph_, rc);
 
         for (auto it = nodes.rbegin(); it != nodes.rend() && !terminate(); ++it) {
-            callback(*it);
+            callback(!skip() ? *it : npos);
         }
     }
 
@@ -132,6 +132,8 @@ class RCDBG : public DBGWrapper<DeBruijnGraph> {
         });
     }
 
+    virtual bool is_base_node(node_index) const override final { return false; }
+
     virtual std::pair<std::vector<node_index>, bool /* is reversed */>
     get_base_path(const std::vector<node_index> &path,
                   const std::string &sequence) const override final {
@@ -139,6 +141,23 @@ class RCDBG : public DBGWrapper<DeBruijnGraph> {
         ret_val.second = !ret_val.second;
         std::reverse(ret_val.first.begin(), ret_val.first.end());
         return ret_val;
+    }
+
+    virtual void serialize(const std::string &filename_base) const override final {
+        graph_->serialize(filename_base);
+    }
+
+    virtual bool load(const std::string &filename_base) override final {
+        return const_cast<DeBruijnGraph*>(graph_.get())->load(filename_base);
+    }
+
+    virtual void set_graph(std::shared_ptr<const DeBruijnGraph> graph) override final {
+        graph_ = graph;
+    }
+
+    virtual void add_sequence(std::string_view sequence,
+                              const std::function<void(node_index)> &on_insertion) override final {
+        const_cast<DeBruijnGraph*>(graph_.get())->add_sequence(sequence, on_insertion);
     }
 };
 

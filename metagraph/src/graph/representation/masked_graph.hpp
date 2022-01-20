@@ -54,10 +54,12 @@ class MaskedDeBruijnGraph : public DBGWrapper<DeBruijnGraph> {
 
     // Traverse graph mapping sequence to the graph nodes
     // and run callback for each node until the termination condition is satisfied.
-    // Guarantees that nodes are called in the same order as the input sequence
+    // Guarantees that nodes are called in the same order as the input sequence.
+    // All k-mers for which the skip condition is satisfied are skipped.
     virtual void map_to_nodes_sequentially(std::string_view sequence,
                                            const std::function<void(node_index)> &callback,
-                                           const std::function<bool()> &terminate = [](){ return false; }) const override;
+                                           const std::function<bool()> &terminate = [](){ return false; },
+                                           const std::function<bool()> &skip = []() { return false; }) const override;
 
     // Given a node index, call the target nodes of all edges outgoing from it.
     virtual void adjacent_outgoing_nodes(node_index node,
@@ -129,10 +131,29 @@ class MaskedDeBruijnGraph : public DBGWrapper<DeBruijnGraph> {
         });
     }
 
+    virtual bool is_base_node(node_index node) const override final { return graph_->is_base_node(node); }
+
     virtual std::pair<std::vector<node_index>, bool /* is reversed */>
     get_base_path(const std::vector<node_index> &path,
                   const std::string &) const override final {
         return std::make_pair(path, false);
+    }
+
+    virtual void serialize(const std::string &) const override final {
+        throw std::runtime_error("serialize not supported for MaskedDeBruijnGraph");
+    }
+
+    virtual bool load(const std::string &) override final {
+        throw std::runtime_error("load not supported for MaskedDeBruijnGraph");
+    }
+
+    virtual void add_sequence(std::string_view,
+                              const std::function<void(node_index)>&) override final {
+        throw std::runtime_error("add_sequence not supported for MaskedDeBruijnGraph");
+    }
+
+    virtual void set_graph(std::shared_ptr<const DeBruijnGraph>) override final {
+        throw std::runtime_error("set_graph not supported for MaskedDeBruijnGraph");
     }
 
   private:

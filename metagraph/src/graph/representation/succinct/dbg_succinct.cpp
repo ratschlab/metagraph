@@ -6,6 +6,7 @@
 #include <string>
 #include <filesystem>
 
+#include "dbg_succinct_cached.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/serialization.hpp"
 #include "common/logger.hpp"
@@ -244,11 +245,13 @@ std::string DBGSuccinct::get_node_sequence(node_index node) const {
 
 // Traverse graph mapping sequence to the graph nodes
 // and run callback for each node until the termination condition is satisfied.
+// For each k-mer satisfying the skip condition, run the callback on npos.
 // Guarantees that nodes are called in the same order as the input sequence.
 // In canonical mode, non-canonical k-mers are not mapped to canonical ones
 void DBGSuccinct::map_to_nodes_sequentially(std::string_view sequence,
                                             const std::function<void(node_index)> &callback,
-                                            const std::function<bool()> &terminate) const {
+                                            const std::function<bool()> &terminate,
+                                            const std::function<bool()> &skip) const {
     if (sequence.size() < get_k())
         return;
 
@@ -259,11 +262,12 @@ void DBGSuccinct::map_to_nodes_sequentially(std::string_view sequence,
         [&](BOSS::edge_index i) { callback(boss_to_kmer_index(i)); },
         terminate,
         [&]() {
-            if (!is_missing())
-                return false;
+            if (is_missing() || skip()) {
+                callback(npos);
+                return true;
+            }
 
-            callback(npos);
-            return true;
+            return false;
         }
     );
 }
@@ -1027,6 +1031,22 @@ void DBGSuccinct::print(std::ostream &out) const {
         }
 
         out << std::endl;
+    }
+}
+
+auto DBGSuccinct::get_cached_view(size_t cache_size) const -> std::unique_ptr<CachedView> {
+    if (get_k() * kmer::KmerExtractorBOSS::bits_per_char <= 64) {
+        return std::make_unique<DBGSuccinctCachedViewImpl<kmer::KmerExtractorBOSS::Kmer64>>(
+            *this, cache_size
+        );
+    } else if (get_k() * kmer::KmerExtractorBOSS::bits_per_char <= 128) {
+        return std::make_unique<DBGSuccinctCachedViewImpl<kmer::KmerExtractorBOSS::Kmer128>>(
+            *this, cache_size
+        );
+    } else {
+        return std::make_unique<DBGSuccinctCachedViewImpl<kmer::KmerExtractorBOSS::Kmer256>>(
+            *this, cache_size
+        );
     }
 }
 

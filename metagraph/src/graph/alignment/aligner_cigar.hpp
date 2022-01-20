@@ -104,7 +104,7 @@ class Cigar {
     static constexpr char opt_to_char(Cigar::Operator op) { return op_str_[op]; }
 
   private:
-    static constexpr char op_str_[] = "SX=DIG";
+    static constexpr char op_str_[] = "SX=DIGL";
     std::vector<value_type> cigar_;
 };
 

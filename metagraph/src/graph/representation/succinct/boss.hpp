@@ -274,6 +274,17 @@ class BOSS {
     std::vector<TAlphabet> get_node_seq(edge_index i) const;
 
     /**
+     * Given an edge index i, this function returns the k-mer sequence of its
+     * source node, and the last node which was accessed during sequence extraction.
+     * If fewer than k bwd traversal steps were taken (when the graph is suffix indexed),
+     * then the third returned value indicates the number of additional bwd operations
+     * required for the resulting node's last value to match the first character
+     * of the returned sequence.
+     */
+    std::tuple<std::vector<TAlphabet>, edge_index, size_t>
+    get_node_seq_with_last_traversed_node(edge_index i) const;
+
+    /**
      * Given index i of an edge and a value k, this function
      * returns the k-th last character of the source node for edge i.
      */

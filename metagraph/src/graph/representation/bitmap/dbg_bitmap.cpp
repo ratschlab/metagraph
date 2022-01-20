@@ -48,15 +48,17 @@ void DBGBitmap::map_to_nodes(std::string_view sequence,
 // Traverse graph mapping sequence to the graph nodes
 // and run callback for each node until the termination condition is satisfied.
 // Guarantees that nodes are called in the same order as the input sequence.
+// All k-mers for which the skip condition is satisfied are skipped.
 // In canonical mode, non-canonical k-mers are NOT mapped to canonical ones
 void DBGBitmap::map_to_nodes_sequentially(std::string_view sequence,
                                           const std::function<void(node_index)> &callback,
-                                          const std::function<bool()> &terminate) const {
+                                          const std::function<bool()> &terminate,
+                                          const std::function<bool()> &skip) const {
     for (const auto &[kmer, is_valid] : sequence_to_kmers(sequence)) {
         if (terminate())
             return;
 
-        callback(is_valid ? to_node(kmer) : npos);
+        callback(is_valid && !skip() ? to_node(kmer) : npos);
     }
 }
 

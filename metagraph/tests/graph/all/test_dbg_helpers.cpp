@@ -5,6 +5,7 @@
 #include "graph/representation/succinct/boss.hpp"
 #include "graph/representation/succinct/boss_construct.hpp"
 #include "graph/representation/bitmap/dbg_bitmap_construct.hpp"
+#include "graph/representation/succinct/dbg_succinct_cached.hpp"
 
 
 namespace mtg {
@@ -24,6 +25,7 @@ template size_t max_test_k<DBGSuccinctBloomFPR<1, 1>>();
 template size_t max_test_k<DBGSuccinctBloomFPR<1, 10>>();
 template size_t max_test_k<DBGSuccinctBloom<4, 1>>();
 template size_t max_test_k<DBGSuccinctBloom<4, 50>>();
+template size_t max_test_k<DBGSuccinct::CachedView>();
 
 template<> size_t max_test_k<DBGBitmap>() {
     return 63. / kmer::KmerExtractor2Bit().bits_per_char;
@@ -243,6 +245,26 @@ build_graph<DBGSuccinctBloom<4, 50>>(uint64_t k,
     return graph;
 }
 
+template <>
+std::shared_ptr<DeBruijnGraph>
+build_graph<DBGSuccinct::CachedView>(uint64_t k,
+                                     std::vector<std::string> sequences,
+                                     DeBruijnGraph::Mode mode) {
+    std::shared_ptr<const DeBruijnGraph> base_graph = build_graph<DBGSuccinct>(k, sequences, mode);
+    if (mode == DeBruijnGraph::PRIMARY)
+        base_graph = dynamic_cast<const CanonicalDBG&>(*base_graph).get_graph_ptr();
+
+    auto dbg_succ = std::dynamic_pointer_cast<const DBGSuccinct>(base_graph);
+    std::shared_ptr<DBGSuccinct::CachedView> cached_graph = dbg_succ->get_cached_view();
+    cached_graph->set_graph(dbg_succ);
+
+    if (mode == DeBruijnGraph::PRIMARY)
+        return std::make_shared<CanonicalDBG>(
+            std::static_pointer_cast<DeBruijnGraph>(cached_graph), 2 /* cache size */);
+
+    return cached_graph;
+}
+
 
 template <class Graph>
 std::shared_ptr<DeBruijnGraph>
@@ -389,6 +411,26 @@ build_graph_batch<DBGSuccinctBloom<4, 50>>(uint64_t k,
     return graph;
 }
 
+template <>
+std::shared_ptr<DeBruijnGraph>
+build_graph_batch<DBGSuccinct::CachedView>(uint64_t k,
+                                           std::vector<std::string> sequences,
+                                           DeBruijnGraph::Mode mode) {
+    std::shared_ptr<const DeBruijnGraph> base_graph = build_graph_batch<DBGSuccinct>(k, sequences, mode);
+    if (mode == DeBruijnGraph::PRIMARY)
+        base_graph = dynamic_cast<const CanonicalDBG&>(*base_graph).get_graph_ptr();
+
+    auto dbg_succ = std::dynamic_pointer_cast<const DBGSuccinct>(base_graph);
+    std::shared_ptr<DBGSuccinct::CachedView> cached_graph = dbg_succ->get_cached_view();
+    cached_graph->set_graph(dbg_succ);
+
+    if (mode == DeBruijnGraph::PRIMARY)
+        return std::make_shared<CanonicalDBG>(
+            std::static_pointer_cast<DeBruijnGraph>(cached_graph), 2 /* cache size */);
+
+    return cached_graph;
+}
+
 
 template <class Graph>
 bool check_graph(const std::string &alphabet, DeBruijnGraph::Mode mode, bool check_sequence) {
@@ -405,7 +447,7 @@ bool check_graph(const std::string &alphabet, DeBruijnGraph::Mode mode, bool che
 #if _PROTEIN_GRAPH
     auto graph = build_graph<Graph>(12, sequences, mode);
 #else
-    auto graph = build_graph<Graph>(20, sequences, mode);
+    auto graph = build_graph<Graph>(20 + (mode == DeBruijnGraph::PRIMARY), sequences, mode);
 #endif
 
     bool node_remap_failed = false;
@@ -452,6 +494,7 @@ template bool check_graph<DBGSuccinctBloomFPR<1, 1>>(const std::string &, DeBrui
 template bool check_graph<DBGSuccinctBloomFPR<1, 10>>(const std::string &, DeBruijnGraph::Mode, bool);
 template bool check_graph<DBGSuccinctBloom<4, 1>>(const std::string &, DeBruijnGraph::Mode, bool);
 template bool check_graph<DBGSuccinctBloom<4, 50>>(const std::string &, DeBruijnGraph::Mode, bool);
+template bool check_graph<DBGSuccinct::CachedView>(const std::string &, DeBruijnGraph::Mode, bool);
 template bool check_graph<DBGBitmap>(const std::string &, DeBruijnGraph::Mode, bool);
 template bool check_graph<DBGHashOrdered>(const std::string &, DeBruijnGraph::Mode, bool);
 template bool check_graph<DBGHashFast>(const std::string &, DeBruijnGraph::Mode, bool);

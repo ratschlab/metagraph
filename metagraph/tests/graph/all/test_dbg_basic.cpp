@@ -22,14 +22,8 @@ const size_t kBitsPerCount = 8;
 
 TYPED_TEST_SUITE(DeBruijnGraphTest, GraphTypes);
 
-
 TYPED_TEST(DeBruijnGraphTest, GraphDefaultConstructor) {
-    TypeParam *graph = nullptr;
-
-    ASSERT_NO_THROW({ graph = new TypeParam(2); });
-    ASSERT_NE(nullptr, graph);
-    delete graph;
-    ASSERT_NO_THROW(TypeParam(2));
+    ASSERT_NO_THROW(build_graph<TypeParam>(2));
 }
 
 TYPED_TEST(DeBruijnGraphTest, InitializeEmpty) {
@@ -51,18 +45,18 @@ TYPED_TEST(DeBruijnGraphTest, SerializeEmpty) {
         EXPECT_TRUE(check_graph_nodes(*graph));
     }
 
-    TypeParam graph(2);
+    auto graph = build_graph<TypeParam>(2);
 
-    ASSERT_TRUE(graph.load(test_dump_basename));
+    ASSERT_TRUE(graph->load(test_dump_basename));
 
-    EXPECT_EQ(0u, graph.num_nodes());
-    EXPECT_EQ(12u, graph.get_k());
+    EXPECT_EQ(0u, graph->num_nodes());
+    EXPECT_EQ(12u, graph->get_k());
 
-    EXPECT_FALSE(graph.find("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
-    EXPECT_FALSE(graph.find("TTTTTTTTTTTTTTTTTTTTTTTTTTTTT"));
-    EXPECT_FALSE(graph.find("CATGTACTAGCTGATCGTAGCTAGCTAGC"));
-    EXPECT_FALSE(graph.find("GCTAGCTAGCTACGATCAGCTAGTACATG"));
-    EXPECT_TRUE(check_graph_nodes(graph));
+    EXPECT_FALSE(graph->find("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
+    EXPECT_FALSE(graph->find("TTTTTTTTTTTTTTTTTTTTTTTTTTTTT"));
+    EXPECT_FALSE(graph->find("CATGTACTAGCTGATCGTAGCTAGCTAGC"));
+    EXPECT_FALSE(graph->find("GCTAGCTAGCTACGATCAGCTAGTACATG"));
+    EXPECT_TRUE(check_graph_nodes(*graph));
 }
 
 TYPED_TEST(DeBruijnGraphTest, Serialize) {
@@ -83,19 +77,19 @@ TYPED_TEST(DeBruijnGraphTest, Serialize) {
         EXPECT_TRUE(check_graph_nodes(*graph));
     }
 
-    TypeParam graph(2);
+    auto graph = build_graph<TypeParam>(2);
 
-    ASSERT_TRUE(graph.load(test_dump_basename));
+    ASSERT_TRUE(graph->load(test_dump_basename));
 
-    EXPECT_EQ(12u, graph.get_k());
+    EXPECT_EQ(12u, graph->get_k());
 
-    EXPECT_TRUE(graph.find("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
-    EXPECT_FALSE(graph.find("TTTTTTTTTTTTTTTTTTTTTTTTTTTTT"));
-    EXPECT_TRUE(graph.find("CATGTACTAGCTGATCGTAGCTAGCTAGC"));
-    EXPECT_FALSE(graph.find("GCTAGCTAGCTACGATCAGCTAGTACATG"));
-    EXPECT_FALSE(graph.find("CATGTTTTTTTAATATATATATTTTTAGC"));
-    EXPECT_FALSE(graph.find("GCTAAAAATATATATATTAAAAAAACATG"));
-    EXPECT_TRUE(check_graph_nodes(graph));
+    EXPECT_TRUE(graph->find("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
+    EXPECT_FALSE(graph->find("TTTTTTTTTTTTTTTTTTTTTTTTTTTTT"));
+    EXPECT_TRUE(graph->find("CATGTACTAGCTGATCGTAGCTAGCTAGC"));
+    EXPECT_FALSE(graph->find("GCTAGCTAGCTACGATCAGCTAGTACATG"));
+    EXPECT_FALSE(graph->find("CATGTTTTTTTAATATATATATTTTTAGC"));
+    EXPECT_FALSE(graph->find("GCTAAAAATATATATATTAAAAAAACATG"));
+    EXPECT_TRUE(check_graph_nodes(*graph));
 }
 
 template <class Graph>
@@ -114,16 +108,16 @@ void test_graph_serialization(size_t k_max) {
             graph->serialize(test_dump_basename);
         }
         {
-            Graph graph(2);
+            auto graph = build_graph<Graph>(2);
 
-            ASSERT_TRUE(graph.load(test_dump_basename)) << "k: " << k;
+            ASSERT_TRUE(graph->load(test_dump_basename)) << "k: " << k;
 
-            EXPECT_EQ(k, graph.get_k());
+            EXPECT_EQ(k, graph->get_k());
 
-            EXPECT_TRUE(graph.find(std::string(k, 'A')));
-            EXPECT_TRUE(graph.find(std::string(k, 'C')));
-            EXPECT_TRUE(graph.find(std::string(k - 1, 'C') + 'G'));
-            EXPECT_FALSE(graph.find(std::string(k, 'G')));
+            EXPECT_TRUE(graph->find(std::string(k, 'A')));
+            EXPECT_TRUE(graph->find(std::string(k, 'C')));
+            EXPECT_TRUE(graph->find(std::string(k - 1, 'C') + 'G'));
+            EXPECT_FALSE(graph->find(std::string(k, 'G')));
         }
     }
 }
@@ -203,7 +197,7 @@ TYPED_TEST(DeBruijnGraphTest, CheckGraph) {
 
 TYPED_TEST(DeBruijnGraphTest, CheckGraphInputWithN) {
     EXPECT_TRUE(check_graph<TypeParam>("ACGTN", DeBruijnGraph::BASIC, false));
-    EXPECT_EQ(TypeParam(3).alphabet().find('N') != std::string::npos,
+    EXPECT_EQ(build_graph<TypeParam>(3)->alphabet().find('N') != std::string::npos,
               check_graph<TypeParam>("ACGTN", DeBruijnGraph::BASIC, true));
 }
 
@@ -240,7 +234,7 @@ TYPED_TEST(DeBruijnGraphTest, TestNonASCIIStrings) {
                                          "АСАСАСАСАСАСА",
                                          "плохая строка",
                                          "АСАСАСАСАСАСА" };
-    if (TypeParam(2).alphabet().find('N') == std::string::npos) {
+    if (build_graph<TypeParam>(2)->alphabet().find('N') == std::string::npos) {
         EXPECT_EQ(0u, build_graph<TypeParam>(6, sequences)->num_nodes());
         EXPECT_EQ(0u, build_graph_batch<TypeParam>(6, sequences)->num_nodes());
     } else {
