@@ -2761,7 +2761,7 @@ void traverse_rd_path_backward(const BOSS &boss,
         // AAAX - AAX$
         // ^^^^
         // AAAY - ****
-        if (!rd_succ[edge])
+        if (!boss.is_single_outgoing(edge) && !rd_succ[edge])
             continue;
 
         // |edge| is the row-diff successor. Thus, it is part of a diff

@@ -259,6 +259,7 @@ void sum_and_call_counts(const fs::path &dir,
 }
 
 rd_succ_bv_type route_at_forks(const graph::DBGSuccinct &graph,
+                               const sdsl::bit_vector &dummy,
                                const std::string &rd_succ_filename,
                                const std::string &count_vectors_dir,
                                const std::string &row_count_extension) {
@@ -283,16 +284,27 @@ rd_succ_bv_type route_at_forks(const graph::DBGSuccinct &graph,
 
         sdsl::bit_vector rd_succ_bv(last.size(), false);
 
+        uint64_t num_forks = 0;
+        uint64_t num_redirected = 0;
         sum_and_call_counts(count_vectors_dir, row_count_extension, "row counts",
             [&](int32_t count) {
-                // TODO: skip single outgoing
+                if (dummy[graph.kmer_to_boss_index(graph_idx)]) {
+                    assert(!outgoing_counts.size());
+                    graph_idx++;
+                    return;
+                }
                 outgoing_counts.push_back(count);
                 if (last[graph.kmer_to_boss_index(graph_idx)]) {
-                    // pick the node with the largest count
-                    size_t max_pos = std::max_element(outgoing_counts.rbegin(),
-                                                      outgoing_counts.rend())
-                                     - outgoing_counts.rbegin();
-                    rd_succ_bv[graph.kmer_to_boss_index(graph_idx - max_pos)] = true;
+                    if (outgoing_counts.size() > 1) {
+                        num_forks++;
+                        // pick the node with the largest count
+                        size_t max_pos = std::max_element(outgoing_counts.rbegin(),
+                                                          outgoing_counts.rend())
+                                         - outgoing_counts.rbegin();
+                        if (max_pos)
+                            num_redirected++;
+                        rd_succ_bv[graph.kmer_to_boss_index(graph_idx - max_pos)] = true;
+                    }
                     outgoing_counts.resize(0);
                 }
                 graph_idx++;
@@ -304,6 +316,9 @@ rd_succ_bv_type route_at_forks(const graph::DBGSuccinct &graph,
                           " graph: {} != {}", graph_idx - 1, graph.num_nodes());
             exit(1);
         }
+
+        logger->info("Number of row-diff successors redirected at forks: {} / {}",
+                      num_redirected, num_forks);
 
         rd_succ = rd_succ_bv_type(std::move(rd_succ_bv));
 
@@ -343,13 +358,13 @@ void build_pred_succ(const std::string &graph_fname,
         std::exit(1);
     }
 
-    // assign row-diff successors at forks
-    rd_succ_bv_type rd_succ = route_at_forks(graph, outfbase + kRowDiffForkSuccExt,
-                                             count_vectors_dir, row_count_extension);
-
     const BOSS &boss = graph.get_boss();
 
     sdsl::bit_vector dummy = boss.mark_all_dummy_edges(num_threads);
+
+    // assign row-diff successors at forks
+    rd_succ_bv_type rd_succ = route_at_forks(graph, dummy, outfbase + kRowDiffForkSuccExt,
+                                             count_vectors_dir, row_count_extension);
 
     // create the succ/pred files, indexed using annotation indices
     uint32_t width = sdsl::bits::hi(graph.num_nodes()) + 1;
@@ -374,20 +389,14 @@ void build_pred_succ(const std::string &graph_fname,
         for (uint64_t i = start; i < std::min(start + BS, graph.num_nodes() + 1); ++i) {
             BOSS::edge_index boss_idx = graph.kmer_to_boss_index(i);
             if (!dummy[boss_idx]) {
-                const BOSS::TAlphabet d = boss.get_W(boss_idx) % boss.alph_size;
-                assert(d && "must not be dummy");
-                BOSS::edge_index next = boss.fwd(boss_idx, d);
-                assert(next);
+                BOSS::edge_index next = boss.row_diff_successor(boss_idx, rd_succ);
                 if (!dummy[next]) {
-                    while (rd_succ.size() && !rd_succ[next]) {
-                        next--;
-                        assert(!boss.get_last(next));
-                    }
                     succ_buf.push_back(to_row(graph.boss_to_kmer_index(next)));
                     succ_boundary_buf.push_back(0);
                 }
                 // compute predecessors only for row-diff successors
-                if (rd_succ.size() ? rd_succ[boss_idx] : boss.get_last(boss_idx)) {
+                if (rd_succ.size() ? (boss.is_single_outgoing(boss_idx) || rd_succ[boss_idx])
+                                   : boss.get_last(boss_idx)) {
                     BOSS::TAlphabet d = boss.get_node_last_value(boss_idx);
                     BOSS::edge_index back_idx = boss.bwd(boss_idx);
                     boss.call_incoming_to_target(back_idx, d,
