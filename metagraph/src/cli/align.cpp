@@ -9,6 +9,7 @@
 #include "graph/alignment/dbg_aligner.hpp"
 #include "graph/alignment/aligner_labeled.hpp"
 #include "graph/graph_extensions/node_lcs.hpp"
+#include "graph/graph_extensions/node_rc.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "seq_io/sequence_io.hpp"
 #include "config/config.hpp"
@@ -338,6 +339,18 @@ int align_to_graph(Config *config) {
 
             if (!graph->get_extension<NodeLCS>()) {
                 common::logger->error("Could not fetch LCS extension");
+                exit(1);
+            }
+        }
+        if (config->noderc) {
+            common::logger->trace("Load graph RC file");
+            if (!dbg_succ->load_extension<NodeRC>(config->infbase)) {
+                common::logger->error("Could not load RC file");
+                exit(1);
+            }
+
+            if (!graph->get_extension<NodeRC>()) {
+                common::logger->error("Could not fetch RC extension");
                 exit(1);
             }
         }

@@ -7,6 +7,7 @@
 #include "common/threads/threading.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/graph_extensions/node_lcs.hpp"
+#include "graph/graph_extensions/node_rc.hpp"
 #include "config/config.hpp"
 #include "load/load_graph.hpp"
 
@@ -41,8 +42,12 @@ int transform_graph(Config *config) {
         throw std::runtime_error("Only implemented for DBGSuccinct");
 
     if (config->lcs) {
-        graph::NodeLCS lcs(*dbg_succ);
-        lcs.serialize(config->outfbase + dbg_succ->file_extension());
+        graph::NodeLCS(*dbg_succ).serialize(config->outfbase + dbg_succ->file_extension());
+        return 0;
+    }
+
+    if (config->noderc) {
+        graph::NodeRC(*dbg_succ).serialize(config->outfbase + dbg_succ->file_extension());
         return 0;
     }
 

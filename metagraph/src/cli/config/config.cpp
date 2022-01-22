@@ -165,6 +165,8 @@ Config::Config(int argc, char *argv[]) {
             fast = true;
         } else if (!strcmp(argv[i], "--lcs")) {
             lcs = true;
+        } else if (!strcmp(argv[i], "--noderc")) {
+            noderc = true;
         } else if (!strcmp(argv[i], "--batch-size")) {
             query_batch_size_in_bytes = atoll(get_value(i++));
         } else if (!strcmp(argv[i], "-p") || !strcmp(argv[i], "--parallel")) {

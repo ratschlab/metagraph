@@ -2,6 +2,7 @@
 
 #include "common/algorithms.hpp"
 #include "graph/representation/rc_dbg.hpp"
+#include "graph/representation/succinct/dbg_succinct.hpp"
 
 namespace mtg {
 namespace graph {

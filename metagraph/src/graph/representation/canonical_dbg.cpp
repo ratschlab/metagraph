@@ -3,6 +3,7 @@
 #include "common/seq_tools/reverse_complement.hpp"
 #include "kmer/kmer_extractor.hpp"
 #include "common/logger.hpp"
+#include "graph/graph_extensions/node_rc.hpp"
 
 
 namespace mtg {
@@ -572,6 +573,9 @@ auto CanonicalDBG::get_rev_comp_suffix_node(node_index node) const -> edge_index
     const DBGSuccinct &dbg_succ = *get_dbg_succ(*graph_);
     const boss::BOSS &boss = dbg_succ.get_boss();
 
+    if (const auto node_rc = dbg_succ.get_extension<NodeRC>())
+        return node_rc->get_suffix_rc(node);
+
     // 78% effective
     edge_index ret_val = 0;
     size_t chars_unmatched = 0;
@@ -662,6 +666,9 @@ auto CanonicalDBG::get_rev_comp_suffix_node(node_index node) const -> edge_index
 auto CanonicalDBG::get_rev_comp_prefix_node(node_index node) const -> edge_index {
     const DBGSuccinct &dbg_succ = *get_dbg_succ(*graph_);
     const boss::BOSS &boss = dbg_succ.get_boss();
+
+    if (const auto node_rc = dbg_succ.get_extension<NodeRC>())
+        return node_rc->get_prefix_rc(node);
 
     // 8% effective
     edge_index ret_val = 0;
