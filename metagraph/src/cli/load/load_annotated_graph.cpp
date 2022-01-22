@@ -29,11 +29,11 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
     if (graph->get_mode() == DeBruijnGraph::PRIMARY)
         graph = primary_to_canonical(graph);
 
-    std::shared_ptr<AnnotatedDBG::Annotator> annotation_temp {
-        (config.infbase_annotators.size()
+    std::shared_ptr<AnnotatedDBG::Annotator> annotation_temp(
+        config.infbase_annotators.size()
             ? initialize_annotation(config.infbase_annotators.at(0), config, 0)
-            : initialize_annotation(config.anno_type, config, max_index)).release()
-    };
+            : initialize_annotation(config.anno_type, config, max_index)
+    );
 
     if (config.infbase_annotators.size()) {
         bool loaded = false;

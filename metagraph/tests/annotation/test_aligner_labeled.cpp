@@ -219,5 +219,4 @@ TYPED_TEST(LabeledAlignerTest, CanonicalTangleGraph) {
 }
 #endif
 
-
 } // namespace
