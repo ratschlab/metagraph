@@ -138,13 +138,7 @@ void AnnotatedDBG::add_kmer_coord(std::string_view sequence,
     if (sequence.size() < dbg_.get_k())
         return;
 
-    std::vector<row_index> indices;
-    indices.reserve(sequence.size() - dbg_.get_k() + 1);
-
-    graph_->map_to_nodes(sequence, [&](node_index i) { indices.push_back(i); });
-
-    if (!indices.size())
-        return;
+    std::vector<row_index> indices = sequence_to_path(sequence);
 
     std::lock_guard<std::mutex> lock(mutex_);
 
@@ -160,16 +154,11 @@ void AnnotatedDBG::add_kmer_coords(
         const std::vector<std::tuple<std::string, std::vector<Label>, uint64_t>> &data) {
     assert(check_compatibility());
 
-    std::vector<std::vector<row_index>> ids(data.size());
-    for (size_t t = 0; t < data.size(); ++t) {
-        const auto &[sequence, labels, _] = data[t];
-        if (sequence.size() < dbg_.get_k())
-            continue;
-
-        auto &indices = ids[t];
-        indices.reserve(sequence.size() - dbg_.get_k() + 1);
-
-        graph_->map_to_nodes(sequence, [&](node_index i) { indices.push_back(i); });
+    std::vector<std::vector<row_index>> ids;
+    ids.reserve(data.size());
+    for (const auto &[sequence, labels, _] : data) {
+        if (sequence.size() >= dbg_.get_k())
+            ids.push_back(sequence_to_path(sequence));
     }
 
     std::lock_guard<std::mutex> lock(mutex_);
@@ -451,11 +440,33 @@ AnnotatedDBG::get_label_count_quantiles(std::string_view sequence,
     return label_quantiles;
 }
 
-std::vector<std::pair<std::string, std::vector<SmallVector<uint64_t>>>>
-AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
-                                   size_t num_top_labels,
-                                   double discovery_fraction,
-                                   double presence_fraction) const {
+std::vector<AnnotatedDBG::node_index>
+AnnotatedDBG::sequence_to_path(std::string_view sequence) const {
+    if (sequence.size() < dbg_.get_k())
+        return {};
+
+    std::vector<node_index> path;
+    path.reserve(sequence.size() - dbg_.get_k() + 1);
+
+    graph_->map_to_nodes(sequence, [&](node_index i) { path.push_back(i); });
+
+    return path;
+}
+
+std::vector<std::pair<Label, std::vector<size_t>>>
+AnnotatedDBG::get_kmer_counts(std::string_view sequence,
+                              size_t num_top_labels,
+                              double discovery_fraction,
+                              double presence_fraction) const {
+    std::vector<node_index> path = sequence_to_path(sequence);
+    return get_kmer_counts(path, num_top_labels, discovery_fraction, presence_fraction);
+}
+
+std::vector<std::pair<Label, std::vector<size_t>>>
+AnnotatedDBG::get_kmer_counts(const std::vector<node_index> &path,
+                              size_t num_top_labels,
+                              double discovery_fraction,
+                              double presence_fraction) const {
     assert(discovery_fraction >= 0.);
     assert(discovery_fraction <= 1.);
     assert(presence_fraction >= 0.);

@@ -325,7 +325,7 @@ SeqSearchResult QueryExecutor::execute_query(QuerySequence&& sequence,
                                                      discovery_fraction,
                                                      presence_fraction);
     } else if (query_coords) {
-        // Get labels with query coordinates
+        // Get labels with k-mer coordinates
         result = anno_graph.get_kmer_coordinates(sequence.sequence,
                                                  num_top_labels,
                                                  discovery_fraction,
