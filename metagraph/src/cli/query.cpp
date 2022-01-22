@@ -187,56 +187,42 @@ Json::Value SeqSearchResult::to_json(bool verbose_coords,
     root["results"] = Json::Value(Json::arrayValue);
 
     // Different action depending on the result type
-    if (std::holds_alternative<LabelVec>(result)) {
+    if (const auto *v = std::get_if<LabelVec>(&result)) {
         // Standard labels only
-        for (const auto &label : std::get<LabelVec>(result)) {
+        for (const auto &label : *v) {
             root["results"].append(get_label_as_json(label));
         }
-    } else if (std::holds_alternative<LabelCountVec>(result)) {
+    } else if (const auto *v = std::get_if<LabelCountVec>(&result)) {
         // Labels with count data
-        for (const auto &[label, count] : std::get<LabelCountVec>(result)) {
-            Json::Value label_obj = get_label_as_json(label);
-
-            label_obj[KMER_COUNT_FIELD] = Json::Value((Json::Int64) count);
-
-            root["results"].append(label_obj);
+        for (const auto &[label, count] : *v) {
+            Json::Value &label_obj = root["results"].append(get_label_as_json(label));
+            label_obj[KMER_COUNT_FIELD] = static_cast<Json::Int64>(count);
         }
-    } else if (std::holds_alternative<LabelSigVec>(result)) {
+    } else if (const auto *v = std::get_if<LabelSigVec>(&result)) {
         // Count signatures
-        for (const auto &[label, kmer_presence_mask] : std::get<LabelSigVec>(result)) {
-            Json::Value label_obj = get_label_as_json(label);
-
-            Json::Value sig_obj = Json::objectValue;
-
+        for (const auto &[label, kmer_presence_mask] : *v) {
+            Json::Value &label_obj = root["results"].append(get_label_as_json(label));
+            // Store the presence mask and score in a separate object
+            Json::Value &sig_obj = (label_obj[SIGNATURE_FIELD] = Json::objectValue);
+            sig_obj["presence_mask"] = Json::Value(sdsl::util::to_string(kmer_presence_mask));
+            sig_obj["score"] = Json::Value(anno_graph.score_kmer_presence_mask(kmer_presence_mask));
             // Add kmer_counts calculated using bitmask
             label_obj[KMER_COUNT_FIELD] = Json::Value(sdsl::util::cnt_one_bits(kmer_presence_mask));
-
-            // Store the presence mask and score in a separate object
-            sig_obj["presence_mask"] = Json::Value(sdsl::util::to_string(kmer_presence_mask));
-            sig_obj["score"] =
-                    Json::Value(anno_graph.score_kmer_presence_mask(kmer_presence_mask));
-
-            label_obj[SIGNATURE_FIELD] = sig_obj;
-            root["results"].append(label_obj);
         }
-    } else if (std::holds_alternative<LabelQuantileVec>(result)) {
+    } else if (const auto *v = std::get_if<LabelQuantileVec>(&result)) {
         // Count quantiles
-        for (const auto &[label, quantiles] : std::get<LabelQuantileVec>(result)) {
-            Json::Value label_obj = get_label_as_json(label);
-            Json::Value quantile_array = Json::arrayValue;
-
+        for (const auto &[label, quantiles] : *v) {
+            Json::Value &label_obj = root["results"].append(get_label_as_json(label));
+            Json::Value &quantile_array = (label_obj[KMER_COUNT_QUANTILE_FIELD] = Json::arrayValue);
             for (size_t quantile : quantiles) {
-                quantile_array.append(Json::Value((Json::Int64) quantile));
+                quantile_array.append(static_cast<Json::Int64>(quantile));
             }
-
-            label_obj[KMER_COUNT_QUANTILE_FIELD] = quantile_array;
-            root["results"].append(label_obj);
         }
-    } else if (std::holds_alternative<LabelCoordVec>(result)) {
+    } else {
         // Kmer coordinates
         for (const auto &[label, tuples] : std::get<LabelCoordVec>(result)) {
-            Json::Value label_obj = get_label_as_json(label);
-            Json::Value coord_array = Json::arrayValue;
+            Json::Value &label_obj = root["results"].append(get_label_as_json(label));
+            Json::Value &coord_array = (label_obj[KMER_COORDINATE_FIELD] = Json::arrayValue);
 
             // Each tuple is represented as a folly::SmallVector<uint64_t> instance
             if (verbose_coords) {
@@ -248,14 +234,7 @@ Json::Value SeqSearchResult::to_json(bool verbose_coords,
                     coord_array.append(range);
                 }
             }
-
-
-            label_obj[KMER_COORDINATE_FIELD] = coord_array;
-            root["results"].append(label_obj);
         }
-    } else {
-        assert(false);
-        throw std::runtime_error("UNKNOWN TYPE");
     }
 
     return root;
@@ -267,47 +246,47 @@ std::string SeqSearchResult::to_string(const std::string delimiter,
                                        bool verbose_coords,
                                        const graph::AnnotatedDBG &anno_graph) const {
     // Return the size of the result type vector using std::visit (ducktyping variant)
-    if (!std::visit([] (auto&& vec) { return vec.size(); }, result) && suppress_unlabeled) {
-        // If empty and unlabeled sequences are supressed then return empty string
+    // If empty and unlabeled sequences are supressed then return empty string
+    if (suppress_unlabeled && !std::visit([] (auto&& vec) { return vec.size(); }, result))
         return "";
-    }
 
-    // Get modified name if sequence has an alignment result
-    std::string mod_seq_name = sequence.name;
-
-    if (alignment) {
-        mod_seq_name = fmt::format(ALIGNED_SEQ_HEADER_FORMAT, sequence.name, sequence.sequence,
-                                   alignment->score, alignment->cigar);
-    }
+    std::string output;
 
     // Print sequence ID and name
-    std::string output = fmt::format("{}\t{}", sequence.id, mod_seq_name);
+    if (alignment) {
+        // Get modified name if sequence has an alignment result
+        const std::string &mod_seq_name
+            = fmt::format(ALIGNED_SEQ_HEADER_FORMAT, sequence.name, sequence.sequence,
+                                   alignment->score, alignment->cigar);
+        output = fmt::format("{}\t{}", sequence.id, mod_seq_name);
+    } else {
+        output = fmt::format("{}\t{}", sequence.id, sequence.name);
+    }
 
     // ... with diff result output depending on the type of result being stored.
-    if (std::holds_alternative<LabelVec>(result)) {
+    if (const auto *v = std::get_if<LabelVec>(&result)) {
         // Standard labels only
-        output += fmt::format("\t{}",
-                              utils::join_strings(std::get<LabelVec>(result),
-                                                  delimiter));
-    } else if (std::holds_alternative<LabelCountVec>(result)) {
+        output += fmt::format("\t{}", utils::join_strings(*v, delimiter));
+
+    } else if (const auto *v = std::get_if<LabelCountVec>(&result)) {
         // Labels with count data
-        for (const auto &[label, count] : std::get<LabelCountVec>(result)) {
+        for (const auto &[label, count] : *v) {
             output += fmt::format("\t<{}>:{}", label, count);
         }
-    } else if (std::holds_alternative<LabelSigVec>(result)) {
+    } else if (const auto *v = std::get_if<LabelSigVec>(&result)) {
         // Count signatures
-        for (const auto &[label, kmer_presence_mask] : std::get<LabelSigVec>(result)) {
+        for (const auto &[label, kmer_presence_mask] : *v) {
             output += fmt::format("\t<{}>:{}:{}:{}", label,
                                   sdsl::util::cnt_one_bits(kmer_presence_mask),
                                   sdsl::util::to_string(kmer_presence_mask),
                                   anno_graph.score_kmer_presence_mask(kmer_presence_mask));
         }
-    } else if (std::holds_alternative<LabelQuantileVec>(result)) {
+    } else if (const auto *v = std::get_if<LabelQuantileVec>(&result)) {
         // Count quantiles
-        for (const auto &[label, quantiles] : std::get<LabelQuantileVec>(result)) {
+        for (const auto &[label, quantiles] : *v) {
             output += fmt::format("\t<{}>:{}", label, fmt::join(quantiles, ":"));
         }
-    } else if (std::holds_alternative<LabelCoordVec>(result)) {
+    } else {
         // Kmer coordinates
         for (const auto &[label, tuples] : std::get<LabelCoordVec>(result)) {
             output += "\t<" + label + ">";
@@ -320,9 +299,6 @@ std::string SeqSearchResult::to_string(const std::string delimiter,
                 output += fmt::format(":{}", fmt::join(collapse_coord_ranges(tuples), ":"));
             }
         }
-    } else {
-        assert(false);
-        throw std::runtime_error("UNKNOWN TYPE");
     }
 
     return output;
