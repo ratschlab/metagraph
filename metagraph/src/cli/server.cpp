@@ -174,8 +174,7 @@ std::string process_align_request(const std::string &received_message,
         "max_num_nodes_per_seq_char",
         config.alignment_max_nodes_per_seq_char).asDouble();
 
-    graph::align::DBGAlignerConfig aligner_config = initialize_aligner_config(config);
-    std::unique_ptr<graph::align::IDBGAligner> aligner = build_aligner(graph, aligner_config);
+    graph::align::DBGAligner aligner(graph, initialize_aligner_config(config));
 
     // TODO: make parallel?
     seq_io::read_fasta_from_string(fasta.asString(),
@@ -190,7 +189,7 @@ std::string process_align_request(const std::string &received_message,
         // TODO: Investigate why calling aligner->align on empty sequence fails
         std::string_view seq = read_stream->seq.s;
         if (!seq.empty()) {
-            const auto paths = aligner->align(seq);
+            const auto paths = aligner.align(seq);
 
             for (const auto &path : paths.data()) {
                 Json::Value a;

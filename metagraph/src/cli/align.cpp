@@ -79,21 +79,6 @@ DBGAlignerConfig initialize_aligner_config(const Config &config) {
     return aligner_config;
 }
 
-template <class Graph, typename... AlignerArgs>
-std::unique_ptr<graph::align::IDBGAligner>
-build_aligner(const Graph &graph, const graph::align::DBGAlignerConfig &aligner_config) {
-    if constexpr(std::is_same_v<Graph, mtg::graph::AnnotatedDBG>) {
-        return std::make_unique<LabeledAligner<AlignerArgs...>>(graph, aligner_config);
-    } else {
-        return std::make_unique<DBGAligner<AlignerArgs...>>(graph, aligner_config);
-    }
-}
-
-template std::unique_ptr<IDBGAligner> build_aligner<DeBruijnGraph>(const DeBruijnGraph &, const DBGAlignerConfig &);
-template std::unique_ptr<IDBGAligner> build_aligner<AnnotatedDBG>(const AnnotatedDBG &, const DBGAlignerConfig &);
-template std::unique_ptr<IDBGAligner> build_aligner<AnnotatedDBG, LabeledExtender>(const AnnotatedDBG &, const DBGAlignerConfig &);
-
-
 void map_sequences_in_file(const std::string &file,
                            const DeBruijnGraph &graph,
                            const Config &config,
@@ -149,19 +134,15 @@ void map_sequences_in_file(const std::string &file,
                 logger->warn("Sub-k-mers will be mapped to unwrapped primary graph");
 
             for (size_t i = 0; i + config.alignment_length <= read_stream->seq.l; ++i) {
-                bool found = false;
+                graphindices.emplace_back(DeBruijnGraph::npos);
                 dbg->call_nodes_with_suffix_matching_longest_prefix(
                     std::string_view(read_stream->seq.s + i, config.alignment_length),
                     [&](auto node, auto) {
-                        if (!found) {
-                            found = true;
-                            graphindices.emplace_back(node);
-                        }
+                        if (graphindices.back() == DeBruijnGraph::npos)
+                            graphindices.back() = node;
                     },
                     config.alignment_length
                 );
-                if (!found)
-                    graphindices.emplace_back(DeBruijnGraph::npos);
             }
         }
 
@@ -444,9 +425,9 @@ int align_to_graph(Config *config) {
 
                 if (annotator) {
                     aln_anno_graph = std::make_shared<AnnotatedDBG>(aln_graph, annotator);
-                    aligner = build_aligner(*aln_anno_graph, aligner_config);
+                    aligner = std::make_unique<LabeledAligner<>>(*aln_anno_graph, aligner_config);
                 } else {
-                    aligner = build_aligner(*aln_graph, aligner_config);
+                    aligner = std::make_unique<DBGAligner<>>(*aln_graph, aligner_config);
                 }
 
                 aligner->align_batch(batch,
