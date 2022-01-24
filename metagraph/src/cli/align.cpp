@@ -365,10 +365,10 @@ int align_to_graph(Config *config) {
 
     DBGAlignerConfig aligner_config = initialize_aligner_config(*config);
 
-    std::shared_ptr<AnnotatedDBG::Annotator> annotator;
+    std::unique_ptr<AnnotatedDBG> anno_dbg;
     if (config->infbase_annotators.size()) {
         assert(config->infbase_annotators.size() == 1);
-        annotator = initialize_annotated_dbg(base_graph, *config)->get_annotation_ptr();
+        anno_dbg = initialize_annotated_dbg(base_graph, *config);
     }
 
     for (const auto &file : files) {
@@ -404,8 +404,7 @@ int align_to_graph(Config *config) {
                     = config->fasta_anno_comment_delim != Config::UNINITIALIZED_STR
                         && it->comment.l
                             ? utils::join_strings({ it->name.s, it->comment.s },
-                                                  config->fasta_anno_comment_delim,
-                                                  true)
+                                                  config->fasta_anno_comment_delim, true)
                             : std::string(it->name.s);
                 seq_batch.emplace_back(std::move(header), it->seq.s, is_reverse_complement);
                 num_bytes_read += it->seq.l;
@@ -414,25 +413,18 @@ int align_to_graph(Config *config) {
             }
 
             auto process_batch = [&,graph](SeqBatch batch) {
-                // make an aliased shared_ptr in a thread-safe way
-                auto aln_graph = std::shared_ptr<DeBruijnGraph>(std::shared_ptr<DeBruijnGraph>{}, graph.get());
-
-                if (aln_graph->get_mode() == DeBruijnGraph::PRIMARY)
-                    aln_graph = std::make_shared<CanonicalDBG>(aln_graph, 100'000);
-
-                std::shared_ptr<AnnotatedDBG> aln_anno_graph;
+                assert(graph->get_mode() != DeBruijnGraph::PRIMARY);
                 std::shared_ptr<IDBGAligner> aligner;
 
-                if (annotator) {
-                    aln_anno_graph = std::make_shared<AnnotatedDBG>(aln_graph, annotator);
-                    aligner = std::make_unique<LabeledAligner<>>(*aln_anno_graph, aligner_config);
+                if (anno_dbg) {
+                    aligner = std::make_unique<LabeledAligner<>>(*anno_dbg, *graph, aligner_config);
                 } else {
-                    aligner = std::make_unique<DBGAligner<>>(*aln_graph, aligner_config);
+                    aligner = std::make_unique<DBGAligner<>>(*graph, aligner_config);
                 }
 
                 aligner->align_batch(batch,
                     [&](std::string_view header, QueryAlignment&& paths) {
-                        std::string res = format_alignment(header, paths, *aln_graph, *config);
+                        std::string res = format_alignment(header, paths, *graph, *config);
                         std::lock_guard<std::mutex> lock(print_mutex);
                         *out << res;
                     }

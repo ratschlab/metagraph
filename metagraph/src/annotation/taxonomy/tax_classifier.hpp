@@ -6,6 +6,7 @@
 
 #include "graph/annotated_dbg.hpp"
 
+
 namespace mtg {
 namespace annot {
 
@@ -38,7 +39,8 @@ class TaxonomyBase {
      * @param [input] filepath -> a ".accession2taxid" file.
      * @param [optional input] anno_matrix -> pointer to the annotation matrix.
      */
-    void read_accversion_to_taxid_map(const std::string &filepath, const graph::AnnotatedDBG *anno_matrix = NULL);
+    void read_accversion_to_taxid_map(const std::string &filepath,
+                                      const graph::AnnotatedDBG *anno_matrix = NULL);
 
     LabelType label_type_;
 
@@ -70,8 +72,9 @@ class TaxonomyClsAnno : public TaxonomyBase {
      * @param [input] lca_coverage_rate -> threshold used for taxonomic classification.
      * @param [input] kmers_discovery_rate -> threshold used for taxonomic classification.
      * @param [input] tax_tree_filepath ->  path to a taxonomic tree ("nodes.dmp" file).
-     * @param [optional input] label_taxid_map_filepath ->  path to the acc_version to taxid lookup table (".accession2taxid").
-     *                                                      Mandatory if the taxid is not mentioned in the label string.
+     * @param [optional input] label_taxid_map_filepath ->  path to the acc_version to
+     * taxid lookup table (".accession2taxid"). Mandatory if the taxid is not mentioned in
+     * the label string.
      */
     TaxonomyClsAnno(const graph::AnnotatedDBG &anno,
                     const std::string &tax_tree_filepath,

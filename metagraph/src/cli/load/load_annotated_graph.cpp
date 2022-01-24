@@ -29,11 +29,9 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
     if (graph->get_mode() == DeBruijnGraph::PRIMARY)
         graph = primary_to_canonical(graph);
 
-    std::shared_ptr<AnnotatedDBG::Annotator> annotation_temp(
-        config.infbase_annotators.size()
+    auto annotation_temp = config.infbase_annotators.size()
             ? initialize_annotation(config.infbase_annotators.at(0), config, 0)
-            : initialize_annotation(config.anno_type, config, max_index)
-    );
+            : initialize_annotation(config.anno_type, config, max_index);
 
     if (config.infbase_annotators.size()) {
         bool loaded = false;
@@ -72,7 +70,8 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
     }
 
     // load graph
-    auto anno_graph = std::make_unique<AnnotatedDBG>(graph, annotation_temp);
+    auto anno_graph
+            = std::make_unique<AnnotatedDBG>(std::move(graph), std::move(annotation_temp));
 
     if (!anno_graph->check_compatibility()) {
         logger->error("Graph and annotation are not compatible");

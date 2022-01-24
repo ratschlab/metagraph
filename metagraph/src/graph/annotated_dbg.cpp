@@ -25,12 +25,19 @@ typedef std::pair<Label, size_t> StringCountPair;
 
 AnnotatedSequenceGraph
 ::AnnotatedSequenceGraph(std::shared_ptr<SequenceGraph> graph,
-                         std::shared_ptr<Annotator> annotation,
+                         std::unique_ptr<Annotator>&& annotation,
                          bool force_fast)
-      : graph_(graph), annotator_(annotation),
+      : graph_(graph), annotator_(std::move(annotation)),
         force_fast_(force_fast) {
     assert(graph_.get());
     assert(annotator_.get());
+}
+
+AnnotatedDBG::AnnotatedDBG(std::shared_ptr<DeBruijnGraph> dbg,
+                           std::unique_ptr<Annotator>&& annotation,
+                           bool force_fast)
+      : AnnotatedSequenceGraph(dbg, std::move(annotation), force_fast),
+        dbg_(*dbg) {
     assert(check_compatibility());
 }
 
@@ -777,6 +784,9 @@ bool AnnotatedSequenceGraph::check_compatibility() const {
 }
 
 bool AnnotatedDBG::check_compatibility() const {
+    // TODO: find a way to fix this thing to add check_compatibility() to the constructor
+    // of AnnotatedSequenceGraph.
+    // Maybe make it how it was before 9f4e8e5b73571d874dd93eedc53079f71615023c
     return dbg_.get_base_graph().max_index() == annotator_->num_objects();
 }
 

@@ -50,26 +50,6 @@ class AnnotationBuffer {
     std::pair<std::vector<node_index>, bool>
     add_path(const std::vector<node_index> &path, std::string sequence);
 
-    node_index get_base_node(node_index node) const {
-        auto find = labels_.find(node);
-        if (find != labels_.end()) {
-            node_index ret_val = AnnotatedDBG::anno_to_graph_index(find->second.first);
-            assert(ret_val == anno_graph_.get_graph().get_base_node(node));
-            return ret_val;
-        } else {
-            auto find_buffer = std::find(added_nodes_.begin(), added_nodes_.end(), node);
-            if (find_buffer != added_nodes_.end()) {
-                node_index ret_val = AnnotatedDBG::anno_to_graph_index(
-                    added_rows_[find_buffer - added_nodes_.begin()]
-                );
-                assert(ret_val == anno_graph_.get_graph().get_base_node(node));
-                return ret_val;
-            }
-        }
-
-        return DeBruijnGraph::npos;
-    }
-
     // get the annotations and coordinates of a node if they have been fetched
     std::pair<std::optional<LabelSet>, std::optional<CoordsSet>>
     get_labels_and_coordinates(node_index node) const {
@@ -289,8 +269,10 @@ class LabeledAligner : public ISeedAndExtendAligner<AlignmentCompare> {
     typedef Alignment::node_index node_index;
     typedef Alignment::Column Column;
 
-    LabeledAligner(const AnnotatedDBG &anno_graph, const DBGAlignerConfig &config)
-          : ISeedAndExtendAligner<AlignmentCompare>(anno_graph.get_graph(), config),
+    LabeledAligner(const AnnotatedDBG &anno_graph,
+                   const DeBruijnGraph &graph,
+                   const DBGAlignerConfig &config)
+          : ISeedAndExtendAligner<AlignmentCompare>(graph, config),
             labeled_graph_(anno_graph) {
         if (labeled_graph_.get_coordinate_matrix()
                 && std::is_same_v<Extender, LabeledBacktrackingExtender>) {
@@ -435,7 +417,7 @@ class LabeledAligner : public ISeedAndExtendAligner<AlignmentCompare> {
                                       std::back_inserter(seed.label_columns));
             }
 
-            seed.label_encoder = &labeled_graph_.get_anno_graph().get_annotation().get_label_encoder();
+            seed.label_encoder = &labeled_graph_.get_anno_graph().get_annotator().get_label_encoder();
 
             for (size_t i = 1; i < nodes.size() && seed.label_columns.size(); ++i) {
                 auto [next_fetch_labels, next_fetch_coords]

@@ -67,7 +67,7 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
                     const DifferentialAssemblyConfig &config,
                     size_t num_threads) {
     bool parallel = num_threads > 1;
-    size_t num_labels = anno_graph.get_annotation().num_labels();
+    size_t num_labels = anno_graph.get_annotator().num_labels();
     size_t num_in_labels = labels_in.size() + labels_in_round2.size();
     size_t num_out_labels = labels_out.size() + labels_out_round2.size();
     auto graph_ptr = std::dynamic_pointer_cast<const DeBruijnGraph>(
@@ -309,8 +309,8 @@ construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
     // the in and out counts are stored interleaved
     sdsl::int_vector<> counts = aligned_int_vector(indicator.size() * 2, 0, width, 16);
 
-    const auto &label_encoder = anno_graph.get_annotation().get_label_encoder();
-    const auto &binmat = anno_graph.get_annotation().get_matrix();
+    const auto &label_encoder = anno_graph.get_annotator().get_label_encoder();
+    const auto &binmat = anno_graph.get_annotator().get_matrix();
 
     tsl::hopscotch_map<uint64_t, uint8_t> code_to_indicator;
     for (const std::string &label_in : labels_in) {

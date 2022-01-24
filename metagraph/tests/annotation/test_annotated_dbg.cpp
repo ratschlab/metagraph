@@ -85,7 +85,7 @@ TEST(AnnotatedDBG, ExtendGraphWithSimplePath) {
                                 std::make_unique<annot::ColumnCompressed<>>(1));
 
         ASSERT_EQ(anno_graph.get_graph().num_nodes(),
-                  anno_graph.get_annotation().num_objects());
+                  anno_graph.get_annotator().num_objects());
 
         std::string sequence(100, 'A');
 
@@ -95,7 +95,7 @@ TEST(AnnotatedDBG, ExtendGraphWithSimplePath) {
         );
 
         ASSERT_EQ(k + 2, anno_graph.get_graph().num_nodes());
-        EXPECT_EQ(1u, anno_graph.get_annotation().num_objects());
+        EXPECT_EQ(1u, anno_graph.get_annotator().num_objects());
 
         anno_graph.annotator_->insert_rows(edge_to_row_idx(inserted_nodes));
         EXPECT_EQ(anno_graph.get_graph().num_nodes() + 1, inserted_nodes.size());
@@ -521,7 +521,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsWithoutDummy) {
         );
         EXPECT_EQ(num_nodes, anno_graph.get_graph().num_nodes());
 
-        EXPECT_TRUE(anno_graph.get_annotation().num_objects() + k
+        EXPECT_TRUE(anno_graph.get_annotator().num_objects() + k
                         < dynamic_cast<const DBGSuccinct&>(anno_graph.get_graph()).get_boss().num_edges())
             << dynamic_cast<const DBGSuccinct&>(anno_graph.get_graph()).get_boss();
 
@@ -568,7 +568,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsWithoutDummy) {
         EXPECT_TRUE(anno_graph.label_exists("Third"));
         EXPECT_FALSE(anno_graph.label_exists("Fourth"));
 
-        EXPECT_TRUE(anno_graph.get_annotation().num_objects() + k
+        EXPECT_TRUE(anno_graph.get_annotator().num_objects() + k
                         < dynamic_cast<const DBGSuccinct&>(anno_graph.get_graph()).get_boss().num_edges())
             << dynamic_cast<const DBGSuccinct&>(anno_graph.get_graph()).get_boss();
 
@@ -639,7 +639,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsWithoutDummyParallel) {
             std::make_unique<annot::ColumnCompressed<>>(graph->max_index())
         );
 
-        EXPECT_TRUE(anno_graph.get_annotation().num_objects() + k
+        EXPECT_TRUE(anno_graph.get_annotator().num_objects() + k
                         < dynamic_cast<const DBGSuccinct&>(anno_graph.get_graph()).get_boss().num_edges())
             << dynamic_cast<const DBGSuccinct&>(anno_graph.get_graph()).get_boss();
 
@@ -697,7 +697,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsWithoutDummyParallel) {
         EXPECT_TRUE(anno_graph.label_exists("Third"));
         EXPECT_FALSE(anno_graph.label_exists("Fourth"));
 
-        EXPECT_TRUE(anno_graph.get_annotation().num_objects() + k
+        EXPECT_TRUE(anno_graph.get_annotator().num_objects() + k
                         < dynamic_cast<const DBGSuccinct&>(anno_graph.get_graph()).get_boss().num_edges())
             << dynamic_cast<const DBGSuccinct&>(anno_graph.get_graph()).get_boss();
 
@@ -779,7 +779,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsPruneDummy) {
         EXPECT_FALSE(anno_graph.label_exists("Third"));
         EXPECT_FALSE(anno_graph.label_exists("Fourth"));
 
-        EXPECT_TRUE(anno_graph.get_annotation().num_objects() + 1
+        EXPECT_TRUE(anno_graph.get_annotator().num_objects() + 1
                         < dynamic_cast<const DBGSuccinct&>(anno_graph.get_graph()).get_boss().num_edges())
             << dynamic_cast<const DBGSuccinct&>(anno_graph.get_graph()).get_boss();
 
@@ -814,7 +814,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsPruneDummy) {
         EXPECT_TRUE(anno_graph.label_exists("Third"));
         EXPECT_FALSE(anno_graph.label_exists("Fourth"));
 
-        EXPECT_TRUE(anno_graph.get_annotation().num_objects() + 1
+        EXPECT_TRUE(anno_graph.get_annotator().num_objects() + 1
                         < dynamic_cast<const DBGSuccinct&>(anno_graph.get_graph()).get_boss().num_edges())
             << dynamic_cast<const DBGSuccinct&>(anno_graph.get_graph()).get_boss();
 
@@ -902,7 +902,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsPruneDummyParallel) {
         EXPECT_FALSE(anno_graph.label_exists("Third"));
         EXPECT_FALSE(anno_graph.label_exists("Fourth"));
 
-        EXPECT_TRUE(anno_graph.get_annotation().num_objects() + 1
+        EXPECT_TRUE(anno_graph.get_annotator().num_objects() + 1
                         < dynamic_cast<const DBGSuccinct&>(anno_graph.get_graph()).get_boss().num_edges())
             << dynamic_cast<const DBGSuccinct&>(anno_graph.get_graph()).get_boss();
 
@@ -942,7 +942,7 @@ TEST(AnnotatedDBG, ExtendGraphAddTwoPathsPruneDummyParallel) {
         EXPECT_TRUE(anno_graph.label_exists("Third"));
         EXPECT_FALSE(anno_graph.label_exists("Fourth"));
 
-        EXPECT_TRUE(anno_graph.get_annotation().num_objects() + 1
+        EXPECT_TRUE(anno_graph.get_annotator().num_objects() + 1
                         < dynamic_cast<const DBGSuccinct&>(anno_graph.get_graph()).get_boss().num_edges())
             << dynamic_cast<const DBGSuccinct&>(anno_graph.get_graph()).get_boss();
 
@@ -1165,7 +1165,7 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_top_label_signatures) {
             k + 1, sequences, { "First", "Second" , "Third" }
         );
 
-        const auto &label_encoder = anno_graph->get_annotation().get_label_encoder();
+        const auto &label_encoder = anno_graph->get_annotator().get_label_encoder();
         auto comp = [&](const std::pair<std::string, sdsl::bit_vector> &a,
                         const std::pair<std::string, sdsl::bit_vector> &b) {
             size_t a_cnt = sdsl::util::cnt_one_bits(a.second);
@@ -1431,7 +1431,7 @@ TYPED_TEST(AnnotatedDBGNoNTest, get_top_label_signatures) {
             k + 1, sequences, { "First", "Second" , "Third" }
         );
 
-        const auto &label_encoder = anno_graph->get_annotation().get_label_encoder();
+        const auto &label_encoder = anno_graph->get_annotator().get_label_encoder();
         auto comp = [&](const std::pair<std::string, sdsl::bit_vector> &a,
                         const std::pair<std::string, sdsl::bit_vector> &b) {
             size_t a_cnt = sdsl::util::cnt_one_bits(a.second);
@@ -1598,7 +1598,7 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_top_labels) {
             k + 1, sequences, { "First", "Second" , "Third" }
         );
 
-        const auto &label_encoder = anno_graph->get_annotation().get_label_encoder();
+        const auto &label_encoder = anno_graph->get_annotator().get_label_encoder();
         auto comp = [&](const std::pair<std::string, size_t> &a,
                         const std::pair<std::string, size_t> &b) {
             return a.second > b.second
@@ -1764,7 +1764,7 @@ TYPED_TEST(AnnotatedDBGNoNTest, get_top_labels) {
             k + 1, sequences, { "First", "Second" , "Third" }
         );
 
-        const auto &label_encoder = anno_graph->get_annotation().get_label_encoder();
+        const auto &label_encoder = anno_graph->get_annotator().get_label_encoder();
         auto comp = [&](const std::pair<std::string, size_t> &a,
                         const std::pair<std::string, size_t> &b) {
             return a.second > b.second

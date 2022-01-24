@@ -16,7 +16,7 @@ using MIM = annot::matrix::MultiIntMatrix;
 
 AnnotationBuffer::AnnotationBuffer(const AnnotatedDBG &anno_graph)
       : anno_graph_(anno_graph),
-        multi_int_(dynamic_cast<const MIM*>(&anno_graph_.get_annotation().get_matrix())),
+        multi_int_(dynamic_cast<const MIM*>(&anno_graph_.get_annotator().get_matrix())),
         labels_set_({ {} }) {
     if (multi_int_ && anno_graph.get_graph().get_mode() == DeBruijnGraph::CANONICAL) {
         multi_int_ = nullptr;
@@ -56,7 +56,7 @@ void AnnotationBuffer::flush() {
             push_node_labels(node_it++, row_it++, std::move(labels));
         }
     } else {
-        for (auto&& labels : anno_graph_.get_annotation().get_matrix().get_rows(added_rows_)) {
+        for (auto&& labels : anno_graph_.get_annotator().get_matrix().get_rows(added_rows_)) {
             push_node_labels(node_it++, row_it++, std::forward<decltype(labels)>(labels));
         }
     }
@@ -565,7 +565,7 @@ void LabeledBacktrackingExtender
 
     // store the label and coordinate information
     alignment.label_encoder
-        = &labeled_graph_.get_anno_graph().get_annotation().get_label_encoder();
+        = &labeled_graph_.get_anno_graph().get_annotator().get_label_encoder();
 
     alignment.label_columns = label_intersection_;
 

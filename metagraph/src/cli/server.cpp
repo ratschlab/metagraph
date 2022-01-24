@@ -71,13 +71,13 @@ std::string process_search_request(const std::string &received_message,
 
     // Throw client an error if they try to query coordinates/kmer-counts on unsupported indexes
     if (config.count_kmers && !(dynamic_cast<const annot::matrix::IntMatrix *>(
-                                        &anno_graph.get_annotation().get_matrix()))) {
+                                        &anno_graph.get_annotator().get_matrix()))) {
         throw std::invalid_argument("Annotation does not support k-mer count queries");
     }
 
     if (config.query_coords) {
         if (!dynamic_cast<const annot::matrix::MultiIntMatrix *>(
-                        &anno_graph.get_annotation().get_matrix())) {
+                        &anno_graph.get_annotator().get_matrix())) {
             throw std::invalid_argument("Annotation does not support k-mer coordinate queries");
         }
 
@@ -211,7 +211,7 @@ std::string process_align_request(const std::string &received_message,
 }
 
 std::string process_column_label_request(const graph::AnnotatedDBG &anno_graph) {
-    auto labels = anno_graph.get_annotation().get_all_labels();
+    auto labels = anno_graph.get_annotator().get_all_labels();
 
     Json::Value root = Json::Value(Json::arrayValue);
 
@@ -238,7 +238,7 @@ std::string process_stats_request(const graph::AnnotatedDBG &anno_graph,
     root["graph"] = graph_stats;
 
     Json::Value annotation_stats;
-    const auto &annotation = anno_graph.get_annotation();
+    const auto &annotation = anno_graph.get_annotator();
     annotation_stats["filename"] = std::filesystem::path(annotation_filename).filename().string();
     annotation_stats["labels"] = static_cast<uint64_t>(annotation.num_labels());
     annotation_stats["objects"] = static_cast<uint64_t>(annotation.num_objects());

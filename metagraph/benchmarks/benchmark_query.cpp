@@ -145,9 +145,8 @@ static void BM_BRWTCompressTranscripts(benchmark::State& state) {
         if (i++)
             throw std::runtime_error("This benchmark will fail on the second iteration");
 
-        const auto *column = dynamic_cast<const annot::ColumnCompressed<>*>(
-            &anno_graph->get_annotation()
-        );
+        const auto *column
+            = dynamic_cast<const annot::ColumnCompressed<>*>(&anno_graph->get_annotator());
 
         if (!column)
             throw std::runtime_error("This shouldn't happen");
