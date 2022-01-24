@@ -31,6 +31,7 @@ AnnotatedSequenceGraph
         force_fast_(force_fast) {
     assert(graph_.get());
     assert(annotator_.get());
+    assert(check_compatibility());
 }
 
 void AnnotatedSequenceGraph
