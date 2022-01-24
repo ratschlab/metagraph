@@ -129,8 +129,6 @@ class MaskedDeBruijnGraph : public DBGWrapper<DeBruijnGraph> {
         });
     }
 
-    virtual node_index get_base_node(node_index node) const override final { return node; }
-
     virtual std::pair<std::vector<node_index>, bool /* is reversed */>
     get_base_path(const std::vector<node_index> &path,
                   const std::string &) const override final {
