@@ -102,7 +102,7 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
 
     virtual bool operator==(const DeBruijnGraph &other) const override final;
 
-    virtual node_index get_base_node(node_index node) const override final {
+    node_index get_base_node(node_index node) const {
         assert(node <= offset_ * 2);
         return node > offset_ ? node - offset_ : node;
     }
