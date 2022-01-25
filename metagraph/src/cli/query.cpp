@@ -314,6 +314,7 @@ SeqSearchResult QueryExecutor::execute_query(QuerySequence&& sequence,
                                              const graph::AnnotatedDBG &anno_graph,
                                              bool with_kmer_counts,
                                              const std::vector<double> &count_quantiles,
+                                             bool query_counts,
                                              bool query_coords) {
     // Perform a different action depending on the type (specified by config flags)
     SeqSearchResult::result_type result;
@@ -330,6 +331,12 @@ SeqSearchResult QueryExecutor::execute_query(QuerySequence&& sequence,
                                                  num_top_labels,
                                                  discovery_fraction,
                                                  presence_fraction);
+    } else if (query_counts) {
+        // Get labels with k-mer counts
+        result = anno_graph.get_kmer_counts(sequence.sequence,
+                                            num_top_labels,
+                                            discovery_fraction,
+                                            presence_fraction);
     } else if (count_quantiles.size()) {
         // Get labels with count quantiles
         result = anno_graph.get_label_count_quantiles(sequence.sequence,
@@ -1175,7 +1182,7 @@ SeqSearchResult query_sequence(QuerySequence&& sequence,
             config.num_top_labels, config.discovery_fraction,
             config.presence_fraction, anno_graph,
             config.count_kmers, config.count_quantiles,
-            config.query_coords);
+            config.query_counts, config.query_coords);
 
     if (aligner_config)
         result.get_alignment() = alignment;

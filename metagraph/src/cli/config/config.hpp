@@ -40,6 +40,7 @@ class Config {
     bool count_kmers = false;
     bool print_signature = false;
     bool query_presence = false;
+    bool query_counts = false;
     bool query_coords = false;
     bool verbose_coords = false;
     bool filter_present = false;

@@ -220,6 +220,8 @@ Config::Config(int argc, char *argv[]) {
             presence_fraction = std::stof(get_value(i++));
         } else if (!strcmp(argv[i], "--query-presence")) {
             query_presence = true;
+        } else if (!strcmp(argv[i], "--query-counts")) {
+            query_counts = true;
         } else if (!strcmp(argv[i], "--query-coords")) {
             query_coords = true;
         } else if (!strcmp(argv[i], "--verbose-coords")) {
@@ -1247,6 +1249,7 @@ if (advanced) {
             fprintf(stderr, "\t   --count-quantiles [FLOAT ...] \tk-mer count quantiles to compute for each label [off]\n"
                             "\t                                 \t\tExample: --count-quantiles '0 0.33 0.5 0.66 1'\n"
                             "\t                                 \t\t(0 corresponds to MIN, 1 corresponds to MAX)\n");
+            fprintf(stderr, "\t   --query-counts \t\tquery k-mer counts (requires count or coord annotation) [off]\n");
             fprintf(stderr, "\t   --query-coords \t\tquery k-mer coordinates (requires coord annotation) [off]\n");
             fprintf(stderr, "\t   --verbose-coords \t\tdo not collapse continuous matched coord ranges in result (for query-coords) [off]\n");
             fprintf(stderr, "\t   --print-signature \t\tprint vectors indicating present/absent k-mers [off]\n");

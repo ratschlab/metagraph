@@ -201,6 +201,7 @@ class QueryExecutor {
                                          const graph::AnnotatedDBG &anno_graph,
                                          bool with_kmer_counts = false,
                                          const std::vector<double> &count_quantiles = {},
+                                         bool query_counts = false,
                                          bool query_coords = false);
 
   private:
