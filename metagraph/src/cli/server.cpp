@@ -128,7 +128,7 @@ std::string process_search_request(const std::string &received_message,
     // Create full JSON object
     Json::Value search_response(Json::arrayValue);
     for (const auto &seq_result : search_results) {
-        search_response.append(seq_result.to_json(config.verbose_coords, anno_graph));
+        search_response.append(seq_result.to_json(config.verbose_output, anno_graph));
     }
 
     // Return JSON string

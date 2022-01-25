@@ -166,7 +166,7 @@ Json::Value get_label_as_json(const std::string &label) {
 }
 
 
-Json::Value SeqSearchResult::to_json(bool verbose_coords,
+Json::Value SeqSearchResult::to_json(bool verbose_output,
                                      const graph::AnnotatedDBG &anno_graph) const {
     Json::Value root;
 
@@ -210,12 +210,36 @@ Json::Value SeqSearchResult::to_json(bool verbose_coords,
             label_obj[KMER_COUNT_FIELD] = Json::Value(sdsl::util::cnt_one_bits(kmer_presence_mask));
         }
     } else if (const auto *v = std::get_if<LabelAbundanceVec>(&result_)) {
-        // Count quantiles
-        for (const auto &[label, quantiles] : *v) {
+        // k-mer counts (or quantiles)
+        for (const auto &[label, counts] : *v) {
+            assert(counts.size());
             Json::Value &label_obj = root["results"].append(get_label_as_json(label));
-            Json::Value &quantile_array = (label_obj[KMER_ABUNDANCE_FIELD] = Json::arrayValue);
-            for (size_t quantile : quantiles) {
-                quantile_array.append(static_cast<Json::Int64>(quantile));
+            Json::Value &counts_array = (label_obj[KMER_ABUNDANCE_FIELD] = Json::arrayValue);
+            if (verbose_output) {
+                for (size_t c : counts) {
+                    counts_array.append(static_cast<Json::Int64>(c));
+                }
+            } else {
+                std::pair<size_t, size_t> last(0, counts.at(0));
+                for (size_t i = 1; i <= counts.size(); ++i) {
+                    if (i < counts.size() && counts[i] == last.second)
+                        continue; // extend run
+
+                    // end of run
+                    if (last.second) {
+                        if (i == last.first + 1) {
+                            counts_array.append(fmt::format("{}:{}", last.first, last.second));
+                        } else {
+                            counts_array.append(fmt::format("{}-{}:{}", last.first, i - 1, last.second));
+                        }
+                    }
+
+                    // start new run
+                    if (i < counts.size()) {
+                        last.first = i;
+                        last.second = counts[i];
+                    }
+                }
             }
         }
     } else {
@@ -225,9 +249,9 @@ Json::Value SeqSearchResult::to_json(bool verbose_coords,
             Json::Value &coord_array = (label_obj[KMER_COORDINATE_FIELD] = Json::arrayValue);
 
             // Each tuple is represented as a folly::SmallVector<uint64_t> instance
-            if (verbose_coords) {
+            if (verbose_output) {
                 for (const auto &coords : tuples) {
-                    coord_array.append(Json::Value(fmt::format("{}", fmt::join(coords, ","))));
+                    coord_array.append(fmt::format("{}", fmt::join(coords, ",")));
                 }
             } else {
                 for (const auto &range : collapse_coord_ranges(tuples)) {
@@ -243,7 +267,7 @@ Json::Value SeqSearchResult::to_json(bool verbose_coords,
 
 std::string SeqSearchResult::to_string(const std::string delimiter,
                                        bool suppress_unlabeled,
-                                       bool verbose_coords,
+                                       bool verbose_output,
                                        const graph::AnnotatedDBG &anno_graph) const {
     // Return the size of the result type vector using std::visit (ducktyping variant)
     // If empty and unlabeled sequences are supressed then return empty string
@@ -291,7 +315,7 @@ std::string SeqSearchResult::to_string(const std::string delimiter,
         for (const auto &[label, tuples] : std::get<LabelCoordVec>(result_)) {
             output += "\t<" + label + ">";
 
-            if (verbose_coords) {
+            if (verbose_output) {
                 for (const auto &coords : tuples) {
                     output += fmt::format(":{}", fmt::join(coords, ","));
                 }
@@ -1119,10 +1143,17 @@ int query_graph(Config *config) {
         executor.query_fasta(file,
                              [config, &anno_graph = std::as_const(*anno_graph)]
                              (const SeqSearchResult &result) {
-            std::cout << result.to_string(config->anno_labels_delimiter,
-                                          config->suppress_unlabeled,
-                                          config->verbose_coords,
-                                          anno_graph) << "\n";
+            if (config->output_json) {
+                std::cout << result.to_json(config->verbose_output
+                                              && (config->query_counts || config->query_coords),
+                                            anno_graph) << "\n";
+            } else {
+                std::cout << result.to_string(config->anno_labels_delimiter,
+                                              config->suppress_unlabeled,
+                                              config->verbose_output
+                                                && (config->query_counts || config->query_coords),
+                                              anno_graph) << "\n";
+            }
         });
         logger->trace("File '{}' was processed in {} sec, total time: {}", file,
                       curr_timer.elapsed(), timer.elapsed());
@@ -1201,14 +1232,22 @@ void QueryExecutor::query_fasta(const string &file,
     if (this->config_.query_coords && !(dynamic_cast<const annot::matrix::MultiIntMatrix *>(
             &this->anno_graph_.get_annotation().get_matrix()))) {
         logger->error("Annotation does not support k-mer coordinate queries. "
-                      "First transform this annotation to include coordinate data.");
+                      "First transform this annotation to include coordinate data "
+                      "(e.g., {}, {}, {}, {}).",
+                      Config::annotype_to_string(Config::ColumnCoord),
+                      Config::annotype_to_string(Config::BRWTCoord),
+                      Config::annotype_to_string(Config::RowDiffCoord),
+                      Config::annotype_to_string(Config::RowDiffBRWTCoord));
         exit(1);
     }
 
     if (this->config_.count_kmers && !(dynamic_cast<const annot::matrix::IntMatrix *>(
             &this->anno_graph_.get_annotation().get_matrix()))) {
         logger->error("Annotation does not support k-mer count queries. "
-                      "First transform this annotation to include count data.");
+                      "First transform this annotation to include count data "
+                      "(e.g., {} or {}).",
+                      Config::annotype_to_string(Config::IntBRWT),
+                      Config::annotype_to_string(Config::IntRowDiffBRWT));
         exit(1);
     }
 

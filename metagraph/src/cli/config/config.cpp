@@ -224,8 +224,8 @@ Config::Config(int argc, char *argv[]) {
             query_counts = true;
         } else if (!strcmp(argv[i], "--query-coords")) {
             query_coords = true;
-        } else if (!strcmp(argv[i], "--verbose-coords")) {
-            verbose_coords = true;
+        } else if (!strcmp(argv[i], "--verbose-output")) {
+            verbose_output = true;
         } else if (!strcmp(argv[i], "--filter-present")) {
             filter_present = true;
         } else if (!strcmp(argv[i], "--count-labels")) {
@@ -1243,6 +1243,7 @@ if (advanced) {
 if (advanced) {
             fprintf(stderr, "\t   --sparse \t\tuse row-major sparse matrix for row annotation [off]\n");
 }
+            fprintf(stderr, "\t   --json \t\toutput query results in JSON format [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --count-labels \t\tcount labels for k-mers from querying sequences [off]\n");
             fprintf(stderr, "\t   --count-kmers \t\tweight k-mers with their annotated counts (requires count annotation) [off]\n");
@@ -1251,7 +1252,7 @@ if (advanced) {
                             "\t                                 \t\t(0 corresponds to MIN, 1 corresponds to MAX)\n");
             fprintf(stderr, "\t   --query-counts \t\tquery k-mer counts (requires count or coord annotation) [off]\n");
             fprintf(stderr, "\t   --query-coords \t\tquery k-mer coordinates (requires coord annotation) [off]\n");
-            fprintf(stderr, "\t   --verbose-coords \t\tdo not collapse continuous matched coord ranges in result (for query-coords) [off]\n");
+            fprintf(stderr, "\t   --verbose-output \t\tdo not collapse continuous coord or count ranges (for query-coords and query-counts) [off]\n");
             fprintf(stderr, "\t   --print-signature \t\tprint vectors indicating present/absent k-mers [off]\n");
             fprintf(stderr, "\t   --num-top-labels [INT] \tmaximum number of frequent labels to print [inf]\n");
             fprintf(stderr, "\t   --discovery-fraction [FLOAT] fraction of labeled k-mers required for annotation [0.7]\n");

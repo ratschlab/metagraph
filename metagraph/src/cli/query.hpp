@@ -141,11 +141,10 @@ class SeqSearchResult {
      *
      * @param counts_kmers      should counts be labeled kmer (t) or label (f) counts?
      * @param anno_graph        reference to annotated dbg for kmer presence mask scoring
-     * @param verbose_coords    do not collapse continuous ranges of coords (query_coords)
+     * @param verbose_output    do not collapse continuous ranges of coords (or counts)
      * @return  Json::Value instance representing sequence result
      */
-    Json::Value to_json(bool verbose_coords,
-                        const graph::AnnotatedDBG &anno_graph) const;
+    Json::Value to_json(bool verbose_output, const graph::AnnotatedDBG &anno_graph) const;
 
     /**
      * Returns a string representing the individual query result for the represented sequence.
@@ -155,12 +154,12 @@ class SeqSearchResult {
      *
      * @param delimiter             the delimiter between labels for that sequence
      * @param suppress_unlabeled    do not print seq_name if sequence is unlabeled
-     * @param verbose_coords        do not collapse continuous ranges of coords (query_coords)
+     * @param verbose_output        do not collapse continuous ranges of coords or counts
      * @param anno_graph            reference to annotated dbg for kmer presence mask scoring
      */
     std::string to_string(std::string delimiter,
                           bool suppress_unlabeled,
-                          bool verbose_coords,
+                          bool verbose_output,
                           const graph::AnnotatedDBG &anno_graph) const;
 
   private:

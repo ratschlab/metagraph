@@ -383,7 +383,9 @@ int transform_annotation(Config *config) {
     if (input_anno_type != Config::ColumnCompressed
         && input_anno_type != Config::RowDiff && files.size() > 1) {
         logger->error("Conversion of multiple annotators is only "
-                      "supported for ColumnCompressed and ColumnRowDiff");
+                      "supported for {} and {}",
+                      Config::annotype_to_string(Config::ColumnCompressed),
+                      Config::annotype_to_string(Config::RowDiff));
         exit(1);
     }
 
@@ -659,9 +661,9 @@ int transform_annotation(Config *config) {
     if (config->cluster_linkage) {
         if (input_anno_type != Config::ColumnCompressed
             && input_anno_type != Config::RowDiff) {
-            logger->error(
-                    "Column clustering is only supported for ColumnCompressed and "
-                    "RowDiff");
+            logger->error("Column clustering is only supported for {} and {}",
+                          Config::annotype_to_string(Config::ColumnCompressed),
+                          Config::annotype_to_string(Config::RowDiff));
             exit(1);
         }
 
