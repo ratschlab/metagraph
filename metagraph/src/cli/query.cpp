@@ -1169,13 +1169,13 @@ int query_graph(Config *config) {
                              (const SeqSearchResult &result) {
             if (config->output_json) {
                 std::cout << result.to_json(config->verbose_output
-                                              && (config->query_counts || config->query_coords),
+                                              || !(config->query_counts || config->query_coords),
                                             anno_graph) << "\n";
             } else {
                 std::cout << result.to_string(config->anno_labels_delimiter,
                                               config->suppress_unlabeled,
                                               config->verbose_output
-                                                && (config->query_counts || config->query_coords),
+                                                || !(config->query_counts || config->query_coords),
                                               anno_graph) << "\n";
             }
         });

@@ -515,8 +515,8 @@ AnnotatedDBG::get_kmer_counts(const std::vector<node_index> &path,
     // sort by the number of matched k-mers
     std::sort(code_counts.begin(), code_counts.end(),
               [](const auto &x, const auto &y) {
-                  return std::make_pair(y.second, x.first)
-                        < std::make_pair(x.second, y.first);
+                  return std::make_pair(y.second.size(), x.first)
+                        < std::make_pair(x.second.size(), y.first);
               });
 
     // keep only the first |num_top_labels| top labels
