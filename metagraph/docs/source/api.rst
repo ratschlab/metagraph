@@ -80,7 +80,7 @@ If the ``align`` flag is set, all the alignment options (explained in the alignm
 Searching count and coordinate indexes
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Metagraph supports k-mer count-aware and coordinate-aware indexes. If you are querying such an index,
-you can also set ``query_counts=True`` or ``query_coords=True``, respectively. If you try to query an
+you can also set ``weighted_with_counts=True`` or ``query_coords=True``, respectively. If you try to query an
 index which does not support either of these query types, the server will return an error.
 
 Alignment

@@ -94,13 +94,13 @@ class SeqSearchResult {
     typedef std::vector<Label> LabelVec;
     typedef std::vector<std::pair<Label, size_t>> LabelCountVec;
     typedef std::vector<std::pair<Label, sdsl::bit_vector>> LabelSigVec;
-    typedef std::vector<std::pair<Label, std::vector<size_t>>> LabelQuantileVec;
+    typedef std::vector<std::pair<Label, std::vector<size_t>>> LabelAbundanceVec;
     typedef std::vector<std::pair<Label, std::vector<SmallVector<uint64_t>>>> LabelCoordVec;
 
     typedef std::variant<LabelVec,
                          LabelCountVec,
                          LabelSigVec,
-                         LabelQuantileVec,
+                         LabelAbundanceVec,
                          LabelCoordVec> result_type;
 
     // JSON Field Keys
@@ -108,7 +108,7 @@ class SeqSearchResult {
     static constexpr auto KMER_COUNT_FIELD = "kmer_count";
     static constexpr auto KMER_COORDINATE_FIELD = "kmer_coords";
     static constexpr auto SIGNATURE_FIELD = "signature";
-    static constexpr auto KMER_COUNT_QUANTILE_FIELD = "kmer_count_quantile";
+    static constexpr auto KMER_ABUNDANCE_FIELD = "kmer_abundance";
     static constexpr auto SCORE_JSON_FIELD = "score";
     static constexpr auto SEQUENCE_JSON_FIELD = "sequence";
     static constexpr auto ALIGNMENT_JSON_FIELD = "alignments";
@@ -118,19 +118,22 @@ class SeqSearchResult {
      * Construct an instance of SeqSearchResult by providing QuerySequence instance describing
      * sequence and result from that query on an annotated DBG. Will move both into this instance.
      *
-     * @param sequence  rvalue reference to QuerySequence (WILL BE MOVED)
-     * @param result    rvalue reference to result_type (WILL BE MOVED)
+     * @param sequence rvalue reference to QuerySequence
+     * @param result rvalue reference to result_type
+     * @param alignment alignment to graph (how the query was transformed)
      */
     SeqSearchResult(QuerySequence&& sequence,
                     result_type&& result,
                     std::optional<Alignment>&& alignment = {})
-          : sequence(std::move(sequence)), alignment(alignment), result(std::move(result)) {}
+          : sequence_(std::move(sequence)),
+            alignment_(std::move(alignment)),
+            result_(std::move(result)) {}
 
     /** Const reference getters */
-    const QuerySequence& get_sequence() const { return sequence; }
-    const std::optional<Alignment>& get_alignment() const { return alignment; }
-    std::optional<Alignment>& get_alignment() { return alignment; }
-    const result_type& get_result() const { return result; }
+    const QuerySequence& get_sequence() const { return sequence_; }
+    const std::optional<Alignment>& get_alignment() const { return alignment_; }
+    std::optional<Alignment>& get_alignment() { return alignment_; }
+    const result_type& get_result() const { return result_; }
 
     /**
      * Returns a Json object representing the individual query result for the
@@ -161,9 +164,9 @@ class SeqSearchResult {
                           const graph::AnnotatedDBG &anno_graph) const;
 
   private:
-    QuerySequence sequence;             // query sequence this result represents
-    std::optional<Alignment> alignment; // optional wrapper for alignment struct
-    result_type result;                 // result vector of labels and additional info
+    QuerySequence sequence_;             // query sequence this result represents
+    std::optional<Alignment> alignment_; // optional wrapper for alignment struct
+    result_type result_;                 // result vector of labels and additional info
 };
 
 

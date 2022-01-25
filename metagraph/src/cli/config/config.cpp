@@ -1248,9 +1248,9 @@ if (advanced) {
                             "\t                                 \t\tExample: --count-quantiles '0 0.33 0.5 0.66 1'\n"
                             "\t                                 \t\t(0 corresponds to MIN, 1 corresponds to MAX)\n");
             fprintf(stderr, "\t   --query-coords \t\tquery k-mer coordinates (requires coord annotation) [off]\n");
-            fprintf(stderr, "\t   --verbose-coords \t\tdo not collapse continuous matched coord ranges in result (for query-coords) [off]");
+            fprintf(stderr, "\t   --verbose-coords \t\tdo not collapse continuous matched coord ranges in result (for query-coords) [off]\n");
             fprintf(stderr, "\t   --print-signature \t\tprint vectors indicating present/absent k-mers [off]\n");
-            fprintf(stderr, "\t   --num-top-labels \t\tmaximum number of frequent labels to print [off]\n");
+            fprintf(stderr, "\t   --num-top-labels [INT] \tmaximum number of frequent labels to print [inf]\n");
             fprintf(stderr, "\t   --discovery-fraction [FLOAT] fraction of labeled k-mers required for annotation [0.7]\n");
             fprintf(stderr, "\t   --presence-fraction [FLOAT] \tfraction of k-mers required to be present in the graph [0.0]\n");
             fprintf(stderr, "\t   --labels-delimiter [STR]\tdelimiter for annotation labels [\":\"]\n");

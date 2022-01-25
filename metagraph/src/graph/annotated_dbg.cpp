@@ -410,8 +410,8 @@ AnnotatedDBG::get_label_count_quantiles(std::string_view sequence,
     // sort by the number of matched k-mers
     std::sort(code_counts.begin(), code_counts.end(),
               [](const auto &x, const auto &y) {
-                  return x.second.size() > y.second.size()
-                      || (x.second.size() == y.second.size() && x.first < y.first);
+                  return std::make_pair(y.second.size(), x.first)
+                        < std::make_pair(x.second.size(), y.first);
               });
     // keep only the first |num_top_labels| top labels
     if (code_counts.size() > num_top_labels)
@@ -453,7 +453,7 @@ AnnotatedDBG::sequence_to_path(std::string_view sequence) const {
     return path;
 }
 
-std::vector<std::pair<Label, std::vector<size_t>>>
+std::vector<std::pair<std::string, std::vector<size_t>>>
 AnnotatedDBG::get_kmer_counts(std::string_view sequence,
                               size_t num_top_labels,
                               double discovery_fraction,
@@ -462,7 +462,7 @@ AnnotatedDBG::get_kmer_counts(std::string_view sequence,
     return get_kmer_counts(path, num_top_labels, discovery_fraction, presence_fraction);
 }
 
-std::vector<std::pair<Label, std::vector<size_t>>>
+std::vector<std::pair<std::string, std::vector<size_t>>>
 AnnotatedDBG::get_kmer_counts(const std::vector<node_index> &path,
                               size_t num_top_labels,
                               double discovery_fraction,
@@ -543,7 +543,8 @@ AnnotatedDBG::get_kmer_coordinates(const std::vector<node_index> &path,
     // sort by the number of matched k-mers
     std::sort(code_counts.begin(), code_counts.end(),
               [](const auto &x, const auto &y) {
-                  return x.second > y.second || (x.second == y.second && x.first < y.first);
+                  return std::make_pair(y.second, x.first)
+                        < std::make_pair(x.second, y.first);
               });
 
     // keep only the first |num_top_labels| top labels
@@ -672,9 +673,9 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
     // sort to get top |num_top_labels| labels
     if (vector.size() > num_top_labels) {
         std::sort(vector.begin(), vector.end(),
-                  [](const auto &a, const auto &b) {
-                      return a.second.second > b.second.second
-                          || (a.second.second == b.second.second && a.first < b.first);
+                  [](const auto &x, const auto &y) {
+                      return std::make_pair(y.second.second, x.first)
+                            < std::make_pair(x.second.second, y.first);
                   });
         vector.resize(num_top_labels);
     }
@@ -728,9 +729,9 @@ std::vector<StringCountPair> top_labels(Container&& code_counts,
     if (code_counts.size() > num_top_labels) {
         // sort labels by counts to get the top |num_top_labels|
         std::sort(code_counts.begin(), code_counts.end(),
-                  [](const auto &first, const auto &second) {
-                      return first.second > second.second
-                          || (first.second == second.second && first.first < second.first);
+                  [](const auto &x, const auto &y) {
+                      return std::make_pair(y.second, x.first)
+                            < std::make_pair(x.second, y.first);
                   });
         // leave only the first |num_top_labels| top labels
         code_counts.resize(num_top_labels);

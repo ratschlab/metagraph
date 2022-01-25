@@ -67,7 +67,7 @@ std::string process_search_request(const std::string &received_message,
     config.fast = json.get("fast", config.fast).asBool();
     config.print_signature = json.get("with_signature", config.print_signature).asBool();
     config.query_coords = json.get("query_coords", config.query_coords).asBool();
-    config.count_kmers = json.get("query_counts", config.count_kmers).asBool();
+    config.count_kmers = json.get("weighted_with_counts", config.count_kmers).asBool();
 
     // Throw client an error if they try to query coordinates/kmer-counts on unsupported indexes
     if (config.count_kmers && !(dynamic_cast<const annot::matrix::IntMatrix *>(
