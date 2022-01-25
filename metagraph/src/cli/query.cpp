@@ -228,9 +228,9 @@ Json::Value SeqSearchResult::to_json(bool verbose_output,
                     // end of run
                     if (last.second) {
                         if (i == last.first + 1) {
-                            counts_array.append(fmt::format("{}:{}", last.first, last.second));
+                            counts_array.append(fmt::format("{}={}", last.first, last.second));
                         } else {
-                            counts_array.append(fmt::format("{}-{}:{}", last.first, i - 1, last.second));
+                            counts_array.append(fmt::format("{}-{}={}", last.first, i - 1, last.second));
                         }
                     }
 
@@ -306,9 +306,33 @@ std::string SeqSearchResult::to_string(const std::string delimiter,
                                   anno_graph.score_kmer_presence_mask(kmer_presence_mask));
         }
     } else if (const auto *v = std::get_if<LabelAbundanceVec>(&result_)) {
-        // Count quantiles
-        for (const auto &[label, quantiles] : *v) {
-            output += fmt::format("\t<{}>:{}", label, fmt::join(quantiles, ":"));
+        // k-mer counts (or quantiles)
+        for (const auto &[label, counts] : *v) {
+            output += "\t<" + label + ">";
+            if (verbose_output) {
+                output += fmt::format(":{}", label, fmt::join(counts, ":"));
+            } else {
+                std::pair<size_t, size_t> last(0, counts.at(0));
+                for (size_t i = 1; i <= counts.size(); ++i) {
+                    if (i < counts.size() && counts[i] == last.second)
+                        continue; // extend run
+
+                    // end of run
+                    if (last.second) {
+                        if (i == last.first + 1) {
+                            output += fmt::format(":{}={}", last.first, last.second);
+                        } else {
+                            output += fmt::format(":{}-{}={}", last.first, i - 1, last.second);
+                        }
+                    }
+
+                    // start new run
+                    if (i < counts.size()) {
+                        last.first = i;
+                        last.second = counts[i];
+                    }
+                }
+            }
         }
     } else {
         // Kmer coordinates
