@@ -55,14 +55,8 @@ class TestAPIBase(TestingBase):
         cls.server_process.kill()
 
     def _start_server(self, graph, annotation):
-        construct_command = '{exe} server_query -i {graph} -a {annot} --port {port} --address {host} -p {threads}'.format(
-            exe=METAGRAPH,
-            graph=graph,
-            annot=annotation,
-            host=self.host,
-            port=self.port,
-            threads=2
-        )
+        construct_command = f'{METAGRAPH} server_query -i {graph} -a {annotation} \
+                                            --port {self.port} --address {self.host} -p {2}'
 
         return subprocess.Popen(shlex.split(construct_command))
 
@@ -75,10 +69,13 @@ class TestAPIRaw(TestAPIBase):
         super().setUpClass(TEST_DATA_DIR + '/transcripts_100.fa', mode=cls.mode)
 
     def setUp(self) -> None:
-        self.raw_post_request = lambda cmd, payload: requests.post(url=f'http://{self.host}:{self.port}/{cmd}', data=payload)
+        self.raw_post_request = lambda cmd, payload: requests.post(
+                                    url=f'http://{self.host}:{self.port}/{cmd}',
+                                    data=payload)
 
     def test_api_raw_incomplete_json(self):
-        ret = self.raw_post_request('search', '{"FASTA": ">query\\nAATAAAGGTGTGAGATAACCCCAGCGGTGCCAGGATCCGTGCA", "discovery_fraction": 0.1,')
+        ret = self.raw_post_request('search',
+            '{"FASTA": ">query\\nAATAAAGGTGTGAGATAACCCCAGCGGTGCCAGGATCCGTGCA", "discovery_fraction": 0.1,')
 
         self.assertEqual(ret.status_code, 400)
         self.assertIn("Bad json received:", ret.json()['error'])
@@ -279,8 +276,8 @@ class TestAPIClient(TestAPIBase):
     def test_api_simple_query_align_no_result(self):
         # If aligned sequence does not have result when searched, make sure client doesn't fail
         sample_align_query = self.sample_query[:2] + 'GG' + self.sample_query[4:]
-        ret = self.graph_client.search(sample_align_query, parallel=False, discovery_threshold=1.0,
-                                       align=True)
+        ret = self.graph_client.search(sample_align_query, parallel=False,
+                                       discovery_threshold=1.0, align=True)
         df = ret[self.graph_name]
         self.assertTrue(df.empty)
 
@@ -373,7 +370,8 @@ class TestAPIJson(TestAPIBase):
         self.assertEqual(len(res_list), repetitions)
 
         # testing if the returned query indices range from 0 to n - 1
-        self.assertEqual(sorted(range(0, repetitions)), sorted([int(a['seq_description']) for a in res_list]))
+        self.assertEqual(sorted(range(0, repetitions)),
+                         sorted([int(a['seq_description']) for a in res_list]))
 
     def test_api_stats(self):
         res = self.graph_client.stats()
@@ -427,13 +425,15 @@ class TestAPIClientWithCoordinates(TestAPIBase):
 
     @classmethod
     def setUpClass(cls):
-        super().setUpClass(TEST_DATA_DIR + '/transcripts_100.fa', mode=cls.mode, anno_repr='row_diff_brwt_coord')
+        super().setUpClass(TEST_DATA_DIR + '/transcripts_100.fa', mode=cls.mode,
+                           anno_repr='row_diff_brwt_coord')
 
         cls.graph_client = MultiGraphClient()
         cls.graph_client.add_graph(cls.host, cls.port, cls.graph_name)
 
     def test_api_simple_query_coords_df(self):
-        ret = self.graph_client.search(self.sample_query, discovery_threshold=0.01, parallel=False, query_coords=True)
+        ret = self.graph_client.search(self.sample_query, discovery_threshold=0.01,
+                                       parallel=False, query_coords=True)
         df = ret[self.graph_name]
 
         self.assertEqual((self.sample_query_expected_rows, 3), df.shape)
@@ -459,7 +459,8 @@ class TestAPIClientWithCounts(TestAPIBase):
         cls.graph_client.add_graph(cls.host, cls.port, cls.graph_name)
 
     def test_api_simple_query_abundance_sum_df(self):
-        ret = self.graph_client.search(self.sample_query, discovery_threshold=0.01, parallel=False, abundance_sum=True)
+        ret = self.graph_client.search(self.sample_query, discovery_threshold=0.01,
+                                       parallel=False, abundance_sum=True)
         df = ret[self.graph_name]
 
         self.assertEqual((self.sample_query_expected_rows, 3), df.shape)
@@ -467,7 +468,8 @@ class TestAPIClientWithCounts(TestAPIBase):
 
     @unittest.expectedFailure
     def test_api_search_no_coordinate_support(self):
-        ret = self.graph_client.search(self.sample_query, discovery_threshold=0.01, parallel=False, query_coords=True)
+        ret = self.graph_client.search(self.sample_query, discovery_threshold=0.01,
+                                       parallel=False, query_coords=True)
 
 
 @parameterized_class(('mode',), input_values=[('canonical',), ('primary',)])
