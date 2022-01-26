@@ -310,7 +310,7 @@ std::string SeqSearchResult::to_string(const std::string delimiter,
         for (const auto &[label, counts] : *v) {
             output += "\t<" + label + ">";
             if (verbose_output) {
-                output += fmt::format(":{}", label, fmt::join(counts, ":"));
+                output += fmt::format(":{}", fmt::join(counts, ":"));
             } else {
                 std::pair<size_t, size_t> last(0, counts.at(0));
                 for (size_t i = 1; i <= counts.size(); ++i) {
