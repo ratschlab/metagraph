@@ -138,7 +138,7 @@ void AnnotatedDBG::add_kmer_coord(std::string_view sequence,
     if (sequence.size() < dbg_.get_k())
         return;
 
-    std::vector<row_index> indices = sequence_to_path(sequence);
+    std::vector<row_index> indices = seq_to_lnodes(sequence);
 
     std::lock_guard<std::mutex> lock(mutex_);
 
@@ -158,7 +158,7 @@ void AnnotatedDBG::add_kmer_coords(
     ids.reserve(data.size());
     for (const auto &[sequence, labels, _] : data) {
         if (sequence.size() >= dbg_.get_k())
-            ids.push_back(sequence_to_path(sequence));
+            ids.push_back(seq_to_lnodes(sequence));
     }
 
     std::lock_guard<std::mutex> lock(mutex_);
@@ -440,17 +440,18 @@ AnnotatedDBG::get_label_count_quantiles(std::string_view sequence,
     return label_quantiles;
 }
 
+// map sequence to labeled nodes
 std::vector<AnnotatedDBG::node_index>
-AnnotatedDBG::sequence_to_path(std::string_view sequence) const {
+AnnotatedDBG::seq_to_lnodes(std::string_view sequence) const {
     if (sequence.size() < dbg_.get_k())
         return {};
 
-    std::vector<node_index> path;
-    path.reserve(sequence.size() - dbg_.get_k() + 1);
+    std::vector<node_index> nodes;
+    nodes.reserve(sequence.size() - dbg_.get_k() + 1);
 
-    graph_->map_to_nodes(sequence, [&](node_index i) { path.push_back(i); });
+    graph_->map_to_nodes(sequence, [&](node_index i) { nodes.push_back(i); });
 
-    return path;
+    return nodes;
 }
 
 std::vector<std::pair<std::string, std::vector<size_t>>>
@@ -458,12 +459,12 @@ AnnotatedDBG::get_kmer_counts(std::string_view sequence,
                               size_t num_top_labels,
                               double discovery_fraction,
                               double presence_fraction) const {
-    std::vector<node_index> path = sequence_to_path(sequence);
-    return get_kmer_counts(path, num_top_labels, discovery_fraction, presence_fraction);
+    std::vector<node_index> nodes = seq_to_lnodes(sequence);
+    return get_kmer_counts(nodes, num_top_labels, discovery_fraction, presence_fraction);
 }
 
 std::vector<std::pair<std::string, std::vector<size_t>>>
-AnnotatedDBG::get_kmer_counts(const std::vector<node_index> &path,
+AnnotatedDBG::get_kmer_counts(const std::vector<node_index> &nodes,
                               size_t num_top_labels,
                               double discovery_fraction,
                               double presence_fraction) const {
@@ -473,21 +474,21 @@ AnnotatedDBG::get_kmer_counts(const std::vector<node_index> &path,
     assert(presence_fraction <= 1.);
     assert(check_compatibility());
 
-    if (!path.size())
+    if (!nodes.size())
         return {};
 
     std::vector<row_index> rows;
-    rows.reserve(path.size());
-    for (node_index i : path) {
+    rows.reserve(nodes.size());
+    for (node_index i : nodes) {
         if (i > 0)
             rows.push_back(graph_to_anno_index(i));
     }
 
-    uint64_t min_count = std::max(1.0, std::ceil(presence_fraction * path.size()));
+    uint64_t min_count = std::max(1.0, std::ceil(presence_fraction * nodes.size()));
     if (rows.size() < min_count)
         return {};
 
-    min_count = std::max(1.0, std::ceil(discovery_fraction * path.size()));
+    min_count = std::max(1.0, std::ceil(discovery_fraction * nodes.size()));
     if (rows.size() < min_count)
         return {};
 
@@ -501,7 +502,7 @@ AnnotatedDBG::get_kmer_counts(const std::vector<node_index> &path,
 
     VectorMap<size_t, std::vector<std::pair<size_t, uint64_t>>> code_to_counts;
     for (size_t i = 0, j = 0; i < row_values.size(); ++i, ++j) {
-        while (!path[j]) {
+        while (!nodes[j]) {
             j++;
         }
         for (const auto &[column, count] : row_values[i]) {
@@ -535,7 +536,7 @@ AnnotatedDBG::get_kmer_counts(const std::vector<node_index> &path,
     for (size_t j = 0; j < result.size(); ++j) {
         result[j].first = annotator_->get_label_encoder().decode(code_counts[j].first);
         auto &counts = result[j].second;
-        counts.resize(path.size(), 0);
+        counts.resize(nodes.size(), 0);
         // fill the non-zero counts
         for (auto &[i, c] : code_counts[j].second) {
             counts[i] = c;
@@ -550,12 +551,12 @@ AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
                                    size_t num_top_labels,
                                    double discovery_fraction,
                                    double presence_fraction) const {
-    std::vector<node_index> path = sequence_to_path(sequence);
-    return get_kmer_coordinates(path, num_top_labels, discovery_fraction, presence_fraction);
+    std::vector<node_index> nodes = seq_to_lnodes(sequence);
+    return get_kmer_coordinates(nodes, num_top_labels, discovery_fraction, presence_fraction);
 }
 
 std::vector<std::pair<std::string, std::vector<SmallVector<uint64_t>>>>
-AnnotatedDBG::get_kmer_coordinates(const std::vector<node_index> &path,
+AnnotatedDBG::get_kmer_coordinates(const std::vector<node_index> &nodes,
                                    size_t num_top_labels,
                                    double discovery_fraction,
                                    double presence_fraction) const {
@@ -565,16 +566,16 @@ AnnotatedDBG::get_kmer_coordinates(const std::vector<node_index> &path,
     assert(presence_fraction <= 1.);
     assert(check_compatibility());
 
-    if (!path.size())
+    if (!nodes.size())
         return {};
 
     std::vector<row_index> rows;
-    rows.reserve(path.size());
+    rows.reserve(nodes.size());
 
     std::vector<size_t> ids;
-    ids.reserve(path.size());
+    ids.reserve(nodes.size());
 
-    for (node_index i : path) {
+    for (node_index i : nodes) {
         if (i > 0) {
             ids.push_back(rows.size());
             rows.push_back(graph_to_anno_index(i));
@@ -583,11 +584,11 @@ AnnotatedDBG::get_kmer_coordinates(const std::vector<node_index> &path,
         }
     }
 
-    uint64_t min_count = std::max(1.0, std::ceil(presence_fraction * path.size()));
+    uint64_t min_count = std::max(1.0, std::ceil(presence_fraction * nodes.size()));
     if (rows.size() < min_count)
         return {};
 
-    min_count = std::max(1.0, std::ceil(discovery_fraction * path.size()));
+    min_count = std::max(1.0, std::ceil(discovery_fraction * nodes.size()));
     if (rows.size() < min_count)
         return {};
 

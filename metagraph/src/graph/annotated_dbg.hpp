@@ -80,7 +80,8 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
 
     bool check_compatibility() const;
 
-    std::vector<node_index> sequence_to_path(std::string_view sequence) const;
+    // map sequence to labeled nodes
+    std::vector<node_index> seq_to_lnodes(std::string_view sequence) const;
 
     // add k-mer counts to the annotation, thread-safe for concurrent calls
     void add_kmer_counts(std::string_view sequence,
@@ -143,7 +144,7 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
                     double presence_fraction) const;
 
     std::vector<std::pair<Label, std::vector<size_t>>>
-    get_kmer_counts(const std::vector<node_index> &path,
+    get_kmer_counts(const std::vector<node_index> &nodes,
                     size_t num_top_labels,
                     double discovery_fraction,
                     double presence_fraction) const;
@@ -155,7 +156,7 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
                          double presence_fraction) const;
 
     std::vector<std::pair<Label, std::vector<SmallVector<uint64_t>>>>
-    get_kmer_coordinates(const std::vector<node_index> &path,
+    get_kmer_coordinates(const std::vector<node_index> &nodes,
                          size_t num_top_labels,
                          double discovery_fraction,
                          double presence_fraction) const;
