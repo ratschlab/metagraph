@@ -317,7 +317,6 @@ int align_to_graph(Config *config) {
 
     // initialize graph
     auto graph = load_critical_dbg(config->infbase);
-    auto base_graph = graph;
 
     if (utils::ends_with(config->outfbase, ".gfa")) {
         gfa_map_files(config, files, *graph);
@@ -334,10 +333,10 @@ int align_to_graph(Config *config) {
     ThreadPool thread_pool(get_num_threads());
     std::mutex print_mutex;
 
-    if (graph->get_mode() == DeBruijnGraph::PRIMARY)
-        graph = primary_to_canonical(graph);
-
     if (config->map_sequences) {
+        if (graph->get_mode() == DeBruijnGraph::PRIMARY)
+            graph = primary_to_canonical(graph);\
+
         if (!config->alignment_length) {
             config->alignment_length = graph->get_k();
         } else if (config->alignment_length > graph->get_k()) {
@@ -368,7 +367,7 @@ int align_to_graph(Config *config) {
     std::unique_ptr<AnnotatedDBG> anno_dbg;
     if (config->infbase_annotators.size()) {
         assert(config->infbase_annotators.size() == 1);
-        anno_dbg = initialize_annotated_dbg(base_graph, *config);
+        anno_dbg = initialize_annotated_dbg(graph, *config);
     }
 
     for (const auto &file : files) {
@@ -413,15 +412,24 @@ int align_to_graph(Config *config) {
             }
 
             auto process_batch = [&,graph](SeqBatch batch) {
-                assert(graph->get_mode() != DeBruijnGraph::PRIMARY);
+                // Make a copy of the shared_ptr in a thread-safe way, then wrap
+                // it in CanonicalDBG if needed. This way, each thread gets its
+                // own wrapper (and more importantly, its own local cache).
+                auto aln_graph = std::shared_ptr<DeBruijnGraph>(
+                    std::shared_ptr<DeBruijnGraph>{}, graph.get()
+                );
+
+                if (aln_graph->get_mode() == DeBruijnGraph::PRIMARY)
+                    aln_graph = primary_to_canonical(aln_graph);
+
                 std::unique_ptr<IDBGAligner> aligner;
 
                 if (anno_dbg) {
                     aligner = std::make_unique<LabeledAligner<>>(
-                        *graph, anno_dbg->get_annotator(), aligner_config
+                        *aln_graph, anno_dbg->get_annotator(), aligner_config
                     );
                 } else {
-                    aligner = std::make_unique<DBGAligner<>>(*graph, aligner_config);
+                    aligner = std::make_unique<DBGAligner<>>(*aln_graph, aligner_config);
                 }
 
                 aligner->align_batch(batch,
