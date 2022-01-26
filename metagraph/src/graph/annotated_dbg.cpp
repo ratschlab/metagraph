@@ -31,15 +31,14 @@ AnnotatedSequenceGraph
         force_fast_(force_fast) {
     assert(graph_.get());
     assert(annotator_.get());
+    assert(check_compatibility());
 }
 
 AnnotatedDBG::AnnotatedDBG(std::shared_ptr<DeBruijnGraph> dbg,
                            std::unique_ptr<Annotator>&& annotation,
                            bool force_fast)
       : AnnotatedSequenceGraph(dbg, std::move(annotation), force_fast),
-        dbg_(*dbg) {
-    assert(check_compatibility());
-}
+        dbg_(*dbg) {}
 
 void AnnotatedSequenceGraph
 ::annotate_sequence(std::string_view sequence,
@@ -779,14 +778,7 @@ void AnnotatedSequenceGraph
     );
 }
 
-bool AnnotatedSequenceGraph::check_compatibility() const {
-    return graph_->max_index() == annotator_->num_objects();
-}
-
 bool AnnotatedDBG::check_compatibility() const {
-    // TODO: find a way to fix this thing to add check_compatibility() to the constructor
-    // of AnnotatedSequenceGraph.
-    // Maybe make it how it was before 9f4e8e5b73571d874dd93eedc53079f71615023c
     return dbg_.get_base_graph().max_index() == annotator_->num_objects();
 }
 
