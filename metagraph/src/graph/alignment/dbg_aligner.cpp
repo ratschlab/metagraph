@@ -58,7 +58,7 @@ void ISeedAndExtendAligner<AlignmentCompare>
         std::string_view this_query = paths.get_query(is_reverse_complement);
         assert(this_query == query);
 
-        std::vector<node_index> nodes = map_sequence_to_nodes(graph_, query);
+        std::vector<node_index> nodes = map_to_nodes_sequentially(graph_, query);
 
         auto seeder = build_seeder(this_query, is_reverse_complement, nodes);
         auto extender = build_extender(this_query, aggregator);

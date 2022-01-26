@@ -35,6 +35,7 @@ class SequenceGraph {
 
     // Traverse graph mapping sequence to the graph nodes
     // and run callback for each node until the termination condition is satisfied
+    // TODO: move to AnnotatedSequenceGraph?
     virtual void map_to_nodes(std::string_view sequence,
                               const std::function<void(node_index)> &callback,
                               const std::function<bool()> &terminate = [](){ return false; }) const = 0;
@@ -238,7 +239,10 @@ size_t incoming_edge_rank(const SequenceGraph &graph,
                           SequenceGraph::node_index target);
 
 std::vector<SequenceGraph::node_index>
-map_sequence_to_nodes(const SequenceGraph &graph, std::string_view sequence);
+map_to_nodes(const SequenceGraph &graph, std::string_view sequence);
+
+std::vector<SequenceGraph::node_index>
+map_to_nodes_sequentially(const SequenceGraph &graph, std::string_view sequence);
 
 void reverse_complement_seq_path(const SequenceGraph &graph,
                                  std::string &seq,

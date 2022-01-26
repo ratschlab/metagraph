@@ -515,7 +515,7 @@ void call_hull_sequences(const DeBruijnGraph &full_dbg,
         }
 
         assert(path.size() == seq.length() - full_dbg.get_k() + 1);
-        assert(path == map_sequence_to_nodes(full_dbg, seq));
+        assert(path == map_to_nodes_sequentially(full_dbg, seq));
 
         callback(seq, path);
 
@@ -735,7 +735,7 @@ void add_nodes_with_suffix_matches(const DBGSuccinct &full_dbg,
             std::string rev_contig = contig;
             reverse_complement(rev_contig);
             call_suffix_match_sequences(full_dbg, rev_contig,
-                                        map_sequence_to_nodes(full_dbg, rev_contig),
+                                        map_to_nodes_sequentially(full_dbg, rev_contig),
                                         callback, sub_k, max_num_nodes_per_suffix);
         }
 

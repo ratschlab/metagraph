@@ -80,9 +80,6 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
 
     bool check_compatibility() const;
 
-    // map sequence to labeled nodes
-    std::vector<node_index> seq_to_lnodes(std::string_view sequence) const;
-
     // add k-mer counts to the annotation, thread-safe for concurrent calls
     void add_kmer_counts(std::string_view sequence,
                          const std::vector<Label> &labels,

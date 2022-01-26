@@ -48,7 +48,7 @@ TYPED_TEST(MaskedStableDeBruijnGraphTest, CallPathsNoMask) {
                 std::mutex seq_mutex;
                 auto reconstructed = build_graph_iterative<TypeParam>(k, [&](const auto &callback) {
                     masked.call_sequences([&](const auto &seq, const auto &path) {
-                        ASSERT_EQ(path, map_sequence_to_nodes(masked, seq));
+                        ASSERT_EQ(path, map_to_nodes_sequentially(masked, seq));
                         std::lock_guard<std::mutex> lock(seq_mutex);
                         callback(seq);
                     }, num_threads);
@@ -79,7 +79,7 @@ TYPED_TEST(MaskedStableDeBruijnGraphTest, CallUnitigsNoMask) {
                 std::mutex seq_mutex;
                 auto reconstructed = build_graph_iterative<TypeParam>(k, [&](const auto &callback) {
                     masked.call_unitigs([&](const auto &seq, const auto &path) {
-                        ASSERT_EQ(path, map_sequence_to_nodes(masked, seq));
+                        ASSERT_EQ(path, map_to_nodes_sequentially(masked, seq));
                         std::lock_guard<std::mutex> lock(seq_mutex);
                         callback(seq);
                     }, num_threads);
@@ -112,7 +112,7 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallPathsNoMask) {
                 std::mutex seq_mutex;
                 auto reconstructed = build_graph_iterative<DBGSuccinct>(k, [&](const auto &callback) {
                     masked.call_sequences([&](const auto &seq, const auto &path) {
-                        ASSERT_EQ(path, map_sequence_to_nodes(masked, seq));
+                        ASSERT_EQ(path, map_to_nodes_sequentially(masked, seq));
                         std::lock_guard<std::mutex> lock(seq_mutex);
                         callback(seq);
                     }, num_threads);
@@ -145,7 +145,7 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallUnitigsNoMask) {
                 std::mutex seq_mutex;
                 auto reconstructed = build_graph_iterative<DBGSuccinct>(k, [&](const auto &callback) {
                     masked.call_unitigs([&](const auto &seq, const auto &path) {
-                        ASSERT_EQ(path, map_sequence_to_nodes(masked, seq));
+                        ASSERT_EQ(path, map_to_nodes_sequentially(masked, seq));
                         std::lock_guard<std::mutex> lock(seq_mutex);
                         callback(seq);
                     }, num_threads);
@@ -184,7 +184,7 @@ TYPED_TEST(MaskedStableDeBruijnGraphTest, CallPathsMaskFirstKmer) {
                 std::mutex seq_mutex;
                 auto reconstructed = build_graph_iterative<TypeParam>(k, [&](const auto &callback) {
                     graph.call_sequences([&](const auto &seq, const auto &path) {
-                        ASSERT_EQ(path, map_sequence_to_nodes(graph, seq));
+                        ASSERT_EQ(path, map_to_nodes_sequentially(graph, seq));
                         std::lock_guard<std::mutex> lock(seq_mutex);
                         callback(seq);
                     }, num_threads);
@@ -248,7 +248,7 @@ TYPED_TEST(MaskedStableDeBruijnGraphTest, CallUnitigsMaskFirstKmer) {
                 std::mutex seq_mutex;
                 auto reconstructed = build_graph_iterative<TypeParam>(k, [&](const auto &callback) {
                     graph.call_unitigs([&](const auto &seq, const auto &path) {
-                        ASSERT_EQ(path, map_sequence_to_nodes(graph, seq));
+                        ASSERT_EQ(path, map_to_nodes_sequentially(graph, seq));
                         std::lock_guard<std::mutex> lock(seq_mutex);
                         callback(seq);
                     }, num_threads);
@@ -312,7 +312,7 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallPathsMaskFirstKmer) {
                 std::mutex seq_mutex;
                 auto reconstructed = build_graph_iterative<DBGSuccinct>(k, [&](const auto &callback) {
                     graph.call_sequences([&](const auto &seq, const auto &path) {
-                        ASSERT_EQ(path, map_sequence_to_nodes(graph, seq));
+                        ASSERT_EQ(path, map_to_nodes_sequentially(graph, seq));
                         std::lock_guard<std::mutex> lock(seq_mutex);
                         callback(seq);
                     }, num_threads);
@@ -376,7 +376,7 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallUnitigsMaskFirstKmer) {
                 std::mutex seq_mutex;
                 auto reconstructed = build_graph_iterative<DBGSuccinct>(k, [&](const auto &callback) {
                     graph.call_unitigs([&](const auto &seq, const auto &path) {
-                        ASSERT_EQ(path, map_sequence_to_nodes(graph, seq));
+                        ASSERT_EQ(path, map_to_nodes_sequentially(graph, seq));
                         std::lock_guard<std::mutex> lock(seq_mutex);
                         callback(seq);
                     }, num_threads);
@@ -453,7 +453,7 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallContigsMaskPath) {
                 std::mutex seq_mutex;
                 auto reconstructed = build_graph_iterative<TypeParam>(k, [&](const auto &callback) {
                     graph.call_sequences([&](const auto &seq, const auto &path) {
-                        ASSERT_EQ(path, map_sequence_to_nodes(graph, seq));
+                        ASSERT_EQ(path, map_to_nodes_sequentially(graph, seq));
                         std::lock_guard<std::mutex> lock(seq_mutex);
                         callback(seq);
                     }, num_threads);
@@ -532,7 +532,7 @@ TYPED_TEST(MaskedDeBruijnGraphTest, CallUnitigsMaskPath) {
             std::mutex seq_mutex;
             graph.call_unitigs(
                 [&](const auto &unitig, const auto &path) {
-                    ASSERT_EQ(path, map_sequence_to_nodes(graph, unitig));
+                    ASSERT_EQ(path, map_to_nodes_sequentially(graph, unitig));
                     graph.map_to_nodes(
                         unitig,
                         [&](const auto &index) {
@@ -618,7 +618,7 @@ TYPED_TEST(MaskedStableDeBruijnGraphTest, CallUnitigsSingleKmerFormCanonical) {
                     [&](const auto &callback) {
                         stable_masked_graph.call_unitigs(
                             [&](const auto &sequence, const auto &path) {
-                                ASSERT_EQ(path, map_sequence_to_nodes(stable_masked_graph, sequence));
+                                ASSERT_EQ(path, map_to_nodes_sequentially(stable_masked_graph, sequence));
                                 std::unique_lock<std::mutex> lock(seq_mutex);
                                 callback(sequence);
                             },
@@ -634,7 +634,7 @@ TYPED_TEST(MaskedStableDeBruijnGraphTest, CallUnitigsSingleKmerFormCanonical) {
                     [&](const auto &callback) {
                         graph.call_unitigs(
                             [&](const auto &sequence, const auto &path) {
-                                ASSERT_EQ(path, map_sequence_to_nodes(graph, sequence));
+                                ASSERT_EQ(path, map_to_nodes_sequentially(graph, sequence));
                                 std::unique_lock<std::mutex> lock(seq_mutex);
                                 callback(sequence);
                             },
@@ -681,7 +681,7 @@ TEST(MaskedDBGSuccinct, CallUnitigsMaskLastEdges) {
                 MaskedDeBruijnGraph masked_graph(graph, std::make_unique<bit_vector_stat>(std::move(mask)));
                 std::atomic<size_t> counted_kmers(0);
                 masked_graph.call_unitigs([&](const auto &seq, const auto &path) {
-                    ASSERT_EQ(path, map_sequence_to_nodes(masked_graph, seq));
+                    ASSERT_EQ(path, map_to_nodes_sequentially(masked_graph, seq));
                     counted_kmers += path.size();
                 }, num_threads);
                 EXPECT_EQ(num_kmers, counted_kmers);

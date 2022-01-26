@@ -87,7 +87,7 @@ void CanonicalDBG
     std::string rev_seq(sequence);
     ::reverse_complement(rev_seq.begin(), rev_seq.end());
     // map the reverse-complement
-    std::vector<node_index> rev_path = map_sequence_to_nodes(*graph_, rev_seq);
+    std::vector<node_index> rev_path = graph::map_to_nodes_sequentially(*graph_, rev_seq);
 
     // map the forward
     const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(graph_.get());
@@ -121,7 +121,7 @@ void CanonicalDBG
         assert(it == rev_path.rend());
 
     } else {
-        path = map_sequence_to_nodes(*graph_, sequence);
+        path = graph::map_to_nodes_sequentially(*graph_, sequence);
     }
 
     assert(path.size() == rev_path.size());

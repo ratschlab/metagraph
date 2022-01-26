@@ -260,7 +260,7 @@ void Alignment::reverse_complement(const DeBruijnGraph &graph,
             assert(sequence_.size() == dbg_succ.get_k() + offset_);
             sequence_ = sequence_.substr(offset_);
 
-            assert(nodes_ == map_sequence_to_nodes(graph, sequence_));
+            assert(nodes_ == map_to_nodes_sequentially(graph, sequence_));
             reverse_complement_seq_path(graph, sequence_, nodes_);
 
             assert(std::find(nodes_.begin(), nodes_.end(), DeBruijnGraph::npos)
@@ -270,7 +270,7 @@ void Alignment::reverse_complement(const DeBruijnGraph &graph,
 
         } else {
             assert(nodes_.size() == 1);
-            assert(nodes_ == map_sequence_to_nodes(graph, sequence_));
+            assert(nodes_ == map_to_nodes_sequentially(graph, sequence_));
             reverse_complement_seq_path(graph, sequence_, nodes_);
 
             assert(std::find(nodes_.begin(), nodes_.end(), DeBruijnGraph::npos)

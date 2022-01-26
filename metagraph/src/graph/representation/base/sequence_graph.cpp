@@ -213,14 +213,14 @@ void call_sequences_from(const DeBruijnGraph &graph,
                   // check if not tip
                   || graph.indegree(start) + graph.outdegree(node) >= 2) {
 
-            assert(path == map_sequence_to_nodes(graph, sequence));
+            assert(path == map_to_nodes_sequentially(graph, sequence));
 
             if (kmers_in_single_form) {
                 // get dual path (mapping of the reverse complement sequence)
                 std::string rev_comp_seq = sequence;
                 reverse_complement(rev_comp_seq.begin(), rev_comp_seq.end());
 
-                auto dual_path = map_sequence_to_nodes(graph, rev_comp_seq);
+                auto dual_path = map_to_nodes_sequentially(graph, rev_comp_seq);
                 std::reverse(dual_path.begin(), dual_path.end());
                 size_t begin = 0;
 
@@ -310,7 +310,7 @@ void call_sequences(const DeBruijnGraph &graph,
                     bool call_unitigs,
                     uint64_t min_tip_size,
                     bool kmers_in_single_form) {
-    // TODO: port over the implementation from BOSS once it's finalized
+    // TODO: port over the implementation from BOSS
     std::ignore = num_threads;
 
     sdsl::bit_vector discovered(graph.max_index() + 1, true);
@@ -500,13 +500,23 @@ size_t incoming_edge_rank(const SequenceGraph &graph,
 }
 
 std::vector<SequenceGraph::node_index>
-map_sequence_to_nodes(const SequenceGraph &graph, std::string_view sequence) {
+map_to_nodes_sequentially(const SequenceGraph &graph, std::string_view sequence) {
     std::vector<SequenceGraph::node_index> nodes;
     nodes.reserve(sequence.size());
 
     graph.map_to_nodes_sequentially(sequence,
         [&nodes](auto node) { nodes.push_back(node); }
     );
+
+    return nodes;
+}
+
+std::vector<SequenceGraph::node_index>
+map_to_nodes(const SequenceGraph &graph, std::string_view sequence) {
+    std::vector<node_index> nodes;
+    nodes.reserve(sequence.size());
+
+    graph.map_to_nodes(sequence, [&](node_index i) { nodes.push_back(i); });
 
     return nodes;
 }
@@ -520,7 +530,7 @@ void reverse_complement_seq_path(const SequenceGraph &graph,
     }
 
     reverse_complement(seq.begin(), seq.end());
-    path = map_sequence_to_nodes(graph, seq);
+    path = map_to_nodes_sequentially(graph, seq);
 }
 
 } // namespace graph

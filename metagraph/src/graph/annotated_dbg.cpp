@@ -138,7 +138,7 @@ void AnnotatedDBG::add_kmer_coord(std::string_view sequence,
     if (sequence.size() < dbg_.get_k())
         return;
 
-    std::vector<row_index> indices = seq_to_lnodes(sequence);
+    std::vector<row_index> indices = map_to_nodes(dbg_, sequence);
 
     std::lock_guard<std::mutex> lock(mutex_);
 
@@ -158,7 +158,7 @@ void AnnotatedDBG::add_kmer_coords(
     ids.reserve(data.size());
     for (const auto &[sequence, labels, _] : data) {
         if (sequence.size() >= dbg_.get_k())
-            ids.push_back(seq_to_lnodes(sequence));
+            ids.push_back(map_to_nodes(dbg_, sequence));
     }
 
     std::lock_guard<std::mutex> lock(mutex_);
@@ -440,26 +440,12 @@ AnnotatedDBG::get_label_count_quantiles(std::string_view sequence,
     return label_quantiles;
 }
 
-// map sequence to labeled nodes
-std::vector<AnnotatedDBG::node_index>
-AnnotatedDBG::seq_to_lnodes(std::string_view sequence) const {
-    if (sequence.size() < dbg_.get_k())
-        return {};
-
-    std::vector<node_index> nodes;
-    nodes.reserve(sequence.size() - dbg_.get_k() + 1);
-
-    graph_->map_to_nodes(sequence, [&](node_index i) { nodes.push_back(i); });
-
-    return nodes;
-}
-
 std::vector<std::pair<std::string, std::vector<size_t>>>
 AnnotatedDBG::get_kmer_counts(std::string_view sequence,
                               size_t num_top_labels,
                               double discovery_fraction,
                               double presence_fraction) const {
-    std::vector<node_index> nodes = seq_to_lnodes(sequence);
+    std::vector<node_index> nodes = map_to_nodes(dbg_, sequence);
     return get_kmer_counts(nodes, num_top_labels, discovery_fraction, presence_fraction);
 }
 
@@ -551,7 +537,7 @@ AnnotatedDBG::get_kmer_coordinates(std::string_view sequence,
                                    size_t num_top_labels,
                                    double discovery_fraction,
                                    double presence_fraction) const {
-    std::vector<node_index> nodes = seq_to_lnodes(sequence);
+    std::vector<node_index> nodes = map_to_nodes(dbg_, sequence);
     return get_kmer_coordinates(nodes, num_top_labels, discovery_fraction, presence_fraction);
 }
 
