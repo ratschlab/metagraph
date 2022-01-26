@@ -38,6 +38,9 @@ class TestingBase(unittest.TestCase):
 
     @staticmethod
     def _build_graph(input, output, k, repr, mode='basic', extra_params=''):
+        if not isinstance(input, str):
+            input = ' '.join(input)
+
         if not output.endswith(graph_file_extension[repr]):
             output += graph_file_extension[repr]
 
@@ -103,6 +106,9 @@ class TestingBase(unittest.TestCase):
     def _annotate_graph(input, graph_path, output, anno_repr,
                         separate=False, no_fork_opt=False, no_anchor_opt=False,
                         anno_type='header', extra_params=''):
+        if not isinstance(input, str):
+            input = ' '.join(input)
+
         target_anno = anno_repr
 
         noswap = anno_repr.endswith('_noswap')

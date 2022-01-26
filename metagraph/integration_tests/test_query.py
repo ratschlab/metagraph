@@ -760,13 +760,16 @@ class TestQueryCounts(TestingBase):
             'GTT': 19,
             'TTT': 20,
         }
-        fasta_file = cls.tempdir.name + '/file.fa'
-        with open(fasta_file, 'w') as f:
-            for kmer, count in cls.kmer_counts_1.items():
-                f.write(f'>L1\n{(kmer + "$") * count}\n')
 
+        cls.fasta_file_1 = cls.tempdir.name + '/file_1.fa'
+        with open(cls.fasta_file_1, 'w') as f:
+            for kmer, count in cls.kmer_counts_1.items():
+                f.write(f'>L1\n{kmer}\n' * count)
+
+        cls.fasta_file_2 = cls.tempdir.name + '/file_2.fa'
+        with open(cls.fasta_file_2, 'w') as f:
             for kmer, count in cls.kmer_counts_2.items():
-                f.write(f'>L2\n{(kmer + "$") * count}\n')
+                f.write(f'>L2\n{kmer}\n' * count)
 
         cls.k = 3
 
@@ -780,7 +783,7 @@ class TestQueryCounts(TestingBase):
             cls.graph_repr = 'succinct'
             cls.mask_dummy = True
 
-        cls._build_graph(fasta_file, cls.tempdir.name + '/graph',
+        cls._build_graph((cls.fasta_file_1, cls.fasta_file_2), cls.tempdir.name + '/graph',
                          cls.k, cls.graph_repr, 'basic', '--mask-dummy' if cls.mask_dummy else '')
 
         res = cls._get_stats(f'{cls.tempdir.name}/graph{graph_file_extension[cls.graph_repr]}')
@@ -802,10 +805,11 @@ class TestQueryCounts(TestingBase):
             assert(res.returncode == 0)
 
         cls._annotate_graph(
-            fasta_file,
+            (cls.fasta_file_1, cls.fasta_file_2),
             cls.tempdir.name + '/graph' + graph_file_extension[cls.graph_repr],
             cls.tempdir.name + '/annotation',
-            cls.anno_repr
+            cls.anno_repr,
+            anno_type='filename'
         )
 
         # check annotation
@@ -854,9 +858,10 @@ class TestQueryCounts(TestingBase):
                     num_matches_2 = sum([get_count(self.kmer_counts_2, s[i:i + self.k]) > 0 for i in range(num_kmers)])
                     count_2 = sum([get_count(self.kmer_counts_2, s[i:i + self.k]) for i in range(len(s) - self.k + 1)])
 
-                    for (c, i, n) in [(count_1, 1, num_matches_1), (count_2, 0, num_matches_2)]:
+                    for (c, label, n) in [(count_1, self.fasta_file_1, num_matches_1),
+                                            (count_2, self.fasta_file_2, num_matches_2)]:
                         if n >= discovery_rate * num_kmers:
-                            expected_output += f'\t<L{2-i}>:{c}'
+                            expected_output += f'\t<{label}>:{c}'
 
                     expected_output += '\n'
 
@@ -891,10 +896,11 @@ class TestQueryCounts(TestingBase):
                     num_matches_2 = sum([get_count(self.kmer_counts_2, s[i:i + self.k]) > 0 for i in range(num_kmers)])
                     counts_2 = [str(get_count(self.kmer_counts_2, s[i:i + self.k])) for i in range(len(s) - self.k + 1)]
 
-                    for (cs, i, n) in [(counts_1, 1, num_matches_1), (counts_2, 0, num_matches_2)]:
+                    for (cs, label, n) in [(counts_1, self.fasta_file_1, num_matches_1),
+                                            (counts_2, self.fasta_file_2, num_matches_2)]:
                         if n >= discovery_rate * num_kmers:
                             cs = ':'.join(cs)
-                            expected_output += f'\t<L{2-i}>:{cs}'
+                            expected_output += f'\t<{label}>:{cs}'
 
                     expected_output += '\n'
 
@@ -915,17 +921,17 @@ class TestQueryCounts(TestingBase):
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         self.assertEqual(res.stdout.decode(),
-            "0\ts0\t<L1>:0=1\t<L2>:0=11\n"
-            "1\ts1\t<L1>:0-1=1\t<L2>:0-1=11\n"
-            "2\ts2\t<L1>:0-10=1\t<L2>:0-10=11\n"
-            "3\ts3\t<L1>:0=4\t<L2>:0=14\n"
-            "4\ts4\t<L1>:0-1=4\t<L2>:0-1=14\n"
-            "5\ts5\t<L1>:0-10=4\t<L2>:0-10=14\n"
-            "6\ts6\t<L1>:0=10\t<L2>:0=20\n"
-            "7\ts7\t<L1>:0=1:1=2:2=3:3=4:4=5:5=6:6=7:7=8:8=9:9=10\t<L2>:0=11:1=12:2=13:3=14:4=15:5=16:6=17:7=18:8=19:9=20\n"
-            "8\ts8\t<L1>:0=1:1=2:2=3:3=4:4=5:5=6:6=7:7=8:8=9:9-12=10\t<L2>:0=11:1=12:2=13:3=14:4=15:5=16:6=17:7=18:8=19:9-12=20\n"
-            "9\ts9\t<L1>:0=1:1=2:2=3:3=4:4=5:5=6:6=7:7=8:8=9:9=10:10=11:11=12:12=1\n"
-            "10\ts10\t<L1>:0=10:1=11:2=12:3=1:4=2:5=3:6=4:7=5:8=6:9=7\n"
+            f"0\ts0\t<{self.fasta_file_1}>:0=1\t<{self.fasta_file_2}>:0=11\n"
+            f"1\ts1\t<{self.fasta_file_1}>:0-1=1\t<{self.fasta_file_2}>:0-1=11\n"
+            f"2\ts2\t<{self.fasta_file_1}>:0-10=1\t<{self.fasta_file_2}>:0-10=11\n"
+            f"3\ts3\t<{self.fasta_file_1}>:0=4\t<{self.fasta_file_2}>:0=14\n"
+            f"4\ts4\t<{self.fasta_file_1}>:0-1=4\t<{self.fasta_file_2}>:0-1=14\n"
+            f"5\ts5\t<{self.fasta_file_1}>:0-10=4\t<{self.fasta_file_2}>:0-10=14\n"
+            f"6\ts6\t<{self.fasta_file_1}>:0=10\t<{self.fasta_file_2}>:0=20\n"
+            f"7\ts7\t<{self.fasta_file_1}>:0=1:1=2:2=3:3=4:4=5:5=6:6=7:7=8:8=9:9=10\t<{self.fasta_file_2}>:0=11:1=12:2=13:3=14:4=15:5=16:6=17:7=18:8=19:9=20\n"
+            f"8\ts8\t<{self.fasta_file_1}>:0=1:1=2:2=3:3=4:4=5:5=6:6=7:7=8:8=9:9-12=10\t<{self.fasta_file_2}>:0=11:1=12:2=13:3=14:4=15:5=16:6=17:7=18:8=19:9-12=20\n"
+            f"9\ts9\t<{self.fasta_file_1}>:0=1:1=2:2=3:3=4:4=5:5=6:6=7:7=8:8=9:9=10:10=11:11=12:12=1\n"
+            f"10\ts10\t<{self.fasta_file_1}>:0=10:1=11:2=12:3=1:4=2:5=3:6=4:7=5:8=6:9=7\n"
             "11\ts11\n")
 
     def test_count_quantiles(self):
@@ -935,7 +941,7 @@ class TestQueryCounts(TestingBase):
         with open(query_file, 'w') as f:
             for i, s in enumerate(self.queries):
                 f.write(f'>s{i}\n{s}\n')
-                expected_output += f'{i}\ts{i}\t<L1>'
+                expected_output += f'{i}\ts{i}\t<{self.fasta_file_1}>'
                 def get_count(d, kmer):
                     try:
                         return d[kmer]
@@ -944,7 +950,7 @@ class TestQueryCounts(TestingBase):
                 for p in quantiles:
                     counts = [get_count(self.kmer_counts_1, s[i:i + self.k]) for i in range(len(s) - self.k + 1)]
                     expected_output += f':{np.quantile(counts, p, interpolation="lower")}'
-                expected_output += f'\t<L2>'
+                expected_output += f'\t<{self.fasta_file_2}>'
                 for p in quantiles:
                     counts = [get_count(self.kmer_counts_2, s[i:i + self.k]) for i in range(len(s) - self.k + 1)]
                     expected_output += f':{np.quantile(counts, p, interpolation="lower")}'
@@ -970,7 +976,7 @@ class TestQueryCounts(TestingBase):
         query_command[4] = ' '.join([str(p) for p in quantiles])
         res = subprocess.run(query_command, stdout=PIPE)
         self.assertEqual(res.returncode, 0)
-        self.assertEqual(len(res.stdout.decode()), 5230)
+        self.assertEqual(len(res.stdout.decode()), 6590)
 
 
 @parameterized_class(('graph_repr', 'anno_repr'),
