@@ -383,8 +383,7 @@ void LabeledExtender
                                            offset, window, match, extra_penalty,
                                            [&](Alignment&& aln) {
         // store the label and coordinate information
-        aln.label_encoder
-            = &labeled_graph_.get_anno_graph().get_annotation().get_label_encoder();
+        aln.label_encoder = &labeled_graph_.get_annotator().get_label_encoder();
 
         auto get_annotation = [&](size_t table_i, node_index node) -> Vector<Column> {
             if (std::optional<Vector<Column>> fetch_labels = node_labels_[table_i])

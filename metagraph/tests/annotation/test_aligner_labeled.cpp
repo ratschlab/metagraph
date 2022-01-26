@@ -237,7 +237,7 @@ TYPED_TEST(LabeledAlignerTest, LabelMixingSwitch) {
     config.extra_penalty = 8;
     config.left_end_bonus = 5;
     config.right_end_bonus = 5;
-    LabeledAligner<LabeledExtender> aligner(*anno_graph, config);
+    LabeledAligner<LabeledExtender> aligner(anno_graph->get_graph(), anno_graph->get_annotator(), config);
 
     std::unordered_map<std::string, std::unordered_map<std::string, std::string>> exp_alignments {{
         { std::string("CGAACGCCTCA"), {{ { std::string("A"), std::string("CGAACGCCTCA") },
@@ -281,7 +281,7 @@ TYPED_TEST(LabeledAlignerTest, LabelMixingSwitchNegativePenalty) {
     config.extra_penalty = -8;
     config.left_end_bonus = 5;
     config.right_end_bonus = 5;
-    LabeledAligner<LabeledExtender> aligner(*anno_graph, config);
+    LabeledAligner<LabeledExtender> aligner(anno_graph->get_graph(), anno_graph->get_annotator(), config);
 
     std::unordered_map<std::string, std::unordered_map<std::string, std::string>> exp_alignments {{
         { std::string("CGAACGCCTCA"), {{ { std::string("A"), std::string("CGAACGCCTCA") },
@@ -327,7 +327,7 @@ TYPED_TEST(LabeledAlignerTest, LabelMixing) {
 
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -1));
     config.extra_penalty = 2;
-    LabeledAligner<LabeledExtender> aligner(*anno_graph, config);
+    LabeledAligner<LabeledExtender> aligner(anno_graph->get_graph(), anno_graph->get_annotator(), config);
 
     std::unordered_map<std::string, std::unordered_map<std::string, std::string>> exp_alignments {{
         { std::string("CGAATGCCTCA"), {{ { std::string("A"), std::string("CGAATGCCTCA") },
@@ -373,7 +373,7 @@ TYPED_TEST(LabeledAlignerTest, LabelMixingLoop) {
 
     DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -1));
     config.extra_penalty = 2;
-    LabeledAligner<LabeledExtender> aligner(*anno_graph, config);
+    LabeledAligner<LabeledExtender> aligner(anno_graph->get_graph(), anno_graph->get_annotator(), config);
 
     std::unordered_map<std::string, std::unordered_map<std::string, std::string>> exp_alignments {{
         { std::string("CGAATGCCTCC"), {{ { std::string("A"), std::string("CGAATGCCTCC") },

@@ -231,7 +231,6 @@ class DBGSuccinct::CachedView : public DBGWrapper<DBGSuccinct> {
     /**
      * Methods from DBGWrapper
      */
-    virtual node_index get_base_node(node_index node) const override final { return node; }
     virtual bool is_base_node(node_index node) const override final { return graph_->is_base_node(node); }
 
     virtual std::pair<std::vector<node_index>, bool /* is reversed */>
