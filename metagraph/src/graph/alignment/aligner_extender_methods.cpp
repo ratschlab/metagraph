@@ -1,5 +1,9 @@
 #include "aligner_extender_methods.hpp"
 
+#include <map>
+
+#include <tsl/hopscotch_set.h>
+
 #include "common/utils/simd_utils.hpp"
 #include "common/utils/template_utils.hpp"
 #include "common/logger.hpp"
@@ -14,6 +18,397 @@ namespace align {
 
 using score_t = DBGAlignerConfig::score_t;
 constexpr score_t ninf = DBGAlignerConfig::ninf;
+
+GreedyExtender::GreedyExtender(const DeBruijnGraph &graph,
+                               const DBGAlignerConfig &config,
+                               std::string_view query,
+                               const std::vector<Alignment> &seeds)
+      : graph_(&graph), config_(config), query_(query) {
+    std::ignore = seeds;
+    if (config_.alignment_match_score % 2) {
+        throw std::runtime_error("Only supported with even match score");
+        exit(1);
+    }
+    config_.alignment_mm_transition_score = config_.alignment_mm_transversion_score;
+    config_.gap_extension_penalty = -config_.alignment_mm_transition_score
+        - config_.alignment_match_score / 2;
+    config_.gap_opening_penalty = config_.gap_extension_penalty;
+
+    for (const auto &seed : seeds) {
+        if (!seed.empty())
+            seeds_[std::make_pair(seed.get_nodes().back(), seed.get_query().size() - 1 + seed.get_cigar().get_clipping())] = seed.get_query().size();
+    }
+}
+
+bool GreedyExtender::set_seed(const Alignment &seed) {
+    seed_ = seed;
+    return true;
+}
+
+bool GreedyExtender::terminate(uint64_t query_i, uint64_t) const {
+    return query_i == query_.size();
+}
+
+bool GreedyExtender::check_seed(const Alignment &seed) const {
+    return !std::all_of(seed.get_nodes().begin(), seed.get_nodes().end(),
+                        [this](const auto &node) { return nodes_.count(node); });
+}
+
+std::vector<Alignment> GreedyExtender::extend(score_t min_path_score, bool force_fixed_seed) {
+    std::ignore = min_path_score;
+    std::ignore = force_fixed_seed;
+    ++num_extensions_;
+    num_explored_nodes_ += seed_.get_nodes().size();
+
+    using dist_t = uint32_t;
+
+    std::string_view window = query_.substr(seed_.get_cigar().get_clipping());
+    score_t hmat = config_.alignment_match_score / 2;
+    score_t dmatmis = config_.alignment_match_score + config_.alignment_mm_transition_score;
+    dist_t d_offset = (config_.xdrop + hmat) / dmatmis + 1;
+
+    auto get_score = [&](score_t ij, score_t d) -> score_t {
+        return ij * hmat - d * dmatmis;
+    };
+
+
+    using diag_t = int32_t;
+    using aln_tree_node_t = uint32_t;
+    using limits_t = std::tuple<diag_t, diag_t, diag_t>;
+    std::vector<std::tuple<node_index, aln_tree_node_t, dist_t, char>> aln_tree;
+    aln_tree.emplace_back(seed_.get_nodes().back(),
+                          std::numeric_limits<aln_tree_node_t>::max(),
+                          seed_.get_query().size() - 1,
+                          seed_.get_query().back());
+
+    diag_t max_i = window.size();
+
+    using diag_v_t = std::tuple<limits_t, diag_t, std::deque<diag_t>, bool>;
+
+    using score_v = std::pair<score_t, diag_v_t>;
+    std::vector<std::map<aln_tree_node_t, score_v>> RT;
+    score_t best_score = config_.ninf;
+
+    using queue_t = std::vector<std::tuple<bool, score_t, aln_tree_node_t>>;
+    queue_t queue;
+
+    RT.emplace_back();
+    std::vector<aln_tree_node_t> traversal_stack;
+    traversal_stack.emplace_back(0);
+    while (traversal_stack.size()) {
+        aln_tree_node_t cur = traversal_stack.back();
+        traversal_stack.pop_back();
+        auto [node, parent, dist, c_prev] = aln_tree[cur];
+        ++dist;
+        if (dist == window.size()) {
+            score_t score = get_score(dist + dist, 0);
+            best_score = std::max(best_score, score);
+            if (terminate(dist, dist)) {
+                queue.clear();
+                break;
+            }
+
+            auto [it, inserted] = RT[0].emplace(cur, score_v{});
+            it->second.first = score;
+            auto &[limits, k_min, dists, has_seed] = it->second.second;
+            has_seed = true;
+            k_min = 0;
+            dists.emplace_back(dist);
+            limits = limits_t{ 0, 0, 0 };
+            continue;
+        }
+
+        graph_->call_outgoing_kmers(node, [&](node_index next, char c) {
+            ++num_explored_nodes_;
+            aln_tree_node_t aln_tree_next = aln_tree.size();
+            aln_tree.emplace_back(next, cur, dist, c);
+            if (c == window[dist]) {
+                size_t global_query_i = dist + seed_.get_cigar().get_clipping();
+                auto find_seed = seeds_.find(std::make_pair(next, global_query_i));
+                if (find_seed != seeds_.end()) {
+                    // common::logger->trace(
+                    //     "found next seed: {}, {}\t{}-{}",
+                    //     next, find_seed->second,
+                    //     global_query_i + 1 - find_seed->second,
+                    //     global_query_i + 1
+                    // );
+                    RT[0].clear();
+                    queue.clear();
+                }
+                traversal_stack.emplace_back(aln_tree_next);
+            } else {
+                // std::cerr << "foo\t" << dist << "\n";
+                auto [it, inserted] = RT[0].emplace(aln_tree_next, score_v{});
+                it->second.first = get_score(dist + dist, 0);
+                best_score = std::max(best_score, it->second.first);
+                auto &[limits, k_min, dists, has_seed] = it->second.second;
+                has_seed = true;
+                k_min = 0;
+                dists.emplace_back(dist);
+                limits = limits_t{ 0, 0, 0 };
+                queue.emplace_back(true, it->second.first, aln_tree_next);
+            }
+        });
+    }
+
+    for (dist_t d = 1; queue.size(); ++d) {
+        assert(RT.size());
+        std::make_heap(queue.begin(), queue.end());
+        queue_t next_queue;
+        RT.emplace_back();
+        while (queue.size()) {
+            std::pop_heap(queue.begin(), queue.end());
+            auto [last_found_seed, score_prev, cur] = queue.back();
+            queue.pop_back();
+
+            auto it = RT[d - 1].find(cur);
+            assert(it != RT[d - 1].end());
+            assert(score_prev == it->second.first);
+            // const auto &score_prev = it->second.first;
+            // if (score_p < score_prev)
+            //     continue;
+
+            // std::cerr << "foo\t" << d << "\t" << score_prev << "\t\t" << num_explored_nodes_ << "\n";
+
+            const auto &[limits_prev, k_prev, vals_prev, has_seed_prev] = it->second.second;
+            const auto &[L, U, Uv2] = limits_prev;
+            if (L > std::min(U, Uv2))
+                continue;
+
+            score_t xdrop_cutoff = config_.ninf;
+            for (const auto &[n, sv] : RT[d - std::min(d, d_offset)]) {
+                xdrop_cutoff = std::max(xdrop_cutoff, sv.first - config_.xdrop);
+            }
+
+            std::vector<std::pair<diag_t, diag_t>> to_update;
+
+            for (diag_t k = L - 1; k <= U + 1; ++k) {
+                diag_t query_i = config_.ninf;
+                if (L < k && vals_prev[k - k_prev - 1] < max_i && vals_prev[k - k_prev - 1] + 1 > query_i) {
+                    query_i = vals_prev[k - k_prev - 1] + 1;
+                }
+
+                if (L <= k && k <= U && vals_prev[k - k_prev] < max_i && vals_prev[k - k_prev] + 1 > query_i) {
+                    query_i = vals_prev[k - k_prev] + 1;
+                }
+
+                if (k < U && vals_prev[k - k_prev + 1] <= max_i && vals_prev[k - k_prev + 1] > query_i) {
+                    query_i = vals_prev[k - k_prev + 1];
+                }
+
+                assert(query_i <= config_.ninf + 1 || query_i >= 0);
+
+                if (query_i <= config_.ninf + 1 || get_score(query_i + query_i - k, d) < xdrop_cutoff)
+                    continue;
+
+                to_update.emplace_back(query_i - k - std::get<2>(aln_tree[cur]), k);
+            }
+
+            if (to_update.empty())
+                continue;
+
+            std::sort(to_update.begin(), to_update.end());
+            std::vector<std::vector<aln_tree_node_t>> local_tree;
+            local_tree.emplace_back();
+            local_tree.back().emplace_back(it->first);
+            size_t start = 0;
+            if (to_update.front().first < 0) {
+                for (diag_t i = 0; i < -to_update.front().first; ++i) {
+                    if (local_tree.back().empty()) {
+                        local_tree.emplace_back();
+                        continue;
+                    }
+
+                    local_tree.emplace_back();
+                    local_tree.back().emplace_back(std::get<1>(aln_tree[local_tree[local_tree.size() - 2].back()]));
+                    if (local_tree.back().back() == std::numeric_limits<aln_tree_node_t>::max())
+                        local_tree.back().clear();
+                }
+                std::reverse(local_tree.begin(), local_tree.end());
+                start = local_tree.size() - 1;
+            }
+            assert(local_tree[start].size() == 1);
+            assert(local_tree[start][0] == it->first);
+            for (diag_t i = 0; i < to_update.back().first; ++i) {
+                local_tree.emplace_back();
+                for (aln_tree_node_t ref_j : local_tree[i + start]) {
+                    auto [node, parent, dist, c_prev] = aln_tree[ref_j];
+                    ++dist;
+                    graph_->call_outgoing_kmers(node, [&](node_index next, char c) {
+                        ++num_explored_nodes_;
+                        local_tree.back().emplace_back(aln_tree.size());
+                        aln_tree.emplace_back(next, ref_j, dist, c);
+                    });
+                }
+            }
+            diag_t local_tree_offset = std::min(std::get<0>(to_update[0]), 0);
+
+            tsl::hopscotch_set<aln_tree_node_t> pushed;
+
+            for (auto [ref_offset, k] : to_update) {
+                diag_t query_i = ref_offset + k + std::get<2>(aln_tree[cur]);
+                assert(query_i >= k);
+                assert(static_cast<dist_t>(ref_offset - local_tree_offset) < local_tree.size());
+
+                auto push_score = [&](dist_t query_i, aln_tree_node_t ref_j, bool found_seed) {
+                    auto [it, inserted] = RT[d].emplace(
+                        ref_j,
+                        score_v{ score_prev, diag_v_t{} }
+                    );
+                    score_t score = get_score(query_i + std::get<2>(aln_tree[ref_j]), d);
+                    pushed.emplace(ref_j);
+
+                    it->second.first = std::max(it->second.first, score);
+                    best_score = std::max(best_score, score);
+
+                    auto &[newlimits, k_min, dists, has_seed] = it->second.second;
+                    has_seed |= found_seed;
+
+                    if (inserted || has_seed) {
+                        k_min = k;
+                        dists.clear();
+                        dists.emplace_back(query_i);
+                    } else {
+                        if (k >= k_min) {
+                            // append to the end of the array
+                            dists.resize(std::max(
+                                dists.size(), static_cast<size_t>(k - k_min + 1)
+                            ), config_.ninf);
+                            dists[k - k_min] = query_i;
+                        } else {
+                            dists.insert(dists.begin(), k_min - k, config_.ninf);
+                            k_min = k;
+                            dists[0] = query_i;
+                        }
+                    }
+                    auto &[newL, newU, newUv2] = newlimits;
+                    if (inserted || has_seed) {
+                        newL = k;
+                        newU = k;
+                    } else {
+                        newL = std::min(newL, k);
+                        newU = std::max(newU, k);
+                    }
+
+                    if (query_i == window.size()) {
+                        if (inserted || has_seed) {
+                            newUv2 = k - 2;
+                        } else {
+                            newUv2 = std::min(newUv2, k - 2);
+                        }
+                    }
+                };
+
+                tsl::hopscotch_map<aln_tree_node_t, bool> prevs;
+                for (auto ref_j : local_tree[ref_offset - local_tree_offset]) {
+                    prevs.emplace(std::get<1>(aln_tree[ref_j]), false);
+                }
+                bool reached_end = false;
+                dist_t num_exact_match = 1;
+                for (dist_t j = ref_offset - local_tree_offset; !reached_end; ++j, ++query_i, ++num_exact_match) {
+                    assert(query_i <= max_i);
+                    assert(j <= local_tree.size());
+                    if (aln_tree.size() > config_.max_nodes_per_seq_char * window.size()) {
+                        pushed.clear();
+                        next_queue.clear();
+                        reached_end = true;
+                        break;
+                    }
+
+                    if (j == local_tree.size()) {
+                        local_tree.emplace_back();
+                        for (auto ref_j : local_tree[j - 1]) {
+                            auto [node, parent, dist, c_prev] = aln_tree[ref_j];
+
+                            ++dist;
+                            graph_->call_outgoing_kmers(node, [&](node_index next, char c) {
+                                ++num_explored_nodes_;
+                                aln_tree_node_t aln_tree_next = aln_tree.size();
+                                aln_tree.emplace_back(next, ref_j, dist, c);
+                                local_tree.back().emplace_back(aln_tree_next);
+                            });
+                        }
+                    }
+
+                    tsl::hopscotch_map<aln_tree_node_t, bool> prevs_next;
+                    reached_end = true;
+                    for (auto ref_j : local_tree[j]) {
+                        assert(std::get<2>(aln_tree[ref_j]) == static_cast<dist_t>(query_i - k));
+                        auto [node, parent, dist, c] = aln_tree[ref_j];
+                        auto pt = prevs.find(parent);
+                        if (pt == prevs.end())
+                            continue;
+
+                        bool found_seed = pt->second;
+
+                        if (query_i == max_i) {
+                            push_score(query_i, ref_j, found_seed);
+                            if (terminate(query_i, ref_j)) {
+                                pushed.clear();
+                                queue.clear();
+                                break;
+                            }
+                        } else if (window[query_i] != c) {
+                            push_score(query_i, ref_j, found_seed);
+                            if (found_seed) {
+                                pushed.clear();
+                                queue.clear();
+                                pushed.emplace(ref_j);
+                                break;
+                            }
+                        } else {
+                            if (!found_seed) {
+                                size_t global_query_i = query_i + seed_.get_cigar().get_clipping();
+                                auto find_seed = seeds_.find(std::make_pair(node, global_query_i));
+                                found_seed |= find_seed != seeds_.end() && find_seed->second <= num_exact_match;
+                                // if (found_seed) {
+                                //     common::logger->trace(
+                                //         "found next seed, terminating: {}, {}\t{}-{}",
+                                //         node, find_seed->second,
+                                //         global_query_i + 1 - find_seed->second,
+                                //         global_query_i + 1
+                                //     );
+                                // }
+                            }
+                            reached_end = false;
+                            prevs_next.emplace(ref_j, found_seed);
+                        }
+                    }
+
+                    std::swap(prevs, prevs_next);
+                }
+
+                if (aln_tree.size() > config_.max_nodes_per_seq_char * window.size()) {
+                    pushed.clear();
+                    next_queue.clear();
+                    reached_end = true;
+                    break;
+                }
+            }
+
+            for (auto ref_j : pushed) {
+                const auto &bucket = RT[d][ref_j];
+                next_queue.emplace_back(std::get<3>(bucket.second), bucket.first, ref_j);
+            }
+        }
+
+        std::swap(queue, next_queue);
+
+        if (aln_tree.size() > config_.max_nodes_per_seq_char * window.size()) {
+            common::logger->trace("Explored too much, giving up");
+            break;
+        }
+    }
+
+    // common::logger->trace("Best score: {}, num_explored: {}, num_extensions: {}",
+    //                       best_score, num_explored_nodes_, num_extensions_);
+
+    for (auto&& [node, parent, dist, c] : aln_tree) {
+        nodes_.emplace(node);
+    }
+
+    return {};
+}
 
 // to ensure that SIMD operations on arrays don't read out of bounds
 constexpr size_t kPadding = 5;

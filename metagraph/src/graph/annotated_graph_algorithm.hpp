@@ -9,6 +9,13 @@
 
 
 namespace mtg {
+
+namespace annot {
+namespace matrix {
+class CSRMatrix;
+}
+}
+
 namespace graph {
 
 
@@ -58,6 +65,9 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
                     const tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> &labels_out_round2,
                     const DifferentialAssemblyConfig &config,
                     size_t num_threads = 1);
+
+
+annot::matrix::CSRMatrix get_2hop_index(const AnnotatedDBG &anno_graph, size_t num_threads = 1);
 
 } // namespace graph
 } // namespace mtg

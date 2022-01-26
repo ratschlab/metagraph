@@ -6,6 +6,7 @@
 
 #include "aligner_alignment.hpp"
 #include "common/aligned_vector.hpp"
+#include "common/hashers/hash.hpp"
 
 
 namespace mtg {
@@ -50,6 +51,41 @@ class IExtender {
 
     // returns whether the seed must be a prefix of an extension
     virtual bool fixed_seed() const { return true; }
+};
+
+class GreedyExtender : public IExtender {
+  public:
+    GreedyExtender(const DeBruijnGraph &graph,
+                   const DBGAlignerConfig &config,
+                   std::string_view query,
+                   const std::vector<Alignment> &seeds = {});
+
+    virtual ~GreedyExtender() {}
+
+    virtual void set_graph(const DeBruijnGraph &graph) override final { graph_ = &graph; }
+
+    virtual size_t num_explored_nodes() const override final { return num_explored_nodes_; }
+    virtual size_t num_extensions() const override final { return num_extensions_; }
+
+    virtual bool check_seed(const Alignment &seed) const override final;
+
+    const tsl::hopscotch_set<node_index>& get_explored_nodes() const { return nodes_; }
+
+  private:
+    const DeBruijnGraph *graph_;
+    DBGAlignerConfig config_;
+    std::string_view query_;
+    Alignment seed_;
+    size_t num_explored_nodes_ = 0;
+    size_t num_extensions_ = 0;
+    tsl::hopscotch_set<node_index> nodes_;
+    tsl::hopscotch_map<std::pair<node_index, size_t>, size_t, utils::Hash<std::pair<node_index, size_t>>> seeds_;
+
+    virtual bool set_seed(const Alignment &seed) override final;
+
+    virtual std::vector<Alignment> extend(score_t min_path_score, bool force_fixed_seed) override final;
+
+    virtual bool terminate(uint64_t query_i, uint64_t ref_i) const;
 };
 
 class SeedFilteringExtender : public IExtender {

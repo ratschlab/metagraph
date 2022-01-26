@@ -4,6 +4,8 @@
 #include "common/vectors/vector_algorithm.hpp"
 #include "common/vectors/bitmap.hpp"
 #include "graph/representation/masked_graph.hpp"
+#include "annotation/binary_matrix/row_diff/row_diff.hpp"
+#include "annotation/int_matrix/csr_matrix/csr_matrix.hpp"
 
 
 namespace mtg {
@@ -391,6 +393,25 @@ void update_masked_graph_by_unitig(MaskedDeBruijnGraph &masked_graph,
                   kept_unitigs, total_unitigs,
                   static_cast<double>(num_kept_nodes + kept_unitigs * (masked_graph.get_k() - 1))
                       / kept_unitigs);
+}
+
+annot::matrix::CSRMatrix get_2hop_index(const AnnotatedDBG &anno_graph, size_t num_threads) {
+    // const auto *rd_anno = dynamic_cast<const annot::IRowDiff*>(anno_graph.get_annotation().get_matrix());
+    // if (!rd_anno) {
+    //     logger->error("Only RowDiff annotators supported");
+    //     exit(1);
+    // }
+
+    // const DeBruijnGraph &graph = anno_graph.get_graph();
+    // using RowValues = annot::IntMatrix::RowValues;
+    // Vector<Vector<RowValues>> row_values(graph.max_index() + 1);
+    // const annot::IRowDiff::anchor_bv_type &anchors = rd_anno->anchor();
+    // graph.call_unitigs([&](const std::string&, const auto &path) {
+    //     std::ignore = path;
+    // }, num_threads);
+    std::ignore = anno_graph;
+    std::ignore = num_threads;
+    return annot::matrix::CSRMatrix();
 }
 
 } // namespace graph
