@@ -725,7 +725,7 @@ class TestQuery1Column(TestingBase):
 @parameterized_class(('graph_repr', 'anno_repr'),
     input_values=product(
         [repr for repr in GRAPH_TYPES if not (repr == 'bitmap' and PROTEIN_MODE)],
-        ['int_brwt', 'row_diff_int_brwt']
+        [anno_type for anno_type in ANNO_TYPES if anno_type.endswith('int_brwt') or anno_type.endswith('_coord')]
     ),
     class_name_func=get_test_class_name
 )
@@ -763,10 +763,10 @@ class TestQueryCounts(TestingBase):
         fasta_file = cls.tempdir.name + '/file.fa'
         with open(fasta_file, 'w') as f:
             for kmer, count in cls.kmer_counts_1.items():
-                f.write(f'>L1\n{kmer}\n' * count)
+                f.write(f'>L1\n{(kmer + "$") * count}\n')
 
             for kmer, count in cls.kmer_counts_2.items():
-                f.write(f'>L2\n{kmer}\n' * count)
+                f.write(f'>L2\n{(kmer + "$") * count}\n')
 
         cls.k = 3
 
@@ -801,24 +801,11 @@ class TestQueryCounts(TestingBase):
             res = subprocess.run([convert_command], shell=True)
             assert(res.returncode == 0)
 
-        def check_suffix(anno_repr, suffix):
-            match = anno_repr.endswith(suffix)
-            if match:
-                anno_repr = anno_repr[:-len(suffix)]
-            return anno_repr, match
-
-        cls.anno_repr, separate = check_suffix(cls.anno_repr, '_separate')
-        cls.anno_repr, no_fork_opt = check_suffix(cls.anno_repr, '_no_fork_opt')
-        cls.anno_repr, no_anchor_opt = check_suffix(cls.anno_repr, '_no_anchor_opt')
-
         cls._annotate_graph(
             fasta_file,
             cls.tempdir.name + '/graph' + graph_file_extension[cls.graph_repr],
             cls.tempdir.name + '/annotation',
-            cls.anno_repr,
-            separate,
-            no_fork_opt,
-            no_anchor_opt
+            cls.anno_repr
         )
 
         # check annotation

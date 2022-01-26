@@ -286,7 +286,11 @@ void ColumnCompressed<Label>::serialize_coordinates(const std::string &filename)
         auto &c_v = const_cast<ColumnCompressed*>(this)->coords_[j];
 
         ips4o::parallel::sort(c_v.begin(), c_v.end(), std::less<>(), get_num_threads());
-        c_v.erase(std::unique(c_v.begin(), c_v.end()), c_v.end());
+        if (std::unique(c_v.begin(), c_v.end()) != c_v.end()) {
+            logger->error("Found repeated coordinates. If flag --anno-header is passed,"
+                          " make sure sequence headers don't repeat.");
+            exit(1);
+        }
 
         #pragma omp parallel for num_threads(get_num_threads())
         for (size_t i = 0; i < c_v.size(); ++i) {

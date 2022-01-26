@@ -68,10 +68,12 @@ std::string process_search_request(const std::string &received_message,
     config.print_signature = json.get("with_signature", config.print_signature).asBool();
     config.query_coords = json.get("query_coords", config.query_coords).asBool();
     config.count_kmers = json.get("abundance_sum", config.count_kmers).asBool();
+    config.query_counts = json.get("query_counts", config.query_counts).asBool();
 
     // Throw client an error if they try to query coordinates/kmer-counts on unsupported indexes
-    if (config.count_kmers && !(dynamic_cast<const annot::matrix::IntMatrix *>(
-                                        &anno_graph.get_annotation().get_matrix()))) {
+    if ((config.count_kmers || config.query_counts)
+            && !(dynamic_cast<const annot::matrix::IntMatrix *>(
+                            &anno_graph.get_annotation().get_matrix()))) {
         throw std::invalid_argument("Annotation does not support k-mer count queries");
     }
 
