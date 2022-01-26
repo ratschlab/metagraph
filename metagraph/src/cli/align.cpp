@@ -414,10 +414,12 @@ int align_to_graph(Config *config) {
 
             auto process_batch = [&,graph](SeqBatch batch) {
                 assert(graph->get_mode() != DeBruijnGraph::PRIMARY);
-                std::shared_ptr<IDBGAligner> aligner;
+                std::unique_ptr<IDBGAligner> aligner;
 
                 if (anno_dbg) {
-                    aligner = std::make_unique<LabeledAligner<>>(*anno_dbg, *graph, aligner_config);
+                    aligner = std::make_unique<LabeledAligner<>>(
+                        *graph, anno_dbg->get_annotator(), aligner_config
+                    );
                 } else {
                     aligner = std::make_unique<DBGAligner<>>(*graph, aligner_config);
                 }

@@ -26,6 +26,7 @@ using VectorSet = tsl::ordered_set<Key, Hash, EqualTo, Allocator, Container, Ind
 
 class AnnotationBuffer {
   public:
+    typedef AnnotatedDBG::Annotator Annotator;
     typedef DeBruijnGraph::node_index node_index;
     typedef annot::binmat::BinaryMatrix::Column Column;
     typedef annot::binmat::BinaryMatrix::Row Row;
@@ -36,9 +37,10 @@ class AnnotationBuffer {
 
     static constexpr Row nrow = std::numeric_limits<Row>::max();
 
-    AnnotationBuffer(const AnnotatedDBG &anno_graph);
+    AnnotationBuffer(const DeBruijnGraph &graph, const Annotator &annotator);
 
-    const AnnotatedDBG& get_anno_graph() const { return anno_graph_; }
+    const DeBruijnGraph& get_graph() const { return graph_; }
+    const Annotator& get_annotator() const { return annotator_; }
     const annot::matrix::MultiIntMatrix* get_coordinate_matrix() const { return multi_int_; }
 
     // flush the buffer and fetch their annotations from the AnnotatedDBG
@@ -46,6 +48,17 @@ class AnnotationBuffer {
 
     // push (a) node(s) to the buffer
     node_index add_node(node_index node);
+
+    node_index get_base_node(node_index node) {
+        auto find = labels_.find(node);
+        if (find == labels_.end()) {
+            add_node(node);
+            find = labels_.find(node);
+        }
+
+        assert(find != labels_.end());
+        return AnnotatedDBG::anno_to_graph_index(find->second.first);
+    }
 
     std::pair<std::vector<node_index>, bool>
     add_path(const std::vector<node_index> &path, std::string sequence);
@@ -83,7 +96,8 @@ class AnnotationBuffer {
     size_t num_cached() const { return added_rows_.size(); }
 
   private:
-    const AnnotatedDBG &anno_graph_;
+    const DeBruijnGraph &graph_;
+    const Annotator &annotator_;
     const annot::matrix::MultiIntMatrix *multi_int_;
 
     // placeholder index for an unfetched annotation
@@ -135,7 +149,7 @@ class LabeledExtender : public DefaultColumnExtender {
                     const DBGAlignerConfig &config,
                     const Aggregator &,
                     std::string_view query)
-          : DefaultColumnExtender(labeled_graph.get_anno_graph().get_graph(), config, query),
+          : DefaultColumnExtender(labeled_graph.get_graph(), config, query),
             labeled_graph_(labeled_graph) {}
 
     virtual ~LabeledExtender() {}
@@ -167,7 +181,7 @@ class LabeledBacktrackingExtender : public LabeledExtender {
                                 const Aggregator &aggregator,
                                 std::string_view query)
           : LabeledExtender(labeled_graph, config, aggregator, query),
-            extensions_(labeled_graph_.get_anno_graph().get_graph(),
+            extensions_(labeled_graph_.get_graph(),
                         aggregator.get_query(false),
                         aggregator.get_query(true), this->config_) {}
 
@@ -265,15 +279,16 @@ template <class Extender = LabeledBacktrackingExtender,
           class AlignmentCompare = LocalAlignmentLess>
 class LabeledAligner : public ISeedAndExtendAligner<AlignmentCompare> {
   public:
+    typedef AnnotationBuffer::Annotator Annotator;
     typedef Alignment::score_t score_t;
     typedef Alignment::node_index node_index;
     typedef Alignment::Column Column;
 
-    LabeledAligner(const AnnotatedDBG &anno_graph,
-                   const DeBruijnGraph &graph,
+    LabeledAligner(const DeBruijnGraph &graph,
+                   const Annotator &annotator,
                    const DBGAlignerConfig &config)
           : ISeedAndExtendAligner<AlignmentCompare>(graph, config),
-            labeled_graph_(anno_graph) {
+            labeled_graph_(graph, annotator) {
         if (labeled_graph_.get_coordinate_matrix()
                 && std::is_same_v<Extender, LabeledBacktrackingExtender>) {
             // do not use a global xdrop cutoff since we need separate cutoffs
@@ -470,7 +485,7 @@ class LabeledAligner : public ISeedAndExtendAligner<AlignmentCompare> {
                                       std::back_inserter(seed.label_columns));
             }
 
-            seed.label_encoder = &labeled_graph_.get_anno_graph().get_annotator().get_label_encoder();
+            seed.label_encoder = &labeled_graph_.get_annotator().get_label_encoder();
 
             for (size_t i = 1; i < nodes.size() && seed.label_columns.size(); ++i) {
                 auto [next_fetch_labels, next_fetch_coords]

@@ -14,11 +14,12 @@ namespace align {
 using MIM = annot::matrix::MultiIntMatrix;
 
 
-AnnotationBuffer::AnnotationBuffer(const AnnotatedDBG &anno_graph)
-      : anno_graph_(anno_graph),
-        multi_int_(dynamic_cast<const MIM*>(&anno_graph_.get_annotator().get_matrix())),
+AnnotationBuffer::AnnotationBuffer(const DeBruijnGraph &graph, const Annotator &annotator)
+      : graph_(graph),
+        annotator_(annotator),
+        multi_int_(dynamic_cast<const MIM*>(&annotator_.get_matrix())),
         labels_set_({ {} }) {
-    if (multi_int_ && anno_graph.get_graph().get_mode() == DeBruijnGraph::CANONICAL) {
+    if (multi_int_ && graph_.get_mode() == DeBruijnGraph::CANONICAL) {
         multi_int_ = nullptr;
         common::logger->warn("Coordinates not supported when aligning to CANONICAL "
                              "or PRIMARY mode graphs");
@@ -59,7 +60,7 @@ void AnnotationBuffer::flush() {
             push_node_labels(node_it++, row_it++, std::move(labels));
         }
     } else {
-        for (auto&& labels : anno_graph_.get_annotator().get_matrix().get_rows(added_rows_)) {
+        for (auto&& labels : annotator_.get_matrix().get_rows(added_rows_)) {
             push_node_labels(node_it++, row_it++, std::forward<decltype(labels)>(labels));
         }
     }
@@ -245,21 +246,20 @@ void LabeledBacktrackingExtender
 
 auto AnnotationBuffer::add_path(const std::vector<node_index> &path, std::string query)
         -> std::pair<std::vector<node_index>, bool> {
-    assert(anno_graph_.get_graph().get_mode() != DeBruijnGraph::PRIMARY
+    assert(graph_.get_mode() != DeBruijnGraph::PRIMARY
                 && "PRIMARY graphs must be wrapped into CANONICAL");
 
     if (path.empty())
         return {};
 
-    const DeBruijnGraph &graph = anno_graph_.get_graph();
-    const DeBruijnGraph &base_graph = graph.get_base_graph();
+    const DeBruijnGraph &base_graph = graph_.get_base_graph();
     bool base_is_canonical = base_graph.get_mode() == DeBruijnGraph::CANONICAL;
 
     const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&base_graph);
     const boss::BOSS *boss = dbg_succ ? &dbg_succ->get_boss() : nullptr;
 
     if (base_is_canonical && query.front() == '#')
-        query = graph.get_node_sequence(path[0]) + query.substr(graph.get_k());
+        query = graph_.get_node_sequence(path[0]) + query.substr(graph_.get_k());
 
     auto call_node = [&](node_index node, node_index base_node) {
         if (base_node != DeBruijnGraph::npos) {
@@ -285,7 +285,7 @@ auto AnnotationBuffer::add_path(const std::vector<node_index> &path, std::string
         }
     };
 
-    auto base_path = graph.get_base_path(path, query);
+    auto base_path = graph_.get_base_path(path, query);
     if (!base_path.second) {
         for (size_t i = 0; i < base_path.first.size(); ++i) {
             call_node(path[i], base_path.first[i]);
@@ -301,7 +301,7 @@ auto AnnotationBuffer::add_path(const std::vector<node_index> &path, std::string
 }
 
 auto AnnotationBuffer::add_node(node_index node) -> node_index {
-    return add_path({ node }, std::string(anno_graph_.get_graph().get_k(), '#')).first[0];
+    return add_path({ node }, std::string(graph_.get_k(), '#')).first[0];
 }
 
 bool LabeledBacktrackingExtender::skip_backtrack_start(size_t i) {
@@ -567,8 +567,7 @@ void LabeledBacktrackingExtender
     );
 
     // store the label and coordinate information
-    alignment.label_encoder
-        = &labeled_graph_.get_anno_graph().get_annotator().get_label_encoder();
+    alignment.label_encoder = &labeled_graph_.get_annotator().get_label_encoder();
 
     alignment.label_columns = label_intersection_;
 
