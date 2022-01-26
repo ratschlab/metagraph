@@ -94,21 +94,21 @@ class SeqSearchResult {
     typedef std::vector<Label> LabelVec;
     typedef std::vector<std::pair<Label, size_t>> LabelCountVec;
     typedef std::vector<std::pair<Label, sdsl::bit_vector>> LabelSigVec;
-    typedef std::vector<std::pair<Label, std::vector<size_t>>> LabelAbundanceVec;
-    typedef std::vector<std::pair<Label, std::vector<SmallVector<uint64_t>>>> LabelCoordVec;
+    typedef std::vector<std::tuple<Label, size_t, std::vector<size_t>>> LabelCountAbundancesVec;
+    typedef std::vector<std::tuple<Label, size_t, std::vector<SmallVector<uint64_t>>>> LabelCountCoordsVec;
 
     typedef std::variant<LabelVec,
                          LabelCountVec,
                          LabelSigVec,
-                         LabelAbundanceVec,
-                         LabelCoordVec> result_type;
+                         LabelCountAbundancesVec,
+                         LabelCountCoordsVec> result_type;
 
     // JSON Field Keys
     static constexpr auto SEQ_DESCRIPTION_JSON_FIELD = "seq_description";
     static constexpr auto KMER_COUNT_FIELD = "kmer_count";
     static constexpr auto KMER_COORDINATE_FIELD = "kmer_coords";
     static constexpr auto SIGNATURE_FIELD = "signature";
-    static constexpr auto KMER_ABUNDANCE_FIELD = "kmer_abundance";
+    static constexpr auto KMER_ABUNDANCE_FIELD = "kmer_abundances";
     static constexpr auto SCORE_JSON_FIELD = "score";
     static constexpr auto SEQUENCE_JSON_FIELD = "sequence";
     static constexpr auto ALIGNMENT_JSON_FIELD = "alignments";

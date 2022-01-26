@@ -209,20 +209,21 @@ Json::Value SeqSearchResult::to_json(bool verbose_output,
             // Add kmer_counts calculated using bitmask
             label_obj[KMER_COUNT_FIELD] = Json::Value(sdsl::util::cnt_one_bits(kmer_presence_mask));
         }
-    } else if (const auto *v = std::get_if<LabelAbundanceVec>(&result_)) {
+    } else if (const auto *v = std::get_if<LabelCountAbundancesVec>(&result_)) {
         // k-mer counts (or quantiles)
-        for (const auto &[label, counts] : *v) {
-            assert(counts.size());
+        for (const auto &[label, count, abundances] : *v) {
+            assert(abundances.size());
             Json::Value &label_obj = root["results"].append(get_label_as_json(label));
+            label_obj[KMER_COUNT_FIELD] = static_cast<Json::Int64>(count);
             Json::Value &counts_array = (label_obj[KMER_ABUNDANCE_FIELD] = Json::arrayValue);
             if (verbose_output) {
-                for (size_t c : counts) {
+                for (size_t c : abundances) {
                     counts_array.append(static_cast<Json::Int64>(c));
                 }
             } else {
-                std::pair<size_t, size_t> last(0, counts.at(0));
-                for (size_t i = 1; i <= counts.size(); ++i) {
-                    if (i < counts.size() && counts[i] == last.second)
+                std::pair<size_t, size_t> last(0, abundances.at(0));
+                for (size_t i = 1; i <= abundances.size(); ++i) {
+                    if (i < abundances.size() && abundances[i] == last.second)
                         continue; // extend run
 
                     // end of run
@@ -235,17 +236,18 @@ Json::Value SeqSearchResult::to_json(bool verbose_output,
                     }
 
                     // start new run
-                    if (i < counts.size()) {
+                    if (i < abundances.size()) {
                         last.first = i;
-                        last.second = counts[i];
+                        last.second = abundances[i];
                     }
                 }
             }
         }
     } else {
         // Kmer coordinates
-        for (const auto &[label, tuples] : std::get<LabelCoordVec>(result_)) {
+        for (const auto &[label, count, tuples] : std::get<LabelCountCoordsVec>(result_)) {
             Json::Value &label_obj = root["results"].append(get_label_as_json(label));
+            label_obj[KMER_COUNT_FIELD] = static_cast<Json::Int64>(count);
             Json::Value &coord_array = (label_obj[KMER_COORDINATE_FIELD] = Json::arrayValue);
 
             // Each tuple is represented as a folly::SmallVector<uint64_t> instance
@@ -305,16 +307,16 @@ std::string SeqSearchResult::to_string(const std::string delimiter,
                                   sdsl::util::to_string(kmer_presence_mask),
                                   anno_graph.score_kmer_presence_mask(kmer_presence_mask));
         }
-    } else if (const auto *v = std::get_if<LabelAbundanceVec>(&result_)) {
+    } else if (const auto *v = std::get_if<LabelCountAbundancesVec>(&result_)) {
         // k-mer counts (or quantiles)
-        for (const auto &[label, counts] : *v) {
+        for (const auto &[label, count, abundances] : *v) {
             output += "\t<" + label + ">";
             if (verbose_output) {
-                output += fmt::format(":{}", fmt::join(counts, ":"));
+                output += fmt::format(":{}", fmt::join(abundances, ":"));
             } else {
-                std::pair<size_t, size_t> last(0, counts.at(0));
-                for (size_t i = 1; i <= counts.size(); ++i) {
-                    if (i < counts.size() && counts[i] == last.second)
+                std::pair<size_t, size_t> last(0, abundances.at(0));
+                for (size_t i = 1; i <= abundances.size(); ++i) {
+                    if (i < abundances.size() && abundances[i] == last.second)
                         continue; // extend run
 
                     // end of run
@@ -327,16 +329,16 @@ std::string SeqSearchResult::to_string(const std::string delimiter,
                     }
 
                     // start new run
-                    if (i < counts.size()) {
+                    if (i < abundances.size()) {
                         last.first = i;
-                        last.second = counts[i];
+                        last.second = abundances[i];
                     }
                 }
             }
         }
     } else {
         // Kmer coordinates
-        for (const auto &[label, tuples] : std::get<LabelCoordVec>(result_)) {
+        for (const auto &[label, count, tuples] : std::get<LabelCountCoordsVec>(result_)) {
             output += "\t<" + label + ">";
 
             if (verbose_output) {

@@ -251,6 +251,7 @@ class TestAPIClient(TestAPIBase):
                                        discovery_threshold=0.01)
         df = ret[self.graph_name]
         self.assertEqual((self.sample_query_expected_rows * repetitions, 3), df.shape)
+        self.assertEqual(df['kmer_count'].sum(), 1381 * repetitions)
 
     def test_api_simple_query_df(self):
         ret = self.graph_client.search(self.sample_query, parallel=False,
@@ -258,6 +259,7 @@ class TestAPIClient(TestAPIBase):
         df = ret[self.graph_name]
 
         self.assertEqual((self.sample_query_expected_rows, 3), df.shape)
+        self.assertEqual(df['kmer_count'].sum(), 1381)
 
     def test_api_simple_query_with_signature_df(self):
         ret = self.graph_client.search(self.sample_query, parallel=False,
@@ -265,6 +267,7 @@ class TestAPIClient(TestAPIBase):
         df = ret[self.graph_name]
 
         self.assertEqual((self.sample_query_expected_rows, 4), df.shape)
+        self.assertEqual(df['kmer_count'].sum(), 1381)
 
     def test_api_simple_query_align_df(self):
         ret = self.graph_client.search(self.sample_query, parallel=False,
@@ -272,6 +275,7 @@ class TestAPIClient(TestAPIBase):
         df = ret[self.graph_name]
 
         self.assertEqual((self.sample_query_expected_rows, 3), df.shape)
+        self.assertEqual(df['kmer_count'].sum(), 1381)
 
     def test_api_simple_query_align_no_result(self):
         # If aligned sequence does not have result when searched, make sure client doesn't fail
@@ -288,7 +292,7 @@ class TestAPIClient(TestAPIBase):
 
         label_list = ret[self.graph_name]
 
-        self.assertGreater(len(label_list), 0)
+        self.assertEqual(len(label_list), 100)
         self.assertTrue(all(l.startswith('ENST') for l in label_list))
 
     def test_api_align_df(self):
@@ -431,13 +435,39 @@ class TestAPIClientWithCoordinates(TestAPIBase):
         cls.graph_client = MultiGraphClient()
         cls.graph_client.add_graph(cls.host, cls.port, cls.graph_name)
 
+    def test_api_simple_query_df(self):
+        ret = self.graph_client.search(self.sample_query, discovery_threshold=0.01,
+                                       parallel=False)
+        df = ret[self.graph_name]
+
+        self.assertEqual((self.sample_query_expected_rows, 3), df.shape)
+        self.assertEqual(df['kmer_count'].sum(), 1381)
+
+    def test_api_simple_query_abundance_sum_df(self):
+        ret = self.graph_client.search(self.sample_query, discovery_threshold=0.01,
+                                       parallel=False, abundance_sum=True)
+        df = ret[self.graph_name]
+
+        self.assertEqual((self.sample_query_expected_rows, 3), df.shape)
+        self.assertEqual(df['kmer_count'].sum(), 2323)
+
+    def test_api_simple_query_counts_df(self):
+        ret = self.graph_client.search(self.sample_query, discovery_threshold=0.01,
+                                       parallel=False, query_counts=True)
+        df = ret[self.graph_name]
+
+        self.assertEqual((self.sample_query_expected_rows, 4), df.shape)
+        self.assertEqual(df['kmer_count'].sum(), 1381)
+        self.assertEqual(df['kmer_abundances'].size, self.sample_query_expected_rows)
+
     def test_api_simple_query_coords_df(self):
         ret = self.graph_client.search(self.sample_query, discovery_threshold=0.01,
                                        parallel=False, query_coords=True)
         df = ret[self.graph_name]
 
-        self.assertEqual((self.sample_query_expected_rows, 3), df.shape)
-        self.assertIn('kmer_coords', df.columns)
+        self.assertEqual((self.sample_query_expected_rows, 4), df.shape)
+        self.assertEqual(df['kmer_count'].sum(), 1381)
+        self.assertEqual(df['kmer_coords'].size, self.sample_query_expected_rows)
 
 
 @parameterized_class(('mode',), input_values=[('canonical',), ('primary',)])
@@ -458,13 +488,30 @@ class TestAPIClientWithCounts(TestAPIBase):
         cls.graph_client = MultiGraphClient()
         cls.graph_client.add_graph(cls.host, cls.port, cls.graph_name)
 
+    def test_api_simple_query_df(self):
+        ret = self.graph_client.search(self.sample_query, discovery_threshold=0.01,
+                                       parallel=False)
+        df = ret[self.graph_name]
+
+        self.assertEqual((self.sample_query_expected_rows, 3), df.shape)
+        self.assertEqual(df['kmer_count'].sum(), 1381)
+
     def test_api_simple_query_abundance_sum_df(self):
         ret = self.graph_client.search(self.sample_query, discovery_threshold=0.01,
                                        parallel=False, abundance_sum=True)
         df = ret[self.graph_name]
 
         self.assertEqual((self.sample_query_expected_rows, 3), df.shape)
-        self.assertIn('kmer_count', df.columns)
+        self.assertEqual(df['kmer_count'].sum(), 2323)
+
+    def test_api_simple_query_counts_df(self):
+        ret = self.graph_client.search(self.sample_query, discovery_threshold=0.01,
+                                       parallel=False, query_counts=True)
+        df = ret[self.graph_name]
+
+        self.assertEqual((self.sample_query_expected_rows, 4), df.shape)
+        self.assertEqual(df['kmer_count'].sum(), 1381)
+        self.assertEqual(df['kmer_abundances'].size, self.sample_query_expected_rows)
 
     @unittest.expectedFailure
     def test_api_search_no_coordinate_support(self):
