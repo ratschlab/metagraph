@@ -41,7 +41,7 @@ class GraphClientJson:
                top_labels: int = DEFAULT_TOP_LABELS,
                discovery_threshold: float = DEFAULT_DISCOVERY_THRESHOLD,
                with_signature: bool = False,
-               weighted_with_counts: bool = False,
+               abundance_sum: bool = False,
                query_coords: bool = False,
                align: bool = False,
                **align_params) -> Tuple[JsonDict, str]:
@@ -76,7 +76,7 @@ class GraphClientJson:
                       "discovery_fraction": discovery_threshold,
                       "num_labels": top_labels,
                       "with_signature": with_signature,
-                      "weighted_with_counts": weighted_with_counts,
+                      "abundance_sum": abundance_sum,
                       "query_coords": query_coords}
 
         search_results = self._json_seq_query(sequence, param_dict, "search")
@@ -173,7 +173,7 @@ class GraphClient:
                top_labels: int = DEFAULT_TOP_LABELS,
                discovery_threshold: float = DEFAULT_DISCOVERY_THRESHOLD,
                with_signature: bool = False,
-               weighted_with_counts: bool = False,
+               abundance_sum: bool = False,
                query_coords: bool = False,
                align: bool = False,
                **align_params) -> pd.DataFrame:
@@ -181,7 +181,7 @@ class GraphClient:
 
         json_obj = self._json_client.search(sequence, top_labels,
                                             discovery_threshold, with_signature,
-                                            weighted_with_counts, query_coords,
+                                            abundance_sum, query_coords,
                                             align, **align_params)
 
         return helpers.df_from_search_result(json_obj)
@@ -229,7 +229,7 @@ class MultiGraphClient:
                top_labels: int = DEFAULT_TOP_LABELS,
                discovery_threshold: float = DEFAULT_DISCOVERY_THRESHOLD,
                with_signature: bool = False,
-               weighted_with_counts: bool = False,
+               abundance_sum: bool = False,
                query_coords: bool = False,
                align: bool = False,
                **align_params) -> Dict[str, Union[pd.DataFrame, Future]]:
@@ -248,7 +248,7 @@ class MultiGraphClient:
             for name, graph_client in self.graphs.items():
                 result[name] = graph_client.search(sequence, top_labels,
                                                    discovery_threshold, with_signature,
-                                                   weighted_with_counts, query_coords,
+                                                   abundance_sum, query_coords,
                                                    align, **align_params)
 
             return result
@@ -263,7 +263,7 @@ class MultiGraphClient:
         for name, graph_client in self.graphs.items():
             futures[name] = executor.submit(graph_client.search, sequence,
                                             top_labels, discovery_threshold, with_signature,
-                                            weighted_with_counts, query_coords,
+                                            abundance_sum, query_coords,
                                             align, **align_params)
 
         print(f'Made {len(self.graphs)} requests with {num_processes} threads...')

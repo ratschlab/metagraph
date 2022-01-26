@@ -845,7 +845,7 @@ class TestQueryCounts(TestingBase):
             'ACACACACACACATTTAAACCCGGG',
         ]
 
-    def test_weighted_query(self):
+    def test_abundance_sum_query(self):
         query_file = self.tempdir.name + '/query.fa'
         for discovery_rate in np.linspace(0, 1, 5):
             expected_output = ''
