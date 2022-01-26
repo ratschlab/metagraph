@@ -44,7 +44,7 @@ class AnnotatedSequenceGraph {
 
     virtual bool label_exists(const Label &label) const;
 
-    virtual bool check_compatibility() const = 0;
+    virtual bool check_compatibility() const;
 
     virtual const SequenceGraph& get_graph() const { return *graph_; }
     std::shared_ptr<const SequenceGraph> get_graph_ptr() const { return graph_; }
