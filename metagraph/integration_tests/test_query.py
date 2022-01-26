@@ -830,9 +830,7 @@ class TestQueryCounts(TestingBase):
             assert('objects: 12' == out[1])
         assert('representation: ' + cls.anno_repr == out[3])
 
-    def test_count_query(self):
-        query_file = self.tempdir.name + '/query.fa'
-        queries = [
+        cls.queries = [
             'AAA',
             'AAAA',
             'AAAAAAAAAAAAA',
@@ -846,10 +844,13 @@ class TestQueryCounts(TestingBase):
             'TTTAAACCCGGG',
             'ACACACACACACATTTAAACCCGGG',
         ]
+
+    def test_weighted_query(self):
+        query_file = self.tempdir.name + '/query.fa'
         for discovery_rate in np.linspace(0, 1, 5):
             expected_output = ''
             with open(query_file, 'w') as f:
-                for i, s in enumerate(queries):
+                for i, s in enumerate(self.queries):
                     f.write(f'>s{i}\n{s}\n')
                     expected_output += f'{i}\ts{i}'
                     def get_count(d, kmer):
@@ -881,26 +882,71 @@ class TestQueryCounts(TestingBase):
             self.assertEqual(res.returncode, 0)
             self.assertEqual(res.stdout.decode(), expected_output)
 
+    def test_count_query(self):
+        query_file = self.tempdir.name + '/query.fa'
+        for discovery_rate in np.linspace(0, 1, 5):
+            expected_output = ''
+            with open(query_file, 'w') as f:
+                for i, s in enumerate(self.queries):
+                    f.write(f'>s{i}\n{s}\n')
+                    expected_output += f'{i}\ts{i}'
+                    def get_count(d, kmer):
+                        try:
+                            return d[kmer]
+                        except:
+                            return 0
+
+                    num_kmers = len(s) - self.k + 1
+
+                    num_matches_1 = sum([get_count(self.kmer_counts_1, s[i:i + self.k]) > 0 for i in range(num_kmers)])
+                    counts_1 = [str(get_count(self.kmer_counts_1, s[i:i + self.k])) for i in range(len(s) - self.k + 1)]
+
+                    num_matches_2 = sum([get_count(self.kmer_counts_2, s[i:i + self.k]) > 0 for i in range(num_kmers)])
+                    counts_2 = [str(get_count(self.kmer_counts_2, s[i:i + self.k])) for i in range(len(s) - self.k + 1)]
+
+                    for (cs, i, n) in [(counts_1, 1, num_matches_1), (counts_2, 0, num_matches_2)]:
+                        if n >= discovery_rate * num_kmers:
+                            cs = ':'.join(cs)
+                            expected_output += f'\t<L{2-i}>:{cs}'
+
+                    expected_output += '\n'
+
+            query_command = f'{METAGRAPH} query --fast --query-counts --verbose-output \
+                            -i {self.tempdir.name}/graph{graph_file_extension[self.graph_repr]} \
+                            -a {self.tempdir.name}/annotation{anno_file_extension[self.anno_repr]} \
+                            --discovery-fraction {discovery_rate} {query_file}'
+
+            res = subprocess.run(query_command.split(), stdout=PIPE)
+            self.assertEqual(res.returncode, 0)
+            self.assertEqual(res.stdout.decode(), expected_output)
+
+        query_command = f'{METAGRAPH} query --fast --query-counts \
+                        -i {self.tempdir.name}/graph{graph_file_extension[self.graph_repr]} \
+                        -a {self.tempdir.name}/annotation{anno_file_extension[self.anno_repr]} \
+                        --discovery-fraction {discovery_rate} {query_file}'
+
+        res = subprocess.run(query_command.split(), stdout=PIPE)
+        self.assertEqual(res.returncode, 0)
+        self.assertEqual(res.stdout.decode(),
+            "0\ts0\t<L1>:0=1\t<L2>:0=11\n"
+            "1\ts1\t<L1>:0-1=1\t<L2>:0-1=11\n"
+            "2\ts2\t<L1>:0-10=1\t<L2>:0-10=11\n"
+            "3\ts3\t<L1>:0=4\t<L2>:0=14\n"
+            "4\ts4\t<L1>:0-1=4\t<L2>:0-1=14\n"
+            "5\ts5\t<L1>:0-10=4\t<L2>:0-10=14\n"
+            "6\ts6\t<L1>:0=10\t<L2>:0=20\n"
+            "7\ts7\t<L1>:0=1:1=2:2=3:3=4:4=5:5=6:6=7:7=8:8=9:9=10\t<L2>:0=11:1=12:2=13:3=14:4=15:5=16:6=17:7=18:8=19:9=20\n"
+            "8\ts8\t<L1>:0=1:1=2:2=3:3=4:4=5:5=6:6=7:7=8:8=9:9-12=10\t<L2>:0=11:1=12:2=13:3=14:4=15:5=16:6=17:7=18:8=19:9-12=20\n"
+            "9\ts9\t<L1>:0=1:1=2:2=3:3=4:4=5:5=6:6=7:7=8:8=9:9=10:10=11:11=12:12=1\n"
+            "10\ts10\t<L1>:0=10:1=11:2=12:3=1:4=2:5=3:6=4:7=5:8=6:9=7\n"
+            "11\ts11\n")
+
     def test_count_quantiles(self):
         query_file = self.tempdir.name + '/query.fa'
-        queries = [
-            'AAA',
-            'AAAA',
-            'AAAAAAAAAAAAA',
-            'CCC',
-            'CCCC',
-            'CCCCCCCCCCCCC',
-            'TTT',
-            'AAACCCGGGTTT',
-            'AAACCCGGGTTTTTT',
-            'AAACCCGGGTTTAAA',
-            'TTTAAACCCGGG',
-            'ACACACACACACATTTAAACCCGGG',
-        ]
         quantiles = np.linspace(0, 1, 100)
         expected_output = ''
         with open(query_file, 'w') as f:
-            for i, s in enumerate(queries):
+            for i, s in enumerate(self.queries):
                 f.write(f'>s{i}\n{s}\n')
                 expected_output += f'{i}\ts{i}\t<L1>'
                 def get_count(d, kmer):
