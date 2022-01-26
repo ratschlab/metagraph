@@ -118,7 +118,7 @@ class ISeedAndExtendAligner : public IDBGAligner {
 
     BatchSeeders
     build_seeders(const std::vector<Query> &seq_batch,
-                  const std::vector<std::pair<QueryAlignment, Aggregator>> &wrapped_seqs) const;
+                  const std::vector<QueryAlignment> &wrapped_seqs) const;
 };
 
 template <class Extender = DefaultColumnExtender,

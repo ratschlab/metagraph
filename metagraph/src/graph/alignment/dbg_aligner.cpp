@@ -217,7 +217,7 @@ size_t align_connect(std::string_view query,
 template <class AlignmentCompare>
 auto ISeedAndExtendAligner<AlignmentCompare>
 ::build_seeders(const std::vector<IDBGAligner::Query> &seq_batch,
-                const std::vector<std::pair<QueryAlignment, Aggregator>> &wrapped_seqs) const
+                const std::vector<QueryAlignment> &wrapped_seqs) const
         -> BatchSeeders {
     assert(seq_batch.size() == wrapped_seqs.size());
     BatchSeeders result;
@@ -225,8 +225,7 @@ auto ISeedAndExtendAligner<AlignmentCompare>
 
     for (size_t i = 0; i < seq_batch.size(); ++i) {
         const auto &[header, query, is_reverse_complement] = seq_batch[i];
-        const auto &[paths, aggregator] = wrapped_seqs[i];
-        std::string_view this_query = paths.get_query(is_reverse_complement);
+        std::string_view this_query = wrapped_seqs[i].get_query(is_reverse_complement);
         assert(this_query == query);
 
         std::vector<node_index> nodes;
@@ -247,12 +246,12 @@ auto ISeedAndExtendAligner<AlignmentCompare>
             std::string dummy(query);
             if (config_.max_seed_length >= graph_.get_k()) {
                 reverse_complement_seq_path(graph_, dummy, nodes_rc);
-                assert(dummy == paths.get_query(!is_reverse_complement));
+                assert(dummy == wrapped_seqs[i].get_query(!is_reverse_complement));
             }
 
             assert(nodes_rc.size() == nodes.size());
 
-            std::string_view reverse = paths.get_query(!is_reverse_complement);
+            std::string_view reverse = wrapped_seqs[i].get_query(!is_reverse_complement);
 
             seeder_rc = build_seeder(reverse, !is_reverse_complement, nodes_rc);
         }
@@ -269,22 +268,21 @@ template <class AlignmentCompare>
 void ISeedAndExtendAligner<AlignmentCompare>
 ::align_batch(const std::vector<IDBGAligner::Query> &seq_batch,
               const AlignmentCallback &callback) const {
-    std::vector<std::pair<QueryAlignment, Aggregator>> paths_aggregators;
-    paths_aggregators.reserve(seq_batch.size());
+    std::vector<QueryAlignment> paths;
+    paths.reserve(seq_batch.size());
     for (const auto &[header, query, is_reverse_complement] : seq_batch) {
-        QueryAlignment paths(query, is_reverse_complement);
-        Aggregator aggregator(graph_, paths.get_query(false), paths.get_query(true),
-                              config_);
-        paths_aggregators.emplace_back(std::move(paths), std::move(aggregator));
+        paths.emplace_back(query, is_reverse_complement);
     }
 
-    auto seeders = build_seeders(seq_batch, paths_aggregators);
+    auto seeders = build_seeders(seq_batch, paths);
     filter_seeds(seeders);
+    assert(seeders.size() == seq_batch.size());
 
     for (size_t i = 0; i < seq_batch.size(); ++i) {
         const auto &[header, query, is_reverse_complement] = seq_batch[i];
-        auto &[paths, aggregator] = paths_aggregators[i];
-        auto &[seeder, nodes, seeder_rc, nodes_rc] = seeders[i];
+        const auto &[seeder, nodes, seeder_rc, nodes_rc] = seeders[i];
+        Aggregator aggregator(graph_, paths[i].get_query(false), paths[i].get_query(true),
+                              config_);
 
         size_t num_seeds = 0;
         size_t num_explored_nodes = 0;
@@ -296,17 +294,18 @@ void ISeedAndExtendAligner<AlignmentCompare>
         };
 
         auto get_min_path_score = [&](const Alignment &seed) {
-            return std::max(config_.min_path_score, aggregator.get_min_path_score(seed));
+            return std::max(config_.min_path_score,
+                            aggregator.get_min_path_score(seed));
         };
 
-        std::string_view this_query = paths.get_query(is_reverse_complement);
+        std::string_view this_query = paths[i].get_query(is_reverse_complement);
         assert(this_query == query);
 
         auto extender = build_extender(this_query, aggregator, config_);
 
 #if ! _PROTEIN_GRAPH
         if (seeder_rc) {
-            std::string_view reverse = paths.get_query(!is_reverse_complement);
+            std::string_view reverse = paths[i].get_query(!is_reverse_complement);
             auto extender_rc = build_extender(reverse, aggregator, config_);
 
             auto [seeds, extensions, explored_nodes] =
@@ -334,15 +333,15 @@ void ISeedAndExtendAligner<AlignmentCompare>
 
 
         for (auto&& alignment : chain_alignments<AlignmentCompare>(aggregator.get_alignments(),
-                                                                   paths.get_query(false),
-                                                                   paths.get_query(true),
+                                                                   paths[i].get_query(false),
+                                                                   paths[i].get_query(true),
                                                                    config_, graph_)) {
             assert(alignment.is_valid(graph_, &config_));
             if (alignment.get_score() > best_score) {
                 best_score = alignment.get_score();
                 query_coverage = alignment.get_query().size();
             }
-            paths.emplace_back(std::forward<decltype(alignment)>(alignment));
+            paths[i].emplace_back(std::forward<decltype(alignment)>(alignment));
         }
 
         common::logger->trace(
@@ -357,7 +356,7 @@ void ISeedAndExtendAligner<AlignmentCompare>
             static_cast<double>(num_explored_nodes) / nodes.size() / num_labels
         );
 
-        callback(header, std::move(paths));
+        callback(header, std::move(paths[i]));
     };
 }
 
