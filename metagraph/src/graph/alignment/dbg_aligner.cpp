@@ -215,17 +215,80 @@ size_t align_connect(std::string_view query,
 }
 
 template <class AlignmentCompare>
+auto ISeedAndExtendAligner<AlignmentCompare>
+::build_seeders(const std::vector<IDBGAligner::Query> &seq_batch,
+                const std::vector<std::pair<QueryAlignment, Aggregator>> &wrapped_seqs) const
+        -> BatchSeeders {
+    assert(seq_batch.size() == wrapped_seqs.size());
+    BatchSeeders result;
+    result.reserve(seq_batch.size());
+
+    for (size_t i = 0; i < seq_batch.size(); ++i) {
+        const auto &[header, query, is_reverse_complement] = seq_batch[i];
+        const auto &[paths, aggregator] = wrapped_seqs[i];
+        std::string_view this_query = paths.get_query(is_reverse_complement);
+        assert(this_query == query);
+
+        std::vector<node_index> nodes;
+        if (config_.max_seed_length >= graph_.get_k()) {
+            nodes = map_sequence_to_nodes(graph_, query);
+        } else if (this_query.size() >= graph_.get_k()) {
+            nodes.resize(this_query.size() - graph_.get_k() + 1);
+        }
+
+        auto seeder = build_seeder(this_query, is_reverse_complement, nodes);
+        std::shared_ptr<ISeeder> seeder_rc;
+        std::vector<node_index> nodes_rc;
+
+#if ! _PROTEIN_GRAPH
+        if (graph_.get_mode() == DeBruijnGraph::CANONICAL
+                || config_.forward_and_reverse_complement) {
+            nodes_rc = nodes;
+            std::string dummy(query);
+            if (config_.max_seed_length >= graph_.get_k()) {
+                reverse_complement_seq_path(graph_, dummy, nodes_rc);
+                assert(dummy == paths.get_query(!is_reverse_complement));
+            }
+
+            assert(nodes_rc.size() == nodes.size());
+
+            std::string_view reverse = paths.get_query(!is_reverse_complement);
+
+            seeder_rc = build_seeder(reverse, !is_reverse_complement, nodes_rc);
+        }
+#endif
+
+        result.emplace_back(std::move(seeder), std::move(nodes),
+                            std::move(seeder_rc), std::move(nodes_rc));
+    }
+
+    return result;
+}
+
+template <class AlignmentCompare>
 void ISeedAndExtendAligner<AlignmentCompare>
 ::align_batch(const std::vector<IDBGAligner::Query> &seq_batch,
               const AlignmentCallback &callback) const {
+    std::vector<std::pair<QueryAlignment, Aggregator>> paths_aggregators;
+    paths_aggregators.reserve(seq_batch.size());
     for (const auto &[header, query, is_reverse_complement] : seq_batch) {
-        size_t num_seeds = 0;
-        size_t num_explored_nodes = 0;
-        size_t num_extensions = 0;
-
         QueryAlignment paths(query, is_reverse_complement);
         Aggregator aggregator(graph_, paths.get_query(false), paths.get_query(true),
                               config_);
+        paths_aggregators.emplace_back(std::move(paths), std::move(aggregator));
+    }
+
+    auto seeders = build_seeders(seq_batch, paths_aggregators);
+    filter_seeds(seeders);
+
+    for (size_t i = 0; i < seq_batch.size(); ++i) {
+        const auto &[header, query, is_reverse_complement] = seq_batch[i];
+        auto &[paths, aggregator] = paths_aggregators[i];
+        auto &[seeder, nodes, seeder_rc, nodes_rc] = seeders[i];
+
+        size_t num_seeds = 0;
+        size_t num_explored_nodes = 0;
+        size_t num_extensions = 0;
 
         auto add_alignment = [&](Alignment&& alignment) {
             assert(alignment.is_valid(graph_, &config_));
@@ -239,31 +302,11 @@ void ISeedAndExtendAligner<AlignmentCompare>
         std::string_view this_query = paths.get_query(is_reverse_complement);
         assert(this_query == query);
 
-        std::vector<node_index> nodes;
-        if (config_.max_seed_length >= graph_.get_k()) {
-            nodes = map_sequence_to_nodes(graph_, query);
-        } else if (this_query.size() >= graph_.get_k()) {
-            nodes.resize(this_query.size() - graph_.get_k() + 1);
-        }
-
-        auto seeder = build_seeder(this_query, is_reverse_complement, nodes);
         auto extender = build_extender(this_query, aggregator, config_);
 
 #if ! _PROTEIN_GRAPH
-        if (graph_.get_mode() == DeBruijnGraph::CANONICAL
-                || config_.forward_and_reverse_complement) {
-            std::vector<node_index> nodes_rc(nodes);
-            std::string dummy(query);
-            if (config_.max_seed_length >= graph_.get_k()) {
-                reverse_complement_seq_path(graph_, dummy, nodes_rc);
-                assert(dummy == paths.get_query(!is_reverse_complement));
-            }
-
-            assert(nodes_rc.size() == nodes.size());
-
+        if (seeder_rc) {
             std::string_view reverse = paths.get_query(!is_reverse_complement);
-
-            auto seeder_rc = build_seeder(reverse, !is_reverse_complement, nodes_rc);
             auto extender_rc = build_extender(reverse, aggregator, config_);
 
             auto [seeds, extensions, explored_nodes] =

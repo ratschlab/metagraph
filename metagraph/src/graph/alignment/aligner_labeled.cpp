@@ -26,6 +26,9 @@ AnnotationBuffer::AnnotationBuffer(const AnnotatedDBG &anno_graph)
 }
 
 void AnnotationBuffer::flush() {
+    if (added_rows_.empty())
+        return;
+
     auto push_node_labels = [&](auto node_it, auto row_it, auto&& labels) {
         assert(node_it != added_nodes_.end());
         assert(row_it != added_rows_.end());

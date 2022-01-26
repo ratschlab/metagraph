@@ -283,6 +283,7 @@ class LabeledAligner : public ISeedAndExtendAligner<AlignmentCompare> {
     }
 
   protected:
+    typedef typename ISeedAndExtendAligner<AlignmentCompare>::BatchSeeders BatchSeeders;
     mutable AnnotationBuffer labeled_graph_;
 
     std::shared_ptr<IExtender>
@@ -296,58 +297,110 @@ class LabeledAligner : public ISeedAndExtendAligner<AlignmentCompare> {
     build_seeder(std::string_view query,
                  bool is_reverse_complement,
                  const std::vector<IDBGAligner::node_index> &nodes) const override final {
-        auto seeder = this->template build_seeder_impl<Seeder>(
-            query, is_reverse_complement, nodes
-        );
-        auto seeds = seeder->get_seeds();
-        size_t num_matching = seeder->get_num_matches();
-        if (seeds.size())
-            num_matching = filter_seeds(seeds);
-
-        return std::make_shared<ManualSeeder>(std::move(seeds), num_matching);
+        return this->template build_seeder_impl<Seeder>(query, is_reverse_complement, nodes);
     }
 
-  private:
-    // find the most frequent labels among the seeds and restrict graph traversal
-    // to those labeled paths during extension
-    size_t filter_seeds(std::vector<Alignment> &seeds) const {
-        auto get_num_matches = [&]() {
-            size_t num_matching = 0;
-            size_t last_end = 0;
-            for (size_t i = 0; i < seeds.size(); ++i) {
-                if (seeds[i].empty())
-                    continue;
+    void filter_seeds(BatchSeeders &seeders) const override final {
+        common::logger->trace("Filtering seeds by label");
+        std::vector<std::pair<std::vector<Alignment>, size_t>> counted_seeds;
+        std::vector<std::pair<std::vector<Alignment>, size_t>> counted_seeds_rc;
 
-                size_t begin = seeds[i].get_clipping();
-                size_t end = begin + seeds[i].get_query().size();
-                if (end > last_end) {
-                    num_matching += end - begin;
-                    if (begin < last_end)
-                        num_matching -= last_end - begin;
-                }
+        size_t num_seeds = 0;
+        size_t num_seeds_rc = 0;
 
-                if (size_t offset = seeds[i].get_offset()) {
-                    size_t clipping = seeds[i].get_clipping();
-                    for (++i; i < seeds.size()
-                                && seeds[i].get_offset() == offset
-                                && seeds[i].get_clipping() == clipping; ++i) {}
-                    --i;
-                }
-
-                last_end = end;
+        for (auto &[seeder, nodes, seeder_rc, nodes_rc] : seeders) {
+            counted_seeds.emplace_back(seeder->get_seeds(), seeder->get_num_matches());
+            num_seeds += counted_seeds.back().first.size();
+            for (const Alignment &seed : counted_seeds.back().first) {
+                labeled_graph_.add_path(
+                    seed.get_nodes(),
+                    std::string(seed.get_nodes().size() + this->graph_.get_k() - 1, '#')
+                );
             }
-            return num_matching;
-        };
 
-        for (const Alignment &seed : seeds) {
-            labeled_graph_.add_path(
-                seed.get_nodes(),
-                std::string(seed.get_nodes().size() + this->graph_.get_k() - 1, '#')
-            );
+#if ! _PROTEIN_GRAPH
+            if (seeder_rc) {
+                counted_seeds_rc.emplace_back(seeder_rc->get_seeds(), seeder_rc->get_num_matches());
+                num_seeds_rc += counted_seeds_rc.back().first.size();
+                for (const Alignment &seed : counted_seeds_rc.back().first) {
+                    labeled_graph_.add_path(
+                        seed.get_nodes(),
+                        std::string(seed.get_nodes().size() + this->graph_.get_k() - 1, '#')
+                    );
+                }
+            }
+#endif
         }
 
         labeled_graph_.flush();
 
+        size_t num_seeds_left = 0;
+        size_t num_seeds_rc_left = 0;
+
+        for (size_t i = 0; i < counted_seeds.size(); ++i) {
+            auto &[seeder, nodes, seeder_rc, nodes_rc] = seeders[i];
+            auto &[seeds, num_matching] = counted_seeds[i];
+            if (seeds.size()) {
+                num_matching = filter_seeds(seeds);
+                num_seeds_left += seeds.size();
+            }
+
+            seeder = make_shared<ManualSeeder>(std::move(seeds), num_matching);
+
+#if ! _PROTEIN_GRAPH
+            if (seeder_rc) {
+                assert(seeder_rc);
+                auto &[seeds, num_matching] = counted_seeds_rc[i];
+                if (seeds.size()) {
+                    num_matching = filter_seeds(seeds);
+                    num_seeds_rc_left += seeds.size();
+                }
+
+                seeder_rc = make_shared<ManualSeeder>(std::move(seeds), num_matching);
+            }
+#endif
+        }
+
+        common::logger->trace("Kept {}/{} seeds",
+                              num_seeds_left + num_seeds_rc_left,
+                              num_seeds + num_seeds_rc);
+
+        common::logger->trace("Prefetching labels");
+        labeled_graph_.flush();
+    }
+
+  private:
+    static inline size_t get_num_matches(const std::vector<Alignment> &seeds) {
+        size_t num_matching = 0;
+        size_t last_end = 0;
+        for (size_t i = 0; i < seeds.size(); ++i) {
+            if (seeds[i].empty())
+                continue;
+
+            size_t begin = seeds[i].get_clipping();
+            size_t end = begin + seeds[i].get_query().size();
+            if (end > last_end) {
+                num_matching += end - begin;
+                if (begin < last_end)
+                    num_matching -= last_end - begin;
+            }
+
+            if (size_t offset = seeds[i].get_offset()) {
+                size_t clipping = seeds[i].get_clipping();
+                for (++i; i < seeds.size()
+                            && seeds[i].get_offset() == offset
+                            && seeds[i].get_clipping() == clipping; ++i) {}
+                --i;
+            }
+
+            last_end = end;
+        }
+        return num_matching;
+    }
+
+    // find the most frequent labels among the seeds and restrict graph traversal
+    // to those labeled paths during extension
+    size_t filter_seeds(std::vector<Alignment> &seeds) const {
         VectorMap<Column, uint64_t> label_counter;
         for (const Alignment &seed : seeds) {
             for (node_index node : seed.get_nodes()) {
@@ -360,7 +413,7 @@ class LabeledAligner : public ISeedAndExtendAligner<AlignmentCompare> {
         }
 
         if (label_counter.empty())
-            return get_num_matches();
+            return get_num_matches(seeds);
 
         std::vector<std::pair<Column, uint64_t>> label_counts
             = const_cast<std::vector<std::pair<Column, uint64_t>>&&>(
@@ -468,7 +521,7 @@ class LabeledAligner : public ISeedAndExtendAligner<AlignmentCompare> {
 
         seeds.erase(seed_it, seeds.end());
 
-        return get_num_matches();
+        return get_num_matches(seeds);
     }
 };
 

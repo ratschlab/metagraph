@@ -10,6 +10,7 @@
 #include "aligner_extender_methods.hpp"
 #include "aligner_chainer.hpp"
 #include "graph/representation/base/sequence_graph.hpp"
+#include "graph/representation/succinct/dbg_succinct.hpp"
 
 
 namespace mtg {
@@ -52,6 +53,8 @@ class ISeedAndExtendAligner : public IDBGAligner {
 
   protected:
     typedef AlignmentAggregator<AlignmentCompare> Aggregator;
+    typedef std::vector<std::tuple<std::shared_ptr<ISeeder>, std::vector<node_index>,
+                                   std::shared_ptr<ISeeder>, std::vector<node_index>>> BatchSeeders;
     const DeBruijnGraph &graph_;
     DBGAlignerConfig config_;
 
@@ -59,6 +62,8 @@ class ISeedAndExtendAligner : public IDBGAligner {
     build_extender(std::string_view query,
                    const Aggregator &aggregator,
                    const DBGAlignerConfig &config) const = 0;
+
+    virtual void filter_seeds(BatchSeeders &seeders) const = 0;
 
     virtual std::shared_ptr<ISeeder>
     build_seeder(std::string_view query,
@@ -110,6 +115,10 @@ class ISeedAndExtendAligner : public IDBGAligner {
                       size_t &num_extensions,
                       size_t &num_explored_nodes,
                       const std::function<void(Alignment&&)> &callback) const;
+
+    BatchSeeders
+    build_seeders(const std::vector<Query> &seq_batch,
+                  const std::vector<std::pair<QueryAlignment, Aggregator>> &wrapped_seqs) const;
 };
 
 template <class Extender = DefaultColumnExtender,
@@ -123,6 +132,8 @@ class DBGAligner : public ISeedAndExtendAligner<AlignmentCompare> {
 
   private:
     typedef typename ISeedAndExtendAligner<AlignmentCompare>::Aggregator Aggregator;
+    typedef typename ISeedAndExtendAligner<AlignmentCompare>::BatchSeeders BatchSeeders;
+
     std::shared_ptr<IExtender>
     build_extender(std::string_view query, const Aggregator&, const DBGAlignerConfig &config) const override final {
         return std::make_shared<Extender>(this->graph_, config, query);
@@ -134,6 +145,8 @@ class DBGAligner : public ISeedAndExtendAligner<AlignmentCompare> {
                  const std::vector<IDBGAligner::node_index> &nodes) const override final {
         return this->template build_seeder_impl<Seeder>(query, is_reverse_complement, nodes);
     }
+
+    void filter_seeds(BatchSeeders &) const override final {}
 };
 
 } // namespace align
