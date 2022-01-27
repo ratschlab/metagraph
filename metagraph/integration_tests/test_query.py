@@ -800,7 +800,6 @@ class TestQueryCounts(TestingBase):
             cls.tempdir.name + '/graph' + graph_file_extension[cls.graph_repr],
             cls.tempdir.name + '/annotation',
             cls.anno_repr,
-            num_threads=1,
             anno_type='filename'
         )
 
@@ -827,6 +826,14 @@ class TestQueryCounts(TestingBase):
             'TTTAAACCCGGG',
             'ACACACACACACATTTAAACCCGGG',
         ]
+
+    def _compare_unsorted_results(self, output, expected):
+        self.assertEqual(len(output), len(expected))
+        output_lines = output.split('\n')
+        expected_lines = expected.split('\n')
+        self.assertEqual(len(output_lines), len(expected_lines))
+        for output_line, expected_line in zip(output_lines, expected_lines):
+            self.assertCountEqual(output_line.split('\t'), expected_line.split('\t'))
 
     def test_abundance_sum_query(self):
         query_file = self.tempdir.name + '/query.fa'
@@ -864,7 +871,7 @@ class TestQueryCounts(TestingBase):
 
             res = subprocess.run(query_command.split(), stdout=PIPE)
             self.assertEqual(res.returncode, 0)
-            self.assertEqual(res.stdout.decode(), expected_output)
+            self._compare_unsorted_results(res.stdout.decode(), expected_output)
 
     def test_count_query(self):
         query_file = self.tempdir.name + '/query.fa'
@@ -903,7 +910,7 @@ class TestQueryCounts(TestingBase):
 
             res = subprocess.run(query_command.split(), stdout=PIPE)
             self.assertEqual(res.returncode, 0)
-            self.assertEqual(res.stdout.decode(), expected_output)
+            self._compare_unsorted_results(res.stdout.decode(), expected_output)
 
         query_command = f'{METAGRAPH} query --fast --query-counts \
                         -i {self.tempdir.name}/graph{graph_file_extension[self.graph_repr]} \
@@ -912,7 +919,7 @@ class TestQueryCounts(TestingBase):
 
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
-        self.assertEqual(res.stdout.decode(),
+        self._compare_unsorted_results(res.stdout.decode(),
             f"0\ts0\t<{self.fasta_file_1}>:0=1\t<{self.fasta_file_2}>:0=11\n"
             f"1\ts1\t<{self.fasta_file_1}>:0-1=1\t<{self.fasta_file_2}>:0-1=11\n"
             f"2\ts2\t<{self.fasta_file_1}>:0-10=1\t<{self.fasta_file_2}>:0-10=11\n"
@@ -957,7 +964,7 @@ class TestQueryCounts(TestingBase):
         query_command[4] = ' '.join([str(p) for p in quantiles])
         res = subprocess.run(query_command, stdout=PIPE)
         self.assertEqual(res.returncode, 0)
-        self.assertEqual(res.stdout.decode(), expected_output)
+        self._compare_unsorted_results(res.stdout.decode(), expected_output)
 
         query_command = f'{METAGRAPH} query --fast --count-quantiles <SET_BELOW> \
                         -i {self.tempdir.name}/graph{graph_file_extension[self.graph_repr]} \
