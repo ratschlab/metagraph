@@ -150,6 +150,7 @@ class TestAPIRaw(TestAPIBase):
         self.assertEqual(json_ret[0]['results'], [])
 
     @parameterized.expand([(1,1), (3,1)])
+    @unittest.skipIf(PROTEIN_MODE, "Protein graphs have different alignments")
     def test_api_raw_align_sequence(self, repetitions, dummy_arg):
         fasta_str = '\n'.join([ f">query{i}\nTCGATCGA" for i in range(repetitions)])
 
