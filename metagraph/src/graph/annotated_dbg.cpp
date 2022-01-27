@@ -407,7 +407,7 @@ AnnotatedDBG::get_label_count_quantiles(std::string_view sequence,
         if (counts.size() >= min_count)
             code_counts.emplace_back(j, std::move(counts));
     }
-    // sort by the number of matched k-mers
+    // sort by the number of k-mer matches
     std::sort(code_counts.begin(), code_counts.end(),
               [](const auto &x, const auto &y) {
                   return std::make_pair(y.second.size(), x.first)
