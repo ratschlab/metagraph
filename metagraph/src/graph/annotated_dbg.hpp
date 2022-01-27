@@ -127,7 +127,7 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
                    size_t min_count = 0,
                    bool with_kmer_counts = false) const;
 
-    // returns tuples (label, num_kmer_matches, count_quantiles)
+    // returns tuples (label, num_kmer_matches, kmer_abundance_quantiles)
     std::vector<std::tuple<Label, size_t, std::vector<size_t>>>
     get_label_count_quantiles(std::string_view sequence,
                               size_t num_top_labels,
