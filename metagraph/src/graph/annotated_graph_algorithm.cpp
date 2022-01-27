@@ -1,11 +1,15 @@
 #include "annotated_graph_algorithm.hpp"
 
+#include <sdsl/dac_vector.hpp>
+#include <progress_bar.hpp>
+
 #include "common/logger.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 #include "common/vectors/bitmap.hpp"
+#include "common/vectors/bit_vector.hpp"
 #include "graph/representation/masked_graph.hpp"
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
-#include "annotation/int_matrix/csr_matrix/csr_matrix.hpp"
+#include "annotation/int_matrix/rank_extended/csc_matrix.hpp"
 
 
 namespace mtg {
@@ -395,23 +399,110 @@ void update_masked_graph_by_unitig(MaskedDeBruijnGraph &masked_graph,
                       / kept_unitigs);
 }
 
-annot::matrix::CSRMatrix get_2hop_index(const AnnotatedDBG &anno_graph, size_t num_threads) {
-    // const auto *rd_anno = dynamic_cast<const annot::IRowDiff*>(anno_graph.get_annotation().get_matrix());
-    // if (!rd_anno) {
-    //     logger->error("Only RowDiff annotators supported");
-    //     exit(1);
-    // }
+std::pair<std::unique_ptr<annot::matrix::IntMatrix>, std::unique_ptr<annot::matrix::IntMatrix>>
+get_2hop_index(AnnotatedDBG &anno_graph, size_t num_threads) {
+    const DeBruijnGraph &graph = anno_graph.get_graph();
+    using dist_t = uint16_t;
+    Vector<Vector<std::pair<node_index, dist_t>>> hop_index(graph.max_index());
+    sdsl::bit_vector borders(graph.max_index(), false);
+    common::logger->trace("Marking borders");
+    size_t num_borders = 0;
+    size_t num_elements = 0;
+    graph.call_unitigs([&](const std::string&, const auto &path) {
+        borders[AnnotatedDBG::graph_to_anno_index(path.front())] = true;
+        ++num_borders;
+        size_t i = 0;
+        while (i + 1 < path.size()) {
+            size_t end = std::min(path.size() - 1, i + std::numeric_limits<dist_t>::max());
+            borders[AnnotatedDBG::graph_to_anno_index(end)] = true;
+            ++num_borders;
+            size_t dist = end - i;
+            for ( ; i < end; ++i, --dist) {
+                hop_index[AnnotatedDBG::graph_to_anno_index(path[i])].emplace_back(AnnotatedDBG::graph_to_anno_index(path[end]), dist);
+                ++num_elements;
+            }
+            if (end < path.size() - 1) {
+                hop_index[AnnotatedDBG::graph_to_anno_index(path[end])].emplace_back(AnnotatedDBG::graph_to_anno_index(path[end + 1]), 1);
+                ++num_elements;
+            }
+        }
+        graph.adjacent_outgoing_nodes(path.back(), [&](node_index next) {
+            hop_index[AnnotatedDBG::graph_to_anno_index(path.back())].emplace_back(AnnotatedDBG::graph_to_anno_index(next), 1);
+            ++num_elements;
+        });
+        graph.adjacent_incoming_nodes(path.front(), [&](node_index prev) {
+            hop_index[AnnotatedDBG::graph_to_anno_index(prev)].emplace_back(AnnotatedDBG::graph_to_anno_index(path.front()), 1);
+            ++num_elements;
+        });
+    }, num_threads);
+    common::logger->trace("Marked {}/{} borders", num_borders, borders.size());
+    common::logger->trace("Extending hop index");
+    call_ones(borders, [&](uint64_t k) {
+        auto find_k = [k](const auto &a) { return a.first == k; };
+        call_ones(borders, [&](uint64_t i) {
+            auto it = std::find_if(hop_index[i].begin(), hop_index[i].end(), find_k);
+            if (it != hop_index[i].end()) {
+                uint32_t d_ik = it->second;
 
-    // const DeBruijnGraph &graph = anno_graph.get_graph();
-    // using RowValues = annot::IntMatrix::RowValues;
-    // Vector<Vector<RowValues>> row_values(graph.max_index() + 1);
-    // const annot::IRowDiff::anchor_bv_type &anchors = rd_anno->anchor();
-    // graph.call_unitigs([&](const std::string&, const auto &path) {
-    //     std::ignore = path;
-    // }, num_threads);
-    std::ignore = anno_graph;
-    std::ignore = num_threads;
-    return annot::matrix::CSRMatrix();
+                call_ones(borders, [&](uint64_t j) {
+                    auto find_j = [j](const auto &a) { return a.first == j; };
+                    auto jt = std::find_if(hop_index[k].begin(), hop_index[k].end(), find_j);
+                    if (jt != hop_index[k].end() && d_ik + jt->second < std::numeric_limits<dist_t>::max()) {
+                        uint16_t d_ij = d_ik + jt->second; // d_ij = d_ik + d_kj
+
+                        auto kt = std::find_if(hop_index[i].begin(), hop_index[i].end(), find_j);
+                        if (kt == hop_index[i].end()) {
+                            hop_index[i].emplace_back(j, d_ij);
+                            ++num_elements;
+                        } else {
+                            kt->second = std::min(kt->second, d_ij);
+                        }
+                    }
+                });
+            }
+        });
+    });
+    common::logger->trace("Recorded {} hops", num_elements);
+
+    common::logger->trace("Rearranging hop index");
+    std::vector<sdsl::int_vector<>> nodes(hop_index.size());
+    std::vector<sdsl::int_vector<16>> dists(hop_index.size());
+    ProgressBar progress_bar(hop_index.size(), "Nodes processed",
+                             std::cerr, !common::get_verbose());
+
+    #pragma omp parallel for num_threads(get_num_threads()) schedule(static)
+    for (size_t i = 0; i < hop_index.size(); ++i) {
+        sdsl::int_vector<> node_v(hop_index[i].size(), 0);
+        dists[i] = sdsl::int_vector<16>(hop_index[i].size(), 0);
+        for (size_t j = 0; j < hop_index[i].size(); ++j) {
+            node_v[j] = hop_index[i][j].first;
+            dists[i][j] = hop_index[i][j].second;
+        }
+        nodes[i] = std::move(node_v);
+        hop_index[i] = decltype(hop_index)::value_type();
+        ++progress_bar;
+    }
+    hop_index = decltype(hop_index)();
+
+    common::logger->trace("Compressing hop index");
+    std::vector<std::unique_ptr<bit_vector>> dummy_columns;
+    dummy_columns.emplace_back(std::make_unique<bit_vector_sd>(graph.max_index(), true));
+    annot::matrix::CSCMatrix<annot::binmat::ColumnMajor, sdsl::int_vector<>> node_mat(
+        annot::binmat::ColumnMajor(std::move(dummy_columns)),
+        std::move(nodes)
+    );
+
+    std::vector<std::unique_ptr<bit_vector>> dummy_columns2;
+    dummy_columns2.emplace_back(std::make_unique<bit_vector_sd>(graph.max_index(), true));
+    annot::matrix::CSCMatrix<annot::binmat::ColumnMajor, sdsl::int_vector<16>> dist_mat(
+        annot::binmat::ColumnMajor(std::move(dummy_columns2)),
+        std::move(dists)
+    );
+
+    return std::make_pair(
+        std::make_unique<decltype(node_mat)>(std::move(node_mat)),
+        std::make_unique<decltype(dist_mat)>(std::move(dist_mat))
+    );
 }
 
 } // namespace graph

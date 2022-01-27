@@ -8,8 +8,10 @@
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/graph_extensions/node_lcs.hpp"
 #include "graph/graph_extensions/node_rc.hpp"
+#include "graph/annotated_graph_algorithm.hpp"
 #include "config/config.hpp"
 #include "load/load_graph.hpp"
+#include "load/load_annotated_graph.hpp"
 
 
 namespace mtg {
@@ -48,6 +50,16 @@ int transform_graph(Config *config) {
 
     if (config->noderc) {
         graph::NodeRC(*dbg_succ).serialize(config->outfbase + dbg_succ->file_extension());
+        return 0;
+    }
+
+    if (config->hop_index) {
+        auto anno_dbg = initialize_annotated_dbg(graph, *config);
+        auto [node_mat, dist_mat] = get_2hop_index(*anno_dbg, get_num_threads());
+        std::ofstream node_out(config->outfbase + ".nodemat");
+        std::ofstream dist_out(config->outfbase + ".distmat");
+        node_mat->serialize(node_out);
+        dist_mat->serialize(dist_out);
         return 0;
     }
 

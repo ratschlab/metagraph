@@ -6,16 +6,10 @@
 #include <tsl/hopscotch_set.h>
 
 #include "graph/annotated_dbg.hpp"
+#include "annotation/int_matrix/base/int_matrix.hpp"
 
 
 namespace mtg {
-
-namespace annot {
-namespace matrix {
-class CSRMatrix;
-}
-}
-
 namespace graph {
 
 
@@ -67,7 +61,8 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
                     size_t num_threads = 1);
 
 
-annot::matrix::CSRMatrix get_2hop_index(const AnnotatedDBG &anno_graph, size_t num_threads = 1);
+std::pair<std::unique_ptr<annot::matrix::IntMatrix>, std::unique_ptr<annot::matrix::IntMatrix>>
+get_2hop_index(AnnotatedDBG &anno_graph, size_t num_threads = 1);
 
 } // namespace graph
 } // namespace mtg

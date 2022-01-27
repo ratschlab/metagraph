@@ -65,6 +65,7 @@ class Config {
     bool coordinates = false;
     bool lcs = false;
     bool noderc = false;
+    bool hop_index = false;
     bool advanced = false;
 
     unsigned int k = 3;
