@@ -247,6 +247,8 @@ class TestAPIClient(TestAPIBase):
         cls.graph_client = MultiGraphClient()
         cls.graph_client.add_graph(cls.host, cls.port, cls.graph_name)
 
+        # 'canonical' and 'primary' graphs represent more k-mers than 'basic', so
+        # they get more matches
         cls.sample_query_expected_rows = 98 if cls.mode == 'basic' else 99
         cls.expected_matches = 840 if cls.mode == 'basic' else 1381
 
@@ -349,6 +351,8 @@ class TestAPIJson(TestAPIBase):
 
         cls.graph_client = GraphClientJson(cls.host, cls.port)
 
+        # 'canonical' and 'primary' graphs represent more k-mers than 'basic', so
+        # they get more matches
         cls.sample_query_expected_rows = 98 if cls.mode == 'basic' else 99
 
     def setUp(self):
@@ -443,6 +447,8 @@ class TestAPIClientWithCoordinates(TestAPIBase):
         cls.graph_client = MultiGraphClient()
         cls.graph_client.add_graph(cls.host, cls.port, cls.graph_name)
 
+        # 'canonical' and 'primary' graphs represent more k-mers than 'basic', so
+        # they get more matches
         cls.sample_query_expected_rows = 98 if cls.mode == 'basic' else 99
         cls.expected_matches = 840 if cls.mode == 'basic' else 1381
         cls.expected_abundance_sum = 1176 if cls.mode == 'basic' else 2323
@@ -500,6 +506,8 @@ class TestAPIClientWithCounts(TestAPIBase):
         cls.graph_client = MultiGraphClient()
         cls.graph_client.add_graph(cls.host, cls.port, cls.graph_name)
 
+        # 'canonical' and 'primary' graphs represent more k-mers than 'basic', so
+        # they get more matches
         cls.sample_query_expected_rows = 98 if cls.mode == 'basic' else 99
         cls.expected_matches = 840 if cls.mode == 'basic' else 1381
         cls.expected_abundance_sum = 1176 if cls.mode == 'basic' else 2323
@@ -558,6 +566,8 @@ class TestAPIClientParallel(TestAPIBase):
         cls.graph_client.add_graph(cls.host, cls.port, cls.graph_names[0])
         cls.graph_client.add_graph(cls.host, cls.port, cls.graph_names[1])
 
+        # 'canonical' and 'primary' graphs represent more k-mers than 'basic', so
+        # they get more matches
         cls.sample_query_expected_rows = 98 if cls.mode == 'basic' else 99
 
     def test_api_parallel_query_df(self):

@@ -127,6 +127,7 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
                    size_t min_count = 0,
                    bool with_kmer_counts = false) const;
 
+    // returns tuples (label, num_kmer_matches, count_quantiles)
     std::vector<std::tuple<Label, size_t, std::vector<size_t>>>
     get_label_count_quantiles(std::string_view sequence,
                               size_t num_top_labels,
@@ -134,24 +135,28 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
                               double presence_fraction,
                               const std::vector<double> &count_quantiles) const;
 
+    // returns tuples (label, num_kmer_matches, kmer_abundances)
     std::vector<std::tuple<Label, size_t, std::vector<size_t>>>
     get_kmer_counts(std::string_view sequence,
                     size_t num_top_labels,
                     double discovery_fraction,
                     double presence_fraction) const;
 
+    // returns tuples (label, num_kmer_matches, kmer_abundances)
     std::vector<std::tuple<Label, size_t, std::vector<size_t>>>
     get_kmer_counts(const std::vector<node_index> &nodes,
                     size_t num_top_labels,
                     double discovery_fraction,
                     double presence_fraction) const;
 
+    // returns tuples (label, num_kmer_matches, kmer_coordinates)
     std::vector<std::tuple<Label, size_t, std::vector<SmallVector<uint64_t>>>>
     get_kmer_coordinates(std::string_view sequence,
                          size_t num_top_labels,
                          double discovery_fraction,
                          double presence_fraction) const;
 
+    // returns tuples (label, num_kmer_matches, kmer_coordinates)
     std::vector<std::tuple<Label, size_t, std::vector<SmallVector<uint64_t>>>>
     get_kmer_coordinates(const std::vector<node_index> &nodes,
                          size_t num_top_labels,
