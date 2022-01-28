@@ -329,7 +329,7 @@ class LabeledAligner : public ISeedAndExtendAligner<AlignmentCompare> {
             for (const Alignment &seed : counted_seeds.back().first) {
                 labeled_graph_.add_path(
                     seed.get_nodes(),
-                    std::string(seed.get_nodes().size() + this->graph_.get_k() - 1, '#')
+                    std::string(seed.get_offset(), '#') + seed.get_sequence()
                 );
             }
 
@@ -340,7 +340,7 @@ class LabeledAligner : public ISeedAndExtendAligner<AlignmentCompare> {
                 for (const Alignment &seed : counted_seeds_rc.back().first) {
                     labeled_graph_.add_path(
                         seed.get_nodes(),
-                        std::string(seed.get_nodes().size() + this->graph_.get_k() - 1, '#')
+                        std::string(seed.get_offset(), '#') + seed.get_sequence()
                     );
                 }
             }
