@@ -26,6 +26,7 @@ jobs:
         build_type: [Debug, Release]
         compiler: [g++-8, g++-9, g++-10, g++-11]
         build_static: [OFF, ON]
+        with_avx: [OFF, ON]
         include:
           - compiler: g++-8
             cxx: g++-8
@@ -54,8 +55,10 @@ jobs:
             build_static: ON
           - build_type: Debug
             build_static: ON
+          - with_avx: OFF
+            build_static: OFF
 
-    name: Linux (${{ matrix.alphabet }}, ${{ matrix.build_type }}, ${{ matrix.compiler }}${{ matrix.build_static == 'ON' && ', static' || '' }})
+    name: Linux (${{ matrix.alphabet }}, ${{ matrix.build_type }}, ${{ matrix.compiler }}${{ matrix.build_static == 'ON' && ', static' || '' }}${{ matrix.with_avx == 'OFF' && ', noAVX' || '' }})
 
     steps:
     - uses: actions/checkout@v1
@@ -102,6 +105,7 @@ jobs:
         cd metagraph/build
         cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
               -DBUILD_STATIC=${{ matrix.build_static }} \
+              -DWITH_AVX=${{ matrix.with_avx }} -DWITH_MSSE42=${{ matrix.with_avx }} \
               -DCMAKE_DBG_ALPHABET=${{ matrix.alphabet }} ..
 
     - name: build metagraph
@@ -127,12 +131,15 @@ jobs:
         cd metagraph/build && make check
 
     # for potential release
+    - name: rename binary
+      if: matrix.with_avx == 'OFF'
+      run: mv metagraph/build/metagraph_${{ matrix.alphabet }} metagraph/build/metagraph_${{ matrix.alphabet }}_noAVX
     - name: upload static binary
-      if: matrix.build_static == 'ON'
+      if: ${{ matrix.build_static == 'ON' && matrix.compiler == 'g++-11' }}
       uses: actions/upload-artifact@v2
       with:
         name: metagraph_${{ matrix.alphabet }}_linux_x86
-        path: metagraph/build/metagraph_${{ matrix.alphabet }}
+        path: metagraph/build/metagraph_${{ matrix.alphabet }}${{ matrix.with_avx == 'OFF' && '_noAVX' || '' }}
 
 
   MacOS:
