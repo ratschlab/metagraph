@@ -132,22 +132,6 @@ class SeedFilteringExtender : public IExtender {
 
 class DefaultColumnExtender : public SeedFilteringExtender {
   public:
-    DefaultColumnExtender(const DeBruijnGraph &graph,
-                          const DBGAlignerConfig &config,
-                          std::string_view query);
-
-    virtual ~DefaultColumnExtender() {}
-
-    virtual void set_graph(const DeBruijnGraph &graph) override {
-        graph_ = &graph;
-    }
-
-    virtual size_t num_extensions() const override final { return num_extensions_; }
-
-  protected:
-    const DeBruijnGraph *graph_;
-    std::string_view query_;
-
     // During extension, a tree is constructed from the graph starting at the
     // seed, then the query is aligned against this tree.
     // Each Column object represents the alignment of a substring of the query
@@ -166,6 +150,25 @@ class DefaultColumnExtender : public SeedFilteringExtender {
                               size_t /* xdrop_cutoffs_ index */,
                               size_t /* last fork index in table */,
                               score_t /* traversal penalty */>;
+
+    DefaultColumnExtender(const DeBruijnGraph &graph,
+                          const DBGAlignerConfig &config,
+                          std::string_view query);
+
+    virtual ~DefaultColumnExtender() {}
+
+    virtual void set_graph(const DeBruijnGraph &graph) override {
+        graph_ = &graph;
+    }
+
+    virtual size_t num_extensions() const override final { return num_extensions_; }
+
+    const std::vector<Column>& data() const { return table; }
+
+  protected:
+    const DeBruijnGraph *graph_;
+    std::string_view query_;
+
     // e.g., the maximal value is located at S[std::get<7>(col) - std::get<8>(col)]
     std::vector<Column> table;
     size_t table_size_bytes_;

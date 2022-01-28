@@ -584,6 +584,35 @@ class LabeledAligner : public ISeedAndExtendAligner<AlignmentCompare> {
 
         seeds.erase(seed_it, seeds.end());
 
+        // DBGAlignerConfig filter_config = this->config_;
+        // filter_config.no_backtrack = true;
+        // filter_config.xdrop = 10;
+        // for (size_t i = 0; i < seeds.size(); ++i) {
+        //     if (seeds[i].empty())
+        //         continue;
+
+        //     const Cigar &cigar = seeds[i].get_cigar();
+        //     std::string_view query {
+        //         seeds[i].get_query().data() - cigar.get_clipping(),
+        //         seeds[i].get_query().size() + cigar.get_end_clipping() + cigar.get_clipping()
+        //     };
+        //     DefaultColumnExtender extender(this->graph_, filter_config, query);
+        //     extender.get_extensions(seeds[i], 0, true);
+        //     for (const auto &elem : extender.data()) {
+        //         labeled_graph_.add_node(std::get<3>(elem));
+        //     }
+        //     for (size_t j = i + 1; j < seeds.size(); ++j) {
+        //         if (!extender.check_seed(seeds[j]))
+        //             seeds[j] = Alignment();
+        //     }
+        // }
+
+        // seed_it = std::remove_if(seeds.begin(), seeds.end(), [](const auto &a) {
+        //     return a.empty();
+        // });
+
+        // seeds.erase(seed_it, seeds.end());
+
         return get_num_matches(seeds);
     }
 };
