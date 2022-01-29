@@ -1352,8 +1352,10 @@ std::vector<Alignment> DefaultColumnExtender
                     assert(j_prev != static_cast<size_t>(-1));
                     j = j_prev;
                 }
+
             } else {
                 DEBUG_LOG("Backtracking failed, trying next start point");
+                assert(false);
                 break;
             }
 

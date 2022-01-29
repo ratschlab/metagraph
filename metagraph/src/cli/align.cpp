@@ -465,9 +465,15 @@ int align_to_graph(Config *config) {
                 }
 
                 if (anno_dbg) {
-                    aligner = std::make_unique<LabeledAligner<>>(
-                        *aln_graph, anno_dbg->get_annotator(), aligner_config
-                    );
+                    if (config->alignment_mix_labels) {
+                        aligner = std::make_unique<LabeledAligner<LabeledExtender>>(
+                            *aln_graph, anno_dbg->get_annotator(), aligner_config
+                        );
+                    } else {
+                        aligner = std::make_unique<LabeledAligner<>>(
+                            *aln_graph, anno_dbg->get_annotator(), aligner_config
+                        );
+                    }
                 } else {
                     aligner = std::make_unique<DBGAligner<>>(*aln_graph, aligner_config);
                 }

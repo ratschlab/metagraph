@@ -324,12 +324,20 @@ void LabeledExtender
                 }
             }
 
+            if (shared_label_counts.empty()) {
+                lclogprob = config_.ninf;
+                DEBUG_LOG("Label change score: {}", lclogprob);
+                continue;
+            }
+
             constexpr double pseudocount = 0.1;
             double numer = pseudocount * pseudocount * shared_label_counts.size();
             for (const auto &[col, count_pair] : shared_label_counts) {
+                assert(count_pair.first || count_pair.second);
                 numer += pseudocount * (count_pair.first + count_pair.second)
                             + count_pair.first * count_pair.second;
             }
+            assert(numer > 0);
 
             double denom_pseudocount = pseudocount * shared_label_counts.size();
             double node_total_count = denom_pseudocount + node_inc_count + node_exc_count;
@@ -338,30 +346,32 @@ void LabeledExtender
             assert(lclogprob < 0);
 
             sum_diff_probs += 1.0 - std::pow(2.0, lclogprob);
+            // std::cerr << "test\t" << numer << "\t" << node_total_count << "\t" << next_total_count << "\t" << lclogprob << "\t" << outgoing.size();
             lclogprob = std::floor(lclogprob - log2(static_cast<double>(outgoing.size())));
+            // std::cerr << "\tlabel c\t" << lclogprob << "\n";
             DEBUG_LOG("Label change score: {}", lclogprob);
         }
 
         sum_diff_probs = std::floor(log2((sum_diff_probs + 1.0)
                             / static_cast<double>(outgoing.size())));
+        // std::cerr << "\tlabel k\t" << sum_diff_probs << "\n";
         DEBUG_LOG("Label preservation score: {}", sum_diff_probs);
     }
 
     for (size_t i = 0; i < inter_diff.size(); ++i) {
         const auto &[next, c, score, next_base] = outgoing[i];
         auto &[inter, diff, lclogprob] = inter_diff[i];
-
         label_changed_.emplace_back(diff.size());
         if (diff.empty()) {
             node_labels_.emplace_back(std::move(inter));
             callback(next, c, score + sum_diff_probs);
-        } else {
+        } else if (!found_diff || lclogprob > config_.ninf) {
             node_labels_.emplace_back(std::move(diff));
             callback(next, c, score + (found_diff ? lclogprob : -config_.extra_penalty));
         }
     }
 
-    assert(node_labels_.size() == table.size() + outgoing.size());
+    // assert(node_labels_.size() == table.size() + outgoing.size());
 }
 
 void LabeledExtender
