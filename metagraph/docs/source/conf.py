@@ -153,7 +153,7 @@ latex_documents = [
 # (source start file, name, description, authors, manual section).
 man_pages = [
     (master_doc, 'metagraph', u'MetaGraph Documentation',
-     [author], 1)
+     author.split(', '), 1)
 ]
 
 
