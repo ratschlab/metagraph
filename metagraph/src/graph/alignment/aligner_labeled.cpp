@@ -5,6 +5,7 @@
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/graph_extensions/node_lcs.hpp"
 #include "annotation/int_matrix/base/int_matrix.hpp"
+#include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "common/algorithms.hpp"
 
 
@@ -117,24 +118,51 @@ void set_intersection_difference(AIt a_begin,
     }
 }
 
+bool LabeledExtender::set_seed(const Alignment &seed) {
+    if (DefaultColumnExtender::set_seed(seed)) {
+        node_labels_.resize(1);
+        label_changed_.resize(1);
+        if (seed.label_columns.size()) {
+            if (auto labels = labeled_graph_.get_labels_and_coordinates(seed.get_nodes()[0]).first) {
+                Vector<Column> inter;
+                std::set_intersection(seed.label_columns.begin(),
+                                      seed.label_columns.end(),
+                                      labels->get().begin(), labels->get().end(),
+                                      std::back_inserter(inter));
+                node_labels_[0] = std::move(inter);
+            } else {
+                node_labels_[0] = seed.label_columns;
+            }
+        } else {
+            node_labels_[0] = std::nullopt;
+        }
+
+        return true;
+    }
+
+    return false;
+}
+
 void LabeledExtender
 ::call_outgoing(node_index node,
                 size_t max_prefetch_distance,
                 const std::function<void(node_index, char /* last char */, score_t)> &callback,
                 size_t table_i,
-                bool force_fixed_seed) {
-    bool in_seed = std::get<6>(table[table_i]) + 1 - this->seed_->get_offset()
-                    < this->seed_->get_sequence().size();
+                bool /* force_fixed_seed */) {
+    assert(label_changed_.size() == node_labels_.size());
+    assert(node_labels_.size() == table.size());
     size_t next_offset = std::get<6>(table[table_i]) + 1;
+    bool in_seed = next_offset - this->seed_->get_offset()
+                    < this->seed_->get_sequence().size();
     assert(node == std::get<3>(table[table_i]));
 
-    if (in_seed && (next_offset < graph_->get_k() || force_fixed_seed || this->fixed_seed())) {
+    if (in_seed && next_offset < graph_->get_k()) {
         DefaultColumnExtender::call_outgoing(node, max_prefetch_distance,
                                              [&](node_index next, char c, score_t score) {
             callback(next, c, score);
-            node_labels_.emplace_back();
+            node_labels_.emplace_back(node_labels_[0]);
             label_changed_.emplace_back(false);
-        }, table_i, force_fixed_seed);
+        }, table_i);
 
         return;
     }
@@ -148,17 +176,16 @@ void LabeledExtender
     DefaultColumnExtender::call_outgoing(node, max_prefetch_distance,
                                          [&](node_index next, char c, score_t score) {
         outgoing.emplace_back(next, c, score, labeled_graph_.add_node(next));
-    }, table_i, force_fixed_seed);
+    }, table_i);
 
-    node_labels_.resize(table.size());
-    label_changed_.resize(node_labels_.size());
+    // if (outgoing.size() > 1)
+    //     labeled_graph_.flush();
 
-    if (outgoing.size() > 1)
-        labeled_graph_.flush();
-
-    const std::optional<Vector<Column>> &base_labels = outgoing.size() > 1
-        ? node_labels_[table_i]
-        : node_labels_[std::get<10>(table[table_i])];
+    // const std::optional<Vector<Column>> &base_labels = outgoing.size() > 1
+    //     ? node_labels_[table_i]
+    //     : node_labels_[std::get<10>(table[table_i])];
+    labeled_graph_.flush();
+    const std::optional<Vector<Column>> &base_labels = node_labels_[table_i];
 
     const DBGSuccinct *dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph_->get_base_graph());
 
@@ -602,26 +629,43 @@ auto AnnotationBuffer::add_path(const std::vector<node_index> &path, std::string
     if (base_is_canonical && query.front() == '#')
         query = graph_.get_node_sequence(path[0]) + query.substr(graph_.get_k());
 
-    auto call_node = [&](node_index node, node_index base_node) {
-        if (base_node != DeBruijnGraph::npos) {
-            if (boss && !boss->get_W(dbg_succ->kmer_to_boss_index(base_node)))
+    auto call_node = [&](node_index start_node, node_index start_base_node) {
+        if (start_base_node != DeBruijnGraph::npos) {
+            if (boss && !boss->get_W(dbg_succ->kmer_to_boss_index(start_base_node)))
                 return; // skip dummy nodes
 
-            Row row = AnnotatedDBG::graph_to_anno_index(base_node);
-            if (labels_.emplace(node, std::make_pair(row, nannot)).second
-                    && (node == base_node
-                        || labels_.emplace(base_node, std::make_pair(row, nannot)).second)) {
-                added_rows_.push_back(row);
-                added_nodes_.push_back(node);
-            } else {
-                auto find_n = labels_.find(node);
-                auto find_b = labels_.find(base_node);
-                assert(find_n != labels_.end());
-                assert(find_b != labels_.end());
-                assert(find_n->second.first == find_b->second.first);
-                auto label_i = std::min(find_n->second.second, find_b->second.second);
-                find_n.value().second = label_i;
-                find_b.value().second = label_i;
+            std::vector<std::pair<node_index, node_index>> to_add;
+            to_add.emplace_back(start_node, start_base_node);
+
+            if (const auto *row_diff = dynamic_cast<const annot::binmat::IRowDiff*>(&annotator_.get_matrix())) {
+                assert(boss);
+                const auto &anchor = row_diff->anchor();
+                const auto &fork_succ = row_diff->fork_succ();
+                auto edge = dbg_succ->kmer_to_boss_index(start_base_node);
+                while (!anchor[edge] && !labels_.count(start_base_node)) {
+                    edge = boss->row_diff_successor(edge, fork_succ);
+                    start_base_node = dbg_succ->boss_to_kmer_index(edge);
+                    to_add.emplace_back(start_base_node, start_base_node);
+                }
+            }
+
+            for (auto&& [node, base_node] : to_add) {
+                Row row = AnnotatedDBG::graph_to_anno_index(base_node);
+                if (labels_.emplace(node, std::make_pair(row, nannot)).second
+                        && (node == base_node
+                            || labels_.emplace(base_node, std::make_pair(row, nannot)).second)) {
+                    added_rows_.push_back(row);
+                    added_nodes_.push_back(node);
+                } else {
+                    auto find_n = labels_.find(node);
+                    auto find_b = labels_.find(base_node);
+                    assert(find_n != labels_.end());
+                    assert(find_b != labels_.end());
+                    assert(find_n->second.first == find_b->second.first);
+                    auto label_i = std::min(find_n->second.second, find_b->second.second);
+                    find_n.value().second = label_i;
+                    find_b.value().second = label_i;
+                }
             }
         }
     };

@@ -41,6 +41,7 @@ class IRowDiff {
     void load_anchor(const std::string &filename);
 
     const anchor_bv_type& anchor() const { return anchor_; }
+    const bit_vector& fork_succ() const { return fork_succ_.size() ? fork_succ_ : graph_->get_boss().get_last(); }
 
   protected:
     // get row-diff paths starting at |row_ids|

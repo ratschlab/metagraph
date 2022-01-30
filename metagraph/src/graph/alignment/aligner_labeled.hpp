@@ -155,21 +155,7 @@ class LabeledExtender : public DefaultColumnExtender {
     virtual ~LabeledExtender() {}
 
   protected:
-    virtual bool set_seed(const Alignment &seed) override {
-        if (DefaultColumnExtender::set_seed(seed)) {
-            node_labels_.resize(1);
-            label_changed_.resize(1);
-            if (seed.label_columns.size()) {
-                node_labels_[0] = seed.label_columns;
-            } else {
-                node_labels_[0] = std::nullopt;
-            }
-
-            return true;
-        }
-
-        return false;
-    }
+    virtual bool set_seed(const Alignment &seed) override;
 
     virtual std::vector<Alignment> backtrack(score_t min_path_score,
                                              std::string_view window) override {
@@ -185,6 +171,10 @@ class LabeledExtender : public DefaultColumnExtender {
         last_buffered_table_i_ = 0;
         return DefaultColumnExtender::extend(min_path_score, force_fixed_seed);
     }
+
+    // since multi-node seeds may span across different labels, we no longer
+    // want the restriction that the seed must be a prefix of the extended alignment
+    virtual bool fixed_seed() const override final { return false; }
 
     // this override ensures that outgoing nodes which change labels are penalized
     virtual void call_outgoing(node_index node,
@@ -272,10 +262,6 @@ class LabeledBacktrackingExtender : public LabeledExtender {
 
     virtual bool terminate_backtrack() const override final { return label_intersection_.empty(); }
     virtual bool skip_backtrack_start(size_t i) override final;
-
-    // since multi-node seeds may span across different labels, we no longer
-    // want the restriction that the seed must be a prefix of the extended alignment
-    virtual bool fixed_seed() const override final { return false; }
 
     // this override ensures that outgoing nodes are label- and coordinate-consistent
     // (when applicable)
