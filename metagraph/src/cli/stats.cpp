@@ -251,7 +251,8 @@ void print_annotation_stats(const std::string &fname, const Config &config) {
         std::cout << "===================== COUNTS STATS =====================" << std::endl;
         if (!dynamic_cast<const annot::ColumnCompressed<> *>(&annotation)) {
             logger->error("Printing statistics for counts is currently only supported for"
-                          " ColumnCompressed annotations");
+                          " ColumnCompressed ({}) annotations with counts",
+                          Config::annotype_to_string(Config::ColumnCompressed));
             exit(1);
         }
         // the annotation is not needed anymore -> free memory

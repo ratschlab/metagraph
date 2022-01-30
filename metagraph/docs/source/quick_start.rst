@@ -319,6 +319,19 @@ The stats for a constructed graph/annotation can always be checked with ::
     metagraph stats graph.dbg
     metagraph stats -a annotation.column.annodbg
 
+.. _indexing counts:
+
+Indexing k-mer counts
+^^^^^^^^^^^^^^^^^^^^^
+TODO
+
+.. _indexing coordinates:
+
+Indexing k-mer coordinates
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+TODO
+
+
 Query index
 -----------
 

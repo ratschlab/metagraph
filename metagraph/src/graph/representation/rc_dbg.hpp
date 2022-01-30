@@ -35,7 +35,7 @@ class RCDBG : public DBGWrapper<DeBruijnGraph> {
 
         std::string rc(sequence);
         ::reverse_complement(rc.begin(), rc.end());
-        std::vector<node_index> nodes = map_sequence_to_nodes(*graph_, rc);
+        std::vector<node_index> nodes = graph::map_to_nodes_sequentially(*graph_, rc);
 
         for (auto it = nodes.rbegin(); it != nodes.rend() && !terminate(); ++it) {
             callback(*it);

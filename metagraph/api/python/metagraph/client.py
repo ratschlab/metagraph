@@ -41,6 +41,7 @@ class GraphClientJson:
                top_labels: int = DEFAULT_TOP_LABELS,
                discovery_threshold: float = DEFAULT_DISCOVERY_THRESHOLD,
                with_signature: bool = False,
+               abundance_sum: bool = False,
                query_counts: bool = False,
                query_coords: bool = False,
                align: bool = False,
@@ -76,6 +77,7 @@ class GraphClientJson:
                       "discovery_fraction": discovery_threshold,
                       "num_labels": top_labels,
                       "with_signature": with_signature,
+                      "abundance_sum": abundance_sum,
                       "query_counts": query_counts,
                       "query_coords": query_coords}
 
@@ -173,15 +175,38 @@ class GraphClient:
                top_labels: int = DEFAULT_TOP_LABELS,
                discovery_threshold: float = DEFAULT_DISCOVERY_THRESHOLD,
                with_signature: bool = False,
+               abundance_sum: bool = False,
                query_counts: bool = False,
                query_coords: bool = False,
                align: bool = False,
                **align_params) -> pd.DataFrame:
-        """See parameters for alignment `align_params` in align()"""
+        """
+        :param      sequence:             The query sequence
+        :type       sequence:             Union[str, Iterable[str]]
+        :param      top_labels:           The maximum number of matched labels to retrieve [default: 100]
+        :type       top_labels:           int
+        :param      discovery_threshold:  The minimum fraction (between 0.0 and 1.0) of k-mers from the query required to match a label (occur in a sample) in order for that label to show up in the result [default: 0.0]
+        :type       discovery_threshold:  float
+        :param      with_signature:       Return the signature of k-mer matches
+        :type       with_signature:       bool
+        :param      abundance_sum:        Compute the sum of abundances for all k-mers matched
+        :type       abundance_sum:        bool
+        :param      query_counts:         Query k-mer counts
+        :type       query_counts:         bool
+        :param      query_coords:         Query k-mer coordinates
+        :type       query_coords:         bool
+        :param      align:                Align the query sequence to the joint graph and query labels for that alignment instead of the original sequence
+        :type       align:                bool
+        :param      align_params:         The parameters for alignment (see method align())
+        :type       align_params:         dictionary
+
+        :return:    A data frame with query results
+        :rtype:     pandas.DataFrame
+        """
 
         json_obj = self._json_client.search(sequence, top_labels,
                                             discovery_threshold, with_signature,
-                                            query_counts, query_coords,
+                                            abundance_sum, query_counts, query_coords,
                                             align, **align_params)
 
         return helpers.df_from_search_result(json_obj)
@@ -190,6 +215,21 @@ class GraphClient:
               min_exact_match: float = DEFAULT_DISCOVERY_THRESHOLD,
               max_alternative_alignments: int = 1,
               max_num_nodes_per_seq_char: float = DEFAULT_NUM_NODES_PER_SEQ_CHAR) -> pd.DataFrame:
+        """
+        Align sequence(s) to the joint graph
+
+        :param      sequence:                    The query sequence
+        :type       sequence:                    Union[str, Iterable[str]]
+        :param      min_exact_match:             The minimum fraction (between 0.0 and 1.0) of matching nucleotides required to align sequence [default: 0]
+        :type       min_exact_match:             float
+        :param      max_alternative_alignments:  The number of different alignments to return [default: 1]
+        :type       max_alternative_alignments:  int
+        :param      max_num_nodes_per_seq_char:  The maximum number of nodes to consider per sequence character during extension [default: 10.0]
+        :type       max_num_nodes_per_seq_char:  float
+
+        :returns:   A data frame with alignments
+        :rtype:     pandas.DataFrame
+        """
         json_obj = self._json_client.align(sequence, min_exact_match,
                                            max_alternative_alignments,
                                            max_num_nodes_per_seq_char)
@@ -229,6 +269,7 @@ class MultiGraphClient:
                top_labels: int = DEFAULT_TOP_LABELS,
                discovery_threshold: float = DEFAULT_DISCOVERY_THRESHOLD,
                with_signature: bool = False,
+               abundance_sum: bool = False,
                query_counts: bool = False,
                query_coords: bool = False,
                align: bool = False,
@@ -248,7 +289,7 @@ class MultiGraphClient:
             for name, graph_client in self.graphs.items():
                 result[name] = graph_client.search(sequence, top_labels,
                                                    discovery_threshold, with_signature,
-                                                   query_counts, query_coords,
+                                                   abundance_sum, query_counts, query_coords,
                                                    align, **align_params)
 
             return result
@@ -263,7 +304,7 @@ class MultiGraphClient:
         for name, graph_client in self.graphs.items():
             futures[name] = executor.submit(graph_client.search, sequence,
                                             top_labels, discovery_threshold, with_signature,
-                                            query_counts, query_coords,
+                                            abundance_sum, query_counts, query_coords,
                                             align, **align_params)
 
         print(f'Made {len(self.graphs)} requests with {num_processes} threads...')

@@ -166,96 +166,101 @@ Json::Value get_label_as_json(const std::string &label) {
 }
 
 
-Json::Value SeqSearchResult::to_json(bool verbose_coords,
+Json::Value SeqSearchResult::to_json(bool verbose_output,
                                      const graph::AnnotatedDBG &anno_graph) const {
     Json::Value root;
 
     // Add seq information
-    root[SEQ_DESCRIPTION_JSON_FIELD] = sequence.name;
+    root[SEQ_DESCRIPTION_JSON_FIELD] = sequence_.name;
 
     // Add alignment information if there is any
-    if (alignment) {
+    if (alignment_) {
         // Recover alignment sequence sequence string
-        root[SEQUENCE_JSON_FIELD] = Json::Value(sequence.sequence);
+        root[SEQUENCE_JSON_FIELD] = Json::Value(sequence_.sequence);
 
         // Alignment metrics
-        root[SCORE_JSON_FIELD] = Json::Value(alignment->score);
-        root[CIGAR_JSON_FIELD] = Json::Value(alignment->cigar);
+        root[SCORE_JSON_FIELD] = Json::Value(alignment_->score);
+        root[CIGAR_JSON_FIELD] = Json::Value(alignment_->cigar);
     }
 
     // Add discovered labels and extra results
     root["results"] = Json::Value(Json::arrayValue);
 
     // Different action depending on the result type
-    if (std::holds_alternative<LabelVec>(result)) {
+    if (const auto *v = std::get_if<LabelVec>(&result_)) {
         // Standard labels only
-        for (const auto &label : std::get<LabelVec>(result)) {
+        for (const auto &label : *v) {
             root["results"].append(get_label_as_json(label));
         }
-    } else if (std::holds_alternative<LabelCountVec>(result)) {
+    } else if (const auto *v = std::get_if<LabelCountVec>(&result_)) {
         // Labels with count data
-        for (const auto &[label, count] : std::get<LabelCountVec>(result)) {
-            Json::Value label_obj = get_label_as_json(label);
-
-            label_obj[KMER_COUNT_FIELD] = Json::Value((Json::Int64) count);
-
-            root["results"].append(label_obj);
+        for (const auto &[label, count] : *v) {
+            Json::Value &label_obj = root["results"].append(get_label_as_json(label));
+            label_obj[KMER_COUNT_FIELD] = static_cast<Json::Int64>(count);
         }
-    } else if (std::holds_alternative<LabelSigVec>(result)) {
+    } else if (const auto *v = std::get_if<LabelSigVec>(&result_)) {
         // Count signatures
-        for (const auto &[label, kmer_presence_mask] : std::get<LabelSigVec>(result)) {
-            Json::Value label_obj = get_label_as_json(label);
-
-            Json::Value sig_obj = Json::objectValue;
-
+        for (const auto &[label, kmer_presence_mask] : *v) {
+            Json::Value &label_obj = root["results"].append(get_label_as_json(label));
+            // Store the presence mask and score in a separate object
+            Json::Value &sig_obj = (label_obj[SIGNATURE_FIELD] = Json::objectValue);
+            sig_obj["presence_mask"] = Json::Value(sdsl::util::to_string(kmer_presence_mask));
+            sig_obj["score"] = Json::Value(anno_graph.score_kmer_presence_mask(kmer_presence_mask));
             // Add kmer_counts calculated using bitmask
             label_obj[KMER_COUNT_FIELD] = Json::Value(sdsl::util::cnt_one_bits(kmer_presence_mask));
-
-            // Store the presence mask and score in a separate object
-            sig_obj["presence_mask"] = Json::Value(sdsl::util::to_string(kmer_presence_mask));
-            sig_obj["score"] =
-                    Json::Value(anno_graph.score_kmer_presence_mask(kmer_presence_mask));
-
-            label_obj[SIGNATURE_FIELD] = sig_obj;
-            root["results"].append(label_obj);
         }
-    } else if (std::holds_alternative<LabelQuantileVec>(result)) {
-        // Count quantiles
-        for (const auto &[label, quantiles] : std::get<LabelQuantileVec>(result)) {
-            Json::Value label_obj = get_label_as_json(label);
-            Json::Value quantile_array = Json::arrayValue;
+    } else if (const auto *v = std::get_if<LabelCountAbundancesVec>(&result_)) {
+        // k-mer counts (or quantiles)
+        for (const auto &[label, count, abundances] : *v) {
+            assert(abundances.size());
+            Json::Value &label_obj = root["results"].append(get_label_as_json(label));
+            label_obj[KMER_COUNT_FIELD] = static_cast<Json::Int64>(count);
+            Json::Value &counts_array = (label_obj[KMER_ABUNDANCE_FIELD] = Json::arrayValue);
+            if (verbose_output) {
+                for (size_t c : abundances) {
+                    counts_array.append(static_cast<Json::Int64>(c));
+                }
+            } else {
+                std::pair<size_t, size_t> last(0, abundances.at(0));
+                for (size_t i = 1; i <= abundances.size(); ++i) {
+                    if (i < abundances.size() && abundances[i] == last.second)
+                        continue; // extend run
 
-            for (size_t quantile : quantiles) {
-                quantile_array.append(Json::Value((Json::Int64) quantile));
+                    // end of run
+                    if (last.second) {
+                        if (i == last.first + 1) {
+                            counts_array.append(fmt::format("{}={}", last.first, last.second));
+                        } else {
+                            counts_array.append(fmt::format("{}-{}={}", last.first, i - 1, last.second));
+                        }
+                    }
+
+                    // start new run
+                    if (i < abundances.size()) {
+                        last.first = i;
+                        last.second = abundances[i];
+                    }
+                }
             }
-
-            label_obj[KMER_COUNT_QUANTILE_FIELD] = quantile_array;
-            root["results"].append(label_obj);
         }
-    } else if (std::holds_alternative<LabelCoordVec>(result)) {
+    } else {
         // Kmer coordinates
-        for (const auto &[label, tuples] : std::get<LabelCoordVec>(result)) {
-            Json::Value label_obj = get_label_as_json(label);
-            Json::Value coord_array = Json::arrayValue;
+        for (const auto &[label, count, tuples] : std::get<LabelCountCoordsVec>(result_)) {
+            Json::Value &label_obj = root["results"].append(get_label_as_json(label));
+            label_obj[KMER_COUNT_FIELD] = static_cast<Json::Int64>(count);
+            Json::Value &coord_array = (label_obj[KMER_COORDINATE_FIELD] = Json::arrayValue);
 
             // Each tuple is represented as a folly::SmallVector<uint64_t> instance
-            if (verbose_coords) {
+            if (verbose_output) {
                 for (const auto &coords : tuples) {
-                    coord_array.append(Json::Value(fmt::format("{}", fmt::join(coords, ","))));
+                    coord_array.append(fmt::format("{}", fmt::join(coords, ",")));
                 }
             } else {
                 for (const auto &range : collapse_coord_ranges(tuples)) {
                     coord_array.append(range);
                 }
             }
-
-
-            label_obj[KMER_COORDINATE_FIELD] = coord_array;
-            root["results"].append(label_obj);
         }
-    } else {
-        assert(false);
-        throw std::runtime_error("UNKNOWN TYPE");
     }
 
     return root;
@@ -264,55 +269,79 @@ Json::Value SeqSearchResult::to_json(bool verbose_coords,
 
 std::string SeqSearchResult::to_string(const std::string delimiter,
                                        bool suppress_unlabeled,
-                                       bool verbose_coords,
+                                       bool verbose_output,
                                        const graph::AnnotatedDBG &anno_graph) const {
     // Return the size of the result type vector using std::visit (ducktyping variant)
-    if (!std::visit([] (auto&& vec) { return vec.size(); }, result) && suppress_unlabeled) {
-        // If empty and unlabeled sequences are supressed then return empty string
+    // If empty and unlabeled sequences are supressed then return empty string
+    if (suppress_unlabeled && !std::visit([] (auto&& vec) { return vec.size(); }, result_))
         return "";
-    }
 
-    // Get modified name if sequence has an alignment result
-    std::string mod_seq_name = sequence.name;
-
-    if (alignment) {
-        mod_seq_name = fmt::format(ALIGNED_SEQ_HEADER_FORMAT, sequence.name, sequence.sequence,
-                                   alignment->score, alignment->cigar);
-    }
+    std::string output;
 
     // Print sequence ID and name
-    std::string output = fmt::format("{}\t{}", sequence.id, mod_seq_name);
+    if (alignment_) {
+        // Get modified name if sequence has an alignment result
+        const std::string &mod_seq_name
+            = fmt::format(ALIGNED_SEQ_HEADER_FORMAT, sequence_.name, sequence_.sequence,
+                                   alignment_->score, alignment_->cigar);
+        output = fmt::format("{}\t{}", sequence_.id, mod_seq_name);
+    } else {
+        output = fmt::format("{}\t{}", sequence_.id, sequence_.name);
+    }
 
     // ... with diff result output depending on the type of result being stored.
-    if (std::holds_alternative<LabelVec>(result)) {
+    if (const auto *v = std::get_if<LabelVec>(&result_)) {
         // Standard labels only
-        output += fmt::format("\t{}",
-                              utils::join_strings(std::get<LabelVec>(result),
-                                                  delimiter));
-    } else if (std::holds_alternative<LabelCountVec>(result)) {
+        output += fmt::format("\t{}", utils::join_strings(*v, delimiter));
+
+    } else if (const auto *v = std::get_if<LabelCountVec>(&result_)) {
         // Labels with count data
-        for (const auto &[label, count] : std::get<LabelCountVec>(result)) {
+        for (const auto &[label, count] : *v) {
             output += fmt::format("\t<{}>:{}", label, count);
         }
-    } else if (std::holds_alternative<LabelSigVec>(result)) {
+    } else if (const auto *v = std::get_if<LabelSigVec>(&result_)) {
         // Count signatures
-        for (const auto &[label, kmer_presence_mask] : std::get<LabelSigVec>(result)) {
+        for (const auto &[label, kmer_presence_mask] : *v) {
             output += fmt::format("\t<{}>:{}:{}:{}", label,
                                   sdsl::util::cnt_one_bits(kmer_presence_mask),
                                   sdsl::util::to_string(kmer_presence_mask),
                                   anno_graph.score_kmer_presence_mask(kmer_presence_mask));
         }
-    } else if (std::holds_alternative<LabelQuantileVec>(result)) {
-        // Count quantiles
-        for (const auto &[label, quantiles] : std::get<LabelQuantileVec>(result)) {
-            output += fmt::format("\t<{}>:{}", label, fmt::join(quantiles, ":"));
+    } else if (const auto *v = std::get_if<LabelCountAbundancesVec>(&result_)) {
+        // k-mer counts (or quantiles)
+        for (const auto &[label, count, abundances] : *v) {
+            output += "\t<" + label + ">";
+            if (verbose_output) {
+                output += fmt::format(":{}", fmt::join(abundances, ":"));
+            } else {
+                std::pair<size_t, size_t> last(0, abundances.at(0));
+                for (size_t i = 1; i <= abundances.size(); ++i) {
+                    if (i < abundances.size() && abundances[i] == last.second)
+                        continue; // extend run
+
+                    // end of run
+                    if (last.second) {
+                        if (i == last.first + 1) {
+                            output += fmt::format(":{}={}", last.first, last.second);
+                        } else {
+                            output += fmt::format(":{}-{}={}", last.first, i - 1, last.second);
+                        }
+                    }
+
+                    // start new run
+                    if (i < abundances.size()) {
+                        last.first = i;
+                        last.second = abundances[i];
+                    }
+                }
+            }
         }
-    } else if (std::holds_alternative<LabelCoordVec>(result)) {
+    } else {
         // Kmer coordinates
-        for (const auto &[label, tuples] : std::get<LabelCoordVec>(result)) {
+        for (const auto &[label, count, tuples] : std::get<LabelCountCoordsVec>(result_)) {
             output += "\t<" + label + ">";
 
-            if (verbose_coords) {
+            if (verbose_output) {
                 for (const auto &coords : tuples) {
                     output += fmt::format(":{}", fmt::join(coords, ","));
                 }
@@ -320,9 +349,6 @@ std::string SeqSearchResult::to_string(const std::string delimiter,
                 output += fmt::format(":{}", fmt::join(collapse_coord_ranges(tuples), ":"));
             }
         }
-    } else {
-        assert(false);
-        throw std::runtime_error("UNKNOWN TYPE");
     }
 
     return output;
@@ -338,6 +364,7 @@ SeqSearchResult QueryExecutor::execute_query(QuerySequence&& sequence,
                                              const graph::AnnotatedDBG &anno_graph,
                                              bool with_kmer_counts,
                                              const std::vector<double> &count_quantiles,
+                                             bool query_counts,
                                              bool query_coords) {
     // Perform a different action depending on the type (specified by config flags)
     SeqSearchResult::result_type result;
@@ -349,11 +376,17 @@ SeqSearchResult QueryExecutor::execute_query(QuerySequence&& sequence,
                                                      discovery_fraction,
                                                      presence_fraction);
     } else if (query_coords) {
-        // Get labels with query coordinates
+        // Get labels with k-mer coordinates
         result = anno_graph.get_kmer_coordinates(sequence.sequence,
                                                  num_top_labels,
                                                  discovery_fraction,
                                                  presence_fraction);
+    } else if (query_counts) {
+        // Get labels with k-mer counts
+        result = anno_graph.get_kmer_counts(sequence.sequence,
+                                            num_top_labels,
+                                            discovery_fraction,
+                                            presence_fraction);
     } else if (count_quantiles.size()) {
         // Get labels with count quantiles
         result = anno_graph.get_label_count_quantiles(sequence.sequence,
@@ -484,7 +517,7 @@ void call_hull_sequences(const DeBruijnGraph &full_dbg,
         }
 
         assert(path.size() == seq.length() - full_dbg.get_k() + 1);
-        assert(path == map_sequence_to_nodes(full_dbg, seq));
+        assert(path == map_to_nodes_sequentially(full_dbg, seq));
 
         callback(seq, path);
 
@@ -704,7 +737,7 @@ void add_nodes_with_suffix_matches(const DBGSuccinct &full_dbg,
             std::string rev_contig = contig;
             reverse_complement(rev_contig);
             call_suffix_match_sequences(full_dbg, rev_contig,
-                                        map_sequence_to_nodes(full_dbg, rev_contig),
+                                        map_to_nodes_sequentially(full_dbg, rev_contig),
                                         callback, sub_k, max_num_nodes_per_suffix);
         }
 
@@ -1136,10 +1169,17 @@ int query_graph(Config *config) {
         executor.query_fasta(file,
                              [config, &anno_graph = std::as_const(*anno_graph)]
                              (const SeqSearchResult &result) {
-            std::cout << result.to_string(config->anno_labels_delimiter,
-                                          config->suppress_unlabeled,
-                                          config->verbose_coords,
-                                          anno_graph) << "\n";
+            if (config->output_json) {
+                std::cout << result.to_json(config->verbose_output
+                                              || !(config->query_counts || config->query_coords),
+                                            anno_graph) << "\n";
+            } else {
+                std::cout << result.to_string(config->anno_labels_delimiter,
+                                              config->suppress_unlabeled,
+                                              config->verbose_output
+                                                || !(config->query_counts || config->query_coords),
+                                              anno_graph) << "\n";
+            }
         });
         logger->trace("File '{}' was processed in {} sec, total time: {}", file,
                       curr_timer.elapsed(), timer.elapsed());
@@ -1199,7 +1239,7 @@ SeqSearchResult query_sequence(QuerySequence&& sequence,
             config.num_top_labels, config.discovery_fraction,
             config.presence_fraction, anno_graph,
             config.count_kmers, config.count_quantiles,
-            config.query_coords);
+            config.query_counts, config.query_coords);
 
     if (aligner_config)
         result.get_alignment() = alignment;
@@ -1218,14 +1258,22 @@ void QueryExecutor::query_fasta(const string &file,
     if (this->config_.query_coords && !(dynamic_cast<const annot::matrix::MultiIntMatrix *>(
             &this->anno_graph_.get_annotation().get_matrix()))) {
         logger->error("Annotation does not support k-mer coordinate queries. "
-                      "First transform this annotation to include coordinate data.");
+                      "First transform this annotation to include coordinate data "
+                      "(e.g., {}, {}, {}, {}).",
+                      Config::annotype_to_string(Config::ColumnCoord),
+                      Config::annotype_to_string(Config::BRWTCoord),
+                      Config::annotype_to_string(Config::RowDiffCoord),
+                      Config::annotype_to_string(Config::RowDiffBRWTCoord));
         exit(1);
     }
 
     if (this->config_.count_kmers && !(dynamic_cast<const annot::matrix::IntMatrix *>(
             &this->anno_graph_.get_annotation().get_matrix()))) {
         logger->error("Annotation does not support k-mer count queries. "
-                      "First transform this annotation to include count data.");
+                      "First transform this annotation to include count data "
+                      "(e.g., {} or {}).",
+                      Config::annotype_to_string(Config::IntBRWT),
+                      Config::annotype_to_string(Config::IntRowDiffBRWT));
         exit(1);
     }
 
