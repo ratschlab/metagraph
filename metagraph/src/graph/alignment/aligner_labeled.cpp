@@ -156,7 +156,7 @@ void LabeledExtender
     if (outgoing.size() > 1)
         labeled_graph_.flush();
 
-    const std::optional<Vector<Column>> &base_labels = node_labels_[table_i]
+    const std::optional<Vector<Column>> &base_labels = outgoing.size() > 1
         ? node_labels_[table_i]
         : node_labels_[std::get<10>(table[table_i])];
 
@@ -361,11 +361,12 @@ void LabeledExtender
     for (size_t i = 0; i < inter_diff.size(); ++i) {
         const auto &[next, c, score, next_base] = outgoing[i];
         auto &[inter, diff, lclogprob] = inter_diff[i];
-        label_changed_.emplace_back(diff.size());
         if (diff.empty()) {
+            label_changed_.emplace_back(false);
             node_labels_.emplace_back(std::move(inter));
             callback(next, c, score + sum_diff_probs);
         } else if (!found_diff || lclogprob > config_.ninf) {
+            label_changed_.emplace_back(true);
             node_labels_.emplace_back(std::move(diff));
             callback(next, c, score + (found_diff ? lclogprob : -config_.extra_penalty));
         }
