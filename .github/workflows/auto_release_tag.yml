@@ -19,4 +19,5 @@ jobs:
         source_file: "package.json"
         extraction_regex: "\\s*\"version\"s*:\\s*\"([\\d\\.]+)\""
         tag_format: "test_v{version}"
+        tag_message: ""
 
