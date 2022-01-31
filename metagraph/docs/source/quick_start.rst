@@ -225,7 +225,7 @@ For cleaning graphs constructed from high-throughput Illumina reads, the recomme
 ``--prune-tips <2k> --prune-unitigs 0 --fallback 2``, which implements the cleaning procedure proposed in `McCortex <https://github.com/mcveanlab/mccortex>`_ (Turner et al., 2018) and includes the following steps:
 
 1. Prune all tips shorter than *2k*, where *k* is the k-mer length.
-2. Compute a threshold for the minimum k-mer abundance as follows. Assume the number of k-mers with sequencing errors (erroneous k-mers) follows a Poisson distribution with a Gamma distributed mean. Also, assume that all k-mers with abundance 3 or less are generated due to sequencing errors. Based on these numbers, fit a Poisson distribution and pick a threshold such that k-mers predicted to be erroneous make up at most 0.1% of the total k-mer coverage at that abundance level. If the chosen threshold keeps less than 20% of the total coverage, deem the automatic estimation procedure unsuccessful and use the fallback value of 2 instead (set by flag ``--fallback``).
+2. Compute a threshold for the minimum k-mer abundance as follows. Assume the number of k-mers with sequencing errors (erroneous k-mers) follows a Poisson distribution with a Gamma distributed mean. Also, assume that all k-mers with an abundance of 3 or less are generated due to sequencing errors. Based on these numbers, fit a Poisson distribution and pick a threshold such that k-mers predicted to be erroneous make up at most 0.1% of the total k-mer coverage at that abundance level. If the chosen threshold keeps less than 20% of the total coverage, deem the automatic estimation procedure unsuccessful and use the fallback value of 2 instead (set by flag ``--fallback``).
 3. Traverse the graph (where all short tips have already been removed in step 1) and fetch all unitigs with a median k-mer abundance greater or equal to the threshold defined in step 2.
 
 Once all clean contigs (or unitigs) are extracted from a de Bruijn graph, construct a clean de Bruijn graph from them.
@@ -315,7 +315,7 @@ First, one can assemble a graph from the KMC counter (see :ref:`construct_from_K
 Next, annotate the graph using these assembled contigs as a normal FASTA file instead of the original KMC counter.
 
 .. tip::
-    Together :ref:`construct_from_KMC` and :ref:`annotate_from_KMC` provide an efficient algorithm for constructing
+    Together, :ref:`construct_from_KMC` and :ref:`annotate_from_KMC` provide an efficient algorithm for constructing
     an annotated graph from many input files with sequences (e.g., indexing SRA experiments).
     Namely, this algorithm includes the following steps.
 
@@ -355,7 +355,7 @@ These counts represent how many times each k-mer indexed in ``graph.dbg`` occurs
     This value, however, can be changed with flag ``--count-width``, to represent counts greater than 255 or, the other way around,
     clip all large counts when only lowly abundant k-mers are of interest.
 
-All other flags (e.g., ``--separately`` and ``--disk-swap``) described above are also supported as for binary annotations.
+All other flags (e.g., ``--separately`` and ``--disk-swap``) described above are also supported similarly as for binary annotations.
 
 The histogram for indexed k-mer counts can be viewed with::
 
@@ -379,7 +379,7 @@ and transforming it to contigs with counts associated with their constituting k-
 
 .. note::
     As noted above in section :ref:`graph_cleaning`, the command ``metagraph clean`` does not actually do any cleaning or k-mer filtering
-    unless additional cleaning parameters are passed to it. Thus, the set of contigs extracted by the command above will actually cover
+    unless additional cleaning parameters are passed to it. Thus, the set of contigs extracted by the command above will cover
     all the k-mers from the de Bruijn graph ``graph.dbg``.
 
 Then, these contigs written to file ``contigs.fasta.gz`` and the counts associated with their k-mers to ``contigs.kmer_counts.gz``
@@ -409,8 +409,8 @@ Index k-mer coordinates
 Besides indexing k-mer counts, MetaGraph supports indexing k-mer coordinates, that is, their positions in the source input.
 These may represent positions in a genome, positions of a k-mer in a raw SRA experiment (say, each read has 70 k-mers in it;
 then the second k-mer of the third read has coordinate 211). Depending on the target application and the final goal, it is
-both possible to consider each sequence of the input as a separate label and index the coordiantes of its k-mers separately,
-or the other extreme, put everything into a single label and use the annotated coordinates of the k-mers to find the borders
+both possible to consider each sequence of the input as a separate label and index the coordinates of its k-mers separately
+or, for the other extreme, put everything into a single label and use the annotated coordinates of the k-mers to find the borders
 of each indexed sequence in post-processing query results. In all cases, it is possible to reconstruct the original input
 from indexes of this kind, which makes this indexing method fully lossless (see more details in paper `<https://www.biorxiv.org/content/10.1101/2021.11.09.467907>`_).
 
@@ -426,7 +426,7 @@ a new annotation label will be created for every sequence in the input, and the 
 will be re-set to 0 for every sequence. Note, however, that this assumes that all sequence headers in the FASTA file are unique
 and do not repeat. If this condition is not met, an error will be returned.
 
-All other flags (e.g., ``--separately`` and ``--disk-swap``) described above are also supported as for binary annotations.
+All other flags (e.g., ``--separately`` and ``--disk-swap``) described above are also supported similarly as for binary annotations.
 
 Query k-mer coordinates
 """""""""""""""""""""""
@@ -500,8 +500,8 @@ the arity of its internal nodes and enhance the compression::
 
 .. note::
     By default, ``metagraph transform_anno --anno-type brwt`` uses disk swap for temp files created for each annotation
-    column (label), which might be inapropriate when the number of columns is too large (around a million or more).
-    In such cases, pass additional flag ``--disk-swap ""`` to compute everything in-memory without creating temp files.
+    column (label), which might be inappropriate when the number of columns is too large (around a million or more).
+    In such cases, pass an additional flag ``--disk-swap ""`` to compute everything in-memory without creating temp files.
 
 .. _to_row_diff_brwt:
 
@@ -568,7 +568,7 @@ Conversion to ``brwt_coord`` is analogous to ``brwt`` and ``int_brwt``.
 Conversion to ``row_diff_brwt_coord`` is analogous to ``row_diff_brwt`` and ``row_diff_int_brwt``, where an additional flag ``--coordinates`` has to be passed.
 
 Additionally, one can convert the delta-transformed columns with coordinates (after step ``--anno-type row_diff --coordinates``)
-directly to the ColumnCompressed format (``row_diff_coord``), which equivalent to ``row_diff_int_brwt`` where the arity is set to infinity,
+directly to the ColumnCompressed format (``row_diff_coord``), which is equivalent to ``row_diff_int_brwt`` where the arity is set to infinity,
 that is, all leaves are connected directly to the root.
 
 Query index
