@@ -35,6 +35,13 @@ class AnnotationBuffer {
     typedef std::reference_wrapper<const Alignment::LabelSet> LabelSet;
     typedef std::reference_wrapper<const Alignment::CoordinateSet> CoordsSet;
 
+    typedef size_t labels_index;
+    typedef size_t coords_index;
+
+    // placeholder index for an unfetched annotation
+    static constexpr labels_index nannot = std::numeric_limits<labels_index>::max();
+
+    // placeholder index for an undefined row
     static constexpr Row nrow = std::numeric_limits<Row>::max();
 
     AnnotationBuffer(const DeBruijnGraph &graph, const Annotator &annotator);
@@ -63,34 +70,62 @@ class AnnotationBuffer {
     std::pair<std::vector<node_index>, bool>
     add_path(const std::vector<node_index> &path, std::string sequence);
 
+    std::pair<labels_index, coords_index> get_label_and_coordinate_indices(node_index node) const {
+        auto it = labels_.find(node);
+        return it != labels_.end()
+            ? std::make_pair(it->second.second, static_cast<coords_index>(it - labels_.begin()))
+            : std::make_pair(nannot, nannot);
+    }
+
     // get the annotations and coordinates of a node if they have been fetched
     std::pair<std::optional<LabelSet>, std::optional<CoordsSet>>
-    get_labels_and_coordinates(node_index node) const {
+    get_labels_and_coordinates_from_indices(labels_index label_i, coords_index coord_i) const {
         std::pair<std::optional<LabelSet>, std::optional<CoordsSet>> ret_val {
             std::nullopt, std::nullopt
         };
 
-        auto it = labels_.find(node);
-
         // if the node hasn't been seen before, or if its annotations haven't
         // been flushed, return nothing
-        if (it == labels_.end() || it->second.second == nannot)
+        if (label_i == nannot)
             return ret_val;
 
-        ret_val.first = std::cref(labels_set_.data()[it->second.second]);
+        assert(label_i < labels_set_.size());
+        ret_val.first = std::cref(labels_set_.data()[label_i]);
 
         // if no coordinates are present, return just the labels
-        if (!multi_int_)
+        if (!multi_int_ || coord_i == nannot)
             return ret_val;
 
-        assert(static_cast<size_t>(it - labels_.begin()) < label_coords_.size());
-        ret_val.second = std::cref(label_coords_[it - labels_.begin()]);
+        assert(coord_i < label_coords_.size());
+        ret_val.second = std::cref(label_coords_[coord_i]);
         return ret_val;
+    }
+
+    // get the annotations and coordinates of a node if they have been fetched
+    std::pair<std::optional<LabelSet>, std::optional<CoordsSet>>
+    get_labels_and_coordinates(node_index node) const {
+        auto [label_i, coord_i] = get_label_and_coordinate_indices(node);
+        return get_labels_and_coordinates_from_indices(label_i, coord_i);
     }
 
     // get the annotations of a node if they have been fetched
     inline std::optional<LabelSet> get_labels(node_index node) const {
         return get_labels_and_coordinates(node).first;
+    }
+
+    inline std::optional<LabelSet> get_labels_from_index(size_t label_i) const {
+        return get_labels_and_coordinates_from_indices(label_i, nannot).first;
+    }
+
+    inline labels_index get_index(const Vector<Column> &labels) const {
+        auto it = labels_set_.find(labels);
+        return it != labels_set_.end() ? it - labels_set_.begin() : nannot;
+    }
+
+    template <typename... Args>
+    inline labels_index emplace(Args&&... labels) {
+        auto it = labels_set_.emplace(std::forward<Args>(labels)...).first;
+        return it - labels_set_.begin();
     }
 
     size_t num_cached() const { return added_rows_.size(); }
@@ -100,14 +135,11 @@ class AnnotationBuffer {
     const Annotator &annotator_;
     const annot::matrix::MultiIntMatrix *multi_int_;
 
-    // placeholder index for an unfetched annotation
-    static constexpr size_t nannot = std::numeric_limits<size_t>::max();
-
     // keep a unique set of annotation rows
     VectorSet<Vector<Column>, utils::VectorHash> labels_set_;
 
     // map nodes to indexes in labels_set_
-    VectorMap<node_index, std::pair<Row, size_t>> labels_;
+    VectorMap<node_index, std::pair<Row, labels_index>> labels_;
 
     // map each element in labels_ to a set of coordinates
     std::vector<Vector<Tuple>> label_coords_;

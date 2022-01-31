@@ -123,7 +123,7 @@ bool LabeledExtender::set_seed(const Alignment &seed) {
         node_labels_.resize(1);
         label_changed_.resize(1);
         if (seed.label_columns.size()) {
-            if (auto labels = labeled_graph_.get_labels_and_coordinates(seed.get_nodes()[0]).first) {
+            if (auto labels = labeled_graph_.get_labels(seed.get_nodes()[0])) {
                 Vector<Column> inter;
                 std::set_intersection(seed.label_columns.begin(),
                                       seed.label_columns.end(),
@@ -203,7 +203,7 @@ void LabeledExtender
     size_t found_subset = 0;
     for (size_t i = 0; i < outgoing.size(); ++i) {
         const auto &[next, c, score, next_base] = outgoing[i];
-        if (auto next_labels = labeled_graph_.get_labels_and_coordinates(next).first) {
+        if (auto next_labels = labeled_graph_.get_labels(next)) {
             auto &[inter, diff, lclogprob] = inter_diff[i];
             if (base_labels) {
                 set_intersection_difference(next_labels->get().begin(),
@@ -311,7 +311,7 @@ void LabeledExtender
             size_t node_exc_count = 0;
             auto update_node_count = [&](boss::BOSS::edge_index i) {
                 if (node_index n = dbg_succ->boss_to_kmer_index(i)) {
-                    if (auto labels = labeled_graph_.get_labels_and_coordinates(n).first) {
+                    if (auto labels = labeled_graph_.get_labels(n)) {
                         for (Column col : labels->get()) {
                             if (!exclude.count(col)) {
                                 ++shared_label_counts[col].first;
@@ -338,7 +338,7 @@ void LabeledExtender
             size_t next_exc_count = 0;
             for (auto i = next_range.first; i <= next_range.second; ++i) {
                 if (node_index n = dbg_succ->boss_to_kmer_index(i)) {
-                    if (auto labels = labeled_graph_.get_labels_and_coordinates(n).first) {
+                    if (auto labels = labeled_graph_.get_labels(n)) {
                         for (Column col : labels->get()) {
                             if (!exclude.count(col)) {
                                 ++shared_label_counts[col].second;
@@ -427,7 +427,7 @@ void LabeledExtender
             if (std::optional<Vector<Column>> fetch_labels = node_labels_[table_i])
                 return *fetch_labels;
 
-            auto labels = labeled_graph_.get_labels_and_coordinates(node).first;
+            auto labels = labeled_graph_.get_labels(node);
             assert(labels);
             size_t last_fork_i = std::get<10>(this->table[table_i]);
             if (std::optional<Vector<Column>> fetch_labels = node_labels_[last_fork_i]) {
