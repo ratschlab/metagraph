@@ -399,7 +399,7 @@ Query k-mer counts
 For querying k-mer counts (abundances), for example, to see how highly a gene is expressed in the indexed RNA-seq samples,
 the annotation should be transformed to a representation that combines both the binary annotation matrix
 (from ``*.column.annodbg``) and the count values (from ``*.column.annodbg.counts``).
-For more details, see sections :ref:`Conversion to Int-Multi-BRWT <to int_brwt>` and :ref:`Conversion to RowDiff\<Int-Multi-BRWT\> <to row_diff_int_brwt>`.
+For more details, see section :ref:`transform_count_annotations`.
 
 
 .. _indexing coordinates:
@@ -428,6 +428,8 @@ and do not repeat. If this condition is not met, an error will be returned.
 
 All other flags (e.g., ``--separately`` and ``--disk-swap``) described above are also supported as for binary annotations.
 
+Query k-mer coordinates
+"""""""""""""""""""""""
 Once a coordinate-aware annotation is constructed, it can be transformed to a more memory-efficient representation supporting
 querying (see :ref:`transform_coord_annotations` below).
 
@@ -465,53 +467,109 @@ The conversion to Rainbowfish consists of two steps.
                                 annotation.row.annodbg
 
 
-.. _to row_diff:
+.. _to_multi_brwt:
+
+Convert annotation to Multi-BRWT
+""""""""""""""""""""""""""""""""
+The conversion to ``Multi-BRWT`` can be done either
+
+*   with a single command, e.g.::
+
+        find . -name "*.column.annodbg" | metagraph transform_anno -v -p 18 --anno-type brwt \
+                                                        --greedy --fast -o anno
+
+*   or with pre-computing a column clustering with::
+
+        find . -name "*.column.annodbg" | metagraph transform_anno -v -p 18 --anno-type brwt \
+                                                        --linkage --greedy --fast -o linkage.txt
+
+    and next converting the annotation to Multi-BRWT according to the pre-computed clustering (linkage)::
+
+        find . -name "*.column.annodbg" | metagraph transform_anno -v -p 18 --anno-type brwt \
+                                                        --linkage-file linkage.txt -o anno
+
+.. note::
+    If the clustering is too slow, it probably means it uses too many subsampled rows. In this case, consider
+    changing the value passed with flag ``--subsample <INT>``. The 1M subsampled by default rows are usually enough
+    even for very large annotations, and increasing this value usually does not lead to any significantly better compression.
+
+Finally, the internal structure of the BRWT tree can be relaxed (which is always recommended to do) to increase
+the arity of its internal nodes and enhance the compression::
+
+    metagraph relax_brwt -v -p 18 -o anno_relaxed anno.brwt.annodbg
+
+.. note::
+    By default, ``metagraph transform_anno --anno-type brwt`` uses disk swap for temp files created for each annotation
+    column (label), which might be inapropriate when the number of columns is too large (around a million or more).
+    In such cases, pass additional flag ``--disk-swap ""`` to compute everything in-memory without creating temp files.
+
+.. _to_row_diff_brwt:
 
 Convert annotation to RowDiff<Multi-BRWT>
 """""""""""""""""""""""""""""""""""""""""
-
 The conversion to ``RowDiff<Multi-BRWT>`` is done in two steps.
 
-1. Transform annotation columns ``*.column.annodbg`` to ``row_diff`` in three stages::
+1.  Transform annotation columns ``*.column.annodbg`` to ``row_diff`` in three stages::
 
-    metagraph transform_anno -v --anno-type row_diff --row-diff-stage 0 ...
-    metagraph transform_anno -v --anno-type row_diff --row-diff-stage 1 ...
-    metagraph transform_anno -v --anno-type row_diff --row-diff-stage 2 ...
+        find . -name "*.column.annodbg" | metagraph transform_anno -v -p 36 \
+                                            --anno-type row_diff --row-diff-stage 0 \
+                                            -i graph.dbg --mem-cap-gb 300
 
-2. Transform the RowDiff-sparsified columns ``*.row_diff.annodbg`` to ``Multi-BRWT``::
+        find . -name "*.column.annodbg" | metagraph transform_anno -v -p 36 \
+                                            --anno-type row_diff --row-diff-stage 1 \
+                                            -i graph.dbg --mem-cap-gb 300
 
-    metagraph transform_anno -v --anno-type row_diff_brwt --greedy --fast ...
-    metagraph relax_brwt -v -p 18 \
-                         --relax-arity 32 \
-                         -o annotation_relaxed \
-                         annotation.row_diff_brwt.annodbg
+        find . -name "*.column.annodbg" | metagraph transform_anno -v -p 36 \
+                                            --anno-type row_diff --row-diff-stage 2 \
+                                            -i graph.dbg --mem-cap-gb 300
 
-.. _to int_brwt:
+    Note that this requires to pass the graph ``graph.dbg`` as well in order to derive the topology for the diff-transform.
 
-Convert count-aware annotation to Int-Multi-BRWT
-""""""""""""""""""""""""""""""""""""""""""""""""
+2.  Transform the diff-transformed columns ``*.row_diff.annodbg`` to ``Multi-BRWT``::
+
+        find . -name "*.row_diff.annodbg" | metagraph transform_anno -v -p 18 \
+                                                        --anno-type row_diff_brwt \
+                                                        --greedy ...
+        metagraph relax_brwt -v -p 18 \
+                             --relax-arity 32 \
+                             -o annotation_relaxed \
+                             annotation.row_diff_brwt.annodbg
+
+    Also see the above paragraph :ref:`to_multi_brwt` for other options.
+
+.. _transform_count_annotations:
+
+Convert count-aware annotations
+"""""""""""""""""""""""""""""""
 
 Converting a graph annotation supplemented with k-mer counts (``*.column.annodbg`` + ``*.column.annodbg.counts``)
-to Int-Multi-BRWT is done as simple as::
+to Int-Multi-BRWT (``int_brwt``) is done exactly the same way as converting a binary annotation to Multi-BRWT (see :ref:`to_multi_brwt`),
+with simply replacing ``--anno-type brwt`` with ``--anno-type int_brwt``::
 
-    metagraph transform_anno --anno-type int_brwt --greedy annotation.column.annodbg -o annotation
+    metagraph transform_anno --anno-type int_brwt --greedy --fast ...
 
-with the only exception that one has to pass flag ``--count-kmers`` when converting the annotation to ``row_diff`` (see more details in ).
+For converting to RowDiff<Int-Multi-BRWT> (``row_diff_int_brwt``), perform the same steps as when
+:ref:`converting to RowDiff\<Multi-BRWT\> <to_row_diff_brwt>` with the following exceptions.
+First, an additional flag ``--count-kmers`` has to be passed on step 1 (the row-diff transform).
+Second, on step 2, delta-transformed columns have file extension ``.column.annodbg`` and not ``.row_diff.annodbg``.
+These columns should be passed to the ``metagraph transform_anno --anno-type row_diff_int_brwt`` command.
+The corresponding transformed delta counts will be loaded automatically.
 
-.. _to row_diff_int_brwt:
-
-Convert count-aware annotation to RowDiff<Int-Multi-BRWT>
-"""""""""""""""""""""""""""""""""""""""""""""""""""""""""
-TODO
-
+For real examples, see `<https://github.com/ratschlab/counting_dbg/blob/master/scripts.md#index-with-k-mer-counts>`_.
 
 .. _transform_coord_annotations:
 
 Transform coordinate annotations
 """"""""""""""""""""""""""""""""
+Conversion to ``column_coord`` is straighforward.
 
-TODO
+Conversion to ``brwt_coord`` is analogous to ``brwt`` and ``int_brwt``.
 
+Conversion to ``row_diff_brwt_coord`` is analogous to ``row_diff_brwt`` and ``row_diff_int_brwt``, where an additional flag ``--coordinates`` has to be passed.
+
+Additionally, one can convert the delta-transformed columns with coordinates (after step ``--anno-type row_diff --coordinates``)
+directly to the ColumnCompressed format (``row_diff_coord``), which equivalent to ``row_diff_int_brwt`` where the arity is set to infinity,
+that is, all leaves are connected directly to the root.
 
 Query index
 -----------
