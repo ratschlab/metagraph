@@ -69,7 +69,7 @@ Construct with disk swap
 For very large inputs, graphs can be constructed with disk swap to limit the RAM usage (currently, available only for ``succinct`` graph representations).
 For example, the buffer size can be set to 4 GiB as follows::
 
-    metagraph build -v -k 31 -o graph -p 36 --disk-swap /tmp --disk-cap-gb 4 file.fa ...
+    metagraph build -v -k 31 -o graph -p 36 --disk-swap /tmp --mem-cap-gb 4 file.fa ...
 
 Using larger buffers usually speeds up the construction. However, using a 50-80 GB buffer is always sufficient, even when constructing graphs with trillions of k-mers.
 
@@ -91,12 +91,34 @@ occurring at least 5 times in the input::
     # count k-mers with KMC
     ./KMC/kmc -ci5 -t4 -k$K -m5 -fm SRR403017.fasta.gz SRR403017.cutoff_5 ./KMC
     # build graph with MetaGraph
-    metagraph build -v -p 4 -k $K --mem-cap-gb 10 -o graph SRR403017.cutoff_5.kmc_pre
+    metagraph build -v -p 4 -k $K -o graph SRR403017.cutoff_5.kmc_pre
 
 .. note::
     In the above example, we use ``./KMC`` as the directory where KMC will store its
     intermediate caches. Depending on your input data, this directory should be at a location
     with a sufficient amount of free intermediate storage space.
+
+.. _construct_weighted_graph:
+
+Construct weighted graph
+""""""""""""""""""""""""
+Since KMC does exactly compute the counts of all k-mers from the input, this information can be included when transforming this to a de Bruijn graph.
+Namely, a node weight (k-mer count) can be associated with every k-mer from the graph.
+All these node weights would supplement the graph in the form of an integer vector ``graph.dbg.weights``,
+which can be constructed by simply adding flag ``--count-kmers`` to the same graph construction command::
+
+    metagraph build -v -p 4 -k 31 --count-kmers -o graph SRR403017.cutoff_5.kmc_pre
+
+which will construct a de Bruijn graph ``graph.dbg`` and an array of counts ``counts.dbg.weights`` associated with its k-mers.
+This supplementing vector of counts can then be used for graph cleaning (see :ref:`graph_cleaning`) or indexing k-mer counts
+with pre-counting (see :ref:`annotate_with_precounting`).
+
+.. note::
+    A weighted graph can also be constructed directly from raw input sequences, without pre-counting with KMC, e.g.,::
+
+        metagraph build -v -p 4 -k 31 --count-kmers -o graph SRR403017.fasta.gz
+
+    This should be used when pre-processing with KMC is complicated or impossible, such as indexing protein sequences.
 
 Transform to other representations
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -123,6 +145,14 @@ The assembled contigs are written to a compressed FASTA file, which can be inspe
 
 To extract all unitigs (linear paths in the graph), add flag ``--unitigs`` to the same ``metagraph transform`` command.
 
+.. note::
+    Extraction of contigs with k-mer counts from a *weighted* de Bruijn graph (see section :ref:`construct_weighted_graph`),
+    currently is only possible with command ``metagraph clean`` instead of ``metagraph transform``. Note, however, that this will actually perform
+    no cleaning or k-mer filtering unless additional cleaning parameters are passed (see more details in :ref:`graph_cleaning`).
+    Instead, this will simply extract a set of contigs (written to file ``*.fasta.gz``) covering all the k-mers from
+    the graph and write counts of their constituting k-mers to file ``*.kmer_counts.gz``.
+
+
 Construct canonical graph
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -131,6 +161,13 @@ When the input sequences are raw reads of unknown directionality (strandedness),
 MetaGraph has a special graph mode where each k-mer indexed in the graph automatically adds its reverse complement k-mer to the index. To build a canonical graph from a set of reads/sequences, add ``--mode canonical`` to the build command::
 
     find . -name "*.fa" | metagraph build -v -p 4 -k 31 -o graph --mode canonical
+
+.. note::
+    Canonical graphs should not be used in combination with delta-coded annotations of type ``RowDiff<*>``.
+    For canonical graphs, only half of the k-mers are annotated, which creates a huge number of "gaps" in
+    the annotation, diminishing the effectiveness of the coding. Instead, *canonical* graphs should always
+    be transformed to *primary* (see section :ref:`construct_primary_graph` below) before annotating them.
+
 
 .. _construct_primary_graph:
 
@@ -158,7 +195,6 @@ Now, this new graph ``graph_primary.dbg`` emulates the original canonical graph 
 or annotating). It represents the same information as the original canonical graph, while taking only
 half of the space.
 
-.. TODO: note that canonical graphs must not be used with row-diff<*> annotations and always must be primarized
 
 .. _graph_cleaning:
 
@@ -303,8 +339,8 @@ Index k-mer counts
 ^^^^^^^^^^^^^^^^^^^^^
 MetaGraph supports indexing k-mer counts (k-mer abundances), e.g., to represent gene expression in RNA-seq data.
 
-The counts are stored in graph annotation, which supports any graph representation.
-To construct a count-aware graph annotation, construct a de Bruijn graph as usual (see :ref:`construct graph`)
+The counts can supplement graphs in any representation.
+To construct a MetaGraph index with k-mer counts (Counting de Bruijn graph), construct a de Bruijn graph as usual (see :ref:`construct graph`)
 and then add ``--count-kmers`` to the annotation command, e.g.::
 
     metagraph annotate -v -i graph.dbg --anno-filename --count-kmers -p 4 \
@@ -330,17 +366,31 @@ For instance, type the following command to compute the *minimum* non-zero count
 
     metagraph stats -a annotation.column.annodbg --count-quantiles '0 0.5 1'
 
+.. _annotate_with_precounting:
 
-Annotate with pre-counting k-mers
-"""""""""""""""""""""""""""""""""
-Similarly to the case of simple binary annotations, it makes sense to pre-count k-mers for each annotation label before annotating it.
-Currently MetaGraph provides two ways to do this.
+Annotate with pre-counting
+""""""""""""""""""""""""""
+Similarly to the case of simple binary annotations considered above, it is recommended to pre-count k-mers for each annotation
+label (typically, sequencing sample) before annotating it. This technique consists in first constructing a *weighted* de Bruijn graph
+(see :ref:`construct_weighted_graph` and note that it can be constructed from raw input sequences as well as from pre-computed KMC counters)
+and transforming it to contigs with counts associated with their constituting k-mers::
 
+    metagraph clean -v -p 4 --to-fasta -o contigs sample_graph.dbg
 
-Annotate KMC counters
-"""""""""""""""""""""
+.. note::
+    As noted above in section :ref:`graph_cleaning`, the command ``metagraph clean`` does not actually do any cleaning or k-mer filtering
+    unless additional cleaning parameters are passed to it. Thus, the set of contigs extracted by the command above will actually cover
+    all the k-mers from the de Bruijn graph ``graph.dbg``.
 
+Then, these contigs written to file ``contigs.fasta.gz`` and the counts associated with their k-mers to ``contigs.kmer_counts.gz``
+can be used when constructing a count-aware graph annotation::
 
+    metagraph annotate -v -i graph.dbg --anno-filename --count-kmers -p 4 \
+                          -o annotation contigs.fasta.gz
+
+.. warning::
+    If something went wrong and no counts could be read from file ``contigs.kmer_counts.gz``, a warning message
+    ``[warning] No k-mer counts found ...`` will be printed and ``metagraph annotate`` will proceed with assuming the count of each k-mer equal to 1.
 
 
 Query k-mer counts
@@ -356,7 +406,30 @@ For more details, see sections :ref:`Conversion to Int-Multi-BRWT <to int_brwt>`
 
 Index k-mer coordinates
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
-TODO
+Besides indexing k-mer counts, MetaGraph supports indexing k-mer coordinates, that is, their positions in the source input.
+These may represent positions in a genome, positions of a k-mer in a raw SRA experiment (say, each read has 70 k-mers in it;
+then the second k-mer of the third read has coordinate 211). Depending on the target application and the final goal, it is
+both possible to consider each sequence of the input as a separate label and index the coordiantes of its k-mers separately,
+or the other extreme, put everything into a single label and use the annotated coordinates of the k-mers to find the borders
+of each indexed sequence in post-processing query results. In all cases, it is possible to reconstruct the original input
+from indexes of this kind, which makes this indexing method fully lossless (see more details in paper `<https://www.biorxiv.org/content/10.1101/2021.11.09.467907>`_).
+
+To construct a MetaGraph index with k-mer coordinates (represented as a Counting de Bruijn graph), construct a de Bruijn graph
+as usual (see :ref:`construct graph`) and then add ``--coordinates`` to the annotation command, e.g.::
+
+    metagraph annotate -v -i graph.dbg --anno-filename --coordinates -p 4 \
+                          -o annotation transcripts_1000.fa
+
+Along with the normal (binary) graph annotation ``annotation.column.annodbg``, this command will create array of corresponding
+k-mer coordinates ``annotation.column.annodbg.coords``. Annotation in the ``--anno-header`` mode is also supported. In that case,
+a new annotation label will be created for every sequence in the input, and the first coordinate for every starting k-mer
+will be re-set to 0 for every sequence. Note, however, that this assumes that all sequence headers in the FASTA file are unique
+and do not repeat. If this condition is not met, an error will be returned.
+
+All other flags (e.g., ``--separately`` and ``--disk-swap``) described above are also supported as for binary annotations.
+
+Once a coordinate-aware annotation is constructed, it can be transformed to a more memory-efficient representation supporting
+querying (see :ref:`transform_coord_annotations` below).
 
 
 .. _transform annotation:
@@ -429,6 +502,14 @@ with the only exception that one has to pass flag ``--count-kmers`` when convert
 
 Convert count-aware annotation to RowDiff<Int-Multi-BRWT>
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""
+TODO
+
+
+.. _transform_coord_annotations:
+
+Transform coordinate annotations
+""""""""""""""""""""""""""""""""
+
 TODO
 
 

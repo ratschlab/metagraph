@@ -20,7 +20,7 @@
 # -- Project information -----------------------------------------------------
 
 project = u'MetaGraph'
-copyright = u'2021, Mikhail Karasikov, Harun Mustafa, Andre Kahles, Gunnar Ratsch, Daniel Danciu, Marc Zimmermann, Chris Barber'
+copyright = u'2022, Mikhail Karasikov, Harun Mustafa, Andre Kahles, Gunnar Ratsch, Daniel Danciu, Marc Zimmermann, Chris Barber'
 author = u'Mikhail Karasikov, Harun Mustafa, Andre Kahles, Gunnar Ratsch, Daniel Danciu, Marc Zimmermann, Chris Barber'
 
 # The short X.Y version
@@ -110,6 +110,7 @@ html_theme_options = {
 # 'searchbox.html']``.
 #
 # html_sidebars = {}
+# html_sidebars = {'quick_start': ['localtoc.html', 'sourcelink.html', 'searchbox.html']}
 
 
 # -- Options for HTMLHelp output ---------------------------------------------
