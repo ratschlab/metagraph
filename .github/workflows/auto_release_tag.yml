@@ -13,11 +13,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v2
-    - uses: Jaliborc/action-general-autotag@1.0.0
+    - uses: Jaliborc/action-general-autotag@1.0.1
       with:
         GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
         source_file: "package.json"
         extraction_regex: "\\s*\"version\"s*:\\s*\"([\\d\\.]+)\""
         tag_format: "test_v{version}"
-        tag_message: ""
+        tag_message: "empty"
 
