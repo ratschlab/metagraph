@@ -162,7 +162,7 @@ MetaGraph has a special graph mode where each k-mer indexed in the graph automat
 
     find . -name "*.fa" | metagraph build -v -p 4 -k 31 -o graph --mode canonical
 
-.. note::
+.. important::
     Canonical graphs should not be used in combination with delta-coded annotations of type ``RowDiff<*>``.
     For canonical graphs, only half of the k-mers are annotated, which creates a huge number of "gaps" in
     the annotation, diminishing the effectiveness of the coding. Instead, *canonical* graphs should always
@@ -290,7 +290,7 @@ This will create a new directory ``annotation/`` with individual annotation colu
 Note, in the command above we passed ``-p 4 --threads-each 9`` to annotate 4 files at a time,
 in parallel, where each uses 9 threads. Thus, this uses 36 threads in total.
 
-.. important:: It is recommended to run annotation from a set of long (primary) contigs/unitigs,
+.. tip:: It is recommended to run annotation from a set of long (primary) contigs/unitigs,
     where all k-mers have already been deduplicated, especially when annotating a (primary) graph
     in the ``succinct`` representation. In contrast, annotating a ``succinct`` graph from
     separate k-mers (especially not deduplicated) will take orders of magnitude longer.
@@ -413,6 +413,8 @@ both possible to consider each sequence of the input as a separate label and ind
 or, for the other extreme, put everything into a single label and use the annotated coordinates of the k-mers to find the borders
 of each indexed sequence in post-processing query results. In all cases, it is possible to reconstruct the original input
 from indexes of this kind, which makes this indexing method fully lossless (see more details in paper `<https://www.biorxiv.org/content/10.1101/2021.11.09.467907>`_).
+
+.. TODO: mention trace-consistent alignment
 
 To construct a MetaGraph index with k-mer coordinates (represented as a Counting de Bruijn graph), construct a de Bruijn graph
 as usual (see :ref:`construct graph`) and then add ``--coordinates`` to the annotation command, e.g.::
@@ -559,8 +561,8 @@ For real examples, see `<https://github.com/ratschlab/counting_dbg/blob/master/s
 
 .. _transform_coord_annotations:
 
-Transform coordinate annotations
-""""""""""""""""""""""""""""""""
+Convert coordinate-aware annotations
+""""""""""""""""""""""""""""""""""""
 Conversion to ``column_coord`` is straighforward.
 
 Conversion to ``brwt_coord`` is analogous to ``brwt`` and ``int_brwt``.
@@ -568,8 +570,8 @@ Conversion to ``brwt_coord`` is analogous to ``brwt`` and ``int_brwt``.
 Conversion to ``row_diff_brwt_coord`` is analogous to ``row_diff_brwt`` and ``row_diff_int_brwt``, where an additional flag ``--coordinates`` has to be passed.
 
 Additionally, one can convert the delta-transformed columns with coordinates (after step ``--anno-type row_diff --coordinates``)
-directly to the ColumnCompressed format (``row_diff_coord``), which is equivalent to ``row_diff_int_brwt`` where the arity is set to infinity,
-that is, all leaves are connected directly to the root.
+directly to the ColumnCompressed format (``row_diff_coord``), equivalent to ``row_diff_brwt_coord`` with the arity set to infinity,
+that is, all leaves (original labels) directly connected to the root of the BRWT tree.
 
 Query index
 -----------
