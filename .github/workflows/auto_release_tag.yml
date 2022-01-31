@@ -12,7 +12,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@mk/auto
+    - uses: actions/checkout@v2
     - uses: Jaliborc/action-general-autotag@1.0.1
       with:
         GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
