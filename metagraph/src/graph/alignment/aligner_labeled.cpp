@@ -129,12 +129,12 @@ bool LabeledExtender::set_seed(const Alignment &seed) {
                                       seed.label_columns.end(),
                                       labels->get().begin(), labels->get().end(),
                                       std::back_inserter(inter));
-                node_labels_[0] = std::move(inter);
+                node_labels_[0] = labeled_graph_.emplace(std::move(inter));
             } else {
-                node_labels_[0] = seed.label_columns;
+                node_labels_[0] = labeled_graph_.emplace(seed.label_columns);
             }
         } else {
-            node_labels_[0] = std::nullopt;
+            node_labels_[0] = AnnotationBuffer::nannot;
         }
 
         return true;
@@ -185,7 +185,7 @@ void LabeledExtender
     //     ? node_labels_[table_i]
     //     : node_labels_[std::get<10>(table[table_i])];
     labeled_graph_.flush();
-    const std::optional<Vector<Column>> &base_labels = node_labels_[table_i];
+    auto base_labels = labeled_graph_.get_labels_from_index(node_labels_[table_i]);
 
     const DBGSuccinct *dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph_->get_base_graph());
 
@@ -208,7 +208,8 @@ void LabeledExtender
             if (base_labels) {
                 set_intersection_difference(next_labels->get().begin(),
                                             next_labels->get().end(),
-                                            base_labels->begin(), base_labels->end(),
+                                            base_labels->get().begin(),
+                                            base_labels->get().end(),
                                             std::back_inserter(inter),
                                             std::back_inserter(diff));
 
@@ -390,11 +391,11 @@ void LabeledExtender
         auto &[inter, diff, lclogprob] = inter_diff[i];
         if (diff.empty()) {
             label_changed_.emplace_back(false);
-            node_labels_.emplace_back(std::move(inter));
+            node_labels_.emplace_back(labeled_graph_.emplace(std::move(inter)));
             callback(next, c, score + sum_diff_probs);
         } else if (!found_diff || lclogprob > config_.ninf) {
             label_changed_.emplace_back(true);
-            node_labels_.emplace_back(std::move(diff));
+            node_labels_.emplace_back(labeled_graph_.emplace(std::move(diff)));
             callback(next, c, score + (found_diff ? lclogprob : -config_.extra_penalty));
         }
     }
@@ -424,18 +425,18 @@ void LabeledExtender
         aln.label_encoder = &labeled_graph_.get_annotator().get_label_encoder();
 
         auto get_annotation = [&](size_t table_i, node_index node) -> Vector<Column> {
-            if (std::optional<Vector<Column>> fetch_labels = node_labels_[table_i])
+            if (std::optional<Vector<Column>> fetch_labels = labeled_graph_.get_labels_from_index(node_labels_[table_i]))
                 return *fetch_labels;
 
             auto labels = labeled_graph_.get_labels(node);
             assert(labels);
-            size_t last_fork_i = std::get<10>(this->table[table_i]);
-            if (std::optional<Vector<Column>> fetch_labels = node_labels_[last_fork_i]) {
+            size_t last_fork_labels_i = node_labels_[std::get<10>(this->table[table_i])];
+            if (std::optional<Vector<Column>> fetch_labels = labeled_graph_.get_labels_from_index(last_fork_labels_i)) {
                 Vector<Column> inter;
                 std::set_intersection(labels->get().begin(), labels->get().end(),
                                       fetch_labels->begin(), fetch_labels->end(),
                                       std::back_inserter(inter));
-                return inter;
+                return labeled_graph_.get_labels_from_index(labeled_graph_.emplace(std::move(inter)))->get();
             }
 
             return labels->get();

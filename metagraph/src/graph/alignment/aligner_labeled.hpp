@@ -175,6 +175,7 @@ class LabeledExtender : public DefaultColumnExtender {
   public:
     typedef AnnotationBuffer::Column Column;
     typedef AnnotationBuffer::Tuple Tuple;
+    typedef AnnotationBuffer::labels_index labels_index;
     typedef AlignmentAggregator<LocalAlignmentLess> Aggregator;
 
     LabeledExtender(AnnotationBuffer &labeled_graph,
@@ -240,7 +241,7 @@ class LabeledExtender : public DefaultColumnExtender {
     AnnotationBuffer &labeled_graph_;
     size_t last_buffered_table_i_;
 
-    std::vector<std::optional<Vector<Column>>> node_labels_;
+    std::vector<labels_index> node_labels_;
     std::vector<bool> label_changed_;
 };
 
