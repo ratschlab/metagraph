@@ -18,6 +18,6 @@ jobs:
         GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
         source_file: "package.json"
         extraction_regex: "\\s*\"version\"s*:\\s*\"([\\d\\.]+)\""
-        tag_format: "test_v{version}"
-        tag_message: "empty"
+        tag_format: "check_v{version}"
+        tag_message: "New version: v{version}"
 
