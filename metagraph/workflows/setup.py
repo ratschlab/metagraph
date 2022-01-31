@@ -3,6 +3,7 @@
 
 """The setup script."""
 
+import json
 from setuptools import setup, find_packages
 
 with open('README.rst') as readme_file:
@@ -15,6 +16,9 @@ with open('requirements.txt') as f:
 
 test_requirements = ['pytest']
 
+with open('../../package.json') as f:
+    version = json.load(f)['version']
+
 setup(
     author="Marc Zimmermann",
     author_email='marc.zimmermann@inf.ethz.ch',
@@ -22,9 +26,10 @@ setup(
     maintainer_email='mikhaika@inf.ethz.ch',
     classifiers=[
         'Development Status :: 2 - Pre-Alpha',
-        'Intended Audience :: Developers',
+        'Intended Audience :: Science/Research',
         'License :: OSI Approved :: MIT License',
         'Natural Language :: English',
+        'Programming Language :: Python',
         'Programming Language :: Python :: 3',
         'Programming Language :: Python :: 3.6',
         'Programming Language :: Python :: 3.7',
@@ -47,6 +52,6 @@ setup(
     test_suite='tests',
     tests_require=test_requirements,
     url='https://github.com/ratschlab/metagraph',
-    version='0.1.0',
+    version=version,
     zip_safe=False,
 )
