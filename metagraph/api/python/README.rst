@@ -30,4 +30,4 @@ Usage
 For more examples, see `notebooks
 <./notebooks>`_.
 
-See more API docs in `<../../docs/source/api.rst>`_ on online: `<https://metagraph.ethz.ch/static/docs/api.html>`_.
+See API docs in `<../../docs/source/api.rst>`_ on online: `<https://metagraph.ethz.ch/static/docs/api.html>`_.
