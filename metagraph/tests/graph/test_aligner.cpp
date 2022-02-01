@@ -604,9 +604,11 @@ TYPED_TEST(DBGAlignerTest, align_noise_in_branching_point) {
 
     EXPECT_EQ(query.size() - k + 2, path.size());
     if (!path.get_orientation()) {
+        // the forward orientation of the read was aligned
         EXPECT_EQ("AAAACTTTTTTT", path.get_sequence());
         EXPECT_EQ("4=1D7=", path.get_cigar().to_string());
     } else {
+        // the reverse complement of the read was aligned
         EXPECT_EQ("AAAAAAACTTTT", path.get_sequence());
         EXPECT_EQ("7=1D4=", path.get_cigar().to_string());
     }
