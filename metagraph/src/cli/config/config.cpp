@@ -893,6 +893,7 @@ if (advanced) {
             fprintf(stderr, "General options:\n");
             fprintf(stderr, "\t--advanced \tshow other advanced and legacy options [off]\n");
             fprintf(stderr, "\t--version \tprint version\n");
+            fprintf(stderr, "\n");
             return;
         }
         case BUILD: {
@@ -1317,6 +1318,7 @@ if (advanced) {
     fprintf(stderr, "\t-v --verbose \t\tswitch on verbose output [off]\n");
     fprintf(stderr, "\t   --advanced \t\tshow other advanced and legacy options [off]\n");
     fprintf(stderr, "\t-h --help \t\tprint usage info\n");
+    fprintf(stderr, "\n");
 }
 
 } // namespace cli
