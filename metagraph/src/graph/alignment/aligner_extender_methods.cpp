@@ -1071,6 +1071,13 @@ std::vector<Alignment> DefaultColumnExtender
                     if (forked_xdrop)
                         xdrop_cutoffs_.pop_back();
 
+#ifndef NDEBUG
+                    if (max_val < xdrop_cutoff) {
+                        DEBUG_LOG("Dropped due to xdrop cutoff: {} < {}", max_val, xdrop_cutoff);
+                    } else {
+                        DEBUG_LOG("Dropped: can't be extended to a better alignment");
+                    }
+#endif
                     continue;
                 }
 
@@ -1226,6 +1233,10 @@ std::vector<Alignment> DefaultColumnExtender
                 && (config_.semiglobal || max_pos != last_pos)) {
             check_and_add_pos(last_pos);
         }
+    }
+
+    if (indices.empty()) {
+        DEBUG_LOG("Found no backtracking start points");
     }
 
     // find highest scoring which is closest to the diagonal

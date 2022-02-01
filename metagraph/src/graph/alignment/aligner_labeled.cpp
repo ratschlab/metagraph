@@ -152,8 +152,8 @@ void LabeledExtender
     assert(label_changed_.size() == node_labels_.size());
     assert(node_labels_.size() == table.size());
     size_t next_offset = std::get<6>(table[table_i]) + 1;
-    bool in_seed = next_offset - this->seed_->get_offset()
-                    < this->seed_->get_sequence().size();
+    size_t position = next_offset - this->seed_->get_offset();
+    bool in_seed = position < this->seed_->get_sequence().size();
     assert(node == std::get<3>(table[table_i]));
 
     if (in_seed && next_offset < graph_->get_k()) {
@@ -354,7 +354,7 @@ void LabeledExtender
 
             if (shared_label_counts.empty()) {
                 lclogprob = config_.ninf;
-                DEBUG_LOG("Label change score: {}", lclogprob);
+                DEBUG_LOG("Position: {}, Label change score: {}", position, lclogprob);
                 continue;
             }
 
@@ -377,13 +377,13 @@ void LabeledExtender
             // std::cerr << "test\t" << numer << "\t" << node_total_count << "\t" << next_total_count << "\t" << lclogprob << "\t" << outgoing.size();
             lclogprob = std::floor(lclogprob - log2(static_cast<double>(outgoing.size())));
             // std::cerr << "\tlabel c\t" << lclogprob << "\n";
-            DEBUG_LOG("Label change score: {}", lclogprob);
+            DEBUG_LOG("Position: {}, Label change score: {}", position, lclogprob);
         }
 
         sum_diff_probs = std::floor(log2((sum_diff_probs + 1.0)
                             / static_cast<double>(outgoing.size())));
         // std::cerr << "\tlabel k\t" << sum_diff_probs << "\n";
-        DEBUG_LOG("Label preservation score: {}", sum_diff_probs);
+        DEBUG_LOG("Position: {}, Label preservation score: {}", position, sum_diff_probs);
     }
 
     for (size_t i = 0; i < inter_diff.size(); ++i) {
