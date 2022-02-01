@@ -430,7 +430,7 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallPathsEmptyGraphCanonical) {
             std::vector<std::string> sequences;
             std::mutex seq_mutex;
             empty->call_sequences([&](const auto &sequence, const auto &path) {
-                ASSERT_EQ(path, map_sequence_to_nodes(*empty, sequence));
+                ASSERT_EQ(path, map_to_nodes_sequentially(*empty, sequence));
                 std::unique_lock<std::mutex> lock(seq_mutex);
                 sequences.push_back(sequence);
             }, num_threads);
@@ -449,7 +449,7 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsEmptyGraph) {
             std::vector<std::string> sequences;
             std::mutex seq_mutex;
             empty->call_unitigs([&](const auto &sequence, const auto &path) {
-                ASSERT_EQ(path, map_sequence_to_nodes(*empty, sequence));
+                ASSERT_EQ(path, map_to_nodes_sequentially(*empty, sequence));
                 std::unique_lock<std::mutex> lock(seq_mutex);
                 sequences.push_back(sequence);
             }, num_threads);
@@ -472,12 +472,12 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallPathsOneSelfLoop) {
 
             std::atomic<size_t> num_sequences = 0;
             graph->call_sequences([&](const auto &sequence, const auto &path) {
-                ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
+                ASSERT_EQ(path, map_to_nodes_sequentially(*graph, sequence));
                 num_sequences++;
             }, num_threads);
             std::atomic<size_t> num_sequences_batch = 0;
             graph_batch->call_sequences([&](const auto &sequence, const auto &path) {
-                ASSERT_EQ(path, map_sequence_to_nodes(*graph_batch, sequence));
+                ASSERT_EQ(path, map_to_nodes_sequentially(*graph_batch, sequence));
                 num_sequences_batch++;
             }, num_threads);
 
@@ -499,12 +499,12 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsOneSelfLoop) {
 
             std::atomic<size_t> num_sequences = 0;
             graph->call_unitigs([&](const auto &sequence, const auto &path) {
-                ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
+                ASSERT_EQ(path, map_to_nodes_sequentially(*graph, sequence));
                 num_sequences++;
             }, num_threads);
             std::atomic<size_t> num_sequences_batch = 0;
             graph_batch->call_unitigs([&](const auto &sequence, const auto &path) {
-                ASSERT_EQ(path, map_sequence_to_nodes(*graph_batch, sequence));
+                ASSERT_EQ(path, map_to_nodes_sequentially(*graph_batch, sequence));
                 num_sequences_batch++;
             }, num_threads);
 
@@ -528,12 +528,12 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallPathsThreeSelfLoops) {
 
             std::atomic<size_t> num_sequences = 0;
             graph->call_sequences([&](const auto &sequence, const auto &path) {
-                ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
+                ASSERT_EQ(path, map_to_nodes_sequentially(*graph, sequence));
                 num_sequences++;
             }, num_threads);
             std::atomic<size_t> num_sequences_batch = 0;
             graph_batch->call_sequences([&](const auto &sequence, const auto &path) {
-                ASSERT_EQ(path, map_sequence_to_nodes(*graph_batch, sequence));
+                ASSERT_EQ(path, map_to_nodes_sequentially(*graph_batch, sequence));
                 num_sequences_batch++;
             }, num_threads);
 
@@ -554,7 +554,7 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallPathsExtractsLongestOneLoop) {
             std::vector<std::string> contigs;
             std::mutex seq_mutex;
             graph->call_sequences([&](const auto &sequence, const auto &path) {
-                ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
+                ASSERT_EQ(path, map_to_nodes_sequentially(*graph, sequence));
                 std::unique_lock<std::mutex> lock(seq_mutex);
                 contigs.push_back(sequence);
             }, num_threads);
@@ -574,7 +574,7 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallContigsUniqueKmers) {
 
         std::atomic<size_t> num_kmers = 0;
         graph->call_sequences([&](const auto &sequence, const auto &path) {
-            ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
+            ASSERT_EQ(path, map_to_nodes_sequentially(*graph, sequence));
             num_kmers += sequence.size() - 2;
         }, num_threads);
 
@@ -591,7 +591,7 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsUniqueKmersCycle) {
         std::atomic<size_t> num_unitigs = 0;
         std::atomic<size_t> num_kmers = 0;
         graph->call_unitigs([&](const auto &sequence, const auto &path) {
-            ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
+            ASSERT_EQ(path, map_to_nodes_sequentially(*graph, sequence));
             num_unitigs++;
             num_kmers += sequence.size() - k + 1;
         }, num_threads);
@@ -610,7 +610,7 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallContigsUniqueKmersCycle) {
         std::atomic<size_t> num_contigs = 0;
         std::atomic<size_t> num_kmers = 0;
         graph->call_sequences([&](const auto &sequence, const auto &path) {
-            ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
+            ASSERT_EQ(path, map_to_nodes_sequentially(*graph, sequence));
             num_contigs++;
             num_kmers += sequence.size() - k + 1;
         }, num_threads);
@@ -633,12 +633,12 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsFourLoops) {
 
             std::atomic<size_t> num_sequences = 0;
             graph->call_unitigs([&](const auto &sequence, const auto &path) {
-                ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
+                ASSERT_EQ(path, map_to_nodes_sequentially(*graph, sequence));
                 num_sequences++;
             }, num_threads);
             std::atomic<size_t> num_sequences_batch = 0;
             graph_batch->call_unitigs([&](const auto &sequence, const auto &path) {
-                ASSERT_EQ(path, map_sequence_to_nodes(*graph_batch, sequence));
+                ASSERT_EQ(path, map_to_nodes_sequentially(*graph_batch, sequence));
                 num_sequences_batch++;
             }, num_threads);
 
@@ -671,7 +671,7 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallPaths) {
                     k,
                     [&](const auto &callback) {
                         graph->call_sequences([&](const auto &sequence, const auto &path) {
-                            ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
+                            ASSERT_EQ(path, map_to_nodes_sequentially(*graph, sequence));
                             std::unique_lock<std::mutex> lock(seq_mutex);
                             callback(sequence);
                         }, num_threads);
@@ -707,7 +707,7 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallPathsSingleKmerForm) {
                     k,
                     [&](const auto &callback) {
                         graph->call_sequences([&](const auto &sequence, const auto &path) {
-                            ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
+                            ASSERT_EQ(path, map_to_nodes_sequentially(*graph, sequence));
                             std::unique_lock<std::mutex> lock(seq_mutex);
                             callback(sequence);
                         }, num_threads, true);
@@ -736,13 +736,13 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallPathsCheckHalfSingleKmerForm) {
 
                 std::atomic<size_t> num_kmers_both = 0;
                 graph->call_sequences([&](const auto &sequence, const auto &path) {
-                    ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
+                    ASSERT_EQ(path, map_to_nodes_sequentially(*graph, sequence));
                     num_kmers_both += path.size();
                 }, num_threads);
 
                 std::atomic<size_t> num_kmers = 0;
                 graph->call_sequences([&](const auto &sequence, const auto &path) {
-                    ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
+                    ASSERT_EQ(path, map_to_nodes_sequentially(*graph, sequence));
                     num_kmers += path.size();
                 }, num_threads, true);
 
@@ -774,7 +774,7 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigs) {
                     k,
                     [&](const auto &callback) {
                         graph->call_unitigs([&](const auto &sequence, const auto &path) {
-                            ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
+                            ASSERT_EQ(path, map_to_nodes_sequentially(*graph, sequence));
                             std::unique_lock<std::mutex> lock(seq_mutex);
                             callback(sequence);
                         }, num_threads);
@@ -810,7 +810,7 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsSingleKmerForm) {
                     k,
                     [&](const auto &callback) {
                         graph->call_unitigs([&](const auto &sequence, const auto &path) {
-                            ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
+                            ASSERT_EQ(path, map_to_nodes_sequentially(*graph, sequence));
                             std::unique_lock<std::mutex> lock(seq_mutex);
                             callback(sequence);
                         }, num_threads, 1, true);
@@ -839,13 +839,13 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsCheckHalfSingleKmerForm) {
 
                 std::atomic<size_t> num_kmers_both = 0;
                 graph->call_unitigs([&](const auto &sequence, const auto &path) {
-                    ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
+                    ASSERT_EQ(path, map_to_nodes_sequentially(*graph, sequence));
                     num_kmers_both += path.size();
                 }, num_threads);
 
                 std::atomic<size_t> num_kmers = 0;
                 graph->call_unitigs([&](const auto &sequence, const auto &path) {
-                    ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
+                    ASSERT_EQ(path, map_to_nodes_sequentially(*graph, sequence));
                     num_kmers += path.size();
                 }, num_threads, 1, true);
 
@@ -866,7 +866,7 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsWithoutTips) {
         ASSERT_EQ(12u, graph->num_nodes());
 
         graph->call_unitigs([&](const auto &unitig, const auto &path) {
-            ASSERT_EQ(path, map_sequence_to_nodes(*graph, unitig));
+            ASSERT_EQ(path, map_to_nodes_sequentially(*graph, unitig));
             std::unique_lock<std::mutex> lock(seq_mutex);
             unitigs.insert(unitig);
         }, num_threads, 0);
@@ -875,7 +875,7 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsWithoutTips) {
 
         unitigs.clear();
         graph->call_unitigs([&](const auto &unitig, const auto &path) {
-            ASSERT_EQ(path, map_sequence_to_nodes(*graph, unitig));
+            ASSERT_EQ(path, map_to_nodes_sequentially(*graph, unitig));
             std::unique_lock<std::mutex> lock(seq_mutex);
             unitigs.insert(unitig);
         }, num_threads, 1);
@@ -884,7 +884,7 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsWithoutTips) {
 
         unitigs.clear();
         graph->call_unitigs([&](const auto &unitig, const auto &path) {
-            ASSERT_EQ(path, map_sequence_to_nodes(*graph, unitig));
+            ASSERT_EQ(path, map_to_nodes_sequentially(*graph, unitig));
             std::unique_lock<std::mutex> lock(seq_mutex);
             unitigs.insert(unitig);
         }, num_threads, 2);
@@ -893,7 +893,7 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsWithoutTips) {
 
         unitigs.clear();
         graph->call_unitigs([&](const auto &unitig, const auto &path) {
-            ASSERT_EQ(path, map_sequence_to_nodes(*graph, unitig));
+            ASSERT_EQ(path, map_to_nodes_sequentially(*graph, unitig));
             std::unique_lock<std::mutex> lock(seq_mutex);
             unitigs.insert(unitig);
         }, num_threads, 10);
@@ -906,7 +906,7 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsWithoutTips) {
 
         unitigs.clear();
         graph->call_unitigs([&](const auto &unitig, const auto &path) {
-            ASSERT_EQ(path, map_sequence_to_nodes(*graph, unitig));
+            ASSERT_EQ(path, map_to_nodes_sequentially(*graph, unitig));
             std::unique_lock<std::mutex> lock(seq_mutex);
             unitigs.insert(unitig);
         }, num_threads, 0);
@@ -914,7 +914,7 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsWithoutTips) {
 
         unitigs.clear();
         graph->call_unitigs([&](const auto &unitig, const auto &path) {
-            ASSERT_EQ(path, map_sequence_to_nodes(*graph, unitig));
+            ASSERT_EQ(path, map_to_nodes_sequentially(*graph, unitig));
             std::unique_lock<std::mutex> lock(seq_mutex);
             unitigs.insert(unitig);
         }, num_threads, 1);
@@ -922,7 +922,7 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsWithoutTips) {
 
         unitigs.clear();
         graph->call_unitigs([&](const auto &unitig, const auto &path) {
-            ASSERT_EQ(path, map_sequence_to_nodes(*graph, unitig));
+            ASSERT_EQ(path, map_to_nodes_sequentially(*graph, unitig));
             std::unique_lock<std::mutex> lock(seq_mutex);
             unitigs.insert(unitig);
         }, num_threads, 2);
@@ -930,7 +930,7 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsWithoutTips) {
 
         unitigs.clear();
         graph->call_unitigs([&](const auto &unitig, const auto &path) {
-            ASSERT_EQ(path, map_sequence_to_nodes(*graph, unitig));
+            ASSERT_EQ(path, map_to_nodes_sequentially(*graph, unitig));
             std::unique_lock<std::mutex> lock(seq_mutex);
             unitigs.insert(unitig);
         }, num_threads, 10);
@@ -943,7 +943,7 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsWithoutTips) {
 
         unitigs.clear();
         graph->call_unitigs([&](const auto &unitig, const auto &path) {
-            ASSERT_EQ(path, map_sequence_to_nodes(*graph, unitig));
+            ASSERT_EQ(path, map_to_nodes_sequentially(*graph, unitig));
             std::unique_lock<std::mutex> lock(seq_mutex);
             unitigs.insert(unitig);
         }, num_threads, 0);
@@ -954,7 +954,7 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsWithoutTips) {
 
         unitigs.clear();
         graph->call_unitigs([&](const auto &unitig, const auto &path) {
-            ASSERT_EQ(path, map_sequence_to_nodes(*graph, unitig));
+            ASSERT_EQ(path, map_to_nodes_sequentially(*graph, unitig));
             std::unique_lock<std::mutex> lock(seq_mutex);
             unitigs.insert(unitig);
         }, num_threads, 1);
@@ -965,7 +965,7 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsWithoutTips) {
 
         unitigs.clear();
         graph->call_unitigs([&](const auto &unitig, const auto &path) {
-            ASSERT_EQ(path, map_sequence_to_nodes(*graph, unitig));
+            ASSERT_EQ(path, map_to_nodes_sequentially(*graph, unitig));
             std::unique_lock<std::mutex> lock(seq_mutex);
             unitigs.insert(unitig);
         }, num_threads, 2);
@@ -976,7 +976,7 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsWithoutTips) {
 
         unitigs.clear();
         graph->call_unitigs([&](const auto &unitig, const auto &path) {
-            ASSERT_EQ(path, map_sequence_to_nodes(*graph, unitig));
+            ASSERT_EQ(path, map_to_nodes_sequentially(*graph, unitig));
             std::unique_lock<std::mutex> lock(seq_mutex);
             unitigs.insert(unitig);
         }, num_threads, 3);
@@ -987,7 +987,7 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsWithoutTips) {
 
         unitigs.clear();
         graph->call_unitigs([&](const auto &unitig, const auto &path) {
-            ASSERT_EQ(path, map_sequence_to_nodes(*graph, unitig));
+            ASSERT_EQ(path, map_to_nodes_sequentially(*graph, unitig));
             std::unique_lock<std::mutex> lock(seq_mutex);
             unitigs.insert(unitig);
         }, num_threads, 10);
@@ -1007,7 +1007,7 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsWithoutTips) {
 
         unitigs.clear();
         graph->call_unitigs([&](const auto &unitig, const auto &path) {
-            ASSERT_EQ(path, map_sequence_to_nodes(*graph, unitig));
+            ASSERT_EQ(path, map_to_nodes_sequentially(*graph, unitig));
             std::unique_lock<std::mutex> lock(seq_mutex);
             unitigs.insert(unitig);
         }, num_threads, 0);
@@ -1017,7 +1017,7 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsWithoutTips) {
 
         unitigs.clear();
         graph->call_unitigs([&](const auto &unitig, const auto &path) {
-            ASSERT_EQ(path, map_sequence_to_nodes(*graph, unitig));
+            ASSERT_EQ(path, map_to_nodes_sequentially(*graph, unitig));
             std::unique_lock<std::mutex> lock(seq_mutex);
             unitigs.insert(unitig);
         }, num_threads, 1);
@@ -1027,7 +1027,7 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsWithoutTips) {
 
         unitigs.clear();
         graph->call_unitigs([&](const auto &unitig, const auto &path) {
-            ASSERT_EQ(path, map_sequence_to_nodes(*graph, unitig));
+            ASSERT_EQ(path, map_to_nodes_sequentially(*graph, unitig));
             std::unique_lock<std::mutex> lock(seq_mutex);
             unitigs.insert(unitig);
         }, num_threads, 2);
@@ -1037,7 +1037,7 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsWithoutTips) {
 
         unitigs.clear();
         graph->call_unitigs([&](const auto &unitig, const auto &path) {
-            ASSERT_EQ(path, map_sequence_to_nodes(*graph, unitig));
+            ASSERT_EQ(path, map_to_nodes_sequentially(*graph, unitig));
             std::unique_lock<std::mutex> lock(seq_mutex);
             unitigs.insert(unitig);
         }, num_threads, 3);
@@ -1047,7 +1047,7 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsWithoutTips) {
 
         unitigs.clear();
         graph->call_unitigs([&](const auto &unitig, const auto &path) {
-            ASSERT_EQ(path, map_sequence_to_nodes(*graph, unitig));
+            ASSERT_EQ(path, map_to_nodes_sequentially(*graph, unitig));
             std::unique_lock<std::mutex> lock(seq_mutex);
             unitigs.insert(unitig);
         }, num_threads, 10);
@@ -1062,7 +1062,7 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsWithoutTips) {
 
         unitigs.clear();
         graph->call_unitigs([&](const auto &unitig, const auto &path) {
-            ASSERT_EQ(path, map_sequence_to_nodes(*graph, unitig));
+            ASSERT_EQ(path, map_to_nodes_sequentially(*graph, unitig));
             std::unique_lock<std::mutex> lock(seq_mutex);
             unitigs.insert(unitig);
         }, num_threads, 0);
@@ -1073,7 +1073,7 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsWithoutTips) {
 
         unitigs.clear();
         graph->call_unitigs([&](const auto &unitig, const auto &path) {
-            ASSERT_EQ(path, map_sequence_to_nodes(*graph, unitig));
+            ASSERT_EQ(path, map_to_nodes_sequentially(*graph, unitig));
             std::unique_lock<std::mutex> lock(seq_mutex);
             unitigs.insert(unitig);
         }, num_threads, 1);
@@ -1084,7 +1084,7 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsWithoutTips) {
 
         unitigs.clear();
         graph->call_unitigs([&](const auto &unitig, const auto &path) {
-            ASSERT_EQ(path, map_sequence_to_nodes(*graph, unitig));
+            ASSERT_EQ(path, map_to_nodes_sequentially(*graph, unitig));
             std::unique_lock<std::mutex> lock(seq_mutex);
             unitigs.insert(unitig);
         }, num_threads, 2);
@@ -1095,7 +1095,7 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsWithoutTips) {
 
         unitigs.clear();
         graph->call_unitigs([&](const auto &unitig, const auto &path) {
-            ASSERT_EQ(path, map_sequence_to_nodes(*graph, unitig));
+            ASSERT_EQ(path, map_to_nodes_sequentially(*graph, unitig));
             std::unique_lock<std::mutex> lock(seq_mutex);
             unitigs.insert(unitig);
         }, num_threads, 3);
@@ -1106,7 +1106,7 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsWithoutTips) {
 
         unitigs.clear();
         graph->call_unitigs([&](const auto &unitig, const auto &path) {
-            ASSERT_EQ(path, map_sequence_to_nodes(*graph, unitig));
+            ASSERT_EQ(path, map_to_nodes_sequentially(*graph, unitig));
             std::unique_lock<std::mutex> lock(seq_mutex);
             unitigs.insert(unitig);
         }, num_threads, 10);
@@ -1129,7 +1129,7 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsWithoutTips2) {
         ASSERT_EQ(34u, graph->num_nodes());
         std::set<std::string> unitigs;
         graph->call_unitigs([&](const auto &unitig, const auto &path) {
-            ASSERT_EQ(path, map_sequence_to_nodes(*graph, unitig));
+            ASSERT_EQ(path, map_to_nodes_sequentially(*graph, unitig));
             std::unique_lock<std::mutex> lock(seq_mutex);
             unitigs.insert(unitig);
         }, num_threads, 0);
@@ -1142,7 +1142,7 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsWithoutTips2) {
 
         unitigs.clear();
         graph->call_unitigs([&](const auto &unitig, const auto &path) {
-            ASSERT_EQ(path, map_sequence_to_nodes(*graph, unitig));
+            ASSERT_EQ(path, map_to_nodes_sequentially(*graph, unitig));
             std::unique_lock<std::mutex> lock(seq_mutex);
             unitigs.insert(unitig);
         }, num_threads, 1);
@@ -1155,7 +1155,7 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsWithoutTips2) {
 
         unitigs.clear();
         graph->call_unitigs([&](const auto &unitig, const auto &path) {
-            ASSERT_EQ(path, map_sequence_to_nodes(*graph, unitig));
+            ASSERT_EQ(path, map_to_nodes_sequentially(*graph, unitig));
             std::unique_lock<std::mutex> lock(seq_mutex);
             unitigs.insert(unitig);
         }, num_threads, 2);
@@ -1167,7 +1167,7 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsWithoutTips2) {
 
         unitigs.clear();
         graph->call_unitigs([&](const auto &unitig, const auto &path) {
-            ASSERT_EQ(path, map_sequence_to_nodes(*graph, unitig));
+            ASSERT_EQ(path, map_to_nodes_sequentially(*graph, unitig));
             std::unique_lock<std::mutex> lock(seq_mutex);
             unitigs.insert(unitig);
         }, num_threads, 10);
@@ -1259,7 +1259,7 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsCheckDegree) {
         std::mutex seq_mutex;
         std::multiset<std::string> obs_unitigs;
         graph->call_unitigs([&](const auto &sequence, const auto &path) {
-            ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
+            ASSERT_EQ(path, map_to_nodes_sequentially(*graph, sequence));
             std::unique_lock<std::mutex> lock(seq_mutex);
             obs_unitigs.insert(sequence);
         }, num_threads, 2);
@@ -1290,7 +1290,7 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsIndegreeFirstNodeIsZero) {
         std::multiset<std::string> obs_unitigs;
         std::mutex seq_mutex;
         graph->call_unitigs([&](const auto &sequence, const auto &path) {
-            ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
+            ASSERT_EQ(path, map_to_nodes_sequentially(*graph, sequence));
             std::unique_lock<std::mutex> lock(seq_mutex);
             obs_unitigs.insert(sequence);
         }, num_threads, 2);
@@ -1336,7 +1336,7 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsCross) {
             for (size_t t = 0; t <= 2; ++t) {
                 std::multiset<std::string> obs_unitigs;
                 graph->call_unitigs([&](const auto &sequence, const auto &path) {
-                    ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
+                    ASSERT_EQ(path, map_to_nodes_sequentially(*graph, sequence));
                     std::unique_lock<std::mutex> lock(seq_mutex);
                     obs_unitigs.insert(sequence);
                 }, num_threads, t);
@@ -1353,7 +1353,7 @@ TYPED_TEST(DeBruijnGraphCanonicalTest, CallUnitigsCross) {
             for (size_t t = 3; t <= 10; ++t) {
                 std::multiset<std::string> obs_long_unitigs;
                 graph->call_unitigs([&](const auto &sequence, const auto &path) {
-                    ASSERT_EQ(path, map_sequence_to_nodes(*graph, sequence));
+                    ASSERT_EQ(path, map_to_nodes_sequentially(*graph, sequence));
                     std::unique_lock<std::mutex> lock(seq_mutex);
                     obs_long_unitigs.insert(sequence);
                 }, num_threads, 3);

@@ -20,7 +20,7 @@
 # -- Project information -----------------------------------------------------
 
 project = u'MetaGraph'
-copyright = u'2021, Mikhail Karasikov, Harun Mustafa, Andre Kahles, Gunnar Ratsch, Daniel Danciu, Marc Zimmermann, Chris Barber'
+copyright = u'2022, Mikhail Karasikov, Harun Mustafa, Andre Kahles, Gunnar Ratsch, Daniel Danciu, Marc Zimmermann, Chris Barber'
 author = u'Mikhail Karasikov, Harun Mustafa, Andre Kahles, Gunnar Ratsch, Daniel Danciu, Marc Zimmermann, Chris Barber'
 
 # The short X.Y version
@@ -40,6 +40,7 @@ author = u'Mikhail Karasikov, Harun Mustafa, Andre Kahles, Gunnar Ratsch, Daniel
 # ones.
 extensions = [
     'sphinx.ext.autodoc',
+    'sphinx_tabs.tabs',
 ]
 
 # Add any paths that contain templates here, relative to this directory.
@@ -110,6 +111,7 @@ html_theme_options = {
 # 'searchbox.html']``.
 #
 # html_sidebars = {}
+# html_sidebars = {'quick_start': ['localtoc.html', 'sourcelink.html', 'searchbox.html']}
 
 
 # -- Options for HTMLHelp output ---------------------------------------------
@@ -153,7 +155,7 @@ latex_documents = [
 # (source start file, name, description, authors, manual section).
 man_pages = [
     (master_doc, 'metagraph', u'MetaGraph Documentation',
-     [author], 1)
+     author.split(', '), 1)
 ]
 
 

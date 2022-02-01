@@ -55,30 +55,28 @@ class TestAPIBase(TestingBase):
         cls.server_process.kill()
 
     def _start_server(self, graph, annotation):
-        construct_command = '{exe} server_query -i {graph} -a {annot} --port {port} --address {host} -p {threads}'.format(
-            exe=METAGRAPH,
-            graph=graph,
-            annot=annotation,
-            host=self.host,
-            port=self.port,
-            threads=2
-        )
+        construct_command = f'{METAGRAPH} server_query -i {graph} -a {annotation} \
+                                            --port {self.port} --address {self.host} -p {2}'
 
         return subprocess.Popen(shlex.split(construct_command))
 
 
-@parameterized_class(('mode',), input_values=[('canonical',), ('primary',)])
-@unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
+# No canonical mode for Protein alphabets
+@parameterized_class(('mode',),
+    input_values=[('basic',)] + ([] if PROTEIN_MODE else [('canonical',), ('primary',)]))
 class TestAPIRaw(TestAPIBase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass(TEST_DATA_DIR + '/transcripts_100.fa', mode=cls.mode)
 
     def setUp(self) -> None:
-        self.raw_post_request = lambda cmd, payload: requests.post(url=f'http://{self.host}:{self.port}/{cmd}', data=payload)
+        self.raw_post_request = lambda cmd, payload: requests.post(
+                                    url=f'http://{self.host}:{self.port}/{cmd}',
+                                    data=payload)
 
     def test_api_raw_incomplete_json(self):
-        ret = self.raw_post_request('search', '{"FASTA": ">query\\nAATAAAGGTGTGAGATAACCCCAGCGGTGCCAGGATCCGTGCA", "discovery_fraction": 0.1,')
+        ret = self.raw_post_request('search',
+            '{"FASTA": ">query\\nAATAAAGGTGTGAGATAACCCCAGCGGTGCCAGGATCCGTGCA", "discovery_fraction": 0.1,')
 
         self.assertEqual(ret.status_code, 400)
         self.assertIn("Bad json received:", ret.json()['error'])
@@ -152,6 +150,7 @@ class TestAPIRaw(TestAPIBase):
         self.assertEqual(json_ret[0]['results'], [])
 
     @parameterized.expand([(1,1), (3,1)])
+    @unittest.skipIf(PROTEIN_MODE, "Protein graphs have different alignments")
     def test_api_raw_align_sequence(self, repetitions, dummy_arg):
         fasta_str = '\n'.join([ f">query{i}\nTCGATCGA" for i in range(repetitions)])
 
@@ -225,7 +224,7 @@ class TestAPIRaw(TestAPIBase):
     def test_api_raw_search_no_count_support(self):
         fasta_str = ">query\nCCTCTGTGGAATCCAATCTGTCTTCCATCCTGCGTGGCCGAGGG"
         payload = json.dumps({"FASTA": fasta_str, 'num_labels': 5, 'min_exact_match': 0.1,
-                              'query_counts': True})
+                              'abundance_sum': True})
 
         ret = self.raw_post_request('search', payload)
 
@@ -233,13 +232,13 @@ class TestAPIRaw(TestAPIBase):
         self.assertIn("Annotation does not support k-mer count queries", ret.json()['error'])
 
 
-@parameterized_class(('mode',), input_values=[('canonical',), ('primary',)])
-@unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
+# No canonical mode for Protein alphabets
+@parameterized_class(('mode',),
+    input_values=[('basic',)] + ([] if PROTEIN_MODE else [('canonical',), ('primary',)]))
 class TestAPIClient(TestAPIBase):
     graph_name = 'test_graph'
 
     sample_query = 'CCTCTGTGGAATCCAATCTGTCTTCCATCCTGCGTGGCCGAGGG'
-    sample_query_expected_rows = 99
 
     @classmethod
     def setUpClass(cls):
@@ -248,39 +247,48 @@ class TestAPIClient(TestAPIBase):
         cls.graph_client = MultiGraphClient()
         cls.graph_client.add_graph(cls.host, cls.port, cls.graph_name)
 
+        # 'canonical' and 'primary' graphs represent more k-mers than 'basic', so
+        # they get more matches
+        cls.sample_query_expected_rows = 98 if cls.mode == 'basic' else 99
+        cls.expected_matches = 840 if cls.mode == 'basic' else 1381
+
     def test_api_multiple_query_df(self):
         repetitions = 5
         ret = self.graph_client.search([self.sample_query] * repetitions, parallel=False,
                                        discovery_threshold=0.01)
         df = ret[self.graph_name]
         self.assertEqual((self.sample_query_expected_rows * repetitions, 3), df.shape)
+        self.assertEqual(df['kmer_count'].sum(), self.expected_matches * repetitions)
 
     def test_api_simple_query_df(self):
         ret = self.graph_client.search(self.sample_query, parallel=False,
                                        discovery_threshold=0.01)
         df = ret[self.graph_name]
 
-        self.assertEqual((self.sample_query_expected_rows, 3), df.shape)
+        self.assertEqual(df.shape, (self.sample_query_expected_rows, 3))
+        self.assertEqual(df['kmer_count'].sum(), self.expected_matches)
 
     def test_api_simple_query_with_signature_df(self):
         ret = self.graph_client.search(self.sample_query, parallel=False,
                                        discovery_threshold=0.01, with_signature=True)
         df = ret[self.graph_name]
 
-        self.assertEqual((self.sample_query_expected_rows, 4), df.shape)
+        self.assertEqual(df.shape, (self.sample_query_expected_rows, 4))
+        self.assertEqual(df['kmer_count'].sum(), self.expected_matches)
 
     def test_api_simple_query_align_df(self):
         ret = self.graph_client.search(self.sample_query, parallel=False,
                                        discovery_threshold=0.01, align=True, min_exact_match=0.01)
         df = ret[self.graph_name]
 
-        self.assertEqual((self.sample_query_expected_rows, 3), df.shape)
+        self.assertEqual(df.shape, (self.sample_query_expected_rows, 3))
+        self.assertEqual(df['kmer_count'].sum(), self.expected_matches)
 
     def test_api_simple_query_align_no_result(self):
         # If aligned sequence does not have result when searched, make sure client doesn't fail
         sample_align_query = self.sample_query[:2] + 'GG' + self.sample_query[4:]
-        ret = self.graph_client.search(sample_align_query, parallel=False, discovery_threshold=1.0,
-                                       align=True)
+        ret = self.graph_client.search(sample_align_query, parallel=False,
+                                       discovery_threshold=1.0, align=True)
         df = ret[self.graph_name]
         self.assertTrue(df.empty)
 
@@ -291,7 +299,7 @@ class TestAPIClient(TestAPIBase):
 
         label_list = ret[self.graph_name]
 
-        self.assertGreater(len(label_list), 0)
+        self.assertEqual(len(label_list), 100)
         self.assertTrue(all(l.startswith('ENST') for l in label_list))
 
     def test_api_align_df(self):
@@ -326,22 +334,26 @@ class TestAPIClient(TestAPIBase):
     @unittest.expectedFailure
     def test_api_search_no_count_support(self):
         ret = self.graph_client.search(self.sample_query, parallel=False,
-                                       discovery_threshold=0.01, query_counts=True)
+                                       discovery_threshold=0.01, abundance_sum=True)
 
 
-@parameterized_class(('mode',), input_values=[('canonical',), ('primary',)])
-@unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
+# No canonical mode for Protein alphabets
+@parameterized_class(('mode',),
+    input_values=[('basic',)] + ([] if PROTEIN_MODE else [('canonical',), ('primary',)]))
 class TestAPIJson(TestAPIBase):
     graph_name = 'test_graph'
 
     sample_query = 'CCTCTGTGGAATCCAATCTGTCTTCCATCCTGCGTGGCCGAGGG'
-    sample_query_expected_cols = 99
 
     @classmethod
     def setUpClass(cls):
         super().setUpClass(TEST_DATA_DIR + '/transcripts_100.fa', mode=cls.mode)
 
         cls.graph_client = GraphClientJson(cls.host, cls.port)
+
+        # 'canonical' and 'primary' graphs represent more k-mers than 'basic', so
+        # they get more matches
+        cls.sample_query_expected_rows = 98 if cls.mode == 'basic' else 99
 
     def setUp(self):
         if not self.graph_client.ready():
@@ -357,7 +369,7 @@ class TestAPIJson(TestAPIBase):
         self.assertEqual(len(res_list), 1)
 
         res_obj = res_list[0]['results']
-        self.assertEqual(len(res_obj), self.sample_query_expected_cols)
+        self.assertEqual(len(res_obj), self.sample_query_expected_rows)
 
         first_res = sorted(res_obj, key=lambda k: k['kmer_count'], reverse=True)[0]
 
@@ -373,7 +385,8 @@ class TestAPIJson(TestAPIBase):
         self.assertEqual(len(res_list), repetitions)
 
         # testing if the returned query indices range from 0 to n - 1
-        self.assertEqual(sorted(range(0, repetitions)), sorted([int(a['seq_description']) for a in res_list]))
+        self.assertEqual(sorted(range(0, repetitions)),
+                         sorted([int(a['seq_description']) for a in res_list]))
 
     def test_api_stats(self):
         res = self.graph_client.stats()
@@ -383,8 +396,9 @@ class TestAPIJson(TestAPIBase):
         self.assertEqual(graph_props["k"], 6)
 
 
-@parameterized_class(('mode',), input_values=[('canonical',), ('primary',)])
-@unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
+# No canonical mode for Protein alphabets
+@parameterized_class(('mode',),
+    input_values=[('basic',)] + ([] if PROTEIN_MODE else [('canonical',), ('primary',)]))
 class TestAPIClientWithProperties(TestAPIBase):
     """
     Testing whether properties encoded in sample name are properly processed
@@ -414,8 +428,9 @@ class TestAPIClientWithProperties(TestAPIBase):
         self.assertTrue(df.empty)
 
 
-@parameterized_class(('mode',), input_values=[('canonical',), ('primary',)])
-@unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
+# No canonical mode for Protein alphabets
+@parameterized_class(('mode',),
+    input_values=[('basic',)] + ([] if PROTEIN_MODE else [('canonical',), ('primary',)]))
 class TestAPIClientWithCoordinates(TestAPIBase):
     """
     Testing whether API works well given coordinate aware annotations
@@ -423,25 +438,59 @@ class TestAPIClientWithCoordinates(TestAPIBase):
     graph_name = 'test_client_coord'
 
     sample_query = 'CCTCTGTGGAATCCAATCTGTCTTCCATCCTGCGTGGCCGAGGG'
-    sample_query_expected_rows = 99
 
     @classmethod
     def setUpClass(cls):
-        super().setUpClass(TEST_DATA_DIR + '/transcripts_100.fa', mode=cls.mode, anno_repr='row_diff_brwt_coord')
+        super().setUpClass(TEST_DATA_DIR + '/transcripts_100.fa', mode=cls.mode,
+                           anno_repr='row_diff_brwt_coord')
 
         cls.graph_client = MultiGraphClient()
         cls.graph_client.add_graph(cls.host, cls.port, cls.graph_name)
 
-    def test_api_simple_query_coords_df(self):
-        ret = self.graph_client.search(self.sample_query, discovery_threshold=0.01, parallel=False, query_coords=True)
+        # 'canonical' and 'primary' graphs represent more k-mers than 'basic', so
+        # they get more matches
+        cls.sample_query_expected_rows = 98 if cls.mode == 'basic' else 99
+        cls.expected_matches = 840 if cls.mode == 'basic' else 1381
+        cls.expected_abundance_sum = 1176 if cls.mode == 'basic' else 2323
+
+    def test_api_simple_query_df(self):
+        ret = self.graph_client.search(self.sample_query, discovery_threshold=0.01,
+                                       parallel=False)
         df = ret[self.graph_name]
 
-        self.assertEqual((self.sample_query_expected_rows, 3), df.shape)
-        self.assertIn('kmer_coords', df.columns)
+        self.assertEqual(df.shape, (self.sample_query_expected_rows, 3))
+        self.assertEqual(df['kmer_count'].sum(), self.expected_matches)
+
+    def test_api_simple_query_abundance_sum_df(self):
+        ret = self.graph_client.search(self.sample_query, discovery_threshold=0.01,
+                                       parallel=False, abundance_sum=True)
+        df = ret[self.graph_name]
+
+        self.assertEqual(df.shape, (self.sample_query_expected_rows, 3))
+        self.assertEqual(df['kmer_count'].sum(), self.expected_abundance_sum)
+
+    def test_api_simple_query_counts_df(self):
+        ret = self.graph_client.search(self.sample_query, discovery_threshold=0.01,
+                                       parallel=False, query_counts=True)
+        df = ret[self.graph_name]
+
+        self.assertEqual(df.shape, (self.sample_query_expected_rows, 4))
+        self.assertEqual(df['kmer_count'].sum(), self.expected_matches)
+        self.assertEqual(df['kmer_abundances'].size, self.sample_query_expected_rows)
+
+    def test_api_simple_query_coords_df(self):
+        ret = self.graph_client.search(self.sample_query, discovery_threshold=0.01,
+                                       parallel=False, query_coords=True)
+        df = ret[self.graph_name]
+
+        self.assertEqual(df.shape, (self.sample_query_expected_rows, 4))
+        self.assertEqual(df['kmer_count'].sum(), self.expected_matches)
+        self.assertEqual(df['kmer_coords'].size, self.sample_query_expected_rows)
 
 
-@parameterized_class(('mode',), input_values=[('canonical',), ('primary',)])
-@unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
+# No canonical mode for Protein alphabets
+@parameterized_class(('mode',),
+    input_values=[('basic',)] + ([] if PROTEIN_MODE else [('canonical',), ('primary',)]))
 class TestAPIClientWithCounts(TestAPIBase):
     """
     Testing whether API works well given k-mer count aware annotations
@@ -449,7 +498,6 @@ class TestAPIClientWithCounts(TestAPIBase):
     graph_name = 'test_client_count'
 
     sample_query = 'CCTCTGTGGAATCCAATCTGTCTTCCATCCTGCGTGGCCGAGGG'
-    sample_query_expected_rows = 99
 
     @classmethod
     def setUpClass(cls):
@@ -458,20 +506,46 @@ class TestAPIClientWithCounts(TestAPIBase):
         cls.graph_client = MultiGraphClient()
         cls.graph_client.add_graph(cls.host, cls.port, cls.graph_name)
 
-    def test_api_simple_query_counts_df(self):
-        ret = self.graph_client.search(self.sample_query, discovery_threshold=0.01, parallel=False, query_counts=True)
+        # 'canonical' and 'primary' graphs represent more k-mers than 'basic', so
+        # they get more matches
+        cls.sample_query_expected_rows = 98 if cls.mode == 'basic' else 99
+        cls.expected_matches = 840 if cls.mode == 'basic' else 1381
+        cls.expected_abundance_sum = 1176 if cls.mode == 'basic' else 2323
+
+    def test_api_simple_query_df(self):
+        ret = self.graph_client.search(self.sample_query, discovery_threshold=0.01,
+                                       parallel=False)
         df = ret[self.graph_name]
 
-        self.assertEqual((self.sample_query_expected_rows, 3), df.shape)
-        self.assertIn('kmer_count', df.columns)
+        self.assertEqual(df.shape, (self.sample_query_expected_rows, 3))
+        self.assertEqual(df['kmer_count'].sum(), self.expected_matches)
+
+    def test_api_simple_query_abundance_sum_df(self):
+        ret = self.graph_client.search(self.sample_query, discovery_threshold=0.01,
+                                       parallel=False, abundance_sum=True)
+        df = ret[self.graph_name]
+
+        self.assertEqual(df.shape, (self.sample_query_expected_rows, 3))
+        self.assertEqual(df['kmer_count'].sum(), self.expected_abundance_sum)
+
+    def test_api_simple_query_counts_df(self):
+        ret = self.graph_client.search(self.sample_query, discovery_threshold=0.01,
+                                       parallel=False, query_counts=True)
+        df = ret[self.graph_name]
+
+        self.assertEqual(df.shape, (self.sample_query_expected_rows, 4))
+        self.assertEqual(df['kmer_count'].sum(), self.expected_matches)
+        self.assertEqual(df['kmer_abundances'].size, self.sample_query_expected_rows)
 
     @unittest.expectedFailure
     def test_api_search_no_coordinate_support(self):
-        ret = self.graph_client.search(self.sample_query, discovery_threshold=0.01, parallel=False, query_coords=True)
+        ret = self.graph_client.search(self.sample_query, discovery_threshold=0.01,
+                                       parallel=False, query_coords=True)
 
 
-@parameterized_class(('mode',), input_values=[('canonical',), ('primary',)])
-@unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
+# No canonical mode for Protein alphabets
+@parameterized_class(('mode',),
+    input_values=[('basic',)] + ([] if PROTEIN_MODE else [('canonical',), ('primary',)]))
 class TestAPIClientParallel(TestAPIBase):
     """
     Testing whether or not parallel requests work
@@ -479,7 +553,6 @@ class TestAPIClientParallel(TestAPIBase):
     graph_names = ['test_graph', 'test_graph_2']
 
     sample_query = 'CCTCTGTGGAATCCAATCTGTCTTCCATCCTGCGTGGCCGAGGG'
-    sample_query_expected_rows = 99
 
     sample_align = ['TCGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGATCGA']
 
@@ -492,6 +565,10 @@ class TestAPIClientParallel(TestAPIBase):
         # Here just query the same endpoint twice to test client
         cls.graph_client.add_graph(cls.host, cls.port, cls.graph_names[0])
         cls.graph_client.add_graph(cls.host, cls.port, cls.graph_names[1])
+
+        # 'canonical' and 'primary' graphs represent more k-mers than 'basic', so
+        # they get more matches
+        cls.sample_query_expected_rows = 98 if cls.mode == 'basic' else 99
 
     def test_api_parallel_query_df(self):
         futures = self.graph_client.search(self.sample_query, parallel=True,

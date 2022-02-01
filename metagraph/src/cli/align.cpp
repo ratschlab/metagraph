@@ -198,7 +198,7 @@ std::string sequence_to_gfa_path(const std::string &seq,
                                  const DeBruijnGraph &graph,
                                  const tsl::ordered_set<uint64_t> &is_unitig_end_node,
                                  const Config *config) {
-    auto path_nodes = map_sequence_to_nodes(graph, seq);
+    auto path_nodes = map_to_nodes_sequentially(graph, seq);
 
     std::string nodes_on_path;
     std::string cigars_on_path;

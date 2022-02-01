@@ -67,11 +67,13 @@ std::string process_search_request(const std::string &received_message,
     config.fast = json.get("fast", config.fast).asBool();
     config.print_signature = json.get("with_signature", config.print_signature).asBool();
     config.query_coords = json.get("query_coords", config.query_coords).asBool();
-    config.count_kmers = json.get("query_counts", config.count_kmers).asBool();
+    config.count_kmers = json.get("abundance_sum", config.count_kmers).asBool();
+    config.query_counts = json.get("query_counts", config.query_counts).asBool();
 
     // Throw client an error if they try to query coordinates/kmer-counts on unsupported indexes
-    if (config.count_kmers && !(dynamic_cast<const annot::matrix::IntMatrix *>(
-                                        &anno_graph.get_annotator().get_matrix()))) {
+    if ((config.count_kmers || config.query_counts)
+            && !(dynamic_cast<const annot::matrix::IntMatrix *>(
+                            &anno_graph.get_annotator().get_matrix()))) {
         throw std::invalid_argument("Annotation does not support k-mer count queries");
     }
 
@@ -128,7 +130,7 @@ std::string process_search_request(const std::string &received_message,
     // Create full JSON object
     Json::Value search_response(Json::arrayValue);
     for (const auto &seq_result : search_results) {
-        search_response.append(seq_result.to_json(config.verbose_coords, anno_graph));
+        search_response.append(seq_result.to_json(config.verbose_output, anno_graph));
     }
 
     // Return JSON string

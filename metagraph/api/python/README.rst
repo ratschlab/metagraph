@@ -18,11 +18,9 @@ Usage
 
 .. code-block:: python
 
-    from metagraph.client import Client
+    from metagraph.client import GraphClient
 
-    metagraph = Client()
-
-    metagraph.connect('localhost', 8555)
+    metagraph = GraphClient('dnaloc.ethz.ch', 80, api_path='/api/metasub19')
 
     metagraph.search('CAAATTCTTGTAAGTATTAAACATTGTATATGTATTTTGAA')
     metagraph.search('GAATGAAAGATATGTGTTTTTCA')
@@ -32,3 +30,4 @@ Usage
 For more examples, see `notebooks
 <./notebooks>`_.
 
+See API docs in `<../../docs/source/api.rst>`_ on online: `<https://metagraph.ethz.ch/static/docs/api.html>`_.

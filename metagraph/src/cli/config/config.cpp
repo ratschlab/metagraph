@@ -221,10 +221,12 @@ Config::Config(int argc, char *argv[]) {
             presence_fraction = std::stof(get_value(i++));
         } else if (!strcmp(argv[i], "--query-presence")) {
             query_presence = true;
+        } else if (!strcmp(argv[i], "--query-counts")) {
+            query_counts = true;
         } else if (!strcmp(argv[i], "--query-coords")) {
             query_coords = true;
-        } else if (!strcmp(argv[i], "--verbose-coords")) {
-            verbose_coords = true;
+        } else if (!strcmp(argv[i], "--verbose-output")) {
+            verbose_output = true;
         } else if (!strcmp(argv[i], "--filter-present")) {
             filter_present = true;
         } else if (!strcmp(argv[i], "--count-labels")) {
@@ -1253,16 +1255,18 @@ if (advanced) {
 if (advanced) {
             fprintf(stderr, "\t   --sparse \t\tuse row-major sparse matrix for row annotation [off]\n");
 }
+            fprintf(stderr, "\t   --json \t\toutput query results in JSON format [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --count-labels \t\tcount labels for k-mers from querying sequences [off]\n");
             fprintf(stderr, "\t   --count-kmers \t\tweight k-mers with their annotated counts (requires count annotation) [off]\n");
             fprintf(stderr, "\t   --count-quantiles [FLOAT ...] \tk-mer count quantiles to compute for each label [off]\n"
                             "\t                                 \t\tExample: --count-quantiles '0 0.33 0.5 0.66 1'\n"
                             "\t                                 \t\t(0 corresponds to MIN, 1 corresponds to MAX)\n");
+            fprintf(stderr, "\t   --query-counts \t\tquery k-mer counts (requires count or coord annotation) [off]\n");
             fprintf(stderr, "\t   --query-coords \t\tquery k-mer coordinates (requires coord annotation) [off]\n");
-            fprintf(stderr, "\t   --verbose-coords \t\tdo not collapse continuous matched coord ranges in result (for query-coords) [off]");
+            fprintf(stderr, "\t   --verbose-output \t\tdo not collapse continuous coord or count ranges (for query-coords and query-counts) [off]\n");
             fprintf(stderr, "\t   --print-signature \t\tprint vectors indicating present/absent k-mers [off]\n");
-            fprintf(stderr, "\t   --num-top-labels \t\tmaximum number of frequent labels to print [off]\n");
+            fprintf(stderr, "\t   --num-top-labels [INT] \tmaximum number of frequent labels to print [inf]\n");
             fprintf(stderr, "\t   --discovery-fraction [FLOAT] fraction of labeled k-mers required for annotation [0.7]\n");
             fprintf(stderr, "\t   --presence-fraction [FLOAT] \tfraction of k-mers required to be present in the graph [0.0]\n");
             fprintf(stderr, "\t   --labels-delimiter [STR]\tdelimiter for annotation labels [\":\"]\n");
@@ -1299,7 +1303,7 @@ if (advanced) {
             fprintf(stderr, "Advanced options for seeding:\n");
             fprintf(stderr, "\t   --align-min-seed-length [INT]\t\tthe minimum length of a seed [graph k]\n");
             fprintf(stderr, "\t   --align-max-seed-length [INT]\t\tthe maximum length of a seed [graph k]\n");
-            fprintf(stderr, "\t   --align-min-exact-match [FLOAT] fraction of matching nucleotides required to align sequence [0.0]\n");
+            fprintf(stderr, "\t   --align-min-exact-match [FLOAT]\t\tfraction of matching nucleotides required to align sequence [0.0]\n");
             fprintf(stderr, "\t   --align-max-num-seeds-per-locus [INT]\tthe maximum number of allowed inexact seeds per locus [inf]\n");
         } break;
         case SERVER_QUERY: {

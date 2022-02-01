@@ -240,12 +240,9 @@ class TestDiffAssembly(TestingBase):
         assert(res.returncode == 0)
 
         if cls.with_bloom:
-            convert_command = '{exe} transform -o {outfile} --initialize-bloom {bloom_param} {input}'.format(
-                exe=METAGRAPH,
-                outfile=cls.tempdir.name + '/graph',
-                bloom_param='--bloom-fpp 0.1',
-                input=cls.tempdir.name + '/graph' + graph_file_extension[cls.graph_repr],
-            )
+            convert_command = f'{METAGRAPH} transform -o {cls.tempdir.name}/graph \
+                                --initialize-bloom --bloom-fpp 0.1 \
+                                {cls.tempdir.name}/graph{graph_file_extension[cls.graph_repr]}'
             res = subprocess.run([convert_command], shell=True)
             assert(res.returncode == 0)
 
