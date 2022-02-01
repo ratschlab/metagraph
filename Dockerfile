@@ -106,6 +106,7 @@ RUN ln -s /usr/local/bin/metagraph_DNA /usr/local/bin/metagraph
 RUN mkdir ${CODE_BASE}
 COPY metagraph/api/python ${CODE_BASE}/api/python
 
-RUN pip3 install ${CODE_BASE}/api/python
+RUN pip3 install --use-feature=in-tree-build ${CODE_BASE}/api/python
+RUN pip3 install --use-feature=in-tree-build ${CODE_BASE}/workflows
 
 ENTRYPOINT ["metagraph"]
