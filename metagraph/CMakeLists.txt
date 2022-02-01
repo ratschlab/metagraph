@@ -1,8 +1,17 @@
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.19)
 cmake_policy(SET CMP0015 NEW)
 
-project(MetaGraph)
+# Read version from JSON
+file(READ ${CMAKE_SOURCE_DIR}/../package.json MY_JSON_STRING)
+string(JSON VERSION GET ${MY_JSON_STRING} version)
+message(STATUS "Current MetaGraph version: ${VERSION}")
 
+project(MetaGraph
+  VERSION ${VERSION}
+  DESCRIPTION "A tool for scalable construction of annotated genome graphs and sequence-to-graph alignment"
+)
+
+add_definitions(-DVERSION="${VERSION}")
 include(CheckFunctionExists)
 include(CheckLibraryExists)
 include(CMakeListsHelpers.txt)
@@ -73,11 +82,6 @@ else()
   message(STATUS "Compile in ${Blue}${CMAKE_BUILD_TYPE}${ColourReset} mode")
 endif()
 
-set(JSONCPP_WITH_TESTS FALSE)
-add_subdirectory(
-  external-libraries/jsoncpp
-)
-
 if(NOT CMAKE_DBG_ALPHABET)
   set(CMAKE_DBG_ALPHABET "DNA")
 endif()
@@ -91,7 +95,10 @@ elseif(CMAKE_DBG_ALPHABET STREQUAL "DNA_CASE_SENSITIVE")
 else()
   add_definitions(-D_PROTEIN_GRAPH)
 endif()
+message(STATUS "Compile for ${BoldCyan}${CMAKE_DBG_ALPHABET}${ColourReset} alphabet")
 
+set(JSONCPP_WITH_TESTS FALSE)
+add_subdirectory(external-libraries/jsoncpp)
 
 add_compile_options(
   -Wall -Wextra -Werror
