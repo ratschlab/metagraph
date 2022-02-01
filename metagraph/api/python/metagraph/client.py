@@ -151,6 +151,10 @@ class GraphClientJson:
 
     # noinspection PyTypeChecker
     def column_labels(self) -> Tuple[JsonStrList, str]:
+        """
+        :returns:   All column labels
+        :rtype:     JSON list
+        """
         return self._do_request("column_labels", {}, post_req=False)
 
     def stats(self) -> Tuple[dict, str]:

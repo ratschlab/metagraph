@@ -14,8 +14,8 @@ At the same time, the provided workflows and their careful implementation, combi
 
 #### Main features:
 * Large-scale indexing of sequences
-* Python API for querying in the server mode
-* Encoding **k-mer counts** or expression values and **k-mer coordinates** (positions in source sequences)
+* [Python API](https://metagraph.ethz.ch/static/docs/api.html) for querying in the server mode
+* Encoding [**k-mer counts**](https://metagraph.ethz.ch/static/docs/quick_start.html#index-k-mer-counts) (e.g., expression values) and [**k-mer coordinates**](https://metagraph.ethz.ch/static/docs/quick_start.html#index-k-mer-coordinates) (positions in source sequences)
 * **Sequence alignment** against very large annotated graphs
 * Scalable cleaning of very large de Bruijn graphs (to remove sequencing errors)
 * Support for custom alphabets (e.g., {A,C,G,T,N} or amino acids)

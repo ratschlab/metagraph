@@ -67,74 +67,75 @@ Before compiling MetaGraph, install the following dependencies:
 .. tip:: For those without administrator/root privileges, we recommend using
          `brew <https://brew.sh/>`_ (available for MacOS and Linux).
 
+.. tabs::
 
-For AppleClang on MacOS
-"""""""""""""""""""""""
-For compiling with **AppleClang**, the prerequisites can be installed as easy as::
+    .. group-tab:: AppleClang on MacOS
 
-    brew install libomp cmake make bzip2 htslib boost jemalloc
+        For compiling with **AppleClang**, the prerequisites can be installed as easy as::
 
-
-For Ubuntu or Debian
-""""""""""""""""""""
-For **Ubuntu** (20.04 LTS or higher) or **Debian** (10 or higher)::
-
-    sudo apt-get install cmake libbz2-dev libhts-dev libjemalloc-dev libboost-all-dev
+            brew install libomp cmake make bzip2 htslib boost jemalloc
 
 
-For CentOS
-""""""""""
-For **CentOS** (8 or higher)::
+    .. group-tab:: Ubuntu / Debian
 
-    yum install cmake bzip2-devel htslib-devel jemalloc-devel boost-devel
+        For **Ubuntu** (20.04 LTS or higher) or **Debian** (10 or higher)::
+
+            sudo apt-get install cmake libbz2-dev libhts-dev libjemalloc-dev libboost-all-dev
 
 
-For Linux with GNU GCC installed with Homebrew
-""""""""""""""""""""""""""""""""""""""""""""""
-GNU GCC and all the prerequisites can be installed with `brew <https://brew.sh/>`_ as follows::
+    .. group-tab:: CentOS
 
-    brew install gcc autoconf automake libtool cmake make htslib
-    [[ "$OSTYPE" == "darwin"* ]] \
-        && brew remove -f boost double-conversion gflags glog lz4 snappy zstd folly \
-        && brew install --cc=gcc-7 boost folly \
-        && brew install gcc@9
-    [[ "$OSTYPE" != "darwin"* ]] \
-        && brew install gcc@9 libomp \
-        && brew remove -f openssl@1.1 boost double-conversion gflags glog lz4 snappy zstd folly \
-        && brew install --cc=gcc-5 glog zstd \
-        && brew install --cc=gcc-9 openssl@1.1 boost folly
+        For **CentOS** (8 or higher)::
 
-Then, the following environment variables have to be set::
+            yum install cmake bzip2-devel htslib-devel jemalloc-devel boost-devel
 
-    echo "\
-    # Use gcc-9 with cmake
-    export CC=\"\$(which gcc-9)\"
-    export CXX=\"\$(which g++-9)\"
-    " >> $( [[ "$OSTYPE" == "darwin"* ]] && echo ~/.bash_profile || echo ~/.bashrc )
 
-For Linux with LLVM Clang installed with Homebrew
-"""""""""""""""""""""""""""""""""""""""""""""""""
-For compiling with LLVM Clang installed with `brew <https://brew.sh/>`_, the prerequisites can be installed with::
+    .. group-tab:: brew + GNU gcc
 
-    brew install llvm libomp autoconf automake libtool cmake make htslib boost folly
+        GNU GCC and all the prerequisites can be installed with `brew <https://brew.sh/>`_ as follows::
 
-Then, the following environment variables have to be set::
+            brew install gcc autoconf automake libtool cmake make htslib
+            [[ "$OSTYPE" == "darwin"* ]] \
+                && brew remove -f boost double-conversion gflags glog lz4 snappy zstd folly \
+                && brew install --cc=gcc-7 boost folly \
+                && brew install gcc@9
+            [[ "$OSTYPE" != "darwin"* ]] \
+                && brew install gcc@9 libomp \
+                && brew remove -f openssl@1.1 boost double-conversion gflags glog lz4 snappy zstd folly \
+                && brew install --cc=gcc-5 glog zstd \
+                && brew install --cc=gcc-9 openssl@1.1 boost folly
 
-    echo "\
-    # OpenMP
-    export LDFLAGS=\"\$LDFLAGS -L$(brew --prefix libomp)/lib\"
-    export CPPFLAGS=\"\$CPPFLAGS -I$(brew --prefix libomp)/include\"
-    export CXXFLAGS=\"\$CXXFLAGS -I$(brew --prefix libomp)/include\"
-    # Clang C++ flags
-    export LDFLAGS=\"\$LDFLAGS -L$(brew --prefix llvm)/lib -Wl,-rpath,$(brew --prefix llvm)/lib\"
-    export CPPFLAGS=\"\$CPPFLAGS -I$(brew --prefix llvm)/include\"
-    export CXXFLAGS=\"\$CXXFLAGS -stdlib=libc++\"
-    # Path to Clang
-    export PATH=\"$(brew --prefix llvm)/bin:\$PATH\"
-    # Use Clang with cmake
-    export CC=\"\$(which clang)\"
-    export CXX=\"\$(which clang++)\"
-    " >> $( [[ "$OSTYPE" == "darwin"* ]] && echo ~/.bash_profile || echo ~/.bashrc )
+        Then, the following environment variables have to be set::
+
+            echo "\
+            # Use gcc-9 with cmake
+            export CC=\"\$(which gcc-9)\"
+            export CXX=\"\$(which g++-9)\"
+            " >> $( [[ "$OSTYPE" == "darwin"* ]] && echo ~/.bash_profile || echo ~/.bashrc )
+
+    .. group-tab:: brew + LLVM Clang
+
+        For compiling with LLVM Clang installed with `brew <https://brew.sh/>`_, the prerequisites can be installed with::
+
+            brew install llvm libomp autoconf automake libtool cmake make htslib boost folly
+
+        Then, the following environment variables have to be set::
+
+            echo "\
+            # OpenMP
+            export LDFLAGS=\"\$LDFLAGS -L$(brew --prefix libomp)/lib\"
+            export CPPFLAGS=\"\$CPPFLAGS -I$(brew --prefix libomp)/include\"
+            export CXXFLAGS=\"\$CXXFLAGS -I$(brew --prefix libomp)/include\"
+            # Clang C++ flags
+            export LDFLAGS=\"\$LDFLAGS -L$(brew --prefix llvm)/lib -Wl,-rpath,$(brew --prefix llvm)/lib\"
+            export CPPFLAGS=\"\$CPPFLAGS -I$(brew --prefix llvm)/include\"
+            export CXXFLAGS=\"\$CXXFLAGS -stdlib=libc++\"
+            # Path to Clang
+            export PATH=\"$(brew --prefix llvm)/bin:\$PATH\"
+            # Use Clang with cmake
+            export CC=\"\$(which clang)\"
+            export CXX=\"\$(which clang++)\"
+            " >> $( [[ "$OSTYPE" == "darwin"* ]] && echo ~/.bash_profile || echo ~/.bashrc )
 
 
 Compiling

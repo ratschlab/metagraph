@@ -8,7 +8,7 @@ Sequence assembly
 Basic assembly
 --------------
 
-See how to assemble simple contigs and unitigs in :ref:`transform to sequences<to-sequences>`.
+See how to assemble simple contigs and unitigs in :ref:`to_sequences`.
 
 Differential assembly
 ---------------------
