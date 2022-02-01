@@ -270,7 +270,17 @@ void LabeledExtender
             }
         }
 
-        for (auto i = node_range.first; i <= node_range.second; ++i) {
+        boss::BOSS::TAlphabet cur_edge_label = boss.get_W(edge_base) % boss.alph_size;
+
+        for (auto i = boss.succ_W(node_range.first, cur_edge_label);
+                i <= node_range.second;
+                i = boss.succ_W(i + 1, cur_edge_label)) {
+            if (node_index n = dbg_succ->boss_to_kmer_index(i))
+                labeled_graph_.add_node(n);
+        }
+        for (auto i = boss.succ_W(node_range.first, cur_edge_label + boss.alph_size);
+                i <= node_range.second;
+                i = boss.succ_W(i + 1, cur_edge_label + boss.alph_size)) {
             if (node_index n = dbg_succ->boss_to_kmer_index(i))
                 labeled_graph_.add_node(n);
         }
@@ -282,7 +292,6 @@ void LabeledExtender
 
         labeled_graph_.flush();
 
-        boss::BOSS::TAlphabet cur_edge_label = boss.get_W(edge_base) % boss.alph_size;
 
         for (size_t j = 0; j < inter_diff.size(); ++j) {
             auto &[inter, diff, lclogprob] = inter_diff[j];
