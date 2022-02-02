@@ -123,7 +123,7 @@ void map_sequences_in_file(const std::string &file,
 
         std::vector<DeBruijnGraph::node_index> graphindices;
         if (config.alignment_length == graph.get_k()) {
-            graph_indices = map_to_nodes(graph, read_stream->seq.s);
+            graphindices = map_to_nodes(graph, read_stream->seq.s);
 
         } else {
             // TODO: make more efficient
