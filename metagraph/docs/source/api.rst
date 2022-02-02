@@ -18,7 +18,7 @@ Install MetaGraph API in Python::
 Sequence search
 ---------------
 The Python client has a ``search`` method for querying an index running on a server.
-The method accepts a single sequence or list of sequences represented with strings.
+The method accepts a single sequence or a list of sequences represented with strings.
 
 .. py:function:: metagraph.client.GraphClient.search(self, ...)
 
@@ -58,7 +58,7 @@ If the ``align`` flag is set, all the alignment options (explained in the :ref:`
 
 Querying k-mer abundance and coordinates
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Metagraph supports k-mer count- and coordinate-aware indexes (see :ref:`Indexing k-mer counts <indexing counts>`
+MetaGraph supports k-mer count- and coordinate-aware indexes (see :ref:`Indexing k-mer counts <indexing counts>`
 and :ref:`Indexing k-mer coordinates <indexing coordinates>`).
 If you are querying such an index,
 you can also set ``abundance_sum=True``, ``query_counts=True``, or ``query_coords=True``. If you try to query an
@@ -69,8 +69,8 @@ index which does not support either of these query types, the server will return
 
 Sequence alignment
 ------------------
-The ``align`` method allows alignment of sequences to the the graph.
-The method accepts a single sequence or list of sequences represented with strings.
+The ``align`` method allows alignment of sequences to the graph.
+The method accepts a single sequence or a list of sequences represented with strings.
 Additionally, the method accepts the following keyword arguments:
 
 .. py:function:: metagraph.client.GraphClient.align(self, ...)
@@ -79,7 +79,7 @@ Additionally, the method accepts the following keyword arguments:
 
         :param      sequence:                    The query sequence
         :type       sequence:                    Union[str, Iterable[str]]
-        :param      min_exact_match:             The minimum fraction (between 0.0 and 1.0) of matching nucleotides required to align sequence [default: 0]
+        :param      min_exact_match:             The minimum fraction (between 0.0 and 1.0) of matching nucleotides required to align the sequence [default: 0]
         :type       min_exact_match:             float
         :param      max_alternative_alignments:  The number of different alignments to return [default: 1]
         :type       max_alternative_alignments:  int
@@ -139,10 +139,10 @@ Search multiple graphs in parallel
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 The API provides ``MultiGraphClient``, which can query multiple graph servers in parallel.
 Both ``search`` and ``align`` have the keyword argument ``parallel`` [default: True].
-If ``parallel=True``, the result will be a dictionary mapping specified index names to instances
+If ``parallel=True``, the result will be a dictionary mapping the specified index names to instances
 of ``concurrent.futures.Future``.
 If ``parallel=False``, all graphs will simply be queried in sequence and the results will
-be ``instances of pandas.DataFrame``.
+be instances of ``pandas.DataFrame``.
 
 ::
 

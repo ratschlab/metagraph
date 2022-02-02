@@ -27,8 +27,8 @@ If docker is available on your system, you can immediately get started with::
         build -v -k 10 -o /mnt/transcripts_1000 /mnt/transcripts_1000.fa
 
 
-where ``${DATA_DIR_HOST}`` should be replaced with a directory on the host system to map it
-under ``/mnt`` in the container. This docker container uses the latest version of MetaGraph from
+where ``${DATA_DIR_HOST}`` should be replaced with a directory on the host system that will be
+mapped under ``/mnt`` in the container. This docker container uses the latest version of MetaGraph from
 the source `GitHub repository <https://github.com/ratschlab/metagraph>`_ (branch ``master``).
 See also the `image overview <https://github.com/ratschlab/metagraph/pkgs/container/metagraph>`_ for
 other versions of the image.
@@ -40,9 +40,9 @@ To run the binary compiled for the `Protein` alphabet, just add ``--entrypoint m
                -v ${DATA_DIR_HOST}:/mnt ghcr.io/ratschlab/metagraph:master \
         build -v -k 10 -o /mnt/graph /mnt/protein.fa
 
-As you see, running MetaGraph from docker containers is very easy.
+As you can see, running MetaGraph from docker containers is very easy.
 Also, the following command (or similar) may be handy to see what directory is mounted in the
-container or other sort of debugging of the command::
+container or to do other sorts of debugging::
 
     docker run -v ${DATA_DIR_HOST}:/mnt --entrypoint ls ghcr.io/ratschlab/metagraph:master /mnt
 
@@ -184,7 +184,7 @@ To compile MetaGraph, please follow these steps.
 Build configurations
 ^^^^^^^^^^^^^^^^^^^^
 
-When configuring ``cmake .. <arguments>`` additional arguments can be provided:
+When configuring via ``cmake .. <arguments>`` additional arguments can be provided:
 
 - ``-DCMAKE_BUILD_TYPE=[Debug|Release|Profile|GProfile]`` -- build modes (``Release`` by default)
 - ``-DBUILD_STATIC=[ON|OFF]`` -- link statically (``OFF`` by default)
