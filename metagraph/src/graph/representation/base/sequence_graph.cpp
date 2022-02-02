@@ -106,15 +106,8 @@ void DeBruijnGraph::traverse(node_index start,
 }
 
 bool DeBruijnGraph::is_base_node(node_index node) const {
-    if (node == npos || get_mode() != DeBruijnGraph::CANONICAL) {
-        return true;
-    } else {
-        node_index ret_val;
-        map_to_nodes(get_node_sequence(node), [&](node_index node) {
-            ret_val = node;
-        });
-        return ret_val == node;
-    }
+    return node == npos || get_mode() != DeBruijnGraph::CANONICAL
+        || graph::map_to_nodes(*this, get_node_sequence(node))[0] == node;
 }
 
 auto DeBruijnGraph::get_base_path(const std::vector<node_index> &path,
