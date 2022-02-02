@@ -18,7 +18,11 @@ These relations may represent, for instance:
 * k-mer ``i`` is present in file ``j``
 * k-mer ``i`` is present in a collection of sequences/files marked by ``j``
 * k-mer ``i`` is highly expressed in sample ``j``
-* k-mer ``i`` is present in positions ``k`` and ``l`` in genome ``j``
+
+The annotation matrix can also be supplemented with additional attributes to represent such quantities as:
+
+* k-mer ``i`` occurs :math:`c_i` times in sample ``j`` (k-mer abundance)
+* k-mer ``i`` occurs at positions :math:`p_1,\dots,p_{c_i}` in genome ``j`` (k-mer coordinates)
 
 .. TODO: Describe counts/coordinate annotation
 
