@@ -10,9 +10,7 @@ RUN export DEBIAN_FRONTEND="noninteractive" && apt-get update && apt-get install
     automake \
     binutils-dev \
     ccache \
-    cmake \
     curl \
-    extra-cmake-modules \
     g++-10 \
     git \
     libboost-all-dev \
@@ -40,7 +38,7 @@ RUN export DEBIAN_FRONTEND="noninteractive" && apt-get update && apt-get install
     zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip3 install parameterized==0.7.1
+RUN pip3 install parameterized==0.7.1 "cmake>=3.19"
 
 WORKDIR /opt
 ENV LD_LIBRARY_PATH=/usr/local/lib
