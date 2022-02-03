@@ -21,17 +21,12 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
     template <typename Graph>
     explicit CanonicalDBG(Graph&& graph, size_t cache_size = 100'000);
 
+    CanonicalDBG(CanonicalDBG&& canonical) = default;
+    CanonicalDBG& operator=(CanonicalDBG&& canonical) = default;
+
     // copy constructors
     CanonicalDBG(const CanonicalDBG &canonical)
           : CanonicalDBG(canonical.graph_, canonical.cache_size_) {}
-
-    CanonicalDBG(CanonicalDBG &canonical)
-          : CanonicalDBG(canonical.graph_, canonical.cache_size_) {}
-
-    // caches cannot be resized or moved, so disable these constructors
-    CanonicalDBG& operator=(const CanonicalDBG &canonical) = delete;
-    CanonicalDBG(CanonicalDBG&&) = delete;
-    CanonicalDBG& operator=(CanonicalDBG&&) = delete;
 
     virtual ~CanonicalDBG() {}
 

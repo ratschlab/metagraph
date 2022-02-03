@@ -333,7 +333,7 @@ int align_to_graph(Config *config) {
 
     if (config->map_sequences) {
         if (graph->get_mode() == DeBruijnGraph::PRIMARY)
-            graph = primary_to_canonical(graph);\
+            graph = std::make_shared<CanonicalDBG>(primary_to_canonical(graph));
 
         if (!config->alignment_length) {
             config->alignment_length = graph->get_k();
@@ -418,7 +418,7 @@ int align_to_graph(Config *config) {
                 );
 
                 if (aln_graph->get_mode() == DeBruijnGraph::PRIMARY)
-                    aln_graph = primary_to_canonical(aln_graph);
+                    aln_graph = std::make_shared<CanonicalDBG>(primary_to_canonical(aln_graph));
 
                 std::unique_ptr<IDBGAligner> aligner;
 

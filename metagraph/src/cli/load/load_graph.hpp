@@ -22,15 +22,17 @@ std::shared_ptr<Graph> load_critical_graph_from_file(const std::string &filename
         exit(1);
     }
 
-    if (graph->get_mode() == graph::DeBruijnGraph::PRIMARY && !(graph->get_k() % 2))
-        common::logger->warn("PRIMARY mode graphs of even order k are less efficient to query. Consider using an odd value of k.");
+    if (graph->get_mode() == graph::DeBruijnGraph::PRIMARY && !(graph->get_k() % 2)) {
+        common::logger->warn("PRIMARY graphs of even order k (k={} is used) are less efficient"
+                             " to query. Consider using an odd value of k.", graph->get_k());
+    }
 
     return graph;
 }
 
 std::shared_ptr<graph::DeBruijnGraph> load_critical_dbg(const std::string &filename);
 
-std::shared_ptr<graph::CanonicalDBG>
+graph::CanonicalDBG
 primary_to_canonical(std::shared_ptr<graph::DeBruijnGraph> graph, size_t cache_size = 100'000);
 
 } // namespace cli

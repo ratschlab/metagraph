@@ -27,7 +27,7 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
     const auto *dbg_graph = dynamic_cast<const DBGSuccinct*>(graph.get());
 
     if (graph->get_mode() == DeBruijnGraph::PRIMARY)
-        graph = primary_to_canonical(graph);
+        graph = std::make_shared<CanonicalDBG>(primary_to_canonical(graph));
 
     auto annotation_temp = config.infbase_annotators.size()
             ? initialize_annotation(config.infbase_annotators.at(0), config, 0)
