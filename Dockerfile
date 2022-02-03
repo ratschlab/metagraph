@@ -95,7 +95,7 @@ RUN apt-get update && apt-get install -y \
     libjemalloc2 \
     python3 \
     python3-pip \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* && pip3 install -U "pip>=20.2.2"
 
 COPY --from=metagraph_bin /opt/metagraph/metagraph/build/metagraph_* /usr/local/bin/
 
