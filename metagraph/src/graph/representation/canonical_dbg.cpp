@@ -150,7 +150,7 @@ void CanonicalDBG::map_to_nodes(std::string_view sequence,
 }
 
 void CanonicalDBG::append_next_rc_nodes(node_index node,
-                                        std::vector<node_index> &children) const {
+                                        SmallVector<node_index> &children) const {
     /**
      *
      * find children of node by searching for parents of its reverse complement
@@ -239,7 +239,7 @@ void CanonicalDBG
         }
 
     } else {
-        std::vector<node_index> children(alphabet.size(), npos);
+        SmallVector<node_index> children(alphabet.size(), npos);
         size_t max_num_edges_left = children.size() - has_sentinel_;
 
         graph_->call_outgoing_kmers(node, [&](node_index next, char c) {
@@ -263,7 +263,7 @@ void CanonicalDBG
 }
 
 void CanonicalDBG::append_prev_rc_nodes(node_index node,
-                                        std::vector<node_index> &parents) const {
+                                        SmallVector<node_index> &parents) const {
     /**
      * find parents of node by searching for children of its reverse complement
      * e.g., node = AGCCAT. Find TAGCCA and AAGCCA by looking for TGGCTA and TGGCTT.
@@ -359,7 +359,7 @@ void CanonicalDBG
         }
 
     } else {
-        std::vector<node_index> parents(alphabet.size(), npos);
+        SmallVector<node_index> parents(alphabet.size(), npos);
         size_t max_num_edges_left = parents.size() - has_sentinel_;
 
         graph_->call_incoming_kmers(node, [&](node_index prev, char c) {
