@@ -88,9 +88,6 @@ void map_sequences_in_file(const std::string &file,
     // TODO: multithreaded
     std::ignore = std::tie(thread_pool, print_mutex);
 
-    const DBGSuccinct *dbg = dynamic_cast<const DBGSuccinct*>(&graph);
-    assert(config.alignment_length == graph.get_k() || dbg);
-
     std::unique_ptr<std::ofstream> ofile;
     if (config.outfbase.size())
         ofile = std::make_unique<std::ofstream>(config.outfbase);
@@ -128,12 +125,13 @@ void map_sequences_in_file(const std::string &file,
         } else {
             // TODO: make more efficient
             // TODO: canonicalization
-            if (dbg->get_mode() == DeBruijnGraph::PRIMARY)
+            const DBGSuccinct &dbg = dynamic_cast<const DBGSuccinct&>(graph);
+            if (dbg.get_mode() == DeBruijnGraph::PRIMARY)
                 logger->warn("Sub-k-mers will be mapped to unwrapped primary graph");
 
             for (size_t i = 0; i + config.alignment_length <= read_stream->seq.l; ++i) {
                 graphindices.emplace_back(DeBruijnGraph::npos);
-                dbg->call_nodes_with_suffix_matching_longest_prefix(
+                dbg.call_nodes_with_suffix_matching_longest_prefix(
                     std::string_view(read_stream->seq.s + i, config.alignment_length),
                     [&](auto node, auto) {
                         if (graphindices.back() == DeBruijnGraph::npos)
@@ -172,17 +170,17 @@ void map_sequences_in_file(const std::string &file,
 
                 prev = i;
             }
-            *out << read_stream->name.s << "\t"
-                 << num_discovered << "/" << num_kmers << "/"
-                 << num_unique_matching_kmers << "\n";
+            *out << fmt::format("{}\t{}/{}/{}\n", read_stream->name.s,
+                                num_discovered, num_kmers, num_unique_matching_kmers);
             return;
         }
 
         // mapping of each k-mer to a graph node
         for (size_t i = 0; i < graphindices.size(); ++i) {
             assert(i + config.alignment_length <= read_stream->seq.l);
-            *out << std::string_view(read_stream->seq.s + i, config.alignment_length)
-                 << ": " << graphindices[i] << "\n";
+            *out << fmt::format("{}: {}\n", std::string_view(read_stream->seq.s + i,
+                                                             config.alignment_length),
+                                            graphindices[i]);
         }
 
     }, config.forward_and_reverse);
