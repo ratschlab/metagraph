@@ -72,6 +72,9 @@ Config::Config(int argc, char *argv[]) {
         identity = ASSEMBLE;
     } else if (!strcmp(argv[1], "relax_brwt")) {
         identity = RELAX_BRWT;
+    } else if (!strcmp(argv[1], "--version")) {
+        std::cout << "Version: " VERSION << std::endl;
+        exit(0);
     } else if (!strcmp(argv[1], "--advanced")) {
         advanced = true;
         print_welcome_message();
@@ -896,6 +899,10 @@ if (advanced) {
 
             fprintf(stderr, "\tstats\t\tprint graph statistics for given graph(s) or annotation\n\n");
 
+            fprintf(stderr, "General options:\n");
+            fprintf(stderr, "\t--advanced \tshow other advanced and legacy options [off]\n");
+            fprintf(stderr, "\t--version \tprint version\n");
+            fprintf(stderr, "\n");
             return;
         }
         case BUILD: {
@@ -1320,7 +1327,7 @@ if (advanced) {
         } break;
     }
 
-    fprintf(stderr, "\n\tGeneral options:\n");
+    fprintf(stderr, "\nGeneral options:\n");
     fprintf(stderr, "\t-v --verbose \t\tswitch on verbose output [off]\n");
     fprintf(stderr, "\t   --advanced \t\tshow other advanced and legacy options [off]\n");
     fprintf(stderr, "\t-h --help \t\tprint usage info\n");
