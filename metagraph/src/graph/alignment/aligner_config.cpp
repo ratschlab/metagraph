@@ -64,7 +64,8 @@ DBGAlignerConfig::score_t DBGAlignerConfig
     if (cigar.empty())
         return 0;
 
-    score_t score = (!cigar.get_clipping() ? left_end_bonus : 0) + (!cigar.get_end_clipping() ? right_end_bonus : 0);
+    score_t score = (!cigar.get_clipping() ? left_end_bonus : 0)
+                    + (!cigar.get_end_clipping() ? right_end_bonus : 0);
 
     auto ref_it = reference.begin();
     auto alt_it = query.begin();
