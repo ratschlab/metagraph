@@ -4,11 +4,12 @@
 #include <cassert>
 #include <array>
 
-#include <common/vector.hpp>
 #include <cache.hpp>
 #include <lru_cache_policy.hpp>
 
+#include "common/vector.hpp"
 #include "graph/representation/base/dbg_wrapper.hpp"
+
 
 namespace mtg {
 namespace graph {
@@ -98,7 +99,7 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
     }
 
   private:
-    size_t cache_size_;
+    const size_t cache_size_;
 
     // cache the results of call_outgoing_kmers
     mutable caches::fixed_sized_cache<node_index,
@@ -115,8 +116,8 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
                                       bool,
                                       caches::LRUCachePolicy<node_index>> is_palindrome_cache_;
 
-    size_t offset_;
-    bool k_odd_;
+    const size_t offset_;
+    const bool k_odd_;
     bool has_sentinel_;
 
     std::array<size_t, 256> alphabet_encoder_;

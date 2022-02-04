@@ -13,12 +13,12 @@ using mtg::common::logger;
 CanonicalDBG::CanonicalDBG(std::shared_ptr<const DeBruijnGraph> graph, size_t cache_size)
       : DBGWrapper<DeBruijnGraph>(std::move(graph)),
         cache_size_(cache_size), child_node_cache_(cache_size_),
-        parent_node_cache_(cache_size_), is_palindrome_cache_(cache_size_) {
+        parent_node_cache_(cache_size_), is_palindrome_cache_(cache_size_),
+        offset_(graph_->max_index()),
+        k_odd_(graph_->get_k() % 2) {
     assert(graph->get_mode() == DeBruijnGraph::PRIMARY
                 && "Only primary graphs can be wrapped in CanonicalDBG");
 
-    offset_ = graph_->max_index();
-    k_odd_ = (graph_->get_k() % 2);
     has_sentinel_ = false;
     alphabet_encoder_.fill(graph_->alphabet().size());
 
