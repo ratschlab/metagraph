@@ -4,7 +4,6 @@
 """The setup script."""
 
 import json
-import os
 from setuptools import setup, find_packages
 
 with open('README.rst') as readme_file:
@@ -17,7 +16,7 @@ with open('requirements.txt') as f:
 
 test_requirements = ['pytest']
 
-with open(os.path.abspath(os.path.dirname(__file__)) + '/../../../package.json') as f:
+with open('../../../package.json') as f:
     version = json.load(f)['version']
 
 setup(
