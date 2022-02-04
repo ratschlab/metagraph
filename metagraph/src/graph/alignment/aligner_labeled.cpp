@@ -244,7 +244,7 @@ void LabeledBacktrackingExtender
     }
 }
 
-auto AnnotationBuffer::add_path(const std::vector<node_index> &path, std::string query)
+auto AnnotationBuffer::add_path(const std::vector<node_index> &path, std::string&& query)
         -> std::pair<std::vector<node_index>, bool> {
     assert(graph_.get_mode() != DeBruijnGraph::PRIMARY
                 && "PRIMARY graphs must be wrapped into CANONICAL");

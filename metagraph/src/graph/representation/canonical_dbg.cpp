@@ -561,21 +561,5 @@ void CanonicalDBG::reverse_complement(std::string &seq,
     std::swap(path, rev_path);
 }
 
-auto CanonicalDBG::get_base_path(const std::vector<node_index> &path,
-                                 const std::string &sequence) const
-        -> std::pair<std::vector<node_index>, bool /* is reversed */> {
-    auto ret_val = graph_->get_base_path(path, sequence);
-
-    if (ret_val.first.size() && get_base_node(ret_val.first[0]) != ret_val.first[0]) {
-        ret_val.second = !ret_val.second;
-        std::reverse(ret_val.first.begin(), ret_val.first.end());
-    }
-
-    std::transform(ret_val.first.begin(), ret_val.first.end(), ret_val.first.begin(),
-                   [this](node_index node) { return get_base_node(node); });
-
-        return ret_val;
-}
-
 } // namespace graph
 } // namespace mtg

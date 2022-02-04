@@ -49,19 +49,8 @@ class AnnotationBuffer {
     // push (a) node(s) to the buffer
     node_index add_node(node_index node);
 
-    node_index get_base_node(node_index node) {
-        auto find = labels_.find(node);
-        if (find == labels_.end()) {
-            add_node(node);
-            find = labels_.find(node);
-        }
-
-        assert(find != labels_.end());
-        return AnnotatedDBG::anno_to_graph_index(find->second.first);
-    }
-
     std::pair<std::vector<node_index>, bool>
-    add_path(const std::vector<node_index> &path, std::string sequence);
+    add_path(const std::vector<node_index> &path, std::string&& sequence);
 
     // get the annotations and coordinates of a node if they have been fetched
     std::pair<std::optional<LabelSet>, std::optional<CoordsSet>>

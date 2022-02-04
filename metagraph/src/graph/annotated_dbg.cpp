@@ -49,7 +49,7 @@ bool AnnotatedDBG::check_compatibility() const {
     // TODO: find a way to fix this thing to add check_compatibility() to the constructor
     // of AnnotatedSequenceGraph.
     // Maybe make it how it was before 9f4e8e5b73571d874dd93eedc53079f71615023c
-    return dbg_.get_base_graph().max_index() == annotator_->num_objects();
+    return dbg_.max_index() == annotator_->num_objects();
 }
 
 void AnnotatedSequenceGraph

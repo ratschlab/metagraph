@@ -53,9 +53,7 @@ class DBGWrapper : public DeBruijnGraph {
     virtual const std::string& alphabet() const override final { return graph_->alphabet(); }
     virtual void print(std::ostream &out) const override { graph_->print(out); }
     virtual Mode get_mode() const override { return graph_->get_mode(); }
-    virtual const DeBruijnGraph& get_base_graph() const override final {
-        return graph_->get_base_graph();
-    }
+    const DeBruijnGraph& get_base_graph() const { return graph_; }
 
     /**
      * Override these if the wrapper changes the graph's indexing
@@ -90,10 +88,6 @@ class DBGWrapper : public DeBruijnGraph {
                                 = [](){ return false; }) const override = 0;
 
     virtual void call_kmers(const std::function<void(node_index, const std::string&)> &callback) const override = 0;
-
-    virtual std::pair<std::vector<node_index>, bool /* is reversed */>
-    get_base_path(const std::vector<node_index> &path,
-                  const std::string &sequence) const override = 0;
 
   protected:
     std::shared_ptr<const Graph> graph_;

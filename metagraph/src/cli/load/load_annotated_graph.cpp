@@ -21,8 +21,6 @@ using mtg::common::logger;
 
 std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnGraph> graph,
                                                        const Config &config) {
-    assert(graph.get() == &graph->get_base_graph());
-
     uint64_t max_index = graph->max_index();
     const auto *dbg_graph = dynamic_cast<const DBGSuccinct*>(graph.get());
 

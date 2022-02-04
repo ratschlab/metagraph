@@ -129,12 +129,6 @@ class MaskedDeBruijnGraph : public DBGWrapper<DeBruijnGraph> {
         });
     }
 
-    virtual std::pair<std::vector<node_index>, bool /* is reversed */>
-    get_base_path(const std::vector<node_index> &path,
-                  const std::string &) const override final {
-        return std::make_pair(path, false);
-    }
-
   private:
     std::unique_ptr<bitmap> kmers_in_graph_;
     bool only_valid_nodes_in_mask_;
