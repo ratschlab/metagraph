@@ -79,14 +79,14 @@ build-metagraph:
 
 	$(EXEC_CMD) 'mkdir -p $(BUILD_DIR) && cd $(BUILD_DIR) \
                    && cmake -DCMAKE_DBG_ALPHABET=$(alphabet) $(additional_cmake_args) $(CODE_BASE)/metagraph \
-                   && make metagraph -j $$(($$(getconf _NPROCESSORS_ONLN) - 1))'
+                   && make metagraph -j $$(getconf _NPROCESSORS_ONLN)'
 
 build-metagraph-static:
 	[ -d $(BUILD_DIR_STATIC_HOST_DOCKER) ] || mkdir -p $(BUILD_DIR_STATIC_HOST_DOCKER)
 	[ -d $(CCACHE_FOR_DOCKER) ] || mkdir -p $(CCACHE_FOR_DOCKER)
 	$(EXEC_CMD) 'mkdir -p $(BUILD_DIR_STATIC) && cd $(BUILD_DIR_STATIC) \
                   && cmake -DCMAKE_DBG_ALPHABET=$(alphabet) -DBUILD_STATIC=ON $(additional_cmake_args) $(CODE_BASE)/metagraph \
-                  && make metagraph -j $$(($$(getconf _NPROCESSORS_ONLN) - 1))'
+                  && make metagraph -j $$(getconf _NPROCESSORS_ONLN)'
 
 build-docker:
 	docker build -t metagraph $(CODE_BASE_HOST)
