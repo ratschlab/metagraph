@@ -32,10 +32,10 @@ DefaultColumnExtender::DefaultColumnExtender(const DeBruijnGraph &graph,
                    [&](char c) { return config_.get_row(c)[c]; });
 
     std::partial_sum(partial_sums_.rbegin(), partial_sums_.rend(), partial_sums_.rbegin());
-    partial_sums_.push_back(0);
-
-    assert(query_.empty() || config_.match_score(query_) == partial_sums_[1]);
+    assert(query_.empty() || config_.match_score(query_) == partial_sums_.front());
     assert(query_.empty() || config_.get_row(query_.back())[query_.back()] == partial_sums_.back());
+
+    partial_sums_.push_back(0);
 
     // precompute profiles to store match/mismatch scores and Cigar::Operators
     // in contiguous arrays
