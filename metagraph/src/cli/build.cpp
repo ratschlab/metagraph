@@ -64,15 +64,9 @@ int build_graph(Config *config) {
 
     logger->trace("Build De Bruijn Graph with k-mer size k={}", config->k);
 
-    // If the mode is CANONICAL, then this could be the initial construction step
-    // with the eventual goal of building a PRIMARY graph. So, we print this warning
-    // here for CANONICAL mode as well just in case that is the eventual goal.
-    if ((config->graph_mode == graph::DeBruijnGraph::PRIMARY
-            || config->graph_mode == graph::DeBruijnGraph::CANONICAL)
-                && !(config->k % 2)) {
-        logger->warn("CANONICAL and PRIMARY graphs of even order k (k={} is used) "
-                     "are less efficient to query. Consider using an odd value of k.",
-                     config->k);
+    if (config->graph_mode == DeBruijnGraph::PRIMARY && !(config->k % 2)) {
+        logger->warn("PRIMARY graphs of even order k (k={} is used) are less efficient"
+                     " to query. Consider using an odd value of k.", config->k);
     }
 
     if (!config->outfbase.size()) {
