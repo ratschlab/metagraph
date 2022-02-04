@@ -16,13 +16,6 @@ CanonicalDBG::CanonicalDBG(std::shared_ptr<const DeBruijnGraph> graph, size_t ca
         parent_node_cache_(cache_size_), is_palindrome_cache_(cache_size_) {
     assert(graph->get_mode() == DeBruijnGraph::PRIMARY
                 && "Only primary graphs can be wrapped in CanonicalDBG");
-    flush();
-}
-
-void CanonicalDBG::flush() {
-    child_node_cache_.Clear();
-    parent_node_cache_.Clear();
-    is_palindrome_cache_.Clear();
 
     offset_ = graph_->max_index();
     k_odd_ = (graph_->get_k() % 2);

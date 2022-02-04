@@ -15,21 +15,15 @@ namespace graph {
 
 /**
  * CanonicalDBG is a wrapper which acts like a canonical-mode DeBruijnGraph, but
- * uses a non-canonical DeBruijnGraph as the underlying storage.
+ * uses a PRIMARY DeBruijnGraph (constructed from primary contigs).
  */
 class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
   public:
     explicit CanonicalDBG(std::shared_ptr<const DeBruijnGraph> graph,
                           size_t cache_size = 100'000);
 
-    CanonicalDBG(CanonicalDBG&& canonical) = default;
-    CanonicalDBG& operator=(CanonicalDBG&& canonical) = default;
-
-    // copy constructors
     CanonicalDBG(const CanonicalDBG &canonical)
           : CanonicalDBG(canonical.graph_, canonical.cache_size_) {}
-
-    virtual ~CanonicalDBG() {}
 
     /**
      * Added methods
@@ -126,9 +120,6 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
     bool has_sentinel_;
 
     std::array<size_t, 256> alphabet_encoder_;
-
-    // reset all caches
-    void flush();
 
     // find all parent nodes of node in the CanonicalDBG which are represented
     // in the reverse complement orientation in the underlying primary graph
