@@ -24,19 +24,6 @@ class DBGWrapper : public DeBruijnGraph {
     DBGWrapper(std::shared_ptr<InGraph> graph)
           : graph_(std::dynamic_pointer_cast<const Graph>(graph)) { assert(graph_); }
 
-    // aliasing constructors
-    template <class InGraph>
-    explicit DBGWrapper(const InGraph &graph)
-          : graph_(std::shared_ptr<const Graph>{}, dynamic_cast<const Graph*>(&graph)) {
-        assert(graph_);
-    }
-
-    template <class InGraph>
-    explicit DBGWrapper(InGraph &graph)
-          : graph_(std::shared_ptr<const Graph>{}, dynamic_cast<const Graph*>(&graph)) {
-        assert(graph_);
-    }
-
     virtual ~DBGWrapper() {}
 
     /**

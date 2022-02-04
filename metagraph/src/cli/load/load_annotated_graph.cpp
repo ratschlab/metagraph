@@ -5,6 +5,7 @@
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "annotation/binary_matrix/row_sparse/row_sparse.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
+#include "graph/representation/canonical_dbg.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "common/logger.hpp"
 #include "cli/config/config.hpp"
@@ -24,8 +25,10 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
     uint64_t max_index = graph->max_index();
     const auto *dbg_graph = dynamic_cast<const DBGSuccinct*>(graph.get());
 
-    if (graph->get_mode() == DeBruijnGraph::PRIMARY)
-        graph = std::make_shared<CanonicalDBG>(primary_to_canonical(graph));
+    if (graph->get_mode() == DeBruijnGraph::PRIMARY) {
+        graph = std::make_shared<CanonicalDBG>(graph);
+        logger->trace("Primary graph wrapped into canonical");
+    }
 
     auto annotation_temp = config.infbase_annotators.size()
             ? initialize_annotation(config.infbase_annotators.at(0), config, 0)

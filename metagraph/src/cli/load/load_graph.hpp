@@ -5,7 +5,6 @@
 
 #include "common/logger.hpp"
 #include "graph/representation/base/sequence_graph.hpp"
-#include "graph/representation/canonical_dbg.hpp"
 #include "cli/config/config.hpp"
 
 
@@ -21,14 +20,10 @@ std::shared_ptr<Graph> load_critical_graph_from_file(const std::string &filename
         common::logger->error("Cannot load graph from file '{}'", filename);
         exit(1);
     }
-
     return graph;
 }
 
 std::shared_ptr<graph::DeBruijnGraph> load_critical_dbg(const std::string &filename);
-
-graph::CanonicalDBG
-primary_to_canonical(std::shared_ptr<graph::DeBruijnGraph> graph, size_t cache_size = 100'000);
 
 } // namespace cli
 } // namespace mtg

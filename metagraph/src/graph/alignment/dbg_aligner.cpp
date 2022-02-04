@@ -473,7 +473,8 @@ void ISeedAndExtendAligner<AlignmentCompare>
     assert(best.is_valid(graph_, &config_));
 
     if (best.get_clipping()) {
-        RCDBG rc_dbg(graph_);
+        RCDBG rc_dbg(std::shared_ptr<const DeBruijnGraph>(
+                        std::shared_ptr<const DeBruijnGraph>(), &graph_));
         const DeBruijnGraph &rc_graph = graph_.get_mode() != DeBruijnGraph::CANONICAL
             ? rc_dbg : graph_;
 
@@ -588,7 +589,8 @@ std::tuple<size_t, size_t, size_t> ISeedAndExtendAligner<AlignmentCompare>
         return std::make_tuple(num_seeds, num_extensions, num_explored_nodes);
     }
 
-    RCDBG rc_dbg(graph_);
+    RCDBG rc_dbg(std::shared_ptr<const DeBruijnGraph>(
+                    std::shared_ptr<const DeBruijnGraph>(), &graph_));
     bool use_rcdbg = graph_.get_mode() != DeBruijnGraph::CANONICAL
                         && config_.forward_and_reverse_complement;
 

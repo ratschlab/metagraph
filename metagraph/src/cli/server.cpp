@@ -22,7 +22,7 @@ namespace mtg {
 namespace cli {
 
 using mtg::common::logger;
-using mtg::graph::AnnotatedDBG;
+using namespace mtg::graph;
 
 using HttpServer = SimpleWeb::Server<SimpleWeb::HTTP>;
 
@@ -90,12 +90,9 @@ std::string process_search_request(const std::string &received_message,
         }
     }
 
-    std::unique_ptr<graph::align::DBGAlignerConfig> aligner_config;
-    if (json.get("align", false).asBool()) {
-        aligner_config.reset(new graph::align::DBGAlignerConfig(
-            initialize_aligner_config(config)
-        ));
-    }
+    std::unique_ptr<align::DBGAlignerConfig> aligner_config;
+    if (json.get("align", false).asBool())
+        aligner_config.reset(new align::DBGAlignerConfig(initialize_aligner_config(config)));
 
     // Need mutex while appending to vector
     std::vector<SeqSearchResult> search_results;
@@ -176,7 +173,7 @@ std::string process_align_request(const std::string &received_message,
         "max_num_nodes_per_seq_char",
         config.alignment_max_nodes_per_seq_char).asDouble();
 
-    graph::align::DBGAligner aligner(graph, initialize_aligner_config(config));
+    align::DBGAligner aligner(graph, initialize_aligner_config(config));
 
     // TODO: make parallel?
     seq_io::read_fasta_from_string(fasta.asString(),

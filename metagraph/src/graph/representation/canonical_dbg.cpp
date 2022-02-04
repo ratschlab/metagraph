@@ -11,20 +11,19 @@ namespace graph {
 using mtg::common::logger;
 
 template <typename Graph>
-CanonicalDBG::CanonicalDBG(Graph&& graph, size_t cache_size)
-      : DBGWrapper<DeBruijnGraph>(std::forward<Graph>(graph)),
+CanonicalDBG::CanonicalDBG(std::shared_ptr<Graph> graph, size_t cache_size)
+      : DBGWrapper<DeBruijnGraph>(std::move(graph)),
         cache_size_(cache_size), child_node_cache_(cache_size_),
         parent_node_cache_(cache_size_), is_palindrome_cache_(cache_size_) {
+    assert(graph->get_mode() == DeBruijnGraph::PRIMARY);
     static_assert(!std::is_same_v<Graph, std::shared_ptr<CanonicalDBG>>);
     static_assert(!std::is_same_v<Graph, std::shared_ptr<const CanonicalDBG>>);
     flush();
 }
 
-template CanonicalDBG::CanonicalDBG(std::shared_ptr<DeBruijnGraph>&&, size_t);
-template CanonicalDBG::CanonicalDBG(std::shared_ptr<const DeBruijnGraph>&&, size_t);
-template CanonicalDBG::CanonicalDBG(std::shared_ptr<DeBruijnGraph>&, size_t);
-template CanonicalDBG::CanonicalDBG(std::shared_ptr<const DeBruijnGraph>&, size_t);
-template CanonicalDBG::CanonicalDBG(std::shared_ptr<DBGSuccinct>&, size_t);
+template CanonicalDBG::CanonicalDBG(std::shared_ptr<DeBruijnGraph>, size_t);
+template CanonicalDBG::CanonicalDBG(std::shared_ptr<const DeBruijnGraph>, size_t);
+template CanonicalDBG::CanonicalDBG(std::shared_ptr<DBGSuccinct>, size_t);
 
 void CanonicalDBG::flush() {
     if (graph_->get_mode() != DeBruijnGraph::PRIMARY) {

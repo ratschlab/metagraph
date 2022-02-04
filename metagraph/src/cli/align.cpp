@@ -6,6 +6,7 @@
 #include "common/unix_tools.hpp"
 #include "common/threads/threading.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
+#include "graph/representation/canonical_dbg.hpp"
 #include "graph/alignment/dbg_aligner.hpp"
 #include "graph/alignment/aligner_labeled.hpp"
 #include "graph/annotated_dbg.hpp"
@@ -330,8 +331,10 @@ int align_to_graph(Config *config) {
     std::mutex print_mutex;
 
     if (config->map_sequences) {
-        if (graph->get_mode() == DeBruijnGraph::PRIMARY)
-            graph = std::make_shared<CanonicalDBG>(primary_to_canonical(graph));
+        if (graph->get_mode() == DeBruijnGraph::PRIMARY) {
+            graph = std::make_shared<CanonicalDBG>(graph);
+            logger->trace("Primary graph wrapped into canonical");
+        }
 
         if (!config->alignment_length) {
             config->alignment_length = graph->get_k();
@@ -415,8 +418,10 @@ int align_to_graph(Config *config) {
                     std::shared_ptr<DeBruijnGraph>{}, graph.get()
                 );
 
-                if (aln_graph->get_mode() == DeBruijnGraph::PRIMARY)
-                    aln_graph = std::make_shared<CanonicalDBG>(primary_to_canonical(aln_graph));
+                if (aln_graph->get_mode() == DeBruijnGraph::PRIMARY) {
+                    aln_graph = std::make_shared<CanonicalDBG>(aln_graph);
+                    logger->trace("Primary graph wrapped into canonical");
+                }
 
                 std::unique_ptr<IDBGAligner> aligner;
 

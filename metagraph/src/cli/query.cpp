@@ -1203,7 +1203,7 @@ Alignment align_sequence(std::string *seq,
                          const AnnotatedDBG &anno_graph,
                          const align::DBGAlignerConfig &aligner_config) {
     const DeBruijnGraph &graph = anno_graph.get_graph();
-    auto alignments = graph::align::DBGAligner(graph, aligner_config).align(*seq);
+    auto alignments = align::DBGAligner(graph, aligner_config).align(*seq);
 
     assert(alignments.size() <= 1 && "Only the best alignment is needed");
 
