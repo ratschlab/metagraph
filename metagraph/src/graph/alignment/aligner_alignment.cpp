@@ -607,8 +607,16 @@ void Alignment::reverse_complement(const DeBruijnGraph &graph,
             // number of sentinel characters (i.e., if some non-sentinel characters
             // from the node prefix are not included).
 
-            const auto *canonical = dynamic_cast<const CanonicalDBG*>(&graph);
-            const auto &dbg_succ = dynamic_cast<const DBGSuccinct&>(graph.get_base_graph());
+            // TODO: this cascade of graph unwrapping is ugly, find a cleaner way to do it
+            const DeBruijnGraph *base_graph = &graph;
+            if (const auto *rc_dbg = dynamic_cast<const RCDBG*>(base_graph))
+                base_graph = &rc_dbg->get_graph();
+
+            const auto *canonical = dynamic_cast<const CanonicalDBG*>(base_graph);
+            if (canonical)
+                base_graph = &canonical->get_graph();
+
+            const auto &dbg_succ = dynamic_cast<const DBGSuccinct&>(*base_graph);
 
             size_t num_sentinels = sequence_.find_last_of(boss::BOSS::kSentinel) + 1;
             assert(offset_ >= num_sentinels);

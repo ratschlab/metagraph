@@ -53,7 +53,6 @@ class DBGWrapper : public DeBruijnGraph {
     virtual const std::string& alphabet() const override final { return graph_->alphabet(); }
     virtual void print(std::ostream &out) const override { graph_->print(out); }
     virtual Mode get_mode() const override { return graph_->get_mode(); }
-    const DeBruijnGraph& get_base_graph() const { return graph_; }
 
     /**
      * Override these if the wrapper changes the graph's indexing

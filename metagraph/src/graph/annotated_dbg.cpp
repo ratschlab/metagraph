@@ -5,6 +5,7 @@
 
 #include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
 #include "annotation/int_matrix/base/int_matrix.hpp"
+#include "graph/representation/canonical_dbg.hpp"
 #include "common/utils/simd_utils.hpp"
 #include "common/aligned_vector.hpp"
 #include "common/vectors/vector_algorithm.hpp"
@@ -49,6 +50,11 @@ bool AnnotatedDBG::check_compatibility() const {
     // TODO: find a way to fix this thing to add check_compatibility() to the constructor
     // of AnnotatedSequenceGraph.
     // Maybe make it how it was before 9f4e8e5b73571d874dd93eedc53079f71615023c
+
+    // TODO: what if CanonicalDBG is not the highest level? find a better way to do this
+    if (const auto *canonical = dynamic_cast<const CanonicalDBG*>(&dbg_))
+        return canonical->get_graph().max_index() == annotator_->num_objects();
+
     return dbg_.max_index() == annotator_->num_objects();
 }
 

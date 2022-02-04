@@ -426,7 +426,10 @@ template <class BaseSeeder>
 const DBGSuccinct& SuffixSeeder<BaseSeeder>
 ::get_base_dbg_succ(const DeBruijnGraph &graph) {
     try {
-        return dynamic_cast<const DBGSuccinct&>(graph.get_base_graph());
+        if (const auto *wrapper = dynamic_cast<const DBGWrapper<>*>(&graph))
+            return dynamic_cast<const DBGSuccinct&>(wrapper->get_graph());
+
+        return dynamic_cast<const DBGSuccinct&>(graph);
 
     } catch (const std::bad_cast &e) {
         common::logger->error(

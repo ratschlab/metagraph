@@ -3,6 +3,7 @@
 #include "graph/representation/rc_dbg.hpp"
 #include "graph/representation/succinct/boss.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
+#include "graph/representation/canonical_dbg.hpp"
 #include "annotation/int_matrix/base/int_matrix.hpp"
 #include "common/algorithms.hpp"
 
@@ -252,52 +253,74 @@ auto AnnotationBuffer::add_path(const std::vector<node_index> &path, std::string
     if (path.empty())
         return {};
 
-    const DeBruijnGraph &base_graph = graph_.get_base_graph();
-    bool base_is_canonical = base_graph.get_mode() == DeBruijnGraph::CANONICAL;
+    assert(query.size() >= graph_.get_k());
+    assert(path.size() == query.size() - graph_.get_k() + 1);
 
-    const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&base_graph);
-    const boss::BOSS *boss = dbg_succ ? &dbg_succ->get_boss() : nullptr;
+    // TODO: this cascade of graph unwrapping is ugly, find a cleaner way to do it
+    const DeBruijnGraph *base_graph = &graph_;
+    bool reverse_path = false;
+    if (const auto *rc_dbg = dynamic_cast<const RCDBG*>(base_graph)) {
+        base_graph = &rc_dbg->get_graph();
+        reverse_path = true;
+    }
 
-    if (base_is_canonical && query.front() == '#')
-        query = graph_.get_node_sequence(path[0]) + query.substr(graph_.get_k());
+    const auto *canonical = dynamic_cast<const CanonicalDBG*>(base_graph);
+    if (canonical)
+        base_graph = &canonical->get_graph();
 
-    auto call_node = [&](node_index node, node_index base_node) {
-        if (base_node != DeBruijnGraph::npos) {
-            if (boss && !boss->get_W(dbg_succ->kmer_to_boss_index(base_node)))
-                return; // skip dummy nodes
+    bool base_is_canonical = (base_graph->get_mode() == DeBruijnGraph::CANONICAL);
 
-            Row row = AnnotatedDBG::graph_to_anno_index(base_node);
-            if (labels_.emplace(node, std::make_pair(row, nannot)).second
-                    && (node == base_node
-                        || labels_.emplace(base_node, std::make_pair(row, nannot)).second)) {
-                added_rows_.push_back(row);
-                added_nodes_.push_back(node);
-            } else {
-                auto find_n = labels_.find(node);
-                auto find_b = labels_.find(base_node);
-                assert(find_n != labels_.end());
-                assert(find_b != labels_.end());
-                assert(find_n->second.first == find_b->second.first);
-                auto label_i = std::min(find_n->second.second, find_b->second.second);
-                find_n.value().second = label_i;
-                find_b.value().second = label_i;
-            }
-        }
-    };
+    std::vector<node_index> base_path;
+    if (base_is_canonical) {
+        if (query.front() == '#')
+            query = graph_.get_node_sequence(path[0]) + query.substr(graph_.get_k());
 
-    auto base_path = graph_.get_base_path(path, query);
-    if (!base_path.second) {
-        for (size_t i = 0; i < base_path.first.size(); ++i) {
-            call_node(path[i], base_path.first[i]);
+        if (reverse_path)
+            reverse_complement(query.begin(), query.end());
+
+        base_path = map_to_nodes(*base_graph, query);
+    } else if (canonical) {
+        base_path.reserve(path.size());
+        for (node_index node : path) {
+            base_path.emplace_back(canonical->get_base_node(node));
         }
     } else {
-        auto it = path.rbegin();
-        for (size_t i = 0; i < base_path.first.size(); ++i, ++it) {
-            call_node(*it, base_path.first[i]);
+        base_path = path;
+    }
+
+    assert(base_path.size() == path.size());
+
+    if (reverse_path)
+        std::reverse(base_path.begin(), base_path.end());
+
+    const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(base_graph);
+    const boss::BOSS *boss = dbg_succ ? &dbg_succ->get_boss() : nullptr;
+    for (size_t i = 0; i < path.size(); ++i) {
+        if (base_path[i] == DeBruijnGraph::npos)
+            continue;
+
+        if (boss && !boss->get_W(dbg_succ->kmer_to_boss_index(base_path[i])))
+            continue; // skip dummy nodes
+
+        Row row = AnnotatedDBG::graph_to_anno_index(base_path[i]);
+        if (labels_.emplace(path[i], std::make_pair(row, nannot)).second
+                && (path[i] == base_path[i]
+                    || labels_.emplace(base_path[i], std::make_pair(row, nannot)).second)) {
+            added_rows_.push_back(row);
+            added_nodes_.push_back(path[i]);
+        } else {
+            auto find_n = labels_.find(path[i]);
+            auto find_b = labels_.find(base_path[i]);
+            assert(find_n != labels_.end());
+            assert(find_b != labels_.end());
+            assert(find_n->second.first == find_b->second.first);
+            auto label_i = std::min(find_n->second.second, find_b->second.second);
+            find_n.value().second = label_i;
+            find_b.value().second = label_i;
         }
     }
 
-    return base_path;
+    return std::make_pair(std::move(base_path), reverse_path);
 }
 
 auto AnnotationBuffer::add_node(node_index node) -> node_index {

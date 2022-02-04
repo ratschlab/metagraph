@@ -152,11 +152,18 @@ build_graph<DBGSuccinct>(uint64_t k,
 }
 
 DBGSuccinct& get_dbg_succ(DeBruijnGraph &graph) {
-    return const_cast<DBGSuccinct&>(dynamic_cast<const DBGSuccinct&>(graph.get_base_graph()));
+    // TODO: what if CanonicalDBG is not the highest level? find a better way to do this
+    if (const auto *canonical = dynamic_cast<CanonicalDBG*>(&graph)) {
+        return const_cast<DBGSuccinct&>(
+            dynamic_cast<const DBGSuccinct&>(canonical->get_graph())
+        );
+    }
+
+    return const_cast<DBGSuccinct&>(dynamic_cast<const DBGSuccinct&>(graph));
 }
 
 BOSS& get_boss(DeBruijnGraph &graph) {
-    return const_cast<BOSS&>(dynamic_cast<const DBGSuccinct&>(graph.get_base_graph()).get_boss());
+    return const_cast<BOSS&>(get_dbg_succ(graph).get_boss());
 }
 
 template <>
