@@ -41,7 +41,7 @@ DOCKER_OPTS := -it -u `id -u ${USER}`:$(DOCKER_GRP) \
 			   -v $(BUILD_DIR_HOST_DOCKER):${BUILD_DIR} \
                -v $(BUILD_DIR_STATIC_HOST_DOCKER):${BUILD_DIR_STATIC} \
                -v $(CCACHE_FOR_DOCKER):/opt/ccache_docker \
-               -v  $(CODE_BASE_HOST):$(CODE_BASE) \
+               -v $(CODE_BASE_HOST):$(CODE_BASE) \
                -v $(DATA_DIR_HOST):$(DATA_DIR)
 
 DOCKER_BASE_CMD := docker run --rm $(DOCKER_OPTS) $(IMG_NAME_DEV)
@@ -79,14 +79,14 @@ build-metagraph:
 
 	$(EXEC_CMD) 'mkdir -p $(BUILD_DIR) && cd $(BUILD_DIR) \
                    && cmake -DCMAKE_DBG_ALPHABET=$(alphabet) $(additional_cmake_args) $(CODE_BASE)/metagraph \
-                   && make metagraph -j $$(($$(getconf _NPROCESSORS_ONLN) - 1))'
+                   && make metagraph -j $$(getconf _NPROCESSORS_ONLN)'
 
 build-metagraph-static:
 	[ -d $(BUILD_DIR_STATIC_HOST_DOCKER) ] || mkdir -p $(BUILD_DIR_STATIC_HOST_DOCKER)
 	[ -d $(CCACHE_FOR_DOCKER) ] || mkdir -p $(CCACHE_FOR_DOCKER)
 	$(EXEC_CMD) 'mkdir -p $(BUILD_DIR_STATIC) && cd $(BUILD_DIR_STATIC) \
                   && cmake -DCMAKE_DBG_ALPHABET=$(alphabet) -DBUILD_STATIC=ON $(additional_cmake_args) $(CODE_BASE)/metagraph \
-                  && make metagraph -j $$(($$(getconf _NPROCESSORS_ONLN) - 1))'
+                  && make metagraph -j $$(getconf _NPROCESSORS_ONLN)'
 
 build-docker:
 	docker build -t metagraph $(CODE_BASE_HOST)
@@ -106,7 +106,3 @@ integration-tests:
 
 integration-tests-api:
 	$(EXEC_CMD) 'cd $(BUILD_DIR) && ./integration_tests --test_filter="test_api*"'
-
-
-
-
