@@ -558,7 +558,7 @@ TYPED_TEST(CanonicalDBGTest, CallUnitigs) {
 }
 
 TYPED_TEST(CanonicalDBGTest, WrapCanonicalGraphFail) {
-    ASSERT_DEATH(CanonicalDBG(build_graph_batch<TypeParam>(3, {}, DeBruijnGraph::CANONICAL)), "");
+    ASSERT_DEBUG_DEATH(CanonicalDBG(build_graph_batch<TypeParam>(3, {}, DeBruijnGraph::CANONICAL)), "");
 }
 
 // TODO: A different combination of forward and reverse complement k-mers may be
