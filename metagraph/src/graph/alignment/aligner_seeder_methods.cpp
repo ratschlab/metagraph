@@ -30,7 +30,7 @@ ExactSeeder::ExactSeeder(const DeBruijnGraph &graph,
 
     std::partial_sum(partial_sum_.begin(), partial_sum_.end(), partial_sum_.begin());
     assert(config_.match_score(query_) == partial_sum_.back());
-    assert(config_.get_row(query_.front())[query_.front()] == partial_sum_[1]);
+    assert(query_.empty() || config_.get_row(query_.front())[query_.front()] == partial_sum_[1]);
     assert(!partial_sum_.front());
 }
 
