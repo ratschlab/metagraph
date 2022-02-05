@@ -96,6 +96,19 @@ TYPED_TEST(DBGAlignerTest, bad_min_cell_score) {
     ASSERT_THROW(DBGAligner<>(*graph, config), std::runtime_error);
 }
 
+TYPED_TEST(DBGAlignerTest, align_empty) {
+    size_t k = 4;
+    std::string reference = "CATTT";
+    std::string query;
+
+    auto graph = build_graph_batch<TypeParam>(k, { reference });
+    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    DBGAligner<> aligner(*graph, config);
+    auto paths = aligner.align(query);
+
+    EXPECT_EQ(0ull, paths.size());
+}
+
 TYPED_TEST(DBGAlignerTest, align_sequence_much_too_short) {
     size_t k = 4;
     std::string reference = "CATTT";

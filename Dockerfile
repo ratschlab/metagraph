@@ -10,9 +10,7 @@ RUN export DEBIAN_FRONTEND="noninteractive" && apt-get update && apt-get install
     automake \
     binutils-dev \
     ccache \
-    cmake \
     curl \
-    extra-cmake-modules \
     g++-10 \
     git \
     libboost-all-dev \
@@ -40,7 +38,7 @@ RUN export DEBIAN_FRONTEND="noninteractive" && apt-get update && apt-get install
     zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip3 install parameterized==0.7.1
+RUN pip3 install parameterized==0.7.1 "cmake>=3.19"
 
 WORKDIR /opt
 ENV LD_LIBRARY_PATH=/usr/local/lib
@@ -97,16 +95,16 @@ RUN apt-get update && apt-get install -y \
     libjemalloc2 \
     python3 \
     python3-pip \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* && pip3 install -U "pip>=21.1"
 
-COPY --from=metagraph_bin /opt/metagraph/metagraph/build/metagraph_* /usr/local/bin/
+COPY --from=metagraph_bin ${CODE_BASE}/metagraph/build/metagraph_* /usr/local/bin/
 
 RUN ln -s /usr/local/bin/metagraph_DNA /usr/local/bin/metagraph
 
 RUN mkdir ${CODE_BASE}
-COPY metagraph/api/python ${CODE_BASE}/api/python
+COPY . ${CODE_BASE}
 
-RUN pip3 install --use-feature=in-tree-build ${CODE_BASE}/api/python
-RUN pip3 install --use-feature=in-tree-build ${CODE_BASE}/workflows
+RUN pip3 install --use-feature=in-tree-build ${CODE_BASE}/metagraph/api/python
+RUN pip3 install --use-feature=in-tree-build ${CODE_BASE}/metagraph/workflows
 
 ENTRYPOINT ["metagraph"]

@@ -15,7 +15,7 @@ Align sequences to the graph
 Sequence alignment features can be accessed via :code:`metagraph align`.
 By default, a sequence of graph paths is output which form a disjoint cover of the
 query sequence. Depending on the desired level of sensitivity, alignment options range
-from simply finding exact k-mer matches to performing an alignment to find a
+from simply finding exact k-mer matches to performing an alignment to finding a
 best-scoring path in the graph.
 
 Exact k-mer matching
@@ -26,7 +26,7 @@ of the corresponding nodes in the graph. An example command may be::
 
     metagraph align --map -i MYGRAPH.dbg MYREADS.fa
 
-Input sequences may be in FASTA or FASTQ format (both uncompressed and gzipped).
+Input sequences may be in FASTA or FASTQ format (uncompressed or gzipped).
 The output is in TSV format with the first column being an input k-mer and the second
 column being the corresponding node in the graph (or :code:`0` if not present).
 

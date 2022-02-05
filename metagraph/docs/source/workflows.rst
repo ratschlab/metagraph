@@ -67,7 +67,7 @@ Typically, the following steps would be performed:
 
    See ``metagraph-workflows build -h`` for more help.
 3. Once a MetaGraph index has been created, it can be queried either by using the command line
-   ``metagraph`` tool or by starting the metagraph server directly on a laptop or on another suitable
+   ``metagraph`` tool or by starting the MetaGraph server directly on a laptop or on another suitable
    machine and querying it using the python :ref:`API` client.
 
 
@@ -87,7 +87,7 @@ The following snakemake options are exposed in the ``build`` subcommand
 Directly invoking Snakemake workflow
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The above command is only a wrapper around a snakemake workflow. You can also
+The ``metagraph-workflows`` command is only a wrapper around a snakemake workflow. You can also
 directly invoke the snakemake workflow (assuming you checked out the `metagraph git repository <https://github.com/ratschlab/metagraph>`_):
 
 .. code-block:: bash
