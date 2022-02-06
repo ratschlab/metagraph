@@ -287,8 +287,23 @@ jobs:
         run: |
           echo ::set-output name=TAG::${GITHUB_REF#refs/tags/}
 
+      # from https://stackoverflow.com/a/61919791/6869319
+      - name: read current version
+        id: read_version
+        run: |
+          content=`cat package.json`
+          # the following lines are only required for multi line json
+          content="${content//'%'/'%25'}"
+          content="${content//$'\n'/'%0A'}"
+          content="${content//$'\r'/'%0D'}"
+          # end of optional handling for multi line json
+          echo "::set-output name=packageJson::$content"
+
       - name: build source archive including submodules
         run: |
+          [[ v${{fromJson(steps.read_version.outputs.packageJson).version}} == ${{ steps.tag_name.outputs.TAG }} ]] \
+            || (echo "::error file=package.json::Version in package.json (v${{fromJson(steps.read_version.outputs.packageJson).version}}) does not match tag ${{ steps.tag_name.outputs.TAG }}. Update package.json and set the tag again."; \
+                exit 1)
           mkdir -p artifacts/sources
           tag=${{ steps.tag_name.outputs.TAG }}
           bash .github/workflows/git-archive-all.sh --format tar.gz artifacts/sources/${tag}-sources-with-submodules.tar.gz
