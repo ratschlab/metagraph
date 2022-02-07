@@ -207,7 +207,7 @@ void LabeledBacktrackingExtender
                     base_coords->get().begin(),
                     next_labels->get().begin(), next_labels->get().end(),
                     next_coords->get().begin(),
-                    [&](auto, const auto &coords, const auto &other_coords) {
+                    [&,next=next,c=c,score=score](auto, const auto &coords, const auto &other_coords) {
                         if (overlap_with_diff(coords, other_coords, dist * dist_sign)) {
                             // found a consistent pair of coordinates
                             callback(next, c, score);
