@@ -73,18 +73,27 @@ void AnnotationBuffer::flush() {
     added_nodes_.clear();
 }
 
-struct HasNext {
-    HasNext(ssize_t diff) : diff_(diff) {}
+struct OverlapWithDiff {
+    OverlapWithDiff(ssize_t diff) : diff_(diff) {}
 
-    template <class InIt1, class InIt2>
-    bool operator()(InIt1 a_begin, InIt1 a_end, InIt2 b_begin, InIt2 b_end) const {
+    template <class T1, class T2>
+    bool operator()(const T1 &tuple1, const T2 &tuple2) const {
+        auto a_begin = tuple1.begin();
+        const auto a_end = tuple1.end();
+        auto b_begin = tuple2.begin();
+        const auto b_end = tuple2.end();
+
+        assert(std::is_sorted(a_begin, a_end));
+        assert(std::is_sorted(b_begin, b_end));
+
         while (a_begin != a_end && b_begin != b_end) {
+            if (*a_begin + diff_ == *b_begin)
+                return true;
+
             if (*a_begin + diff_ < *b_begin) {
                 ++a_begin;
-            } else if (*a_begin + diff_ > *b_begin) {
-                ++b_begin;
             } else {
-                return true;
+                ++b_begin;
             }
         }
 
@@ -197,13 +206,12 @@ void LabeledBacktrackingExtender
             // if we are traversing backwards, then negate the coordinate delta
             ssize_t dist_sign = rev_align ? -1 : 1;
 
-            if (!utils::indexed_set_find(base_labels->get().begin(),
-                                         base_labels->get().end(),
-                                         base_coords->get().begin(),
-                                         next_labels->get().begin(),
-                                         next_labels->get().end(),
-                                         next_coords->get().begin(),
-                                         HasNext(dist * dist_sign)))
+            // check if at least one label has consistent coordinates
+            if (!utils::have_consistent(base_labels->get().begin(), base_labels->get().end(),
+                                        base_coords->get().begin(),
+                                        next_labels->get().begin(), next_labels->get().end(),
+                                        next_coords->get().begin(),
+                                        OverlapWithDiff(dist * dist_sign)))
                 continue;
 
             callback(next, c, score);
