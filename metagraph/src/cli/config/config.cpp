@@ -356,6 +356,8 @@ Config::Config(int argc, char *argv[]) {
             output_compacted = true;
         } else if (!strcmp(argv[i], "--json")) {
             output_json = true;
+        } else if (!strcmp(argv[i], "--gaf")) {
+            output_gaf = true;
         } else if (!strcmp(argv[i], "--unitigs")) {
             to_fasta = true;
             unitigs = true;
@@ -1027,6 +1029,7 @@ if (advanced) {
             fprintf(stderr, "\t-a --annotator [STR] \t\t\t\tannotator to load for label/trace-consistent alignment []\n");
             fprintf(stderr, "\t-o --outfile-base [STR]\t\t\t\tbasename of output file []\n");
             fprintf(stderr, "\t   --json \t\t\t\t\toutput alignment in JSON format [off]\n");
+            fprintf(stderr, "\t   --gaf \t\t\t\t\toutput alignment in GAF format [off]\n");
 if (advanced) {
             fprintf(stderr, "\t   --align-only-forwards \t\t\tdo not align backwards from a seed on basic-mode graphs [off]\n");
             fprintf(stderr, "\t   --align-no-seed-complexity-filter \t\t\t\tdisable the filter for low-complexity seeds. [off]\n");

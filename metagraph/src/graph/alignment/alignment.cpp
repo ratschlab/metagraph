@@ -1116,6 +1116,25 @@ Json::Value path_json(const std::vector<DeBruijnGraph::node_index> &nodes,
     return path;
 }
 
+std::string Alignment::to_gaf(const std::string &name) const {
+    size_t query_size = query_view_.size() + get_clipping() + get_end_clipping();
+    if (nodes_.empty())
+        return fmt::format("{}\t{}\t*\t*\t*\t*\t*\t*\t*\t*\t*\t*\n", name, query_size);
+
+    size_t begin = orientation_ ? get_end_clipping() : get_clipping();
+
+    return fmt::format(
+        "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\tAS:i:{}\tcg:Z:{}\tMD:Z:{}",
+        name, query_size, begin, begin + query_view_.size(),
+        orientation_ ? '-' : '+',
+        fmt::format(">{}", fmt::join(nodes_, ">")),
+        sequence_.size() + offset_,
+        orientation_ ? offset_ : 0, !orientation_ ? offset_ : 0,
+        cigar_.get_num_matches(), sequence_.size(), 255 /* quality missing */, score_,
+        cigar_.to_string(), cigar_.to_md_string(sequence_)
+    );
+}
+
 Json::Value Alignment::to_json(size_t node_size,
                                bool is_secondary,
                                const std::string &read_name,

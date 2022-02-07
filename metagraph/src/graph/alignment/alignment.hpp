@@ -291,6 +291,8 @@ class Alignment {
                         const std::string &name = {},
                         const std::string &label = {}) const;
 
+    std::string to_gaf(const std::string &name = {}) const;
+
     // writes to |query_str| the string which will be referenced in this object
     void load_from_json(const Json::Value &alignment,
                         const DeBruijnGraph &graph,

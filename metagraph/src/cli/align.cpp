@@ -257,18 +257,7 @@ std::string format_alignment(const std::string &header,
                              const DeBruijnGraph &graph,
                              const Config &config) {
     std::string sout;
-    if (!config.output_json) {
-        sout += fmt::format("{}\t{}", header, paths.get_query());
-        if (paths.empty()) {
-            sout += fmt::format("\t*\t*\t{}\t*\t*\t*\n", config.alignment_min_path_score);
-        } else {
-            for (const auto &path : paths) {
-                sout += fmt::format("\t{}", path);
-            }
-            sout += "\n";
-        }
-
-    } else {
+    if (config.output_json) {
         Json::StreamWriterBuilder builder;
         builder["indentation"] = "";
 
@@ -284,6 +273,20 @@ std::string format_alignment(const std::string &header,
         if (paths.empty()) {
             Json::Value json_line = Alignment().to_json(graph.get_k(), secondary, header);
             sout += fmt::format("{}\n", Json::writeString(builder, json_line));
+        }
+    } else if (config.output_gaf) {
+        for (size_t i = 0; i < paths.size(); ++i) {
+            sout += fmt::format("{}\n", paths[i].to_gaf(header));
+        }
+    } else {
+        sout += fmt::format("{}\t{}", header, paths.get_query());
+        if (paths.empty()) {
+            sout += fmt::format("\t*\t*\t{}\t*\t*\t*\n", config.alignment_min_path_score);
+        } else {
+            for (const auto &path : paths) {
+                sout += fmt::format("\t{}", path);
+            }
+            sout += "\n";
         }
     }
 
