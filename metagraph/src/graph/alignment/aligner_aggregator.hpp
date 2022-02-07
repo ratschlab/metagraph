@@ -15,11 +15,11 @@ namespace graph {
 namespace align {
 
 
-template <typename Type, typename Sequence, typename Compare>
-class PriorityDeque : public boost::container::priority_deque<Type, Sequence, Compare> {
+template <typename T, class Container = std::vector<T>, class Compare = std::less<T>>
+class PriorityDeque : public boost::container::priority_deque<T, Container, Compare> {
   public:
-    Sequence& data() { return this->sequence(); }
-    Compare& cmp() { return this->compare(); }
+    Container& data() { return this->sequence(); }
+    const Container& data() const { return this->sequence(); }
 };
 
 
