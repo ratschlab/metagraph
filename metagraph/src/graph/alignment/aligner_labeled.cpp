@@ -197,13 +197,13 @@ void LabeledBacktrackingExtender
             // if we are traversing backwards, then negate the coordinate delta
             ssize_t dist_sign = rev_align ? -1 : 1;
 
-            if (!utils::indexed_set_find<HasNext>(base_labels->get().begin(),
-                                                  base_labels->get().end(),
-                                                  base_coords->get().begin(),
-                                                  next_labels->get().begin(),
-                                                  next_labels->get().end(),
-                                                  next_coords->get().begin(),
-                                                  dist * dist_sign))
+            if (!utils::indexed_set_find(base_labels->get().begin(),
+                                         base_labels->get().end(),
+                                         base_coords->get().begin(),
+                                         next_labels->get().begin(),
+                                         next_labels->get().end(),
+                                         next_coords->get().begin(),
+                                         HasNext(dist * dist_sign)))
                 continue;
 
             callback(next, c, score);
@@ -364,14 +364,13 @@ bool LabeledBacktrackingExtender::skip_backtrack_start(size_t i) {
 
                     Vector<Column> labels_inter;
                     Vector<Tuple> coords_inter;
-                    utils::indexed_set_op<Tuple, CoordIntersection>(
+                    utils::indexed_set_op<Tuple>(
                         label_intersection_.begin(), label_intersection_.end(),
                         label_intersection_coords_.begin(),
-                        seed_labels_.begin(),
-                        seed_labels_.end(),
+                        seed_labels_.begin(), seed_labels_.end(),
                         seed_label_coordinates_.begin(),
                         std::back_inserter(labels_inter), std::back_inserter(coords_inter),
-                        dist * dist_sign
+                        CoordIntersection(dist * dist_sign)
                     );
                     std::swap(labels_inter, label_intersection_);
                     std::swap(coords_inter, label_intersection_coords_);
@@ -492,11 +491,12 @@ void LabeledBacktrackingExtender
             label_set = &labels;
             label_coord = &coords;
             std::tie(old_size, cur_size, new_size)
-                = utils::indexed_set_op<Tuple, CoordIntersection>(
+                = utils::indexed_set_op<Tuple>(
                     label_intersection_.begin(), label_intersection_.end(),
                     label_intersection_coords_.begin(),
                     labels.begin(), labels.end(), coords.begin(),
-                    std::back_inserter(label_inter), std::back_inserter(coord_inter)
+                    std::back_inserter(label_inter), std::back_inserter(coord_inter),
+                    CoordIntersection()
                 );
 
             std::swap(label_intersection_, label_inter);
@@ -534,11 +534,13 @@ void LabeledBacktrackingExtender
             auto prev_find = diff_label_sets_.find(trace[last_path_size_]);
             if (prev_find == diff_label_sets_.end()) {
                 if (label_intersection_coords_.size()) {
-                    utils::indexed_set_op<Tuple, CoordDiff>(
-                        label_set->begin(), label_set->end(), label_coord->begin(),
+                    utils::indexed_set_op<Tuple>(
+                        label_set->begin(), label_set->end(),
+                        label_coord->begin(),
                         label_intersection_.begin(), label_intersection_.end(),
                         label_intersection_coords_.begin(),
-                        std::back_inserter(diff), std::back_inserter(diff_coords)
+                        std::back_inserter(diff), std::back_inserter(diff_coords),
+                        CoordDiff()
                     );
                 } else if (label_intersection_.size()) {
                     std::set_difference(label_set->begin(), label_set->end(),
@@ -555,11 +557,13 @@ void LabeledBacktrackingExtender
             } else {
                 auto &[prev_labels, prev_coords] = prev_find.value();
                 if (label_intersection_coords_.size()) {
-                    utils::indexed_set_op<Tuple, CoordDiff>(
-                        prev_labels.begin(), prev_labels.end(), prev_coords.begin(),
+                    utils::indexed_set_op<Tuple>(
+                        prev_labels.begin(), prev_labels.end(),
+                        prev_coords.begin(),
                         label_intersection_.begin(), label_intersection_.end(),
                         label_intersection_coords_.begin(),
-                        std::back_inserter(diff), std::back_inserter(diff_coords)
+                        std::back_inserter(diff), std::back_inserter(diff_coords),
+                        CoordDiff()
                     );
                 } else {
                     std::set_difference(prev_labels.begin(), prev_labels.end(),
@@ -622,11 +626,13 @@ void LabeledBacktrackingExtender
         Vector<Column> diff;
         if (seed_label_coordinates_.size()) {
             Vector<Tuple> diff_coords;
-            utils::indexed_set_op<Tuple, CoordDiff>(
-                seed_labels_.begin(), seed_labels_.end(), seed_label_coordinates_.begin(),
+            utils::indexed_set_op<Tuple>(
+                seed_labels_.begin(), seed_labels_.end(),
+                seed_label_coordinates_.begin(),
                 alignment.label_columns.begin(), alignment.label_columns.end(),
                 alignment.label_coordinates.begin(),
-                std::back_inserter(diff), std::back_inserter(diff_coords)
+                std::back_inserter(diff), std::back_inserter(diff_coords),
+                CoordDiff()
             );
             std::swap(diff_coords, seed_label_coordinates_);
         } else {

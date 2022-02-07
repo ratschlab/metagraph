@@ -133,13 +133,13 @@ bool Alignment::append(Alignment&& other) {
 
         // if the alignments fit together without gaps, make sure that the
         // coordinates form a contiguous range
-        utils::indexed_set_op<Tuple, MergeCoords>(
-            label_columns.begin(), label_columns.end(), label_coordinates.begin(),
+        utils::indexed_set_op<Tuple>(
+            label_columns.begin(), label_columns.end(),
+            label_coordinates.begin(),
             other.label_columns.begin(), other.label_columns.end(),
             other.label_coordinates.begin(),
-            std::back_inserter(merged_label_columns),
-            std::back_inserter(merged_label_coordinates),
-            sequence_.size()
+            std::back_inserter(merged_label_columns), std::back_inserter(merged_label_coordinates),
+            MergeCoords(sequence_.size())
         );
 
         if (merged_label_columns.empty()) {

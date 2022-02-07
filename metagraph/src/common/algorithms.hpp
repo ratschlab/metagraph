@@ -116,19 +116,18 @@ namespace utils {
     // tuple_out, respectively.
     template <class OutType, class SetOp,
               class InIt1, class InIt2, class InIt3, class InIt4,
-              class OutIt1, class OutIt2, typename... Args>
+              class OutIt1, class OutIt2>
     constexpr std::tuple<size_t, size_t, size_t> indexed_set_op(InIt1 index1_begin, InIt1 index1_end,
                                                                 InIt2 tuple1_begin,
                                                                 InIt3 index2_begin, InIt3 index2_end,
                                                                 InIt4 tuple2_begin,
                                                                 OutIt1 index_out_begin,
                                                                 OutIt2 tuple_out_begin,
-                                                                Args&&... args) {
+                                                                const SetOp &set_op) {
         assert(std::distance(index1_begin, index1_end) == std::distance(index2_begin, index2_end));
         size_t size1 = 0;
         size_t size2 = 0;
         size_t size_out = 0;
-        SetOp set_op(std::forward<Args>(args)...);
 
         while (index1_begin != index1_end && index2_begin != index2_end) {
             if (*index1_begin < *index2_begin) {
@@ -165,15 +164,13 @@ namespace utils {
     // stored in tuple1 and tuple2 (of equal length).
     // i.e., For each shared element between index1 and index2, check the
     // corresponding tuples in tuple1 and tuple2.
-    template <class Check, class InIt1, class InIt2, class InIt3, class InIt4,
-              typename... Args>
+    template <class Check, class InIt1, class InIt2, class InIt3, class InIt4>
     constexpr bool indexed_set_find(InIt1 index1_begin, InIt1 index1_end,
                                     InIt2 tuple1_begin,
                                     InIt3 index2_begin, InIt3 index2_end,
                                     InIt4 tuple2_begin,
-                                    Args&&... args) {
+                                    const Check &check) {
         assert(std::distance(index1_begin, index1_end) == std::distance(index2_begin, index2_end));
-        Check check(std::forward<Args>(args)...);
 
         while (index1_begin != index1_end && index2_begin != index2_end) {
             if (*index1_begin < *index2_begin) {

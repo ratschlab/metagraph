@@ -101,14 +101,13 @@ void filter_seed(const Alignment &prev, Alignment &a) {
     } else {
         Vector<Alignment::Column> diff;
         Vector<Alignment::Tuple> diff_coords;
-        utils::indexed_set_op<Alignment::Tuple, CoordDiff>(
-            a.label_columns.begin(),
-            a.label_columns.end(),
+        utils::indexed_set_op<Alignment::Tuple>(
+            a.label_columns.begin(), a.label_columns.end(),
             a.label_coordinates.begin(),
-            prev.label_columns.begin(),
-            prev.label_columns.end(),
+            prev.label_columns.begin(), prev.label_columns.end(),
             prev.label_coordinates.begin(),
-            std::back_inserter(diff), std::back_inserter(diff_coords)
+            std::back_inserter(diff), std::back_inserter(diff_coords),
+            CoordDiff()
         );
         if (diff.empty()) {
             a = Alignment();
