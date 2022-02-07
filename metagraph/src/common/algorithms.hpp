@@ -66,8 +66,8 @@ namespace utils {
         return mask;
     }
 
-    template <class InIt1, class InIt2>
-    constexpr uint64_t count_intersection(InIt1 a_begin, InIt1 a_end, InIt2 b_begin, InIt2 b_end) {
+    template <class It1, class It2>
+    constexpr uint64_t count_intersection(It1 a_begin, It1 a_end, It2 b_begin, It2 b_end) {
         assert(std::is_sorted(a_begin, a_end));
         assert(std::is_sorted(b_begin, b_end));
         assert(std::adjacent_find(a_begin, a_end) == a_end);
@@ -78,11 +78,11 @@ namespace utils {
         while (a_begin != a_end && b_begin != b_end) {
             if (*a_begin < *b_begin) {
                 ++a_begin;
-            } else if (*b_begin < *a_begin) {
-                ++b_begin;
             } else {
-                ++count;
-                ++a_begin;
+                if (*a_begin == *b_begin) {
+                    ++count;
+                    ++a_begin;
+                }
                 ++b_begin;
             }
         }
@@ -91,15 +91,15 @@ namespace utils {
     }
 
     // Return true if the two sorted ranges share a common element
-    template <class InIt1, class InIt2>
-    constexpr bool share_element(InIt1 a_begin, InIt1 a_end, InIt2 b_begin, InIt2 b_end) {
+    template <class It1, class It2>
+    constexpr bool share_element(It1 a_begin, It1 a_end, It2 b_begin, It2 b_end) {
         assert(std::is_sorted(a_begin, a_end));
         assert(std::is_sorted(b_begin, b_end));
 
         while (a_begin != a_end && b_begin != b_end) {
             if (*a_begin < *b_begin) {
                 ++a_begin;
-            } else if (*b_begin < *a_begin) {
+            } else if (*a_begin > *b_begin) {
                 ++b_begin;
             } else {
                 return true;
@@ -116,49 +116,48 @@ namespace utils {
     template <class OutType, class SetOp,
               class InIt1, class InIt2, class InIt3, class InIt4,
               class OutIt1, class OutIt2, typename... Args>
-    constexpr std::tuple<size_t, size_t, size_t> indexed_set_op(InIt1 a1_begin,
-                                                                InIt1 a1_end,
-                                                                InIt2 a2_begin,
-                                                                InIt3 b1_begin,
-                                                                InIt3 b1_end,
-                                                                InIt4 b2_begin,
-                                                                OutIt1 out1,
-                                                                OutIt2 out2,
+    constexpr std::tuple<size_t, size_t, size_t> indexed_set_op(InIt1 index1_begin, InIt1 index1_end,
+                                                                InIt2 tuple1_begin,
+                                                                InIt3 index2_begin, InIt3 index2_end,
+                                                                InIt4 tuple2_begin,
+                                                                OutIt1 index_out_begin,
+                                                                OutIt2 tuple_out_begin,
                                                                 Args&&... args) {
-        size_t a_size = 0;
-        size_t b_size = 0;
-        size_t new_size = 0;
+        assert(std::distance(index1_begin, index1_end) == std::distance(index2_begin, index2_end));
+        size_t size1 = 0;
+        size_t size2 = 0;
+        size_t size_out = 0;
         SetOp set_op(std::forward<Args>(args)...);
 
-        while (a1_begin != a1_end && b1_begin != b1_end) {
-            if (*a1_begin < *b1_begin) {
-                ++a1_begin;
-                ++a2_begin;
-            } else if (*b1_begin < *a1_begin) {
-                ++b1_begin;
-                ++b2_begin;
+        while (index1_begin != index1_end && index2_begin != index2_end) {
+            if (*index1_begin < *index2_begin) {
+                ++index1_begin;
+                ++tuple1_begin;
             } else {
-                a_size += a2_begin->size();
-                b_size += b2_begin->size();
-                OutType merged;
-                set_op(a2_begin->begin(), a2_begin->end(),
-                       b2_begin->begin(), b2_begin->end(),
-                       std::back_inserter(merged));
-                if (merged.size()) {
-                    new_size += merged.size();
-                    *out1 = *a1_begin;
-                    ++out1;
-                    *out2 = std::move(merged);
-                    ++out2;
+                if (*index1_begin == *index2_begin) {
+                    size1 += tuple1_begin->size();
+                    size2 += tuple2_begin->size();
+                    OutType merged;
+                    set_op(tuple1_begin->begin(), tuple1_begin->end(),
+                           tuple2_begin->begin(), tuple2_begin->end(),
+                           std::back_inserter(merged));
+                    if (merged.size()) {
+                        size_out += merged.size();
+                        *index_out_begin = *index1_begin;
+                        ++index_out_begin;
+                        *tuple_out_begin = std::move(merged);
+                        ++tuple_out_begin;
+                    }
+                    ++index1_begin;
+                    ++tuple1_begin;
                 }
-                ++a1_begin;
-                ++b1_begin;
-                ++a2_begin;
-                ++b2_begin;
+                ++index2_begin;
+                ++tuple2_begin;
             }
         }
 
-        return std::make_tuple(a_size, b_size, new_size);
+        // TODO: how do we know how many tuples were written to output?
+        return std::make_tuple(size1, size2, size_out);
     }
 
     // Intersect the sorted ranges a1 and b1 with corresponding sorted ranges of

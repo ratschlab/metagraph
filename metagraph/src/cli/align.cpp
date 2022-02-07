@@ -119,9 +119,9 @@ void map_sequences_in_file(const std::string &file,
 
         assert(config.alignment_length <= graph.get_k());
 
-        std::vector<DeBruijnGraph::node_index> graphindices;
+        std::vector<DeBruijnGraph::node_index> nodes;
         if (config.alignment_length == graph.get_k()) {
-            graphindices = map_to_nodes(graph, read_stream->seq.s);
+            nodes = map_to_nodes(graph, read_stream->seq.s);
 
         } else {
             // TODO: make more efficient
@@ -131,22 +131,22 @@ void map_sequences_in_file(const std::string &file,
                 logger->warn("Sub-k-mers will be mapped to unwrapped primary graph");
 
             for (size_t i = 0; i + config.alignment_length <= read_stream->seq.l; ++i) {
-                graphindices.emplace_back(DeBruijnGraph::npos);
+                nodes.emplace_back(DeBruijnGraph::npos);
                 dbg.call_nodes_with_suffix_matching_longest_prefix(
                     std::string_view(read_stream->seq.s + i, config.alignment_length),
                     [&](auto node, auto) {
-                        if (graphindices.back() == DeBruijnGraph::npos)
-                            graphindices.back() = node;
+                        if (nodes.back() == DeBruijnGraph::npos)
+                            nodes.back() = node;
                     },
                     config.alignment_length
                 );
             }
         }
 
-        size_t num_discovered = std::count_if(graphindices.begin(), graphindices.end(),
+        size_t num_discovered = std::count_if(nodes.begin(), nodes.end(),
                                               [](const auto &x) { return x > 0; });
 
-        const size_t num_kmers = graphindices.size();
+        const size_t num_kmers = nodes.size();
 
         if (config.query_presence) {
             const size_t min_kmers_discovered =
@@ -162,10 +162,10 @@ void map_sequences_in_file(const std::string &file,
         }
 
         if (config.count_kmers) {
-            std::sort(graphindices.begin(), graphindices.end());
+            std::sort(nodes.begin(), nodes.end());
             size_t num_unique_matching_kmers = 0;
             auto prev = DeBruijnGraph::npos;
-            for (auto i : graphindices) {
+            for (auto i : nodes) {
                 if (i != DeBruijnGraph::npos && i != prev)
                     ++num_unique_matching_kmers;
 
@@ -177,11 +177,11 @@ void map_sequences_in_file(const std::string &file,
         }
 
         // mapping of each k-mer to a graph node
-        for (size_t i = 0; i < graphindices.size(); ++i) {
+        for (size_t i = 0; i < nodes.size(); ++i) {
             assert(i + config.alignment_length <= read_stream->seq.l);
             *out << fmt::format("{}: {}\n", std::string_view(read_stream->seq.s + i,
                                                              config.alignment_length),
-                                            graphindices[i]);
+                                            nodes[i]);
         }
 
     }, config.forward_and_reverse);
@@ -411,13 +411,12 @@ int align_to_graph(Config *config) {
             }
 
             auto process_batch = [&,graph](SeqBatch batch) {
-                // Make a copy of the shared_ptr in a thread-safe way, then wrap
-                // it in CanonicalDBG if needed. This way, each thread gets its
-                // own wrapper (and more importantly, its own local cache).
-                auto aln_graph = std::shared_ptr<DeBruijnGraph>(
-                    std::shared_ptr<DeBruijnGraph>{}, graph.get()
-                );
+                // Make a dummy shared_ptr
+                auto aln_graph
+                    = std::shared_ptr<DeBruijnGraph>(std::shared_ptr<DeBruijnGraph>{}, graph.get());
 
+                // Wrap it in CanonicalDBG if needed. This way, each thread gets its
+                // own wrapper (and more importantly, its own local cache).
                 if (aln_graph->get_mode() == DeBruijnGraph::PRIMARY) {
                     aln_graph = std::make_shared<CanonicalDBG>(aln_graph);
                     logger->trace("Primary graph wrapped into canonical");
@@ -427,15 +426,14 @@ int align_to_graph(Config *config) {
 
                 if (anno_dbg) {
                     aligner = std::make_unique<LabeledAligner<>>(
-                        *aln_graph, anno_dbg->get_annotator(), aligner_config
-                    );
+                                *aln_graph, anno_dbg->get_annotator(), aligner_config);
                 } else {
                     aligner = std::make_unique<DBGAligner<>>(*aln_graph, aligner_config);
                 }
 
                 aligner->align_batch(batch,
                     [&](std::string_view header, QueryAlignment&& paths) {
-                        std::string res = format_alignment(header, paths, *graph, *config);
+                        const auto &res = format_alignment(header, paths, *graph, *config);
                         std::lock_guard<std::mutex> lock(print_mutex);
                         *out << res;
                     }
