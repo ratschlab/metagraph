@@ -40,6 +40,7 @@ class Cigar {
     bool empty() const { return cigar_.empty(); }
 
     std::string to_string() const;
+    std::string to_md_string(std::string_view reference) const;
 
     void append(Operator op, LengthType num = 1);
     void append(Cigar&& other);

@@ -287,18 +287,7 @@ std::string format_alignment(std::string_view header,
                              const DeBruijnGraph &graph,
                              const Config &config) {
     std::string sout;
-    if (!config.output_json) {
-        sout += fmt::format("{}\t{}", header, paths.get_query());
-        if (paths.empty()) {
-            sout += fmt::format("\t*\t*\t{}\t*\t*\t*", config.alignment_min_path_score);
-        } else {
-            for (const auto &path : paths.data()) {
-                sout += fmt::format("\t{}", path);
-            }
-        }
-
-        sout += "\n";
-    } else {
+    if (config.output_json) {
         Json::StreamWriterBuilder builder;
         builder["indentation"] = "";
 
@@ -319,6 +308,58 @@ std::string format_alignment(std::string_view header,
 
             sout += fmt::format("{}\n", Json::writeString(builder, json_line));
         }
+    } else if (config.output_gaf) {
+        std::string base = fmt::format("{}\t{}\t", header, paths.get_query().size());
+        for (size_t i = 0; i < paths.size(); ++i) {
+            const auto &path = paths[i];
+            const auto &cigar = path.get_cigar();
+            const auto &nodes = path.get_nodes();
+            sout += base;
+            if (path.empty()) {
+                sout += "*\t*\t*\t*\t*\t*\t*\t*\t*\t*\n";
+                continue;
+            }
+
+            size_t begin = 0;
+            size_t end = 0;
+
+            if (path.get_orientation()) {
+                begin = cigar.get_end_clipping();
+                end = paths.get_query().size() - cigar.get_clipping();
+            } else {
+                begin = cigar.get_clipping();
+                end = paths.get_query().size() - cigar.get_end_clipping();
+            }
+
+            sout += fmt::format(
+                "{}\t{}\t+\t{}\t{}\t{}\t{}\t{}\t{}\t255\tAS:i:{}\tcg:Z:{}\tMD:Z:{}",
+                begin, end,
+                path.get_orientation()
+                    ? fmt::format("<{}", fmt::join(nodes.rbegin(), nodes.rend(), ">"))
+                    : fmt::format(">{}", fmt::join(nodes, ">")),
+                path.get_sequence().size() + path.get_offset(),
+                path.get_orientation() ? path.get_offset() : 0,
+                !path.get_orientation() ? path.get_offset() : 0,
+                cigar.get_num_matches(),
+                path.get_sequence().size(),
+                path.get_score(),
+                cigar.to_string(),
+                cigar.to_md_string(path.get_sequence())
+            );
+
+            sout += "\n";
+        }
+    } else {
+        sout += fmt::format("{}\t{}", header, paths.get_query());
+        if (paths.empty()) {
+            sout += fmt::format("\t*\t*\t{}\t*\t*\t*", config.alignment_min_path_score);
+        } else {
+            for (const auto &path : paths.data()) {
+                sout += fmt::format("\t{}", path);
+            }
+        }
+
+        sout += "\n";
     }
 
     return sout;
