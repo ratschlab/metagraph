@@ -93,6 +93,46 @@ std::string Cigar::to_string() const {
     return cigar_string;
 }
 
+std::string Cigar::to_md_string(std::string_view reference) const {
+    std::string md_string;
+    auto ref_it = reference.begin();
+
+    size_t match_count = 0;
+    for (const auto &[op, num] : cigar_) {
+        switch (op) {
+            case CLIPPED:
+            case INSERTION:
+            case NODE_INSERTION: {} break;
+            case MATCH: {
+                match_count += num;
+                ref_it += num;
+            } break;
+            case MISMATCH: {
+                if (match_count) {
+                    md_string += std::to_string(match_count);
+                    match_count = 0;
+                }
+                md_string += std::string(ref_it, ref_it + num);
+                ref_it += num;
+            } break;
+            case DELETION: {
+                if (match_count) {
+                    md_string += std::to_string(match_count);
+                    match_count = 0;
+                }
+                md_string += "^" + std::string(ref_it, ref_it + num);
+                ref_it += num;
+            }
+        }
+    }
+
+    if (match_count)
+        md_string += std::to_string(match_count);
+
+    assert(ref_it == reference.end());
+    return md_string;
+}
+
 void Cigar::append(Operator op, LengthType num) {
     if (!num)
         return;

@@ -61,6 +61,7 @@ class Config {
     bool align_only_forwards = false;
     bool filter_by_kmer = false;
     bool output_json = false;
+    bool output_gaf = false;
     bool aggregate_columns = false;
     bool coordinates = false;
     bool advanced = false;
