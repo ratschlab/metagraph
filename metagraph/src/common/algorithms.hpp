@@ -99,20 +99,21 @@ namespace utils {
         while (a_begin != a_end && b_begin != b_end) {
             if (*a_begin < *b_begin) {
                 ++a_begin;
-            } else if (*a_begin > *b_begin) {
-                ++b_begin;
             } else {
-                return true;
+                if (*a_begin == *b_begin)
+                    return true;
+                ++b_begin;
             }
         }
 
         return false;
     }
 
-    // Intersect the sorted ranges a1 and b1 with corresponding sorted ranges of
-    // sorted ranges a2 and b2 (of equal length).
-    // i.e., For each shared element between a1 and b1, intersect the corresponding
-    // ranges in a2 and b2.
+    // Intersect sorted ranges index1 and index2 with corresponding tuples
+    // stored in tuple1 and tuple2 (of equal length).
+    // i.e., For each shared element between index1 and index2, intersect the
+    // corresponding tuples in tuple1 and tuple2. Write these to index_out and
+    // tuple_out, respectively.
     template <class OutType, class SetOp,
               class InIt1, class InIt2, class InIt3, class InIt4,
               class OutIt1, class OutIt2, typename... Args>
@@ -160,38 +161,35 @@ namespace utils {
         return std::make_tuple(size1, size2, size_out);
     }
 
-    // Intersect the sorted ranges a1 and b1 with corresponding sorted ranges of
-    // sorted ranges a2 and b2 (of equal length).
-    // i.e., For each shared element between a1 and b1, intersect the corresponding
-    // ranges in a2 and b2.
+    // Intersect sorted ranges index1 and index2 with corresponding tuples
+    // stored in tuple1 and tuple2 (of equal length).
+    // i.e., For each shared element between index1 and index2, check the
+    // corresponding tuples in tuple1 and tuple2.
     template <class Check, class InIt1, class InIt2, class InIt3, class InIt4,
               typename... Args>
-    constexpr bool indexed_set_find(InIt1 a1_begin,
-                                    InIt1 a1_end,
-                                    InIt2 a2_begin,
-                                    InIt3 b1_begin,
-                                    InIt3 b1_end,
-                                    InIt4 b2_begin,
+    constexpr bool indexed_set_find(InIt1 index1_begin, InIt1 index1_end,
+                                    InIt2 tuple1_begin,
+                                    InIt3 index2_begin, InIt3 index2_end,
+                                    InIt4 tuple2_begin,
                                     Args&&... args) {
+        assert(std::distance(index1_begin, index1_end) == std::distance(index2_begin, index2_end));
         Check check(std::forward<Args>(args)...);
 
-        while (a1_begin != a1_end && b1_begin != b1_end) {
-            if (*a1_begin < *b1_begin) {
-                ++a1_begin;
-                ++a2_begin;
-            } else if (*b1_begin < *a1_begin) {
-                ++b1_begin;
-                ++b2_begin;
+        while (index1_begin != index1_end && index2_begin != index2_end) {
+            if (*index1_begin < *index2_begin) {
+                ++index1_begin;
+                ++tuple1_begin;
             } else {
-                if (check(a2_begin->begin(), a2_begin->end(),
-                          b2_begin->begin(), b2_begin->end())) {
-                    return true;
+                if (*index1_begin == *index2_begin) {
+                    if (check(tuple1_begin->begin(), tuple1_begin->end(),
+                              tuple2_begin->begin(), tuple2_begin->end())) {
+                        return true;
+                    }
+                    ++index1_begin;
+                    ++tuple1_begin;
                 }
-
-                ++a1_begin;
-                ++b1_begin;
-                ++a2_begin;
-                ++b2_begin;
+                ++index2_begin;
+                ++tuple2_begin;
             }
         }
 
