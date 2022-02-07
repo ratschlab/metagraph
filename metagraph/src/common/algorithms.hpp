@@ -138,39 +138,6 @@ namespace utils {
         }
     }
 
-    // Intersect sorted ranges index1 and index2 (of equal length) with their
-    // corresponding values stored in value1 and value2, respectively.
-    // i.e., For each element shared between index1 and index2, check the
-    // corresponding values in value1 and value2 and return true if checker
-    // |consistent| returns true. Otherwise, move on to the next elements.
-    template <class Check, class InIt1, class InIt2, class InIt3, class InIt4>
-    constexpr bool have_consistent(InIt1 index1_begin, InIt1 index1_end,
-                                   InIt2 value1_begin,
-                                   InIt3 index2_begin, InIt3 index2_end,
-                                   InIt4 value2_begin,
-                                   const Check &consistent) {
-        assert(std::distance(index1_begin, index1_end)
-                == std::distance(index2_begin, index2_end));
-
-        while (index1_begin != index1_end && index2_begin != index2_end) {
-            if (*index1_begin < *index2_begin) {
-                ++index1_begin;
-                ++value1_begin;
-            } else {
-                if (*index1_begin == *index2_begin) {
-                    if (consistent(*value1_begin, *value2_begin))
-                        return true;
-                    ++index1_begin;
-                    ++value1_begin;
-                }
-                ++index2_begin;
-                ++value2_begin;
-            }
-        }
-
-        return false;
-    }
-
     // Bitmap |new_indexes| marks positions of inserted values in the final vector
     template <class Vector, class Bitmap>
     void insert(Vector *vector,

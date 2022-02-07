@@ -73,35 +73,29 @@ void AnnotationBuffer::flush() {
     added_nodes_.clear();
 }
 
-struct OverlapWithDiff {
-    OverlapWithDiff(ssize_t diff) : diff_(diff) {}
+template <class T1, class T2>
+bool overlap_with_diff(const T1 &tuple1, const T2 &tuple2, size_t diff) {
+    auto a_begin = tuple1.begin();
+    const auto a_end = tuple1.end();
+    auto b_begin = tuple2.begin();
+    const auto b_end = tuple2.end();
 
-    template <class T1, class T2>
-    bool operator()(const T1 &tuple1, const T2 &tuple2) const {
-        auto a_begin = tuple1.begin();
-        const auto a_end = tuple1.end();
-        auto b_begin = tuple2.begin();
-        const auto b_end = tuple2.end();
+    assert(std::is_sorted(a_begin, a_end));
+    assert(std::is_sorted(b_begin, b_end));
 
-        assert(std::is_sorted(a_begin, a_end));
-        assert(std::is_sorted(b_begin, b_end));
+    while (a_begin != a_end && b_begin != b_end) {
+        if (*a_begin + diff == *b_begin)
+            return true;
 
-        while (a_begin != a_end && b_begin != b_end) {
-            if (*a_begin + diff_ == *b_begin)
-                return true;
-
-            if (*a_begin + diff_ < *b_begin) {
-                ++a_begin;
-            } else {
-                ++b_begin;
-            }
+        if (*a_begin + diff < *b_begin) {
+            ++a_begin;
+        } else {
+            ++b_begin;
         }
-
-        return false;
     }
 
-    ssize_t diff_;
-};
+    return false;
+}
 
 void LabeledBacktrackingExtender
 ::call_outgoing(node_index node,
@@ -207,14 +201,22 @@ void LabeledBacktrackingExtender
             ssize_t dist_sign = rev_align ? -1 : 1;
 
             // check if at least one label has consistent coordinates
-            if (!utils::have_consistent(base_labels->get().begin(), base_labels->get().end(),
-                                        base_coords->get().begin(),
-                                        next_labels->get().begin(), next_labels->get().end(),
-                                        next_coords->get().begin(),
-                                        OverlapWithDiff(dist * dist_sign)))
-                continue;
-
-            callback(next, c, score);
+            try {
+                utils::match_indexed_values(
+                    base_labels->get().begin(), base_labels->get().end(),
+                    base_coords->get().begin(),
+                    next_labels->get().begin(), next_labels->get().end(),
+                    next_coords->get().begin(),
+                    [&](auto, const auto &coords, const auto &other_coords) {
+                        if (overlap_with_diff(coords, other_coords, dist * dist_sign)) {
+                            // found a consistent pair of coordinates
+                            callback(next, c, score);
+                            // throw to interrupt earlier
+                            throw std::exception();
+                        }
+                    }
+                );
+            } catch (const std::exception &) {}
         }
     } else if (base_labels) {
         // label consistency (weaker than coordinate consistency):
