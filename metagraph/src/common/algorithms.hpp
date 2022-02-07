@@ -109,55 +109,32 @@ namespace utils {
         return false;
     }
 
-    // Intersect sorted ranges index1 and index2 with corresponding tuples
-    // stored in tuple1 and tuple2 (of equal length).
-    // i.e., For each shared element between index1 and index2, intersect the
-    // corresponding tuples in tuple1 and tuple2. Write these to index_out and
-    // tuple_out, respectively.
-    template <class OutType, class SetOp,
-              class InIt1, class InIt2, class InIt3, class InIt4,
-              class OutIt1, class OutIt2>
-    constexpr std::tuple<size_t, size_t, size_t> indexed_set_op(InIt1 index1_begin, InIt1 index1_end,
-                                                                InIt2 tuple1_begin,
-                                                                InIt3 index2_begin, InIt3 index2_end,
-                                                                InIt4 tuple2_begin,
-                                                                OutIt1 index_out_begin,
-                                                                OutIt2 tuple_out_begin,
-                                                                const SetOp &set_op) {
+    // Intersect sorted ranges index1 and index2 (of equal length) with
+    // corresponding values stored in value1 and value2.
+    // For each shared element between index1 and index2, invoke the callback
+    // for the index and the values stored in value1 and value2.
+    template <class InIt1, class InIt2, class InIt3, class InIt4, class Callback>
+    constexpr void match_indexed_values(InIt1 index1_begin, InIt1 index1_end,
+                                        InIt2 value1_begin,
+                                        InIt3 index2_begin, InIt3 index2_end,
+                                        InIt4 value2_begin,
+                                        const Callback &callback) {
         assert(std::distance(index1_begin, index1_end) == std::distance(index2_begin, index2_end));
-        size_t size1 = 0;
-        size_t size2 = 0;
-        size_t size_out = 0;
 
         while (index1_begin != index1_end && index2_begin != index2_end) {
             if (*index1_begin < *index2_begin) {
                 ++index1_begin;
-                ++tuple1_begin;
+                ++value1_begin;
             } else {
                 if (*index1_begin == *index2_begin) {
-                    size1 += tuple1_begin->size();
-                    size2 += tuple2_begin->size();
-                    OutType merged;
-                    set_op(tuple1_begin->begin(), tuple1_begin->end(),
-                           tuple2_begin->begin(), tuple2_begin->end(),
-                           std::back_inserter(merged));
-                    if (merged.size()) {
-                        size_out += merged.size();
-                        *index_out_begin = *index1_begin;
-                        ++index_out_begin;
-                        *tuple_out_begin = std::move(merged);
-                        ++tuple_out_begin;
-                    }
+                    callback(*index1_begin, *value1_begin, *value2_begin);
                     ++index1_begin;
-                    ++tuple1_begin;
+                    ++value1_begin;
                 }
                 ++index2_begin;
-                ++tuple2_begin;
+                ++value2_begin;
             }
         }
-
-        // TODO: how do we know how many tuples were written to output?
-        return std::make_tuple(size1, size2, size_out);
     }
 
     // Intersect sorted ranges index1 and index2 (of equal length) with

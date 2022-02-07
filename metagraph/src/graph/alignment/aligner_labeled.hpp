@@ -482,13 +482,22 @@ class LabeledAligner : public ISeedAndExtendAligner<AlignmentCompare> {
                 if (next_fetch_coords) {
                     Vector<Column> label_inter;
                     Alignment::CoordinateSet coord_inter;
-                    utils::indexed_set_op<Alignment::Tuple>(
+                    CoordIntersection intersect_coords(i);
+                    utils::match_indexed_values(
                         seed.label_columns.begin(), seed.label_columns.end(),
                         seed.label_coordinates.begin(),
                         next_fetch_labels->get().begin(), next_fetch_labels->get().end(),
                         next_fetch_coords->get().begin(),
-                        std::back_inserter(label_inter), std::back_inserter(coord_inter),
-                        CoordIntersection(i)
+                        [&](auto col, const auto &coords, const auto &other_coords) {
+                            Alignment::Tuple overlap;
+                            intersect_coords(coords.begin(), coords.end(),
+                                             other_coords.begin(), other_coords.end(),
+                                             std::back_inserter(overlap));
+                            if (overlap.size()) {
+                                label_inter.push_back(col);
+                                coord_inter.push_back(std::move(overlap));
+                            }
+                        }
                     );
 
                     std::swap(seed.label_columns, label_inter);

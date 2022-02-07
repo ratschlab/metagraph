@@ -131,15 +131,25 @@ bool Alignment::append(Alignment&& other) {
         LabelSet merged_label_columns;
         CoordinateSet merged_label_coordinates;
 
+        MergeCoords merge_coords(sequence_.size());
+
         // if the alignments fit together without gaps, make sure that the
         // coordinates form a contiguous range
-        utils::indexed_set_op<Tuple>(
+        utils::match_indexed_values(
             label_columns.begin(), label_columns.end(),
             label_coordinates.begin(),
             other.label_columns.begin(), other.label_columns.end(),
             other.label_coordinates.begin(),
-            std::back_inserter(merged_label_columns), std::back_inserter(merged_label_coordinates),
-            MergeCoords(sequence_.size())
+            [&](auto col, const auto &coords, const auto &other_coords) {
+                Tuple merged;
+                merge_coords(coords.begin(), coords.end(),
+                             other_coords.begin(), other_coords.end(),
+                             std::back_inserter(merged));
+                if (merged.size()) {
+                    merged_label_columns.push_back(col);
+                    merged_label_coordinates.push_back(std::move(merged));
+                }
+            }
         );
 
         if (merged_label_columns.empty()) {

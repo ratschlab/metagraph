@@ -372,13 +372,22 @@ bool LabeledBacktrackingExtender::skip_backtrack_start(size_t i) {
 
                     Vector<Column> labels_inter;
                     Vector<Tuple> coords_inter;
-                    utils::indexed_set_op<Tuple>(
+                    CoordIntersection intersect_coords(dist * dist_sign);
+                    utils::match_indexed_values(
                         label_intersection_.begin(), label_intersection_.end(),
                         label_intersection_coords_.begin(),
                         seed_labels_.begin(), seed_labels_.end(),
                         seed_label_coordinates_.begin(),
-                        std::back_inserter(labels_inter), std::back_inserter(coords_inter),
-                        CoordIntersection(dist * dist_sign)
+                        [&](auto col, const auto &coords, const auto &other_coords) {
+                            Tuple overlap;
+                            intersect_coords(coords.begin(), coords.end(),
+                                             other_coords.begin(), other_coords.end(),
+                                             std::back_inserter(overlap));
+                            if (overlap.size()) {
+                                labels_inter.push_back(col);
+                                coords_inter.push_back(std::move(overlap));
+                            }
+                        }
                     );
                     std::swap(labels_inter, label_intersection_);
                     std::swap(coords_inter, label_intersection_coords_);
@@ -409,28 +418,6 @@ bool LabeledBacktrackingExtender::skip_backtrack_start(size_t i) {
     return label_intersection_.empty();
 }
 
-struct CoordDiff {
-    CoordDiff(size_t offset = 0) : offset_(offset) {}
-
-    template <typename It1, typename It2, typename Out>
-    void operator()(It1 a_begin, It1 a_end, It2 b_begin, It2 b_end, Out out) const {
-        while (a_begin != a_end) {
-            if (b_begin == b_end || *a_begin + offset_ < *b_begin) {
-                *out = *a_begin;
-                ++out;
-                ++a_begin;
-            } else if (*a_begin + offset_ > *b_begin) {
-                ++b_begin;
-            } else {
-                ++a_begin;
-                ++b_begin;
-            }
-        }
-    }
-
-    size_t offset_;
-};
-
 void LabeledBacktrackingExtender
 ::call_alignments(score_t cur_cell_score,
                   score_t end_score,
@@ -452,6 +439,31 @@ void LabeledBacktrackingExtender
     score_t alignment_score = end_score - (clipping ? cur_cell_score : 0);
     if (cur_min_path_score_ > alignment_score)
         return;
+
+    auto compute_diff = [](const Vector<Column> &labels_first,
+                           const Vector<Tuple> &coords_first,
+                           const Vector<Column> &labels_second,
+                           const Vector<Tuple> &coords_second) {
+        Vector<Column> diff;
+        Vector<Tuple> diff_coords;
+
+        utils::match_indexed_values(
+            labels_first.begin(), labels_first.end(), coords_first.begin(),
+            labels_second.begin(), labels_second.end(), coords_second.begin(),
+            [&](auto col, const auto &coords, const auto &other_coords) {
+                Tuple set;
+                std::set_difference(coords.begin(), coords.end(),
+                                    other_coords.begin(), other_coords.end(),
+                                    std::back_inserter(set));
+                if (set.size()) {
+                    diff.push_back(col);
+                    diff_coords.push_back(std::move(set));
+                }
+            }
+        );
+
+        return std::make_tuple(diff, diff_coords);
+    };
 
     // Normally, we start from the end of the alignment and reconstruct the
     // alignment backwards (shifting coordinates by -1).
@@ -498,14 +510,25 @@ void LabeledBacktrackingExtender
             Vector<Tuple> coord_inter;
             label_set = &labels;
             label_coord = &coords;
-            std::tie(old_size, cur_size, new_size)
-                = utils::indexed_set_op<Tuple>(
-                    label_intersection_.begin(), label_intersection_.end(),
-                    label_intersection_coords_.begin(),
-                    labels.begin(), labels.end(), coords.begin(),
-                    std::back_inserter(label_inter), std::back_inserter(coord_inter),
-                    CoordIntersection()
-                );
+            CoordIntersection intersect_coords;
+            utils::match_indexed_values(
+                label_intersection_.begin(), label_intersection_.end(),
+                label_intersection_coords_.begin(),
+                labels.begin(), labels.end(), coords.begin(),
+                [&](auto col, const auto &coords, const auto &other_coords) {
+                    Tuple overlap;
+                    intersect_coords(coords.begin(), coords.end(),
+                                     other_coords.begin(), other_coords.end(),
+                                     std::back_inserter(overlap));
+                    old_size += coords.size();
+                    cur_size += other_coords.size();
+                    new_size += overlap.size();
+                    if (overlap.size()) {
+                        label_inter.push_back(col);
+                        coord_inter.push_back(std::move(overlap));
+                    }
+                }
+            );
 
             std::swap(label_intersection_, label_inter);
             std::swap(label_intersection_coords_, coord_inter);
@@ -542,14 +565,9 @@ void LabeledBacktrackingExtender
             auto prev_find = diff_label_sets_.find(trace[last_path_size_]);
             if (prev_find == diff_label_sets_.end()) {
                 if (label_intersection_coords_.size()) {
-                    utils::indexed_set_op<Tuple>(
-                        label_set->begin(), label_set->end(),
-                        label_coord->begin(),
-                        label_intersection_.begin(), label_intersection_.end(),
-                        label_intersection_coords_.begin(),
-                        std::back_inserter(diff), std::back_inserter(diff_coords),
-                        CoordDiff()
-                    );
+                    std::tie(diff, diff_coords)
+                        = compute_diff(*label_set, *label_coord,
+                                       label_intersection_, label_intersection_coords_);
                 } else if (label_intersection_.size()) {
                     std::set_difference(label_set->begin(), label_set->end(),
                                         label_intersection_.begin(),
@@ -565,14 +583,9 @@ void LabeledBacktrackingExtender
             } else {
                 auto &[prev_labels, prev_coords] = prev_find.value();
                 if (label_intersection_coords_.size()) {
-                    utils::indexed_set_op<Tuple>(
-                        prev_labels.begin(), prev_labels.end(),
-                        prev_coords.begin(),
-                        label_intersection_.begin(), label_intersection_.end(),
-                        label_intersection_coords_.begin(),
-                        std::back_inserter(diff), std::back_inserter(diff_coords),
-                        CoordDiff()
-                    );
+                    std::tie(diff, diff_coords)
+                        = compute_diff(prev_labels, prev_coords,
+                                       label_intersection_, label_intersection_coords_);
                 } else {
                     std::set_difference(prev_labels.begin(), prev_labels.end(),
                                         label_intersection_.begin(),
@@ -633,16 +646,9 @@ void LabeledBacktrackingExtender
     if (!table_i && seed_labels_.size()) {
         Vector<Column> diff;
         if (seed_label_coordinates_.size()) {
-            Vector<Tuple> diff_coords;
-            utils::indexed_set_op<Tuple>(
-                seed_labels_.begin(), seed_labels_.end(),
-                seed_label_coordinates_.begin(),
-                alignment.label_columns.begin(), alignment.label_columns.end(),
-                alignment.label_coordinates.begin(),
-                std::back_inserter(diff), std::back_inserter(diff_coords),
-                CoordDiff()
-            );
-            std::swap(diff_coords, seed_label_coordinates_);
+            std::tie(diff, seed_label_coordinates_)
+                = compute_diff(seed_labels_, seed_label_coordinates_,
+                               alignment.label_columns, alignment.label_coordinates);
         } else {
             std::set_difference(seed_labels_.begin(), seed_labels_.end(),
                                 alignment.label_columns.begin(),

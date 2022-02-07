@@ -57,32 +57,6 @@ std::pair<Alignment, Alignment> split_seed(const DeBruijnGraph &graph,
     return ret_val;
 }
 
-/**
- * filter_seed: clear the seed a if it has no unexplored labels or coordinates
- *              relative to the seed prev
- */
-struct CoordDiff {
-    CoordDiff(size_t offset = 0) : offset_(offset) {}
-
-    template <typename It1, typename It2, typename Out>
-    void operator()(It1 a_begin, It1 a_end, It2 b_begin, It2 b_end, Out out) const {
-        while (a_begin != a_end) {
-            if (b_begin == b_end || *a_begin + offset_ < *b_begin) {
-                *out = *a_begin;
-                ++out;
-                ++a_begin;
-            } else if (*a_begin + offset_ > *b_begin) {
-                ++b_begin;
-            } else {
-                ++a_begin;
-                ++b_begin;
-            }
-        }
-    }
-
-    size_t offset_;
-};
-
 void filter_seed(const Alignment &prev, Alignment &a) {
     if (prev.label_columns.empty()) {
         a = Alignment();
@@ -101,13 +75,23 @@ void filter_seed(const Alignment &prev, Alignment &a) {
     } else {
         Vector<Alignment::Column> diff;
         Vector<Alignment::Tuple> diff_coords;
-        utils::indexed_set_op<Alignment::Tuple>(
+        utils::match_indexed_values(
             a.label_columns.begin(), a.label_columns.end(),
             a.label_coordinates.begin(),
             prev.label_columns.begin(), prev.label_columns.end(),
             prev.label_coordinates.begin(),
-            std::back_inserter(diff), std::back_inserter(diff_coords),
-            CoordDiff()
+            [&](auto col, const auto &coords, const auto &other_coords) {
+                Alignment::Tuple set;
+                // filter_seed: clear the seed a if it has no unexplored labels or coordinates
+                // relative to the seed prev
+                std::set_difference(coords.begin(), coords.end(),
+                                    other_coords.begin(), other_coords.end(),
+                                    std::back_inserter(set));
+                if (set.size()) {
+                    diff.push_back(col);
+                    diff_coords.push_back(std::move(set));
+                }
+            }
         );
         if (diff.empty()) {
             a = Alignment();
