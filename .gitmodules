@@ -61,4 +61,4 @@
 	url = https://github.com/facebook/folly
 [submodule "metagraph/external-libraries/Priority-Deque"]
 	path = metagraph/external-libraries/Priority-Deque
-	url = git@github.com:nmcclatchey/Priority-Deque.git
+	url = https://github.com/nmcclatchey/Priority-Deque
