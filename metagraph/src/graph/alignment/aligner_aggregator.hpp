@@ -101,6 +101,10 @@ inline bool AlignmentAggregator<AlignmentCompare>::add_alignment(Alignment&& ali
         return true;
     }
 
+    // note: Each reference made to path_queue_ has the potential to increase
+    //       the size of the underlying storage, and hence, reallocate it.
+    //       So, storing a reference to path_queue_[ncol] may lead to segfaults.
+
     for (const auto &aln : path_queue_[ncol]) {
         if (*a == *aln)
             return false;
