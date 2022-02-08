@@ -265,7 +265,7 @@ void ISeedAndExtendAligner<AlignmentCompare>
         const auto &[header, query, is_reverse_complement] = seq_batch[i];
         const auto &[seeder, nodes, seeder_rc, nodes_rc] = seeders[i];
         // paths[i].get_query(false), paths[i].get_query(true)
-        AlignmentAggregator aggregator(config_);
+        AlignmentAggregator<AlignmentCompare> aggregator(config_);
 
         size_t num_seeds = 0;
         size_t num_explored_nodes = 0;
@@ -284,12 +284,12 @@ void ISeedAndExtendAligner<AlignmentCompare>
         std::string_view this_query = paths[i].get_query(is_reverse_complement);
         assert(this_query == query);
 
-        auto extender = build_extender(this_query, aggregator, config_);
+        auto extender = build_extender(this_query, config_);
 
 #if ! _PROTEIN_GRAPH
         if (seeder_rc) {
             std::string_view reverse = paths[i].get_query(!is_reverse_complement);
-            auto extender_rc = build_extender(reverse, aggregator, config_);
+            auto extender_rc = build_extender(reverse, config_);
 
             auto [seeds, extensions, explored_nodes] =
                 align_both_directions(this_query, reverse, *seeder, *seeder_rc,
@@ -389,7 +389,6 @@ void ISeedAndExtendAligner<AlignmentCompare>
     gap_fill_config.allow_left_trim = false;
     gap_fill_config.trim_offset_after_extend = false;
 
-    AlignmentAggregator dummy(config_);
     const char *query_end = query.data() + query.size();
     assert(chain.size());
 
@@ -415,7 +414,7 @@ void ISeedAndExtendAligner<AlignmentCompare>
         num_explored_nodes += align_connect(query, graph_, gap_fill_config, cur, chain[i],
                                             [&](std::string_view query_window,
                                                 const DBGAlignerConfig &config) {
-            return build_extender(query_window, dummy, config);
+            return build_extender(query_window, config);
         });
         if (cur.empty())
             return;
@@ -434,7 +433,7 @@ void ISeedAndExtendAligner<AlignmentCompare>
         end_cfg.trim_offset_after_extend = false;
         end_cfg.allow_left_trim = false;
 
-        auto extender = build_extender(query, dummy, end_cfg);
+        auto extender = build_extender(query, end_cfg);
         auto extensions = extender->get_extensions(best, config_.ninf, true);
         ++num_extensions;
         num_explored_nodes += extender->num_explored_nodes();
@@ -465,7 +464,7 @@ void ISeedAndExtendAligner<AlignmentCompare>
             assert(rev.get_end_clipping());
             DBGAlignerConfig no_trim_config = config_;
             no_trim_config.allow_left_trim = false;
-            auto extender = build_extender(query_rc, dummy, no_trim_config);
+            auto extender = build_extender(query_rc, no_trim_config);
             extender->set_graph(rc_graph);
             auto extensions = extender->get_extensions(rev, config_.ninf, true);
             if (extensions.size() && extensions[0].get_query().data()
@@ -535,7 +534,7 @@ std::tuple<size_t, size_t, size_t> ISeedAndExtendAligner<AlignmentCompare>
             exit(1);
         }
 
-        AlignmentAggregator aggregator(config_);
+        AlignmentAggregator<AlignmentCompare> aggregator(config_);
 
         bool terminate = false;
         size_t this_num_explored;

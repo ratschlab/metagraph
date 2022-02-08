@@ -52,16 +52,13 @@ class ISeedAndExtendAligner : public IDBGAligner {
     const DBGAlignerConfig& get_config() const { return config_; }
 
   protected:
-    typedef AlignmentAggregator<AlignmentCompare> AlignmentAggregator;
     typedef std::vector<std::tuple<std::shared_ptr<ISeeder>, std::vector<node_index>,
                                    std::shared_ptr<ISeeder>, std::vector<node_index>>> BatchSeeders;
     const DeBruijnGraph &graph_;
     DBGAlignerConfig config_;
 
     virtual std::shared_ptr<IExtender>
-    build_extender(std::string_view query,
-                   const AlignmentAggregator &aggregator,
-                   const DBGAlignerConfig &config) const = 0;
+    build_extender(std::string_view query, const DBGAlignerConfig &config) const = 0;
 
     virtual void filter_seeds(BatchSeeders &seeders) const = 0;
 
@@ -131,13 +128,10 @@ class DBGAligner : public ISeedAndExtendAligner<AlignmentCompare> {
           : ISeedAndExtendAligner<AlignmentCompare>(std::forward<Args>(args)...) {}
 
   private:
-    typedef typename ISeedAndExtendAligner<AlignmentCompare>::AlignmentAggregator AlignmentAggregator;
     typedef typename ISeedAndExtendAligner<AlignmentCompare>::BatchSeeders BatchSeeders;
 
     std::shared_ptr<IExtender>
-    build_extender(std::string_view query,
-                   const AlignmentAggregator &,
-                   const DBGAlignerConfig &config) const override final {
+    build_extender(std::string_view query, const DBGAlignerConfig &config) const override final {
         return std::make_shared<Extender>(this->graph_, config, query);
     }
 

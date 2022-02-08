@@ -97,7 +97,8 @@ bool overlap_with_diff(const T1 &tuple1, const T2 &tuple2, size_t diff) {
     return false;
 }
 
-void LabeledBacktrackingExtender
+template <class AlignmentCompare>
+void LabeledBacktrackingExtender<AlignmentCompare>
 ::call_outgoing(node_index node,
                 size_t max_prefetch_distance,
                 const std::function<void(node_index, char /* last char */, score_t)> &callback,
@@ -337,7 +338,8 @@ auto AnnotationBuffer::add_node(node_index node) -> node_index {
     return add_path({ node }, std::string(graph_.get_k(), '#')).first[0];
 }
 
-bool LabeledBacktrackingExtender::skip_backtrack_start(size_t i) {
+template <class AlignmentCompare>
+bool LabeledBacktrackingExtender<AlignmentCompare>::skip_backtrack_start(size_t i) {
     label_intersection_.clear();
     label_intersection_coords_.clear();
 
@@ -420,7 +422,8 @@ bool LabeledBacktrackingExtender::skip_backtrack_start(size_t i) {
     return label_intersection_.empty();
 }
 
-void LabeledBacktrackingExtender
+template <class AlignmentCompare>
+void LabeledBacktrackingExtender<AlignmentCompare>
 ::call_alignments(score_t cur_cell_score,
                   score_t end_score,
                   score_t min_path_score,
@@ -664,6 +667,8 @@ void LabeledBacktrackingExtender
     // after extension is done, the best ones are called back
     extensions_.add_alignment(std::move(alignment));
 }
+
+template class LabeledBacktrackingExtender<>;
 
 } // namespace align
 } // namespace graph

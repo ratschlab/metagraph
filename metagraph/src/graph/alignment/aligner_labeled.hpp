@@ -132,11 +132,9 @@ class LabeledExtender : public DefaultColumnExtender {
   public:
     typedef AnnotationBuffer::Column Column;
     typedef AnnotationBuffer::Tuple Tuple;
-    typedef AlignmentAggregator<LocalAlignmentLess> AlignmentAggregator;
 
     LabeledExtender(AnnotationBuffer &labeled_graph,
                     const DBGAlignerConfig &config,
-                    const AlignmentAggregator &,
                     std::string_view query)
           : DefaultColumnExtender(labeled_graph.get_graph(), config, query),
             labeled_graph_(labeled_graph) {}
@@ -163,13 +161,13 @@ class LabeledExtender : public DefaultColumnExtender {
     size_t last_buffered_table_i_;
 };
 
+template <class AlignmentCompare = LocalAlignmentLess>
 class LabeledBacktrackingExtender : public LabeledExtender {
   public:
     LabeledBacktrackingExtender(AnnotationBuffer &labeled_graph,
                                 const DBGAlignerConfig &config,
-                                const AlignmentAggregator &aggregator,
                                 std::string_view query)
-          : LabeledExtender(labeled_graph, config, aggregator, query),
+          : LabeledExtender(labeled_graph, config, query),
             extensions_(this->config_) {}
 
     virtual ~LabeledBacktrackingExtender() {}
@@ -243,7 +241,7 @@ class LabeledBacktrackingExtender : public LabeledExtender {
 
   private:
     // local set of alignments
-    AlignmentAggregator extensions_;
+    AlignmentAggregator<AlignmentCompare> extensions_;
 
     // keep track of the label set for the current backtracking
     Vector<Column> label_intersection_;
@@ -261,9 +259,9 @@ class LabeledBacktrackingExtender : public LabeledExtender {
     tsl::hopscotch_map<size_t, std::pair<Vector<Column>, Vector<Tuple>>> diff_label_sets_;
 };
 
-template <class Extender = LabeledBacktrackingExtender,
-          class Seeder = UniMEMSeeder,
-          class AlignmentCompare = LocalAlignmentLess>
+template <class AlignmentCompare = LocalAlignmentLess,
+          class Extender = LabeledBacktrackingExtender<AlignmentCompare>,
+          class Seeder = UniMEMSeeder>
 class LabeledAligner : public ISeedAndExtendAligner<AlignmentCompare> {
   public:
     typedef AnnotationBuffer::Annotator Annotator;
@@ -277,7 +275,7 @@ class LabeledAligner : public ISeedAndExtendAligner<AlignmentCompare> {
           : ISeedAndExtendAligner<AlignmentCompare>(graph, config),
             labeled_graph_(graph, annotator) {
         if (labeled_graph_.get_coordinate_matrix()
-                && std::is_same_v<Extender, LabeledBacktrackingExtender>) {
+                && std::is_same_v<Extender, LabeledBacktrackingExtender<>>) {
             // do not use a global xdrop cutoff since we need separate cutoffs
             // for each label
             this->config_.global_xdrop = false;
@@ -289,10 +287,8 @@ class LabeledAligner : public ISeedAndExtendAligner<AlignmentCompare> {
     mutable AnnotationBuffer labeled_graph_;
 
     std::shared_ptr<IExtender>
-    build_extender(std::string_view query,
-                   const typename Extender::AlignmentAggregator &aggregator,
-                   const DBGAlignerConfig &config) const override final {
-        return std::make_shared<Extender>(labeled_graph_, config, aggregator, query);
+    build_extender(std::string_view query, const DBGAlignerConfig &config) const override final {
+        return std::make_shared<Extender>(labeled_graph_, config, query);
     }
 
     std::shared_ptr<ISeeder>
