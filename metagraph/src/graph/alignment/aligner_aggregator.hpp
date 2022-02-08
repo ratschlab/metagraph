@@ -187,11 +187,12 @@ template <class AlignmentCompare>
 inline auto AlignmentAggregator<AlignmentCompare>
 ::get_min_path_score(Column label) const -> score_t {
     auto find = path_queue_.find(label);
-    return find == path_queue_.end() || find->second.size() < config_.num_alternative_paths
+    return find == path_queue_.end()
+            || find->second.size() < config_.num_alternative_paths
             || config_.post_chain_alignments
         ? config_.min_path_score
         : std::max(static_cast<score_t>(find->second.maximum()->get_score()
-                        * config_.rel_score_cutoff),
+                                            * config_.rel_score_cutoff),
                    find->second.minimum()->get_score());
 }
 
@@ -205,27 +206,20 @@ inline auto AlignmentAggregator<AlignmentCompare>
 
 template <class AlignmentCompare>
 inline std::vector<Alignment> AlignmentAggregator<AlignmentCompare>::get_alignments() {
-    typedef std::pair<Column, PathQueue> queue_value;
-    auto queues = const_cast<std::vector<queue_value>&&>(path_queue_.values_container());
-    path_queue_.clear();
-
-    std::vector<std::shared_ptr<Alignment>> alignment_ptrs;
-    for (auto &[label, queue] : queues) {
-        std::vector<std::shared_ptr<Alignment>> merged;
-        boost::heap::sort_interval_heap(queue.data().begin(), queue.data().end(), cmp_);
-        std::set_union(alignment_ptrs.begin(), alignment_ptrs.end(),
-                       queue.data().begin(), queue.data().end(),
-                       std::back_inserter(merged), cmp_);
-        std::swap(merged, alignment_ptrs);
+    // move all alignments to one vector
+    std::vector<std::shared_ptr<Alignment>> ptrs;
+    for (const auto &[_, alns] : path_queue_) {
+        std::copy(alns.begin(), alns.end(), std::back_inserter(ptrs));
     }
-
+    path_queue_.clear();
+    // sort and remove duplicates
+    std::sort(ptrs.begin(), ptrs.end(), cmp_);
+    ptrs.erase(std::unique(ptrs.begin(), ptrs.end()), ptrs.end());
+    // transform pointers to objects
     std::vector<Alignment> alignments;
-    alignments.reserve(alignment_ptrs.size());
-
-    std::transform(alignment_ptrs.rbegin(), alignment_ptrs.rend(),
-                   std::back_inserter(alignments),
-                   [](auto a) { return std::move(*a); });
-
+    alignments.reserve(ptrs.size());
+    std::transform(ptrs.rbegin(), ptrs.rend(), std::back_inserter(alignments),
+                   [](auto &a) { return std::move(*a); });
     return alignments;
 }
 
