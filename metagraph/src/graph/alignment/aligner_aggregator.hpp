@@ -25,8 +25,7 @@ class PriorityDeque : public boost::container::priority_deque<T, Container, Comp
 
 template <class AlignmentCompare>
 class AlignmentAggregator {
-  public:
-    struct SharedPtrCmp {
+    struct ValCmp {
         bool operator()(const std::shared_ptr<Alignment> &a,
                         const std::shared_ptr<Alignment> &b) const {
             return base_cmp_(*a, *b);
@@ -35,12 +34,11 @@ class AlignmentAggregator {
         AlignmentCompare base_cmp_;
     };
 
-    typedef Alignment::node_index node_index;
+  public:
     typedef Alignment::score_t score_t;
     typedef annot::binmat::BinaryMatrix::Column Column;
     typedef PriorityDeque<std::shared_ptr<Alignment>,
-                          std::vector<std::shared_ptr<Alignment>>,
-                          SharedPtrCmp> PathQueue;
+                          std::vector<std::shared_ptr<Alignment>>, ValCmp> PathQueue;
 
     static constexpr Column ncol = std::numeric_limits<Column>::max();
 
@@ -60,31 +58,9 @@ class AlignmentAggregator {
     score_t get_min_path_score(Column label = ncol) const;
     score_t get_max_path_score(Column label = ncol) const;
 
-    score_t get_min_path_score(const Alignment &seed) const {
-        return get_min_path_score(seed.label_columns);
-    }
-
-    score_t get_max_path_score(const Alignment &seed) const {
-        return get_max_path_score(seed.label_columns);
-    }
-
-    const Alignment& maximum() const { return path_queue_.maximum(); }
-    void pop_maximum() { path_queue_.pop_maximum(); }
-
     std::vector<Alignment> get_alignments();
 
-    size_t size() const {
-        size_t size = 0;
-        for (const auto &[label, queue] : path_queue_)
-            size += queue.size();
-
-        return size;
-    }
-
-    size_t num_labels() const { return path_queue_.size(); }
-
-    bool empty() const { return path_queue_.empty(); }
-
+    const VectorMap<Column, PathQueue>& data() const { return path_queue_; }
     VectorMap<Column, PathQueue>& data() { return path_queue_; }
 
     void clear() { path_queue_.clear(); }
@@ -99,7 +75,7 @@ class AlignmentAggregator {
     const DBGAlignerConfig &config_;
     const DeBruijnGraph &graph_;
     VectorMap<Column, PathQueue> path_queue_;
-    SharedPtrCmp cmp_;
+    ValCmp cmp_;
 };
 
 
@@ -109,54 +85,47 @@ inline bool AlignmentAggregator<AlignmentCompare>::add_alignment(Alignment&& ali
 
     if (path_queue_.empty()) {
         path_queue_[ncol].emplace(packaged_alignment);
-        for (Alignment::Column c : packaged_alignment->label_columns) {
+        for (Column c : packaged_alignment->label_columns) {
             path_queue_[c].emplace(packaged_alignment);
         }
-
         return true;
     }
 
-    if (packaged_alignment->label_columns.empty() && path_queue_.size() == 1) {
+    if (packaged_alignment->label_columns.empty()) {
+        if (path_queue_.size() != 1)
+            return false;
+
         auto &queue = path_queue_[ncol];
-        assert(path_queue_.count(ncol));
         if (queue.size() < config_.num_alternative_paths
                 || config_.post_chain_alignments) {
             for (const auto &aln : queue) {
-                if (*packaged_alignment == *aln) {
+                if (*packaged_alignment == *aln)
                     return false;
-                }
             }
 
             queue.emplace(packaged_alignment);
             return true;
         }
 
-        if (!cmp_(packaged_alignment, queue.minimum())) {
-            queue.update(queue.begin(), packaged_alignment);
-            return true;
-        }
+        if (cmp_(packaged_alignment, queue.minimum()))
+            return false;
 
-        return false;
-    }
-
-    if (packaged_alignment->label_columns.empty()) {
-        return false;
+        queue.update(queue.begin(), packaged_alignment);
+        return true;
     }
 
     for (const auto &aln : path_queue_[ncol]) {
-        if (*packaged_alignment == *aln) {
+        if (*packaged_alignment == *aln)
             return false;
-        }
     }
 
     if (path_queue_[ncol].size() < config_.num_alternative_paths
             || config_.post_chain_alignments) {
-        for (Alignment::Column c : packaged_alignment->label_columns) {
+        for (Column c : packaged_alignment->label_columns) {
             auto &cur_queue = path_queue_[c];
             for (const auto &aln : cur_queue) {
-                if (*packaged_alignment == *aln) {
+                if (*packaged_alignment == *aln)
                     return false;
-                }
             }
 
             cur_queue.emplace(packaged_alignment);
@@ -166,34 +135,33 @@ inline bool AlignmentAggregator<AlignmentCompare>::add_alignment(Alignment&& ali
         return true;
     }
 
-    if (!cmp_(packaged_alignment, path_queue_[ncol].minimum())
-            || (packaged_alignment->get_score()
-                >= path_queue_[ncol].maximum()->get_score() * config_.rel_score_cutoff)) {
-        bool added = false;
-        for (Alignment::Column c : packaged_alignment->label_columns) {
-            auto &cur_queue = path_queue_[c];
-            if (cur_queue.size() < config_.num_alternative_paths) {
-                cur_queue.emplace(packaged_alignment);
-                added = true;
-            } else if (!cmp_(packaged_alignment, cur_queue.minimum())) {
-                cur_queue.update(cur_queue.begin(), packaged_alignment);
-                added = true;
-            }
-        }
-
-        if (added) {
-            auto &cur_queue = path_queue_[ncol];
-            if (!cmp_(packaged_alignment, cur_queue.minimum())) {
-                cur_queue.update(cur_queue.begin(), packaged_alignment);
-            } else {
-                cur_queue.emplace(packaged_alignment);
-            }
-
-            return true;
-        }
+    if (cmp_(packaged_alignment, path_queue_[ncol].minimum())
+            && (packaged_alignment->get_score()
+                < path_queue_[ncol].maximum()->get_score() * config_.rel_score_cutoff)) {
+        return false;
     }
 
-    return false;
+    bool added = false;
+    for (Column c : packaged_alignment->label_columns) {
+        auto &cur_queue = path_queue_[c];
+        if (cur_queue.size() < config_.num_alternative_paths) {
+            cur_queue.emplace(packaged_alignment);
+            added = true;
+        } else if (!cmp_(packaged_alignment, cur_queue.minimum())) {
+            cur_queue.update(cur_queue.begin(), packaged_alignment);
+            added = true;
+        }
+    }
+    if (!added)
+        return false;
+
+    auto &cur_queue = path_queue_[ncol];
+    if (!cmp_(packaged_alignment, cur_queue.minimum())) {
+        cur_queue.update(cur_queue.begin(), packaged_alignment);
+    } else {
+        cur_queue.emplace(packaged_alignment);
+    }
+    return true;
 }
 
 template <class AlignmentCompare>

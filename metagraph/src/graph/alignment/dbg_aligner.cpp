@@ -264,8 +264,7 @@ void ISeedAndExtendAligner<AlignmentCompare>
     for (size_t i = 0; i < seq_batch.size(); ++i) {
         const auto &[header, query, is_reverse_complement] = seq_batch[i];
         const auto &[seeder, nodes, seeder_rc, nodes_rc] = seeders[i];
-        Aggregator aggregator(graph_, paths[i].get_query(false), paths[i].get_query(true),
-                              config_);
+        AlignmentAggregator aggregator(graph_, paths[i].get_query(false), paths[i].get_query(true), config_);
 
         size_t num_seeds = 0;
         size_t num_explored_nodes = 0;
@@ -278,7 +277,7 @@ void ISeedAndExtendAligner<AlignmentCompare>
 
         auto get_min_path_score = [&](const Alignment &seed) {
             return std::max(config_.min_path_score,
-                            aggregator.get_min_path_score(seed));
+                            aggregator.get_min_path_score(seed.label_columns));
         };
 
         std::string_view this_query = paths[i].get_query(is_reverse_complement);
@@ -309,7 +308,7 @@ void ISeedAndExtendAligner<AlignmentCompare>
 
         num_explored_nodes += extender->num_explored_nodes();
         num_extensions += extender->num_extensions();
-        size_t num_labels = std::max(size_t { 1 }, aggregator.num_labels() - 1);
+        size_t num_labels = std::max(size_t { 1 }, aggregator.data().size() - 1);
         score_t best_score = std::numeric_limits<score_t>::min();
         size_t query_coverage = 0;
 
@@ -391,7 +390,7 @@ void ISeedAndExtendAligner<AlignmentCompare>
 
     std::string_view fw = chain[0].get_orientation() ? query_rc : query;
     std::string_view bw = chain[0].get_orientation() ? query : query_rc;
-    AlignmentAggregator<AlignmentCompare> dummy(graph_, fw, bw, config_);
+    AlignmentAggregator dummy(graph_, fw, bw, config_);
     const char *query_end = query.data() + query.size();
     assert(chain.size());
 
@@ -537,7 +536,7 @@ std::tuple<size_t, size_t, size_t> ISeedAndExtendAligner<AlignmentCompare>
             exit(1);
         }
 
-        Aggregator aggregator(graph_, forward, reverse, config_);
+        AlignmentAggregator aggregator(graph_, forward, reverse, config_);
 
         bool terminate = false;
         size_t this_num_explored;

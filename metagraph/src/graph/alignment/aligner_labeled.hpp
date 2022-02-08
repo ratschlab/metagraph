@@ -132,11 +132,11 @@ class LabeledExtender : public DefaultColumnExtender {
   public:
     typedef AnnotationBuffer::Column Column;
     typedef AnnotationBuffer::Tuple Tuple;
-    typedef AlignmentAggregator<LocalAlignmentLess> Aggregator;
+    typedef AlignmentAggregator<LocalAlignmentLess> AlignmentAggregator;
 
     LabeledExtender(AnnotationBuffer &labeled_graph,
                     const DBGAlignerConfig &config,
-                    const Aggregator &,
+                    const AlignmentAggregator &,
                     std::string_view query)
           : DefaultColumnExtender(labeled_graph.get_graph(), config, query),
             labeled_graph_(labeled_graph) {}
@@ -167,7 +167,7 @@ class LabeledBacktrackingExtender : public LabeledExtender {
   public:
     LabeledBacktrackingExtender(AnnotationBuffer &labeled_graph,
                                 const DBGAlignerConfig &config,
-                                const Aggregator &aggregator,
+                                const AlignmentAggregator &aggregator,
                                 std::string_view query)
           : LabeledExtender(labeled_graph, config, aggregator, query),
             extensions_(labeled_graph_.get_graph(),
@@ -245,7 +245,7 @@ class LabeledBacktrackingExtender : public LabeledExtender {
 
   private:
     // local set of alignments
-    Aggregator extensions_;
+    AlignmentAggregator extensions_;
 
     // keep track of the label set for the current backtracking
     Vector<Column> label_intersection_;
@@ -292,7 +292,7 @@ class LabeledAligner : public ISeedAndExtendAligner<AlignmentCompare> {
 
     std::shared_ptr<IExtender>
     build_extender(std::string_view query,
-                   const typename Extender::Aggregator &aggregator,
+                   const typename Extender::AlignmentAggregator &aggregator,
                    const DBGAlignerConfig &config) const override final {
         return std::make_shared<Extender>(labeled_graph_, config, aggregator, query);
     }
