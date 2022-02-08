@@ -313,8 +313,6 @@ void ISeedAndExtendAligner<AlignmentCompare>
         score_t best_score = std::numeric_limits<score_t>::min();
         size_t query_coverage = 0;
 
-
-
         for (auto&& alignment : chain_alignments<AlignmentCompare>(aggregator.get_alignments(),
                                                                    paths[i].get_query(false),
                                                                    paths[i].get_query(true),

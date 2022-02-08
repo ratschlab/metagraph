@@ -46,11 +46,8 @@ class AlignmentAggregator {
 
     bool add_alignment(Alignment&& alignment);
 
-    score_t get_min_path_score(const Vector<Column> &labels) const;
-    score_t get_max_path_score(const Vector<Column> &labels) const;
-
-    score_t get_min_path_score(Column label = ncol) const;
-    score_t get_max_path_score(Column label = ncol) const;
+    score_t get_min_path_score(const Vector<Column> &labels = {}) const;
+    score_t get_max_path_score(const Vector<Column> &labels = {}) const;
 
     std::vector<Alignment> get_alignments();
 
@@ -63,13 +60,32 @@ class AlignmentAggregator {
     const DBGAlignerConfig &config_;
     VectorMap<Column, PathQueue> path_queue_;
     ValCmp cmp_;
+
+    score_t get_label_min_path_score(Column label = ncol) const;
+    score_t get_label_max_path_score(Column label = ncol) const;
+
+    score_t get_global_min() const {
+        auto find = path_queue_.find(ncol);
+        if (find == path_queue_.end()) {
+            assert(path_queue_.empty());
+            return config_.min_cell_score;
+        }
+
+        score_t global_min = find->second.maximum()->get_score();
+        if (global_min > 0)
+            global_min *= config_.rel_score_cutoff;
+
+        return global_min;
+    }
 };
 
 
 template <class AlignmentCompare>
 inline bool AlignmentAggregator<AlignmentCompare>::add_alignment(Alignment&& alignment) {
+    // first, wrap the alignment so that duplicates are not stored in each per-label queue
     auto a = std::make_shared<Alignment>(std::move(alignment));
 
+    // if nothing has been added to the queue so far, add the alignment
     if (path_queue_.empty()) {
         path_queue_[ncol].emplace(a);
         for (Column c : a->label_columns) {
@@ -78,98 +94,96 @@ inline bool AlignmentAggregator<AlignmentCompare>::add_alignment(Alignment&& ali
         return true;
     }
 
-    if (a->label_columns.empty()) {
-        // If other alignments have been added to the aggregator which have labels,
-        // then we're not interested in storing an unlabeled alignment
-        if (path_queue_.size() != 1)
-            return false;
-
-        auto &nqueue = path_queue_[ncol];
-        if (nqueue.size() < config_.num_alternative_paths
-                || config_.post_chain_alignments) {
-            for (const auto &aln : nqueue) {
-                if (*a == *aln)
-                    return false;
-            }
-
-            nqueue.emplace(a);
-            return true;
-        }
-
-        if (cmp_(a, nqueue.minimum()))
-            return false;
-
-        nqueue.update(nqueue.begin(), a);
-        return true;
-    }
-
-    // note: Each reference made to path_queue_ has the potential to increase
-    //       the size of the underlying storage, and hence, reallocate it.
-    //       So, storing a reference to path_queue_[ncol] may lead to segfaults.
-
-    for (const auto &aln : path_queue_[ncol]) {
-        if (*a == *aln)
-            return false;
-    }
-
-    if (path_queue_[ncol].size() < config_.num_alternative_paths
-            || config_.post_chain_alignments) {
-        for (Column c : a->label_columns) {
-            auto &cur_queue = path_queue_[c];
-            for (const auto &aln : cur_queue) {
-                if (*a == *aln)
-                    return false;
-            }
-
-            cur_queue.emplace(a);
-        }
-
-        path_queue_[ncol].emplace(a);
-        return true;
-    }
-
-    if (cmp_(a, path_queue_[ncol].minimum())
-            && a->get_score()
-                < path_queue_[ncol].maximum()->get_score() * config_.rel_score_cutoff) {
+    // if the score is less than the global relative score cutoff, don't add it
+    if (a->get_score() < get_global_min())
         return false;
+
+    // check for duplicates
+    auto has_aln = [&](auto find) {
+        if (find == path_queue_.end())
+            return false;
+
+        for (const auto &aln : find->second) {
+            if (*a == *aln)
+                return true;
+        }
+
+        return false;
+    };
+
+    auto find = path_queue_.find(ncol);
+    if (has_aln(find))
+        return false;
+
+    for (Column c : a->label_columns) {
+        if (has_aln(path_queue_.find(c)))
+            return false;
     }
 
+    // helper for adding alignments to the queue
+    auto add_alignment_to_label = [&](auto &queue) {
+        // If the queue is not at capacity, or if post-alignment chaining is
+        // requested, add the alignment. Otherwise, replace the minimum element
+        // in the queue if the current alignment is better.
+        if (queue.size() < config_.num_alternative_paths
+                || config_.post_chain_alignments) {
+            queue.emplace(a);
+            return true;
+        } else if (cmp_(a, queue.minimum())) {
+            return false;
+        }
+
+        queue.update(queue.begin(), a);
+        return true;
+    };
+
+    // if we are in the unlabeled case, only consider the ncol queue
+    if (a->label_columns.empty() && path_queue_.size() == 1)
+        return add_alignment_to_label(find.value());
+
+    // if an incoming alignment has labels, and we haven't encountered a labeled
+    // alignment yet, we only need the ncol queue for fetching the global minimum,
+    // so shrink it to only one element
+    if (path_queue_.size() == 1) {
+        auto &data = find.value().data();
+        if (data.size() > 1)
+            data.erase(data.begin(), data.begin() + 1);
+
+        data.erase(data.begin() + 1, data.end());
+    }
+    assert(find.value().size() == 1);
+
+    // add the alignment to its labeled queues
     bool added = false;
     for (Column c : a->label_columns) {
-        auto &cur_queue = path_queue_[c];
-        if (cur_queue.size() < config_.num_alternative_paths) {
-            cur_queue.emplace(a);
-            added = true;
-        } else if (!cmp_(a, cur_queue.minimum())) {
-            cur_queue.update(cur_queue.begin(), a);
-            added = true;
-        }
+        added |= add_alignment_to_label(path_queue_[c]);
     }
+
     if (!added)
         return false;
 
-    if (!cmp_(a, path_queue_[ncol].minimum())) {
-        path_queue_[ncol].update(path_queue_[ncol].begin(), a);
-    } else {
-        path_queue_[ncol].emplace(a);
-    }
+    // if this is the best alignment so far, update the ncol queue
+    auto &nqueue = path_queue_[ncol];
+    if (!cmp_(a, nqueue.maximum()))
+        nqueue.update(nqueue.begin(), a);
+
     return true;
 }
 
 template <class AlignmentCompare>
 inline auto AlignmentAggregator<AlignmentCompare>
 ::get_min_path_score(const Vector<Column> &labels) const -> score_t {
-    score_t global_min = get_max_path_score() * config_.rel_score_cutoff;
+    score_t global_min = get_global_min();
 
     if (labels.empty())
-        return std::max(global_min, get_min_path_score());
+        return std::max(global_min, get_label_min_path_score());
 
     score_t min_score = std::numeric_limits<score_t>::max();
     for (Column label : labels) {
         if (min_score < global_min)
             break;
 
-        min_score = std::min(min_score, get_min_path_score(label));
+        min_score = std::min(min_score, get_label_min_path_score(label));
     }
 
     return std::max(global_min, min_score);
@@ -179,11 +193,11 @@ template <class AlignmentCompare>
 inline auto AlignmentAggregator<AlignmentCompare>
 ::get_max_path_score(const Vector<Column> &labels) const -> score_t {
     if (labels.empty())
-        return get_max_path_score();
+        return get_label_max_path_score();
 
     score_t max_score = std::numeric_limits<score_t>::min();
     for (Column label : labels) {
-        max_score = std::max(max_score, get_max_path_score(label));
+        max_score = std::max(max_score, get_label_max_path_score(label));
     }
 
     return max_score;
@@ -191,20 +205,18 @@ inline auto AlignmentAggregator<AlignmentCompare>
 
 template <class AlignmentCompare>
 inline auto AlignmentAggregator<AlignmentCompare>
-::get_min_path_score(Column label) const -> score_t {
+::get_label_min_path_score(Column label) const -> score_t {
     auto find = path_queue_.find(label);
     return find == path_queue_.end()
             || find->second.size() < config_.num_alternative_paths
             || config_.post_chain_alignments
         ? config_.min_path_score
-        : std::max(static_cast<score_t>(find->second.maximum()->get_score()
-                                            * config_.rel_score_cutoff),
-                   find->second.minimum()->get_score());
+        : find->second.minimum()->get_score();
 }
 
 template <class AlignmentCompare>
 inline auto AlignmentAggregator<AlignmentCompare>
-::get_max_path_score(Column label) const -> score_t {
+::get_label_max_path_score(Column label) const -> score_t {
     auto find = path_queue_.find(label);
     return find == path_queue_.end() ? config_.min_path_score
                                      : find->second.maximum()->get_score();
