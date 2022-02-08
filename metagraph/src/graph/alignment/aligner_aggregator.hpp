@@ -79,6 +79,8 @@ inline bool AlignmentAggregator<AlignmentCompare>::add_alignment(Alignment&& ali
     }
 
     if (a->label_columns.empty()) {
+        // If other alignments have been added to the aggregator which have labels,
+        // then we're not interested in storing an unlabeled alignment
         if (path_queue_.size() != 1)
             return false;
 
