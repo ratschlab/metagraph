@@ -4,11 +4,9 @@
 #include <priority_deque.hpp>
 
 #include "aligner_alignment.hpp"
-#include "graph/representation/base/sequence_graph.hpp"
 #include "common/algorithms.hpp"
 #include "common/vector_map.hpp"
 #include "common/utils/template_utils.hpp"
-#include "annotation/binary_matrix/base/binary_matrix.hpp"
 
 
 namespace mtg {
@@ -36,7 +34,7 @@ class AlignmentAggregator {
 
   public:
     typedef Alignment::score_t score_t;
-    typedef annot::binmat::BinaryMatrix::Column Column;
+    typedef Alignment::Column Column;
     typedef PriorityDeque<std::shared_ptr<Alignment>,
                           std::vector<std::shared_ptr<Alignment>>, ValCmp> PathQueue;
 
@@ -70,85 +68,84 @@ class AlignmentAggregator {
 
 template <class AlignmentCompare>
 inline bool AlignmentAggregator<AlignmentCompare>::add_alignment(Alignment&& alignment) {
-    auto packaged_alignment = std::make_shared<Alignment>(std::move(alignment));
+    auto a = std::make_shared<Alignment>(std::move(alignment));
+
+    auto &nqueue = path_queue_[ncol];
 
     if (path_queue_.empty()) {
-        path_queue_[ncol].emplace(packaged_alignment);
-        for (Column c : packaged_alignment->label_columns) {
-            path_queue_[c].emplace(packaged_alignment);
+        nqueue.emplace(a);
+        for (Column c : a->label_columns) {
+            path_queue_[c].emplace(a);
         }
         return true;
     }
 
-    if (packaged_alignment->label_columns.empty()) {
+    if (a->label_columns.empty()) {
         if (path_queue_.size() != 1)
             return false;
 
-        auto &queue = path_queue_[ncol];
-        if (queue.size() < config_.num_alternative_paths
+        if (nqueue.size() < config_.num_alternative_paths
                 || config_.post_chain_alignments) {
-            for (const auto &aln : queue) {
-                if (*packaged_alignment == *aln)
+            for (const auto &aln : nqueue) {
+                if (*a == *aln)
                     return false;
             }
 
-            queue.emplace(packaged_alignment);
+            nqueue.emplace(a);
             return true;
         }
 
-        if (cmp_(packaged_alignment, queue.minimum()))
+        if (cmp_(a, nqueue.minimum()))
             return false;
 
-        queue.update(queue.begin(), packaged_alignment);
+        nqueue.update(nqueue.begin(), a);
         return true;
     }
 
-    for (const auto &aln : path_queue_[ncol]) {
-        if (*packaged_alignment == *aln)
+    for (const auto &aln : nqueue) {
+        if (*a == *aln)
             return false;
     }
 
-    if (path_queue_[ncol].size() < config_.num_alternative_paths
+    if (nqueue.size() < config_.num_alternative_paths
             || config_.post_chain_alignments) {
-        for (Column c : packaged_alignment->label_columns) {
+        for (Column c : a->label_columns) {
             auto &cur_queue = path_queue_[c];
             for (const auto &aln : cur_queue) {
-                if (*packaged_alignment == *aln)
+                if (*a == *aln)
                     return false;
             }
 
-            cur_queue.emplace(packaged_alignment);
+            cur_queue.emplace(a);
         }
 
-        path_queue_[ncol].emplace(packaged_alignment);
+        nqueue.emplace(a);
         return true;
     }
 
-    if (cmp_(packaged_alignment, path_queue_[ncol].minimum())
-            && (packaged_alignment->get_score()
-                < path_queue_[ncol].maximum()->get_score() * config_.rel_score_cutoff)) {
+    if (cmp_(a, nqueue.minimum())
+            && a->get_score() < nqueue.maximum()->get_score() * config_.rel_score_cutoff) {
         return false;
     }
 
     bool added = false;
-    for (Column c : packaged_alignment->label_columns) {
+    for (Column c : a->label_columns) {
         auto &cur_queue = path_queue_[c];
         if (cur_queue.size() < config_.num_alternative_paths) {
-            cur_queue.emplace(packaged_alignment);
+            cur_queue.emplace(a);
             added = true;
-        } else if (!cmp_(packaged_alignment, cur_queue.minimum())) {
-            cur_queue.update(cur_queue.begin(), packaged_alignment);
+        } else if (!cmp_(a, cur_queue.minimum())) {
+            cur_queue.update(cur_queue.begin(), a);
             added = true;
         }
     }
     if (!added)
         return false;
 
-    auto &cur_queue = path_queue_[ncol];
-    if (!cmp_(packaged_alignment, cur_queue.minimum())) {
-        cur_queue.update(cur_queue.begin(), packaged_alignment);
+    if (!cmp_(a, nqueue.minimum())) {
+        nqueue.update(nqueue.begin(), a);
     } else {
-        cur_queue.emplace(packaged_alignment);
+        nqueue.emplace(a);
     }
     return true;
 }
