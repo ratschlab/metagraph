@@ -70,15 +70,15 @@ template <class AlignmentCompare>
 inline bool AlignmentAggregator<AlignmentCompare>::add_alignment(Alignment&& alignment) {
     auto a = std::make_shared<Alignment>(std::move(alignment));
 
-    auto &nqueue = path_queue_[ncol];
-
     if (path_queue_.empty()) {
-        nqueue.emplace(a);
+        path_queue_[ncol].emplace(a);
         for (Column c : a->label_columns) {
             path_queue_[c].emplace(a);
         }
         return true;
     }
+
+    auto &nqueue = path_queue_[ncol];
 
     if (a->label_columns.empty()) {
         if (path_queue_.size() != 1)
