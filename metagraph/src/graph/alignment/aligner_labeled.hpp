@@ -170,9 +170,7 @@ class LabeledBacktrackingExtender : public LabeledExtender {
                                 const AlignmentAggregator &aggregator,
                                 std::string_view query)
           : LabeledExtender(labeled_graph, config, aggregator, query),
-            extensions_(labeled_graph_.get_graph(),
-                        aggregator.get_query(false),
-                        aggregator.get_query(true), this->config_) {}
+            extensions_(this->config_) {}
 
     virtual ~LabeledBacktrackingExtender() {}
 

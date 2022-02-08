@@ -329,7 +329,7 @@ std::vector<Alignment> chain_alignments(std::vector<Alignment>&& alignments,
 
     DBGAlignerConfig no_chain_config { config };
     no_chain_config.post_chain_alignments = false;
-    AlignmentAggregator<AlignmentCompare> aggregator(graph, query, rc_query, no_chain_config);
+    AlignmentAggregator<AlignmentCompare> aggregator(no_chain_config);
 
     std::sort(alignments.begin(), alignments.end(), [](const auto &a, const auto &b) {
         return std::make_tuple(a.get_orientation(),
@@ -344,8 +344,8 @@ std::vector<Alignment> chain_alignments(std::vector<Alignment>&& alignments,
                               b.get_sequence().size());
     });
 
-    auto run = [&](bool orientation, auto begin, auto end) {
-        std::string_view this_query = aggregator.get_query(orientation);
+    auto run = [&](bool rev_compl, auto begin, auto end) {
+        std::string_view this_query = rev_compl ? rc_query : query;
         std::vector<score_t> best_score(this_query.size() + 1, 0);
         for (auto it = begin; it != end; ++it) {
             size_t end_pos = it->get_query().data() + it->get_query().size()

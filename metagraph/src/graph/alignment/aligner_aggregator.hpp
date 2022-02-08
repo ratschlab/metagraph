@@ -10,10 +10,10 @@
 #include "common/utils/template_utils.hpp"
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
 
+
 namespace mtg {
 namespace graph {
 namespace align {
-
 
 template <typename T, class Container = std::vector<T>, class Compare = std::less<T>>
 class PriorityDeque : public boost::container::priority_deque<T, Container, Compare> {
@@ -42,11 +42,7 @@ class AlignmentAggregator {
 
     static constexpr Column ncol = std::numeric_limits<Column>::max();
 
-    AlignmentAggregator(const DeBruijnGraph &graph,
-                        std::string_view query,
-                        std::string_view rc_query,
-                        const DBGAlignerConfig &config)
-          : query_(query), rc_query_(rc_query), config_(config), graph_(graph) {
+    explicit AlignmentAggregator(const DBGAlignerConfig &config) : config_(config) {
         assert(config_.num_alternative_paths);
     }
 
@@ -65,15 +61,8 @@ class AlignmentAggregator {
 
     void clear() { path_queue_.clear(); }
 
-    std::string_view get_query(bool is_reverse_complement) const {
-        return is_reverse_complement ? rc_query_ : query_;
-    }
-
   private:
-    std::string_view query_;
-    std::string_view rc_query_;
     const DBGAlignerConfig &config_;
-    const DeBruijnGraph &graph_;
     VectorMap<Column, PathQueue> path_queue_;
     ValCmp cmp_;
 };

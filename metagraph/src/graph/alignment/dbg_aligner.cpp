@@ -264,7 +264,8 @@ void ISeedAndExtendAligner<AlignmentCompare>
     for (size_t i = 0; i < seq_batch.size(); ++i) {
         const auto &[header, query, is_reverse_complement] = seq_batch[i];
         const auto &[seeder, nodes, seeder_rc, nodes_rc] = seeders[i];
-        AlignmentAggregator aggregator(graph_, paths[i].get_query(false), paths[i].get_query(true), config_);
+        // paths[i].get_query(false), paths[i].get_query(true)
+        AlignmentAggregator aggregator(config_);
 
         size_t num_seeds = 0;
         size_t num_explored_nodes = 0;
@@ -388,9 +389,7 @@ void ISeedAndExtendAligner<AlignmentCompare>
     gap_fill_config.allow_left_trim = false;
     gap_fill_config.trim_offset_after_extend = false;
 
-    std::string_view fw = chain[0].get_orientation() ? query_rc : query;
-    std::string_view bw = chain[0].get_orientation() ? query : query_rc;
-    AlignmentAggregator dummy(graph_, fw, bw, config_);
+    AlignmentAggregator dummy(config_);
     const char *query_end = query.data() + query.size();
     assert(chain.size());
 
@@ -536,7 +535,7 @@ std::tuple<size_t, size_t, size_t> ISeedAndExtendAligner<AlignmentCompare>
             exit(1);
         }
 
-        AlignmentAggregator aggregator(graph_, forward, reverse, config_);
+        AlignmentAggregator aggregator(config_);
 
         bool terminate = false;
         size_t this_num_explored;
