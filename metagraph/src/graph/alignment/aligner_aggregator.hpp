@@ -78,12 +78,11 @@ inline bool AlignmentAggregator<AlignmentCompare>::add_alignment(Alignment&& ali
         return true;
     }
 
-    auto &nqueue = path_queue_[ncol];
-
     if (a->label_columns.empty()) {
         if (path_queue_.size() != 1)
             return false;
 
+        auto &nqueue = path_queue_[ncol];
         if (nqueue.size() < config_.num_alternative_paths
                 || config_.post_chain_alignments) {
             for (const auto &aln : nqueue) {
@@ -102,12 +101,12 @@ inline bool AlignmentAggregator<AlignmentCompare>::add_alignment(Alignment&& ali
         return true;
     }
 
-    for (const auto &aln : nqueue) {
+    for (const auto &aln : path_queue_[ncol]) {
         if (*a == *aln)
             return false;
     }
 
-    if (nqueue.size() < config_.num_alternative_paths
+    if (path_queue_[ncol].size() < config_.num_alternative_paths
             || config_.post_chain_alignments) {
         for (Column c : a->label_columns) {
             auto &cur_queue = path_queue_[c];
@@ -119,12 +118,13 @@ inline bool AlignmentAggregator<AlignmentCompare>::add_alignment(Alignment&& ali
             cur_queue.emplace(a);
         }
 
-        nqueue.emplace(a);
+        path_queue_[ncol].emplace(a);
         return true;
     }
 
-    if (cmp_(a, nqueue.minimum())
-            && a->get_score() < nqueue.maximum()->get_score() * config_.rel_score_cutoff) {
+    if (cmp_(a, path_queue_[ncol].minimum())
+            && a->get_score()
+                < path_queue_[ncol].maximum()->get_score() * config_.rel_score_cutoff) {
         return false;
     }
 
@@ -142,10 +142,10 @@ inline bool AlignmentAggregator<AlignmentCompare>::add_alignment(Alignment&& ali
     if (!added)
         return false;
 
-    if (!cmp_(a, nqueue.minimum())) {
-        nqueue.update(nqueue.begin(), a);
+    if (!cmp_(a, path_queue_[ncol].minimum())) {
+        path_queue_[ncol].update(path_queue_[ncol].begin(), a);
     } else {
-        nqueue.emplace(a);
+        path_queue_[ncol].emplace(a);
     }
     return true;
 }
