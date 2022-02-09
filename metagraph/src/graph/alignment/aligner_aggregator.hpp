@@ -70,13 +70,10 @@ class AlignmentAggregator {
     score_t get_label_max_path_score(Column label = ncol) const;
 
     score_t get_global_min() const {
-        auto find = path_queue_.find(ncol);
-        if (find == path_queue_.end()) {
-            assert(path_queue_.empty());
+        if (path_queue_.empty())
             return config_.ninf;
-        }
 
-        score_t global_min = find->second.maximum()->get_score();
+        score_t global_min = path_queue_.at(ncol).maximum()->get_score();
         if (global_min > 0)
             global_min *= config_.rel_score_cutoff;
 

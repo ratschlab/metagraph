@@ -322,7 +322,7 @@ void ISeedAndExtendAligner<AlignmentCompare>
                 best_score = alignment.get_score();
                 query_coverage = alignment.get_query().size();
             }
-            paths[i].emplace_back(std::forward<decltype(alignment)>(alignment));
+            paths[i].emplace_back(std::move(alignment));
         }
 
         if (common::get_verbose()) {
@@ -338,10 +338,8 @@ void ISeedAndExtendAligner<AlignmentCompare>
             );
 
             if (num_labels) {
-                log_out += fmt::format(
-                    "\tnodes/k-mer/label: {:.2f}",
-                    static_cast<double>(num_explored_nodes) / nodes.size() / num_labels
-                );
+                log_out += fmt::format("\tnodes/k-mer/label: {:.2f}",
+                        static_cast<double>(num_explored_nodes) / nodes.size() / num_labels);
             }
 
             common::logger->trace(log_out);

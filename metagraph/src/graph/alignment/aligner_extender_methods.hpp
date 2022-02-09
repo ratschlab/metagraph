@@ -138,9 +138,7 @@ class DefaultColumnExtender : public SeedFilteringExtender {
     std::vector<std::pair<size_t, score_t>> xdrop_cutoffs_;
     size_t num_extensions_ = 0;
 
-    virtual const DeBruijnGraph& get_graph() const override final {
-        return *graph_;
-    }
+    virtual const DeBruijnGraph& get_graph() const override final { return *graph_; }
 
     // If force_fixed_seed is true, then all alignments must have the seed as a
     // prefix. Otherwise, only the first node of the seed is used as a starting node.
