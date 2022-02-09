@@ -1263,6 +1263,7 @@ bool Alignment::is_valid(const DeBruijnGraph &graph, const DBGAlignerConfig *con
 
 AlignmentResults::AlignmentResults(std::string_view query, bool is_reverse_complement) {
     // pad sequences for easier access in 64-bit blocks
+    std::string query_;
     query_.reserve(query.size() + 8);
 
     // TODO: use alphabet encoder
@@ -1284,6 +1285,9 @@ AlignmentResults::AlignmentResults(std::string_view query, bool is_reverse_compl
     reverse_complement(query_rc_.begin(), query_rc_.end());
     if (is_reverse_complement)
         std::swap(query_, query_rc_);
+
+    this->query_ = std::make_shared<const std::string>(std::move(query_));
+    this->query_rc_ = std::make_shared<const std::string>(std::move(query_rc_));
 }
 
 } // namespace align
