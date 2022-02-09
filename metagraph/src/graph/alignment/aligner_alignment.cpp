@@ -1263,31 +1263,27 @@ bool Alignment::is_valid(const DeBruijnGraph &graph, const DBGAlignerConfig *con
 
 QueryAlignment::QueryAlignment(std::string_view query, bool is_reverse_complement) {
     // pad sequences for easier access in 64-bit blocks
-    std::string query_padded;
-    query_padded.reserve(query.size() + 8);
+    query_.reserve(query.size() + 8);
 
     // TODO: use alphabet encoder
     // transform to upper and fix non-standard characters
-    std::transform(query.begin(), query.end(), std::back_inserter(query_padded),
+    std::transform(query.begin(), query.end(), std::back_inserter(query_),
                    [](char c) { return c >= 0 ? toupper(c) : 127; });
 
     // fill padding with '\0'
-    memset(query_padded.data() + query.size(), '\0', query_padded.capacity() - query.size());
+    memset(query_.data() + query.size(), '\0', query_.capacity() - query.size());
 
     // set the reverse complement
-    std::string query_rc_padded(query_padded);
+    std::string query_rc_(query_);
 
     // fill padding just in case optimizations removed it
-    query_rc_padded.reserve(query.size() + 8);
-    memset(query_rc_padded.data() + query.size(), '\0', query_rc_padded.capacity() - query.size());
+    query_rc_.reserve(query.size() + 8);
+    memset(query_rc_.data() + query.size(), '\0', query_rc_.capacity() - query.size());
 
     // reverse complement
-    reverse_complement(query_rc_padded.begin(), query_rc_padded.end());
+    reverse_complement(query_rc_.begin(), query_rc_.end());
     if (is_reverse_complement)
-        std::swap(query_padded, query_rc_padded);
-
-    query_ = std::make_shared<const std::string>(std::move(query_padded));
-    query_rc_ = std::make_shared<const std::string>(std::move(query_rc_padded));
+        std::swap(query_, query_rc_);
 }
 
 } // namespace align

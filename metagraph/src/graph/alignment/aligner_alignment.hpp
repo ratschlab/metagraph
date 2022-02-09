@@ -213,10 +213,6 @@ class QueryAlignment {
   public:
     explicit QueryAlignment(std::string_view query, bool is_reverse_complement = false);
 
-    explicit QueryAlignment(std::shared_ptr<const std::string> query,
-                            std::shared_ptr<const std::string> query_rc)
-          : query_(query), query_rc_(query_rc) {}
-
     template <typename... Args>
     void emplace_back(Args&&... args) {
         alignments_.emplace_back(std::forward<Args>(args)...);
@@ -228,12 +224,8 @@ class QueryAlignment {
                 + get_query(alignments_.back().get_orientation()).size());
     }
 
-    std::shared_ptr<const std::string> get_query_ptr(bool reverse_complement = false) const {
-        return !reverse_complement ? query_ : query_rc_;
-    }
-
     const std::string& get_query(bool reverse_complement = false) const {
-        return *get_query_ptr(reverse_complement);
+        return !reverse_complement ? query_ : query_rc_;
     }
 
     size_t size() const { return alignments_.size(); }
@@ -244,8 +236,8 @@ class QueryAlignment {
     const std::vector<Alignment>& data() const { return alignments_; }
 
   private:
-    std::shared_ptr<const std::string> query_;
-    std::shared_ptr<const std::string> query_rc_;
+    std::string query_;
+    std::string query_rc_;
     std::vector<Alignment> alignments_;
 };
 
