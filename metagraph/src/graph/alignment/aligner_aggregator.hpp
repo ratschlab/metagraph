@@ -56,6 +56,11 @@ class AlignmentAggregator {
 
     void clear() { path_queue_.clear(); }
 
+    size_t num_labels() const {
+        // don't count the ncol queue
+        return path_queue_.size() ? path_queue_.size() - 1 : 0;
+    }
+
   private:
     const DBGAlignerConfig &config_;
     VectorMap<Column, PathQueue> path_queue_;
@@ -68,7 +73,7 @@ class AlignmentAggregator {
         auto find = path_queue_.find(ncol);
         if (find == path_queue_.end()) {
             assert(path_queue_.empty());
-            return config_.min_cell_score;
+            return config_.ninf;
         }
 
         score_t global_min = find->second.maximum()->get_score();
@@ -210,7 +215,7 @@ inline auto AlignmentAggregator<AlignmentCompare>
     return find == path_queue_.end()
             || find->second.size() < config_.num_alternative_paths
             || config_.post_chain_alignments
-        ? config_.min_path_score
+        ? config_.ninf
         : find->second.minimum()->get_score();
 }
 
@@ -218,8 +223,7 @@ template <class AlignmentCompare>
 inline auto AlignmentAggregator<AlignmentCompare>
 ::get_label_max_path_score(Column label) const -> score_t {
     auto find = path_queue_.find(label);
-    return find == path_queue_.end() ? config_.min_path_score
-                                     : find->second.maximum()->get_score();
+    return find == path_queue_.end() ? config_.ninf : find->second.maximum()->get_score();
 }
 
 template <class AlignmentCompare>

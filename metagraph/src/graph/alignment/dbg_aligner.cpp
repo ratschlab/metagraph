@@ -297,8 +297,8 @@ void ISeedAndExtendAligner<AlignmentCompare>
                                       add_alignment, get_min_path_score);
 
             num_seeds += seeds;
-            num_extensions += extensions;
-            num_explored_nodes += explored_nodes;
+            num_extensions += extensions + extender_rc->num_extensions();
+            num_explored_nodes += explored_nodes + extender_rc->num_explored_nodes();
 
         } else {
             align_core(*seeder, *extender, add_alignment, get_min_path_score, false);
@@ -309,7 +309,8 @@ void ISeedAndExtendAligner<AlignmentCompare>
 
         num_explored_nodes += extender->num_explored_nodes();
         num_extensions += extender->num_extensions();
-        size_t num_labels = std::max(size_t { 1 }, aggregator.data().size() - 1);
+
+        size_t num_labels = aggregator.num_labels();
         score_t best_score = std::numeric_limits<score_t>::min();
         size_t query_coverage = 0;
 
@@ -325,17 +326,27 @@ void ISeedAndExtendAligner<AlignmentCompare>
             paths[i].emplace_back(std::forward<decltype(alignment)>(alignment));
         }
 
-        common::logger->trace(
-            "{}\tlength: {}\tcovered: {}\tbest score: {}\tseeds: {}\textensions: {}\t"
-            "explored nodes: {}\texplored nodes/extension: {:.2f}\texplored nodes/k-mer: {:.2f}\t"
-            "labels: {}\tnodes/k-mer/label: {:.2f}",
-            header, query.size(), query_coverage, best_score, num_seeds,
-            num_extensions, num_explored_nodes,
-            static_cast<double>(num_explored_nodes) / num_extensions,
-            static_cast<double>(num_explored_nodes) / nodes.size(),
-            num_labels,
-            static_cast<double>(num_explored_nodes) / nodes.size() / num_labels
-        );
+        if (common::get_verbose()) {
+            std::string log_out = fmt::format(
+                "{}\tlength: {}\tcovered: {}\tbest score: {}\tseeds: {}\textensions: {}\t"
+                "explored nodes: {}\texplored nodes/extension: {:.2f}\t"
+                "explored nodes/k-mer: {:.2f}\tlabels: {}",
+                header, query.size(), query_coverage, best_score, num_seeds,
+                num_extensions, num_explored_nodes,
+                static_cast<double>(num_explored_nodes) / num_extensions,
+                static_cast<double>(num_explored_nodes) / nodes.size(),
+                num_labels
+            );
+
+            if (num_labels) {
+                log_out += fmt::format(
+                    "\tnodes/k-mer/label: {:.2f}",
+                    static_cast<double>(num_explored_nodes) / nodes.size() / num_labels
+                );
+            }
+
+            common::logger->trace(log_out);
+        }
 
         callback(header, std::move(paths[i]));
     };

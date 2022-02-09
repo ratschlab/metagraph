@@ -61,7 +61,7 @@ class SeedFilteringExtender : public IExtender {
 
     virtual ~SeedFilteringExtender() {}
 
-    virtual size_t num_explored_nodes() const override {
+    virtual size_t num_explored_nodes() const override final {
         return explored_nodes_previous_ + conv_checker_.size();
     }
 
