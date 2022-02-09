@@ -1164,17 +1164,17 @@ void Alignment::insert_gap_prefix(ssize_t gap_length,
     offset_ = graph.get_k() - 1;
 }
 
-
-bool spell_path(const DeBruijnGraph &graph,
-                const std::vector<DeBruijnGraph::node_index> &path,
-                std::string &seq,
-                size_t offset) {
+// Return the string spelled by the path. This path may have disconnects (if it came)
+// from a chain alignment), so this method inserts
+std::string spell_path(const DeBruijnGraph &graph,
+                       const std::vector<DeBruijnGraph::node_index> &path,
+                       size_t offset) {
+    std::string seq;
     assert(offset < graph.get_k());
 
     if (path.empty())
-        return "";
+        return seq;
 
-    seq.clear();
     seq.reserve(path.size() + graph.get_k() - 1 - offset);
 
     size_t num_dummy = 0;
@@ -1188,7 +1188,7 @@ bool spell_path(const DeBruijnGraph &graph,
     for (size_t i = 1; i < path.size(); ++i) {
         if (num_dummy > graph.get_k()) {
             logger->error("Too many dummy nodes\n{}", fmt::join(path, " "));
-            return false;
+            throw std::runtime_error("");
         }
 
         if (path[i]) {
@@ -1209,7 +1209,7 @@ bool spell_path(const DeBruijnGraph &graph,
                                   path[i - 1], path[i],
                                   graph.get_node_sequence(path[i - 1]),
                                   graph.get_node_sequence(path[i]));
-                    return false;
+                    throw std::runtime_error("");
                 }
 
                 seq += next;
@@ -1221,39 +1221,34 @@ bool spell_path(const DeBruijnGraph &graph,
     }
 
     assert(seq.size() == path.size() + graph.get_k() - 1 - offset);
-
-    return true;
+    return seq;
 }
 
 bool Alignment::is_valid(const DeBruijnGraph &graph, const DBGAlignerConfig *config) const {
     if (empty())
         return true;
 
-    std::string path;
-    if (!spell_path(graph, nodes_, path, offset_)) {
-        std::cerr << *this << std::endl;
-        return false;
-    }
-
-    if (path != sequence_) {
-        std::cerr << "ERROR: stored sequence is incorrect" << std::endl
-                  << path << "\t"
-                  << *this << std::endl;
+    try {
+        std::string spelling = spell_path(graph, nodes_, offset_);
+        if (spelling != sequence_) {
+            logger->error("Stored sequence is incorrect\n{}\t{}", spelling, *this);
+            return false;
+        }
+    } catch (const std::runtime_error&) {
+        logger->error("{}", *this);
         return false;
     }
 
     if (!cigar_.is_valid(sequence_, query_)) {
-        std::cerr << *this << std::endl;
+        logger->error("{}", *this);
         return false;
     }
 
     score_t cigar_score = config ? config->score_cigar(sequence_, query_, cigar_) : 0;
     cigar_score += extra_penalty;
     if (config && score_ != cigar_score) {
-        std::cerr << "ERROR: mismatch between CIGAR and score" << std::endl
-                  << "CIGAR score: " << cigar_score << std::endl
-                  << query_ << "\t"
-                  << *this << std::endl;
+        logger->error("Mismatch between CIGAR and score\nCigar score: {}\n{}\t{}",
+                      cigar_score, query_, *this);
         return false;
     }
 
