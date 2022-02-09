@@ -277,7 +277,9 @@ void ISeedAndExtendAligner<AlignmentCompare>
 
         auto get_min_path_score = [&](const Alignment &seed) {
             return std::max(config_.min_path_score,
-                            aggregator.get_min_path_score(seed.label_columns));
+                            seed.label_columns.size()
+                                ? aggregator.get_score_cutoff(seed.label_columns)
+                                : aggregator.get_global_cutoff());
         };
 
         std::string_view this_query = paths[i].get_query(is_reverse_complement);
@@ -309,7 +311,7 @@ void ISeedAndExtendAligner<AlignmentCompare>
         num_explored_nodes += extender->num_explored_nodes();
         num_extensions += extender->num_extensions();
 
-        size_t num_labels = aggregator.num_labels();
+        size_t aligned_labels = aggregator.num_aligned_labels();
         score_t best_score = std::numeric_limits<score_t>::min();
         size_t query_coverage = 0;
 
@@ -334,12 +336,12 @@ void ISeedAndExtendAligner<AlignmentCompare>
                 num_extensions, num_explored_nodes,
                 static_cast<double>(num_explored_nodes) / num_extensions,
                 static_cast<double>(num_explored_nodes) / nodes.size(),
-                num_labels
+                aligned_labels
             );
 
-            if (num_labels) {
+            if (aligned_labels) {
                 log_out += fmt::format("\tnodes/k-mer/label: {:.2f}",
-                        static_cast<double>(num_explored_nodes) / nodes.size() / num_labels);
+                        static_cast<double>(num_explored_nodes) / nodes.size() / aligned_labels);
             }
 
             common::logger->trace(log_out);

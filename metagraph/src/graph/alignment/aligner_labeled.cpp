@@ -415,7 +415,7 @@ bool LabeledBacktrackingExtender<AlignmentCompare>::skip_backtrack_start(size_t 
         || label_intersection_.size() == label_intersection_coords_.size());
 
     cur_min_path_score_ = label_intersection_.size()
-        ? extensions_.get_min_path_score(label_intersection_)
+        ? extensions_.get_score_cutoff(label_intersection_)
         : std::numeric_limits<score_t>::max();
 
     // skip backtracking from this node if no labels could be determined for it
@@ -606,7 +606,7 @@ void LabeledBacktrackingExtender<AlignmentCompare>
     }
 
     cur_min_path_score_ = label_intersection_.size()
-        ? extensions_.get_min_path_score(label_intersection_)
+        ? extensions_.get_score_cutoff(label_intersection_)
         : std::numeric_limits<score_t>::max();
 
     if ((!config_.allow_left_trim && table_i) || (
