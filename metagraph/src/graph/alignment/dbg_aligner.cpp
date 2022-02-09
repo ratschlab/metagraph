@@ -654,10 +654,8 @@ std::tuple<size_t, size_t, size_t> ISeedAndExtendAligner<AlignmentCompare>
 
                         if (auto *filter = dynamic_cast<SeedFilteringExtender*>(&fwd_extender)) {
                             for (node_index node : path.get_nodes()) {
-                                filter->filter_nodes(
-                                    node, path.get_clipping(),
-                                    query.size() - path.get_end_clipping()
-                                );
+                                filter->filter_nodes(node, path.get_clipping(),
+                                                     query.size() - path.get_end_clipping());
                             }
                         }
                     }

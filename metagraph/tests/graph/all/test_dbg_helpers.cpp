@@ -151,15 +151,13 @@ build_graph<DBGSuccinct>(uint64_t k,
     return graph;
 }
 
+// Cast DeBruijnGraph to DBGSuccinct. Also works for graphs wrapped into CanonicalDBG
 DBGSuccinct& get_dbg_succ(DeBruijnGraph &graph) {
-    // TODO: what if CanonicalDBG is not the highest level? find a better way to do this
-    if (const auto *canonical = dynamic_cast<CanonicalDBG*>(&graph)) {
-        return const_cast<DBGSuccinct&>(
-            dynamic_cast<const DBGSuccinct&>(canonical->get_graph())
-        );
-    }
+    const DeBruijnGraph *g = &graph;
+    if (const auto *canonical = dynamic_cast<const CanonicalDBG*>(g))
+        g = &canonical->get_graph();
 
-    return const_cast<DBGSuccinct&>(dynamic_cast<const DBGSuccinct&>(graph));
+    return const_cast<DBGSuccinct&>(dynamic_cast<const DBGSuccinct&>(*g));
 }
 
 BOSS& get_boss(DeBruijnGraph &graph) {
