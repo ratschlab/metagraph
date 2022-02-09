@@ -37,6 +37,9 @@ class AnnotationBuffer {
 
     static constexpr Row nrow = std::numeric_limits<Row>::max();
 
+    // placeholder index for an unfetched annotation
+    static constexpr size_t nannot = std::numeric_limits<size_t>::max();
+
     AnnotationBuffer(const DeBruijnGraph &graph, const Annotator &annotator);
 
     const DeBruijnGraph& get_graph() const { return graph_; }
@@ -84,13 +87,30 @@ class AnnotationBuffer {
 
     size_t num_cached() const { return added_rows_.size(); }
 
+    template <typename... Args>
+    size_t emplace_label_set(Args&&... args) {
+        auto it = labels_set_.emplace(std::forward<Args>(args)...).first;
+        return it - labels_set_.begin();
+    }
+
+    size_t get_index(const Vector<Column> &labels) const {
+        auto find = labels_set_.find(labels);
+        if (find == labels_set_.end())
+            return nannot;
+
+        return find - labels_set_.begin();
+    }
+
+    const Vector<Column>& get_labels_from_index(size_t i) const {
+        assert(i != nannot);
+        assert(i < labels_set_.size());
+        return labels_set_.data()[i];
+    }
+
   private:
     const DeBruijnGraph &graph_;
     const Annotator &annotator_;
     const annot::matrix::MultiIntMatrix *multi_int_;
-
-    // placeholder index for an unfetched annotation
-    static constexpr size_t nannot = std::numeric_limits<size_t>::max();
 
     // keep a unique set of annotation rows
     VectorSet<Vector<Column>, utils::VectorHash> labels_set_;
@@ -143,7 +163,7 @@ class LabeledExtender : public DefaultColumnExtender {
 
   protected:
     virtual std::vector<Alignment> backtrack(score_t min_path_score,
-                                             std::string_view window) override {
+                                             std::string_view window) override final {
         // extract all labels for explored nodes
         labeled_graph_.flush();
 
@@ -152,7 +172,7 @@ class LabeledExtender : public DefaultColumnExtender {
     }
 
     virtual std::vector<Alignment> extend(score_t min_path_score,
-                                          bool force_fixed_seed) override {
+                                          bool force_fixed_seed) override final {
         last_buffered_table_i_ = 0;
         return DefaultColumnExtender::extend(min_path_score, force_fixed_seed);
     }
@@ -167,47 +187,27 @@ class LabeledBacktrackingExtender : public LabeledExtender {
     LabeledBacktrackingExtender(AnnotationBuffer &labeled_graph,
                                 const DBGAlignerConfig &config,
                                 std::string_view query)
-          : LabeledExtender(labeled_graph, config, query),
-            extensions_(this->config_) {}
+          : LabeledExtender(labeled_graph, config, query) {}
 
     virtual ~LabeledBacktrackingExtender() {}
 
   protected:
     virtual bool set_seed(const Alignment &seed) override {
         if (DefaultColumnExtender::set_seed(seed)) {
-            seed_labels_ = seed.label_columns;
-            seed_label_coordinates_ = seed.label_coordinates;
+            fetched_label_i_ = labeled_graph_.emplace_label_set(seed.label_columns);
+            assert(fetched_label_i_ != AnnotationBuffer::nannot);
+            node_labels_.assign(1, fetched_label_i_);
             return true;
         }
 
         return false;
     }
 
-    virtual std::vector<Alignment> extend(score_t min_path_score,
-                                          bool force_fixed_seed) override final {
-        // the overridden backtrack populates extensions_, so this should return nothing
-        LabeledExtender::extend(min_path_score, force_fixed_seed);
-
-        // fetch the alignments from extensions_
-        return extensions_.get_alignments();
-    }
-
-    // backtrack through the DP table to reconstruct alignments
-    virtual std::vector<Alignment> backtrack(score_t min_path_score,
-                                             std::string_view window) override final {
-        // reset the per-node temporary label storage
-        diff_label_sets_.clear();
-
-        // run backtracking
-        return LabeledExtender::backtrack(min_path_score, window);
-    }
-
     // overrides for backtracking helpers
     virtual bool terminate_backtrack_start(const std::vector<Alignment> &) const override final {
-        return this->seed_->label_columns.size() && seed_labels_.empty();
+        return !fetched_label_i_;
     }
 
-    virtual bool terminate_backtrack() const override final { return label_intersection_.empty(); }
     virtual bool skip_backtrack_start(size_t i) override final;
 
     // since multi-node seeds may span across different labels, we no longer
@@ -237,26 +237,16 @@ class LabeledBacktrackingExtender : public LabeledExtender {
                                  score_t extra_penalty,
                                  const std::function<void(Alignment&&)> &callback) override final;
 
-    virtual void pop(size_t i) override { DefaultColumnExtender::pop(i); }
+    virtual void pop(size_t i) override {
+        assert(i < node_labels_.size());
+        DefaultColumnExtender::pop(i);
+        node_labels_.erase(node_labels_.begin() + i, node_labels_.begin() + i + 1);
+    }
 
   private:
-    // local set of alignments
-    AlignmentAggregator<AlignmentCompare> extensions_;
-
-    // keep track of the label set for the current backtracking
+    std::vector<size_t> node_labels_;
+    size_t fetched_label_i_;
     Vector<Column> label_intersection_;
-    score_t cur_min_path_score_;
-    size_t last_path_size_;
-
-    Vector<Tuple> label_intersection_coords_;
-
-    Vector<Column> seed_labels_;
-    Vector<Tuple> seed_label_coordinates_;
-
-    // After a node has been visited during backtracking, we keep track of which
-    // of its labels haven't been considered yet. This way, if backtracking is
-    // called from this node, then we can restrict it to these labels.
-    tsl::hopscotch_map<size_t, std::pair<Vector<Column>, Vector<Tuple>>> diff_label_sets_;
 };
 
 template <class AlignmentCompare = LocalAlignmentLess,
@@ -510,6 +500,8 @@ class LabeledAligner : public ISeedAndExtendAligner<AlignmentCompare> {
                 }
             }
 
+            labeled_graph_.emplace_label_set(seed.label_columns);
+
             if (seed.get_offset() && seed.label_coordinates.size()) {
                 for (auto &tuple : seed.label_coordinates) {
                     for (auto &coord : tuple) {
@@ -519,7 +511,8 @@ class LabeledAligner : public ISeedAndExtendAligner<AlignmentCompare> {
             }
         }
 
-        auto seed_it = std::remove_if(seeds.begin(), seeds.end(), [](const auto &a) {
+        auto seed_it = std::remove_if(seeds.begin(), seeds.end(), [&](const auto &a) {
+            assert(labeled_graph_.get_index(a.label_columns) != AnnotationBuffer::nannot);
             return a.label_columns.empty();
         });
 

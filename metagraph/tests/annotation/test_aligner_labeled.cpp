@@ -39,8 +39,7 @@ inline std::vector<std::string> get_alignment_labels(const AnnotatedDBG &anno_gr
 
     std::vector<std::string> dec_labels;
     for (uint64_t label : alignment.label_columns) {
-        EXPECT_TRUE(enc_labels.count(label))
-            << alignment << " " << label_encoder.decode(label);
+        EXPECT_TRUE(enc_labels.count(label)) << alignment;
         dec_labels.emplace_back(label_encoder.decode(label));
     }
 
@@ -100,7 +99,7 @@ TYPED_TEST(LabeledAlignerTest, SimpleTangleGraph) {
                     break;
                 }
             }
-            EXPECT_TRUE(found) << alignment << " " << alignment.label_columns.size();
+            EXPECT_TRUE(found) << alignment;
         }
     }
 }
@@ -133,8 +132,7 @@ TEST(LabeledAlignerTest, SimpleTangleGraphSuffixSeed) {
         { std::string("TGAAATGCAT"), {{
 #if ! _PROTEIN_GRAPH
             { std::string("C"), std::string("TGGAATGCAT") }, // 2=1X7=
-            { std::string("B"), std::string("TCGAATGCCT") }, // 1=2X5=1X1=
-            { std::string("A"), std::string("TGCC") } // 5S1=2X1=1S
+            { std::string("B"), std::string("TCGAATGCCT") } // 1=2X5=1X1=
 #else
             { std::string("C"), std::string("AATGCAT") }, // 3S7=
             { std::string("B"), std::string("AATGCCT") } // 3S5=1X1=
@@ -156,7 +154,7 @@ TEST(LabeledAlignerTest, SimpleTangleGraphSuffixSeed) {
                     break;
                 }
             }
-            EXPECT_TRUE(found) << alignment << " " << alignment.label_columns.size();
+            EXPECT_TRUE(found) << alignment;
         }
     }
 }
@@ -212,7 +210,7 @@ TYPED_TEST(LabeledAlignerTest, CanonicalTangleGraph) {
                         break;
                     }
                 }
-                EXPECT_TRUE(found) << alignment << " " << alignment.label_columns.size();
+                EXPECT_TRUE(found) << alignment;
             }
         }
     }
