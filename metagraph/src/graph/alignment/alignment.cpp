@@ -1,4 +1,4 @@
-#include "aligner_alignment.hpp"
+#include "alignment.hpp"
 
 #include "graph/representation/base/sequence_graph.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
@@ -1261,7 +1261,7 @@ bool Alignment::is_valid(const DeBruijnGraph &graph, const DBGAlignerConfig *con
 }
 
 
-QueryAlignment::QueryAlignment(std::string_view query, bool is_reverse_complement) {
+AlignmentResults::AlignmentResults(std::string_view query, bool is_reverse_complement) {
     // pad sequences for easier access in 64-bit blocks
     query_.reserve(query.size() + 8);
 

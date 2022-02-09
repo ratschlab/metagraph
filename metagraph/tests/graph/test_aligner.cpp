@@ -321,18 +321,18 @@ TYPED_TEST(DBGAlignerTest, align_straight_forward_and_reverse_complement) {
     check_extend(graph, aligner.get_config(), paths, query);
     auto ext_paths = get_extend(graph, config_fwd_and_rev, paths, query);
 
-    EXPECT_TRUE(std::equal(paths.data().begin(), paths.data().end(),
-                           ext_paths.data().begin(), ext_paths.data().end()));
+    EXPECT_TRUE(std::equal(paths.begin(), paths.end(),
+                           ext_paths.begin(), ext_paths.end()));
 
     // test copy
     auto paths_copy = paths;
-    for (const auto &path : paths_copy.data()) {
+    for (const auto &path : paths_copy) {
         EXPECT_TRUE(path.is_valid(*graph, &config));
     }
 
     // test move
     auto paths_move = std::move(paths);
-    for (const auto &path : paths_move.data()) {
+    for (const auto &path : paths_move) {
         EXPECT_TRUE(path.is_valid(*graph, &config));
     }
 }

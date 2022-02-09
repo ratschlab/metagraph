@@ -1,7 +1,8 @@
 #ifndef __ALIGNER_CHAINER_HPP__
 #define __ALIGNER_CHAINER_HPP__
 
-#include "aligner_alignment.hpp"
+#include "alignment.hpp"
+
 
 namespace mtg {
 namespace graph {
@@ -9,15 +10,6 @@ namespace align {
 
 typedef std::vector<Alignment> Chain;
 typedef Alignment::score_t score_t;
-typedef std::tuple<Alignment::Column /* label */,
-                   ssize_t /* coordinate */,
-                   size_t /* seed clipping */,
-                   Alignment::node_index /* first node of seed */,
-                   ssize_t /* seed length */,
-                   score_t /* chain score */,
-                   uint32_t /* previous seed index */,
-                   uint32_t /* current seed index */> TableElem;
-typedef std::vector<TableElem> ChainDPTable;
 
 // Given sets of forward and reverse-complement seeds, construct and call chains of seeds
 // until terminate() returns true.

@@ -4,7 +4,7 @@
 #include <cassert>
 #include <functional>
 
-#include "aligner_alignment.hpp"
+#include "alignment.hpp"
 #include "aligner_aggregator.hpp"
 #include "aligner_seeder_methods.hpp"
 #include "aligner_extender_methods.hpp"
@@ -27,7 +27,7 @@ class IDBGAligner {
                        std::string /* seq */,
                        bool /* orientation of seq */> Query;
     typedef std::function<void(std::string_view /* header */,
-                               QueryAlignment&& /* alignments */)> AlignmentCallback;
+                               AlignmentResults&& /* alignments */)> AlignmentCallback;
 
     virtual ~IDBGAligner() {}
 
@@ -36,7 +36,7 @@ class IDBGAligner {
                              const AlignmentCallback &callback) const = 0;
 
     // Convenience method
-    QueryAlignment align(std::string_view query, bool is_reverse_complement = false) const;
+    AlignmentResults align(std::string_view query, bool is_reverse_complement = false) const;
 };
 
 template <class AlignmentCompare = LocalAlignmentLess>
@@ -115,7 +115,7 @@ class ISeedAndExtendAligner : public IDBGAligner {
 
     BatchSeeders
     build_seeders(const std::vector<Query> &seq_batch,
-                  const std::vector<QueryAlignment> &wrapped_seqs) const;
+                  const std::vector<AlignmentResults> &wrapped_seqs) const;
 };
 
 template <class Extender = DefaultColumnExtender,

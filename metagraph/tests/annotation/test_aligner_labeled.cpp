@@ -90,7 +90,7 @@ TYPED_TEST(LabeledAlignerTest, SimpleTangleGraph) {
         auto alignments = aligner.align(query);
         EXPECT_EQ(labels.size(), alignments.size()) << query;
 
-        for (const auto &alignment : alignments.data()) {
+        for (const auto &alignment : alignments) {
             bool found = false;
             for (const auto &label : get_alignment_labels(*anno_graph, alignment)) {
                 auto find = labels.find(label);
@@ -146,7 +146,7 @@ TEST(LabeledAlignerTest, SimpleTangleGraphSuffixSeed) {
         auto alignments = aligner.align(query);
         EXPECT_EQ(labels.size(), alignments.size()) << query;
 
-        for (const auto &alignment : alignments.data()) {
+        for (const auto &alignment : alignments) {
             bool found = false;
             for (const auto &label : get_alignment_labels(*anno_graph, alignment)) {
                 auto find = labels.find(label);
@@ -202,7 +202,7 @@ TYPED_TEST(LabeledAlignerTest, CanonicalTangleGraph) {
             auto alignments = aligner.align(query);
             EXPECT_EQ(labels.size(), alignments.size()) << query;
 
-            for (const auto &alignment : alignments.data()) {
+            for (const auto &alignment : alignments) {
                 bool found = false;
                 for (const auto &label : get_alignment_labels(*anno_graph, alignment)) {
                     auto find = labels.find(label);

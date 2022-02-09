@@ -3,16 +3,16 @@
 #include "common/algorithms.hpp"
 #include "graph/representation/rc_dbg.hpp"
 
+
 namespace mtg {
 namespace graph {
 namespace align {
 
-
-QueryAlignment IDBGAligner::align(std::string_view query,
-                                  bool is_reverse_complement) const {
-    QueryAlignment result(query);
+AlignmentResults IDBGAligner::align(std::string_view query,
+                                    bool is_reverse_complement) const {
+    AlignmentResults result(query);
     align_batch({ Query{ std::string{}, query, is_reverse_complement} },
-        [&](std::string_view, QueryAlignment&& alignment) {
+        [&](std::string_view, AlignmentResults&& alignment) {
             result = std::move(alignment);
         }
     );
@@ -200,7 +200,7 @@ size_t align_connect(std::string_view query,
 template <class AlignmentCompare>
 auto ISeedAndExtendAligner<AlignmentCompare>
 ::build_seeders(const std::vector<IDBGAligner::Query> &seq_batch,
-                const std::vector<QueryAlignment> &wrapped_seqs) const
+                const std::vector<AlignmentResults> &wrapped_seqs) const
         -> BatchSeeders {
     assert(seq_batch.size() == wrapped_seqs.size());
     BatchSeeders result;
@@ -251,7 +251,7 @@ template <class AlignmentCompare>
 void ISeedAndExtendAligner<AlignmentCompare>
 ::align_batch(const std::vector<IDBGAligner::Query> &seq_batch,
               const AlignmentCallback &callback) const {
-    std::vector<QueryAlignment> paths;
+    std::vector<AlignmentResults> paths;
     paths.reserve(seq_batch.size());
     for (const auto &[header, query, is_reverse_complement] : seq_batch) {
         paths.emplace_back(query, is_reverse_complement);

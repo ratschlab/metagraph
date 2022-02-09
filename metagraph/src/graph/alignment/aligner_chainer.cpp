@@ -13,6 +13,16 @@ typedef DeBruijnGraph::node_index node_index;
 
 constexpr size_t nid = std::numeric_limits<uint32_t>::max();
 
+typedef std::tuple<Alignment::Column /* label */,
+                   ssize_t /* coordinate */,
+                   size_t /* seed clipping */,
+                   Alignment::node_index /* first node of seed */,
+                   ssize_t /* seed length */,
+                   score_t /* chain score */,
+                   uint32_t /* previous seed index */,
+                   uint32_t /* current seed index */> TableElem;
+typedef std::vector<TableElem> ChainDPTable;
+
 std::tuple<ChainDPTable, size_t, size_t>
 chain_seeds(const DBGAlignerConfig &config,
             std::string_view query,

@@ -878,11 +878,9 @@ void add_to_graph(Graph &graph, const Contigs &contigs, size_t k) {
                             DeBruijnGraph::npos)
                     - nodes_in_full.begin();
 
-            if (begin != end) {
-                graph.add_sequence(std::string_view(
-                    contig.data() + begin, end - begin + k - 1
-                ));
-            }
+            if (begin != end)
+                graph.add_sequence(std::string_view(contig.data() + begin, end - begin + k - 1));
+
             begin = end + 1;
         } while (end < nodes_in_full.size());
     }

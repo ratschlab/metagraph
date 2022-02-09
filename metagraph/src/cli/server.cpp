@@ -190,7 +190,7 @@ std::string process_align_request(const std::string &received_message,
         if (!seq.empty()) {
             const auto paths = aligner.align(seq);
 
-            for (const auto &path : paths.data()) {
+            for (const auto &path : paths) {
                 Json::Value a;
                 a[SeqSearchResult::SCORE_JSON_FIELD] = path.get_score();
                 a[SeqSearchResult::SEQUENCE_JSON_FIELD] = path.get_sequence();

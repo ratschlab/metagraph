@@ -13,10 +13,10 @@
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
 #include "annotation/int_matrix/base/int_matrix.hpp"
 
+
 namespace mtg {
 namespace graph {
 namespace align {
-
 
 template <typename Key, class Hash = std::hash<Key>, typename IndexType = uint64_t,
           class EqualTo = std::equal_to<Key>, class Allocator = std::allocator<Key>,

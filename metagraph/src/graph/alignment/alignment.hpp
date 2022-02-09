@@ -157,7 +157,7 @@ class Alignment {
     LabelSet label_columns;
     score_t extra_penalty = 0;
 
-    // for each column in target_columns, store a vector of coordinate ranges
+    // for each column in |label_columns|, store a vector of coordinate ranges
     CoordinateSet label_coordinates;
 
     const annot::LabelEncoder<> *label_encoder = nullptr;
@@ -205,13 +205,12 @@ struct LocalAlignmentGreater {
     }
 };
 
-// A container holding many alignments to a shared query sequence. Each alignment
-// only holds a string_view to the query, so this class ensures that the query sequence
-// is always accessible.
-// TODO: rename to AlignmentResults
-class QueryAlignment {
+// A container holding many alignments to a shared query sequence.
+// Each alignment only holds a string_view to the query, so this class
+// ensures that the query sequence is always accessible.
+class AlignmentResults {
   public:
-    explicit QueryAlignment(std::string_view query, bool is_reverse_complement = false);
+    explicit AlignmentResults(std::string_view query, bool is_reverse_complement = false);
 
     template <typename... Args>
     void emplace_back(Args&&... args) {
@@ -232,8 +231,8 @@ class QueryAlignment {
     bool empty() const { return alignments_.empty(); }
     const Alignment& operator[](size_t i) const { return alignments_[i]; }
 
-    std::vector<Alignment>& data() { return alignments_; }
-    const std::vector<Alignment>& data() const { return alignments_; }
+    auto begin() const { return alignments_.begin(); }
+    auto end() const { return alignments_.end(); }
 
   private:
     std::string query_;

@@ -264,7 +264,7 @@ void gfa_map_files(const Config *config,
 }
 
 std::string format_alignment(std::string_view header,
-                             const QueryAlignment &paths,
+                             const AlignmentResults &paths,
                              const DeBruijnGraph &graph,
                              const Config &config) {
     std::string sout;
@@ -273,7 +273,7 @@ std::string format_alignment(std::string_view header,
         if (paths.empty()) {
             sout += fmt::format("\t*\t*\t{}\t*\t*\t*\n", config.alignment_min_path_score);
         } else {
-            for (const auto &path : paths.data()) {
+            for (const auto &path : paths) {
                 sout += fmt::format("\t{}", path);
             }
             sout += "\n";
@@ -432,7 +432,7 @@ int align_to_graph(Config *config) {
                 }
 
                 aligner->align_batch(batch,
-                    [&](std::string_view header, QueryAlignment&& paths) {
+                    [&](std::string_view header, AlignmentResults&& paths) {
                         const auto &res = format_alignment(header, paths, *graph, *config);
                         std::lock_guard<std::mutex> lock(print_mutex);
                         *out << res;

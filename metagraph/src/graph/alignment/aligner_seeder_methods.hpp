@@ -1,7 +1,7 @@
 #ifndef __ALIGNER_SEEDER_METHODS_HPP__
 #define __ALIGNER_SEEDER_METHODS_HPP__
 
-#include "aligner_alignment.hpp"
+#include "alignment.hpp"
 #include "common/vectors/bitmap.hpp"
 
 

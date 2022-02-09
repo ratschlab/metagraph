@@ -21,11 +21,11 @@ class DBGAlignerPostChainTest : public DeBruijnGraphTest<Graph> {};
 
 TYPED_TEST_SUITE(DBGAlignerPostChainTest, FewGraphTypes);
 
-inline void check_chain(const QueryAlignment &paths,
+inline void check_chain(const AlignmentResults &paths,
                         const DeBruijnGraph &graph,
                         const DBGAlignerConfig &config,
                         bool has_chain = true) {
-    for (const auto &path : paths.data()) {
+    for (const auto &path : paths) {
         EXPECT_TRUE(path.is_valid(graph, &config)) << path;
         if (has_chain) {
             EXPECT_THROW(path.to_json(paths.get_query(path.get_orientation()),

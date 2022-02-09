@@ -3,7 +3,7 @@
 
 #include <priority_deque.hpp>
 
-#include "aligner_alignment.hpp"
+#include "alignment.hpp"
 #include "common/algorithms.hpp"
 #include "common/vector_map.hpp"
 #include "common/utils/template_utils.hpp"

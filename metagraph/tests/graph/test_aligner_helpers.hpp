@@ -5,8 +5,8 @@
 
 #include "gtest/gtest.h"
 
+#include "graph/alignment/alignment.hpp"
 #include "graph/alignment/dbg_aligner.hpp"
-#include "graph/alignment/aligner_alignment.hpp"
 #include "graph/representation/base/sequence_graph.hpp"
 
 
@@ -62,10 +62,10 @@ void check_json_dump_load(const DeBruijnGraph &graph,
         << load_alignment.get_query() << "\n";
 }
 
-QueryAlignment get_extend(std::shared_ptr<const DeBruijnGraph> graph,
-                          const DBGAlignerConfig &config,
-                          const QueryAlignment &paths,
-                          const std::string &query) {
+AlignmentResults get_extend(std::shared_ptr<const DeBruijnGraph> graph,
+                            const DBGAlignerConfig &config,
+                            const AlignmentResults &paths,
+                            const std::string &query) {
     assert(graph.get());
     EXPECT_EQ(query, paths.get_query());
     auto uniconfig = config;
@@ -75,7 +75,7 @@ QueryAlignment get_extend(std::shared_ptr<const DeBruijnGraph> graph,
 
 inline void check_extend(std::shared_ptr<const DeBruijnGraph> graph,
                          const DBGAlignerConfig &config,
-                         const QueryAlignment &paths,
+                         const AlignmentResults &paths,
                          const std::string &query) {
     auto unimem_paths = get_extend(graph, config, paths, query);
 

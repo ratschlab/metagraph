@@ -4,7 +4,7 @@
 #include <tsl/hopscotch_map.h>
 #include <tsl/hopscotch_set.h>
 
-#include "aligner_alignment.hpp"
+#include "alignment.hpp"
 #include "common/aligned_vector.hpp"
 
 
