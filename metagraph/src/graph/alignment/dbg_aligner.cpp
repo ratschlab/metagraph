@@ -264,7 +264,6 @@ void ISeedAndExtendAligner<AlignmentCompare>
     for (size_t i = 0; i < seq_batch.size(); ++i) {
         const auto &[header, query, is_reverse_complement] = seq_batch[i];
         const auto &[seeder, nodes, seeder_rc, nodes_rc] = seeders[i];
-        // paths[i].get_query(false), paths[i].get_query(true)
         AlignmentAggregator<AlignmentCompare> aggregator(config_);
 
         size_t num_seeds = 0;
