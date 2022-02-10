@@ -156,7 +156,7 @@ class LabeledExtender : public DefaultColumnExtender {
 
     virtual ~LabeledExtender() {}
 
-  protected:
+  private:
     virtual std::vector<Alignment> backtrack(score_t min_path_score,
                                              std::string_view window) override final {
         // extract all labels for explored nodes
@@ -174,24 +174,6 @@ class LabeledExtender : public DefaultColumnExtender {
         return DefaultColumnExtender::extend(min_path_score, force_fixed_seed);
     }
 
-    virtual void flush() = 0;
-
-    AnnotationBuffer &labeled_graph_;
-    size_t last_buffered_table_i_;
-    size_t last_flushed_table_i_;
-};
-
-template <class AlignmentCompare = LocalAlignmentLess>
-class LabeledBacktrackingExtender : public LabeledExtender {
-  public:
-    LabeledBacktrackingExtender(AnnotationBuffer &labeled_graph,
-                                const DBGAlignerConfig &config,
-                                std::string_view query)
-          : LabeledExtender(labeled_graph, config, query) {}
-
-    virtual ~LabeledBacktrackingExtender() {}
-
-  protected:
     virtual bool set_seed(const Alignment &seed) override final {
         if (DefaultColumnExtender::set_seed(seed)) {
             assert(labeled_graph_.is_flushed(seed.get_nodes()));
@@ -244,9 +226,11 @@ class LabeledBacktrackingExtender : public LabeledExtender {
         node_labels_.erase(node_labels_.begin() + i, node_labels_.begin() + i + 1);
     }
 
-    virtual void flush() override final;
+    void flush();
 
-  private:
+    AnnotationBuffer &labeled_graph_;
+    size_t last_buffered_table_i_;
+    size_t last_flushed_table_i_;
     std::vector<size_t> node_labels_;
     size_t fetched_label_i_;
     Vector<Column> label_intersection_;
@@ -279,7 +263,7 @@ class ILabeledAligner : public ISeedAndExtendAligner<AlignmentCompare> {
 };
 
 template <class AlignmentCompare = LocalAlignmentLess,
-          class Extender = LabeledBacktrackingExtender<AlignmentCompare>,
+          class Extender = LabeledExtender,
           class Seeder = UniMEMSeeder>
 class LabeledAligner : public ILabeledAligner<AlignmentCompare> {
   public:
@@ -290,7 +274,7 @@ class LabeledAligner : public ILabeledAligner<AlignmentCompare> {
                    const DBGAlignerConfig &config)
           : ILabeledAligner<AlignmentCompare>(graph, annotator, config) {
         if (this->labeled_graph_.get_coordinate_matrix()
-                && std::is_same_v<Extender, LabeledBacktrackingExtender<>>) {
+                && std::is_same_v<Extender, LabeledExtender>) {
             // do not use a global xdrop cutoff since we need separate cutoffs
             // for each label
             this->config_.global_xdrop = false;

@@ -254,15 +254,15 @@ struct CoordIntersection {
     size_t offset_;
 };
 
-template <class AlignmentCompare>
-void LabeledBacktrackingExtender<AlignmentCompare>::flush() {
+void LabeledExtender::flush() {
     labeled_graph_.flush();
     for ( ; last_flushed_table_i_ < table.size(); ++last_flushed_table_i_) {
         size_t parent_i = std::get<4>(table[last_flushed_table_i_]);
         assert(parent_i < last_flushed_table_i_);
 
         node_index node = std::get<3>(table[last_flushed_table_i_]);
-        const auto &parent_labels = labeled_graph_.get_labels_from_index(node_labels_[parent_i]);
+        const auto &parent_labels
+            = labeled_graph_.get_labels_from_index(node_labels_[parent_i]);
 
         auto clear = [&]() {
             node_labels_[last_flushed_table_i_] = 0;
@@ -288,15 +288,15 @@ void LabeledBacktrackingExtender<AlignmentCompare>::flush() {
             continue;
         }
 
-        node_labels_[last_flushed_table_i_] = labeled_graph_.emplace_label_set(std::move(intersect_labels));
+        node_labels_[last_flushed_table_i_]
+            = labeled_graph_.emplace_label_set(std::move(intersect_labels));
     }
 }
 
-template <class AlignmentCompare>
-void LabeledBacktrackingExtender<AlignmentCompare>
+void LabeledExtender
 ::call_outgoing(node_index node,
                 size_t max_prefetch_distance,
-                const std::function<void(node_index, char /* last char */, score_t)> &callback,
+                const std::function<void(node_index, char, score_t)> &callback,
                 size_t table_i,
                 bool force_fixed_seed) {
     bool in_seed = std::get<6>(table[table_i]) + 1 - this->seed_->get_offset()
@@ -434,8 +434,7 @@ void LabeledBacktrackingExtender<AlignmentCompare>
     }
 }
 
-template <class AlignmentCompare>
-bool LabeledBacktrackingExtender<AlignmentCompare>::skip_backtrack_start(size_t i) {
+bool LabeledExtender::skip_backtrack_start(size_t i) {
     assert(fetched_label_i_ != AnnotationBuffer::nannot);
     assert(node_labels_[i] != AnnotationBuffer::nannot);
     if (!this->prev_starts.emplace(i).second)
@@ -457,21 +456,19 @@ bool LabeledBacktrackingExtender<AlignmentCompare>::skip_backtrack_start(size_t 
     return label_intersection_.empty();
 }
 
-template <class AlignmentCompare>
-void LabeledBacktrackingExtender<AlignmentCompare>
-::call_alignments(score_t cur_cell_score,
-                  score_t end_score,
-                  score_t min_path_score,
-                  const std::vector<node_index> &path,
-                  const std::vector<size_t> &trace,
-                  size_t table_i,
-                  const Cigar &ops,
-                  size_t clipping,
-                  size_t offset,
-                  std::string_view window,
-                  const std::string &match,
-                  score_t extra_penalty,
-                  const std::function<void(Alignment&&)> &callback) {
+void LabeledExtender::call_alignments(score_t cur_cell_score,
+                                      score_t end_score,
+                                      score_t min_path_score,
+                                      const std::vector<node_index> &path,
+                                      const std::vector<size_t> &trace,
+                                      size_t table_i,
+                                      const Cigar &ops,
+                                      size_t clipping,
+                                      size_t offset,
+                                      std::string_view window,
+                                      const std::string &match,
+                                      score_t extra_penalty,
+                                      const std::function<void(Alignment&&)> &callback) {
     DefaultColumnExtender::call_alignments(cur_cell_score, end_score, min_path_score,
                                            path, trace, table_i, ops, clipping, offset,
                                            window, match, extra_penalty,
@@ -806,7 +803,6 @@ size_t ILabeledAligner<AlignmentCompare>
     return get_num_matches(seeds);
 }
 
-template class LabeledBacktrackingExtender<>;
 template class ILabeledAligner<>;
 
 } // namespace align
