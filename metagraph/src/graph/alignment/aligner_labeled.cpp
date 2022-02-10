@@ -537,24 +537,24 @@ void ILabeledAligner<AlignmentCompare>::filter_seeds(BatchSeeders &seeders) cons
     for (auto &[seeder, nodes, seeder_rc, nodes_rc] : seeders) {
         counted_seeds.emplace_back(seeder->get_seeds(), seeder->get_num_matches());
         num_seeds += counted_seeds.back().first.size();
-        for (const Alignment &seed : counted_seeds.back().first) {
-            labeled_graph_.add_path(
-                seed.get_nodes(),
-                std::string(seed.get_offset(), '#') + seed.get_sequence()
-            );
-        }
+
+        auto add_seeds = [&](const auto &seeds) {
+            for (const Alignment &seed : seeds) {
+                labeled_graph_.add_path(
+                    seed.get_nodes(),
+                    std::string(seed.get_offset(), '#') + seed.get_sequence()
+                );
+            }
+        };
+
+        add_seeds(counted_seeds.back().first);
 
 #if ! _PROTEIN_GRAPH
         if (seeder_rc) {
             counted_seeds_rc.emplace_back(seeder_rc->get_seeds(),
                                           seeder_rc->get_num_matches());
             num_seeds_rc += counted_seeds_rc.back().first.size();
-            for (const Alignment &seed : counted_seeds_rc.back().first) {
-                labeled_graph_.add_path(
-                    seed.get_nodes(),
-                    std::string(seed.get_offset(), '#') + seed.get_sequence()
-                );
-            }
+            add_seeds(counted_seeds_rc.back().first);
         }
 #endif
     }
