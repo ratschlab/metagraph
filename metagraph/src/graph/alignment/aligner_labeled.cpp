@@ -27,21 +27,109 @@ AnnotationBuffer::AnnotationBuffer(const DeBruijnGraph &graph, const Annotator &
     }
 }
 
+auto AnnotationBuffer::add_node(node_index node) -> node_index {
+    return add_path({ node }, std::string(graph_.get_k(), '#')).first[0];
+}
+
+auto AnnotationBuffer::add_path(const std::vector<node_index> &path, std::string&& query)
+        -> std::pair<std::vector<node_index>, bool> {
+    assert(graph_.get_mode() != DeBruijnGraph::PRIMARY
+                && "PRIMARY graphs must be wrapped into CANONICAL");
+
+    if (path.empty())
+        return {};
+
+    assert(query.size() >= graph_.get_k());
+    assert(path.size() == query.size() - graph_.get_k() + 1);
+
+    // TODO: this cascade of graph unwrapping is ugly, find a cleaner way to do it
+    const DeBruijnGraph *base_graph = &graph_;
+    bool reverse_path = false;
+    if (const auto *rc_dbg = dynamic_cast<const RCDBG*>(base_graph)) {
+        base_graph = &rc_dbg->get_graph();
+        reverse_path = true;
+    }
+
+    const auto *canonical = dynamic_cast<const CanonicalDBG*>(base_graph);
+    if (canonical)
+        base_graph = &canonical->get_graph();
+
+    bool base_is_canonical = (base_graph->get_mode() == DeBruijnGraph::CANONICAL);
+
+    std::vector<node_index> base_path;
+    if (base_is_canonical) {
+        if (query.front() == '#')
+            query = graph_.get_node_sequence(path[0]) + query.substr(graph_.get_k());
+
+        if (reverse_path)
+            reverse_complement(query.begin(), query.end());
+
+        base_path = map_to_nodes(*base_graph, query);
+    } else if (canonical) {
+        base_path.reserve(path.size());
+        for (node_index node : path) {
+            base_path.emplace_back(canonical->get_base_node(node));
+        }
+    } else {
+        base_path = path;
+    }
+
+    assert(base_path.size() == path.size());
+
+    if (reverse_path)
+        std::reverse(base_path.begin(), base_path.end());
+
+    const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(base_graph);
+    const boss::BOSS *boss = dbg_succ ? &dbg_succ->get_boss() : nullptr;
+    for (size_t i = 0; i < path.size(); ++i) {
+        if (base_path[i] == DeBruijnGraph::npos)
+            continue;
+
+        if (boss && !boss->get_W(dbg_succ->kmer_to_boss_index(base_path[i])))
+            continue; // skip dummy nodes
+
+        Row row = AnnotatedDBG::graph_to_anno_index(base_path[i]);
+        if (labels_.emplace(path[i], std::make_pair(row, nannot)).second
+                && (path[i] == base_path[i]
+                    || labels_.emplace(base_path[i], std::make_pair(row, nannot)).second)) {
+            added_rows_.push_back(row);
+            added_nodes_.push_back(path[i]);
+        } else {
+            auto find_n = labels_.find(path[i]);
+            auto find_b = labels_.find(base_path[i]);
+            assert(find_n != labels_.end());
+            assert(find_b != labels_.end());
+            assert(find_n->second.first == find_b->second.first);
+            auto label_i = std::min(find_n->second.second, find_b->second.second);
+            if (label_i == nannot) {
+                added_rows_.push_back(row);
+                added_nodes_.push_back(path[i]);
+            } else {
+                find_n.value().second = label_i;
+                find_b.value().second = label_i;
+            }
+        }
+    }
+
+    return std::make_pair(std::move(base_path), reverse_path);
+}
+
 void AnnotationBuffer::flush() {
+    assert(added_rows_.size() == added_nodes_.size());
     if (added_rows_.empty())
         return;
 
     auto push_node_labels = [&](auto node_it, auto row_it, auto&& labels) {
         assert(node_it != added_nodes_.end());
         assert(row_it != added_rows_.end());
-        auto label_it = labels_set_.emplace(std::forward<decltype(labels)>(labels)).first;
         assert(labels_.count(*node_it));
         assert(labels_.count(AnnotatedDBG::anno_to_graph_index(*row_it)));
         assert(labels_[*node_it].first
             == *(added_rows_.begin() + (node_it - added_nodes_.begin())));
 
-        labels_[*node_it].second = label_it - labels_set_.begin();
-        labels_[AnnotatedDBG::anno_to_graph_index(*row_it)].second = label_it - labels_set_.begin();
+        size_t label_i = emplace_label_set(std::forward<decltype(labels)>(labels));
+        labels_[*node_it].second = label_i;
+        labels_[AnnotatedDBG::anno_to_graph_index(*row_it)].second = label_i;
     };
 
     auto node_it = added_nodes_.begin();
@@ -71,7 +159,14 @@ void AnnotationBuffer::flush() {
 
     added_rows_.clear();
     added_nodes_.clear();
+
+#ifndef NDEBUG
+    for (const auto &[node, val] : labels_) {
+        assert(val.second != nannot);
+    }
+#endif
 }
+
 
 template <class T1, class T2>
 bool overlap_with_diff(const T1 &tuple1, const T2 &tuple2, size_t diff) {
@@ -110,6 +205,7 @@ void LabeledBacktrackingExtender<AlignmentCompare>
     assert(node == std::get<3>(table[table_i]));
 
     if (in_seed && (next_offset < graph_->get_k() || force_fixed_seed || this->fixed_seed())) {
+        assert(labeled_graph_.is_flushed(node));
         DefaultColumnExtender::call_outgoing(node, max_prefetch_distance,
                                              [&](node_index next, char c, score_t score) {
             node_labels_.emplace_back(node_labels_[table_i]);
@@ -130,8 +226,21 @@ void LabeledBacktrackingExtender<AlignmentCompare>
         labeled_graph_.add_node(next);
     }, table_i, force_fixed_seed);
 
-    // if (outgoing.size() > 1)
-        labeled_graph_.flush();
+    if (outgoing.size() == 1) {
+        for (const auto &[next, c, score] : outgoing) {
+            node_labels_.emplace_back(node_labels_[table_i]);
+            callback(next, c, score);
+        }
+        return;
+    }
+
+    labeled_graph_.flush();
+    assert(labeled_graph_.is_flushed(node));
+#ifndef NDEBUG
+    for (const auto &[next, c, score] : outgoing) {
+        assert(labeled_graph_.is_flushed(next));
+    }
+#endif
 
     const Alignment &seed = *this->seed_;
 
@@ -225,88 +334,6 @@ void LabeledBacktrackingExtender<AlignmentCompare>
     }
 }
 
-auto AnnotationBuffer::add_path(const std::vector<node_index> &path, std::string&& query)
-        -> std::pair<std::vector<node_index>, bool> {
-    assert(graph_.get_mode() != DeBruijnGraph::PRIMARY
-                && "PRIMARY graphs must be wrapped into CANONICAL");
-
-    if (path.empty())
-        return {};
-
-    assert(query.size() >= graph_.get_k());
-    assert(path.size() == query.size() - graph_.get_k() + 1);
-
-    // TODO: this cascade of graph unwrapping is ugly, find a cleaner way to do it
-    const DeBruijnGraph *base_graph = &graph_;
-    bool reverse_path = false;
-    if (const auto *rc_dbg = dynamic_cast<const RCDBG*>(base_graph)) {
-        base_graph = &rc_dbg->get_graph();
-        reverse_path = true;
-    }
-
-    const auto *canonical = dynamic_cast<const CanonicalDBG*>(base_graph);
-    if (canonical)
-        base_graph = &canonical->get_graph();
-
-    bool base_is_canonical = (base_graph->get_mode() == DeBruijnGraph::CANONICAL);
-
-    std::vector<node_index> base_path;
-    if (base_is_canonical) {
-        if (query.front() == '#')
-            query = graph_.get_node_sequence(path[0]) + query.substr(graph_.get_k());
-
-        if (reverse_path)
-            reverse_complement(query.begin(), query.end());
-
-        base_path = map_to_nodes(*base_graph, query);
-    } else if (canonical) {
-        base_path.reserve(path.size());
-        for (node_index node : path) {
-            base_path.emplace_back(canonical->get_base_node(node));
-        }
-    } else {
-        base_path = path;
-    }
-
-    assert(base_path.size() == path.size());
-
-    if (reverse_path)
-        std::reverse(base_path.begin(), base_path.end());
-
-    const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(base_graph);
-    const boss::BOSS *boss = dbg_succ ? &dbg_succ->get_boss() : nullptr;
-    for (size_t i = 0; i < path.size(); ++i) {
-        if (base_path[i] == DeBruijnGraph::npos)
-            continue;
-
-        if (boss && !boss->get_W(dbg_succ->kmer_to_boss_index(base_path[i])))
-            continue; // skip dummy nodes
-
-        Row row = AnnotatedDBG::graph_to_anno_index(base_path[i]);
-        if (labels_.emplace(path[i], std::make_pair(row, nannot)).second
-                && (path[i] == base_path[i]
-                    || labels_.emplace(base_path[i], std::make_pair(row, nannot)).second)) {
-            added_rows_.push_back(row);
-            added_nodes_.push_back(path[i]);
-        } else {
-            auto find_n = labels_.find(path[i]);
-            auto find_b = labels_.find(base_path[i]);
-            assert(find_n != labels_.end());
-            assert(find_b != labels_.end());
-            assert(find_n->second.first == find_b->second.first);
-            auto label_i = std::min(find_n->second.second, find_b->second.second);
-            find_n.value().second = label_i;
-            find_b.value().second = label_i;
-        }
-    }
-
-    return std::make_pair(std::move(base_path), reverse_path);
-}
-
-auto AnnotationBuffer::add_node(node_index node) -> node_index {
-    return add_path({ node }, std::string(graph_.get_k(), '#')).first[0];
-}
-
 template <class AIt, class BIt, class OutIt, class OutIt2>
 void set_intersection_difference(AIt a_begin,
                                  AIt a_end,
@@ -342,8 +369,8 @@ bool LabeledBacktrackingExtender<AlignmentCompare>::skip_backtrack_start(size_t 
 
     label_intersection_ = Vector<Column>{};
     Vector<Column> label_diff;
-    set_intersection_difference(end_labels.begin(), end_labels.end(),
-                                left_labels.begin(), left_labels.end(),
+    set_intersection_difference(left_labels.begin(), left_labels.end(),
+                                end_labels.begin(), end_labels.end(),
                                 std::back_inserter(label_intersection_),
                                 std::back_inserter(label_diff));
 

@@ -80,6 +80,23 @@ class AnnotationBuffer {
         return ret_val;
     }
 
+    inline bool is_flushed(node_index node) const {
+        auto it = labels_.find(node);
+
+        // if the node hasn't been seen before, or if its annotations haven't
+        // been flushed, return false
+        return it != labels_.end() && it->second.second != nannot;
+    }
+
+    inline bool is_flushed(const std::vector<node_index> &nodes) const {
+        for (node_index node : nodes) {
+            if (!is_flushed(node))
+                return false;
+        }
+
+        return true;
+    }
+
     // get the annotations of a node if they have been fetched
     inline std::optional<LabelSet> get_labels(node_index node) const {
         return get_labels_and_coordinates(node).first;
@@ -194,6 +211,7 @@ class LabeledBacktrackingExtender : public LabeledExtender {
   protected:
     virtual bool set_seed(const Alignment &seed) override {
         if (DefaultColumnExtender::set_seed(seed)) {
+            assert(labeled_graph_.is_flushed(seed.get_nodes()));
             fetched_label_i_ = labeled_graph_.emplace_label_set(seed.label_columns);
             assert(fetched_label_i_ != AnnotationBuffer::nannot);
             node_labels_.assign(1, fetched_label_i_);
@@ -391,11 +409,12 @@ class LabeledAligner : public ISeedAndExtendAligner<AlignmentCompare> {
     size_t filter_seeds(std::vector<Alignment> &seeds) const {
         VectorMap<Column, uint64_t> label_counter;
         for (const Alignment &seed : seeds) {
+            assert(labeled_graph_.is_flushed(seed.get_nodes()));
             for (node_index node : seed.get_nodes()) {
-                if (auto labels = labeled_graph_.get_labels(node)) {
-                    for (uint64_t label : labels->get()) {
-                        ++label_counter[label];
-                    }
+                auto labels = labeled_graph_.get_labels(node);
+                assert(labels);
+                for (uint64_t label : labels->get()) {
+                    ++label_counter[label];
                 }
             }
         }
