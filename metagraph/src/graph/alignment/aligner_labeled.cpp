@@ -255,6 +255,44 @@ struct CoordIntersection {
 };
 
 template <class AlignmentCompare>
+void LabeledBacktrackingExtender<AlignmentCompare>::flush() {
+    labeled_graph_.flush();
+    for ( ; last_flushed_table_i_ < table.size(); ++last_flushed_table_i_) {
+        size_t parent_i = std::get<4>(table[last_flushed_table_i_]);
+        assert(parent_i < last_flushed_table_i_);
+
+        node_index node = std::get<3>(table[last_flushed_table_i_]);
+        const auto &parent_labels = labeled_graph_.get_labels_from_index(node_labels_[parent_i]);
+
+        auto clear = [&]() {
+            node_labels_[last_flushed_table_i_] = 0;
+            auto &S = std::get<0>(table[last_flushed_table_i_]);
+            std::fill(S.begin(), S.end(), config_.ninf);
+        };
+
+        if (parent_labels.empty()) {
+            assert(!node_labels_[parent_i]);
+            clear();
+            continue;
+        }
+        auto cur_labels = labeled_graph_.get_labels(node);
+        assert(cur_labels);
+        Vector<Column> intersect_labels;
+        std::set_intersection(parent_labels.begin(),
+                              parent_labels.end(),
+                              cur_labels->get().begin(),
+                              cur_labels->get().end(),
+                              std::back_inserter(intersect_labels));
+        if (intersect_labels.empty()) {
+            clear();
+            continue;
+        }
+
+        node_labels_[last_flushed_table_i_] = labeled_graph_.emplace_label_set(std::move(intersect_labels));
+    }
+}
+
+template <class AlignmentCompare>
 void LabeledBacktrackingExtender<AlignmentCompare>
 ::call_outgoing(node_index node,
                 size_t max_prefetch_distance,
@@ -296,7 +334,7 @@ void LabeledBacktrackingExtender<AlignmentCompare>
         return;
     }
 
-    labeled_graph_.flush();
+    flush();
     assert(labeled_graph_.is_flushed(node));
 #ifndef NDEBUG
     for (const auto &[next, c, score] : outgoing) {

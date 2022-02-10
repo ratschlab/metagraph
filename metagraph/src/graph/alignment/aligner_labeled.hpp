@@ -160,7 +160,7 @@ class LabeledExtender : public DefaultColumnExtender {
     virtual std::vector<Alignment> backtrack(score_t min_path_score,
                                              std::string_view window) override final {
         // extract all labels for explored nodes
-        labeled_graph_.flush();
+        flush();
 
         // run backtracking
         return DefaultColumnExtender::backtrack(min_path_score, window);
@@ -168,12 +168,17 @@ class LabeledExtender : public DefaultColumnExtender {
 
     virtual std::vector<Alignment> extend(score_t min_path_score,
                                           bool force_fixed_seed) override final {
-        last_buffered_table_i_ = 0;
+        // the first node of the seed has already been buffered and flushed
+        last_buffered_table_i_ = 1;
+        last_flushed_table_i_ = 1;
         return DefaultColumnExtender::extend(min_path_score, force_fixed_seed);
     }
 
+    virtual void flush() = 0;
+
     AnnotationBuffer &labeled_graph_;
     size_t last_buffered_table_i_;
+    size_t last_flushed_table_i_;
 };
 
 template <class AlignmentCompare = LocalAlignmentLess>
@@ -238,6 +243,8 @@ class LabeledBacktrackingExtender : public LabeledExtender {
         DefaultColumnExtender::pop(i);
         node_labels_.erase(node_labels_.begin() + i, node_labels_.begin() + i + 1);
     }
+
+    virtual void flush() override final;
 
   private:
     std::vector<size_t> node_labels_;
