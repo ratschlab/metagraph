@@ -79,11 +79,19 @@ auto AnnotationBuffer::add_path(const std::vector<node_index> &path, std::string
     const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(base_graph);
     const boss::BOSS *boss = dbg_succ ? &dbg_succ->get_boss() : nullptr;
     for (size_t i = 0; i < path.size(); ++i) {
-        if (base_path[i] == DeBruijnGraph::npos)
+        if (base_path[i] == DeBruijnGraph::npos) {
+            // this can happen when the base graph is CANONICAL and path[i] is a
+            // dummy node
+            labels_[path[i]] = std::make_pair(base_path[i], 0);
             continue;
+        }
 
-        if (boss && !boss->get_W(dbg_succ->kmer_to_boss_index(base_path[i])))
-            continue; // skip dummy nodes
+        if (boss && !boss->get_W(dbg_succ->kmer_to_boss_index(base_path[i]))) {
+            // skip dummy nodes
+            labels_[path[i]] = std::make_pair(base_path[i], 0);
+            labels_[base_path[i]] = std::make_pair(base_path[i], 0);
+            continue;
+        }
 
         Row row = AnnotatedDBG::graph_to_anno_index(base_path[i]);
         if (labels_.emplace(path[i], std::make_pair(row, nannot)).second
