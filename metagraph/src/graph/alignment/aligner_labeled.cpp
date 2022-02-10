@@ -382,8 +382,6 @@ void LabeledExtender
     bool rev_align = dynamic_cast<const RCDBG*>(graph_);
 
     // if the seed has coordinates, use the seed as the base
-    auto seed_label_it = node_labels.begin();
-    auto seed_label_end_it = node_labels.end();
     base_labels = std::cref(seed.label_columns);
     base_coords = std::cref(seed.label_coordinates);
     ssize_t offset = std::get<6>(table[table_i]);
@@ -404,6 +402,8 @@ void LabeledExtender
 
         // check if at least one label has consistent coordinates
         Vector<Column> intersect_labels;
+        auto seed_label_it = node_labels.begin();
+        auto seed_label_end_it = node_labels.end();
         try {
             utils::match_indexed_values(
                 base_labels->get().begin(), base_labels->get().end(),
