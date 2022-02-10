@@ -116,6 +116,13 @@ void AnnotationBuffer::flush() {
     if (added_rows_.empty())
         return;
 
+    // TODO: this cascade of unwrapping is ugly, find a better way to do this
+    const DeBruijnGraph *base_graph = &graph_;
+    if (const auto *rc_dbg = dynamic_cast<const RCDBG*>(base_graph))
+        base_graph = &rc_dbg->get_graph();
+
+    const auto *canonical = dynamic_cast<const CanonicalDBG*>(base_graph);
+
     auto push_node_labels = [&](auto node_it, auto row_it, auto&& labels) {
         assert(node_it != added_nodes_.end());
         assert(row_it != added_rows_.end());
@@ -125,8 +132,13 @@ void AnnotationBuffer::flush() {
             == *(added_rows_.begin() + (node_it - added_nodes_.begin())));
 
         size_t label_i = emplace_label_set(std::forward<decltype(labels)>(labels));
+        node_index base_node = AnnotatedDBG::anno_to_graph_index(*row_it);
         labels_[*node_it].second = label_i;
-        labels_[AnnotatedDBG::anno_to_graph_index(*row_it)].second = label_i;
+        labels_[base_node].second = label_i;
+        if (canonical && base_node == *node_it) {
+            node_index rc_node = canonical->reverse_complement(*node_it);
+            labels_[rc_node] = std::make_pair(*row_it, label_i);
+        }
     };
 
     auto node_it = added_nodes_.begin();
