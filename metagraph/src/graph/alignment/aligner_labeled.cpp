@@ -137,10 +137,6 @@ auto AnnotationBuffer::add_path(const std::vector<node_index> &path, std::string
             }
         } else if (find_a != labels_.end() && find_b == labels_.end()) {
             find_b = labels_.emplace(base_path[i], find_a->second).first;
-            if (find_a->second.second == nannot) {
-                added_rows_.push_back(row);
-                added_nodes_.push_back(base_path[i]);
-            }
         } else {
             size_t label_i = std::min(find_a->second.second, find_b->second.second);
             if (label_i != nannot) {
@@ -177,15 +173,20 @@ void AnnotationBuffer::flush() {
         node_index base_node = AnnotatedDBG::anno_to_graph_index(*row_it);
         labels_[*node_it].second = label_i;
         if (base_node != *node_it) {
-            labels_[base_node].second = label_i;
-            if (multi_int_)
-                label_coords_.emplace_back(label_coords_.back());
-        }
-        if (canonical && base_node == *node_it) {
+            auto find = labels_.find(base_node);
+            if (find == labels_.end()) {
+                labels_[base_node] = std::make_pair(*row_it, label_i);
+                if (multi_int_)
+                    label_coords_.emplace_back(label_coords_.back());
+            }
+        } else if (canonical) {
             node_index rc_node = canonical->reverse_complement(*node_it);
-            labels_[rc_node] = std::make_pair(*row_it, label_i);
-            if (multi_int_)
-                label_coords_.emplace_back(label_coords_.back());
+            auto find = labels_.find(rc_node);
+            if (find == labels_.end()) {
+                labels_[rc_node] = std::make_pair(*row_it, label_i);
+                if (multi_int_)
+                    label_coords_.emplace_back(label_coords_.back());
+            }
         }
     };
 
@@ -300,6 +301,21 @@ void LabeledExtender::flush() {
         size_t parent_i = std::get<4>(table[last_flushed_table_i_]);
         assert(parent_i < last_flushed_table_i_);
 
+        auto clear = [&]() {
+            node_labels_[last_flushed_table_i_] = 0;
+            auto &S = std::get<0>(table[last_flushed_table_i_]);
+            auto &E = std::get<1>(table[last_flushed_table_i_]);
+            auto &F = std::get<2>(table[last_flushed_table_i_]);
+            std::fill(S.begin(), S.end(), config_.ninf);
+            std::fill(E.begin(), E.end(), config_.ninf);
+            std::fill(F.begin(), F.end(), config_.ninf);
+        };
+
+        if (!node_labels_[parent_i]) {
+            clear();
+            continue;
+        }
+
         if (node_labels_[parent_i] != node_labels_[last_flushed_table_i_])
             continue;
 
@@ -307,17 +323,6 @@ void LabeledExtender::flush() {
         const auto &parent_labels
             = labeled_graph_.get_labels_from_index(node_labels_[parent_i]);
 
-        auto clear = [&]() {
-            node_labels_[last_flushed_table_i_] = 0;
-            auto &S = std::get<0>(table[last_flushed_table_i_]);
-            std::fill(S.begin(), S.end(), config_.ninf);
-        };
-
-        if (parent_labels.empty()) {
-            assert(!node_labels_[parent_i]);
-            clear();
-            continue;
-        }
         auto cur_labels = labeled_graph_.get_labels(node);
         assert(cur_labels);
         Vector<Column> intersect_labels;
@@ -513,7 +518,7 @@ bool LabeledExtender::skip_backtrack_start(size_t i) {
     assert(fetched_label_i_ != AnnotationBuffer::nannot);
     assert(node_labels_[i] != AnnotationBuffer::nannot);
     if (!this->prev_starts.emplace(i).second)
-        return false;
+        return true;
 
     const auto &end_labels = labeled_graph_.get_labels_from_index(node_labels_[i]);
     const auto &left_labels = labeled_graph_.get_labels_from_index(fetched_label_i_);
@@ -558,14 +563,12 @@ void LabeledExtender::call_alignments(score_t cur_cell_score,
             if (base_coords) {
                 base_coords = std::cref(seed_->label_coordinates);
                 dist -= seed_->get_offset();
+                if (dynamic_cast<const RCDBG*>(graph_)) {
+                    dist = (alignment.get_sequence().size() - seed_->get_sequence().size()) * -1;
+                }
             }
-        } else {
-            // TODO:
-            assert(false);
-        }
-
-        if (dynamic_cast<const RCDBG*>(graph_)) {
-            dist = (alignment.get_sequence().size() - seed_->get_sequence().size()) * -1;
+        } else if (dynamic_cast<const RCDBG*>(graph_)) {
+            dist *= -1;
         }
 
         auto update_fetched = [&]() {
