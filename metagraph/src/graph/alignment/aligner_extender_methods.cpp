@@ -839,7 +839,7 @@ std::vector<Alignment> DefaultColumnExtender
         }
     }
 
-    DEBUG_LOG("Backtracking from {} indices", indices.size());
+    size_t num_backtracks = 0;
 
     // find highest scoring which is closest to the diagonal
     // use heap sort to make this run in O(n + (num_alternative_paths) * log(n)) time
@@ -867,6 +867,8 @@ std::vector<Alignment> DefaultColumnExtender
 
         if (score - min_cell_score_ < best_score)
             break;
+
+        ++num_backtracks;
 
         size_t dummy_counter = 0;
 
@@ -987,6 +989,8 @@ std::vector<Alignment> DefaultColumnExtender
             }
         }
     }
+
+    DEBUG_LOG("Backtracked from {}/{} indices", num_backtracks, indices.size());
 
     if (extensions.empty() && this->seed_->get_score() >= min_path_score) {
         extensions.emplace_back(*this->seed_);

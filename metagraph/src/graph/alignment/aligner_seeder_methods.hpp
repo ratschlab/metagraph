@@ -25,7 +25,7 @@ class ISeeder {
 
 class ManualSeeder : public ISeeder {
   public:
-    ManualSeeder(std::vector<Seed>&& seeds, size_t num_matching = 0)
+    ManualSeeder(std::vector<Seed>&& seeds = {}, size_t num_matching = 0)
         : seeds_(std::move(seeds)), num_matching_(num_matching) {}
 
     virtual ~ManualSeeder() {}

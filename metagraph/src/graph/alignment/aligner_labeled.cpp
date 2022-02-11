@@ -529,6 +529,7 @@ bool LabeledExtender::skip_backtrack_start(size_t i) {
                                 end_labels.begin(), end_labels.end(),
                                 std::back_inserter(label_intersection_),
                                 std::back_inserter(label_diff_));
+    label_diff_.push_back(AnnotationBuffer::nannot);
 
     return label_intersection_.empty();
 }
@@ -572,7 +573,8 @@ void LabeledExtender::call_alignments(score_t cur_cell_score,
         }
 
         auto update_fetched = [&]() {
-            if (label_diff_.size()) {
+            if (label_diff_.size() && label_diff_.back() == AnnotationBuffer::nannot) {
+                label_diff_.pop_back();
                 fetched_label_i_ = labeled_graph_.emplace_label_set(std::move(label_diff_));
                 assert(fetched_label_i_ != AnnotationBuffer::nannot);
                 label_diff_ = Vector<Column>{};
