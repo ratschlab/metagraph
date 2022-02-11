@@ -174,17 +174,7 @@ class LabeledExtender : public DefaultColumnExtender {
         return DefaultColumnExtender::extend(min_path_score, force_fixed_seed);
     }
 
-    virtual bool set_seed(const Alignment &seed) override final {
-        if (DefaultColumnExtender::set_seed(seed)) {
-            assert(labeled_graph_.is_flushed(seed.get_nodes()));
-            fetched_label_i_ = labeled_graph_.emplace_label_set(seed.label_columns);
-            assert(fetched_label_i_ != AnnotationBuffer::nannot);
-            node_labels_.assign(1, fetched_label_i_);
-            return true;
-        }
-
-        return false;
-    }
+    virtual bool set_seed(const Alignment &seed) override final;
 
     // overrides for backtracking helpers
     virtual bool terminate_backtrack_start(const std::vector<Alignment> &) const override final {
@@ -234,6 +224,8 @@ class LabeledExtender : public DefaultColumnExtender {
     std::vector<size_t> node_labels_;
     size_t fetched_label_i_;
     Vector<Column> label_intersection_;
+    Vector<Column> label_diff_;
+    Vector<Tuple> base_coords_;
 };
 
 template <class AlignmentCompare = LocalAlignmentLess>

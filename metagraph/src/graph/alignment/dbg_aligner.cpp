@@ -176,6 +176,7 @@ size_t align_connect(std::string_view query,
         }
 
         if (second.get_score() > first.get_score()) {
+            assert(false);
             std::swap(first, second);
         }
 
@@ -191,6 +192,7 @@ size_t align_connect(std::string_view query,
         assert(first.get_nodes().front());
         assert(first.get_nodes().back());
     } else {
+        assert(false);
         std::swap(first, second);
     }
 
@@ -545,6 +547,7 @@ std::tuple<size_t, size_t, size_t> ISeedAndExtendAligner<AlignmentCompare>
         AlignmentAggregator<AlignmentCompare> aggregator(config_);
 
         bool terminate = false;
+        score_t best_chain_score = config_.ninf;
         size_t this_num_explored;
         std::tie(num_seeds, this_num_explored) = call_seed_chains_both_strands(
             forward, reverse, graph_, config_, std::move(fwd_seeds), std::move(bwd_seeds),
@@ -553,7 +556,15 @@ std::tuple<size_t, size_t, size_t> ISeedAndExtendAligner<AlignmentCompare>
                              chain[0].get_orientation() ? forward : reverse,
                              std::move(chain), score, num_extensions, num_explored_nodes,
                              [&](Alignment&& aln) {
-                                 terminate |= aggregator.add_alignment(std::move(aln));
+                                 score_t score = aln.get_score();
+                                 if (aggregator.add_alignment(std::move(aln))) {
+                                     terminate = true;
+                                     if (score > best_chain_score) {
+                                         best_chain_score = score;
+                                     } else if (best_chain_score * config_.rel_score_cutoff > score) {
+                                         terminate = true;
+                                     }
+                                 }
                              });
             },
             [&]() { return terminate; }

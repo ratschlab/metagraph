@@ -549,8 +549,10 @@ std::vector<Alignment> DefaultColumnExtender
                 prev_begin = std::find_if(S.begin(), S.end(), in_range) - S.begin() + trim;
                 prev_end = std::find_if(S.rbegin(), S.rend(), in_range).base() - S.begin() + trim;
 
-                if (prev_end <= prev_begin)
+                if (prev_end <= prev_begin) {
+                    DEBUG_LOG("Bandwidth reached 0");
                     continue;
+                }
 
                 in_seed = next_offset - this->seed_->get_offset()
                                 < this->seed_->get_sequence().size();
@@ -669,10 +671,13 @@ std::vector<Alignment> DefaultColumnExtender
                 if (static_cast<size_t>(offset - seed_offset) < config_.target_distance + 1) {
                     has_extension = true;
                 } else if (config_.target_distance) {
+                    DEBUG_LOG("Target distance reached");
                     has_extension = false;
                 }
 
                 if (!in_seed && (max_val < xdrop_cutoff || !has_extension)) {
+                    DEBUG_LOG("x-drop: {} < {} or no extension possible",
+                              max_val, xdrop_cutoff);
                     pop(table.size() - 1);
                     if (forked_xdrop)
                         xdrop_cutoffs_.pop_back();
@@ -833,6 +838,8 @@ std::vector<Alignment> DefaultColumnExtender
             check_and_add_pos(last_pos);
         }
     }
+
+    DEBUG_LOG("Backtracking from {} indices", indices.size());
 
     // find highest scoring which is closest to the diagonal
     // use heap sort to make this run in O(n + (num_alternative_paths) * log(n)) time
