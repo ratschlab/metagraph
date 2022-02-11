@@ -422,8 +422,6 @@ void LabeledExtender
     }
 #endif
 
-    const Alignment &seed = *this->seed_;
-
     // use the label set of the current node in the alignment tree as the basis
     const auto &node_labels = labeled_graph_.get_labels_from_index(node_labels_[table_i]);
 
@@ -455,12 +453,10 @@ void LabeledExtender
 
     // check label and coordinate consistency
     // use the seed as the basis for labels and coordinates
-    assert(seed.label_coordinates.size());
+    assert(seed_->label_coordinates.size());
 
     // compute the coordinate distance from base_coords
-    ssize_t offset = std::get<6>(table[table_i]);
-    ssize_t dist_from_origin = offset - (seed.get_offset() - 1);
-    ssize_t dist = dist_from_origin - seed.get_sequence().size() + seed.get_nodes().size();
+    ssize_t dist = next_offset - graph_->get_k() + 1;
 
     // if we are traversing backwards, then negate the coordinate delta
     if (dynamic_cast<const RCDBG*>(graph_))
@@ -479,7 +475,8 @@ void LabeledExtender
         auto base_label_end_it = node_labels.end();
         try {
             utils::match_indexed_values(
-                seed.label_columns.begin(), seed.label_columns.end(), base_coords_.begin(),
+                seed_->label_columns.begin(), seed_->label_columns.end(),
+                base_coords_.begin(),
                 next_labels->get().begin(), next_labels->get().end(),
                 next_coords->get().begin(),
                 [&](Column c, const auto &coords, const auto &other_coords) {
