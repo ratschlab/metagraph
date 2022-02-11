@@ -308,22 +308,8 @@ void ISeedAndExtendAligner<AlignmentCompare>
 
         auto extender = build_extender(this_query, config_);
 
-        if (seeder->get_num_matches() <= config_.min_seed_length) {
-            for (auto&& seed : seeder->get_seeds()) {
-                add_alignment(std::move(seed));
-            }
-            seeder = std::make_shared<ManualSeeder>();
-        }
-
 #if ! _PROTEIN_GRAPH
         if (seeder_rc) {
-            if (seeder_rc->get_num_matches() <= config_.min_seed_length) {
-                for (auto&& seed : seeder->get_seeds()) {
-                    add_alignment(std::move(seed));
-                }
-                seeder_rc = std::make_shared<ManualSeeder>();
-            }
-
             std::string_view reverse = paths[i].get_query(!is_reverse_complement);
             auto extender_rc = build_extender(reverse, config_);
 
