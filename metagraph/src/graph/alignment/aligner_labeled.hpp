@@ -35,8 +35,6 @@ class AnnotationBuffer {
     typedef std::reference_wrapper<const Alignment::LabelSet> LabelSet;
     typedef std::reference_wrapper<const Alignment::CoordinateSet> CoordsSet;
 
-    static constexpr Row nrow = std::numeric_limits<Row>::max();
-
     // placeholder index for an unfetched annotation
     static constexpr size_t nannot = std::numeric_limits<size_t>::max();
 
@@ -49,9 +47,12 @@ class AnnotationBuffer {
     // flush the buffer and fetch their annotations from the AnnotatedDBG
     void flush();
 
-    // push (a) node(s) to the buffer
+    // push a node to the buffer
     node_index add_node(node_index node);
 
+    // Push the nodes in a path to the buffer. Return the a pair with the
+    // vector of corresponding labeled nodes, and a bool indicating if this vector
+    // is reversed relative to the input path.
     std::pair<std::vector<node_index>, bool>
     add_path(const std::vector<node_index> &path, std::string&& sequence);
 
@@ -80,6 +81,7 @@ class AnnotationBuffer {
         return ret_val;
     }
 
+    // return true if the annotations for the node have been fetched
     inline bool is_flushed(node_index node) const {
         auto it = labels_.find(node);
 
@@ -88,6 +90,7 @@ class AnnotationBuffer {
         return it != labels_.end() && it->second.second != nannot;
     }
 
+    // return true if the annotations for all nodes in the vector have been fetched
     inline bool is_flushed(const std::vector<node_index> &nodes) const {
         for (node_index node : nodes) {
             if (!is_flushed(node))
@@ -97,19 +100,22 @@ class AnnotationBuffer {
         return true;
     }
 
-    // get the annotations of a node if they have been fetched
+    // get the labels of a node if they have been fetched
     inline std::optional<LabelSet> get_labels(node_index node) const {
         return get_labels_and_coordinates(node).first;
     }
 
+    // get the number of nodes that are waiting to have their annotations fetched
     size_t num_cached() const { return added_rows_.size(); }
 
+    // add a label set (represented as a vector of sorted column indices) to the buffer
     template <typename... Args>
     size_t emplace_label_set(Args&&... args) {
         auto it = labels_set_.emplace(std::forward<Args>(args)...).first;
         return it - labels_set_.begin();
     }
 
+    // get the index of the label set
     size_t get_index(const Vector<Column> &labels) const {
         auto find = labels_set_.find(labels);
         if (find == labels_set_.end())
@@ -118,6 +124,7 @@ class AnnotationBuffer {
         return find - labels_set_.begin();
     }
 
+    // fetch a label set given its index
     const Vector<Column>& get_labels_from_index(size_t i) const {
         assert(i != nannot);
         assert(i < labels_set_.size());
@@ -130,17 +137,18 @@ class AnnotationBuffer {
     const annot::matrix::MultiIntMatrix *multi_int_;
 
     // keep a unique set of annotation rows
+    // the first element is the empty label set
     VectorSet<Vector<Column>, utils::VectorHash> labels_set_;
 
     // map nodes to indexes in labels_set_
     VectorMap<node_index, std::pair<Row, size_t>> labels_;
 
-    // map each element in labels_ to a set of coordinates
+    // map each key in labels_ to a set of coordinates
     std::vector<Vector<Tuple>> label_coords_;
 
     // buffer of accessed nodes and their corresponding annotation rows
-    std::vector<Row> added_rows_;
     std::vector<node_index> added_nodes_;
+    std::vector<Row> added_rows_;
 };
 
 class LabeledExtender : public DefaultColumnExtender {
@@ -159,7 +167,7 @@ class LabeledExtender : public DefaultColumnExtender {
   private:
     virtual std::vector<Alignment> backtrack(score_t min_path_score,
                                              std::string_view window) override final {
-        // extract all labels for explored nodes
+        // extract all annotations for explored nodes
         flush();
 
         // run backtracking
@@ -168,8 +176,7 @@ class LabeledExtender : public DefaultColumnExtender {
 
     virtual std::vector<Alignment> extend(score_t min_path_score,
                                           bool force_fixed_seed) override final {
-        // the first node of the seed has already been buffered and flushed
-        last_buffered_table_i_ = 1;
+        // the first node of the seed has already been flushed
         last_flushed_table_i_ = 1;
         return DefaultColumnExtender::extend(min_path_score, force_fixed_seed);
     }
@@ -178,7 +185,8 @@ class LabeledExtender : public DefaultColumnExtender {
 
     // overrides for backtracking helpers
     virtual bool terminate_backtrack_start(const std::vector<Alignment> &) const override final {
-        return !fetched_label_i_;
+        // we are done with backtracking if all seed labels have been accounted for
+        return !remaining_labels_i_;
     }
 
     virtual bool skip_backtrack_start(size_t i) override final;
@@ -210,22 +218,38 @@ class LabeledExtender : public DefaultColumnExtender {
                                  score_t extra_penalty,
                                  const std::function<void(Alignment&&)> &callback) override final;
 
+    // ensure that when terminating a path early, the per-node label storage is also
+    // correctly handled
     virtual void pop(size_t i) override final {
         assert(i < node_labels_.size());
         DefaultColumnExtender::pop(i);
-        node_labels_.erase(node_labels_.begin() + i, node_labels_.begin() + i + 1);
+        node_labels_.erase(node_labels_.begin() + i);
     }
 
+    // this override flushes the AnnotationBuffer, and checks elements in the
+    // dynamic programming table for label- (and coordinate-)consistency
     void flush();
 
+    // stores annotations for nodes
     AnnotationBuffer &labeled_graph_;
-    size_t last_buffered_table_i_;
+
+    // index of the last dynamic programming table element whose node was flushed
     size_t last_flushed_table_i_;
+
+    // map each table element to a corresponding label set index
     std::vector<size_t> node_labels_;
-    size_t fetched_label_i_;
+
+    // if the seed has coordinates, then the coordinates of the initial node in the
+    // extension is stored here
+    Vector<Tuple> base_coords_;
+
+    // index of the set of labels that still have not been seen during backtracking
+    size_t remaining_labels_i_;
+
+    // the label set intersection and difference between the current backtracking
+    // operation and the ones still left to be observed
     Vector<Column> label_intersection_;
     Vector<Column> label_diff_;
-    Vector<Tuple> base_coords_;
 };
 
 template <class AlignmentCompare = LocalAlignmentLess>
@@ -246,11 +270,12 @@ class ILabeledAligner : public ISeedAndExtendAligner<AlignmentCompare> {
           : ISeedAndExtendAligner<AlignmentCompare>(graph, config),
             labeled_graph_(graph, annotator) {}
 
+    // find the most frequent labels among the seeds and restrict graph traversal
+    // to those labeled paths during extension
     virtual void filter_seeds(BatchSeeders &seeders) const override final;
 
   private:
-    // find the most frequent labels among the seeds and restrict graph traversal
-    // to those labeled paths during extension
+    // helper for the protected filter_seeds method
     size_t filter_seeds(std::vector<Alignment> &seeds) const;
 };
 
