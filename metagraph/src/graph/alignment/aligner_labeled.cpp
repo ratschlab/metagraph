@@ -564,12 +564,9 @@ void LabeledExtender::call_alignments(score_t cur_cell_score,
             if (base_coords) {
                 base_coords = std::cref(seed_->label_coordinates);
                 dist -= seed_->get_offset();
-                if (dynamic_cast<const RCDBG*>(graph_)) {
-                    dist = (alignment.get_sequence().size() - seed_->get_sequence().size()) * -1;
-                }
+                if (dynamic_cast<const RCDBG*>(graph_))
+                    dist = alignment.get_sequence().size() - seed_->get_sequence().size();
             }
-        } else if (dynamic_cast<const RCDBG*>(graph_)) {
-            dist *= -1;
         }
 
         auto update_fetched = [&]() {
@@ -616,6 +613,10 @@ void LabeledExtender::call_alignments(score_t cur_cell_score,
             assert(cur_labels->get().size());
             assert(cur_coords);
             assert(cur_coords->get().size());
+            if (dynamic_cast<const RCDBG*>(graph_)) {
+                std::swap(cur_labels, base_labels);
+                std::swap(cur_coords, base_coords);
+            }
             CoordIntersection intersect_coords(dist);
             try {
                 utils::match_indexed_values(
@@ -649,6 +650,14 @@ void LabeledExtender::call_alignments(score_t cur_cell_score,
 
         if (alignment.label_coordinates.empty())
             return;
+
+        if (dynamic_cast<const RCDBG*>(graph_) && alignment.get_offset()) {
+            for (auto &coords : alignment.label_coordinates) {
+                for (auto &c : coords) {
+                    c += alignment.get_offset();
+                }
+            }
+        }
 
         update_fetched();
 
