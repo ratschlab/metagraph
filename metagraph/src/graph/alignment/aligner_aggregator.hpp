@@ -184,14 +184,19 @@ inline std::vector<Alignment> AlignmentAggregator<AlignmentCompare>::get_alignme
     }
     std::copy(unlabeled_.begin(), unlabeled_.end(), std::back_inserter(ptrs));
     clear();
-    // sort and remove duplicates
+    // sort by value (not by pointer value)
     std::sort(ptrs.begin(), ptrs.end(), cmp_);
-    ptrs.erase(std::unique(ptrs.begin(), ptrs.end()), ptrs.end());
     // transform pointers to objects
     std::vector<Alignment> alignments;
     alignments.reserve(ptrs.size());
-    std::transform(ptrs.rbegin(), ptrs.rend(), std::back_inserter(alignments),
-                   [](auto &a) { return std::move(*a); });
+    for (auto it = ptrs.rbegin(); it != ptrs.rend(); ++it) {
+        // make sure this alignment hasn't been moved yet
+        if ((*it)->size()) {
+            alignments.emplace_back(std::move(**it));
+            **it = Alignment();
+        }
+    }
+
     return alignments;
 }
 
