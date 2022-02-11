@@ -46,12 +46,29 @@ ISeedAndExtendAligner<AlignmentCompare>
 std::pair<Alignment, Alignment> split_seed(const DeBruijnGraph &graph,
                                            const DBGAlignerConfig &config,
                                            const Alignment &alignment) {
+    assert(alignment.is_valid(graph, &config));
     if (alignment.get_sequence().size() < graph.get_k() * 2)
         return std::make_pair(Alignment(), alignment);
 
     auto ret_val = std::make_pair(alignment, alignment);
     ret_val.first.trim_reference_suffix(graph.get_k(), graph, config, false);
-    ret_val.second.trim_reference_prefix(alignment.get_sequence().size() - graph.get_k(),
+
+    // ensure that there's no DELETION at the splice point
+    size_t trim_nodes = graph.get_k();
+    if (ret_val.first.size()) {
+        auto it = ret_val.first.get_cigar().data().rbegin();
+        if (it->first == Cigar::CLIPPED)
+            ++it;
+
+        if (it->first == Cigar::DELETION) {
+            trim_nodes += it->second;
+            ret_val.first.trim_reference_suffix(it->second, graph, config, false);
+        }
+
+        assert(ret_val.first.size());
+    }
+
+    ret_val.second.trim_reference_prefix(alignment.get_sequence().size() - trim_nodes,
                                          graph, config, true);
 
     return ret_val;
@@ -173,6 +190,7 @@ size_t align_connect(std::string_view query,
             extensions[0].trim_clipping();
             left.append(std::move(extensions[0]));
             std::swap(left, first);
+            assert(first.is_valid(graph, &config));
         }
 
         if (second.get_score() > first.get_score()) {
