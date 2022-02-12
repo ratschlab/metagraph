@@ -118,13 +118,13 @@ auto AnnotationBuffer::add_path(const std::vector<node_index> &path, std::string
                 added_nodes_.push_back(base_path[i]);
             }
         } else if (find_a == labels_.end() && find_b != labels_.end()) {
-            find_a = labels_.emplace(path[i], find_b->second).first;
+            labels_.emplace(path[i], find_b->second);
             if (find_b->second.second == nannot) {
                 added_rows_.push_back(row);
                 added_nodes_.push_back(path[i]);
             }
         } else if (find_a != labels_.end() && find_b == labels_.end()) {
-            find_b = labels_.emplace(base_path[i], find_a->second).first;
+            labels_.emplace(base_path[i], find_a->second);
         } else {
             size_t label_i = std::min(find_a->second.second, find_b->second.second);
             if (label_i != nannot) {
