@@ -319,11 +319,10 @@ void LabeledExtender::flush() {
                               std::back_inserter(intersect_labels));
         if (intersect_labels.empty()) {
             clear();
-            continue;
+        } else {
+            node_labels_[last_flushed_table_i_]
+                = labeled_graph_.emplace_label_set(std::move(intersect_labels));
         }
-
-        node_labels_[last_flushed_table_i_]
-            = labeled_graph_.emplace_label_set(std::move(intersect_labels));
     }
 }
 
@@ -368,6 +367,7 @@ void LabeledExtender
                 const std::function<void(node_index, char, score_t)> &callback,
                 size_t table_i,
                 bool force_fixed_seed) {
+    assert(table.size() == node_labels_.size());
     assert(node == std::get<3>(table[table_i]));
 
     // if we are in the seed and want to force the seed to be fixed, automatically
@@ -398,6 +398,10 @@ void LabeledExtender
 
     // flush the AnnotationBuffer and correct for annotation errors introduced above
     flush();
+
+    if (!node_labels_[table_i])
+        return;
+
     assert(labeled_graph_.get_labels_and_coordinates(node).first);
 
     // use the label set of the current node in the alignment tree as the basis
