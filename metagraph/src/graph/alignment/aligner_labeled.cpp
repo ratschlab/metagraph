@@ -80,44 +80,31 @@ auto AnnotationBuffer::add_path(const std::vector<node_index> &path, std::string
     const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(base_graph);
     const boss::BOSS *boss = dbg_succ ? &dbg_succ->get_boss() : nullptr;
     for (size_t i = 0; i < path.size(); ++i) {
-        auto find_a = labels_.find(path[i]);
-        auto find_b = labels_.find(base_path[i]);
         Row row = AnnotatedDBG::graph_to_anno_index(base_path[i]);
         std::pair<Row, size_t> val { row, 0 };
 
         if (base_path[i] == DeBruijnGraph::npos) {
             // this can happen when the base graph is CANONICAL and path[i] is a
             // dummy node
-            if (find_a != labels_.end()) {
-                find_a.value() = val;
-            } else {
-                labels_[path[i]] = val;
-                if (multi_int_)
-                    label_coords_.emplace_back();
-            }
+            if (labels_.emplace(path[i], val).second && multi_int_)
+                label_coords_.emplace_back();
+
             continue;
         }
 
         if (boss && !boss->get_W(dbg_succ->kmer_to_boss_index(base_path[i]))) {
             // skip dummy nodes
-            if (find_a != labels_.end()) {
-                find_a.value() = val;
-            } else {
-                labels_[path[i]] = val;
-                if (multi_int_)
-                    label_coords_.emplace_back();
-                find_b = labels_.find(base_path[i]);
-            }
+            if (labels_.emplace(path[i], val).second && multi_int_)
+                label_coords_.emplace_back();
 
-            if (find_b != labels_.end()) {
-                find_b.value() = val;
-            } else {
-                labels_[base_path[i]] = val;
-                if (multi_int_)
-                    label_coords_.emplace_back();
-            }
+            if (labels_.emplace(base_path[i], val).second && multi_int_)
+                label_coords_.emplace_back();
+
             continue;
         }
+
+        auto find_a = labels_.find(path[i]);
+        auto find_b = labels_.find(base_path[i]);
 
         if (find_a == labels_.end() && find_b == labels_.end()) {
             val.second = nannot;
