@@ -345,7 +345,8 @@ bool LabeledExtender::set_seed(const Alignment &seed) {
     if (!DefaultColumnExtender::set_seed(seed))
         return false;
 
-    assert(labeled_graph_.is_flushed(seed.get_nodes()));
+    assert(std::all_of(seed.get_nodes().begin(), seed.get_nodes().end(),
+                       [&](node_index n) { return labeled_graph_.get_labels(n); }));
     remaining_labels_i_ = labeled_graph_.emplace_label_set(seed.label_columns);
     assert(remaining_labels_i_ != AnnotationBuffer::nannot);
     node_labels_.assign(1, remaining_labels_i_);
@@ -415,12 +416,7 @@ void LabeledExtender
 
     // flush the AnnotationBuffer and correct for annotation errors introduced above
     flush();
-    assert(labeled_graph_.is_flushed(node));
-#ifndef NDEBUG
-    for (const auto &[next, c, score] : outgoing) {
-        assert(labeled_graph_.is_flushed(next));
-    }
-#endif
+    assert(labeled_graph_.get_labels_and_coordinates(node).first);
 
     // use the label set of the current node in the alignment tree as the basis
     const auto &node_labels = labeled_graph_.get_labels_from_index(node_labels_[table_i]);
@@ -769,7 +765,6 @@ size_t ILabeledAligner<AlignmentCompare>
 ::filter_seeds(std::vector<Alignment> &seeds) const {
     VectorMap<Column, uint64_t> label_counter;
     for (const Alignment &seed : seeds) {
-        assert(labeled_graph_.is_flushed(seed.get_nodes()));
         for (node_index node : seed.get_nodes()) {
             auto labels = labeled_graph_.get_labels(node);
             assert(labels);

@@ -81,25 +81,6 @@ class AnnotationBuffer {
         return ret_val;
     }
 
-    // return true if the annotations for the node have been fetched
-    inline bool is_flushed(node_index node) const {
-        auto it = labels_.find(node);
-
-        // if the node hasn't been seen before, or if its annotations haven't
-        // been flushed, return false
-        return it != labels_.end() && it->second.second != nannot;
-    }
-
-    // return true if the annotations for all nodes in the vector have been fetched
-    inline bool is_flushed(const std::vector<node_index> &nodes) const {
-        for (node_index node : nodes) {
-            if (!is_flushed(node))
-                return false;
-        }
-
-        return true;
-    }
-
     // get the labels of a node if they have been fetched
     inline std::optional<LabelSet> get_labels(node_index node) const {
         return get_labels_and_coordinates(node).first;
