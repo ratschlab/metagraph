@@ -82,14 +82,16 @@ auto AnnotationBuffer::add_path(const std::vector<node_index> &path, std::string
     for (size_t i = 0; i < path.size(); ++i) {
         auto find_a = labels_.find(path[i]);
         auto find_b = labels_.find(base_path[i]);
+        Row row = AnnotatedDBG::graph_to_anno_index(base_path[i]);
+        std::pair<Row, size_t> val { row, 0 };
 
         if (base_path[i] == DeBruijnGraph::npos) {
             // this can happen when the base graph is CANONICAL and path[i] is a
             // dummy node
             if (find_a != labels_.end()) {
-                find_a.value() = std::make_pair(AnnotatedDBG::graph_to_anno_index(base_path[i]), 0);
+                find_a.value() = val;
             } else {
-                labels_[path[i]] = std::make_pair(AnnotatedDBG::graph_to_anno_index(base_path[i]), 0);
+                labels_[path[i]] = val;
                 if (multi_int_)
                     label_coords_.emplace_back();
             }
@@ -99,28 +101,26 @@ auto AnnotationBuffer::add_path(const std::vector<node_index> &path, std::string
         if (boss && !boss->get_W(dbg_succ->kmer_to_boss_index(base_path[i]))) {
             // skip dummy nodes
             if (find_a != labels_.end()) {
-                find_a.value() = std::make_pair(AnnotatedDBG::graph_to_anno_index(base_path[i]), 0);
+                find_a.value() = val;
             } else {
-                labels_[path[i]] = std::make_pair(AnnotatedDBG::graph_to_anno_index(base_path[i]), 0);
+                labels_[path[i]] = val;
                 if (multi_int_)
                     label_coords_.emplace_back();
                 find_b = labels_.find(base_path[i]);
             }
 
             if (find_b != labels_.end()) {
-                find_b.value() = std::make_pair(AnnotatedDBG::graph_to_anno_index(base_path[i]), 0);
+                find_b.value() = val;
             } else {
-                labels_[base_path[i]] = std::make_pair(AnnotatedDBG::graph_to_anno_index(base_path[i]), 0);
+                labels_[base_path[i]] = val;
                 if (multi_int_)
                     label_coords_.emplace_back();
             }
             continue;
         }
 
-        Row row = AnnotatedDBG::graph_to_anno_index(base_path[i]);
-
         if (find_a == labels_.end() && find_b == labels_.end()) {
-            auto val = std::make_pair(row, nannot);
+            val.second = nannot;
             labels_.emplace(path[i], val);
             added_rows_.push_back(row);
             added_nodes_.push_back(path[i]);
