@@ -1,8 +1,6 @@
 #ifndef __LABELED_ALIGNER_HPP__
 #define __LABELED_ALIGNER_HPP__
 
-#include <optional>
-
 #include <tsl/hopscotch_map.h>
 #include <tsl/ordered_set.h>
 
@@ -32,8 +30,8 @@ class AnnotationBuffer {
     typedef annot::binmat::BinaryMatrix::Row Row;
     typedef annot::matrix::MultiIntMatrix::Tuple Tuple;
 
-    typedef std::reference_wrapper<const Alignment::LabelSet> LabelSet;
-    typedef std::reference_wrapper<const Alignment::CoordinateSet> CoordsSet;
+    typedef Alignment::LabelSet LabelSet;
+    typedef Alignment::CoordinateSet CoordsSet;
 
     // placeholder index for an unfetched annotation
     static constexpr size_t nannot = std::numeric_limits<size_t>::max();
@@ -57,11 +55,9 @@ class AnnotationBuffer {
     add_path(const std::vector<node_index> &path, std::string&& sequence);
 
     // get the annotations and coordinates of a node if they have been fetched
-    std::pair<std::optional<LabelSet>, std::optional<CoordsSet>>
+    std::pair<const LabelSet*, const CoordsSet*>
     get_labels_and_coordinates(node_index node) const {
-        std::pair<std::optional<LabelSet>, std::optional<CoordsSet>> ret_val {
-            std::nullopt, std::nullopt
-        };
+        std::pair<const LabelSet*, const CoordsSet*> ret_val;
 
         auto it = labels_.find(node);
 
@@ -70,19 +66,19 @@ class AnnotationBuffer {
         if (it == labels_.end() || it->second.second == nannot)
             return ret_val;
 
-        ret_val.first = std::cref(labels_set_.data()[it->second.second]);
+        ret_val.first = &labels_set_.data()[it->second.second];
 
         // if no coordinates are present, return just the labels
         if (!multi_int_)
             return ret_val;
 
         assert(static_cast<size_t>(it - labels_.begin()) < label_coords_.size());
-        ret_val.second = std::cref(label_coords_[it - labels_.begin()]);
+        ret_val.second = &label_coords_[it - labels_.begin()];
         return ret_val;
     }
 
     // get the labels of a node if they have been fetched
-    inline std::optional<LabelSet> get_labels(node_index node) const {
+    inline const LabelSet* get_labels(node_index node) const {
         return get_labels_and_coordinates(node).first;
     }
 

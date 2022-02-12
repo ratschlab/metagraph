@@ -326,10 +326,8 @@ void LabeledExtender::flush() {
         auto cur_labels = labeled_graph_.get_labels(node);
         assert(cur_labels);
         Vector<Column> intersect_labels;
-        std::set_intersection(parent_labels.begin(),
-                              parent_labels.end(),
-                              cur_labels->get().begin(),
-                              cur_labels->get().end(),
+        std::set_intersection(parent_labels.begin(), parent_labels.end(),
+                              cur_labels->begin(), cur_labels->end(),
                               std::back_inserter(intersect_labels));
         if (intersect_labels.empty()) {
             clear();
@@ -422,10 +420,8 @@ void LabeledExtender
             assert(next_labels);
 
             Vector<Column> intersect_labels;
-            std::set_intersection(node_labels.begin(),
-                                  node_labels.end(),
-                                  next_labels->get().begin(),
-                                  next_labels->get().end(),
+            std::set_intersection(node_labels.begin(), node_labels.end(),
+                                  next_labels->begin(), next_labels->end(),
                                   std::back_inserter(intersect_labels));
 
             if (intersect_labels.size()) {
@@ -447,8 +443,8 @@ void LabeledExtender
     size_t dist = next_offset - graph_->get_k() + 1;
 
     for (const auto &[next, c, score] : outgoing) {
-        std::optional<AnnotationBuffer::LabelSet> base_labels = std::cref(seed_->label_columns);
-        std::optional<AnnotationBuffer::CoordsSet> base_coords = std::cref(base_coords_);
+        const AnnotationBuffer::LabelSet *base_labels = &seed_->label_columns;
+        const AnnotationBuffer::CoordsSet *base_coords = &base_coords_;
         auto [next_labels, next_coords]
             = labeled_graph_.get_labels_and_coordinates(next);
 
@@ -467,10 +463,8 @@ void LabeledExtender
         auto cur_label_end_it = node_labels.end();
         try {
             utils::match_indexed_values(
-                base_labels->get().begin(), base_labels->get().end(),
-                base_coords->get().begin(),
-                next_labels->get().begin(), next_labels->get().end(),
-                next_coords->get().begin(),
+                base_labels->begin(), base_labels->end(), base_coords->begin(),
+                next_labels->begin(), next_labels->end(), next_coords->begin(),
                 [&](Column c, const auto &coords, const auto &other_coords) {
                     // also, intersect with the label set of node
                     while (cur_label_it != cur_label_end_it && c > *cur_label_it) {
@@ -545,10 +539,10 @@ void LabeledExtender::call_alignments(score_t cur_cell_score,
         auto [base_labels, base_coords]
             = labeled_graph_.get_labels_and_coordinates(alignment.get_nodes().front());
         assert(base_labels);
-        assert(base_labels->get().size());
+        assert(base_labels->size());
 
         if (!clipping)
-            base_labels = std::cref(seed_->label_columns);
+            base_labels = &seed_->label_columns;
 
         auto call_alignment = [&]() {
             if (label_diff_.size() && label_diff_.back() == AnnotationBuffer::nannot) {
@@ -569,7 +563,7 @@ void LabeledExtender::call_alignments(score_t cur_cell_score,
 
         ssize_t dist = alignment.get_nodes().size() - 1;
         if (!clipping) {
-            base_coords = std::cref(seed_->label_coordinates);
+            base_coords = &seed_->label_coordinates;
             dist -= seed_->get_offset();
             if (dynamic_cast<const RCDBG*>(graph_))
                 dist = alignment.get_sequence().size() - seed_->get_sequence().size();
@@ -579,9 +573,9 @@ void LabeledExtender::call_alignments(score_t cur_cell_score,
         auto label_end_it = label_intersection_.end();
 
         if (alignment.get_nodes().size() == 1) {
-            auto it = base_labels->get().begin();
-            auto end = base_labels->get().end();
-            auto c_it = base_coords->get().begin();
+            auto it = base_labels->begin();
+            auto end = base_labels->end();
+            auto c_it = base_coords->begin();
             while (label_it != label_end_it && it != end) {
                 if (*label_it < *it) {
                     ++label_it;
@@ -600,9 +594,9 @@ void LabeledExtender::call_alignments(score_t cur_cell_score,
             auto [cur_labels, cur_coords]
                 = labeled_graph_.get_labels_and_coordinates(alignment.get_nodes().back());
             assert(cur_labels);
-            assert(cur_labels->get().size());
+            assert(cur_labels->size());
             assert(cur_coords);
-            assert(cur_coords->get().size());
+            assert(cur_coords->size());
             if (dynamic_cast<const RCDBG*>(graph_)) {
                 std::swap(cur_labels, base_labels);
                 std::swap(cur_coords, base_coords);
@@ -610,10 +604,8 @@ void LabeledExtender::call_alignments(score_t cur_cell_score,
             CoordIntersection intersect_coords(dist);
             try {
                 utils::match_indexed_values(
-                    base_labels->get().begin(), base_labels->get().end(),
-                    base_coords->get().begin(),
-                    cur_labels->get().begin(), cur_labels->get().end(),
-                    cur_coords->get().begin(),
+                    base_labels->begin(), base_labels->end(), base_coords->begin(),
+                    cur_labels->begin(), cur_labels->end(), cur_coords->begin(),
                     [&](Column c, const auto &coords, const auto &other_coords) {
                         while (label_it != label_end_it && c > *label_it) {
                             ++label_it;
@@ -758,9 +750,8 @@ size_t ILabeledAligner<AlignmentCompare>
     VectorMap<Column, uint64_t> label_counter;
     for (const Alignment &seed : seeds) {
         for (node_index node : seed.get_nodes()) {
-            auto labels = labeled_graph_.get_labels(node);
-            assert(labels);
-            for (uint64_t label : labels->get()) {
+            assert(labeled_graph_.get_labels(node));
+            for (uint64_t label : *labeled_graph_.get_labels(node)) {
                 ++label_counter[label];
             }
         }
@@ -798,9 +789,9 @@ size_t ILabeledAligner<AlignmentCompare>
             continue;
 
         if (fetch_coords) {
-            auto a_begin = fetch_labels->get().begin();
-            auto a_end = fetch_labels->get().end();
-            auto a_c_begin = fetch_coords->get().begin();
+            auto a_begin = fetch_labels->begin();
+            auto a_end = fetch_labels->end();
+            auto a_c_begin = fetch_coords->begin();
             auto b_begin = labels.begin();
             auto b_end = labels.end();
             while (a_begin != a_end && b_begin != b_end) {
@@ -818,8 +809,7 @@ size_t ILabeledAligner<AlignmentCompare>
                 }
             }
         } else {
-            std::set_intersection(fetch_labels->get().begin(),
-                                  fetch_labels->get().end(),
+            std::set_intersection(fetch_labels->begin(), fetch_labels->end(),
                                   labels.begin(), labels.end(),
                                   std::back_inserter(seed.label_columns));
         }
@@ -836,8 +826,8 @@ size_t ILabeledAligner<AlignmentCompare>
                 utils::match_indexed_values(
                     seed.label_columns.begin(), seed.label_columns.end(),
                     seed.label_coordinates.begin(),
-                    next_fetch_labels->get().begin(), next_fetch_labels->get().end(),
-                    next_fetch_coords->get().begin(),
+                    next_fetch_labels->begin(), next_fetch_labels->end(),
+                    next_fetch_coords->begin(),
                     [&](auto col, const auto &coords, const auto &other_coords) {
                         Alignment::Tuple overlap;
                         intersect_coords(coords.begin(), coords.end(),
@@ -854,10 +844,8 @@ size_t ILabeledAligner<AlignmentCompare>
                 std::swap(seed.label_coordinates, coord_inter);
             } else if (next_fetch_labels) {
                 Vector<Column> temp;
-                std::set_intersection(next_fetch_labels->get().begin(),
-                                      next_fetch_labels->get().end(),
-                                      seed.label_columns.begin(),
-                                      seed.label_columns.end(),
+                std::set_intersection(next_fetch_labels->begin(), next_fetch_labels->end(),
+                                      seed.label_columns.begin(), seed.label_columns.end(),
                                       std::back_inserter(temp));
                 std::swap(temp, seed.label_columns);
             } else {
