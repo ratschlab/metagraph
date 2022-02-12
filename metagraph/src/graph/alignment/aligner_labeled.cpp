@@ -386,28 +386,20 @@ void LabeledExtender
     bool in_seed = (next_offset - seed_->get_offset() < seed_->get_sequence().size())
         && (next_offset < graph_->get_k() || force_fixed_seed || fixed_seed());
 
-    if (in_seed) {
-        assert(labeled_graph_.is_flushed(node));
-        DefaultColumnExtender::call_outgoing(node, max_prefetch_distance,
-                                             [&](node_index next, char c, score_t score) {
-            assert(labeled_graph_.is_flushed(next));
-            node_labels_.emplace_back(node_labels_[table_i]);
-            callback(next, c, score);
-        }, table_i, force_fixed_seed);
-        return;
-    }
-
-    // otherwise, fetch the next nodes normally
     std::vector<std::tuple<node_index, char, score_t>> outgoing;
     DefaultColumnExtender::call_outgoing(node, max_prefetch_distance,
                                          [&](node_index next, char c, score_t score) {
         outgoing.emplace_back(next, c, score);
-        labeled_graph_.add_node(next);
+        if (!in_seed)
+            labeled_graph_.add_node(next);
     }, table_i, force_fixed_seed);
 
-    // If in a unitig, assume for now that it has the same annotations as the current
-    // node. Violations of this assumption are corrected for on the next flush
+    if (outgoing.empty())
+        return;
+
     if (outgoing.size() == 1) {
+        // Assume that annotations are preserved in unitigs. Violations of this
+        // assumption are corrected after the next flush
         const auto &[next, c, score] = outgoing[0];
         node_labels_.emplace_back(node_labels_[table_i]);
         callback(next, c, score);
