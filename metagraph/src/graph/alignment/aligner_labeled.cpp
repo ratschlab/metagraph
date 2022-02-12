@@ -342,34 +342,33 @@ void LabeledExtender::flush() {
 }
 
 bool LabeledExtender::set_seed(const Alignment &seed) {
-    if (DefaultColumnExtender::set_seed(seed)) {
-        assert(labeled_graph_.is_flushed(seed.get_nodes()));
-        remaining_labels_i_ = labeled_graph_.emplace_label_set(seed.label_columns);
-        assert(remaining_labels_i_ != AnnotationBuffer::nannot);
-        node_labels_.assign(1, remaining_labels_i_);
-        base_coords_ = seed.label_coordinates;
-        if (base_coords_.size()) {
-            if (dynamic_cast<const RCDBG*>(graph_)) {
+    if (!DefaultColumnExtender::set_seed(seed))
+        return false;
+
+    assert(labeled_graph_.is_flushed(seed.get_nodes()));
+    remaining_labels_i_ = labeled_graph_.emplace_label_set(seed.label_columns);
+    assert(remaining_labels_i_ != AnnotationBuffer::nannot);
+    node_labels_.assign(1, remaining_labels_i_);
+    base_coords_ = seed.label_coordinates;
+    if (base_coords_.size()) {
+        if (dynamic_cast<const RCDBG*>(graph_)) {
+            for (auto &coords : base_coords_) {
+                for (auto &c : coords) {
+                    c += seed.get_nodes().size() - 1 - seed.get_offset();
+                }
+            }
+        } else {
+            if (seed.get_offset()) {
                 for (auto &coords : base_coords_) {
                     for (auto &c : coords) {
-                        c += seed.get_nodes().size() - 1 - seed.get_offset();
-                    }
-                }
-            } else {
-                if (seed.get_offset()) {
-                    for (auto &coords : base_coords_) {
-                        for (auto &c : coords) {
-                            c -= seed.get_offset();
-                        }
+                        c -= seed.get_offset();
                     }
                 }
             }
         }
-
-        return true;
     }
 
-    return false;
+    return true;
 }
 
 void LabeledExtender
@@ -555,16 +554,8 @@ void LabeledExtender::call_alignments(score_t cur_cell_score,
         assert(base_labels);
         assert(base_labels->get().size());
 
-        ssize_t dist = alignment.get_nodes().size() - 1;
-        if (!clipping) {
+        if (!clipping)
             base_labels = std::cref(seed_->label_columns);
-            if (base_coords) {
-                base_coords = std::cref(seed_->label_coordinates);
-                dist -= seed_->get_offset();
-                if (dynamic_cast<const RCDBG*>(graph_))
-                    dist = alignment.get_sequence().size() - seed_->get_sequence().size();
-            }
-        }
 
         auto update_fetched = [&]() {
             if (label_diff_.size() && label_diff_.back() == AnnotationBuffer::nannot) {
@@ -580,6 +571,14 @@ void LabeledExtender::call_alignments(score_t cur_cell_score,
             update_fetched();
             callback(std::move(alignment));
             return;
+        }
+
+        ssize_t dist = alignment.get_nodes().size() - 1;
+        if (!clipping) {
+            base_coords = std::cref(seed_->label_coordinates);
+            dist -= seed_->get_offset();
+            if (dynamic_cast<const RCDBG*>(graph_))
+                dist = alignment.get_sequence().size() - seed_->get_sequence().size();
         }
 
         auto seed_label_it = label_intersection_.begin();
