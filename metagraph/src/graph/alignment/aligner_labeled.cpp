@@ -6,6 +6,7 @@
 #include "graph/representation/canonical_dbg.hpp"
 #include "annotation/int_matrix/base/int_matrix.hpp"
 #include "common/algorithms.hpp"
+#include "common/utils/template_utils.hpp"
 
 
 namespace mtg {

@@ -1,26 +1,17 @@
 #ifndef __LABELED_ALIGNER_HPP__
 #define __LABELED_ALIGNER_HPP__
 
-#include <tsl/hopscotch_map.h>
-#include <tsl/ordered_set.h>
-
 #include "dbg_aligner.hpp"
-#include "common/hashers/hash.hpp"
-#include "common/utils/template_utils.hpp"
-#include "graph/annotated_dbg.hpp"
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
 #include "annotation/int_matrix/base/int_matrix.hpp"
+#include "common/hashers/hash.hpp"
+#include "common/vector_set.hpp"
+#include "graph/annotated_dbg.hpp"
 
 
 namespace mtg {
 namespace graph {
 namespace align {
-
-template <typename Key, class Hash = std::hash<Key>, typename IndexType = uint64_t,
-          class EqualTo = std::equal_to<Key>, class Allocator = std::allocator<Key>,
-          class Container = std::vector<Key, Allocator>>
-using VectorSet = tsl::ordered_set<Key, Hash, EqualTo, Allocator, Container, IndexType>;
-
 
 class AnnotationBuffer {
   public:
@@ -42,7 +33,7 @@ class AnnotationBuffer {
     const Annotator& get_annotator() const { return annotator_; }
     const annot::matrix::MultiIntMatrix* get_coordinate_matrix() const { return multi_int_; }
 
-    // flush the buffer and fetch their annotations from the AnnotatedDBG
+    // flush the buffer and fetch their annotations from the Annotator
     void flush();
 
     // push a node to the buffer
