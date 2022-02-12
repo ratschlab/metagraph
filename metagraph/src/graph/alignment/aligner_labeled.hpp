@@ -137,13 +137,6 @@ class LabeledExtender : public DefaultColumnExtender {
         return DefaultColumnExtender::backtrack(min_path_score, window);
     }
 
-    virtual std::vector<Alignment> extend(score_t min_path_score,
-                                          bool force_fixed_seed) override final {
-        // the first node of the seed has already been flushed
-        last_flushed_table_i_ = 1;
-        return DefaultColumnExtender::extend(min_path_score, force_fixed_seed);
-    }
-
     virtual bool set_seed(const Alignment &seed) override final;
 
     // overrides for backtracking helpers

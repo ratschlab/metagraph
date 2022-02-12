@@ -333,6 +333,10 @@ bool LabeledExtender::set_seed(const Alignment &seed) {
 
     assert(std::all_of(seed.get_nodes().begin(), seed.get_nodes().end(),
                        [&](node_index n) { return labeled_graph_.get_labels(n); }));
+
+    // the first node of the seed has already been flushed
+    last_flushed_table_i_ = 1;
+
     remaining_labels_i_ = labeled_graph_.emplace_label_set(seed.label_columns);
     assert(remaining_labels_i_ != AnnotationBuffer::nannot);
     node_labels_.assign(1, remaining_labels_i_);
