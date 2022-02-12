@@ -20,7 +20,6 @@ class AnnotationBuffer {
     typedef annot::binmat::BinaryMatrix::Column Column;
     typedef annot::binmat::BinaryMatrix::Row Row;
     typedef annot::matrix::MultiIntMatrix::Tuple Tuple;
-
     typedef Alignment::LabelSet LabelSet;
     typedef Alignment::CoordinateSet CoordsSet;
 
@@ -59,12 +58,11 @@ class AnnotationBuffer {
 
         ret_val.first = &labels_set_.data()[it->second.second];
 
-        // if no coordinates are present, return just the labels
-        if (!multi_int_)
-            return ret_val;
+        if (multi_int_) {
+            assert(static_cast<size_t>(it - labels_.begin()) < label_coords_.size());
+            ret_val.second = &label_coords_[it - labels_.begin()];
+        }
 
-        assert(static_cast<size_t>(it - labels_.begin()) < label_coords_.size());
-        ret_val.second = &label_coords_[it - labels_.begin()];
         return ret_val;
     }
 
@@ -86,10 +84,7 @@ class AnnotationBuffer {
     // get the index of the label set
     size_t get_index(const Vector<Column> &labels) const {
         auto find = labels_set_.find(labels);
-        if (find == labels_set_.end())
-            return nannot;
-
-        return find - labels_set_.begin();
+        return find != labels_set_.end() ? find - labels_set_.begin() : nannot;
     }
 
     // fetch a label set given its index
