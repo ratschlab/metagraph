@@ -13,7 +13,7 @@ AlignmentResults IDBGAligner::align(std::string_view query,
     AlignmentResults result(query);
     align_batch({ Query{ std::string{}, query, is_reverse_complement} },
         [&](std::string_view, AlignmentResults&& alignment) {
-            result = std::move(alignment);
+            std::swap(result, alignment);
         }
     );
 

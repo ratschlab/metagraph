@@ -1258,9 +1258,11 @@ bool Alignment::is_valid(const DeBruijnGraph &graph, const DBGAlignerConfig *con
 
 
 AlignmentResults::AlignmentResults(std::string_view query, bool is_reverse_complement) {
-    // pad sequences for easier access in 64-bit blocks
-    std::string query_;
-    query_.reserve(query.size() + 8);
+    // Pad sequences for easier access in 64-bit blocks.
+    // Take the max of the query size and sizeof(query_) to ensure that small-string
+    // optimizations are disabled. Implementation taken from:
+    // https://stackoverflow.com/questions/34788789/disable-stdstrings-sso
+    query_.reserve(std::max(query.size(), sizeof(query_)) + 8);
 
     // TODO: use alphabet encoder
     // transform to upper and fix non-standard characters
@@ -1271,19 +1273,16 @@ AlignmentResults::AlignmentResults(std::string_view query, bool is_reverse_compl
     memset(query_.data() + query.size(), '\0', query_.capacity() - query.size());
 
     // set the reverse complement
-    std::string query_rc_(query_);
+    query_rc_ = query_;
 
     // fill padding just in case optimizations removed it
-    query_rc_.reserve(query.size() + 8);
+    query_rc_.reserve(query_.capacity());
     memset(query_rc_.data() + query.size(), '\0', query_rc_.capacity() - query.size());
 
     // reverse complement
     reverse_complement(query_rc_.begin(), query_rc_.end());
     if (is_reverse_complement)
         std::swap(query_, query_rc_);
-
-    this->query_ = std::make_shared<const std::string>(std::move(query_));
-    this->query_rc_ = std::make_shared<const std::string>(std::move(query_rc_));
 }
 
 } // namespace align

@@ -212,6 +212,13 @@ class AlignmentResults {
   public:
     explicit AlignmentResults(std::string_view query, bool is_reverse_complement = false);
 
+    // Copy constructors are disabled to ensure that the string_view pointers
+    // in the Alignment objects stay valid
+    AlignmentResults(const AlignmentResults&) = delete;
+    AlignmentResults& operator=(const AlignmentResults&) = delete;
+    AlignmentResults(AlignmentResults&&) = default;
+    AlignmentResults& operator=(AlignmentResults&&) = default;
+
     template <typename... Args>
     void emplace_back(Args&&... args) {
         alignments_.emplace_back(std::forward<Args>(args)...);
@@ -224,7 +231,7 @@ class AlignmentResults {
     }
 
     const std::string& get_query(bool reverse_complement = false) const {
-        return !reverse_complement ? *query_ : *query_rc_;
+        return !reverse_complement ? query_ : query_rc_;
     }
 
     size_t size() const { return alignments_.size(); }
@@ -235,11 +242,8 @@ class AlignmentResults {
     auto end() const { return alignments_.end(); }
 
   private:
-    // TODO: Storing these as shared_ptr ensures that moves and copies can happen
-    //       without invalidating the string_views in the alignments. This is a bit
-    //       of an ugly hack, so find a better way to do this.
-    std::shared_ptr<const std::string> query_;
-    std::shared_ptr<const std::string> query_rc_;
+    std::string query_;
+    std::string query_rc_;
     std::vector<Alignment> alignments_;
 };
 
