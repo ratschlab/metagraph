@@ -47,7 +47,7 @@ class AnnotationBuffer {
     // get the annotations and coordinates of a node if they have been fetched
     std::pair<const LabelSet*, const CoordsSet*>
     get_labels_and_coordinates(node_index node) const {
-        std::pair<const LabelSet*, const CoordsSet*> ret_val;
+        std::pair<const LabelSet*, const CoordsSet*> ret_val { nullptr, nullptr };
 
         auto it = labels_.find(node);
 

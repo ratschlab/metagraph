@@ -402,7 +402,7 @@ void LabeledExtender
     if (!node_labels_[table_i])
         return;
 
-    assert(labeled_graph_.get_labels_and_coordinates(node).first);
+    assert(labeled_graph_.get_labels(node));
 
     // use the label set of the current node in the alignment tree as the basis
     const auto &node_labels = labeled_graph_.get_labels_from_index(node_labels_[table_i]);
