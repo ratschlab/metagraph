@@ -21,7 +21,7 @@ class AnnotationBuffer {
     typedef annot::binmat::BinaryMatrix::Row Row;
     typedef annot::matrix::MultiIntMatrix::Tuple Tuple;
     typedef Alignment::LabelSet LabelSet;
-    typedef Alignment::CoordinateSet CoordsSet;
+    typedef Alignment::CoordinateSet CoordinateSet;
 
     // placeholder index for an unfetched annotation
     static constexpr size_t nannot = std::numeric_limits<size_t>::max();
@@ -45,9 +45,9 @@ class AnnotationBuffer {
     add_path(const std::vector<node_index> &path, std::string&& sequence);
 
     // get the annotations and coordinates of a node if they have been fetched
-    std::pair<const LabelSet*, const CoordsSet*>
+    std::pair<const LabelSet*, const CoordinateSet*>
     get_labels_and_coordinates(node_index node) const {
-        std::pair<const LabelSet*, const CoordsSet*> ret_val { nullptr, nullptr };
+        std::pair<const LabelSet*, const CoordinateSet*> ret_val { nullptr, nullptr };
 
         auto it = labels_.find(node);
 
@@ -82,13 +82,13 @@ class AnnotationBuffer {
     }
 
     // get the index of the label set
-    size_t get_index(const Vector<Column> &labels) const {
+    size_t get_index(const LabelSet &labels) const {
         auto find = labels_set_.find(labels);
         return find != labels_set_.end() ? find - labels_set_.begin() : nannot;
     }
 
     // fetch a label set given its index
-    const Vector<Column>& get_labels_from_index(size_t i) const {
+    const LabelSet& get_labels_from_index(size_t i) const {
         assert(i != nannot);
         assert(i < labels_set_.size());
         return labels_set_.data()[i];
@@ -101,13 +101,13 @@ class AnnotationBuffer {
 
     // keep a unique set of annotation rows
     // the first element is the empty label set
-    VectorSet<Vector<Column>, utils::VectorHash> labels_set_;
+    VectorSet<LabelSet, utils::VectorHash> labels_set_;
 
     // map nodes to indexes in labels_set_
     VectorMap<node_index, std::pair<Row, size_t>> labels_;
 
     // map each key in labels_ to a set of coordinates
-    std::vector<Vector<Tuple>> label_coords_;
+    std::vector<CoordinateSet> label_coords_;
 
     // buffer of accessed nodes and their corresponding annotation rows
     std::vector<node_index> added_nodes_;
@@ -118,6 +118,8 @@ class LabeledExtender : public DefaultColumnExtender {
   public:
     typedef AnnotationBuffer::Column Column;
     typedef AnnotationBuffer::Tuple Tuple;
+    typedef AnnotationBuffer::LabelSet LabelSet;
+    typedef AnnotationBuffer::CoordinateSet CoordinateSet;
 
     LabeledExtender(AnnotationBuffer &labeled_graph,
                     const DBGAlignerConfig &config,
@@ -197,22 +199,22 @@ class LabeledExtender : public DefaultColumnExtender {
 
     // if the seed has coordinates, then the coordinates of the initial node in the
     // extension is stored here
-    Vector<Tuple> base_coords_;
+    CoordinateSet base_coords_;
 
     // index of the set of labels that still have not been seen during backtracking
     size_t remaining_labels_i_;
 
     // the label set intersection and difference between the current backtracking
     // operation and the ones still left to be observed
-    Vector<Column> label_intersection_;
-    Vector<Column> label_diff_;
+    LabelSet label_intersection_;
+    LabelSet label_diff_;
 };
 
 template <class AlignmentCompare = LocalAlignmentLess>
 class ILabeledAligner : public ISeedAndExtendAligner<AlignmentCompare> {
   public:
     typedef AnnotationBuffer::Annotator Annotator;
-    typedef Alignment::score_t score_t;
+    typedef AnnotationBuffer::LabelSet LabelSet;
     typedef Alignment::node_index node_index;
     typedef Alignment::Column Column;
 
@@ -240,12 +242,9 @@ template <class AlignmentCompare = LocalAlignmentLess,
           class Seeder = UniMEMSeeder>
 class LabeledAligner : public ILabeledAligner<AlignmentCompare> {
   public:
-    typedef typename ILabeledAligner<AlignmentCompare>::Annotator Annotator;
-
-    LabeledAligner(const DeBruijnGraph &graph,
-                   const Annotator &annotator,
-                   const DBGAlignerConfig &config)
-          : ILabeledAligner<AlignmentCompare>(graph, annotator, config) {
+    template <typename... Args>
+    LabeledAligner(Args&&... args)
+          : ILabeledAligner<AlignmentCompare>(std::forward<Args>(args)...) {
         if (this->labeled_graph_.get_coordinate_matrix()
                 && std::is_same_v<Extender, LabeledExtender>) {
             // do not use a global xdrop cutoff since we need separate cutoffs

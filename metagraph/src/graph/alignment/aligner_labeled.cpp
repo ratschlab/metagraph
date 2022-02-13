@@ -183,7 +183,7 @@ void AnnotationBuffer::flush() {
     if (multi_int_) {
         // extract both labels and coordinates, then store them separately
         for (auto&& row_tuples : multi_int_->get_row_tuples(added_rows_)) {
-            Vector<Column> labels;
+            LabelSet labels;
             labels.reserve(row_tuples.size());
             label_coords_.emplace_back();
             label_coords_.back().reserve(row_tuples.size());
@@ -313,7 +313,7 @@ void LabeledExtender::flush() {
 
         auto cur_labels = labeled_graph_.get_labels(node);
         assert(cur_labels);
-        Vector<Column> intersect_labels;
+        LabelSet intersect_labels;
         std::set_intersection(parent_labels.begin(), parent_labels.end(),
                               cur_labels->begin(), cur_labels->end(),
                               std::back_inserter(intersect_labels));
@@ -440,7 +440,7 @@ void LabeledExtender
 
     for (const auto &[next, c, score] : outgoing) {
         const AnnotationBuffer::LabelSet *base_labels = &seed_->label_columns;
-        const AnnotationBuffer::CoordsSet *base_coords = &base_coords_;
+        const AnnotationBuffer::CoordinateSet *base_coords = &base_coords_;
         auto [next_labels, next_coords]
             = labeled_graph_.get_labels_and_coordinates(next);
 
@@ -453,7 +453,7 @@ void LabeledExtender
         }
 
         // check if at least one label has consistent coordinates
-        Vector<Column> intersect_labels;
+        LabelSet intersect_labels;
 
         auto cur_label_it = node_labels.begin();
         auto cur_label_end_it = node_labels.end();
@@ -502,8 +502,8 @@ bool LabeledExtender::skip_backtrack_start(size_t i) {
     const auto &end_labels = labeled_graph_.get_labels_from_index(node_labels_[i]);
     const auto &left_labels = labeled_graph_.get_labels_from_index(remaining_labels_i_);
 
-    label_intersection_ = Vector<Column>{};
-    label_diff_ = Vector<Column>{};
+    label_intersection_ = LabelSet{};
+    label_diff_ = LabelSet{};
     set_intersection_difference(left_labels.begin(), left_labels.end(),
                                 end_labels.begin(), end_labels.end(),
                                 std::back_inserter(label_intersection_),
@@ -770,7 +770,7 @@ size_t ILabeledAligner<AlignmentCompare>
 
     label_counts.erase(it, label_counts.end());
 
-    Vector<Column> labels;
+    LabelSet labels;
     labels.reserve(label_counts.size());
     for (const auto &[label, count] : label_counts) {
         labels.push_back(label);
@@ -816,7 +816,7 @@ size_t ILabeledAligner<AlignmentCompare>
             auto [next_fetch_labels, next_fetch_coords]
                 = labeled_graph_.get_labels_and_coordinates(nodes[i]);
             if (next_fetch_coords) {
-                Vector<Column> label_inter;
+                LabelSet label_inter;
                 Alignment::CoordinateSet coord_inter;
                 CoordIntersection intersect_coords(i);
                 utils::match_indexed_values(
@@ -839,7 +839,7 @@ size_t ILabeledAligner<AlignmentCompare>
                 std::swap(seed.label_columns, label_inter);
                 std::swap(seed.label_coordinates, coord_inter);
             } else if (next_fetch_labels) {
-                Vector<Column> temp;
+                LabelSet temp;
                 std::set_intersection(next_fetch_labels->begin(), next_fetch_labels->end(),
                                       seed.label_columns.begin(), seed.label_columns.end(),
                                       std::back_inserter(temp));

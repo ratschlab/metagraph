@@ -77,15 +77,6 @@ class ISeedAndExtendAligner : public IDBGAligner {
         );
     }
 
-    // Generates seeds and extends them. If force_fixed_seed is true, then
-    // all alignments must have the seed as a prefix. Otherwise, only the first
-    // node of the seed is used as an alignment starting node.
-    virtual void align_core(const ISeeder &seeder,
-                            IExtender &extender,
-                            const std::function<void(Alignment&&)> &callback,
-                            const std::function<score_t(const Alignment&)> &get_min_path_score,
-                            bool force_fixed_seed) const;
-
   private:
     // Align the forward and reverse complement of the query sequence in both
     // directions and return the overall best alignment. e.g., for the forward query
@@ -102,6 +93,15 @@ class ISeedAndExtendAligner : public IDBGAligner {
                           IExtender &reverse_extender,
                           const std::function<void(Alignment&&)> &callback,
                           const std::function<score_t(const Alignment&)> &get_min_path_score) const;
+
+    // Generates seeds and extends them. If force_fixed_seed is true, then
+    // all alignments must have the seed as a prefix. Otherwise, only the first
+    // node of the seed is used as an alignment starting node.
+    void align_core(const ISeeder &seeder,
+                    IExtender &extender,
+                    const std::function<void(Alignment&&)> &callback,
+                    const std::function<score_t(const Alignment&)> &get_min_path_score,
+                    bool force_fixed_seed) const;
 
     // Construct a full alignment from a chain by aligning the query agaisnt
     // the graph in the regions of the query in between the chain seeds.
