@@ -523,7 +523,8 @@ std::vector<Alignment> DefaultColumnExtender
                     // if too many nodes have been explored, give up
                     if (static_cast<double>(node_counter) / window.size()
                             >= config_.max_nodes_per_seq_char) {
-                        DEBUG_LOG("Alignment node limit reached, stopping this branch");
+                        DEBUG_LOG("Position {}: Alignment node limit reached, stopping this branch",
+                                  next_offset - seed_->get_offset());
                         if (config_.global_xdrop) {
                             queue = std::priority_queue<TableIt>();
                             next_nodes.clear();
@@ -534,7 +535,8 @@ std::vector<Alignment> DefaultColumnExtender
 
                     if (static_cast<double>(table_size_bytes_) / 1'000'000
                             > config_.max_ram_per_alignment) {
-                        DEBUG_LOG("Alignment RAM limit reached, stopping extension");
+                        DEBUG_LOG("Position {}: Alignment RAM limit reached, stopping extension",
+                                  next_offset - seed_->get_offset());
                         queue = std::priority_queue<TableIt>();
                         next_nodes.clear();
                         continue;
@@ -550,7 +552,7 @@ std::vector<Alignment> DefaultColumnExtender
                 prev_end = std::find_if(S.rbegin(), S.rend(), in_range).base() - S.begin() + trim;
 
                 if (prev_end <= prev_begin) {
-                    DEBUG_LOG("Bandwidth reached 0");
+                    DEBUG_LOG("Position {}: Bandwidth reached 0", next_offset - seed_->get_offset());
                     continue;
                 }
 
@@ -675,9 +677,21 @@ std::vector<Alignment> DefaultColumnExtender
                     has_extension = false;
                 }
 
-                if (!in_seed && (max_val < xdrop_cutoff || !has_extension)) {
-                    DEBUG_LOG("x-drop: {} < {} or no extension possible",
-                              max_val, xdrop_cutoff);
+                if (!in_seed && max_val < xdrop_cutoff) {
+                    DEBUG_LOG("Position {}: x-drop: {} < {}",
+                              next_offset - seed_->get_offset(), max_val, xdrop_cutoff);
+                    pop(table.size() - 1);
+                    if (forked_xdrop)
+                        xdrop_cutoffs_.pop_back();
+
+                    continue;
+                }
+
+                if (!in_seed && !has_extension) {
+                    DEBUG_LOG("Position {}: no extension possible from score {}. "
+                              "Best score so far is {}",
+                              next_offset - seed_->get_offset(), max_val,
+                              std::get<3>(best_score));
                     pop(table.size() - 1);
                     if (forked_xdrop)
                         xdrop_cutoffs_.pop_back();
@@ -723,6 +737,7 @@ std::vector<Alignment> DefaultColumnExtender
                 std::get<0>(next_score) = this->update_seed_filter(
                     next, vec_offset, s_begin, s_end
                 );
+
                 if (std::get<0>(next_score) != ninf) {
                     // if this next node is the only next option, or if it's
                     // better than all other options, take it without pushing
@@ -734,7 +749,8 @@ std::vector<Alignment> DefaultColumnExtender
                         queue.emplace(std::move(next_score));
                     }
                 } else {
-                    DEBUG_LOG("Dropped due to convergence");
+                    DEBUG_LOG("Position {}: Dropped due to convergence",
+                              next_offset - seed_->get_offset());
                 }
             }
         }
