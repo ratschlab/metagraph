@@ -58,29 +58,18 @@ call_seed_chains_both_strands(std::string_view forward,
 
     // perform chaining on the forward, and the reverse-complement seeds
     ChainDPTable dp_tables[2];
-    size_t num_seeds = 0;
-    size_t num_nodes = 0;
+    size_t num_seeds;
+    size_t num_nodes;
+    std::tie(dp_tables[0], num_seeds, num_nodes)
+        = chain_seeds(config, forward, both_seeds[0]);
 
-    auto chain_fwd = [&]() {
-        size_t num_seeds_fwd;
-        size_t num_nodes_fwd;
-        std::tie(dp_tables[0], num_seeds_fwd, num_nodes_fwd)
-            = chain_seeds(config, forward, both_seeds[0]);
-        num_seeds += num_seeds_fwd;
-        num_nodes += num_nodes_fwd;
-    };
+    size_t num_seeds_bwd;
+    size_t num_nodes_bwd;
+    std::tie(dp_tables[1], num_seeds_bwd, num_nodes_bwd)
+        = chain_seeds(config, reverse, both_seeds[1]);
 
-    auto chain_bwd = [&]() {
-        size_t num_seeds_bwd;
-        size_t num_nodes_bwd;
-        std::tie(dp_tables[1], num_seeds_bwd, num_nodes_bwd)
-            = chain_seeds(config, reverse, both_seeds[1]);
-        num_seeds += num_seeds_bwd;
-        num_nodes += num_nodes_bwd;
-    };
-
-    chain_fwd();
-    chain_bwd();
+    num_seeds += num_seeds_bwd;
+    num_nodes += num_nodes_bwd;
 
     // construct chains by backtracking
     std::vector<std::tuple<score_t, size_t, ssize_t>> starts;
