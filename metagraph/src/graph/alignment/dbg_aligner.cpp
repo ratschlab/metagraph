@@ -422,14 +422,7 @@ void ISeedAndExtendAligner<AlignmentCompare>
     assert(chain.size());
 
     std::ignore = score;
-    DEBUG_LOG("Chain size: {}, score: {}", chain.size(), score);
-#ifndef NDEBUG
-    if (common::get_verbose()) {
-        for (const Alignment &c : chain) {
-            DEBUG_LOG("\t{}", c);
-        }
-    }
-#endif
+    DEBUG_LOG("Chain size: {}, score: {}\n{}", chain.size(), score, fmt::join(chain, "\t"));
 
     Alignment cur = std::move(chain[0]);
     Alignment best = cur;
