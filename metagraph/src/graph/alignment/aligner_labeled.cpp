@@ -289,11 +289,11 @@ LabeledExtender LabeledExtender::make(const IDBGAligner &aligner,
                                       const DBGAlignerConfig &config,
                                       std::string_view query) {
     return LabeledExtender(
-        dynamic_cast<const LabeledAligner<>&>(aligner).get_labeled_graph(), config, query);
+        dynamic_cast<const LabeledAligner<>&>(aligner).get_annotation_buffer(), config, query);
 }
 
 void LabeledExtender::flush() {
-    labeled_graph_.flush();
+    annotation_buffer_.flush();
     for ( ; last_flushed_table_i_ < table.size(); ++last_flushed_table_i_) {
         auto &table_elem = table[last_flushed_table_i_];
 
@@ -317,9 +317,9 @@ void LabeledExtender::flush() {
 
         node_index node = table_elem.node;
         const auto &parent_labels
-            = labeled_graph_.get_labels_from_index(node_labels_[parent_i]);
+            = annotation_buffer_.get_labels_from_index(node_labels_[parent_i]);
 
-        auto cur_labels = labeled_graph_.get_labels(node);
+        auto cur_labels = annotation_buffer_.get_labels(node);
         assert(cur_labels);
         LabelSet intersect_labels;
         std::set_intersection(parent_labels.begin(), parent_labels.end(),
@@ -329,7 +329,7 @@ void LabeledExtender::flush() {
             clear();
         } else {
             node_labels_[last_flushed_table_i_]
-                = labeled_graph_.emplace_label_set(std::move(intersect_labels));
+                = annotation_buffer_.emplace_label_set(std::move(intersect_labels));
         }
     }
 }
@@ -339,12 +339,12 @@ bool LabeledExtender::set_seed(const Alignment &seed) {
         return false;
 
     assert(std::all_of(seed.get_nodes().begin(), seed.get_nodes().end(),
-                       [&](node_index n) { return labeled_graph_.get_labels(n); }));
+                       [&](node_index n) { return annotation_buffer_.get_labels(n); }));
 
     // the first node of the seed has already been flushed
     last_flushed_table_i_ = 1;
 
-    remaining_labels_i_ = labeled_graph_.emplace_label_set(seed.label_columns);
+    remaining_labels_i_ = annotation_buffer_.emplace_label_set(seed.label_columns);
     assert(remaining_labels_i_ != AnnotationBuffer::nannot);
     node_labels_.assign(1, remaining_labels_i_);
     base_coords_ = seed.label_coordinates;
@@ -388,7 +388,7 @@ void LabeledExtender
                                          [&](node_index next, char c, score_t score) {
         outgoing.emplace_back(next, c, score);
         if (!in_seed)
-            labeled_graph_.add_node(next);
+            annotation_buffer_.add_node(next);
     }, table_i, force_fixed_seed);
 
     if (outgoing.empty())
@@ -409,17 +409,17 @@ void LabeledExtender
     if (!node_labels_[table_i])
         return;
 
-    assert(labeled_graph_.get_labels(node));
+    assert(annotation_buffer_.get_labels(node));
 
     // use the label set of the current node in the alignment tree as the basis
-    const auto &node_labels = labeled_graph_.get_labels_from_index(node_labels_[table_i]);
+    const auto &node_labels = annotation_buffer_.get_labels_from_index(node_labels_[table_i]);
 
     // no coordinates are present in the annotation
-    if (!labeled_graph_.get_labels_and_coordinates(node).second) {
+    if (!annotation_buffer_.get_labels_and_coordinates(node).second) {
         // label consistency (weaker than coordinate consistency):
         // checks if there is at least one label shared between adjacent nodes
         for (const auto &[next, c, score] : outgoing) {
-            auto next_labels = labeled_graph_.get_labels(next);
+            auto next_labels = annotation_buffer_.get_labels(next);
             assert(next_labels);
 
             Vector<Column> intersect_labels;
@@ -428,7 +428,7 @@ void LabeledExtender
                                   std::back_inserter(intersect_labels));
 
             if (intersect_labels.size()) {
-                node_labels_.emplace_back(labeled_graph_.emplace_label_set(
+                node_labels_.emplace_back(annotation_buffer_.emplace_label_set(
                     std::move(intersect_labels)
                 ));
                 callback(next, c, score);
@@ -449,7 +449,7 @@ void LabeledExtender
         const AnnotationBuffer::LabelSet *base_labels = &seed_->label_columns;
         const AnnotationBuffer::CoordinateSet *base_coords = &base_coords_;
         auto [next_labels, next_coords]
-            = labeled_graph_.get_labels_and_coordinates(next);
+            = annotation_buffer_.get_labels_and_coordinates(next);
 
         assert(next_coords);
 
@@ -489,7 +489,7 @@ void LabeledExtender
 
         if (intersect_labels.size()) {
             // found a consistent set of coordinates, so assign labels for this next node
-            node_labels_.emplace_back(labeled_graph_.emplace_label_set(
+            node_labels_.emplace_back(annotation_buffer_.emplace_label_set(
                 std::move(intersect_labels)
             ));
             callback(next, c, score);
@@ -506,8 +506,8 @@ bool LabeledExtender::skip_backtrack_start(size_t i) {
         return true;
 
     // check if this starting point involves seed labels which have not been considered yet
-    const auto &end_labels = labeled_graph_.get_labels_from_index(node_labels_[i]);
-    const auto &left_labels = labeled_graph_.get_labels_from_index(remaining_labels_i_);
+    const auto &end_labels = annotation_buffer_.get_labels_from_index(node_labels_[i]);
+    const auto &left_labels = annotation_buffer_.get_labels_from_index(remaining_labels_i_);
 
     label_intersection_ = LabelSet{};
     label_diff_ = LabelSet{};
@@ -537,10 +537,10 @@ void LabeledExtender::call_alignments(score_t cur_cell_score,
                                            path, trace, table_i, ops, clipping, offset,
                                            window, match, extra_penalty,
                                            [&](Alignment&& alignment) {
-        alignment.label_encoder = &labeled_graph_.get_annotator().get_label_encoder();
+        alignment.label_encoder = &annotation_buffer_.get_annotator().get_label_encoder();
 
         auto [base_labels, base_coords]
-            = labeled_graph_.get_labels_and_coordinates(alignment.get_nodes().front());
+            = annotation_buffer_.get_labels_and_coordinates(alignment.get_nodes().front());
         assert(base_labels);
         assert(base_labels->size());
 
@@ -550,7 +550,7 @@ void LabeledExtender::call_alignments(score_t cur_cell_score,
         auto call_alignment = [&]() {
             if (label_diff_.size() && label_diff_.back() == AnnotationBuffer::nannot) {
                 label_diff_.pop_back();
-                remaining_labels_i_ = labeled_graph_.emplace_label_set(std::move(label_diff_));
+                remaining_labels_i_ = annotation_buffer_.emplace_label_set(std::move(label_diff_));
                 assert(remaining_labels_i_ != AnnotationBuffer::nannot);
                 label_diff_ = Vector<Column>{};
             }
@@ -595,7 +595,7 @@ void LabeledExtender::call_alignments(score_t cur_cell_score,
             }
         } else {
             auto [cur_labels, cur_coords]
-                = labeled_graph_.get_labels_and_coordinates(alignment.get_nodes().back());
+                = annotation_buffer_.get_labels_and_coordinates(alignment.get_nodes().back());
             assert(cur_labels);
             assert(cur_labels->size());
             assert(cur_coords);
@@ -654,8 +654,8 @@ LabeledAligner<Seeder, Extender, AlignmentCompare>
                  const DBGAlignerConfig &config,
                  const Annotator &annotator)
       : DBGAligner<Seeder, Extender, AlignmentCompare>(graph, config),
-        labeled_graph_(graph, annotator) {
-    if (labeled_graph_.get_coordinate_matrix()
+        annotation_buffer_(graph, annotator) {
+    if (annotation_buffer_.get_coordinate_matrix()
             && std::is_same_v<Extender, LabeledExtender>) {
         // do not use a global xdrop cutoff since we need separate cutoffs
         // for each label
@@ -666,9 +666,9 @@ LabeledAligner<Seeder, Extender, AlignmentCompare>
 template <class Seeder, class Extender, class AlignmentCompare>
 LabeledAligner<Seeder, Extender, AlignmentCompare>::~LabeledAligner() {
     logger->trace("Buffered {}/{} nodes and {} label combinations",
-                  labeled_graph_.num_nodes_buffered(),
+                  annotation_buffer_.num_nodes_buffered(),
                   this->graph_.num_nodes(),
-                  labeled_graph_.num_label_sets());
+                  annotation_buffer_.num_label_sets());
 }
 
 template <class Seeder, class Extender, class AlignmentCompare>
@@ -692,7 +692,7 @@ auto LabeledAligner<Seeder, Extender, AlignmentCompare>
 
         auto add_seeds = [&](const auto &seeds) {
             for (const Alignment &seed : seeds) {
-                labeled_graph_.add_path(
+                annotation_buffer_.add_path(
                     seed.get_nodes(),
                     std::string(seed.get_offset(), '#') + seed.get_sequence()
                 );
@@ -711,7 +711,7 @@ auto LabeledAligner<Seeder, Extender, AlignmentCompare>
 #endif
     }
 
-    labeled_graph_.flush();
+    annotation_buffer_.flush();
 
     size_t num_seeds_left = 0;
     size_t num_seeds_rc_left = 0;
@@ -743,7 +743,7 @@ auto LabeledAligner<Seeder, Extender, AlignmentCompare>
     logger->trace("Kept {}/{} seeds", num_seeds_left + num_seeds_rc_left,
                                       num_seeds + num_seeds_rc);
     logger->trace("Prefetching labels");
-    labeled_graph_.flush();
+    annotation_buffer_.flush();
 
     return seeders;
 }
@@ -782,8 +782,8 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
     VectorMap<Column, uint64_t> label_counter;
     for (const Alignment &seed : seeds) {
         for (node_index node : seed.get_nodes()) {
-            assert(labeled_graph_.get_labels(node));
-            for (uint64_t label : *labeled_graph_.get_labels(node)) {
+            assert(annotation_buffer_.get_labels(node));
+            for (uint64_t label : *annotation_buffer_.get_labels(node)) {
                 ++label_counter[label];
             }
         }
@@ -816,7 +816,7 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
     for (Alignment &seed : seeds) {
         const std::vector<node_index> &nodes = seed.get_nodes();
         auto [fetch_labels, fetch_coords]
-            = labeled_graph_.get_labels_and_coordinates(nodes[0]);
+            = annotation_buffer_.get_labels_and_coordinates(nodes[0]);
         if (!fetch_labels)
             continue;
 
@@ -846,11 +846,11 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
                                   std::back_inserter(seed.label_columns));
         }
 
-        seed.label_encoder = &labeled_graph_.get_annotator().get_label_encoder();
+        seed.label_encoder = &annotation_buffer_.get_annotator().get_label_encoder();
 
         for (size_t i = 1; i < nodes.size() && seed.label_columns.size(); ++i) {
             auto [next_fetch_labels, next_fetch_coords]
-                = labeled_graph_.get_labels_and_coordinates(nodes[i]);
+                = annotation_buffer_.get_labels_and_coordinates(nodes[i]);
             if (next_fetch_coords) {
                 LabelSet label_inter;
                 Alignment::CoordinateSet coord_inter;
@@ -886,7 +886,7 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
             }
         }
 
-        labeled_graph_.emplace_label_set(seed.label_columns);
+        annotation_buffer_.emplace_label_set(seed.label_columns);
 
         if (seed.get_offset() && seed.label_coordinates.size()) {
             for (auto &tuple : seed.label_coordinates) {
@@ -898,7 +898,7 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
     }
 
     auto seed_it = std::remove_if(seeds.begin(), seeds.end(), [&](const auto &a) {
-        assert(labeled_graph_.get_index(a.label_columns) != AnnotationBuffer::nannot);
+        assert(annotation_buffer_.get_index(a.label_columns) != AnnotationBuffer::nannot);
         return a.label_columns.empty();
     });
 

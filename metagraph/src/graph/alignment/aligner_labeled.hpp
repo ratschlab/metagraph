@@ -129,11 +129,11 @@ class LabeledExtender : public DefaultColumnExtender {
     typedef AnnotationBuffer::LabelSet LabelSet;
     typedef AnnotationBuffer::CoordinateSet CoordinateSet;
 
-    LabeledExtender(AnnotationBuffer &labeled_graph,
+    LabeledExtender(AnnotationBuffer &annotation_buffer,
                     const DBGAlignerConfig &config,
                     std::string_view query)
-          : DefaultColumnExtender(labeled_graph.get_graph(), config, query),
-            labeled_graph_(labeled_graph) {}
+          : DefaultColumnExtender(annotation_buffer.get_graph(), config, query),
+            annotation_buffer_(annotation_buffer) {}
 
     // |aligner| must be an instance of LabeledAligner<>
     static LabeledExtender make(const IDBGAligner &aligner,
@@ -203,7 +203,7 @@ class LabeledExtender : public DefaultColumnExtender {
     void flush();
 
     // stores annotations for nodes
-    AnnotationBuffer &labeled_graph_;
+    AnnotationBuffer &annotation_buffer_;
 
     // index of the last dynamic programming table element whose node was flushed
     size_t last_flushed_table_i_;
@@ -240,11 +240,11 @@ class LabeledAligner : public DBGAligner<Seeder, Extender, AlignmentCompare> {
 
     virtual ~LabeledAligner();
 
-    auto& get_labeled_graph() const { return labeled_graph_; }
+    auto& get_annotation_buffer() const { return annotation_buffer_; }
 
   private:
     typedef typename DBGAligner<Seeder, Extender, AlignmentCompare>::BatchSeeders BatchSeeders;
-    mutable AnnotationBuffer labeled_graph_;
+    mutable AnnotationBuffer annotation_buffer_;
 
     BatchSeeders
     virtual build_seeders(const std::vector<IDBGAligner::Query> &seq_batch,
