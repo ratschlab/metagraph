@@ -27,8 +27,9 @@ inline std::vector<std::string> get_alignment_labels(const AnnotatedDBG &anno_gr
     const auto &label_encoder = anno_graph.get_annotator().get_label_encoder();
     auto labels = anno_graph.get_labels(alignment.get_sequence(),
                                         check_full_coverage ? 1.0 : 0.0);
-    if (check_full_coverage)
+    if (check_full_coverage) {
         EXPECT_GE(labels.size(), alignment.label_columns.size());
+    }
 
     std::unordered_set<uint64_t> enc_labels;
     for (const auto &label : labels) {
