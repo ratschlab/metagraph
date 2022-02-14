@@ -135,6 +135,11 @@ class LabeledExtender : public DefaultColumnExtender {
           : DefaultColumnExtender(labeled_graph.get_graph(), config, query),
             labeled_graph_(labeled_graph) {}
 
+    // |aligner| must be an instance of LabeledAligner<>
+    static LabeledExtender make(const IDBGAligner &aligner,
+                                const DBGAlignerConfig &config,
+                                std::string_view query);
+
     virtual ~LabeledExtender() {}
 
   private:
@@ -219,68 +224,39 @@ class LabeledExtender : public DefaultColumnExtender {
     LabelSet label_diff_;
 };
 
-template <class AlignmentCompare = LocalAlignmentLess>
-class ILabeledAligner : public ISeedAndExtendAligner<AlignmentCompare> {
+template <class Seeder = SuffixSeeder<UniMEMSeeder>,
+          class Extender = LabeledExtender,
+          class AlignmentCompare = LocalAlignmentLess>
+class LabeledAligner : public DBGAligner<Seeder, Extender, AlignmentCompare> {
   public:
     typedef AnnotationBuffer::Annotator Annotator;
     typedef AnnotationBuffer::LabelSet LabelSet;
     typedef Alignment::node_index node_index;
     typedef Alignment::Column Column;
 
-    virtual ~ILabeledAligner() {
+    LabeledAligner(const DeBruijnGraph &graph,
+                   const DBGAlignerConfig &config,
+                   const Annotator &annotator);
+
+    virtual ~LabeledAligner() {
         common::logger->trace("Buffered {}/{} nodes and {} label combinations",
                               labeled_graph_.num_nodes_buffered(),
                               this->graph_.num_nodes(),
                               labeled_graph_.num_label_sets());
     }
 
-  protected:
-    typedef typename ISeedAndExtendAligner<AlignmentCompare>::BatchSeeders BatchSeeders;
-    mutable AnnotationBuffer labeled_graph_;
-
-    ILabeledAligner(const DeBruijnGraph &graph,
-                    const Annotator &annotator,
-                    const DBGAlignerConfig &config)
-          : ISeedAndExtendAligner<AlignmentCompare>(graph, config),
-            labeled_graph_(graph, annotator) {}
-
-    // find the most frequent labels among the seeds and restrict graph traversal
-    // to those labeled paths during extension
-    virtual void filter_seeds(BatchSeeders &seeders) const override final;
+    auto& get_labeled_graph() const { return labeled_graph_; }
 
   private:
-    // helper for the protected filter_seeds method
+    typedef typename DBGAligner<Seeder, Extender, AlignmentCompare>::BatchSeeders BatchSeeders;
+    mutable AnnotationBuffer labeled_graph_;
+
+    BatchSeeders
+    virtual build_seeders(const std::vector<IDBGAligner::Query> &seq_batch,
+                          const std::vector<AlignmentResults> &wrapped_seqs) const override;
+
+    // helper for the build_seeders method
     size_t filter_seeds(std::vector<Alignment> &seeds) const;
-};
-
-template <class AlignmentCompare = LocalAlignmentLess,
-          class Extender = LabeledExtender,
-          class Seeder = UniMEMSeeder>
-class LabeledAligner : public ILabeledAligner<AlignmentCompare> {
-  public:
-    template <typename... Args>
-    LabeledAligner(Args&&... args)
-          : ILabeledAligner<AlignmentCompare>(std::forward<Args>(args)...) {
-        if (this->labeled_graph_.get_coordinate_matrix()
-                && std::is_same_v<Extender, LabeledExtender>) {
-            // do not use a global xdrop cutoff since we need separate cutoffs
-            // for each label
-            this->config_.global_xdrop = false;
-        }
-    }
-
-  protected:
-    virtual std::shared_ptr<IExtender>
-    build_extender(std::string_view query, const DBGAlignerConfig &config) const override final {
-        return std::make_shared<Extender>(this->labeled_graph_, config, query);
-    }
-
-    virtual std::shared_ptr<ISeeder>
-    build_seeder(std::string_view query,
-                 bool is_reverse_complement,
-                 const std::vector<IDBGAligner::node_index> &nodes) const override final {
-        return this->template build_seeder_impl<Seeder>(query, is_reverse_complement, nodes);
-    }
 };
 
 } // namespace align

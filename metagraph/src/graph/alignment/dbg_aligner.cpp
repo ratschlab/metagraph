@@ -2,6 +2,7 @@
 
 #include "common/algorithms.hpp"
 #include "graph/representation/rc_dbg.hpp"
+#include "aligner_labeled.hpp"
 
 
 namespace mtg {
@@ -20,9 +21,9 @@ AlignmentResults IDBGAligner::align(std::string_view query,
     return result;
 }
 
-template <class AlignmentCompare>
-ISeedAndExtendAligner<AlignmentCompare>
-::ISeedAndExtendAligner(const DeBruijnGraph &graph, const DBGAlignerConfig &config)
+template <class Seeder, class Extender, class AlignmentCompare>
+DBGAligner<Seeder, Extender, AlignmentCompare>
+::DBGAligner(const DeBruijnGraph &graph, const DBGAlignerConfig &config)
       : graph_(graph), config_(config) {
     if (!config_.min_seed_length)
         config_.min_seed_length = graph_.get_k();
@@ -179,8 +180,8 @@ size_t align_connect(std::string_view query,
     );
     assert(next.get_query()
         == query_window.substr(next.get_clipping(), next.get_query().size()));
-    auto extender = build_extender(query_window, config);
-    auto extensions = extender->get_extensions(
+    auto extender = build_extender(query_window);
+    auto extensions = extender.get_extensions(
         next, config.ninf, true, AlignmentPairedCoordinatesDist()(next, second),
         second.get_nodes().back()
     );
@@ -222,14 +223,13 @@ size_t align_connect(std::string_view query,
         std::swap(first, second);
     }
 
-    return extender->num_explored_nodes();
+    return extender.num_explored_nodes();
 }
 
-template <class AlignmentCompare>
-auto ISeedAndExtendAligner<AlignmentCompare>
+template <class Seeder, class Extender, class AlignmentCompare>
+auto DBGAligner<Seeder, Extender, AlignmentCompare>
 ::build_seeders(const std::vector<IDBGAligner::Query> &seq_batch,
-                const std::vector<AlignmentResults> &wrapped_seqs) const
-        -> BatchSeeders {
+                const std::vector<AlignmentResults> &wrapped_seqs) const -> BatchSeeders {
     assert(seq_batch.size() == wrapped_seqs.size());
     BatchSeeders result;
     result.reserve(seq_batch.size());
@@ -247,7 +247,7 @@ auto ISeedAndExtendAligner<AlignmentCompare>
         }
 
         auto seeder = build_seeder(this_query, is_reverse_complement, nodes);
-        std::shared_ptr<ISeeder> seeder_rc;
+        std::shared_ptr<Seeder> seeder_rc;
         std::vector<node_index> nodes_rc;
 
 #if ! _PROTEIN_GRAPH
@@ -275,8 +275,8 @@ auto ISeedAndExtendAligner<AlignmentCompare>
     return result;
 }
 
-template <class AlignmentCompare>
-void ISeedAndExtendAligner<AlignmentCompare>
+template <class Seeder, class Extender, class AlignmentCompare>
+void DBGAligner<Seeder, Extender, AlignmentCompare>
 ::align_batch(const std::vector<IDBGAligner::Query> &seq_batch,
               const AlignmentCallback &callback) const {
     std::vector<AlignmentResults> paths;
@@ -286,7 +286,6 @@ void ISeedAndExtendAligner<AlignmentCompare>
     }
 
     auto seeders = build_seeders(seq_batch, paths);
-    filter_seeds(seeders);
     assert(seeders.size() == seq_batch.size());
 
     for (size_t i = 0; i < seq_batch.size(); ++i) {
@@ -313,31 +312,31 @@ void ISeedAndExtendAligner<AlignmentCompare>
         std::string_view this_query = paths[i].get_query(is_reverse_complement);
         assert(this_query == query);
 
-        auto extender = build_extender(this_query, config_);
+        auto extender = Extender::make(*this, config_, this_query);
 
 #if ! _PROTEIN_GRAPH
         if (seeder_rc) {
             std::string_view reverse = paths[i].get_query(!is_reverse_complement);
-            auto extender_rc = build_extender(reverse, config_);
+            auto extender_rc = Extender::make(*this, config_, reverse);
 
             auto [seeds, extensions, explored_nodes] =
                 align_both_directions(this_query, reverse, *seeder, *seeder_rc,
-                                      *extender, *extender_rc,
+                                      extender, extender_rc,
                                       add_alignment, get_min_path_score);
 
             num_seeds += seeds;
-            num_extensions += extensions + extender_rc->num_extensions();
-            num_explored_nodes += explored_nodes + extender_rc->num_explored_nodes();
+            num_extensions += extensions + extender_rc.num_extensions();
+            num_explored_nodes += explored_nodes + extender_rc.num_explored_nodes();
 
         } else {
-            align_core(*seeder, *extender, add_alignment, get_min_path_score, false);
+            align_core(*seeder, extender, add_alignment, get_min_path_score, false);
         }
 #else
-        align_core(*seeder, *extender, add_alignment, get_min_path_score, false);
+        align_core(*seeder, extender, add_alignment, get_min_path_score, false);
 #endif
 
-        num_explored_nodes += extender->num_explored_nodes();
-        num_extensions += extender->num_extensions();
+        num_explored_nodes += extender.num_explored_nodes();
+        num_extensions += extender.num_extensions();
 
         size_t aligned_labels = aggregator.num_aligned_labels();
         score_t best_score = std::numeric_limits<score_t>::min();
@@ -380,13 +379,15 @@ void ISeedAndExtendAligner<AlignmentCompare>
     };
 }
 
-template <class AlignmentCompare>
-void ISeedAndExtendAligner<AlignmentCompare>
-::align_core(const ISeeder &seeder,
-             IExtender &extender,
-             const std::function<void(Alignment&&)> &callback,
-             const std::function<score_t(const Alignment&)> &get_min_path_score,
-             bool force_fixed_seed) const {
+// Generates seeds and extends them. If force_fixed_seed is true, then
+// all alignments must have the seed as a prefix. Otherwise, only the first
+// node of the seed is used as an alignment starting node.
+template <class Seeder, class Extender>
+void align_core(const Seeder &seeder,
+                Extender &extender,
+                const std::function<void(Alignment&&)> &callback,
+                const std::function<score_t(const Alignment&)> &get_min_path_score,
+                bool force_fixed_seed) {
     auto seeds = seeder.get_seeds();
 
     for (size_t i = 0; i < seeds.size(); ++i) {
@@ -412,8 +413,8 @@ void ISeedAndExtendAligner<AlignmentCompare>
 
 // Construct a full alignment from a chain by aligning the query agaisnt
 // the graph in the regions of the query in between the chain seeds.
-template <class AlignmentCompare>
-void ISeedAndExtendAligner<AlignmentCompare>
+template <class Seeder, class Extender, class AlignmentCompare>
+void DBGAligner<Seeder, Extender, AlignmentCompare>
 ::extend_chain(std::string_view query,
                std::string_view query_rc,
                Chain&& chain,
@@ -443,10 +444,10 @@ void ISeedAndExtendAligner<AlignmentCompare>
                                             + chain[i].get_query().size() == query_end
             ? config_.right_end_bonus : 0;
         num_explored_nodes += align_connect(query, graph_, gap_fill_config, cur, chain[i],
-                                            [&](std::string_view query_window,
-                                                const DBGAlignerConfig &config) {
-            return build_extender(query_window, config);
-        });
+            [&](std::string_view query_window) {
+                return Extender::make(*this, gap_fill_config, query_window);
+            }
+        );
         if (cur.empty())
             return;
     }
@@ -464,10 +465,10 @@ void ISeedAndExtendAligner<AlignmentCompare>
         end_cfg.trim_offset_after_extend = false;
         end_cfg.allow_left_trim = false;
 
-        auto extender = build_extender(query, end_cfg);
-        auto extensions = extender->get_extensions(best, config_.ninf, true);
+        auto extender = Extender::make(*this, end_cfg, query);
+        auto extensions = extender.get_extensions(best, config_.ninf, true);
         ++num_extensions;
-        num_explored_nodes += extender->num_explored_nodes();
+        num_explored_nodes += extender.num_explored_nodes();
         if (extensions.size() && extensions[0].get_query().data()
                                     + extensions[0].get_query().size()
                 > best.get_query().data() + best.get_query().size()
@@ -495,9 +496,9 @@ void ISeedAndExtendAligner<AlignmentCompare>
             assert(rev.get_end_clipping());
             DBGAlignerConfig no_trim_config = config_;
             no_trim_config.allow_left_trim = false;
-            auto extender = build_extender(query_rc, no_trim_config);
-            extender->set_graph(rc_graph);
-            auto extensions = extender->get_extensions(rev, config_.ninf, true);
+            auto extender = Extender::make(*this, no_trim_config, query_rc);
+            extender.set_graph(rc_graph);
+            auto extensions = extender.get_extensions(rev, config_.ninf, true);
             if (extensions.size() && extensions[0].get_query().data()
                                         + extensions[0].get_query().size()
                     > rev.get_query().data() + rev.get_query().size()
@@ -514,21 +515,22 @@ void ISeedAndExtendAligner<AlignmentCompare>
             }
 
             ++num_extensions;
-            num_explored_nodes += extender->num_explored_nodes() - rev.size();
+            num_explored_nodes += extender.num_explored_nodes() - rev.size();
         }
     }
 
     callback(std::move(best));
 }
 
-template <class AlignmentCompare>
-std::tuple<size_t, size_t, size_t> ISeedAndExtendAligner<AlignmentCompare>
+template <class Seeder, class Extender, class AlignmentCompare>
+std::tuple<size_t, size_t, size_t>
+DBGAligner<Seeder, Extender, AlignmentCompare>
 ::align_both_directions(std::string_view forward,
                         std::string_view reverse,
                         const ISeeder &forward_seeder,
                         const ISeeder &reverse_seeder,
-                        IExtender &forward_extender,
-                        IExtender &reverse_extender,
+                        Extender &forward_extender,
+                        Extender &reverse_extender,
                         const std::function<void(Alignment&&)> &callback,
                         const std::function<score_t(const Alignment&)> &get_min_path_score) const {
 #if _PROTEIN_GRAPH
@@ -618,8 +620,8 @@ std::tuple<size_t, size_t, size_t> ISeedAndExtendAligner<AlignmentCompare>
     auto aln_both = [&](std::string_view query,
                         std::string_view query_rc,
                         std::vector<Alignment>&& seeds,
-                        IExtender &fwd_extender,
-                        IExtender &bwd_extender,
+                        Extender &fwd_extender,
+                        Extender &bwd_extender,
                         const std::function<void(Alignment&&)> &callback) {
         fwd_extender.set_graph(graph_);
         bwd_extender.set_graph(rc_graph);
@@ -722,7 +724,8 @@ std::tuple<size_t, size_t, size_t> ISeedAndExtendAligner<AlignmentCompare>
     return std::make_tuple(num_seeds, num_extensions, num_explored_nodes);
 }
 
-template class ISeedAndExtendAligner<>;
+template class DBGAligner<>;
+template class DBGAligner<SuffixSeeder<UniMEMSeeder>, LabeledExtender>;
 
 } // namespace align
 } // namespace graph

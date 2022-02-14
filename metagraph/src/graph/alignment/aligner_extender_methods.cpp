@@ -6,6 +6,7 @@
 
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/rc_dbg.hpp"
+#include "dbg_aligner.hpp"
 
 
 namespace mtg {
@@ -18,6 +19,12 @@ constexpr score_t ninf = DBGAlignerConfig::ninf;
 // to ensure that SIMD operations on arrays don't read out of bounds
 constexpr size_t kPadding = 5;
 
+
+DefaultColumnExtender DefaultColumnExtender::make(const IDBGAligner &aligner,
+                                                  const DBGAlignerConfig &config,
+                                                  std::string_view query) {
+    return DefaultColumnExtender(aligner.get_graph(), config, query);
+}
 
 DefaultColumnExtender::DefaultColumnExtender(const DeBruijnGraph &graph,
                                              const DBGAlignerConfig &config,
@@ -727,7 +734,7 @@ std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score,
 
                 // if this node has not been reached by a different
                 // alignment with a better score, continue
-                std::get<0>(next_score) = this->update_seed_filter(
+                std::get<0>(next_score) = update_seed_filter(
                     next, vec_offset, s_begin, s_end
                 );
 

@@ -12,6 +12,8 @@ namespace mtg {
 namespace graph {
 namespace align {
 
+class IDBGAligner;
+
 class IExtender {
   public:
     typedef DeBruijnGraph::node_index node_index;
@@ -112,6 +114,10 @@ class DefaultColumnExtender : public SeedFilteringExtender {
     DefaultColumnExtender(const DeBruijnGraph &graph,
                           const DBGAlignerConfig &config,
                           std::string_view query);
+
+    static DefaultColumnExtender make(const IDBGAligner &aligner,
+                                      const DBGAlignerConfig &config,
+                                      std::string_view query);
 
     virtual ~DefaultColumnExtender() {}
 

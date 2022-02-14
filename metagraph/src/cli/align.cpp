@@ -426,8 +426,8 @@ int align_to_graph(Config *config) {
                 std::unique_ptr<IDBGAligner> aligner;
 
                 if (anno_dbg) {
-                    aligner = std::make_unique<LabeledAligner<>>(
-                                *aln_graph, anno_dbg->get_annotator(), aligner_config);
+                    aligner = std::make_unique<LabeledAligner<>>(*aln_graph, aligner_config,
+                                                                 anno_dbg->get_annotator());
                 } else {
                     aligner = std::make_unique<DBGAligner<>>(*aln_graph, aligner_config);
                 }

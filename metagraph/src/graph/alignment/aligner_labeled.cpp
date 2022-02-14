@@ -283,6 +283,13 @@ struct CoordIntersection {
     ssize_t offset_;
 };
 
+LabeledExtender LabeledExtender::make(const IDBGAligner &aligner,
+                                      const DBGAlignerConfig &config,
+                                      std::string_view query) {
+    return LabeledExtender(
+        dynamic_cast<const LabeledAligner<>&>(aligner).get_labeled_graph(), config, query);
+}
+
 void LabeledExtender::flush() {
     labeled_graph_.flush();
     for ( ; last_flushed_table_i_ < table.size(); ++last_flushed_table_i_) {
@@ -639,8 +646,29 @@ void LabeledExtender::call_alignments(score_t cur_cell_score,
     });
 }
 
-template <class AlignmentCompare>
-void ILabeledAligner<AlignmentCompare>::filter_seeds(BatchSeeders &seeders) const {
+template <class Seeder, class Extender, class AlignmentCompare>
+LabeledAligner<Seeder, Extender, AlignmentCompare>
+::LabeledAligner(const DeBruijnGraph &graph,
+                 const DBGAlignerConfig &config,
+                 const Annotator &annotator)
+      : DBGAligner<Seeder, Extender, AlignmentCompare>(graph, config),
+        labeled_graph_(graph, annotator) {
+    if (labeled_graph_.get_coordinate_matrix()
+            && std::is_same_v<Extender, LabeledExtender>) {
+        // do not use a global xdrop cutoff since we need separate cutoffs
+        // for each label
+        this->config_.global_xdrop = false;
+    }
+}
+
+template <class Seeder, class Extender, class AlignmentCompare>
+auto LabeledAligner<Seeder, Extender, AlignmentCompare>
+::build_seeders(const std::vector<IDBGAligner::Query> &seq_batch,
+                const std::vector<AlignmentResults> &wrapped_seqs) const -> BatchSeeders {
+    BatchSeeders seeders
+        = DBGAligner<Seeder, Extender, AlignmentCompare>::build_seeders(seq_batch, wrapped_seqs);
+
+    // now we're going to filter the seeds
     common::logger->trace("Filtering seeds by label");
     std::vector<std::pair<std::vector<Alignment>, size_t>> counted_seeds;
     std::vector<std::pair<std::vector<Alignment>, size_t>> counted_seeds_rc;
@@ -708,6 +736,8 @@ void ILabeledAligner<AlignmentCompare>::filter_seeds(BatchSeeders &seeders) cons
 
     common::logger->trace("Prefetching labels");
     labeled_graph_.flush();
+
+    return seeders;
 }
 
 inline size_t get_num_matches(const std::vector<Alignment> &seeds) {
@@ -738,8 +768,8 @@ inline size_t get_num_matches(const std::vector<Alignment> &seeds) {
     return num_matching;
 }
 
-template <class AlignmentCompare>
-size_t ILabeledAligner<AlignmentCompare>
+template <class Seeder, class Extender, class AlignmentCompare>
+size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
 ::filter_seeds(std::vector<Alignment> &seeds) const {
     VectorMap<Column, uint64_t> label_counter;
     for (const Alignment &seed : seeds) {
@@ -762,7 +792,7 @@ size_t ILabeledAligner<AlignmentCompare>
     std::sort(label_counts.begin(), label_counts.end(), utils::GreaterSecond());
 
     double cutoff = static_cast<double>(label_counts[0].second)
-        * this->config_.rel_score_cutoff;
+                        * this->config_.rel_score_cutoff;
     auto it = std::find_if(label_counts.begin() + 1, label_counts.end(),
                            [cutoff](const auto &a) { return a.second < cutoff; });
 
@@ -869,7 +899,7 @@ size_t ILabeledAligner<AlignmentCompare>
     return get_num_matches(seeds);
 }
 
-template class ILabeledAligner<>;
+template class LabeledAligner<>;
 
 } // namespace align
 } // namespace graph
