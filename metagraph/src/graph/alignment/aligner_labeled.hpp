@@ -57,6 +57,7 @@ class AnnotationBuffer {
             return ret_val;
 
         ret_val.first = &labels_set_.data()[it->second.second];
+        assert(std::is_sorted(ret_val.first->begin(), ret_val.first->end()));
 
         if (multi_int_) {
             assert(static_cast<size_t>(it - labels_.begin()) < label_coords_.size());
@@ -78,11 +79,13 @@ class AnnotationBuffer {
     template <typename... Args>
     size_t emplace_label_set(Args&&... args) {
         auto it = labels_set_.emplace(std::forward<Args>(args)...).first;
+        assert(std::is_sorted(it->begin(), it->end()));
         return it - labels_set_.begin();
     }
 
     // get the index of the label set
     size_t get_index(const LabelSet &labels) const {
+        assert(std::is_sorted(labels.begin(), labels.end()));
         auto find = labels_set_.find(labels);
         return find != labels_set_.end() ? find - labels_set_.begin() : nannot;
     }
@@ -91,8 +94,13 @@ class AnnotationBuffer {
     const LabelSet& get_labels_from_index(size_t i) const {
         assert(i != nannot);
         assert(i < labels_set_.size());
+        assert(std::is_sorted(labels_set_.data()[i].begin(),
+                              labels_set_.data()[i].end()));
         return labels_set_.data()[i];
     }
+
+    size_t num_nodes_buffered() const { return labels_.size(); }
+    size_t num_label_sets() const { return labels_set_.size(); }
 
   private:
     const DeBruijnGraph &graph_;
@@ -217,6 +225,13 @@ class ILabeledAligner : public ISeedAndExtendAligner<AlignmentCompare> {
     typedef AnnotationBuffer::LabelSet LabelSet;
     typedef Alignment::node_index node_index;
     typedef Alignment::Column Column;
+
+    virtual ~ILabeledAligner() {
+        common::logger->trace("Buffered {}/{} nodes and {} label combinations",
+                              labeled_graph_.num_nodes_buffered(),
+                              this->graph_.num_nodes(),
+                              labeled_graph_.num_label_sets());
+    }
 
   protected:
     typedef typename ISeedAndExtendAligner<AlignmentCompare>::BatchSeeders BatchSeeders;
