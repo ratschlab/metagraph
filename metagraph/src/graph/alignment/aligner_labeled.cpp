@@ -367,7 +367,6 @@ void LabeledExtender
                 size_t table_i,
                 bool force_fixed_seed) {
     assert(table.size() == node_labels_.size());
-    assert(node == std::get<3>(table[table_i]));
 
     // if we are in the seed and want to force the seed to be fixed, automatically
     // take the next node in the seed
