@@ -20,8 +20,7 @@ call_seed_chains_both_strands(std::string_view forward,
                               const DBGAlignerConfig &config,
                               std::vector<Alignment>&& fwd_seeds,
                               std::vector<Alignment>&& bwd_seeds,
-                              const std::function<void(Chain&&, score_t)> &callback,
-                              const std::function<bool()> &terminate = []() { return false; });
+                              const std::function<void(Chain&&, score_t)> &callback);
 
 // Given a set of local alignments, use sparse dynamic programming to construct
 // longer alignments, potentially with gaps.

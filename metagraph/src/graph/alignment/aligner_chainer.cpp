@@ -35,11 +35,7 @@ call_seed_chains_both_strands(std::string_view forward,
                               const DBGAlignerConfig &config,
                               std::vector<Alignment>&& fwd_seeds,
                               std::vector<Alignment>&& bwd_seeds,
-                              const std::function<void(Chain&&, score_t)> &callback,
-                              const std::function<bool()> &terminate) {
-    if (terminate())
-        return {};
-
+                              const std::function<void(Chain&&, score_t)> &callback) {
     // filter out empty seeds
     std::vector<Alignment> both_seeds[2];
     both_seeds[0].reserve(fwd_seeds.size());
@@ -88,13 +84,13 @@ call_seed_chains_both_strands(std::string_view forward,
         }
     }
 
-    // use heap sort to keep extracting chains until terminate() returns true
+    // use heap sort to keep extracting chains
     std::make_heap(starts.begin(), starts.end());
 
     Chain last_chain;
     score_t last_chain_score = std::numeric_limits<score_t>::min();
 
-    for (auto it = starts.rbegin(); it != starts.rend() && !terminate(); ++it) {
+    for (auto it = starts.rbegin(); it != starts.rend(); ++it) {
         std::pop_heap(starts.begin(), it.base());
         score_t chain_score = std::get<0>(*it);
         const auto &dp_table = dp_tables[std::get<1>(*it)];
@@ -202,7 +198,7 @@ call_seed_chains_both_strands(std::string_view forward,
         }
     }
 
-    if (!terminate() && last_chain.size())
+    if (last_chain.size())
         callback(std::move(last_chain), last_chain_score);
 
     return std::make_pair(num_seeds, num_nodes);

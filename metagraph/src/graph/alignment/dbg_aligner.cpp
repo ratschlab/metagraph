@@ -565,21 +565,22 @@ std::tuple<size_t, size_t, size_t> ISeedAndExtendAligner<AlignmentCompare>
 
         AlignmentAggregator<AlignmentCompare> aggregator(config_);
 
-        bool terminate = false;
-        size_t this_num_explored;
-        std::tie(num_seeds, this_num_explored) = call_seed_chains_both_strands(
-            forward, reverse, graph_, config_, std::move(fwd_seeds), std::move(bwd_seeds),
-            [&](Chain&& chain, score_t score) {
-                extend_chain(chain[0].get_orientation() ? reverse : forward,
-                             chain[0].get_orientation() ? forward : reverse,
-                             std::move(chain), score, num_extensions, num_explored_nodes,
-                             [&](Alignment&& aln) {
-                                 terminate |= aggregator.add_alignment(std::move(aln));
-                             });
-            },
-            [&]() { return terminate; }
-        );
-        num_explored_nodes += this_num_explored;
+        try {
+            size_t this_num_explored;
+            std::tie(num_seeds, this_num_explored) = call_seed_chains_both_strands(
+                forward, reverse, graph_, config_, std::move(fwd_seeds), std::move(bwd_seeds),
+                [&](Chain&& chain, score_t score) {
+                    extend_chain(chain[0].get_orientation() ? reverse : forward,
+                                 chain[0].get_orientation() ? forward : reverse,
+                                 std::move(chain), score, num_extensions, num_explored_nodes,
+                                 [&](Alignment&& aln) {
+                                     if (aggregator.add_alignment(std::move(aln)))
+                                        throw std::exception();
+                                 });
+                }
+            );
+            num_explored_nodes += this_num_explored;
+        } catch (const std::exception&) {}
 
         for (Alignment &alignment : aggregator.get_alignments()) {
             if (alignment.get_score() < get_min_path_score(alignment))
