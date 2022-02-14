@@ -60,37 +60,6 @@ std::string Alignment::format_coords() const {
     return fmt::format("{}", fmt::join(decoded_labels, ";"));
 }
 
-std::ostream& operator<<(std::ostream& out, const Alignment &alignment) {
-    out << fmt::format("{}\t{}\t{}\t{}\t{}\t{}",
-                       alignment.get_orientation() ? "-" : "+",
-                       alignment.get_sequence(),
-                       alignment.get_score(),
-                       alignment.get_cigar().get_num_matches(),
-                       alignment.get_cigar().to_string(),
-                       alignment.get_offset());
-
-    const auto &label_columns = alignment.label_columns;
-    const auto &label_coordinates = alignment.label_coordinates;
-
-    if (label_coordinates.size()) {
-        out << "\t" << alignment.format_coords();
-
-    } else if (label_columns.size()) {
-        assert(alignment.label_encoder);
-
-        std::vector<std::string> decoded_labels;
-        decoded_labels.reserve(label_columns.size());
-
-        for (size_t i = 0; i < label_columns.size(); ++i) {
-            decoded_labels.emplace_back(alignment.label_encoder->decode(label_columns[i]));
-        }
-
-        out << fmt::format("\t{}", fmt::join(decoded_labels, ";"));
-    }
-
-    return out;
-}
-
 struct MergeCoords {
     MergeCoords(size_t a_sequence_length) : a_len_(a_sequence_length) {}
 

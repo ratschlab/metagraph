@@ -15,6 +15,7 @@
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
 #include "annotation/int_matrix/base/int_matrix.hpp"
 #include "annotation/representation/base/annotation.hpp"
+#include "common/logger.hpp"
 #include "common/vector.hpp"
 #include "common/algorithms.hpp"
 
@@ -177,7 +178,9 @@ class Alignment {
     size_t offset_;
 };
 
-std::ostream& operator<<(std::ostream& out, const Alignment &alignment);
+inline std::ostream& operator<<(std::ostream& out, const Alignment &a) {
+    return out << fmt::format("{}", a);
+}
 
 struct LocalAlignmentLess {
     bool operator()(const Alignment &a, const Alignment &b) const {
@@ -250,5 +253,47 @@ class AlignmentResults {
 } // namespace align
 } // namespace graph
 } // namespace mtg
+
+
+namespace fmt {
+template <> struct formatter<mtg::graph::align::Alignment> {
+    // Parses format specifications of the form ['f' | 'e'].
+    constexpr auto parse(format_parse_context& ctx) -> decltype(ctx.begin()) {
+        // we have only one format, so nothing to parse
+        return ctx.end();
+    }
+
+    template <typename FormatContext>
+    auto format(const mtg::graph::align::Alignment &a, FormatContext &ctx) -> decltype(ctx.out()) {
+        format_to(ctx.out(), "{}\t{}\t{}\t{}\t{}\t{}",
+                  a.get_orientation() ? "-" : "+",
+                  a.get_sequence(),
+                  a.get_score(),
+                  a.get_cigar().get_num_matches(),
+                  a.get_cigar().to_string(),
+                  a.get_offset());
+
+        const auto &label_columns = a.label_columns;
+        const auto &label_coordinates = a.label_coordinates;
+
+        if (label_coordinates.size()) {
+            format_to(ctx.out(), "\t{}", a.format_coords());
+        } else if (label_columns.size()) {
+            assert(a.label_encoder);
+
+            std::vector<std::string> decoded_labels;
+            decoded_labels.reserve(label_columns.size());
+
+            for (size_t i = 0; i < label_columns.size(); ++i) {
+                decoded_labels.emplace_back(a.label_encoder->decode(label_columns[i]));
+            }
+
+            format_to(ctx.out(), "\t{}", fmt::join(decoded_labels, ";"));
+        }
+
+        return ctx.out();
+    }
+};
+} // namespace fmt
 
 #endif  // __ALIGNER_ALIGNMENT_HPP__
