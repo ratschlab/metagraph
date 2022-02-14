@@ -287,17 +287,13 @@ std::string format_alignment(std::string_view header,
         for (size_t i = 0; i < paths.size(); ++i) {
             const auto &path = paths[i];
 
-            Json::Value json_line = path.to_json(paths.get_query(path.get_orientation()),
-                                                 graph.get_k(), secondary, header);
-
+            Json::Value json_line = path.to_json(graph.get_k(), secondary, header);
             sout += fmt::format("{}\n", Json::writeString(builder, json_line));
             secondary = true;
         }
 
         if (paths.empty()) {
-            Json::Value json_line = Alignment().to_json(paths.get_query(), graph.get_k(),
-                                                        secondary, header);
-
+            Json::Value json_line = Alignment().to_json(graph.get_k(), secondary, header);
             sout += fmt::format("{}\n", Json::writeString(builder, json_line));
         }
     }

@@ -870,8 +870,7 @@ Json::Value Alignment::path_json(size_t node_size, std::string_view label) const
     return path;
 }
 
-Json::Value Alignment::to_json(std::string_view full_query,
-                               size_t node_size,
+Json::Value Alignment::to_json(size_t node_size,
                                bool is_secondary,
                                std::string_view read_name,
                                std::string_view label) const {
@@ -879,6 +878,9 @@ Json::Value Alignment::to_json(std::string_view full_query,
             || std::find(nodes_.begin(), nodes_.end(), DeBruijnGraph::npos) != nodes_.end()) {
         throw std::runtime_error("JSON output for chains not supported");
     }
+
+    std::string_view full_query = { query_.data() - get_clipping(),
+                                    query_.size() + get_clipping() + get_end_clipping() };
 
     // encode alignment
     Json::Value alignment;
