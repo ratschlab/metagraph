@@ -293,12 +293,9 @@ void LabeledExtender::flush() {
 
         auto clear = [&]() {
             node_labels_[last_flushed_table_i_] = 0;
-            auto &S = std::get<0>(table[last_flushed_table_i_]);
-            auto &E = std::get<1>(table[last_flushed_table_i_]);
-            auto &F = std::get<2>(table[last_flushed_table_i_]);
-            std::fill(S.begin(), S.end(), config_.ninf);
-            std::fill(E.begin(), E.end(), config_.ninf);
-            std::fill(F.begin(), F.end(), config_.ninf);
+            std::fill(table_elem.S.begin(), table_elem.S.end(), config_.ninf);
+            std::fill(table_elem.E.begin(), table_elem.E.end(), config_.ninf);
+            std::fill(table_elem.F.begin(), table_elem.F.end(), config_.ninf);
         };
 
         if (!node_labels_[parent_i]) {
@@ -374,7 +371,7 @@ void LabeledExtender
 
     // if we are in the seed and want to force the seed to be fixed, automatically
     // take the next node in the seed
-    size_t next_offset = std::get<6>(table[table_i]) + 1;
+    size_t next_offset = table[table_i].offset + 1;
     bool in_seed = (next_offset - seed_->get_offset() < seed_->get_sequence().size())
         && (next_offset < graph_->get_k() || force_fixed_seed || fixed_seed());
 
