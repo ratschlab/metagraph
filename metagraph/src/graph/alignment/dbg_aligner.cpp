@@ -71,6 +71,9 @@ std::pair<Alignment, Alignment> split_seed(const DeBruijnGraph &graph,
     ret_val.second.trim_reference_prefix(alignment.get_sequence().size() - trim_nodes,
                                          graph.get_k() - 1, config, true);
 
+    assert(ret_val.first.is_valid(graph, &config));
+    assert(ret_val.second.is_valid(graph, &config));
+
     return ret_val;
 }
 
@@ -203,8 +206,10 @@ size_t align_connect(std::string_view query,
         ssize_t overlap = first.get_clipping() + first.get_query().size()
                             - second.get_clipping();
         second.trim_query_prefix(overlap, graph.get_k() - 1, config, false);
+        assert(second.is_valid(graph, &config));
         second.trim_clipping();
         second.insert_gap_prefix(-overlap, graph.get_k() - 1, config);
+        assert(second.is_valid(graph, &config));
         first.trim_end_clipping();
         first.append(std::move(second));
         assert(first.get_nodes().front());
@@ -339,7 +344,8 @@ void ISeedAndExtendAligner<AlignmentCompare>
         for (auto&& alignment : chain_alignments<AlignmentCompare>(aggregator.get_alignments(),
                                                                    paths[i].get_query(false),
                                                                    paths[i].get_query(true),
-                                                                   config_, graph_)) {
+                                                                   config_,
+                                                                   graph_.get_k() - 1)) {
             assert(alignment.is_valid(graph_, &config_));
             if (alignment.get_score() > best_score) {
                 best_score = alignment.get_score();

@@ -312,7 +312,7 @@ std::vector<Alignment> chain_alignments(std::vector<Alignment>&& alignments,
                                         std::string_view query,
                                         std::string_view rc_query,
                                         const DBGAlignerConfig &config,
-                                        const DeBruijnGraph &graph) {
+                                        size_t node_overlap) {
     if (alignments.size() < 2 || !config.post_chain_alignments)
         return std::move(alignments);
 
@@ -348,8 +348,8 @@ std::vector<Alignment> chain_alignments(std::vector<Alignment>&& alignments,
             if (it->get_score() > best_score[end_pos]) {
                 best_score[end_pos] = it->get_score();
                 construct_alignment_chain<AlignmentCompare>(
-                    graph, config, this_query, Alignment(*it), it + 1, end, best_score,
-                    [&](Alignment&& chain) {
+                    node_overlap, config, this_query, Alignment(*it), it + 1, end,
+                    best_score, [&](Alignment&& chain) {
                       aggregator.add_alignment(std::move(chain));
                     }
                 );
@@ -367,7 +367,7 @@ std::vector<Alignment> chain_alignments(std::vector<Alignment>&& alignments,
 }
 
 template <class AlignmentCompare>
-void construct_alignment_chain(const DeBruijnGraph &graph,
+void construct_alignment_chain(size_t node_overlap,
                                const DBGAlignerConfig &config,
                                std::string_view query,
                                Alignment&& chain,
@@ -385,7 +385,6 @@ void construct_alignment_chain(const DeBruijnGraph &graph,
         return;
     }
 
-    size_t k = graph.get_k();
     score_t score = chain.get_score();
 
     bool called = false;
@@ -415,7 +414,7 @@ void construct_alignment_chain(const DeBruijnGraph &graph,
 
         if (next_begin >= chain_end) {
             // no overlap
-            aln.insert_gap_prefix(next_begin - chain_end, graph.get_k() - 1, config);
+            aln.insert_gap_prefix(next_begin - chain_end, node_overlap, config);
 
         } else {
             // trim, then fill in dummy nodes
@@ -424,10 +423,10 @@ void construct_alignment_chain(const DeBruijnGraph &graph,
             // first trim front of the incoming alignment
             size_t overlap = std::min(
                 static_cast<size_t>((chain.get_cigar().data().end() - 2)->second),
-                aln.trim_query_prefix(chain_end - it->get_query().data(), graph.get_k() - 1, config)
+                aln.trim_query_prefix(chain_end - it->get_query().data(), node_overlap, config)
             );
 
-            if (aln.empty() || aln.get_sequence().size() < k
+            if (aln.empty() || aln.get_sequence().size() <= node_overlap
                     || (aln.get_cigar().data().begin()
                             + static_cast<bool>(aln.get_clipping()))->first != Cigar::MATCH) {
                 continue;
@@ -435,8 +434,8 @@ void construct_alignment_chain(const DeBruijnGraph &graph,
 
             assert(aln.get_query().data() == chain.get_query().data() + chain.get_query().size());
 
-            if (overlap < k - 1)
-                aln.insert_gap_prefix(-overlap, graph.get_k() - 1, config);
+            if (overlap < node_overlap)
+                aln.insert_gap_prefix(-overlap, node_overlap, config);
         }
 
         if (aln.empty())
@@ -454,7 +453,7 @@ void construct_alignment_chain(const DeBruijnGraph &graph,
             if (next_chain.size()) {
                 called |= modified;
                 construct_alignment_chain<AlignmentCompare>(
-                    graph, config, query, std::move(next_chain),
+                    node_overlap, config, query, std::move(next_chain),
                     it + 1, end, best_score, callback
                 );
             }
@@ -469,7 +468,7 @@ template std::vector<Alignment> chain_alignments<LocalAlignmentLess>(std::vector
                                                                      std::string_view,
                                                                      std::string_view,
                                                                      const DBGAlignerConfig&,
-                                                                     const DeBruijnGraph&);
+                                                                     size_t);
 
 } // namespace align
 } // namespace graph

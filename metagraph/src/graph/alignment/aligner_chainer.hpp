@@ -29,7 +29,7 @@ std::vector<Alignment> chain_alignments(std::vector<Alignment>&& alignments,
                                         std::string_view query,
                                         std::string_view rc_query,
                                         const DBGAlignerConfig &config,
-                                        const DeBruijnGraph &graph);
+                                        size_t node_overlap);
 
 } // namespace align
 } // namespace graph
