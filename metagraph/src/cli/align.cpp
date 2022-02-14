@@ -410,7 +410,8 @@ int align_to_graph(Config *config) {
                 is_reverse_complement ^= config->forward_and_reverse;
             }
 
-            auto process_batch = [&,graph](SeqBatch batch) {
+            ++num_batches;
+            thread_pool.enqueue([&,graph,batch=std::move(seq_batch)]() {
                 // Make a dummy shared_ptr
                 auto aln_graph
                     = std::shared_ptr<DeBruijnGraph>(std::shared_ptr<DeBruijnGraph>{}, graph.get());
@@ -438,39 +439,7 @@ int align_to_graph(Config *config) {
                         *out << res;
                     }
                 );
-            };
-
-            ++num_batches;
-
-            uint64_t mbatch_size = it == end && num_batches < get_num_threads()
-                ? num_bytes_read / std::max(get_num_threads() - num_batches,
-                                            static_cast<size_t>(1))
-                : 0;
-
-            if (mbatch_size) {
-                // split remaining batch
-                logger->trace("Splitting final batch into minibatches");
-
-                auto it = seq_batch.begin();
-                auto b_end = seq_batch.end();
-                uint64_t num_minibatches = 0;
-                while (it != b_end) {
-                    uint64_t cur_minibatch_read = 0;
-                    auto last_mv_it = std::make_move_iterator(it);
-                    for ( ; it != b_end && cur_minibatch_read < mbatch_size; ++it) {
-                        cur_minibatch_read += std::get<1>(*it).size();
-                    }
-
-                    thread_pool.enqueue(process_batch,
-                                        SeqBatch(last_mv_it, std::make_move_iterator(it)));
-                    ++num_minibatches;
-                }
-
-                logger->trace("Num minibatches: {}, minibatch size: {} KB",
-                              num_minibatches, mbatch_size / 1e3);
-            } else {
-                thread_pool.enqueue(process_batch, std::move(seq_batch));
-            }
+            });
         };
 
         thread_pool.join();
