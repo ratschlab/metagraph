@@ -47,7 +47,7 @@ class ExactSeeder : public ISeeder {
     ExactSeeder(const DeBruijnGraph &graph,
                 std::string_view query,
                 bool orientation,
-                const std::vector<node_index> &nodes,
+                std::vector<node_index>&& nodes,
                 const DBGAlignerConfig &config);
 
     virtual ~ExactSeeder() {}
@@ -59,7 +59,7 @@ class ExactSeeder : public ISeeder {
     const DeBruijnGraph &graph_;
     std::string_view query_;
     bool orientation_;
-    const std::vector<node_index> &query_nodes_;
+    std::vector<node_index> query_nodes_;
     const DBGAlignerConfig &config_;
     std::vector<score_t> partial_sum_;
     size_t num_matching_;

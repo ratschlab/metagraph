@@ -70,8 +70,9 @@ class DBGAligner : public IDBGAligner {
     std::shared_ptr<Seeder>
     build_seeder(std::string_view query,
                  bool is_reverse_complement,
-                 const std::vector<IDBGAligner::node_index> &nodes) const {
-        return std::make_shared<Seeder>(graph_, query, is_reverse_complement, nodes, config_);
+                 std::vector<IDBGAligner::node_index>&& nodes) const {
+        return std::make_shared<Seeder>(graph_, query, is_reverse_complement,
+                                        std::move(nodes), config_);
     }
 
     // Align the forward and reverse complement of the query sequence in both

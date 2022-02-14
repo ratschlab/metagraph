@@ -13,12 +13,12 @@ namespace align {
 ExactSeeder::ExactSeeder(const DeBruijnGraph &graph,
                          std::string_view query,
                          bool orientation,
-                         const std::vector<node_index> &nodes,
+                         std::vector<node_index>&& nodes,
                          const DBGAlignerConfig &config)
       : graph_(graph),
         query_(query),
         orientation_(orientation),
-        query_nodes_(nodes),
+        query_nodes_(std::move(nodes)),
         config_(config),
         num_matching_(num_exact_matching()) {
     assert(config_.check_config_scores());
