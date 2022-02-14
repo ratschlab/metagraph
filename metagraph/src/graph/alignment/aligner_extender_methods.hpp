@@ -108,29 +108,32 @@ class DefaultColumnExtender : public SeedFilteringExtender {
 
     virtual size_t num_extensions() const override final { return num_extensions_; }
 
-  protected:
-    const DeBruijnGraph *graph_;
-    std::string_view query_;
-
     // During extension, a tree is constructed from the graph starting at the
     // seed, then the query is aligned against this tree.
     // Each Column object represents the alignment of a substring of the query
     // against a node in the tree.
     // The horizontal concatenation (hstack) of all of the columns along a path
     // in this tree is analogous to a Needleman-Wunsch dynamic programming score matrix.
-    using Column = std::tuple<AlignedVector<score_t> /* S (best score) */,
-                              AlignedVector<score_t> /* E (best score after insert) */,
-                              AlignedVector<score_t> /* F (best score after delete) */,
-                              node_index /* node */,
-                              size_t /* parent index in table */,
-                              char /* last char of node */,
-                              ssize_t /* offset (distance from start of the first node) */,
-                              ssize_t /* absolute index of maximal value*/,
-                              ssize_t /* trim (starting absolute index of array) */,
-                              size_t /* xdrop_cutoffs_ index */,
-                              size_t /* last fork index in table */,
-                              score_t /* traversal penalty */>;
-    // e.g., the maximal value is located at S[std::get<7>(col) - std::get<8>(col)]
+    struct Column {
+        AlignedVector<score_t> S; /* best score */
+        AlignedVector<score_t> E; /* best score after insert */
+        AlignedVector<score_t> F; /* best score after delete */
+        node_index node; /* graph node represented by the column */
+        size_t parent_i; /* index of the parent column */
+        char c; /* the last character of the node's k-mer */
+        ssize_t offset; /* distance from the starting character of the first node */
+        ssize_t max_pos; /* absolute index of the maximal value */
+        ssize_t trim; /* first index which is allocated by the vectors
+                         i.e., the maximal value is located at S[max_pos - trim] */
+        size_t xdrop_cutoff_i; /* corresponding index in the xdrop_cutoff vector */
+        size_t last_fork_i; /* index of the nearest ancestor that was a fork */
+        score_t score; /* added score when traversing to this node
+                          (typically a negative penalty) */
+    };
+
+  protected:
+    const DeBruijnGraph *graph_;
+    std::string_view query_;
     std::vector<Column> table;
     size_t table_size_bytes_;
 
@@ -197,7 +200,7 @@ class DefaultColumnExtender : public SeedFilteringExtender {
         if (clipping && cur_cell_score != 0)
             return;
 
-        if (!clipping && cur_cell_score != std::get<0>(table[0])[0])
+        if (!clipping && cur_cell_score != table[0].S[0])
             return;
 
         if (!config_.allow_left_trim) {

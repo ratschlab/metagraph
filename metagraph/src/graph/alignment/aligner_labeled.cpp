@@ -286,7 +286,9 @@ struct CoordIntersection {
 void LabeledExtender::flush() {
     labeled_graph_.flush();
     for ( ; last_flushed_table_i_ < table.size(); ++last_flushed_table_i_) {
-        size_t parent_i = std::get<4>(table[last_flushed_table_i_]);
+        auto &table_elem = table[last_flushed_table_i_];
+
+        size_t parent_i = table_elem.parent_i;
         assert(parent_i < last_flushed_table_i_);
 
         auto clear = [&]() {
@@ -307,7 +309,7 @@ void LabeledExtender::flush() {
         if (node_labels_[parent_i] != node_labels_[last_flushed_table_i_])
             continue;
 
-        node_index node = std::get<3>(table[last_flushed_table_i_]);
+        node_index node = table_elem.node;
         const auto &parent_labels
             = labeled_graph_.get_labels_from_index(node_labels_[parent_i]);
 

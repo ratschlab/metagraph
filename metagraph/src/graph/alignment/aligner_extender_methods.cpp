@@ -350,8 +350,8 @@ void DefaultColumnExtender
                 const std::function<void(node_index, char, score_t)> &callback,
                 size_t table_i,
                 bool force_fixed_seed) {
-    assert(node == std::get<3>(table[table_i]));
-    size_t next_offset = std::get<6>(table[table_i]) + 1;
+    assert(node == table[table_i].node);
+    size_t next_offset = table[table_i].offset + 1;
     size_t seed_pos = next_offset - this->seed_->get_offset();
     bool in_seed = seed_pos < this->seed_->get_sequence().size();
 
@@ -383,27 +383,25 @@ void DefaultColumnExtender
 
 // allocate and initialize with padding to ensure that SIMD operations don't
 // read/write out of bounds
-template <class Column, typename... RestArgs>
-Column alloc_column(size_t size, RestArgs... args) {
-    Column column { {}, {}, {}, args... };
-    auto &[S, E, F, node, i_prev, c, offset, max_pos, trim,
-           xdrop_cutoff_i, last_fork_i, score] = column;
+template <typename... RestArgs>
+DefaultColumnExtender::Column alloc_column(size_t size, RestArgs... args) {
+    DefaultColumnExtender::Column column { {}, {}, {}, args... };
 
     // allocate and initialize enough space to allow the SIMD code to access these
     // vectors in 16 byte blocks without reading out of bounds
-    S.reserve(size + kPadding);
-    E.reserve(size + kPadding);
-    F.reserve(size + kPadding);
+    column.S.reserve(size + kPadding);
+    column.E.reserve(size + kPadding);
+    column.F.reserve(size + kPadding);
 
     // the size is set properly to allow for AlignedVector methods (size(), push_back())
     // to function properly
-    S.resize(size, ninf);
-    E.resize(size, ninf);
-    F.resize(size, ninf);
+    column.S.resize(size, ninf);
+    column.E.resize(size, ninf);
+    column.F.resize(size, ninf);
 
-    std::fill(S.data() + S.size(), S.data() + S.capacity(), ninf);
-    std::fill(E.data() + E.size(), E.data() + E.capacity(), ninf);
-    std::fill(F.data() + F.size(), F.data() + F.capacity(), ninf);
+    std::fill(column.S.data() + column.S.size(), column.S.data() + column.S.capacity(), ninf);
+    std::fill(column.E.data() + column.E.size(), column.E.data() + column.E.capacity(), ninf);
+    std::fill(column.F.data() + column.F.size(), column.F.data() + column.F.capacity(), ninf);
 
     return column;
 }
@@ -442,8 +440,8 @@ std::vector<Alignment> DefaultColumnExtender
 
     // initialize the root of the tree
     table.emplace_back(
-        alloc_column<Column>(1, this->seed_->get_nodes().front(), static_cast<size_t>(-1),
-                             '\0', seed_offset, 0, 0, 0u, 0u, 0)
+        alloc_column(1, this->seed_->get_nodes().front(), static_cast<size_t>(-1),
+                     '\0', seed_offset, 0, 0, 0u, 0u, 0)
     );
 
     {
@@ -453,13 +451,10 @@ std::vector<Alignment> DefaultColumnExtender
         extend_ins_end(S, E, F, window.size() + 1 - trim,
                        xdrop_cutoffs_[xdrop_cutoff_i].second, config_);
 
-        static_assert(std::is_same_v<decltype(table)::value_type, Column>);
-        static_assert(std::is_same_v<decltype(S)::value_type, score_t>);
-        static_assert(std::is_same_v<decltype(E)::value_type, score_t>);
-        static_assert(std::is_same_v<decltype(F)::value_type, score_t>);
-
-        table_size_bytes_ = sizeof(Column) * table.capacity()
-                                + S.capacity() * sizeof(score_t) * 3;
+        table_size_bytes_ = sizeof(decltype(table)::value_type) * table.capacity()
+                                + S.capacity() * sizeof(decltype(S)::value_type)
+                                + E.capacity() * sizeof(decltype(E)::value_type)
+                                + F.capacity() * sizeof(decltype(F)::value_type);
     }
 
     // The nodes in the traversal (with corresponding score columns) are sorted by
@@ -581,7 +576,7 @@ std::vector<Alignment> DefaultColumnExtender
                 }
 
                 size_t table_sizediff = table.capacity();
-                table.emplace_back(alloc_column<Column>(
+                table.emplace_back(alloc_column(
                     end - begin, next, i, c,
                     static_cast<ssize_t>(next_offset),
                     begin, begin,
@@ -701,15 +696,11 @@ std::vector<Alignment> DefaultColumnExtender
 
                 table_sizediff = table.capacity() - table_sizediff;
 
-                static_assert(std::is_same_v<decltype(table)::value_type, Column>);
-                static_assert(std::is_same_v<decltype(S)::value_type, score_t>);
-                static_assert(std::is_same_v<decltype(E)::value_type, score_t>);
-                static_assert(std::is_same_v<decltype(F)::value_type, score_t>);
-                static_assert(std::is_same_v<decltype(scores_reached_)::value_type, score_t>);
-
-                table_size_bytes_ += sizeof(Column) * table_sizediff
-                    + S.capacity() * sizeof(score_t) * 3
-                    + sizeof(score_t) * scores_reached_sizediff
+                table_size_bytes_ += sizeof(decltype(table)::value_type) * table_sizediff
+                    + S.capacity() * sizeof(decltype(S)::value_type)
+                    + E.capacity() * sizeof(decltype(E)::value_type)
+                    + F.capacity() * sizeof(decltype(F)::value_type)
+                    + sizeof(decltype(scores_reached_)::value_type) * scores_reached_sizediff
                     + sizeof(xdrop_cutoff_v) * xdrop_cutoffs_sizediff;
 
                 if (max_val - xdrop_cutoff > config_.xdrop)
@@ -840,17 +831,14 @@ std::vector<Alignment> DefaultColumnExtender
             }
         };
 
-        const auto &[S, E, F, node, j_prev, c, offset, max_pos, trim,
-                     xdrop_cutoff_i, last_fork_i, score] = table[i];
-
-        if (offset < seed_dist)
+        if (table[i].offset < seed_dist)
             continue;
 
         if (!config_.semiglobal)
-            check_and_add_pos(max_pos);
+            check_and_add_pos(table[i].max_pos);
 
-        if (S.size() + trim == window.size() + 1
-                && (config_.semiglobal || max_pos != last_pos)) {
+        if (table[i].S.size() + table[i].trim == window.size() + 1
+                && (config_.semiglobal || table[i].max_pos != last_pos)) {
             check_and_add_pos(last_pos);
         }
     }
@@ -989,16 +977,13 @@ std::vector<Alignment> DefaultColumnExtender
             }
 
             if (trace.size() >= min_trace_length && path.size() && path.back()) {
-                const auto &[S, E, F, node, j_prev, c, offset, max_pos, trim,
-                             xdrop_cutoff_i, last_fork_i, score_cur] = table[j];
-
-                best_score = std::max(best_score, score - S[pos - trim]);
+                best_score = std::max(best_score, score - table[j].S[pos - table[j].trim]);
                 if (score - min_cell_score_ < best_score)
                     break;
 
-                call_alignments(S[pos - trim], score, min_start_score, path, trace, j,
-                                ops, pos, align_offset, window.substr(pos, end_pos - pos),
-                                seq, extra_penalty,
+                call_alignments(table[j].S[pos - table[j].trim], score, min_start_score,
+                                path, trace, j, ops, pos, align_offset,
+                                window.substr(pos, end_pos - pos), seq, extra_penalty,
                                 [&](Alignment&& alignment) {
                     extensions.emplace_back(std::move(alignment));
                 });
