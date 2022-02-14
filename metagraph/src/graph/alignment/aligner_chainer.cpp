@@ -153,51 +153,52 @@ call_seed_chains_both_strands(std::string_view forward,
             continue;
         }
 
-        // if this chain has the same seeds as the last one, merge their coordinate sets
-        if (last_chain == chain) {
-            for (size_t i = 0; i < chain.size(); ++i) {
-                Alignment::LabelSet label_union;
-                Alignment::CoordinateSet coord_union;
-                auto a_begin = last_chain[i].label_columns.begin();
-                auto a_end = last_chain[i].label_columns.end();
-                auto a_c_begin = last_chain[i].label_coordinates.begin();
-                auto b_begin = chain[i].label_columns.begin();
-                auto b_end = chain[i].label_columns.end();
-                auto b_c_begin = chain[i].label_coordinates.begin();
-                while (a_begin != a_end && b_begin != b_end) {
-                    if (*a_begin < *b_begin) {
-                        label_union.push_back(*a_begin);
-                        coord_union.push_back(*a_c_begin);
-                        ++a_begin;
-                        ++a_c_begin;
-                    } else if (*a_begin > *b_begin) {
-                        label_union.push_back(*b_begin);
-                        coord_union.push_back(*b_c_begin);
-                        ++b_begin;
-                        ++b_c_begin;
-                    } else {
-                        label_union.push_back(*a_begin);
-                        coord_union.emplace_back();
-                        std::set_union(a_c_begin->begin(), a_c_begin->end(),
-                                       b_c_begin->begin(), b_c_begin->end(),
-                                       std::back_inserter(coord_union.back()));
-                        ++a_begin;
-                        ++a_c_begin;
-                        ++b_begin;
-                        ++b_c_begin;
-                    }
-                }
-                label_union.insert(label_union.end(), a_begin, a_end);
-                label_union.insert(label_union.end(), b_begin, b_end);
-                coord_union.insert(coord_union.end(), a_c_begin, last_chain[i].label_coordinates.end());
-                coord_union.insert(coord_union.end(), b_c_begin, chain[i].label_coordinates.end());
-                std::swap(last_chain[i].label_columns, label_union);
-                std::swap(last_chain[i].label_coordinates, coord_union);
-            }
-        } else {
+        if (last_chain != chain) {
             callback(std::move(last_chain), last_chain_score);
             std::swap(last_chain, chain);
             last_chain_score = chain_score;
+            continue;
+        }
+
+        // if this chain has the same seeds as the last one, merge their coordinate sets
+        for (size_t i = 0; i < chain.size(); ++i) {
+            Alignment::LabelSet label_union;
+            Alignment::CoordinateSet coord_union;
+            auto a_begin = last_chain[i].label_columns.begin();
+            auto a_end = last_chain[i].label_columns.end();
+            auto a_c_begin = last_chain[i].label_coordinates.begin();
+            auto b_begin = chain[i].label_columns.begin();
+            auto b_end = chain[i].label_columns.end();
+            auto b_c_begin = chain[i].label_coordinates.begin();
+            while (a_begin != a_end && b_begin != b_end) {
+                if (*a_begin < *b_begin) {
+                    label_union.push_back(*a_begin);
+                    coord_union.push_back(*a_c_begin);
+                    ++a_begin;
+                    ++a_c_begin;
+                } else if (*a_begin > *b_begin) {
+                    label_union.push_back(*b_begin);
+                    coord_union.push_back(*b_c_begin);
+                    ++b_begin;
+                    ++b_c_begin;
+                } else {
+                    label_union.push_back(*a_begin);
+                    coord_union.emplace_back();
+                    std::set_union(a_c_begin->begin(), a_c_begin->end(),
+                                   b_c_begin->begin(), b_c_begin->end(),
+                                   std::back_inserter(coord_union.back()));
+                    ++a_begin;
+                    ++a_c_begin;
+                    ++b_begin;
+                    ++b_c_begin;
+                }
+            }
+            label_union.insert(label_union.end(), a_begin, a_end);
+            label_union.insert(label_union.end(), b_begin, b_end);
+            coord_union.insert(coord_union.end(), a_c_begin, last_chain[i].label_coordinates.end());
+            coord_union.insert(coord_union.end(), b_c_begin, chain[i].label_coordinates.end());
+            std::swap(last_chain[i].label_columns, label_union);
+            std::swap(last_chain[i].label_coordinates, coord_union);
         }
     }
 
