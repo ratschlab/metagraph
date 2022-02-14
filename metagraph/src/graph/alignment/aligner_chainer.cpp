@@ -298,7 +298,7 @@ chain_seeds(const DBGAlignerConfig &config,
 }
 
 template <class AlignmentCompare>
-void construct_alignment_chain(const DeBruijnGraph &graph,
+void construct_alignment_chain(size_t node_overlap,
                                const DBGAlignerConfig &config,
                                std::string_view query,
                                Alignment&& chain,
@@ -449,7 +449,6 @@ void construct_alignment_chain(size_t node_overlap,
             next_chain.trim_end_clipping();
             bool modified = next_chain.append(std::move(aln));
             assert(next_chain.get_score() == next_score);
-            assert(next_chain.is_valid(graph, &config));
             if (next_chain.size()) {
                 called |= modified;
                 construct_alignment_chain<AlignmentCompare>(
