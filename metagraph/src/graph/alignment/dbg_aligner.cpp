@@ -424,7 +424,6 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
                size_t &num_explored_nodes,
                const std::function<void(Alignment&&)> &callback) const {
     DBGAlignerConfig gap_fill_config = config_;
-    gap_fill_config.semiglobal = true;
     gap_fill_config.allow_left_trim = false;
     gap_fill_config.trim_offset_after_extend = false;
 

@@ -799,7 +799,7 @@ std::vector<Alignment> DefaultColumnExtender
     ssize_t k_minus_1 = graph_->get_k() - 1;
     ssize_t last_pos = window.size();
     ssize_t seed_dist = std::max(graph_->get_k(), this->seed_->get_sequence().size()) - 1;
-    score_t min_start_score = config_.semiglobal ? ninf : min_path_score;
+    score_t min_start_score = target_node ? ninf : min_path_score;
     size_t min_trace_length = this->graph_->get_k() - this->seed_->get_offset();
 
     std::vector<std::tuple<score_t, ssize_t, ssize_t, ssize_t>> indices;
@@ -821,7 +821,7 @@ std::vector<Alignment> DefaultColumnExtender
 
             score_t end_bonus = start_pos == last_pos ? config_.right_end_bonus : 0;
 
-            if (config_.semiglobal) {
+            if (target_node) {
                 if (node == target_node
                         && S[pos] == S_p[pos_p] + score + profile_score_.find(c)->second[seed_clipping + start_pos]) {
                     indices.emplace_back(S[pos] + end_bonus, -std::abs(start_pos - offset + seed_offset),
@@ -842,11 +842,11 @@ std::vector<Alignment> DefaultColumnExtender
         if (table[i].offset < seed_dist)
             continue;
 
-        if (!config_.semiglobal)
+        if (!target_node)
             check_and_add_pos(table[i].max_pos);
 
         if (table[i].S.size() + table[i].trim == window.size() + 1
-                && (config_.semiglobal || table[i].max_pos != last_pos)) {
+                && (target_node || table[i].max_pos != last_pos)) {
             check_and_add_pos(last_pos);
         }
     }
