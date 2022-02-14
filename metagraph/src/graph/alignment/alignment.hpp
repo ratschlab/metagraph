@@ -95,29 +95,27 @@ class Alignment {
     size_t trim_offset();
 
     size_t trim_query_prefix(size_t n,
-                             const DeBruijnGraph &graph,
+                             size_t node_overlap,
                              const DBGAlignerConfig &config,
                              bool trim_excess_deletions = true);
 
     size_t trim_query_suffix(size_t n,
-                             const DeBruijnGraph &graph,
                              const DBGAlignerConfig &config,
                              bool trim_excess_deletions = true);
 
     size_t trim_reference_prefix(size_t n,
-                                 const DeBruijnGraph &graph,
+                                 size_t node_overlap,
                                  const DBGAlignerConfig &config,
                                  bool trim_excess_insertions = true);
 
     size_t trim_reference_suffix(size_t n,
-                                 const DeBruijnGraph &graph,
                                  const DBGAlignerConfig &config,
                                  bool trim_excess_insertions = true);
 
     // When chaining together two alignments, use this method to adapt the prefix
     // of this alignment so it can be appended to the first one.
     // a negative gap indicates an overlap
-    void insert_gap_prefix(ssize_t gap_length, const DeBruijnGraph &graph, const DBGAlignerConfig &config);
+    void insert_gap_prefix(ssize_t gap_length, size_t node_overlap, const DBGAlignerConfig &config);
 
     void reverse_complement(const DeBruijnGraph &graph, std::string_view query_rev_comp);
 

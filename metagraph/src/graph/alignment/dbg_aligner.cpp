@@ -51,7 +51,7 @@ std::pair<Alignment, Alignment> split_seed(const DeBruijnGraph &graph,
         return std::make_pair(Alignment(), alignment);
 
     auto ret_val = std::make_pair(alignment, alignment);
-    ret_val.first.trim_reference_suffix(graph.get_k(), graph, config, false);
+    ret_val.first.trim_reference_suffix(graph.get_k(), config, false);
 
     // ensure that there's no DELETION at the splice point
     size_t trim_nodes = graph.get_k();
@@ -62,14 +62,14 @@ std::pair<Alignment, Alignment> split_seed(const DeBruijnGraph &graph,
 
         if (it->first == Cigar::DELETION) {
             trim_nodes += it->second;
-            ret_val.first.trim_reference_suffix(it->second, graph, config, false);
+            ret_val.first.trim_reference_suffix(it->second, config, false);
         }
 
         assert(ret_val.first.size());
     }
 
     ret_val.second.trim_reference_prefix(alignment.get_sequence().size() - trim_nodes,
-                                         graph, config, true);
+                                         graph.get_k() - 1, config, true);
 
     return ret_val;
 }
@@ -202,9 +202,9 @@ size_t align_connect(std::string_view query,
             && first.get_clipping() + first.get_query().size() > second.get_clipping()) {
         ssize_t overlap = first.get_clipping() + first.get_query().size()
                             - second.get_clipping();
-        second.trim_query_prefix(overlap, graph, config, false);
+        second.trim_query_prefix(overlap, graph.get_k() - 1, config, false);
         second.trim_clipping();
-        second.insert_gap_prefix(-overlap, graph, config);
+        second.insert_gap_prefix(-overlap, graph.get_k() - 1, config);
         first.trim_end_clipping();
         first.append(std::move(second));
         assert(first.get_nodes().front());
@@ -425,9 +425,11 @@ void ISeedAndExtendAligner<AlignmentCompare>
     DEBUG_LOG("Chain size: {}, score: {}\n{}", chain.size(), score, fmt::join(chain, "\t"));
 
     Alignment cur = std::move(chain[0]);
+    assert(cur.is_valid(graph_, &config_));
     Alignment best = cur;
 
     for (size_t i = 1; i < chain.size(); ++i) {
+        assert(chain[i].is_valid(graph_, &config_));
         gap_fill_config.xdrop = config_.xdrop;
         gap_fill_config.terminal_node = chain[i].get_nodes().back();
         gap_fill_config.right_end_bonus = chain[i].get_query().data()
@@ -561,7 +563,8 @@ std::tuple<size_t, size_t, size_t> ISeedAndExtendAligner<AlignmentCompare>
         try {
             size_t this_num_explored;
             std::tie(num_seeds, this_num_explored) = call_seed_chains_both_strands(
-                forward, reverse, graph_, config_, std::move(fwd_seeds), std::move(bwd_seeds),
+                forward, reverse, graph_.get_k() - 1, config_,
+                std::move(fwd_seeds), std::move(bwd_seeds),
                 [&](Chain&& chain, score_t score) {
                     extend_chain(chain[0].get_orientation() ? reverse : forward,
                                  chain[0].get_orientation() ? forward : reverse,

@@ -31,7 +31,7 @@ chain_seeds(const DBGAlignerConfig &config,
 std::pair<size_t, size_t>
 call_seed_chains_both_strands(std::string_view forward,
                               std::string_view reverse,
-                              const DeBruijnGraph &graph,
+                              size_t node_overlap,
                               const DBGAlignerConfig &config,
                               std::vector<Alignment>&& fwd_seeds,
                               std::vector<Alignment>&& bwd_seeds,
@@ -122,16 +122,15 @@ call_seed_chains_both_strands(std::string_view forward,
         for (size_t i = chain.size() - 1; i > 0; --i) {
             const char *prev_end = chain[i - 1].get_query().data() + chain[i - 1].get_query().size();
             const char *cur_begin = chain[i].get_query().data();
-            if (prev_end + chain[i].get_offset() >= cur_begin + graph.get_k() - 1) {
+            if (prev_end + chain[i].get_offset() >= cur_begin + node_overlap) {
                 Alignment trim = chain[i];
                 Alignment merge = chain[i - 1];
                 merge.trim_end_clipping();
-                trim.trim_query_prefix(prev_end - cur_begin, graph, config);
+                trim.trim_query_prefix(prev_end - cur_begin, node_overlap, config);
                 trim.trim_clipping();
-                assert(trim.get_offset() == graph.get_k() - 1);
+                assert(trim.get_offset() == node_overlap);
                 merge.append(std::move(trim));
                 if (merge.size()) {
-                    assert(merge.is_valid(graph, &config));
                     std::swap(merge, chain[i - 1]);
                     chain[i] = Alignment();
                 }
@@ -416,7 +415,7 @@ void construct_alignment_chain(const DeBruijnGraph &graph,
 
         if (next_begin >= chain_end) {
             // no overlap
-            aln.insert_gap_prefix(next_begin - chain_end, graph, config);
+            aln.insert_gap_prefix(next_begin - chain_end, graph.get_k() - 1, config);
 
         } else {
             // trim, then fill in dummy nodes
@@ -425,7 +424,7 @@ void construct_alignment_chain(const DeBruijnGraph &graph,
             // first trim front of the incoming alignment
             size_t overlap = std::min(
                 static_cast<size_t>((chain.get_cigar().data().end() - 2)->second),
-                aln.trim_query_prefix(chain_end - it->get_query().data(), graph, config)
+                aln.trim_query_prefix(chain_end - it->get_query().data(), graph.get_k() - 1, config)
             );
 
             if (aln.empty() || aln.get_sequence().size() < k
@@ -437,7 +436,7 @@ void construct_alignment_chain(const DeBruijnGraph &graph,
             assert(aln.get_query().data() == chain.get_query().data() + chain.get_query().size());
 
             if (overlap < k - 1)
-                aln.insert_gap_prefix(-overlap, graph, config);
+                aln.insert_gap_prefix(-overlap, graph.get_k() - 1, config);
         }
 
         if (aln.empty())

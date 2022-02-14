@@ -185,10 +185,9 @@ size_t Alignment::trim_offset() {
 }
 
 size_t Alignment::trim_query_prefix(size_t n,
-                                    const DeBruijnGraph &graph,
+                                    size_t node_overlap,
                                     const DBGAlignerConfig &config,
                                     bool trim_excess_deletions) {
-    assert(is_valid(graph, &config));
     const char *query_begin = query_.data() - get_clipping();
     bool has_clipping = get_clipping();
     auto it = cigar_.data().begin() + has_clipping;
@@ -197,12 +196,10 @@ size_t Alignment::trim_query_prefix(size_t n,
     auto s_it = sequence_.begin();
     auto node_it = nodes_.begin();
 
-    size_t offset_cutoff = graph.get_k() - 1;
-
     auto consume_ref = [&]() {
         assert(s_it != sequence_.end());
         ++s_it;
-        if (offset_ < offset_cutoff) {
+        if (offset_ < node_overlap) {
             ++offset_;
         } else if (node_it + 1 < nodes_.end()) {
             ++node_it;
@@ -272,16 +269,12 @@ size_t Alignment::trim_query_prefix(size_t n,
     cigar_.data().erase(cigar_.data().begin(), it);
     extend_query_begin(query_begin);
 
-    assert(is_valid(graph, &config));
-
     return cigar_offset;
 }
 
 size_t Alignment::trim_query_suffix(size_t n,
-                                    const DeBruijnGraph &graph,
                                     const DBGAlignerConfig &config,
                                     bool trim_excess_deletions) {
-    assert(is_valid(graph, &config));
     const char *query_end = query_.data() + query_.size();
     bool has_end_clipping = get_end_clipping();
 
@@ -355,18 +348,15 @@ size_t Alignment::trim_query_suffix(size_t n,
     it->second -= cigar_offset;
     cigar_.data().erase(it.base(), cigar_.data().end());
 
-    std::ignore = graph;
     extend_query_end(query_end);
-    assert(is_valid(graph, &config));
 
     return cigar_offset;
 }
 
 size_t Alignment::trim_reference_prefix(size_t n,
-                                        const DeBruijnGraph &graph,
+                                        size_t node_overlap,
                                         const DBGAlignerConfig &config,
                                         bool trim_excess_insertions) {
-    assert(is_valid(graph, &config));
     const char *query_begin = query_.data() - get_clipping();
     bool has_clipping = get_clipping();
 
@@ -376,7 +366,6 @@ size_t Alignment::trim_reference_prefix(size_t n,
     auto s_it = sequence_.begin();
     auto node_it = nodes_.begin();
 
-    size_t offset_cutoff = graph.get_k() - 1;
     size_t seq_trim = 0;
 
     auto consume_ref = [&]() {
@@ -388,7 +377,7 @@ size_t Alignment::trim_reference_prefix(size_t n,
         }
 
         ++s_it;
-        if (offset_ < offset_cutoff) {
+        if (offset_ < node_overlap) {
             ++offset_;
         } else if (node_it + 1 < nodes_.end()) {
             ++node_it;
@@ -460,16 +449,12 @@ size_t Alignment::trim_reference_prefix(size_t n,
 
     extend_query_begin(query_begin);
 
-    assert(is_valid(graph, &config));
-
     return cigar_offset;
 }
 
 size_t Alignment::trim_reference_suffix(size_t n,
-                                        const DeBruijnGraph &graph,
                                         const DBGAlignerConfig &config,
                                         bool trim_excess_insertions) {
-    assert(is_valid(graph, &config));
     const char *query_end = query_.data() + query_.size();
     bool has_end_clipping = get_end_clipping();
     trim_end_clipping();
@@ -541,9 +526,7 @@ size_t Alignment::trim_reference_suffix(size_t n,
     it->second -= cigar_offset;
     cigar_.data().erase(it.base(), cigar_.data().end());
 
-    std::ignore = graph;
     extend_query_end(query_end);
-    assert(is_valid(graph, &config));
 
     return cigar_offset;
 }
@@ -1051,9 +1034,9 @@ std::shared_ptr<const std::string> Alignment
 }
 
 void Alignment::insert_gap_prefix(ssize_t gap_length,
-                                  const DeBruijnGraph &graph,
+                                  size_t node_overlap,
                                   const DBGAlignerConfig &config) {
-    size_t extra_nodes = graph.get_k();
+    size_t extra_nodes = node_overlap + 1;
 
     if (gap_length < 0) {
         // alignments overlap
@@ -1112,7 +1095,7 @@ void Alignment::insert_gap_prefix(ssize_t gap_length,
         cigar_.data().insert(cigar_.data().begin(), Cigar::value_type{ Cigar::DELETION, 1 });
         score_ += config.gap_opening_penalty;
 
-        if (static_cast<size_t>(gap_length) < graph.get_k()) {
+        if (static_cast<size_t>(gap_length) <= node_overlap) {
             // overlap is small, so add only the required dummy nods
             trim_offset();
             assert(extra_nodes >= 2);
@@ -1130,7 +1113,7 @@ void Alignment::insert_gap_prefix(ssize_t gap_length,
     nodes_.insert(nodes_.begin(), extra_nodes, DeBruijnGraph::npos);
 
     assert(nodes_.size() == sequence_.size());
-    offset_ = graph.get_k() - 1;
+    offset_ = node_overlap;
 }
 
 // Return the string spelled by the path. This path may have disconnects (if it came)
