@@ -29,7 +29,7 @@ inline void check_chain(const AlignmentResults &paths,
         EXPECT_TRUE(path.is_valid(graph, &config)) << path;
         if (has_chain) {
             EXPECT_THROW(path.to_json(paths.get_query(path.get_orientation()),
-                                      graph, false, "", ""),
+                                      graph.get_k(), false, "", ""),
                          std::runtime_error);
         } else {
             check_json_dump_load(graph, path, paths.get_query(), paths.get_query(true));

@@ -41,7 +41,7 @@ void check_json_dump_load(const DeBruijnGraph &graph,
 
     Alignment load_alignment;
     auto load_sequence = load_alignment.load_from_json(
-        alignment.to_json(path_query, graph),
+        alignment.to_json(path_query, graph.get_k()),
         graph
     );
 

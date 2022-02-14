@@ -140,7 +140,7 @@ class Alignment {
     bool operator!=(const Alignment &other) const { return !(*this == other); }
 
     Json::Value to_json(std::string_view query,
-                        const DeBruijnGraph &graph,
+                        size_t node_size,
                         bool is_secondary = false,
                         std::string_view name = {},
                         std::string_view label = {}) const;

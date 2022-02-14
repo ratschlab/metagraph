@@ -871,11 +871,10 @@ Json::Value Alignment::path_json(size_t node_size, std::string_view label) const
 }
 
 Json::Value Alignment::to_json(std::string_view full_query,
-                               const DeBruijnGraph &graph,
+                               size_t node_size,
                                bool is_secondary,
                                std::string_view read_name,
                                std::string_view label) const {
-    assert(is_valid(graph));
     if (sequence_.find("$") != std::string::npos
             || std::find(nodes_.begin(), nodes_.end(), DeBruijnGraph::npos) != nodes_.end()) {
         throw std::runtime_error("JSON output for chains not supported");
@@ -901,7 +900,7 @@ Json::Value Alignment::to_json(std::string_view full_query,
 
     // encode path
     if (nodes_.size())
-        alignment["path"] = path_json(graph.get_k(), label);
+        alignment["path"] = path_json(node_size, label);
 
     alignment["score"] = static_cast<int32_t>(score_);
 
