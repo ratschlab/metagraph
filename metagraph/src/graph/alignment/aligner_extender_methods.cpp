@@ -406,8 +406,10 @@ DefaultColumnExtender::Column alloc_column(size_t size, RestArgs... args) {
     return column;
 }
 
-std::vector<Alignment> DefaultColumnExtender
-::extend(score_t min_path_score, bool force_fixed_seed) {
+std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score,
+                                                     bool force_fixed_seed,
+                                                     size_t target_length,
+                                                     node_index target_node) {
     assert(this->seed_);
 
     ++num_extensions_;
@@ -665,9 +667,9 @@ std::vector<Alignment> DefaultColumnExtender
 
                 score_t max_val = S[max_pos - trim];
 
-                if (static_cast<size_t>(offset - seed_offset) < config_.target_distance + 1) {
+                if (static_cast<size_t>(offset - seed_offset) < target_length + 1) {
                     has_extension = true;
-                } else if (config_.target_distance) {
+                } else if (target_length) {
                     DEBUG_LOG("Target distance reached");
                     has_extension = false;
                 }
@@ -750,7 +752,7 @@ std::vector<Alignment> DefaultColumnExtender
     if (config_.no_backtrack)
         return { *seed_ };
 
-    return backtrack(min_path_score, window);
+    return backtrack(min_path_score, window, target_node);
 }
 
 Alignment DefaultColumnExtender::construct_alignment(Cigar cigar,
@@ -784,7 +786,7 @@ Alignment DefaultColumnExtender::construct_alignment(Cigar cigar,
 }
 
 std::vector<Alignment> DefaultColumnExtender
-::backtrack(score_t min_path_score, std::string_view window) {
+::backtrack(score_t min_path_score, std::string_view window, node_index target_node) {
     std::vector<Alignment> extensions;
     size_t seed_clipping = this->seed_->get_clipping();
     ssize_t seed_offset = static_cast<ssize_t>(this->seed_->get_offset() - 1);
@@ -814,7 +816,7 @@ std::vector<Alignment> DefaultColumnExtender
             score_t end_bonus = start_pos == last_pos ? config_.right_end_bonus : 0;
 
             if (config_.semiglobal) {
-                if (node == config_.terminal_node
+                if (node == target_node
                         && S[pos] == S_p[pos_p] + score + profile_score_.find(c)->second[seed_clipping + start_pos]) {
                     indices.emplace_back(S[pos] + end_bonus, -std::abs(start_pos - offset + seed_offset),
                                          -static_cast<ssize_t>(i), start_pos);

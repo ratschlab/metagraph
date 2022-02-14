@@ -139,12 +139,13 @@ class LabeledExtender : public DefaultColumnExtender {
 
   private:
     virtual std::vector<Alignment> backtrack(score_t min_path_score,
-                                             std::string_view window) override final {
+                                             std::string_view window,
+                                             node_index target_node = DeBruijnGraph::npos) override final {
         // extract all annotations for explored nodes
         flush();
 
         // run backtracking
-        return DefaultColumnExtender::backtrack(min_path_score, window);
+        return DefaultColumnExtender::backtrack(min_path_score, window, target_node);
     }
 
     virtual bool set_seed(const Alignment &seed) override final;

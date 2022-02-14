@@ -173,7 +173,6 @@ size_t align_connect(std::string_view query,
                      const BuildExtender &build_extender) {
     auto [left, next] = split_seed(graph, config, first);
     config.xdrop += first.get_score() - next.get_score();
-    config.target_distance = AlignmentPairedCoordinatesDist()(next, second);
     std::string_view query_window(
         query.data(),
         second.get_query().data() + second.get_query().size() - query.data()
@@ -181,7 +180,10 @@ size_t align_connect(std::string_view query,
     assert(next.get_query()
         == query_window.substr(next.get_clipping(), next.get_query().size()));
     auto extender = build_extender(query_window, config);
-    auto extensions = extender->get_extensions(next, config.ninf, true);
+    auto extensions = extender->get_extensions(
+        next, config.ninf, true, AlignmentPairedCoordinatesDist()(next, second),
+        second.get_nodes().back()
+    );
     if (extensions.size() && extensions[0].get_query().data() + extensions[0].get_query().size()
             > first.get_query().data() + first.get_query().size()) {
         assert(extensions[0].get_nodes().front() == next.get_nodes().front());
@@ -437,7 +439,6 @@ void ISeedAndExtendAligner<AlignmentCompare>
     for (size_t i = 1; i < chain.size(); ++i) {
         assert(chain[i].is_valid(graph_, &config_));
         gap_fill_config.xdrop = config_.xdrop;
-        gap_fill_config.terminal_node = chain[i].get_nodes().back();
         gap_fill_config.right_end_bonus = chain[i].get_query().data()
                                             + chain[i].get_query().size() == query_end
             ? config_.right_end_bonus : 0;

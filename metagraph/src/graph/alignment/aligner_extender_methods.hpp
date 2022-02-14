@@ -21,10 +21,17 @@ class IExtender {
 
     // If force_fixed_seed is true, then all alignments must have the seed as a
     // prefix. Otherwise, only the first node of the seed is used as a starting node.
+    // If target_length and target_node are set, then terminate the extension
+    // once target_length nucleotides have been aligned to and only backtrack
+    // from target_node
     std::vector<Alignment>
-    get_extensions(const Alignment &seed, score_t min_path_score, bool force_fixed_seed) {
+    get_extensions(const Alignment &seed,
+                   score_t min_path_score,
+                   bool force_fixed_seed,
+                   size_t target_length = 0,
+                   node_index target_node = DeBruijnGraph::npos) {
         if (set_seed(seed))
-            return extend(min_path_score, force_fixed_seed);
+            return extend(min_path_score, force_fixed_seed, target_length, target_node);
 
         return {};
     }
@@ -46,7 +53,13 @@ class IExtender {
     // Helper function for running the extension.
     // If force_fixed_seed is true, then all alignments must have the seed as a
     // prefix. Otherwise, only the first node of the seed is used as a starting node.
-    virtual std::vector<Alignment> extend(score_t min_path_score, bool force_fixed_seed) = 0;
+    // If target_length and target_node are set, then terminate the extension
+    // once target_length nucleotides have been aligned to and only backtrack
+    // from target_node
+    virtual std::vector<Alignment> extend(score_t min_path_score,
+                                          bool force_fixed_seed,
+                                          size_t target_length = 0,
+                                          node_index target_node = DeBruijnGraph::npos) = 0;
 
     // returns whether the seed must be a prefix of an extension
     virtual bool fixed_seed() const { return true; }
@@ -145,7 +158,13 @@ class DefaultColumnExtender : public SeedFilteringExtender {
 
     // If force_fixed_seed is true, then all alignments must have the seed as a
     // prefix. Otherwise, only the first node of the seed is used as a starting node.
-    virtual std::vector<Alignment> extend(score_t min_path_score, bool force_fixed_seed) override;
+    // If target_length and target_node are set, then terminate the extension
+    // once target_length nucleotides have been aligned to and only backtrack
+    // from target_node
+    virtual std::vector<Alignment> extend(score_t min_path_score,
+                                          bool force_fixed_seed,
+                                          size_t target_length = 0,
+                                          node_index target_node = DeBruijnGraph::npos) override;
 
     virtual void call_outgoing(node_index node,
                                size_t max_prefetch_distance,
@@ -157,8 +176,11 @@ class DefaultColumnExtender : public SeedFilteringExtender {
     // there exist j,j' s.t. i<=j<j' and j is the parent of j'
     virtual void pop(size_t i) { table.erase(table.begin() + i); }
 
-    // backtrack through the DP table to reconstruct alignments
-    virtual std::vector<Alignment> backtrack(score_t min_path_score, std::string_view window);
+    // Backtrack through the DP table to reconstruct alignments. If target_node
+    // is set, then only backtrack from target_node.
+    virtual std::vector<Alignment> backtrack(score_t min_path_score,
+                                             std::string_view window,
+                                             node_index target_node = DeBruijnGraph::npos);
 
     /**
      * Backtracking helpers

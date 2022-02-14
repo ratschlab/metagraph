@@ -68,11 +68,6 @@ class DBGAlignerConfig {
     score_t min_path_score = 0;
     score_t xdrop = std::numeric_limits<score_t>::max();
 
-    // Terminate an extension and start backtracking if terminal_node is reached
-    // after target_distance characters from the graph are aligned to.
-    DeBruijnGraph::node_index terminal_node = DeBruijnGraph::npos;
-    size_t target_distance = 0;
-
     double min_exact_match = 0.0;
     double max_nodes_per_seq_char = std::numeric_limits<double>::max();
     double max_ram_per_alignment = std::numeric_limits<double>::max();
