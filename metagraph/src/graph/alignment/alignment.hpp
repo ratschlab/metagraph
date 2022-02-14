@@ -178,7 +178,7 @@ class Alignment {
     size_t offset_;
 };
 
-inline std::ostream& operator<<(std::ostream& out, const Alignment &a) {
+inline std::ostream& operator<<(std::ostream &out, const Alignment &a) {
     return out << fmt::format("{}", a);
 }
 

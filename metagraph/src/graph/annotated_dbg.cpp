@@ -28,8 +28,7 @@ AnnotatedSequenceGraph
 ::AnnotatedSequenceGraph(std::shared_ptr<SequenceGraph> graph,
                          std::unique_ptr<Annotator>&& annotation,
                          bool force_fast)
-      : graph_(graph), annotator_(std::move(annotation)),
-        force_fast_(force_fast) {
+      : graph_(graph), annotator_(std::move(annotation)), force_fast_(force_fast) {
     assert(graph_.get());
     assert(annotator_.get());
 }
@@ -37,25 +36,16 @@ AnnotatedSequenceGraph
 AnnotatedDBG::AnnotatedDBG(std::shared_ptr<DeBruijnGraph> dbg,
                            std::unique_ptr<Annotator>&& annotation,
                            bool force_fast)
-      : AnnotatedSequenceGraph(dbg, std::move(annotation), force_fast),
-        dbg_(*dbg) {
+      : AnnotatedSequenceGraph(dbg, std::move(annotation), force_fast), dbg_(*dbg) {
     assert(check_compatibility());
 }
 
 bool AnnotatedSequenceGraph::check_compatibility() const {
-    return graph_->max_index() == annotator_->num_objects();
-}
-
-bool AnnotatedDBG::check_compatibility() const {
-    // TODO: find a way to fix this thing to add check_compatibility() to the constructor
-    // of AnnotatedSequenceGraph.
-    // Maybe make it how it was before 9f4e8e5b73571d874dd93eedc53079f71615023c
-
     // TODO: what if CanonicalDBG is not the highest level? find a better way to do this
-    if (const auto *canonical = dynamic_cast<const CanonicalDBG*>(&dbg_))
+    if (const auto *canonical = dynamic_cast<const CanonicalDBG *>(graph_.get()))
         return canonical->get_graph().max_index() == annotator_->num_objects();
 
-    return dbg_.max_index() == annotator_->num_objects();
+    return graph_->max_index() == annotator_->num_objects();
 }
 
 void AnnotatedSequenceGraph

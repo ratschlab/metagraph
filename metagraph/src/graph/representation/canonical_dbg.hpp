@@ -95,7 +95,7 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
 
     node_index get_base_node(node_index node) const {
         assert(node <= offset_ * 2);
-        return node > offset_ ? node - offset_ : node;
+        return node <= offset_ ? node : node - offset_;
     }
 
   private:
