@@ -5,9 +5,12 @@
 
 #include <tsl/ordered_set.h>
 
-template <typename Key, class Hash = std::hash<Key>, typename IndexType = uint64_t,
-          class EqualTo = std::equal_to<Key>, class Allocator = std::allocator<Key>,
-          class Container = std::vector<Key, Allocator>>
-using VectorSet = tsl::ordered_set<Key, Hash, EqualTo, Allocator, Container, IndexType>;
+template <typename T,
+          class Hash = std::hash<T>,
+          typename IndexType = uint64_t,
+          class EqualTo = std::equal_to<T>,
+          class Allocator = std::allocator<T>,
+          class Container = std::vector<T, Allocator>>
+using VectorSet = tsl::ordered_set<T, Hash, EqualTo, Allocator, Container, IndexType>;
 
 #endif // __VECTOR_SET_HPP__
