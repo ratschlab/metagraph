@@ -313,12 +313,12 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
         std::string_view this_query = paths[i].get_query(is_reverse_complement);
         assert(this_query == query);
 
-        auto extender = Extender::make(*this, config_, this_query);
+        Extender extender(*this, config_, this_query);
 
 #if ! _PROTEIN_GRAPH
         if (seeder_rc) {
             std::string_view reverse = paths[i].get_query(!is_reverse_complement);
-            auto extender_rc = Extender::make(*this, config_, reverse);
+            Extender extender_rc(*this, config_, reverse);
 
             auto [seeds, extensions, explored_nodes] =
                 align_both_directions(this_query, reverse, *seeder, *seeder_rc,
@@ -446,7 +446,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
             ? config_.right_end_bonus : 0;
         num_explored_nodes += align_connect(query, graph_, gap_fill_config, cur, chain[i],
             [&](std::string_view query_window) {
-                return Extender::make(*this, gap_fill_config, query_window);
+                return Extender(*this, gap_fill_config, query_window);
             }
         );
         if (cur.empty())
@@ -466,7 +466,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
         end_cfg.trim_offset_after_extend = false;
         end_cfg.allow_left_trim = false;
 
-        auto extender = Extender::make(*this, end_cfg, query);
+        Extender extender(*this, end_cfg, query);
         auto extensions = extender.get_extensions(best, config_.ninf, true);
         ++num_extensions;
         num_explored_nodes += extender.num_explored_nodes();
@@ -497,7 +497,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
             assert(rev.get_end_clipping());
             DBGAlignerConfig no_trim_config = config_;
             no_trim_config.allow_left_trim = false;
-            auto extender = Extender::make(*this, no_trim_config, query_rc);
+            Extender extender(*this, no_trim_config, query_rc);
             extender.set_graph(rc_graph);
             auto extensions = extender.get_extensions(rev, config_.ninf, true);
             if (extensions.size() && extensions[0].get_query().data()

@@ -136,9 +136,9 @@ class LabeledExtender : public DefaultColumnExtender {
             annotation_buffer_(annotation_buffer) {}
 
     // |aligner| must be an instance of LabeledAligner<>
-    static LabeledExtender make(const IDBGAligner &aligner,
-                                const DBGAlignerConfig &config,
-                                std::string_view query);
+    LabeledExtender(const IDBGAligner &aligner,
+                    const DBGAlignerConfig &config,
+                    std::string_view query);
 
     virtual ~LabeledExtender() {}
 

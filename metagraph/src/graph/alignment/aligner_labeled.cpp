@@ -285,12 +285,11 @@ struct CoordIntersection {
     ssize_t offset_;
 };
 
-LabeledExtender LabeledExtender::make(const IDBGAligner &aligner,
-                                      const DBGAlignerConfig &config,
-                                      std::string_view query) {
-    return LabeledExtender(
-        dynamic_cast<const LabeledAligner<>&>(aligner).get_annotation_buffer(), config, query);
-}
+LabeledExtender::LabeledExtender(const IDBGAligner &aligner,
+                                 const DBGAlignerConfig &config,
+                                 std::string_view query)
+        : LabeledExtender(dynamic_cast<const LabeledAligner<>&>(aligner).get_annotation_buffer(),
+                          config, query) {}
 
 void LabeledExtender::flush() {
     annotation_buffer_.flush();

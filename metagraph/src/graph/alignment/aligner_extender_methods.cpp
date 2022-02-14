@@ -20,12 +20,6 @@ constexpr score_t ninf = DBGAlignerConfig::ninf;
 constexpr size_t kPadding = 5;
 
 
-DefaultColumnExtender DefaultColumnExtender::make(const IDBGAligner &aligner,
-                                                  const DBGAlignerConfig &config,
-                                                  std::string_view query) {
-    return DefaultColumnExtender(aligner.get_graph(), config, query);
-}
-
 DefaultColumnExtender::DefaultColumnExtender(const DeBruijnGraph &graph,
                                              const DBGAlignerConfig &config,
                                              std::string_view query)
@@ -60,6 +54,11 @@ DefaultColumnExtender::DefaultColumnExtender(const DeBruijnGraph &graph,
                        [&op_row](char q) { return op_row[q]; });
     }
 }
+
+DefaultColumnExtender::DefaultColumnExtender(const IDBGAligner &aligner,
+                                             const DBGAlignerConfig &config,
+                                             std::string_view query)
+      : DefaultColumnExtender(aligner.get_graph(), config, query) {}
 
 bool SeedFilteringExtender::check_seed(const Alignment &seed) const {
     if (seed.empty())

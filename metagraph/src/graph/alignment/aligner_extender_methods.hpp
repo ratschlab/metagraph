@@ -115,9 +115,9 @@ class DefaultColumnExtender : public SeedFilteringExtender {
                           const DBGAlignerConfig &config,
                           std::string_view query);
 
-    static DefaultColumnExtender make(const IDBGAligner &aligner,
-                                      const DBGAlignerConfig &config,
-                                      std::string_view query);
+    DefaultColumnExtender(const IDBGAligner &aligner,
+                          const DBGAlignerConfig &config,
+                          std::string_view query);
 
     virtual ~DefaultColumnExtender() {}
 
