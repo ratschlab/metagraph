@@ -238,12 +238,7 @@ class LabeledAligner : public DBGAligner<Seeder, Extender, AlignmentCompare> {
                    const DBGAlignerConfig &config,
                    const Annotator &annotator);
 
-    virtual ~LabeledAligner() {
-        common::logger->trace("Buffered {}/{} nodes and {} label combinations",
-                              labeled_graph_.num_nodes_buffered(),
-                              this->graph_.num_nodes(),
-                              labeled_graph_.num_label_sets());
-    }
+    virtual ~LabeledAligner();
 
     auto& get_labeled_graph() const { return labeled_graph_; }
 

@@ -13,6 +13,8 @@ namespace mtg {
 namespace graph {
 namespace align {
 
+using mtg::common::logger;
+
 AnnotationBuffer::AnnotationBuffer(const DeBruijnGraph &graph, const Annotator &annotator)
       : graph_(graph),
         annotator_(annotator),
@@ -20,8 +22,8 @@ AnnotationBuffer::AnnotationBuffer(const DeBruijnGraph &graph, const Annotator &
         labels_set_({ {} }) {
     if (multi_int_ && graph_.get_mode() == DeBruijnGraph::CANONICAL) {
         multi_int_ = nullptr;
-        common::logger->warn("Coordinates not supported when aligning to CANONICAL "
-                             "or PRIMARY mode graphs");
+        logger->warn("Coordinates not supported when aligning to CANONICAL "
+                     "or PRIMARY mode graphs");
     }
 }
 
@@ -662,6 +664,14 @@ LabeledAligner<Seeder, Extender, AlignmentCompare>
 }
 
 template <class Seeder, class Extender, class AlignmentCompare>
+LabeledAligner<Seeder, Extender, AlignmentCompare>::~LabeledAligner() {
+    logger->trace("Buffered {}/{} nodes and {} label combinations",
+                  labeled_graph_.num_nodes_buffered(),
+                  this->graph_.num_nodes(),
+                  labeled_graph_.num_label_sets());
+}
+
+template <class Seeder, class Extender, class AlignmentCompare>
 auto LabeledAligner<Seeder, Extender, AlignmentCompare>
 ::build_seeders(const std::vector<IDBGAligner::Query> &seq_batch,
                 const std::vector<AlignmentResults> &wrapped_seqs) const -> BatchSeeders {
@@ -669,7 +679,7 @@ auto LabeledAligner<Seeder, Extender, AlignmentCompare>
         = DBGAligner<Seeder, Extender, AlignmentCompare>::build_seeders(seq_batch, wrapped_seqs);
 
     // now we're going to filter the seeds
-    common::logger->trace("Filtering seeds by label");
+    logger->trace("Filtering seeds by label");
     std::vector<std::pair<std::vector<Alignment>, size_t>> counted_seeds;
     std::vector<std::pair<std::vector<Alignment>, size_t>> counted_seeds_rc;
 
@@ -730,11 +740,9 @@ auto LabeledAligner<Seeder, Extender, AlignmentCompare>
 #endif
     }
 
-    common::logger->trace("Kept {}/{} seeds",
-                          num_seeds_left + num_seeds_rc_left,
-                          num_seeds + num_seeds_rc);
-
-    common::logger->trace("Prefetching labels");
+    logger->trace("Kept {}/{} seeds", num_seeds_left + num_seeds_rc_left,
+                                      num_seeds + num_seeds_rc);
+    logger->trace("Prefetching labels");
     labeled_graph_.flush();
 
     return seeders;
