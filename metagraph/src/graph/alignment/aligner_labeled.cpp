@@ -519,12 +519,9 @@ bool LabeledExtender::skip_backtrack_start(size_t i) {
     return label_intersection_.empty();
 }
 
-void LabeledExtender::call_alignments(score_t cur_cell_score,
-                                      score_t end_score,
-                                      score_t min_path_score,
+void LabeledExtender::call_alignments(score_t end_score,
                                       const std::vector<node_index> &path,
-                                      const std::vector<size_t> &trace,
-                                      size_t table_i,
+                                      const std::vector<size_t> & /* trace */,
                                       const Cigar &ops,
                                       size_t clipping,
                                       size_t offset,
@@ -532,119 +529,116 @@ void LabeledExtender::call_alignments(score_t cur_cell_score,
                                       const std::string &match,
                                       score_t extra_penalty,
                                       const std::function<void(Alignment&&)> &callback) {
-    DefaultColumnExtender::call_alignments(cur_cell_score, end_score, min_path_score,
-                                           path, trace, table_i, ops, clipping, offset,
-                                           window, match, extra_penalty,
-                                           [&](Alignment&& alignment) {
-        alignment.label_encoder = &annotation_buffer_.get_annotator().get_label_encoder();
+    Alignment alignment = construct_alignment(ops, clipping, window, path, match,
+                                              end_score, offset, extra_penalty);
+    alignment.label_encoder = &annotation_buffer_.get_annotator().get_label_encoder();
 
-        auto [base_labels, base_coords]
-            = annotation_buffer_.get_labels_and_coordinates(alignment.get_nodes().front());
-        assert(base_labels);
-        assert(base_labels->size());
+    auto [base_labels, base_coords]
+        = annotation_buffer_.get_labels_and_coordinates(alignment.get_nodes().front());
+    assert(base_labels);
+    assert(base_labels->size());
 
-        if (!clipping)
-            base_labels = &seed_->label_columns;
+    if (!clipping)
+        base_labels = &seed_->label_columns;
 
-        auto call_alignment = [&]() {
-            if (label_diff_.size() && label_diff_.back() == AnnotationBuffer::nannot) {
-                label_diff_.pop_back();
-                remaining_labels_i_ = annotation_buffer_.emplace_label_set(std::move(label_diff_));
-                assert(remaining_labels_i_ != AnnotationBuffer::nannot);
-                label_diff_ = Vector<Column>{};
-            }
-
-            callback(std::move(alignment));
-        };
-
-        if (!base_coords) {
-            alignment.label_columns = std::move(label_intersection_);
-            call_alignment();
-            return;
+    auto call_alignment = [&]() {
+        if (label_diff_.size() && label_diff_.back() == AnnotationBuffer::nannot) {
+            label_diff_.pop_back();
+            remaining_labels_i_ = annotation_buffer_.emplace_label_set(std::move(label_diff_));
+            assert(remaining_labels_i_ != AnnotationBuffer::nannot);
+            label_diff_ = Vector<Column>{};
         }
 
-        ssize_t dist = alignment.get_nodes().size() - 1;
-        if (!clipping) {
-            base_coords = &seed_->label_coordinates;
-            dist -= seed_->get_offset();
-            if (dynamic_cast<const RCDBG*>(graph_))
-                dist = alignment.get_sequence().size() - seed_->get_sequence().size();
-        }
+        callback(std::move(alignment));
+    };
 
-        auto label_it = label_intersection_.begin();
-        auto label_end_it = label_intersection_.end();
-
-        if (alignment.get_nodes().size() == 1) {
-            auto it = base_labels->begin();
-            auto end = base_labels->end();
-            auto c_it = base_coords->begin();
-            while (label_it != label_end_it && it != end) {
-                if (*label_it < *it) {
-                    ++label_it;
-                } else if (*label_it > *it) {
-                    ++it;
-                    ++c_it;
-                } else {
-                    alignment.label_columns.emplace_back(*it);
-                    alignment.label_coordinates.emplace_back(*c_it);
-                    ++it;
-                    ++c_it;
-                    ++label_it;
-                }
-            }
-        } else {
-            auto [cur_labels, cur_coords]
-                = annotation_buffer_.get_labels_and_coordinates(alignment.get_nodes().back());
-            assert(cur_labels);
-            assert(cur_labels->size());
-            assert(cur_coords);
-            assert(cur_coords->size());
-            if (dynamic_cast<const RCDBG*>(graph_)) {
-                std::swap(cur_labels, base_labels);
-                std::swap(cur_coords, base_coords);
-            }
-            CoordIntersection intersect_coords(dist);
-            try {
-                utils::match_indexed_values(
-                    base_labels->begin(), base_labels->end(), base_coords->begin(),
-                    cur_labels->begin(), cur_labels->end(), cur_coords->begin(),
-                    [&](Column c, const auto &coords, const auto &other_coords) {
-                        while (label_it != label_end_it && c > *label_it) {
-                            ++label_it;
-                        }
-
-                        if (label_it == label_end_it)
-                            throw std::exception();
-
-                        if (c < *label_it)
-                            return;
-
-                        Tuple overlap;
-                        intersect_coords(coords.begin(), coords.end(),
-                                         other_coords.begin(), other_coords.end(),
-                                         std::back_inserter(overlap));
-                        if (overlap.size()) {
-                            alignment.label_columns.emplace_back(c);
-                            alignment.label_coordinates.emplace_back(std::move(overlap));
-                        }
-                    }
-                );
-            } catch (const std::exception&) {}
-        }
-
-        if (alignment.label_coordinates.empty())
-            return;
-
-        if (dynamic_cast<const RCDBG*>(graph_) && alignment.get_offset()) {
-            for (auto &coords : alignment.label_coordinates) {
-                for (auto &c : coords) {
-                    c += alignment.get_offset();
-                }
-            }
-        }
-
+    if (!base_coords) {
+        alignment.label_columns = std::move(label_intersection_);
         call_alignment();
-    });
+        return;
+    }
+
+    ssize_t dist = alignment.get_nodes().size() - 1;
+    if (!clipping) {
+        base_coords = &seed_->label_coordinates;
+        dist -= seed_->get_offset();
+        if (dynamic_cast<const RCDBG*>(graph_))
+            dist = alignment.get_sequence().size() - seed_->get_sequence().size();
+    }
+
+    auto label_it = label_intersection_.begin();
+    auto label_end_it = label_intersection_.end();
+
+    if (alignment.get_nodes().size() == 1) {
+        auto it = base_labels->begin();
+        auto end = base_labels->end();
+        auto c_it = base_coords->begin();
+        while (label_it != label_end_it && it != end) {
+            if (*label_it < *it) {
+                ++label_it;
+            } else if (*label_it > *it) {
+                ++it;
+                ++c_it;
+            } else {
+                alignment.label_columns.emplace_back(*it);
+                alignment.label_coordinates.emplace_back(*c_it);
+                ++it;
+                ++c_it;
+                ++label_it;
+            }
+        }
+    } else {
+        auto [cur_labels, cur_coords]
+            = annotation_buffer_.get_labels_and_coordinates(alignment.get_nodes().back());
+        assert(cur_labels);
+        assert(cur_labels->size());
+        assert(cur_coords);
+        assert(cur_coords->size());
+        if (dynamic_cast<const RCDBG*>(graph_)) {
+            std::swap(cur_labels, base_labels);
+            std::swap(cur_coords, base_coords);
+        }
+        CoordIntersection intersect_coords(dist);
+        try {
+            utils::match_indexed_values(
+                base_labels->begin(), base_labels->end(), base_coords->begin(),
+                cur_labels->begin(), cur_labels->end(), cur_coords->begin(),
+                [&](Column c, const auto &coords, const auto &other_coords) {
+                    while (label_it != label_end_it && c > *label_it) {
+                        ++label_it;
+                    }
+
+                    if (label_it == label_end_it)
+                        throw std::exception();
+
+                    if (c < *label_it)
+                        return;
+
+                    Tuple overlap;
+                    intersect_coords(coords.begin(), coords.end(),
+                                     other_coords.begin(), other_coords.end(),
+                                     std::back_inserter(overlap));
+                    if (overlap.size()) {
+                        alignment.label_columns.emplace_back(c);
+                        alignment.label_coordinates.emplace_back(std::move(overlap));
+                    }
+                }
+            );
+        } catch (const std::exception&) {}
+    }
+
+    if (alignment.label_coordinates.empty())
+        return;
+
+    if (dynamic_cast<const RCDBG*>(graph_) && alignment.get_offset()) {
+        for (auto &coords : alignment.label_coordinates) {
+            for (auto &c : coords) {
+                c += alignment.get_offset();
+            }
+        }
+    }
+
+    call_alignment();
 }
 
 template <class Seeder, class Extender, class AlignmentCompare>

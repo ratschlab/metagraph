@@ -176,12 +176,9 @@ class LabeledExtender : public DefaultColumnExtender {
                                bool force_fixed_seed = false) override final;
 
     // this method calls multiple label-consistent alignments by backtracking
-    virtual void call_alignments(score_t cur_cell_score,
-                                 score_t end_score,
-                                 score_t min_path_score,
+    virtual void call_alignments(score_t end_score,
                                  const std::vector<node_index> &path,
                                  const std::vector<size_t> &trace,
-                                 size_t table_i,
                                  const Cigar &ops,
                                  size_t clipping,
                                  size_t offset,

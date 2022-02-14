@@ -206,12 +206,9 @@ class DefaultColumnExtender : public SeedFilteringExtender {
 
     // This method calls at most one alignment, but can be overridden by a child
     // class to call multiple alignments.
-    virtual void call_alignments(score_t cur_cell_score,
-                                 score_t end_score,
-                                 score_t min_path_score,
+    virtual void call_alignments(score_t end_score,
                                  const std::vector<node_index> &path,
                                  const std::vector<size_t> & /* trace */,
-                                 size_t table_i,
                                  const Cigar &ops,
                                  size_t clipping,
                                  size_t offset,
@@ -219,29 +216,8 @@ class DefaultColumnExtender : public SeedFilteringExtender {
                                  const std::string &match,
                                  score_t extra_penalty,
                                  const std::function<void(Alignment&&)> &callback) {
-        assert(path.size());
-        assert(ops.size());
-
-        if (end_score < min_path_score)
-            return;
-
-        if (clipping && cur_cell_score != 0)
-            return;
-
-        if (!clipping && cur_cell_score != table[0].S[0])
-            return;
-
-        if (!config_.allow_left_trim) {
-            if (!table_i) {
-                callback(construct_alignment(ops, clipping, window, path, match,
-                                             end_score, offset, extra_penalty));
-            }
-
-            return;
-        }
-
-        callback(construct_alignment(ops, clipping, window, path, match,
-                                     end_score, offset, extra_penalty));
+        callback(construct_alignment(ops, clipping, window, path, match, end_score,
+                                     offset, extra_penalty));
     }
 
     Alignment construct_alignment(Cigar cigar,

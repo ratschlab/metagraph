@@ -770,6 +770,7 @@ Alignment DefaultColumnExtender::construct_alignment(Cigar cigar,
                                                      size_t offset,
                                                      score_t extra_penalty) const {
     assert(final_path.size());
+    assert(cigar.size());
     cigar.append(Cigar::CLIPPED, clipping);
 
     std::reverse(cigar.data().begin(), cigar.data().end());
@@ -985,16 +986,21 @@ std::vector<Alignment> DefaultColumnExtender
             }
 
             if (trace.size() >= min_trace_length && path.size() && path.back()) {
-                best_score = std::max(best_score, score - table[j].S[pos - table[j].trim]);
+                score_t cur_cell_score = table[j].S[pos - table[j].trim];
+                best_score = std::max(best_score, score - cur_cell_score);
                 if (score - min_cell_score_ < best_score)
                     break;
 
-                call_alignments(table[j].S[pos - table[j].trim], score, min_start_score,
-                                path, trace, j, ops, pos, align_offset,
-                                window.substr(pos, end_pos - pos), seq, extra_penalty,
-                                [&](Alignment&& alignment) {
-                    extensions.emplace_back(std::move(alignment));
-                });
+                if (score >= min_start_score
+                        && (!pos || cur_cell_score == 0)
+                        && (pos || cur_cell_score == table[0].S[0])
+                        && (config_.allow_left_trim || !j)) {
+                    call_alignments(score, path, trace, ops, pos, align_offset,
+                                    window.substr(pos, end_pos - pos), seq, extra_penalty,
+                                    [&](Alignment&& alignment) {
+                        extensions.emplace_back(std::move(alignment));
+                    });
+                }
             }
         }
     }
