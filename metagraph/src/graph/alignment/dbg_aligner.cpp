@@ -38,6 +38,10 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
 
     if (!config_.check_config_scores())
         throw std::runtime_error("Error: sum of min_cell_score and lowest penalty too low.");
+
+    // extensions should not trim characters from chain seed prefixes
+    if (config_.chain_alignments)
+        config_.allow_left_trim = false;
 }
 
 /**
@@ -420,23 +424,19 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
                size_t &num_extensions,
                size_t &num_explored_nodes,
                const std::function<void(Alignment&&)> &callback) const {
-    DBGAlignerConfig gap_fill_config = config_;
-    gap_fill_config.allow_left_trim = false;
-    gap_fill_config.trim_offset_after_extend = false;
-
-    const char *query_end = query.data() + query.size();
     assert(chain.size());
 
     Alignment cur = std::move(chain[0]);
     assert(cur.is_valid(graph_, &config_));
     Alignment best = cur;
 
+    DBGAlignerConfig gap_fill_config = config_;
+    gap_fill_config.trim_offset_after_extend = false;
     for (size_t i = 1; i < chain.size(); ++i) {
         assert(chain[i].is_valid(graph_, &config_));
         gap_fill_config.xdrop = config_.xdrop;
-        gap_fill_config.right_end_bonus = chain[i].get_query().data()
-                                            + chain[i].get_query().size() == query_end
-            ? config_.right_end_bonus : 0;
+        gap_fill_config.right_end_bonus = chain[i].get_end_clipping()
+            ? 0 : config_.right_end_bonus;
         num_explored_nodes += align_connect(query, graph_, gap_fill_config, cur, chain[i],
             [&](std::string_view query_window) {
                 return Extender(*this, gap_fill_config, query_window);
@@ -447,24 +447,18 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
     }
     num_extensions += chain.size() - 1;
 
-
     if (AlignmentCompare()(best, cur))
         std::swap(best, cur);
 
-    if (best.get_query().data() + best.get_query().size() < query_end) {
-        DBGAlignerConfig end_cfg = config_;
-        end_cfg.allow_left_trim = false;
-
-        Extender extender(*this, end_cfg, query);
+    if (best.get_end_clipping()) {
+        Extender extender(*this, config_, query);
         auto extensions = extender.get_extensions(best, config_.ninf, true);
         ++num_extensions;
         num_explored_nodes += extender.num_explored_nodes();
-        if (extensions.size() && extensions[0].get_query().data()
-                                    + extensions[0].get_query().size()
-                > best.get_query().data() + best.get_query().size()
+        if (extensions.size()
+                && extensions[0].get_end_clipping() < best.get_end_clipping()
                 && extensions[0].get_score() > best.get_score()) {
             std::swap(best, extensions[0]);
-            assert(best.is_valid(graph_, &config_));
         }
     }
 
@@ -481,15 +475,12 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
         rev.reverse_complement(rc_graph, query_rc);
         if (rev.size() && rev.get_nodes().back()) {
             assert(rev.get_end_clipping());
-            DBGAlignerConfig no_trim_config = config_;
-            no_trim_config.allow_left_trim = false;
-            Extender extender(*this, no_trim_config, query_rc);
+            Extender extender(*this, config_, query_rc);
             extender.set_graph(rc_graph);
             auto extensions = extender.get_extensions(rev, config_.ninf, true);
-            if (extensions.size() && extensions[0].get_query().data()
-                                        + extensions[0].get_query().size()
-                    > rev.get_query().data() + rev.get_query().size()
-                    && extensions[0].get_query().data() == rev.get_query().data()
+            if (extensions.size()
+                    && extensions[0].get_clipping() == rev.get_clipping()
+                    && extensions[0].get_end_clipping() < rev.get_end_clipping()
                     && extensions[0].get_nodes()[0] == rev.get_nodes()[0]) {
                 extensions[0].reverse_complement(rc_graph, query);
                 if (extensions[0].size())
