@@ -42,7 +42,7 @@ DBGAlignerConfig initialize_aligner_config(const Config &config) {
         .gap_opening_penalty = static_cast<int8_t>(-config.alignment_gap_opening_penalty),
         .gap_extension_penalty = static_cast<int8_t>(-config.alignment_gap_extension_penalty),
         .left_end_bonus = config.alignment_end_bonus,
-        .right_end_bonus = config.alignment_end_bonus
+        .right_end_bonus = config.alignment_end_bonus,
         .forward_and_reverse_complement = !config.align_only_forwards,
         .chain_alignments = config.alignment_chain,
         .post_chain_alignments = config.alignment_post_chain,
