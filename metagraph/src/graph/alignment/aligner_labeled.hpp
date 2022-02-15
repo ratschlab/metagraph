@@ -135,21 +135,21 @@ class LabeledExtender : public DefaultColumnExtender {
             annotation_buffer_(annotation_buffer) {}
 
     // |aligner| must be an instance of LabeledAligner<>
-    LabeledExtender(const IDBGAligner &aligner,
-                    const DBGAlignerConfig &config,
-                    std::string_view query);
+    LabeledExtender(const IDBGAligner &aligner, std::string_view query);
 
     virtual ~LabeledExtender() {}
 
   private:
     virtual std::vector<Alignment> backtrack(score_t min_path_score,
                                              std::string_view window,
+                                             score_t right_end_bonus,
                                              node_index target_node = DeBruijnGraph::npos) override final {
         // extract all annotations for explored nodes
         flush();
 
         // run backtracking
-        return DefaultColumnExtender::backtrack(min_path_score, window, target_node);
+        return DefaultColumnExtender::backtrack(min_path_score, window,
+                                                right_end_bonus, target_node);
     }
 
     virtual bool set_seed(const Alignment &seed) override final;

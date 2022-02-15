@@ -169,33 +169,23 @@ struct AlignmentPairedCoordinatesDist {
 };
 
 // Extend the alignment first until it reaches the end of the alignment second
-template <class BuildExtender>
-size_t align_connect(std::string_view query,
-                     const DeBruijnGraph &graph,
-                     DBGAlignerConfig &config,
+template <class Extender>
+size_t align_connect(const DeBruijnGraph &graph,
+                     const DBGAlignerConfig &config,
                      Alignment &first,
                      Alignment &second,
-                     const BuildExtender &build_extender) {
+                     Extender extender) {
     auto [left, next] = split_seed(graph, config, first);
 
-    config.xdrop += first.get_score() - next.get_score();
-    std::string_view query_window(
-        query.data(),
-        second.get_query().data() + second.get_query().size() - query.data()
-    );
-    next.trim_end_clipping();
-    next.extend_query_end(query_window.data() + query_window.size());
-    assert(next.get_query()
-        == query_window.substr(next.get_clipping(), next.get_query().size()));
-    auto extender = build_extender(query_window);
     auto extensions = extender.get_extensions(
         next, config.ninf, true, AlignmentPairedCoordinatesDist()(next, second),
-        second.get_nodes().back(), false
+        second.get_nodes().back(), false, second.get_end_clipping(),
+        first.get_score() - next.get_score()
     );
+
     if (extensions.size() && extensions[0].get_query().data() + extensions[0].get_query().size()
             > first.get_query().data() + first.get_query().size()) {
         assert(extensions[0].get_nodes().front() == next.get_nodes().front());
-        extensions[0].extend_query_end(query.data() + query.size());
         left.splice(std::move(extensions[0]));
         std::swap(left, first);
         assert(first.is_valid(graph, &config));
@@ -315,12 +305,12 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
         std::string_view this_query = paths[i].get_query(is_reverse_complement);
         assert(this_query == query);
 
-        Extender extender(*this, config_, this_query);
+        Extender extender(*this, this_query);
 
 #if ! _PROTEIN_GRAPH
         if (seeder_rc) {
             std::string_view reverse = paths[i].get_query(!is_reverse_complement);
-            Extender extender_rc(*this, config_, reverse);
+            Extender extender_rc(*this, reverse);
 
             auto [seeds, extensions, explored_nodes] =
                 align_both_directions(this_query, reverse, *seeder, *seeder_rc,
@@ -432,14 +422,8 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
 
     for (size_t i = 1; i < chain.size(); ++i) {
         assert(chain[i].is_valid(graph_, &config_));
-        DBGAlignerConfig gap_fill_config = config_;
-        gap_fill_config.right_end_bonus = chain[i].get_end_clipping()
-            ? 0 : config_.right_end_bonus;
-        num_explored_nodes += align_connect(query, graph_, gap_fill_config, cur, chain[i],
-            [&](std::string_view query_window) {
-                return Extender(*this, gap_fill_config, query_window);
-            }
-        );
+        num_explored_nodes += align_connect(graph_, config_, cur, chain[i],
+                                            Extender(*this, query));
         if (cur.empty())
             return;
     }
@@ -449,7 +433,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
         std::swap(best, cur);
 
     if (best.get_end_clipping()) {
-        Extender extender(*this, config_, query);
+        Extender extender(*this, query);
         auto extensions = extender.get_extensions(best, config_.ninf, true);
         ++num_extensions;
         num_explored_nodes += extender.num_explored_nodes();
@@ -473,7 +457,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
         rev.reverse_complement(rc_graph, query_rc);
         if (rev.size() && rev.get_nodes().back()) {
             assert(rev.get_end_clipping());
-            Extender extender(*this, config_, query_rc);
+            Extender extender(*this, query_rc);
             extender.set_graph(rc_graph);
             auto extensions = extender.get_extensions(rev, config_.ninf, true);
             ++num_extensions;

@@ -32,10 +32,13 @@ class IExtender {
                    bool force_fixed_seed,
                    size_t target_length = 0,
                    node_index target_node = DeBruijnGraph::npos,
-                   bool trim_offset_after_extend = true) {
+                   bool trim_offset_after_extend = true,
+                   size_t trim_query_suffix = 0,
+                   score_t added_xdrop = 0) {
         if (set_seed(seed)) {
             return extend(min_path_score, force_fixed_seed, target_length,
-                          target_node, trim_offset_after_extend);
+                          target_node, trim_offset_after_extend, trim_query_suffix,
+                          added_xdrop);
         }
 
         return {};
@@ -65,7 +68,9 @@ class IExtender {
                                           bool force_fixed_seed,
                                           size_t target_length = 0,
                                           node_index target_node = DeBruijnGraph::npos,
-                                          bool trim_offset_after_extend = true) = 0;
+                                          bool trim_offset_after_extend = true,
+                                          size_t trim_query_suffix = 0,
+                                          score_t added_xdrop = 0) = 0;
 
     // returns whether the seed must be a prefix of an extension
     virtual bool fixed_seed() const { return true; }
@@ -119,9 +124,7 @@ class DefaultColumnExtender : public SeedFilteringExtender {
                           const DBGAlignerConfig &config,
                           std::string_view query);
 
-    DefaultColumnExtender(const IDBGAligner &aligner,
-                          const DBGAlignerConfig &config,
-                          std::string_view query);
+    DefaultColumnExtender(const IDBGAligner &aligner, std::string_view query);
 
     virtual ~DefaultColumnExtender() {}
 
@@ -175,7 +178,9 @@ class DefaultColumnExtender : public SeedFilteringExtender {
                                           bool force_fixed_seed,
                                           size_t target_length = 0,
                                           node_index target_node = DeBruijnGraph::npos,
-                                          bool trim_offset_after_extend = true) override;
+                                          bool trim_offset_after_extend = true,
+                                          size_t trim_query_suffix = 0,
+                                          score_t added_xdrop = 0) override;
 
     virtual void call_outgoing(node_index node,
                                size_t max_prefetch_distance,
@@ -191,6 +196,7 @@ class DefaultColumnExtender : public SeedFilteringExtender {
     // is set, then only backtrack from target_node.
     virtual std::vector<Alignment> backtrack(score_t min_path_score,
                                              std::string_view window,
+                                             score_t right_end_bonus,
                                              node_index target_node = DeBruijnGraph::npos);
 
     /**

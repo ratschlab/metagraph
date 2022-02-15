@@ -31,6 +31,7 @@ class IDBGAligner {
     virtual ~IDBGAligner() {}
 
     virtual const DeBruijnGraph& get_graph() const = 0;
+    virtual const DBGAlignerConfig& get_config() const = 0;
 
     // Main aligner
     virtual void align_batch(const std::vector<Query> &seq_batch,
@@ -54,7 +55,7 @@ class DBGAligner : public IDBGAligner {
                              const AlignmentCallback &callback) const override;
 
     const DeBruijnGraph& get_graph() const override { return graph_; }
-    const DBGAlignerConfig& get_config() const { return config_; }
+    const DBGAlignerConfig& get_config() const override { return config_; }
 
   protected:
     const DeBruijnGraph &graph_;

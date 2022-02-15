@@ -56,9 +56,8 @@ DefaultColumnExtender::DefaultColumnExtender(const DeBruijnGraph &graph,
 }
 
 DefaultColumnExtender::DefaultColumnExtender(const IDBGAligner &aligner,
-                                             const DBGAlignerConfig &config,
                                              std::string_view query)
-      : DefaultColumnExtender(aligner.get_graph(), config, query) {}
+      : DefaultColumnExtender(aligner.get_graph(), aligner.get_config(), query) {}
 
 bool SeedFilteringExtender::check_seed(const Alignment &seed) const {
     if (seed.empty())
@@ -418,7 +417,9 @@ std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score,
                                                      bool force_fixed_seed,
                                                      size_t target_length,
                                                      node_index target_node,
-                                                     bool trim_offset_after_extend) {
+                                                     bool trim_offset_after_extend,
+                                                     size_t trim_query_suffix,
+                                                     score_t added_xdrop) {
     assert(this->seed_);
 
     ++num_extensions_;
@@ -428,9 +429,9 @@ std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score,
     table.clear();
     prev_starts.clear();
 
-    assert(config_.xdrop > 0);
+    assert(config_.xdrop + added_xdrop > 0);
 
-    xdrop_cutoffs_.assign(1, std::make_pair(0u, std::max(-config_.xdrop, ninf + 1)));
+    xdrop_cutoffs_.assign(1, std::make_pair(0u, std::max(-config_.xdrop - added_xdrop, ninf + 1)));
     assert(xdrop_cutoffs_[0].second < 0);
 
     if (!config_.global_xdrop)
@@ -444,8 +445,10 @@ std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score,
 
     // the sequence to align (the suffix of the query starting from the seed)
     std::string_view window(this->seed_->get_query().data(),
-                            query_.data() + query_.size() - this->seed_->get_query().data());
-    assert(partial_sums_.at(start) == config_.match_score(window));
+                            query_.data() + query_.size()
+                                - this->seed_->get_query().data() - trim_query_suffix);
+    score_t partial_sum_offset = partial_sums_.at(start + window.size());
+    assert(partial_sums_.at(start) - partial_sum_offset == config_.match_score(window));
 
     ssize_t seed_offset = static_cast<ssize_t>(this->seed_->get_offset()) - 1;
 
@@ -633,7 +636,8 @@ std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score,
                 ssize_t diag_i = offset - seed_offset;
                 bool has_extension = in_seed;
                 const score_t *partial_sums = &partial_sums_[start + trim];
-                score_t extension_cutoff = std::get<3>(best_score) * config_.rel_score_cutoff;
+                score_t extension_cutoff
+                    = std::get<3>(best_score) * config_.rel_score_cutoff + partial_sum_offset;
                 score_t max_diff = ninf;
 
                 size_t scores_reached_sizediff = 0;
@@ -660,10 +664,12 @@ std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score,
                     }
 
                     // check if this node can be extended to get a better alignment
-                    assert(partial_sums[j] == config_.match_score(window.substr(j + trim)));
-                    if (!has_extension && S[j] + partial_sums[j] >= extension_cutoff
-                            && scores_reached_cutoff)
+                    assert(partial_sums[j] - partial_sum_offset
+                            == config_.match_score(window.substr(j + trim)));
+                    if (!has_extension && scores_reached_cutoff
+                            && S[j] + partial_sums[j] >= extension_cutoff) {
                         has_extension = true;
+                    }
 
                     if (static_cast<size_t>(trim - trim_prev) < S_prev.size()
                             && S[j] - S_prev[j + trim - trim_prev] > max_diff) {
@@ -714,8 +720,8 @@ std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score,
                     + sizeof(decltype(scores_reached_)::value_type) * scores_reached_sizediff
                     + sizeof(xdrop_cutoff_v) * xdrop_cutoffs_sizediff;
 
-                if (max_val - xdrop_cutoff > config_.xdrop)
-                    xdrop_cutoff = max_val - config_.xdrop;
+                if (max_val - xdrop_cutoff > config_.xdrop + added_xdrop)
+                    xdrop_cutoff = max_val - config_.xdrop - added_xdrop;
 
                 // if the best score in this column is above the xdrop score
                 // then check if the extension can continue
@@ -761,7 +767,9 @@ std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score,
     if (config_.no_backtrack)
         return { *seed_ };
 
-    auto extensions = backtrack(min_path_score, window, target_node);
+    auto extensions = backtrack(min_path_score, window,
+                                trim_query_suffix ? 0 : config_.right_end_bonus,
+                                target_node);
     if (trim_offset_after_extend) {
         for (auto &extension : extensions) {
             extension.trim_offset();
@@ -800,6 +808,7 @@ Alignment DefaultColumnExtender::construct_alignment(Cigar cigar,
 
 std::vector<Alignment> DefaultColumnExtender::backtrack(score_t min_path_score,
                                                         std::string_view window,
+                                                        score_t right_end_bonus,
                                                         node_index target_node) {
     std::vector<Alignment> extensions;
     size_t seed_clipping = this->seed_->get_clipping();
@@ -827,7 +836,7 @@ std::vector<Alignment> DefaultColumnExtender::backtrack(score_t min_path_score,
             if (S[pos] == ninf || S_p[pos_p] == ninf)
                 return;
 
-            score_t end_bonus = start_pos == last_pos ? config_.right_end_bonus : 0;
+            score_t end_bonus = start_pos == last_pos ? right_end_bonus : 0;
 
             if (target_node) {
                 if (node == target_node
