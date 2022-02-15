@@ -27,7 +27,7 @@ namespace seq_io {
 namespace graph {
     class AnnotatedDBG;
     namespace align {
-        class DBGAlignerConfig;
+        struct DBGAlignerConfig;
     }
 }
 

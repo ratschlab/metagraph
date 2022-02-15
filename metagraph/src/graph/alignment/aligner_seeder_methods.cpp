@@ -26,11 +26,11 @@ ExactSeeder::ExactSeeder(const DeBruijnGraph &graph,
     partial_sum_.resize(query_.size() + 1);
     std::transform(query_.begin(), query_.end(),
                    partial_sum_.begin() + 1,
-                   [&](char c) { return config_.get_row(c)[c]; });
+                   [&](char c) { return config_.score_matrix[c][c]; });
 
     std::partial_sum(partial_sum_.begin(), partial_sum_.end(), partial_sum_.begin());
     assert(config_.match_score(query_) == partial_sum_.back());
-    assert(query_.empty() || config_.get_row(query_.front())[query_.front()] == partial_sum_[1]);
+    assert(query_.empty() || config_.score_matrix[query_.front()][query_.front()] == partial_sum_[1]);
     assert(!partial_sum_.front());
 }
 

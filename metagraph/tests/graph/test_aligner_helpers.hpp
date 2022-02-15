@@ -21,10 +21,6 @@ using namespace mtg::kmer;
 
 typedef DBGAligner<>::score_t score_t;
 
-inline int8_t single_char_score(const DBGAlignerConfig &config, char a, int8_t b) {
-    return config.get_row(a)[b];
-}
-
 void check_json_dump_load(const DeBruijnGraph &graph,
                           const Alignment &alignment,
                           const std::string &query,

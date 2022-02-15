@@ -218,7 +218,7 @@ size_t Alignment::trim_query_prefix(size_t n,
             case Cigar::MATCH:
             case Cigar::MISMATCH: {
                 assert(s_it != sequence_.end());
-                score_ -= config.get_row(query_[0])[*s_it];
+                score_ -= config.score_matrix[query_[0]][*s_it];
                 query_.remove_prefix(1);
                 --n;
                 consume_ref();
@@ -305,7 +305,7 @@ size_t Alignment::trim_query_suffix(size_t n,
             case Cigar::MATCH:
             case Cigar::MISMATCH: {
                 assert(s_it != sequence_.rend());
-                score_ -= config.get_row(query_.back())[*s_it];
+                score_ -= config.score_matrix[query_.back()][*s_it];
                 query_.remove_suffix(1);
                 --n;
                 consume_ref();
@@ -396,7 +396,7 @@ size_t Alignment::trim_reference_prefix(size_t n,
             case Cigar::MATCH:
             case Cigar::MISMATCH: {
                 assert(s_it != sequence_.end());
-                score_ -= config.get_row(query_[0])[*s_it];
+                score_ -= config.score_matrix[query_[0]][*s_it];
                 query_.remove_prefix(1);
                 consume_ref();
                 if (empty())
@@ -486,7 +486,7 @@ size_t Alignment::trim_reference_suffix(size_t n,
             case Cigar::MATCH:
             case Cigar::MISMATCH: {
                 assert(s_it != sequence_.rend());
-                score_ -= config.get_row(query_.back())[*s_it];
+                score_ -= config.score_matrix[query_.back()][*s_it];
                 query_.remove_suffix(1);
                 consume_ref();
                 if (empty())

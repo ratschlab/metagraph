@@ -41,7 +41,8 @@ TYPED_TEST(DBGAlignerPostChainTest, align_chain_swap) {
     std::string query     = "TGACCCCGGATGATATGA";
 
     auto graph = std::make_shared<DBGSuccinct>(k);
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     config.post_chain_alignments = true;
     graph->add_sequence(reference);
 
@@ -60,7 +61,8 @@ TYPED_TEST(DBGAlignerPostChainTest, align_chain_overlap_2) {
     std::string query      = "TGAGGATCAGCTAGCTAGCTAGC";
 
     auto graph = std::make_shared<DBGSuccinct>(k);
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     config.post_chain_alignments = true;
     graph->add_sequence(reference1);
     graph->add_sequence(reference2);
@@ -82,7 +84,8 @@ TYPED_TEST(DBGAlignerPostChainTest, align_chain_overlap_3_prefer_mismatch_over_g
     //                                        X
 
     auto graph = std::make_shared<DBGSuccinct>(k);
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -3, -3));
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
     config.post_chain_alignments = true;
     graph->add_sequence(reference1);
     graph->add_sequence(reference2);
@@ -102,7 +105,8 @@ TYPED_TEST(DBGAlignerPostChainTest, align_chain_insert_no_chain_if_full_coverage
     std::string query     = "TGAGGATCAG""CTAGCTTGCTAGC";
 
     auto graph = std::make_shared<DBGSuccinct>(k);
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     config.post_chain_alignments = true;
     graph->add_sequence(reference);
 
@@ -121,7 +125,8 @@ TYPED_TEST(DBGAlignerPostChainTest, align_chain_insert1) {
     std::string query      = "TGAGGATCAG""CTAGCTTGCTAGCGCTAGCTAGATC";
 
     auto graph = std::make_shared<DBGSuccinct>(k);
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     config.post_chain_alignments = true;
     graph->add_sequence(reference1);
     graph->add_sequence(reference2);
@@ -142,7 +147,8 @@ TYPED_TEST(DBGAlignerPostChainTest, align_chain_insert_mismatch) {
     //                                      X
 
     auto graph = std::make_shared<DBGSuccinct>(k);
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     config.post_chain_alignments = true;
     graph->add_sequence(reference1);
     graph->add_sequence(reference2);
@@ -162,7 +168,8 @@ TYPED_TEST(DBGAlignerPostChainTest, align_chain_insert_in_overlap) {
     std::string query      = "TGAGGATCAG""CTAAGCTTGCTAGCGCTAGCTAGATC";
 
     auto graph = std::make_shared<DBGSuccinct>(k);
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     config.post_chain_alignments = true;
     graph->add_sequence(reference1);
     graph->add_sequence(reference2);
@@ -182,7 +189,8 @@ TYPED_TEST(DBGAlignerPostChainTest, align_chain_large_overlap) {
     std::string query      = "TGAGGATCAGTAATCTAGCTTGCTAGCGCTAGCTAGATC";
 
     auto graph = std::make_shared<DBGSuccinct>(k);
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     config.post_chain_alignments = true;
     graph->add_sequence(reference1);
     graph->add_sequence(reference2);
@@ -202,7 +210,10 @@ TYPED_TEST(DBGAlignerPostChainTest, align_chain_overlap_with_insert) {
     std::string query      = "TGAGGATCAGTTCTAAGCTTGCTAGCGCTAGCTAGATC";
 
     auto graph = std::make_shared<DBGSuccinct>(k);
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(1, -1, -1), -1, -1);
+    DBGAlignerConfig config;
+    config.gap_opening_penalty = -1;
+    config.gap_extension_penalty = -1;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(1, -1, -1);
     config.post_chain_alignments = true;
     graph->add_sequence(reference1);
     graph->add_sequence(reference2);
@@ -222,7 +233,8 @@ TYPED_TEST(DBGAlignerPostChainTest, align_chain_delete_in_overlap) {
     std::string query      = "TGAGGATCAGTTCTACTTGCTAGCGCTAGCTAGATC";
 
     auto graph = std::make_shared<DBGSuccinct>(k);
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     config.post_chain_alignments = true;
     graph->add_sequence(reference1);
     graph->add_sequence(reference2);
@@ -242,7 +254,8 @@ TYPED_TEST(DBGAlignerPostChainTest, align_chain_disjoint) {
     std::string query      = "CCCCCCCCTGAGGATCAGTTCACTAGCTAGCCCCCCCCC";
 
     auto graph = std::make_shared<DBGSuccinct>(k);
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     config.post_chain_alignments = true;
     graph->add_sequence(reference1);
     graph->add_sequence(reference2);
@@ -262,7 +275,10 @@ TYPED_TEST(DBGAlignerPostChainTest, align_chain_gap) {
     std::string query      = "AAAAACCCCCTGAGGATCAGTTCACTAGCTAGCCCCCCAAAAA";
 
     auto graph = std::make_shared<DBGSuccinct>(k);
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(1, -1, -1), -1, -1);
+    DBGAlignerConfig config;
+    config.gap_opening_penalty = -1;
+    config.gap_extension_penalty = -1;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(1, -1, -1);
     config.post_chain_alignments = true;
     graph->add_sequence(reference1);
     graph->add_sequence(reference2);

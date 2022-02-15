@@ -7,7 +7,7 @@ namespace mtg {
 
 namespace graph {
 namespace align {
-    class DBGAlignerConfig;
+    struct DBGAlignerConfig;
 }
 }
 

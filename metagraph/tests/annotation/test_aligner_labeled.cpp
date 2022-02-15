@@ -74,7 +74,8 @@ TYPED_TEST(LabeledAlignerTest, SimpleTangleGraph) {
     auto anno_graph = build_anno_graph<typename TypeParam::first_type,
                                        typename TypeParam::second_type>(k, sequences, labels);
 
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -1));
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -1);
     LabeledAligner<> aligner(anno_graph->get_graph(), config, anno_graph->get_annotator());
 
     std::unordered_map<std::string, std::unordered_map<std::string, std::string>> exp_alignments {{
@@ -121,7 +122,8 @@ TEST(LabeledAlignerTest, SimpleTangleGraphSuffixSeed) {
 
     auto anno_graph = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(k, sequences, labels);
 
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -1));
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -1);
     config.min_seed_length = 2;
     config.left_end_bonus = 5;
     config.right_end_bonus = 5;
@@ -187,7 +189,8 @@ TYPED_TEST(LabeledAlignerTest, CanonicalTangleGraph) {
             k, sequences, labels, mode
         );
 
-        DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+        DBGAlignerConfig config;
+        config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
         LabeledAligner<> aligner(anno_graph->get_graph(), config, anno_graph->get_annotator());
 
         std::unordered_map<std::string, std::unordered_map<std::string, std::string>> exp_alignments {{

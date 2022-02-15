@@ -8,8 +8,6 @@
 #include <numeric>
 #include <string_view>
 
-#include "graph/representation/base/sequence_graph.hpp"
-
 
 namespace mtg {
 namespace graph {
@@ -17,41 +15,10 @@ namespace align {
 
 class Cigar;
 
-class DBGAlignerConfig {
-  public:
+struct DBGAlignerConfig {
     typedef int32_t score_t;
     typedef std::array<int8_t, 128> ScoreMatrixRow;
     typedef std::array<ScoreMatrixRow, 128> ScoreMatrix;
-
-    // Set parameters manually and call `set_scoring_matrix()`
-    DBGAlignerConfig() {}
-
-    explicit DBGAlignerConfig(const ScoreMatrix &score_matrix,
-                              int8_t gap_opening = -5,
-                              int8_t gap_extension = -2);
-
-    DBGAlignerConfig(ScoreMatrix&& score_matrix,
-                     int8_t gap_opening = -5,
-                     int8_t gap_extension = -2);
-
-    score_t score_sequences(std::string_view a, std::string_view b) const {
-        return std::inner_product(
-            a.begin(), a.end(), b.begin(), score_t(0), std::plus<score_t>(),
-            [&](char a, char b) -> score_t { return score_matrix_[a][b]; }
-        );
-    }
-
-    score_t match_score(std::string_view query) const {
-        return score_sequences(query, query);
-    }
-
-    score_t score_cigar(std::string_view reference,
-                        std::string_view query,
-                        const Cigar &cigar) const;
-
-    const ScoreMatrixRow& get_row(char char_in_query) const {
-        return score_matrix_[char_in_query];
-    }
 
     size_t num_alternative_paths = 1;
     size_t min_seed_length = 0;
@@ -73,8 +40,8 @@ class DBGAlignerConfig {
     double max_ram_per_alignment = std::numeric_limits<double>::max();
     double rel_score_cutoff = 0.0;
 
-    int8_t gap_opening_penalty;
-    int8_t gap_extension_penalty;
+    int8_t gap_opening_penalty = -5;
+    int8_t gap_extension_penalty = -2;
     int8_t left_end_bonus = 0;
     int8_t right_end_bonus = 0;
 
@@ -90,6 +57,25 @@ class DBGAlignerConfig {
     int8_t alignment_mm_transition_score;
     int8_t alignment_mm_transversion_score;
 
+    ScoreMatrix score_matrix;
+
+    void print_summary() const;
+
+    score_t score_sequences(std::string_view a, std::string_view b) const {
+        return std::inner_product(
+            a.begin(), a.end(), b.begin(), score_t(0), std::plus<score_t>(),
+            [&](char a, char b) -> score_t { return score_matrix[a][b]; }
+        );
+    }
+
+    score_t match_score(std::string_view query) const {
+        return score_sequences(query, query);
+    }
+
+    score_t score_cigar(std::string_view reference,
+                        std::string_view query,
+                        const Cigar &cigar) const;
+
     bool check_config_scores() const;
 
     void set_scoring_matrix();
@@ -104,9 +90,6 @@ class DBGAlignerConfig {
     static ScoreMatrix unit_scoring_matrix(int8_t match_score,
                                            const std::string &alphabet,
                                            const uint8_t *encoding);
-
-  private:
-    ScoreMatrix score_matrix_;
 };
 
 } // namespace align

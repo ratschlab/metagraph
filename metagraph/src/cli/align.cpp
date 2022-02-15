@@ -28,56 +28,35 @@ using mtg::common::logger;
 DBGAlignerConfig initialize_aligner_config(const Config &config) {
     assert(config.alignment_num_alternative_paths);
 
-    DBGAlignerConfig aligner_config;
+    DBGAlignerConfig c = {
+        .num_alternative_paths = config.alignment_num_alternative_paths,
+        .min_seed_length = config.alignment_min_seed_length,
+        .max_seed_length = config.alignment_max_seed_length,
+        .max_num_seeds_per_locus = config.alignment_max_num_seeds_per_locus,
+        .max_nodes_per_seq_char = config.alignment_max_nodes_per_seq_char,
+        .max_ram_per_alignment = config.alignment_max_ram,
+        .min_path_score = config.alignment_min_path_score,
+        .xdrop = config.alignment_xdrop,
+        .min_exact_match = config.alignment_min_exact_match,
+        .gap_opening_penalty = static_cast<int8_t>(-config.alignment_gap_opening_penalty),
+        .gap_extension_penalty = static_cast<int8_t>(-config.alignment_gap_extension_penalty),
+        .forward_and_reverse_complement = !config.align_only_forwards,
+        .alignment_edit_distance = config.alignment_edit_distance,
+        .alignment_match_score = config.alignment_match_score,
+        .alignment_mm_transition_score = config.alignment_mm_transition_score,
+        .alignment_mm_transversion_score = config.alignment_mm_transversion_score,
+        .rel_score_cutoff = config.alignment_rel_score_cutoff,
+        .chain_alignments = config.alignment_chain,
+        .post_chain_alignments = config.alignment_post_chain,
+        .left_end_bonus = config.alignment_end_bonus,
+        .right_end_bonus = config.alignment_end_bonus
+    };
 
-    aligner_config.num_alternative_paths = config.alignment_num_alternative_paths;
-    aligner_config.min_seed_length = config.alignment_min_seed_length;
-    aligner_config.max_seed_length = config.alignment_max_seed_length;
-    aligner_config.max_num_seeds_per_locus = config.alignment_max_num_seeds_per_locus;
-    aligner_config.max_nodes_per_seq_char = config.alignment_max_nodes_per_seq_char;
-    aligner_config.max_ram_per_alignment = config.alignment_max_ram;
-    aligner_config.min_path_score = config.alignment_min_path_score;
-    aligner_config.xdrop = config.alignment_xdrop;
-    aligner_config.min_exact_match = config.alignment_min_exact_match;
-    aligner_config.gap_opening_penalty = -config.alignment_gap_opening_penalty;
-    aligner_config.gap_extension_penalty = -config.alignment_gap_extension_penalty;
-    aligner_config.forward_and_reverse_complement = !config.align_only_forwards;
-    aligner_config.alignment_edit_distance = config.alignment_edit_distance;
-    aligner_config.alignment_match_score = config.alignment_match_score;
-    aligner_config.alignment_mm_transition_score = config.alignment_mm_transition_score;
-    aligner_config.alignment_mm_transversion_score = config.alignment_mm_transversion_score;
-    aligner_config.rel_score_cutoff = config.alignment_rel_score_cutoff;
-    aligner_config.chain_alignments = config.alignment_chain;
-    aligner_config.post_chain_alignments = config.alignment_post_chain;
-    aligner_config.left_end_bonus = config.alignment_end_bonus;
-    aligner_config.right_end_bonus = config.alignment_end_bonus;
+    c.set_scoring_matrix();
 
-    logger->trace("Alignment settings:");
-    logger->trace("\t Alignments to report: {}", aligner_config.num_alternative_paths);
-    logger->trace("\t Min seed length: {}", aligner_config.min_seed_length);
-    logger->trace("\t Max seed length: {}", aligner_config.max_seed_length);
-    logger->trace("\t Max num seeds per locus: {}", aligner_config.max_num_seeds_per_locus);
-    logger->trace("\t Max num nodes per sequence char: {}", aligner_config.max_nodes_per_seq_char);
-    logger->trace("\t Max RAM per alignment: {}", aligner_config.max_ram_per_alignment);
-    logger->trace("\t Gap opening penalty: {}", int64_t(aligner_config.gap_opening_penalty));
-    logger->trace("\t Gap extension penalty: {}", int64_t(aligner_config.gap_extension_penalty));
-    logger->trace("\t Min alignment score: {}", aligner_config.min_path_score);
-    logger->trace("\t X drop-off: {}", aligner_config.xdrop);
-    logger->trace("\t Exact nucleotide match threshold: {}", aligner_config.min_exact_match);
-    logger->trace("\t Chain alignments: {}", aligner_config.chain_alignments);
+    c.print_summary();
 
-    logger->trace("\t Scoring matrix: {}", config.alignment_edit_distance ? "unit costs" : "matrix");
-    if (!config.alignment_edit_distance) {
-        logger->trace("\t\t Match score: {}", int64_t(config.alignment_match_score));
-        logger->trace("\t\t (DNA) Transition score: {}",
-                      int64_t(config.alignment_mm_transition_score));
-        logger->trace("\t\t (DNA) Transversion score: {}",
-                      int64_t(config.alignment_mm_transversion_score));
-    }
-
-    aligner_config.set_scoring_matrix();
-
-    return aligner_config;
+    return c;
 }
 
 void map_sequences_in_file(const std::string &file,

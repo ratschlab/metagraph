@@ -28,11 +28,11 @@ DefaultColumnExtender::DefaultColumnExtender(const DeBruijnGraph &graph,
     partial_sums_.reserve(query_.size() + 1);
     partial_sums_.resize(query_.size(), 0);
     std::transform(query_.begin(), query_.end(), partial_sums_.begin(),
-                   [&](char c) { return config_.get_row(c)[c]; });
+                   [&](char c) { return config_.score_matrix[c][c]; });
 
     std::partial_sum(partial_sums_.rbegin(), partial_sums_.rend(), partial_sums_.rbegin());
     assert(query_.empty() || config_.match_score(query_) == partial_sums_.front());
-    assert(query_.empty() || config_.get_row(query_.back())[query_.back()] == partial_sums_.back());
+    assert(query_.empty() || config_.score_matrix[query_.back()][query_.back()] == partial_sums_.back());
 
     partial_sums_.push_back(0);
 
@@ -42,7 +42,7 @@ DefaultColumnExtender::DefaultColumnExtender(const DeBruijnGraph &graph,
         auto &p_score_row = profile_score_.emplace(c, query_.size() + kPadding).first.value();
         auto &p_op_row = profile_op_.emplace(c, query_.size() + kPadding).first.value();
 
-        const auto &row = config_.get_row(c);
+        const auto &row = config_.score_matrix[c];
         const auto &op_row = kCharToOp[c];
 
         // the first cell in a DP table row is one position before the first character,
