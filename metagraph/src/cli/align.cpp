@@ -50,6 +50,7 @@ DBGAlignerConfig initialize_aligner_config(const Config &config) {
         .alignment_match_score = config.alignment_match_score,
         .alignment_mm_transition_score = config.alignment_mm_transition_score,
         .alignment_mm_transversion_score = config.alignment_mm_transversion_score,
+        .score_matrix = DBGAlignerConfig::ScoreMatrix{},
     };
 
     c.set_scoring_matrix();
