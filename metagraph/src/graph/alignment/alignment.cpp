@@ -188,9 +188,9 @@ size_t Alignment::trim_query_prefix(size_t n,
                                     size_t node_overlap,
                                     const DBGAlignerConfig &config,
                                     bool trim_excess_deletions) {
-    const char *query_begin = query_.data() - get_clipping();
-    bool has_clipping = get_clipping();
-    auto it = cigar_.data().begin() + has_clipping;
+    size_t clipping = get_clipping();
+    const char *query_begin = query_.data() - clipping;
+    auto it = cigar_.data().begin() + static_cast<bool>(clipping);
     size_t cigar_offset = 0;
 
     auto s_it = sequence_.begin();
@@ -260,7 +260,7 @@ size_t Alignment::trim_query_prefix(size_t n,
         }
     }
 
-    if (!has_clipping && it != cigar_.data().begin())
+    if (!clipping && it != cigar_.data().begin())
         score_ -= config.left_end_bonus;
 
     nodes_.erase(nodes_.begin(), node_it);
@@ -275,8 +275,8 @@ size_t Alignment::trim_query_prefix(size_t n,
 size_t Alignment::trim_query_suffix(size_t n,
                                     const DBGAlignerConfig &config,
                                     bool trim_excess_deletions) {
-    const char *query_end = query_.data() + query_.size();
-    bool has_end_clipping = get_end_clipping();
+    size_t end_clipping = get_end_clipping();
+    const char *query_end = query_.data() + query_.size() + end_clipping;
 
     trim_end_clipping();
     auto it = cigar_.data().rbegin();
@@ -340,7 +340,7 @@ size_t Alignment::trim_query_suffix(size_t n,
         }
     }
 
-    if (!has_end_clipping && (cigar_offset || it.base() != cigar_.data().end()))
+    if (!end_clipping && (cigar_offset || it.base() != cigar_.data().end()))
         score_ -= config.right_end_bonus;
 
     nodes_.erase(node_it.base(), nodes_.end());
@@ -357,10 +357,10 @@ size_t Alignment::trim_reference_prefix(size_t n,
                                         size_t node_overlap,
                                         const DBGAlignerConfig &config,
                                         bool trim_excess_insertions) {
-    const char *query_begin = query_.data() - get_clipping();
-    bool has_clipping = get_clipping();
+    size_t clipping = get_clipping();
+    const char *query_begin = query_.data() - clipping;
 
-    auto it = cigar_.data().begin() + has_clipping;
+    auto it = cigar_.data().begin() + static_cast<bool>(clipping);
     size_t cigar_offset = 0;
 
     auto s_it = sequence_.begin();
@@ -439,7 +439,7 @@ size_t Alignment::trim_reference_prefix(size_t n,
         }
     }
 
-    if (!has_clipping && (cigar_offset || it != cigar_.data().begin()))
+    if (!clipping && (cigar_offset || it != cigar_.data().begin()))
         score_ -= config.left_end_bonus;
 
     nodes_.erase(nodes_.begin(), node_it);
@@ -455,8 +455,9 @@ size_t Alignment::trim_reference_prefix(size_t n,
 size_t Alignment::trim_reference_suffix(size_t n,
                                         const DBGAlignerConfig &config,
                                         bool trim_excess_insertions) {
-    const char *query_end = query_.data() + query_.size();
-    bool has_end_clipping = get_end_clipping();
+    size_t end_clipping = get_end_clipping();
+    const char *query_end = query_.data() + query_.size() + end_clipping;
+
     trim_end_clipping();
     auto it = cigar_.data().rbegin();
     size_t cigar_offset = 0;
@@ -518,7 +519,7 @@ size_t Alignment::trim_reference_suffix(size_t n,
         }
     }
 
-    if (!has_end_clipping && (cigar_offset || it.base() != cigar_.data().end()))
+    if (!end_clipping && (cigar_offset || it.base() != cigar_.data().end()))
         score_ -= config.right_end_bonus;
 
     nodes_.erase(node_it.base(), nodes_.end());

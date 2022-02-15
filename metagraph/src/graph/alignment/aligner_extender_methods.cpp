@@ -87,6 +87,8 @@ bool SeedFilteringExtender::check_seed(const Alignment &seed) const {
 }
 
 bool SeedFilteringExtender::set_seed(const Alignment &seed) {
+    assert(seed.get_query().size() + seed.get_clipping() + seed.get_end_clipping()
+            == query_size_);
     seed_ = &seed;
     clear_conv_checker();
     return seed_;
@@ -1007,15 +1009,8 @@ std::vector<Alignment> DefaultColumnExtender
 
     DEBUG_LOG("Backtracked from {}/{} indices", num_backtracks, indices.size());
 
-    if (extensions.empty() && this->seed_->get_score() >= min_path_score) {
+    if (extensions.empty() && this->seed_->get_score() >= min_path_score)
         extensions.emplace_back(*this->seed_);
-        if (config_.trim_offset_after_extend) {
-            extensions.back().trim_offset();
-            extensions.back().extend_query_end(query_.data() + query_.size());
-        } else {
-            extensions.back().get_cigar().trim_clipping();
-        }
-    }
 
     return extensions;
 }

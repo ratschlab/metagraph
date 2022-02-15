@@ -173,11 +173,14 @@ size_t align_connect(std::string_view query,
                      Alignment &second,
                      const BuildExtender &build_extender) {
     auto [left, next] = split_seed(graph, config, first);
+
     config.xdrop += first.get_score() - next.get_score();
     std::string_view query_window(
         query.data(),
         second.get_query().data() + second.get_query().size() - query.data()
     );
+    next.trim_end_clipping();
+    next.extend_query_end(query_window.data() + query_window.size());
     assert(next.get_query()
         == query_window.substr(next.get_clipping(), next.get_query().size()));
     auto extender = build_extender(query_window);
@@ -216,7 +219,6 @@ size_t align_connect(std::string_view query,
         assert(first.get_nodes().back());
     } else {
         common::logger->warn("No extension found, restarting from seed {}", second);
-        assert(false);
         std::swap(first, second);
     }
 
@@ -454,9 +456,6 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
     if (AlignmentCompare()(best, cur))
         std::swap(best, cur);
 
-    best.extend_query_begin(query.data());
-    best.extend_query_end(query_end);
-
     if (best.get_query().data() + best.get_query().size() < query_end) {
         DBGAlignerConfig end_cfg = config_;
         end_cfg.trim_offset_after_extend = false;
@@ -475,10 +474,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
         }
     }
 
-    best.extend_query_begin(query.data());
-    best.extend_query_end(query_end);
     best.trim_offset();
-
     assert(best.is_valid(graph_, &config_));
 
     if (best.get_clipping()) {
@@ -501,14 +497,9 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
                     > rev.get_query().data() + rev.get_query().size()
                     && extensions[0].get_query().data() == rev.get_query().data()
                     && extensions[0].get_nodes()[0] == rev.get_nodes()[0]) {
-                extensions[0].extend_query_begin(query_rc.data());
-                extensions[0].extend_query_end(query_rc.data() + query_rc.size());
                 extensions[0].reverse_complement(rc_graph, query);
-                if (extensions[0].size()) {
+                if (extensions[0].size())
                     std::swap(best, extensions[0]);
-                    best.extend_query_begin(query.data());
-                    best.extend_query_end(query_end);
-                }
             }
 
             ++num_extensions;
