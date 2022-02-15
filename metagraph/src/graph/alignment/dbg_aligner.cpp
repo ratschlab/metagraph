@@ -207,7 +207,6 @@ size_t align_connect(std::string_view query,
                             - second.get_clipping();
         second.trim_query_prefix(overlap, graph.get_k() - 1, config, false);
         assert(second.is_valid(graph, &config));
-        second.trim_clipping();
         second.insert_gap_prefix(-overlap, graph.get_k() - 1, config);
         assert(second.is_valid(graph, &config));
 
@@ -418,7 +417,6 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
 ::extend_chain(std::string_view query,
                std::string_view query_rc,
                Chain&& chain,
-               score_t score,
                size_t &num_extensions,
                size_t &num_explored_nodes,
                const std::function<void(Alignment&&)> &callback) const {
@@ -428,9 +426,6 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
 
     const char *query_end = query.data() + query.size();
     assert(chain.size());
-
-    std::ignore = score;
-    DEBUG_LOG("Chain size: {}, score: {}\n{}", chain.size(), score, fmt::join(chain, "\t"));
 
     Alignment cur = std::move(chain[0]);
     assert(cur.is_valid(graph_, &config_));
@@ -563,9 +558,11 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
                 forward, reverse, graph_.get_k() - 1, config_,
                 std::move(fwd_seeds), std::move(bwd_seeds),
                 [&](Chain&& chain, score_t score) {
+                    DEBUG_LOG("Chain size: {}, score: {}\n{}",
+                              chain.size(), score, fmt::join(chain, "\t"));
                     extend_chain(chain[0].get_orientation() ? reverse : forward,
                                  chain[0].get_orientation() ? forward : reverse,
-                                 std::move(chain), score, num_extensions, num_explored_nodes,
+                                 std::move(chain), num_extensions, num_explored_nodes,
                                  [&](Alignment&& aln) {
                                      if (aggregator.add_alignment(std::move(aln)))
                                         throw std::exception();

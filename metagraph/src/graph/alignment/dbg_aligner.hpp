@@ -96,7 +96,6 @@ class DBGAligner : public IDBGAligner {
     void extend_chain(std::string_view query,
                       std::string_view query_rc,
                       Chain&& chain,
-                      score_t score,
                       size_t &num_extensions,
                       size_t &num_explored_nodes,
                       const std::function<void(Alignment&&)> &callback) const;
