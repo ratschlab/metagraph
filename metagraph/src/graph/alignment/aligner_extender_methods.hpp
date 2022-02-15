@@ -31,9 +31,12 @@ class IExtender {
                    score_t min_path_score,
                    bool force_fixed_seed,
                    size_t target_length = 0,
-                   node_index target_node = DeBruijnGraph::npos) {
-        if (set_seed(seed))
-            return extend(min_path_score, force_fixed_seed, target_length, target_node);
+                   node_index target_node = DeBruijnGraph::npos,
+                   bool trim_offset_after_extend = true) {
+        if (set_seed(seed)) {
+            return extend(min_path_score, force_fixed_seed, target_length,
+                          target_node, trim_offset_after_extend);
+        }
 
         return {};
     }
@@ -61,7 +64,8 @@ class IExtender {
     virtual std::vector<Alignment> extend(score_t min_path_score,
                                           bool force_fixed_seed,
                                           size_t target_length = 0,
-                                          node_index target_node = DeBruijnGraph::npos) = 0;
+                                          node_index target_node = DeBruijnGraph::npos,
+                                          bool trim_offset_after_extend = true) = 0;
 
     // returns whether the seed must be a prefix of an extension
     virtual bool fixed_seed() const { return true; }
@@ -170,7 +174,8 @@ class DefaultColumnExtender : public SeedFilteringExtender {
     virtual std::vector<Alignment> extend(score_t min_path_score,
                                           bool force_fixed_seed,
                                           size_t target_length = 0,
-                                          node_index target_node = DeBruijnGraph::npos) override;
+                                          node_index target_node = DeBruijnGraph::npos,
+                                          bool trim_offset_after_extend = true) override;
 
     virtual void call_outgoing(node_index node,
                                size_t max_prefetch_distance,

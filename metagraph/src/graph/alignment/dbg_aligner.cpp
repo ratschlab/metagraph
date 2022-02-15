@@ -190,7 +190,7 @@ size_t align_connect(std::string_view query,
     auto extender = build_extender(query_window);
     auto extensions = extender.get_extensions(
         next, config.ninf, true, AlignmentPairedCoordinatesDist()(next, second),
-        second.get_nodes().back()
+        second.get_nodes().back(), false
     );
     if (extensions.size() && extensions[0].get_query().data() + extensions[0].get_query().size()
             > first.get_query().data() + first.get_query().size()) {
@@ -430,11 +430,9 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
     assert(cur.is_valid(graph_, &config_));
     Alignment best = cur;
 
-    DBGAlignerConfig gap_fill_config = config_;
-    gap_fill_config.trim_offset_after_extend = false;
     for (size_t i = 1; i < chain.size(); ++i) {
         assert(chain[i].is_valid(graph_, &config_));
-        gap_fill_config.xdrop = config_.xdrop;
+        DBGAlignerConfig gap_fill_config = config_;
         gap_fill_config.right_end_bonus = chain[i].get_end_clipping()
             ? 0 : config_.right_end_bonus;
         num_explored_nodes += align_connect(query, graph_, gap_fill_config, cur, chain[i],

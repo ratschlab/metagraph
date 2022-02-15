@@ -417,7 +417,8 @@ DefaultColumnExtender::Column alloc_column(size_t size, RestArgs... args) {
 std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score,
                                                      bool force_fixed_seed,
                                                      size_t target_length,
-                                                     node_index target_node) {
+                                                     node_index target_node,
+                                                     bool trim_offset_after_extend) {
     assert(this->seed_);
 
     ++num_extensions_;
@@ -760,7 +761,15 @@ std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score,
     if (config_.no_backtrack)
         return { *seed_ };
 
-    return backtrack(min_path_score, window, target_node);
+    auto extensions = backtrack(min_path_score, window, target_node);
+    if (trim_offset_after_extend) {
+        for (auto &extension : extensions) {
+            extension.trim_offset();
+            assert(extension.is_valid(*graph_, &config_));
+        }
+    }
+
+    return extensions;
 }
 
 Alignment DefaultColumnExtender::construct_alignment(Cigar cigar,
@@ -786,16 +795,12 @@ Alignment DefaultColumnExtender::construct_alignment(Cigar cigar,
     extension.extra_penalty = extra_penalty;
     assert(extension.is_valid(*this->graph_, &config_));
 
-    if (config_.trim_offset_after_extend) {
-        extension.trim_offset();
-        assert(extension.is_valid(*this->graph_, &config_));
-    }
-
     return extension;
 }
 
-std::vector<Alignment> DefaultColumnExtender
-::backtrack(score_t min_path_score, std::string_view window, node_index target_node) {
+std::vector<Alignment> DefaultColumnExtender::backtrack(score_t min_path_score,
+                                                        std::string_view window,
+                                                        node_index target_node) {
     std::vector<Alignment> extensions;
     size_t seed_clipping = this->seed_->get_clipping();
     ssize_t seed_offset = static_cast<ssize_t>(this->seed_->get_offset() - 1);

@@ -83,7 +83,6 @@ class DBGAlignerConfig {
     bool post_chain_alignments = false;
     bool global_xdrop = true;
     bool allow_left_trim = true;
-    bool trim_offset_after_extend = true;
     bool no_backtrack = false;
 
     bool alignment_edit_distance;
