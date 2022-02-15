@@ -125,7 +125,6 @@ class AnnotationBuffer {
 class LabeledExtender : public DefaultColumnExtender {
   public:
     typedef AnnotationBuffer::Column Column;
-    typedef AnnotationBuffer::Tuple Tuple;
     typedef AnnotationBuffer::LabelSet LabelSet;
     typedef AnnotationBuffer::CoordinateSet CoordinateSet;
 

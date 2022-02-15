@@ -421,7 +421,7 @@ void LabeledExtender
             auto next_labels = annotation_buffer_.get_labels(next);
             assert(next_labels);
 
-            Vector<Column> intersect_labels;
+            LabelSet intersect_labels;
             std::set_intersection(node_labels.begin(), node_labels.end(),
                                   next_labels->begin(), next_labels->end(),
                                   std::back_inserter(intersect_labels));
@@ -546,7 +546,7 @@ void LabeledExtender::call_alignments(score_t end_score,
             label_diff_.pop_back();
             remaining_labels_i_ = annotation_buffer_.emplace_label_set(std::move(label_diff_));
             assert(remaining_labels_i_ != AnnotationBuffer::nannot);
-            label_diff_ = Vector<Column>{};
+            label_diff_ = LabelSet{};
         }
 
         callback(std::move(alignment));
@@ -614,7 +614,7 @@ void LabeledExtender::call_alignments(score_t end_score,
                     if (c < *label_it)
                         return;
 
-                    Tuple overlap;
+                    Alignment::Tuple overlap;
                     intersect_coords(coords.begin(), coords.end(),
                                      other_coords.begin(), other_coords.end(),
                                      std::back_inserter(overlap));
