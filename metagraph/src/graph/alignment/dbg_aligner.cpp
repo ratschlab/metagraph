@@ -478,15 +478,14 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
             Extender extender(*this, config_, query_rc);
             extender.set_graph(rc_graph);
             auto extensions = extender.get_extensions(rev, config_.ninf, true);
+            ++num_extensions;
+            num_explored_nodes += extender.num_explored_nodes() - rev.size();
             if (extensions.size()
                     && extensions[0].get_end_clipping() < rev.get_end_clipping()) {
                 extensions[0].reverse_complement(rc_graph, query);
                 if (extensions[0].size())
                     std::swap(best, extensions[0]);
             }
-
-            ++num_extensions;
-            num_explored_nodes += extender.num_explored_nodes() - rev.size();
         }
     }
 
