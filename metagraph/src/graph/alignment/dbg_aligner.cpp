@@ -189,15 +189,9 @@ size_t align_connect(std::string_view query,
             > first.get_query().data() + first.get_query().size()) {
         assert(extensions[0].get_nodes().front() == next.get_nodes().front());
         extensions[0].extend_query_end(query.data() + query.size());
-        if (left.empty()) {
-            std::swap(first, extensions[0]);
-        } else {
-            left.trim_end_clipping();
-            extensions[0].trim_clipping();
-            left.append(std::move(extensions[0]));
-            std::swap(left, first);
-            assert(first.is_valid(graph, &config));
-        }
+        left.splice(std::move(extensions[0]));
+        std::swap(left, first);
+        assert(first.is_valid(graph, &config));
 
         if (second.get_score() > first.get_score()) {
             common::logger->warn("Extension score too low, restarting from seed {}", second);
@@ -213,6 +207,9 @@ size_t align_connect(std::string_view query,
         second.trim_clipping();
         second.insert_gap_prefix(-overlap, graph.get_k() - 1, config);
         assert(second.is_valid(graph, &config));
+
+        // use append instead of splice because any clipping in second is due to
+        // internally clipped characters
         first.trim_end_clipping();
         first.append(std::move(second));
         assert(first.get_nodes().front());

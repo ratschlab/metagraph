@@ -127,9 +127,7 @@ call_seed_chains_both_strands(std::string_view forward,
                 Alignment merge = chain[i - 1];
                 merge.trim_end_clipping();
                 trim.trim_query_prefix(prev_end - cur_begin, node_overlap, config);
-                trim.trim_clipping();
-                assert(trim.get_offset() == node_overlap);
-                merge.append(std::move(trim));
+                merge.splice(std::move(trim));
                 if (merge.size()) {
                     std::swap(merge, chain[i - 1]);
                     chain[i] = Alignment();
@@ -445,6 +443,8 @@ void construct_alignment_chain(size_t node_overlap,
         if (next_score > best_score[next_end - query.data()]) {
             best_score[next_end - query.data()] = next_score;
 
+            // use append instead of splice because any clipping in aln represents
+            // internally clipped characters
             Alignment next_chain(chain);
             next_chain.trim_end_clipping();
             bool modified = next_chain.append(std::move(aln));

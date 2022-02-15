@@ -67,6 +67,17 @@ class Alignment {
     // Returns true if the label or coordinate set of this changed.
     bool append(Alignment&& other);
 
+    bool splice(Alignment&& other) {
+        if (empty()) {
+            std::swap(*this, other);
+            return label_columns.size();
+        }
+
+        trim_end_clipping();
+        other.trim_clipping();
+        return append(std::move(other));
+    }
+
     size_t size() const { return nodes_.size(); }
     bool empty() const { return nodes_.empty(); }
     const std::vector<node_index>& get_nodes() const { return nodes_; }
