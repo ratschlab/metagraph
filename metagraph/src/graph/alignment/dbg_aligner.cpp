@@ -170,11 +170,11 @@ struct AlignmentPairedCoordinatesDist {
 
 // Extend the alignment first until it reaches the end of the alignment second
 template <class Extender>
-size_t align_connect(const DeBruijnGraph &graph,
-                     const DBGAlignerConfig &config,
-                     Alignment &first,
-                     Alignment &second,
-                     Extender extender) {
+void align_connect(const DeBruijnGraph &graph,
+                   const DBGAlignerConfig &config,
+                   Alignment &first,
+                   Alignment &second,
+                   Extender &extender) {
     auto [left, next] = split_seed(graph, config, first);
 
     auto extensions = extender.get_extensions(
@@ -214,8 +214,6 @@ size_t align_connect(const DeBruijnGraph &graph,
         common::logger->warn("No extension found, restarting from seed {}", second);
         std::swap(first, second);
     }
-
-    return extender.num_explored_nodes();
 }
 
 template <class Seeder, class Extender, class AlignmentCompare>
@@ -410,6 +408,7 @@ template <class Seeder, class Extender, class AlignmentCompare>
 void DBGAligner<Seeder, Extender, AlignmentCompare>
 ::extend_chain(std::string_view query,
                std::string_view query_rc,
+               Extender &extender,
                Chain&& chain,
                size_t &num_extensions,
                size_t &num_explored_nodes,
@@ -422,8 +421,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
 
     for (size_t i = 1; i < chain.size(); ++i) {
         assert(chain[i].is_valid(graph_, &config_));
-        num_explored_nodes += align_connect(graph_, config_, cur, chain[i],
-                                            Extender(*this, query));
+        align_connect(graph_, config_, cur, chain[i], extender);
         if (cur.empty())
             return;
     }
@@ -433,10 +431,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
         std::swap(best, cur);
 
     if (best.get_end_clipping()) {
-        Extender extender(*this, query);
         auto extensions = extender.get_extensions(best, config_.ninf, true);
-        ++num_extensions;
-        num_explored_nodes += extender.num_explored_nodes();
         if (extensions.size()
                 && extensions[0].get_end_clipping() < best.get_end_clipping()
                 && extensions[0].get_score() > best.get_score()) {
@@ -457,11 +452,11 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
         rev.reverse_complement(rc_graph, query_rc);
         if (rev.size() && rev.get_nodes().back()) {
             assert(rev.get_end_clipping());
-            Extender extender(*this, query_rc);
-            extender.set_graph(rc_graph);
-            auto extensions = extender.get_extensions(rev, config_.ninf, true);
+            Extender extender_rc(*this, query_rc);
+            extender_rc.set_graph(rc_graph);
+            auto extensions = extender_rc.get_extensions(rev, config_.ninf, true);
             ++num_extensions;
-            num_explored_nodes += extender.num_explored_nodes() - rev.size();
+            num_explored_nodes += extender_rc.num_explored_nodes() - rev.size();
             if (extensions.size()
                     && extensions[0].get_end_clipping() < rev.get_end_clipping()) {
                 extensions[0].reverse_complement(rc_graph, query);
@@ -532,6 +527,7 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
                               chain.size(), score, fmt::join(chain, "\t"));
                     extend_chain(chain[0].get_orientation() ? reverse : forward,
                                  chain[0].get_orientation() ? forward : reverse,
+                                 chain[0].get_orientation() ? reverse_extender : forward_extender,
                                  std::move(chain), num_extensions, num_explored_nodes,
                                  [&](Alignment&& aln) {
                                      if (aggregator.add_alignment(std::move(aln)))

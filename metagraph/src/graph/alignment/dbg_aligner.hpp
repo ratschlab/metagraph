@@ -96,6 +96,7 @@ class DBGAligner : public IDBGAligner {
     // the graph in the regions of the query in between the chain seeds.
     void extend_chain(std::string_view query,
                       std::string_view query_rc,
+                      Extender &forward_extender,
                       Chain&& chain,
                       size_t &num_extensions,
                       size_t &num_explored_nodes,
