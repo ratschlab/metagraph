@@ -479,9 +479,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
             extender.set_graph(rc_graph);
             auto extensions = extender.get_extensions(rev, config_.ninf, true);
             if (extensions.size()
-                    && extensions[0].get_clipping() == rev.get_clipping()
-                    && extensions[0].get_end_clipping() < rev.get_end_clipping()
-                    && extensions[0].get_nodes()[0] == rev.get_nodes()[0]) {
+                    && extensions[0].get_end_clipping() < rev.get_end_clipping()) {
                 extensions[0].reverse_complement(rc_graph, query);
                 if (extensions[0].size())
                     std::swap(best, extensions[0]);
@@ -548,6 +546,7 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
                 forward, reverse, graph_.get_k() - 1, config_,
                 std::move(fwd_seeds), std::move(bwd_seeds),
                 [&](Chain&& chain, score_t score) {
+                    std::ignore = score;
                     DEBUG_LOG("Chain size: {}, score: {}\n{}",
                               chain.size(), score, fmt::join(chain, "\t"));
                     extend_chain(chain[0].get_orientation() ? reverse : forward,
