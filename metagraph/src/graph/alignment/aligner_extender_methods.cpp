@@ -1000,23 +1000,23 @@ std::vector<Alignment> DefaultColumnExtender::backtrack(score_t min_path_score,
                 DEBUG_LOG("Backtracking failed, trying next start point");
                 break;
             }
+        }
 
-            if (trace.size() >= min_trace_length && path.size() && path.back()) {
-                score_t cur_cell_score = table[j].S[pos - table[j].trim];
-                best_score = std::max(best_score, score - cur_cell_score);
-                if (score - min_cell_score_ < best_score)
-                    break;
+        if (trace.size() >= min_trace_length && path.size() && path.back()) {
+            score_t cur_cell_score = table[j].S[pos - table[j].trim];
+            best_score = std::max(best_score, score - cur_cell_score);
+            if (score - min_cell_score_ < best_score)
+                break;
 
-                if (score >= min_start_score
-                        && (!pos || cur_cell_score == 0)
-                        && (pos || cur_cell_score == table[0].S[0])
-                        && (config_.allow_left_trim || !j)) {
-                    call_alignments(score, path, trace, ops, pos, align_offset,
-                                    window.substr(pos, end_pos - pos), seq, extra_penalty,
-                                    [&](Alignment&& alignment) {
-                        extensions.emplace_back(std::move(alignment));
-                    });
-                }
+            if (score >= min_start_score
+                    && (!pos || cur_cell_score == 0)
+                    && (pos || cur_cell_score == table[0].S[0])
+                    && (config_.allow_left_trim || !j)) {
+                call_alignments(score, path, trace, ops, pos, align_offset,
+                                window.substr(pos, end_pos - pos), seq, extra_penalty,
+                                [&](Alignment&& alignment) {
+                    extensions.emplace_back(std::move(alignment));
+                });
             }
         }
     }
