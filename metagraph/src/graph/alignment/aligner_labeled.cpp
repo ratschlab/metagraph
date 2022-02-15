@@ -561,7 +561,7 @@ void LabeledExtender::call_alignments(score_t end_score,
     ssize_t dist = alignment.get_nodes().size() - 1;
     if (!clipping) {
         base_coords = &seed_->label_coordinates;
-        dist -= seed_->get_offset();
+        dist -= alignment.get_offset();
         if (dynamic_cast<const RCDBG*>(graph_))
             dist = alignment.get_sequence().size() - seed_->get_sequence().size();
     }

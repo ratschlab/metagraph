@@ -453,7 +453,6 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
 
     if (best.get_query().data() + best.get_query().size() < query_end) {
         DBGAlignerConfig end_cfg = config_;
-        end_cfg.trim_offset_after_extend = false;
         end_cfg.allow_left_trim = false;
 
         Extender extender(*this, end_cfg, query);
