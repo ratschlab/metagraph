@@ -8,6 +8,7 @@
 #include <vector>
 
 #include <json/json.h>
+#include <spdlog/fmt/fmt.h>
 
 #include "aligner_cigar.hpp"
 #include "aligner_config.hpp"
@@ -15,9 +16,7 @@
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
 #include "annotation/int_matrix/base/int_matrix.hpp"
 #include "annotation/representation/base/annotation.hpp"
-#include "common/logger.hpp"
 #include "common/vector.hpp"
-#include "common/algorithms.hpp"
 
 
 namespace mtg {
@@ -59,13 +58,13 @@ class Alignment {
               bool orientation = false,
               size_t offset = 0);
 
-    // Append other to the end of the current alignment. In this process, alignment
+    // Append |next| to the end of the current alignment. In this process, alignment
     // labels are intersected. If coordinates are present, then the append is only
-    // successful if at least one coordinate of other immediately proceeds the
+    // successful if at least one coordinate of |next| immediately proceeds the
     // one of the coordinates in this. If this operation is unsuccessful, then
     // *this == {} afterwards.
     // Returns true if the label or coordinate set of this changed.
-    bool append(Alignment&& other);
+    bool append(Alignment&& next);
 
     bool splice(Alignment&& other) {
         if (empty()) {

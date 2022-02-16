@@ -433,13 +433,13 @@ void construct_alignment_chain(size_t node_overlap,
         // internally clipped characters
         Alignment next_chain = chain;
         next_chain.trim_end_clipping();
-        bool extended = next_chain.append(std::move(aln));
+        bool changed = next_chain.append(std::move(aln));
         if (next_chain.size()) {
             assert(next_chain.get_score() == next_score);
             construct_alignment_chain<AlignmentCompare>(
                     node_overlap, config, query, std::move(next_chain),
                     it + 1, end, best_score, callback);
-            called |= extended;
+            called |= changed;
         }
     }
 
