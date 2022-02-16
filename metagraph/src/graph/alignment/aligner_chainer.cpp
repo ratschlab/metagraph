@@ -7,7 +7,7 @@ namespace mtg {
 namespace graph {
 namespace align {
 
-#define LOG2(X) ((unsigned) (8*sizeof (unsigned long long) - __builtin_clzll((X)) - 1))
+#define LOG2(X) ((unsigned) (8 * sizeof(unsigned long long) - __builtin_clzll((X)) - 1))
 
 typedef DeBruijnGraph::node_index node_index;
 
@@ -76,11 +76,7 @@ call_seed_chains_both_strands(std::string_view forward,
 
     for (size_t j : { 0, 1 }) {
         for (size_t i = 0; i < dp_tables[j].size(); ++i) {
-            starts.emplace_back(
-                std::get<5>(dp_tables[j][i]),
-                j,
-                -static_cast<ssize_t>(i)
-            );
+            starts.emplace_back(std::get<5>(dp_tables[j][i]), j, -static_cast<ssize_t>(i));
         }
     }
 
@@ -135,10 +131,9 @@ call_seed_chains_both_strands(std::string_view forward,
             }
         }
 
-        auto chain_it = std::remove_if(chain.begin(), chain.end(),
-                                       [](const auto &a) { return a.empty(); });
-
-        chain.erase(chain_it, chain.end());
+        chain.erase(std::remove_if(chain.begin(), chain.end(),
+                                   [](const auto &a) { return a.empty(); }),
+                    chain.end());
 
         if (last_chain.empty()) {
             std::swap(last_chain, chain);
@@ -234,14 +229,9 @@ chain_seeds(const DBGAlignerConfig &config,
         for (size_t j = 0; j < seeds[i].label_coordinates.size(); ++j) {
             Alignment::Column c = seeds[i].label_columns[j];
             for (auto coord : seeds[i].label_coordinates[j]) {
-                dp_table.emplace_back(c,
-                                      coord,
-                                      seeds[i].get_clipping(),
-                                      seeds[i].get_nodes()[0],
-                                      seeds[i].get_query().size(),
-                                      seeds[i].get_query().size(),
-                                      nid,
-                                      i);
+                dp_table.emplace_back(c, coord, seeds[i].get_clipping(),
+                                      seeds[i].get_nodes()[0], seeds[i].get_query().size(),
+                                      seeds[i].get_query().size(), nid, i);
             }
         }
     }
@@ -302,7 +292,7 @@ void construct_alignment_chain(size_t node_overlap,
                                Alignment&& chain,
                                typename std::vector<Alignment>::iterator begin,
                                typename std::vector<Alignment>::iterator end,
-                               std::vector<score_t> &best_score,
+                               std::vector<score_t> *best_score,
                                const std::function<void(Alignment&&)> &callback);
 
 template <class AlignmentCompare>
@@ -314,10 +304,9 @@ std::vector<Alignment> chain_alignments(std::vector<Alignment>&& alignments,
     if (alignments.size() < 2 || !config.post_chain_alignments)
         return std::move(alignments);
 
-    if (std::any_of(alignments.begin(), alignments.end(), [](const auto &a) {
-        return a.label_coordinates.size();
-    })) {
-        throw std::runtime_error("Post-chaining alignments with coordinates not supported");
+    for (const auto &a : alignments) {
+        if (a.label_coordinates.size())
+            throw std::runtime_error("Post-chaining alignments with coordinates not supported");
     }
 
     DBGAlignerConfig no_chain_config { config };
@@ -346,10 +335,8 @@ std::vector<Alignment> chain_alignments(std::vector<Alignment>&& alignments,
             if (it->get_score() > best_score[end_pos]) {
                 best_score[end_pos] = it->get_score();
                 construct_alignment_chain<AlignmentCompare>(
-                    node_overlap, config, this_query, Alignment(*it), it + 1, end,
-                    best_score, [&](Alignment&& chain) {
-                      aggregator.add_alignment(std::move(chain));
-                    }
+                    node_overlap, config, this_query, Alignment(*it), it + 1, end, &best_score,
+                    [&](Alignment&& chain) { aggregator.add_alignment(std::move(chain)); }
                 );
             }
         }
@@ -371,13 +358,13 @@ void construct_alignment_chain(size_t node_overlap,
                                Alignment&& chain,
                                typename std::vector<Alignment>::iterator begin,
                                typename std::vector<Alignment>::iterator end,
-                               std::vector<score_t> &best_score,
+                               std::vector<score_t> *best_score,
                                const std::function<void(Alignment&&)> &callback) {
     assert(begin <= end);
     assert(chain.size());
 
     const char *chain_begin = chain.get_query().data();
-    const char *chain_end = chain_begin + chain.get_query().size();
+    const char *chain_end = chain.get_query().data() + chain.get_query().size();
     if (begin == end || chain_end == query.data() + query.size()) {
         callback(std::move(chain));
         return;
@@ -391,11 +378,10 @@ void construct_alignment_chain(size_t node_overlap,
             continue;
 
         const char *next_begin = it->get_query().data();
+        const char *next_end = it->get_query().data() + it->get_query().size();
 
         assert(chain_begin - chain.get_clipping() == next_begin - it->get_clipping());
         assert(it->get_orientation() == chain.get_orientation());
-
-        const char *next_end = next_begin + it->get_query().size();
 
         if (next_begin <= chain_begin || next_end == chain_end)
             continue;
@@ -408,7 +394,7 @@ void construct_alignment_chain(size_t node_overlap,
             continue;
         }
 
-        Alignment aln(*it);
+        Alignment aln = *it;
 
         if (next_begin >= chain_end) {
             // no overlap
@@ -436,26 +422,24 @@ void construct_alignment_chain(size_t node_overlap,
                 aln.insert_gap_prefix(-overlap, node_overlap, config);
         }
 
-        if (aln.empty())
-            continue;
+        assert(!aln.empty());
 
         score_t next_score = score + aln.get_score();
-        if (next_score > best_score[next_end - query.data()]) {
-            best_score[next_end - query.data()] = next_score;
+        if (next_score <= (*best_score)[next_end - query.data()])
+            continue;
 
-            // use append instead of splice because any clipping in aln represents
-            // internally clipped characters
-            Alignment next_chain(chain);
-            next_chain.trim_end_clipping();
-            bool modified = next_chain.append(std::move(aln));
+        (*best_score)[next_end - query.data()] = next_score;
+        // use append instead of splice because any clipping in aln represents
+        // internally clipped characters
+        Alignment next_chain = chain;
+        next_chain.trim_end_clipping();
+        bool extended = next_chain.append(std::move(aln));
+        if (next_chain.size()) {
             assert(next_chain.get_score() == next_score);
-            if (next_chain.size()) {
-                called |= modified;
-                construct_alignment_chain<AlignmentCompare>(
+            construct_alignment_chain<AlignmentCompare>(
                     node_overlap, config, query, std::move(next_chain),
-                    it + 1, end, best_score, callback
-                );
-            }
+                    it + 1, end, best_score, callback);
+            called |= extended;
         }
     }
 
@@ -463,11 +447,12 @@ void construct_alignment_chain(size_t node_overlap,
         callback(std::move(chain));
 }
 
-template std::vector<Alignment> chain_alignments<LocalAlignmentLess>(std::vector<Alignment>&&,
-                                                                     std::string_view,
-                                                                     std::string_view,
-                                                                     const DBGAlignerConfig&,
-                                                                     size_t);
+template
+std::vector<Alignment> chain_alignments<LocalAlignmentLess>(std::vector<Alignment>&&,
+                                                            std::string_view,
+                                                            std::string_view,
+                                                            const DBGAlignerConfig&,
+                                                            size_t);
 
 } // namespace align
 } // namespace graph
