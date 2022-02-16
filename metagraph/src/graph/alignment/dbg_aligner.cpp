@@ -459,6 +459,8 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
     callback(std::move(best));
 }
 
+// there are no reverse-complement for protein sequences
+#if ! _PROTEIN_GRAPH
 template <class Seeder, class Extender, class AlignmentCompare>
 std::tuple<size_t, size_t, size_t>
 DBGAligner<Seeder, Extender, AlignmentCompare>
@@ -470,10 +472,6 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
                         Extender &reverse_extender,
                         const std::function<void(Alignment&&)> &callback,
                         const std::function<score_t(const Alignment&)> &get_min_path_score) const {
-#if _PROTEIN_GRAPH
-    assert(false && "Only alignment in one direction supported for Protein graphs");
-#endif
-
     size_t num_seeds = 0;
     size_t num_extensions = 0;
     size_t num_explored_nodes = 0;
@@ -664,6 +662,7 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
 
     return std::make_tuple(num_seeds, num_extensions, num_explored_nodes);
 }
+#endif
 
 template class DBGAligner<>;
 template class DBGAligner<SuffixSeeder<UniMEMSeeder>, LabeledExtender>;

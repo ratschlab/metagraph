@@ -76,12 +76,16 @@ class DBGAligner : public IDBGAligner {
                                         std::move(nodes), config_);
     }
 
-    // Align the forward and reverse complement of the query sequence in both
-    // directions and return the overall best alignment. e.g., for the forward query
-    // 1. Find all seeds of its reverse complement
-    // 2. Given a seed, extend forwards to get alignment A
-    // 3. Reverse complement the alignment to get A', treat it like a new seed
-    // 4. Extend A' forwards to get the final alignment A''
+// there are no reverse-complement for protein sequences
+#if ! _PROTEIN_GRAPH
+    /**
+     * Align the forward and reverse complement of the query sequence in both
+     * directions and return the overall best alignment. e.g., for the forward query
+     * 1. Find all seeds of its reverse complement
+     * 2. Given a seed, extend forwards to get alignment A
+     * 3. Reverse complement the alignment to get A', treat it like a new seed
+     * 4. Extend A' forwards to get the final alignment A''
+     */
     std::tuple<size_t, size_t, size_t>
     align_both_directions(std::string_view forward,
                           std::string_view reverse,
@@ -91,6 +95,7 @@ class DBGAligner : public IDBGAligner {
                           Extender &reverse_extender,
                           const std::function<void(Alignment&&)> &callback,
                           const std::function<score_t(const Alignment&)> &get_min_path_score) const;
+#endif
 
     // Construct a full alignment from a chain by aligning the query agaisnt
     // the graph in the regions of the query in between the chain seeds.
