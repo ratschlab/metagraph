@@ -19,8 +19,6 @@ using namespace mtg::test;
 using namespace mtg::kmer;
 
 
-typedef DBGAligner<>::score_t score_t;
-
 void check_json_dump_load(const DeBruijnGraph &graph,
                           const Alignment &alignment,
                           const std::string &query,

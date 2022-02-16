@@ -1,13 +1,15 @@
 #include "dbg_aligner.hpp"
 
+#include "common/logger.hpp"
 #include "common/algorithms.hpp"
 #include "graph/representation/rc_dbg.hpp"
 #include "aligner_labeled.hpp"
 
-
 namespace mtg {
 namespace graph {
 namespace align {
+
+using mtg::common::logger;
 
 AlignmentResults IDBGAligner::align(std::string_view query,
                                     bool is_reverse_complement) const {
@@ -192,7 +194,7 @@ void align_connect(const DeBruijnGraph &graph,
         assert(first.is_valid(graph, &config));
 
         if (second.get_score() > first.get_score()) {
-            common::logger->warn("Extension score too low, restarting from seed {}", second);
+            logger->warn("Extension score too low, restarting from seed {}", second);
             std::swap(first, second);
         }
 
@@ -212,7 +214,7 @@ void align_connect(const DeBruijnGraph &graph,
         assert(first.get_nodes().front());
         assert(first.get_nodes().back());
     } else {
-        common::logger->warn("No extension found, restarting from seed {}", second);
+        logger->warn("No extension found, restarting from seed {}", second);
         std::swap(first, second);
     }
 }
@@ -347,25 +349,12 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
             paths[i].emplace_back(std::move(alignment));
         }
 
-        if (common::get_verbose()) {
-            std::string log_out = fmt::format(
-                "{}\tlength: {}\tcovered: {}\tbest score: {}\tseeds: {}\textensions: {}\t"
-                "explored nodes: {}\texplored nodes/extension: {:.2f}\t"
+        logger->trace("{}\tlength: {}\tcovered: {}\tbest score: {}\tseeds: {}\t"
+                "extensions: {}\texplored nodes: {}\texplored nodes/extension: {:.2f}\t"
                 "explored nodes/k-mer: {:.2f}\tlabels: {}",
-                header, query.size(), query_coverage, best_score, num_seeds,
-                num_extensions, num_explored_nodes,
-                static_cast<double>(num_explored_nodes) / num_extensions,
-                static_cast<double>(num_explored_nodes) / nodes.size(),
-                aligned_labels
-            );
-
-            if (aligned_labels) {
-                log_out += fmt::format("\tnodes/k-mer/label: {:.2f}",
-                        static_cast<double>(num_explored_nodes) / nodes.size() / aligned_labels);
-            }
-
-            common::logger->trace(log_out);
-        }
+                header, query.size(), query_coverage, best_score, num_seeds, num_extensions,
+                num_explored_nodes, static_cast<double>(num_explored_nodes) / num_extensions,
+                static_cast<double>(num_explored_nodes) / nodes.size(), aligned_labels);
 
         callback(header, std::move(paths[i]));
     };
@@ -511,7 +500,7 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
         }
 
         if (!can_chain) {
-            common::logger->error("Chaining only supported for seeds with coordinates. Skipping seed chaining.");
+            logger->error("Chaining only supported for seeds with coordinates. Skipping seed chaining.");
             exit(1);
         }
 

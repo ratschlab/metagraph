@@ -113,8 +113,6 @@ class SuffixSeeder : public BaseSeeder {
 
     std::vector<Seed> get_seeds() const override { return seeds_; }
 
-    BaseSeeder& get_base_seeder() { return dynamic_cast<BaseSeeder&>(*this); }
-
   protected:
     void generate_seeds();
 

@@ -19,9 +19,6 @@ namespace align {
 
 class IDBGAligner {
   public:
-    typedef DeBruijnGraph::node_index node_index;
-    typedef Alignment::score_t score_t;
-
     typedef std::tuple<std::string /* header */,
                        std::string /* seq */,
                        bool /* orientation of seq */> Query;
@@ -58,6 +55,9 @@ class DBGAligner : public IDBGAligner {
     const DBGAlignerConfig& get_config() const override { return config_; }
 
   protected:
+    typedef typename Seeder::node_index node_index;
+    typedef Alignment::score_t score_t;
+
     const DeBruijnGraph &graph_;
     DBGAlignerConfig config_;
 
@@ -71,7 +71,7 @@ class DBGAligner : public IDBGAligner {
     std::shared_ptr<Seeder>
     build_seeder(std::string_view query,
                  bool is_reverse_complement,
-                 std::vector<IDBGAligner::node_index>&& nodes) const {
+                 std::vector<node_index>&& nodes) const {
         return std::make_shared<Seeder>(graph_, query, is_reverse_complement,
                                         std::move(nodes), config_);
     }

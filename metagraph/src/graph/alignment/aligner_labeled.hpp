@@ -236,7 +236,7 @@ class LabeledAligner : public DBGAligner<Seeder, Extender, AlignmentCompare> {
 
     virtual ~LabeledAligner();
 
-    auto& get_annotation_buffer() const { return annotation_buffer_; }
+    AnnotationBuffer& get_annotation_buffer() const { return annotation_buffer_; }
 
   private:
     typedef typename DBGAligner<Seeder, Extender, AlignmentCompare>::BatchSeeders BatchSeeders;
