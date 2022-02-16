@@ -79,12 +79,10 @@ bool SeedFilteringExtender::check_seed(const Alignment &seed) const {
 
     size_t pos = seed.get_query_view().size() + seed.get_clipping() - 1;
     const auto &[start, vec] = it->second;
-    if (pos < start || pos - start >= vec.size()
-            || vec[pos - start] < seed.get_score()) {
-        return true;
-    }
 
-    return false;
+    return pos < start
+            || pos - start >= vec.size()
+            || vec[pos - start] < seed.get_score();
 }
 
 bool SeedFilteringExtender::set_seed(const Alignment &seed) {
@@ -614,9 +612,8 @@ std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score,
                 assert(node_cur == next);
                 assert(c_stored == c);
                 assert(offset == offset_prev + 1);
-                assert(!node_cur || c == graph_->get_node_sequence(node_cur)[std::min(
-                    static_cast<ssize_t>(graph_->get_k()) - 1, offset
-                )]);
+                assert(!node_cur || c == graph_->get_node_sequence(node_cur)[
+                    std::min(static_cast<ssize_t>(graph_->get_k()) - 1, offset)]);
 
                 // compute column scores
                 update_column(prev_end - trim,
@@ -647,8 +644,7 @@ std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score,
                 if (!config_.global_xdrop) {
                     scores_reached_sizediff = scores_reached_.capacity();
                     scores_reached_.resize(S.size() + trim + 1, ninf);
-                    scores_reached_sizediff = scores_reached_.capacity()
-                                                - scores_reached_sizediff;
+                    scores_reached_sizediff = scores_reached_.capacity() - scores_reached_sizediff;
                 }
 
                 for (size_t j = 0; j < S.size(); ++j, ++cur_offset) {
