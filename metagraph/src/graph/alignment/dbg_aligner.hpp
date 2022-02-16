@@ -68,14 +68,6 @@ class DBGAligner : public IDBGAligner {
                           const std::vector<AlignmentResults> &wrapped_seqs) const;
 
   private:
-    std::shared_ptr<Seeder>
-    build_seeder(std::string_view query,
-                 bool is_reverse_complement,
-                 std::vector<node_index>&& nodes) const {
-        return std::make_shared<Seeder>(graph_, query, is_reverse_complement,
-                                        std::move(nodes), config_);
-    }
-
 // there are no reverse-complement for protein sequences
 #if ! _PROTEIN_GRAPH
     /**

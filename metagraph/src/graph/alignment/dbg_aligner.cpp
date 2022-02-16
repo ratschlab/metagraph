@@ -239,8 +239,8 @@ auto DBGAligner<Seeder, Extender, AlignmentCompare>
             nodes.resize(this_query.size() - graph_.get_k() + 1);
         }
 
-        auto seeder = build_seeder(this_query, is_reverse_complement,
-                                   std::vector<node_index>(nodes));
+        auto seeder = std::make_shared<Seeder>(graph_, this_query, is_reverse_complement,
+                                               std::vector<node_index>(nodes), config_);
         std::shared_ptr<Seeder> seeder_rc;
         std::vector<node_index> nodes_rc;
 
@@ -258,10 +258,10 @@ auto DBGAligner<Seeder, Extender, AlignmentCompare>
 
             std::string_view reverse = wrapped_seqs[i].get_query(!is_reverse_complement);
 
-            seeder_rc = build_seeder(reverse, !is_reverse_complement, std::move(nodes_rc));
+            seeder_rc = std::make_shared<Seeder>(graph_, reverse, !is_reverse_complement,
+                                                 std::move(nodes_rc), config_);
         }
 #endif
-
         result.emplace_back(std::move(seeder), std::move(nodes),
                             std::move(seeder_rc), std::move(nodes_rc));
     }

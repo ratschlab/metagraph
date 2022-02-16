@@ -14,56 +14,77 @@ namespace align {
 
 class IDBGAligner;
 
-class IExtender {
+class SeedFilteringExtender {
   public:
     typedef DeBruijnGraph::node_index node_index;
     typedef Alignment::score_t score_t;
 
-    virtual ~IExtender() {}
-
-    // If force_fixed_seed is true, then all alignments must have the seed as a
-    // prefix. Otherwise, only the first node of the seed is used as a starting node.
-    // If target_length and target_node are set, then terminate the extension
-    // once target_length nucleotides have been aligned to and only backtrack
-    // from target_node
-    std::vector<Alignment>
-    get_extensions(const Alignment &seed,
-                   score_t min_path_score,
-                   bool force_fixed_seed,
-                   size_t target_length = 0,
-                   node_index target_node = DeBruijnGraph::npos,
-                   bool trim_offset_after_extend = true,
-                   size_t trim_query_suffix = 0,
-                   score_t added_xdrop = 0) {
-        if (set_seed(seed)) {
-            return extend(min_path_score, force_fixed_seed, target_length,
-                          target_node, trim_offset_after_extend, trim_query_suffix,
-                          added_xdrop);
-        }
-
-        return {};
+    SeedFilteringExtender(const DeBruijnGraph *graph,
+                          const DBGAlignerConfig &config,
+                          std::string_view query)
+          : graph_(graph), config_(config), query_size_(query.size()) {
+        assert(config_.check_config_scores());
     }
 
-    virtual void set_graph(const DeBruijnGraph &graph) = 0;
+    virtual ~SeedFilteringExtender() {}
+
+    /**
+     * If force_fixed_seed is true, then all alignments must have the seed as a
+     * prefix. Otherwise, only the first node of the seed is used as a starting node.
+     * If target_length and target_node are set, then terminate the extension
+     * once target_length nucleotides have been aligned to and only backtrack
+     * from target_node
+     */
+    std::vector<Alignment> get_extensions(const Alignment &seed,
+                                          score_t min_path_score,
+                                          bool force_fixed_seed,
+                                          size_t target_length = 0,
+                                          node_index target_node = DeBruijnGraph::npos,
+                                          bool trim_offset_after_extend = true,
+                                          size_t trim_query_suffix = 0,
+                                          score_t added_xdrop = 0) {
+        if (!set_seed(seed))
+            return {};
+
+        return extend(min_path_score, force_fixed_seed, target_length, target_node,
+                      trim_offset_after_extend, trim_query_suffix, added_xdrop);
+    }
 
     // report alignment extension statistics
-    virtual size_t num_explored_nodes() const = 0;
-    virtual size_t num_extensions() const = 0;
+    size_t num_explored_nodes() const {
+        return explored_nodes_previous_ + conv_checker_.size();
+    }
 
     // return true if the nodes in this seed have been traversed previously with
     // better or equal scores
-    virtual bool check_seed(const Alignment &seed) const = 0;
+    virtual bool check_seed(const Alignment &seed) const;
+
+    virtual bool filter_nodes(node_index node, size_t query_start, size_t query_end);
+
+    void clear_conv_checker() {
+        explored_nodes_previous_ += conv_checker_.size();
+        conv_checker_.clear();
+    }
 
   protected:
-    // set the seed from which to extend and return true if extension can proceed
-    virtual bool set_seed(const Alignment &seed) = 0;
+    const DeBruijnGraph *graph_;
+    const DBGAlignerConfig &config_;
+    const Alignment *seed_ = nullptr;
+    size_t query_size_;
 
-    // Helper function for running the extension.
-    // If force_fixed_seed is true, then all alignments must have the seed as a
-    // prefix. Otherwise, only the first node of the seed is used as a starting node.
-    // If target_length and target_node are set, then terminate the extension
-    // once target_length nucleotides have been aligned to and only backtrack
-    // from target_node
+    typedef std::pair<size_t, AlignedVector<score_t>> ScoreVec;
+    tsl::hopscotch_map<node_index, ScoreVec> conv_checker_;
+
+    size_t explored_nodes_previous_ = 0;
+
+    /**
+     * Helper function for running the extension.
+     * If force_fixed_seed is true, then all alignments must have the seed as a
+     * prefix. Otherwise, only the first node of the seed is used as a starting node.
+     * If target_length and target_node are set, then terminate the extension
+     * once target_length nucleotides have been aligned to and only backtrack
+     * from target_node
+     */
     virtual std::vector<Alignment> extend(score_t min_path_score,
                                           bool force_fixed_seed,
                                           size_t target_length = 0,
@@ -74,48 +95,13 @@ class IExtender {
 
     // returns whether the seed must be a prefix of an extension
     virtual bool fixed_seed() const { return true; }
-};
 
-class SeedFilteringExtender : public IExtender {
-  public:
-    SeedFilteringExtender(const DBGAlignerConfig &config, std::string_view query)
-          : config_(config), query_size_(query.size()) {
-        assert(config_.check_config_scores());
-    }
-
-    virtual ~SeedFilteringExtender() {}
-
-    virtual size_t num_explored_nodes() const override final {
-        return explored_nodes_previous_ + conv_checker_.size();
-    }
-
-    virtual bool check_seed(const Alignment &seed) const override;
-
-    virtual bool filter_nodes(node_index node, size_t query_start, size_t query_end);
-
-    void clear_conv_checker() {
-        explored_nodes_previous_ += conv_checker_.size();
-        conv_checker_.clear();
-    }
-
-  protected:
-    const DBGAlignerConfig &config_;
-    const Alignment *seed_ = nullptr;
-    size_t query_size_;
-
-    typedef std::pair<size_t, AlignedVector<score_t>> ScoreVec;
-    tsl::hopscotch_map<node_index, ScoreVec> conv_checker_;
-
-    size_t explored_nodes_previous_ = 0;
-
-    virtual bool set_seed(const Alignment &seed) override;
+    virtual bool set_seed(const Alignment &seed);
 
     virtual score_t update_seed_filter(node_index node,
                                        size_t query_start,
                                        const score_t *s_begin,
                                        const score_t *s_end);
-
-    virtual const DeBruijnGraph& get_graph() const = 0;
 };
 
 class DefaultColumnExtender : public SeedFilteringExtender {
@@ -128,37 +114,35 @@ class DefaultColumnExtender : public SeedFilteringExtender {
 
     virtual ~DefaultColumnExtender() {}
 
-    virtual void set_graph(const DeBruijnGraph &graph) override {
-        graph_ = &graph;
-    }
+    void set_graph(const DeBruijnGraph &graph) { graph_ = &graph; }
 
-    virtual size_t num_extensions() const override final { return num_extensions_; }
+    size_t num_extensions() const { return num_extensions_; }
 
-    // During extension, a tree is constructed from the graph starting at the
-    // seed, then the query is aligned against this tree.
-    // Each Column object represents the alignment of a substring of the query
-    // against a node in the tree.
-    // The horizontal concatenation (hstack) of all of the columns along a path
-    // in this tree is analogous to a Needleman-Wunsch dynamic programming score matrix.
+    /**
+     * During extension, a tree is constructed from the graph starting at the
+     * seed, then the query is aligned against this tree.
+     * Each Column object represents the alignment of a substring of the query
+     * against a node in the tree.
+     * The horizontal concatenation (hstack) of all of the columns along a path
+     * in this tree is analogous to a Needleman-Wunsch dynamic programming score matrix.
+     */
     struct Column {
-        AlignedVector<score_t> S; /* best score */
-        AlignedVector<score_t> E; /* best score after insert */
-        AlignedVector<score_t> F; /* best score after delete */
-        node_index node; /* graph node represented by the column */
-        size_t parent_i; /* index of the parent column */
-        char c; /* the last character of the node's k-mer */
-        ssize_t offset; /* distance from the starting character of the first node */
-        ssize_t max_pos; /* absolute index of the maximal value */
-        ssize_t trim; /* first index which is allocated by the vectors
-                         i.e., the maximal value is located at S[max_pos - trim] */
-        size_t xdrop_cutoff_i; /* corresponding index in the xdrop_cutoff vector */
-        size_t last_fork_i; /* index of the nearest ancestor that was a fork */
-        score_t score; /* added score when traversing to this node
-                          (typically a negative penalty) */
+        AlignedVector<score_t> S; // best score
+        AlignedVector<score_t> E; // best score after insert
+        AlignedVector<score_t> F; // best score after delete
+        node_index node; // graph node represented by the column
+        size_t parent_i; // index of the parent column
+        char c; // the last character of the node's k-mer
+        ssize_t offset; // distance from the starting character of the first node
+        ssize_t max_pos; // absolute index of the maximal value
+        ssize_t trim; // first index allocated by the vectors
+                      // i.e., the maximal value is located at S[max_pos - trim]
+        size_t xdrop_cutoff_i; // corresponding index in the xdrop_cutoff vector
+        size_t last_fork_i; // index of the nearest ancestor that was a fork
+        score_t score; // added score when traversing to this node (typically a negative penalty)
     };
 
   protected:
-    const DeBruijnGraph *graph_;
     std::string_view query_;
     std::vector<Column> table;
     size_t table_size_bytes_;
@@ -166,8 +150,6 @@ class DefaultColumnExtender : public SeedFilteringExtender {
     tsl::hopscotch_set<size_t> prev_starts;
     std::vector<std::pair<size_t, score_t>> xdrop_cutoffs_;
     size_t num_extensions_ = 0;
-
-    virtual const DeBruijnGraph& get_graph() const override final { return *graph_; }
 
     // If force_fixed_seed is true, then all alignments must have the seed as a
     // prefix. Otherwise, only the first node of the seed is used as a starting node.
@@ -202,6 +184,7 @@ class DefaultColumnExtender : public SeedFilteringExtender {
     /**
      * Backtracking helpers
      */
+
     // halt the currently-running backtracking
     virtual bool terminate_backtrack() const { return false; }
 
@@ -241,13 +224,12 @@ class DefaultColumnExtender : public SeedFilteringExtender {
                                   score_t extra_penalty) const;
 
   private:
-    // compute perfect match scores for all suffixes
-    // used for branch and bound checks
+    // compute perfect match scores for all suffixes used for branch and bound checks
     std::vector<score_t> partial_sums_;
 
     // a quick lookup table of char pair match/mismatch scores for the current query
-    tsl::hopscotch_map<char, AlignedVector<score_t>> profile_score_;
-    tsl::hopscotch_map<char, AlignedVector<Cigar::Operator>> profile_op_;
+    std::vector<AlignedVector<score_t>> profile_score_;
+    std::vector<AlignedVector<Cigar::Operator>> profile_op_;
 
     std::vector<score_t> scores_reached_;
     score_t min_cell_score_;

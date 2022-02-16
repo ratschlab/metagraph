@@ -34,6 +34,7 @@ class Alignment {
     typedef annot::matrix::MultiIntMatrix::Tuple Tuple;
     typedef Vector<Column> LabelSet;
     typedef Vector<Tuple> CoordinateSet;
+    static const score_t ninf = DBGAlignerConfig::ninf;
 
     Alignment() : score_(0), orientation_(false), offset_(0) {}
 

@@ -13,8 +13,8 @@ namespace mtg {
 namespace graph {
 namespace align {
 
-using score_t = DBGAlignerConfig::score_t;
-constexpr score_t ninf = DBGAlignerConfig::ninf;
+using score_t = Alignment::score_t;
+constexpr score_t ninf = Alignment::ninf;
 
 // to ensure that SIMD operations on arrays don't read out of bounds
 constexpr size_t kPadding = 5;
@@ -23,7 +23,7 @@ constexpr size_t kPadding = 5;
 DefaultColumnExtender::DefaultColumnExtender(const DeBruijnGraph &graph,
                                              const DBGAlignerConfig &config,
                                              std::string_view query)
-      : SeedFilteringExtender(config, query), graph_(&graph), query_(query) {
+      : SeedFilteringExtender(&graph, config, query), query_(query) {
     // compute exact-match scores for all suffixes of the query
     partial_sums_.reserve(query_.size() + 1);
     partial_sums_.resize(query_.size(), 0);
@@ -36,21 +36,23 @@ DefaultColumnExtender::DefaultColumnExtender(const DeBruijnGraph &graph,
 
     partial_sums_.push_back(0);
 
-    // precompute profiles to store match/mismatch scores and Cigar::Operators
-    // in contiguous arrays
+    const char max_c = *std::max_element(graph_->alphabet().begin(), graph_->alphabet().end());
+    profile_score_.resize(max_c + 1);
+    profile_op_.resize(max_c + 1);
     for (char c : graph_->alphabet()) {
-        auto &p_score_row = profile_score_.emplace(c, query_.size() + kPadding).first.value();
-        auto &p_op_row = profile_op_.emplace(c, query_.size() + kPadding).first.value();
-
+        // precompute profiles to store match/mismatch scores and Cigar::Operators
+        // in contiguous arrays
+        profile_score_[c] = AlignedVector<score_t>(query_.size() + kPadding);
+        profile_op_[c] = AlignedVector<Cigar::Operator>(query_.size() + kPadding);
         const auto &row = config_.score_matrix[c];
         const auto &op_row = kCharToOp[c];
 
         // the first cell in a DP table row is one position before the first character,
         // so we need to shift the indices of profile_score_ and profile_op_
-        std::transform(query_.begin(), query_.end(), p_score_row.begin() + 1,
+        std::transform(query_.begin(), query_.end(), profile_score_[c].begin() + 1,
                        [&row](char q) { return row[q]; });
 
-        std::transform(query_.begin(), query_.end(), p_op_row.begin() + 1,
+        std::transform(query_.begin(), query_.end(), profile_op_[c].begin() + 1,
                        [&op_row](char q) { return op_row[q]; });
     }
 }
@@ -67,8 +69,8 @@ bool SeedFilteringExtender::check_seed(const Alignment &seed) const {
     assert(seed.get_cigar().size());
 
     node_index node = seed.get_nodes().back();
-    if (dynamic_cast<const RCDBG*>(&get_graph()))
-        node += get_graph().max_index();
+    if (dynamic_cast<const RCDBG*>(graph_))
+        node += graph_->max_index();
 
     auto it = conv_checker_.find(node);
 
@@ -97,8 +99,8 @@ score_t SeedFilteringExtender::update_seed_filter(node_index node,
                                                   size_t query_start,
                                                   const score_t *s_begin,
                                                   const score_t *s_end) {
-    if (dynamic_cast<const RCDBG*>(&get_graph()))
-        node += get_graph().max_index();
+    if (dynamic_cast<const RCDBG*>(graph_))
+        node += graph_->max_index();
 
     assert(s_end >= s_begin);
     assert(query_start + (s_end - s_begin) <= query_size_);
@@ -840,13 +842,13 @@ std::vector<Alignment> DefaultColumnExtender::backtrack(score_t min_path_score,
 
             if (target_node) {
                 if (node == target_node
-                        && S[pos] == S_p[pos_p] + score + profile_score_.find(c)->second[seed_clipping + start_pos]) {
+                        && S[pos] == S_p[pos_p] + score + profile_score_[c][seed_clipping + start_pos]) {
                     indices.emplace_back(S[pos] + end_bonus, -std::abs(start_pos - offset + seed_offset),
                                          -static_cast<ssize_t>(i), start_pos);
                 }
             } else if (S[pos] + end_bonus >= min_start_score) {
-                bool is_match = S[pos] == S_p[pos_p] + score + profile_score_.find(c)->second[seed_clipping + start_pos]
-                    && profile_op_.find(c)->second[seed_clipping + start_pos] == Cigar::MATCH;
+                bool is_match = S[pos] == S_p[pos_p] + score + profile_score_[c][seed_clipping + start_pos]
+                    && profile_op_[c][seed_clipping + start_pos] == Cigar::MATCH;
                 if (is_match || start_pos == last_pos) {
                     indices.emplace_back(
                         S[pos] + end_bonus, -std::abs(start_pos - offset + seed_offset),
@@ -958,12 +960,12 @@ std::vector<Alignment> DefaultColumnExtender::backtrack(score_t min_path_score,
                 }
             } else if (pos && pos >= trim_p + 1
                     && S[pos - trim] == S_p[pos - trim_p - 1] + score_cur
-                        + profile_score_.find(c)->second[seed_clipping + pos]) {
+                        + profile_score_[c][seed_clipping + pos]) {
                 // match/mismatch
                 trace.emplace_back(j);
 
                 seq += c;
-                append_node(node, offset, profile_op_.find(c)->second[seed_clipping + pos]);
+                append_node(node, offset, profile_op_[c][seed_clipping + pos]);
                 --pos;
                 assert(j_prev != static_cast<size_t>(-1));
                 j = j_prev;
