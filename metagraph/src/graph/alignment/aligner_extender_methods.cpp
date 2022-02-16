@@ -75,7 +75,7 @@ bool SeedFilteringExtender::check_seed(const Alignment &seed) const {
     if (it == conv_checker_.end())
         return true;
 
-    size_t pos = seed.get_query().size() + seed.get_clipping() - 1;
+    size_t pos = seed.get_query_view().size() + seed.get_clipping() - 1;
     const auto &[start, vec] = it->second;
     if (pos < start || pos - start >= vec.size()
             || vec[pos - start] < seed.get_score()) {
@@ -86,7 +86,7 @@ bool SeedFilteringExtender::check_seed(const Alignment &seed) const {
 }
 
 bool SeedFilteringExtender::set_seed(const Alignment &seed) {
-    assert(seed.get_query().size() + seed.get_clipping() + seed.get_end_clipping()
+    assert(seed.get_query_view().size() + seed.get_clipping() + seed.get_end_clipping()
             == query_size_);
     seed_ = &seed;
     clear_conv_checker();
@@ -444,9 +444,9 @@ std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score,
     size_t start = this->seed_->get_clipping();
 
     // the sequence to align (the suffix of the query starting from the seed)
-    std::string_view window(this->seed_->get_query().data(),
+    std::string_view window(this->seed_->get_query_view().data(),
                             query_.data() + query_.size()
-                                - this->seed_->get_query().data() - trim_query_suffix);
+                                - this->seed_->get_query_view().data() - trim_query_suffix);
     score_t partial_sum_offset = partial_sums_.at(start + window.size());
     assert(partial_sums_.at(start) - partial_sum_offset == config_.match_score(window));
 

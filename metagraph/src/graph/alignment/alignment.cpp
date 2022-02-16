@@ -22,12 +22,12 @@ Alignment::Alignment(std::string_view query,
                      size_t clipping,
                      bool orientation,
                      size_t offset)
-      : query_(query), nodes_(std::move(nodes)), sequence_(std::move(sequence)),
+      : query_view_(query), nodes_(std::move(nodes)), sequence_(std::move(sequence)),
         score_(score),
         orientation_(orientation),
         offset_(offset) {
-    assert(query_.size() == sequence_.size());
-    cigar_ = std::inner_product(query_.begin(), query_.end(), sequence_.begin(),
+    assert(query_view_.size() == sequence_.size());
+    cigar_ = std::inner_product(query_view_.begin(), query_view_.end(), sequence_.begin(),
                                 Cigar(Cigar::CLIPPED, clipping),
                                 [&](Cigar &cigar, bool equal) -> Cigar& {
                                     cigar.append(equal ? Cigar::MATCH : Cigar::MISMATCH);
@@ -84,7 +84,8 @@ struct MergeCoords {
 };
 
 bool Alignment::append(Alignment&& other) {
-    assert(query_.data() + query_.size() + other.get_clipping() == other.query_.data());
+    assert(query_view_.data() + query_view_.size() + other.get_clipping()
+            == other.query_view_.data());
     assert(orientation_ == other.orientation_);
 
     bool ret_val = false;
@@ -164,7 +165,8 @@ bool Alignment::append(Alignment&& other) {
     cigar_.append(std::move(other.cigar_));
 
     // expand the query window to cover both alignments
-    query_ = std::string_view(query_.data(), other.query_.end() - query_.begin());
+    query_view_ = std::string_view(query_view_.data(),
+                                   other.query_view_.end() - query_view_.begin());
 
     return ret_val;
 }
@@ -189,7 +191,7 @@ size_t Alignment::trim_query_prefix(size_t n,
                                     const DBGAlignerConfig &config,
                                     bool trim_excess_deletions) {
     size_t clipping = get_clipping();
-    const char *query_begin = query_.data() - clipping;
+    const char *query_begin = query_view_.data() - clipping;
     auto it = cigar_.data().begin() + static_cast<bool>(clipping);
     size_t cigar_offset = 0;
 
@@ -218,8 +220,8 @@ size_t Alignment::trim_query_prefix(size_t n,
             case Cigar::MATCH:
             case Cigar::MISMATCH: {
                 assert(s_it != sequence_.end());
-                score_ -= config.score_matrix[query_[0]][*s_it];
-                query_.remove_prefix(1);
+                score_ -= config.score_matrix[query_view_[0]][*s_it];
+                query_view_.remove_prefix(1);
                 --n;
                 consume_ref();
                 if (empty())
@@ -229,7 +231,7 @@ size_t Alignment::trim_query_prefix(size_t n,
                 score_ -= it->second - cigar_offset == 1
                     ? config.gap_opening_penalty
                     : config.gap_extension_penalty;
-                query_.remove_prefix(1);
+                query_view_.remove_prefix(1);
                 --n;
             } break;
             case Cigar::DELETION: {
@@ -276,7 +278,7 @@ size_t Alignment::trim_query_suffix(size_t n,
                                     const DBGAlignerConfig &config,
                                     bool trim_excess_deletions) {
     size_t end_clipping = get_end_clipping();
-    const char *query_end = query_.data() + query_.size() + end_clipping;
+    const char *query_end = query_view_.data() + query_view_.size() + end_clipping;
 
     trim_end_clipping();
     auto it = cigar_.data().rbegin();
@@ -305,8 +307,8 @@ size_t Alignment::trim_query_suffix(size_t n,
             case Cigar::MATCH:
             case Cigar::MISMATCH: {
                 assert(s_it != sequence_.rend());
-                score_ -= config.score_matrix[query_.back()][*s_it];
-                query_.remove_suffix(1);
+                score_ -= config.score_matrix[query_view_.back()][*s_it];
+                query_view_.remove_suffix(1);
                 --n;
                 consume_ref();
                 if (empty())
@@ -316,7 +318,7 @@ size_t Alignment::trim_query_suffix(size_t n,
                 score_ -= it->second - cigar_offset == 1
                     ? config.gap_opening_penalty
                     : config.gap_extension_penalty;
-                query_.remove_suffix(1);
+                query_view_.remove_suffix(1);
                 --n;
             } break;
             case Cigar::DELETION: {
@@ -358,7 +360,7 @@ size_t Alignment::trim_reference_prefix(size_t n,
                                         const DBGAlignerConfig &config,
                                         bool trim_excess_insertions) {
     size_t clipping = get_clipping();
-    const char *query_begin = query_.data() - clipping;
+    const char *query_begin = query_view_.data() - clipping;
 
     auto it = cigar_.data().begin() + static_cast<bool>(clipping);
     size_t cigar_offset = 0;
@@ -396,8 +398,8 @@ size_t Alignment::trim_reference_prefix(size_t n,
             case Cigar::MATCH:
             case Cigar::MISMATCH: {
                 assert(s_it != sequence_.end());
-                score_ -= config.score_matrix[query_[0]][*s_it];
-                query_.remove_prefix(1);
+                score_ -= config.score_matrix[query_view_[0]][*s_it];
+                query_view_.remove_prefix(1);
                 consume_ref();
                 if (empty())
                     return 0;
@@ -406,7 +408,7 @@ size_t Alignment::trim_reference_prefix(size_t n,
                 score_ -= it->second - cigar_offset == 1
                     ? config.gap_opening_penalty
                     : config.gap_extension_penalty;
-                query_.remove_prefix(1);
+                query_view_.remove_prefix(1);
             } break;
             case Cigar::DELETION: {
                 score_ -= it->second - cigar_offset == 1
@@ -456,7 +458,7 @@ size_t Alignment::trim_reference_suffix(size_t n,
                                         const DBGAlignerConfig &config,
                                         bool trim_excess_insertions) {
     size_t end_clipping = get_end_clipping();
-    const char *query_end = query_.data() + query_.size() + end_clipping;
+    const char *query_end = query_view_.data() + query_view_.size() + end_clipping;
 
     trim_end_clipping();
     auto it = cigar_.data().rbegin();
@@ -486,8 +488,8 @@ size_t Alignment::trim_reference_suffix(size_t n,
             case Cigar::MATCH:
             case Cigar::MISMATCH: {
                 assert(s_it != sequence_.rend());
-                score_ -= config.score_matrix[query_.back()][*s_it];
-                query_.remove_suffix(1);
+                score_ -= config.score_matrix[query_view_.back()][*s_it];
+                query_view_.remove_suffix(1);
                 consume_ref();
                 if (empty())
                     return 0;
@@ -496,7 +498,7 @@ size_t Alignment::trim_reference_suffix(size_t n,
                 score_ -= it->second - cigar_offset == 1
                     ? config.gap_opening_penalty
                     : config.gap_extension_penalty;
-                query_.remove_suffix(1);
+                query_view_.remove_suffix(1);
             } break;
             case Cigar::DELETION: {
                 score_ -= it->second - cigar_offset == 1
@@ -534,7 +536,7 @@ size_t Alignment::trim_reference_suffix(size_t n,
 
 void Alignment::reverse_complement(const DeBruijnGraph &graph,
                                    std::string_view query_rev_comp) {
-    assert(query_.size() + get_end_clipping() == query_rev_comp.size() - get_clipping());
+    assert(query_view_.size() + get_end_clipping() == query_rev_comp.size() - get_clipping());
 
     trim_offset();
     assert(!offset_ || nodes_.size() == 1);
@@ -549,8 +551,8 @@ void Alignment::reverse_complement(const DeBruijnGraph &graph,
             assert(query_rev_comp.size() >= get_clipping() + get_end_clipping());
 
             orientation_ = !orientation_;
-            query_ = { query_rev_comp.data() + get_clipping(),
-                       query_rev_comp.size() - get_clipping() - get_end_clipping() };
+            query_view_ = { query_rev_comp.data() + get_clipping(),
+                            query_rev_comp.size() - get_clipping() - get_end_clipping() };
         }
         return;
     }
@@ -691,8 +693,8 @@ void Alignment::reverse_complement(const DeBruijnGraph &graph,
     assert(query_rev_comp.size() >= get_clipping() + get_end_clipping());
 
     orientation_ = !orientation_;
-    query_ = { query_rev_comp.data() + get_clipping(),
-               query_rev_comp.size() - get_clipping() - get_end_clipping() };
+    query_view_ = { query_rev_comp.data() + get_clipping(),
+                    query_rev_comp.size() - get_clipping() - get_end_clipping() };
     assert(is_valid(graph));
 }
 
@@ -712,10 +714,10 @@ Json::Value Alignment::path_json(size_t node_size, std::string_view label) const
     assert(cigar_it != cigar_.data().end());
 
     int64_t rank = 1;
-    const char *query_start = query_.data();
+    const char *query_start = query_view_.data();
 
 #ifndef NDEBUG
-    const char *query_end = query_.data() + query_.size();
+    const char *query_end = query_view_.data() + query_view_.size();
 #endif
 
     size_t cur_pos = rank == 1 ? offset_ : 0;
@@ -880,8 +882,10 @@ Json::Value Alignment::to_json(size_t node_size,
         throw std::runtime_error("JSON output for chains not supported");
     }
 
-    std::string_view full_query = { query_.data() - get_clipping(),
-                                    query_.size() + get_clipping() + get_end_clipping() };
+    std::string_view full_query = {
+        query_view_.data() - get_clipping(),
+        query_view_.size() + get_clipping() + get_end_clipping()
+    };
 
     // encode alignment
     Json::Value alignment;
@@ -892,11 +896,11 @@ Json::Value Alignment::to_json(size_t node_size,
     if (sequence_.size())
         alignment["annotation"]["ref_sequence"] = sequence_;
 
-    if (query_.empty())
+    if (query_view_.empty())
         return alignment;
 
-    assert(query_.data() - cigar_.get_clipping() == full_query.data());
-    assert(query_.size() + cigar_.get_clipping() + cigar_.get_end_clipping()
+    assert(query_view_.data() - cigar_.get_clipping() == full_query.data());
+    assert(query_view_.size() + cigar_.get_clipping() + cigar_.get_end_clipping()
             == full_query.size());
 
     alignment["annotation"]["cigar"] = cigar_.to_string();
@@ -915,11 +919,11 @@ Json::Value Alignment::to_json(size_t node_size,
     if (is_secondary)
         alignment["is_secondary"] = is_secondary;
 
-    alignment["identity"] = query_.size()
-        ? static_cast<double>(cigar_.get_num_matches()) / query_.size()
+    alignment["identity"] = query_view_.size()
+        ? static_cast<double>(cigar_.get_num_matches()) / query_view_.size()
         : 0;
 
-    alignment["read_mapped"] = static_cast<bool>(query_.size());
+    alignment["read_mapped"] = static_cast<bool>(query_view_.size());
 
     if (orientation_)
         alignment["read_on_reverse_strand"] = orientation_;
@@ -1013,11 +1017,11 @@ std::shared_ptr<const std::string> Alignment
         }
     }
 
-    query_ = { this_query_begin, this_query_size };
+    query_view_ = { this_query_begin, this_query_size };
 
-    if (query_.size() + get_clipping() < query_sequence->size()) {
+    if (query_view_.size() + get_clipping() < query_sequence->size()) {
         cigar_.append(Cigar::CLIPPED,
-                      query_sequence->size() - query_.size() - get_clipping());
+                      query_sequence->size() - query_view_.size() - get_clipping());
     }
 
     if (alignment["annotation"]["cigar"]
@@ -1109,7 +1113,7 @@ void Alignment::insert_gap_prefix(ssize_t gap_length,
             );
         }
 
-        extend_query_begin(query_.data() - gap_length);
+        extend_query_begin(query_view_.data() - gap_length);
     }
 
     nodes_.insert(nodes_.begin(), extra_nodes, DeBruijnGraph::npos);
@@ -1194,16 +1198,16 @@ bool Alignment::is_valid(const DeBruijnGraph &graph, const DBGAlignerConfig *con
         return false;
     }
 
-    if (!cigar_.is_valid(sequence_, query_)) {
+    if (!cigar_.is_valid(sequence_, query_view_)) {
         logger->error("{}", *this);
         return false;
     }
 
-    score_t cigar_score = config ? config->score_cigar(sequence_, query_, cigar_) : 0;
+    score_t cigar_score = config ? config->score_cigar(sequence_, query_view_, cigar_) : 0;
     cigar_score += extra_penalty;
     if (config && score_ != cigar_score) {
         logger->error("Mismatch between CIGAR and score\nCigar score: {}\n{}\t{}",
-                      cigar_score, query_, *this);
+                      cigar_score, query_view_, *this);
         return false;
     }
 
@@ -1213,7 +1217,7 @@ bool Alignment::is_valid(const DeBruijnGraph &graph, const DBGAlignerConfig *con
 
 AlignmentResults::AlignmentResults(std::string_view query, bool is_reverse_complement) {
     // Pad sequences for easier access in 64-bit blocks.
-    // Take the max of the query size and sizeof(query_) to ensure that small-string
+    // Take the max of the query size and sizeof(query_view_) to ensure that small-string
     // optimizations are disabled. Implementation taken from:
     // https://stackoverflow.com/questions/34788789/disable-stdstrings-sso
     query_.reserve(std::max(query.size(), sizeof(query_)) + 8);

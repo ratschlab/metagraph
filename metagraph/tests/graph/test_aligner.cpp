@@ -23,7 +23,7 @@ const std::string test_data_dir = "../tests/data";
 const bool PICK_REV_COMP = true;
 
 inline bool is_exact_match(const Alignment &alignment) {
-    return alignment.get_cigar().is_exact_match(alignment.get_query().size());
+    return alignment.get_cigar().is_exact_match(alignment.get_query_view().size());
 }
 
 void check_score_matrix(const DBGAlignerConfig &config,

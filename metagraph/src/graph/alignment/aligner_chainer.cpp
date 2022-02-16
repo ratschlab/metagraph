@@ -116,8 +116,8 @@ call_seed_chains_both_strands(std::string_view forward,
 
         // clean chain by merging overlapping seeds
         for (size_t i = chain.size() - 1; i > 0; --i) {
-            const char *prev_end = chain[i - 1].get_query().data() + chain[i - 1].get_query().size();
-            const char *cur_begin = chain[i].get_query().data();
+            const char *prev_end = chain[i - 1].get_query_view().data() + chain[i - 1].get_query_view().size();
+            const char *cur_begin = chain[i].get_query_view().data();
             if (prev_end + chain[i].get_offset() >= cur_begin + node_overlap) {
                 Alignment trim = chain[i];
                 Alignment merge = chain[i - 1];
@@ -230,8 +230,8 @@ chain_seeds(const DBGAlignerConfig &config,
             Alignment::Column c = seeds[i].label_columns[j];
             for (auto coord : seeds[i].label_coordinates[j]) {
                 dp_table.emplace_back(c, coord, seeds[i].get_clipping(),
-                                      seeds[i].get_nodes()[0], seeds[i].get_query().size(),
-                                      seeds[i].get_query().size(), nid, i);
+                                      seeds[i].get_nodes()[0], seeds[i].get_query_view().size(),
+                                      seeds[i].get_query_view().size(), nid, i);
             }
         }
     }
@@ -315,12 +315,12 @@ std::vector<Alignment> chain_alignments(std::vector<Alignment>&& alignments,
 
     std::sort(alignments.begin(), alignments.end(), [](const auto &a, const auto &b) {
         return std::make_tuple(a.get_orientation(),
-                               a.get_clipping() + a.get_query().size(),
+                               a.get_clipping() + a.get_query_view().size(),
                                a.get_clipping(),
                                b.get_score(),
                                a.get_sequence().size())
             < std::make_tuple(b.get_orientation(),
-                              b.get_clipping() + b.get_query().size(),
+                              b.get_clipping() + b.get_query_view().size(),
                               b.get_clipping(),
                               a.get_score(),
                               b.get_sequence().size());
@@ -330,7 +330,7 @@ std::vector<Alignment> chain_alignments(std::vector<Alignment>&& alignments,
         std::string_view this_query = rev_compl ? rc_query : query;
         std::vector<score_t> best_score(this_query.size() + 1, 0);
         for (auto it = begin; it != end; ++it) {
-            size_t end_pos = it->get_query().data() + it->get_query().size()
+            size_t end_pos = it->get_query_view().data() + it->get_query_view().size()
                                 - this_query.data();
             if (it->get_score() > best_score[end_pos]) {
                 best_score[end_pos] = it->get_score();
@@ -363,8 +363,8 @@ void construct_alignment_chain(size_t node_overlap,
     assert(begin <= end);
     assert(chain.size());
 
-    const char *chain_begin = chain.get_query().data();
-    const char *chain_end = chain.get_query().data() + chain.get_query().size();
+    const char *chain_begin = chain.get_query_view().data();
+    const char *chain_end = chain.get_query_view().data() + chain.get_query_view().size();
     if (begin == end || chain_end == query.data() + query.size()) {
         callback(std::move(chain));
         return;
@@ -377,8 +377,8 @@ void construct_alignment_chain(size_t node_overlap,
         if (it->get_offset())
             continue;
 
-        const char *next_begin = it->get_query().data();
-        const char *next_end = it->get_query().data() + it->get_query().size();
+        const char *next_begin = it->get_query_view().data();
+        const char *next_end = it->get_query_view().data() + it->get_query_view().size();
 
         assert(chain_begin - chain.get_clipping() == next_begin - it->get_clipping());
         assert(it->get_orientation() == chain.get_orientation());
@@ -407,7 +407,7 @@ void construct_alignment_chain(size_t node_overlap,
             // first trim front of the incoming alignment
             size_t overlap = std::min(
                 static_cast<size_t>((chain.get_cigar().data().end() - 2)->second),
-                aln.trim_query_prefix(chain_end - it->get_query().data(), node_overlap, config)
+                aln.trim_query_prefix(chain_end - it->get_query_view().data(), node_overlap, config)
             );
 
             if (aln.empty() || aln.get_sequence().size() <= node_overlap
@@ -416,7 +416,7 @@ void construct_alignment_chain(size_t node_overlap,
                 continue;
             }
 
-            assert(aln.get_query().data() == chain.get_query().data() + chain.get_query().size());
+            assert(aln.get_query_view().data() == chain.get_query_view().data() + chain.get_query_view().size());
 
             if (overlap < node_overlap)
                 aln.insert_gap_prefix(-overlap, node_overlap, config);

@@ -46,7 +46,7 @@ class Alignment {
               size_t clipping = 0,
               bool orientation = false,
               size_t offset = 0)
-          : query_(query), nodes_(std::move(nodes)), sequence_(std::move(sequence)),
+          : query_view_(query), nodes_(std::move(nodes)), sequence_(std::move(sequence)),
             score_(score), cigar_(Cigar::CLIPPED, clipping), orientation_(orientation),
             offset_(offset) { cigar_.append(std::move(cigar)); }
 
@@ -84,17 +84,18 @@ class Alignment {
 
     score_t get_score() const { return score_; }
 
-    std::string_view get_query() const { return query_; }
+    std::string_view get_query_view() const { return query_view_; }
 
     void extend_query_begin(const char *begin) {
-        const char *full_query_begin = query_.data() - get_clipping();
+        const char *full_query_begin = query_view_.data() - get_clipping();
         assert(full_query_begin >= begin);
         if (full_query_begin > begin)
             cigar_.extend_clipping(full_query_begin - begin);
     }
 
     void extend_query_end(const char *end) {
-        const char *full_query_end = query_.data() + query_.size() + get_end_clipping();
+        const char *full_query_end
+            = query_view_.data() + query_view_.size() + get_end_clipping();
         assert(full_query_end <= end);
         if (full_query_end < end)
             cigar_.append(Cigar::CLIPPED, end - full_query_end);
@@ -142,7 +143,7 @@ class Alignment {
         return orientation_ == other.orientation_
             && offset_ == other.offset_
             && score_ == other.score_
-            && query_ == other.query_
+            && query_view_ == other.query_view_
             && sequence_ == other.sequence_
             && cigar_ == other.cigar_
             && nodes_ == other.nodes_;
@@ -176,8 +177,7 @@ class Alignment {
   private:
     Json::Value path_json(size_t node_size, std::string_view label = {}) const;
 
-    // TODO: rename to query_view_
-    std::string_view query_;
+    std::string_view query_view_;
     std::vector<node_index> nodes_;
     std::string sequence_;
     score_t score_;
@@ -196,9 +196,9 @@ struct LocalAlignmentLess {
         // 2) more of the query is covered, or
         // 3) if it is in the reverse orientation, or
         // 4) if the starting point is later in the query
-        return std::make_tuple(b.get_score(), a.get_query().size(),
+        return std::make_tuple(b.get_score(), a.get_query_view().size(),
                                a.get_orientation(), a.get_clipping())
-            > std::make_tuple(a.get_score(), b.get_query().size(),
+            > std::make_tuple(a.get_score(), b.get_query_view().size(),
                               b.get_orientation(), b.get_clipping());
     }
 };
@@ -209,9 +209,9 @@ struct LocalAlignmentGreater {
         // 2) less of the query is covered, or
         // 3) if it is in the forward orientation, or
         // 4) if the starting point is earlier in the query
-        return std::make_tuple(a.get_score(), b.get_query().size(),
+        return std::make_tuple(a.get_score(), b.get_query_view().size(),
                                b.get_orientation(), b.get_clipping())
-            > std::make_tuple(b.get_score(), a.get_query().size(),
+            > std::make_tuple(b.get_score(), a.get_query_view().size(),
                               a.get_orientation(), a.get_clipping());
     }
 };
@@ -234,9 +234,9 @@ class AlignmentResults {
     void emplace_back(Args&&... args) {
         alignments_.emplace_back(std::forward<Args>(args)...);
 
-        assert(alignments_.back().get_query().data()
+        assert(alignments_.back().get_query_view().data()
             >= get_query(alignments_.back().get_orientation()).c_str());
-        assert(alignments_.back().get_query().data() + alignments_.back().get_query().size()
+        assert(alignments_.back().get_query_view().data() + alignments_.back().get_query_view().size()
             <= get_query(alignments_.back().get_orientation()).c_str()
                 + get_query(alignments_.back().get_orientation()).size());
     }

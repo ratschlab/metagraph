@@ -747,7 +747,7 @@ inline size_t get_num_matches(const std::vector<Alignment> &seeds) {
             continue;
 
         size_t begin = seeds[i].get_clipping();
-        size_t end = begin + seeds[i].get_query().size();
+        size_t end = begin + seeds[i].get_query_view().size();
         if (end > last_end) {
             num_matching += end - begin;
             if (begin < last_end)

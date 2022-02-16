@@ -159,7 +159,7 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
     );
 
     for (auto&& seed : this->BaseSeeder::get_seeds()) {
-        assert(seed.get_query().size() >= this->config_.min_seed_length);
+        assert(seed.get_query_view().size() >= this->config_.min_seed_length);
 
         size_t i = seed.get_clipping();
         assert(i + seed.size() <= min_seed_length.size());
@@ -316,7 +316,7 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
             return a.get_orientation() == b.get_orientation()
                 && a.get_offset() == b.get_offset()
                 && a.get_score() == b.get_score()
-                && a.get_query() == b.get_query()
+                && a.get_query_view() == b.get_query_view()
                 && a.get_sequence() == b.get_sequence()
                 && a.get_cigar() == b.get_cigar();
         }));
@@ -336,7 +336,7 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
         if (!pos_seeds[0].get_offset()
                 || pos_seeds.size() <= this->config_.max_num_seeds_per_locus) {
             size_t begin = seeds_.back().get_clipping();
-            size_t end = begin + seeds_.back().get_query().size();
+            size_t end = begin + seeds_.back().get_query_view().size();
             if (begin < last_end) {
                 this->num_matching_ += end - begin - (last_end - begin);
             } else {

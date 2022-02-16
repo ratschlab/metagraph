@@ -132,8 +132,10 @@ void filter_seed(const Alignment &prev, Alignment &a) {
 struct AlignmentPairedCoordinatesDist {
     size_t operator()(const Alignment &a, const Alignment &b) const {
         size_t max_dist = 0;
-        if (a.label_coordinates.empty() || b.label_coordinates.empty())
-            return b.get_query().data() + b.get_query().size() - a.get_query().data();
+        if (a.label_coordinates.empty() || b.label_coordinates.empty()) {
+            return b.get_query_view().data() + b.get_query_view().size()
+                    - a.get_query_view().data();
+        }
 
         auto a_begin = a.label_columns.begin();
         auto a_end = a.label_columns.end();
@@ -183,8 +185,8 @@ void align_connect(const DeBruijnGraph &graph,
         first.get_score() - next.get_score()
     );
 
-    if (extensions.size() && extensions[0].get_query().data() + extensions[0].get_query().size()
-            > first.get_query().data() + first.get_query().size()) {
+    if (extensions.size() && extensions[0].get_query_view().data() + extensions[0].get_query_view().size()
+            > first.get_query_view().data() + first.get_query_view().size()) {
         assert(extensions[0].get_nodes().front() == next.get_nodes().front());
         left.splice(std::move(extensions[0]));
         std::swap(left, first);
@@ -196,8 +198,8 @@ void align_connect(const DeBruijnGraph &graph,
         }
 
     } else if (!second.get_offset()
-            && first.get_clipping() + first.get_query().size() > second.get_clipping()) {
-        ssize_t overlap = first.get_clipping() + first.get_query().size()
+            && first.get_clipping() + first.get_query_view().size() > second.get_clipping()) {
+        ssize_t overlap = first.get_clipping() + first.get_query_view().size()
                             - second.get_clipping();
         second.trim_query_prefix(overlap, graph.get_k() - 1, config, false);
         assert(second.is_valid(graph, &config));
@@ -341,7 +343,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
             assert(alignment.is_valid(graph_, &config_));
             if (alignment.get_score() > best_score) {
                 best_score = alignment.get_score();
-                query_coverage = alignment.get_query().size();
+                query_coverage = alignment.get_query_view().size();
             }
             paths[i].emplace_back(std::move(alignment));
         }
