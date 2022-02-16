@@ -152,8 +152,8 @@ class Alignment {
 
     Json::Value to_json(size_t node_size,
                         bool is_secondary = false,
-                        std::string_view name = {},
-                        std::string_view label = {}) const;
+                        const std::string &name = {},
+                        const std::string &label = {}) const;
 
     // returns a shared_ptr of the query string which is referenced in this object
     std::shared_ptr<const std::string> load_from_json(const Json::Value &alignment,
@@ -174,8 +174,6 @@ class Alignment {
     std::string format_coords() const;
 
   private:
-    Json::Value path_json(size_t node_size, std::string_view label = {}) const;
-
     std::string_view query_view_;
     std::vector<node_index> nodes_;
     std::string sequence_;
@@ -220,7 +218,7 @@ struct LocalAlignmentGreater {
 // ensures that the query sequence is always accessible.
 class AlignmentResults {
   public:
-    explicit AlignmentResults(std::string_view query, bool is_reverse_complement = false);
+    AlignmentResults(std::string_view query = {}, bool is_reverse_complement = false);
 
     // Copy constructors are disabled to ensure that the string_view pointers
     // in the Alignment objects stay valid

@@ -701,31 +701,36 @@ void Alignment::reverse_complement(const DeBruijnGraph &graph,
 
 // derived from:
 // https://github.com/maickrau/GraphAligner/blob/236e1cf0514cfa9104e9a3333cdc1c43209c3c5a/src/vg.proto
-Json::Value Alignment::path_json(size_t node_size, std::string_view label) const {
-    assert(nodes_.size());
+Json::Value path_json(const std::vector<DeBruijnGraph::node_index> &nodes,
+                      const Cigar &cigar,
+                      size_t node_size,
+                      std::string_view query_view,
+                      size_t offset,
+                      const std::string &label) {
+    assert(nodes.size());
 
     Json::Value path;
 
-    auto cigar_it = cigar_.data().begin();
-    if (cigar_.size() && cigar_it->first == Cigar::CLIPPED) {
+    auto cigar_it = cigar.data().begin();
+    if (cigar.size() && cigar_it->first == Cigar::CLIPPED) {
         cigar_it++;
     }
 
     size_t cigar_offset = 0;
-    assert(cigar_it != cigar_.data().end());
+    assert(cigar_it != cigar.data().end());
 
     int64_t rank = 1;
-    const char *query_start = query_view_.data();
+    const char *query_start = query_view.data();
 
 #ifndef NDEBUG
-    const char *query_end = query_view_.data() + query_view_.size();
+    const char *query_end = query_view.data() + query_view.size();
 #endif
 
-    size_t cur_pos = rank == 1 ? offset_ : 0;
+    size_t cur_pos = rank == 1 ? offset : 0;
 
     Json::Value mapping;
     Json::Value position;
-    position["node_id"] = nodes_.front();
+    position["node_id"] = nodes.front();
 
     if (cur_pos)
         position["offset"] = Json::Value::UInt64(cur_pos);
@@ -736,7 +741,7 @@ Json::Value Alignment::path_json(size_t node_size, std::string_view label) const
     mapping["position"] = position;
 
     // handle alignment to the first node
-    while (cur_pos < node_size && cigar_it != cigar_.data().end()) {
+    while (cur_pos < node_size && cigar_it != cigar.data().end()) {
         assert(cigar_it->second > cigar_offset);
         size_t next_pos = std::min(node_size,
                                    cur_pos + (cigar_it->second - cigar_offset));
@@ -776,7 +781,7 @@ Json::Value Alignment::path_json(size_t node_size, std::string_view label) const
             case Cigar::CLIPPED: {
                 ++cigar_it;
                 cigar_offset = 0;
-                assert(cigar_it == cigar_.data().end());
+                assert(cigar_it == cigar.data().end());
                 continue;
             } break;
             case Cigar::NODE_INSERTION: {
@@ -799,8 +804,8 @@ Json::Value Alignment::path_json(size_t node_size, std::string_view label) const
     path["mapping"].append(mapping);
 
     // handle the rest of the alignment
-    for (auto node_it = nodes_.begin() + 1; node_it != nodes_.end(); ++node_it) {
-        assert(cigar_it != cigar_.data().end());
+    for (auto node_it = nodes.begin() + 1; node_it != nodes.end(); ++node_it) {
+        assert(cigar_it != cigar.data().end());
         assert(cigar_it->second > cigar_offset);
 
         Json::Value mapping;
@@ -823,7 +828,7 @@ Json::Value Alignment::path_json(size_t node_size, std::string_view label) const
             ++cigar_it;
             cigar_offset = 0;
             mapping["edit"].append(edit);
-            assert(cigar_it != cigar_.data().end());
+            assert(cigar_it != cigar.data().end());
         }
 
         Json::Value edit;
@@ -860,24 +865,23 @@ Json::Value Alignment::path_json(size_t node_size, std::string_view label) const
     }
 
     assert(query_start == query_end);
-    assert(cigar_it == cigar_.data().end()
-            || (cigar_it + 1 == cigar_.data().end() && cigar_it->first == Cigar::CLIPPED));
+    assert(cigar_it == cigar.data().end()
+            || (cigar_it + 1 == cigar.data().end() && cigar_it->first == Cigar::CLIPPED));
 
-    path["length"] = Json::Value::UInt64(nodes_.size());
+    path["length"] = Json::Value::UInt64(nodes.size());
 
-    if (nodes_.front() == nodes_.back())
+    if (nodes.front() == nodes.back())
         path["is_circular"] = true;
 
-    if (label.data())
-        path["name"] = std::string(label);
+    path["name"] = label;
 
     return path;
 }
 
 Json::Value Alignment::to_json(size_t node_size,
                                bool is_secondary,
-                               std::string_view read_name,
-                               std::string_view label) const {
+                               const std::string &read_name,
+                               const std::string &label) const {
     if (sequence_.find("$") != std::string::npos
             || std::find(nodes_.begin(), nodes_.end(), DeBruijnGraph::npos) != nodes_.end()) {
         throw std::runtime_error("JSON output for chains not supported");
@@ -891,7 +895,7 @@ Json::Value Alignment::to_json(size_t node_size,
     // encode alignment
     Json::Value alignment;
 
-    alignment["name"] = read_name.data() ? std::string(read_name) : "";
+    alignment["name"] = read_name;
     alignment["sequence"] = std::string(full_query);
 
     if (sequence_.size())
@@ -908,7 +912,7 @@ Json::Value Alignment::to_json(size_t node_size,
 
     // encode path
     if (nodes_.size())
-        alignment["path"] = path_json(node_size, label);
+        alignment["path"] = path_json(nodes_, cigar_, node_size, query_view_, offset_, label);
 
     alignment["score"] = static_cast<int32_t>(score_);
 
@@ -1108,10 +1112,8 @@ void Alignment::insert_gap_prefix(ssize_t gap_length,
             assert(extra_nodes >= 2);
             score_ += config.gap_opening_penalty
                 + (extra_nodes - 2) * config.gap_extension_penalty;
-            cigar_.data().insert(
-                cigar_.data().begin(),
-                Cigar::value_type{ Cigar::NODE_INSERTION, extra_nodes - 1 }
-            );
+            cigar_.data().insert(cigar_.data().begin(),
+                                 Cigar::value_type{ Cigar::NODE_INSERTION, extra_nodes - 1 });
         }
 
         extend_query_begin(query_view_.data() - gap_length);

@@ -25,7 +25,7 @@ class IDBGAligner {
     typedef std::tuple<std::string /* header */,
                        std::string /* seq */,
                        bool /* orientation of seq */> Query;
-    typedef std::function<void(std::string_view /* header */,
+    typedef std::function<void(const std::string& /* header */,
                                AlignmentResults&& /* alignments */)> AlignmentCallback;
 
     virtual ~IDBGAligner() {}

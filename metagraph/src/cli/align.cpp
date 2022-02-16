@@ -243,7 +243,7 @@ void gfa_map_files(const Config *config,
     }
 }
 
-std::string format_alignment(std::string_view header,
+std::string format_alignment(const std::string &header,
                              const AlignmentResults &paths,
                              const DeBruijnGraph &graph,
                              const Config &config) {
@@ -409,7 +409,7 @@ int align_to_graph(Config *config) {
                 }
 
                 aligner->align_batch(batch,
-                    [&](std::string_view header, AlignmentResults&& paths) {
+                    [&](const std::string &header, AlignmentResults&& paths) {
                         const auto &res = format_alignment(header, paths, *graph, *config);
                         std::lock_guard<std::mutex> lock(print_mutex);
                         *out << res;

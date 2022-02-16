@@ -11,9 +11,9 @@ namespace align {
 
 AlignmentResults IDBGAligner::align(std::string_view query,
                                     bool is_reverse_complement) const {
-    AlignmentResults result(query);
+    AlignmentResults result;
     align_batch({ Query{ std::string{}, query, is_reverse_complement} },
-        [&](std::string_view, AlignmentResults&& alignment) {
+        [&](const std::string&, AlignmentResults&& alignment) {
             std::swap(result, alignment);
         }
     );
