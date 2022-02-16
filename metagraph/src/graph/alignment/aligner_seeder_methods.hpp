@@ -14,7 +14,6 @@ namespace align {
 
 class ISeeder {
   public:
-    typedef DeBruijnGraph::node_index node_index;
     typedef Alignment Seed;
 
     virtual ~ISeeder() {}
@@ -42,7 +41,7 @@ class ManualSeeder : public ISeeder {
 
 class ExactSeeder : public ISeeder {
   public:
-    typedef DBGAlignerConfig::score_t score_t;
+    typedef DeBruijnGraph::node_index node_index;
 
     ExactSeeder(const DeBruijnGraph &graph,
                 std::string_view query,
@@ -61,7 +60,7 @@ class ExactSeeder : public ISeeder {
     bool orientation_;
     std::vector<node_index> query_nodes_;
     const DBGAlignerConfig &config_;
-    std::vector<score_t> partial_sum_;
+    std::vector<Alignment::score_t> partial_sum_;
     size_t num_matching_;
 
     size_t num_exact_matching() const;
@@ -104,8 +103,6 @@ template <class BaseSeeder>
 class SuffixSeeder : public BaseSeeder {
   public:
     typedef typename BaseSeeder::Seed Seed;
-    typedef typename BaseSeeder::node_index node_index;
-    typedef typename BaseSeeder::score_t score_t;
 
     template <typename... Args>
     SuffixSeeder(Args&&... args) : BaseSeeder(std::forward<Args>(args)...) {
@@ -117,7 +114,6 @@ class SuffixSeeder : public BaseSeeder {
     std::vector<Seed> get_seeds() const override { return seeds_; }
 
     BaseSeeder& get_base_seeder() { return dynamic_cast<BaseSeeder&>(*this); }
-    static const DBGSuccinct& get_base_dbg_succ(const DeBruijnGraph &graph);
 
   protected:
     void generate_seeds();

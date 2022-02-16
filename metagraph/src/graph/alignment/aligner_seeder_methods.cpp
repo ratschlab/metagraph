@@ -2,6 +2,7 @@
 
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/canonical_dbg.hpp"
+#include "common/logger.hpp"
 #include "common/utils/template_utils.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 
@@ -9,6 +10,10 @@
 namespace mtg {
 namespace graph {
 namespace align {
+
+using mtg::common::logger;
+
+typedef Alignment::score_t score_t;
 
 ExactSeeder::ExactSeeder(const DeBruijnGraph &graph,
                          std::string_view query,
@@ -111,7 +116,7 @@ void suffix_to_prefix(const DBGSuccinct &dbg_succ,
         return;
     }
 
-    std::vector<BOSSEdgeRange> range_stack{ index_range };
+    std::vector<BOSSEdgeRange> range_stack { index_range };
 
     while (range_stack.size()) {
         BOSSEdgeRange cur_range = std::move(range_stack.back());
@@ -134,8 +139,22 @@ void suffix_to_prefix(const DBGSuccinct &dbg_succ,
     }
 }
 
+const DBGSuccinct& get_base_dbg_succ(const DeBruijnGraph *graph) {
+    if (const auto *wrapper = dynamic_cast<const DBGWrapper<>*>(graph))
+        graph = &wrapper->get_graph();
+
+    try {
+        return dynamic_cast<const DBGSuccinct&>(*graph);
+    } catch (const std::bad_cast &e) {
+        logger->error("SuffixSeeder can be used only with succinct graph representation");
+        throw e;
+    }
+}
+
 template <class BaseSeeder>
 void SuffixSeeder<BaseSeeder>::generate_seeds() {
+    typedef typename BaseSeeder::node_index node_index;
+
     // this method assumes that seeds from the BaseSeeder are exact match only
     static_assert(std::is_base_of_v<ExactSeeder, BaseSeeder>);
 
@@ -144,7 +163,7 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
         return;
     }
 
-    const DBGSuccinct &dbg_succ = get_base_dbg_succ(this->graph_);
+    const DBGSuccinct &dbg_succ = get_base_dbg_succ(&this->graph_);
 
     if (this->query_.size() < this->config_.min_seed_length)
         return;
@@ -284,10 +303,8 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
             assert(seed_length < this->config_.min_seed_length
                 || j < min_seed_length.size());
 
-            if (seed_length < this->config_.min_seed_length
-                    || seed_length < min_seed_length[j]) {
+            if (seed_length < this->config_.min_seed_length || seed_length < min_seed_length[j])
                 continue;
-            }
 
             // e.g., matched: ***ATG, want ATG***
             suffix_to_prefix(
@@ -420,23 +437,6 @@ auto MEMSeeder::get_seeds() const -> std::vector<Seed> {
     }
 
     return seeds;
-}
-
-template <class BaseSeeder>
-const DBGSuccinct& SuffixSeeder<BaseSeeder>
-::get_base_dbg_succ(const DeBruijnGraph &graph) {
-    try {
-        if (const auto *wrapper = dynamic_cast<const DBGWrapper<>*>(&graph))
-            return dynamic_cast<const DBGSuccinct&>(wrapper->get_graph());
-
-        return dynamic_cast<const DBGSuccinct&>(graph);
-
-    } catch (const std::bad_cast &e) {
-        common::logger->error(
-            "SuffixSeeder can be used only with succinct graph representation"
-        );
-        throw e;
-    }
 }
 
 template class SuffixSeeder<ExactSeeder>;
