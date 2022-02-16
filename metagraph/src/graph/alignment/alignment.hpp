@@ -155,9 +155,10 @@ class Alignment {
                         const std::string &name = {},
                         const std::string &label = {}) const;
 
-    // returns a shared_ptr of the query string which is referenced in this object
-    std::shared_ptr<const std::string> load_from_json(const Json::Value &alignment,
-                                                      const DeBruijnGraph &graph);
+    // writes to |query_str| the string which will be referenced in this object
+    void load_from_json(const Json::Value &alignment,
+                        const DeBruijnGraph &graph,
+                        std::string *query_str);
 
     bool is_valid(const DeBruijnGraph &graph, const DBGAlignerConfig *config = nullptr) const;
 

@@ -52,37 +52,13 @@ std::string Alignment::format_coords() const {
         decoded_labels.emplace_back(label_encoder->decode(label_columns[i]));
         for (uint64_t coord : label_coordinates[i]) {
             // alignment coordinates are 1-based inclusive ranges
-            decoded_labels.back() += fmt::format(
-                ":{}-{}", coord + 1, coord + sequence_.size()
-            );
+            decoded_labels.back()
+                += fmt::format(":{}-{}", coord + 1, coord + sequence_.size());
         }
     }
 
     return fmt::format("{}", fmt::join(decoded_labels, ";"));
 }
-
-struct MergeCoords {
-    MergeCoords(size_t a_sequence_length) : a_len_(a_sequence_length) {}
-
-    template <class InIt1, class InIt2, class OutIt>
-    void operator()(InIt1 a_begin, InIt1 a_end, InIt2 b_begin, InIt2 b_end, OutIt out) const {
-        while (a_begin != a_end && b_begin != b_end) {
-            if (*a_begin + a_len_ < *b_begin) {
-                ++a_begin;
-            } else if (*a_begin + a_len_ > *b_begin) {
-                ++b_begin;
-            } else {
-                assert(*a_begin + a_len_ == *b_begin);
-                *out = *a_begin;
-                ++out;
-                ++a_begin;
-                ++b_begin;
-            }
-        }
-    }
-
-    size_t a_len_;
-};
 
 bool Alignment::append(Alignment&& other) {
     assert(query_view_.data() + query_view_.size() + other.get_clipping()
@@ -102,8 +78,6 @@ bool Alignment::append(Alignment&& other) {
         LabelSet merged_label_columns;
         CoordinateSet merged_label_coordinates;
 
-        MergeCoords merge_coords(sequence_.size());
-
         // if the alignments fit together without gaps, make sure that the
         // coordinates form a contiguous range
         utils::match_indexed_values(
@@ -113,9 +87,22 @@ bool Alignment::append(Alignment&& other) {
             other.label_coordinates.begin(),
             [&](auto col, const auto &coords, const auto &other_coords) {
                 Tuple merged;
-                merge_coords(coords.begin(), coords.end(),
-                             other_coords.begin(), other_coords.end(),
-                             std::back_inserter(merged));
+                auto a_begin = coords.begin();
+                auto a_end = coords.end();
+                auto b_begin = other_coords.begin();
+                auto b_end = other_coords.end();
+                while (a_begin != a_end && b_begin != b_end) {
+                    if (*a_begin + sequence_.size() < *b_begin) {
+                        ++a_begin;
+                    } else if (*a_begin + sequence_.size() > *b_begin) {
+                        ++b_begin;
+                    } else {
+                        assert(*a_begin + sequence_.size() == *b_begin);
+                        merged.push_back(*a_begin);
+                        ++a_begin;
+                        ++b_begin;
+                    }
+                }
                 if (merged.size()) {
                     merged_label_columns.push_back(col);
                     merged_label_coordinates.push_back(std::move(merged));
@@ -158,17 +145,13 @@ bool Alignment::append(Alignment&& other) {
         std::swap(label_columns, merged_label_columns);
     }
 
-
     nodes_.insert(nodes_.end(), other.nodes_.begin(), other.nodes_.end());
     sequence_ += std::move(other.sequence_);
     score_ += other.score_;
-
     cigar_.append(std::move(other.cigar_));
-
     // expand the query window to cover both alignments
     query_view_ = std::string_view(query_view_.data(),
                                    other.query_view_.end() - query_view_.begin());
-
     return ret_val;
 }
 
@@ -960,15 +943,16 @@ Json::Value Alignment::to_json(size_t node_size,
     return alignment;
 }
 
-std::shared_ptr<const std::string> Alignment
-::load_from_json(const Json::Value &alignment, const DeBruijnGraph &graph) {
+void Alignment::load_from_json(const Json::Value &alignment,
+                               const DeBruijnGraph &graph,
+                               std::string *query_sequence) {
+    assert(query_sequence);
+
     cigar_ = Cigar();
     nodes_.clear();
     sequence_.clear();
 
-    auto query_sequence = std::make_shared<const std::string>(
-        alignment["sequence"].asString()
-    );
+    *query_sequence = alignment["sequence"].asString();
     orientation_ = alignment["read_on_reverse_strand"].asBool();
     score_ = alignment["score"].asInt();
     const Json::Value &mapping = alignment["path"]["mapping"];
@@ -1040,8 +1024,6 @@ std::shared_ptr<const std::string> Alignment
 
     if (!is_valid(graph))
         throw std::runtime_error("ERROR: JSON reconstructs invalid alignment");
-
-    return query_sequence;
 }
 
 void Alignment::insert_gap_prefix(ssize_t gap_length,
