@@ -185,8 +185,7 @@ void align_connect(const DeBruijnGraph &graph,
         first.get_score() - next.get_score()
     );
 
-    if (extensions.size() && extensions[0].get_query_view().data() + extensions[0].get_query_view().size()
-            > first.get_query_view().data() + first.get_query_view().size()) {
+    if (extensions.size() && extensions[0].get_end_clipping() < first.get_end_clipping()) {
         assert(extensions[0].get_nodes().front() == next.get_nodes().front());
         left.splice(std::move(extensions[0]));
         std::swap(left, first);
