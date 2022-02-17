@@ -9,6 +9,7 @@
 
 #include "common/vector.hpp"
 #include "graph/representation/base/dbg_wrapper.hpp"
+#include "graph/representation/succinct/dbg_succinct.hpp"
 
 
 namespace mtg {
@@ -129,6 +130,9 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
     // find all child nodes of node in the CanonicalDBG which are represented
     // in the reverse complement orientation in the underlying primary graph
     void append_next_rc_nodes(node_index node, SmallVector<node_index> &children) const;
+
+    boss::BOSS::edge_index get_rev_comp_suffix_node(node_index node) const;
+    boss::BOSS::edge_index get_rev_comp_prefix_node(node_index node) const;
 };
 
 } // namespace graph

@@ -33,6 +33,7 @@ class Config {
     bool to_fasta = false;
     bool enumerate_out_sequences = false;
     bool to_gfa = false;
+    bool noderc = false;
     bool output_compacted = false;
     bool unitigs = false;
     bool kmers_in_single_form = false;
