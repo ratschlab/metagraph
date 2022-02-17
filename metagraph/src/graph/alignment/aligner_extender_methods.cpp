@@ -14,7 +14,7 @@ namespace graph {
 namespace align {
 
 using score_t = Alignment::score_t;
-constexpr score_t ninf = Alignment::ninf;
+const score_t ninf = Alignment::ninf;
 
 
 DefaultColumnExtender::DefaultColumnExtender(const DeBruijnGraph &graph,
@@ -397,13 +397,13 @@ DefaultColumnExtender::DPTColumn::create(size_t size, RestArgs&&... args) {
 
     // the size is set properly to allow for AlignedVector methods (size(), push_back())
     // to function properly
-    column.S.resize(size, Alignment::ninf);
-    column.E.resize(size, Alignment::ninf);
-    column.F.resize(size, Alignment::ninf);
+    column.S.resize(size, ninf);
+    column.E.resize(size, ninf);
+    column.F.resize(size, ninf);
 
-    std::fill(column.S.data() + column.S.size(), column.S.data() + column.S.capacity(), Alignment::ninf);
-    std::fill(column.E.data() + column.E.size(), column.E.data() + column.E.capacity(), Alignment::ninf);
-    std::fill(column.F.data() + column.F.size(), column.F.data() + column.F.capacity(), Alignment::ninf);
+    std::fill(column.S.data() + column.S.size(), column.S.data() + column.S.capacity(), ninf);
+    std::fill(column.E.data() + column.E.size(), column.E.data() + column.E.capacity(), ninf);
+    std::fill(column.F.data() + column.F.size(), column.F.data() + column.F.capacity(), ninf);
 
     return column;
 }

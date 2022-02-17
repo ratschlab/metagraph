@@ -15,6 +15,7 @@ namespace align {
 
 using mtg::common::logger;
 
+typedef annot::binmat::BinaryMatrix::Row Row;
 typedef annot::binmat::BinaryMatrix::Column Column;
 typedef AnnotationBuffer::Columns Columns;
 typedef DeBruijnGraph::node_index node_index;
@@ -35,203 +36,191 @@ AnnotationBuffer::AnnotationBuffer(const DeBruijnGraph &graph, const Annotator &
     }
 }
 
-// void AnnotationBuffer::fetch_queued_annotations() {
+void AnnotationBuffer::fetch_queued_annotations() {
+    assert(graph_.get_mode() != DeBruijnGraph::PRIMARY
+                && "PRIMARY graphs must be wrapped into CANONICAL");
 
+    std::vector<node_index> queued_nodes;
+    std::vector<Row> queued_rows;
 
-//     assert(graph_.get_mode() != DeBruijnGraph::PRIMARY
-//                 && "PRIMARY graphs must be wrapped into CANONICAL");
+    for (const auto &path : queued_paths_) {
+        // TODO: this cascade of graph unwrapping is ugly, find a cleaner way to do it
+        const DeBruijnGraph *base_graph = &graph_;
+        bool reverse_path = false;
+        if (const auto *rc_dbg = dynamic_cast<const RCDBG*>(base_graph)) {
+            base_graph = &rc_dbg->get_graph();
+            reverse_path = true;
+        }
 
-//     if (path.empty())
-//         return {};
+        const auto *canonical = dynamic_cast<const CanonicalDBG*>(base_graph);
+        if (canonical)
+            base_graph = &canonical->get_graph();
 
-//     assert(query.size() >= graph_.get_k());
-//     assert(path.size() == query.size() - graph_.get_k() + 1);
+        std::vector<node_index> base_path;
+        if (base_graph->get_mode() == DeBruijnGraph::CANONICAL) {
+            std::string query = spell_path(graph_, path);
+            if (reverse_path)
+                reverse_complement(query.begin(), query.end());
 
-//     // TODO: this cascade of graph unwrapping is ugly, find a cleaner way to do it
-//     const DeBruijnGraph *base_graph = &graph_;
-//     bool reverse_path = false;
-//     if (const auto *rc_dbg = dynamic_cast<const RCDBG*>(base_graph)) {
-//         base_graph = &rc_dbg->get_graph();
-//         reverse_path = true;
-//     }
+            base_path = map_to_nodes(*base_graph, query);
+        } else if (canonical) {
+            base_path.reserve(path.size());
+            for (node_index node : path) {
+                base_path.emplace_back(canonical->get_base_node(node));
+            }
+        } else {
+            base_path = path;
+        }
 
-//     const auto *canonical = dynamic_cast<const CanonicalDBG*>(base_graph);
-//     if (canonical)
-//         base_graph = &canonical->get_graph();
+        assert(base_path.size() == path.size());
 
-//     bool base_is_canonical = (base_graph->get_mode() == DeBruijnGraph::CANONICAL);
+        if (reverse_path)
+            std::reverse(base_path.begin(), base_path.end());
 
-//     std::vector<node_index> base_path;
-//     if (base_is_canonical) {
-//         if (query.front() == '#')
-//             query = graph_.get_node_sequence(path[0]) + query.substr(graph_.get_k());
+        const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(base_graph);
+        const boss::BOSS *boss = dbg_succ ? &dbg_succ->get_boss() : nullptr;
+        for (size_t i = 0; i < path.size(); ++i) {
+            Row row = AnnotatedDBG::graph_to_anno_index(base_path[i]);
+            size_t val = 0;
 
-//         if (reverse_path)
-//             reverse_complement(query.begin(), query.end());
+            if (base_path[i] == DeBruijnGraph::npos) {
+                // this can happen when the base graph is CANONICAL and path[i] is a
+                // dummy node
+                if (node_to_cols_.emplace(path[i], val).second && multi_int_)
+                    label_coords_.emplace_back();
 
-//         base_path = map_to_nodes(*base_graph, query);
-//     } else if (canonical) {
-//         base_path.reserve(path.size());
-//         for (node_index node : path) {
-//             base_path.emplace_back(canonical->get_base_node(node));
-//         }
-//     } else {
-//         base_path = path;
-//     }
+                continue;
+            }
 
-//     assert(base_path.size() == path.size());
+            if (boss && !boss->get_W(dbg_succ->kmer_to_boss_index(base_path[i]))) {
+                // skip dummy nodes
+                if (node_to_cols_.emplace(path[i], val).second && multi_int_)
+                    label_coords_.emplace_back();
 
-//     if (reverse_path)
-//         std::reverse(base_path.begin(), base_path.end());
+                if (node_to_cols_.emplace(base_path[i], val).second && multi_int_)
+                    label_coords_.emplace_back();
 
-//     const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(base_graph);
-//     const boss::BOSS *boss = dbg_succ ? &dbg_succ->get_boss() : nullptr;
-//     for (size_t i = 0; i < path.size(); ++i) {
-//         auto row = AnnotatedDBG::graph_to_anno_index(base_path[i]);
-//         size_t val = 0;
+                continue;
+            }
 
-//         if (base_path[i] == DeBruijnGraph::npos) {
-//             // this can happen when the base graph is CANONICAL and path[i] is a
-//             // dummy node
-//             if (node_to_cols_.emplace(path[i], val).second && multi_int_)
-//                 label_coords_.emplace_back();
+            auto find_a = node_to_cols_.find(path[i]);
+            auto find_b = node_to_cols_.find(base_path[i]);
 
-//             continue;
-//         }
+            if (find_a == node_to_cols_.end() && find_b == node_to_cols_.end()) {
+                val = nannot;
+                node_to_cols_.emplace(path[i], val);
+                queued_rows.push_back(row);
+                queued_nodes.push_back(path[i]);
 
-//         if (boss && !boss->get_W(dbg_succ->kmer_to_boss_index(base_path[i]))) {
-//             // skip dummy nodes
-//             if (node_to_cols_.emplace(path[i], val).second && multi_int_)
-//                 label_coords_.emplace_back();
+                if (path[i] != base_path[i]) {
+                    node_to_cols_.emplace(base_path[i], val);
+                    queued_rows.push_back(row);
+                    queued_nodes.push_back(base_path[i]);
+                }
+            } else if (find_a == node_to_cols_.end() && find_b != node_to_cols_.end()) {
+                node_to_cols_.emplace(path[i], find_b->second);
+                if (find_b->second == nannot) {
+                    queued_rows.push_back(row);
+                    queued_nodes.push_back(path[i]);
+                }
+            } else if (find_a != node_to_cols_.end() && find_b == node_to_cols_.end()) {
+                node_to_cols_.emplace(base_path[i], find_a->second);
+            } else {
+                size_t label_i = std::min(find_a->second, find_b->second);
+                if (label_i != nannot) {
+                    find_a.value() = label_i;
+                    find_b.value() = label_i;
+                }
+            }
+        }
+    }
 
-//             if (node_to_cols_.emplace(base_path[i], val).second && multi_int_)
-//                 label_coords_.emplace_back();
+    queued_paths_.clear();
 
-//             continue;
-//         }
+    if (queued_nodes.empty())
+        return;
 
-//         auto find_a = node_to_cols_.find(path[i]);
-//         auto find_b = node_to_cols_.find(base_path[i]);
+    // TODO: this cascade of unwrapping is ugly, find a better way to do this
+    const DeBruijnGraph *base_graph = &graph_;
+    if (const auto *rc_dbg = dynamic_cast<const RCDBG*>(base_graph))
+        base_graph = &rc_dbg->get_graph();
 
-//         if (find_a == node_to_cols_.end() && find_b == node_to_cols_.end()) {
-//             val = nannot;
-//             node_to_cols_.emplace(path[i], val);
-//             queued_nodes_.push_back(path[i]);
+    const auto *canonical = dynamic_cast<const CanonicalDBG*>(base_graph);
 
-//             if (path[i] != base_path[i]) {
-//                 node_to_cols_.emplace(base_path[i], val);
-//                 queued_nodes_.push_back(base_path[i]);
-//             }
-//         } else if (find_a == node_to_cols_.end() && find_b != node_to_cols_.end()) {
-//             node_to_cols_.emplace(path[i], find_b->second);
-//             if (find_b->second == nannot) {
-//                 queued_nodes_.push_back(path[i]);
-//             }
-//         } else if (find_a != node_to_cols_.end() && find_b == node_to_cols_.end()) {
-//             node_to_cols_.emplace(base_path[i], find_a->second);
-//         } else {
-//             size_t label_i = std::min(find_a->second, find_b->second);
-//             if (label_i != nannot) {
-//                 find_a.value() = label_i;
-//                 find_b.value() = label_i;
-//             }
-//         }
-//     }
+    auto push_node_labels = [&](auto node_it, auto row_it, auto&& labels) {
+        assert(node_it != queued_nodes.end());
+        assert(node_to_cols_.count(*node_it));
+        assert(node_to_cols_.count(AnnotatedDBG::anno_to_graph_index(*row_it)));
 
-//     return std::make_pair(std::move(base_path), reverse_path);
+        size_t label_i = emplace_column_set(std::forward<decltype(labels)>(labels));
+        node_index base_node = AnnotatedDBG::anno_to_graph_index(*row_it);
+        node_to_cols_[*node_it] = label_i;
+        if (base_node != *node_it) {
+            auto find = node_to_cols_.find(base_node);
+            if (find == node_to_cols_.end()) {
+                node_to_cols_[base_node] = label_i;
+                if (multi_int_)
+                    label_coords_.emplace_back(label_coords_.back());
+            }
+        } else if (canonical) {
+            node_index rc_node = canonical->reverse_complement(*node_it);
+            auto find = node_to_cols_.find(rc_node);
+            if (find == node_to_cols_.end()) {
+                node_to_cols_[rc_node] = label_i;
+                if (multi_int_)
+                    label_coords_.emplace_back(label_coords_.back());
+            }
+        }
+    };
 
+    auto node_it = queued_nodes.begin();
+    auto row_it = queued_rows.begin();
+    if (multi_int_) {
+        // extract both labels and coordinates, then store them separately
+        for (auto&& row_tuples : multi_int_->get_row_tuples(queued_rows)) {
+            Columns labels;
+            labels.reserve(row_tuples.size());
+            label_coords_.emplace_back();
+            label_coords_.back().reserve(row_tuples.size());
+            for (auto&& [label, coords] : row_tuples) {
+                labels.push_back(label);
+                label_coords_.back().emplace_back(std::forward<decltype(coords)>(coords));
+            }
+            push_node_labels(node_it++, row_it++, std::move(labels));
+        }
+    } else {
+        for (auto&& labels : annotator_.get_matrix().get_rows(queued_rows)) {
+            push_node_labels(node_it++, row_it++, std::move(labels));
+        }
+    }
 
-//     if (queued_nodes_.empty())
-//         return;
+#ifndef NDEBUG
+    for (const auto &[node, val] : node_to_cols_) {
+        assert(val != nannot);
+    }
+#endif
+}
 
-//     // TODO: this cascade of unwrapping is ugly, find a better way to do this
-//     const DeBruijnGraph *base_graph = &graph_;
-//     if (const auto *rc_dbg = dynamic_cast<const RCDBG*>(base_graph))
-//         base_graph = &rc_dbg->get_graph();
+auto AnnotationBuffer::get_labels_and_coords(node_index node) const
+        -> std::pair<const Columns*, const CoordinateSet*> {
+    std::pair<const Columns*, const CoordinateSet*> ret_val { nullptr, nullptr };
 
-//     const auto *canonical = dynamic_cast<const CanonicalDBG*>(base_graph);
+    auto it = node_to_cols_.find(node);
 
-//     auto push_node_labels = [&](auto node_it, auto row_it, auto&& labels) {
-//         assert(node_it != queued_nodes_.end());
-//         assert(node_to_cols_.count(*node_it));
-//         assert(node_to_cols_.count(AnnotatedDBG::anno_to_graph_index(*row_it)));
-//         assert(node_to_cols_[*node_it].first
-//             == *(added_rows_.begin() + (node_it - queued_nodes_.begin())));
+    // if the node hasn't been seen before, or if its annotations haven't
+    // been fetched, return nothing
+    if (it == node_to_cols_.end() || it->second == nannot)
+        return ret_val;
 
-//         size_t label_i = emplace_column_set(std::forward<decltype(labels)>(labels));
-//         node_index base_node = AnnotatedDBG::anno_to_graph_index(*row_it);
-//         node_to_cols_[*node_it].second = label_i;
-//         if (base_node != *node_it) {
-//             auto find = node_to_cols_.find(base_node);
-//             if (find == node_to_cols_.end()) {
-//                 node_to_cols_[base_node] = std::make_pair(*row_it, label_i);
-//                 if (multi_int_)
-//                     label_coords_.emplace_back(label_coords_.back());
-//             }
-//         } else if (canonical) {
-//             node_index rc_node = canonical->reverse_complement(*node_it);
-//             auto find = node_to_cols_.find(rc_node);
-//             if (find == node_to_cols_.end()) {
-//                 node_to_cols_[rc_node] = std::make_pair(*row_it, label_i);
-//                 if (multi_int_)
-//                     label_coords_.emplace_back(label_coords_.back());
-//             }
-//         }
-//     };
+    ret_val.first = &column_sets_.data()[it->second];
 
-//     auto node_it = queued_nodes_.begin();
-//     if (multi_int_) {
-//         // extract both labels and coordinates, then store them separately
-//         for (auto&& row_tuples : multi_int_->get_row_tuples(added_rows_)) {
-//             Columns labels;
-//             labels.reserve(row_tuples.size());
-//             label_coords_.emplace_back();
-//             label_coords_.back().reserve(row_tuples.size());
-//             for (auto&& [label, coords] : row_tuples) {
-//                 labels.push_back(label);
-//                 label_coords_.back().emplace_back(std::forward<decltype(coords)>(coords));
-//             }
+    if (has_coordinates()) {
+        assert(static_cast<size_t>(it - node_to_cols_.begin()) < label_coords_.size());
+        ret_val.second = &label_coords_[it - node_to_cols_.begin()];
+    }
 
-//             push_node_labels(node_it++, row_it++, std::move(labels));
-//         }
-//     } else {
-//         for (auto&& labels : annotator_.get_matrix().get_rows(added_rows_)) {
-//             push_node_labels(node_it++, row_it++, std::forward<decltype(labels)>(labels));
-//         }
-//     }
-
-//     assert(node_it == queued_nodes_.end());
-
-//     queued_nodes_.clear();
-
-// #ifndef NDEBUG
-//     for (const auto &[node, val] : node_to_cols_) {
-//         assert(val.second != nannot);
-//     }
-// #endif
-// }
-
-// auto AnnotationBuffer::get_labels_and_coords(node_index node) const
-//         -> std::pair<const Columns*, const CoordinateSet*> {
-//     std::pair<const Columns*, const CoordinateSet*> ret_val { nullptr, nullptr };
-
-//     auto it = node_to_cols_.find(node);
-
-//     // if the node hasn't been seen before, or if its annotations haven't
-//     // been fetched, return nothing
-//     if (it == node_to_cols_.end() || it->second == nannot)
-//         return ret_val;
-
-//     ret_val.first = &column_sets_.data()[it->second];
-
-//     if (has_coordinates()) {
-//         assert(static_cast<size_t>(it - node_to_cols_.begin()) < label_coords_.size());
-//         ret_val.second = &label_coords_[it - node_to_cols_.begin()];
-//     }
-
-//     return ret_val;
-// }
-
+    return ret_val;
+}
 
 template <class T1, class T2>
 bool overlap_with_diff(const T1 &tuple1, const T2 &tuple2, size_t diff) {

@@ -15,7 +15,6 @@ namespace align {
 
 using mtg::common::logger;
 
-
 Alignment::Alignment(std::string_view query,
                      std::vector<node_index>&& nodes,
                      std::string&& sequence,

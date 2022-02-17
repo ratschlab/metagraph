@@ -257,6 +257,10 @@ class AlignmentResults {
     std::vector<Alignment> alignments_;
 };
 
+std::string spell_path(const DeBruijnGraph &graph,
+                       const std::vector<DeBruijnGraph::node_index> &path,
+                       size_t offset = 0);
+
 } // namespace align
 } // namespace graph
 } // namespace mtg
