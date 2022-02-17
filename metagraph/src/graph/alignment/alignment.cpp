@@ -75,7 +75,7 @@ bool Alignment::append(Alignment&& other) {
 
     if (label_coordinates.size()) {
         assert(label_columns.size() == label_coordinates.size());
-        LabelSet merged_label_columns;
+        Columns merged_label_columns;
         CoordinateSet merged_label_coordinates;
 
         // if the alignments fit together without gaps, make sure that the
@@ -130,7 +130,7 @@ bool Alignment::append(Alignment&& other) {
         std::swap(label_coordinates, merged_label_coordinates);
 
     } else if (label_columns.size()) {
-        LabelSet merged_label_columns;
+        Columns merged_label_columns;
         std::set_intersection(label_columns.begin(), label_columns.end(),
                               other.label_columns.begin(), other.label_columns.end(),
                               std::back_inserter(merged_label_columns));

@@ -32,7 +32,7 @@ class Alignment {
     typedef DBGAlignerConfig::score_t score_t;
     typedef annot::binmat::BinaryMatrix::Column Column;
     typedef annot::matrix::MultiIntMatrix::Tuple Tuple;
-    typedef Vector<Column> LabelSet;
+    typedef Vector<Column> Columns;
     typedef Vector<Tuple> CoordinateSet;
     static const score_t ninf = DBGAlignerConfig::ninf;
 
@@ -165,7 +165,7 @@ class Alignment {
 
     static bool coordinates_less(const Alignment &a, const Alignment &b);
 
-    LabelSet label_columns;
+    Columns label_columns;
     score_t extra_penalty = 0;
 
     // for each column in |label_columns|, store a vector of coordinate ranges

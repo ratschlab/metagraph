@@ -106,6 +106,9 @@ class SeedFilteringExtender {
 
 class DefaultColumnExtender : public SeedFilteringExtender {
   public:
+    // to ensure that SIMD operations on arrays don't read out of bounds
+    static const size_t kPadding = 5;
+
     DefaultColumnExtender(const DeBruijnGraph &graph,
                           const DBGAlignerConfig &config,
                           std::string_view query);
@@ -121,12 +124,12 @@ class DefaultColumnExtender : public SeedFilteringExtender {
     /**
      * During extension, a tree is constructed from the graph starting at the
      * seed, then the query is aligned against this tree.
-     * Each Column object represents the alignment of a substring of the query
+     * Each DPTColumn object represents the alignment of a substring of the query
      * against a node in the tree.
      * The horizontal concatenation (hstack) of all of the columns along a path
      * in this tree is analogous to a Needleman-Wunsch dynamic programming score matrix.
      */
-    struct Column {
+    struct DPTColumn {
         AlignedVector<score_t> S; // best score
         AlignedVector<score_t> E; // best score after insert
         AlignedVector<score_t> F; // best score after delete
@@ -140,11 +143,16 @@ class DefaultColumnExtender : public SeedFilteringExtender {
         size_t xdrop_cutoff_i; // corresponding index in the xdrop_cutoff vector
         size_t last_fork_i; // index of the nearest ancestor that was a fork
         score_t score; // added score when traversing to this node (typically a negative penalty)
+
+        // allocate and initialize with padding to ensure that SIMD operations don't
+        // read/write out of bounds
+        template <typename... RestArgs>
+        static DPTColumn create(size_t size, RestArgs&&... args);
     };
 
   protected:
     std::string_view query_;
-    std::vector<Column> table;
+    std::vector<DPTColumn> table;
     size_t table_size_bytes_;
 
     tsl::hopscotch_set<size_t> prev_starts;

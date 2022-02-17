@@ -16,9 +16,6 @@ namespace align {
 using score_t = Alignment::score_t;
 constexpr score_t ninf = Alignment::ninf;
 
-// to ensure that SIMD operations on arrays don't read out of bounds
-constexpr size_t kPadding = 5;
-
 
 DefaultColumnExtender::DefaultColumnExtender(const DeBruijnGraph &graph,
                                              const DBGAlignerConfig &config,
@@ -342,9 +339,9 @@ void extend_ins_end(AlignedVector<score_t> &S,
 
     // allocate and initialize enough space to allow the SIMD code to access these
     // vectors in 16 byte blocks without reading out of bounds
-    S.reserve(S.size() + kPadding);
-    E.reserve(E.size() + kPadding);
-    F.reserve(F.size() + kPadding);
+    S.reserve(S.size() + DefaultColumnExtender::kPadding);
+    E.reserve(E.size() + DefaultColumnExtender::kPadding);
+    F.reserve(F.size() + DefaultColumnExtender::kPadding);
 
     std::fill(S.data() + S.size(), S.data() + S.capacity(), ninf);
     std::fill(E.data() + E.size(), E.data() + E.capacity(), ninf);
@@ -388,12 +385,10 @@ void DefaultColumnExtender
     }
 }
 
-// allocate and initialize with padding to ensure that SIMD operations don't
-// read/write out of bounds
 template <typename... RestArgs>
-DefaultColumnExtender::Column alloc_column(size_t size, RestArgs... args) {
-    DefaultColumnExtender::Column column { {}, {}, {}, args... };
-
+DefaultColumnExtender::DPTColumn
+DefaultColumnExtender::DPTColumn::create(size_t size, RestArgs&&... args) {
+    DPTColumn column { {}, {}, {}, std::forward<RestArgs>(args)... };
     // allocate and initialize enough space to allow the SIMD code to access these
     // vectors in 16 byte blocks without reading out of bounds
     column.S.reserve(size + kPadding);
@@ -402,13 +397,13 @@ DefaultColumnExtender::Column alloc_column(size_t size, RestArgs... args) {
 
     // the size is set properly to allow for AlignedVector methods (size(), push_back())
     // to function properly
-    column.S.resize(size, ninf);
-    column.E.resize(size, ninf);
-    column.F.resize(size, ninf);
+    column.S.resize(size, Alignment::ninf);
+    column.E.resize(size, Alignment::ninf);
+    column.F.resize(size, Alignment::ninf);
 
-    std::fill(column.S.data() + column.S.size(), column.S.data() + column.S.capacity(), ninf);
-    std::fill(column.E.data() + column.E.size(), column.E.data() + column.E.capacity(), ninf);
-    std::fill(column.F.data() + column.F.size(), column.F.data() + column.F.capacity(), ninf);
+    std::fill(column.S.data() + column.S.size(), column.S.data() + column.S.capacity(), Alignment::ninf);
+    std::fill(column.E.data() + column.E.size(), column.E.data() + column.E.capacity(), Alignment::ninf);
+    std::fill(column.F.data() + column.F.size(), column.F.data() + column.F.capacity(), Alignment::ninf);
 
     return column;
 }
@@ -453,10 +448,9 @@ std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score,
     ssize_t seed_offset = static_cast<ssize_t>(this->seed_->get_offset()) - 1;
 
     // initialize the root of the tree
-    table.emplace_back(
-        alloc_column(1, this->seed_->get_nodes().front(), static_cast<size_t>(-1),
-                     '\0', seed_offset, 0, 0, 0u, 0u, 0)
-    );
+    table.emplace_back(DPTColumn::create(
+            1, this->seed_->get_nodes().front(), static_cast<size_t>(-1),
+            '\0', seed_offset, 0, 0, 0u, 0u, 0));
 
     {
         auto &[S, E, F, node, i_prev, c, offset, max_pos, trim,
@@ -590,8 +584,7 @@ std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score,
                 }
 
                 size_t table_sizediff = table.capacity();
-                table.emplace_back(alloc_column(
-                    end - begin, next, i, c,
+                table.emplace_back(DPTColumn::create(end - begin, next, i, c,
                     static_cast<ssize_t>(next_offset),
                     begin, begin,
                     forked_xdrop ? xdrop_cutoffs_.size() - 1 : prev_xdrop_cutoff_i,
@@ -846,10 +839,8 @@ std::vector<Alignment> DefaultColumnExtender::backtrack(score_t min_path_score,
                 bool is_match = S[pos] == S_p[pos_p] + score + profile_score_[c][seed_clipping + start_pos]
                     && profile_op_[c][seed_clipping + start_pos] == Cigar::MATCH;
                 if (is_match || start_pos == last_pos) {
-                    indices.emplace_back(
-                        S[pos] + end_bonus, -std::abs(start_pos - offset + seed_offset),
-                        -static_cast<ssize_t>(i), start_pos
-                    );
+                    indices.emplace_back(S[pos] + end_bonus, -std::abs(start_pos - offset + seed_offset),
+                                         -static_cast<ssize_t>(i), start_pos);
                 }
             }
         };

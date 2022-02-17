@@ -35,6 +35,7 @@ class AlignmentAggregator {
   public:
     typedef Alignment::score_t score_t;
     typedef Alignment::Column Column;
+    typedef Alignment::Columns Columns;
     typedef PriorityDeque<std::shared_ptr<Alignment>,
                           std::vector<std::shared_ptr<Alignment>>, ValCmp> PathQueue;
 
@@ -45,7 +46,7 @@ class AlignmentAggregator {
     bool add_alignment(Alignment&& alignment);
 
     score_t get_global_cutoff() const;
-    score_t get_score_cutoff(const Vector<Column> &labels) const;
+    score_t get_score_cutoff(const Columns &labels) const;
 
     std::vector<Alignment> get_alignments();
 
