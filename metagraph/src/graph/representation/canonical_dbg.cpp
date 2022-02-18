@@ -167,9 +167,6 @@ void CanonicalDBG::append_next_rc_nodes(node_index node,
                     if (next == npos)
                         return;
 
-                    // TODO: this is the only place where get_first_value is called.
-                    // Try to find a way to restructure this using call_incoming_kmers
-                    // so that get_first_value can be made private.
                     boss::BOSS::TAlphabet s
                         = boss.get_minus_k_value(incoming_boss_edge, get_k() - 2).first;
 
