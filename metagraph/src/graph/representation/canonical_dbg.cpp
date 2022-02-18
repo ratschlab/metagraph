@@ -181,41 +181,43 @@ void CanonicalDBG::append_next_rc_nodes(node_index node,
     // TGGCTrc(n) as index(nAGCCA) + offset_
 
     if (const DBGSuccinct *dbg_succ = get_dbg_succ(*graph_)) {
-        if (boss::BOSS::edge_index rc_edge = get_rev_comp_suffix_node(*graph_, node)) {
-            const boss::BOSS &boss = dbg_succ->get_boss();
+        boss::BOSS::edge_index rc_edge = get_rev_comp_suffix_node(*graph_, node);
+        if (!rc_edge)
+            return;
 
-            // rc_edge may be a dummy sink, so this won't work with graph_->call_incoming_kmers
-            boss.call_incoming_to_target(boss.bwd(rc_edge), boss.get_node_last_value(rc_edge),
-                [&](boss::BOSS::edge_index incoming_boss_edge) {
-                    node_index next = dbg_succ->boss_to_kmer_index(incoming_boss_edge);
-                    if (next == npos)
-                        return;
+        const boss::BOSS &boss = dbg_succ->get_boss();
 
-                    boss::BOSS::TAlphabet s
-                        = boss.get_minus_k_value(incoming_boss_edge, get_k() - 2).first;
+        // rc_edge may be a dummy sink, so this won't work with graph_->call_incoming_kmers
+        boss.call_incoming_to_target(boss.bwd(rc_edge), boss.get_node_last_value(rc_edge),
+            [&](boss::BOSS::edge_index incoming_boss_edge) {
+                node_index next = dbg_succ->boss_to_kmer_index(incoming_boss_edge);
+                if (next == npos)
+                    return;
 
-                    if (s == boss::BOSS::kSentinelCode)
-                        return;
+                boss::BOSS::TAlphabet s
+                    = boss.get_minus_k_value(incoming_boss_edge, get_k() - 2).first;
 
-                    s = kmer::KmerExtractorBOSS::complement(s);
-                    if (children[s] == npos) {
-                        children[s] = next + offset_;
-                        return;
-                    }
+                if (s == boss::BOSS::kSentinelCode)
+                    return;
 
-                    if (k_odd_) {
-                        logger->error(
-                            "Primary graph contains both forward and reverse complement: {} {} -> {} {}\t{} {}",
-                            node, graph_->get_node_sequence(node),
-                            children[s], graph_->get_node_sequence(children[s]),
-                            next, graph_->get_node_sequence(next));
-                        exit(1);
-                    }
-
-                    is_palindrome_cache_.Put(next, true);
+                s = kmer::KmerExtractorBOSS::complement(s);
+                if (children[s] == npos) {
+                    children[s] = next + offset_;
+                    return;
                 }
-            );
-        }
+
+                if (k_odd_) {
+                    logger->error(
+                        "Primary graph contains both forward and reverse complement: {} {} -> {} {}\t{} {}",
+                        node, graph_->get_node_sequence(node),
+                        children[s], graph_->get_node_sequence(children[s]),
+                        next, graph_->get_node_sequence(next));
+                    exit(1);
+                }
+
+                is_palindrome_cache_.Put(next, true);
+            }
+        );
 
         return;
     }
@@ -326,40 +328,43 @@ void CanonicalDBG::append_prev_rc_nodes(node_index node,
     // rc(n)AGCCA as index(TGGCTn) + offset_
 
     if (const DBGSuccinct *dbg_succ = get_dbg_succ(*graph_)) {
-        if (boss::BOSS::edge_index edge = get_rev_comp_prefix_node(*graph_, node)) {
-            const boss::BOSS &boss = dbg_succ->get_boss();
-            boss.call_outgoing(edge, [&](boss::BOSS::edge_index adjacent_edge) {
-                assert(dbg_succ);
-                node_index prev = dbg_succ->boss_to_kmer_index(adjacent_edge);
-                if (prev == npos)
-                    return;
+        boss::BOSS::edge_index rc_edge = get_rev_comp_prefix_node(*graph_, node);
 
-                boss::BOSS::TAlphabet c = boss.get_W(adjacent_edge) % boss.alph_size;
+        if (!rc_edge)
+            return;
 
-                if (c == boss::BOSS::kSentinelCode)
-                    return;
+        const boss::BOSS &boss = dbg_succ->get_boss();
+        boss.call_outgoing(rc_edge, [&](boss::BOSS::edge_index adjacent_edge) {
+            assert(dbg_succ);
+            node_index prev = dbg_succ->boss_to_kmer_index(adjacent_edge);
+            if (prev == npos)
+                return;
 
-                c = kmer::KmerExtractorBOSS::complement(c);
+            boss::BOSS::TAlphabet c = boss.get_W(adjacent_edge) % boss.alph_size;
 
-                if (parents[c] == npos) {
-                    parents[c] = prev + offset_;
+            if (c == boss::BOSS::kSentinelCode)
+                return;
 
-                    return;
-                }
+            c = kmer::KmerExtractorBOSS::complement(c);
 
-                if (k_odd_) {
-                    logger->error(
-                        "Primary graph contains both forward and reverse complement: {} {} -> {} {}\t{} {}",
-                        node, graph_->get_node_sequence(node),
-                        parents[c], graph_->get_node_sequence(parents[c]),
-                        prev, graph_->get_node_sequence(prev)
-                    );
-                    exit(1);
-                }
+            if (parents[c] == npos) {
+                parents[c] = prev + offset_;
 
-                is_palindrome_cache_.Put(prev, true);
-            });
-        }
+                return;
+            }
+
+            if (k_odd_) {
+                logger->error(
+                    "Primary graph contains both forward and reverse complement: {} {} -> {} {}\t{} {}",
+                    node, graph_->get_node_sequence(node),
+                    parents[c], graph_->get_node_sequence(parents[c]),
+                    prev, graph_->get_node_sequence(prev)
+                );
+                exit(1);
+            }
+
+            is_palindrome_cache_.Put(prev, true);
+        });
 
         return;
     }
