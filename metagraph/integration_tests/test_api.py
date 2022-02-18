@@ -165,8 +165,8 @@ class TestAPIRaw(TestAPIBase):
                       'alignments': [{'score': 21, 'sequence': 'TAGATCGA', 'cigar': '1=1X6=',
                                       'orientation': False }]}
         expected_2 = {'seq_description': 'query0',
-                      'alignments': [{'score': 21, 'sequence': 'TCGATCTA', 'cigar': '6=1X1=',
-                                      'orientation': True }]}
+                      'alignments': [{'score': 21, 'sequence': 'TCGATCAA', 'cigar': '6=1X1=',
+                                      'orientation': False }]}
         try:
             self.assertDictEqual(ret.json()[0], expected_1)
         except AssertionError:
