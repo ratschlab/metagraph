@@ -30,7 +30,7 @@ class NodeRC : public INodeRC {
     NodeRC() {};
     NodeRC(const DBGSuccinct &graph);
 
-    edge_index get_prefix_rc(node_index node) const override final {
+    edge_index get_prefix_rc(node_index node) const {
         if (auto rank = rc_.conditional_rank1(node)) {
             return mapping_[(rank - 1) * 2];
         } else {
@@ -38,7 +38,7 @@ class NodeRC : public INodeRC {
         }
     }
 
-    edge_index get_suffix_rc(node_index node) const override final {
+    edge_index get_suffix_rc(node_index node) const {
         if (auto rank = rc_.conditional_rank1(node)) {
             return mapping_[(rank - 1) * 2 + 1];
         } else {
