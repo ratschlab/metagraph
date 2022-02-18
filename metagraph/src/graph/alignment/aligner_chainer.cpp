@@ -351,6 +351,7 @@ std::vector<Alignment> chain_alignments(std::vector<Alignment>&& alignments,
     return aggregator.get_alignments();
 }
 
+// TODO: rewrite this to not use recursion
 template <class AlignmentCompare>
 void construct_alignment_chain(size_t node_overlap,
                                const DBGAlignerConfig &config,
