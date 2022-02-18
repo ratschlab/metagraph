@@ -17,8 +17,6 @@
 namespace mtg {
 namespace graph {
 
-static const uint64_t kBlockSize = 10'000;
-
 template <class Indicator, class Mapping>
 NodeRC<Indicator, Mapping>::NodeRC(const DBGSuccinct &graph) {
     if (graph.get_mode() != DeBruijnGraph::PRIMARY) {
