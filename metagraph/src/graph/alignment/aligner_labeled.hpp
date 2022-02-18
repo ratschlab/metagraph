@@ -45,22 +45,23 @@ class AnnotationBuffer {
 
     const Annotator& get_annotator() const { return annotator_; }
 
-    // add a label set (represented as a vector of sorted column indices) to the buffer
+    size_t num_nodes_buffered() const { return node_to_cols_.size(); }
+    size_t num_column_sets() const { return column_sets_.size(); }
+
+    // This method lets the caller push additional column sets to dictionary
+    // `column_sets_`. These column sets can later be fetched with `get_cached_column_set()`
     template <typename... Args>
-    size_t emplace_column_set(Args&&... args) {
+    inline size_t cache_column_set(Args&&... args) {
         auto it = column_sets_.emplace(std::forward<Args>(args)...).first;
         assert(std::is_sorted(it->begin(), it->end()));
         return it - column_sets_.begin();
     }
 
-    // fetch a label set given its index
-    inline const Columns& get_column_set(size_t i) const {
+    // Fetch a label set given its index returned by `cache_column_set()`
+    inline const Columns& get_cached_column_set(size_t i) const {
         assert(i < column_sets_.size());
         return column_sets_.data()[i];
     }
-
-    size_t num_nodes_buffered() const { return node_to_cols_.size(); }
-    size_t num_column_sets() const { return column_sets_.size(); }
 
   private:
     const DeBruijnGraph &graph_;
@@ -193,10 +194,10 @@ class LabeledAligner : public DBGAligner<Seeder, Extender, AlignmentCompare> {
     virtual ~LabeledAligner();
 
   private:
-    typedef typename DBGAligner<Seeder, Extender, AlignmentCompare>::BatchSeeders BatchSeeders;
     mutable AnnotationBuffer annotation_buffer_;
     const Annotator &annotator_;
 
+    typedef typename DBGAligner<Seeder, Extender, AlignmentCompare>::BatchSeeders BatchSeeders;
     BatchSeeders
     virtual build_seeders(const std::vector<IDBGAligner::Query> &seq_batch,
                           const std::vector<AlignmentResults> &wrapped_seqs) const override;

@@ -29,7 +29,7 @@ AnnotationBuffer::AnnotationBuffer(const DeBruijnGraph &graph, const Annotator &
         annotator_(annotator),
         multi_int_(dynamic_cast<const annot::matrix::MultiIntMatrix*>(&annotator_.get_matrix())),
         column_sets_({ {} }) {
-    if (multi_int_ && graph_.get_mode() == DeBruijnGraph::CANONICAL) {
+    if (multi_int_ && graph_.get_mode() != DeBruijnGraph::BASIC) {
         multi_int_ = nullptr;
         logger->warn("Coordinates not supported when aligning to CANONICAL "
                      "or PRIMARY mode graphs");
@@ -43,42 +43,37 @@ void AnnotationBuffer::fetch_queued_annotations() {
     std::vector<node_index> queued_nodes;
     std::vector<Row> queued_rows;
 
+    const DeBruijnGraph *base_graph = &graph_;
+
+    const auto *canonical = dynamic_cast<const CanonicalDBG*>(&graph_);
+    if (canonical)
+        base_graph = &canonical->get_graph();
+
+    const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(base_graph);
+    const boss::BOSS *boss = dbg_succ ? &dbg_succ->get_boss() : nullptr;
+
     for (const auto &path : queued_paths_) {
-        // TODO: this cascade of graph unwrapping is ugly, find a cleaner way to do it
-        const DeBruijnGraph *base_graph = &graph_;
-        bool reverse_path = false;
-        if (const auto *rc_dbg = dynamic_cast<const RCDBG*>(base_graph)) {
-            base_graph = &rc_dbg->get_graph();
-            reverse_path = true;
-        }
-
-        const auto *canonical = dynamic_cast<const CanonicalDBG*>(base_graph);
-        if (canonical)
-            base_graph = &canonical->get_graph();
-
         std::vector<node_index> base_path;
         if (base_graph->get_mode() == DeBruijnGraph::CANONICAL) {
+            // TODO: avoid this call of spell_path
             std::string query = spell_path(graph_, path);
-            if (reverse_path)
-                reverse_complement(query.begin(), query.end());
-
             base_path = map_to_nodes(*base_graph, query);
+
         } else if (canonical) {
             base_path.reserve(path.size());
             for (node_index node : path) {
                 base_path.emplace_back(canonical->get_base_node(node));
             }
+
         } else {
+            assert(graph_.get_mode() == DeBruijnGraph::BASIC);
             base_path = path;
+            if (const auto *rc_dbg = dynamic_cast<const RCDBG*>(&graph_))
+                std::reverse(base_path.begin(), base_path.end());
         }
 
         assert(base_path.size() == path.size());
 
-        if (reverse_path)
-            std::reverse(base_path.begin(), base_path.end());
-
-        const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(base_graph);
-        const boss::BOSS *boss = dbg_succ ? &dbg_succ->get_boss() : nullptr;
         for (size_t i = 0; i < path.size(); ++i) {
             Row row = AnnotatedDBG::graph_to_anno_index(base_path[i]);
             size_t val = 0;
@@ -140,19 +135,12 @@ void AnnotationBuffer::fetch_queued_annotations() {
     if (queued_nodes.empty())
         return;
 
-    // TODO: this cascade of unwrapping is ugly, find a better way to do this
-    const DeBruijnGraph *base_graph = &graph_;
-    if (const auto *rc_dbg = dynamic_cast<const RCDBG*>(base_graph))
-        base_graph = &rc_dbg->get_graph();
-
-    const auto *canonical = dynamic_cast<const CanonicalDBG*>(base_graph);
-
     auto push_node_labels = [&](auto node_it, auto row_it, auto&& labels) {
         assert(node_it != queued_nodes.end());
         assert(node_to_cols_.count(*node_it));
         assert(node_to_cols_.count(AnnotatedDBG::anno_to_graph_index(*row_it)));
 
-        size_t label_i = emplace_column_set(std::forward<decltype(labels)>(labels));
+        size_t label_i = cache_column_set(std::move(labels));
         node_index base_node = AnnotatedDBG::anno_to_graph_index(*row_it);
         node_to_cols_[*node_it] = label_i;
         if (base_node != *node_it) {
@@ -163,6 +151,8 @@ void AnnotationBuffer::fetch_queued_annotations() {
                     label_coords_.emplace_back(label_coords_.back());
             }
         } else if (canonical) {
+            // TODO: remove this block: don't add annotations twice but
+            //       query for the canonical node instead
             node_index rc_node = canonical->reverse_complement(*node_it);
             auto find = node_to_cols_.find(rc_node);
             if (find == node_to_cols_.end()) {
@@ -184,7 +174,7 @@ void AnnotationBuffer::fetch_queued_annotations() {
             label_coords_.back().reserve(row_tuples.size());
             for (auto&& [label, coords] : row_tuples) {
                 labels.push_back(label);
-                label_coords_.back().emplace_back(std::forward<decltype(coords)>(coords));
+                label_coords_.back().push_back(std::move(coords));
             }
             push_node_labels(node_it++, row_it++, std::move(labels));
         }
@@ -321,7 +311,7 @@ void LabeledExtender::flush() {
 
         node_index node = table_elem.node;
         const auto &parent_labels
-            = annotation_buffer_.get_column_set(node_labels_[parent_i]);
+            = annotation_buffer_.get_cached_column_set(node_labels_[parent_i]);
 
         auto cur_labels = annotation_buffer_.get_labels(node);
         assert(cur_labels);
@@ -333,7 +323,7 @@ void LabeledExtender::flush() {
             clear();
         } else {
             node_labels_[last_flushed_table_i_]
-                = annotation_buffer_.emplace_column_set(std::move(intersect_labels));
+                = annotation_buffer_.cache_column_set(std::move(intersect_labels));
         }
     }
 }
@@ -348,24 +338,23 @@ bool LabeledExtender::set_seed(const Alignment &seed) {
     // the first node of the seed has already been flushed
     last_flushed_table_i_ = 1;
 
-    remaining_labels_i_ = annotation_buffer_.emplace_column_set(seed.label_columns);
+    remaining_labels_i_ = annotation_buffer_.cache_column_set(seed.label_columns);
     assert(remaining_labels_i_ != nannot);
     node_labels_.assign(1, remaining_labels_i_);
     base_coords_ = seed.label_coordinates;
-    if (base_coords_.size()) {
-        if (dynamic_cast<const RCDBG*>(graph_)) {
-            for (auto &coords : base_coords_) {
-                for (auto &c : coords) {
-                    c += seed.get_nodes().size() - 1 - seed.get_offset();
-                }
+    if (!base_coords_.size())
+        return true;
+
+    if (dynamic_cast<const RCDBG*>(graph_)) {
+        for (auto &coords : base_coords_) {
+            for (auto &c : coords) {
+                c += seed.get_nodes().size() - 1 - seed.get_offset();
             }
-        } else {
-            if (seed.get_offset()) {
-                for (auto &coords : base_coords_) {
-                    for (auto &c : coords) {
-                        c -= seed.get_offset();
-                    }
-                }
+        }
+    } else if (seed.get_offset()) {
+        for (auto &coords : base_coords_) {
+            for (auto &c : coords) {
+                c -= seed.get_offset();
             }
         }
     }
@@ -389,11 +378,13 @@ void LabeledExtender
 
     std::vector<std::tuple<node_index, char, score_t>> outgoing;
     DefaultColumnExtender::call_outgoing(node, max_prefetch_distance,
-                                         [&](node_index next, char c, score_t score) {
-        outgoing.emplace_back(next, c, score);
-        if (!in_seed)
-            annotation_buffer_.queue_path({ next });
-    }, table_i, force_fixed_seed);
+        [&](node_index next, char c, score_t score) {
+            outgoing.emplace_back(next, c, score);
+            if (!in_seed)
+                annotation_buffer_.queue_path({ next });
+        },
+        table_i, force_fixed_seed
+    );
 
     if (outgoing.empty())
         return;
@@ -416,7 +407,7 @@ void LabeledExtender
     assert(annotation_buffer_.get_labels(node));
 
     // use the label set of the current node in the alignment tree as the basis
-    const auto &columns = annotation_buffer_.get_column_set(node_labels_[table_i]);
+    const auto &columns = annotation_buffer_.get_cached_column_set(node_labels_[table_i]);
 
     // no coordinates are present in the annotation
     if (!annotation_buffer_.get_labels_and_coords(node).second) {
@@ -432,9 +423,8 @@ void LabeledExtender
                                   std::back_inserter(intersect_labels));
 
             if (intersect_labels.size()) {
-                node_labels_.emplace_back(annotation_buffer_.emplace_column_set(
-                    std::move(intersect_labels)
-                ));
+                node_labels_.push_back(annotation_buffer_.cache_column_set(
+                                                std::move(intersect_labels)));
                 callback(next, c, score);
             }
         }
@@ -494,9 +484,8 @@ void LabeledExtender
 
         if (intersect_labels.size()) {
             // found a consistent set of coordinates, so assign labels for this next node
-            node_labels_.emplace_back(annotation_buffer_.emplace_column_set(
-                std::move(intersect_labels)
-            ));
+            node_labels_.push_back(annotation_buffer_.cache_column_set(
+                                                std::move(intersect_labels)));
             callback(next, c, score);
         }
     }
@@ -511,8 +500,8 @@ bool LabeledExtender::skip_backtrack_start(size_t i) {
         return true;
 
     // check if this starting point involves seed labels which have not been considered yet
-    const auto &end_labels = annotation_buffer_.get_column_set(node_labels_[i]);
-    const auto &left_labels = annotation_buffer_.get_column_set(remaining_labels_i_);
+    const auto &end_labels = annotation_buffer_.get_cached_column_set(node_labels_[i]);
+    const auto &left_labels = annotation_buffer_.get_cached_column_set(remaining_labels_i_);
 
     label_intersection_ = Columns{};
     label_diff_ = Columns{};
@@ -550,7 +539,7 @@ void LabeledExtender::call_alignments(score_t end_score,
     auto call_alignment = [&]() {
         if (label_diff_.size() && label_diff_.back() == nannot) {
             label_diff_.pop_back();
-            remaining_labels_i_ = annotation_buffer_.emplace_column_set(std::move(label_diff_));
+            remaining_labels_i_ = annotation_buffer_.cache_column_set(std::move(label_diff_));
             assert(remaining_labels_i_ != nannot);
             label_diff_ = Columns{};
         }
@@ -880,7 +869,7 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
             }
         }
 
-        annotation_buffer_.emplace_column_set(seed.label_columns);
+        annotation_buffer_.cache_column_set(seed.label_columns);
 
         if (seed.get_offset() && seed.label_coordinates.size()) {
             for (auto &tuple : seed.label_coordinates) {
