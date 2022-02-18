@@ -161,11 +161,16 @@ class TestAPIRaw(TestAPIBase):
         self.assertEqual(ret.status_code, 200)
 
         self.assertEqual(len(ret.json()), repetitions)
-        self.assertEqual(ret.json()[0]['seq_description'], 'query0')
-        self.assertTrue('alignments' in ret.json()[0])
-        self.assertGreaterEqual(len(ret.json()[0]['alignments']), 1)
-        self.assertTrue(all(a['score'] == 21 for a in ret.json()[0]['alignments']))
-        self.assertTrue(all(a['cigar'] in ["6=1X1=", "1=1X6="] for a in ret.json()[0]['alignments']))
+        expected_1 = {'seq_description': 'query0',
+                      'alignments': [{'score': 21, 'sequence': 'TAGATCGA', 'cigar': '1=1X6=',
+                                      'orientation': False }]}
+        expected_2 = {'seq_description': 'query0',
+                      'alignments': [{'score': 21, 'sequence': 'TCGATCTA', 'cigar': '6=1X1=',
+                                      'orientation': True }]}
+        try:
+            self.assertDictEqual(ret.json()[0], expected_1)
+        except AssertionError:
+            self.assertDictEqual(ret.json()[0], expected_2)
 
         self.assertListEqual(
             [ret.json()[i]['seq_description'] for i in range(repetitions)],
@@ -313,6 +318,7 @@ class TestAPIClient(TestAPIBase):
 
         align_res = ret[self.graph_name]
         self.assertIn('cigar', align_res.columns)
+        self.assertIn('orientation', align_res.columns)
         # number of alignments returned per sequence is not necessarily equals max_alternative_alignments
         # but here it turns out to be the case
         self.assertEqual(len(align_res), repetitions *  alignment_cnt)
@@ -326,6 +332,7 @@ class TestAPIClient(TestAPIBase):
 
         align_res = ret[self.graph_name]
         self.assertIn('cigar', align_res.columns)
+        self.assertIn('orientation', align_res.columns)
         self.assertEqual(len(align_res), 0)
 
     @unittest.expectedFailure
@@ -608,6 +615,7 @@ class TestAPIClientParallel(TestAPIBase):
             self.assertIn(graph, dfs)
             self.assertIsInstance(dfs[graph], pd.DataFrame)
             self.assertIn('cigar', dfs[graph].columns)
+            self.assertIn('orientation', dfs[graph].columns)
             self.assertEqual(len(dfs[graph]), repetitions *  alignment_cnt)
 
     def test_api_parallel_query_error(self):

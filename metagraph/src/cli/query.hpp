@@ -77,6 +77,7 @@ struct QuerySequence {
 struct Alignment {
     graph::align::DBGAlignerConfig::score_t score;
     std::string cigar;
+    bool orientation;
 };
 
 
@@ -113,6 +114,7 @@ class SeqSearchResult {
     static constexpr auto SEQUENCE_JSON_FIELD = "sequence";
     static constexpr auto ALIGNMENT_JSON_FIELD = "alignments";
     static constexpr auto CIGAR_JSON_FIELD = "cigar";
+    static constexpr auto ORIENTATION_JSON_FIELD = "orientation";
 
     /**
      * Construct an instance of SeqSearchResult by providing QuerySequence instance describing

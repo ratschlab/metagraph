@@ -68,7 +68,7 @@ void AnnotationBuffer::fetch_queued_annotations() {
         } else {
             assert(graph_.get_mode() == DeBruijnGraph::BASIC);
             base_path = path;
-            if (const auto *rc_dbg = dynamic_cast<const RCDBG*>(&graph_))
+            if (dynamic_cast<const RCDBG*>(&graph_))
                 std::reverse(base_path.begin(), base_path.end());
         }
 

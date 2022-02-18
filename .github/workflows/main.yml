@@ -286,9 +286,25 @@ jobs:
         id: tag_name
         run: |
           echo ::set-output name=TAG::${GITHUB_REF#refs/tags/}
+          echo ::set-output name=VER::${GITHUB_REF#refs/tags/v}
+
+      # from https://stackoverflow.com/a/61919791/6869319
+      - name: read current version
+        id: read_version
+        run: |
+          content=`cat package.json`
+          # the following lines are only required for multi line json
+          content="${content//'%'/'%25'}"
+          content="${content//$'\n'/'%0A'}"
+          content="${content//$'\r'/'%0D'}"
+          # end of optional handling for multi line json
+          echo "::set-output name=packageJson::$content"
 
       - name: build source archive including submodules
         run: |
+          [[ v${{fromJson(steps.read_version.outputs.packageJson).version}} == ${{ steps.tag_name.outputs.TAG }} ]] \
+            || (echo "::error file=package.json::Version in package.json (v${{fromJson(steps.read_version.outputs.packageJson).version}}) does not match tag ${{ steps.tag_name.outputs.TAG }}. Update package.json and set the tag again."; \
+                exit 1)
           mkdir -p artifacts/sources
           tag=${{ steps.tag_name.outputs.TAG }}
           bash .github/workflows/git-archive-all.sh --format tar.gz artifacts/sources/${tag}-sources-with-submodules.tar.gz
@@ -297,10 +313,10 @@ jobs:
       - name: create release with static binaries
         uses: svenstaro/upload-release-action@v2
         with:
-          release_name: Release ${{ steps.tag_name.outputs.TAG }}
+          release_name: Version ${{ steps.tag_name.outputs.VER }}
           body: |
-            The binaries are currently provided on an experimental basis.
-            The Linux binaries are statically linked and hence don't require additional libraries to be installed.
+            The pre-compiled binaries (only for Linux) are statically linked and hence don't require additional libraries to be installed.
+            The *_noAVX binaries are compiled without the modern AVX2 and MSSE4.2 instructions and should be used when the processor does not support these instructions.
           file: 'artifacts/*/*'
           file_glob: true
           repo_token: ${{ secrets.GITHUB_TOKEN }}
