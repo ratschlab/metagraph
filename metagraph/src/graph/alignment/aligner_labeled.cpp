@@ -78,7 +78,7 @@ void AnnotationBuffer::fetch_queued_annotations() {
             if (base_path[i] == DeBruijnGraph::npos) {
                 // this can happen when the base graph is CANONICAL and path[i] is a
                 // dummy node
-                if (node_to_cols_.emplace(path[i], 0).second && multi_int_)
+                if (node_to_cols_.emplace(path[i], 0).second && has_coordinates())
                     label_coords_.emplace_back();
 
                 continue;
@@ -86,12 +86,12 @@ void AnnotationBuffer::fetch_queued_annotations() {
 
             if (boss && !boss->get_W(dbg_succ->kmer_to_boss_index(base_path[i]))) {
                 // skip dummy nodes
-                if (node_to_cols_.emplace(base_path[i], 0).second && multi_int_)
+                if (node_to_cols_.emplace(base_path[i], 0).second && has_coordinates())
                     label_coords_.emplace_back();
 
                 if (graph_.get_mode() == DeBruijnGraph::CANONICAL
                         && base_path[i] != path[i]
-                        && node_to_cols_.emplace(path[i], 0).second && multi_int_) {
+                        && node_to_cols_.emplace(path[i], 0).second && has_coordinates()) {
                     label_coords_.emplace_back();
                 }
 
@@ -161,7 +161,7 @@ void AnnotationBuffer::fetch_queued_annotations() {
         } else {
             node_to_cols_[*node_it] = label_i;
             if (base_node != *node_it && node_to_cols_.emplace(base_node, label_i).second
-                    && multi_int_) {
+                    && has_coordinates()) {
                 label_coords_.emplace_back(label_coords_.back());
             }
         }
@@ -169,7 +169,8 @@ void AnnotationBuffer::fetch_queued_annotations() {
 
     auto node_it = queued_nodes.begin();
     auto row_it = queued_rows.begin();
-    if (multi_int_) {
+    if (has_coordinates()) {
+        assert(multi_int_);
         // extract both labels and coordinates, then store them separately
         for (auto&& row_tuples : multi_int_->get_row_tuples(queued_rows)) {
             Columns labels;
@@ -701,6 +702,7 @@ auto LabeledAligner<Seeder, Extender, AlignmentCompare>
 #endif
     }
 
+    logger->trace("Prefetching labels");
     annotation_buffer_.fetch_queued_annotations();
 
     size_t num_seeds_left = 0;
@@ -732,8 +734,6 @@ auto LabeledAligner<Seeder, Extender, AlignmentCompare>
 
     logger->trace("Kept {}/{} seeds", num_seeds_left + num_seeds_rc_left,
                                       num_seeds + num_seeds_rc);
-    logger->trace("Prefetching labels");
-    annotation_buffer_.fetch_queued_annotations();
 
     return seeders;
 }
