@@ -141,29 +141,6 @@ void CanonicalDBG::map_to_nodes(std::string_view sequence,
     }, terminate);
 }
 
-boss::BOSS::edge_index get_rev_comp_suffix_node(const DeBruijnGraph &graph,
-                                                DeBruijnGraph::node_index node) {
-    const DBGSuccinct &dbg_succ = *get_dbg_succ(graph);
-    const boss::BOSS &boss = dbg_succ.get_boss();
-
-    if (const auto node_rc = dbg_succ.get_extension<INodeRC>())
-        return node_rc->get_suffix_rc(node);
-
-    //   AGAGGATCTCGTATGCCGTCTTCTGCTTGAG
-    //->  GAGGATCTCGTATGCCGTCTTCTGCTTGAG
-    //->  CTCAAGCAGAAGACGGCATACGAGATCCTC
-    std::string rev_seq = graph.get_node_sequence(node).substr(1, boss.get_k());
-    if (rev_seq[0] == boss::BOSS::kSentinel)
-        return 0;
-
-    ::reverse_complement(rev_seq.begin(), rev_seq.end());
-    auto encoded = boss.encode(rev_seq);
-    auto [edge, edge_2, end] = boss.index_range(encoded.begin(), encoded.end());
-    assert(end != encoded.end() || edge == edge_2);
-
-    return end == encoded.end() ? edge : 0;
-}
-
 void CanonicalDBG::append_next_rc_nodes(node_index node,
                                         SmallVector<node_index> &children) const {
     /**
@@ -181,11 +158,32 @@ void CanonicalDBG::append_next_rc_nodes(node_index node,
     // TGGCTrc(n) as index(nAGCCA) + offset_
 
     if (const DBGSuccinct *dbg_succ = get_dbg_succ(*graph_)) {
-        boss::BOSS::edge_index rc_edge = get_rev_comp_suffix_node(*graph_, node);
+        boss::BOSS::edge_index rc_edge = 0;
+        const boss::BOSS &boss = dbg_succ->get_boss();
+
+        //   AGAGGATCTCGTATGCCGTCTTCTGCTTGAG
+        //->  GAGGATCTCGTATGCCGTCTTCTGCTTGAG
+        //->  CTCAAGCAGAAGACGGCATACGAGATCCTC
+        if (const auto node_rc = dbg_succ->get_extension<INodeRC>()) {
+            rc_edge = node_rc->get_suffix_rc(node);
+
+        } else {
+            std::string rev_seq = graph_->get_node_sequence(node).substr(1, boss.get_k());
+            if (rev_seq[0] == boss::BOSS::kSentinel)
+                return;
+
+            ::reverse_complement(rev_seq.begin(), rev_seq.end());
+            auto encoded = boss.encode(rev_seq);
+            auto [edge, edge_2, end] = boss.index_range(encoded.begin(), encoded.end());
+
+            if (end == encoded.end()) {
+                assert(edge == edge_2);
+                rc_edge = edge;
+            }
+        }
+
         if (!rc_edge)
             return;
-
-        const boss::BOSS &boss = dbg_succ->get_boss();
 
         // rc_edge may be a dummy sink, so this won't work with graph_->call_incoming_kmers
         boss.call_incoming_to_target(boss.bwd(rc_edge), boss.get_node_last_value(rc_edge),
@@ -288,30 +286,6 @@ void CanonicalDBG
     }
 }
 
-boss::BOSS::edge_index get_rev_comp_prefix_node(const DeBruijnGraph &graph,
-                                                DeBruijnGraph::node_index node) {
-    const DBGSuccinct &dbg_succ = *get_dbg_succ(graph);
-    const boss::BOSS &boss = dbg_succ.get_boss();
-
-    if (const auto node_rc = dbg_succ.get_extension<INodeRC>())
-        return node_rc->get_prefix_rc(node);
-
-    //   AGAGGATCTCGTATGCCGTCTTCTGCTTGAG
-    //-> AGAGGATCTCGTATGCCGTCTTCTGCTTGA
-    //-> TCAAGCAGAAGACGGCATACGAGATCCTCT
-    std::string rev_seq = graph.get_node_sequence(node).substr(0, boss.get_k());
-    if (rev_seq[0] == boss::BOSS::kSentinel)
-        return 0;
-
-    ::reverse_complement(rev_seq.begin(), rev_seq.end());
-    auto encoded = boss.encode(rev_seq);
-    auto [edge, edge_2, end] = boss.index_range(encoded.begin(), encoded.end());
-    assert(end != encoded.end() || edge == edge_2);
-
-    return end == encoded.end() ? edge : 0;
-}
-
-
 void CanonicalDBG::append_prev_rc_nodes(node_index node,
                                         SmallVector<node_index> &parents) const {
     /**
@@ -328,12 +302,33 @@ void CanonicalDBG::append_prev_rc_nodes(node_index node,
     // rc(n)AGCCA as index(TGGCTn) + offset_
 
     if (const DBGSuccinct *dbg_succ = get_dbg_succ(*graph_)) {
-        boss::BOSS::edge_index rc_edge = get_rev_comp_prefix_node(*graph_, node);
+        boss::BOSS::edge_index rc_edge = 0;
+        const boss::BOSS &boss = dbg_succ->get_boss();
+
+        //   AGAGGATCTCGTATGCCGTCTTCTGCTTGAG
+        //-> AGAGGATCTCGTATGCCGTCTTCTGCTTGA
+        //-> TCAAGCAGAAGACGGCATACGAGATCCTCT
+        if (const auto node_rc = dbg_succ->get_extension<INodeRC>()) {
+            rc_edge = node_rc->get_prefix_rc(node);
+
+        } else {
+            std::string rev_seq = graph_->get_node_sequence(node).substr(0, boss.get_k());
+            if (rev_seq[0] == boss::BOSS::kSentinel)
+                return;
+
+            ::reverse_complement(rev_seq.begin(), rev_seq.end());
+            auto encoded = boss.encode(rev_seq);
+            auto [edge, edge_2, end] = boss.index_range(encoded.begin(), encoded.end());
+
+            if (end == encoded.end()) {
+                assert(edge == edge_2);
+                rc_edge = edge;
+            }
+        }
 
         if (!rc_edge)
             return;
 
-        const boss::BOSS &boss = dbg_succ->get_boss();
         boss.call_outgoing(rc_edge, [&](boss::BOSS::edge_index adjacent_edge) {
             assert(dbg_succ);
             node_index prev = dbg_succ->boss_to_kmer_index(adjacent_edge);
