@@ -161,7 +161,7 @@ boss::BOSS::edge_index get_rev_comp_suffix_node(const DeBruijnGraph &graph,
     auto [edge, edge_2, end] = boss.index_range(encoded.begin(), encoded.end());
     assert(end != encoded.end() || edge == edge_2);
 
-    return end != encoded.end() ? edge : 0;
+    return end == encoded.end() ? edge : 0;
 }
 
 void CanonicalDBG::append_next_rc_nodes(node_index node,
@@ -308,7 +308,7 @@ boss::BOSS::edge_index get_rev_comp_prefix_node(const DeBruijnGraph &graph,
     auto [edge, edge_2, end] = boss.index_range(encoded.begin(), encoded.end());
     assert(end != encoded.end() || edge == edge_2);
 
-    return end != encoded.end() ? edge : 0;
+    return end == encoded.end() ? edge : 0;
 }
 
 
@@ -355,7 +355,7 @@ void CanonicalDBG::append_prev_rc_nodes(node_index node,
 
             if (k_odd_) {
                 logger->error(
-                    "Primary graph contains both forward and reverse complement: {} {} -> {} {}\t{} {}",
+                    "Primary graph contains both forward and reverse complement: {} {} <- {} {}\t{} {}",
                     node, graph_->get_node_sequence(node),
                     parents[c], graph_->get_node_sequence(parents[c]),
                     prev, graph_->get_node_sequence(prev)
