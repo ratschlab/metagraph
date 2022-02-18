@@ -146,7 +146,7 @@ bool NodeRC<Indicator, Mapping>::is_compatible(const SequenceGraph &graph,
         return false;
     }
 
-    if (rc_.num_set_bits() * 2 == mapping_.size()) {
+    if (rc_.num_set_bits() * 2 != mapping_.size()) {
         if (verbose)
             std::cerr << "ERROR: RC file contains the wrong mapping"
                       << std::endl;
