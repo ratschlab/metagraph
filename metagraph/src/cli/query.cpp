@@ -181,6 +181,7 @@ Json::Value SeqSearchResult::to_json(bool verbose_output,
         // Alignment metrics
         root[SCORE_JSON_FIELD] = Json::Value(alignment_->score);
         root[CIGAR_JSON_FIELD] = Json::Value(alignment_->cigar);
+        root[ORIENTATION_JSON_FIELD] = Json::Value(alignment_->orientation);
     }
 
     // Add discovered labels and extra results
@@ -1217,9 +1218,9 @@ Alignment align_sequence(std::string *seq,
             *seq = const_cast<std::string&&>(match.get_sequence());
         }
 
-        return { match.get_score(), match.get_cigar().to_string() };
+        return { match.get_score(), match.get_cigar().to_string(), match.get_orientation() };
     } else {
-        return { 0, fmt::format("{}S", seq->length()) };
+        return { 0, fmt::format("{}S", seq->length()), false };
     }
 }
 

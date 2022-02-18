@@ -162,7 +162,8 @@ class TestAPIRaw(TestAPIBase):
 
         self.assertEqual(len(ret.json()), repetitions)
         expected = {'seq_description': 'query0',
-                    'alignments': [{'score': 12, 'sequence': 'TCGATC', 'cigar': '6=2S'}]}
+                    'alignments': [{'score': 12, 'sequence': 'TCGATC', 'cigar': '6=2S',
+                                    'orientation': False }]}
         self.assertDictEqual(ret.json()[0], expected)
 
         self.assertListEqual(
@@ -311,6 +312,7 @@ class TestAPIClient(TestAPIBase):
 
         align_res = ret[self.graph_name]
         self.assertIn('cigar', align_res.columns)
+        self.assertIn('orientation', align_res.columns)
         # number of alignments returned per sequence is not necessarily equals max_alternative_alignments
         # but here it turns out to be the case
         self.assertEqual(len(align_res), repetitions *  alignment_cnt)
@@ -324,6 +326,7 @@ class TestAPIClient(TestAPIBase):
 
         align_res = ret[self.graph_name]
         self.assertIn('cigar', align_res.columns)
+        self.assertIn('orientation', align_res.columns)
         self.assertEqual(len(align_res), 0)
 
     @unittest.expectedFailure
@@ -606,6 +609,7 @@ class TestAPIClientParallel(TestAPIBase):
             self.assertIn(graph, dfs)
             self.assertIsInstance(dfs[graph], pd.DataFrame)
             self.assertIn('cigar', dfs[graph].columns)
+            self.assertIn('orientation', dfs[graph].columns)
             self.assertEqual(len(dfs[graph]), repetitions *  alignment_cnt)
 
     def test_api_parallel_query_error(self):
