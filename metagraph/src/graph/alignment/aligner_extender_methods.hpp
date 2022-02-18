@@ -193,9 +193,6 @@ class DefaultColumnExtender : public SeedFilteringExtender {
      * Backtracking helpers
      */
 
-    // halt the currently-running backtracking
-    virtual bool terminate_backtrack() const { return false; }
-
     // stop considering new points from which to start backtracking
     virtual bool terminate_backtrack_start(const std::vector<Alignment> &extensions) const {
         return extensions.size() >= config_.num_alternative_paths;

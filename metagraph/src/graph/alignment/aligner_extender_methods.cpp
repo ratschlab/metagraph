@@ -909,7 +909,7 @@ std::vector<Alignment> DefaultColumnExtender::backtrack(score_t min_path_score,
 
         score_t extra_penalty = 0;
 
-        while (j && !terminate_backtrack()) {
+        while (j) {
             assert(j != static_cast<size_t>(-1));
             const auto &[S, E, F, node, j_prev, c, offset, max_pos, trim,
                          xdrop_cutoff_i, last_fork_i, score_cur] = table[j];
