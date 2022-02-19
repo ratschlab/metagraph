@@ -166,6 +166,8 @@ Config::Config(int argc, char *argv[]) {
             num_columns_cached = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--fast")) {
             fast = true;
+        } else if (!strcmp(argv[i], "--lcs")) {
+            lcs = true;
         } else if (!strcmp(argv[i], "--batch-size")) {
             query_batch_size_in_bytes = atoll(get_value(i++));
         } else if (!strcmp(argv[i], "-p") || !strcmp(argv[i], "--parallel")) {
@@ -273,6 +275,8 @@ Config::Config(int argc, char *argv[]) {
         } else if (!strcmp(argv[i], "--align-xdrop")) {
             alignment_xdrop = atol(get_value(i++));
             xdrop_override = true;
+        } else if (!strcmp(argv[i], "--align-label-change-score")) {
+            alignment_label_change_score = atol(get_value(i++));
         } else if (!strcmp(argv[i], "--align-min-seed-length")) {
             alignment_min_seed_length = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--align-max-seed-length")) {
@@ -1040,6 +1044,7 @@ if (advanced) {
             fprintf(stderr, "\t   --align-gap-extension-penalty [INT]\t\tpositive gap extension penalty [2]\n");
             fprintf(stderr, "\t   --align-end-bonus [INT]\t\tscore bonus for each endpoint of the query covered by an alignment [5]\n");
             fprintf(stderr, "\t   --align-edit-distance \t\t\tuse unit costs for scoring matrix [off]\n");
+            fprintf(stderr, "\t   --align-label-change-score [INT] \t\tfallback score for changing labels during an alignment [-inf]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "Advanced options for seeding:\n");
             fprintf(stderr, "\t   --align-min-seed-length [INT]\t\tthe minimum length of a seed [graph k]\n");

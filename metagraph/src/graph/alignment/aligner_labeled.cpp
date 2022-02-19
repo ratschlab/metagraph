@@ -4,6 +4,7 @@
 #include "graph/representation/succinct/boss.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/canonical_dbg.hpp"
+#include "graph/graph_extensions/node_lcs.hpp"
 #include "annotation/int_matrix/base/int_matrix.hpp"
 #include "common/algorithms.hpp"
 #include "common/utils/template_utils.hpp"
@@ -19,7 +20,6 @@ typedef annot::binmat::BinaryMatrix::Row Row;
 typedef annot::binmat::BinaryMatrix::Column Column;
 typedef AnnotationBuffer::Columns Columns;
 typedef DeBruijnGraph::node_index node_index;
-// typedef AnnotationBuffer::Columns Columns;
 
 // dummy index for an unfetched annotations
 static constexpr size_t nannot = std::numeric_limits<size_t>::max();
@@ -303,7 +303,9 @@ void LabeledExtender::flush() {
         assert(parent_i < last_flushed_table_i_);
 
         auto clear = [&]() {
+            DEBUG_LOG("Removed table element {}", last_flushed_table_i_);
             node_labels_[last_flushed_table_i_] = 0;
+            node_labels_switched_[last_flushed_table_i_] = false;
             std::fill(table_elem.S.begin(), table_elem.S.end(), config_.ninf);
             std::fill(table_elem.E.begin(), table_elem.E.end(), config_.ninf);
             std::fill(table_elem.F.begin(), table_elem.F.end(), config_.ninf);
@@ -314,8 +316,10 @@ void LabeledExtender::flush() {
             continue;
         }
 
-        if (node_labels_[parent_i] != node_labels_[last_flushed_table_i_])
+        if (node_labels_[parent_i] != node_labels_[last_flushed_table_i_]
+                || node_labels_switched_[last_flushed_table_i_]) {
             continue;
+        }
 
         node_index node = table_elem.node;
         const auto &parent_labels
@@ -349,6 +353,7 @@ bool LabeledExtender::set_seed(const Alignment &seed) {
     remaining_labels_i_ = annotation_buffer_.cache_column_set(seed.label_columns);
     assert(remaining_labels_i_ != nannot);
     node_labels_.assign(1, remaining_labels_i_);
+    node_labels_switched_.assign(1, false);
     base_coords_ = seed.label_coordinates;
     if (!base_coords_.size())
         return true;
@@ -370,6 +375,294 @@ bool LabeledExtender::set_seed(const Alignment &seed) {
     return true;
 }
 
+template <class Outgoing, class LabelIntersectDiff>
+double compute_label_change_scores(const DeBruijnGraph &graph,
+                                   AnnotationBuffer &annotation_buffer,
+                                   const DBGAlignerConfig &config,
+                                   Alignment::node_index node,
+                                   char node_last_char,
+                                   const Outgoing &outgoing,
+                                   LabelIntersectDiff &intersect_diff_labels) {
+    assert(outgoing.size() == intersect_diff_labels.size());
+    double sum_diff_probs = 0.0;
+
+    size_t found_diffs = 0;
+    for (const auto &[inter, diff, lclogprob] : intersect_diff_labels) {
+        found_diffs += !diff.empty();
+    }
+
+    if (!found_diffs)
+        return sum_diff_probs;
+
+    auto default_init = [&]() {
+        for (auto &[inter, diff, lclogprob] : intersect_diff_labels) {
+            if (diff.size()) {
+                sum_diff_probs += 1.0 - std::pow(2.0, config.label_change_score);
+                lclogprob = std::floor(config.label_change_score - log2(outgoing.size()));
+            }
+        }
+        sum_diff_probs = std::floor(log2(sum_diff_probs + 1.0) - log2(outgoing.size()));
+    };
+
+    // TODO: this cascade of graph unwrapping is ugly, find a cleaner way to do it
+    const DeBruijnGraph *base_graph = &graph;
+    if (const auto *rc_dbg = dynamic_cast<const RCDBG*>(base_graph)) {
+        base_graph = &rc_dbg->get_graph();
+    } else if (const auto *canonical = dynamic_cast<const CanonicalDBG*>(base_graph)) {
+        base_graph = &canonical->get_graph();
+    }
+
+    const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(base_graph);
+
+    if (!dbg_succ) {
+        default_init();
+        return sum_diff_probs;
+    }
+
+    size_t expand_seed = graph.get_k() - 1
+        - std::min(graph.get_k() - 1, config.label_change_search_width);
+
+    std::shared_ptr<NodeLCS> lcs = dbg_succ->get_extension<NodeLCS>();
+
+    if (!lcs) {
+        default_init();
+        return sum_diff_probs;
+    }
+
+    typedef boss::BOSS::TAlphabet TAlphabet;
+    typedef boss::BOSS::edge_index edge_index;
+    typedef Alignment::node_index node_index;
+    typedef Alignment::Column Column;
+
+    const boss::BOSS &boss = dbg_succ->get_boss();
+    const auto *rev_graph = dynamic_cast<const RCDBG*>(&graph);
+    const auto *canonical = dynamic_cast<const CanonicalDBG*>(
+        rev_graph ? &rev_graph->get_graph() : &graph
+    );
+
+    auto get_labeled_node = [&](node_index node) {
+        if (const auto *canonical = dynamic_cast<const CanonicalDBG*>(&graph))
+            return canonical->get_base_node(node);
+
+        if (graph.get_mode() == DeBruijnGraph::CANONICAL) {
+            std::string query = spell_path(graph, { node });
+            return map_to_nodes(graph, query)[0];
+        }
+
+        return node;
+    };
+
+    assert(annotation_buffer.get_labels(node));
+    node_index node_base = get_labeled_node(node);
+    assert(node_base);
+
+    // Case 1:  node == node_base, next == next_base
+    //          node         next
+    // e.g.,    GTCATGC C -> TCATGCC X
+    // look for $$$ATGC C -> $$ATGCC X
+    // Case 2:  node != node_base, next != next_base
+
+    // Case 3:  node == node_base, next != next_base (TODO: handle later)
+    // Case 4:  node != node_base, next == next_base (TODO: handle later)
+
+    size_t num_nonbase_next_nodes = 0;
+    for (const auto &[next, c, score] : outgoing) {
+        num_nonbase_next_nodes += (next != get_labeled_node(next));
+    }
+
+    if (node != node_base && canonical && rev_graph && num_nonbase_next_nodes) {
+        rev_graph = nullptr;
+    } else {
+        if (node != node_base) {
+            default_init();
+            return sum_diff_probs;
+        }
+
+        if (rev_graph && num_nonbase_next_nodes) {
+            default_init();
+            return sum_diff_probs;
+        }
+    }
+
+    //          node         next
+    // e.g.,    GTCATGC C <- XGTCATG C
+    edge_index edge_base = dbg_succ->kmer_to_boss_index(
+        rev_graph ? get_labeled_node(std::get<0>(outgoing[0])) : node_base
+    );
+    edge_index last_edge_base = boss.succ_last(edge_base);
+
+    std::pair<edge_index, edge_index> node_range {
+        boss.pred_last(last_edge_base - 1) + 1, last_edge_base
+    };
+    assert(node_range.first);
+    assert(node_range.second);
+    node_range = lcs->expand(node_range.first, node_range.second,
+                             boss.get_k(), boss.get_k() - expand_seed);
+    assert((*lcs)[node_range.first] < expand_seed);
+    assert(node_range.second + 1 == lcs->data().size()
+        || (*lcs)[node_range.second + 1] < expand_seed);
+
+    auto next_range = node_range;
+    TAlphabet cur_edge_label = rev_graph
+        ? boss.get_node_last_value(dbg_succ->kmer_to_boss_index(node_base))
+        : boss.encode(node_last_char);
+    assert(cur_edge_label == boss.get_W(edge_base) % boss.alph_size);
+    bool check = boss.tighten_range(&next_range.first, &next_range.second,
+                                    cur_edge_label);
+    std::ignore = check;
+    assert(check);
+
+    assert(boss.rank_W(node_range.second, cur_edge_label)
+            - boss.rank_W(node_range.first - 1, cur_edge_label)
+                == boss.rank_last(next_range.second) - boss.rank_last(next_range.first - 1));
+
+    std::vector<TAlphabet> next_range_w;
+    if (!rev_graph) {
+        next_range_w.reserve(next_range.second - next_range.first + 1);
+        for (edge_index i = next_range.first; i <= next_range.second; ++i) {
+            next_range_w.emplace_back(boss.get_W(i) % boss.alph_size);
+        }
+    }
+
+    std::vector<node_index> nodes_to_queue;
+    for (edge_index i = boss.succ_W(node_range.first, cur_edge_label);
+            i <= node_range.second;
+            i = boss.succ_W(i + 1, cur_edge_label)) {
+        if (node_index n = dbg_succ->boss_to_kmer_index(i))
+            nodes_to_queue.push_back(n);
+    }
+    for (edge_index i = boss.succ_W(node_range.first, cur_edge_label + boss.alph_size);
+            i <= node_range.second;
+            i = boss.succ_W(i + 1, cur_edge_label + boss.alph_size)) {
+        if (node_index n = dbg_succ->boss_to_kmer_index(i))
+            nodes_to_queue.push_back(n);
+    }
+
+    for (edge_index i = next_range.first; i <= next_range.second; ++i) {
+        if (node_index n = dbg_succ->boss_to_kmer_index(i))
+            nodes_to_queue.push_back(n);
+    }
+
+    annotation_buffer.queue_path(std::move(nodes_to_queue));
+    annotation_buffer.fetch_queued_annotations();
+
+    size_t total = 0;
+    Vector<size_t> out_map(boss.alph_size, intersect_diff_labels.size());
+    for (size_t i = 0; i < outgoing.size(); ++i) {
+        const auto &[next, c, score] = outgoing[i];
+        out_map[boss.encode(c)] = i;
+    }
+
+    Vector<size_t> counts(boss.alph_size);
+    Vector<tsl::hopscotch_set<Column>> exclude_sets;
+    exclude_sets.reserve(intersect_diff_labels.size());
+    for (const auto &[inter, diff, _] : intersect_diff_labels) {
+        if (diff.empty()) {
+            exclude_sets.emplace_back();
+            continue;
+        }
+
+        assert(inter.empty());
+
+        exclude_sets.emplace_back(diff.begin(), diff.end());
+        assert(exclude_sets.back().size() == diff.size());
+    }
+
+    edge_index node_wp = boss.succ_W(node_range.first, cur_edge_label);
+    edge_index node_wm = boss.succ_W(node_range.first, cur_edge_label + boss.alph_size);
+    edge_index i = boss.succ_last(next_range.first);
+    edge_index i_start = boss.pred_last(i - 1) + 1;
+    bool label_preserving_traversal_found = false;
+    while (i <= next_range.second) {
+        assert(node_wp != node_wm);
+        edge_index node_w = std::min(node_wp, node_wm);
+        assert(boss.fwd(node_w, cur_edge_label) == i);
+        if (node_index n = dbg_succ->boss_to_kmer_index(node_w)) {
+            ++total;
+            sdsl::bit_vector match_found(boss.alph_size, false);
+            size_t matches = 0;
+            const Alignment::Columns *n_labels = annotation_buffer.get_labels(n);
+            assert(n_labels);
+
+            // TODO: find a more efficient way to get this
+            TAlphabet common_next_c_enc = rev_graph
+                ? boss.encode(complement(boss.decode(
+                    boss.get_minus_k_value(node_w, boss.get_k() - 1).first)
+                  ))
+                : 0;
+
+            for (edge_index next_edge = i_start; next_edge <= i; ++next_edge) {
+                if (matches == match_found.size() - 1)
+                    break;
+
+                node_index m = dbg_succ->boss_to_kmer_index(next_edge);
+                if (!m)
+                    continue;
+
+                TAlphabet next_c_enc = rev_graph
+                    ? common_next_c_enc
+                    : next_range_w[next_edge - next_range.first];
+                size_t j = out_map[next_c_enc];
+                if (j == outgoing.size() || match_found[next_c_enc])
+                    continue;
+
+                const auto &[_, diff, lclogprob] = intersect_diff_labels[j];
+                if (diff.empty())
+                    continue;
+
+                const auto &exclude = exclude_sets[j];
+                const Alignment::Columns *m_labels = annotation_buffer.get_labels(m);
+                assert(m_labels);
+                Alignment::Columns inter;
+                std::set_intersection(n_labels->begin(), n_labels->end(),
+                                      m_labels->begin(), m_labels->end(),
+                                      std::back_inserter(inter));
+                for (Column col : inter) {
+                    if (!exclude.count(col)) {
+                        // found an independent label
+                        match_found[next_c_enc] = true;
+                        ++matches;
+                    }
+                }
+            }
+
+            if (matches)
+                label_preserving_traversal_found = true;
+
+            for (size_t j = 0; j < match_found.size(); ++j) {
+                counts[j] += match_found[j];
+            }
+        }
+
+        if (node_wp < node_wm) {
+            node_wp = boss.succ_W(node_wp + 1, cur_edge_label);
+        } else {
+            node_wm = boss.succ_W(node_wm + 1, cur_edge_label + boss.alph_size);
+        }
+
+        if (node_wp <= node_wm) {
+            i_start = i + 1;
+            i = boss.succ_last(i_start);
+        }
+    }
+
+    if (!label_preserving_traversal_found)
+        return sum_diff_probs;
+
+    for (size_t i = 0; i < outgoing.size(); ++i) {
+        const auto &[next, c, score] = outgoing[i];
+        auto &[inter, diff, lclogprob] = intersect_diff_labels[i];
+        if (size_t count = counts[boss.encode(c)]) {
+            assert(diff.size());
+            lclogprob = log2(count) - log2(total);
+            sum_diff_probs += 1.0 - std::pow(2.0, lclogprob);
+            lclogprob = std::floor(lclogprob - log2(outgoing.size()));
+        }
+    }
+
+    return std::floor(log2(sum_diff_probs + 1.0) - log2(outgoing.size()));
+}
+
 void LabeledExtender
 ::call_outgoing(node_index node,
                 size_t max_prefetch_distance,
@@ -377,12 +670,14 @@ void LabeledExtender
                 size_t table_i,
                 bool force_fixed_seed) {
     assert(table.size() == node_labels_.size());
+    assert(table.size() == node_labels_switched_.size());
 
     // if we are in the seed and want to force the seed to be fixed, automatically
     // take the next node in the seed
     size_t next_offset = table[table_i].offset + 1;
-    bool in_seed = (next_offset - seed_->get_offset() < seed_->get_sequence().size())
-        && (next_offset < graph_->get_k() || force_fixed_seed || fixed_seed());
+    bool is_seed_fixed = force_fixed_seed || fixed_seed();
+    bool in_seed = next_offset - seed_->get_offset() < seed_->get_sequence().size()
+                    && (next_offset < graph_->get_k() || is_seed_fixed);
 
     std::vector<std::tuple<node_index, char, score_t>> outgoing;
     DefaultColumnExtender::call_outgoing(node, max_prefetch_distance,
@@ -398,10 +693,26 @@ void LabeledExtender
         return;
 
     if (outgoing.size() == 1) {
-        // Assume that annotations are preserved in unitigs. Violations of this
-        // assumption are corrected after the next flush
         const auto &[next, c, score] = outgoing[0];
-        node_labels_.emplace_back(node_labels_[table_i]);
+        if (next_offset <= graph_->get_k()
+                || next_offset - graph_->get_k() - 1 >= seed_->label_column_diffs.size()
+                || seed_->label_column_diffs[next_offset - graph_->get_k() - 1].empty()) {
+            // Assume that annotations are preserved in unitigs. Violations of this
+            // assumption are corrected after the next flush
+            node_labels_.emplace_back(node_labels_[table_i]);
+            node_labels_switched_.emplace_back(false);
+        } else {
+            const auto &columns = annotation_buffer_.get_cached_column_set(node_labels_[table_i]);
+            const auto &diff_labels = seed_->label_column_diffs[next_offset - graph_->get_k() - 1];
+            Columns decoded;
+            std::set_symmetric_difference(columns.begin(), columns.end(),
+                                          diff_labels.begin(), diff_labels.end(),
+                                          std::back_inserter(decoded));
+            node_labels_.emplace_back(annotation_buffer_.cache_column_set(std::move(decoded)));
+            node_labels_switched_.emplace_back(true);
+            last_flushed_table_i_ = std::max(last_flushed_table_i_, node_labels_.size());
+        }
+
         callback(next, c, score);
         return;
     }
@@ -419,21 +730,54 @@ void LabeledExtender
 
     // no coordinates are present in the annotation
     if (!annotation_buffer_.get_labels_and_coords(node).second) {
+        std::vector<std::tuple<Columns, Columns, double>> intersect_diff_labels(
+            outgoing.size()
+        );
+
         // label consistency (weaker than coordinate consistency):
         // checks if there is at least one label shared between adjacent nodes
-        for (const auto &[next, c, score] : outgoing) {
+        for (size_t i = 0; i < outgoing.size(); ++i) {
+            const auto &[next, c, score] = outgoing[i];
+            auto &[intersect_labels, diff_labels, lclogprob] = intersect_diff_labels[i];
+            lclogprob = config_.ninf;
             auto next_labels = annotation_buffer_.get_labels(next);
             assert(next_labels);
 
-            Columns intersect_labels;
-            std::set_intersection(columns.begin(), columns.end(),
-                                  next_labels->begin(), next_labels->end(),
-                                  std::back_inserter(intersect_labels));
+            set_intersection_difference(next_labels->begin(), next_labels->end(),
+                                        columns.begin(), columns.end(),
+                                        std::back_inserter(intersect_labels),
+                                        std::back_inserter(diff_labels));
 
-            if (intersect_labels.size()) {
-                node_labels_.push_back(annotation_buffer_.cache_column_set(
-                                                std::move(intersect_labels)));
-                callback(next, c, score);
+            if (intersect_labels.size())
+                diff_labels.clear();
+        }
+
+        double sum_diff_probs = compute_label_change_scores(
+            *graph_, annotation_buffer_, config_, node, table[table_i].c, outgoing,
+            intersect_diff_labels
+        );
+
+        for (size_t i = 0; i < outgoing.size(); ++i) {
+            const auto &[next, c, score] = outgoing[i];
+            score_t abs_match_score = std::abs(config_.score_matrix[c][c]);
+            auto &[inter, diff, lclogprob] = intersect_diff_labels[i];
+            assert(diff.size() || lclogprob == config_.ninf);
+
+            if (lclogprob > config_.ninf && diff.size())
+                lclogprob *= abs_match_score;
+
+            DEBUG_LOG("Position {} edge {}: label preserve: {}\tlabel change: {}",
+                      next_offset - seed_->get_offset(), i, sum_diff_probs * abs_match_score,
+                      lclogprob);
+
+            if (lclogprob > config_.ninf && diff.size()) {
+                node_labels_.emplace_back(annotation_buffer_.cache_column_set(std::move(diff)));
+                node_labels_switched_.emplace_back(true);
+                callback(next, c, score + lclogprob);
+            } else if (inter.size()) {
+                node_labels_.emplace_back(annotation_buffer_.cache_column_set(std::move(inter)));
+                node_labels_switched_.emplace_back(false);
+                callback(next, c, score + sum_diff_probs * abs_match_score);
             }
         }
 
@@ -494,6 +838,7 @@ void LabeledExtender
             // found a consistent set of coordinates, so assign labels for this next node
             node_labels_.push_back(annotation_buffer_.cache_column_set(
                                                 std::move(intersect_labels)));
+            node_labels_switched_.emplace_back(false);
             callback(next, c, score);
         }
     }
@@ -504,8 +849,14 @@ bool LabeledExtender::skip_backtrack_start(size_t i) {
     assert(node_labels_[i] != nannot);
 
     // if this alignment tree node has been visited previously, ignore it
+    assert(remaining_labels_i_);
     if (!prev_starts.emplace(i).second)
         return true;
+
+    if (std::any_of(node_labels_switched_.begin(), node_labels_switched_.end(),
+                    [](const auto &a) { return a; })) {
+        return false;
+    }
 
     // check if this starting point involves seed labels which have not been considered yet
     const auto &end_labels = annotation_buffer_.get_cached_column_set(node_labels_[i]);
@@ -524,16 +875,21 @@ bool LabeledExtender::skip_backtrack_start(size_t i) {
 
 void LabeledExtender::call_alignments(score_t end_score,
                                       const std::vector<node_index> &path,
-                                      const std::vector<size_t> & /* trace */,
+                                      const std::vector<size_t> &trace,
+                                      const std::vector<score_t> &score_trace,
                                       const Cigar &ops,
                                       size_t clipping,
                                       size_t offset,
                                       std::string_view window,
                                       const std::string &match,
-                                      score_t extra_penalty,
+                                      score_t extra_score,
                                       const std::function<void(Alignment&&)> &callback) {
+    assert(label_intersection_.size()
+            || std::any_of(node_labels_switched_.begin(), node_labels_switched_.end(),
+                           [](const auto &a) { return a; }));
+
     Alignment alignment = construct_alignment(ops, clipping, window, path, match,
-                                              end_score, offset, extra_penalty);
+                                              end_score, offset, score_trace, extra_score);
     alignment.label_encoder = &annotation_buffer_.get_annotator().get_label_encoder();
 
     auto [base_labels, base_coords]
@@ -545,6 +901,7 @@ void LabeledExtender::call_alignments(score_t end_score,
         base_labels = &seed_->label_columns;
 
     auto call_alignment = [&]() {
+        assert(alignment.label_columns.size());
         if (label_diff_.size() && label_diff_.back() == nannot) {
             label_diff_.pop_back();
             remaining_labels_i_ = annotation_buffer_.cache_column_set(std::move(label_diff_));
@@ -556,7 +913,35 @@ void LabeledExtender::call_alignments(score_t end_score,
     };
 
     if (!base_coords) {
-        alignment.label_columns = std::move(label_intersection_);
+        if (std::any_of(node_labels_switched_.begin(), node_labels_switched_.end(),
+                        [](const auto &a) { return a; })) {
+            auto it = trace.rend() - alignment.get_nodes().size();
+            assert(*it);
+            alignment.label_columns
+                = annotation_buffer_.get_cached_column_set(node_labels_[*it]);
+            assert(alignment.label_columns.size());
+
+            alignment.label_column_diffs.reserve(alignment.get_nodes().size() - 1);
+            const auto *prev = &annotation_buffer_.get_cached_column_set(node_labels_[*it]);
+            for (++it; it != trace.rend(); ++it) {
+                const auto *cur = &annotation_buffer_.get_cached_column_set(node_labels_[*it]);
+                alignment.label_column_diffs.emplace_back();
+                std::set_symmetric_difference(
+                    prev->begin(), prev->end(), cur->begin(), cur->end(),
+                    std::back_inserter(alignment.label_column_diffs.back())
+                );
+                std::swap(prev, cur);
+            }
+
+            if (alignment.extra_scores.empty())
+                alignment.extra_scores.resize(alignment.label_column_diffs.size(), 0);
+
+            label_diff_.assign(1, nannot);
+        } else {
+            alignment.label_columns = std::move(label_intersection_);
+            label_intersection_ = Columns{};
+        }
+
         call_alignment();
         return;
     }

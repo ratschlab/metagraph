@@ -10,6 +10,7 @@
 #include "graph/alignment/dbg_aligner.hpp"
 #include "graph/alignment/aligner_labeled.hpp"
 #include "graph/annotated_dbg.hpp"
+#include "graph/graph_extensions/node_lcs.hpp"
 #include "seq_io/sequence_io.hpp"
 #include "config/config.hpp"
 #include "load/load_graph.hpp"
@@ -43,6 +44,7 @@ DBGAlignerConfig initialize_aligner_config(const Config &config) {
         .gap_extension_penalty = static_cast<int8_t>(-config.alignment_gap_extension_penalty),
         .left_end_bonus = config.alignment_end_bonus,
         .right_end_bonus = config.alignment_end_bonus,
+        .label_change_score = config.alignment_label_change_score,
         .forward_and_reverse_complement = !config.align_only_forwards,
         .chain_alignments = config.alignment_chain,
         .post_chain_alignments = config.alignment_post_chain,
@@ -299,8 +301,21 @@ int align_to_graph(Config *config) {
     // For graphs which still feature a mask, this speeds up mapping and allows
     // for dummy nodes to be matched by suffix seeding
     auto dbg_succ = std::dynamic_pointer_cast<DBGSuccinct>(graph);
-    if (dbg_succ)
+    if (dbg_succ) {
         dbg_succ->reset_mask();
+        if (config->lcs) {
+            common::logger->trace("Load graph LCS file");
+            if (!dbg_succ->load_extension<NodeLCS>(config->infbase)) {
+                common::logger->error("Could not load LCS file");
+                exit(1);
+            }
+
+            if (!graph->get_extension<NodeLCS>()) {
+                common::logger->error("Could not fetch LCS extension");
+                exit(1);
+            }
+        }
+    }
 
     Timer timer;
     ThreadPool thread_pool(get_num_threads());

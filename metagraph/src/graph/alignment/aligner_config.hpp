@@ -24,6 +24,7 @@ struct DBGAlignerConfig {
     size_t min_seed_length = 0;
     size_t max_seed_length = 0;
     size_t max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
+    size_t label_change_search_width = 5;
 
     // Lowest possible score. 100 is added to prevent underflow during operations.
     // For this to work, all penalties should be less than 100.
@@ -44,6 +45,7 @@ struct DBGAlignerConfig {
     int8_t gap_extension_penalty = -2;
     int8_t left_end_bonus = 0;
     int8_t right_end_bonus = 0;
+    score_t label_change_score = ninf;
 
     bool forward_and_reverse_complement = true;
     bool chain_alignments = false;

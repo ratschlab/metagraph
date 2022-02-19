@@ -166,7 +166,9 @@ class Alignment {
     static bool coordinates_less(const Alignment &a, const Alignment &b);
 
     Columns label_columns;
-    score_t extra_penalty = 0;
+    std::vector<Columns> label_column_diffs;
+    std::vector<score_t> extra_scores;
+    score_t extra_score = 0;
 
     // for each column in |label_columns|, store a vector of coordinate ranges
     CoordinateSet label_coordinates;
@@ -287,11 +289,8 @@ template <> struct formatter<mtg::graph::align::Alignment> {
         const auto &label_columns = a.label_columns;
         const auto &label_coordinates = a.label_coordinates;
 
-        if (label_coordinates.size()) {
-            format_to(ctx.out(), "\t{}", a.format_coords());
-        } else if (label_columns.size()) {
+        auto decode_labels = [&](const auto &label_columns, char delimiter) {
             assert(a.label_encoder);
-
             std::vector<std::string> decoded_labels;
             decoded_labels.reserve(label_columns.size());
 
@@ -299,7 +298,32 @@ template <> struct formatter<mtg::graph::align::Alignment> {
                 decoded_labels.emplace_back(a.label_encoder->decode(label_columns[i]));
             }
 
-            format_to(ctx.out(), "\t{}", fmt::join(decoded_labels, ";"));
+            format_to(ctx.out(), "{}{}", delimiter, fmt::join(decoded_labels, ";"));
+        };
+
+        if (label_coordinates.size()) {
+            format_to(ctx.out(), "\t{}", a.format_coords());
+        } else if (label_columns.size()) {
+            mtg::graph::align::Alignment::Columns cur_labels = label_columns;
+            decode_labels(cur_labels, '\t');
+            size_t count = 1;
+            for (const auto &diff_labels : a.label_column_diffs) {
+                if (diff_labels.empty()) {
+                    ++count;
+                } else {
+                    format_to(ctx.out(), ":{}", count);
+                    mtg::graph::align::Alignment::Columns diff;
+                    std::set_symmetric_difference(cur_labels.begin(), cur_labels.end(),
+                                                  diff_labels.begin(), diff_labels.end(),
+                                                  std::back_inserter(diff));
+                    decode_labels(diff, '>');
+                    std::swap(diff, cur_labels);
+                    count = 1;
+                }
+            }
+
+            if (a.label_column_diffs.size())
+                format_to(ctx.out(), ":{}", count);
         }
 
         return ctx.out();

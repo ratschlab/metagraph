@@ -208,15 +208,16 @@ class DefaultColumnExtender : public SeedFilteringExtender {
     virtual void call_alignments(score_t end_score,
                                  const std::vector<node_index> &path,
                                  const std::vector<size_t> & /* trace */,
+                                 const std::vector<score_t> &score_trace,
                                  const Cigar &ops,
                                  size_t clipping,
                                  size_t offset,
                                  std::string_view window,
                                  const std::string &match,
-                                 score_t extra_penalty,
+                                 score_t extra_score,
                                  const std::function<void(Alignment&&)> &callback) {
         callback(construct_alignment(ops, clipping, window, path, match, end_score,
-                                     offset, extra_penalty));
+                                     offset, score_trace, extra_score));
     }
 
     Alignment construct_alignment(Cigar cigar,
@@ -226,7 +227,8 @@ class DefaultColumnExtender : public SeedFilteringExtender {
                                   std::string match,
                                   score_t score,
                                   size_t offset,
-                                  score_t extra_penalty) const;
+                                  const std::vector<score_t> &score_trace,
+                                  score_t extra_score) const;
 
   private:
     // compute perfect match scores for all suffixes used for branch and bound checks

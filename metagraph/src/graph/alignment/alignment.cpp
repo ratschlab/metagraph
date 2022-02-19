@@ -144,9 +144,33 @@ bool Alignment::append(Alignment&& other) {
         std::swap(label_columns, merged_label_columns);
     }
 
+    if (other.extra_scores.size() && extra_scores.empty())
+        extra_scores.resize(nodes_.size() - 1);
+
+    if (other.label_column_diffs.size() && label_column_diffs.empty())
+        label_column_diffs.resize(nodes_.size() - 1);
+
     nodes_.insert(nodes_.end(), other.nodes_.begin(), other.nodes_.end());
+    if (other.extra_scores.size()) {
+        extra_scores.emplace_back(0);
+        extra_scores.insert(extra_scores.end(), other.extra_scores.begin(), other.extra_scores.end());
+    }
+
+    if (other.label_column_diffs.size()) {
+        label_column_diffs.emplace_back();
+        label_column_diffs.insert(label_column_diffs.end(), other.label_column_diffs.begin(), other.label_column_diffs.end());
+    }
+
+    if (extra_scores.size())
+        extra_scores.resize(nodes_.size() - 1);
+
+    if (label_column_diffs.size())
+        label_column_diffs.resize(nodes_.size() - 1);
+
     sequence_ += std::move(other.sequence_);
     score_ += other.score_;
+    extra_score += other.extra_score;
+
     cigar_.append(std::move(other.cigar_));
     // expand the query window to cover both alignments
     query_view_ = std::string_view(query_view_.data(),
@@ -158,13 +182,31 @@ size_t Alignment::trim_offset() {
     if (!offset_ || nodes_.size() <= 1)
         return 0;
 
+    assert(extra_scores.empty() || extra_scores.size() == nodes_.size() - 1);
+    assert(label_column_diffs.empty() || label_column_diffs.size() == nodes_.size() - 1);
+
     assert(nodes_.front());
 
     size_t first_dummy = (std::find(nodes_.begin(), nodes_.end(), DeBruijnGraph::npos)
         - nodes_.begin()) - 1;
-    size_t trim = std::min(std::min(offset_, nodes_.size() - 1), first_dummy);
+    size_t first_extra_score = extra_scores.empty()
+        ? nodes_.size()
+        : (std::find_if(extra_scores.begin(), extra_scores.end(), [](score_t s) { return s; })
+            - extra_scores.begin());
+    size_t trim = std::min({ offset_, nodes_.size() - 1, first_dummy, first_extra_score });
+    if (!trim)
+        return trim;
+
     offset_ -= trim;
     nodes_.erase(nodes_.begin(), nodes_.begin() + trim);
+    if (extra_scores.size())
+        extra_scores.erase(extra_scores.begin(), extra_scores.begin() + trim);
+
+    if (label_column_diffs.size())
+        label_column_diffs.erase(label_column_diffs.begin(), label_column_diffs.begin() + trim);
+
+    assert(extra_scores.empty() || extra_scores.size() == nodes_.size() - 1);
+    assert(label_column_diffs.empty() || label_column_diffs.size() == nodes_.size() - 1);
     assert(nodes_.front());
     return trim;
 }
@@ -249,6 +291,16 @@ size_t Alignment::trim_query_prefix(size_t n,
         score_ -= config.left_end_bonus;
 
     nodes_.erase(nodes_.begin(), node_it);
+    if (extra_scores.size() && node_it != nodes_.begin()) {
+        extra_score -= std::accumulate(extra_scores.begin(),
+                                       extra_scores.begin() + (node_it - nodes_.begin()),
+                                       score_t(0));
+        extra_scores.erase(extra_scores.begin(), extra_scores.begin() + (node_it - nodes_.begin()));
+    }
+
+    if (label_column_diffs.size() && node_it != nodes_.begin())
+        label_column_diffs.erase(label_column_diffs.begin(), label_column_diffs.begin() + (node_it - nodes_.begin()));
+
     sequence_.erase(sequence_.begin(), s_it);
     it->second -= cigar_offset;
     cigar_.data().erase(cigar_.data().begin(), it);
@@ -329,6 +381,16 @@ size_t Alignment::trim_query_suffix(size_t n,
         score_ -= config.right_end_bonus;
 
     nodes_.erase(node_it.base(), nodes_.end());
+    if (extra_scores.size() >= nodes_.size()) {
+        extra_score -= std::accumulate(extra_scores.end() - nodes_.size() + 1,
+                                       extra_scores.end(),
+                                       score_t(0));
+        extra_scores.resize(nodes_.size() - 1);
+    }
+
+    if (label_column_diffs.size() >= nodes_.size())
+        label_column_diffs.resize(nodes_.size() - 1);
+
     sequence_.erase(s_it.base(), sequence_.end());
     it->second -= cigar_offset;
     cigar_.data().erase(it.base(), cigar_.data().end());
@@ -428,6 +490,16 @@ size_t Alignment::trim_reference_prefix(size_t n,
         score_ -= config.left_end_bonus;
 
     nodes_.erase(nodes_.begin(), node_it);
+    if (extra_scores.size() && node_it != nodes_.begin()) {
+        extra_score -= std::accumulate(extra_scores.begin(),
+                                       extra_scores.begin() + (node_it - nodes_.begin()),
+                                       score_t(0));
+        extra_scores.erase(extra_scores.begin(), extra_scores.begin() + (node_it - nodes_.begin()));
+    }
+
+    if (label_column_diffs.size() && node_it != nodes_.begin())
+        label_column_diffs.erase(label_column_diffs.begin(), label_column_diffs.begin() + (node_it - nodes_.begin()));
+
     sequence_.erase(sequence_.begin(), s_it);
     it->second -= cigar_offset;
     cigar_.data().erase(cigar_.data().begin(), it);
@@ -508,6 +580,16 @@ size_t Alignment::trim_reference_suffix(size_t n,
         score_ -= config.right_end_bonus;
 
     nodes_.erase(node_it.base(), nodes_.end());
+    if (extra_scores.size() >= nodes_.size()) {
+        extra_score -= std::accumulate(extra_scores.end() - nodes_.size() + 1,
+                                       extra_scores.end(),
+                                       score_t(0));
+        extra_scores.resize(nodes_.size() - 1);
+    }
+
+    if (label_column_diffs.size() >= nodes_.size())
+        label_column_diffs.resize(nodes_.size() - 1);
+
     sequence_.erase(s_it.base(), sequence_.end());
     it->second -= cigar_offset;
     cigar_.data().erase(it.base(), cigar_.data().end());
@@ -523,6 +605,35 @@ void Alignment::reverse_complement(const DeBruijnGraph &graph,
 
     trim_offset();
     assert(!offset_ || nodes_.size() == 1);
+
+    if (label_column_diffs.size()) {
+        assert(extra_scores.size() == label_column_diffs.size());
+        Columns cur_labels = label_columns;
+        for (auto &diff_labels : label_column_diffs) {
+            if (diff_labels.size()) {
+                Columns diff;
+                std::set_symmetric_difference(cur_labels.begin(), cur_labels.end(),
+                                              diff_labels.begin(), diff_labels.end(),
+                                              std::back_inserter(diff));
+                diff_labels = diff;
+                std::swap(diff, cur_labels);
+            } else {
+                diff_labels = cur_labels;
+            }
+        }
+        std::reverse(label_column_diffs.begin(), label_column_diffs.end());
+        std::reverse(extra_scores.begin(), extra_scores.end());
+        label_column_diffs.emplace_back(std::move(label_columns));
+        for (auto it = label_column_diffs.rbegin(); it != label_column_diffs.rend() - 1; ++it) {
+            Columns diff;
+            std::set_symmetric_difference(it->begin(), it->end(),
+                                          (it + 1)->begin(), (it + 1)->end(),
+                                          std::back_inserter(diff));
+            std::swap(*it, diff);
+        }
+        std::swap(label_columns, label_column_diffs.front());
+        label_column_diffs.erase(label_column_diffs.begin());
+    }
 
     if (dynamic_cast<const RCDBG*>(&graph)) {
         if (offset_) {
@@ -864,6 +975,9 @@ Json::Value Alignment::to_json(size_t node_size,
                                bool is_secondary,
                                const std::string &read_name,
                                const std::string &label) const {
+    if (extra_score)
+        throw std::runtime_error("Alignments from PSSMs not supported");
+
     if (sequence_.find("$") != std::string::npos
             || std::find(nodes_.begin(), nodes_.end(), DeBruijnGraph::npos) != nodes_.end()) {
         throw std::runtime_error("JSON output for chains not supported");
@@ -1049,6 +1163,17 @@ void Alignment::insert_gap_prefix(ssize_t gap_length,
             // part of the overlap
             assert(static_cast<ssize_t>(offset_) >= -gap_length);
             nodes_.erase(nodes_.begin(), nodes_.begin() + offset_ + gap_length);
+            if (offset_ + gap_length > 1) {
+                if (extra_scores.size()) {
+                    extra_score -= std::accumulate(extra_scores.begin(),
+                                                   extra_scores.begin() + offset_ + gap_length,
+                                                   score_t(0));
+                    extra_scores.erase(extra_scores.begin(), extra_scores.begin() + offset_ + gap_length);
+                }
+
+                if (label_column_diffs.size())
+                    label_column_diffs.erase(label_column_diffs.begin(), label_column_diffs.begin() + offset_ + gap_length);
+            }
         }
 
         if (extra_nodes) {
@@ -1101,6 +1226,11 @@ void Alignment::insert_gap_prefix(ssize_t gap_length,
     }
 
     nodes_.insert(nodes_.begin(), extra_nodes, DeBruijnGraph::npos);
+    if (extra_scores.size() && extra_nodes > 1)
+        extra_scores.insert(extra_scores.begin(), extra_nodes, 0);
+
+    if (label_column_diffs.size() && extra_nodes > 1)
+        label_column_diffs.insert(label_column_diffs.begin(), extra_nodes, {});
 
     assert(nodes_.size() == sequence_.size());
     offset_ = node_overlap;
@@ -1187,11 +1317,31 @@ bool Alignment::is_valid(const DeBruijnGraph &graph, const DBGAlignerConfig *con
         return false;
     }
 
+    if (extra_scores.size() && extra_scores.size() != nodes_.size() - 1) {
+        logger->error("Extra score array incorrect size: {} vs. {}\n{}",
+                      extra_scores.size(), nodes_.size() - 1, *this);
+        return false;
+    }
+
+    score_t change_score_sum = std::accumulate(extra_scores.begin(), extra_scores.end(),
+                                               score_t(0));
+    if (extra_score != change_score_sum) {
+        logger->error("Mismatch between extra score array and extra score sum: {} vs. {}\n{}",
+                      fmt::join(extra_scores, ","), extra_score, *this);
+        return false;
+    }
+
     score_t cigar_score = config ? config->score_cigar(sequence_, query_view_, cigar_) : 0;
-    cigar_score += extra_penalty;
+    cigar_score += extra_score;
     if (config && score_ != cigar_score) {
         logger->error("Mismatch between CIGAR and score\nCigar score: {}\n{}\t{}",
                       cigar_score, query_view_, *this);
+        return false;
+    }
+
+    if (label_column_diffs.size() && label_column_diffs.size() != nodes_.size() - 1) {
+        logger->error("Label storage array incorrect size: {} vs. {}\n{}",
+                      label_column_diffs.size(), nodes_.size() - 1, *this);
         return false;
     }
 
