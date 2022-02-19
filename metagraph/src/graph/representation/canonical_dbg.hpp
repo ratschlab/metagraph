@@ -128,7 +128,6 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
 
     // find all child nodes of node in the CanonicalDBG which are represented
     // in the reverse complement orientation in the underlying primary graph
-
     void append_next_rc_nodes(node_index node, SmallVector<node_index> &children) const;
 };
 
