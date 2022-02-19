@@ -4,6 +4,7 @@
 
 #include "graph/representation/hash/dbg_hash_fast.hpp"
 #include "graph/representation/bitmap/dbg_bitmap.hpp"
+#include "graph/representation/canonical_dbg.hpp"
 
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 
@@ -26,7 +27,11 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
     assert(sequences.size() == labels.size());
     auto graph = build_graph_batch<Graph>(k, sequences, mode);
 
-    uint64_t max_index = graph->get_base_graph().max_index();
+    // TODO: what if CanonicalDBG is not the highest level? find a better way to do this
+    const auto *canonical = dynamic_cast<const CanonicalDBG*>(graph.get());
+    uint64_t max_index = canonical
+        ? canonical->get_graph().max_index()
+        : graph->max_index();
 
     auto anno_graph = std::make_unique<AnnotatedDBG>(
         graph,

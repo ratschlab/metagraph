@@ -258,7 +258,7 @@ include_directories(
   external-libraries/binrel_wt/include
   external-libraries/asio/asio/include
   external-libraries/cpp_progress_bar
-  external-libraries/nvbio/contrib/priority-deque
+  external-libraries/Priority-Deque
   external-libraries/rollinghashcpp
   external-libraries/spdlog/include
   external-libraries/zlib

@@ -161,10 +161,16 @@ class TestAPIRaw(TestAPIBase):
         self.assertEqual(ret.status_code, 200)
 
         self.assertEqual(len(ret.json()), repetitions)
-        expected = {'seq_description': 'query0',
-                    'alignments': [{'score': 12, 'sequence': 'TCGATC', 'cigar': '6=2S',
-                                    'orientation': False }]}
-        self.assertDictEqual(ret.json()[0], expected)
+        expected_1 = {'seq_description': 'query0',
+                      'alignments': [{'score': 21, 'sequence': 'TAGATCGA', 'cigar': '1=1X6=',
+                                      'orientation': False }]}
+        expected_2 = {'seq_description': 'query0',
+                      'alignments': [{'score': 21, 'sequence': 'TCGATCAA', 'cigar': '6=1X1=',
+                                      'orientation': False }]}
+        try:
+            self.assertDictEqual(ret.json()[0], expected_1)
+        except AssertionError:
+            self.assertDictEqual(ret.json()[0], expected_2)
 
         self.assertListEqual(
             [ret.json()[i]['seq_description'] for i in range(repetitions)],

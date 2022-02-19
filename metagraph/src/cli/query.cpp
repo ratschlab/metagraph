@@ -879,11 +879,9 @@ void add_to_graph(Graph &graph, const Contigs &contigs, size_t k) {
                             DeBruijnGraph::npos)
                     - nodes_in_full.begin();
 
-            if (begin != end) {
-                graph.add_sequence(std::string_view(
-                    contig.data() + begin, end - begin + k - 1
-                ));
-            }
+            if (begin != end)
+                graph.add_sequence(std::string_view(contig.data() + begin, end - begin + k - 1));
+
             begin = end + 1;
         } while (end < nodes_in_full.size());
     }
@@ -916,7 +914,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                       size_t num_threads,
                       const Config *config) {
     const auto &full_dbg = anno_graph.get_graph();
-    const auto &full_annotation = anno_graph.get_annotation();
+    const auto &full_annotation = anno_graph.get_annotator();
     const auto *dbg_succ = dynamic_cast<const DBGSuccinct *>(&full_dbg);
 
     assert(full_dbg.get_mode() != DeBruijnGraph::PRIMARY
@@ -1204,7 +1202,7 @@ Alignment align_sequence(std::string *seq,
                          const AnnotatedDBG &anno_graph,
                          const align::DBGAlignerConfig &aligner_config) {
     const DeBruijnGraph &graph = anno_graph.get_graph();
-    auto alignments = build_aligner(graph, aligner_config)->align(*seq);
+    auto alignments = align::DBGAligner(graph, aligner_config).align(*seq);
 
     assert(alignments.size() <= 1 && "Only the best alignment is needed");
 
@@ -1257,7 +1255,7 @@ void QueryExecutor::query_fasta(const string &file,
 
     // Only query_coords/count_kmers if using coord/count aware index.
     if (this->config_.query_coords && !(dynamic_cast<const annot::matrix::MultiIntMatrix *>(
-            &this->anno_graph_.get_annotation().get_matrix()))) {
+            &this->anno_graph_.get_annotator().get_matrix()))) {
         logger->error("Annotation does not support k-mer coordinate queries. "
                       "First transform this annotation to include coordinate data "
                       "(e.g., {}, {}, {}, {}).",
@@ -1269,7 +1267,7 @@ void QueryExecutor::query_fasta(const string &file,
     }
 
     if (this->config_.count_kmers && !(dynamic_cast<const annot::matrix::IntMatrix *>(
-            &this->anno_graph_.get_annotation().get_matrix()))) {
+            &this->anno_graph_.get_annotator().get_matrix()))) {
         logger->error("Annotation does not support k-mer count queries. "
                       "First transform this annotation to include count data "
                       "(e.g., {} or {}).",

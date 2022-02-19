@@ -5,6 +5,7 @@
 
 #include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
 #include "annotation/int_matrix/base/int_matrix.hpp"
+#include "graph/representation/canonical_dbg.hpp"
 #include "common/utils/simd_utils.hpp"
 #include "common/aligned_vector.hpp"
 #include "common/vectors/vector_algorithm.hpp"
@@ -27,10 +28,10 @@ AnnotatedSequenceGraph
 ::AnnotatedSequenceGraph(std::shared_ptr<SequenceGraph> graph,
                          std::unique_ptr<Annotator>&& annotation,
                          bool force_fast)
-      : graph_(graph), annotator_(std::move(annotation)),
-        force_fast_(force_fast) {
+      : graph_(graph), annotator_(std::move(annotation)), force_fast_(force_fast) {
     assert(graph_.get());
     assert(annotator_.get());
+    assert(check_compatibility());
 }
 
 AnnotatedDBG::AnnotatedDBG(std::shared_ptr<DeBruijnGraph> dbg,
@@ -847,11 +848,11 @@ void AnnotatedSequenceGraph
 }
 
 bool AnnotatedSequenceGraph::check_compatibility() const {
-    return graph_->max_index() == annotator_->num_objects();
-}
+    // TODO: what if CanonicalDBG is not the highest level? find a better way to do this
+    if (const auto *canonical = dynamic_cast<const CanonicalDBG *>(graph_.get()))
+        return canonical->get_graph().max_index() == annotator_->num_objects();
 
-bool AnnotatedDBG::check_compatibility() const {
-    return dbg_.get_base_graph().max_index() == annotator_->num_objects();
+    return graph_->max_index() == annotator_->num_objects();
 }
 
 

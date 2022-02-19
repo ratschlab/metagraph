@@ -23,7 +23,7 @@ const std::string test_data_dir = "../tests/data";
 const bool PICK_REV_COMP = true;
 
 inline bool is_exact_match(const Alignment &alignment) {
-    return alignment.get_cigar().is_exact_match(alignment.get_query().size());
+    return alignment.get_cigar().is_exact_match(alignment.get_query_view().size());
 }
 
 void check_score_matrix(const DBGAlignerConfig &config,
@@ -33,53 +33,47 @@ void check_score_matrix(const DBGAlignerConfig &config,
 
     for (size_t i = 0; i < alph_size; ++i) {
         if (i + 1 != alph_size) {
-            EXPECT_LT(int8_t(0), single_char_score(config, alphabet[i], alphabet[i]));
+            EXPECT_LT(int8_t(0), config.score_matrix[alphabet[i]][alphabet[i]]);
         }
 
         for (size_t j = 0; j < alph_size; ++j) {
             //check if the match score is the greatest
             if (i + 1 != alph_size) {
-                EXPECT_GE(single_char_score(config, alphabet[i], alphabet[i]),
-                          single_char_score(config, alphabet[i], alphabet[j]));
+                EXPECT_GE(config.score_matrix[alphabet[i]][alphabet[i]],
+                          config.score_matrix[alphabet[i]][alphabet[j]]);
             }
 
             // checking symmetry
-            EXPECT_EQ(single_char_score(config, alphabet[i], alphabet[j]),
-                      single_char_score(config, alphabet[j], alphabet[i]));
+            EXPECT_EQ(config.score_matrix[alphabet[i]][alphabet[j]],
+                      config.score_matrix[alphabet[j]][alphabet[i]]);
         }
     }
 }
 
 TEST(DBGAlignerTest, check_score_matrix_dna) {
-    check_score_matrix(DBGAlignerConfig(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2)),
-                       alphabets::kAlphabetDNA5,
-                       alphabets::kSigmaDNA5);
+    DBGAlignerConfig c;
+    c.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+    check_score_matrix(c, alphabets::kAlphabetDNA5, alphabets::kSigmaDNA5);
 }
 
 TEST(DBGAlignerTest, check_score_matrix_protein) {
-    check_score_matrix(DBGAlignerConfig(DBGAlignerConfig::score_matrix_blosum62),
-                       alphabets::kAlphabetProtein,
-                       alphabets::kSigmaProtein);
+    DBGAlignerConfig c;
+    c.score_matrix = DBGAlignerConfig::score_matrix_blosum62;
+    check_score_matrix(c, alphabets::kAlphabetProtein, alphabets::kSigmaProtein);
 }
 
 TEST(DBGAlignerTest, check_score_matrix_dna_unit) {
-    check_score_matrix(
-        DBGAlignerConfig(DBGAlignerConfig::unit_scoring_matrix(
-            1, alphabets::kAlphabetDNA, alphabets::kCharToDNA
-        )),
-        alphabets::kAlphabetDNA5,
-        alphabets::kSigmaDNA5
-    );
+    DBGAlignerConfig c;
+    c.score_matrix = DBGAlignerConfig::unit_scoring_matrix(1, alphabets::kAlphabetDNA,
+                                                              alphabets::kCharToDNA);
+    check_score_matrix(c, alphabets::kAlphabetDNA5, alphabets::kSigmaDNA5);
 }
 
 TEST(DBGAlignerTest, check_score_matrix_protein_unit) {
-    check_score_matrix(
-        DBGAlignerConfig(DBGAlignerConfig::unit_scoring_matrix(
-            1, alphabets::kAlphabetProtein, alphabets::kCharToProtein
-        )),
-        alphabets::kAlphabetProtein,
-        alphabets::kSigmaProtein
-    );
+    DBGAlignerConfig c;
+    c.score_matrix = DBGAlignerConfig::unit_scoring_matrix(1, alphabets::kAlphabetProtein,
+                                                              alphabets::kCharToProtein);
+    check_score_matrix(c, alphabets::kAlphabetProtein, alphabets::kSigmaProtein);
 }
 
 
@@ -90,7 +84,8 @@ TYPED_TEST_SUITE(DBGAlignerTest, FewGraphTypes);
 
 TYPED_TEST(DBGAlignerTest, bad_min_cell_score) {
     auto graph = build_graph_batch<TypeParam>(3, {});
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     config.min_cell_score = std::numeric_limits<score_t>::min();
     config.min_path_score = std::numeric_limits<score_t>::min();
     ASSERT_THROW(DBGAligner<>(*graph, config), std::runtime_error);
@@ -102,7 +97,8 @@ TYPED_TEST(DBGAlignerTest, align_empty) {
     std::string query;
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
 
@@ -115,7 +111,8 @@ TYPED_TEST(DBGAlignerTest, align_sequence_much_too_short) {
     std::string query =     "CA";
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
 
@@ -128,7 +125,8 @@ TYPED_TEST(DBGAlignerTest, align_sequence_too_short) {
     std::string query =     "CAT";
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     config.min_seed_length = k;
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
@@ -142,7 +140,8 @@ TYPED_TEST(DBGAlignerTest, align_big_self_loop) {
     std::string query =     "AAAAAAAAA";
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
 
@@ -170,7 +169,8 @@ TYPED_TEST(DBGAlignerTest, align_single_node) {
     std::string query =     "CAT";
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
 
@@ -198,7 +198,8 @@ TYPED_TEST(DBGAlignerTest, align_straight) {
     std::string query = reference;
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
 
@@ -220,26 +221,29 @@ TYPED_TEST(DBGAlignerTest, align_straight) {
     check_extend(graph, aligner.get_config(), paths, query);
 }
 
-TYPED_TEST(DBGAlignerTest, align_straight_max_size) {
-    size_t k = 4;
-    std::string reference = "AGCTTCGAGGCCAA";
-    std::string query = reference;
+// TODO: max RAM restrictions only apply to off-paths. rewrite this test
+// TYPED_TEST(DBGAlignerTest, align_straight_max_size) {
+//     size_t k = 4;
+//     std::string reference = "AGCTTCGAGGCCAA";
+//     std::string query = reference;
 
-    auto graph = build_graph_batch<TypeParam>(k, { reference });
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
-    config.xdrop = 4;
-    config.max_ram_per_alignment = (24.0 + (120.0 + sizeof(score_t) * 3.0 * 2.0) * 2.0) / 1'000'000.0;
-    DBGAligner<> aligner(*graph, config);
-    auto paths = aligner.align(query);
+//     auto graph = build_graph_batch<TypeParam>(k, { reference });
+//     DBGAlignerConfig config;
+//     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+//     config.xdrop = 4;
+//     config.chain_alignments = false;
+//     config.max_ram_per_alignment = (24.0 + (120.0 + sizeof(score_t) * 3.0 * 2.0)) / 1'000'000.0;
+//     DBGAligner<> aligner(*graph, config);
+//     auto paths = aligner.align(query);
 
-    EXPECT_EQ(1ull, paths.size());
-    auto path = paths[0];
+//     EXPECT_EQ(1ull, paths.size());
+//     auto path = paths[0];
 
-    EXPECT_NE("14=", path.get_cigar().to_string());
-    EXPECT_LT(0u, path.get_cigar().get_num_matches());
-    EXPECT_GT(14u, path.get_cigar().get_num_matches());
-    EXPECT_TRUE(path.is_valid(*graph, &config));
-}
+//     EXPECT_NE("14=", path.get_cigar().to_string());
+//     EXPECT_LT(0u, path.get_cigar().get_num_matches());
+//     EXPECT_GT(14u, path.get_cigar().get_num_matches());
+//     EXPECT_TRUE(path.is_valid(*graph, &config));
+// }
 
 TYPED_TEST(DBGAlignerTest, align_straight_min_path_score) {
     size_t k = 4;
@@ -247,7 +251,8 @@ TYPED_TEST(DBGAlignerTest, align_straight_min_path_score) {
     std::string query = reference;
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     config.min_path_score = 100;
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
@@ -263,7 +268,8 @@ TYPED_TEST(DBGAlignerTest, align_straight_with_N) {
     //                           X
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
 
@@ -295,7 +301,8 @@ TYPED_TEST(DBGAlignerTest, align_straight_forward_and_reverse_complement) {
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
 
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     auto config_fwd_and_rev = config;
 
     DBGAligner<> aligner(*graph, config_fwd_and_rev);
@@ -319,18 +326,11 @@ TYPED_TEST(DBGAlignerTest, align_straight_forward_and_reverse_complement) {
     check_extend(graph, aligner.get_config(), paths, query);
     auto ext_paths = get_extend(graph, config_fwd_and_rev, paths, query);
 
-    EXPECT_TRUE(std::equal(paths.data().begin(), paths.data().end(),
-                           ext_paths.data().begin(), ext_paths.data().end()));
-
-    // test copy
-    auto paths_copy = paths;
-    for (const auto &path : paths_copy.data()) {
-        EXPECT_TRUE(path.is_valid(*graph, &config));
-    }
-
+    EXPECT_TRUE(std::equal(paths.begin(), paths.end(),
+                           ext_paths.begin(), ext_paths.end()));
     // test move
     auto paths_move = std::move(paths);
-    for (const auto &path : paths_move.data()) {
+    for (const auto &path : paths_move) {
         EXPECT_TRUE(path.is_valid(*graph, &config));
     }
 }
@@ -343,7 +343,8 @@ TYPED_TEST(DBGAlignerTest, align_straight_forward_and_reverse_complement_batch) 
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
 
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     auto config_fwd_and_rev = config;
 
     DBGAligner<> aligner(*graph, config_fwd_and_rev);
@@ -390,7 +391,8 @@ TYPED_TEST(DBGAlignerTest, align_ending_branch) {
     std::string query = reference_2;
 
     auto graph = build_graph_batch<TypeParam>(k, { reference_1, reference_2 });
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
 
@@ -421,7 +423,8 @@ TYPED_TEST(DBGAlignerTest, align_branch) {
     std::string query = reference_2;
 
     auto graph = build_graph_batch<TypeParam>(k, { reference_1, reference_2 });
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
 
@@ -452,7 +455,8 @@ TYPED_TEST(DBGAlignerTest, align_branch_with_cycle) {
     std::string query = reference_2;
 
     auto graph = build_graph_batch<TypeParam>(k, { reference_1, reference_2 });
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
 
@@ -480,7 +484,8 @@ TYPED_TEST(DBGAlignerTest, repetitive_sequence_alignment) {
     std::string query =     "AGGGGG";
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
 
@@ -509,7 +514,8 @@ TYPED_TEST(DBGAlignerTest, variation) {
     //                            X
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
 
@@ -540,7 +546,10 @@ TYPED_TEST(DBGAlignerTest, variation_in_branching_point) {
 
     auto graph = build_graph_batch<TypeParam>(k, { reference_1, reference_2 });
 
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2), -3, -1);
+    DBGAlignerConfig config;
+    config.gap_opening_penalty = -3;
+    config.gap_extension_penalty = -1;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     DBGAligner<> aligner(*graph, config);
 
     auto paths = aligner.align(query);
@@ -574,7 +583,8 @@ TYPED_TEST(DBGAlignerTest, multiple_variations) {
     //                             X      X X
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
 
@@ -605,7 +615,10 @@ TYPED_TEST(DBGAlignerTest, align_noise_in_branching_point) {
 
     auto graph = build_graph_batch<TypeParam>(k, { reference_1, reference_2 });
 
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -3, -3), -3, -1);
+    DBGAlignerConfig config;
+    config.gap_opening_penalty = -3;
+    config.gap_extension_penalty = -1;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
     DBGAligner<> aligner(*graph, config);
 
     auto paths = aligner.align(query);
@@ -614,8 +627,15 @@ TYPED_TEST(DBGAlignerTest, align_noise_in_branching_point) {
     auto path = paths[0];
 
     EXPECT_EQ(query.size() - k + 2, path.size());
-    EXPECT_EQ(reference_1 + "T", path.get_sequence());
-    EXPECT_EQ("4=1D7=", path.get_cigar().to_string());
+    if (!path.get_orientation()) {
+        // the forward orientation of the read was aligned
+        EXPECT_EQ("AAAACTTTTTTT", path.get_sequence());
+        EXPECT_EQ("4=1D7=", path.get_cigar().to_string());
+    } else {
+        // the reverse complement of the read was aligned
+        EXPECT_EQ("AAAAAAACTTTT", path.get_sequence());
+        EXPECT_EQ("7=1D4=", path.get_cigar().to_string());
+    }
     EXPECT_EQ(11u, path.get_cigar().get_num_matches());
     EXPECT_FALSE(is_exact_match(path));
     EXPECT_EQ(0u, path.get_clipping());
@@ -638,7 +658,10 @@ TYPED_TEST(DBGAlignerTest, alternative_path_basic) {
 
     auto graph = build_graph_batch<TypeParam>(k, references);
 
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2), -3, -1);
+    DBGAlignerConfig config;
+    config.gap_opening_penalty = -3;
+    config.gap_extension_penalty = -1;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     config.num_alternative_paths = 2;
     DBGAligner<> aligner(*graph, config);
 
@@ -665,7 +688,8 @@ TYPED_TEST(DBGAlignerTest, align_multiple_misalignment) {
     //                           X         X
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
 
@@ -694,7 +718,8 @@ TYPED_TEST(DBGAlignerTest, align_insert_non_existent) {
     //                            I
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     config.gap_opening_penalty = -3;
     config.gap_extension_penalty = -3;
     DBGAligner<> aligner(*graph, config);
@@ -725,7 +750,8 @@ TYPED_TEST(DBGAlignerTest, align_insert_multi) {
     //                            II
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     config.gap_opening_penalty = -3;
     config.gap_extension_penalty = -3;
     DBGAligner<> aligner(*graph, config);
@@ -757,7 +783,8 @@ TYPED_TEST(DBGAlignerTest, align_insert_long) {
     //                            IIIIIIIII
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -1));
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -1);
     config.gap_opening_penalty = -1;
     config.gap_extension_penalty = -1;
     DBGAligner<> aligner(*graph, config);
@@ -789,7 +816,8 @@ TYPED_TEST(DBGAlignerTest, align_insert_long_offset) {
     //                             XIIIIIIIII
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -1));
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -1);
     config.gap_opening_penalty = -1;
     config.gap_extension_penalty = -1;
     DBGAligner<> aligner(*graph, config);
@@ -823,7 +851,8 @@ TYPED_TEST(DBGAlignerTest, align_delete) {
     //                             D
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     config.gap_opening_penalty = -3;
     config.gap_extension_penalty = -3;
     DBGAligner<> aligner(*graph, config);
@@ -860,7 +889,8 @@ TYPED_TEST(DBGAlignerTest, align_gap) {
     //                                 DDDD
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     config.gap_opening_penalty = -3;
     config.gap_extension_penalty = -3;
     DBGAligner<> aligner(*graph, config);
@@ -892,7 +922,8 @@ TYPED_TEST(DBGAlignerTest, align_gap_after_seed) {
     //                           DDDD
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     config.gap_opening_penalty = -3;
     config.gap_extension_penalty = -1;
     DBGAligner<> aligner(*graph, config);
@@ -924,9 +955,10 @@ TYPED_TEST(DBGAlignerTest, align_loop_deletion) {
     //                           DDDD
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-    DBGAlignerConfig config(DBGAlignerConfig::unit_scoring_matrix(
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::unit_scoring_matrix(
         1, alphabets::kAlphabetDNA, alphabets::kCharToDNA
-    ));
+    );
     config.gap_opening_penalty = -1;
     config.gap_extension_penalty = -1;
     DBGAligner<> aligner(*graph, config);
@@ -958,8 +990,10 @@ TYPED_TEST(DBGAlignerTest, align_straight_long_xdrop) {
     std::string query = reference_1;
 
     auto graph = build_graph_batch<TypeParam>(k, { reference_1, reference_2 });
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -3, -3));
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
     config.xdrop = 30;
+    config.rel_score_cutoff = 0.8;
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
 
@@ -988,7 +1022,8 @@ TYPED_TEST(DBGAlignerTest, align_drop_seed) {
     //                       SSSSSSS
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -6, -6));
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -6, -6);
     config.gap_opening_penalty = -10;
     config.gap_extension_penalty = -4;
     config.xdrop = 6;
@@ -1021,8 +1056,9 @@ TYPED_TEST(DBGAlignerTest, align_long_gap_after_seed) {
     //                             SSSS
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
-    config.gap_opening_penalty = -3;
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+    config.gap_opening_penalty = -5;
     config.gap_extension_penalty = -1;
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
@@ -1054,7 +1090,8 @@ TYPED_TEST(DBGAlignerTest, align_repeat_sequence_no_delete_after_insert) {
     // "TTTGTGGCTAGAGCTCGAGATCGCGCG" "GCCACAATTGACAAAT"             "GACAAATG" "T" "GATCTAAT" "G" "AAACTAAAGAGCTTCTGCACAGCAAAAGAAACTGTCATC";
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -3, -3));
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
     config.gap_opening_penalty = -3;
     config.gap_extension_penalty = -3;
     DBGAligner<> aligner(*graph, config);
@@ -1114,7 +1151,8 @@ TYPED_TEST(DBGAlignerTest, align_clipping1) {
     //                       SS
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
 
@@ -1144,7 +1182,8 @@ TYPED_TEST(DBGAlignerTest, align_clipping2) {
     //                        SS
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
 
@@ -1173,7 +1212,8 @@ TYPED_TEST(DBGAlignerTest, align_long_clipping) {
     //                       SSSSSSS
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
     ASSERT_FALSE(paths.empty());
@@ -1203,7 +1243,8 @@ TYPED_TEST(DBGAlignerTest, align_end_clipping) {
     //                                        SSSSSSS
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
 
@@ -1232,7 +1273,8 @@ TYPED_TEST(DBGAlignerTest, align_clipping_min_cell_score) {
     //                          SS
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     config.min_cell_score = std::numeric_limits<score_t>::min() + 100;
     config.min_path_score = std::numeric_limits<score_t>::min() + 100;
     DBGAligner<> aligner(*graph, config);
@@ -1262,7 +1304,8 @@ TYPED_TEST(DBGAlignerTest, align_low_similarity) {
     std::string query =     "CTAGAACTTAAAGTATAATAATACTAATAAAAGTACAATACA";
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -3, -3));
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
 
@@ -1290,7 +1333,8 @@ TYPED_TEST(DBGAlignerTest, align_low_similarity2) {
     std::string query =     "GCCACAATTGACAAATGACAAATGTGATCTAATGAAACTAAAGAGCTTCTGCACAGCAAAAGAAACTGTCATC";
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -3, -3));
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
 
@@ -1304,7 +1348,8 @@ TYPED_TEST(DBGAlignerTest, align_low_similarity3) {
     std::string query =     "AAAAAAAAAAAAAAAAAAAAAAAAAAACGCCAAAAAGGGGGAATAGGGGGGGGGGAACCCCAACACCGGTATGTTTTTTTGTGTGTGGGGGATTTTTTTC";
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -3, -3));
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
 
@@ -1338,10 +1383,11 @@ TYPED_TEST(DBGAlignerTest, align_low_similarity4) {
 
     EXPECT_TRUE(graph->find(match, 1.0));
 
-    for (double nodes_per_seq_char : { 10.0, std::numeric_limits<double>::max() }) {
+    for (double nodes_per_seq_char : { 10.0, 50.0 }) {
         for (size_t xdrop : { 27, 30 }) {
             for (double discovery_fraction : { 0.0, 1.0 }) {
-                DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -3, -3));
+                DBGAlignerConfig config;
+                config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
                 config.gap_opening_penalty = -5;
                 config.gap_extension_penalty = -2;
                 config.xdrop = xdrop;
@@ -1358,7 +1404,6 @@ TYPED_TEST(DBGAlignerTest, align_low_similarity4) {
                 if (discovery_fraction == 0.0) {
                     ASSERT_EQ(2ull, paths.size());
                     EXPECT_NE(paths[0], paths[1]);
-                    EXPECT_FALSE(paths[0].get_orientation());
                     EXPECT_GE(paths[0].get_score(), paths[1].get_score());
                 } else {
                     EXPECT_EQ(0ull, paths.size());
@@ -1381,7 +1426,8 @@ TYPED_TEST(DBGAlignerTest, align_low_similarity5) {
     auto graph = std::make_shared<DBGSuccinct>(k);
     graph->add_sequence(reference);
 
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -3, -3));
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
     ASSERT_EQ(1ull, paths.size());
@@ -1394,72 +1440,38 @@ TYPED_TEST(DBGAlignerTest, align_low_similarity5) {
 }
 
 TEST(DBGAlignerTest, align_suffix_seed_snp_min_seed_length) {
-    {
-        size_t k = 7;
-        std::string reference = "AAAAGCTTTCGAGGCCAA";
-        std::string query =        "ACCTTTCGAGGCCAA";
-        //                          SS
+    size_t k = 7;
+    std::string reference = "AAAAGCTTTCGAGGCCAA";
+    std::string query =        "ACCTTTCGAGGCCAA";
+    //                          SS
 
-        auto graph = std::make_shared<DBGSuccinct>(k);
-        graph->add_sequence(reference);
+    auto graph = std::make_shared<DBGSuccinct>(k);
+    graph->add_sequence(reference);
 
-        DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
-        config.min_seed_length = 2;
-        config.max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
-        config.min_cell_score = std::numeric_limits<score_t>::min() + 100;
-        config.min_path_score = std::numeric_limits<score_t>::min() + 100;
-        DBGAligner<> aligner(*graph, config);
-        auto paths = aligner.align(query);
-        ASSERT_EQ(1ull, paths.size());
-        auto path = paths[0];
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+    config.min_seed_length = 2;
+    config.max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
+    config.min_cell_score = std::numeric_limits<score_t>::min() + 100;
+    config.min_path_score = std::numeric_limits<score_t>::min() + 100;
+    DBGAligner<> aligner(*graph, config);
+    auto paths = aligner.align(query);
+    ASSERT_EQ(1ull, paths.size());
+    auto path = paths[0];
 
-        EXPECT_EQ(7u, path.size());
-        EXPECT_EQ(reference.substr(5), path.get_sequence());
-        EXPECT_EQ(config.match_score(query.substr(2)), path.get_score());
-        EXPECT_EQ("2S13=", path.get_cigar().to_string());
-        EXPECT_EQ(13u, path.get_cigar().get_num_matches());
-        EXPECT_FALSE(is_exact_match(path));
-        EXPECT_EQ(2u, path.get_clipping());
-        EXPECT_EQ(0u, path.get_end_clipping());
-        EXPECT_EQ(0u, path.get_offset());
-        EXPECT_TRUE(path.is_valid(*graph, &config));
-        check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
+    EXPECT_EQ(7u, path.size());
+    EXPECT_EQ(reference.substr(5), path.get_sequence());
+    EXPECT_EQ(config.match_score(query.substr(2)), path.get_score());
+    EXPECT_EQ("2S13=", path.get_cigar().to_string());
+    EXPECT_EQ(13u, path.get_cigar().get_num_matches());
+    EXPECT_FALSE(is_exact_match(path));
+    EXPECT_EQ(2u, path.get_clipping());
+    EXPECT_EQ(0u, path.get_end_clipping());
+    EXPECT_EQ(0u, path.get_offset());
+    EXPECT_TRUE(path.is_valid(*graph, &config));
+    check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
 
-        check_extend(graph, aligner.get_config(), paths, query);
-    }
-    {
-        size_t k = 15;
-        std::string reference = "TTTCGAGGCCAAAGCTTTCGAGGCCAA";
-        std::string query =                 "ACCTTTCGAGGCCAA";
-        //                                    X
-
-        auto graph = std::make_shared<DBGSuccinct>(k);
-        graph->add_sequence(reference);
-
-        DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -1));
-        config.min_seed_length = 1;
-        config.max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
-        config.min_cell_score = std::numeric_limits<score_t>::min() + 100;
-        config.min_path_score = std::numeric_limits<score_t>::min() + 100;
-        DBGAligner<> aligner(*graph, config);
-        auto paths = aligner.align(query);
-        ASSERT_EQ(1ull, paths.size());
-        auto path = paths[0];
-
-        EXPECT_EQ(1u, path.size()); // includes dummy k-mers
-        EXPECT_EQ(reference.substr(12), path.get_sequence());
-        EXPECT_EQ(config.score_sequences(query, reference.substr(12)), path.get_score());
-        EXPECT_EQ("1=1X13=", path.get_cigar().to_string());
-        EXPECT_EQ(14u, path.get_cigar().get_num_matches());
-        EXPECT_FALSE(is_exact_match(path));
-        EXPECT_EQ(0u, path.get_clipping());
-        EXPECT_EQ(0u, path.get_end_clipping());
-        EXPECT_EQ(0u, path.get_offset());
-        EXPECT_TRUE(path.is_valid(*graph, &config));
-        check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
-
-        check_extend(graph, aligner.get_config(), paths, query);
-    }
+    check_extend(graph, aligner.get_config(), paths, query);
 }
 
 #if ! _PROTEIN_GRAPH
@@ -1480,7 +1492,8 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_canonical) {
         if (mode == DeBruijnGraph::PRIMARY)
             graph = std::make_shared<CanonicalDBG>(graph);
 
-        DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+        DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
         config.max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
         config.min_cell_score = std::numeric_limits<score_t>::min() + 100;
         config.min_path_score = std::numeric_limits<score_t>::min() + 100;
@@ -1529,7 +1542,8 @@ TYPED_TEST(DBGAlignerTest, align_both_directions) {
     //                                      X
 
     auto graph = build_graph_batch<TypeParam>(k, { reference }, DeBruijnGraph::CANONICAL);
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
     ASSERT_EQ(1ull, paths.size());
@@ -1564,7 +1578,8 @@ TYPED_TEST(DBGAlignerTest, align_both_directions2) {
     //                                   X           X
 
     auto graph = build_graph_batch<TypeParam>(k, { reference }, DeBruijnGraph::BASIC);
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
     ASSERT_EQ(1ull, paths.size());
@@ -1595,7 +1610,8 @@ TYPED_TEST(DBGAlignerTest, align_low_similarity4_rep_primary) {
                         "CGATCGATCGATCGATCGATCGACGATCGATCGATCGATCGATCGATCGATCGAT"
                         "CGATCGATCGATCGATCGATCGA";
 
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -3, -3));
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
     config.gap_opening_penalty = -5;
     config.gap_extension_penalty = -2;
     config.xdrop = 27;
@@ -1617,7 +1633,8 @@ TYPED_TEST(DBGAlignerTest, align_nodummy) {
     //                            X
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
 
     for (bool both_directions : { false, true }) {
 #if _PROTEIN_GRAPH
@@ -1660,7 +1677,8 @@ TYPED_TEST(DBGAlignerTest, align_seed_to_end) {
     std::string query =     "ATCCCGGGGGGGGGGGGGGGGGTTTTAAAA";
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
     ASSERT_EQ(1ull, paths.size());
@@ -1677,7 +1695,8 @@ TYPED_TEST(DBGAlignerTest, align_bfs_vs_dfs_xdrop) {
     std::string query =       "TCGGGGCAAGAAACACACAGCCTTCTCATCCAAGGGCCTCAGTGATGATGAGTACGATGAGTACAAGAGCATCAGAGAGGAGAGGAATGGCAAATACTCAATAGAGGAATACCTCCAAGATAGGGACAGATACTATGAAGAGCTTGCCAT";
 
     auto graph = build_graph_batch<TypeParam>(k, { reference_1, reference_2 });
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -3, -3));
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
     config.xdrop = 27;
     config.min_seed_length = 0;
     config.max_seed_length = 0;
@@ -1697,7 +1716,8 @@ TEST(DBGAlignerTest, align_dummy) {
     //                            X
 
     auto graph = std::make_shared<DBGSuccinct>(k);
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     config.min_seed_length = 5;
     graph->add_sequence(reference);
 
@@ -1727,7 +1747,8 @@ TEST(DBGAlignerTest, align_extended_insert_after_match) {
     std::string reference_2 = "CGTGGCCCAGGCCCAGGCCCAGCCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAAGCC";
     std::string query =       "CGTGGCCCAGGCCCAGGCCCAGTGGGCGTTGGCCCAGGCGGCCACGGTGGCTGCGCAGGCCCGCCTGGCACAAGCCACGCTG";
     auto graph = std::make_shared<DBGSuccinct>(k);
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -3, -3));
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
     config.min_seed_length = 15;
     graph->add_sequence(reference_1);
     graph->add_sequence(reference_2);
@@ -1745,6 +1766,7 @@ TEST(DBGAlignerTest, align_extended_insert_after_match) {
     check_extend(graph, aligner.get_config(), paths, query);
 }
 
+#if ! _PROTEIN_GRAPH
 TEST(DBGAlignerTest, align_suffix_seed_no_full_seeds) {
     size_t k = 31;
     std::string reference = "CTGCTGCGCCATCGCAACCCACGGTTGCTTTTTGAGTCGCTGCTCACGTTAGCCATCACACTGACGTTAAGCTGGCTTTCGATGCTGTATC";
@@ -1754,7 +1776,8 @@ TEST(DBGAlignerTest, align_suffix_seed_no_full_seeds) {
     dbg_succ->add_sequence(reference);
     auto graph = std::make_shared<CanonicalDBG>(dbg_succ);
 
-    DBGAlignerConfig config(DBGAlignerConfig::dna_scoring_matrix(2, -1, -2));
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     config.max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
     config.min_cell_score = std::numeric_limits<score_t>::min() + 100;
     config.min_path_score = std::numeric_limits<score_t>::min() + 100;
@@ -1770,5 +1793,6 @@ TEST(DBGAlignerTest, align_suffix_seed_no_full_seeds) {
         check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
     }
 }
+#endif
 
 } // namespace

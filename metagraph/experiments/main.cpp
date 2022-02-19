@@ -996,14 +996,12 @@ int main(int argc, char *argv[]) {
             std::string file = file_arg.getValue();
             cmd.reset();
 
-            std::unique_ptr<DBGAlignerConfig> config;
+            auto config = std::make_unique<DBGAlignerConfig>();
 
             if (mode != "unit" && alphabet_arg.getValue() == "protein") {
-                config.reset(new DBGAlignerConfig(
-                    DBGAlignerConfig::ScoreMatrix(DBGAlignerConfig::score_matrix_blosum62),
-                    -3,
-                    -1
-                ));
+                config->gap_opening_penalty = -3;
+                config->gap_extension_penalty = -1;
+                config->score_matrix = DBGAlignerConfig::score_matrix_blosum62;
             } else {
                 ValueArg<int> match_arg("",
                                         "match",
@@ -1015,13 +1013,12 @@ int main(int argc, char *argv[]) {
 
                 if (mode == "unit") {
                     cmd.parse(argc, argv);
-                    config.reset(new DBGAlignerConfig(
-                        DBGAlignerConfig::unit_scoring_matrix(match_arg.getValue(),
-                                                              alphabet,
-                                                              alphabet_encoding),
-                        -1,
-                        -1
-                    ));
+                    config->gap_opening_penalty = -1;
+                    config->gap_extension_penalty = -1;
+                    config->score_matrix
+                        = DBGAlignerConfig::unit_scoring_matrix(match_arg.getValue(),
+                                                                alphabet,
+                                                                alphabet_encoding);
                 } else {
                     ValueArg<int> gap_open_arg(
                         "", "gap_open_penalty", "gap open penalty", false, 3, "int", cmd
@@ -1039,13 +1036,12 @@ int main(int argc, char *argv[]) {
                         );
                         cmd.parse(argc, argv);
 
-                        config.reset(new DBGAlignerConfig(
-                            DBGAlignerConfig::dna_scoring_matrix(match_arg.getValue(),
-                                                                 -mm_transition_arg.getValue(),
-                                                                 -mm_transversion_arg.getValue()),
-                            -gap_open_arg.getValue(),
-                            -gap_ext_arg.getValue()
-                        ));
+                        config->gap_opening_penalty = -gap_open_arg.getValue();
+                        config->gap_extension_penalty = -gap_ext_arg.getValue();
+                        config->score_matrix
+                            = DBGAlignerConfig::dna_scoring_matrix(match_arg.getValue(),
+                                                                   -mm_transition_arg.getValue(),
+                                                                   -mm_transversion_arg.getValue());
                     } else {
                         throw std::runtime_error("Not implemented for " + cur_alphabet);
                     }

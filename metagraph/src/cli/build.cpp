@@ -64,6 +64,12 @@ int build_graph(Config *config) {
 
     logger->trace("Build De Bruijn Graph with k-mer size k={}", config->k);
 
+    // TODO: check how much slower it actually is, also in which scenarios
+    if (config->graph_mode == DeBruijnGraph::PRIMARY && !(config->k % 2)) {
+        logger->warn("PRIMARY graphs of even order k (k={} is used) are less efficient"
+                     " to query. Consider using an odd value of k.", config->k);
+    }
+
     if (!config->outfbase.size()) {
         logger->error("No output file provided");
         exit(1);

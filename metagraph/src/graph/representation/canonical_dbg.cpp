@@ -10,34 +10,15 @@ namespace graph {
 
 using mtg::common::logger;
 
-template <typename Graph>
-CanonicalDBG::CanonicalDBG(Graph&& graph, size_t cache_size)
-      : DBGWrapper<DeBruijnGraph>(std::forward<Graph>(graph)),
+CanonicalDBG::CanonicalDBG(std::shared_ptr<const DeBruijnGraph> graph, size_t cache_size)
+      : DBGWrapper<DeBruijnGraph>(std::move(graph)),
         cache_size_(cache_size), child_node_cache_(cache_size_),
-        parent_node_cache_(cache_size_), is_palindrome_cache_(cache_size_) {
-    static_assert(!std::is_same_v<Graph, std::shared_ptr<CanonicalDBG>>);
-    static_assert(!std::is_same_v<Graph, std::shared_ptr<const CanonicalDBG>>);
-    flush();
-}
+        parent_node_cache_(cache_size_), is_palindrome_cache_(cache_size_),
+        offset_(graph_->max_index()),
+        k_odd_(graph_->get_k() % 2) {
+    assert(graph_->get_mode() == DeBruijnGraph::PRIMARY
+                && "Only primary graphs can be wrapped in CanonicalDBG");
 
-template CanonicalDBG::CanonicalDBG(std::shared_ptr<DeBruijnGraph>&&, size_t);
-template CanonicalDBG::CanonicalDBG(std::shared_ptr<const DeBruijnGraph>&&, size_t);
-template CanonicalDBG::CanonicalDBG(std::shared_ptr<DeBruijnGraph>&, size_t);
-template CanonicalDBG::CanonicalDBG(std::shared_ptr<const DeBruijnGraph>&, size_t);
-template CanonicalDBG::CanonicalDBG(std::shared_ptr<DBGSuccinct>&, size_t);
-
-void CanonicalDBG::flush() {
-    if (graph_->get_mode() != DeBruijnGraph::PRIMARY) {
-        logger->error("Only primary graphs can be wrapped in CanonicalDBG");
-        exit(1);
-    }
-
-    child_node_cache_.Clear();
-    parent_node_cache_.Clear();
-    is_palindrome_cache_.Clear();
-
-    offset_ = graph_->max_index();
-    k_odd_ = (graph_->get_k() % 2);
     has_sentinel_ = false;
     alphabet_encoder_.fill(graph_->alphabet().size());
 
@@ -145,12 +126,12 @@ void CanonicalDBG::map_to_nodes(std::string_view sequence,
                                 const std::function<void(node_index)> &callback,
                                 const std::function<bool()> &terminate) const {
     map_to_nodes_sequentially(sequence, [&](node_index i) {
-        callback(i != npos ? get_base_node(i) : i);
+        callback(get_base_node(i));
     }, terminate);
 }
 
 void CanonicalDBG::append_next_rc_nodes(node_index node,
-                                        std::vector<node_index> &children) const {
+                                        SmallVector<node_index> &children) const {
     /**
      *
      * find children of node by searching for parents of its reverse complement
@@ -239,7 +220,7 @@ void CanonicalDBG
         }
 
     } else {
-        std::vector<node_index> children(alphabet.size(), npos);
+        SmallVector<node_index> children(alphabet.size(), npos);
         size_t max_num_edges_left = children.size() - has_sentinel_;
 
         graph_->call_outgoing_kmers(node, [&](node_index next, char c) {
@@ -263,7 +244,7 @@ void CanonicalDBG
 }
 
 void CanonicalDBG::append_prev_rc_nodes(node_index node,
-                                        std::vector<node_index> &parents) const {
+                                        SmallVector<node_index> &parents) const {
     /**
      * find parents of node by searching for children of its reverse complement
      * e.g., node = AGCCAT. Find TAGCCA and AAGCCA by looking for TGGCTA and TGGCTT.
@@ -359,7 +340,7 @@ void CanonicalDBG
         }
 
     } else {
-        std::vector<node_index> parents(alphabet.size(), npos);
+        SmallVector<node_index> parents(alphabet.size(), npos);
         size_t max_num_edges_left = parents.size() - has_sentinel_;
 
         graph_->call_incoming_kmers(node, [&](node_index prev, char c) {

@@ -46,7 +46,7 @@ void TaxonomyBase::read_accversion_to_taxid_map(const std::string &filepath,
 
     tsl::hopscotch_set<std::string> input_accessions;
     if (anno_matrix != NULL) {
-        for (const std::string &label : anno_matrix->get_annotation().get_all_labels()) {
+        for (const std::string &label : anno_matrix->get_annotator().get_all_labels()) {
             input_accessions.insert(get_accession_version_from_label(label));
         }
     }
@@ -87,7 +87,7 @@ TaxonomyClsAnno::TaxonomyClsAnno(const graph::AnnotatedDBG &anno,
     }
 
     // Take one sample label and find the label type.
-    std::string sample_label = anno_matrix_->get_annotation().get_all_labels()[0];
+    std::string sample_label = anno_matrix_->get_annotator().get_all_labels()[0];
 
     if (utils::starts_with(sample_label, "gi|")) {
         // e.g.   >gi|1070643132|ref|NC_031224.1| Arthrobacter phage Mudcat, complete genome

@@ -7,33 +7,24 @@
 #include <cache.hpp>
 #include <lru_cache_policy.hpp>
 
+#include "common/vector.hpp"
 #include "graph/representation/base/dbg_wrapper.hpp"
+
 
 namespace mtg {
 namespace graph {
 
 /**
  * CanonicalDBG is a wrapper which acts like a canonical-mode DeBruijnGraph, but
- * uses a non-canonical DeBruijnGraph as the underlying storage.
+ * uses a PRIMARY DeBruijnGraph (constructed from primary contigs).
  */
 class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
   public:
-    template <typename Graph>
-    explicit CanonicalDBG(Graph&& graph, size_t cache_size = 100'000);
+    explicit CanonicalDBG(std::shared_ptr<const DeBruijnGraph> graph,
+                          size_t cache_size = 100'000);
 
-    // copy constructors
     CanonicalDBG(const CanonicalDBG &canonical)
           : CanonicalDBG(canonical.graph_, canonical.cache_size_) {}
-
-    CanonicalDBG(CanonicalDBG &canonical)
-          : CanonicalDBG(canonical.graph_, canonical.cache_size_) {}
-
-    // caches cannot be resized or moved, so disable these constructors
-    CanonicalDBG& operator=(const CanonicalDBG &canonical) = delete;
-    CanonicalDBG(CanonicalDBG&&) = delete;
-    CanonicalDBG& operator=(CanonicalDBG&&) = delete;
-
-    virtual ~CanonicalDBG() {}
 
     /**
      * Added methods
@@ -44,9 +35,8 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
     node_index reverse_complement(node_index node) const;
 
     inline node_index get_base_node(node_index node) const {
-        assert(node);
         assert(node <= offset_ * 2);
-        return node > offset_ ? node - offset_ : node;
+        return node <= offset_ ? node : node - offset_;
     }
 
     /**
@@ -109,36 +99,36 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
     virtual bool operator==(const DeBruijnGraph &other) const override final;
 
   private:
-    size_t cache_size_;
+    const size_t cache_size_;
 
     // cache the results of call_outgoing_kmers
-    mutable caches::fixed_sized_cache<node_index, std::vector<node_index>,
+    mutable caches::fixed_sized_cache<node_index,
+                                      SmallVector<node_index>,
                                       caches::LRUCachePolicy<node_index>> child_node_cache_;
 
     // cache the results of call_incoming_kmers
-    mutable caches::fixed_sized_cache<node_index, std::vector<node_index>,
+    mutable caches::fixed_sized_cache<node_index,
+                                      SmallVector<node_index>,
                                       caches::LRUCachePolicy<node_index>> parent_node_cache_;
 
     // cache whether a given node is a palindrome (it's equal to its reverse complement)
-    mutable caches::fixed_sized_cache<node_index, bool,
+    mutable caches::fixed_sized_cache<node_index,
+                                      bool,
                                       caches::LRUCachePolicy<node_index>> is_palindrome_cache_;
 
-    size_t offset_;
-    bool k_odd_;
+    const size_t offset_;
+    const bool k_odd_;
     bool has_sentinel_;
 
     std::array<size_t, 256> alphabet_encoder_;
 
-    // reset all caches
-    void flush();
-
     // find all parent nodes of node in the CanonicalDBG which are represented
     // in the reverse complement orientation in the underlying primary graph
-    void append_prev_rc_nodes(node_index node, std::vector<node_index> &parents) const;
+    void append_prev_rc_nodes(node_index node, SmallVector<node_index> &parents) const;
 
     // find all child nodes of node in the CanonicalDBG which are represented
     // in the reverse complement orientation in the underlying primary graph
-    void append_next_rc_nodes(node_index node, std::vector<node_index> &children) const;
+    void append_next_rc_nodes(node_index node, SmallVector<node_index> &children) const;
 };
 
 } // namespace graph

@@ -66,37 +66,76 @@ namespace utils {
         return mask;
     }
 
-    template <class AIt, class BIt>
-    uint64_t count_intersection(AIt first_begin, AIt first_end,
-                                BIt second_begin, BIt second_end) {
-        assert(std::is_sorted(first_begin, first_end));
-        assert(std::is_sorted(second_begin, second_end));
-        assert(std::set<typename AIt::value_type>(first_begin, first_end).size()
-                    == static_cast<uint64_t>(std::distance(first_begin, first_end)));
-        assert(std::set<typename BIt::value_type>(second_begin, second_end).size()
-                    == static_cast<uint64_t>(std::distance(second_begin, second_end)));
+    template <class It1, class It2>
+    constexpr uint64_t count_intersection(It1 a_begin, It1 a_end, It2 b_begin, It2 b_end) {
+        assert(std::is_sorted(a_begin, a_end));
+        assert(std::is_sorted(b_begin, b_end));
+        assert(std::adjacent_find(a_begin, a_end) == a_end);
+        assert(std::adjacent_find(b_begin, b_end) == b_end);
 
         uint64_t count = 0;
 
-        while (first_begin != first_end && second_begin != second_end) {
-            first_begin = std::lower_bound(first_begin, first_end, *second_begin);
-
-            if (first_begin == first_end)
-                break;
-
-            second_begin = std::lower_bound(second_begin, second_end, *first_begin);
-
-            if (second_begin == second_end)
-                break;
-
-            if (*first_begin == *second_begin) {
-                ++count;
-                ++first_begin;
-                ++second_begin;
+        while (a_begin != a_end && b_begin != b_end) {
+            if (*a_begin < *b_begin) {
+                ++a_begin;
+            } else {
+                if (*a_begin == *b_begin) {
+                    ++count;
+                    ++a_begin;
+                }
+                ++b_begin;
             }
         }
 
         return count;
+    }
+
+    // Return true if the two sorted ranges share a common element
+    template <class It1, class It2>
+    constexpr bool share_element(It1 a_begin, It1 a_end, It2 b_begin, It2 b_end) {
+        assert(std::is_sorted(a_begin, a_end));
+        assert(std::is_sorted(b_begin, b_end));
+
+        while (a_begin != a_end && b_begin != b_end) {
+            if (*a_begin < *b_begin) {
+                ++a_begin;
+            } else {
+                if (*a_begin == *b_begin)
+                    return true;
+                ++b_begin;
+            }
+        }
+
+        return false;
+    }
+
+    // Intersect sorted ranges index1 and index2 (of equal length) with their
+    // corresponding values stored in value1 and value2, respectively.
+    // For each element shared between index1 and index2, invoke the callback
+    // for that element and its corresponding values.
+    template <class InIt1, class InIt2, class InIt3, class InIt4, class Callback>
+    constexpr void match_indexed_values(InIt1 index1_begin, InIt1 index1_end,
+                                        InIt2 value1_begin,
+                                        InIt3 index2_begin, InIt3 index2_end,
+                                        InIt4 value2_begin,
+                                        const Callback &callback) {
+        assert(std::distance(index1_begin, index1_end)
+                == std::distance(index2_begin, index2_end));
+
+        while (index1_begin != index1_end && index2_begin != index2_end) {
+            if (*index1_begin < *index2_begin) {
+                ++index1_begin;
+                ++value1_begin;
+            } else {
+                if (*index1_begin == *index2_begin) {
+                    callback(*index1_begin, *value1_begin, *value2_begin);
+                    ++index1_begin;
+                    ++value1_begin;
+                }
+                ++index2_begin;
+                ++value2_begin;
+            }
+        }
     }
 
     // Bitmap |new_indexes| marks positions of inserted values in the final vector

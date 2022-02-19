@@ -275,7 +275,7 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
 
         thread_pool.join();
 
-        anno_graph->get_annotation().serialize(annotator_filename);
+        anno_graph->get_annotator().serialize(annotator_filename);
 
         return;
     }
@@ -386,7 +386,7 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
 
     thread_pool.join();
 
-    anno_graph->get_annotation().serialize(annotator_filename);
+    anno_graph->get_annotator().serialize(annotator_filename);
 }
 
 
@@ -549,7 +549,7 @@ int annotate_graph_with_genome_coordinates(Config *config) {
                          config->forward_and_reverse,
                          config->genome_binsize_anno);
 
-    anno_graph.get_annotation().serialize(config->outfbase);
+    anno_graph.get_annotator().serialize(config->outfbase);
 
     return 0;
 }

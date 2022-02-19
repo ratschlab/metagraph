@@ -22,7 +22,7 @@ namespace mtg {
 namespace cli {
 
 using mtg::common::logger;
-using mtg::graph::AnnotatedDBG;
+using namespace mtg::graph;
 
 using HttpServer = SimpleWeb::Server<SimpleWeb::HTTP>;
 
@@ -73,13 +73,13 @@ std::string process_search_request(const std::string &received_message,
     // Throw client an error if they try to query coordinates/kmer-counts on unsupported indexes
     if ((config.count_kmers || config.query_counts)
             && !(dynamic_cast<const annot::matrix::IntMatrix *>(
-                            &anno_graph.get_annotation().get_matrix()))) {
+                            &anno_graph.get_annotator().get_matrix()))) {
         throw std::invalid_argument("Annotation does not support k-mer count queries");
     }
 
     if (config.query_coords) {
         if (!dynamic_cast<const annot::matrix::MultiIntMatrix *>(
-                        &anno_graph.get_annotation().get_matrix())) {
+                        &anno_graph.get_annotator().get_matrix())) {
             throw std::invalid_argument("Annotation does not support k-mer coordinate queries");
         }
 
@@ -90,12 +90,9 @@ std::string process_search_request(const std::string &received_message,
         }
     }
 
-    std::unique_ptr<graph::align::DBGAlignerConfig> aligner_config;
-    if (json.get("align", false).asBool()) {
-        aligner_config.reset(new graph::align::DBGAlignerConfig(
-            initialize_aligner_config(config)
-        ));
-    }
+    std::unique_ptr<align::DBGAlignerConfig> aligner_config;
+    if (json.get("align", false).asBool())
+        aligner_config.reset(new align::DBGAlignerConfig(initialize_aligner_config(config)));
 
     // Need mutex while appending to vector
     std::vector<SeqSearchResult> search_results;
@@ -176,8 +173,7 @@ std::string process_align_request(const std::string &received_message,
         "max_num_nodes_per_seq_char",
         config.alignment_max_nodes_per_seq_char).asDouble();
 
-    graph::align::DBGAlignerConfig aligner_config = initialize_aligner_config(config);
-    std::unique_ptr<graph::align::IDBGAligner> aligner = build_aligner(graph, aligner_config);
+    align::DBGAligner aligner(graph, initialize_aligner_config(config));
 
     // TODO: make parallel?
     seq_io::read_fasta_from_string(fasta.asString(),
@@ -192,9 +188,9 @@ std::string process_align_request(const std::string &received_message,
         // TODO: Investigate why calling aligner->align on empty sequence fails
         std::string_view seq = read_stream->seq.s;
         if (!seq.empty()) {
-            const auto paths = aligner->align(seq);
+            const auto paths = aligner.align(seq);
 
-            for (const auto &path : paths.data()) {
+            for (const auto &path : paths) {
                 Json::Value a;
                 a[SeqSearchResult::SCORE_JSON_FIELD] = path.get_score();
                 a[SeqSearchResult::SEQUENCE_JSON_FIELD] = path.get_sequence();
@@ -215,7 +211,7 @@ std::string process_align_request(const std::string &received_message,
 }
 
 std::string process_column_label_request(const graph::AnnotatedDBG &anno_graph) {
-    auto labels = anno_graph.get_annotation().get_all_labels();
+    auto labels = anno_graph.get_annotator().get_all_labels();
 
     Json::Value root = Json::Value(Json::arrayValue);
 
@@ -242,7 +238,7 @@ std::string process_stats_request(const graph::AnnotatedDBG &anno_graph,
     root["graph"] = graph_stats;
 
     Json::Value annotation_stats;
-    const auto &annotation = anno_graph.get_annotation();
+    const auto &annotation = anno_graph.get_annotator();
     annotation_stats["filename"] = std::filesystem::path(annotation_filename).filename().string();
     annotation_stats["labels"] = static_cast<uint64_t>(annotation.num_labels());
     annotation_stats["objects"] = static_cast<uint64_t>(annotation.num_objects());

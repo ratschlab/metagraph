@@ -151,12 +151,17 @@ build_graph<DBGSuccinct>(uint64_t k,
     return graph;
 }
 
+// Cast DeBruijnGraph to DBGSuccinct. Also works for graphs wrapped into CanonicalDBG
 DBGSuccinct& get_dbg_succ(DeBruijnGraph &graph) {
-    return const_cast<DBGSuccinct&>(dynamic_cast<const DBGSuccinct&>(graph.get_base_graph()));
+    const DeBruijnGraph *g = &graph;
+    if (const auto *canonical = dynamic_cast<const CanonicalDBG*>(g))
+        g = &canonical->get_graph();
+
+    return const_cast<DBGSuccinct&>(dynamic_cast<const DBGSuccinct&>(*g));
 }
 
 BOSS& get_boss(DeBruijnGraph &graph) {
-    return const_cast<BOSS&>(dynamic_cast<const DBGSuccinct&>(graph.get_base_graph()).get_boss());
+    return const_cast<BOSS&>(get_dbg_succ(graph).get_boss());
 }
 
 template <>

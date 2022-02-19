@@ -11,10 +11,33 @@ namespace align {
 
 using mtg::common::logger;
 
+void DBGAlignerConfig::print_summary() const {
+    logger->trace("Alignment settings:");
+    logger->trace("\t Alignments to report: {}", num_alternative_paths);
+    logger->trace("\t Min seed length: {}", min_seed_length);
+    logger->trace("\t Max seed length: {}", max_seed_length);
+    logger->trace("\t Max num seeds per locus: {}", max_num_seeds_per_locus);
+    logger->trace("\t Max num nodes per sequence char: {}", max_nodes_per_seq_char);
+    logger->trace("\t Max RAM per alignment: {}", max_ram_per_alignment);
+    logger->trace("\t Gap opening penalty: {}", (int64_t)gap_opening_penalty);
+    logger->trace("\t Gap extension penalty: {}", (int64_t)gap_extension_penalty);
+    logger->trace("\t Min alignment score: {}", min_path_score);
+    logger->trace("\t X drop-off: {}", xdrop);
+    logger->trace("\t Exact nucleotide match threshold: {}", min_exact_match);
+    logger->trace("\t Chain alignments: {}", chain_alignments);
+
+    logger->trace("\t Scoring matrix: {}", alignment_edit_distance ? "unit costs" : "matrix");
+    if (!alignment_edit_distance) {
+        logger->trace("\t\t Match score: {}", (int64_t)alignment_match_score);
+        logger->trace("\t\t (DNA) Transition score: {}", (int64_t)alignment_mm_transition_score);
+        logger->trace("\t\t (DNA) Transversion score: {}", (int64_t)alignment_mm_transversion_score);
+    }
+}
+
 // check to make sure the current scoring system won't underflow
 bool DBGAlignerConfig::check_config_scores() const {
     int8_t min_penalty_score = std::numeric_limits<int8_t>::max();
-    for (const auto &row : score_matrix_) {
+    for (const auto &row : score_matrix) {
         min_penalty_score = std::min(min_penalty_score,
                                      *std::min_element(row.begin(), row.end()));
     }
@@ -41,30 +64,17 @@ bool DBGAlignerConfig::check_config_scores() const {
     return false;
 }
 
-DBGAlignerConfig::DBGAlignerConfig(const ScoreMatrix &score_matrix,
-                                   int8_t gap_opening,
-                                   int8_t gap_extension)
-      : gap_opening_penalty(gap_opening),
-        gap_extension_penalty(gap_extension),
-        score_matrix_(score_matrix) {}
-
-DBGAlignerConfig::DBGAlignerConfig(ScoreMatrix&& score_matrix,
-                                   int8_t gap_opening,
-                                   int8_t gap_extension)
-      : gap_opening_penalty(gap_opening),
-        gap_extension_penalty(gap_extension),
-        score_matrix_(std::move(score_matrix)) {}
-
 DBGAlignerConfig::score_t DBGAlignerConfig
 ::score_cigar(std::string_view reference,
               std::string_view query,
               const Cigar &cigar) const {
-    score_t score = 0;
-
     assert(cigar.is_valid(reference, query));
 
     if (cigar.empty())
-        return score;
+        return 0;
+
+    score_t score = (!cigar.get_clipping() ? left_end_bonus : 0)
+                    + (!cigar.get_end_clipping() ? right_end_bonus : 0);
 
     auto ref_it = reference.begin();
     auto alt_it = query.begin();
@@ -126,15 +136,17 @@ void DBGAlignerConfig::set_scoring_matrix() {
             );
         #endif
 
-        score_matrix_ = unit_scoring_matrix(1, alphabet, alphabet_encoding);
+        score_matrix = unit_scoring_matrix(1, alphabet, alphabet_encoding);
+        left_end_bonus = 0;
+        right_end_bonus = 0;
 
     } else {
         #if _PROTEIN_GRAPH
-            score_matrix_ = score_matrix_blosum62;
+            score_matrix = score_matrix_blosum62;
         #elif _DNA_GRAPH || _DNA5_GRAPH || _DNA_CASE_SENSITIVE_GRAPH
-            score_matrix_ = dna_scoring_matrix(alignment_match_score,
-                                               -alignment_mm_transition_score,
-                                               -alignment_mm_transversion_score);
+            score_matrix = dna_scoring_matrix(alignment_match_score,
+                                              -alignment_mm_transition_score,
+                                              -alignment_mm_transversion_score);
         #else
             static_assert(false,
                 "Define an alphabet: either "

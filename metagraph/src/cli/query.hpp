@@ -14,7 +14,7 @@
 #include <sdsl/int_vector.hpp>
 
 #include "common/vector.hpp"
-#include "graph/alignment/aligner_alignment.hpp"
+#include "graph/alignment/alignment.hpp"
 
 class ThreadPool;
 
@@ -27,7 +27,7 @@ namespace seq_io {
 namespace graph {
     class AnnotatedDBG;
     namespace align {
-        class DBGAlignerConfig;
+        struct DBGAlignerConfig;
     }
 }
 

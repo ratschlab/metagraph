@@ -5,8 +5,8 @@
 
 #include "gtest/gtest.h"
 
+#include "graph/alignment/alignment.hpp"
 #include "graph/alignment/dbg_aligner.hpp"
-#include "graph/alignment/aligner_alignment.hpp"
 #include "graph/representation/base/sequence_graph.hpp"
 
 
@@ -19,12 +19,6 @@ using namespace mtg::test;
 using namespace mtg::kmer;
 
 
-typedef DBGAligner<>::score_t score_t;
-
-inline int8_t single_char_score(const DBGAlignerConfig &config, char a, int8_t b) {
-    return config.get_row(a)[b];
-}
-
 void check_json_dump_load(const DeBruijnGraph &graph,
                           const Alignment &alignment,
                           const std::string &query,
@@ -36,16 +30,14 @@ void check_json_dump_load(const DeBruijnGraph &graph,
         : query;
 
     ASSERT_EQ(std::string(path_query.c_str() + alignment.get_clipping(),
-                          alignment.get_query().size()),
-              alignment.get_query());
+                          alignment.get_query_view().size()),
+              alignment.get_query_view());
 
     Alignment load_alignment;
-    auto load_sequence = load_alignment.load_from_json(
-        alignment.to_json(path_query, graph),
-        graph
-    );
+    std::string load_sequence;
+    load_alignment.load_from_json(alignment.to_json(graph.get_k()), graph, &load_sequence);
 
-    EXPECT_EQ(path_query, *load_sequence);
+    EXPECT_EQ(path_query, load_sequence);
 
     EXPECT_EQ(alignment, load_alignment)
         << alignment.get_orientation() << " "
@@ -58,14 +50,14 @@ void check_json_dump_load(const DeBruijnGraph &graph,
         << load_alignment.get_sequence() << "\n"
         << alignment.get_cigar().to_string() << " "
         << load_alignment.get_cigar().to_string() << "\n"
-        << alignment.get_query() << " "
-        << load_alignment.get_query() << "\n";
+        << alignment.get_query_view() << " "
+        << load_alignment.get_query_view() << "\n";
 }
 
-QueryAlignment get_extend(std::shared_ptr<const DeBruijnGraph> graph,
-                          const DBGAlignerConfig &config,
-                          const QueryAlignment &paths,
-                          const std::string &query) {
+AlignmentResults get_extend(std::shared_ptr<const DeBruijnGraph> graph,
+                            const DBGAlignerConfig &config,
+                            const AlignmentResults &paths,
+                            const std::string &query) {
     assert(graph.get());
     EXPECT_EQ(query, paths.get_query());
     auto uniconfig = config;
@@ -75,7 +67,7 @@ QueryAlignment get_extend(std::shared_ptr<const DeBruijnGraph> graph,
 
 inline void check_extend(std::shared_ptr<const DeBruijnGraph> graph,
                          const DBGAlignerConfig &config,
-                         const QueryAlignment &paths,
+                         const AlignmentResults &paths,
                          const std::string &query) {
     auto unimem_paths = get_extend(graph, config, paths, query);
 

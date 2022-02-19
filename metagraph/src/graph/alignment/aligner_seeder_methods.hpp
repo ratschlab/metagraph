@@ -1,7 +1,7 @@
 #ifndef __ALIGNER_SEEDER_METHODS_HPP__
 #define __ALIGNER_SEEDER_METHODS_HPP__
 
-#include "aligner_alignment.hpp"
+#include "alignment.hpp"
 #include "common/vectors/bitmap.hpp"
 
 
@@ -14,48 +14,53 @@ namespace align {
 
 class ISeeder {
   public:
-    typedef DeBruijnGraph::node_index node_index;
     typedef Alignment Seed;
 
     virtual ~ISeeder() {}
 
     virtual std::vector<Seed> get_seeds() const = 0;
+    virtual size_t get_num_matches() const = 0;
 };
 
 class ManualSeeder : public ISeeder {
   public:
-    ManualSeeder(std::vector<Seed>&& seeds) : seeds_(std::move(seeds)) {}
+    ManualSeeder(std::vector<Seed>&& seeds = {}, size_t num_matching = 0)
+        : seeds_(std::move(seeds)), num_matching_(num_matching) {}
 
     virtual ~ManualSeeder() {}
 
     std::vector<Seed> get_seeds() const override { return seeds_; }
+    size_t get_num_matches() const override final { return num_matching_; }
+
     std::vector<Seed>& data() { return seeds_; }
 
   private:
     std::vector<Seed> seeds_;
+    size_t num_matching_;
 };
 
 class ExactSeeder : public ISeeder {
   public:
-    typedef DBGAlignerConfig::score_t score_t;
+    typedef DeBruijnGraph::node_index node_index;
 
     ExactSeeder(const DeBruijnGraph &graph,
                 std::string_view query,
                 bool orientation,
-                const std::vector<node_index> &nodes,
+                std::vector<node_index>&& nodes,
                 const DBGAlignerConfig &config);
 
     virtual ~ExactSeeder() {}
 
     std::vector<Seed> get_seeds() const override;
+    size_t get_num_matches() const override final { return num_matching_; }
 
   protected:
     const DeBruijnGraph &graph_;
     std::string_view query_;
     bool orientation_;
-    const std::vector<node_index> &query_nodes_;
+    std::vector<node_index> query_nodes_;
     const DBGAlignerConfig &config_;
-    std::vector<score_t> partial_sum_;
+    std::vector<Alignment::score_t> partial_sum_;
     size_t num_matching_;
 
     size_t num_exact_matching() const;
@@ -98,18 +103,21 @@ template <class BaseSeeder>
 class SuffixSeeder : public BaseSeeder {
   public:
     typedef typename BaseSeeder::Seed Seed;
-    typedef typename BaseSeeder::node_index node_index;
-    typedef typename BaseSeeder::score_t score_t;
 
     template <typename... Args>
-    SuffixSeeder(Args&&... args) : BaseSeeder(std::forward<Args>(args)...) {}
+    SuffixSeeder(Args&&... args) : BaseSeeder(std::forward<Args>(args)...) {
+        generate_seeds();
+    }
 
     virtual ~SuffixSeeder() {}
 
-    std::vector<Seed> get_seeds() const override;
+    std::vector<Seed> get_seeds() const override { return seeds_; }
 
-    BaseSeeder& get_base_seeder() { return dynamic_cast<BaseSeeder&>(*this); }
-    static const DBGSuccinct& get_base_dbg_succ(const DeBruijnGraph &graph);
+  protected:
+    void generate_seeds();
+
+  private:
+    std::vector<Seed> seeds_;
 };
 
 } // namespace align

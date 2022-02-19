@@ -24,19 +24,6 @@ class DBGWrapper : public DeBruijnGraph {
     DBGWrapper(std::shared_ptr<InGraph> graph)
           : graph_(std::dynamic_pointer_cast<const Graph>(graph)) { assert(graph_); }
 
-    // aliasing constructors
-    template <class InGraph>
-    explicit DBGWrapper(const InGraph &graph)
-          : graph_(std::shared_ptr<const Graph>{}, dynamic_cast<const Graph*>(&graph)) {
-        assert(graph_);
-    }
-
-    template <class InGraph>
-    explicit DBGWrapper(InGraph &graph)
-          : graph_(std::shared_ptr<const Graph>{}, dynamic_cast<const Graph*>(&graph)) {
-        assert(graph_);
-    }
-
     virtual ~DBGWrapper() {}
 
     /**
@@ -53,9 +40,6 @@ class DBGWrapper : public DeBruijnGraph {
     virtual const std::string& alphabet() const override final { return graph_->alphabet(); }
     virtual void print(std::ostream &out) const override { graph_->print(out); }
     virtual Mode get_mode() const override { return graph_->get_mode(); }
-    virtual const DeBruijnGraph& get_base_graph() const override final {
-        return graph_->get_base_graph();
-    }
 
     /**
      * Override these if the wrapper changes the graph's indexing

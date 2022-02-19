@@ -22,7 +22,7 @@ class AnnotatedSequenceGraph {
     using node_index = SequenceGraph::node_index;
     using row_index = Annotator::Index;
 
-    AnnotatedSequenceGraph(std::shared_ptr<SequenceGraph> graphh,
+    AnnotatedSequenceGraph(std::shared_ptr<SequenceGraph> graph,
                            std::unique_ptr<Annotator>&& annotation,
                            bool force_fast = false);
 
@@ -49,7 +49,7 @@ class AnnotatedSequenceGraph {
     virtual const SequenceGraph& get_graph() const { return *graph_; }
     std::shared_ptr<const SequenceGraph> get_graph_ptr() const { return graph_; }
 
-    virtual const Annotator& get_annotation() const { return *annotator_; }
+    virtual const Annotator& get_annotator() const { return *annotator_; }
 
     static row_index graph_to_anno_index(node_index kmer_index) {
         assert(kmer_index);
@@ -77,8 +77,6 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
     using AnnotatedSequenceGraph::get_labels;
 
     const DeBruijnGraph& get_graph() const { return dbg_; }
-
-    bool check_compatibility() const;
 
     // add k-mer counts to the annotation, thread-safe for concurrent calls
     void add_kmer_counts(std::string_view sequence,

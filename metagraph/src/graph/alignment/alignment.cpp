@@ -1,8 +1,9 @@
-#include "aligner_alignment.hpp"
+#include "alignment.hpp"
 
 #include "graph/representation/base/sequence_graph.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/canonical_dbg.hpp"
+#include "common/algorithms.hpp"
 #include "common/logger.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 #include "graph/representation/rc_dbg.hpp"
@@ -14,7 +15,6 @@ namespace align {
 
 using mtg::common::logger;
 
-
 Alignment::Alignment(std::string_view query,
                      std::vector<node_index>&& nodes,
                      std::string&& sequence,
@@ -22,12 +22,12 @@ Alignment::Alignment(std::string_view query,
                      size_t clipping,
                      bool orientation,
                      size_t offset)
-      : query_(query), nodes_(std::move(nodes)), sequence_(std::move(sequence)),
+      : query_view_(query), nodes_(std::move(nodes)), sequence_(std::move(sequence)),
         score_(score),
         orientation_(orientation),
         offset_(offset) {
-    assert(query_.size() == sequence_.size());
-    cigar_ = std::inner_product(query_.begin(), query_.end(), sequence_.begin(),
+    assert(query_view_.size() == sequence_.size());
+    cigar_ = std::inner_product(query_view_.begin(), query_view_.end(), sequence_.begin(),
                                 Cigar(Cigar::CLIPPED, clipping),
                                 [&](Cigar &cigar, bool equal) -> Cigar& {
                                     cigar.append(equal ? Cigar::MATCH : Cigar::MISMATCH);
@@ -36,64 +36,155 @@ Alignment::Alignment(std::string_view query,
                                 std::equal_to<char>());
 }
 
-std::ostream& operator<<(std::ostream& out, const Alignment &alignment) {
-    out << fmt::format("{}\t{}\t{}\t{}\t{}\t{}",
-                       (alignment.get_orientation() ? "-" : "+"),
-                       alignment.get_sequence(),
-                       alignment.get_score(),
-                       alignment.get_cigar().get_num_matches(),
-                       alignment.get_cigar().to_string(),
-                       alignment.get_offset());
+std::string Alignment::format_coords() const {
+    if (!label_coordinates.size())
+        return "";
 
-    return out;
+    assert(label_columns.size());
+    assert(label_encoder);
+    assert(label_coordinates.size() == label_columns.size());
+
+    std::vector<std::string> decoded_labels;
+    decoded_labels.reserve(label_columns.size());
+
+    for (size_t i = 0; i < label_columns.size(); ++i) {
+        decoded_labels.emplace_back(label_encoder->decode(label_columns[i]));
+        for (uint64_t coord : label_coordinates[i]) {
+            // alignment coordinates are 1-based inclusive ranges
+            decoded_labels.back()
+                += fmt::format(":{}-{}", coord + 1, coord + sequence_.size());
+        }
+    }
+
+    return fmt::format("{}", fmt::join(decoded_labels, ";"));
 }
 
-void Alignment::append(Alignment&& other) {
-    assert(query_.data() + query_.size() + other.get_clipping() == other.query_.data());
+bool Alignment::append(Alignment&& other) {
+    assert(query_view_.data() + query_view_.size() + other.get_clipping()
+            == other.query_view_.data());
     assert(orientation_ == other.orientation_);
+
+    bool ret_val = false;
+
+    if (label_coordinates.size() && other.label_coordinates.empty())
+        label_coordinates.clear();
+
+    if (label_columns.size() && other.label_columns.empty())
+        label_columns.clear();
+
+    if (label_coordinates.size()) {
+        assert(label_columns.size() == label_coordinates.size());
+        Columns merged_label_columns;
+        CoordinateSet merged_label_coordinates;
+
+        // if the alignments fit together without gaps, make sure that the
+        // coordinates form a contiguous range
+        utils::match_indexed_values(
+            label_columns.begin(), label_columns.end(),
+            label_coordinates.begin(),
+            other.label_columns.begin(), other.label_columns.end(),
+            other.label_coordinates.begin(),
+            [&](auto col, const auto &coords, const auto &other_coords) {
+                Tuple merged;
+                auto a_begin = coords.begin();
+                auto a_end = coords.end();
+                auto b_begin = other_coords.begin();
+                auto b_end = other_coords.end();
+                while (a_begin != a_end && b_begin != b_end) {
+                    if (*a_begin + sequence_.size() < *b_begin) {
+                        ++a_begin;
+                    } else if (*a_begin + sequence_.size() > *b_begin) {
+                        ++b_begin;
+                    } else {
+                        assert(*a_begin + sequence_.size() == *b_begin);
+                        merged.push_back(*a_begin);
+                        ++a_begin;
+                        ++b_begin;
+                    }
+                }
+                if (merged.size()) {
+                    merged_label_columns.push_back(col);
+                    merged_label_coordinates.push_back(std::move(merged));
+                }
+            }
+        );
+
+        if (merged_label_columns.empty()) {
+            *this = Alignment();
+            return true;
+        }
+
+        ret_val = merged_label_columns.size() < label_columns.size();
+
+        if (!ret_val) {
+            for (size_t i = 0; i < label_columns.size(); ++i) {
+                if (merged_label_coordinates[i].size() < label_coordinates[i].size()) {
+                    ret_val = true;
+                    break;
+                }
+            }
+        }
+
+        std::swap(label_columns, merged_label_columns);
+        std::swap(label_coordinates, merged_label_coordinates);
+
+    } else if (label_columns.size()) {
+        Columns merged_label_columns;
+        std::set_intersection(label_columns.begin(), label_columns.end(),
+                              other.label_columns.begin(), other.label_columns.end(),
+                              std::back_inserter(merged_label_columns));
+
+        if (merged_label_columns.empty()) {
+            *this = Alignment();
+            return true;
+        }
+
+        ret_val = merged_label_columns.size() < label_columns.size();
+
+        std::swap(label_columns, merged_label_columns);
+    }
 
     nodes_.insert(nodes_.end(), other.nodes_.begin(), other.nodes_.end());
     sequence_ += std::move(other.sequence_);
     score_ += other.score_;
-
     cigar_.append(std::move(other.cigar_));
-
     // expand the query window to cover both alignments
-    query_ = std::string_view(query_.data(), other.query_.end() - query_.begin());
+    query_view_ = std::string_view(query_view_.data(),
+                                   other.query_view_.end() - query_view_.begin());
+    return ret_val;
 }
 
 size_t Alignment::trim_offset() {
-    assert(std::find(nodes_.begin(), nodes_.end(), DeBruijnGraph::npos) == nodes_.end()
-            && "chains not supported");
-
     if (!offset_ || nodes_.size() <= 1)
         return 0;
 
-    size_t trim = std::min(offset_, nodes_.size() - 1);
+    assert(nodes_.front());
+
+    size_t first_dummy = (std::find(nodes_.begin(), nodes_.end(), DeBruijnGraph::npos)
+        - nodes_.begin()) - 1;
+    size_t trim = std::min(std::min(offset_, nodes_.size() - 1), first_dummy);
     offset_ -= trim;
     nodes_.erase(nodes_.begin(), nodes_.begin() + trim);
+    assert(nodes_.front());
     return trim;
 }
 
 size_t Alignment::trim_query_prefix(size_t n,
-                                    const DeBruijnGraph &graph,
-                                    const DBGAlignerConfig &config) {
-    assert(!offset_);
-
-    size_t clipping = get_clipping() + n;
-
+                                    size_t node_overlap,
+                                    const DBGAlignerConfig &config,
+                                    bool trim_excess_deletions) {
+    size_t clipping = get_clipping();
+    const char *query_begin = query_view_.data() - clipping;
     auto it = cigar_.data().begin() + static_cast<bool>(clipping);
     size_t cigar_offset = 0;
 
     auto s_it = sequence_.begin();
     auto node_it = nodes_.begin();
 
-    size_t offset_cutoff = graph.get_k() - 1;
-
     auto consume_ref = [&]() {
         assert(s_it != sequence_.end());
         ++s_it;
-        if (offset_ < offset_cutoff) {
+        if (offset_ < node_overlap) {
             ++offset_;
         } else if (node_it + 1 < nodes_.end()) {
             ++node_it;
@@ -102,7 +193,7 @@ size_t Alignment::trim_query_prefix(size_t n,
         }
     };
 
-    while (n) {
+    while (n || (trim_excess_deletions && it->first == Cigar::DELETION)) {
         if (it == cigar_.data().end()) {
             *this = Alignment();
             return 0;
@@ -112,8 +203,8 @@ size_t Alignment::trim_query_prefix(size_t n,
             case Cigar::MATCH:
             case Cigar::MISMATCH: {
                 assert(s_it != sequence_.end());
-                score_ -= config.get_row(query_[0])[*s_it];
-                query_.remove_prefix(1);
+                score_ -= config.score_matrix[query_view_[0]][*s_it];
+                query_view_.remove_prefix(1);
                 --n;
                 consume_ref();
                 if (empty())
@@ -123,7 +214,7 @@ size_t Alignment::trim_query_prefix(size_t n,
                 score_ -= it->second - cigar_offset == 1
                     ? config.gap_opening_penalty
                     : config.gap_extension_penalty;
-                query_.remove_prefix(1);
+                query_view_.remove_prefix(1);
                 --n;
             } break;
             case Cigar::DELETION: {
@@ -147,19 +238,288 @@ size_t Alignment::trim_query_prefix(size_t n,
         }
     }
 
+    size_t seq_trim = s_it - sequence_.begin();
+    for (auto &coords : label_coordinates) {
+        for (auto &c : coords) {
+            c += seq_trim;
+        }
+    }
+
+    if (!clipping && it != cigar_.data().begin())
+        score_ -= config.left_end_bonus;
+
+    nodes_.erase(nodes_.begin(), node_it);
+    sequence_.erase(sequence_.begin(), s_it);
+    it->second -= cigar_offset;
+    cigar_.data().erase(cigar_.data().begin(), it);
+    extend_query_begin(query_begin);
+
+    return cigar_offset;
+}
+
+size_t Alignment::trim_query_suffix(size_t n,
+                                    const DBGAlignerConfig &config,
+                                    bool trim_excess_deletions) {
+    size_t end_clipping = get_end_clipping();
+    const char *query_end = query_view_.data() + query_view_.size() + end_clipping;
+
+    trim_end_clipping();
+    auto it = cigar_.data().rbegin();
+    size_t cigar_offset = 0;
+
+    auto s_it = sequence_.rbegin();
+    auto node_it = nodes_.rbegin();
+
+    auto consume_ref = [&]() {
+        assert(s_it != sequence_.rend());
+        ++s_it;
+        if (node_it + 1 < nodes_.rend()) {
+            ++node_it;
+        } else {
+            *this = Alignment();
+        }
+    };
+
+    while (n || (trim_excess_deletions && it->first == Cigar::DELETION)) {
+        if (it == cigar_.data().rend()) {
+            *this = Alignment();
+            return 0;
+        }
+
+        switch (it->first) {
+            case Cigar::MATCH:
+            case Cigar::MISMATCH: {
+                assert(s_it != sequence_.rend());
+                score_ -= config.score_matrix[query_view_.back()][*s_it];
+                query_view_.remove_suffix(1);
+                --n;
+                consume_ref();
+                if (empty())
+                    return 0;
+            } break;
+            case Cigar::INSERTION: {
+                score_ -= it->second - cigar_offset == 1
+                    ? config.gap_opening_penalty
+                    : config.gap_extension_penalty;
+                query_view_.remove_suffix(1);
+                --n;
+            } break;
+            case Cigar::DELETION: {
+                score_ -= it->second - cigar_offset == 1
+                    ? config.gap_opening_penalty
+                    : config.gap_extension_penalty;
+                consume_ref();
+                if (empty())
+                    return 0;
+            } break;
+            case Cigar::CLIPPED:
+            case Cigar::NODE_INSERTION: {
+                assert(false && "trimming chains not supported");
+            } break;
+        }
+
+        ++cigar_offset;
+        if (cigar_offset == it->second) {
+            ++it;
+            cigar_offset = 0;
+        }
+    }
+
+    if (!end_clipping && (cigar_offset || it.base() != cigar_.data().end()))
+        score_ -= config.right_end_bonus;
+
+    nodes_.erase(node_it.base(), nodes_.end());
+    sequence_.erase(s_it.base(), sequence_.end());
+    it->second -= cigar_offset;
+    cigar_.data().erase(it.base(), cigar_.data().end());
+
+    extend_query_end(query_end);
+
+    return cigar_offset;
+}
+
+size_t Alignment::trim_reference_prefix(size_t n,
+                                        size_t node_overlap,
+                                        const DBGAlignerConfig &config,
+                                        bool trim_excess_insertions) {
+    size_t clipping = get_clipping();
+    const char *query_begin = query_view_.data() - clipping;
+
+    auto it = cigar_.data().begin() + static_cast<bool>(clipping);
+    size_t cigar_offset = 0;
+
+    auto s_it = sequence_.begin();
+    auto node_it = nodes_.begin();
+
+    size_t seq_trim = 0;
+
+    auto consume_ref = [&]() {
+        assert(s_it != sequence_.end());
+        assert(n);
+        if (*s_it != '$') {
+            ++seq_trim;
+            --n;
+        }
+
+        ++s_it;
+        if (offset_ < node_overlap) {
+            ++offset_;
+        } else if (node_it + 1 < nodes_.end()) {
+            ++node_it;
+        } else {
+            *this = Alignment();
+        }
+    };
+
+    while (n || (trim_excess_insertions && it->first == Cigar::INSERTION)) {
+        if (it == cigar_.data().end()) {
+            *this = Alignment();
+            return 0;
+        }
+
+        switch (it->first) {
+            case Cigar::MATCH:
+            case Cigar::MISMATCH: {
+                assert(s_it != sequence_.end());
+                score_ -= config.score_matrix[query_view_[0]][*s_it];
+                query_view_.remove_prefix(1);
+                consume_ref();
+                if (empty())
+                    return 0;
+            } break;
+            case Cigar::INSERTION: {
+                score_ -= it->second - cigar_offset == 1
+                    ? config.gap_opening_penalty
+                    : config.gap_extension_penalty;
+                query_view_.remove_prefix(1);
+            } break;
+            case Cigar::DELETION: {
+                score_ -= it->second - cigar_offset == 1
+                    ? config.gap_opening_penalty
+                    : config.gap_extension_penalty;
+                consume_ref();
+                if (empty())
+                    return 0;
+            } break;
+            case Cigar::NODE_INSERTION: {
+                score_ -= it->second - cigar_offset == 1
+                    ? config.gap_opening_penalty
+                    : config.gap_extension_penalty;
+            } break;
+            case Cigar::CLIPPED: {
+                assert(false && "this should not happen");
+            } break;
+        }
+
+        ++cigar_offset;
+        if (cigar_offset == it->second) {
+            ++it;
+            cigar_offset = 0;
+        }
+    }
+
+    for (auto &coords : label_coordinates) {
+        for (auto &c : coords) {
+            c += seq_trim;
+        }
+    }
+
+    if (!clipping && (cigar_offset || it != cigar_.data().begin()))
+        score_ -= config.left_end_bonus;
+
     nodes_.erase(nodes_.begin(), node_it);
     sequence_.erase(sequence_.begin(), s_it);
     it->second -= cigar_offset;
     cigar_.data().erase(cigar_.data().begin(), it);
 
-    assert(is_valid(graph, &config));
+    extend_query_begin(query_begin);
+
+    return cigar_offset;
+}
+
+size_t Alignment::trim_reference_suffix(size_t n,
+                                        const DBGAlignerConfig &config,
+                                        bool trim_excess_insertions) {
+    size_t end_clipping = get_end_clipping();
+    const char *query_end = query_view_.data() + query_view_.size() + end_clipping;
+
+    trim_end_clipping();
+    auto it = cigar_.data().rbegin();
+    size_t cigar_offset = 0;
+
+    auto s_it = sequence_.rbegin();
+    auto node_it = nodes_.rbegin();
+
+    auto consume_ref = [&]() {
+        --n;
+        assert(s_it != sequence_.rend());
+        ++s_it;
+        if (node_it + 1 < nodes_.rend()) {
+            ++node_it;
+        } else {
+            *this = Alignment();
+        }
+    };
+
+    while (n || (trim_excess_insertions && it->first == Cigar::INSERTION)) {
+        if (it == cigar_.data().rend()) {
+            *this = Alignment();
+            return 0;
+        }
+
+        switch (it->first) {
+            case Cigar::MATCH:
+            case Cigar::MISMATCH: {
+                assert(s_it != sequence_.rend());
+                score_ -= config.score_matrix[query_view_.back()][*s_it];
+                query_view_.remove_suffix(1);
+                consume_ref();
+                if (empty())
+                    return 0;
+            } break;
+            case Cigar::INSERTION: {
+                score_ -= it->second - cigar_offset == 1
+                    ? config.gap_opening_penalty
+                    : config.gap_extension_penalty;
+                query_view_.remove_suffix(1);
+            } break;
+            case Cigar::DELETION: {
+                score_ -= it->second - cigar_offset == 1
+                    ? config.gap_opening_penalty
+                    : config.gap_extension_penalty;
+                consume_ref();
+                if (empty())
+                    return 0;
+            } break;
+            case Cigar::CLIPPED:
+            case Cigar::NODE_INSERTION: {
+                assert(false && "trimming chains not supported");
+            } break;
+        }
+
+        ++cigar_offset;
+        if (cigar_offset == it->second) {
+            ++it;
+            cigar_offset = 0;
+        }
+    }
+
+    if (!end_clipping && (cigar_offset || it.base() != cigar_.data().end()))
+        score_ -= config.right_end_bonus;
+
+    nodes_.erase(node_it.base(), nodes_.end());
+    sequence_.erase(s_it.base(), sequence_.end());
+    it->second -= cigar_offset;
+    cigar_.data().erase(it.base(), cigar_.data().end());
+
+    extend_query_end(query_end);
 
     return cigar_offset;
 }
 
 void Alignment::reverse_complement(const DeBruijnGraph &graph,
                                    std::string_view query_rev_comp) {
-    assert(query_.size() + get_end_clipping() == query_rev_comp.size() - get_clipping());
+    assert(query_view_.size() + get_end_clipping() == query_rev_comp.size() - get_clipping());
 
     trim_offset();
     assert(!offset_ || nodes_.size() == 1);
@@ -174,8 +534,8 @@ void Alignment::reverse_complement(const DeBruijnGraph &graph,
             assert(query_rev_comp.size() >= get_clipping() + get_end_clipping());
 
             orientation_ = !orientation_;
-            query_ = { query_rev_comp.data() + get_clipping(),
-                       query_rev_comp.size() - get_clipping() - get_end_clipping() };
+            query_view_ = { query_rev_comp.data() + get_clipping(),
+                            query_rev_comp.size() - get_clipping() - get_end_clipping() };
         }
         return;
     }
@@ -195,8 +555,16 @@ void Alignment::reverse_complement(const DeBruijnGraph &graph,
             // number of sentinel characters (i.e., if some non-sentinel characters
             // from the node prefix are not included).
 
-            const auto *canonical = dynamic_cast<const CanonicalDBG*>(&graph);
-            const auto &dbg_succ = dynamic_cast<const DBGSuccinct&>(graph.get_base_graph());
+            // TODO: this cascade of graph unwrapping is ugly, find a cleaner way to do it
+            const DeBruijnGraph *base_graph = &graph;
+            if (const auto *rc_dbg = dynamic_cast<const RCDBG*>(base_graph))
+                base_graph = &rc_dbg->get_graph();
+
+            const auto *canonical = dynamic_cast<const CanonicalDBG*>(base_graph);
+            if (canonical)
+                base_graph = &canonical->get_graph();
+
+            const auto &dbg_succ = dynamic_cast<const DBGSuccinct&>(*base_graph);
 
             size_t num_sentinels = sequence_.find_last_of(boss::BOSS::kSentinel) + 1;
             assert(offset_ >= num_sentinels);
@@ -308,38 +676,43 @@ void Alignment::reverse_complement(const DeBruijnGraph &graph,
     assert(query_rev_comp.size() >= get_clipping() + get_end_clipping());
 
     orientation_ = !orientation_;
-    query_ = { query_rev_comp.data() + get_clipping(),
-               query_rev_comp.size() - get_clipping() - get_end_clipping() };
+    query_view_ = { query_rev_comp.data() + get_clipping(),
+                    query_rev_comp.size() - get_clipping() - get_end_clipping() };
     assert(is_valid(graph));
 }
 
 // derived from:
 // https://github.com/maickrau/GraphAligner/blob/236e1cf0514cfa9104e9a3333cdc1c43209c3c5a/src/vg.proto
-Json::Value Alignment::path_json(size_t node_size, std::string_view label) const {
-    assert(nodes_.size());
+Json::Value path_json(const std::vector<DeBruijnGraph::node_index> &nodes,
+                      const Cigar &cigar,
+                      size_t node_size,
+                      std::string_view query_view,
+                      size_t offset,
+                      const std::string &label) {
+    assert(nodes.size());
 
     Json::Value path;
 
-    auto cigar_it = cigar_.data().begin();
-    if (cigar_.size() && cigar_it->first == Cigar::CLIPPED) {
+    auto cigar_it = cigar.data().begin();
+    if (cigar.size() && cigar_it->first == Cigar::CLIPPED) {
         cigar_it++;
     }
 
     size_t cigar_offset = 0;
-    assert(cigar_it != cigar_.data().end());
+    assert(cigar_it != cigar.data().end());
 
     int64_t rank = 1;
-    const char *query_start = query_.data();
+    const char *query_start = query_view.data();
 
 #ifndef NDEBUG
-    const char *query_end = query_.data() + query_.size();
+    const char *query_end = query_view.data() + query_view.size();
 #endif
 
-    size_t cur_pos = rank == 1 ? offset_ : 0;
+    size_t cur_pos = rank == 1 ? offset : 0;
 
     Json::Value mapping;
     Json::Value position;
-    position["node_id"] = nodes_.front();
+    position["node_id"] = nodes.front();
 
     if (cur_pos)
         position["offset"] = Json::Value::UInt64(cur_pos);
@@ -350,7 +723,7 @@ Json::Value Alignment::path_json(size_t node_size, std::string_view label) const
     mapping["position"] = position;
 
     // handle alignment to the first node
-    while (cur_pos < node_size && cigar_it != cigar_.data().end()) {
+    while (cur_pos < node_size && cigar_it != cigar.data().end()) {
         assert(cigar_it->second > cigar_offset);
         size_t next_pos = std::min(node_size,
                                    cur_pos + (cigar_it->second - cigar_offset));
@@ -390,7 +763,7 @@ Json::Value Alignment::path_json(size_t node_size, std::string_view label) const
             case Cigar::CLIPPED: {
                 ++cigar_it;
                 cigar_offset = 0;
-                assert(cigar_it == cigar_.data().end());
+                assert(cigar_it == cigar.data().end());
                 continue;
             } break;
             case Cigar::NODE_INSERTION: {
@@ -413,8 +786,8 @@ Json::Value Alignment::path_json(size_t node_size, std::string_view label) const
     path["mapping"].append(mapping);
 
     // handle the rest of the alignment
-    for (auto node_it = nodes_.begin() + 1; node_it != nodes_.end(); ++node_it) {
-        assert(cigar_it != cigar_.data().end());
+    for (auto node_it = nodes.begin() + 1; node_it != nodes.end(); ++node_it) {
+        assert(cigar_it != cigar.data().end());
         assert(cigar_it->second > cigar_offset);
 
         Json::Value mapping;
@@ -437,7 +810,7 @@ Json::Value Alignment::path_json(size_t node_size, std::string_view label) const
             ++cigar_it;
             cigar_offset = 0;
             mapping["edit"].append(edit);
-            assert(cigar_it != cigar_.data().end());
+            assert(cigar_it != cigar.data().end());
         }
 
         Json::Value edit;
@@ -474,52 +847,54 @@ Json::Value Alignment::path_json(size_t node_size, std::string_view label) const
     }
 
     assert(query_start == query_end);
-    assert(cigar_it == cigar_.data().end()
-            || (cigar_it + 1 == cigar_.data().end() && cigar_it->first == Cigar::CLIPPED));
+    assert(cigar_it == cigar.data().end()
+            || (cigar_it + 1 == cigar.data().end() && cigar_it->first == Cigar::CLIPPED));
 
-    path["length"] = Json::Value::UInt64(nodes_.size());
+    path["length"] = Json::Value::UInt64(nodes.size());
 
-    if (nodes_.front() == nodes_.back())
+    if (nodes.front() == nodes.back())
         path["is_circular"] = true;
 
-    if (label.data())
-        path["name"] = std::string(label);
+    path["name"] = label;
 
     return path;
 }
 
-Json::Value Alignment::to_json(std::string_view full_query,
-                               const DeBruijnGraph &graph,
+Json::Value Alignment::to_json(size_t node_size,
                                bool is_secondary,
-                               std::string_view read_name,
-                               std::string_view label) const {
-    assert(is_valid(graph));
+                               const std::string &read_name,
+                               const std::string &label) const {
     if (sequence_.find("$") != std::string::npos
             || std::find(nodes_.begin(), nodes_.end(), DeBruijnGraph::npos) != nodes_.end()) {
         throw std::runtime_error("JSON output for chains not supported");
     }
 
+    std::string_view full_query = {
+        query_view_.data() - get_clipping(),
+        query_view_.size() + get_clipping() + get_end_clipping()
+    };
+
     // encode alignment
     Json::Value alignment;
 
-    alignment["name"] = read_name.data() ? std::string(read_name) : "";
+    alignment["name"] = read_name;
     alignment["sequence"] = std::string(full_query);
 
     if (sequence_.size())
         alignment["annotation"]["ref_sequence"] = sequence_;
 
-    if (query_.empty())
+    if (query_view_.empty())
         return alignment;
 
-    assert(query_.data() - cigar_.get_clipping() == full_query.data());
-    assert(query_.size() + cigar_.get_clipping() + cigar_.get_end_clipping()
+    assert(query_view_.data() - cigar_.get_clipping() == full_query.data());
+    assert(query_view_.size() + cigar_.get_clipping() + cigar_.get_end_clipping()
             == full_query.size());
 
     alignment["annotation"]["cigar"] = cigar_.to_string();
 
     // encode path
     if (nodes_.size())
-        alignment["path"] = path_json(graph.get_k(), label);
+        alignment["path"] = path_json(nodes_, cigar_, node_size, query_view_, offset_, label);
 
     alignment["score"] = static_cast<int32_t>(score_);
 
@@ -531,11 +906,11 @@ Json::Value Alignment::to_json(std::string_view full_query,
     if (is_secondary)
         alignment["is_secondary"] = is_secondary;
 
-    alignment["identity"] = query_.size()
-        ? static_cast<double>(cigar_.get_num_matches()) / query_.size()
+    alignment["identity"] = query_view_.size()
+        ? static_cast<double>(cigar_.get_num_matches()) / query_view_.size()
         : 0;
 
-    alignment["read_mapped"] = static_cast<bool>(query_.size());
+    alignment["read_mapped"] = static_cast<bool>(query_view_.size());
 
     if (orientation_)
         alignment["read_on_reverse_strand"] = orientation_;
@@ -567,15 +942,16 @@ Json::Value Alignment::to_json(std::string_view full_query,
     return alignment;
 }
 
-std::shared_ptr<const std::string> Alignment
-::load_from_json(const Json::Value &alignment, const DeBruijnGraph &graph) {
+void Alignment::load_from_json(const Json::Value &alignment,
+                               const DeBruijnGraph &graph,
+                               std::string *query_sequence) {
+    assert(query_sequence);
+
     cigar_ = Cigar();
     nodes_.clear();
     sequence_.clear();
 
-    auto query_sequence = std::make_shared<const std::string>(
-        alignment["sequence"].asString()
-    );
+    *query_sequence = alignment["sequence"].asString();
     orientation_ = alignment["read_on_reverse_strand"].asBool();
     score_ = alignment["score"].asInt();
     const Json::Value &mapping = alignment["path"]["mapping"];
@@ -629,11 +1005,11 @@ std::shared_ptr<const std::string> Alignment
         }
     }
 
-    query_ = { this_query_begin, this_query_size };
+    query_view_ = { this_query_begin, this_query_size };
 
-    if (query_.size() + get_clipping() < query_sequence->size()) {
+    if (query_view_.size() + get_clipping() < query_sequence->size()) {
         cigar_.append(Cigar::CLIPPED,
-                      query_sequence->size() - query_.size() - get_clipping());
+                      query_sequence->size() - query_view_.size() - get_clipping());
     }
 
     if (alignment["annotation"]["cigar"]
@@ -647,14 +1023,12 @@ std::shared_ptr<const std::string> Alignment
 
     if (!is_valid(graph))
         throw std::runtime_error("ERROR: JSON reconstructs invalid alignment");
-
-    return query_sequence;
 }
 
 void Alignment::insert_gap_prefix(ssize_t gap_length,
-                                  const DeBruijnGraph &graph,
+                                  size_t node_overlap,
                                   const DBGAlignerConfig &config) {
-    size_t extra_nodes = graph.get_k();
+    size_t extra_nodes = node_overlap + 1;
 
     if (gap_length < 0) {
         // alignments overlap
@@ -713,38 +1087,37 @@ void Alignment::insert_gap_prefix(ssize_t gap_length,
         cigar_.data().insert(cigar_.data().begin(), Cigar::value_type{ Cigar::DELETION, 1 });
         score_ += config.gap_opening_penalty;
 
-        if (static_cast<size_t>(gap_length) < graph.get_k()) {
+        if (static_cast<size_t>(gap_length) <= node_overlap) {
             // overlap is small, so add only the required dummy nods
             trim_offset();
             assert(extra_nodes >= 2);
             score_ += config.gap_opening_penalty
                 + (extra_nodes - 2) * config.gap_extension_penalty;
-            cigar_.data().insert(
-                cigar_.data().begin(),
-                Cigar::value_type{ Cigar::NODE_INSERTION, extra_nodes - 1 }
-            );
+            cigar_.data().insert(cigar_.data().begin(),
+                                 Cigar::value_type{ Cigar::NODE_INSERTION, extra_nodes - 1 });
         }
 
-        extend_query_begin(query_.data() - gap_length);
+        extend_query_begin(query_view_.data() - gap_length);
     }
 
     nodes_.insert(nodes_.begin(), extra_nodes, DeBruijnGraph::npos);
 
     assert(nodes_.size() == sequence_.size());
-    offset_ = graph.get_k() - 1;
+    offset_ = node_overlap;
 }
 
-
-bool spell_path(const DeBruijnGraph &graph,
-                const std::vector<DeBruijnGraph::node_index> &path,
-                std::string &seq,
-                size_t offset) {
+// Return the string spelled by the path. This path may have disconnects (if it came)
+// from a chain alignment), so this method handles that case. If there is an invalid
+// edge, or if there is too long of a stretch of npos nodes, this throws a runtime error.
+std::string spell_path(const DeBruijnGraph &graph,
+                       const std::vector<DeBruijnGraph::node_index> &path,
+                       size_t offset) {
+    std::string seq;
     assert(offset < graph.get_k());
 
     if (path.empty())
-        return "";
+        return seq;
 
-    seq.clear();
     seq.reserve(path.size() + graph.get_k() - 1 - offset);
 
     size_t num_dummy = 0;
@@ -758,7 +1131,7 @@ bool spell_path(const DeBruijnGraph &graph,
     for (size_t i = 1; i < path.size(); ++i) {
         if (num_dummy > graph.get_k()) {
             logger->error("Too many dummy nodes\n{}", fmt::join(path, " "));
-            return false;
+            throw std::runtime_error("");
         }
 
         if (path[i]) {
@@ -779,7 +1152,7 @@ bool spell_path(const DeBruijnGraph &graph,
                                   path[i - 1], path[i],
                                   graph.get_node_sequence(path[i - 1]),
                                   graph.get_node_sequence(path[i]));
-                    return false;
+                    throw std::runtime_error("");
                 }
 
                 seq += next;
@@ -791,35 +1164,34 @@ bool spell_path(const DeBruijnGraph &graph,
     }
 
     assert(seq.size() == path.size() + graph.get_k() - 1 - offset);
-
-    return true;
+    return seq;
 }
 
 bool Alignment::is_valid(const DeBruijnGraph &graph, const DBGAlignerConfig *config) const {
-    std::string path;
-    if (!spell_path(graph, nodes_, path, offset_)) {
-        std::cerr << *this << std::endl;
+    if (empty())
+        return true;
+
+    try {
+        std::string spelling = spell_path(graph, nodes_, offset_);
+        if (spelling != sequence_) {
+            logger->error("Stored sequence is incorrect\n{}\t{}", spelling, *this);
+            return false;
+        }
+    } catch (const std::runtime_error&) {
+        logger->error("{}", *this);
         return false;
     }
 
-    if (path != sequence_) {
-        std::cerr << "ERROR: stored sequence is incorrect" << std::endl
-                  << path << "\t"
-                  << *this << std::endl;
+    if (!cigar_.is_valid(sequence_, query_view_)) {
+        logger->error("{}", *this);
         return false;
     }
 
-    if (!cigar_.is_valid(sequence_, query_)) {
-        std::cerr << *this << std::endl;
-        return false;
-    }
-
-    score_t cigar_score = config ? config->score_cigar(sequence_, query_, cigar_) : 0;
+    score_t cigar_score = config ? config->score_cigar(sequence_, query_view_, cigar_) : 0;
+    cigar_score += extra_penalty;
     if (config && score_ != cigar_score) {
-        std::cerr << "ERROR: mismatch between CIGAR and score" << std::endl
-                  << "CIGAR score: " << cigar_score << std::endl
-                  << query_ << "\t"
-                  << *this << std::endl;
+        logger->error("Mismatch between CIGAR and score\nCigar score: {}\n{}\t{}",
+                      cigar_score, query_view_, *this);
         return false;
     }
 
@@ -827,33 +1199,32 @@ bool Alignment::is_valid(const DeBruijnGraph &graph, const DBGAlignerConfig *con
 }
 
 
-QueryAlignment::QueryAlignment(std::string_view query, bool is_reverse_complement) {
-    // pad sequences for easier access in 64-bit blocks
-    std::string query_padded;
-    query_padded.reserve(query.size() + 8);
+AlignmentResults::AlignmentResults(std::string_view query, bool is_reverse_complement) {
+    // Pad sequences for easier access in 64-bit blocks.
+    // Take the max of the query size and sizeof(query_view_) to ensure that small-string
+    // optimizations are disabled. Implementation taken from:
+    // https://stackoverflow.com/questions/34788789/disable-stdstrings-sso
+    query_.reserve(std::max(query.size(), sizeof(query_)) + 8);
 
     // TODO: use alphabet encoder
     // transform to upper and fix non-standard characters
-    std::transform(query.begin(), query.end(), std::back_inserter(query_padded),
+    std::transform(query.begin(), query.end(), std::back_inserter(query_),
                    [](char c) { return c >= 0 ? toupper(c) : 127; });
 
     // fill padding with '\0'
-    memset(query_padded.data() + query.size(), '\0', query_padded.capacity() - query.size());
+    memset(query_.data() + query.size(), '\0', query_.capacity() - query.size());
 
     // set the reverse complement
-    std::string query_rc_padded(query_padded);
+    query_rc_ = query_;
 
     // fill padding just in case optimizations removed it
-    query_rc_padded.reserve(query.size() + 8);
-    memset(query_rc_padded.data() + query.size(), '\0', query_rc_padded.capacity() - query.size());
+    query_rc_.reserve(query_.capacity());
+    memset(query_rc_.data() + query.size(), '\0', query_rc_.capacity() - query.size());
 
     // reverse complement
-    reverse_complement(query_rc_padded.begin(), query_rc_padded.end());
+    reverse_complement(query_rc_.begin(), query_rc_.end());
     if (is_reverse_complement)
-        std::swap(query_padded, query_rc_padded);
-
-    query_ = std::make_shared<const std::string>(std::move(query_padded));
-    query_rc_ = std::make_shared<const std::string>(std::move(query_rc_padded));
+        std::swap(query_, query_rc_);
 }
 
 } // namespace align
