@@ -31,19 +31,17 @@ class NodeRC : public INodeRC {
     NodeRC(const DBGSuccinct &graph);
 
     edge_index get_prefix_rc(node_index node) const {
-        if (auto rank = rc_.conditional_rank1(node)) {
+        if (auto rank = rc_.conditional_rank1(node))
             return mapping_[(rank - 1) * 2];
-        } else {
-            return 0;
-        }
+
+        return 0;
     }
 
     edge_index get_suffix_rc(node_index node) const {
-        if (auto rank = rc_.conditional_rank1(node)) {
+        if (auto rank = rc_.conditional_rank1(node))
             return mapping_[(rank - 1) * 2 + 1];
-        } else {
-            return 0;
-        }
+
+        return 0;
     }
 
     bool load(const std::string &filename_base);
