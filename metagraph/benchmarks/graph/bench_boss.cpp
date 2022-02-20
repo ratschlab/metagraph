@@ -100,24 +100,23 @@ DEFINE_BOSS_BENCHMARK(bwd,                 bwd,                 get_W,    size);
 
 template <class Extension>
 void load_extension(benchmark::State &state, DBGSuccinct &graph) {
-    if constexpr(!std::is_same_v<Extension, std::nullopt_t>) {
-        std::string path = std::getenv("GRAPH");
-        if (!graph.load_extension<Extension>(path)) {
-            state.SkipWithError((std::string("Can't load the RC index for graph ")
-                                    + path).c_str());
-        }
+    std::string path = std::getenv("GRAPH");
+    if (!graph.load_extension<Extension>(path)) {
+        state.SkipWithError((std::string("Can't load the RC index for graph ")
+                                + path).c_str());
     }
 }
 
-
-#define DEFINE_BOSS_PATH_BENCHMARK(NAME, OPERATION, ...) \
+#define DEFINE_BOSS_PATH_BENCHMARK(NAME, OPERATION, CACHE_SIZE, RC_INDEX) \
 static void BM_BOSS_##NAME(benchmark::State& state) { \
     auto base_graph = load_graph(state); \
     if (!base_graph) \
         return; \
  \
-    load_extension<__VA_ARGS__>(state, *base_graph); \
-    CanonicalDBG graph(base_graph, 100'000); \
+    if (RC_INDEX) \
+        load_extension<NodeRC<>>(state, *base_graph); \
+\
+    CanonicalDBG graph(base_graph, CACHE_SIZE); \
     size_t size = NUM_DISTINCT_INDEXES >> 2; \
     auto indexes = random_traversal_numbers(graph, size, PATH_SIZE); \
     size_t i = 0; \
@@ -131,8 +130,10 @@ static void BM_BOSS_##NAME(benchmark::State& state) { \
 } \
 BENCHMARK(BM_BOSS_##NAME) -> Unit(benchmark::kMicrosecond); \
 
-DEFINE_BOSS_PATH_BENCHMARK(call_outgoing_kmers_path, call_outgoing_kmers, std::nullopt_t);
-DEFINE_BOSS_PATH_BENCHMARK(call_outgoing_kmers_rcindex_path, call_outgoing_kmers, NodeRC<>);
+DEFINE_BOSS_PATH_BENCHMARK(call_outgoing_kmers_path_cache_0, call_outgoing_kmers, 0, false);
+DEFINE_BOSS_PATH_BENCHMARK(call_outgoing_kmers_path_cache_100k, call_outgoing_kmers, 100'000, false);
+DEFINE_BOSS_PATH_BENCHMARK(call_outgoing_kmers_rcindex_path_cache_0, call_outgoing_kmers, 0, true);
+DEFINE_BOSS_PATH_BENCHMARK(call_outgoing_kmers_rcindex_path_cache_100k, call_outgoing_kmers, 100'000, true);
 
 
 static void BM_BOSS_get_W_and_fwd(benchmark::State &state) {
