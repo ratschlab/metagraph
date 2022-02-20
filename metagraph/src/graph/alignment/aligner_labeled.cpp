@@ -573,67 +573,7 @@ double compute_label_change_scores(const DeBruijnGraph &graph,
     edge_index i = boss.succ_last(next_range.first);
     edge_index i_start = boss.pred_last(i - 1) + 1;
     bool label_preserving_traversal_found = false;
-    while (i <= next_range.second) {
-        assert(node_wp != node_wm);
-        edge_index node_w = std::min(node_wp, node_wm);
-        assert(boss.fwd(node_w, cur_edge_label) == i);
-        if (node_index n = dbg_succ->boss_to_kmer_index(node_w)) {
-            ++total;
-            sdsl::bit_vector match_found(boss.alph_size, false);
-            size_t matches = 0;
-            const Alignment::Columns *n_labels = annotation_buffer.get_labels(n);
-            assert(n_labels);
-
-            // TODO: find a more efficient way to get this
-            TAlphabet common_next_c_enc = rev_graph
-                ? boss.encode(complement(boss.decode(
-                    boss.get_minus_k_value(node_w, boss.get_k() - 1).first)
-                  ))
-                : 0;
-
-            for (edge_index next_edge = i_start; next_edge <= i; ++next_edge) {
-                if (matches == match_found.size() - 1)
-                    break;
-
-                node_index m = dbg_succ->boss_to_kmer_index(next_edge);
-                if (!m)
-                    continue;
-
-                TAlphabet next_c_enc = rev_graph
-                    ? common_next_c_enc
-                    : next_range_w[next_edge - next_range.first];
-                size_t j = out_map[next_c_enc];
-                if (j == outgoing.size() || match_found[next_c_enc])
-                    continue;
-
-                const auto &[_, diff, lclogprob] = intersect_diff_labels[j];
-                if (diff.empty())
-                    continue;
-
-                const auto &exclude = exclude_sets[j];
-                const Alignment::Columns *m_labels = annotation_buffer.get_labels(m);
-                assert(m_labels);
-                Alignment::Columns inter;
-                std::set_intersection(n_labels->begin(), n_labels->end(),
-                                      m_labels->begin(), m_labels->end(),
-                                      std::back_inserter(inter));
-                for (Column col : inter) {
-                    if (!exclude.count(col)) {
-                        // found an independent label
-                        match_found[next_c_enc] = true;
-                        ++matches;
-                    }
-                }
-            }
-
-            if (matches)
-                label_preserving_traversal_found = true;
-
-            for (size_t j = 0; j < match_found.size(); ++j) {
-                counts[j] += match_found[j];
-            }
-        }
-
+    auto step = [&]() {
         if (node_wp < node_wm) {
             node_wp = boss.succ_W(node_wp + 1, cur_edge_label);
         } else {
@@ -643,6 +583,69 @@ double compute_label_change_scores(const DeBruijnGraph &graph,
         if (node_wp <= node_wm) {
             i_start = i + 1;
             i = boss.succ_last(i_start);
+        }
+    };
+    for ( ; i <= next_range.second; step()) {
+        assert(node_wp != node_wm);
+        edge_index node_w = std::min(node_wp, node_wm);
+        assert(boss.fwd(node_w, cur_edge_label) == i);
+        node_index n = dbg_succ->boss_to_kmer_index(node_w);
+        if (!n)
+            continue;
+
+        ++total;
+        sdsl::bit_vector match_found(boss.alph_size, false);
+        size_t matches = 0;
+        const Alignment::Columns *n_labels = annotation_buffer.get_labels(n);
+        assert(n_labels);
+
+        // TODO: find a more efficient way to get this
+        TAlphabet common_next_c_enc = rev_graph
+            ? boss.encode(complement(boss.decode(
+                boss.get_minus_k_value(node_w, boss.get_k() - 1).first)
+              ))
+            : 0;
+
+        for (edge_index next_edge = i_start; next_edge <= i; ++next_edge) {
+            if (matches == match_found.size() - 1)
+                break;
+
+            node_index m = dbg_succ->boss_to_kmer_index(next_edge);
+            if (!m)
+                continue;
+
+            TAlphabet next_c_enc = rev_graph
+                ? common_next_c_enc
+                : next_range_w[next_edge - next_range.first];
+            size_t j = out_map[next_c_enc];
+            if (j == outgoing.size() || match_found[next_c_enc])
+                continue;
+
+            const auto &[_, diff, lclogprob] = intersect_diff_labels[j];
+            if (diff.empty())
+                continue;
+
+            const auto &exclude = exclude_sets[j];
+            const Alignment::Columns *m_labels = annotation_buffer.get_labels(m);
+            assert(m_labels);
+            Alignment::Columns inter;
+            std::set_intersection(n_labels->begin(), n_labels->end(),
+                                  m_labels->begin(), m_labels->end(),
+                                  std::back_inserter(inter));
+            for (Column col : inter) {
+                if (!exclude.count(col)) {
+                    // found an independent label
+                    match_found[next_c_enc] = true;
+                    ++matches;
+                }
+            }
+        }
+
+        if (matches)
+            label_preserving_traversal_found = true;
+
+        for (size_t j = 0; j < match_found.size(); ++j) {
+            counts[j] += match_found[j];
         }
     }
 

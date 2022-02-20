@@ -158,15 +158,15 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
     // this method assumes that seeds from the BaseSeeder are exact match only
     static_assert(std::is_base_of_v<ExactSeeder, BaseSeeder>);
 
+    if (this->query_.size() < this->config_.min_seed_length)
+        return;
+
     if (this->config_.min_seed_length >= this->graph_.get_k()) {
         seeds_ = this->BaseSeeder::get_seeds();
         return;
     }
 
     const DBGSuccinct &dbg_succ = get_base_dbg_succ(&this->graph_);
-
-    if (this->query_.size() < this->config_.min_seed_length)
-        return;
 
     std::vector<std::vector<Seed>> suffix_seeds(
         this->query_.size() - this->config_.min_seed_length + 1
