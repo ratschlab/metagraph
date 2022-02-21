@@ -212,10 +212,7 @@ auto AnnotationBuffer::get_labels_and_coords(node_index node) const
         -> std::pair<const Columns*, const CoordinateSet*> {
     std::pair<const Columns*, const CoordinateSet*> ret_val { nullptr, nullptr };
 
-    if (const auto *canonical = dynamic_cast<const CanonicalDBG*>(&graph_))
-        node = canonical->get_base_node(node);
-
-    auto it = node_to_cols_.find(node);
+    auto it = node_to_cols_.find(get_labeled_node(graph_, node));
 
     // if the node hasn't been seen before, or if its annotations haven't
     // been fetched, return nothing
