@@ -115,6 +115,7 @@ class Config {
     bool alignment_edit_distance = false;
     bool alignment_chain = false;
     bool alignment_post_chain = false;
+    bool alignment_label_change_union = false;
 
     int8_t alignment_match_score = 2;
     int8_t alignment_mm_transition_score = 3;

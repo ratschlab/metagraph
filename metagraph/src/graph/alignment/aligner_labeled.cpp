@@ -557,15 +557,8 @@ double compute_label_change_scores(const DeBruijnGraph &graph,
     Vector<tsl::hopscotch_set<Column>> exclude_sets;
     exclude_sets.reserve(intersect_diff_labels.size());
     for (const auto &[inter, diff, _] : intersect_diff_labels) {
-        if (diff.empty()) {
-            exclude_sets.emplace_back();
-            continue;
-        }
-
-        assert(inter.empty());
-
         exclude_sets.emplace_back(diff.begin(), diff.end());
-        assert(exclude_sets.back().size() == diff.size());
+        exclude_sets.back().insert(inter.begin(), inter.end());
     }
 
     edge_index node_wp = boss.succ_W(node_range.first, cur_edge_label);
@@ -703,7 +696,7 @@ void LabeledExtender
             // Assume that annotations are preserved in unitigs. Violations of this
             // assumption are corrected after the next flush
             node_labels_.emplace_back(node_labels_[table_i]);
-            node_labels_switched_.emplace_back(false);
+            node_labels_switched_.emplace_back(config_.label_change_union);
         } else {
             const auto &columns = annotation_buffer_.get_cached_column_set(node_labels_[table_i]);
             const auto &diff_labels = seed_->label_column_diffs[next_offset - graph_->get_k() - 1];
@@ -751,7 +744,7 @@ void LabeledExtender
                                         std::back_inserter(intersect_labels),
                                         std::back_inserter(diff_labels));
 
-            if (intersect_labels.size())
+            if (!config_.label_change_union && intersect_labels.size())
                 diff_labels.clear();
         }
 
@@ -773,14 +766,29 @@ void LabeledExtender
                       next_offset - seed_->get_offset(), i, sum_diff_probs * abs_match_score,
                       lclogprob);
 
-            if (lclogprob > config_.ninf && diff.size()) {
-                node_labels_.emplace_back(annotation_buffer_.cache_column_set(std::move(diff)));
-                node_labels_switched_.emplace_back(true);
-                callback(next, c, score + lclogprob);
-            } else if (inter.size()) {
-                node_labels_.emplace_back(annotation_buffer_.cache_column_set(std::move(inter)));
-                node_labels_switched_.emplace_back(false);
-                callback(next, c, score + sum_diff_probs * abs_match_score);
+            if (config_.label_change_union) {
+                if (lclogprob > config_.ninf && diff.size()) {
+                    Columns column_union;
+                    std::set_union(columns.begin(), columns.end(), diff.begin(), diff.end(),
+                                   std::back_inserter(column_union));
+                    node_labels_.emplace_back(annotation_buffer_.cache_column_set(std::move(column_union)));
+                    node_labels_switched_.emplace_back(true);
+                    callback(next, c, score + lclogprob);
+                } else {
+                    node_labels_.emplace_back(node_labels_[table_i]);
+                    node_labels_switched_.emplace_back(true);
+                    callback(next, c, score + sum_diff_probs * abs_match_score);
+                }
+            } else {
+                if (lclogprob > config_.ninf && diff.size()) {
+                    node_labels_.emplace_back(annotation_buffer_.cache_column_set(std::move(diff)));
+                    node_labels_switched_.emplace_back(true);
+                    callback(next, c, score + lclogprob);
+                } else if (inter.size()) {
+                    node_labels_.emplace_back(annotation_buffer_.cache_column_set(std::move(inter)));
+                    node_labels_switched_.emplace_back(false);
+                    callback(next, c, score + sum_diff_probs * abs_match_score);
+                }
             }
         }
 

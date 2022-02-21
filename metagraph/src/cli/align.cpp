@@ -48,6 +48,7 @@ DBGAlignerConfig initialize_aligner_config(const Config &config) {
         .forward_and_reverse_complement = !config.align_only_forwards,
         .chain_alignments = config.alignment_chain,
         .post_chain_alignments = config.alignment_post_chain,
+        .label_change_union = config.alignment_label_change_union,
         .alignment_edit_distance = config.alignment_edit_distance,
         .alignment_match_score = config.alignment_match_score,
         .alignment_mm_transition_score = config.alignment_mm_transition_score,

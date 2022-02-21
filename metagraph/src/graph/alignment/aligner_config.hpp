@@ -53,6 +53,7 @@ struct DBGAlignerConfig {
     bool global_xdrop = true;
     bool allow_left_trim = true;
     bool no_backtrack = false;
+    bool label_change_union = false;
 
     bool alignment_edit_distance;
     int8_t alignment_match_score;

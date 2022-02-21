@@ -250,6 +250,8 @@ Config::Config(int argc, char *argv[]) {
             alignment_chain = true;
         } else if (!strcmp(argv[i], "--align-post-chain")) {
             alignment_post_chain = true;
+        } else if (!strcmp(argv[i], "--align-label-change-union")) {
+            alignment_label_change_union = true;
         } else if (!strcmp(argv[i], "--max-hull-depth")) {
             max_hull_depth = atoll(get_value(i++));
         } else if (!strcmp(argv[i], "--batch-align")) {
