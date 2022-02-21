@@ -24,6 +24,18 @@ typedef DeBruijnGraph::node_index node_index;
 // dummy index for an unfetched annotations
 static constexpr size_t nannot = std::numeric_limits<size_t>::max();
 
+node_index get_labeled_node(const DeBruijnGraph &graph, node_index node) {
+    if (const auto *canonical = dynamic_cast<const CanonicalDBG*>(&graph))
+        return canonical->get_base_node(node);
+
+    if (graph.get_mode() == DeBruijnGraph::CANONICAL) {
+        std::string query = spell_path(graph, { node });
+        return map_to_nodes(graph, query)[0];
+    }
+
+    return node;
+}
+
 AnnotationBuffer::AnnotationBuffer(const DeBruijnGraph &graph, const Annotator &annotator)
       : graph_(graph),
         annotator_(annotator),
@@ -440,20 +452,8 @@ double compute_label_change_scores(const DeBruijnGraph &graph,
         rev_graph ? &rev_graph->get_graph() : &graph
     );
 
-    auto get_labeled_node = [&](node_index node) {
-        if (const auto *canonical = dynamic_cast<const CanonicalDBG*>(&graph))
-            return canonical->get_base_node(node);
-
-        if (graph.get_mode() == DeBruijnGraph::CANONICAL) {
-            std::string query = spell_path(graph, { node });
-            return map_to_nodes(graph, query)[0];
-        }
-
-        return node;
-    };
-
     assert(annotation_buffer.get_labels(node));
-    node_index node_base = get_labeled_node(node);
+    node_index node_base = get_labeled_node(graph, node);
     assert(node_base);
 
     // Case 1:  node == node_base, next == next_base
@@ -467,7 +467,7 @@ double compute_label_change_scores(const DeBruijnGraph &graph,
 
     size_t num_nonbase_next_nodes = 0;
     for (const auto &[next, c, score] : outgoing) {
-        num_nonbase_next_nodes += (next != get_labeled_node(next));
+        num_nonbase_next_nodes += (next != get_labeled_node(graph, next));
     }
 
     if (node != node_base && canonical && rev_graph && num_nonbase_next_nodes) {
@@ -487,7 +487,7 @@ double compute_label_change_scores(const DeBruijnGraph &graph,
     //          node         next
     // e.g.,    GTCATGC C <- XGTCATG C
     edge_index edge_base = dbg_succ->kmer_to_boss_index(
-        rev_graph ? get_labeled_node(std::get<0>(outgoing[0])) : node_base
+        rev_graph ? get_labeled_node(graph, std::get<0>(outgoing[0])) : node_base
     );
     edge_index last_edge_base = boss.succ_last(edge_base);
 
