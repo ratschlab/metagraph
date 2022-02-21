@@ -12,14 +12,14 @@ namespace graph {
 
 class DBGSuccinct;
 
+// Maps each node in a PRIMARY-mode DBGSuccinct to the BOSS nodes corresponding
+// to the reverse complements of its k-1 prefix and k-1 suffix.
 class INodeRC : public SequenceGraph::GraphExtension {
   public:
     virtual uint64_t get_prefix_rc(SequenceGraph::node_index node) const = 0;
     virtual uint64_t get_suffix_rc(SequenceGraph::node_index node) const = 0;
 };
 
-// Maps each node in a PRIMARY-mode DBGSuccinct to the BOSS nodes corresponding
-// to its k-1 prefix or suffix.
 template <class Indicator = bit_vector_smart,
           class Mapping = sdsl::dac_vector_dp<sdsl::rrr_vector<>>>
 class NodeRC : public INodeRC {
