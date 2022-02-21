@@ -550,7 +550,8 @@ double compute_label_change_scores(const DeBruijnGraph &graph,
     Vector<size_t> out_map(boss.alph_size, intersect_diff_labels.size());
     for (size_t i = 0; i < outgoing.size(); ++i) {
         const auto &[next, c, score] = outgoing[i];
-        out_map[boss.encode(c)] = i;
+        if (c != boss::BOSS::kSentinel)
+            out_map[boss.encode(c)] = i;
     }
 
     Vector<size_t> counts(boss.alph_size);
@@ -593,11 +594,14 @@ double compute_label_change_scores(const DeBruijnGraph &graph,
         assert(n_labels);
 
         // TODO: find a more efficient way to get this
-        TAlphabet common_next_c_enc = rev_graph
-            ? boss.encode(complement(boss.decode(
-                boss.get_minus_k_value(node_w, boss.get_k() - 1).first)
-              ))
-            : 0;
+        TAlphabet common_next_c_enc = 0;
+        if (rev_graph) {
+            TAlphabet s = boss.get_minus_k_value(node_w, boss.get_k() - 1).first;
+            if (s == boss::BOSS::kSentinelCode)
+                continue;
+
+            common_next_c_enc = boss.encode(complement(boss.decode(s)));
+        }
 
         for (edge_index next_edge = i_start; next_edge <= i; ++next_edge) {
             if (matches == match_found.size() - 1)
@@ -610,6 +614,7 @@ double compute_label_change_scores(const DeBruijnGraph &graph,
             TAlphabet next_c_enc = rev_graph
                 ? common_next_c_enc
                 : next_range_w[next_edge - next_range.first];
+
             size_t j = out_map[next_c_enc];
             if (j == outgoing.size() || match_found[next_c_enc])
                 continue;
@@ -696,7 +701,7 @@ void LabeledExtender
             // Assume that annotations are preserved in unitigs. Violations of this
             // assumption are corrected after the next flush
             node_labels_.emplace_back(node_labels_[table_i]);
-            node_labels_switched_.emplace_back(config_.label_change_union);
+            node_labels_switched_.emplace_back(false);
         } else {
             const auto &columns = annotation_buffer_.get_cached_column_set(node_labels_[table_i]);
             const auto &diff_labels = seed_->label_column_diffs[next_offset - graph_->get_k() - 1];
