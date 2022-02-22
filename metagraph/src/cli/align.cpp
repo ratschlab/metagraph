@@ -303,13 +303,9 @@ int align_to_graph(Config *config) {
     auto dbg_succ = std::dynamic_pointer_cast<DBGSuccinct>(graph);
     if (dbg_succ) {
         dbg_succ->reset_mask();
-        if (dbg_succ->load_extension<NodeRC<>>(config->infbase)) {
+        if (auto node_rc = dbg_succ->load_extension<NodeRC<>>(config->infbase)) {
             common::logger->trace("Loaded graph RC file");
-
-            if (!graph->get_extension<NodeRC<>>()) {
-                common::logger->error("Could not fetch RC extension");
-                exit(1);
-            }
+            node_rc->set_graph(*dbg_succ);
         }
     }
 
