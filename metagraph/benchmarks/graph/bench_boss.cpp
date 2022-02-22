@@ -102,10 +102,12 @@ DEFINE_BOSS_BENCHMARK(bwd,                 bwd,                 get_W,    size);
 template <class Extension>
 void load_extension(benchmark::State &state, DBGSuccinct &graph) {
     std::string path = std::getenv("GRAPH");
-    if (!graph.load_extension<Extension>(path)) {
-        state.SkipWithError((std::string("Can't load the RC index for graph ")
-                                + path).c_str());
+    if (const auto node_rc = graph.load_extension<Extension>(path)) {
+        node_rc->set_graph(graph);
+        return;
     }
+
+    state.SkipWithError((std::string("Can't load the RC index for graph ") + path).c_str());
 }
 
 #define DEFINE_BOSS_PATH_BENCHMARK(NAME, OPERATION, BWD_CACHE, RC_INDEX) \

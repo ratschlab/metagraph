@@ -16,33 +16,29 @@ class DBGSuccinct;
 // to the reverse complements of its k-1 prefix and k-1 suffix.
 class INodeRC : public SequenceGraph::GraphExtension {
   public:
-    virtual uint64_t get_prefix_rc(SequenceGraph::node_index node) const = 0;
-    virtual uint64_t get_suffix_rc(SequenceGraph::node_index node) const = 0;
+    using node_index = SequenceGraph::node_index;
+
+    virtual void call_outgoing_nodes_from_rc(node_index node, const std::function<void(node_index)> &callback) const = 0;
+    virtual void call_incoming_nodes_from_rc(node_index node, const std::function<void(node_index)> &callback) const = 0;
 };
 
 template <class Indicator = bit_vector_smart,
           class Mapping = sdsl::dac_vector_dp<sdsl::rrr_vector<>>>
 class NodeRC : public INodeRC {
   public:
-    using node_index = SequenceGraph::node_index;
-    using edge_index = uint64_t;
+    // Use set_graph to set the graph pointer after using the default constructor
+    NodeRC() : graph_(nullptr) {};
 
-    NodeRC() {};
+    // Construct a NodeRC index
     NodeRC(const DBGSuccinct &graph);
 
-    edge_index get_prefix_rc(node_index node) const {
-        if (auto rank = rc_.conditional_rank1(node))
-            return mapping_[(rank - 1) * 2];
-
-        return 0;
+    void set_graph(const DeBruijnGraph &graph) {
+        assert(!rc_.size() || is_compatible(graph));
+        graph_ = &graph;
     }
 
-    edge_index get_suffix_rc(node_index node) const {
-        if (auto rank = rc_.conditional_rank1(node))
-            return mapping_[(rank - 1) * 2 + 1];
-
-        return 0;
-    }
+    void call_outgoing_nodes_from_rc(node_index node, const std::function<void(node_index)> &callback) const;
+    void call_incoming_nodes_from_rc(node_index node, const std::function<void(node_index)> &callback) const;
 
     bool load(const std::string &filename_base);
     void serialize(const std::string &filename_base) const;
@@ -50,6 +46,8 @@ class NodeRC : public INodeRC {
     bool is_compatible(const SequenceGraph &graph, bool verbose = true) const;
 
   private:
+    const DeBruijnGraph *graph_;
+
     // Indicates whether a reverse complement prefix/suffix exists for each graph node.
     Indicator rc_;
 
