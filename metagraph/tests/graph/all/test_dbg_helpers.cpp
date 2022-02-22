@@ -5,6 +5,7 @@
 #include "graph/representation/succinct/boss.hpp"
 #include "graph/representation/succinct/boss_construct.hpp"
 #include "graph/representation/bitmap/dbg_bitmap_construct.hpp"
+#include "graph/graph_extensions/node_first_cache.hpp"
 
 
 namespace mtg {
@@ -24,6 +25,7 @@ template size_t max_test_k<DBGSuccinctBloomFPR<1, 1>>();
 template size_t max_test_k<DBGSuccinctBloomFPR<1, 10>>();
 template size_t max_test_k<DBGSuccinctBloom<4, 1>>();
 template size_t max_test_k<DBGSuccinctBloom<4, 50>>();
+template size_t max_test_k<DBGSuccinctCached>();
 
 template<> size_t max_test_k<DBGBitmap>() {
     return 63. / kmer::KmerExtractor2Bit().bits_per_char;
@@ -170,8 +172,8 @@ build_graph<DBGSuccinctIndexed<1>>(uint64_t k,
                                    std::vector<std::string> sequences,
                                    DeBruijnGraph::Mode mode) {
     auto graph = build_graph<DBGSuccinct>(k, sequences, mode);
-    BOSS *boss = &get_boss(*graph);
-    boss->index_suffix_ranges(1);
+    BOSS &boss = get_boss(*graph);
+    boss.index_suffix_ranges(1);
 
     return graph;
 }
@@ -182,8 +184,8 @@ build_graph<DBGSuccinctIndexed<2>>(uint64_t k,
                                    std::vector<std::string> sequences,
                                    DeBruijnGraph::Mode mode) {
     auto graph = build_graph<DBGSuccinct>(k, sequences, mode);
-    BOSS *boss = &get_boss(*graph);
-    boss->index_suffix_ranges(std::min(k - 1, (uint64_t)2));
+    BOSS &boss = get_boss(*graph);
+    boss.index_suffix_ranges(std::min(k - 1, (uint64_t)2));
 
     return graph;
 }
@@ -194,8 +196,8 @@ build_graph<DBGSuccinctIndexed<10>>(uint64_t k,
                                     std::vector<std::string> sequences,
                                     DeBruijnGraph::Mode mode) {
     auto graph = build_graph<DBGSuccinct>(k, sequences, mode);
-    BOSS *boss = &get_boss(*graph);
-    boss->index_suffix_ranges(std::min(k - 1, (uint64_t)10));
+    BOSS &boss = get_boss(*graph);
+    boss.index_suffix_ranges(std::min(k - 1, (uint64_t)10));
 
     return graph;
 }
@@ -206,8 +208,8 @@ build_graph<DBGSuccinctBloomFPR<1, 1>>(uint64_t k,
                                        std::vector<std::string> sequences,
                                        DeBruijnGraph::Mode mode) {
     auto graph = build_graph<DBGSuccinct>(k, sequences, mode);
-    DBGSuccinct *dbg_succ = &get_dbg_succ(*graph);
-    dbg_succ->initialize_bloom_filter_from_fpr(1.0);
+    DBGSuccinct &dbg_succ = get_dbg_succ(*graph);
+    dbg_succ.initialize_bloom_filter_from_fpr(1.0);
 
     return graph;
 }
@@ -218,8 +220,8 @@ build_graph<DBGSuccinctBloomFPR<1, 10>>(uint64_t k,
                                         std::vector<std::string> sequences,
                                         DeBruijnGraph::Mode mode) {
     auto graph = build_graph<DBGSuccinct>(k, sequences, mode);
-    DBGSuccinct *dbg_succ = &get_dbg_succ(*graph);
-    dbg_succ->initialize_bloom_filter_from_fpr(1.0 / 10);
+    DBGSuccinct &dbg_succ = get_dbg_succ(*graph);
+    dbg_succ.initialize_bloom_filter_from_fpr(1.0 / 10);
 
     return graph;
 }
@@ -230,8 +232,8 @@ build_graph<DBGSuccinctBloom<4, 1>>(uint64_t k,
                                     std::vector<std::string> sequences,
                                     DeBruijnGraph::Mode mode) {
     auto graph = build_graph<DBGSuccinct>(k, sequences, mode);
-    DBGSuccinct *dbg_succ = &get_dbg_succ(*graph);
-    dbg_succ->initialize_bloom_filter(4.0, 1);
+    DBGSuccinct &dbg_succ = get_dbg_succ(*graph);
+    dbg_succ.initialize_bloom_filter(4.0, 1);
 
     return graph;
 }
@@ -242,8 +244,20 @@ build_graph<DBGSuccinctBloom<4, 50>>(uint64_t k,
                                      std::vector<std::string> sequences,
                                      DeBruijnGraph::Mode mode) {
     auto graph = build_graph<DBGSuccinct>(k, sequences, mode);
-    DBGSuccinct *dbg_succ = &get_dbg_succ(*graph);
-    dbg_succ->initialize_bloom_filter(4.0, 50);
+    DBGSuccinct &dbg_succ = get_dbg_succ(*graph);
+    dbg_succ.initialize_bloom_filter(4.0, 50);
+
+    return graph;
+}
+
+template <>
+std::shared_ptr<DeBruijnGraph>
+build_graph<DBGSuccinctCached>(uint64_t k,
+                               std::vector<std::string> sequences,
+                               DeBruijnGraph::Mode mode) {
+    auto graph = build_graph<DBGSuccinct>(k, sequences, mode);
+    if (mode == DeBruijnGraph::PRIMARY)
+        graph->add_extension(std::make_shared<graph::NodeFirstCache>(get_dbg_succ(*graph)));
 
     return graph;
 }
@@ -316,8 +330,8 @@ build_graph_batch<DBGSuccinctIndexed<1>>(uint64_t k,
                                          std::vector<std::string> sequences,
                                          DeBruijnGraph::Mode mode) {
     auto graph = build_graph_batch<DBGSuccinct>(k, sequences, mode);
-    BOSS *boss = &get_boss(*graph);
-    boss->index_suffix_ranges(1);
+    BOSS &boss = get_boss(*graph);
+    boss.index_suffix_ranges(1);
 
     return graph;
 }
@@ -328,8 +342,8 @@ build_graph_batch<DBGSuccinctIndexed<2>>(uint64_t k,
                                          std::vector<std::string> sequences,
                                          DeBruijnGraph::Mode mode) {
     auto graph = build_graph_batch<DBGSuccinct>(k, sequences, mode);
-    BOSS *boss = &get_boss(*graph);
-    boss->index_suffix_ranges(std::min(k - 1, (uint64_t)2));
+    BOSS &boss = get_boss(*graph);
+    boss.index_suffix_ranges(std::min(k - 1, (uint64_t)2));
 
     return graph;
 }
@@ -340,8 +354,8 @@ build_graph_batch<DBGSuccinctIndexed<10>>(uint64_t k,
                                           std::vector<std::string> sequences,
                                           DeBruijnGraph::Mode mode) {
     auto graph = build_graph_batch<DBGSuccinct>(k, sequences, mode);
-    BOSS *boss = &get_boss(*graph);
-    boss->index_suffix_ranges(std::min(k - 1, (uint64_t)10));
+    BOSS &boss = get_boss(*graph);
+    boss.index_suffix_ranges(std::min(k - 1, (uint64_t)10));
 
     return graph;
 }
@@ -352,8 +366,8 @@ build_graph_batch<DBGSuccinctBloomFPR<1, 1>>(uint64_t k,
                                              std::vector<std::string> sequences,
                                              DeBruijnGraph::Mode mode) {
     auto graph = build_graph_batch<DBGSuccinct>(k, sequences, mode);
-    DBGSuccinct *dbg_succ = &get_dbg_succ(*graph);
-    dbg_succ->initialize_bloom_filter_from_fpr(1.0);
+    DBGSuccinct &dbg_succ = get_dbg_succ(*graph);
+    dbg_succ.initialize_bloom_filter_from_fpr(1.0);
 
     return graph;
 }
@@ -364,8 +378,8 @@ build_graph_batch<DBGSuccinctBloomFPR<1, 10>>(uint64_t k,
                                               std::vector<std::string> sequences,
                                               DeBruijnGraph::Mode mode) {
     auto graph = build_graph_batch<DBGSuccinct>(k, sequences, mode);
-    DBGSuccinct *dbg_succ = &get_dbg_succ(*graph);
-    dbg_succ->initialize_bloom_filter_from_fpr(1.0 / 10);
+    DBGSuccinct &dbg_succ = get_dbg_succ(*graph);
+    dbg_succ.initialize_bloom_filter_from_fpr(1.0 / 10);
 
     return graph;
 }
@@ -376,8 +390,8 @@ build_graph_batch<DBGSuccinctBloom<4, 1>>(uint64_t k,
                                           std::vector<std::string> sequences,
                                           DeBruijnGraph::Mode mode) {
     auto graph = build_graph_batch<DBGSuccinct>(k, sequences, mode);
-    DBGSuccinct *dbg_succ = &get_dbg_succ(*graph);
-    dbg_succ->initialize_bloom_filter(4.0, 1);
+    DBGSuccinct &dbg_succ = get_dbg_succ(*graph);
+    dbg_succ.initialize_bloom_filter(4.0, 1);
 
     return graph;
 }
@@ -388,8 +402,20 @@ build_graph_batch<DBGSuccinctBloom<4, 50>>(uint64_t k,
                                            std::vector<std::string> sequences,
                                            DeBruijnGraph::Mode mode) {
     auto graph = build_graph_batch<DBGSuccinct>(k, sequences, mode);
-    DBGSuccinct *dbg_succ = &get_dbg_succ(*graph);
-    dbg_succ->initialize_bloom_filter(4.0, 50);
+    DBGSuccinct &dbg_succ = get_dbg_succ(*graph);
+    dbg_succ.initialize_bloom_filter(4.0, 50);
+
+    return graph;
+}
+
+template <>
+std::shared_ptr<DeBruijnGraph>
+build_graph_batch<DBGSuccinctCached>(uint64_t k,
+                                     std::vector<std::string> sequences,
+                                     DeBruijnGraph::Mode mode) {
+    auto graph = build_graph_batch<DBGSuccinct>(k, sequences, mode);
+    if (mode == DeBruijnGraph::PRIMARY)
+        graph->add_extension(std::make_shared<graph::NodeFirstCache>(get_dbg_succ(*graph)));
 
     return graph;
 }
@@ -457,6 +483,7 @@ template bool check_graph<DBGSuccinctBloomFPR<1, 1>>(const std::string &, DeBrui
 template bool check_graph<DBGSuccinctBloomFPR<1, 10>>(const std::string &, DeBruijnGraph::Mode, bool);
 template bool check_graph<DBGSuccinctBloom<4, 1>>(const std::string &, DeBruijnGraph::Mode, bool);
 template bool check_graph<DBGSuccinctBloom<4, 50>>(const std::string &, DeBruijnGraph::Mode, bool);
+template bool check_graph<DBGSuccinctCached>(const std::string &, DeBruijnGraph::Mode, bool);
 template bool check_graph<DBGBitmap>(const std::string &, DeBruijnGraph::Mode, bool);
 template bool check_graph<DBGHashOrdered>(const std::string &, DeBruijnGraph::Mode, bool);
 template bool check_graph<DBGHashFast>(const std::string &, DeBruijnGraph::Mode, bool);

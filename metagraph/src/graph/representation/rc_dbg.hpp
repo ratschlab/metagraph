@@ -3,9 +3,12 @@
 
 #include "graph/representation/base/dbg_wrapper.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
+#include "graph/graph_extensions/node_first_cache.hpp"
 
 namespace mtg {
 namespace graph {
+
+class DBGSuccinct;
 
 /**
  * RCDBG is a wrapper which represents the reverse complement of the underlying Graph.
@@ -15,7 +18,10 @@ namespace graph {
 class RCDBG : public DBGWrapper<DeBruijnGraph> {
   public:
     template <typename... Args>
-    RCDBG(Args&&... args) : DBGWrapper<DeBruijnGraph>(std::forward<Args>(args)...) {}
+    RCDBG(Args&&... args) : DBGWrapper<DeBruijnGraph>(std::forward<Args>(args)...) {
+        if (const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(graph_.get()))
+            add_extension(std::make_shared<NodeFirstCache>(*dbg_succ));
+    }
 
     virtual node_index traverse(node_index node, char next_char) const override final {
         return graph_->traverse_back(node, complement(next_char));
@@ -79,9 +85,15 @@ class RCDBG : public DBGWrapper<DeBruijnGraph> {
 
     virtual void call_outgoing_kmers(node_index kmer,
                                      const OutgoingEdgeCallback &callback) const override final {
-        graph_->call_incoming_kmers(kmer, [&](node_index prev, char c) {
+        auto incoming_kmer_callback = [&](node_index prev, char c) {
             callback(prev, complement(c));
-        });
+        };
+
+        if (const auto cache = get_extension<NodeFirstCache>()) {
+            cache->call_incoming_kmers(kmer, incoming_kmer_callback);
+        } else {
+            graph_->call_incoming_kmers(kmer, incoming_kmer_callback);
+        }
     }
 
     virtual void call_incoming_kmers(node_index kmer,
