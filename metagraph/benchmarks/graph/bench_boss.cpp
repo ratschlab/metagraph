@@ -108,7 +108,7 @@ void load_extension(benchmark::State &state, DBGSuccinct &graph) {
     }
 }
 
-#define DEFINE_BOSS_PATH_BENCHMARK(NAME, OPERATION, RC_INDEX, BWD_CACHE) \
+#define DEFINE_BOSS_PATH_BENCHMARK(NAME, OPERATION, BWD_CACHE, RC_INDEX) \
 static void BM_BOSS_##NAME(benchmark::State& state) { \
     auto base_graph = load_graph(state); \
     if (!base_graph) \
@@ -135,8 +135,8 @@ static void BM_BOSS_##NAME(benchmark::State& state) { \
 BENCHMARK(BM_BOSS_##NAME) -> Unit(benchmark::kMicrosecond); \
 
 DEFINE_BOSS_PATH_BENCHMARK(call_outgoing_kmers_path_cache, call_outgoing_kmers, false, false);
-DEFINE_BOSS_PATH_BENCHMARK(call_outgoing_kmers_rcindex_path_cache, call_outgoing_kmers, true, false);
-DEFINE_BOSS_PATH_BENCHMARK(call_outgoing_kmers_bwdcache_path_cache, call_outgoing_kmers, false, true);
+DEFINE_BOSS_PATH_BENCHMARK(call_outgoing_kmers_bwdcache_path_cache, call_outgoing_kmers, true, false);
+DEFINE_BOSS_PATH_BENCHMARK(call_outgoing_kmers_rcindex_path_cache, call_outgoing_kmers, false, true);
 DEFINE_BOSS_PATH_BENCHMARK(call_outgoing_kmers_bwdcache_rcindex_path_cache, call_outgoing_kmers, true, true);
 
 
