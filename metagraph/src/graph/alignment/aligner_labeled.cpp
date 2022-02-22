@@ -698,7 +698,9 @@ void LabeledExtender
             // Assume that annotations are preserved in unitigs. Violations of this
             // assumption are corrected after the next flush
             node_labels_.emplace_back(node_labels_[table_i]);
-            node_labels_switched_.emplace_back(false);
+            node_labels_switched_.emplace_back(config_.label_change_union
+                ? node_labels_switched_.back()
+                : false);
         } else {
             const auto &columns = annotation_buffer_.get_cached_column_set(node_labels_[table_i]);
             const auto &diff_labels = seed_->label_column_diffs[next_offset - graph_->get_k() - 1];
@@ -933,17 +935,27 @@ void LabeledExtender::call_alignments(score_t end_score,
             alignment.label_columns
                 = annotation_buffer_.get_cached_column_set(node_labels_[*it]);
             assert(alignment.label_columns.size());
+            auto node_it = alignment.get_nodes().begin() + 1;
 
             alignment.label_column_diffs.reserve(alignment.get_nodes().size() - 1);
-            const auto *prev = &annotation_buffer_.get_cached_column_set(node_labels_[*it]);
+            auto prev_labels = alignment.label_columns;
             for (++it; it != trace.rend(); ++it) {
                 const auto *cur = &annotation_buffer_.get_cached_column_set(node_labels_[*it]);
+                Alignment::Columns inter;
+                if (config_.label_change_union) {
+                    const Alignment::Columns &true_labels = *annotation_buffer_.get_labels(*node_it);
+                    std::set_intersection(true_labels.begin(), true_labels.end(),
+                                          cur->begin(), cur->end(),
+                                          std::back_inserter(inter));
+                    cur = &inter;
+                    ++node_it;
+                }
                 alignment.label_column_diffs.emplace_back();
                 std::set_symmetric_difference(
-                    prev->begin(), prev->end(), cur->begin(), cur->end(),
+                    prev_labels.begin(), prev_labels.end(), cur->begin(), cur->end(),
                     std::back_inserter(alignment.label_column_diffs.back())
                 );
-                std::swap(prev, cur);
+                prev_labels = *cur;
             }
 
             if (alignment.extra_scores.empty())

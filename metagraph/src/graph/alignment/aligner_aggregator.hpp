@@ -69,19 +69,6 @@ inline bool AlignmentAggregator<AlignmentCompare>::add_alignment(Alignment&& ali
     // first, wrap the alignment so that duplicates are not stored in each per-label queue
     auto a = std::make_shared<Alignment>(std::move(alignment));
 
-    // if nothing has been added to the queue so far, add the alignment
-    if (unlabeled_.empty()) {
-        unlabeled_.emplace(a);
-        for (Column c : a->label_columns) {
-            path_queue_[c].emplace(a);
-        }
-        return true;
-    }
-
-    // if the score is less than the cutoff, don't add it
-    if (a->get_score() < get_global_cutoff())
-        return false;
-
     // helper for adding alignments to the queue
     auto push_to_queue = [&](auto &queue) {
         // check for duplicates
@@ -103,6 +90,42 @@ inline bool AlignmentAggregator<AlignmentCompare>::add_alignment(Alignment&& ali
         return true;
     };
 
+    auto call_columns = [&](const std::function<void(Column)> &callback) {
+        for (Column c : a->label_columns) {
+            callback(c);
+        }
+
+        if (a->label_column_diffs.empty())
+            return;
+
+        Columns col_union = a->label_columns;
+        for (const auto &diff : a->label_column_diffs) {
+            Columns cur_union;
+            std::set_union(col_union.begin(), col_union.end(), diff.begin(), diff.end(),
+                           std::back_inserter(cur_union));
+            std::swap(cur_union, col_union);
+        }
+
+        Columns to_add;
+        std::set_difference(col_union.begin(), col_union.end(),
+                            a->label_columns.begin(), a->label_columns.end(),
+                            std::back_inserter(to_add));
+        for (Column c : to_add) {
+            callback(c);
+        }
+    };
+
+    // if nothing has been added to the queue so far, add the alignment
+    if (unlabeled_.empty()) {
+        unlabeled_.emplace(a);
+        call_columns([&](Column c) { path_queue_[c].emplace(a); });
+        return true;
+    }
+
+    // if the score is less than the cutoff, don't add it
+    if (a->get_score() < get_global_cutoff())
+        return false;
+
     // if we are in the unlabeled case, only consider the global queue
     if (a->label_columns.empty())
         return path_queue_.empty() ? push_to_queue(unlabeled_) : false;
@@ -122,9 +145,7 @@ inline bool AlignmentAggregator<AlignmentCompare>::add_alignment(Alignment&& ali
 
     // add the alignment to its labeled queues
     bool added = false;
-    for (Column c : a->label_columns) {
-        added |= push_to_queue(path_queue_[c]);
-    }
+    call_columns([&](Column c) { added |= push_to_queue(path_queue_[c]); });
 
     if (!added)
         return false;

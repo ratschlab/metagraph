@@ -21,6 +21,46 @@ using namespace mtg::graph::align;
 using namespace mtg::test;
 using namespace mtg::kmer;
 
+Alignment::Columns check_alignment_labels(const AnnotatedDBG &anno_graph,
+                                          const Alignment &alignment) {
+    const auto &label_encoder = anno_graph.get_annotator().get_label_encoder();
+    std::vector<Alignment::Columns> alignment_columns;
+    Alignment::Columns ret_val = alignment.label_columns;
+    if (alignment.label_column_diffs.empty()) {
+        alignment_columns.assign(alignment.get_nodes().size(), alignment.label_columns);
+    } else {
+        alignment_columns.reserve(alignment.get_nodes().size());
+        alignment_columns.emplace_back(alignment.label_columns);
+        for (const auto &diff : alignment.label_column_diffs) {
+            Alignment::Columns next;
+            std::set_symmetric_difference(alignment_columns.back().begin(),
+                                          alignment_columns.back().end(),
+                                          diff.begin(), diff.end(),
+                                          std::back_inserter(next));
+            Alignment::Columns next_union;
+            std::set_union(diff.begin(), diff.end(), ret_val.begin(), ret_val.end(),
+                           std::back_inserter(next_union));
+            std::swap(next_union, ret_val);
+            alignment_columns.emplace_back(std::move(next));
+        }
+    }
+
+    for (const auto &[label, signature] : anno_graph.get_top_label_signatures(alignment.get_sequence(),
+                                                                              std::numeric_limits<size_t>::max())) {
+        Alignment::Column c = label_encoder.encode(label);
+        for (size_t i = 0; i < signature.size(); ++i) {
+            bool label_in_alignment = std::find(alignment_columns[i].begin(),
+                                                alignment_columns[i].end(), c)
+                                                    != alignment_columns[i].end();
+            EXPECT_TRUE(signature[i] || !label_in_alignment)
+                << label << " " << i << " " << signature[i] << " " << label_in_alignment
+                << "\t" << alignment;
+        }
+    }
+
+    return ret_val;
+}
+
 inline std::vector<std::string> get_alignment_labels(const AnnotatedDBG &anno_graph,
                                                      const Alignment &alignment,
                                                      bool check_full_coverage = true) {
@@ -78,7 +118,7 @@ TYPED_TEST(LabeledAlignerTest, SimpleTangleGraph) {
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -1);
     LabeledAligner<> aligner(anno_graph->get_graph(), config, anno_graph->get_annotator());
 
-    std::unordered_map<std::string, std::unordered_map<std::string, std::string>> exp_alignments {{
+    std::vector<std::pair<std::string, std::unordered_map<std::string, std::string>>> exp_alignments {{
         { std::string("CGAATGCAT"), {{ { std::string("C"), std::string("GAATGCAT") }, // 1S8=
                                        { std::string("B"), std::string("CGAATGCCT") }, // 7=1X1=
                                        { std::string("A"), std::string("TGCCT") } // 4S3=1X1=
@@ -90,6 +130,7 @@ TYPED_TEST(LabeledAlignerTest, SimpleTangleGraph) {
         EXPECT_EQ(labels.size(), alignments.size()) << query;
 
         for (const auto &alignment : alignments) {
+            check_alignment_labels(*anno_graph, alignment);
             bool found = false;
             for (const auto &label : get_alignment_labels(*anno_graph, alignment)) {
                 auto find = labels.find(label);
@@ -129,7 +170,7 @@ TEST(LabeledAlignerTest, SimpleTangleGraphSuffixSeed) {
     config.right_end_bonus = 5;
     LabeledAligner<> aligner(anno_graph->get_graph(), config, anno_graph->get_annotator());
 
-    std::unordered_map<std::string, std::unordered_map<std::string, std::string>> exp_alignments {{
+    std::vector<std::pair<std::string, std::unordered_map<std::string, std::string>>> exp_alignments {{
         { std::string("TGAAATGCAT"), {{
 #if ! _PROTEIN_GRAPH
             { std::string("C"), std::string("TGGAATGCAT") }, // 2=1X7=
@@ -146,6 +187,7 @@ TEST(LabeledAlignerTest, SimpleTangleGraphSuffixSeed) {
         EXPECT_EQ(labels.size(), alignments.size()) << query;
 
         for (const auto &alignment : alignments) {
+            check_alignment_labels(*anno_graph, alignment);
             bool found = false;
             for (const auto &label : get_alignment_labels(*anno_graph, alignment)) {
                 auto find = labels.find(label);
@@ -193,7 +235,7 @@ TYPED_TEST(LabeledAlignerTest, CanonicalTangleGraph) {
         config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
         LabeledAligner<> aligner(anno_graph->get_graph(), config, anno_graph->get_annotator());
 
-        std::unordered_map<std::string, std::unordered_map<std::string, std::string>> exp_alignments {{
+        std::vector<std::pair<std::string, std::unordered_map<std::string, std::string>>> exp_alignments {{
             // r.c. TTTGAACTAA
             { std::string("TTAGTTCAAA"), {{ { std::string("B"), std::string("TTAGTCGAAA") } }} } // 5=2X3=
         }};
@@ -203,6 +245,7 @@ TYPED_TEST(LabeledAlignerTest, CanonicalTangleGraph) {
             EXPECT_EQ(labels.size(), alignments.size()) << query;
 
             for (const auto &alignment : alignments) {
+                check_alignment_labels(*anno_graph, alignment);
                 bool found = false;
                 for (const auto &label : get_alignment_labels(*anno_graph, alignment)) {
                     auto find = labels.find(label);
@@ -244,26 +287,25 @@ TYPED_TEST(LabeledAlignerTest, LabelMixing) {
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -4, -4);
     LabeledAligner<> aligner(anno_graph->get_graph(), config, anno_graph->get_annotator());
 
-    std::unordered_map<std::string, std::unordered_map<std::string, std::string>> exp_alignments {{
-        { std::string("CGAATGCCTCA"), {{ { std::string("A"), std::string("CGAATGCCTCA") },
-                                         { std::string("B"), std::string("CGAATGCCTCA") },
+    std::vector<std::pair<std::string, std::unordered_map<std::string, std::vector<std::string>>>> exp_alignments {{
+        { std::string("CGAATGCCTCA"), {{ { std::string("CGAATGCCTCA"), { std::string("A"), std::string("B") } },
                                       }} }
     }};
 
-    for (const auto &[query, labels] : exp_alignments) {
+    for (const auto &[query, results] : exp_alignments) {
         auto alignments = aligner.align(query);
 
         for (const auto &alignment : alignments) {
-            bool found = false;
-            for (const auto &label : get_alignment_labels(*anno_graph, alignment, false)) {
-                auto find = labels.find(label);
-                ASSERT_TRUE(find != labels.end()) << label;
-                if (alignment.get_sequence() == find->second) {
-                    found = true;
-                    break;
-                }
+            Alignment::Columns merged_columns = check_alignment_labels(*anno_graph, alignment);
+            auto find = results.find(alignment.get_sequence());
+            ASSERT_NE(results.end(), find) << alignment;
+            ASSERT_EQ(find->second.size(), merged_columns.size()) << alignment;
+            for (const std::string &label : find->second) {
+                ASSERT_NE(merged_columns.end(),
+                          std::find(merged_columns.begin(), merged_columns.end(),
+                                    anno_graph->get_annotator().get_label_encoder().encode(label)))
+                    << alignment;
             }
-            EXPECT_TRUE(found) << alignment;
         }
     }
 }
@@ -293,26 +335,25 @@ TYPED_TEST(LabeledAlignerTest, LabelMixingLoop) {
     config.right_end_bonus = 5;
     LabeledAligner<> aligner(anno_graph->get_graph(), config, anno_graph->get_annotator());
 
-    std::unordered_map<std::string, std::unordered_map<std::string, std::string>> exp_alignments {{
-        { std::string("CGAATGCCTCC"), {{ { std::string("A"), std::string("CGAATGCCTCC") },
-                                         { std::string("B"), std::string("CGAATGCCTCC") },
+    std::vector<std::pair<std::string, std::unordered_map<std::string, std::vector<std::string>>>> exp_alignments {{
+        { std::string("CGAATGCCTCC"), {{ { std::string("CGAATGCCTCC"), { std::string("A"), std::string("B") } },
                                       }} }
     }};
 
-    for (const auto &[query, labels] : exp_alignments) {
+    for (const auto &[query, results] : exp_alignments) {
         auto alignments = aligner.align(query);
 
         for (const auto &alignment : alignments) {
-            bool found = false;
-            for (const auto &label : get_alignment_labels(*anno_graph, alignment, false)) {
-                auto find = labels.find(label);
-                ASSERT_TRUE(find != labels.end()) << label;
-                if (alignment.get_sequence() == find->second) {
-                    found = true;
-                    break;
-                }
+            Alignment::Columns merged_columns = check_alignment_labels(*anno_graph, alignment);
+            auto find = results.find(alignment.get_sequence());
+            ASSERT_NE(results.end(), find) << alignment;
+            ASSERT_EQ(find->second.size(), merged_columns.size()) << alignment;
+            for (const std::string &label : find->second) {
+                ASSERT_NE(merged_columns.end(),
+                          std::find(merged_columns.begin(), merged_columns.end(),
+                                    anno_graph->get_annotator().get_label_encoder().encode(label)))
+                    << alignment;
             }
-            EXPECT_TRUE(found) << alignment;
         }
     }
 }
@@ -336,26 +377,25 @@ TYPED_TEST(LabeledAlignerTest, LabelMixingForkUnion) {
     config.label_change_union = true;
     LabeledAligner<> aligner(anno_graph->get_graph(), config, anno_graph->get_annotator());
 
-    std::unordered_map<std::string, std::unordered_map<std::string, std::string>> exp_alignments {{
-        { std::string("CGAACGCCTCC"), {{ { std::string("A"), std::string("CGAACGCCTCC") },
-                                         { std::string("B"), std::string("CGAACGCCTCC") },
+    std::vector<std::pair<std::string, std::unordered_map<std::string, std::vector<std::string>>>> exp_alignments {{
+        { std::string("CGAACGCCTCC"), {{ { std::string("CGAACGCCTCC"), { std::string("A"), std::string("B") } },
                                       }} }
     }};
 
-    for (const auto &[query, labels] : exp_alignments) {
+    for (const auto &[query, results] : exp_alignments) {
         auto alignments = aligner.align(query);
 
         for (const auto &alignment : alignments) {
-            bool found = false;
-            for (const auto &label : get_alignment_labels(*anno_graph, alignment, false)) {
-                auto find = labels.find(label);
-                ASSERT_TRUE(find != labels.end()) << label;
-                if (alignment.get_sequence() == find->second) {
-                    found = true;
-                    break;
-                }
+            Alignment::Columns merged_columns = check_alignment_labels(*anno_graph, alignment);
+            auto find = results.find(alignment.get_sequence());
+            ASSERT_NE(results.end(), find) << alignment;
+            ASSERT_EQ(find->second.size(), merged_columns.size()) << alignment;
+            for (const std::string &label : find->second) {
+                ASSERT_NE(merged_columns.end(),
+                          std::find(merged_columns.begin(), merged_columns.end(),
+                                    anno_graph->get_annotator().get_label_encoder().encode(label)))
+                    << alignment;
             }
-            EXPECT_TRUE(found) << alignment;
         }
     }
 }
@@ -386,26 +426,25 @@ TYPED_TEST(LabeledAlignerTest, LabelMixingLoopUnion) {
     config.label_change_union = true;
     LabeledAligner<> aligner(anno_graph->get_graph(), config, anno_graph->get_annotator());
 
-    std::unordered_map<std::string, std::unordered_map<std::string, std::string>> exp_alignments {{
-        { std::string("CGAATGCCTCC"), {{ { std::string("A"), std::string("CGAATGCCTCC") },
-                                         { std::string("B"), std::string("CGAATGCCTCC") },
+    std::vector<std::pair<std::string, std::unordered_map<std::string, std::vector<std::string>>>> exp_alignments {{
+        { std::string("CGAATGCCTCC"), {{ { std::string("CGAATGCCTCC"), { std::string("A"), std::string("B") } },
                                       }} }
     }};
 
-    for (const auto &[query, labels] : exp_alignments) {
+    for (const auto &[query, results] : exp_alignments) {
         auto alignments = aligner.align(query);
 
         for (const auto &alignment : alignments) {
-            bool found = false;
-            for (const auto &label : get_alignment_labels(*anno_graph, alignment, false)) {
-                auto find = labels.find(label);
-                ASSERT_TRUE(find != labels.end()) << label;
-                if (alignment.get_sequence() == find->second) {
-                    found = true;
-                    break;
-                }
+            Alignment::Columns merged_columns = check_alignment_labels(*anno_graph, alignment);
+            auto find = results.find(alignment.get_sequence());
+            ASSERT_NE(results.end(), find) << alignment;
+            ASSERT_EQ(find->second.size(), merged_columns.size()) << alignment;
+            for (const std::string &label : find->second) {
+                ASSERT_NE(merged_columns.end(),
+                          std::find(merged_columns.begin(), merged_columns.end(),
+                                    anno_graph->get_annotator().get_label_encoder().encode(label)))
+                    << alignment;
             }
-            EXPECT_TRUE(found) << alignment;
         }
     }
 }
