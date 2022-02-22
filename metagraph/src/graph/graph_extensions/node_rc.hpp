@@ -14,18 +14,12 @@ class DBGSuccinct;
 
 // Maps each node in a PRIMARY-mode DBGSuccinct to the BOSS nodes corresponding
 // to the reverse complements of its k-1 prefix and k-1 suffix.
-class INodeRC : public SequenceGraph::GraphExtension {
+template <class Indicator = bit_vector_smart,
+          class Mapping = sdsl::dac_vector_dp<sdsl::rrr_vector<>>>
+class NodeRC : public SequenceGraph::GraphExtension {
   public:
     using node_index = SequenceGraph::node_index;
 
-    virtual void call_outgoing_nodes_from_rc(node_index node, const std::function<void(node_index)> &callback) const = 0;
-    virtual void call_incoming_nodes_from_rc(node_index node, const std::function<void(node_index)> &callback) const = 0;
-};
-
-template <class Indicator = bit_vector_smart,
-          class Mapping = sdsl::dac_vector_dp<sdsl::rrr_vector<>>>
-class NodeRC : public INodeRC {
-  public:
     // Use set_graph to set the graph pointer after using the default constructor
     NodeRC() : graph_(nullptr) {};
 
