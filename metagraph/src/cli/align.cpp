@@ -11,6 +11,7 @@
 #include "graph/alignment/aligner_labeled.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "graph/graph_extensions/node_rc.hpp"
+#include "graph/graph_extensions/node_first_cache.hpp"
 #include "seq_io/sequence_io.hpp"
 #include "config/config.hpp"
 #include "load/load_graph.hpp"
@@ -407,6 +408,10 @@ int align_to_graph(Config *config) {
                 if (aln_graph->get_mode() == DeBruijnGraph::PRIMARY) {
                     aln_graph = std::make_shared<CanonicalDBG>(aln_graph);
                     logger->trace("Primary graph wrapped into canonical");
+                    // If backwards traversal on DBGSuccinct will be needed, then
+                    // add a cache to speed it up.
+                    if (dbg_succ && aln_graph->get_mode() != DeBruijnGraph::CANONICAL)
+                        aln_graph->add_extension(std::make_shared<NodeFirstCache>(*dbg_succ));
                 }
 
                 std::unique_ptr<IDBGAligner> aligner;

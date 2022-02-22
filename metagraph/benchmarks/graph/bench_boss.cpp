@@ -5,6 +5,7 @@
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "graph/graph_extensions/node_rc.hpp"
+#include "graph/graph_extensions/node_first_cache.hpp"
 
 
 namespace {
@@ -107,7 +108,7 @@ void load_extension(benchmark::State &state, DBGSuccinct &graph) {
     }
 }
 
-#define DEFINE_BOSS_PATH_BENCHMARK(NAME, OPERATION, CACHE_SIZE, RC_INDEX) \
+#define DEFINE_BOSS_PATH_BENCHMARK(NAME, OPERATION, RC_INDEX, BWD_CACHE) \
 static void BM_BOSS_##NAME(benchmark::State& state) { \
     auto base_graph = load_graph(state); \
     if (!base_graph) \
@@ -116,7 +117,10 @@ static void BM_BOSS_##NAME(benchmark::State& state) { \
     if (RC_INDEX) \
         load_extension<NodeRC<>>(state, *base_graph); \
 \
-    CanonicalDBG graph(base_graph, CACHE_SIZE); \
+    CanonicalDBG graph(base_graph); \
+    if (BWD_CACHE) \
+        graph.add_extension(std::make_shared<NodeFirstCache>(*base_graph)); \
+\
     size_t size = NUM_DISTINCT_INDEXES >> 2; \
     auto indexes = random_traversal_numbers(graph, size, PATH_SIZE); \
     size_t i = 0; \
@@ -130,10 +134,10 @@ static void BM_BOSS_##NAME(benchmark::State& state) { \
 } \
 BENCHMARK(BM_BOSS_##NAME) -> Unit(benchmark::kMicrosecond); \
 
-DEFINE_BOSS_PATH_BENCHMARK(call_outgoing_kmers_path_cache_0, call_outgoing_kmers, 0, false);
-DEFINE_BOSS_PATH_BENCHMARK(call_outgoing_kmers_path_cache_100k, call_outgoing_kmers, 100'000, false);
-DEFINE_BOSS_PATH_BENCHMARK(call_outgoing_kmers_rcindex_path_cache_0, call_outgoing_kmers, 0, true);
-DEFINE_BOSS_PATH_BENCHMARK(call_outgoing_kmers_rcindex_path_cache_100k, call_outgoing_kmers, 100'000, true);
+DEFINE_BOSS_PATH_BENCHMARK(call_outgoing_kmers_path_cache, call_outgoing_kmers, false, false);
+DEFINE_BOSS_PATH_BENCHMARK(call_outgoing_kmers_rcindex_path_cache, call_outgoing_kmers, true, false);
+DEFINE_BOSS_PATH_BENCHMARK(call_outgoing_kmers_bwdcache_path_cache, call_outgoing_kmers, false, true);
+DEFINE_BOSS_PATH_BENCHMARK(call_outgoing_kmers_bwdcache_rcindex_path_cache, call_outgoing_kmers, true, true);
 
 
 static void BM_BOSS_get_W_and_fwd(benchmark::State &state) {

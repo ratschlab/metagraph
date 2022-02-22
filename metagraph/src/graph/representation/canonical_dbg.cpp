@@ -4,6 +4,7 @@
 #include "kmer/kmer_extractor.hpp"
 #include "common/logger.hpp"
 #include "graph/graph_extensions/node_rc.hpp"
+#include "graph/graph_extensions/node_first_cache.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 
 
@@ -23,8 +24,7 @@ inline const DBGSuccinct* get_dbg_succ(const DeBruijnGraph &graph) {
 
 CanonicalDBG::CanonicalDBG(std::shared_ptr<const DeBruijnGraph> graph, size_t cache_size)
       : DBGWrapper<DeBruijnGraph>(std::move(graph)),
-        cache_size_(cache_size), child_node_cache_(cache_size_),
-        parent_node_cache_(cache_size_), is_palindrome_cache_(cache_size_),
+        cache_size_(cache_size), is_palindrome_cache_(cache_size_),
         offset_(graph_->max_index()),
         k_odd_(graph_->get_k() % 2) {
     assert(graph_->get_mode() == DeBruijnGraph::PRIMARY
@@ -161,6 +161,8 @@ void CanonicalDBG::append_next_rc_nodes(node_index node,
         boss::BOSS::edge_index rc_edge = 0;
         const boss::BOSS &boss = dbg_succ->get_boss();
 
+        const auto cache = get_extension<NodeFirstCache>();
+
         //   AGAGGATCTCGTATGCCGTCTTCTGCTTGAG
         //->  GAGGATCTCGTATGCCGTCTTCTGCTTGAG
         //->  CTCAAGCAGAAGACGGCATACGAGATCCTC
@@ -192,13 +194,14 @@ void CanonicalDBG::append_next_rc_nodes(node_index node,
                 if (next == npos)
                     return;
 
-                boss::BOSS::TAlphabet s
-                    = boss.get_minus_k_value(incoming_boss_edge, get_k() - 2).first;
-
-                if (s == boss::BOSS::kSentinelCode)
+                char c = cache
+                    ? cache->get_first_char(next)
+                    : boss.decode(boss.get_minus_k_value(incoming_boss_edge, boss.get_k() - 1).first);
+                if (c == boss::BOSS::kSentinel)
                     return;
 
-                s = kmer::KmerExtractorBOSS::complement(s);
+                auto s = kmer::KmerExtractorBOSS::complement(boss.encode(c));
+
                 if (children[s] == npos) {
                     children[s] = next + offset_;
                     return;
@@ -254,15 +257,6 @@ void CanonicalDBG
 
     const auto &alphabet = graph_->alphabet();
 
-    if (auto fetch = child_node_cache_.TryGet(node)) {
-        for (size_t c = 0; c < alphabet.size(); ++c) {
-            if ((*fetch)[c] != npos)
-                callback((*fetch)[c], alphabet[c]);
-        }
-
-        return;
-    }
-
     SmallVector<node_index> children(alphabet.size(), npos);
     size_t max_num_edges_left = children.size() - has_sentinel_;
 
@@ -275,8 +269,6 @@ void CanonicalDBG
 
     if (max_num_edges_left)
         append_next_rc_nodes(node, children);
-
-    child_node_cache_.Put(node, children);
 
     for (size_t c = 0; c < children.size(); ++c) {
         if (children[c] != npos) {
@@ -398,29 +390,24 @@ void CanonicalDBG
 
     const auto &alphabet = graph_->alphabet();
 
-    if (auto fetch = parent_node_cache_.TryGet(node)) {
-        for (size_t c = 0; c < alphabet.size(); ++c) {
-            if ((*fetch)[c] != npos)
-                callback((*fetch)[c], alphabet[c]);
-        }
-
-        return;
-    }
-
     SmallVector<node_index> parents(alphabet.size(), npos);
     size_t max_num_edges_left = parents.size() - has_sentinel_;
 
-    graph_->call_incoming_kmers(node, [&](node_index prev, char c) {
+    auto incoming_kmer_callback = [&](node_index prev, char c) {
         if (c != boss::BOSS::kSentinel) {
             parents[alphabet_encoder_[c]] = prev;
             --max_num_edges_left;
         }
-    });
+    };
+
+    if (const auto cache = get_extension<NodeFirstCache>()) {
+        cache->call_incoming_kmers(node, incoming_kmer_callback);
+    } else {
+        graph_->call_incoming_kmers(node, incoming_kmer_callback);
+    }
 
     if (max_num_edges_left)
         append_prev_rc_nodes(node, parents);
-
-    parent_node_cache_.Put(node, parents);
 
     for (size_t c = 0; c < parents.size(); ++c) {
         if (parents[c] != npos) {

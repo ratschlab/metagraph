@@ -36,7 +36,8 @@ typedef ::testing::Types<DBGBitmap,
                          DBGHashFast,
                          DBGSuccinct,
                          DBGSuccinctBloom<4, 1>,
-                         DBGSuccinctRCIndexed> CanonicalGraphTypes;
+                         DBGSuccinctRCIndexed,
+                         DBGSuccinctCached> CanonicalGraphTypes;
 
 TYPED_TEST_SUITE(CanonicalDBGTest, CanonicalGraphTypes);
 

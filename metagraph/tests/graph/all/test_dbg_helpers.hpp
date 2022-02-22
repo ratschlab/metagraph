@@ -45,6 +45,13 @@ class DBGSuccinctIndexed : public DBGSuccinct {
           : DBGSuccinct(std::forward<Args>(args)...) {}
 };
 
+class DBGSuccinctCached : public DBGSuccinct {
+  public:
+    template <typename... Args>
+    DBGSuccinctCached(Args&&... args)
+          : DBGSuccinct(std::forward<Args>(args)...) {}
+};
+
 class DBGSuccinctRCIndexed : public DBGSuccinct {
   public:
     template <typename... Args>
@@ -101,7 +108,8 @@ typedef ::testing::Types<DBGBitmap,
                          DBGSuccinctBloomFPR<1, 10>,
                          DBGSuccinctBloom<4, 1>,
                          DBGSuccinctBloom<4, 50>,
-                         DBGSuccinctRCIndexed> GraphTypes;
+                         DBGSuccinctRCIndexed,
+                         DBGSuccinctCached> GraphTypes;
 
 // in stable graphs the order of input sequences
 // does not change the order of k-mers and their indexes
@@ -118,7 +126,8 @@ typedef ::testing::Types<DBGBitmap,
                          DBGSuccinctBloomFPR<1, 10>,
                          DBGSuccinctBloom<4, 1>,
                          DBGSuccinctBloom<4, 50>,
-                         DBGSuccinctRCIndexed> StableGraphTypes;
+                         DBGSuccinctRCIndexed,
+                         DBGSuccinctCached> StableGraphTypes;
 
 typedef ::testing::Types<DBGHashFast, DBGSuccinct> FewGraphTypes;
 
