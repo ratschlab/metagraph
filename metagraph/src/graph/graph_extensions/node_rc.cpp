@@ -90,7 +90,8 @@ NodeRC<Indicator, Mapping>::NodeRC(const DBGSuccinct &graph)
     builder.reset();
 
     common::logger->trace("Constructing reverse complement map");
-    ips4o::parallel::sort(mapping.begin(), mapping.end(), utils::LessFirst(), get_num_threads());
+    ips4o::parallel::sort(mapping.begin(), mapping.end(), utils::LessFirst(),
+                          get_num_threads());
     std::vector<uint64_t> map;
     map.reserve(mapping.size() * 2);
 
@@ -160,8 +161,6 @@ void NodeRC<Indicator, Mapping>
 
     const auto &alphabet = graph_->alphabet();
     for (size_t c = 0; c < alphabet.size(); ++c) {
-        // Do the checks by directly mapping the sequences of the desired k-mers.
-        // For non-DBGSuccinct graphs, this should be fast enough.
         if (alphabet[c] != boss::BOSS::kSentinel) {
             rev_seq.back() = complement(alphabet[c]);
             node_index prev = graph_->kmer_to_node(rev_seq);
@@ -251,8 +250,7 @@ bool NodeRC<Indicator, Mapping>::load(const std::string &filename_base) {
         return true;
 
     } catch (...) {
-        std::cerr << "ERROR: Cannot load graph RC from file "
-                  << rc_filename << std::endl;
+        std::cerr << "ERROR: Cannot load graph RC from file " << rc_filename << std::endl;
         return false;
     }
 }
@@ -273,28 +271,28 @@ template <class Indicator, class Mapping>
 bool NodeRC<Indicator, Mapping>::is_compatible(const SequenceGraph &graph,
                                                bool verbose) const {
     if (!rc_.size()) {
-        const auto *dbg = dynamic_cast<const DeBruijnGraph*>(&graph);
-        if (!dbg) {
-            if (verbose)
-                std::cerr << "ERROR: only compatible with DeBruijnGraph" << std::endl;
+        if (const auto *dbg = dynamic_cast<const DeBruijnGraph*>(&graph))
+            return *dbg == *graph_;
 
-            return false;
-        }
+        if (verbose)
+            std::cerr << "ERROR: only compatible with DeBruijnGraph" << std::endl;
 
-        return *dbg == *graph_;
+        return false;
     }
 
     if (graph.max_index() + 1 != rc_.size()) {
-        if (verbose)
+        if (verbose) {
             std::cerr << "ERROR: RC file does not match number of nodes in graph"
                       << std::endl;
+        }
         return false;
     }
 
     if (rc_.num_set_bits() * 2 != mapping_.size()) {
         if (verbose)
-            std::cerr << "ERROR: RC file contains the wrong mapping"
-                      << std::endl;
+            std::cerr << "ERROR: RC file contains the wrong mapping" << std::endl;
+
+        return false;
     }
 
     return true;
