@@ -12,8 +12,10 @@ namespace graph {
 
 class DBGSuccinct;
 
-// Maps each node in a PRIMARY-mode DBGSuccinct to the BOSS nodes corresponding
-// to the reverse complements of its k-1 prefix and k-1 suffix.
+// Maps each node in a PRIMARY-mode DeBruijnGraph to nodes adjacent to its reverse
+// complement. When using the index construct constructor on DBGSuccinct, or when
+// loading such an index, this stores a map from each DBGSuccinct to the BOSS nodes
+// corresponding to the reverse complements of its k-1 prefix and k-1 suffix.
 template <class Indicator = bit_vector_smart,
           class Mapping = sdsl::dac_vector_dp<sdsl::rrr_vector<>>>
 class NodeRC : public SequenceGraph::GraphExtension {
