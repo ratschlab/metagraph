@@ -164,14 +164,13 @@ void CanonicalDBG::append_next_rc_nodes(node_index node,
 
     // for each n, check for nAGCCA. If found, define and store the index for
     // TGGCTrc(n) as index(nAGCCA) + offset_
-    const auto *node_rc = get_extension_threadsafe<INodeRC>();
-    assert(node_rc);
+    assert(get_extension_threadsafe<INodeRC>());
 
     const DBGSuccinct *dbg_succ = get_dbg_succ(*graph_);
     const boss::BOSS *boss = dbg_succ ? &dbg_succ->get_boss() : nullptr;
     const auto cache = get_extension<NodeFirstCache>();
 
-    node_rc->call_incoming_nodes_from_rc(node, [&](node_index next) {
+    get_extension_threadsafe<INodeRC>()->call_incoming_nodes_from_rc(node, [&](node_index next) {
         char c;
         if (cache) {
             c = cache->get_first_char(next);
@@ -256,13 +255,12 @@ void CanonicalDBG::append_prev_rc_nodes(node_index node,
 
     // for each n, check for TGGCTn. If found, define and store the index for
     // rc(n)AGCCA as index(TGGCTn) + offset_
-    const auto *node_rc = get_extension_threadsafe<INodeRC>();
-    assert(node_rc);
+    assert(get_extension_threadsafe<INodeRC>());
 
     const DBGSuccinct *dbg_succ = get_dbg_succ(*graph_);
     const boss::BOSS *boss = dbg_succ ? &dbg_succ->get_boss() : nullptr;
 
-    node_rc->call_outgoing_nodes_from_rc(node, [&](node_index prev) {
+    get_extension_threadsafe<INodeRC>()->call_outgoing_nodes_from_rc(node, [&](node_index prev) {
         char c = boss
             ? boss->decode(boss->get_W(dbg_succ->kmer_to_boss_index(prev)) % boss->alph_size)
             : graph_->get_node_sequence(prev).back();

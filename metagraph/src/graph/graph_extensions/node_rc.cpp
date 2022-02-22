@@ -4,15 +4,10 @@
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/vectors/bitmap_builder.hpp"
 #include "common/utils/template_utils.hpp"
-#include "common/serialization.hpp"
 
-#include <filesystem>
-#include <string_view>
 #include <progress_bar.hpp>
 #include <ips4o.hpp>
 #include <mutex>
-
-#include "graph/annotated_dbg.hpp"
 
 namespace mtg {
 namespace graph {
