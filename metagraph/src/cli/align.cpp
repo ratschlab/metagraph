@@ -400,7 +400,7 @@ int align_to_graph(Config *config) {
                     logger->trace("Primary graph wrapped into canonical");
                     // If backwards traversal on DBGSuccinct will be needed, then
                     // add a cache to speed it up.
-                    if (dbg_succ && aln_graph->get_mode() != DeBruijnGraph::CANONICAL)
+                    if (dbg_succ && graph->get_mode() != DeBruijnGraph::CANONICAL)
                         aln_graph->add_extension(std::make_shared<NodeFirstCache>(*dbg_succ));
                 }
 
