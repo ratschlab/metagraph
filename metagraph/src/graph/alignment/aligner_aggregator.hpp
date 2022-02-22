@@ -105,7 +105,7 @@ inline bool AlignmentAggregator<AlignmentCompare>::add_alignment(Alignment&& ali
 
     // if we are in the unlabeled case, only consider the global queue
     if (a->label_columns.empty())
-        return push_to_queue(unlabeled_);
+        return path_queue_.empty() ? push_to_queue(unlabeled_) : false;
 
     // if an incoming alignment has labels, and we haven't encountered a labeled
     // alignment yet, we only need the ncol queue for fetching the global minimum,
