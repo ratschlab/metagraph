@@ -6,10 +6,13 @@ namespace graph {
 char NodeFirstCache::get_first_char(node_index node) const {
     assert(dbg_succ_);
     const boss::BOSS &boss = dbg_succ_->get_boss();
+
     edge_index edge = dbg_succ_->kmer_to_boss_index(node);
     assert(boss.bwd(edge) == get_parent_pair(edge).first);
+
     boss::BOSS::TAlphabet s = boss.get_node_last_value(get_parent_pair(edge).second);
     assert(s == boss.get_minus_k_value(edge, boss.get_k() - 1).first);
+
     return boss.decode(s);
 }
 
@@ -17,6 +20,7 @@ void NodeFirstCache::call_incoming_kmers(node_index node,
                                          const IncomingEdgeCallback &callback) const {
     assert(dbg_succ_);
     const boss::BOSS &boss = dbg_succ_->get_boss();
+
     assert(node > 0 && node <= dbg_succ_->num_nodes());
 
     edge_index edge = dbg_succ_->kmer_to_boss_index(node);
@@ -69,6 +73,7 @@ auto NodeFirstCache::get_parent_pair(edge_index edge, edge_index child_hint) con
         -> std::pair<edge_index, edge_index> {
     assert(dbg_succ_);
     const boss::BOSS &boss = dbg_succ_->get_boss();
+
     if (boss.get_k() == 1)
         return std::make_pair(boss.bwd(edge), edge);
 
@@ -77,6 +82,8 @@ auto NodeFirstCache::get_parent_pair(edge_index edge, edge_index child_hint) con
         return *fetch;
     }
 
+    // if a child of edge has been cached already, check if we can compute
+    // get_parent_pair with only two bwd calls
     if (child_hint) {
         if (auto fetch = first_cache_.TryGet(child_hint)) {
             const auto &[cur, first] = *fetch;
@@ -90,6 +97,7 @@ auto NodeFirstCache::get_parent_pair(edge_index edge, edge_index child_hint) con
         }
     }
 
+    // we have to take all k - 1 steps
     assert(boss.get_k() >= 2);
     edge_index i = boss.bwd(edge);
     edge_index parent = i;
