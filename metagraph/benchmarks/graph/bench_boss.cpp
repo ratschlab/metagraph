@@ -3,6 +3,8 @@
 #include <benchmark/benchmark.h>
 
 #include "graph/representation/succinct/dbg_succinct.hpp"
+#include "graph/representation/canonical_dbg.hpp"
+#include "graph/graph_extensions/node_first_cache.hpp"
 
 
 namespace {
@@ -14,10 +16,10 @@ using mtg::graph::boss::BOSS;
 const std::string filename = "./benchmark_graph.dbg";
 
 constexpr uint64_t NUM_DISTINCT_INDEXES = 1 << 21;
+constexpr uint64_t PATH_SIZE = 10'000;
 
-
-std::unique_ptr<DBGSuccinct> load_graph(benchmark::State &state) {
-    auto graph = std::make_unique<DBGSuccinct>(2);
+std::shared_ptr<DBGSuccinct> load_graph(benchmark::State &state) {
+    auto graph = std::make_shared<DBGSuccinct>(2);
     if (!std::getenv("GRAPH")) {
         state.SkipWithError("Set environment variable GRAPH");
     } else if (!graph->load(std::getenv("GRAPH"))) {
@@ -36,6 +38,34 @@ std::vector<uint64_t> random_numbers(size_t size, uint64_t min, uint64_t max) {
     for (uint64_t &number : numbers) {
         number = dis(gen);
     }
+    return numbers;
+}
+
+std::vector<uint64_t> random_traversal_numbers(const DeBruijnGraph &graph,
+                                               size_t size,
+                                               size_t path_size) {
+    std::mt19937 gen(32);
+    std::uniform_int_distribution<uint64_t> dis(1, graph.num_nodes());
+
+    std::vector<uint64_t> numbers;
+    numbers.reserve(size);
+
+    while (numbers.size() < size) {
+        numbers.push_back(dis(gen));
+        for (size_t j = 1; j < path_size && numbers.size() < size; ++j) {
+            bool found = false;
+            graph.adjacent_outgoing_nodes(numbers.back(), [&](auto next) {
+                found = true;
+                numbers.push_back(next);
+            });
+            if (!found)
+                break;
+        }
+    }
+
+    if (numbers.size() > size)
+        throw std::runtime_error("Number generation failed");
+
     return numbers;
 }
 
@@ -67,6 +97,41 @@ DEFINE_BOSS_BENCHMARK(select_last,         select_last,         get_last, num_se
 DEFINE_BOSS_BENCHMARK(pred_last,           pred_last,           get_last, size);
 DEFINE_BOSS_BENCHMARK(succ_last,           succ_last,           get_last, size);
 DEFINE_BOSS_BENCHMARK(bwd,                 bwd,                 get_W,    size);
+
+template <class Extension>
+void load_extension(benchmark::State &state, DBGSuccinct &graph) {
+    std::string path = std::getenv("GRAPH");
+    if (!graph.load_extension<Extension>(path)) {
+        state.SkipWithError((std::string("Can't load the RC index for graph ")
+                                + path).c_str());
+    }
+}
+
+#define DEFINE_BOSS_PATH_BENCHMARK(NAME, OPERATION, BWD_CACHE) \
+static void BM_BOSS_##NAME(benchmark::State& state) { \
+    auto base_graph = load_graph(state); \
+    if (!base_graph) \
+        return; \
+\
+    CanonicalDBG graph(base_graph); \
+    if (BWD_CACHE) \
+        graph.add_extension(std::make_shared<NodeFirstCache>(*base_graph)); \
+\
+    size_t size = NUM_DISTINCT_INDEXES >> 2; \
+    auto indexes = random_traversal_numbers(graph, size, PATH_SIZE); \
+    size_t i = 0; \
+    for (auto _ : state) { \
+        DeBruijnGraph::node_index node = indexes[i++ % size]; \
+        graph.OPERATION(node, [](auto node, char c) { \
+            benchmark::DoNotOptimize(node); \
+            benchmark::DoNotOptimize(c); \
+        }); \
+    } \
+} \
+BENCHMARK(BM_BOSS_##NAME) -> Unit(benchmark::kMicrosecond); \
+
+DEFINE_BOSS_PATH_BENCHMARK(call_outgoing_kmers_path_cache, call_outgoing_kmers, false);
+DEFINE_BOSS_PATH_BENCHMARK(call_outgoing_kmers_bwdcache_path_cache, call_outgoing_kmers, true);
 
 
 static void BM_BOSS_get_W_and_fwd(benchmark::State &state) {
