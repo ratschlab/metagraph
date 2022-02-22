@@ -40,11 +40,12 @@ void NodeFirstCache::call_incoming_kmers(node_index node,
 
             node_index prev = dbg_succ_->boss_to_kmer_index(incoming_boss_edge);
             if (prev != DeBruijnGraph::npos) {
-                char c = boss.decode(boss.get_node_last_value(
+                boss::BOSS::TAlphabet s = boss.get_node_last_value(
                     get_parent_pair(incoming_boss_edge, edge).second
-                ));
-                assert(dbg_succ_->traverse_back(node, c) == prev);
-                callback(prev, c);
+                );
+                assert(boss.get_minus_k_value(incoming_boss_edge,
+                                              boss.get_k() - 1).first == s);
+                callback(prev, boss.decode(s));
             }
         }
     );
