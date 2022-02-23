@@ -554,11 +554,11 @@ void compute_label_change_scores(const DeBruijnGraph &graph,
         if (!n)
             continue;
 
-        ++total;
-        sdsl::bit_vector match_found(boss.alph_size, false);
+        Vector<size_t> match_found(boss.alph_size, 0);
         size_t matches = 0;
         const Alignment::Columns *n_labels = annotation_buffer.get_labels(n);
         assert(n_labels);
+        total += n_labels->size();
 
         // TODO: find a more efficient way to get this
         TAlphabet common_next_c_enc = 0;
@@ -592,9 +592,9 @@ void compute_label_change_scores(const DeBruijnGraph &graph,
 
             const Alignment::Columns *m_labels = annotation_buffer.get_labels(m);
             assert(m_labels);
-            if (utils::share_element(n_labels->begin(), n_labels->end(),
-                                     m_labels->begin(), m_labels->end())) {
-                match_found[next_c_enc] = true;
+            if (size_t count = utils::count_intersection(n_labels->begin(), n_labels->end(),
+                                                         m_labels->begin(), m_labels->end())) {
+                match_found[next_c_enc] += count;
                 ++matches;
             }
         }
@@ -612,9 +612,10 @@ void compute_label_change_scores(const DeBruijnGraph &graph,
 
     for (size_t i = 0; i < outgoing.size(); ++i) {
         const auto &[next, c, score] = outgoing[i];
-        auto &[inter, diff, lclogprob] = intersect_diff_labels[i];
         if (size_t count = counts[boss.encode(c)]) {
+            auto &[inter, diff, lclogprob] = intersect_diff_labels[i];
             assert(diff.size());
+            assert(count <= total);
             lclogprob = std::floor(log2(count) - log2(total));
         }
     }
