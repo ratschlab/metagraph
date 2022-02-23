@@ -1235,28 +1235,50 @@ inline size_t get_num_matches(const std::vector<Alignment> &seeds) {
 template <class Seeder, class Extender, class AlignmentCompare>
 size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
 ::filter_seeds(std::vector<Alignment> &seeds) const {
-    VectorMap<Column, uint64_t> label_counter;
+    if (seeds.empty())
+        return 0;
+
+    size_t query_size = seeds[0].get_clipping() + seeds[0].get_end_clipping()
+                            + seeds[0].get_query_view().size();
+
+    VectorMap<Column, sdsl::bit_vector> label_mapper;
     for (const Alignment &seed : seeds) {
+        size_t begin = seed.get_clipping();
+        size_t offset = seed.get_offset();
+        size_t end = begin + this->graph_.get_k() - offset;
         for (node_index node : seed.get_nodes()) {
             assert(annotation_buffer_.get_labels(node));
             for (uint64_t label : *annotation_buffer_.get_labels(node)) {
-                ++label_counter[label];
+                auto &indicator = label_mapper[label];
+                if (indicator.empty())
+                    indicator = sdsl::bit_vector(query_size, false);
+
+                for (size_t i = begin; i < end; ++i) {
+                    indicator[i] = true;
+                }
+            }
+            ++end;
+            if (offset) {
+                --offset;
+            } else {
+                ++begin;
+                assert(end - begin == this->graph_.get_k());
             }
         }
     }
 
-    if (label_counter.empty())
+    if (label_mapper.empty())
         return get_num_matches(seeds);
 
-    std::vector<std::pair<Column, uint64_t>> label_counts
-        = const_cast<std::vector<std::pair<Column, uint64_t>>&&>(
-            label_counter.values_container()
-        );
+    std::vector<std::pair<Column, uint64_t>> label_counts;
+    label_counts.reserve(label_mapper.size());
+    for (const auto &[c, indicator] : label_mapper) {
+        label_counts.emplace_back(c, sdsl::util::cnt_one_bits(indicator));
+    }
 
     std::sort(label_counts.begin(), label_counts.end(), utils::GreaterSecond());
 
-    double cutoff = static_cast<double>(label_counts[0].second)
-                        * this->config_.rel_score_cutoff;
+    double cutoff = this->config_.rel_score_cutoff * label_counts[0].second;
     auto it = std::find_if(label_counts.begin() + 1, label_counts.end(),
                            [cutoff](const auto &a) { return a.second < cutoff; });
 
