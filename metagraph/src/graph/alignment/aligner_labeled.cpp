@@ -385,15 +385,14 @@ bool LabeledExtender::set_seed(const Alignment &seed) {
 }
 
 template <class Outgoing, class LabelIntersectDiff>
-double compute_label_change_scores(const DeBruijnGraph &graph,
-                                   AnnotationBuffer &annotation_buffer,
-                                   const DBGAlignerConfig &config,
-                                   Alignment::node_index node,
-                                   char node_last_char,
-                                   const Outgoing &outgoing,
-                                   LabelIntersectDiff &intersect_diff_labels) {
+void compute_label_change_scores(const DeBruijnGraph &graph,
+                                 AnnotationBuffer &annotation_buffer,
+                                 const DBGAlignerConfig &config,
+                                 Alignment::node_index node,
+                                 char node_last_char,
+                                 const Outgoing &outgoing,
+                                 LabelIntersectDiff &intersect_diff_labels) {
     assert(outgoing.size() == intersect_diff_labels.size());
-    double sum_diff_probs = 0.0;
 
     size_t found_diffs = 0;
     for (const auto &[inter, diff, lclogprob] : intersect_diff_labels) {
@@ -401,17 +400,7 @@ double compute_label_change_scores(const DeBruijnGraph &graph,
     }
 
     if (!found_diffs)
-        return sum_diff_probs;
-
-    auto default_init = [&]() {
-        for (auto &[inter, diff, lclogprob] : intersect_diff_labels) {
-            if (diff.size()) {
-                sum_diff_probs += 1.0 - std::pow(2.0, config.label_change_score);
-                lclogprob = std::floor(config.label_change_score - log2(outgoing.size()));
-            }
-        }
-        sum_diff_probs = std::floor(log2(sum_diff_probs + 1.0) - log2(outgoing.size()));
-    };
+        return;
 
     // TODO: this cascade of graph unwrapping is ugly, find a cleaner way to do it
     const DeBruijnGraph *base_graph = &graph;
@@ -423,20 +412,16 @@ double compute_label_change_scores(const DeBruijnGraph &graph,
 
     const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(base_graph);
 
-    if (!dbg_succ) {
-        default_init();
-        return sum_diff_probs;
-    }
+    if (!dbg_succ)
+        return;
 
     size_t expand_seed = graph.get_k() - 1
         - std::min(graph.get_k() - 1, config.label_change_search_width);
 
     std::shared_ptr<NodeLCS> lcs = dbg_succ->get_extension<NodeLCS>();
 
-    if (!lcs) {
-        default_init();
-        return sum_diff_probs;
-    }
+    if (!lcs)
+        return;
 
     typedef boss::BOSS::TAlphabet TAlphabet;
     typedef boss::BOSS::edge_index edge_index;
@@ -468,16 +453,8 @@ double compute_label_change_scores(const DeBruijnGraph &graph,
 
     if (node != node_base && canonical && rev_graph && num_nonbase_next_nodes) {
         rev_graph = nullptr;
-    } else {
-        if (node != node_base) {
-            default_init();
-            return sum_diff_probs;
-        }
-
-        if (rev_graph && num_nonbase_next_nodes) {
-            default_init();
-            return sum_diff_probs;
-        }
+    } else if (node != node_base || (rev_graph && num_nonbase_next_nodes)) {
+        return;
     }
 
     //          node         next
@@ -631,20 +608,16 @@ double compute_label_change_scores(const DeBruijnGraph &graph,
     }
 
     if (!label_preserving_traversal_found)
-        return sum_diff_probs;
+        return;
 
     for (size_t i = 0; i < outgoing.size(); ++i) {
         const auto &[next, c, score] = outgoing[i];
         auto &[inter, diff, lclogprob] = intersect_diff_labels[i];
         if (size_t count = counts[boss.encode(c)]) {
             assert(diff.size());
-            lclogprob = log2(count) - log2(total);
-            sum_diff_probs += 1.0 - std::pow(2.0, lclogprob);
-            lclogprob = std::floor(lclogprob - log2(outgoing.size()));
+            lclogprob = std::floor(log2(count) - log2(total));
         }
     }
-
-    return std::floor(log2(sum_diff_probs + 1.0) - log2(outgoing.size()));
 }
 
 void LabeledExtender
@@ -716,7 +689,7 @@ void LabeledExtender
 
     // no coordinates are present in the annotation
     if (!annotation_buffer_.get_labels_and_coords(node).second) {
-        std::vector<std::tuple<Columns, Columns, double>> intersect_diff_labels(
+        std::vector<std::tuple<Columns, Columns, score_t>> intersect_diff_labels(
             outgoing.size()
         );
 
@@ -734,14 +707,15 @@ void LabeledExtender
                                         std::back_inserter(intersect_labels),
                                         std::back_inserter(diff_labels));
 
-            if (!config_.label_change_union && intersect_labels.size())
+            if (!config_.label_change_union && intersect_labels.size()) {
                 diff_labels.clear();
+            } else if (diff_labels.size()) {
+                lclogprob = config_.label_change_score;
+            }
         }
 
-        double sum_diff_probs = compute_label_change_scores(
-            *graph_, annotation_buffer_, config_, node, table[table_i].c, outgoing,
-            intersect_diff_labels
-        );
+        compute_label_change_scores(*graph_, annotation_buffer_, config_, node,
+                                    table[table_i].c, outgoing, intersect_diff_labels);
 
         for (size_t i = 0; i < outgoing.size(); ++i) {
             const auto &[next, c, score] = outgoing[i];
@@ -749,12 +723,16 @@ void LabeledExtender
             auto &[inter, diff, lclogprob] = intersect_diff_labels[i];
             assert(diff.size() || lclogprob == config_.ninf);
 
-            if (lclogprob > config_.ninf && diff.size())
+            score_t label_preserve = 0;
+
+            if (lclogprob > config_.ninf && diff.size()) {
+                label_preserve = floor(log2(1.0 - std::pow(2.0, lclogprob))) * abs_match_score;
                 lclogprob *= abs_match_score;
+                lclogprob += label_preserve;
+            }
 
             DEBUG_LOG("Position {} edge {}: label preserve: {}\tlabel change: {}",
-                      next_offset - seed_->get_offset(), i, sum_diff_probs * abs_match_score,
-                      lclogprob);
+                      next_offset - seed_->get_offset(), i, label_preserve, lclogprob);
 
             if (config_.label_change_union) {
                 if (lclogprob > config_.ninf && diff.size()) {
@@ -767,7 +745,7 @@ void LabeledExtender
                 } else {
                     node_labels_.emplace_back(node_labels_[table_i]);
                     node_labels_switched_.emplace_back(true);
-                    callback(next, c, score + sum_diff_probs * abs_match_score);
+                    callback(next, c, score + label_preserve);
                 }
             } else {
                 if (lclogprob > config_.ninf && diff.size()) {
@@ -777,7 +755,7 @@ void LabeledExtender
                 } else if (inter.size()) {
                     node_labels_.emplace_back(annotation_buffer_.cache_column_set(std::move(inter)));
                     node_labels_switched_.emplace_back(false);
-                    callback(next, c, score + sum_diff_probs * abs_match_score);
+                    callback(next, c, score + label_preserve);
                 }
             }
         }
