@@ -799,7 +799,7 @@ void LabeledExtender
                                         std::back_inserter(intersect_labels),
                                         std::back_inserter(diff_labels));
 
-            if (!config_.label_change_union && intersect_labels.size()) {
+            if (intersect_labels.size()) {
                 diff_labels.clear();
             } else if (diff_labels.size()) {
                 lclogprob = config_.label_change_score;
@@ -823,8 +823,10 @@ void LabeledExtender
                 lclogprob += label_preserve;
             }
 
-            DEBUG_LOG("Position {} edge {}: label preserve: {}\tlabel change: {}",
-                      next_offset - seed_->get_offset(), i, label_preserve, lclogprob);
+            DEBUG_LOG("Position {} edge {} {}: label preserve: {}\tlabel change: {}\t"
+                      "Intersect labels: {}\tDiff. labels: {}",
+                      next_offset - seed_->get_offset(), i, c, label_preserve, lclogprob,
+                      inter.size(), diff.size());
 
             if (config_.label_change_union) {
                 if (lclogprob > config_.ninf && diff.size()) {

@@ -1020,6 +1020,7 @@ std::vector<Alignment> DefaultColumnExtender::backtrack(score_t min_path_score,
                 call_alignments(score, path, trace, score_trace, ops, pos, align_offset,
                                 window.substr(pos, end_pos - pos), seq, extra_score,
                                 [&](Alignment&& alignment) {
+                    DEBUG_LOG("Extension: {}", alignment);
                     extensions.emplace_back(std::move(alignment));
                 });
             }
