@@ -609,9 +609,18 @@ void compute_label_change_scores(const DeBruijnGraph &graph,
 
         Vector<size_t> match_found(boss.alph_size, 0);
         size_t matches = 0;
-        const Alignment::Columns *n_labels = annotation_buffer.get_labels(n);
+        auto [n_labels, n_counts] = annotation_buffer.get_labels_and_counts(n);
         assert(n_labels);
-        total += n_labels->size();
+        auto n_coords = annotation_buffer.get_labels_and_coords(n).second;
+        if (n_counts) {
+            total += std::accumulate(n_labels->begin(), n_labels->end(), size_t{0});
+        } else if (n_coords) {
+            for (const auto &coord : *n_coords) {
+                total += coord.size();
+            }
+        } else {
+            total += n_labels->size();
+        }
 
         // TODO: find a more efficient way to get this
         TAlphabet common_next_c_enc = 0;
@@ -643,12 +652,37 @@ void compute_label_change_scores(const DeBruijnGraph &graph,
             if (diff.empty())
                 continue;
 
-            const Alignment::Columns *m_labels = annotation_buffer.get_labels(m);
+            auto [m_labels, m_counts] = annotation_buffer.get_labels_and_counts(m);
             assert(m_labels);
-            if (size_t count = utils::count_intersection(n_labels->begin(),
-                                                         n_labels->end(),
-                                                         m_labels->begin(),
-                                                         m_labels->end())) {
+            if (m_counts) {
+                assert(n_counts);
+                utils::match_indexed_values(
+                    n_labels->begin(), n_labels->end(), n_counts->begin(),
+                    m_labels->begin(), m_labels->end(), m_counts->begin(),
+                    [&](auto, auto count, auto other_count) {
+                        if (count && other_count) {
+                            match_found[next_c_enc] += std::min(count, other_count);
+                            ++matches;
+                        }
+                    }
+                );
+            } else if (auto m_coords = annotation_buffer.get_labels_and_coords(m).second) {
+                assert(n_counts);
+                utils::match_indexed_values(
+                    n_labels->begin(), n_labels->end(), n_coords->begin(),
+                    m_labels->begin(), m_labels->end(), m_coords->begin(),
+                    [&](auto, const auto &coords, const auto &other_coords) {
+                        if (coords.size() && other_coords.size()) {
+                            match_found[next_c_enc]
+                                += std::min(coords.size(), other_coords.size());
+                            ++matches;
+                        }
+                    }
+                );
+            } else if (size_t count = utils::count_intersection(n_labels->begin(),
+                                                                n_labels->end(),
+                                                                m_labels->begin(),
+                                                                m_labels->end())) {
                 match_found[next_c_enc] += count;
                 ++matches;
             }
