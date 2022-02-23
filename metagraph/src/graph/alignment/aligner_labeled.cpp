@@ -592,8 +592,10 @@ void compute_label_change_scores(const DeBruijnGraph &graph,
 
             const Alignment::Columns *m_labels = annotation_buffer.get_labels(m);
             assert(m_labels);
-            if (size_t count = utils::count_intersection(n_labels->begin(), n_labels->end(),
-                                                         m_labels->begin(), m_labels->end())) {
+            if (size_t count = utils::count_intersection(n_labels->begin(),
+                                                         n_labels->end(),
+                                                         m_labels->begin(),
+                                                         m_labels->end())) {
                 match_found[next_c_enc] += count;
                 ++matches;
             }
@@ -612,11 +614,13 @@ void compute_label_change_scores(const DeBruijnGraph &graph,
 
     for (size_t i = 0; i < outgoing.size(); ++i) {
         const auto &[next, c, score] = outgoing[i];
+        auto &[inter, diff, lclogprob] = intersect_diff_labels[i];
         if (size_t count = counts[boss.encode(c)]) {
-            auto &[inter, diff, lclogprob] = intersect_diff_labels[i];
             assert(diff.size());
             assert(count <= total);
             lclogprob = std::floor(log2(count) - log2(total));
+        } else {
+            lclogprob = config.ninf;
         }
     }
 }
