@@ -21,6 +21,7 @@ class AnnotationBuffer {
     typedef annot::matrix::MultiIntMatrix::Tuple Tuple;
     typedef Alignment::Columns Columns;
     typedef Alignment::CoordinateSet CoordinateSet;
+    typedef Vector<annot::matrix::IntMatrix::Value> CountSet;
 
     AnnotationBuffer(const DeBruijnGraph &graph, const Annotator &annotator);
 
@@ -32,11 +33,17 @@ class AnnotationBuffer {
     void fetch_queued_annotations();
 
     bool has_coordinates() const { return multi_int_; }
+    bool has_counts() const { return count_; }
 
     // Get the annotations and coordinates of a node if they have been fetched.
     // The returned pointers are valid until next fetch_queued_annotations().
     std::pair<const Columns*, const CoordinateSet*>
     get_labels_and_coords(node_index node) const;
+
+    // Get the annotations and counts of a node if they have been fetched.
+    // The returned pointers are valid until next fetch_queued_annotations().
+    std::pair<const Columns*, const CountSet*>
+    get_labels_and_counts(node_index node) const;
 
     // get the labels of a node if they have been fetched
     inline const Columns* get_labels(node_index node) const {
@@ -67,6 +74,7 @@ class AnnotationBuffer {
     const DeBruijnGraph &graph_;
     const Annotator &annotator_;
     const annot::matrix::MultiIntMatrix *multi_int_;
+    const annot::matrix::IntMatrix *count_;
 
     // keep a unique set of annotation rows
     // the first element is the empty label set
@@ -75,6 +83,8 @@ class AnnotationBuffer {
     VectorMap<node_index, size_t> node_to_cols_; // map node to index in |column_sets_|
     // coordinate sets for all nodes in |node_to_cols_| in the same order
     std::vector<CoordinateSet> label_coords_;
+    // count sets for all nodes in |node_to_cols_| in the same order
+    std::vector<CountSet> label_counts_;
     // buffer of paths to later querying with fetch_queued_annotations()
     std::vector<std::vector<node_index>> queued_paths_;
 };

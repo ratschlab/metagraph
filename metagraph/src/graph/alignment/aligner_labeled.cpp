@@ -40,6 +40,7 @@ AnnotationBuffer::AnnotationBuffer(const DeBruijnGraph &graph, const Annotator &
       : graph_(graph),
         annotator_(annotator),
         multi_int_(dynamic_cast<const annot::matrix::MultiIntMatrix*>(&annotator_.get_matrix())),
+        count_(multi_int_ ? nullptr : dynamic_cast<const annot::matrix::IntMatrix*>(&annotator_.get_matrix())),
         column_sets_({ {} }) {
     if (multi_int_ && graph_.get_mode() != DeBruijnGraph::BASIC) {
         multi_int_ = nullptr;
@@ -90,21 +91,35 @@ void AnnotationBuffer::fetch_queued_annotations() {
             if (base_path[i] == DeBruijnGraph::npos) {
                 // this can happen when the base graph is CANONICAL and path[i] is a
                 // dummy node
-                if (node_to_cols_.emplace(path[i], 0).second && has_coordinates())
-                    label_coords_.emplace_back();
+                if (node_to_cols_.emplace(path[i], 0).second) {
+                    if (has_coordinates())
+                        label_coords_.emplace_back();
+
+                    if (has_counts())
+                        label_counts_.emplace_back();
+                }
 
                 continue;
             }
 
             if (boss && !boss->get_W(dbg_succ->kmer_to_boss_index(base_path[i]))) {
                 // skip dummy nodes
-                if (node_to_cols_.emplace(base_path[i], 0).second && has_coordinates())
-                    label_coords_.emplace_back();
+                if (node_to_cols_.emplace(base_path[i], 0).second) {
+                    if (has_coordinates())
+                        label_coords_.emplace_back();
+
+                    if (has_counts())
+                        label_counts_.emplace_back();
+                }
 
                 if (graph_.get_mode() == DeBruijnGraph::CANONICAL
                         && base_path[i] != path[i]
-                        && node_to_cols_.emplace(path[i], 0).second && has_coordinates()) {
-                    label_coords_.emplace_back();
+                        && node_to_cols_.emplace(path[i], 0).second) {
+                    if (has_coordinates())
+                        label_coords_.emplace_back();
+
+                    if (has_counts())
+                        label_counts_.emplace_back();
                 }
 
                 continue;
@@ -172,9 +187,12 @@ void AnnotationBuffer::fetch_queued_annotations() {
             node_to_cols_[base_node] = label_i;
         } else {
             node_to_cols_[*node_it] = label_i;
-            if (base_node != *node_it && node_to_cols_.emplace(base_node, label_i).second
-                    && has_coordinates()) {
-                label_coords_.emplace_back(label_coords_.back());
+            if (base_node != *node_it && node_to_cols_.emplace(base_node, label_i).second) {
+                if (has_coordinates())
+                    label_coords_.emplace_back(label_coords_.back());
+
+                if (has_counts())
+                    label_counts_.emplace_back(label_counts_.back());
             }
         }
     };
@@ -192,6 +210,20 @@ void AnnotationBuffer::fetch_queued_annotations() {
             for (auto&& [label, coords] : row_tuples) {
                 labels.push_back(label);
                 label_coords_.back().push_back(std::move(coords));
+            }
+            push_node_labels(node_it++, row_it++, std::move(labels));
+        }
+    } else if (has_counts()) {
+        assert(count_);
+        // extract both labels and counts, then store them separately
+        for (auto&& row_values : count_->get_row_values(queued_rows)) {
+            Columns labels;
+            labels.reserve(row_values.size());
+            label_counts_.emplace_back();
+            label_counts_.back().reserve(row_values.size());
+            for (auto&& [label, count] : row_values) {
+                labels.push_back(label);
+                label_counts_.back().push_back(count);
             }
             push_node_labels(node_it++, row_it++, std::move(labels));
         }
@@ -224,6 +256,27 @@ auto AnnotationBuffer::get_labels_and_coords(node_index node) const
     if (has_coordinates()) {
         assert(static_cast<size_t>(it - node_to_cols_.begin()) < label_coords_.size());
         ret_val.second = &label_coords_[it - node_to_cols_.begin()];
+    }
+
+    return ret_val;
+}
+
+auto AnnotationBuffer::get_labels_and_counts(node_index node) const
+        -> std::pair<const Columns*, const CountSet*> {
+    std::pair<const Columns*, const CountSet*> ret_val { nullptr, nullptr };
+
+    auto it = node_to_cols_.find(get_labeled_node(graph_, node));
+
+    // if the node hasn't been seen before, or if its annotations haven't
+    // been fetched, return nothing
+    if (it == node_to_cols_.end() || it->second == nannot)
+        return ret_val;
+
+    ret_val.first = &column_sets_.data()[it->second];
+
+    if (has_counts()) {
+        assert(static_cast<size_t>(it - node_to_cols_.begin()) < label_counts_.size());
+        ret_val.second = &label_counts_[it - node_to_cols_.begin()];
     }
 
     return ret_val;
