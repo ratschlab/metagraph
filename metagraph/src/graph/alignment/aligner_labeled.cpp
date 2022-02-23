@@ -441,7 +441,6 @@ double compute_label_change_scores(const DeBruijnGraph &graph,
     typedef boss::BOSS::TAlphabet TAlphabet;
     typedef boss::BOSS::edge_index edge_index;
     typedef Alignment::node_index node_index;
-    typedef Alignment::Column Column;
 
     const boss::BOSS &boss = dbg_succ->get_boss();
     const auto *rev_graph = dynamic_cast<const RCDBG*>(&graph);
@@ -552,12 +551,6 @@ double compute_label_change_scores(const DeBruijnGraph &graph,
     }
 
     Vector<size_t> counts(boss.alph_size);
-    Vector<tsl::hopscotch_set<Column>> exclude_sets;
-    exclude_sets.reserve(intersect_diff_labels.size());
-    for (const auto &[inter, diff, _] : intersect_diff_labels) {
-        exclude_sets.emplace_back(diff.begin(), diff.end());
-        exclude_sets.back().insert(inter.begin(), inter.end());
-    }
 
     edge_index node_wp = boss.succ_W(node_range.first, cur_edge_label);
     edge_index node_wm = boss.succ_W(node_range.first, cur_edge_label + boss.alph_size);
@@ -620,19 +613,12 @@ double compute_label_change_scores(const DeBruijnGraph &graph,
             if (diff.empty())
                 continue;
 
-            const auto &exclude = exclude_sets[j];
             const Alignment::Columns *m_labels = annotation_buffer.get_labels(m);
             assert(m_labels);
-            Alignment::Columns inter;
-            std::set_intersection(n_labels->begin(), n_labels->end(),
-                                  m_labels->begin(), m_labels->end(),
-                                  std::back_inserter(inter));
-            for (Column col : inter) {
-                if (!exclude.count(col)) {
-                    // found an independent label
-                    match_found[next_c_enc] = true;
-                    ++matches;
-                }
+            if (utils::share_element(n_labels->begin(), n_labels->end(),
+                                     m_labels->begin(), m_labels->end())) {
+                match_found[next_c_enc] = true;
+                ++matches;
             }
         }
 
