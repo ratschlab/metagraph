@@ -93,9 +93,6 @@ class SeedFilteringExtender {
                                           size_t trim_query_suffix = 0,
                                           score_t added_xdrop = 0) = 0;
 
-    // returns whether the seed must be a prefix of an extension
-    virtual bool fixed_seed() const { return true; }
-
     virtual bool set_seed(const Alignment &seed);
 
     virtual score_t update_seed_filter(node_index node,

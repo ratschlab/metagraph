@@ -130,10 +130,6 @@ class LabeledExtender : public DefaultColumnExtender {
 
     virtual bool skip_backtrack_start(size_t i) override final;
 
-    // since multi-node seeds may span across different labels, we no longer
-    // want the restriction that the seed must be a prefix of the extended alignment
-    virtual bool fixed_seed() const override final { return false; }
-
     // this override ensures that outgoing nodes are label- and coordinate-consistent
     // (when applicable)
     virtual void call_outgoing(node_index node,

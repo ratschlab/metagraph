@@ -118,7 +118,8 @@ void filter_seed(const Alignment &prev, Alignment &a) {
                     diff.push_back(col);
                     diff_coords.push_back(std::move(set));
                 }
-            }
+            },
+            [](auto, const auto&) {}, [](auto, const auto&) {}
         );
         if (diff.empty()) {
             a = Alignment();
