@@ -111,8 +111,12 @@ namespace utils {
 
     // Intersect sorted ranges index1 and index2 (of equal length) with their
     // corresponding values stored in value1 and value2, respectively.
-    // For each element shared between index1 and index2, invoke the callback
+    // For each element shared between index1 and index2, invoke callback
     // for that element and its corresponding values.
+    // For each element in index1 not in index2, invoke callback_diff1 for that
+    // element and its corresponding values.
+    // For each element in index2 not in index1, invoke callback_diff2 for that
+    // element and its corresponding values.
     template <class InIt1, class InIt2, class InIt3, class InIt4, class Callback, class CallbackDiff1, class CallbackDiff2>
     constexpr void match_indexed_values(InIt1 index1_begin, InIt1 index1_end,
                                         InIt2 value1_begin,
@@ -141,6 +145,23 @@ namespace utils {
                 ++value2_begin;
             }
         }
+    }
+
+    // Intersect sorted ranges index1 and index2 (of equal length) with their
+    // corresponding values stored in value1 and value2, respectively.
+    // For each element shared between index1 and index2, invoke the callback
+    // for that element and its corresponding values.
+    template <class InIt1, class InIt2, class InIt3, class InIt4, class Callback>
+    constexpr void match_indexed_values(InIt1 index1_begin, InIt1 index1_end,
+                                        InIt2 value1_begin,
+                                        InIt3 index2_begin, InIt3 index2_end,
+                                        InIt4 value2_begin,
+                                        const Callback &callback) {
+        match_indexed_values(index1_begin, index1_end, value1_begin,
+                             index2_begin, index2_end, value2_begin,
+                             callback,
+                             [](const auto&, const auto&) {},
+                             [](const auto&, const auto&) {});
     }
 
     // Bitmap |new_indexes| marks positions of inserted values in the final vector

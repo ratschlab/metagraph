@@ -534,8 +534,7 @@ void LabeledExtender
                     // then check coordinate consistency with the seed
                     if (overlap_with_diff(coords, other_coords, dist))
                         intersect_labels.push_back(c);
-                },
-                [](auto, const auto&) {}, [](auto, const auto&) {}
+                }
             );
         } catch (const std::exception&) {}
 
@@ -674,8 +673,7 @@ void LabeledExtender::call_alignments(score_t end_score,
                         alignment.label_columns.emplace_back(c);
                         alignment.label_coordinates.emplace_back(std::move(overlap));
                     }
-                },
-                [](auto, const auto&) {}, [](auto, const auto&) {}
+                }
             );
         } catch (const std::exception&) {}
     }
