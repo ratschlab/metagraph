@@ -712,8 +712,7 @@ void compute_label_change_scores(const DeBruijnGraph &graph,
                             match_found[next_c_enc] += std::min(count, other_count);
                             ++matches;
                         }
-                    },
-                    [](auto, const auto&) {}, [](auto, const auto&) {}
+                    }
                 );
             } else if (auto m_coords = annotation_buffer.get_labels_and_coords(m).second) {
                 assert(n_counts);
@@ -726,8 +725,7 @@ void compute_label_change_scores(const DeBruijnGraph &graph,
                                 += std::min(coords.size(), other_coords.size());
                             ++matches;
                         }
-                    },
-                    [](auto, const auto&) {}, [](auto, const auto&) {}
+                    }
                 );
             } else if (size_t count = utils::count_intersection(n_labels->begin(),
                                                                 n_labels->end(),
@@ -952,8 +950,7 @@ void LabeledExtender
                     // then check coordinate consistency with the seed
                     if (overlap_with_diff(coords, other_coords, dist))
                         intersect_labels.push_back(c);
-                },
-                [](auto, const auto&) {}, [](auto, const auto&) {}
+                }
             );
         } catch (const std::exception&) {}
 
@@ -1143,8 +1140,7 @@ void LabeledExtender::call_alignments(score_t end_score,
                         alignment.label_columns.emplace_back(c);
                         alignment.label_coordinates.emplace_back(std::move(overlap));
                     }
-                },
-                [](auto, const auto&) {}, [](auto, const auto&) {}
+                }
             );
         } catch (const std::exception&) {}
     }

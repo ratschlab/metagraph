@@ -106,8 +106,7 @@ bool Alignment::append(Alignment&& other) {
                     merged_label_columns.push_back(col);
                     merged_label_coordinates.push_back(std::move(merged));
                 }
-            },
-            [](auto, const auto&) {}, [](auto, const auto&) {}
+            }
         );
 
         if (merged_label_columns.empty()) {
