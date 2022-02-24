@@ -85,16 +85,12 @@ class GraphClientJson:
 
         if align:
             assert len(alignments) == len(search_results)
-
             # Zip best alignment results
             for alignment, search_result in zip(alignments, search_results):
                 if 'alignments' in alignment and len(alignment['alignments']) > 0:
                     search_result['best_alignment'] = alignment['alignments'][0]
                 else:
                     search_result['best_alignment'] = {}
-
-        else:
-            search_results = self._json_seq_query(sequence, param_dict, "search")
 
         return search_results
 

@@ -184,21 +184,14 @@ std::string process_align_request(const std::string &received_message,
         // not supporting reverse complement yet
         Json::Value alignments = Json::Value(Json::arrayValue);
 
-        // Only align if we have a non-empty sequence
-        // TODO: Investigate why calling aligner->align on empty sequence fails
-        std::string_view seq = read_stream->seq.s;
-        if (!seq.empty()) {
-            const auto paths = aligner.align(seq);
+        for (const auto &path : aligner.align(read_stream->seq.s)) {
+            Json::Value a;
+            a[SeqSearchResult::SCORE_JSON_FIELD] = path.get_score();
+            a[SeqSearchResult::SEQUENCE_JSON_FIELD] = path.get_sequence();
+            a[SeqSearchResult::CIGAR_JSON_FIELD] = path.get_cigar().to_string();
+            a[SeqSearchResult::ORIENTATION_JSON_FIELD] = path.get_orientation();
 
-            for (const auto &path : paths) {
-                Json::Value a;
-                a[SeqSearchResult::SCORE_JSON_FIELD] = path.get_score();
-                a[SeqSearchResult::SEQUENCE_JSON_FIELD] = path.get_sequence();
-                a[SeqSearchResult::CIGAR_JSON_FIELD] = path.get_cigar().to_string();
-                a[SeqSearchResult::ORIENTATION_JSON_FIELD] = path.get_orientation();
-
-                alignments.append(a);
-            };
+            alignments.append(a);
         }
 
         align_entry[SeqSearchResult::ALIGNMENT_JSON_FIELD] = alignments;
