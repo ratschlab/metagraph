@@ -113,17 +113,20 @@ namespace utils {
     // corresponding values stored in value1 and value2, respectively.
     // For each element shared between index1 and index2, invoke the callback
     // for that element and its corresponding values.
-    template <class InIt1, class InIt2, class InIt3, class InIt4, class Callback>
+    template <class InIt1, class InIt2, class InIt3, class InIt4, class Callback, class CallbackDiff1, class CallbackDiff2>
     constexpr void match_indexed_values(InIt1 index1_begin, InIt1 index1_end,
                                         InIt2 value1_begin,
                                         InIt3 index2_begin, InIt3 index2_end,
                                         InIt4 value2_begin,
-                                        const Callback &callback) {
+                                        const Callback &callback,
+                                        const CallbackDiff1 &callback_diff1,
+                                        const CallbackDiff2 &callback_diff2) {
         assert(std::distance(index1_begin, index1_end)
                 == std::distance(index2_begin, index2_end));
 
-        while (index1_begin != index1_end && index2_begin != index2_end) {
-            if (*index1_begin < *index2_begin) {
+        while (index1_begin != index1_end) {
+            if (index2_begin == index2_end || *index1_begin < *index2_begin) {
+                callback_diff1(*index1_begin, *value1_begin);
                 ++index1_begin;
                 ++value1_begin;
             } else {
@@ -131,6 +134,8 @@ namespace utils {
                     callback(*index1_begin, *value1_begin, *value2_begin);
                     ++index1_begin;
                     ++value1_begin;
+                } else {
+                    callback_diff2(*index2_begin, *value2_begin);
                 }
                 ++index2_begin;
                 ++value2_begin;

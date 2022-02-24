@@ -367,7 +367,7 @@ void DefaultColumnExtender
         callback(this->seed_->get_nodes().front(),
                  this->seed_->get_sequence()[seed_pos],
                  0);
-    } else if (in_seed && (force_fixed_seed || this->fixed_seed())) {
+    } else if (in_seed && force_fixed_seed) {
         size_t node_i = next_offset - graph_->get_k() + 1;
         assert(node == this->seed_->get_nodes()[node_i - 1]);
         node_index next_node = this->seed_->get_nodes()[node_i];
