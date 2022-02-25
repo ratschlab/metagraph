@@ -1369,9 +1369,10 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
     }
     std::sort(labels.begin(), labels.end());
 
+    std::vector<Alignment> new_seed_prefixes;
     for (size_t j = 0; j < seeds.size(); ++j) {
         Alignment &seed = seeds[j];
-        std::vector<Alignment> new_seeds;
+        std::vector<Alignment> new_seed_suffixes;
         const std::vector<node_index> &nodes = seed.get_nodes();
         if (seed.label_columns.empty()) {
             auto [fetch_labels, fetch_coords]
@@ -1471,53 +1472,45 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
                 }
 
                 if (diff_next.size() && seed.get_sequence().size() - prefix_length >= this->config_.min_seed_length) {
-                    new_seeds.emplace_back(seed);
-                    new_seeds.back().label_columns.clear();
-                    new_seeds.back().label_coordinates.clear();
-                    new_seeds.back().trim_reference_prefix(prefix_length,
-                                                           this->graph_.get_k() - 1,
-                                                           this->config_);
-                    new_seeds.back().trim_offset();
-                    assert(new_seeds.back().get_nodes()[0] == nodes[prefix_length]);
+                    auto &new_seed = new_seed_suffixes.emplace_back(seed);
+                    new_seed.label_columns.clear();
+                    new_seed.label_coordinates.clear();
+                    new_seed.trim_reference_prefix(prefix_length,
+                                                   this->graph_.get_k() - 1,
+                                                   this->config_);
+                    new_seed.trim_offset();
+                    assert(new_seed.get_nodes()[0] == nodes[prefix_length]);
                     if (coord_diff_next.size()) {
                         matched_intersection(
                             diff_next.begin(), diff_next.end(),
                             coord_diff_next.begin(),
                             labels.begin(), labels.end(),
-                            std::back_inserter(new_seeds.back().label_columns),
-                            std::back_inserter(new_seeds.back().label_coordinates)
+                            std::back_inserter(new_seed.label_columns),
+                            std::back_inserter(new_seed.label_coordinates)
                         );
                     } else {
                         std::set_intersection(
                             labels.begin(), labels.end(),
                             diff_next.begin(), diff_next.end(),
-                            std::back_inserter(new_seeds.back().label_columns)
+                            std::back_inserter(new_seed.label_columns)
                         );
                     }
 
 
-                    if (new_seeds.back().label_columns.empty())
-                        new_seeds.pop_back();
-
-                    assert(new_seeds.back().empty()
-                        || new_seeds.back().get_sequence().size()
-                                >= this->config_.min_seed_length);
+                    if (new_seed.label_columns.empty())
+                        new_seed_suffixes.pop_back();
                 }
 
                 if (inter.size() < seed.label_columns.size()) {
                     if (diff_cur.size() && seed.get_sequence().size() - suffix_length >= this->config_.min_seed_length) {
-                        new_seeds.emplace_back(seed);
-                        new_seeds.back().trim_reference_suffix(suffix_length,
-                                                               this->config_);
-                        std::swap(new_seeds.back().label_columns, diff_cur);
-                        std::swap(new_seeds.back().label_coordinates, coord_diff_cur);
-                        assert(new_seeds.back().get_sequence().size()
-                                    >= this->config_.min_seed_length);
+                        auto &new_seed = new_seed_prefixes.emplace_back(seed);
+                        new_seed.trim_reference_suffix(suffix_length, this->config_);
+                        std::swap(new_seed.label_columns, diff_cur);
+                        std::swap(new_seed.label_coordinates, coord_diff_cur);
                     }
 
                     if (inter.size() && seed.get_sequence().size() - suffix_length >= this->config_.min_seed_length) {
                         seed.trim_reference_suffix(suffix_length, this->config_);
-                        assert(seed.get_sequence().size() >= this->config_.min_seed_length);
                     } else {
                         seed = Alignment();
                     }
@@ -1529,12 +1522,13 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
 
         annotation_buffer_.cache_column_set(seed.label_columns);
 
-        if (new_seeds.size()) {
-            seeds.insert(seeds.end(),
-                         std::make_move_iterator(new_seeds.begin()),
-                         std::make_move_iterator(new_seeds.end()));
-        }
+        seeds.insert(seeds.end(),
+                     std::make_move_iterator(new_seed_suffixes.begin()),
+                     std::make_move_iterator(new_seed_suffixes.end()));
     }
+
+    seeds.insert(seeds.end(), std::make_move_iterator(new_seed_prefixes.begin()),
+                              std::make_move_iterator(new_seed_prefixes.end()));
 
     auto seed_it = std::remove_if(seeds.begin(), seeds.end(), [&](const auto &a) {
         return a.label_columns.empty();
