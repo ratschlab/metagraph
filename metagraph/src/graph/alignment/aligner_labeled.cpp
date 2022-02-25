@@ -1394,6 +1394,7 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
         }
 
         if (nodes.size() > 1) {
+            Columns found_labels;
             size_t suffix_length = seed.get_sequence().size() - (this->graph_.get_k() - seed.get_offset());
             for (size_t prefix_length = 1; prefix_length < nodes.size(); ++prefix_length, --suffix_length) {
                 auto [next_fetch_labels, next_fetch_coords]
@@ -1469,9 +1470,20 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
                                                 std::back_inserter(inter),
                                                 std::back_inserter(diff_cur),
                                                 std::back_inserter(diff_next));
+                    Columns diff_next_filtered;
+                    std::set_difference(diff_next.begin(), diff_next.end(),
+                                        found_labels.begin(), found_labels.end(),
+                                        std::back_inserter(diff_next_filtered));
+                    std::swap(diff_next, diff_next_filtered);
                 }
 
                 if (diff_next.size() && seed.get_sequence().size() - prefix_length >= this->config_.min_seed_length) {
+                    Columns found_labels_update;
+                    std::set_union(found_labels.begin(), found_labels.end(),
+                                   diff_next.begin(), diff_next.end(),
+                                   std::back_inserter(found_labels_update));
+                    std::swap(found_labels, found_labels_update);
+
                     auto &new_seed = new_seed_suffixes.emplace_back(seed);
                     new_seed.label_columns.clear();
                     new_seed.label_coordinates.clear();
