@@ -33,6 +33,10 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
     if (!config_.max_seed_length)
         config_.max_seed_length = graph_.get_k();
 
+    std::tie(config_.min_seed_length, config_.max_seed_length)
+        = std::make_pair(std::min(config_.min_seed_length, config_.max_seed_length),
+                         std::max(config_.min_seed_length, config_.max_seed_length));
+
     assert(config_.max_seed_length >= config_.min_seed_length);
     assert(config_.num_alternative_paths);
     assert(graph_.get_mode() != DeBruijnGraph::PRIMARY
@@ -480,6 +484,9 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
     auto bwd_seeds = reverse_seeder.get_seeds();
 
     if (config_.chain_alignments) {
+        if (fwd_seeds.empty() && bwd_seeds.empty())
+            return std::make_tuple(num_seeds, num_extensions, num_explored_nodes);
+
         bool can_chain = false;
         for (const Alignment &seed : fwd_seeds) {
             if (seed.label_coordinates.size()) {
