@@ -902,7 +902,6 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
     }
     std::sort(labels.begin(), labels.end());
 
-    std::vector<Alignment> new_seed_prefixes;
     for (size_t j = 0; j < seeds.size(); ++j) {
         Alignment &seed = seeds[j];
         std::vector<Alignment> new_seed_suffixes;
@@ -1050,19 +1049,7 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
                 }
 
                 if (diff_cur.size()) {
-                    auto &new_seed = new_seed_prefixes.emplace_back(seed);
-                    new_seed.trim_reference_suffix(suffix_trim, this->config_);
-                    std::swap(new_seed.label_columns, diff_cur);
-                    std::swap(new_seed.label_coordinates, coord_diff_cur);
-                }
-
-                if (inter.size() < seed.label_columns.size()) {
-                    if (inter.size()) {
-                        seed.trim_reference_suffix(suffix_trim, this->config_);
-                    } else {
-                        seed = Alignment();
-                    }
-
+                    seed.trim_reference_suffix(suffix_trim, this->config_);
                     break;
                 }
             }
@@ -1074,9 +1061,6 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
                      std::make_move_iterator(new_seed_suffixes.begin()),
                      std::make_move_iterator(new_seed_suffixes.end()));
     }
-
-    seeds.insert(seeds.end(), std::make_move_iterator(new_seed_prefixes.begin()),
-                              std::make_move_iterator(new_seed_prefixes.end()));
 
     auto seed_it = std::remove_if(seeds.begin(), seeds.end(), [&](const auto &a) {
         return a.label_columns.empty();
