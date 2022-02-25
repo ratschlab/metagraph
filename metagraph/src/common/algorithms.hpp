@@ -109,8 +109,8 @@ namespace utils {
         return false;
     }
 
-    // Intersect sorted ranges index1 and index2 (of equal length) with their
-    // corresponding values stored in value1 and value2, respectively.
+    // Intersect sorted ranges index1 and index2 with their corresponding values
+    // stored in value1 and value2, respectively.
     // For each element shared between index1 and index2, invoke callback
     // for that element and its corresponding values.
     // For each element in index1 not in index2, invoke callback_diff1 for that
@@ -125,11 +125,12 @@ namespace utils {
                                         const Callback &callback,
                                         const CallbackDiff1 &callback_diff1,
                                         const CallbackDiff2 &callback_diff2) {
-        assert(std::distance(index1_begin, index1_end)
-                == std::distance(index2_begin, index2_end));
-
-        while (index1_begin != index1_end) {
-            if (index2_begin == index2_end || *index1_begin < *index2_begin) {
+        while (index1_begin != index1_end || index2_begin != index2_end) {
+            if (index1_begin == index1_end) {
+                callback_diff2(*index2_begin, *value2_begin);
+                ++index2_begin;
+                ++value2_begin;
+            } else if (index2_begin == index2_end || *index1_begin < *index2_begin) {
                 callback_diff1(*index1_begin, *value1_begin);
                 ++index1_begin;
                 ++value1_begin;
@@ -141,14 +142,15 @@ namespace utils {
                 } else {
                     callback_diff2(*index2_begin, *value2_begin);
                 }
+
                 ++index2_begin;
                 ++value2_begin;
             }
         }
     }
 
-    // Intersect sorted ranges index1 and index2 (of equal length) with their
-    // corresponding values stored in value1 and value2, respectively.
+    // Intersect sorted ranges index1 and index2 with their corresponding values
+    // stored in value1 and value2, respectively.
     // For each element shared between index1 and index2, invoke the callback
     // for that element and its corresponding values.
     template <class InIt1, class InIt2, class InIt3, class InIt4, class Callback>
@@ -157,11 +159,20 @@ namespace utils {
                                         InIt3 index2_begin, InIt3 index2_end,
                                         InIt4 value2_begin,
                                         const Callback &callback) {
-        match_indexed_values(index1_begin, index1_end, value1_begin,
-                             index2_begin, index2_end, value2_begin,
-                             callback,
-                             [](const auto&, const auto&) {},
-                             [](const auto&, const auto&) {});
+        while (index1_begin != index1_end && index2_begin != index2_end) {
+            if (*index1_begin < *index2_begin) {
+                ++index1_begin;
+                ++value1_begin;
+            } else {
+                if (*index1_begin == *index2_begin) {
+                    callback(*index1_begin, *value1_begin, *value2_begin);
+                    ++index1_begin;
+                    ++value1_begin;
+                }
+                ++index2_begin;
+                ++value2_begin;
+            }
+        }
     }
 
     // Bitmap |new_indexes| marks positions of inserted values in the final vector
