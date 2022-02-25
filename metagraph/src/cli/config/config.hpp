@@ -139,6 +139,7 @@ class Config {
     double bloom_bpk = 4.0;
     double alignment_max_nodes_per_seq_char = 5.0;
     double alignment_max_ram = 200;
+    // TODO: rename to min_covered_by_seeds
     double alignment_min_exact_match = 0.0;
     double min_fraction = 0.0;
     double max_fraction = 1.0;
