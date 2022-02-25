@@ -117,7 +117,8 @@ namespace utils {
     // element and its corresponding values.
     // For each element in index2 not in index1, invoke callback_diff2 for that
     // element and its corresponding values.
-    template <class InIt1, class InIt2, class InIt3, class InIt4, class Callback, class CallbackDiff1, class CallbackDiff2>
+    template <class InIt1, class InIt2, class InIt3, class InIt4,
+              class Callback, class CallbackDiff1, class CallbackDiff2>
     constexpr void match_indexed_values(InIt1 index1_begin, InIt1 index1_end,
                                         InIt2 value1_begin,
                                         InIt3 index2_begin, InIt3 index2_end,
