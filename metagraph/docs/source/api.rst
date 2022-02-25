@@ -79,7 +79,7 @@ Additionally, the method accepts the following keyword arguments:
 
         :param      sequence:                    The query sequence
         :type       sequence:                    Union[str, Iterable[str]]
-        :param      min_exact_match:             The minimum fraction (between 0.0 and 1.0) of matching nucleotides required to align the sequence [default: 0]
+        :param      min_exact_match:             The minimum fraction (between 0.0 and 1.0) of nucleotides covered by seeds required to align the sequence [default: 0]
         :type       min_exact_match:             float
         :param      max_alternative_alignments:  The number of different alignments to return [default: 1]
         :type       max_alternative_alignments:  int
