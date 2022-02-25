@@ -55,6 +55,51 @@ typedef ::testing::Types<std::pair<DBGHashFast, annot::ColumnCompressed<>>,
 
 TYPED_TEST_SUITE(LabeledAlignerTest, FewGraphAnnotationPairTypes);
 
+TYPED_TEST(LabeledAlignerTest, SimpleLinearGraph) {
+    size_t k = 4;
+    /*
+        A    A    B    B    B    B
+        GCAA-CAAT-AATG-ATGC-TGCT-GCTT
+    */
+    const std::vector<std::string> sequences {
+        "GCAAT",
+        "AATGCTT"
+    };
+    const std::vector<std::string> labels { "A", "B" };
+
+    auto anno_graph = build_anno_graph<typename TypeParam::first_type,
+                                       typename TypeParam::second_type>(k, sequences, labels);
+
+    DBGAlignerConfig config;
+    config.max_seed_length = std::numeric_limits<size_t>::max();
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -1);
+    LabeledAligner<> aligner(anno_graph->get_graph(), config, anno_graph->get_annotator());
+
+    std::unordered_map<std::string, std::unordered_map<std::string, std::string>> exp_alignments {{
+        { std::string("GCAATGCTT"), {{ { std::string("B"), std::string("AATGCTT") }, // 2S7=
+                                       { std::string("A"), std::string("GCAAT") } //5=4S
+                                     }} }
+    }};
+
+    for (const auto &[query, labels] : exp_alignments) {
+        auto alignments = aligner.align(query);
+        EXPECT_EQ(labels.size(), alignments.size()) << query;
+
+        for (const auto &alignment : alignments) {
+            bool found = false;
+            for (const auto &label : get_alignment_labels(*anno_graph, alignment)) {
+                auto find = labels.find(label);
+                ASSERT_TRUE(find != labels.end()) << label;
+                if (alignment.get_sequence() == find->second) {
+                    found = true;
+                    break;
+                }
+            }
+            EXPECT_TRUE(found) << alignment;
+        }
+    }
+}
+
 TYPED_TEST(LabeledAlignerTest, SimpleTangleGraph) {
     size_t k = 3;
     /*  B                  AB  AB
