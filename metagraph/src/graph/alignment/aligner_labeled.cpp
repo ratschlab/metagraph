@@ -19,7 +19,6 @@ typedef annot::binmat::BinaryMatrix::Row Row;
 typedef annot::binmat::BinaryMatrix::Column Column;
 typedef AnnotationBuffer::Columns Columns;
 typedef DeBruijnGraph::node_index node_index;
-// typedef AnnotationBuffer::Columns Columns;
 
 // dummy index for an unfetched annotations
 static constexpr size_t nannot = std::numeric_limits<size_t>::max();
@@ -353,23 +352,17 @@ struct CoordUnion {
                 *out = *a_begin;
                 ++a_begin;
                 ++out;
-            } else if (a_begin == a_end) {
-                *out = *b_begin - offset_;
-                ++b_begin;
-                ++out;
-            } else if (*a_begin + offset_ < *b_begin) {
-                *out = *a_begin;
-                ++a_begin;
-                ++out;
-            } else if (*a_begin + offset_ > *b_begin) {
+            } else if (a_begin == a_end || *a_begin + offset_ > *b_begin) {
                 *out = *b_begin - offset_;
                 ++b_begin;
                 ++out;
             } else {
+                if (*a_begin + offset_ == *b_begin)
+                    ++b_begin;
+
                 *out = *a_begin;
                 ++a_begin;
                 ++out;
-                ++b_begin;
             }
         }
     }
