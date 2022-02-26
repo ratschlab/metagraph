@@ -343,6 +343,40 @@ struct CoordDifference {
     ssize_t offset_;
 };
 
+struct CoordUnion {
+    CoordUnion(ssize_t offset = 0) : offset_(offset) {}
+
+    template <typename It1, typename It2, typename Out>
+    void operator()(It1 a_begin, It1 a_end, It2 b_begin, It2 b_end, Out out) const {
+        while (a_begin != a_end || b_begin != b_end) {
+            if (b_begin == b_end) {
+                *out = *a_begin;
+                ++a_begin;
+                ++out;
+            } else if (a_begin == a_end) {
+                *out = *b_begin - offset_;
+                ++b_begin;
+                ++out;
+            } else if (*a_begin + offset_ < *b_begin) {
+                *out = *a_begin;
+                ++a_begin;
+                ++out;
+            } else if (*a_begin + offset_ > *b_begin) {
+                *out = *b_begin - offset_;
+                ++b_begin;
+                ++out;
+            } else {
+                *out = *a_begin;
+                ++a_begin;
+                ++out;
+                ++b_begin;
+            }
+        }
+    }
+
+    ssize_t offset_;
+};
+
 LabeledExtender::LabeledExtender(const IDBGAligner &aligner, std::string_view query)
     : LabeledExtender(aligner.get_graph(), aligner.get_config(),
                       dynamic_cast<const LabeledAligner<>&>(aligner).annotation_buffer_,
@@ -927,6 +961,7 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
 
         if (nodes.size() > 1) {
             Columns found_labels;
+            Alignment::CoordinateSet found_coords;
             assert(this->graph_.get_k() - seed.get_offset() >= this->config_.min_seed_length);
             size_t suffix_trim = seed.get_sequence().size()
                                     - (this->graph_.get_k() - seed.get_offset());
@@ -994,6 +1029,34 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
                             }
                         }
                     );
+
+                    if (suffix_length >= this->config_.min_seed_length) {
+                        Columns diff_next_filtered;
+                        Alignment::CoordinateSet coord_diff_next_filtered;
+                        utils::match_indexed_values(
+                            diff_next.begin(), diff_next.end(),
+                            coord_diff_next.begin(),
+                            found_labels.begin(), found_labels.end(),
+                            found_coords.begin(),
+                            [&](auto col, const auto &coords, const auto &other_coords) {
+                                Alignment::Tuple c_diff;
+                                diff_coords_next(other_coords.begin(), other_coords.end(),
+                                                 coords.begin(), coords.end(),
+                                                 std::back_inserter(c_diff));
+                                if (c_diff.size()) {
+                                    diff_next_filtered.push_back(col);
+                                    coord_diff_next_filtered.push_back(std::move(c_diff));
+                                }
+                            },
+                            [&](auto col, const auto &coords) {
+                                diff_next_filtered.push_back(col);
+                                coord_diff_next_filtered.push_back(coords);
+                            },
+                            [](const auto&, const auto&) {}
+                        );
+                        std::swap(diff_next, diff_next_filtered);
+                        std::swap(coord_diff_next, coord_diff_next_filtered);
+                    }
                 } else {
                     set_intersection_difference(seed.label_columns.begin(),
                                                 seed.label_columns.end(),
@@ -1014,9 +1077,39 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
                 if (diff_next.size()) {
                     assert(suffix_length >= this->config_.min_seed_length);
                     Columns found_labels_update;
-                    std::set_union(found_labels.begin(), found_labels.end(),
-                                   diff_next.begin(), diff_next.end(),
-                                   std::back_inserter(found_labels_update));
+                    if (coord_diff_next.size()) {
+                        Alignment::CoordinateSet found_coords_update;
+                        CoordUnion coord_union(prefix_trim);
+                        utils::match_indexed_values(
+                            found_labels.begin(), found_labels.end(),
+                            found_coords.begin(),
+                            diff_next.begin(), diff_next.end(),
+                            coord_diff_next.begin(),
+                            [&](auto col, const auto &coords, const auto &other_coords) {
+                                found_labels_update.push_back(col);
+                                found_coords_update.emplace_back();
+                                coord_union(coords.begin(), coords.end(),
+                                            other_coords.begin(), other_coords.end(),
+                                            std::back_inserter(found_coords_update.back()));
+                            },
+                            [&](auto col, const auto &coords) {
+                                found_labels_update.push_back(col);
+                                found_coords_update.push_back(coords);
+                            },
+                            [&](auto col, const auto &coords) {
+                                found_labels_update.push_back(col);
+                                found_coords_update.push_back(coords);
+                                for (auto &c : found_coords_update.back()) {
+                                    c -= prefix_trim;
+                                }
+                            }
+                        );
+                        std::swap(found_coords, found_coords_update);
+                    } else {
+                        std::set_union(found_labels.begin(), found_labels.end(),
+                                       diff_next.begin(), diff_next.end(),
+                                       std::back_inserter(found_labels_update));
+                    }
                     std::swap(found_labels, found_labels_update);
 
                     auto &new_seed = new_seed_suffixes.emplace_back(seed);
