@@ -178,7 +178,7 @@ void AnnotationBuffer::fetch_queued_annotations() {
             label_coords_.back().reserve(row_tuples.size());
             for (auto&& [label, coords] : row_tuples) {
                 labels.push_back(label);
-                label_coords_.back().push_back(std::move(coords));
+                label_coords_.back().emplace_back(coords.begin(), coords.end());
             }
             push_node_labels(node_it++, row_it++, std::move(labels));
         }
@@ -220,7 +220,7 @@ auto AnnotationBuffer::get_labels_and_coords(node_index node) const
 }
 
 template <class T1, class T2>
-bool overlap_with_diff(const T1 &tuple1, const T2 &tuple2, size_t diff) {
+bool overlap_with_diff(const T1 &tuple1, const T2 &tuple2, int64_t diff) {
     auto a_begin = tuple1.begin();
     const auto a_end = tuple1.end();
     auto b_begin = tuple2.begin();
@@ -299,7 +299,7 @@ void set_intersection_difference(AIt a_begin,
 }
 
 struct CoordIntersection {
-    CoordIntersection(ssize_t offset = 0) : offset_(offset) {}
+    CoordIntersection(int64_t offset = 0) : offset_(offset) {}
 
     template <typename It1, typename It2, typename Out>
     void operator()(It1 a_begin, It1 a_end, It2 b_begin, It2 b_end, Out out) const {
@@ -317,11 +317,11 @@ struct CoordIntersection {
         }
     }
 
-    ssize_t offset_;
+    int64_t offset_;
 };
 
 struct CoordDifference {
-    CoordDifference(ssize_t offset = 0) : offset_(offset) {}
+    CoordDifference(int64_t offset = 0) : offset_(offset) {}
 
     template <typename It1, typename It2, typename Out>
     void operator()(It1 a_begin, It1 a_end, It2 b_begin, It2 b_end, Out out) const {
@@ -339,11 +339,11 @@ struct CoordDifference {
         }
     }
 
-    ssize_t offset_;
+    int64_t offset_;
 };
 
 struct CoordUnion {
-    CoordUnion(ssize_t offset = 0) : offset_(offset) {}
+    CoordUnion(int64_t offset = 0) : offset_(offset) {}
 
     template <typename It1, typename It2, typename Out>
     void operator()(It1 a_begin, It1 a_end, It2 b_begin, It2 b_end, Out out) const {
@@ -367,7 +367,7 @@ struct CoordUnion {
         }
     }
 
-    ssize_t offset_;
+    int64_t offset_;
 };
 
 LabeledExtender::LabeledExtender(const IDBGAligner &aligner, std::string_view query)

@@ -18,7 +18,7 @@ class AnnotationBuffer {
   public:
     typedef AnnotatedDBG::Annotator Annotator;
     typedef DeBruijnGraph::node_index node_index;
-    typedef annot::matrix::MultiIntMatrix::Tuple Tuple;
+    typedef Alignment::Tuple Tuple;
     typedef Alignment::Columns Columns;
     typedef Alignment::CoordinateSet CoordinateSet;
 

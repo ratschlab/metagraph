@@ -79,6 +79,7 @@ bool Alignment::append(Alignment&& other) {
 
         // if the alignments fit together without gaps, make sure that the
         // coordinates form a contiguous range
+        int64_t offset = sequence_.size();
         utils::match_indexed_values(
             label_columns.begin(), label_columns.end(),
             label_coordinates.begin(),
@@ -91,12 +92,12 @@ bool Alignment::append(Alignment&& other) {
                 auto b_begin = other_coords.begin();
                 auto b_end = other_coords.end();
                 while (a_begin != a_end && b_begin != b_end) {
-                    if (*a_begin + sequence_.size() < *b_begin) {
+                    if (*a_begin + offset < *b_begin) {
                         ++a_begin;
-                    } else if (*a_begin + sequence_.size() > *b_begin) {
+                    } else if (*a_begin + offset > *b_begin) {
                         ++b_begin;
                     } else {
-                        assert(*a_begin + sequence_.size() == *b_begin);
+                        assert(*a_begin + offset == *b_begin);
                         merged.push_back(*a_begin);
                         ++a_begin;
                         ++b_begin;
