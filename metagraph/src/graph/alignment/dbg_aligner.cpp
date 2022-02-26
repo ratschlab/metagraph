@@ -143,34 +143,19 @@ struct AlignmentPairedCoordinatesDist {
                     - a.get_query_view().data();
         }
 
-        auto a_begin = a.label_columns.begin();
-        auto a_end = a.label_columns.end();
-        auto b_begin = b.label_columns.begin();
-        auto b_end = b.label_columns.end();
-        auto a_cs_begin = a.label_coordinates.begin();
-        auto b_cs_begin = b.label_coordinates.begin();
         size_t len = b.get_sequence().size();
-        while (a_begin != a_end && b_begin != b_end) {
-            if (*a_begin < *b_begin) {
-                ++a_begin;
-                ++a_cs_begin;
-            } else if (*a_begin > *b_begin) {
-                ++b_begin;
-                ++b_cs_begin;
-            } else {
-                assert(a_cs_begin->size() == b_cs_begin->size());
-                for (size_t i = 0; i < a_cs_begin->size(); ++i) {
-                    max_dist = std::max(
-                        max_dist,
-                        static_cast<size_t>((*b_cs_begin)[i] + len - (*a_cs_begin)[i])
-                    );
+        utils::match_indexed_values(
+            a.label_columns.begin(), a.label_columns.end(),
+            a.label_coordinates.begin(),
+            b.label_columns.begin(), b.label_columns.end(),
+            b.label_coordinates.begin(),
+            [&](auto, const auto &coords, const auto &other_coords) {
+                assert(coords.size() == other_coords.size());
+                for (size_t i = 0; i < coords.size(); ++i) {
+                    max_dist = std::max(max_dist, other_coords[i] + len - coords[i]);
                 }
-                ++a_begin;
-                ++b_begin;
-                ++a_cs_begin;
-                ++b_cs_begin;
             }
-        }
+        );
 
         return max_dist;
     }

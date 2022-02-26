@@ -261,6 +261,78 @@ std::string spell_path(const DeBruijnGraph &graph,
                        const std::vector<DeBruijnGraph::node_index> &path,
                        size_t offset = 0);
 
+struct CoordIntersection {
+    CoordIntersection(int64_t offset = 0) : offset_(offset) {}
+
+    template <typename It1, typename It2, typename Out>
+    void operator()(It1 a_begin, It1 a_end, It2 b_begin, It2 b_end, Out out) const {
+        while (a_begin != a_end && b_begin != b_end) {
+            if (*a_begin + offset_ < *b_begin) {
+                ++a_begin;
+            } else if (*a_begin + offset_ > *b_begin) {
+                ++b_begin;
+            } else {
+                *out = *a_begin;
+                ++a_begin;
+                ++b_begin;
+                ++out;
+            }
+        }
+    }
+
+    int64_t offset_;
+};
+
+struct CoordDifference {
+    CoordDifference(int64_t offset = 0) : offset_(offset) {}
+
+    template <typename It1, typename It2, typename Out>
+    void operator()(It1 a_begin, It1 a_end, It2 b_begin, It2 b_end, Out out) const {
+        while (a_begin != a_end) {
+            if (b_begin == b_end || *a_begin + offset_ < *b_begin) {
+                *out = *a_begin;
+                ++a_begin;
+                ++out;
+            } else if (*a_begin + offset_ > *b_begin) {
+                ++b_begin;
+            } else {
+                ++a_begin;
+                ++b_begin;
+            }
+        }
+    }
+
+    int64_t offset_;
+};
+
+struct CoordUnion {
+    CoordUnion(int64_t offset = 0) : offset_(offset) {}
+
+    template <typename It1, typename It2, typename Out>
+    void operator()(It1 a_begin, It1 a_end, It2 b_begin, It2 b_end, Out out) const {
+        while (a_begin != a_end || b_begin != b_end) {
+            if (b_begin == b_end) {
+                *out = *a_begin;
+                ++a_begin;
+                ++out;
+            } else if (a_begin == a_end || *a_begin + offset_ > *b_begin) {
+                *out = *b_begin - offset_;
+                ++b_begin;
+                ++out;
+            } else {
+                if (*a_begin + offset_ == *b_begin)
+                    ++b_begin;
+
+                *out = *a_begin;
+                ++a_begin;
+                ++out;
+            }
+        }
+    }
+
+    int64_t offset_;
+};
+
 } // namespace align
 } // namespace graph
 } // namespace mtg
