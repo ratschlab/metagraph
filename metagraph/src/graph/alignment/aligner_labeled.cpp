@@ -960,8 +960,8 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
                                              std::back_inserter(overlap));
                             if (suffix_length >= this->config_.min_seed_length) {
                                 Alignment::Tuple c_diff;
-                                diff_coords_next(coords.begin(), coords.end(),
-                                                 other_coords.begin(), other_coords.end(),
+                                diff_coords_next(other_coords.begin(), other_coords.end(),
+                                                 coords.begin(), coords.end(),
                                                  std::back_inserter(c_diff));
                                 if (c_diff.size()) {
                                     diff_next.push_back(col);
