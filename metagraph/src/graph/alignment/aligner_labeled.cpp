@@ -314,8 +314,10 @@ void LabeledExtender::flush() {
             continue;
         }
 
-        if (node_labels_[parent_i] != node_labels_[last_flushed_table_i_])
+        if (node_labels_[parent_i] != node_labels_[last_flushed_table_i_]
+                || table_elem.node == DeBruijnGraph::npos) {
             continue;
+        }
 
         node_index node = table_elem.node;
         const auto &parent_labels
@@ -341,7 +343,9 @@ bool LabeledExtender::set_seed(const Alignment &seed) {
         return false;
 
     assert(std::all_of(seed.get_nodes().begin(), seed.get_nodes().end(),
-                       [&](node_index n) { return annotation_buffer_.get_labels(n); }));
+                    [&](node_index n) {
+                        return n == DeBruijnGraph::npos || annotation_buffer_.get_labels(n);
+                    }));
 
     // the first node of the seed has already been flushed
     last_flushed_table_i_ = 1;
