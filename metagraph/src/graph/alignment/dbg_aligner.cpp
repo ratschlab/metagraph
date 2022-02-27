@@ -136,14 +136,14 @@ void filter_seed(const Alignment &prev, Alignment &a) {
 
 // Compute the maximum coordinate distance between two alignments
 struct AlignmentPairedCoordinatesDist {
-    size_t operator()(const Alignment &a, const Alignment &b) const {
-        size_t max_dist = 0;
+    int64_t operator()(const Alignment &a, const Alignment &b) const {
+        int64_t max_dist = 0;
         if (a.label_coordinates.empty() || b.label_coordinates.empty()) {
             return b.get_query_view().data() + b.get_query_view().size()
                     - a.get_query_view().data();
         }
 
-        size_t len = b.get_sequence().size();
+        int64_t len = b.get_sequence().size();
         utils::match_indexed_values(
             a.label_columns.begin(), a.label_columns.end(),
             a.label_coordinates.begin(),
