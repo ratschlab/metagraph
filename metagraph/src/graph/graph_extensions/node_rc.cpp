@@ -19,7 +19,7 @@ template <class Indicator, class Mapping>
 NodeRC<Indicator, Mapping>::NodeRC(const DBGSuccinct &graph)
       : graph_(&graph) {
     if (graph.get_mode() != DeBruijnGraph::PRIMARY) {
-        common::logger->error("Only implemented for PRIMARY graphs");
+        logger->error("Only implemented for PRIMARY graphs");
         exit(1);
     }
 
