@@ -52,7 +52,7 @@ class NodeRC : public SequenceGraph::GraphExtension {
     // mapping_.size() == rc_->num_set_bits() * 2
     Mapping mapping_;
 
-    static constexpr auto kRCExtension = ".rc";
+    static constexpr auto kRCExtension = ".rc_adj";
 };
 
 } // namespace graph
