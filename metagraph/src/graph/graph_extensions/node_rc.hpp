@@ -16,8 +16,6 @@ class DBGSuccinct;
 // complement. When using the index construct constructor on DBGSuccinct, or when
 // loading such an index, this stores a map from each DBGSuccinct to the BOSS nodes
 // corresponding to the reverse complements of its k-1 prefix and k-1 suffix.
-template <class Indicator = bit_vector_smart,
-          class Mapping = sdsl::dac_vector_dp<sdsl::rrr_vector<>>>
 class NodeRC : public SequenceGraph::GraphExtension {
   public:
     using node_index = SequenceGraph::node_index;
@@ -43,6 +41,9 @@ class NodeRC : public SequenceGraph::GraphExtension {
 
   private:
     const DeBruijnGraph *graph_;
+
+    typedef bit_vector_smart Indicator;
+    typedef sdsl::dac_vector_dp<sdsl::rrr_vector<>> Mapping;
 
     // Indicates whether a reverse complement prefix/suffix exists for each graph node.
     Indicator rc_;

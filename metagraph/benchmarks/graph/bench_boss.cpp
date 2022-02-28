@@ -117,7 +117,7 @@ static void BM_BOSS_##NAME(benchmark::State& state) { \
         return; \
  \
     if (RC_INDEX) \
-        load_extension<NodeRC<>>(state, *base_graph); \
+        load_extension<NodeRC>(state, *base_graph); \
 \
     CanonicalDBG graph(base_graph); \
     if (BWD_CACHE) \

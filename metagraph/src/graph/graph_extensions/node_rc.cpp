@@ -17,9 +17,7 @@ using edge_index = BOSS::edge_index;
 using mtg::common::logger;
 
 
-template <class Indicator, class Mapping>
-NodeRC<Indicator, Mapping>::NodeRC(const DBGSuccinct &graph)
-      : graph_(&graph) {
+NodeRC::NodeRC(const DBGSuccinct &graph) : graph_(&graph) {
     if (graph.get_mode() != DeBruijnGraph::PRIMARY) {
         logger->error("Only implemented for PRIMARY graphs");
         exit(1);
@@ -109,10 +107,8 @@ NodeRC<Indicator, Mapping>::NodeRC(const DBGSuccinct &graph)
     mapping_ = { std::move(map) };
 }
 
-template <class Indicator, class Mapping>
-void NodeRC<Indicator, Mapping>
-::call_outgoing_from_rc(node_index node,
-                        const std::function<void(node_index)> &callback) const {
+void NodeRC::call_outgoing_from_rc(node_index node,
+                                   const std::function<void(node_index)> &callback) const {
     //        lshift    rc
     // AGCCAT -> *AGCCA -> TGGCT*
     assert(graph_);
@@ -172,10 +168,8 @@ void NodeRC<Indicator, Mapping>
     }
 }
 
-template <class Indicator, class Mapping>
-void NodeRC<Indicator, Mapping>
-::call_incoming_from_rc(node_index node,
-                        const std::function<void(node_index)> &callback) const {
+void NodeRC::call_incoming_from_rc(node_index node,
+                                   const std::function<void(node_index)> &callback) const {
     //        rshift    rc
     // ATGGCT -> TGGCT* -> *AGCCA
     assert(graph_);
@@ -239,8 +233,7 @@ void NodeRC<Indicator, Mapping>
     }
 }
 
-template <class Indicator, class Mapping>
-bool NodeRC<Indicator, Mapping>::load(const std::string &filename_base) {
+bool NodeRC::load(const std::string &filename_base) {
     const auto rc_filename = utils::make_suffix(filename_base, kRCExtension);
     try {
         std::ifstream instream(rc_filename, std::ios::binary);
@@ -257,8 +250,7 @@ bool NodeRC<Indicator, Mapping>::load(const std::string &filename_base) {
     }
 }
 
-template <class Indicator, class Mapping>
-void NodeRC<Indicator, Mapping>::serialize(const std::string &filename_base) const {
+void NodeRC::serialize(const std::string &filename_base) const {
     if (!rc_.size())
         logger->warn("NodeRC was initialized with set_graph, so nothing to serialize.");
 
@@ -269,9 +261,7 @@ void NodeRC<Indicator, Mapping>::serialize(const std::string &filename_base) con
     mapping_.serialize(outstream);
 }
 
-template <class Indicator, class Mapping>
-bool NodeRC<Indicator, Mapping>::is_compatible(const SequenceGraph &graph,
-                                               bool verbose) const {
+bool NodeRC::is_compatible(const SequenceGraph &graph, bool verbose) const {
     if (!rc_.size()) {
         if (const auto *dbg = dynamic_cast<const DeBruijnGraph*>(&graph))
             return *dbg == *graph_;
@@ -298,8 +288,6 @@ bool NodeRC<Indicator, Mapping>::is_compatible(const SequenceGraph &graph,
 
     return true;
 }
-
-template class NodeRC<>;
 
 } // namespace graph
 } // namespace mtg

@@ -38,10 +38,10 @@ CanonicalDBG::CanonicalDBG(std::shared_ptr<const DeBruijnGraph> graph, size_t ca
             has_sentinel_ = true;
     }
 
-    if (NodeRC<> *node_rc = graph_->get_extension_threadsafe<NodeRC<>>()) {
-        add_extension(std::shared_ptr<NodeRC<>>(std::shared_ptr<NodeRC<>>{}, node_rc));
+    if (NodeRC *node_rc = graph_->get_extension_threadsafe<NodeRC>()) {
+        add_extension(std::shared_ptr<NodeRC>(std::shared_ptr<NodeRC>{}, node_rc));
     } else {
-        auto ext = std::make_shared<NodeRC<>>();
+        auto ext = std::make_shared<NodeRC>();
         ext->set_graph(*graph_);
         add_extension(ext);
     }
@@ -187,13 +187,13 @@ void CanonicalDBG
 
         // for each n, check for nAGCCA. If found, define and store the index for
         // TGGCTrc(n) as index(nAGCCA) + offset_
-        assert(get_extension<NodeRC<>>());
+        assert(get_extension<NodeRC>());
 
         const DBGSuccinct *dbg_succ = get_dbg_succ(*graph_);
         const boss::BOSS *boss = dbg_succ ? &dbg_succ->get_boss() : nullptr;
         const auto cache = get_extension<NodeFirstCache>();
 
-        get_extension<NodeRC<>>()->call_incoming_from_rc(node, [&](node_index next) {
+        get_extension<NodeRC>()->call_incoming_from_rc(node, [&](node_index next) {
             char c;
             if (cache) {
                 c = cache->get_first_char(next);
@@ -280,12 +280,12 @@ void CanonicalDBG
 
         // for each n, check for TGGCTn. If found, define and store the index for
         // rc(n)AGCCA as index(TGGCTn) + offset_
-        assert(get_extension<NodeRC<>>());
+        assert(get_extension<NodeRC>());
 
         const DBGSuccinct *dbg_succ = get_dbg_succ(*graph_);
         const boss::BOSS *boss = dbg_succ ? &dbg_succ->get_boss() : nullptr;
 
-        get_extension<NodeRC<>>()->call_outgoing_from_rc(node, [&](node_index prev) {
+        get_extension<NodeRC>()->call_outgoing_from_rc(node, [&](node_index prev) {
             char c = boss
                 ? boss->decode(boss->get_W(dbg_succ->kmer_to_boss_index(prev)) % boss->alph_size)
                 : graph_->get_node_sequence(prev).back();
