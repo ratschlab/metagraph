@@ -892,11 +892,8 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
         Columns found_labels;
         Alignment::CoordinateSet found_coords;
         assert(this->graph_.get_k() - seed.get_offset() >= this->config_.min_seed_length);
-        size_t suffix_trim = seed.get_sequence().size()
-                                - (this->graph_.get_k() - seed.get_offset());
         size_t suffix_length = seed.get_sequence().size() - 1;
-        for (size_t prefix_trim = 1; prefix_trim < nodes.size();
-                ++prefix_trim, --suffix_length, --suffix_trim) {
+        for (size_t prefix_trim = 1; prefix_trim < nodes.size(); ++prefix_trim, --suffix_length) {
             auto [next_fetch_labels, next_fetch_coords]
                 = annotation_buffer_.get_labels_and_coords(nodes[prefix_trim]);
             assert(next_fetch_labels);
@@ -1056,7 +1053,7 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
             }
 
             if (diff_cur.size()) {
-                seed.trim_reference_suffix(suffix_trim, this->config_);
+                seed.trim_reference_suffix(seed.size() - prefix_trim, this->config_);
                 break;
             }
         }
