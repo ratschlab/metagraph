@@ -956,7 +956,7 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
                 );
 
                 if (diff_next.size()) {
-                    assert(suffix_length >= this->config_.min_seed_length);
+                    Columns found_labels_update;
                     Columns diff_next_filtered;
                     Alignment::CoordinateSet coord_diff_next_filtered;
                     utils::match_indexed_values(
@@ -982,28 +982,7 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
                     );
                     std::swap(diff_next, diff_next_filtered);
                     std::swap(coord_diff_next, coord_diff_next_filtered);
-                }
-            } else {
-                set_intersection_difference(seed.label_columns.begin(),
-                                            seed.label_columns.end(),
-                                            next_fetch_labels->begin(),
-                                            next_fetch_labels->end(),
-                                            std::back_inserter(inter),
-                                            std::back_inserter(diff_cur),
-                                            std::back_inserter(diff_next));
-                if (suffix_length >= this->config_.min_seed_length && diff_next.size()) {
-                    Columns diff_next_filtered;
-                    std::set_difference(diff_next.begin(), diff_next.end(),
-                                        found_labels.begin(), found_labels.end(),
-                                        std::back_inserter(diff_next_filtered));
-                    std::swap(diff_next, diff_next_filtered);
-                }
-            }
 
-            if (diff_next.size()) {
-                assert(suffix_length >= this->config_.min_seed_length);
-                Columns found_labels_update;
-                if (coord_diff_next.size()) {
                     Alignment::CoordinateSet found_coords_update;
                     CoordUnion coord_union(prefix_trim);
                     utils::match_indexed_values(
@@ -1031,13 +1010,34 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
                         }
                     );
                     std::swap(found_coords, found_coords_update);
-                } else {
+                    std::swap(found_labels, found_labels_update);
+                }
+            } else {
+                set_intersection_difference(seed.label_columns.begin(),
+                                            seed.label_columns.end(),
+                                            next_fetch_labels->begin(),
+                                            next_fetch_labels->end(),
+                                            std::back_inserter(inter),
+                                            std::back_inserter(diff_cur),
+                                            std::back_inserter(diff_next));
+                if (suffix_length < this->config_.min_seed_length) {
+                    diff_next.clear();
+                } else if (diff_next.size()) {
+                    Columns found_labels_update;
+                    Columns diff_next_filtered;
+                    std::set_difference(diff_next.begin(), diff_next.end(),
+                                        found_labels.begin(), found_labels.end(),
+                                        std::back_inserter(diff_next_filtered));
+                    std::swap(diff_next, diff_next_filtered);
                     std::set_union(found_labels.begin(), found_labels.end(),
                                    diff_next.begin(), diff_next.end(),
                                    std::back_inserter(found_labels_update));
+                    std::swap(found_labels, found_labels_update);
                 }
-                std::swap(found_labels, found_labels_update);
+            }
 
+            if (diff_next.size()) {
+                assert(suffix_length >= this->config_.min_seed_length);
                 auto &new_seed = new_seed_suffixes.emplace_back(seed);
                 new_seed.label_columns.clear();
                 new_seed.label_coordinates.clear();
