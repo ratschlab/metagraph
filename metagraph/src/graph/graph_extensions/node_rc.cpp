@@ -2,10 +2,8 @@
 
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
-#include "common/vectors/bitmap_builder.hpp"
 #include "common/utils/template_utils.hpp"
 
-#include <progress_bar.hpp>
 #include <ips4o.hpp>
 #include <mutex>
 
@@ -25,81 +23,58 @@ NodeRC::NodeRC(const DBGSuccinct &graph) : graph_(&graph) {
 
     const BOSS &boss = graph.get_boss();
 
-    std::unique_ptr<bitmap_builder> builder;
-    builder = std::make_unique<bitmap_builder_set>(graph.max_index() + 1, 0,
-                                                   graph.num_nodes() * 0.06);
-
     std::mutex mu;
 
     std::vector<std::pair<node_index, std::pair<edge_index, edge_index>>> mapping;
     graph.call_sequences([&](const std::string &seq, const std::vector<node_index> &path) {
+        assert(seq.size() == path.size() + boss.get_k());
         std::string rev_seq = seq;
         ::reverse_complement(rev_seq.begin(), rev_seq.end());
+
+        // map each (k-1)-mer from the reverse complement to BOSS nodes
         auto encoded = boss.encode(rev_seq);
+        std::vector<edge_index> rc_edges;
+        rc_edges.reserve(path.size() + 1);
+        for (auto it = encoded.rbegin() + boss.get_k(); it <= encoded.rend(); ++it) {
+            auto [edge, edge_2, end] = boss.index_range(it.base(), it.base() + boss.get_k());
+            assert(end != it.base() + boss.get_k() || edge == edge_2);
+            rc_edges.emplace_back(end == it.base() + boss.get_k() ? edge : 0);
+        }
+        assert(rc_edges.size() == path.size() + 1);
 
-        // initialize
-        auto it = encoded.end() - boss.get_k();
-        auto [edge, edge_2, end] = boss.index_range(it, it + boss.get_k());
-        assert(end != it + boss.get_k() || edge == edge_2);
-
-        for (size_t i = 0; i < path.size(); ++i) {
-            // prefix
-            size_t map_i = 0;
-            bool found = false;
-            if (end == it + boss.get_k()) {
+        // For each contig node, determine if the prefix or the suffix of its reverse
+        // complement maps to a BOSS node. If so, then record the mapping
+        auto it = rc_edges.begin();
+        for (size_t i = 0; i < path.size(); ++i, ++it) {
+            if (*it || *(it + 1)) {
                 std::lock_guard<std::mutex> lock(mu);
-                assert(edge);
-                map_i = mapping.size();
-                mapping.emplace_back(path[i], std::make_pair(edge, 0));
-                found = true;
-                builder->add_one(path[i]);
-            }
-
-            // suffix
-            --it;
-            std::tie(edge, edge_2, end) = boss.index_range(it, it + boss.get_k());
-            assert(end != it + boss.get_k() || edge == edge_2);
-
-            if (end == it + boss.get_k()) {
-                std::lock_guard<std::mutex> lock(mu);
-                assert(edge);
-                if (found) {
-                    assert(mapping[map_i].first == path[i]);
-                    assert(mapping[map_i].second.first);
-                    assert(!mapping[map_i].second.second);
-                    mapping[map_i].second.second = edge;
-                } else {
-                    builder->add_one(path[i]);
-                    mapping.emplace_back(path[i], std::make_pair(0, edge));
-                }
+                mapping.emplace_back(path[i], std::make_pair(*it, *(it + 1)));
             }
         }
-        assert(it == encoded.begin());
     }, get_num_threads());
 
     logger->trace("Found {} / {} ({:.2f}%) nodes with reverse complements",
                   mapping.size(), graph.num_nodes(),
                   100.0 * mapping.size() / graph.num_nodes());
 
-    logger->trace("Generating reverse complement indicator vector");
-    auto initialization_data = builder->get_initialization_data();
-    assert(initialization_data.num_set_bits == mapping.size());
-    rc_ = Indicator(initialization_data.call_ones,
-                    initialization_data.size,
-                    initialization_data.num_set_bits);
-    builder.reset();
-
+    // sort by node ID, then construct the binary indicator vector at the compressed
+    // node-to-rc mapping
     logger->trace("Constructing reverse complement map");
     ips4o::parallel::sort(mapping.begin(), mapping.end(), utils::LessFirst(),
                           get_num_threads());
+
     std::vector<uint64_t> map;
     map.reserve(mapping.size() * 2);
 
-    for (size_t i = 0; i < mapping.size(); ++i) {
-        assert(rc_.select1(i + 1) == mapping[i].first);
-        map.emplace_back(mapping[i].second.first);
-        map.emplace_back(mapping[i].second.second);
-    }
+    rc_ = Indicator([&](const auto &callback) {
+                        for (const auto &[node, rc] : mapping) {
+                            callback(node);
+                            map.emplace_back(rc.first);
+                            map.emplace_back(rc.second);
+                        }
+                    },
+                    graph.max_index() + 1,
+                    mapping.size());
 
     mapping = decltype(mapping)();
 
