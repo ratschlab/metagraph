@@ -244,12 +244,9 @@ bool overlap_with_diff(const T1 &tuple1, const T2 &tuple2, int64_t diff) {
 }
 
 template <class AIt, class BIt, class OutIt, class OutIt2>
-void set_intersection_difference(AIt a_begin,
-                                 AIt a_end,
-                                 BIt b_begin,
-                                 BIt b_end,
-                                 OutIt intersection_out,
-                                 OutIt2 diff_out) {
+void set_intersection_difference(AIt a_begin, AIt a_end,
+                                 BIt b_begin, BIt b_end,
+                                 OutIt intersection_out, OutIt2 diff_out) {
     while (a_begin != a_end) {
         if (b_begin == b_end || *a_begin < *b_begin) {
             *diff_out = *a_begin;
@@ -266,36 +263,43 @@ void set_intersection_difference(AIt a_begin,
     }
 }
 
-template <class AIt, class BIt, class OutIt, class OutIt2, class OutIt3>
-void set_intersection_difference(AIt a_begin,
-                                 AIt a_end,
-                                 BIt b_begin,
-                                 BIt b_end,
-                                 OutIt intersection_out,
-                                 OutIt2 diff_out,
-                                 OutIt3 diff_out2) {
+template <class AIt, class BIt, class CallbackInter, class CallbackDiff1, class CallbackDiff2>
+void call_set_intersection_difference(AIt a_begin, AIt a_end,
+                                      BIt b_begin, BIt b_end,
+                                      const CallbackInter &callback_inter,
+                                      const CallbackDiff1 &callback_diff1,
+                                      const CallbackDiff2 &callback_diff2) {
     while (a_begin != a_end || b_begin != b_end) {
         if (b_begin == b_end) {
-            *diff_out = *a_begin;
-            ++diff_out;
+            callback_diff1(*a_begin);
             ++a_begin;
         } else if (a_begin == a_end || *a_begin > *b_begin) {
-            *diff_out2 = *b_begin;
-            ++diff_out2;
+            callback_diff2(*b_begin);
             ++b_begin;
         } else {
             if (*a_begin == *b_begin) {
-                *intersection_out = *a_begin;
-                ++intersection_out;
+                callback_inter(*a_begin);
                 ++b_begin;
             } else {
-                *diff_out = *a_begin;
-                ++diff_out;
+                callback_diff1(*a_begin);
             }
 
             ++a_begin;
         }
     }
+}
+
+template <class AIt, class BIt, class OutIt, class OutIt2, class OutIt3>
+void set_intersection_difference(AIt a_begin, AIt a_end,
+                                 BIt b_begin, BIt b_end,
+                                 OutIt intersection_out,
+                                 OutIt2 diff_out,
+                                 OutIt3 diff_out2) {
+    call_set_intersection_difference(a_begin, a_end, b_begin, b_end,
+        [&](const auto &inter) { *intersection_out = inter; ++intersection_out; },
+        [&](const auto &diff1) { *diff_out = diff1; ++diff_out; },
+        [&](const auto &diff2) { *diff_out2 = diff2; ++diff_out2; }
+    );
 }
 
 LabeledExtender::LabeledExtender(const IDBGAligner &aligner, std::string_view query)
@@ -958,38 +962,13 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
                 if (diff_next.size()) {
                     Columns found_labels_update;
                     Columns diff_next_filtered;
-                    Alignment::CoordinateSet coord_diff_next_filtered;
-                    utils::match_indexed_values(
-                        diff_next.begin(), diff_next.end(),
-                        coord_diff_next.begin(),
-                        found_labels.begin(), found_labels.end(),
-                        found_coords.begin(),
-                        [&](auto col, const auto &coords, const auto &other_coords) {
-                            Alignment::Tuple c_diff;
-                            diff_coords_next(other_coords.begin(), other_coords.end(),
-                                             coords.begin(), coords.end(),
-                                             std::back_inserter(c_diff));
-                            if (c_diff.size()) {
-                                diff_next_filtered.push_back(col);
-                                coord_diff_next_filtered.push_back(std::move(c_diff));
-                            }
-                        },
-                        [&](auto col, const auto &coords) {
-                            diff_next_filtered.push_back(col);
-                            coord_diff_next_filtered.push_back(coords);
-                        },
-                        [](const auto&, const auto&) {}
-                    );
-                    std::swap(diff_next, diff_next_filtered);
-                    std::swap(coord_diff_next, coord_diff_next_filtered);
-
                     Alignment::CoordinateSet found_coords_update;
+                    Alignment::CoordinateSet coord_diff_next_filtered;
                     CoordUnion coord_union(prefix_trim);
+
                     utils::match_indexed_values(
-                        found_labels.begin(), found_labels.end(),
-                        found_coords.begin(),
-                        diff_next.begin(), diff_next.end(),
-                        coord_diff_next.begin(),
+                        diff_next.begin(), diff_next.end(), coord_diff_next.begin(),
+                        found_labels.begin(), found_labels.end(), found_coords.begin(),
                         [&](auto col, const auto &coords, const auto &other_coords) {
                             found_labels_update.push_back(col);
                             found_coords_update.emplace_back();
@@ -998,17 +977,22 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
                                         std::back_inserter(found_coords_update.back()));
                         },
                         [&](auto col, const auto &coords) {
-                            found_labels_update.push_back(col);
-                            found_coords_update.push_back(coords);
-                        },
-                        [&](auto col, const auto &coords) {
+                            diff_next_filtered.push_back(col);
+                            coord_diff_next_filtered.push_back(coords);
                             found_labels_update.push_back(col);
                             found_coords_update.push_back(coords);
                             for (auto &c : found_coords_update.back()) {
                                 c -= prefix_trim;
                             }
+                        },
+                        [&](auto col, const auto &coords) {
+                            found_labels_update.push_back(col);
+                            found_coords_update.push_back(coords);
                         }
                     );
+
+                    std::swap(diff_next, diff_next_filtered);
+                    std::swap(coord_diff_next, coord_diff_next_filtered);
                     std::swap(found_coords, found_coords_update);
                     std::swap(found_labels, found_labels_update);
                 }
@@ -1023,15 +1007,19 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
                 if (suffix_length < this->config_.min_seed_length) {
                     diff_next.clear();
                 } else if (diff_next.size()) {
-                    Columns found_labels_update;
                     Columns diff_next_filtered;
-                    std::set_difference(diff_next.begin(), diff_next.end(),
-                                        found_labels.begin(), found_labels.end(),
-                                        std::back_inserter(diff_next_filtered));
+                    Columns found_labels_update;
+                    call_set_intersection_difference(
+                        diff_next.begin(), diff_next.end(),
+                        found_labels.begin(), found_labels.end(),
+                        [&](const auto &inter) { found_labels_update.push_back(inter); },
+                        [&](const auto &diff_new) {
+                            diff_next_filtered.push_back(diff_new);
+                            found_labels_update.push_back(diff_new);
+                        },
+                        [&](const auto &inter) { found_labels_update.push_back(inter); }
+                    );
                     std::swap(diff_next, diff_next_filtered);
-                    std::set_union(found_labels.begin(), found_labels.end(),
-                                   diff_next.begin(), diff_next.end(),
-                                   std::back_inserter(found_labels_update));
                     std::swap(found_labels, found_labels_update);
                 }
             }
