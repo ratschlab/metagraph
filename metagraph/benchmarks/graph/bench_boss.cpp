@@ -115,20 +115,25 @@ static void BM_BOSS_##NAME(benchmark::State& state) { \
     auto base_graph = load_graph(state); \
     if (!base_graph) \
         return; \
- \
-    if (RC_INDEX) \
-        load_extension<NodeRC>(state, *base_graph); \
 \
-    CanonicalDBG graph(base_graph); \
-    if (BWD_CACHE) \
-        graph.add_extension(std::make_shared<NodeFirstCache>(*base_graph)); \
+    std::shared_ptr<DeBruijnGraph> graph = base_graph; \
+    if (base_graph->get_mode() == DeBruijnGraph::PRIMARY) { \
+        if (RC_INDEX) \
+            load_extension<NodeRC>(state, *base_graph); \
+\
+        auto canonical = std::make_shared<CanonicalDBG>(base_graph); \
+        if (BWD_CACHE) \
+            canonical->add_extension(std::make_shared<NodeFirstCache>(*base_graph)); \
+\
+        graph = canonical; \
+    } \
 \
     size_t size = NUM_DISTINCT_INDEXES >> 2; \
-    auto indexes = random_traversal_numbers(graph, size, PATH_SIZE); \
+    auto indexes = random_traversal_numbers(*graph, size, PATH_SIZE); \
     size_t i = 0; \
     for (auto _ : state) { \
         DeBruijnGraph::node_index node = indexes[i++ % size]; \
-        graph.OPERATION(node, [](auto node, char c) { \
+        graph->OPERATION(node, [](auto node, char c) { \
             benchmark::DoNotOptimize(node); \
             benchmark::DoNotOptimize(c); \
         }); \
@@ -136,10 +141,10 @@ static void BM_BOSS_##NAME(benchmark::State& state) { \
 } \
 BENCHMARK(BM_BOSS_##NAME) -> Unit(benchmark::kMicrosecond); \
 
-DEFINE_BOSS_PATH_BENCHMARK(call_outgoing_kmers_path_cache, call_outgoing_kmers, false, false);
-DEFINE_BOSS_PATH_BENCHMARK(call_outgoing_kmers_bwdcache_path_cache, call_outgoing_kmers, true, false);
-DEFINE_BOSS_PATH_BENCHMARK(call_outgoing_kmers_rcindex_path_cache, call_outgoing_kmers, false, true);
-DEFINE_BOSS_PATH_BENCHMARK(call_outgoing_kmers_bwdcache_rcindex_path_cache, call_outgoing_kmers, true, true);
+DEFINE_BOSS_PATH_BENCHMARK(call_outgoing_kmers_path, call_outgoing_kmers, false, false);
+DEFINE_BOSS_PATH_BENCHMARK(call_outgoing_kmers_bwdcache_path, call_outgoing_kmers, true, false);
+DEFINE_BOSS_PATH_BENCHMARK(call_outgoing_kmers_rcindex_path, call_outgoing_kmers, false, true);
+DEFINE_BOSS_PATH_BENCHMARK(call_outgoing_kmers_bwdcache_rcindex_path, call_outgoing_kmers, true, true);
 
 
 static void BM_BOSS_get_W_and_fwd(benchmark::State &state) {
