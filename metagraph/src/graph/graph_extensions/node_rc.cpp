@@ -263,11 +263,18 @@ void NodeRC::serialize(const std::string &filename_base) const {
 
 bool NodeRC::is_compatible(const SequenceGraph &graph, bool verbose) const {
     if (!rc_.size()) {
-        if (const auto *dbg = dynamic_cast<const DeBruijnGraph*>(&graph))
-            return *dbg == *graph_;
+        if (const auto *dbg = dynamic_cast<const DeBruijnGraph*>(&graph)) {
+            if (dbg == graph_)
+                return true;
+
+            if (verbose)
+                logger->error("Stored graph pointer does not match");
+
+            return false;
+        }
 
         if (verbose)
-            logger->error("only compatible with DeBruijnGraph");
+            logger->error("Only compatible with DeBruijnGraph");
 
         return false;
     }
