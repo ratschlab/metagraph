@@ -304,7 +304,7 @@ int align_to_graph(Config *config) {
     if (dbg_succ) {
         dbg_succ->reset_mask();
         if (auto node_rc = dbg_succ->load_extension<NodeRC<>>(config->infbase)) {
-            common::logger->trace("Loaded graph RC file");
+            logger->trace("Loaded graph RC file");
             node_rc->set_graph(*dbg_succ);
         }
     }
