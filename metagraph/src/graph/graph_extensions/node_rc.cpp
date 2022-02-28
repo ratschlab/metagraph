@@ -14,6 +14,8 @@ namespace graph {
 
 using boss::BOSS;
 using edge_index = BOSS::edge_index;
+using mtg::common::logger;
+
 
 template <class Indicator, class Mapping>
 NodeRC<Indicator, Mapping>::NodeRC(const DBGSuccinct &graph)
@@ -77,11 +79,11 @@ NodeRC<Indicator, Mapping>::NodeRC(const DBGSuccinct &graph)
         assert(it == encoded.begin());
     }, get_num_threads());
 
-    common::logger->trace("Found {} / {} ({:.2f}%) nodes with reverse complements",
-                          mapping.size(), graph.num_nodes(),
-                          100.0 * mapping.size() / graph.num_nodes());
+    logger->trace("Found {} / {} ({:.2f}%) nodes with reverse complements",
+                  mapping.size(), graph.num_nodes(),
+                  100.0 * mapping.size() / graph.num_nodes());
 
-    common::logger->trace("Generating reverse complement indicator vector");
+    logger->trace("Generating reverse complement indicator vector");
     auto initialization_data = builder->get_initialization_data();
     assert(initialization_data.num_set_bits == mapping.size());
     rc_ = Indicator(initialization_data.call_ones,
@@ -89,7 +91,7 @@ NodeRC<Indicator, Mapping>::NodeRC(const DBGSuccinct &graph)
                     initialization_data.num_set_bits);
     builder.reset();
 
-    common::logger->trace("Constructing reverse complement map");
+    logger->trace("Constructing reverse complement map");
     ips4o::parallel::sort(mapping.begin(), mapping.end(), utils::LessFirst(),
                           get_num_threads());
     std::vector<uint64_t> map;
@@ -103,7 +105,7 @@ NodeRC<Indicator, Mapping>::NodeRC(const DBGSuccinct &graph)
 
     mapping = decltype(mapping)();
 
-    common::logger->trace("Compressing reverse complement map");
+    logger->trace("Compressing reverse complement map");
     mapping_ = { std::move(map) };
 }
 
