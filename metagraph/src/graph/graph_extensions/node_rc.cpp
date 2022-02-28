@@ -111,8 +111,8 @@ NodeRC<Indicator, Mapping>::NodeRC(const DBGSuccinct &graph)
 
 template <class Indicator, class Mapping>
 void NodeRC<Indicator, Mapping>
-::call_outgoing_nodes_from_rc(node_index node,
-                              const std::function<void(node_index)> &callback) const {
+::call_outgoing_from_rc(node_index node,
+                        const std::function<void(node_index)> &callback) const {
     //        lshift    rc
     // AGCCAT -> *AGCCA -> TGGCT*
     assert(graph_);
@@ -174,8 +174,8 @@ void NodeRC<Indicator, Mapping>
 
 template <class Indicator, class Mapping>
 void NodeRC<Indicator, Mapping>
-::call_incoming_nodes_from_rc(node_index node,
-                              const std::function<void(node_index)> &callback) const {
+::call_incoming_from_rc(node_index node,
+                        const std::function<void(node_index)> &callback) const {
     //        rshift    rc
     // ATGGCT -> TGGCT* -> *AGCCA
     assert(graph_);
@@ -252,7 +252,7 @@ bool NodeRC<Indicator, Mapping>::load(const std::string &filename_base) {
         return true;
 
     } catch (...) {
-        std::cerr << "ERROR: Cannot load graph RC from file " << rc_filename << std::endl;
+        logger->error("Cannot load graph RC from file {}", rc_filename);
         return false;
     }
 }
@@ -260,7 +260,7 @@ bool NodeRC<Indicator, Mapping>::load(const std::string &filename_base) {
 template <class Indicator, class Mapping>
 void NodeRC<Indicator, Mapping>::serialize(const std::string &filename_base) const {
     if (!rc_.size())
-        std::cerr << "WARNING: NodeRC was initialized with set_graph, so nothing to serialize." << std::endl;
+        logger->warn("NodeRC was initialized with set_graph, so nothing to serialize.");
 
     const auto fname = utils::make_suffix(filename_base, kRCExtension);
 
@@ -277,22 +277,21 @@ bool NodeRC<Indicator, Mapping>::is_compatible(const SequenceGraph &graph,
             return *dbg == *graph_;
 
         if (verbose)
-            std::cerr << "ERROR: only compatible with DeBruijnGraph" << std::endl;
+            logger->error("only compatible with DeBruijnGraph");
 
         return false;
     }
 
     if (graph.max_index() + 1 != rc_.size()) {
-        if (verbose) {
-            std::cerr << "ERROR: RC file does not match number of nodes in graph"
-                      << std::endl;
-        }
+        if (verbose)
+            logger->error("RC file does not match number of nodes in graph");
+
         return false;
     }
 
     if (rc_.num_set_bits() * 2 != mapping_.size()) {
         if (verbose)
-            std::cerr << "ERROR: RC file contains the wrong mapping" << std::endl;
+            logger->error("RC file contains the wrong mapping");
 
         return false;
     }

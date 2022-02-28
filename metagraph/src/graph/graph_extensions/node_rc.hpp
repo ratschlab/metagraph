@@ -33,8 +33,8 @@ class NodeRC : public SequenceGraph::GraphExtension {
         graph_ = &graph;
     }
 
-    void call_outgoing_nodes_from_rc(node_index node, const std::function<void(node_index)> &callback) const;
-    void call_incoming_nodes_from_rc(node_index node, const std::function<void(node_index)> &callback) const;
+    void call_outgoing_from_rc(node_index node, const std::function<void(node_index)> &callback) const;
+    void call_incoming_from_rc(node_index node, const std::function<void(node_index)> &callback) const;
 
     bool load(const std::string &filename_base);
     void serialize(const std::string &filename_base) const;
