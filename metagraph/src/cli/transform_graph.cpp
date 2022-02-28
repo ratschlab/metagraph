@@ -40,7 +40,7 @@ int transform_graph(Config *config) {
     if (!dbg_succ.get())
         throw std::runtime_error("Only implemented for DBGSuccinct");
 
-    if (config->noderc) {
+    if (config->adjrc) {
         graph::NodeRC(*dbg_succ).serialize(config->outfbase + dbg_succ->file_extension());
         return 0;
     }
