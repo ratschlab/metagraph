@@ -964,7 +964,7 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
                     Columns diff_next_filtered;
                     Alignment::CoordinateSet found_coords_update;
                     Alignment::CoordinateSet coord_diff_next_filtered;
-                    CoordUnion coord_union(prefix_trim);
+                    CoordUnion coord_union(-static_cast<int64_t>(prefix_trim));
 
                     utils::match_indexed_values(
                         diff_next.begin(), diff_next.end(), coord_diff_next.begin(),
