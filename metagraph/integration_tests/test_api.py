@@ -154,9 +154,7 @@ class TestAPIRaw(TestAPIBase):
     def test_api_raw_align_sequence(self, repetitions, dummy_arg):
         fasta_str = '\n'.join([ f">query{i}\nTCGATCGA" for i in range(repetitions)])
 
-        payload = json.dumps({"FASTA": fasta_str,
-                              "min_exact_match": 0,
-                              "max_alternative_alignments": 10})
+        payload = json.dumps({"FASTA": fasta_str, "min_exact_match": 0})
 
         ret = self.raw_post_request('align', payload)
 
