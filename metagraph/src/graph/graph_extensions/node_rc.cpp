@@ -236,35 +236,27 @@ void NodeRC::serialize(const std::string &filename_base) const {
     mapping_.serialize(outstream);
 }
 
-bool NodeRC::is_compatible(const SequenceGraph &graph, bool verbose) const {
+bool NodeRC::is_compatible(const SequenceGraph &graph, bool) const {
     if (!rc_.size()) {
         if (const auto *dbg = dynamic_cast<const DeBruijnGraph*>(&graph)) {
             if (dbg == graph_)
                 return true;
 
-            if (verbose)
-                logger->error("Stored graph pointer does not match");
-
+            logger->error("Stored graph pointer does not match");
             return false;
         }
 
-        if (verbose)
-            logger->error("Only compatible with DeBruijnGraph");
-
+        logger->error("Only compatible with DeBruijnGraph");
         return false;
     }
 
     if (graph.max_index() + 1 != rc_.size()) {
-        if (verbose)
-            logger->error("RC file does not match number of nodes in graph");
-
+        logger->error("RC file does not match number of nodes in graph");
         return false;
     }
 
     if (rc_.num_set_bits() * 2 != mapping_.size()) {
-        if (verbose)
-            logger->error("RC file contains the wrong mapping");
-
+        logger->error("RC file contains the wrong mapping");
         return false;
     }
 

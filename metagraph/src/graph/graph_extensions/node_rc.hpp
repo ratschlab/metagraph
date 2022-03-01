@@ -46,11 +46,12 @@ class NodeRC : public SequenceGraph::GraphExtension {
     typedef sdsl::dac_vector_dp<sdsl::rrr_vector<>> Mapping;
 
     // Indicates whether a reverse complement prefix/suffix exists for each graph node.
+    // If the index is initialized, then rc_.size() == graph_->max_index() + 1
     Indicator rc_;
 
     // Vector storing the indices of the reverse complements of the node prefix and
     // suffix (if they exist) in an interleaved form.
-    // mapping_.size() == rc_->num_set_bits() * 2
+    // If the index is initialized, then mapping_.size() == rc_->num_set_bits() * 2
     Mapping mapping_;
 
     static constexpr auto kRCExtension = ".rc_adj";
