@@ -176,6 +176,69 @@ namespace utils {
         }
     }
 
+    template <typename It1, typename It2, typename Out>
+    constexpr void set_intersection(It1 a_begin, It1 a_end,
+                                    It2 b_begin, It2 b_end,
+                                    Out out,
+                                    int64_t delta = 0) {
+        while (a_begin != a_end && b_begin != b_end) {
+            if (*a_begin + delta < *b_begin) {
+                ++a_begin;
+            } else if (*a_begin + delta > *b_begin) {
+                ++b_begin;
+            } else {
+                *out = *a_begin;
+                ++a_begin;
+                ++b_begin;
+                ++out;
+            }
+        }
+    }
+
+    template <typename It1, typename It2, typename Out>
+    constexpr void set_difference(It1 a_begin, It1 a_end,
+                                  It2 b_begin, It2 b_end,
+                                  Out out,
+                                  int64_t delta = 0) {
+        while (a_begin != a_end) {
+            if (b_begin == b_end || *a_begin + delta < *b_begin) {
+                *out = *a_begin;
+                ++a_begin;
+                ++out;
+            } else if (*a_begin + delta > *b_begin) {
+                ++b_begin;
+            } else {
+                ++a_begin;
+                ++b_begin;
+            }
+        }
+    }
+
+    template <typename It1, typename It2, typename Out>
+    constexpr void set_union(It1 a_begin, It1 a_end,
+                             It2 b_begin, It2 b_end,
+                             Out out,
+                             int64_t delta = 0) {
+        while (a_begin != a_end || b_begin != b_end) {
+            if (b_begin == b_end) {
+                *out = *a_begin;
+                ++a_begin;
+                ++out;
+            } else if (a_begin == a_end || *a_begin + delta > *b_begin) {
+                *out = *b_begin - delta;
+                ++b_begin;
+                ++out;
+            } else {
+                if (*a_begin + delta == *b_begin)
+                    ++b_begin;
+
+                *out = *a_begin;
+                ++a_begin;
+                ++out;
+            }
+        }
+    }
+
     // Bitmap |new_indexes| marks positions of inserted values in the final vector
     template <class Vector, class Bitmap>
     void insert(Vector *vector,

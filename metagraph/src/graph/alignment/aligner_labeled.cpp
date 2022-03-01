@@ -614,7 +614,6 @@ void LabeledExtender::call_alignments(score_t end_score,
             std::swap(cur_labels, base_labels);
             std::swap(cur_coords, base_coords);
         }
-        CoordIntersection intersect_coords(dist);
         try {
             utils::match_indexed_values(
                 base_labels->begin(), base_labels->end(), base_coords->begin(),
@@ -631,9 +630,10 @@ void LabeledExtender::call_alignments(score_t end_score,
                         return;
 
                     Alignment::Tuple overlap;
-                    intersect_coords(coords.begin(), coords.end(),
-                                     other_coords.begin(), other_coords.end(),
-                                     std::back_inserter(overlap));
+                    utils::set_intersection(coords.begin(), coords.end(),
+                                            other_coords.begin(), other_coords.end(),
+                                            std::back_inserter(overlap),
+                                            dist);
                     if (overlap.size()) {
                         alignment.label_columns.emplace_back(c);
                         alignment.label_coordinates.emplace_back(std::move(overlap));
@@ -906,9 +906,6 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
             Alignment::CoordinateSet coord_diff_next;
 
             if (next_fetch_coords) {
-                CoordIntersection intersect_coords(prefix_trim);
-                CoordDifference diff_coords_cur(prefix_trim);
-                CoordDifference diff_coords_next(-static_cast<ssize_t>(prefix_trim));
                 utils::match_indexed_values(
                     seed.label_columns.begin(), seed.label_columns.end(),
                     seed.label_coordinates.begin(),
@@ -916,14 +913,18 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
                     next_fetch_coords->begin(),
                     [&](auto col, const auto &coords, const auto &other_coords) {
                         Alignment::Tuple overlap;
-                        intersect_coords(coords.begin(), coords.end(),
-                                         other_coords.begin(), other_coords.end(),
-                                         std::back_inserter(overlap));
+                        utils::set_intersection(coords.begin(), coords.end(),
+                                                other_coords.begin(),
+                                                other_coords.end(),
+                                                std::back_inserter(overlap),
+                                                prefix_trim);
                         if (suffix_length >= this->config_.min_seed_length) {
                             Alignment::Tuple c_diff;
-                            diff_coords_next(other_coords.begin(), other_coords.end(),
-                                             coords.begin(), coords.end(),
-                                             std::back_inserter(c_diff));
+                            utils::set_difference(other_coords.begin(),
+                                                  other_coords.end(),
+                                                  coords.begin(), coords.end(),
+                                                  std::back_inserter(c_diff),
+                                                  -static_cast<ssize_t>(prefix_trim));
                             if (c_diff.size()) {
                                 diff_next.push_back(col);
                                 coord_diff_next.push_back(std::move(c_diff));
@@ -931,9 +932,10 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
                         }
 
                         Alignment::Tuple c_diff;
-                        diff_coords_cur(coords.begin(), coords.end(),
-                                        other_coords.begin(), other_coords.end(),
-                                        std::back_inserter(c_diff));
+                        utils::set_difference(coords.begin(), coords.end(),
+                                              other_coords.begin(), other_coords.end(),
+                                              std::back_inserter(c_diff),
+                                              prefix_trim);
                         if (c_diff.size()) {
                             diff_cur.push_back(col);
                             coord_diff_cur.push_back(std::move(c_diff));
@@ -961,7 +963,6 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
                     Columns diff_next_filtered;
                     Alignment::CoordinateSet found_coords_update;
                     Alignment::CoordinateSet coord_diff_next_filtered;
-                    CoordUnion coord_union(-static_cast<int64_t>(prefix_trim));
 
                     utils::match_indexed_values(
                         diff_next.begin(), diff_next.end(), coord_diff_next.begin(),
@@ -969,9 +970,12 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
                         [&](auto col, const auto &coords, const auto &other_coords) {
                             found_labels_update.push_back(col);
                             found_coords_update.emplace_back();
-                            coord_union(coords.begin(), coords.end(),
-                                        other_coords.begin(), other_coords.end(),
-                                        std::back_inserter(found_coords_update.back()));
+                            utils::set_union(
+                                coords.begin(), coords.end(),
+                                other_coords.begin(), other_coords.end(),
+                                std::back_inserter(found_coords_update.back()),
+                                -static_cast<int64_t>(prefix_trim)
+                            );
                         },
                         [&](auto col, const auto &coords) {
                             diff_next_filtered.push_back(col);

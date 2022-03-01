@@ -79,7 +79,6 @@ bool Alignment::append(Alignment&& other) {
 
         // if the alignments fit together without gaps, make sure that the
         // coordinates form a contiguous range
-        CoordIntersection coord_inter(sequence_.size());
         utils::match_indexed_values(
             label_columns.begin(), label_columns.end(),
             label_coordinates.begin(),
@@ -87,9 +86,10 @@ bool Alignment::append(Alignment&& other) {
             other.label_coordinates.begin(),
             [&](auto col, const auto &coords, const auto &other_coords) {
                 Tuple merged;
-                coord_inter(coords.begin(), coords.end(),
-                            other_coords.begin(), other_coords.end(),
-                            std::back_inserter(merged));
+                utils::set_intersection(coords.begin(), coords.end(),
+                                        other_coords.begin(), other_coords.end(),
+                                        std::back_inserter(merged),
+                                        sequence_.size());
                 if (merged.size()) {
                     merged_label_columns.push_back(col);
                     merged_label_coordinates.push_back(std::move(merged));
