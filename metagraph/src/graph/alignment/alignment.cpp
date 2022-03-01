@@ -86,22 +86,10 @@ bool Alignment::append(Alignment&& other) {
             other.label_coordinates.begin(),
             [&](auto col, const auto &coords, const auto &other_coords) {
                 Tuple merged;
-                auto a_begin = coords.begin();
-                auto a_end = coords.end();
-                auto b_begin = other_coords.begin();
-                auto b_end = other_coords.end();
-                while (a_begin != a_end && b_begin != b_end) {
-                    if (*a_begin + sequence_.size() < *b_begin) {
-                        ++a_begin;
-                    } else if (*a_begin + sequence_.size() > *b_begin) {
-                        ++b_begin;
-                    } else {
-                        assert(*a_begin + sequence_.size() == *b_begin);
-                        merged.push_back(*a_begin);
-                        ++a_begin;
-                        ++b_begin;
-                    }
-                }
+                utils::set_intersection(coords.begin(), coords.end(),
+                                        other_coords.begin(), other_coords.end(),
+                                        std::back_inserter(merged),
+                                        sequence_.size());
                 if (merged.size()) {
                     merged_label_columns.push_back(col);
                     merged_label_coordinates.push_back(std::move(merged));

@@ -31,7 +31,7 @@ class Alignment {
     typedef DeBruijnGraph::node_index node_index;
     typedef DBGAlignerConfig::score_t score_t;
     typedef annot::binmat::BinaryMatrix::Column Column;
-    typedef annot::matrix::MultiIntMatrix::Tuple Tuple;
+    typedef SmallVector<int64_t> Tuple;
     typedef Vector<Column> Columns;
     typedef Vector<Tuple> CoordinateSet;
     static const score_t ninf = DBGAlignerConfig::ninf;

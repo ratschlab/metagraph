@@ -152,39 +152,26 @@ call_seed_chains_both_strands(std::string_view forward,
         for (size_t i = 0; i < chain.size(); ++i) {
             Alignment::Columns columns;
             Alignment::CoordinateSet coord_union;
-            auto a_begin = last_chain[i].label_columns.begin();
-            auto a_end = last_chain[i].label_columns.end();
-            auto a_c_begin = last_chain[i].label_coordinates.begin();
-            auto b_begin = chain[i].label_columns.begin();
-            auto b_end = chain[i].label_columns.end();
-            auto b_c_begin = chain[i].label_coordinates.begin();
-            while (a_begin != a_end && b_begin != b_end) {
-                if (*a_begin < *b_begin) {
-                    columns.push_back(*a_begin);
-                    coord_union.push_back(*a_c_begin);
-                    ++a_begin;
-                    ++a_c_begin;
-                } else if (*a_begin > *b_begin) {
-                    columns.push_back(*b_begin);
-                    coord_union.push_back(*b_c_begin);
-                    ++b_begin;
-                    ++b_c_begin;
-                } else {
-                    columns.push_back(*a_begin);
+            auto add_col_coords = [&](auto col, const auto &coords) {
+                columns.push_back(col);
+                coord_union.push_back(coords);
+            };
+            utils::match_indexed_values(
+                last_chain[i].label_columns.begin(),
+                last_chain[i].label_columns.end(),
+                last_chain[i].label_coordinates.begin(),
+                chain[i].label_columns.begin(),
+                chain[i].label_columns.end(),
+                chain[i].label_coordinates.begin(),
+                [&](auto col, const auto &coords, const auto &other_coords) {
+                    columns.push_back(col);
                     coord_union.emplace_back();
-                    std::set_union(a_c_begin->begin(), a_c_begin->end(),
-                                   b_c_begin->begin(), b_c_begin->end(),
+                    std::set_union(coords.begin(), coords.end(),
+                                   other_coords.begin(), other_coords.end(),
                                    std::back_inserter(coord_union.back()));
-                    ++a_begin;
-                    ++a_c_begin;
-                    ++b_begin;
-                    ++b_c_begin;
-                }
-            }
-            columns.insert(columns.end(), a_begin, a_end);
-            columns.insert(columns.end(), b_begin, b_end);
-            coord_union.insert(coord_union.end(), a_c_begin, last_chain[i].label_coordinates.end());
-            coord_union.insert(coord_union.end(), b_c_begin, chain[i].label_coordinates.end());
+                },
+                add_col_coords, add_col_coords
+            );
             std::swap(last_chain[i].label_columns, columns);
             std::swap(last_chain[i].label_coordinates, coord_union);
         }

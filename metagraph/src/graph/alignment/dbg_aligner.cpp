@@ -33,6 +33,10 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
     if (!config_.max_seed_length)
         config_.max_seed_length = graph_.get_k();
 
+    std::tie(config_.min_seed_length, config_.max_seed_length)
+        = std::make_pair(std::min(config_.min_seed_length, config_.max_seed_length),
+                         std::max(config_.min_seed_length, config_.max_seed_length));
+
     assert(config_.max_seed_length >= config_.min_seed_length);
     assert(config_.num_alternative_paths);
     assert(graph_.get_mode() != DeBruijnGraph::PRIMARY
@@ -134,41 +138,26 @@ void filter_seed(const Alignment &prev, Alignment &a) {
 
 // Compute the maximum coordinate distance between two alignments
 struct AlignmentPairedCoordinatesDist {
-    size_t operator()(const Alignment &a, const Alignment &b) const {
-        size_t max_dist = 0;
+    int64_t operator()(const Alignment &a, const Alignment &b) const {
+        int64_t max_dist = 0;
         if (a.label_coordinates.empty() || b.label_coordinates.empty()) {
             return b.get_query_view().data() + b.get_query_view().size()
                     - a.get_query_view().data();
         }
 
-        auto a_begin = a.label_columns.begin();
-        auto a_end = a.label_columns.end();
-        auto b_begin = b.label_columns.begin();
-        auto b_end = b.label_columns.end();
-        auto a_cs_begin = a.label_coordinates.begin();
-        auto b_cs_begin = b.label_coordinates.begin();
-        size_t len = b.get_sequence().size();
-        while (a_begin != a_end && b_begin != b_end) {
-            if (*a_begin < *b_begin) {
-                ++a_begin;
-                ++a_cs_begin;
-            } else if (*a_begin > *b_begin) {
-                ++b_begin;
-                ++b_cs_begin;
-            } else {
-                assert(a_cs_begin->size() == b_cs_begin->size());
-                for (size_t i = 0; i < a_cs_begin->size(); ++i) {
-                    max_dist = std::max(
-                        max_dist,
-                        static_cast<size_t>((*b_cs_begin)[i] + len - (*a_cs_begin)[i])
-                    );
+        int64_t len = b.get_sequence().size();
+        utils::match_indexed_values(
+            a.label_columns.begin(), a.label_columns.end(),
+            a.label_coordinates.begin(),
+            b.label_columns.begin(), b.label_columns.end(),
+            b.label_coordinates.begin(),
+            [&](auto, const auto &coords, const auto &other_coords) {
+                assert(coords.size() == other_coords.size());
+                for (size_t i = 0; i < coords.size(); ++i) {
+                    max_dist = std::max(max_dist, other_coords[i] + len - coords[i]);
                 }
-                ++a_begin;
-                ++b_begin;
-                ++a_cs_begin;
-                ++b_cs_begin;
             }
-        }
+        );
 
         return max_dist;
     }
@@ -502,6 +491,9 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
     auto bwd_seeds = reverse_seeder.get_seeds();
 
     if (config_.chain_alignments) {
+        if (fwd_seeds.empty() && bwd_seeds.empty())
+            return std::make_tuple(num_seeds, num_extensions, num_explored_nodes);
+
         bool can_chain = false;
         for (const Alignment &seed : fwd_seeds) {
             if (seed.label_coordinates.size()) {

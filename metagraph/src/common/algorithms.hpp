@@ -109,8 +109,49 @@ namespace utils {
         return false;
     }
 
-    // Intersect sorted ranges index1 and index2 (of equal length) with their
-    // corresponding values stored in value1 and value2, respectively.
+    // Intersect sorted ranges index1 and index2 with their corresponding values
+    // stored in value1 and value2, respectively.
+    // For each element shared between index1 and index2, invoke callback
+    // for that element and its corresponding values.
+    // For each element in index1 not in index2, invoke callback_diff1 for that
+    // element and its corresponding values.
+    // For each element in index2 not in index1, invoke callback_diff2 for that
+    // element and its corresponding values.
+    template <class InIt1, class InIt2, class InIt3, class InIt4,
+              class Callback, class CallbackDiff1, class CallbackDiff2>
+    constexpr void match_indexed_values(InIt1 index1_begin, InIt1 index1_end,
+                                        InIt2 value1_begin,
+                                        InIt3 index2_begin, InIt3 index2_end,
+                                        InIt4 value2_begin,
+                                        const Callback &callback,
+                                        const CallbackDiff1 &callback_diff1,
+                                        const CallbackDiff2 &callback_diff2) {
+        while (index1_begin != index1_end || index2_begin != index2_end) {
+            if (index1_begin == index1_end) {
+                callback_diff2(*index2_begin, *value2_begin);
+                ++index2_begin;
+                ++value2_begin;
+            } else if (index2_begin == index2_end || *index1_begin < *index2_begin) {
+                callback_diff1(*index1_begin, *value1_begin);
+                ++index1_begin;
+                ++value1_begin;
+            } else {
+                if (*index1_begin == *index2_begin) {
+                    callback(*index1_begin, *value1_begin, *value2_begin);
+                    ++index1_begin;
+                    ++value1_begin;
+                } else {
+                    callback_diff2(*index2_begin, *value2_begin);
+                }
+
+                ++index2_begin;
+                ++value2_begin;
+            }
+        }
+    }
+
+    // Intersect sorted ranges index1 and index2 with their corresponding values
+    // stored in value1 and value2, respectively.
     // For each element shared between index1 and index2, invoke the callback
     // for that element and its corresponding values.
     template <class InIt1, class InIt2, class InIt3, class InIt4, class Callback>
@@ -119,9 +160,6 @@ namespace utils {
                                         InIt3 index2_begin, InIt3 index2_end,
                                         InIt4 value2_begin,
                                         const Callback &callback) {
-        assert(std::distance(index1_begin, index1_end)
-                == std::distance(index2_begin, index2_end));
-
         while (index1_begin != index1_end && index2_begin != index2_end) {
             if (*index1_begin < *index2_begin) {
                 ++index1_begin;
@@ -134,6 +172,69 @@ namespace utils {
                 }
                 ++index2_begin;
                 ++value2_begin;
+            }
+        }
+    }
+
+    template <typename It1, typename It2, typename Out>
+    constexpr void set_intersection(It1 a_begin, It1 a_end,
+                                    It2 b_begin, It2 b_end,
+                                    Out out,
+                                    int64_t delta = 0) {
+        while (a_begin != a_end && b_begin != b_end) {
+            if (*a_begin + delta < *b_begin) {
+                ++a_begin;
+            } else if (*a_begin + delta > *b_begin) {
+                ++b_begin;
+            } else {
+                *out = *a_begin;
+                ++a_begin;
+                ++b_begin;
+                ++out;
+            }
+        }
+    }
+
+    template <typename It1, typename It2, typename Out>
+    constexpr void set_difference(It1 a_begin, It1 a_end,
+                                  It2 b_begin, It2 b_end,
+                                  Out out,
+                                  int64_t delta = 0) {
+        while (a_begin != a_end) {
+            if (b_begin == b_end || *a_begin + delta < *b_begin) {
+                *out = *a_begin;
+                ++a_begin;
+                ++out;
+            } else if (*a_begin + delta > *b_begin) {
+                ++b_begin;
+            } else {
+                ++a_begin;
+                ++b_begin;
+            }
+        }
+    }
+
+    template <typename It1, typename It2, typename Out>
+    constexpr void set_union(It1 a_begin, It1 a_end,
+                             It2 b_begin, It2 b_end,
+                             Out out,
+                             int64_t delta = 0) {
+        while (a_begin != a_end || b_begin != b_end) {
+            if (b_begin == b_end) {
+                *out = *a_begin;
+                ++a_begin;
+                ++out;
+            } else if (a_begin == a_end || *a_begin + delta > *b_begin) {
+                *out = *b_begin - delta;
+                ++b_begin;
+                ++out;
+            } else {
+                if (*a_begin + delta == *b_begin)
+                    ++b_begin;
+
+                *out = *a_begin;
+                ++a_begin;
+                ++out;
             }
         }
     }

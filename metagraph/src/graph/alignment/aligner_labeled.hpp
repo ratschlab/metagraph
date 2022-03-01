@@ -18,7 +18,7 @@ class AnnotationBuffer {
   public:
     typedef AnnotatedDBG::Annotator Annotator;
     typedef DeBruijnGraph::node_index node_index;
-    typedef annot::matrix::MultiIntMatrix::Tuple Tuple;
+    typedef Alignment::Tuple Tuple;
     typedef Alignment::Columns Columns;
     typedef Alignment::CoordinateSet CoordinateSet;
 
@@ -119,10 +119,6 @@ class LabeledExtender : public DefaultColumnExtender {
     }
 
     virtual bool skip_backtrack_start(size_t i) override final;
-
-    // since multi-node seeds may span across different labels, we no longer
-    // want the restriction that the seed must be a prefix of the extended alignment
-    virtual bool fixed_seed() const override final { return false; }
 
     // this override ensures that outgoing nodes are label- and coordinate-consistent
     // (when applicable)
