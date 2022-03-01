@@ -303,10 +303,12 @@ int align_to_graph(Config *config) {
     auto dbg_succ = std::dynamic_pointer_cast<DBGSuccinct>(graph);
     if (dbg_succ) {
         dbg_succ->reset_mask();
-        auto node_rc = std::make_shared<NodeRC>(*dbg_succ);
-        if (node_rc->load(config->infbase)) {
-            logger->trace("Loaded the adj-rc index (adjacent to reverse-complement nodes)");
-            dbg_succ->add_extension(node_rc);
+        if (dbg_succ->get_mode() == DeBruijnGraph::PRIMARY) {
+            auto node_rc = std::make_shared<NodeRC>(*dbg_succ);
+            if (node_rc->load(config->infbase)) {
+                logger->trace("Loaded the adj-rc index (adjacent to reverse-complement nodes)");
+                dbg_succ->add_extension(node_rc);
+            }
         }
     }
 
