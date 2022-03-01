@@ -260,7 +260,7 @@ build_graph<DBGSuccinctRCIndexed>(uint64_t k,
     auto graph = build_graph<DBGSuccinct>(k, sequences, mode);
     if (mode == DeBruijnGraph::PRIMARY) {
         DBGSuccinct &dbg_succ = get_dbg_succ(*graph);
-        dbg_succ.add_extension(std::make_shared<graph::NodeRC>(dbg_succ));
+        dbg_succ.add_extension(std::make_shared<graph::NodeRC>(dbg_succ, true));
     }
 
     return graph;
@@ -432,7 +432,7 @@ build_graph_batch<DBGSuccinctRCIndexed>(uint64_t k,
     auto graph = build_graph_batch<DBGSuccinct>(k, sequences, mode);
     if (mode == DeBruijnGraph::PRIMARY) {
         DBGSuccinct &dbg_succ = get_dbg_succ(*graph);
-        dbg_succ.add_extension(std::make_shared<graph::NodeRC>(dbg_succ));
+        dbg_succ.add_extension(std::make_shared<graph::NodeRC>(dbg_succ, true));
     }
 
     return graph;

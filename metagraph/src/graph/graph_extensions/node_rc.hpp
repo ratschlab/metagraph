@@ -10,8 +10,6 @@
 namespace mtg {
 namespace graph {
 
-class DBGSuccinct;
-
 // Maps each node in a PRIMARY-mode DeBruijnGraph to nodes adjacent to its reverse
 // complement. When using the index construct constructor on DBGSuccinct, or when
 // loading such an index, this stores a map from each DBGSuccinct to the BOSS nodes
@@ -20,16 +18,9 @@ class NodeRC : public SequenceGraph::GraphExtension {
   public:
     using node_index = SequenceGraph::node_index;
 
-    // Use set_graph to set the graph pointer after using the default constructor
-    NodeRC() : graph_(nullptr) {};
-
-    // Construct a NodeRC index
-    NodeRC(const DBGSuccinct &graph);
-
-    void set_graph(const DeBruijnGraph &graph) {
-        assert(!rc_.size() || is_compatible(graph));
-        graph_ = &graph;
-    }
+    // If construct_index is false, then an index must be loaded to take advantage
+    // of the index for call_*_from_rc calls
+    NodeRC(const DeBruijnGraph &graph, bool construct_index = false);
 
     void call_outgoing_from_rc(node_index node, const std::function<void(node_index)> &callback) const;
     void call_incoming_from_rc(node_index node, const std::function<void(node_index)> &callback) const;

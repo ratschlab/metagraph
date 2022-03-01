@@ -99,11 +99,11 @@ DEFINE_BOSS_BENCHMARK(pred_last,           pred_last,           get_last, size);
 DEFINE_BOSS_BENCHMARK(succ_last,           succ_last,           get_last, size);
 DEFINE_BOSS_BENCHMARK(bwd,                 bwd,                 get_W,    size);
 
-template <class Extension>
-void load_extension(benchmark::State &state, DBGSuccinct &graph) {
+void load_noderc(benchmark::State &state, DBGSuccinct &graph) {
     std::string path = std::getenv("GRAPH");
-    if (const auto node_rc = graph.load_extension<Extension>(path)) {
-        node_rc->set_graph(graph);
+    auto node_rc = std::make_shared<NodeRC>(graph);
+    if (node_rc->load(path)) {
+        graph.add_extension(node_rc);
         return;
     }
 
@@ -119,7 +119,7 @@ static void BM_BOSS_##NAME(benchmark::State& state) { \
     std::shared_ptr<DeBruijnGraph> graph = base_graph; \
     if (base_graph->get_mode() == DeBruijnGraph::PRIMARY) { \
         if (RC_INDEX) \
-            load_extension<NodeRC>(state, *base_graph); \
+            load_noderc(state, *base_graph); \
 \
         auto canonical = std::make_shared<CanonicalDBG>(base_graph); \
         if (BWD_CACHE) \

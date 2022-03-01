@@ -41,9 +41,7 @@ CanonicalDBG::CanonicalDBG(std::shared_ptr<const DeBruijnGraph> graph, size_t ca
     if (NodeRC *node_rc = graph_->get_extension_threadsafe<NodeRC>()) {
         add_extension(std::shared_ptr<NodeRC>(std::shared_ptr<NodeRC>{}, node_rc));
     } else {
-        auto ext = std::make_shared<NodeRC>();
-        ext->set_graph(*graph_);
-        add_extension(ext);
+        add_extension(std::make_shared<NodeRC>(*graph_));
     }
 }
 

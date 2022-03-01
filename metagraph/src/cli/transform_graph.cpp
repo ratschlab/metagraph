@@ -41,7 +41,7 @@ int transform_graph(Config *config) {
         throw std::runtime_error("Only implemented for DBGSuccinct");
 
     if (config->adjrc) {
-        graph::NodeRC(*dbg_succ).serialize(config->outfbase + dbg_succ->file_extension());
+        graph::NodeRC(*dbg_succ, true).serialize(config->outfbase + dbg_succ->file_extension());
         return 0;
     }
 

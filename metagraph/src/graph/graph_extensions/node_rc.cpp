@@ -15,13 +15,20 @@ using edge_index = BOSS::edge_index;
 using mtg::common::logger;
 
 
-NodeRC::NodeRC(const DBGSuccinct &graph) : graph_(&graph) {
+NodeRC::NodeRC(const DeBruijnGraph &graph, bool construct_index) : graph_(&graph) {
     if (graph.get_mode() != DeBruijnGraph::PRIMARY) {
         logger->error("Only implemented for PRIMARY graphs");
         exit(1);
     }
 
-    const BOSS &boss = graph.get_boss();
+    if (!construct_index)
+        return;
+
+    const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph);
+    if (!dbg_succ)
+        return;
+
+    const BOSS &boss = dbg_succ->get_boss();
 
     std::mutex mu;
 
