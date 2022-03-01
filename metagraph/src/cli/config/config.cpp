@@ -1090,7 +1090,7 @@ if (advanced) {
             fprintf(stderr, "\t   --state [STR] \tchange state of succinct graph: small / dynamic / stat / fast [stat]\n");
             fprintf(stderr, "\t   --to-adj-list \twrite adjacency list to file [off]\n");
             fprintf(stderr, "\t   --to-fasta \t\textract sequences from graph and dump to compressed FASTA file [off]\n");
-            fprintf(stderr, "\t   --adj-rc \t\tgenerate a reverse-complement index for the graph (only for primary succinct graphs) [off]\n");
+            fprintf(stderr, "\t   --adj-rc \t\tconstruct an index of adjacent to reverse-complement nodes (only for primary succinct graphs) [off]\n");
             fprintf(stderr, "\t   --enumerate \t\tenumerate sequences in FASTA [off]\n");
             fprintf(stderr, "\t   --initialize-bloom \tconstruct a Bloom filter for faster detection of non-existing k-mers [off]\n");
             fprintf(stderr, "\t   --unitigs \t\textract all unitigs from graph and dump to compressed FASTA file [off]\n");
