@@ -865,6 +865,8 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
     }
     std::sort(labels.begin(), labels.end());
 
+    Columns found_labels;
+    Alignment::CoordinateSet found_coords;
     for (size_t j = 0; j < seeds.size(); ++j) {
         Alignment &seed = seeds[j];
         std::vector<Alignment> new_seed_suffixes;
@@ -893,8 +895,6 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
             continue;
         }
 
-        Columns found_labels;
-        Alignment::CoordinateSet found_coords;
         assert(this->graph_.get_k() - seed.get_offset() >= this->config_.min_seed_length);
         size_t suffix_length = seed.get_sequence().size() - 1;
         for (size_t prefix_trim = 1; prefix_trim < nodes.size(); ++prefix_trim, --suffix_length) {
