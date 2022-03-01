@@ -161,16 +161,28 @@ class TestAPIRaw(TestAPIBase):
         self.assertEqual(ret.status_code, 200)
 
         self.assertEqual(len(ret.json()), repetitions)
-        expected_1 = {'seq_description': 'query0',
-                      'alignments': [{'score': 21, 'sequence': 'TAGATCGA', 'cigar': '1=1X6=',
-                                      'orientation': False }]}
-        expected_2 = {'seq_description': 'query0',
-                      'alignments': [{'score': 21, 'sequence': 'TCGATCAA', 'cigar': '6=1X1=',
-                                      'orientation': False }]}
-        try:
-            self.assertDictEqual(ret.json()[0], expected_1)
-        except AssertionError:
-            self.assertDictEqual(ret.json()[0], expected_2)
+        possible_alignments = [
+            ('1=1X6=', 'TAGATCGA'),
+            ('1=1X6=', 'TGGATCGA'),
+            ('1=1X6=', 'TTGATCGA'),
+            ('6=1X1=', 'TCGATCTA'),
+            ('6=1X1=', 'TCGATCCA'),
+            ('6=1X1=', 'TCGATCAA'),
+        ]
+        expecteds = [{'score': 21, 'sequence': sequence, 'cigar': cigar, 'orientation': False}
+                        for cigar, sequence in possible_alignments]
+        found = False
+        for cigar, sequence in possible_alignments:
+            self.assertEqual(ret.json()[0]['seq_description'], 'query0')
+            for expected in expecteds:
+                for aln in ret.json()[0]['alignments']:
+                    try:
+                        self.assertDictEqual(aln, expected)
+                        found = True
+                        break
+                    except AssertionError:
+                        pass
+        self.assertTrue(found)
 
         self.assertListEqual(
             [ret.json()[i]['seq_description'] for i in range(repetitions)],

@@ -54,8 +54,10 @@ std::pair<Alignment, Alignment> split_seed(const DeBruijnGraph &graph,
                                            const DBGAlignerConfig &config,
                                            const Alignment &alignment) {
     assert(alignment.is_valid(graph, &config));
-    if (alignment.get_sequence().size() < graph.get_k() * 2)
+    if (alignment.get_sequence().size() < graph.get_k() * 2
+            || std::find(alignment.get_nodes().begin(), alignment.get_nodes().end(), DeBruijnGraph::npos) != alignment.get_nodes().end()) {
         return std::make_pair(Alignment(), alignment);
+    }
 
     auto ret_val = std::make_pair(alignment, alignment);
     ret_val.first.trim_reference_suffix(graph.get_k(), config, false);
@@ -178,13 +180,15 @@ void align_connect(const DeBruijnGraph &graph,
                    const DBGAlignerConfig &config,
                    Alignment &first,
                    Alignment &second,
-                   Extender &extender) {
+                   Extender &extender,
+                   std::vector<Alignment> &partial_alignments) {
     auto [left, next] = split_seed(graph, config, first);
+    int64_t coord_dist = AlignmentPairedCoordinatesDist()(next, second);
+    assert(coord_dist > 0);
 
     auto extensions = extender.get_extensions(
-        next, config.ninf, true, AlignmentPairedCoordinatesDist()(next, second),
-        second.get_nodes().back(), false, second.get_end_clipping(),
-        first.get_score() - next.get_score()
+        next, config.ninf, true, coord_dist, second.get_nodes().back(), false,
+        second.get_end_clipping(), first.get_score() - next.get_score()
     );
 
     if (extensions.size() && extensions[0].get_end_clipping() < first.get_end_clipping()) {
@@ -198,25 +202,11 @@ void align_connect(const DeBruijnGraph &graph,
             std::swap(first, second);
         }
 
-    } else if (!second.get_offset()
-            && first.get_clipping() + first.get_query_view().size() > second.get_clipping()) {
-        ssize_t overlap = first.get_clipping() + first.get_query_view().size()
-                            - second.get_clipping();
-        second.trim_query_prefix(overlap, graph.get_k() - 1, config, false);
-        assert(second.is_valid(graph, &config));
-        second.insert_gap_prefix(-overlap, graph.get_k() - 1, config);
-        assert(second.is_valid(graph, &config));
-
-        // use append instead of splice because any clipping in second is due to
-        // internally clipped characters
-        first.trim_end_clipping();
-        first.append(std::move(second));
-        assert(first.get_nodes().front());
-        assert(first.get_nodes().back());
-    } else {
-        logger->warn("No extension found, restarting from seed {}", second);
-        std::swap(first, second);
+        return;
     }
+
+    partial_alignments.emplace_back(first);
+    std::swap(first, second);
 }
 
 template <class Seeder, class Extender, class AlignmentCompare>
@@ -409,16 +399,48 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
     assert(cur.is_valid(graph_, &config_));
     Alignment best = cur;
 
+    std::vector<Alignment> partial_alignments;
+
     for (size_t i = 1; i < chain.size(); ++i) {
         assert(chain[i].is_valid(graph_, &config_));
-        align_connect(graph_, config_, cur, chain[i], extender);
-        if (cur.empty())
-            return;
+        align_connect(graph_, config_, cur, chain[i], extender, partial_alignments);
+        if (AlignmentCompare()(best, cur))
+            best = cur;
     }
     num_extensions += chain.size() - 1;
+    if (partial_alignments.size()) {
+        partial_alignments.emplace_back(cur);
+        Alignment *first = &partial_alignments[0];
+        DEBUG_LOG("Partial alignments:\n\t{}", fmt::join(partial_alignments, "\n\t"));
+        for (size_t i = 1; i < partial_alignments.size(); ++i) {
+            Alignment &next = partial_alignments[i];
+            if (next.get_sequence().size() < graph_.get_k()) {
+                first = &next;
+                continue;
+            }
 
-    if (AlignmentCompare()(best, cur))
-        std::swap(best, cur);
+            int64_t coord_dist = AlignmentPairedCoordinatesDist()(*first, next);
+            first->splice_with_unknown(
+                Alignment(next),
+                coord_dist - first->get_sequence().size() - next.get_sequence().size(),
+                graph_.get_k() - 1,
+                config_
+            );
+
+            if (first->empty()) {
+                first = &next;
+                continue;
+            }
+
+            assert(first->is_valid(graph_, &config_));
+
+            if (AlignmentCompare()(best, *first))
+                best = *first;
+        }
+
+        if (AlignmentCompare()(best, *first))
+            best = *first;
+    }
 
     if (best.get_end_clipping()) {
         auto extensions = extender.get_extensions(best, config_.ninf, true);
@@ -511,20 +533,20 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
                 std::move(fwd_seeds), std::move(bwd_seeds),
                 [&](Chain&& chain, score_t score) {
                     std::ignore = score;
-                    DEBUG_LOG("Chain size: {}, score: {}\n{}",
-                              chain.size(), score, fmt::join(chain, "\t"));
+                    DEBUG_LOG("Chain size: {}, score: {}\n\t{}",
+                              chain.size(), score, fmt::join(chain, "\n\t"));
                     extend_chain(chain[0].get_orientation() ? reverse : forward,
                                  chain[0].get_orientation() ? forward : reverse,
                                  chain[0].get_orientation() ? reverse_extender : forward_extender,
                                  std::move(chain), num_extensions, num_explored_nodes,
                                  [&](Alignment&& aln) {
                                      if (aggregator.add_alignment(std::move(aln)))
-                                        throw std::exception();
+                                        throw std::bad_function_call();
                                  });
                 }
             );
             num_explored_nodes += this_num_explored;
-        } catch (const std::exception&) {}
+        } catch (const std::bad_function_call&) {}
 
         for (Alignment &alignment : aggregator.get_alignments()) {
             if (alignment.get_score() < get_min_path_score(alignment))

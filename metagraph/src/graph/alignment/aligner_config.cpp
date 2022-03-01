@@ -107,6 +107,10 @@ DBGAlignerConfig::score_t DBGAlignerConfig
             case Cigar::DELETION: {
                 score += gap_opening_penalty + (op.second - 1) * gap_extension_penalty;
                 ref_it += op.second;
+                if (it >= cigar.data().begin() + 2 && (it - 2)->first == Cigar::DELETION
+                        && (it - 1)->first == Cigar::NODE_INSERTION) {
+                    score -= gap_opening_penalty - gap_extension_penalty;
+                }
             } break;
             case Cigar::NODE_INSERTION: {
                 score += gap_opening_penalty + (op.second - 1) * gap_extension_penalty;

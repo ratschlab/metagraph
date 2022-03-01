@@ -94,6 +94,9 @@ score_t SeedFilteringExtender::update_seed_filter(node_index node,
                                                   size_t query_start,
                                                   const score_t *s_begin,
                                                   const score_t *s_end) {
+    if (node == DeBruijnGraph::npos)
+        return *std::max_element(s_begin, s_end);
+
     if (dynamic_cast<const RCDBG*>(graph_))
         node += graph_->max_index();
 
@@ -894,7 +897,9 @@ std::vector<Alignment> DefaultColumnExtender::backtrack(score_t min_path_score,
         ssize_t end_pos = pos;
         size_t align_offset = this->seed_->get_offset();
 
-        auto append_node = [&](node_index node, ssize_t offset, Cigar::Operator op) {
+        score_t extra_penalty = 0;
+        auto append_node = [&](node_index node, char c, ssize_t offset, Cigar::Operator op) {
+            seq += c;
             ops.append(op);
             if (offset >= k_minus_1) {
                 path.emplace_back(node);
@@ -902,12 +907,12 @@ std::vector<Alignment> DefaultColumnExtender::backtrack(score_t min_path_score,
                     ++dummy_counter;
                 } else if (dummy_counter) {
                     ops.append(Cigar::NODE_INSERTION, dummy_counter);
+                    extra_penalty -= config_.gap_opening_penalty + (dummy_counter - 1) * config_.gap_extension_penalty;
                     dummy_counter = 0;
                 }
             }
         };
 
-        score_t extra_penalty = 0;
 
         while (j) {
             assert(j != static_cast<size_t>(-1));
@@ -951,12 +956,11 @@ std::vector<Alignment> DefaultColumnExtender::backtrack(score_t min_path_score,
                 // match/mismatch
                 trace.emplace_back(j);
 
-                seq += c;
-                append_node(node, offset, profile_op_[c][seed_clipping + pos]);
+                extra_penalty += score_cur;
+                append_node(node, c, offset, profile_op_[c][seed_clipping + pos]);
                 --pos;
                 assert(j_prev != static_cast<size_t>(-1));
                 j = j_prev;
-                extra_penalty += score_cur;
 
             } else if (S[pos - trim] == F[pos - trim] && (ops.empty()
                     || ops.data().back().first != Cigar::INSERTION)) {
@@ -978,10 +982,9 @@ std::vector<Alignment> DefaultColumnExtender::backtrack(score_t min_path_score,
                         : Cigar::MATCH;
 
                     trace.emplace_back(j);
-                    append_node(node, offset, Cigar::DELETION);
                     extra_penalty += score_cur;
+                    append_node(node, c, offset, Cigar::DELETION);
 
-                    seq += c;
                     assert(j_prev != static_cast<size_t>(-1));
                     j = j_prev;
                 }
@@ -992,6 +995,7 @@ std::vector<Alignment> DefaultColumnExtender::backtrack(score_t min_path_score,
         }
 
         if (trace.size() >= min_trace_length && path.size() && path.back()) {
+            assert(!dummy_counter);
             score_t cur_cell_score = table[j].S[pos - table[j].trim];
             best_score = std::max(best_score, score - cur_cell_score);
             if (score - min_cell_score_ < best_score)
