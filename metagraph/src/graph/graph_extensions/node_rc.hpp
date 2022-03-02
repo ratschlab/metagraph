@@ -18,8 +18,9 @@ class NodeRC : public SequenceGraph::GraphExtension {
   public:
     using node_index = SequenceGraph::node_index;
 
-    // If construct_index is false, then an index must be loaded to take advantage
-    // of the index for call_*_from_rc calls
+    // If construct_index is true, a fully pre-computed index will be constructed.
+    // Otherwise, call_*_from_rc will invoke on-the-fly computations on the graph,
+    // unless the index is loaded with load().
     NodeRC(const DeBruijnGraph &graph, bool construct_index = false);
 
     void call_outgoing_from_rc(node_index node, const std::function<void(node_index)> &callback) const;
