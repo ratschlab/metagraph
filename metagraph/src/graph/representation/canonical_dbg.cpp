@@ -433,18 +433,11 @@ void CanonicalDBG::call_sequences(const CallPath &callback,
                                   size_t num_threads,
                                   bool kmers_in_single_form) const {
     if (kmers_in_single_form) {
-        graph_->call_sequences(callback, num_threads, false);
-        return;
+        graph_->call_sequences(callback, num_threads, true);
+    } else {
+        // TODO: port over implementation from DBGSuccinct to DeBruijnGraph
+        DeBruijnGraph::call_sequences(callback, num_threads, false);
     }
-
-    graph_->call_sequences([&](const std::string &seq, const auto &path) {
-        callback(seq, path);
-        std::string rev_seq = seq;
-        auto rev_path = path;
-        reverse_complement(rev_seq, rev_path);
-        if (seq != rev_seq)
-            callback(rev_seq, rev_path);
-    }, num_threads, false);
 }
 
 void CanonicalDBG::call_unitigs(const CallPath &callback,
