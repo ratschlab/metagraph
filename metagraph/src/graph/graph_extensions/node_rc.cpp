@@ -228,7 +228,6 @@ bool NodeRC::load(const std::string &filename_base) {
         return true;
 
     } catch (...) {
-        logger->error("Cannot load graph RC from file {}", rc_filename);
         return false;
     }
 }
