@@ -236,7 +236,29 @@ void CanonicalDBG
 void CanonicalDBG
 ::adjacent_outgoing_nodes(node_index node,
                           const std::function<void(node_index)> &callback) const {
-    call_outgoing_kmers(node, [&](node_index next, char) { callback(next); });
+    assert(node);
+    assert(node <= offset_ * 2);
+    if (node > offset_) {
+        adjacent_incoming_nodes(node - offset_, [&](node_index next) {
+            callback(reverse_complement(next));
+        });
+        return;
+    }
+
+    size_t max_num_edges_left = graph_->alphabet().size();
+
+    graph_->adjacent_outgoing_nodes(node, [&](node_index next) {
+        callback(next);
+        --max_num_edges_left;
+    });
+
+    if (!max_num_edges_left)
+        return;
+
+    assert(get_extension_threadsafe<NodeRC>());
+    get_extension_threadsafe<NodeRC>()->call_incoming_from_rc(node, [&](node_index next) {
+        callback(next + offset_);
+    });
 }
 
 bool CanonicalDBG::has_multiple_outgoing(node_index node) const {
@@ -251,6 +273,20 @@ bool CanonicalDBG::has_multiple_outgoing(node_index node) const {
     } catch (const std::bad_function_call&) { return true; }
 
     return false;
+}
+
+bool CanonicalDBG::has_single_incoming(node_index node) const {
+    size_t count = 0;
+    try {
+        adjacent_incoming_nodes(node, [&](node_index) {
+            if (count)
+                throw std::bad_function_call();
+
+            ++count;
+        });
+    } catch (const std::bad_function_call&) {}
+
+    return count == 1;
 }
 
 void CanonicalDBG
@@ -342,7 +378,29 @@ void CanonicalDBG
 void CanonicalDBG
 ::adjacent_incoming_nodes(node_index node,
                           const std::function<void(node_index)> &callback) const {
-    call_incoming_kmers(node, [&](node_index prev, char) { callback(prev); });
+    assert(node);
+    assert(node <= offset_ * 2);
+    if (node > offset_) {
+        adjacent_outgoing_nodes(node - offset_, [&](node_index prev) {
+            callback(reverse_complement(prev));
+        });
+        return;
+    }
+
+    size_t max_num_edges_left = graph_->alphabet().size();
+    graph_->adjacent_incoming_nodes(node, [&](node_index prev) {
+        callback(prev);
+        --max_num_edges_left;
+    });
+
+    if (!max_num_edges_left)
+        return;
+
+    assert(get_extension_threadsafe<NodeRC>());
+
+    get_extension_threadsafe<NodeRC>()->call_outgoing_from_rc(node, [&](node_index prev) {
+        callback(prev + offset_);
+    });
 }
 
 size_t CanonicalDBG::outdegree(node_index node) const {
