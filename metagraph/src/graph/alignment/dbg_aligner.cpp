@@ -1,5 +1,7 @@
 #include "dbg_aligner.hpp"
 
+#include <progress_bar.hpp>
+
 #include "common/logger.hpp"
 #include "common/algorithms.hpp"
 #include "graph/representation/rc_dbg.hpp"
@@ -227,7 +229,9 @@ auto DBGAligner<Seeder, Extender, AlignmentCompare>
     BatchSeeders result;
     result.reserve(seq_batch.size());
 
-    for (size_t i = 0; i < seq_batch.size(); ++i) {
+    ProgressBar progress_bar(seq_batch.size(), "Seeding sequences in batch",
+                             std::cerr, !common::get_verbose());
+    for (size_t i = 0; i < seq_batch.size(); ++i, ++progress_bar) {
         const auto &[header, query, is_reverse_complement] = seq_batch[i];
         std::string_view this_query = wrapped_seqs[i].get_query(is_reverse_complement);
         assert(this_query == query);

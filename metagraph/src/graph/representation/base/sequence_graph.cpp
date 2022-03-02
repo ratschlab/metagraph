@@ -470,6 +470,20 @@ void DeBruijnGraph
     });
 }
 
+bool DeBruijnGraph::has_multiple_incoming(node_index node) const {
+    bool found = false;
+    try {
+        adjacent_outgoing_nodes(node, [&](node_index) {
+            if (found)
+                throw std::bad_function_call();
+
+            found = true;
+        });
+    } catch (const std::bad_function_call&) { return true; }
+
+    return false;
+}
+
 
 std::ostream& operator<<(std::ostream &out, const DeBruijnGraph &graph) {
     graph.print(out);

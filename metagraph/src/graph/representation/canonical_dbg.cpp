@@ -166,72 +166,91 @@ void CanonicalDBG
 
     graph_->call_outgoing_kmers(node, [&](node_index next, char c) {
         if (c != boss::BOSS::kSentinel) {
+            callback(next, c);
+            assert(traverse(node, c) == next);
             children[alphabet_encoder_[c]] = next;
             --max_num_edges_left;
         }
     });
 
-    if (max_num_edges_left) {
-        /**
-         *
-         * find children of node by searching for parents of its reverse complement
-         * e.g., node = ATGGCT. Find TGGCTA and TGGCTT by looking for  TAGCCA and AAGCCA
-         *         TGGCTA      TAGCCA
-         *        /                  \
-         *  ATGGCT         ->         AGCCAT
-         *        \                  /
-         *         TGGCTT      AAGCCA
-         */
+    if (!max_num_edges_left)
+        return;
 
-        // for each n, check for nAGCCA. If found, define and store the index for
-        // TGGCTrc(n) as index(nAGCCA) + offset_
-        assert(get_extension_threadsafe<NodeRC>());
+    /**
+     *
+     * find children of node by searching for parents of its reverse complement
+     * e.g., node = ATGGCT. Find TGGCTA and TGGCTT by looking for  TAGCCA and AAGCCA
+     *         TGGCTA      TAGCCA
+     *        /                  \
+     *  ATGGCT         ->         AGCCAT
+     *        \                  /
+     *         TGGCTT      AAGCCA
+     */
 
-        const DBGSuccinct *dbg_succ = get_dbg_succ(*graph_);
-        const boss::BOSS *boss = dbg_succ ? &dbg_succ->get_boss() : nullptr;
-        const auto *cache = get_extension_threadsafe<NodeFirstCache>();
+    // for each n, check for nAGCCA. If found, define and store the index for
+    // TGGCTrc(n) as index(nAGCCA) + offset_
+    assert(get_extension_threadsafe<NodeRC>());
 
-        get_extension_threadsafe<NodeRC>()->call_incoming_from_rc(node, [&](node_index next) {
-            char c;
-            if (cache) {
-                c = cache->get_first_char(next);
-            } else if (boss) {
-                c = boss->decode(boss->get_minus_k_value(
-                        dbg_succ->kmer_to_boss_index(next), boss->get_k() - 1).first);
-            } else {
-                c = graph_->get_node_sequence(next)[0];
-            }
+    const DBGSuccinct *dbg_succ = get_dbg_succ(*graph_);
+    const boss::BOSS *boss = dbg_succ ? &dbg_succ->get_boss() : nullptr;
+    const auto *cache = get_extension_threadsafe<NodeFirstCache>();
 
-            if (c == boss::BOSS::kSentinel)
-                return;
-
-            auto s = alphabet_encoder_[complement(c)];
-
-            if (children[s] == npos) {
-                children[s] = next + offset_;
-                return;
-            }
-
-            assert(children[s] == get_base_node(children[s]));
-
-            if (k_odd_) {
-                logger->error(
-                    "Primary graph contains both forward and reverse complement: {} {} -> {} {}\t{} {}",
-                    node, get_node_sequence(node), children[s], get_node_sequence(children[s]),
-                    next, get_node_sequence(next));
-                exit(1);
-            }
-
-            is_palindrome_cache_.Put(next, true);
-        });
-    }
-
-    for (size_t c = 0; c < children.size(); ++c) {
-        if (children[c] != npos) {
-            callback(children[c], alphabet[c]);
-            assert(traverse(node, alphabet[c]) == children[c]);
+    get_extension_threadsafe<NodeRC>()->call_incoming_from_rc(node, [&](node_index next) {
+        char c;
+        if (cache) {
+            c = cache->get_first_char(next);
+        } else if (boss) {
+            c = boss->decode(boss->get_minus_k_value(
+                    dbg_succ->kmer_to_boss_index(next), boss->get_k() - 1).first);
+        } else {
+            c = graph_->get_node_sequence(next)[0];
         }
-    }
+
+        if (c == boss::BOSS::kSentinel)
+            return;
+
+        c = complement(c);
+        auto s = alphabet_encoder_[c];
+
+        if (children[s] == npos) {
+            callback(next + offset_, c);
+            children[s] = next + offset_;
+            assert(traverse(node, c) == next + offset_);
+            return;
+        }
+
+        assert(children[s] == get_base_node(children[s]));
+
+        if (k_odd_) {
+            logger->error(
+                "Primary graph contains both forward and reverse complement: {} {} -> {} {}\t{} {}",
+                node, get_node_sequence(node), children[s], get_node_sequence(children[s]),
+                next, get_node_sequence(next));
+            exit(1);
+        }
+
+        is_palindrome_cache_.Put(next, true);
+    });
+}
+
+void CanonicalDBG
+::adjacent_outgoing_nodes(node_index node,
+                          const std::function<void(node_index)> &callback) const {
+    call_outgoing_kmers(node, [&](node_index next, char) { callback(next); });
+}
+
+bool CanonicalDBG::has_multiple_outgoing(node_index node) const {
+    bool found = false;
+    try {
+        adjacent_outgoing_nodes(node, [&](node_index) {
+            if (found)
+                throw std::bad_function_call();
+
+            found = true;
+        });
+    } catch (const std::bad_function_call&) { return true; }
+
+    return false;
 }
 
 void CanonicalDBG
@@ -254,7 +273,9 @@ void CanonicalDBG
 
     auto incoming_kmer_callback = [&](node_index prev, char c) {
         if (c != boss::BOSS::kSentinel) {
+            callback(prev, c);
             parents[alphabet_encoder_[c]] = prev;
+            assert(traverse_back(node, c) == prev);
             --max_num_edges_left;
         }
     };
@@ -265,74 +286,63 @@ void CanonicalDBG
         graph_->call_incoming_kmers(node, incoming_kmer_callback);
     }
 
-    if (max_num_edges_left) {
-        /**
-         * find parents of node by searching for children of its reverse complement
-         * e.g., node = AGCCAT. Find TAGCCA and AAGCCA by looking for TGGCTA and TGGCTT.
-         *  TAGCCA                    TGGCTA
-         *        \                  /
-         *         AGCCAT  ->  ATGGCT
-         *        /                  \
-         *  AAGCCA                    TGGCTT
-         */
+    if (!max_num_edges_left)
+        return;
 
-        // for each n, check for TGGCTn. If found, define and store the index for
-        // rc(n)AGCCA as index(TGGCTn) + offset_
-        assert(get_extension_threadsafe<NodeRC>());
+    /**
+     * find parents of node by searching for children of its reverse complement
+     * e.g., node = AGCCAT. Find TAGCCA and AAGCCA by looking for TGGCTA and TGGCTT.
+     *  TAGCCA                    TGGCTA
+     *        \                  /
+     *         AGCCAT  ->  ATGGCT
+     *        /                  \
+     *  AAGCCA                    TGGCTT
+     */
 
-        const DBGSuccinct *dbg_succ = get_dbg_succ(*graph_);
-        const boss::BOSS *boss = dbg_succ ? &dbg_succ->get_boss() : nullptr;
+    // for each n, check for TGGCTn. If found, define and store the index for
+    // rc(n)AGCCA as index(TGGCTn) + offset_
+    assert(get_extension_threadsafe<NodeRC>());
 
-        get_extension_threadsafe<NodeRC>()->call_outgoing_from_rc(node, [&](node_index prev) {
-            char c = boss
-                ? boss->decode(boss->get_W(dbg_succ->kmer_to_boss_index(prev)) % boss->alph_size)
-                : graph_->get_node_sequence(prev).back();
+    const DBGSuccinct *dbg_succ = get_dbg_succ(*graph_);
+    const boss::BOSS *boss = dbg_succ ? &dbg_succ->get_boss() : nullptr;
 
-            if (c == boss::BOSS::kSentinel)
-                return;
+    get_extension_threadsafe<NodeRC>()->call_outgoing_from_rc(node, [&](node_index prev) {
+        char c = boss
+            ? boss->decode(boss->get_W(dbg_succ->kmer_to_boss_index(prev)) % boss->alph_size)
+            : graph_->get_node_sequence(prev).back();
 
-            auto s = alphabet_encoder_[complement(c)];
+        if (c == boss::BOSS::kSentinel)
+            return;
 
-            if (parents[s] == npos) {
-                parents[s] = prev + offset_;
-                return;
-            }
+        c = complement(c);
+        auto s = alphabet_encoder_[c];
 
-            assert(parents[s] == get_base_node(parents[s]));
-
-            if (k_odd_) {
-                logger->error(
-                    "Primary graph contains both forward and reverse complement: {} {} <- {} {}\t{} {}",
-                    node, get_node_sequence(node), parents[s], get_node_sequence(parents[s]),
-                    prev, get_node_sequence(prev)
-                );
-                exit(1);
-            }
-
-            is_palindrome_cache_.Put(prev, true);
-        });
-    }
-
-    for (size_t c = 0; c < parents.size(); ++c) {
-        if (parents[c] != npos) {
-            callback(parents[c], alphabet[c]);
-            assert(traverse_back(node, alphabet[c]) == parents[c]);
+        if (parents[s] == npos) {
+            callback(prev + offset_, c);
+            parents[s] = prev + offset_;
+            assert(traverse_back(node, c) == prev + offset_);
+            return;
         }
-    }
-}
 
-void CanonicalDBG
-::adjacent_outgoing_nodes(node_index node,
-                          const std::function<void(node_index)> &callback) const {
-    // TODO: better implementation
-    call_outgoing_kmers(node, [&](node_index i, char) { callback(i); });
+        assert(parents[s] == get_base_node(parents[s]));
+
+        if (k_odd_) {
+            logger->error(
+                "Primary graph contains both forward and reverse complement: {} {} <- {} {}\t{} {}",
+                node, get_node_sequence(node), parents[s], get_node_sequence(parents[s]),
+                prev, get_node_sequence(prev)
+            );
+            exit(1);
+        }
+
+        is_palindrome_cache_.Put(prev, true);
+    });
 }
 
 void CanonicalDBG
 ::adjacent_incoming_nodes(node_index node,
                           const std::function<void(node_index)> &callback) const {
-    // TODO: better implementation
-    call_incoming_kmers(node, [&](node_index i, char) { callback(i); });
+    call_incoming_kmers(node, [&](node_index prev, char) { callback(prev); });
 }
 
 size_t CanonicalDBG::outdegree(node_index node) const {

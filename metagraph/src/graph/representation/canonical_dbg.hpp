@@ -91,6 +91,7 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
 
     virtual size_t outdegree(node_index) const override final;
     virtual size_t indegree(node_index) const override final;
+    virtual bool has_multiple_outgoing(node_index node) const override final;
 
     virtual void call_kmers(const std::function<void(node_index, const std::string&)> &callback) const override final;
     virtual void call_nodes(const std::function<void(node_index)> &callback,

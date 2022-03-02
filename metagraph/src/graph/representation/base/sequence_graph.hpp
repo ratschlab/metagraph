@@ -211,6 +211,7 @@ class DeBruijnGraph : public SequenceGraph {
     virtual size_t indegree(node_index) const = 0;
     virtual bool has_no_incoming(node_index node) const { return indegree(node) == 0; }
     virtual bool has_single_incoming(node_index node) const { return indegree(node) == 1; }
+    virtual bool has_multiple_incoming(node_index node) const;
 
     virtual node_index kmer_to_node(std::string_view kmer) const;
 
