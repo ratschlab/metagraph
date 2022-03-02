@@ -308,6 +308,10 @@ int align_to_graph(Config *config) {
             if (node_rc->load(config->infbase)) {
                 logger->trace("Loaded the adj-rc index (adjacent to reverse-complement nodes)");
                 dbg_succ->add_extension(node_rc);
+            } else {
+                logger->warn("adj-rc index missing or failed to load. "
+                             "Alignment speed will be significantly slower. "
+                             "Use metagraph transform to generate an adj-rc index.");
             }
         }
     }
