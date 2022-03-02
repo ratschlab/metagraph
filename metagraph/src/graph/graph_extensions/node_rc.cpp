@@ -130,23 +130,21 @@ void NodeRC::call_outgoing_from_rc(node_index node,
             if (prev != DeBruijnGraph::npos)
                 callback(prev);
         });
+    } else {
+        // Do the checks by directly mapping the sequences of the desired k-mers.
+        // For non-DBGSuccinct graphs, this should be fast enough.
+        std::string rev_seq = graph_->get_node_sequence(node).substr(0, graph_->get_k() - 1);
+        ::reverse_complement(rev_seq.begin(), rev_seq.end());
+        rev_seq.push_back('\0');
 
-        return;
-    }
-
-    // Do the checks by directly mapping the sequences of the desired k-mers.
-    // For non-DBGSuccinct graphs, this should be fast enough.
-    std::string rev_seq = graph_->get_node_sequence(node).substr(0, graph_->get_k() - 1);
-    ::reverse_complement(rev_seq.begin(), rev_seq.end());
-    rev_seq.push_back('\0');
-
-    const auto &alphabet = graph_->alphabet();
-    for (size_t c = 0; c < alphabet.size(); ++c) {
-        if (alphabet[c] != boss::BOSS::kSentinel) {
-            rev_seq.back() = complement(alphabet[c]);
-            node_index prev = graph_->kmer_to_node(rev_seq);
-            if (prev != DeBruijnGraph::npos)
-                callback(prev);
+        const auto &alphabet = graph_->alphabet();
+        for (size_t c = 0; c < alphabet.size(); ++c) {
+            if (alphabet[c] != boss::BOSS::kSentinel) {
+                rev_seq.back() = complement(alphabet[c]);
+                node_index prev = graph_->kmer_to_node(rev_seq);
+                if (prev != DeBruijnGraph::npos)
+                    callback(prev);
+            }
         }
     }
 }
