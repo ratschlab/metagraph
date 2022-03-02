@@ -236,6 +236,13 @@ void CanonicalDBG
 void CanonicalDBG
 ::adjacent_outgoing_nodes(node_index node,
                           const std::function<void(node_index)> &callback) const {
+    if (!k_odd_) {
+        call_outgoing_kmers(node, [&](node_index next, char) {
+            callback(next);
+        });
+        return;
+    }
+
     assert(node);
     assert(node <= offset_ * 2);
     if (node > offset_) {
@@ -279,10 +286,8 @@ bool CanonicalDBG::has_single_incoming(node_index node) const {
     size_t count = 0;
     try {
         adjacent_incoming_nodes(node, [&](node_index) {
-            if (count)
+            if (++count > 1)
                 throw std::bad_function_call();
-
-            ++count;
         });
     } catch (const std::bad_function_call&) {}
 
@@ -378,6 +383,13 @@ void CanonicalDBG
 void CanonicalDBG
 ::adjacent_incoming_nodes(node_index node,
                           const std::function<void(node_index)> &callback) const {
+    if (!k_odd_) {
+        call_incoming_kmers(node, [&](node_index prev, char) {
+            callback(prev);
+        });
+        return;
+    }
+
     assert(node);
     assert(node <= offset_ * 2);
     if (node > offset_) {
@@ -422,10 +434,17 @@ void CanonicalDBG::call_sequences(const CallPath &callback,
                                   bool kmers_in_single_form) const {
     if (kmers_in_single_form) {
         graph_->call_sequences(callback, num_threads, false);
-    } else {
-        // TODO: port over implementation from DBGSuccinct to DeBruijnGraph
-        DeBruijnGraph::call_sequences(callback, num_threads, false);
+        return;
     }
+
+    graph_->call_sequences([&](const std::string &seq, const auto &path) {
+        callback(seq, path);
+        std::string rev_seq = seq;
+        auto rev_path = path;
+        reverse_complement(rev_seq, rev_path);
+        if (seq != rev_seq)
+            callback(rev_seq, rev_path);
+    }, num_threads, false);
 }
 
 void CanonicalDBG::call_unitigs(const CallPath &callback,
