@@ -88,7 +88,7 @@ void CanonicalDBG
 
     // map the forward
     const auto *dbg_succ = get_dbg_succ(*graph_);
-    if (dbg_succ && get_k() % 2) {
+    if (dbg_succ && k_odd_) {
         // if it's a boss table with odd k (without palindromic k-mers),
         // we can skip k-mers that have been found in the rev-compl sequence
         const auto &boss = dbg_succ->get_boss();

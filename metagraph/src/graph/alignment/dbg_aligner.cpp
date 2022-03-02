@@ -229,7 +229,7 @@ auto DBGAligner<Seeder, Extender, AlignmentCompare>
     BatchSeeders result;
     result.reserve(seq_batch.size());
 
-    ProgressBar progress_bar(seq_batch.size(), "Seeding sequences in batch",
+    ProgressBar progress_bar(seq_batch.size(), "Seeding sequences",
                              std::cerr, !common::get_verbose());
     for (size_t i = 0; i < seq_batch.size(); ++i, ++progress_bar) {
         const auto &[header, query, is_reverse_complement] = seq_batch[i];
