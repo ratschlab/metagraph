@@ -1,11 +1,12 @@
 #include "node_rc.hpp"
 
+#include <mutex>
+
+#include <ips4o.hpp>
+
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/utils/template_utils.hpp"
-
-#include <ips4o.hpp>
-#include <mutex>
 
 namespace mtg {
 namespace graph {
