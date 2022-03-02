@@ -277,7 +277,9 @@ bool CanonicalDBG::has_multiple_outgoing(node_index node) const {
 
             found = true;
         });
-    } catch (const std::bad_function_call&) { return true; }
+    } catch (const std::bad_function_call&) {
+        return true;
+    }
 
     return false;
 }
