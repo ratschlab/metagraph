@@ -85,7 +85,7 @@ class UniMEMSeeder : public MEMSeeder {
           : MEMSeeder(std::forward<Args>(args)...),
             is_mem_terminus_([&](auto i) {
                                  return graph_.has_multiple_outgoing(i)
-                                     || graph_.indegree(i) > 1;
+                                     || !graph_.has_single_incoming(i);
                              },
                              graph_.max_index() + 1) {
         assert(is_mem_terminus_.size() == graph_.max_index() + 1);

@@ -10,6 +10,7 @@
 #include "graph/alignment/dbg_aligner.hpp"
 #include "graph/alignment/aligner_labeled.hpp"
 #include "graph/annotated_dbg.hpp"
+#include "graph/graph_extensions/node_rc.hpp"
 #include "graph/graph_extensions/node_first_cache.hpp"
 #include "seq_io/sequence_io.hpp"
 #include "config/config.hpp"
@@ -300,8 +301,20 @@ int align_to_graph(Config *config) {
     // For graphs which still feature a mask, this speeds up mapping and allows
     // for dummy nodes to be matched by suffix seeding
     auto dbg_succ = std::dynamic_pointer_cast<DBGSuccinct>(graph);
-    if (dbg_succ)
+    if (dbg_succ) {
         dbg_succ->reset_mask();
+        if (dbg_succ->get_mode() == DeBruijnGraph::PRIMARY) {
+            auto node_rc = std::make_shared<NodeRC>(*dbg_succ);
+            if (node_rc->load(config->infbase)) {
+                logger->trace("Loaded the adj-rc index (adjacent to reverse-complement nodes)");
+                dbg_succ->add_extension(node_rc);
+            } else {
+                logger->warn("adj-rc index missing or failed to load. "
+                             "Alignment speed will be significantly slower. "
+                             "Use metagraph transform to generate an adj-rc index.");
+            }
+        }
+    }
 
     Timer timer;
     ThreadPool thread_pool(get_num_threads());

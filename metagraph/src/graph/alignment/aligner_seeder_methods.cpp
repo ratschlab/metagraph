@@ -378,7 +378,11 @@ auto MEMSeeder::get_seeds() const -> std::vector<Seed> {
         if (query_nodes_[i] != DeBruijnGraph::npos) {
             // the second bit indicates that a node has been found, while the
             // first bit indicates if the node is a maximal exact match terminus
-            query_node_flags[i] = 2 | get_mem_terminator()[query_nodes_[i]];
+            query_node_flags[i] = 2 |
+                (i + 1 == query_nodes_.size()
+                    || query_nodes_[i + 1] == DeBruijnGraph::npos
+                    || get_mem_terminator()[query_nodes_[i]]);
+
         }
     }
 

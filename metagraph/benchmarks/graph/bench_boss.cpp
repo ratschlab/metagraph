@@ -4,6 +4,7 @@
 
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/canonical_dbg.hpp"
+#include "graph/graph_extensions/node_rc.hpp"
 #include "graph/graph_extensions/node_first_cache.hpp"
 
 
@@ -98,31 +99,41 @@ DEFINE_BOSS_BENCHMARK(pred_last,           pred_last,           get_last, size);
 DEFINE_BOSS_BENCHMARK(succ_last,           succ_last,           get_last, size);
 DEFINE_BOSS_BENCHMARK(bwd,                 bwd,                 get_W,    size);
 
-template <class Extension>
-void load_extension(benchmark::State &state, DBGSuccinct &graph) {
+void load_noderc(benchmark::State &state, DBGSuccinct &graph) {
     std::string path = std::getenv("GRAPH");
-    if (!graph.load_extension<Extension>(path)) {
-        state.SkipWithError((std::string("Can't load the RC index for graph ")
-                                + path).c_str());
+    auto node_rc = std::make_shared<NodeRC>(graph);
+    if (node_rc->load(path)) {
+        graph.add_extension(node_rc);
+        return;
     }
+
+    state.SkipWithError((std::string("Can't load the RC index for graph ") + path).c_str());
 }
 
-#define DEFINE_BOSS_PATH_BENCHMARK(NAME, OPERATION, BWD_CACHE) \
+#define DEFINE_BOSS_PATH_BENCHMARK(NAME, OPERATION, BWD_CACHE, RC_INDEX) \
 static void BM_BOSS_##NAME(benchmark::State& state) { \
     auto base_graph = load_graph(state); \
     if (!base_graph) \
         return; \
 \
-    CanonicalDBG graph(base_graph); \
-    if (BWD_CACHE) \
-        graph.add_extension(std::make_shared<NodeFirstCache>(*base_graph)); \
+    std::shared_ptr<DeBruijnGraph> graph = base_graph; \
+    if (base_graph->get_mode() == DeBruijnGraph::PRIMARY) { \
+        if (RC_INDEX) \
+            load_noderc(state, *base_graph); \
+\
+        auto canonical = std::make_shared<CanonicalDBG>(base_graph); \
+        if (BWD_CACHE) \
+            canonical->add_extension(std::make_shared<NodeFirstCache>(*base_graph)); \
+\
+        graph = canonical; \
+    } \
 \
     size_t size = NUM_DISTINCT_INDEXES >> 2; \
-    auto indexes = random_traversal_numbers(graph, size, PATH_SIZE); \
+    auto indexes = random_traversal_numbers(*graph, size, PATH_SIZE); \
     size_t i = 0; \
     for (auto _ : state) { \
         DeBruijnGraph::node_index node = indexes[i++ % size]; \
-        graph.OPERATION(node, [](auto node, char c) { \
+        graph->OPERATION(node, [](auto node, char c) { \
             benchmark::DoNotOptimize(node); \
             benchmark::DoNotOptimize(c); \
         }); \
@@ -130,8 +141,10 @@ static void BM_BOSS_##NAME(benchmark::State& state) { \
 } \
 BENCHMARK(BM_BOSS_##NAME) -> Unit(benchmark::kMicrosecond); \
 
-DEFINE_BOSS_PATH_BENCHMARK(call_outgoing_kmers_path_cache, call_outgoing_kmers, false);
-DEFINE_BOSS_PATH_BENCHMARK(call_outgoing_kmers_bwdcache_path_cache, call_outgoing_kmers, true);
+DEFINE_BOSS_PATH_BENCHMARK(call_outgoing_kmers_path, call_outgoing_kmers, false, false);
+DEFINE_BOSS_PATH_BENCHMARK(call_outgoing_kmers_bwdcache_path, call_outgoing_kmers, true, false);
+DEFINE_BOSS_PATH_BENCHMARK(call_outgoing_kmers_rcindex_path, call_outgoing_kmers, false, true);
+DEFINE_BOSS_PATH_BENCHMARK(call_outgoing_kmers_bwdcache_rcindex_path, call_outgoing_kmers, true, true);
 
 
 static void BM_BOSS_get_W_and_fwd(benchmark::State &state) {

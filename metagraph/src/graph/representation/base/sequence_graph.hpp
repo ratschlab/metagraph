@@ -86,6 +86,16 @@ class SequenceGraph {
     void add_extension(std::shared_ptr<GraphExtension> extension);
 
     template <class ExtensionSubtype>
+    ExtensionSubtype* get_extension_threadsafe() const {
+        static_assert(std::is_base_of<GraphExtension, ExtensionSubtype>::value);
+        for (auto &extension : extensions_) {
+            if (auto *match = dynamic_cast<ExtensionSubtype*>(extension.get()))
+                return match;
+        }
+        return nullptr;
+    }
+
+    template <class ExtensionSubtype>
     std::shared_ptr<ExtensionSubtype> get_extension() const {
         static_assert(std::is_base_of<GraphExtension, ExtensionSubtype>::value);
         for (auto extension : extensions_) {

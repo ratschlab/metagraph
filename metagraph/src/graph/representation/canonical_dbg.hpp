@@ -91,6 +91,8 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
 
     virtual size_t outdegree(node_index) const override final;
     virtual size_t indegree(node_index) const override final;
+    virtual bool has_multiple_outgoing(node_index node) const override final;
+    virtual bool has_single_incoming(node_index node) const override final;
 
     virtual void call_kmers(const std::function<void(node_index, const std::string&)> &callback) const override final;
     virtual void call_nodes(const std::function<void(node_index)> &callback,
@@ -102,8 +104,7 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
     const size_t cache_size_;
 
     // cache whether a given node is a palindrome (it's equal to its reverse complement)
-    mutable caches::fixed_sized_cache<node_index,
-                                      bool,
+    mutable caches::fixed_sized_cache<node_index, bool,
                                       caches::LRUCachePolicy<node_index>> is_palindrome_cache_;
 
     const size_t offset_;
@@ -111,14 +112,6 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
     bool has_sentinel_;
 
     std::array<size_t, 256> alphabet_encoder_;
-
-    // find all parent nodes of node in the CanonicalDBG which are represented
-    // in the reverse complement orientation in the underlying primary graph
-    void append_prev_rc_nodes(node_index node, SmallVector<node_index> &parents) const;
-
-    // find all child nodes of node in the CanonicalDBG which are represented
-    // in the reverse complement orientation in the underlying primary graph
-    void append_next_rc_nodes(node_index node, SmallVector<node_index> &children) const;
 };
 
 } // namespace graph
