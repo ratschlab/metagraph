@@ -286,6 +286,9 @@ template <> struct formatter<mtg::graph::align::Alignment> {
                   a.get_cigar().to_string(),
                   a.get_offset());
 
+        if (!a.label_encoder)
+            return ctx.out();
+
         const auto &label_columns = a.label_columns;
         const auto &label_coordinates = a.label_coordinates;
 

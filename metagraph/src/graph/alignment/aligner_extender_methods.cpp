@@ -85,6 +85,7 @@ bool SeedFilteringExtender::check_seed(const Alignment &seed) const {
 bool SeedFilteringExtender::set_seed(const Alignment &seed) {
     assert(seed.get_query_view().size() + seed.get_clipping() + seed.get_end_clipping()
             == query_size_);
+    DEBUG_LOG("Seed: {}", seed);
     seed_ = &seed;
     clear_conv_checker();
     return seed_;
@@ -971,6 +972,8 @@ std::vector<Alignment> DefaultColumnExtender::backtrack(score_t min_path_score,
                                  xdrop_cutoff_i, last_fork_i, score_cur] = table[j];
                     const auto &[S_p, E_p, F_p, node_p, j_prev_p, c_p, offset_p, max_pos_p, trim_p,
                                  xdrop_cutoff_i_p, last_fork_i_p, score_cur_p] = table[j_prev];
+
+                    align_offset = std::min(offset, k_minus_1);
 
                     assert(pos >= trim_p);
 
