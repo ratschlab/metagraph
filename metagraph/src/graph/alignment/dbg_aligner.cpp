@@ -177,9 +177,14 @@ void align_connect(const DeBruijnGraph &graph,
     int64_t coord_dist = AlignmentPairedCoordinatesDist()(next, second);
     assert(coord_dist > 0);
 
-    auto extensions = extender.get_extensions(
-        next, config.ninf, true, coord_dist, second.get_nodes().back(), false,
-        second.get_end_clipping(), first.get_score() - next.get_score()
+    auto extensions = extender.get_extensions(next,
+        config.ninf,                         // min_path_score
+        true,                                // force_fixed_seed
+        coord_dist,                          // target_length
+        second.get_nodes().back(),           // target_node
+        false,                               // trim_offset_after_extend
+        second.get_end_clipping(),           // trim_query_suffix
+        first.get_score() - next.get_score() // added_xdrop
     );
 
     if (extensions.size() && extensions[0].get_end_clipping() < first.get_end_clipping()) {

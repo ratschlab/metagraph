@@ -428,6 +428,10 @@ std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score,
     table.clear();
     prev_starts.clear();
 
+    // prevent overflow
+    if (config_.xdrop > std::numeric_limits<score_t>::max() - added_xdrop)
+        added_xdrop = std::numeric_limits<score_t>::max() - config_.xdrop;
+
     assert(config_.xdrop + added_xdrop > 0);
 
     xdrop_cutoffs_.assign(1, std::make_pair(0u, std::max(-config_.xdrop - added_xdrop, ninf + 1)));
