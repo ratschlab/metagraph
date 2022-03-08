@@ -327,21 +327,34 @@ void LabeledExtender::flush() {
             continue;
         }
 
-        if (node_labels_[parent_i] != node_labels_[last_flushed_table_i_]
-                || table_elem.node == DeBruijnGraph::npos) {
+        if (table_elem.node == DeBruijnGraph::npos)
             continue;
-        }
 
-        node_index node = table_elem.node;
         const auto &parent_labels
             = annotation_buffer_.get_cached_column_set(node_labels_[parent_i]);
 
-        auto cur_labels = annotation_buffer_.get_labels(node);
+        auto cur_labels = annotation_buffer_.get_labels(table_elem.node);
         assert(cur_labels);
+
+#ifndef NDEBUG
+        if (table[parent_i].offset >= 0
+                && static_cast<size_t>(table[parent_i].offset) >= graph_->get_k() - 1) {
+            auto parent_real_labels = annotation_buffer_.get_labels(table[parent_i].node);
+            assert(parent_real_labels);
+            assert(parent_real_labels->size() >= parent_labels.size());
+            Columns diff;
+            std::set_difference(parent_labels.begin(), parent_labels.end(),
+                                parent_real_labels->begin(), parent_real_labels->end(),
+                                std::back_inserter(diff));
+            assert(diff.empty());
+        }
+#endif
+
         Columns intersect_labels;
         std::set_intersection(parent_labels.begin(), parent_labels.end(),
                               cur_labels->begin(), cur_labels->end(),
                               std::back_inserter(intersect_labels));
+
         if (intersect_labels.empty()) {
             clear();
         } else {
