@@ -316,6 +316,7 @@ void LabeledExtender::flush() {
         assert(parent_i < last_flushed_table_i_);
 
         auto clear = [&]() {
+            DEBUG_LOG("Removed table element {}", last_flushed_table_i_);
             node_labels_[last_flushed_table_i_] = 0;
             std::fill(table_elem.S.begin(), table_elem.S.end(), config_.ninf);
             std::fill(table_elem.E.begin(), table_elem.E.end(), config_.ninf);
@@ -534,6 +535,7 @@ bool LabeledExtender::skip_backtrack_start(size_t i) {
     assert(node_labels_[i] != nannot);
 
     // if this alignment tree node has been visited previously, ignore it
+    assert(remaining_labels_i_);
     if (!prev_starts.emplace(i).second)
         return true;
 
@@ -575,6 +577,7 @@ void LabeledExtender::call_alignments(score_t end_score,
         base_labels = &seed_->label_columns;
 
     auto call_alignment = [&]() {
+        assert(alignment.label_columns.size());
         if (label_diff_.size() && label_diff_.back() == nannot) {
             label_diff_.pop_back();
             remaining_labels_i_ = annotation_buffer_.cache_column_set(std::move(label_diff_));
