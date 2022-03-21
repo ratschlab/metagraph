@@ -406,6 +406,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
             best = cur;
     }
     num_extensions += chain.size() - 1;
+
     if (partial_alignments.size()) {
         partial_alignments.emplace_back(cur);
         Alignment *first = &partial_alignments[0];
@@ -418,8 +419,10 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
             }
 
             int64_t coord_dist = AlignmentPairedCoordinatesDist()(*first, next);
+            auto next_fixed = next;
+            next_fixed.trim_offset();
             first->splice_with_unknown(
-                Alignment(next),
+                std::move(next_fixed),
                 coord_dist - first->get_sequence().size() - next.get_sequence().size(),
                 graph_.get_k() - 1,
                 config_

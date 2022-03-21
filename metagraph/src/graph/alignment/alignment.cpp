@@ -1020,10 +1020,14 @@ void Alignment::splice_with_unknown(Alignment&& other,
     assert(!empty());
     assert(num_unknown);
 
-    ssize_t overlap = std::max(
-        static_cast<ssize_t>(get_clipping() + query_view_.size()) - other.get_clipping(),
-        ssize_t{ 0 }
-    );
+    if (other.get_offset()) {
+        logger->trace("Can't splice in sub-k alignment");
+        *this = Alignment();
+        return;
+    }
+
+    ssize_t overlap = static_cast<ssize_t>(get_clipping() + query_view_.size())
+                            - other.get_clipping();
 
     other.trim_clipping();
     if (overlap <= 0) {
@@ -1045,12 +1049,6 @@ void Alignment::splice_with_unknown(Alignment&& other,
         // This can happen if there's a gap in the graph (due to N) at a point
         // where read has fewer copies of a repetitive sequence relative to the graph.
         // Correct for this by re-constructing the deletion.
-        if (other.get_offset()) {
-            logger->warn("Can't splice in overlapping sub-k alignment");
-            *this = Alignment();
-            return;
-        }
-
         auto nodes = nodes_;
         auto seq = sequence_;
         size_t offset = offset_;
