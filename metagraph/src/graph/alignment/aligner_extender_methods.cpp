@@ -428,13 +428,12 @@ std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score,
     table.clear();
     prev_starts.clear();
 
-    // prevent overflow
-    if (config_.xdrop > std::numeric_limits<score_t>::max() - added_xdrop)
-        added_xdrop = std::numeric_limits<score_t>::max() - config_.xdrop;
+    // saturating addition
+    score_t xdrop = std::min(config_.xdrop, std::numeric_limits<score_t>::max() - added_xdrop)
+                        + added_xdrop;
+    assert(xdrop > 0);
 
-    assert(config_.xdrop + added_xdrop > 0);
-
-    xdrop_cutoffs_.assign(1, std::make_pair(0u, std::max(-config_.xdrop - added_xdrop, ninf + 1)));
+    xdrop_cutoffs_.assign(1, std::make_pair(0u, std::max(-xdrop, ninf + 1)));
     assert(xdrop_cutoffs_[0].second < 0);
 
     if (!config_.global_xdrop)
@@ -719,8 +718,8 @@ std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score,
                     + sizeof(decltype(scores_reached_)::value_type) * scores_reached_sizediff
                     + sizeof(xdrop_cutoff_v) * xdrop_cutoffs_sizediff;
 
-                if (max_val - xdrop_cutoff > config_.xdrop + added_xdrop)
-                    xdrop_cutoff = max_val - config_.xdrop - added_xdrop;
+                if (max_val - xdrop_cutoff > xdrop)
+                    xdrop_cutoff = max_val - xdrop;
 
                 // if the best score in this column is above the xdrop score
                 // then check if the extension can continue
