@@ -187,7 +187,7 @@ std::string process_align_request(const std::string &received_message,
         for (const auto &path : aligner.align(read_stream->seq.s)) {
             Json::Value a;
             a[SeqSearchResult::SCORE_JSON_FIELD] = path.get_score();
-            a[SeqSearchResult::SEQUENCE_JSON_FIELD] = path.get_sequence();
+            a[SeqSearchResult::SEQUENCE_JSON_FIELD] = std::string(path.get_sequence());
             a[SeqSearchResult::CIGAR_JSON_FIELD] = path.get_cigar().to_string();
             a[SeqSearchResult::ORIENTATION_JSON_FIELD] = path.get_orientation();
 

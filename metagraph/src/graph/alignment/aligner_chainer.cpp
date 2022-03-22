@@ -26,16 +26,17 @@ typedef std::vector<TableElem> ChainDPTable;
 std::tuple<ChainDPTable, size_t, size_t>
 chain_seeds(const DBGAlignerConfig &config,
             std::string_view query,
-            const std::vector<Alignment> &seeds);
+            const std::vector<Seed> &seeds);
 
 std::pair<size_t, size_t>
 call_seed_chains_both_strands(std::string_view forward,
                               std::string_view reverse,
                               size_t node_overlap,
                               const DBGAlignerConfig &config,
-                              std::vector<Alignment>&& fwd_seeds,
-                              std::vector<Alignment>&& bwd_seeds,
-                              const std::function<void(Chain&&, score_t)> &callback) {
+                              std::vector<Seed>&& fwd_seeds,
+                              std::vector<Seed>&& bwd_seeds,
+                              const std::function<void(Chain&&, score_t)> &callback,
+                              const std::function<bool(Alignment::Column)> &skip_column) {
     if (fwd_seeds.empty() && bwd_seeds.empty())
         return { 0, 0 };
 
@@ -58,7 +59,7 @@ call_seed_chains_both_strands(std::string_view forward,
         }
     }
     // filter out empty seeds
-    std::vector<Alignment> both_seeds[2];
+    std::vector<Seed> both_seeds[2];
     both_seeds[0].reserve(fwd_seeds.size());
     both_seeds[1].reserve(bwd_seeds.size());
     for (auto&& fwd_seed : fwd_seeds) {
@@ -70,8 +71,8 @@ call_seed_chains_both_strands(std::string_view forward,
             both_seeds[1].emplace_back(std::move(bwd_seed));
     }
 
-    fwd_seeds = std::vector<Alignment>();
-    bwd_seeds = std::vector<Alignment>();
+    fwd_seeds = std::vector<Seed>();
+    bwd_seeds = std::vector<Seed>();
 
     // perform chaining on the forward, and the reverse-complement seeds
     ChainDPTable dp_tables[2];
@@ -122,8 +123,11 @@ call_seed_chains_both_strands(std::string_view forward,
 
         while (i != nid) {
             const auto &[label, coord, clipping, node, length, score, pred, seed_i] = dp_table[i];
+            if (skip_column(label))
+                break;
+
             used[i] = true;
-            chain.emplace_back(seeds[seed_i], coord);
+            chain.emplace_back(Alignment(seeds[seed_i], config), coord);
             chain.back().first.label_columns.clear();
             chain.back().first.label_coordinates.clear();
             if (has_labels) {
@@ -234,7 +238,7 @@ call_seed_chains_both_strands(std::string_view forward,
 std::tuple<ChainDPTable, size_t, size_t>
 chain_seeds(const DBGAlignerConfig &config,
             std::string_view query,
-            const std::vector<Alignment> &seeds) {
+            const std::vector<Seed> &seeds) {
     if (seeds.empty())
         return {};
 
@@ -370,8 +374,11 @@ std::vector<Alignment> chain_alignments(std::vector<Alignment>&& alignments,
                               b.get_sequence().size());
     });
 
-    auto run = [&](bool rev_compl, auto begin, auto end) {
-        std::string_view this_query = rev_compl ? rc_query : query;
+    if (common::get_verbose()) {
+        DEBUG_LOG("Chaining alignments:\n{}", fmt::join(alignments, "\t\n"));
+    }
+
+    auto run = [&](std::string_view this_query, auto begin, auto end) {
         std::vector<score_t> best_score(this_query.size() + 1, 0);
         for (auto it = begin; it != end; ++it) {
             size_t end_pos = it->get_query_view().data() + it->get_query_view().size()
@@ -389,8 +396,8 @@ std::vector<Alignment> chain_alignments(std::vector<Alignment>&& alignments,
     // recursively construct chains
     auto split_it = std::find_if(alignments.begin(), alignments.end(),
                                  [](const auto &a) { return a.get_orientation(); });
-    run(false, alignments.begin(), split_it);
-    run(true, split_it, alignments.end());
+    run(query, alignments.begin(), split_it);
+    run(rc_query, split_it, alignments.end());
 
     return aggregator.get_alignments();
 }
@@ -419,6 +426,7 @@ void construct_alignment_chain(size_t node_overlap,
 
     bool called = false;
     for (auto it = begin; it != end; ++it) {
+        // TODO: handle this case later
         if (it->get_offset())
             continue;
 
@@ -452,7 +460,8 @@ void construct_alignment_chain(size_t node_overlap,
             // first trim front of the incoming alignment
             size_t overlap = std::min(
                 static_cast<size_t>((chain.get_cigar().data().end() - 2)->second),
-                aln.trim_query_prefix(chain_end - it->get_query_view().data(), node_overlap, config)
+                aln.trim_query_prefix(chain_end - it->get_query_view().data(),
+                                      node_overlap, config)
             );
 
             if (aln.empty() || aln.get_sequence().size() <= node_overlap
@@ -461,10 +470,14 @@ void construct_alignment_chain(size_t node_overlap,
                 continue;
             }
 
-            assert(aln.get_query_view().data() == chain.get_query_view().data() + chain.get_query_view().size());
+            assert(aln.get_query_view().data()
+                    == chain.get_query_view().data() + chain.get_query_view().size());
 
-            if (overlap < node_overlap)
+            if (overlap < node_overlap) {
                 aln.insert_gap_prefix(-overlap, node_overlap, config);
+            } else {
+                aln.trim_clipping();
+            }
         }
 
         assert(!aln.empty());

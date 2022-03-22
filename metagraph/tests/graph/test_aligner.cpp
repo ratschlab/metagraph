@@ -348,7 +348,7 @@ TYPED_TEST(DBGAlignerTest, align_straight_forward_and_reverse_complement_batch) 
     auto config_fwd_and_rev = config;
 
     DBGAligner<> aligner(*graph, config_fwd_and_rev);
-    std::vector<IDBGAligner::Query> query_batch { { "", query, true } };
+    std::vector<IDBGAligner::Query> query_batch { { "", query } };
     aligner.align_batch(query_batch, [&](std::string_view, auto&& paths) {
         ASSERT_EQ(1ull, paths.size());
         auto path = paths[0];
@@ -365,7 +365,7 @@ TYPED_TEST(DBGAlignerTest, align_straight_forward_and_reverse_complement_batch) 
         EXPECT_TRUE(path.is_valid(*graph, &config));
     });
 
-    auto paths = aligner.align(query, true);
+    auto paths = aligner.align(query);
     auto path = paths[0];
     EXPECT_EQ(query.size() - k + 1, path.size());
     EXPECT_EQ(reference, path.get_sequence());
