@@ -1019,68 +1019,96 @@ void Alignment::splice_with_unknown(Alignment&& other,
                                     const DBGAlignerConfig &config) {
     assert(!empty());
     assert(num_unknown);
+    assert(other.get_clipping() >= num_unknown);
 
-    ssize_t overlap = std::max(
-        static_cast<ssize_t>(get_clipping() + query_view_.size()) - other.get_clipping(),
-        ssize_t{ 0 }
-    );
+    if (other.get_offset()) {
+        logger->trace("Can't splice in sub-k alignment");
+        *this = Alignment();
+        return;
+    }
+
+    ssize_t overlap = static_cast<ssize_t>(get_clipping() + query_view_.size())
+                            - other.get_clipping();
 
     other.trim_clipping();
     if (overlap <= 0) {
         // there is a normal gap between the alignments due to missing characters
         // in the graph (typically N)
         trim_end_clipping();
+        size_t query_gap = -overlap;
+        if (query_gap > num_unknown) {
+            cigar_.append(Cigar::INSERTION, query_gap - num_unknown);
+            score_ += static_cast<score_t>(config.gap_opening_penalty)
+                            + static_cast<score_t>(query_gap - num_unknown - 1)
+                                * static_cast<score_t>(config.gap_extension_penalty);
+            query_view_ = std::string_view{ query_view_.data(),
+                                            query_view_.size() + query_gap - num_unknown };
+            query_gap = num_unknown;
+        }
+
+        const char *start = other.query_view_.data() - query_gap;
+        if (query_gap) {
+            other.cigar_.data().insert(other.cigar_.data().begin(),
+                                       Cigar::value_type{ Cigar::MISMATCH, query_gap });
+            other.score_ += config.score_sequences(std::string_view{ start, query_gap },
+                                                   std::string(num_unknown, '$'));
+        }
+
+        if (num_unknown > query_gap) {
+            other.cigar_.data().insert(other.cigar_.data().begin(),
+                                       Cigar::value_type{ Cigar::DELETION,
+                                                          num_unknown - query_gap });
+            other.score_ += static_cast<score_t>(config.gap_opening_penalty)
+                            + static_cast<score_t>(num_unknown - query_gap - 1)
+                                * static_cast<score_t>(config.gap_extension_penalty);
+        }
+
         other.cigar_.data().insert(other.cigar_.data().begin(),
-                                   Cigar::value_type{ Cigar::MISMATCH, num_unknown });
-        other.cigar_.data().insert(other.cigar_.data().begin(),
-                                   Cigar::value_type{ Cigar::NODE_INSERTION, node_overlap + num_unknown - other.offset_ });
-        const char *start = other.query_view_.data() - num_unknown;
-        std::string_view extra { start, num_unknown };
-        other.query_view_ = std::string_view(start, other.query_view_.size() + num_unknown);
-        other.score_ += config.score_sequences(extra, std::string(num_unknown, '$'))
-                            + static_cast<score_t>(config.gap_opening_penalty)
+                                   Cigar::value_type{ Cigar::NODE_INSERTION,
+                                                      node_overlap + num_unknown - other.offset_ });
+        other.query_view_ = std::string_view(start, other.query_view_.size() + query_gap);
+        other.score_ += static_cast<score_t>(config.gap_opening_penalty)
                             + static_cast<score_t>(node_overlap + num_unknown - other.offset_ - 1)
                                 * static_cast<score_t>(config.gap_extension_penalty);
+        assert(query_view_.data() + query_view_.size() == other.query_view_.data());
     } else {
         // This can happen if there's a gap in the graph (due to N) at a point
         // where read has fewer copies of a repetitive sequence relative to the graph.
         // Correct for this by re-constructing the deletion.
-        if (other.get_offset()) {
-            logger->warn("Can't splice in overlapping sub-k alignment");
-            *this = Alignment();
-            return;
-        }
-
         auto nodes = nodes_;
         auto seq = sequence_;
-        size_t offset = offset_;
         trim_query_suffix(overlap, config, false);
-        overlap = seq.size() - sequence_.size();
-
-        if (offset_ > offset) {
-            logger->warn("Not enough nodes in this alignment for splicing");
+        if (empty()) {
+            // TODO: splice from both ends
+            logger->trace("Not enough nodes in this alignment for splicing");
             *this = Alignment();
             return;
         }
-
+        overlap = seq.size() - sequence_.size();
 
         trim_end_clipping();
-        cigar_.data().emplace_back(Cigar::DELETION, overlap);
-        nodes_.insert(nodes_.end(), nodes.end() - overlap, nodes.end());
-        sequence_ += std::string_view(seq.data() + seq.size() - overlap, overlap);
+        if (overlap) {
+            cigar_.data().emplace_back(Cigar::DELETION, overlap);
+            nodes_.insert(nodes_.end(), nodes.end() - overlap, nodes.end());
+            sequence_ += std::string_view(seq.data() + seq.size() - overlap, overlap);
+        }
 
         other.cigar_.data().insert(other.cigar_.data().begin(),
                                    Cigar::value_type{ Cigar::DELETION, num_unknown });
         other.cigar_.data().insert(other.cigar_.data().begin(),
-                                   Cigar::value_type{ Cigar::NODE_INSERTION, node_overlap + num_unknown });
+                                   Cigar::value_type{ Cigar::NODE_INSERTION,
+                                                      node_overlap + num_unknown });
         other.score_ += static_cast<score_t>(config.gap_opening_penalty) * 2
-                        + static_cast<score_t>(node_overlap + overlap + num_unknown - 1)
+                        + static_cast<score_t>(node_overlap + num_unknown - 1
+                                                + overlap + num_unknown - 1)
                             * static_cast<score_t>(config.gap_extension_penalty);
     }
 
     other.sequence_ = std::string(num_unknown, '$') + other.sequence_;
 
-    other.nodes_.insert(other.nodes_.begin(), node_overlap + num_unknown - other.offset_, DeBruijnGraph::npos);
+    other.nodes_.insert(other.nodes_.begin(),
+                        node_overlap + num_unknown - other.offset_,
+                        DeBruijnGraph::npos);
     other.offset_ = node_overlap;
     for (auto &tuple : other.label_coordinates) {
         for (auto &c : tuple) {
@@ -1198,11 +1226,6 @@ std::string spell_path(const DeBruijnGraph &graph,
     }
 
     for (size_t i = 1; i < path.size(); ++i) {
-        if (num_dummy > graph.get_k()) {
-            logger->error("Too many dummy nodes\n{}", fmt::join(path, " "));
-            throw std::runtime_error("");
-        }
-
         if (path[i]) {
             if (num_dummy) {
                 seq += '$';
