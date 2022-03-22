@@ -237,7 +237,7 @@ RowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
     node_to_rd = VectorMap<Row, size_t>();
 
     std::vector<SetBitPositions> rd_rows = diffs_.get_rows(rd_ids);
-    common::logger->trace("Queried batch of {} diffed rows", rd_ids.size());
+    DEBUG_LOG("Queried batch of {} diffed rows", rd_ids.size());
 
     rd_ids = std::vector<Row>();
 
@@ -259,7 +259,7 @@ RowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
             }
         }
     }
-    common::logger->trace("Reconstructed annotations for {} rows", rows.size());
+    DEBUG_LOG("Reconstructed annotations for {} rows", rows.size());
     assert(times_traversed == std::vector<size_t>(rd_rows.size(), 0));
 
     return rows;
