@@ -279,10 +279,12 @@ void update_column(size_t prev_end,
         __m128i ins_open_next = _mm_add_epi32(match, gap_open);
         _mm_storeu_si128((__m128i*)&E_v[j + 1], ins_open_next);
 
-        size_t end = j + 4;
-        for (size_t k = j; k < end; ++k) {
-            E_v[k + 1] = std::max(E_v[k] + config_.gap_extension_penalty, E_v[k + 1]);
-        }
+        // This is rolling update is hard to vectorize
+        // E_v[j + 1] = max(E_v[j + 1], E_v[j] + gap_extend)
+        E_v[j + 1] = std::max(E_v[j] + config_.gap_extension_penalty, E_v[j + 1]);
+        E_v[j + 2] = std::max(E_v[j + 1] + config_.gap_extension_penalty, E_v[j + 2]);
+        E_v[j + 3] = std::max(E_v[j + 2] + config_.gap_extension_penalty, E_v[j + 3]);
+        E_v[j + 4] = std::max(E_v[j + 3] + config_.gap_extension_penalty, E_v[j + 4]);
 
         // S_v[j] = max(match, E_v[j])
         match = _mm_max_epi32(match, _mm_load_si128((__m128i*)&E_v[j]));
