@@ -661,8 +661,7 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
 
         std::sort(label_counts.begin(), label_counts.end(), utils::GreaterSecond());
 
-        double cutoff = std::max(this->config_.rel_score_cutoff * label_counts[0].second,
-                                 this->config_.min_exact_match * query_size);
+        double cutoff = this->config_.min_exact_match * query_size;
         auto it = std::find_if(label_counts.begin(), label_counts.end(),
                                [cutoff](const auto &a) { return a.second < cutoff; });
 
