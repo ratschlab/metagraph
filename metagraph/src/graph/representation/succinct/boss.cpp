@@ -2234,6 +2234,7 @@ void BOSS::call_paths(Call<std::vector<edge_index> &&, std::vector<TAlphabet> &&
         std::vector<edge_index> path;
         std::vector<TAlphabet> sequence = get_node_seq(edge);
         do {
+            path.push_back(edge);
             edge = fwd(edge);
             sequence.push_back(get_node_last_value(edge));
             assert(sequence.back() != kSentinelCode);
