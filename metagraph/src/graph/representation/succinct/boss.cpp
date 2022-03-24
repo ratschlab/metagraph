@@ -2941,6 +2941,7 @@ void BOSS::row_diff_traverse(size_t num_threads,
         std::vector<TAlphabet> sequence = get_node_seq(edge);
         do {
             assert(is_single_outgoing(edge));
+            path.push_back(edge);
             edge = fwd(edge);
             sequence.push_back(get_node_last_value(edge));
             assert(sequence.back() != kSentinelCode);
