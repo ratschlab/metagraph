@@ -262,8 +262,9 @@ TAlphabet wavelet_tree_dyn::operator[](uint64_t i) const {
 std::pair<uint64_t, TAlphabet>
 wavelet_tree_dyn::inverse_select(uint64_t i) const {
     assert(i < size());
-    TAlphabet val = dwt_.at(i);
-    return std::make_pair(rank(val, i), val);
+    auto val = dwt_.inverse_select(i);
+    ++val.first;
+    return val;
 }
 
 uint64_t wavelet_tree_dyn::next(uint64_t i, TAlphabet c) const {
