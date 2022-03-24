@@ -234,14 +234,16 @@ void update_column(size_t prev_end,
             S_v[j] = match;
     }
 #else
+    static_assert(DefaultColumnExtender::kPadding == 5);
+    constexpr size_t width = DefaultColumnExtender::kPadding - 1;
     const __m128i gap_open = _mm_set1_epi32(config_.gap_opening_penalty);
     const __m128i gap_extend = _mm_set1_epi32(config_.gap_extension_penalty);
     const __m128i xdrop_v = _mm_set1_epi32(xdrop_cutoff - 1);
     const __m128i ninf_v = _mm_set1_epi32(ninf);
     const __m128i score_v = _mm_set1_epi32(init_score);
-    for (size_t j = 0; j < prev_end; j += 4) {
+    for (size_t j = 0; j < prev_end; j += width) {
         // ensure that nothing will access out of bounds
-        assert(j + 5 <= S_v.capacity());
+        assert(j + DefaultColumnExtender::kPadding <= S_v.capacity());
 
         // match = j ? S_prev_v[j - 1] + profile_scores[j] : ninf;
         __m128i match;
@@ -279,7 +281,7 @@ void update_column(size_t prev_end,
         __m128i ins_open_next = _mm_add_epi32(match, gap_open);
         _mm_storeu_si128((__m128i*)&E_v[j + 1], ins_open_next);
 
-        // This is rolling update is hard to vectorize
+        // This rolling update is hard to vectorize
         // E_v[j + 1] = max(E_v[j + 1], E_v[j] + gap_extend)
         E_v[j + 1] = std::max(E_v[j] + config_.gap_extension_penalty, E_v[j + 1]);
         E_v[j + 2] = std::max(E_v[j + 1] + config_.gap_extension_penalty, E_v[j + 2]);
