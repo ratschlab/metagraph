@@ -188,6 +188,15 @@ TAlphabet wavelet_tree_sdsl_fast<t_wt_sdsl>::operator[](uint64_t i) const {
 }
 
 template <class t_wt_sdsl>
+std::pair<uint64_t, TAlphabet>
+wavelet_tree_sdsl_fast<t_wt_sdsl>::inverse_select(uint64_t i) const {
+    assert(i < size());
+    auto val = wwt_.inverse_select(i);
+    ++val.first;
+    return val;
+}
+
+template <class t_wt_sdsl>
 uint64_t wavelet_tree_sdsl_fast<t_wt_sdsl>::next(uint64_t i, TAlphabet c) const {
     assert(i < size());
     assert(c < (1llu << logsigma()));
@@ -248,6 +257,13 @@ uint64_t wavelet_tree_dyn::select(TAlphabet c, uint64_t i) const {
 TAlphabet wavelet_tree_dyn::operator[](uint64_t i) const {
     assert(i < size());
     return dwt_.at(i);
+}
+
+std::pair<uint64_t, TAlphabet>
+wavelet_tree_dyn::inverse_select(uint64_t i) const {
+    assert(i < size());
+    TAlphabet val = dwt_.at(i);
+    return std::make_pair(rank(val, i), val);
 }
 
 uint64_t wavelet_tree_dyn::next(uint64_t i, TAlphabet c) const {
@@ -343,6 +359,15 @@ template <class t_wt_sdsl>
 TAlphabet wavelet_tree_sdsl<t_wt_sdsl>::operator[](uint64_t i) const {
     assert(i < size());
     return wwt_[i];
+}
+
+template <class t_wt_sdsl>
+std::pair<uint64_t, TAlphabet>
+wavelet_tree_sdsl<t_wt_sdsl>::inverse_select(uint64_t i) const {
+    assert(i < size());
+    auto val = wwt_.inverse_select(i);
+    ++val.first;
+    return val;
 }
 
 template <class t_wt_sdsl>
@@ -456,6 +481,13 @@ template <class t_bv>
 TAlphabet partite_vector<t_bv>::operator[](uint64_t i) const {
     assert(i < size());
     return int_vector_[i];
+}
+
+template <class t_bv>
+std::pair<uint64_t, TAlphabet> partite_vector<t_bv>::inverse_select(uint64_t i) const {
+    assert(i < size());
+    TAlphabet val = int_vector_[i];
+    return std::make_pair(rank(val, i), val);
 }
 
 template <class t_bv>

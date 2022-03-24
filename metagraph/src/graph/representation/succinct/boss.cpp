@@ -640,6 +640,27 @@ edge_index BOSS::fwd(edge_index i, TAlphabet c) const {
 }
 
 /**
+ * This function gets a position i reflecting the r-th occurrence of the corresponding
+ * character c in W and returns the position of the r-th occurrence of c in last.
+ */
+edge_index BOSS::fwd(edge_index i) const {
+    CHECK_INDEX(i);
+
+    auto [rank, c] = W_->inverse_select(i);
+    assert(i == 1 || c != kSentinelCode);
+    if (c == kSentinelCode) {
+        --rank;
+    } else if (c >= alph_size) {
+        c %= alph_size;
+        rank = rank_W(i, c);
+    }
+    // get the index of the target node
+    node_index target_node = NF_[c] + rank;
+    // get the index of the representative edge with that target node
+    return select_last(target_node);
+}
+
+/**
  * Using the offset structure F this function returns the value of the last
  * position of the source node for edge i.
  */
@@ -1167,8 +1188,7 @@ void BOSS::print(std::ostream &os) const {
 
 void BOSS::print_adj_list(std::ostream &os) const {
     for (edge_index edge = 1; edge < W_->size(); ++edge) {
-        os << 1 + rank_last(fwd(edge, get_W(edge) % alph_size) - 1)
-           << " ";
+        os << 1 + rank_last(fwd(edge) - 1) << " ";
         if (get_last(edge))
             os << "\n";
     }
@@ -1464,7 +1484,7 @@ void BOSS::edge_DFT(edge_index start,
     do {
         // traverse until the last dummy source edge in a path
         while (!end_branch(path.back())) {
-            path.push_back(fwd(path.back(), get_W(path.back()) % alph_size));
+            path.push_back(fwd(path.back()));
             pre_visit(path.back());
         }
 
@@ -2047,7 +2067,7 @@ void assert_forks_and_merges_visited(const BOSS &boss,
         assert(check);
 
         // make sure the next neighbouring edge has also not been visited
-        t = boss.fwd(t, boss.get_W(t) % boss.alph_size);
+        t = boss.fwd(t);
         check = masked_pick_single_outgoing(boss, &t, subgraph_mask);
         assert(t);
         assert(check);
@@ -2068,9 +2088,9 @@ void assert_no_leftovers(const BOSS &boss, const sdsl::bit_vector &visited) {
     bool leftover = false;
     call_zeros(visited, [&](edge_index edge) {
         leftover = true;
-        TAlphabet d = boss.get_W(edge) % boss.alph_size;
+        edge = boss.fwd(edge);
+        TAlphabet d = boss.get_node_last_value(edge);
         std::cout << edge << "\t" << boss.get_node_str(edge) << " " << boss.decode(d) << "\t";
-        edge = boss.fwd(edge, d);
         d = boss.get_W(edge) % boss.alph_size;
         std::cout << edge << "\t" << boss.get_node_str(edge) << " " << boss.decode(d) << "\n";
     }, true);
@@ -2214,12 +2234,9 @@ void BOSS::call_paths(Call<std::vector<edge_index> &&, std::vector<TAlphabet> &&
         std::vector<edge_index> path;
         std::vector<TAlphabet> sequence = get_node_seq(edge);
         do {
-            TAlphabet w = get_W(edge);
-            assert(w != kSentinelCode);
-            TAlphabet d = w % alph_size;
-            sequence.push_back(d);
-            path.push_back(edge);
-            edge = fwd(edge, d);
+            edge = fwd(edge);
+            sequence.push_back(get_node_last_value(edge));
+            assert(sequence.back() != kSentinelCode);
             masked_pick_single_outgoing(*this, &edge, subgraph_mask);
             assert(edge);
         } while (edge != start);
@@ -2616,8 +2633,7 @@ call_path(const BOSS &boss,
 
             // schedule traversal branched off from each terminal dual k-mer
             if (i + 1 == dual_path.size() || !dual_path[i + 1]) {
-                edge_index next_edge = boss.fwd(dual_path[i],
-                                                boss.get_W(dual_path[i]) % boss.alph_size);
+                edge_index next_edge = boss.fwd(dual_path[i]);
 
                 // schedule only if it has a single outgoing k-mer,
                 // otherwise it's a fork which will be covered in the forward pass.
@@ -2869,7 +2885,7 @@ void BOSS::row_diff_traverse(size_t num_threads,
     call_ones(dummy, [&](edge_index i) {
         if (!fetch_and_set_bit(visited.data(), i, async)) {
             ++progress_bar;
-            edge_index real_source = fwd(i, get_W(i) % alph_size);
+            edge_index real_source = fwd(i);
             masked_call_outgoing(*this, real_source, NULL, [&](edge_index next) {
                 if (!fetch_bit(visited.data(), next, async))
                     enqueue_start(next);
@@ -2923,13 +2939,10 @@ void BOSS::row_diff_traverse(size_t num_threads,
         std::vector<edge_index> path;
         std::vector<TAlphabet> sequence = get_node_seq(edge);
         do {
-            TAlphabet w = get_W(edge);
-            assert(w != kSentinelCode);
-            TAlphabet d = w % alph_size;
-            sequence.push_back(d);
-            path.push_back(edge);
             assert(is_single_outgoing(edge));
-            edge = fwd(edge, d);
+            edge = fwd(edge);
+            sequence.push_back(get_node_last_value(edge));
+            assert(sequence.back() != kSentinelCode);
         } while (edge != start);
 
         // check the cycle's representative node to see if the cycle has already been

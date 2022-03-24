@@ -89,8 +89,7 @@ node_index DBGSuccinct::traverse(node_index node, char next_char) const {
 
     // dbg node is a boss edge
     BOSS::edge_index boss_edge = kmer_to_boss_index(node);
-    boss_edge = boss_graph_->fwd(boss_edge, boss_graph_->get_W(boss_edge)
-                                                    % boss_graph_->alph_size);
+    boss_edge = boss_graph_->fwd(boss_edge);
     return boss_to_kmer_index(
         boss_graph_->pick_edge(boss_edge, boss_graph_->encode(next_char))
     );

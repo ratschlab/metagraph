@@ -157,12 +157,10 @@ class BOSS {
                            sdsl::bit_vector *terminal) const;
 
     edge_index row_diff_successor(edge_index edge, const bit_vector &rd_succ) const {
-        TAlphabet d = get_W(edge) % alph_size;
-        assert(d != kSentinelCode && "sinks have no row-diff successors");
         // make one traversal step
-        edge = fwd(edge, d);
+        edge = fwd(edge);
         // pick the row-diff successor
-        if (!get_last(edge - 1)) {
+        if (&rd_succ != last_ && !get_last(edge - 1)) {
             while (!rd_succ[edge]) {
                 edge--;
                 assert(!get_last(edge) && "a row-diff successor must exist");
@@ -449,6 +447,12 @@ class BOSS {
      * character c in W and returns the position of the r-th occurrence of c in last.
      */
     edge_index fwd(edge_index i, TAlphabet c) const;
+
+    /**
+     * This functions gets a position i reflecting the r-th occurrence of the corresponding
+     * character c in W and returns the position of the r-th occurrence of c in last.
+     */
+    edge_index fwd(edge_index i) const;
 
     /**
      * This function gets a position i that reflects the i-th node and returns the
