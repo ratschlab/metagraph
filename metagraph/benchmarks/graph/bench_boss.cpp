@@ -170,6 +170,29 @@ static void BM_BOSS_get_W_and_fwd(benchmark::State &state) {
 }
 BENCHMARK(BM_BOSS_get_W_and_fwd) -> Unit(benchmark::kMicrosecond);
 
+static void BM_BOSS_no_get_W_and_fwd(benchmark::State &state) {
+    auto graph = load_graph(state);
+    const BOSS &boss = graph->get_boss();
+
+    std::mt19937 gen(32);
+    std::uniform_int_distribution<uint64_t> dis(1, boss.get_W().size() - 1);
+
+    std::vector<uint64_t> edges;
+    edges.reserve(NUM_DISTINCT_INDEXES);
+    while (edges.size() < NUM_DISTINCT_INDEXES) {
+        uint64_t edge = dis(gen);
+        if (boss.get_W().size() <= 2 || boss.get_W(edge))
+            edges.push_back(edge);
+    }
+
+    size_t i = 0;
+    for (auto _ : state) {
+        uint64_t edge = edges[i++ % NUM_DISTINCT_INDEXES];
+        benchmark::DoNotOptimize(boss.fwd(edge));
+    }
+}
+BENCHMARK(BM_BOSS_no_get_W_and_fwd) -> Unit(benchmark::kMicrosecond);
+
 
 static void BM_BOSS_fwd(benchmark::State &state) {
     auto graph = load_graph(state);
