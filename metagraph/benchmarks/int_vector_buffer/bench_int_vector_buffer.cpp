@@ -71,6 +71,7 @@ static void BM_int_vector_buffer_sequential_read_GiB(benchmark::State &state) {
                                  benchmark::Counter::OneK::kIs1024);
     }
 
+    (void)result;
     buf.close(true);
 }
 

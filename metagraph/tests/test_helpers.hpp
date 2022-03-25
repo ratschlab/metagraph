@@ -44,15 +44,11 @@ using namespace mtg;
 
 #endif // _NO_DEATH_TEST
 
-#define GTEST_LOG_COLOR testing::internal::COLOR_GREEN
-
-#define PRINTF(...) do { testing::internal::ColoredPrintf(testing::internal::COLOR_GREEN, "[          ] "); testing::internal::ColoredPrintf(GTEST_LOG_COLOR, __VA_ARGS__); } while(0)
-
 // C++ stream interface
 class TestCout : public std::stringstream {
   public:
     ~TestCout() {
-        PRINTF("%s\n", str().c_str());
+        fmt::print("[          ] {:s}\n", str().c_str());
     }
 };
 
