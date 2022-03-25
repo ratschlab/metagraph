@@ -374,9 +374,8 @@ std::vector<Alignment> chain_alignments(std::vector<Alignment>&& alignments,
                               b.get_sequence().size());
     });
 
-    if (common::get_verbose()) {
-        DEBUG_LOG("Chaining alignments:\n{}", fmt::join(alignments, "\t\n"));
-    }
+    DEBUG_LOG("Chaining alignments:\n{}", fmt::join(alignments, "\t\n"));
+
 
     auto run = [&](std::string_view this_query, auto begin, auto end) {
         std::vector<score_t> best_score(this_query.size() + 1, 0);
