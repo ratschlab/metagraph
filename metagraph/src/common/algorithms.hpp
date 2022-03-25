@@ -150,6 +150,8 @@ namespace utils {
         }
     }
 
+    // Output the intersection of the sorted ranges a and b to intersection_out,
+    // and the elements from a not in b to diff_out (i.e., the set difference of a and b)
     template <class AIt, class BIt, class OutIt, class OutIt2>
     constexpr void set_intersection_difference(AIt a_begin, AIt a_end,
                                                BIt b_begin, BIt b_end,
