@@ -487,20 +487,12 @@ std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score,
     std::vector<size_t> tips;
 
     while (queue.size()) {
-        std::vector<TableIt> next_nodes{ queue.top() };
+        size_t i = std::get<2>(queue.top());
         queue.pop();
+        bool has_single_outgoing = true;
 
-        // try all paths which have the same best partial alignment score
-        // (this performs a BFS-like search)
-        while (queue.size() && std::get<0>(queue.top()) == std::get<0>(next_nodes.back())) {
-            next_nodes.push_back(queue.top());
-            queue.pop();
-        }
-
-        while (next_nodes.size()) {
-            size_t i = std::get<2>(next_nodes.back());
-            next_nodes.pop_back();
-
+        while (has_single_outgoing) {
+            has_single_outgoing = false;
             std::vector<std::tuple<node_index, char, score_t>> outgoing;
             size_t next_offset = table[i].offset + 1;
 
@@ -526,10 +518,8 @@ std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score,
                     if (node_counter / window.size() >= config_.max_nodes_per_seq_char) {
                         DEBUG_LOG("Position {}: Alignment node limit reached, stopping this branch",
                                   next_offset - seed_->get_offset());
-                        if (config_.global_xdrop) {
+                        if (config_.global_xdrop)
                             queue = std::priority_queue<TableIt>();
-                            next_nodes.clear();
-                        }
 
                         continue;
                     }
@@ -539,7 +529,6 @@ std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score,
                         DEBUG_LOG("Position {}: Alignment RAM limit reached, stopping extension",
                                   next_offset - seed_->get_offset());
                         queue = std::priority_queue<TableIt>();
-                        next_nodes.clear();
                         continue;
                     }
                 }
@@ -731,16 +720,14 @@ std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score,
                     next, vec_offset, s_begin, s_end
                 );
                 if (converged_score != ninf) {
-                    // if this next node is the only next option, or if it's
-                    // better than all other options, take it without pushing
+                    // if this next node is the only next option, take it without pushing
                     // to the queue
-                    TableIt next_score { converged_score, -std::abs(max_pos - diag_i),
-                                         table.size() - 1, max_val };
-                    if (next_nodes.size()
-                            && converged_score == std::get<0>(next_nodes[0])) {
-                        next_nodes.emplace_back(std::move(next_score));
+                    if (outgoing.size() == 1) {
+                        has_single_outgoing = true;
+                        i = table.size() - 1;
                     } else {
-                        queue.emplace(std::move(next_score));
+                        queue.emplace(converged_score, -std::abs(max_pos - diag_i),
+                                      table.size() - 1, max_val);
                     }
                 } else {
                     DEBUG_LOG("Position {}: Dropped due to convergence",
