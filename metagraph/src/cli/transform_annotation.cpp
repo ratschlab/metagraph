@@ -464,7 +464,7 @@ int transform_annotation(Config *config) {
         logger->trace("Loading annotation...");
 
         // TODO: rename columns without loading the full annotation
-        if (config->anno_type == Config::ColumnCompressed) {
+        if (input_anno_type == Config::ColumnCompressed) {
             if (!dynamic_cast<ColumnCompressed<>&>(*annotation).merge_load(files)) {
                 logger->error("Cannot load annotations");
                 exit(1);
