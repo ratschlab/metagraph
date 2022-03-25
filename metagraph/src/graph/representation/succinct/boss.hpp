@@ -153,17 +153,18 @@ class BOSS {
      */
     void row_diff_traverse(size_t num_threads,
                            size_t max_length,
-                           const bit_vector &rd_succ,
+                           const std::function<bool(edge_index)> &is_successor,
                            sdsl::bit_vector *terminal) const;
 
-    edge_index row_diff_successor(edge_index edge, const bit_vector &rd_succ) const {
+    // TODO: move all row-diff related things to DBGSuccinct and remove this function
+    edge_index row_diff_successor(edge_index edge, const std::function<bool(edge_index)> &is_successor) const {
         TAlphabet d = get_W(edge) % alph_size;
         assert(d != kSentinelCode && "sinks have no row-diff successors");
         // make one traversal step
         edge = fwd(edge, d);
         // pick the row-diff successor
         if (!get_last(edge - 1)) {
-            while (!rd_succ[edge]) {
+            while (!is_successor(edge)) {
                 edge--;
                 assert(!get_last(edge) && "a row-diff successor must exist");
             }

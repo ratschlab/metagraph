@@ -13,7 +13,6 @@
 #include "common/logger.hpp"
 #include "common/utils/template_utils.hpp"
 #include "graph/annotated_dbg.hpp"
-#include "graph/representation/succinct/boss.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "annotation/int_matrix/base/int_matrix.hpp"
@@ -86,9 +85,9 @@ template <class BaseMatrix>
 std::vector<IntMatrix::Row> IntRowDiff<BaseMatrix>::get_column(Column j) const {
     assert(graph_ && "graph must be loaded");
     assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
+    assert(!fork_succ_.size() || fork_succ_.size() == graph_->num_nodes() + 1);
 
     const graph::boss::BOSS &boss = graph_->get_boss();
-    assert(!fork_succ_.size() || fork_succ_.size() == boss.get_last().size());
 
     // TODO: implement a more efficient algorithm
     std::vector<Row> result;
@@ -113,7 +112,7 @@ std::vector<IntMatrix::RowValues>
 IntRowDiff<BaseMatrix>::get_row_values(const std::vector<Row> &row_ids) const {
     assert(graph_ && "graph must be loaded");
     assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
-    assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());
+    assert(!fork_succ_.size() || fork_succ_.size() == graph_->num_nodes() + 1);
 
     // get row-diff paths
     auto [rd_ids, rd_paths_trunc] = get_rd_ids(row_ids);
@@ -121,6 +120,7 @@ IntRowDiff<BaseMatrix>::get_row_values(const std::vector<Row> &row_ids) const {
     std::vector<RowValues> rd_rows = diffs_.get_row_values(rd_ids);
     for (auto &row : rd_rows) {
         decode_diffs(&row);
+        std::sort(row.begin(), row.end());
     }
 
     rd_ids = std::vector<Row>();
@@ -129,17 +129,15 @@ IntRowDiff<BaseMatrix>::get_row_values(const std::vector<Row> &row_ids) const {
     std::vector<RowValues> rows(row_ids.size());
 
     for (size_t i = 0; i < row_ids.size(); ++i) {
-        RowValues &result = rows[i];
+        const auto &rd_path = rd_paths_trunc[i];
         // propagate back and reconstruct full annotations for predecessors
-        for (auto it = rd_paths_trunc[i].rbegin(); it != rd_paths_trunc[i].rend(); ++it) {
-            std::sort(rd_rows[*it].begin(), rd_rows[*it].end());
-            add_diff(rd_rows[*it], &result);
-            // replace diff row with full reconstructed annotation
-            rd_rows[*it] = result;
+        for (size_t j = 0; j + 1 < rd_path.size(); ++j) {
+            auto [node, succ] = rd_path[j];
+            // reconstruct annotation by adding the diff (full succ + diff)
+            add_diff(rd_rows[succ], &rd_rows[node]);
         }
-        assert(std::all_of(result.begin(), result.end(),
-                           [](auto &p) { return p.second; }));
-        assert(std::all_of(result.begin(), result.end(),
+        rows[i] = rd_rows[rd_path.back().second];
+        assert(std::all_of(rows[i].begin(), rows[i].end(),
                            [](auto &p) { return (int64_t)p.second > 0; }));
     }
 

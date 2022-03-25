@@ -37,12 +37,14 @@ void IRowDiff::load_fork_succ(const std::string &filename) {
     fork_succ_.load(f);
 }
 
-std::pair<std::vector<BinaryMatrix::Row>, std::vector<std::vector<size_t>>>
+std::pair<std::vector<BinaryMatrix::Row>, std::vector<std::vector<std::pair<size_t, size_t>>>>
 IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids) const {
     assert(graph_ && "graph must be loaded");
-    assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());
+    assert(!fork_succ_.size() || fork_succ_.size() == graph_->num_nodes() + 1);
 
     using Row = BinaryMatrix::Row;
+
+    const size_t RD_PATH_RESERVE_SIZE = 2;
 
     // diff rows annotating nodes along the row-diff paths
     std::vector<Row> rd_ids;
@@ -55,38 +57,50 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids) const {
     // Truncated row-diff paths, indexes to |rd_rows|.
     // The last index in each path points to an anchor or to a row which had
     // been reached before, and thus, will be reconstructed before this one.
-    std::vector<std::vector<size_t>> rd_paths_trunc(row_ids.size());
-
-    const graph::boss::BOSS &boss = graph_->get_boss();
-    const bit_vector &rd_succ = fork_succ_.size() ? fork_succ_ : boss.get_last();
+    std::vector<std::vector<std::pair<size_t, size_t>>> rd_paths_trunc(row_ids.size());
 
     for (size_t i = 0; i < row_ids.size(); ++i) {
-        Row row = row_ids[i];
+        std::vector<std::pair<size_t, size_t>> &rd_path = rd_paths_trunc[i];
 
-        graph::boss::BOSS::edge_index boss_edge = graph_->kmer_to_boss_index(
-                graph::AnnotatedSequenceGraph::anno_to_graph_index(row));
+        std::vector<size_t> path;
+        Vector<std::pair<size_t, Row>> queue;
+        queue.emplace_back(0, row_ids[i]);
 
-        while (true) {
-            row = graph::AnnotatedSequenceGraph::graph_to_anno_index(
-                    graph_->boss_to_kmer_index(boss_edge));
-
+        while (queue.size()) {
+            size_t depth = queue.back().first;
+            Row row = queue.back().second;
+            queue.pop_back();
+            while (depth < path.size()) {
+                assert(path.size() > 1);
+                rd_path.emplace_back(*(path.rbegin() + 1), *path.rbegin());
+                path.pop_back();
+            }
             auto [it, is_new] = node_to_rd.try_emplace(row, rd_ids.size());
-            rd_paths_trunc[i].push_back(it.value());
-
+            path.push_back(it.value());
             // If a node had been reached before, we interrupt the diff path.
             // The annotation for that node will have been reconstructed earlier
             // than for other nodes in this path as well. Thus, we will start
             // reconstruction from that node and don't need its successors.
             if (!is_new)
-                break;
+                continue;
 
             rd_ids.push_back(row);
 
             if (anchor_[row])
-                break;
+                continue;
 
-            boss_edge = boss.row_diff_successor(boss_edge, rd_succ);
+            auto node = graph::AnnotatedSequenceGraph::anno_to_graph_index(row);
+            graph_->call_row_diff_successors(node, fork_succ_, [&](auto succ) {
+                queue.emplace_back(depth + 1, graph::AnnotatedSequenceGraph::graph_to_anno_index(succ));
+            });
         }
+
+        while (path.size() > 1) {
+            rd_path.emplace_back(*(path.rbegin() + 1), *path.rbegin());
+            path.pop_back();
+        }
+        assert(path.size());
+        rd_path.emplace_back(-1, path[0]);
     }
 
     return std::make_pair(std::move(rd_ids), std::move(rd_paths_trunc));

@@ -13,7 +13,6 @@
 #include "common/logger.hpp"
 #include "common/utils/template_utils.hpp"
 #include "graph/annotated_dbg.hpp"
-#include "graph/representation/succinct/boss.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "annotation/int_matrix/base/int_matrix.hpp"
@@ -52,6 +51,7 @@ class TupleRowDiff : public binmat::IRowDiff, public MultiIntMatrix {
 
   private:
     static void decode_diffs(RowTuples *diffs);
+    static void shift_coords(RowTuples *diffs);
     static void add_diff(const RowTuples &diff, RowTuples *row);
 
     BaseMatrix diffs_;
@@ -69,9 +69,9 @@ template <class BaseMatrix>
 std::vector<MultiIntMatrix::Row> TupleRowDiff<BaseMatrix>::get_column(Column j) const {
     assert(graph_ && "graph must be loaded");
     assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
+    assert(!fork_succ_.size() || fork_succ_.size() == graph_->num_nodes() + 1);
 
     const graph::boss::BOSS &boss = graph_->get_boss();
-    assert(!fork_succ_.size() || fork_succ_.size() == boss.get_last().size());
 
     // TODO: implement a more efficient algorithm
     std::vector<Row> result;
@@ -96,7 +96,7 @@ std::vector<MultiIntMatrix::RowTuples>
 TupleRowDiff<BaseMatrix>::get_row_tuples(const std::vector<Row> &row_ids) const {
     assert(graph_ && "graph must be loaded");
     assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
-    assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());
+    assert(!fork_succ_.size() || fork_succ_.size() == graph_->num_nodes() + 1);
 
     // get row-diff paths
     auto [rd_ids, rd_paths_trunc] = get_rd_ids(row_ids);
@@ -104,6 +104,7 @@ TupleRowDiff<BaseMatrix>::get_row_tuples(const std::vector<Row> &row_ids) const 
     std::vector<RowTuples> rd_rows = diffs_.get_row_tuples(rd_ids);
     for (auto &row : rd_rows) {
         decode_diffs(&row);
+        std::sort(row.begin(), row.end());
     }
 
     rd_ids = std::vector<Row>();
@@ -112,19 +113,30 @@ TupleRowDiff<BaseMatrix>::get_row_tuples(const std::vector<Row> &row_ids) const 
     std::vector<RowTuples> rows(row_ids.size());
 
     for (size_t i = 0; i < row_ids.size(); ++i) {
-        RowTuples &result = rows[i];
-
-        auto it = rd_paths_trunc[i].rbegin();
-        std::sort(rd_rows[*it].begin(), rd_rows[*it].end());
-        result = rd_rows[*it];
+        const auto &rd_path = rd_paths_trunc[i];
+        uint64_t last_node = -1;
         // propagate back and reconstruct full annotations for predecessors
-        for (++it ; it != rd_paths_trunc[i].rend(); ++it) {
-            std::sort(rd_rows[*it].begin(), rd_rows[*it].end());
-            add_diff(rd_rows[*it], &result);
-            // replace diff row with full reconstructed annotation
-            rd_rows[*it] = result;
+        for (size_t j = 0; j + 1 < rd_path.size(); ++j) {
+            auto [node, succ] = rd_path[j];
+            if (last_node == succ)
+                shift_coords(&rd_rows[last_node]);
+            // reconstruct annotation by adding the diff (full succ + diff)
+            add_diff(rd_rows[succ], &rd_rows[node]);
+            last_node = node;
         }
-        assert(std::all_of(result.begin(), result.end(),
+        if (last_node != (uint64_t)-1) {
+            assert(last_node == rd_path.back().second);
+            shift_coords(&rd_rows[last_node]);
+        }
+        auto &row = rd_rows[rd_path.back().second];
+        rows[i].reserve(std::count_if(row.begin(), row.end(),
+                                      [](const auto &v) { return !v.second.empty(); }));
+        for (auto&& v : row) {
+            if (v.second.size())
+                rows[i].push_back(std::move(v));
+        }
+        row = rows[i];
+        assert(std::all_of(rows[i].begin(), rows[i].end(),
                            [](auto &p) { return p.second.size(); }));
     }
 
@@ -153,6 +165,16 @@ void TupleRowDiff<BaseMatrix>::decode_diffs(RowTuples *diffs) {
 }
 
 template <class BaseMatrix>
+void TupleRowDiff<BaseMatrix>::shift_coords(RowTuples *diffs) {
+    for (auto &[j, tuple] : *diffs) {
+        assert(std::is_sorted(tuple.begin(), tuple.end()));
+        for (uint64_t &c : tuple) {
+            c -= SHIFT;
+        }
+    }
+}
+
+template <class BaseMatrix>
 void TupleRowDiff<BaseMatrix>::add_diff(const RowTuples &diff, RowTuples *row) {
     assert(std::is_sorted(row->begin(), row->end()));
     assert(std::is_sorted(diff.begin(), diff.end()));
@@ -168,32 +190,34 @@ void TupleRowDiff<BaseMatrix>::add_diff(const RowTuples &diff, RowTuples *row) {
                 result.push_back(*it);
                 ++it;
             } else if (it->first > it2->first) {
-                result.push_back(*it2);
+                if (it2->second.size())
+                    result.push_back(*it2);
                 ++it2;
             } else {
-                if (it2->second.size()) {
-                    result.emplace_back(it->first, Tuple{});
+                result.emplace_back(it->first, Tuple{});
+                if (it->second.size()) {
+                    assert(std::is_sorted(it->second.begin(), it->second.end()));
+                    assert(std::is_sorted(it2->second.begin(), it2->second.end()));
                     std::set_symmetric_difference(it->second.begin(), it->second.end(),
                                                   it2->second.begin(), it2->second.end(),
                                                   std::back_inserter(result.back().second));
+                    if (result.back().second.empty())
+                        result.pop_back();
                 }
                 ++it;
                 ++it2;
             }
         }
         std::copy(it, row->end(), std::back_inserter(result));
-        std::copy(it2, diff.end(), std::back_inserter(result));
+        for ( ; it2 != diff.end(); ++it2) {
+            if (it2->second.size())
+                result.push_back(*it2);
+        }
 
         row->swap(result);
     }
 
     assert(std::is_sorted(row->begin(), row->end()));
-    for (auto &[j, tuple] : *row) {
-        assert(std::is_sorted(tuple.begin(), tuple.end()));
-        for (uint64_t &c : tuple) {
-            c -= SHIFT;
-        }
-    }
 }
 
 } // namespace matrix

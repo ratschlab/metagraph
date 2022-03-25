@@ -2496,7 +2496,7 @@ void update_terminal_bits(size_t max_length,
  * if the row-diff successor in a fork has already been visited.
  */
 void traverse_rd_path(const BOSS &boss,
-                      const bit_vector &rd_succ,
+                      const std::function<bool(edge_index)> &is_successor,
                       edge_index edge,
                       size_t max_length,
                       sdsl::bit_vector *visited,
@@ -2524,7 +2524,7 @@ void traverse_rd_path(const BOSS &boss,
 
         path.push_back(edge);
 
-        edge = boss.row_diff_successor(edge, rd_succ);
+        edge = boss.row_diff_successor(edge, is_successor);
     }
 
     // mark terminal and near terminal nodes
@@ -2720,12 +2720,12 @@ void BOSS::call_sequences(Call<std::string&&, std::vector<edge_index>&&> callbac
 // Reach all k-mers that merge into anchor |edge| by following their diff paths.
 template <typename T>
 void traverse_rd_path_backward(const BOSS &boss,
-                               const bit_vector &rd_succ,
+                               const std::function<bool(edge_index)> &is_successor,
                                edge_index edge,
                                T max_length,
                                sdsl::bit_vector *visited,
                                sdsl::bit_vector *terminal,
-                               sdsl::bit_vector *dummy,
+                               const sdsl::bit_vector &dummy,
                                ProgressBar &progress_bar) {
     constexpr bool async = true;
 
@@ -2740,7 +2740,7 @@ void traverse_rd_path_backward(const BOSS &boss,
         std::tie(edge, dist_to_anchor) = queue.back();
         queue.pop_back();
 
-        assert(boss.get_W(edge) && !fetch_bit(dummy->data(), edge, async));
+        assert(boss.get_W(edge) && !dummy[edge]);
 
         // mark as visited
         // also check if the node had already been visited (in case of loop)
@@ -2761,7 +2761,7 @@ void traverse_rd_path_backward(const BOSS &boss,
         // AAAX - AAX$
         // ^^^^
         // AAAY - ****
-        if (!rd_succ[edge])
+        if (!is_successor(edge))
             continue;
 
         // |edge| is the row-diff successor. Thus, it is part of a diff
@@ -2769,7 +2769,7 @@ void traverse_rd_path_backward(const BOSS &boss,
         // So, we propagate the diff path backward.
         boss.call_incoming_to_target(boss.bwd(edge), boss.get_node_last_value(edge),
             [&](edge_index pred) {
-                if (!fetch_bit(dummy->data(), pred, async))
+                if (!dummy[pred])
                     queue.emplace_back(pred, dist_to_anchor + 1);
             }
         );
@@ -2778,7 +2778,7 @@ void traverse_rd_path_backward(const BOSS &boss,
 
 void BOSS::row_diff_traverse(size_t num_threads,
                              size_t max_length,
-                             const bit_vector &rd_succ,
+                             const std::function<bool(edge_index)> &is_successor,
                              sdsl::bit_vector *terminal) const {
     // TODO: can we do it without using this extra |dummy| bitmap?
     sdsl::bit_vector dummy(W_->size(), false);
@@ -2848,8 +2848,8 @@ void BOSS::row_diff_traverse(size_t num_threads,
 
     // backward traversal
     traverse_path = [&](edge_index anchor) {
-        traverse_rd_path_backward(*this, rd_succ, anchor, max_length, &visited,
-                                  terminal, &dummy, progress_bar);
+        traverse_rd_path_backward(*this, is_successor, anchor, max_length, &visited,
+                                  terminal, dummy, progress_bar);
     };
 
     // run backward traversal from every anchor
@@ -2860,7 +2860,7 @@ void BOSS::row_diff_traverse(size_t num_threads,
 
     // forward traversal
     traverse_path = [&](edge_index start) {
-        traverse_rd_path(*this, rd_succ, start, max_length, &visited,
+        traverse_rd_path(*this, is_successor, start, max_length, &visited,
                          terminal, &near_terminal, progress_bar);
     };
     // start traversal from the dummy source edges first ($X...X)
