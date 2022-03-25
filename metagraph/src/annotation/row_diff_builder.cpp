@@ -374,9 +374,7 @@ void build_pred_succ(const std::string &graph_fname,
         for (uint64_t i = start; i < std::min(start + BS, graph.num_nodes() + 1); ++i) {
             BOSS::edge_index boss_idx = graph.kmer_to_boss_index(i);
             if (!dummy[boss_idx]) {
-                const BOSS::TAlphabet d = boss.get_W(boss_idx) % boss.alph_size;
-                assert(d && "must not be dummy");
-                BOSS::edge_index next = boss.fwd(boss_idx, d);
+                BOSS::edge_index next = boss.fwd(boss_idx);
                 assert(next);
                 if (!dummy[next]) {
                     while (rd_succ.size() && !rd_succ[next]) {

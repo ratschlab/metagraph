@@ -22,6 +22,7 @@ class wavelet_tree {
     virtual uint64_t rank(TAlphabet c, uint64_t i) const = 0;
     virtual uint64_t select(TAlphabet c, uint64_t i) const = 0;
     virtual TAlphabet operator[](uint64_t i) const = 0;
+    virtual std::pair<uint64_t, TAlphabet> inverse_select(uint64_t i) const = 0;
 
     // get the position of the next value |c| in subvector [i, ...]
     virtual uint64_t next(uint64_t i, TAlphabet c) const = 0;
@@ -75,6 +76,7 @@ class wavelet_tree_sdsl_fast : public wavelet_tree_sdsl_augmented {
     uint64_t rank(TAlphabet c, uint64_t i) const;
     uint64_t select(TAlphabet c, uint64_t i) const;
     TAlphabet operator[](uint64_t i) const;
+    std::pair<uint64_t, TAlphabet> inverse_select(uint64_t i) const;
 
     uint64_t next(uint64_t i, TAlphabet c) const;
     uint64_t prev(uint64_t i, TAlphabet c) const;
@@ -118,6 +120,7 @@ class partite_vector : public wavelet_tree_sdsl_augmented {
     uint64_t rank(TAlphabet c, uint64_t i) const;
     uint64_t select(TAlphabet c, uint64_t i) const;
     TAlphabet operator[](uint64_t i) const;
+    std::pair<uint64_t, TAlphabet> inverse_select(uint64_t i) const;
 
     uint64_t next(uint64_t i, TAlphabet c) const;
     uint64_t prev(uint64_t i, TAlphabet c) const;
@@ -150,6 +153,7 @@ class wavelet_tree_dyn : public wavelet_tree {
     uint64_t rank(TAlphabet c, uint64_t i) const;
     uint64_t select(TAlphabet c, uint64_t i) const;
     TAlphabet operator[](uint64_t i) const;
+    std::pair<uint64_t, TAlphabet> inverse_select(uint64_t i) const;
 
     uint64_t next(uint64_t i, TAlphabet c) const;
     uint64_t prev(uint64_t i, TAlphabet c) const;
@@ -196,6 +200,7 @@ class wavelet_tree_sdsl : public wavelet_tree {
     uint64_t rank(TAlphabet c, uint64_t i) const;
     uint64_t select(TAlphabet c, uint64_t i) const;
     TAlphabet operator[](uint64_t i) const;
+    std::pair<uint64_t, TAlphabet> inverse_select(uint64_t i) const;
 
     uint64_t next(uint64_t i, TAlphabet c) const;
     uint64_t prev(uint64_t i, TAlphabet c) const;

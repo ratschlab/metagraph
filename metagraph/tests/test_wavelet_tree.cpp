@@ -124,6 +124,11 @@ void reference_based_test(const wavelet_tree &vector,
         }
     }
 
+    for (uint64_t i = 0; i < vector.size(); ++i) {
+        EXPECT_EQ(std::make_pair(vector.rank(reference[i], i), reference[i]),
+                  vector.inverse_select(i));
+    }
+
     test_next(vector);
     test_prev(vector);
 }
