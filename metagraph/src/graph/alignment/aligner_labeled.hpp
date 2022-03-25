@@ -145,6 +145,7 @@ class LabeledExtender : public DefaultColumnExtender {
     virtual void pop(size_t i) override final {
         assert(i < node_labels_.size());
         DefaultColumnExtender::pop(i);
+        last_flushed_table_i_ = std::min(i, last_flushed_table_i_);
         node_labels_.erase(node_labels_.begin() + i);
     }
 

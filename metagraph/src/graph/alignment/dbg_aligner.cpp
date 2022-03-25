@@ -138,48 +138,30 @@ void filter_seed(const Alignment &prev, Alignment &a) {
 
 }
 
-// Compute the maximum coordinate distance between two alignments
-struct AlignmentPairedCoordinatesDist {
-    int64_t operator()(const Alignment &a, const Alignment &b) const {
-        int64_t max_dist = 0;
-        if (a.label_coordinates.empty() || b.label_coordinates.empty()) {
-            return b.get_query_view().data() + b.get_query_view().size()
-                    - a.get_query_view().data();
-        }
-
-        int64_t len = b.get_sequence().size();
-        utils::match_indexed_values(
-            a.label_columns.begin(), a.label_columns.end(),
-            a.label_coordinates.begin(),
-            b.label_columns.begin(), b.label_columns.end(),
-            b.label_coordinates.begin(),
-            [&](auto, const auto &coords, const auto &other_coords) {
-                assert(coords.size() == other_coords.size());
-                for (size_t i = 0; i < coords.size(); ++i) {
-                    max_dist = std::max(max_dist, other_coords[i] + len - coords[i]);
-                }
-            }
-        );
-
-        return max_dist;
-    }
-};
-
-// Extend the alignment first until it reaches the end of the alignment second
+// Extend the alignment first until it reaches the end of the alignment second.
+// Return whether the connection was successful. If not, then replace first with second
+// and push first to the back of partial_alignments.
 template <class Extender>
-void align_connect(const DeBruijnGraph &graph,
+bool align_connect(const DeBruijnGraph &graph,
                    const DBGAlignerConfig &config,
                    Alignment &first,
                    Alignment &second,
+                   int64_t coord_dist,
                    Extender &extender,
                    std::vector<Alignment> &partial_alignments) {
     auto [left, next] = split_seed(graph, config, first);
-    int64_t coord_dist = AlignmentPairedCoordinatesDist()(next, second);
+    coord_dist += second.get_sequence().size() + next.get_sequence().size()
+            - first.get_sequence().size();
     assert(coord_dist > 0);
 
-    auto extensions = extender.get_extensions(
-        next, config.ninf, true, coord_dist, second.get_nodes().back(), false,
-        second.get_end_clipping(), first.get_score() - next.get_score()
+    auto extensions = extender.get_extensions(next,
+        config.ninf,                         // min_path_score
+        true,                                // force_fixed_seed
+        coord_dist,                          // target_length
+        second.get_nodes().back(),           // target_node
+        false,                               // trim_offset_after_extend
+        second.get_end_clipping(),           // trim_query_suffix
+        first.get_score() - next.get_score() // added_xdrop
     );
 
     if (extensions.size() && extensions[0].get_end_clipping() < first.get_end_clipping()) {
@@ -188,16 +170,14 @@ void align_connect(const DeBruijnGraph &graph,
         std::swap(left, first);
         assert(first.is_valid(graph, &config));
 
-        if (second.get_score() > first.get_score()) {
-            logger->warn("Extension score too low, restarting from seed {}", second);
-            std::swap(first, second);
-        }
-
-        return;
+        if (first.get_score() >= second.get_score())
+            return true;
     }
 
+    logger->trace("Extension score too low, restarting from seed {}", second);
     partial_alignments.emplace_back(first);
     std::swap(first, second);
+    return false;
 }
 
 template <class Seeder, class Extender, class AlignmentCompare>
@@ -332,12 +312,17 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
             paths[i].emplace_back(std::move(alignment));
         }
 
+        double explored_nodes_d = num_explored_nodes;
+        double explored_nodes_per_kmer =
+            explored_nodes_d / (query.size() - graph_.get_k() + 1);
         logger->trace("{}\tlength: {}\tcovered: {}\tbest score: {}\tseeds: {}\t"
                 "extensions: {}\texplored nodes: {}\texplored nodes/extension: {:.2f}\t"
-                "explored nodes/k-mer: {:.2f}\tlabels: {}",
+                "explored nodes/k-mer: {:.2f}\tlabels: {}\texplored nodes/k-mer/label: {:.2f}",
                 header, query.size(), query_coverage, best_score, num_seeds, num_extensions,
-                num_explored_nodes, static_cast<double>(num_explored_nodes) / num_extensions,
-                static_cast<double>(num_explored_nodes) / nodes.size(), aligned_labels);
+                num_explored_nodes,
+                num_explored_nodes ? explored_nodes_d / num_extensions : 0,
+                explored_nodes_per_kmer, aligned_labels,
+                aligned_labels ? explored_nodes_per_kmer / aligned_labels : 0);
 
         callback(header, std::move(paths[i]));
     };
@@ -388,21 +373,34 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
                const std::function<void(Alignment&&)> &callback) const {
     assert(chain.size());
 
-    Alignment cur = std::move(chain[0]);
+    Alignment cur = std::move(chain[0].first);
     assert(cur.is_valid(graph_, &config_));
     Alignment best = cur;
 
     std::vector<Alignment> partial_alignments;
+    std::vector<int64_t> coord_offsets { 0 };
 
+    int64_t coord_offset = 0;
     for (size_t i = 1; i < chain.size(); ++i) {
-        assert(chain[i].is_valid(graph_, &config_));
-        align_connect(graph_, config_, cur, chain[i], extender, partial_alignments);
+        assert(chain[i].first.is_valid(graph_, &config_));
+        coord_offset += chain[i].second;
+        if (!align_connect(graph_, config_, cur, chain[i].first, coord_offset,
+                           extender, partial_alignments)) {
+            if (AlignmentCompare()(best, partial_alignments.back()))
+                best = partial_alignments.back();
+
+            coord_offsets.push_back(coord_offset);
+            coord_offset = 0;
+        }
+
         if (AlignmentCompare()(best, cur))
             best = cur;
     }
     num_extensions += chain.size() - 1;
+
     if (partial_alignments.size()) {
         partial_alignments.emplace_back(cur);
+        assert(partial_alignments.size() == coord_offsets.size());
         Alignment *first = &partial_alignments[0];
         DEBUG_LOG("Partial alignments:\n\t{}", fmt::join(partial_alignments, "\n\t"));
         for (size_t i = 1; i < partial_alignments.size(); ++i) {
@@ -412,20 +410,28 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
                 continue;
             }
 
-            int64_t coord_dist = AlignmentPairedCoordinatesDist()(*first, next);
-            first->splice_with_unknown(
-                Alignment(next),
-                coord_dist - first->get_sequence().size() - next.get_sequence().size(),
-                graph_.get_k() - 1,
-                config_
-            );
-
-            if (first->empty()) {
+            int64_t num_unknown = coord_offsets[i] - first->get_sequence().size();
+            if (num_unknown > 0 && next.get_clipping() > num_unknown) {
+                auto merged = *first;
+                auto next_fixed = next;
+                next_fixed.trim_offset();
+                merged.splice_with_unknown(
+                    std::move(next_fixed),
+                    num_unknown,
+                    graph_.get_k() - 1,
+                    config_
+                );
+                assert(merged.is_valid(graph_, &config_));
+                if (merged.size()) {
+                    std::swap(*first, merged);
+                } else {
+                    first = &next;
+                    continue;
+                }
+            } else {
                 first = &next;
                 continue;
             }
-
-            assert(first->is_valid(graph_, &config_));
 
             if (AlignmentCompare()(best, *first))
                 best = *first;
@@ -434,6 +440,8 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
         if (AlignmentCompare()(best, *first))
             best = *first;
     }
+
+    assert(!best.empty());
 
     if (best.get_end_clipping()) {
         auto extensions = extender.get_extensions(best, config_.ninf, true);
@@ -444,6 +452,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
         }
     }
 
+    assert(!best.empty());
     best.trim_offset();
     assert(best.is_valid(graph_, &config_));
 
@@ -471,7 +480,13 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
         }
     }
 
+    assert(!best.empty());
     callback(std::move(best));
+
+    for (auto&& aln : partial_alignments) {
+        if (!aln.empty())
+            callback(std::move(aln));
+    }
 }
 
 // there are no reverse-complement for protein sequences
@@ -529,11 +544,11 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
                 std::move(fwd_seeds), std::move(bwd_seeds),
                 [&](Chain&& chain, score_t score) {
                     std::ignore = score;
-                    DEBUG_LOG("Chain size: {}, score: {}\n\t{}",
-                              chain.size(), score, fmt::join(chain, "\n\t"));
-                    extend_chain(chain[0].get_orientation() ? reverse : forward,
-                                 chain[0].get_orientation() ? forward : reverse,
-                                 chain[0].get_orientation() ? reverse_extender : forward_extender,
+                    extend_chain(chain[0].first.get_orientation() ? reverse : forward,
+                                 chain[0].first.get_orientation() ? forward : reverse,
+                                 chain[0].first.get_orientation()
+                                     ? reverse_extender
+                                     : forward_extender,
                                  std::move(chain), num_extensions, num_explored_nodes,
                                  [&](Alignment&& aln) {
                                      if (aggregator.add_alignment(std::move(aln)))
@@ -582,7 +597,7 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
                         const std::function<void(Alignment&&)> &callback) {
         fwd_extender.set_graph(graph_);
         bwd_extender.set_graph(rc_graph);
-        num_seeds = seeds.size();
+        num_seeds += seeds.size();
 
         if (seeds.empty())
             return;

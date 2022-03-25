@@ -8,7 +8,7 @@ namespace mtg {
 namespace graph {
 namespace align {
 
-typedef std::vector<Alignment> Chain;
+typedef std::vector<std::pair<Alignment, int64_t>> Chain;
 typedef Alignment::score_t score_t;
 
 // Given forward and reverse-complement seeds, construct and call chains of seeds

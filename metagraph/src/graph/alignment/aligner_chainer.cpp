@@ -36,6 +36,27 @@ call_seed_chains_both_strands(std::string_view forward,
                               std::vector<Alignment>&& fwd_seeds,
                               std::vector<Alignment>&& bwd_seeds,
                               const std::function<void(Chain&&, score_t)> &callback) {
+    if (fwd_seeds.empty() && bwd_seeds.empty())
+        return { 0, 0 };
+
+    bool has_labels = false;
+    bool has_coords = false;
+
+    if (fwd_seeds.size()) {
+        if (fwd_seeds[0].label_coordinates.size()) {
+            has_labels = true;
+            has_coords = true;
+        } else if (fwd_seeds[0].label_columns.size()) {
+            has_labels = true;
+        }
+    } else {
+        if (bwd_seeds[0].label_coordinates.size()) {
+            has_labels = true;
+            has_coords = true;
+        } else if (bwd_seeds[0].label_columns.size()) {
+            has_labels = true;
+        }
+    }
     // filter out empty seeds
     std::vector<Alignment> both_seeds[2];
     both_seeds[0].reserve(fwd_seeds.size());
@@ -102,12 +123,16 @@ call_seed_chains_both_strands(std::string_view forward,
         while (i != nid) {
             const auto &[label, coord, clipping, node, length, score, pred, seed_i] = dp_table[i];
             used[i] = true;
-            chain.push_back(seeds[seed_i]);
-            chain.back().label_columns.clear();
-            chain.back().label_coordinates.clear();
-            chain.back().label_columns.assign(1, label);
-            chain.back().label_coordinates.resize(1);
-            chain.back().label_coordinates[0].assign(1, coord);
+            chain.emplace_back(seeds[seed_i], coord);
+            chain.back().first.label_columns.clear();
+            chain.back().first.label_coordinates.clear();
+            if (has_labels) {
+                chain.back().first.label_columns.assign(1, label);
+                if (has_coords) {
+                    chain.back().first.label_coordinates.resize(1);
+                    chain.back().first.label_coordinates[0].assign(1, coord);
+                }
+            }
             i = pred;
         }
 
@@ -116,24 +141,31 @@ call_seed_chains_both_strands(std::string_view forward,
 
         // clean chain by merging overlapping seeds
         for (size_t i = chain.size() - 1; i > 0; --i) {
-            const char *prev_end = chain[i - 1].get_query_view().data() + chain[i - 1].get_query_view().size();
-            const char *cur_begin = chain[i].get_query_view().data();
-            if (prev_end + chain[i].get_offset() >= cur_begin + node_overlap) {
-                Alignment trim = chain[i];
-                Alignment merge = chain[i - 1];
+            const char *prev_end = chain[i - 1].first.get_query_view().data()
+                                    + chain[i - 1].first.get_query_view().size();
+            const char *cur_begin = chain[i].first.get_query_view().data();
+            if (prev_end + chain[i].first.get_offset() >= cur_begin + node_overlap) {
+                Alignment trim = chain[i].first;
+                Alignment merge = chain[i - 1].first;
                 merge.trim_end_clipping();
                 trim.trim_query_prefix(prev_end - cur_begin, node_overlap, config);
                 merge.splice(std::move(trim));
                 if (merge.size()) {
-                    std::swap(merge, chain[i - 1]);
-                    chain[i] = Alignment();
+                    std::swap(merge, chain[i - 1].first);
+                    chain[i].first = Alignment();
                 }
             }
         }
 
         chain.erase(std::remove_if(chain.begin(), chain.end(),
-                                   [](const auto &a) { return a.empty(); }),
+                                   [](const auto &a) { return a.first.empty(); }),
                     chain.end());
+
+        for (size_t i = chain.size() - 1; i > 0; --i) {
+            chain[i].second -= chain[i - 1].second;
+        }
+
+        chain[0].second = 0;
 
         if (last_chain.empty()) {
             std::swap(last_chain, chain);
@@ -148,32 +180,48 @@ call_seed_chains_both_strands(std::string_view forward,
             continue;
         }
 
+        if (chain[0].first.label_columns.empty())
+            continue;
+
         // if this chain has the same seeds as the last one, merge their coordinate sets
         for (size_t i = 0; i < chain.size(); ++i) {
             Alignment::Columns columns;
-            Alignment::CoordinateSet coord_union;
-            auto add_col_coords = [&](auto col, const auto &coords) {
-                columns.push_back(col);
-                coord_union.push_back(coords);
-            };
-            utils::match_indexed_values(
-                last_chain[i].label_columns.begin(),
-                last_chain[i].label_columns.end(),
-                last_chain[i].label_coordinates.begin(),
-                chain[i].label_columns.begin(),
-                chain[i].label_columns.end(),
-                chain[i].label_coordinates.begin(),
-                [&](auto col, const auto &coords, const auto &other_coords) {
+            if (chain[i].first.label_coordinates.size()) {
+                assert(last_chain[i].first.label_columns.size()
+                        == last_chain[i].first.label_coordinates.size());
+                assert(chain[i].first.label_columns.size()
+                        == chain[i].first.label_coordinates.size());
+                Alignment::CoordinateSet coord_union;
+                auto add_col_coords = [&](auto col, const auto &coords) {
                     columns.push_back(col);
-                    coord_union.emplace_back();
-                    std::set_union(coords.begin(), coords.end(),
-                                   other_coords.begin(), other_coords.end(),
-                                   std::back_inserter(coord_union.back()));
-                },
-                add_col_coords, add_col_coords
-            );
-            std::swap(last_chain[i].label_columns, columns);
-            std::swap(last_chain[i].label_coordinates, coord_union);
+                    coord_union.push_back(coords);
+                };
+                utils::match_indexed_values(
+                    last_chain[i].first.label_columns.begin(),
+                    last_chain[i].first.label_columns.end(),
+                    last_chain[i].first.label_coordinates.begin(),
+                    chain[i].first.label_columns.begin(),
+                    chain[i].first.label_columns.end(),
+                    chain[i].first.label_coordinates.begin(),
+                    [&](auto col, const auto &coords, const auto &other_coords) {
+                        columns.push_back(col);
+                        coord_union.emplace_back();
+                        std::set_union(coords.begin(), coords.end(),
+                                       other_coords.begin(), other_coords.end(),
+                                       std::back_inserter(coord_union.back()));
+                    },
+                    add_col_coords, add_col_coords
+                );
+                std::swap(last_chain[i].first.label_coordinates, coord_union);
+            } else {
+                assert(chain[i].first.label_columns.size());
+                std::set_union(last_chain[i].first.label_columns.begin(),
+                               last_chain[i].first.label_columns.end(),
+                               chain[i].first.label_columns.begin(),
+                               chain[i].first.label_columns.end(),
+                               std::back_inserter(columns));
+            }
+            std::swap(last_chain[i].first.label_columns, columns);
         }
     }
 
@@ -299,6 +347,15 @@ std::vector<Alignment> chain_alignments(std::vector<Alignment>&& alignments,
     DBGAlignerConfig no_chain_config { config };
     no_chain_config.post_chain_alignments = false;
     AlignmentAggregator<AlignmentCompare> aggregator(no_chain_config);
+
+    alignments.erase(std::remove_if(alignments.begin(), alignments.end(), [&](Alignment &a) {
+        if (!a.get_clipping() && !a.get_end_clipping()) {
+            aggregator.add_alignment(std::move(a));
+            return true;
+        }
+
+        return false;
+    }), alignments.end());
 
     std::sort(alignments.begin(), alignments.end(), [](const auto &a, const auto &b) {
         return std::make_tuple(a.get_orientation(),

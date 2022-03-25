@@ -1,12 +1,13 @@
 #include "aligner_extender_methods.hpp"
 
+#include "dbg_aligner.hpp"
+
 #include "common/utils/simd_utils.hpp"
 #include "common/utils/template_utils.hpp"
 #include "common/logger.hpp"
-
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/rc_dbg.hpp"
-#include "dbg_aligner.hpp"
+#include "kmer/kmer_extractor.hpp"
 
 
 namespace mtg {
@@ -15,7 +16,7 @@ namespace align {
 
 using score_t = Alignment::score_t;
 const score_t ninf = Alignment::ninf;
-
+using kmer::KmerExtractorBOSS;
 
 DefaultColumnExtender::DefaultColumnExtender(const DeBruijnGraph &graph,
                                              const DBGAlignerConfig &config,
@@ -33,23 +34,26 @@ DefaultColumnExtender::DefaultColumnExtender(const DeBruijnGraph &graph,
 
     partial_sums_.push_back(0);
 
-    const char max_c = *std::max_element(graph_->alphabet().begin(), graph_->alphabet().end());
-    profile_score_.resize(max_c + 1);
-    profile_op_.resize(max_c + 1);
-    for (char c : graph_->alphabet()) {
+    profile_score_.resize(KmerExtractorBOSS::alphabet.size() + 1);
+    profile_op_.resize(KmerExtractorBOSS::alphabet.size() + 1);
+
+    for (size_t i = 0; i < profile_score_.size(); ++i) {
         // precompute profiles to store match/mismatch scores and Cigar::Operators
         // in contiguous arrays
-        profile_score_[c] = AlignedVector<score_t>(query_.size() + kPadding);
-        profile_op_[c] = AlignedVector<Cigar::Operator>(query_.size() + kPadding);
+        profile_score_[i] = AlignedVector<score_t>(query_.size() + kPadding);
+        profile_op_[i] = AlignedVector<Cigar::Operator>(query_.size() + kPadding);
+        char c = i != KmerExtractorBOSS::alphabet.size()
+            ? KmerExtractorBOSS::decode(i)
+            : '\0';
         const auto &row = config_.score_matrix[c];
         const auto &op_row = kCharToOp[c];
 
         // the first cell in a DP table row is one position before the first character,
         // so we need to shift the indices of profile_score_ and profile_op_
-        std::transform(query_.begin(), query_.end(), profile_score_[c].begin() + 1,
+        std::transform(query_.begin(), query_.end(), profile_score_[i].begin() + 1,
                        [&row](char q) { return row[q]; });
 
-        std::transform(query_.begin(), query_.end(), profile_op_[c].begin() + 1,
+        std::transform(query_.begin(), query_.end(), profile_op_[i].begin() + 1,
                        [&op_row](char q) { return op_row[q]; });
     }
 }
@@ -85,6 +89,8 @@ bool SeedFilteringExtender::check_seed(const Alignment &seed) const {
 bool SeedFilteringExtender::set_seed(const Alignment &seed) {
     assert(seed.get_query_view().size() + seed.get_clipping() + seed.get_end_clipping()
             == query_size_);
+    DEBUG_LOG("Seed: {}", seed);
+    assert(seed.is_valid(*graph_, &config_));
     seed_ = &seed;
     clear_conv_checker();
     return seed_;
@@ -378,7 +384,8 @@ void DefaultColumnExtender
         callback(next_node, next_c, next_node
             ? 0
             : (!node ? config_.gap_extension_penalty : config_.gap_opening_penalty));
-        assert(!node || graph_->traverse(node, next_c) == next_node);
+        assert(!node || next_c == boss::BOSS::kSentinel ||
+                graph_->traverse(node, next_c) == next_node);
     } else {
         assert(node);
         graph_->call_outgoing_kmers(node, [&](node_index next, char c) {
@@ -427,9 +434,12 @@ std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score,
     table.clear();
     prev_starts.clear();
 
-    assert(config_.xdrop + added_xdrop > 0);
+    // saturating addition
+    score_t xdrop = std::min(config_.xdrop, std::numeric_limits<score_t>::max() - added_xdrop)
+                        + added_xdrop;
+    assert(xdrop > 0);
 
-    xdrop_cutoffs_.assign(1, std::make_pair(0u, std::max(-config_.xdrop - added_xdrop, ninf + 1)));
+    xdrop_cutoffs_.assign(1, std::make_pair(0u, std::max(-xdrop, ninf + 1)));
     assert(xdrop_cutoffs_[0].second < 0);
 
     if (!config_.global_xdrop)
@@ -616,7 +626,7 @@ std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score,
                               S_prev.data() + trim - trim_prev,
                               F_prev.data() + trim - trim_prev,
                               S, E, F,
-                              profile_score_[c].data() + start + trim,
+                              profile_score_[KmerExtractorBOSS::encode(c)].data() + start + trim,
                               xdrop_cutoff, config_, score, offset);
 
                 update_ins_extension(S, E, xdrop_cutoff, config_);
@@ -714,8 +724,8 @@ std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score,
                     + sizeof(decltype(scores_reached_)::value_type) * scores_reached_sizediff
                     + sizeof(xdrop_cutoff_v) * xdrop_cutoffs_sizediff;
 
-                if (max_val - xdrop_cutoff > config_.xdrop + added_xdrop)
-                    xdrop_cutoff = max_val - config_.xdrop - added_xdrop;
+                if (max_val - xdrop_cutoff > xdrop)
+                    xdrop_cutoff = max_val - xdrop;
 
                 // if the best score in this column is above the xdrop score
                 // then check if the extension can continue
@@ -832,15 +842,16 @@ std::vector<Alignment> DefaultColumnExtender::backtrack(score_t min_path_score,
 
             score_t end_bonus = start_pos == last_pos ? right_end_bonus : 0;
 
+            KmerExtractorBOSS::TAlphabet s = KmerExtractorBOSS::encode(c);
             if (target_node) {
                 if (node == target_node
-                        && S[pos] == S_p[pos_p] + score + profile_score_[c][seed_clipping + start_pos]) {
+                        && S[pos] == S_p[pos_p] + score + profile_score_[s][seed_clipping + start_pos]) {
                     indices.emplace_back(S[pos] + end_bonus, -std::abs(start_pos - offset + seed_offset),
                                          -static_cast<ssize_t>(i), start_pos);
                 }
             } else if (S[pos] + end_bonus >= min_start_score) {
-                bool is_match = S[pos] == S_p[pos_p] + score + profile_score_[c][seed_clipping + start_pos]
-                    && profile_op_[c][seed_clipping + start_pos] == Cigar::MATCH;
+                bool is_match = S[pos] == S_p[pos_p] + score + profile_score_[s][seed_clipping + start_pos]
+                    && profile_op_[s][seed_clipping + start_pos] == Cigar::MATCH;
                 if (is_match || start_pos == last_pos) {
                     indices.emplace_back(S[pos] + end_bonus, -std::abs(start_pos - offset + seed_offset),
                                          -static_cast<ssize_t>(i), start_pos);
@@ -930,6 +941,8 @@ std::vector<Alignment> DefaultColumnExtender::backtrack(score_t min_path_score,
             if (pos == max_pos)
                 prev_starts.emplace(j);
 
+            KmerExtractorBOSS::TAlphabet s = KmerExtractorBOSS::encode(c);
+
             if (S[pos - trim] == ninf) {
                 j = 0;
 
@@ -952,12 +965,12 @@ std::vector<Alignment> DefaultColumnExtender::backtrack(score_t min_path_score,
                 }
             } else if (pos && pos >= trim_p + 1
                     && S[pos - trim] == S_p[pos - trim_p - 1] + score_cur
-                        + profile_score_[c][seed_clipping + pos]) {
+                        + profile_score_[s][seed_clipping + pos]) {
                 // match/mismatch
                 trace.emplace_back(j);
 
                 extra_penalty += score_cur;
-                append_node(node, c, offset, profile_op_[c][seed_clipping + pos]);
+                append_node(node, c, offset, profile_op_[s][seed_clipping + pos]);
                 --pos;
                 assert(j_prev != static_cast<size_t>(-1));
                 j = j_prev;
@@ -971,6 +984,8 @@ std::vector<Alignment> DefaultColumnExtender::backtrack(score_t min_path_score,
                                  xdrop_cutoff_i, last_fork_i, score_cur] = table[j];
                     const auto &[S_p, E_p, F_p, node_p, j_prev_p, c_p, offset_p, max_pos_p, trim_p,
                                  xdrop_cutoff_i_p, last_fork_i_p, score_cur_p] = table[j_prev];
+
+                    align_offset = std::min(offset, k_minus_1);
 
                     assert(pos >= trim_p);
 
