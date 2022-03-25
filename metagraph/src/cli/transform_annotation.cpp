@@ -107,10 +107,10 @@ binmat::LinkageMatrix cluster_columns(const std::vector<std::string> &files,
                     [&](uint64_t i) { set_bits.push_back(i); }
                 );
 
-                common::logger->trace("Subsampled set bits: {:.2e}/{:.2e}"
-                                      ", total size: {:.2e}/{:.2e}, column: {}",
-                                      (double)set_bits.size(), (double)column->num_set_bits(),
-                                      (double)size, (double)column->size(), label);
+                logger->trace("Subsampled set bits: {:.2e}/{:.2e}"
+                              ", total size: {:.2e}/{:.2e}, column: {}",
+                              (double)set_bits.size(), (double)column->num_set_bits(),
+                              (double)size, (double)column->size(), label);
             }
         });
     };
@@ -400,7 +400,7 @@ int transform_annotation(Config *config) {
 
         logger->trace("Loading annotation...");
 
-        if (config->anno_type == Config::ColumnCompressed) {
+        if (input_anno_type == Config::ColumnCompressed) {
             if (!dynamic_cast<ColumnCompressed<>&>(*annotation).merge_load(files)) {
                 logger->error("Cannot load annotations");
                 exit(1);
