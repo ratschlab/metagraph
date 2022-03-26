@@ -23,41 +23,136 @@ namespace mtg {
 namespace graph {
 namespace align {
 
+
+// Note: this object stores pointers to the query sequence, so it is the user's
+//       responsibility to ensure that the query sequence is not destroyed when
+//       calling this class' methods
+class Seed {
+  public:
+    typedef DeBruijnGraph::node_index node_index;
+    typedef annot::binmat::BinaryMatrix::Column Column;
+    typedef SmallVector<int64_t> Tuple;
+    typedef Vector<Column> Columns;
+    typedef Vector<Tuple> CoordinateSet;
+
+    Seed() : orientation_(false), offset_(0), clipping_(0), end_clipping_(0) {}
+    Seed(std::string_view query_view,
+         std::vector<node_index>&& nodes,
+         bool orientation,
+         size_t offset,
+         size_t clipping,
+         size_t end_clipping)
+          : query_view_(query_view), nodes_(std::move(nodes)), orientation_(orientation),
+            offset_(offset), clipping_(clipping), end_clipping_(end_clipping) {}
+
+    std::string_view get_query_view() const { return query_view_; }
+
+    bool empty() const { return nodes_.empty(); }
+
+    // The matched path in the graph
+    const std::vector<node_index>& get_nodes() const { return nodes_; }
+
+    // get the spelling of the matched path
+    std::string_view get_sequence() const { return query_view_; }
+
+    // The number of characters discarded from the prefix of the first node in the path.
+    size_t get_offset() const { return offset_; }
+
+    // The number of nodes in the matched path.
+    // This is equal to get_sequence().size() - graph.get_k() + 1 + get_offset()
+    size_t size() const { return nodes_.size(); }
+
+    // The orientation of the original query sequence. Return true iff the reverse
+    // complement is matched to the path.
+    bool get_orientation() const { return orientation_; }
+
+    Cigar::LengthType get_clipping() const { return clipping_; }
+    Cigar::LengthType get_end_clipping() const { return end_clipping_; }
+
+    // Add more nodes to the Seed. This assumes that the original query has |next|
+    // extra characters and that the updated path still spells the query view.
+    void expand(const std::vector<node_index> &next) {
+        query_view_ = std::string_view(query_view_.data(), query_view_.size() + next.size());
+        end_clipping_ -= next.size();
+        nodes_.insert(nodes_.end(), next.begin(), next.end());
+    }
+
+    const annot::LabelEncoder<> *label_encoder = nullptr;
+
+    Columns label_columns;
+
+    // for each column in |label_columns|, store a vector of coordinates for the
+    // alignment's first nucleotide
+    // (i.e., the first node's coordinate + the alignment offset)
+    CoordinateSet label_coordinates;
+
+  private:
+    std::string_view query_view_;
+    std::vector<node_index> nodes_;
+    bool orientation_;
+    size_t offset_;
+    Cigar::LengthType clipping_;
+    Cigar::LengthType end_clipping_;
+};
+
 // Note: this object stores pointers to the query sequence, so it is the user's
 //       responsibility to ensure that the query sequence is not destroyed when
 //       calling this class' methods
 class Alignment {
   public:
     typedef DeBruijnGraph::node_index node_index;
-    typedef DBGAlignerConfig::score_t score_t;
     typedef annot::binmat::BinaryMatrix::Column Column;
     typedef SmallVector<int64_t> Tuple;
     typedef Vector<Column> Columns;
     typedef Vector<Tuple> CoordinateSet;
+    typedef DBGAlignerConfig::score_t score_t;
     static const score_t ninf = DBGAlignerConfig::ninf;
 
-    Alignment() : score_(0), orientation_(false), offset_(0) {}
-
-    Alignment(std::string_view query,
-              std::vector<node_index>&& nodes,
-              std::string&& sequence,
-              score_t score,
-              Cigar&& cigar,
+    Alignment(std::string_view query = {},
+              std::vector<node_index>&& nodes = {},
+              std::string&& sequence = "",
+              score_t score = 0,
+              Cigar&& cigar = {},
               size_t clipping = 0,
               bool orientation = false,
               size_t offset = 0)
-          : query_view_(query), nodes_(std::move(nodes)), sequence_(std::move(sequence)),
-            score_(score), cigar_(Cigar::CLIPPED, clipping), orientation_(orientation),
-            offset_(offset) { cigar_.append(std::move(cigar)); }
+          : query_view_(query), nodes_(std::move(nodes)), orientation_(orientation),
+            offset_(offset), sequence_(std::move(sequence)), score_(score),
+            cigar_(Cigar::CLIPPED, clipping) { cigar_.append(std::move(cigar)); }
 
-    // Used for constructing gapless Alignments
-    Alignment(std::string_view query,
-              std::vector<node_index>&& nodes,
-              std::string&& sequence,
-              score_t score,
-              size_t clipping = 0,
-              bool orientation = false,
-              size_t offset = 0);
+    Alignment(const Seed &seed, const DBGAlignerConfig &config)
+          : label_encoder(seed.label_encoder), label_columns(seed.label_columns),
+            label_coordinates(seed.label_coordinates), query_view_(seed.get_query_view()),
+            nodes_(std::vector<node_index>(seed.get_nodes())),
+            orientation_(seed.get_orientation()), offset_(seed.get_offset()),
+            sequence_(query_view_),
+            score_(config.match_score(query_view_) + (!seed.get_clipping() ? config.left_end_bonus : 0)
+                     + (!seed.get_end_clipping() ? config.right_end_bonus : 0)),
+            cigar_(Cigar::CLIPPED, seed.get_clipping()) {
+        cigar_.append(Cigar::MATCH, query_view_.size());
+        cigar_.append(Cigar::CLIPPED, seed.get_end_clipping());
+    }
+
+    std::string_view get_query_view() const { return query_view_; }
+
+    bool empty() const { return nodes_.empty(); }
+
+    // The matched path in the graph
+    const std::vector<node_index>& get_nodes() const { return nodes_; }
+
+    // get the spelling of the matched path
+    std::string_view get_sequence() const { return sequence_; }
+
+    // The number of characters discarded from the prefix of the first node in the path.
+    size_t get_offset() const { return offset_; }
+
+    // The number of nodes in the matched path.
+    // This is equal to get_sequence().size() - graph.get_k() + 1 + get_offset()
+    size_t size() const { return nodes_.size(); }
+
+    // The orientation of the original query sequence. Return true iff the reverse
+    // complement is matched to the path.
+    bool get_orientation() const { return orientation_; }
 
     // Append |next| to the end of the current alignment. In this process, alignment
     // labels are intersected. If coordinates are present, then the append is only
@@ -78,13 +173,7 @@ class Alignment {
         return append(std::move(other));
     }
 
-    size_t size() const { return nodes_.size(); }
-    bool empty() const { return nodes_.empty(); }
-    const std::vector<node_index>& get_nodes() const { return nodes_; }
-
     score_t get_score() const { return score_; }
-
-    std::string_view get_query_view() const { return query_view_; }
 
     void extend_query_begin(const char *begin) {
         const char *full_query_begin = query_view_.data() - get_clipping();
@@ -133,11 +222,8 @@ class Alignment {
 
     void reverse_complement(const DeBruijnGraph &graph, std::string_view query_rev_comp);
 
-    const std::string& get_sequence() const { return sequence_; }
     const Cigar& get_cigar() const { return cigar_; }
     Cigar& get_cigar() { return cigar_; }
-    bool get_orientation() const { return orientation_; }
-    size_t get_offset() const { return offset_; }
     Cigar::LengthType get_clipping() const { return cigar_.get_clipping(); }
     Cigar::LengthType get_end_clipping() const { return cigar_.get_end_clipping(); }
 
@@ -165,26 +251,29 @@ class Alignment {
 
     bool is_valid(const DeBruijnGraph &graph, const DBGAlignerConfig *config = nullptr) const;
 
-    static bool coordinates_less(const Alignment &a, const Alignment &b);
+    const annot::LabelEncoder<> *label_encoder = nullptr;
 
     Columns label_columns;
-    score_t extra_penalty = 0;
 
-    // for each column in |label_columns|, store a vector of coordinate ranges
+    // for each column in |label_columns|, store a vector of coordinates for the
+    // alignment's first nucleotide
+    // (i.e., the first node's coordinate + the alignment offset)
     CoordinateSet label_coordinates;
 
-    const annot::LabelEncoder<> *label_encoder = nullptr;
+    static bool coordinates_less(const Alignment &a, const Alignment &b);
+
+    score_t extra_score = 0;
 
     std::string format_coords() const;
 
   private:
     std::string_view query_view_;
     std::vector<node_index> nodes_;
+    bool orientation_;
+    size_t offset_;
     std::string sequence_;
     score_t score_;
     Cigar cigar_;
-    bool orientation_;
-    size_t offset_;
 };
 
 inline std::ostream& operator<<(std::ostream &out, const Alignment &a) {
@@ -222,7 +311,7 @@ struct LocalAlignmentGreater {
 // ensures that the query sequence is always accessible.
 class AlignmentResults {
   public:
-    AlignmentResults(std::string_view query = {}, bool is_reverse_complement = false);
+    AlignmentResults(std::string_view query = {});
 
     // Copy constructors are disabled to ensure that the string_view pointers
     // in the Alignment objects stay valid
@@ -292,16 +381,17 @@ template <> struct formatter<mtg::graph::align::Alignment> {
         if (label_coordinates.size()) {
             format_to(ctx.out(), "\t{}", a.format_coords());
         } else if (label_columns.size()) {
-            assert(a.label_encoder);
+            if (a.label_encoder) {
+                std::vector<std::string> decoded_labels;
+                decoded_labels.reserve(label_columns.size());
+                for (size_t i = 0; i < label_columns.size(); ++i) {
+                    decoded_labels.emplace_back(a.label_encoder->decode(label_columns[i]));
+                }
 
-            std::vector<std::string> decoded_labels;
-            decoded_labels.reserve(label_columns.size());
-
-            for (size_t i = 0; i < label_columns.size(); ++i) {
-                decoded_labels.emplace_back(a.label_encoder->decode(label_columns[i]));
+                format_to(ctx.out(), "\t{}", fmt::join(decoded_labels, ";"));
+            } else {
+                format_to(ctx.out(), "\t{}", fmt::join(label_columns, ";"));
             }
-
-            format_to(ctx.out(), "\t{}", fmt::join(decoded_labels, ";"));
         }
 
         return ctx.out();

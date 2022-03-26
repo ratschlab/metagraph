@@ -138,7 +138,6 @@ class DefaultColumnExtender : public SeedFilteringExtender {
         ssize_t trim; // first index allocated by the vectors
                       // i.e., the maximal value is located at S[max_pos - trim]
         size_t xdrop_cutoff_i; // corresponding index in the xdrop_cutoff vector
-        size_t last_fork_i; // index of the nearest ancestor that was a fork
         score_t score; // added score when traversing to this node (typically a negative penalty)
 
         // allocate and initialize with padding to ensure that SIMD operations don't
@@ -184,6 +183,7 @@ class DefaultColumnExtender : public SeedFilteringExtender {
     virtual std::vector<Alignment> backtrack(score_t min_path_score,
                                              std::string_view window,
                                              score_t right_end_bonus,
+                                             const std::vector<size_t> &tips,
                                              node_index target_node = DeBruijnGraph::npos);
 
     /**
@@ -210,10 +210,10 @@ class DefaultColumnExtender : public SeedFilteringExtender {
                                  size_t offset,
                                  std::string_view window,
                                  const std::string &match,
-                                 score_t extra_penalty,
+                                 score_t extra_score,
                                  const std::function<void(Alignment&&)> &callback) {
         callback(construct_alignment(ops, clipping, window, path, match, end_score,
-                                     offset, extra_penalty));
+                                     offset, extra_score));
     }
 
     Alignment construct_alignment(Cigar cigar,
@@ -223,7 +223,7 @@ class DefaultColumnExtender : public SeedFilteringExtender {
                                   std::string match,
                                   score_t score,
                                   size_t offset,
-                                  score_t extra_penalty) const;
+                                  score_t extra_score) const;
 
   private:
     // compute perfect match scores for all suffixes used for branch and bound checks

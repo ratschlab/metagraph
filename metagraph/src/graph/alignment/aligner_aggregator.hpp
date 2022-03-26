@@ -87,7 +87,7 @@ inline bool AlignmentAggregator<AlignmentCompare>::add_alignment(Alignment&& ali
         // check for duplicates
         for (const auto &aln : queue) {
             if (*a == *aln)
-                return false;
+                return config_.post_chain_alignments;
         }
         // If post-alignment chaining is requested, never skip any alignments
         if (config_.post_chain_alignments || queue.size() < config_.num_alternative_paths) {

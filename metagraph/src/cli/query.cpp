@@ -1211,9 +1211,9 @@ Alignment align_sequence(std::string *seq,
         // modify sequence for querying with the best alignment
         if (match.get_offset()) {
             *seq = graph.get_node_sequence(match.get_nodes()[0]).substr(0, match.get_offset())
-                  + match.get_sequence();
+                  + std::string(match.get_sequence());
         } else {
-            *seq = const_cast<std::string&&>(match.get_sequence());
+            *seq = match.get_sequence();
         }
 
         return { match.get_score(), match.get_cigar().to_string(), match.get_orientation() };

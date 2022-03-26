@@ -19,9 +19,7 @@ namespace align {
 
 class IDBGAligner {
   public:
-    typedef std::tuple<std::string /* header */,
-                       std::string /* seq */,
-                       bool /* orientation of seq */> Query;
+    typedef std::pair<std::string /* header */, std::string /* seq */> Query;
     typedef std::function<void(const std::string& /* header */,
                                AlignmentResults&& /* alignments */)> AlignmentCallback;
 
@@ -35,7 +33,7 @@ class IDBGAligner {
                              const AlignmentCallback &callback) const = 0;
 
     // Convenience method
-    AlignmentResults align(std::string_view query, bool is_reverse_complement = false) const;
+    AlignmentResults align(std::string_view query) const;
 };
 
 
@@ -61,8 +59,8 @@ class DBGAligner : public IDBGAligner {
     const DeBruijnGraph &graph_;
     DBGAlignerConfig config_;
 
-    typedef std::vector<std::tuple<std::shared_ptr<ISeeder>, std::vector<node_index>,
-                                   std::shared_ptr<ISeeder>, std::vector<node_index>>> BatchSeeders;
+    typedef std::vector<std::pair<std::shared_ptr<ISeeder>, std::shared_ptr<ISeeder>>> BatchSeeders;
+
     BatchSeeders
     virtual build_seeders(const std::vector<Query> &seq_batch,
                           const std::vector<AlignmentResults> &wrapped_seqs) const;

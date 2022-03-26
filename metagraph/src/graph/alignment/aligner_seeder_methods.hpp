@@ -7,35 +7,70 @@
 
 namespace mtg {
 namespace graph {
-
-class DBGSuccinct;
-
 namespace align {
 
 class ISeeder {
   public:
-    typedef Alignment Seed;
-
     virtual ~ISeeder() {}
 
+    virtual const DBGAlignerConfig& get_config() const = 0;
     virtual std::vector<Seed> get_seeds() const = 0;
     virtual size_t get_num_matches() const = 0;
+
+    virtual std::vector<Alignment> get_alignments() const {
+        std::vector<Alignment> alignments;
+        std::vector<Seed> seeds = get_seeds();
+        alignments.reserve(seeds.size());
+        for (const Seed &seed : seeds) {
+            alignments.emplace_back(seed, get_config());
+            alignments.back().trim_offset();
+        }
+        return alignments;
+    }
+};
+
+class ManualMatchingSeeder : public ISeeder {
+  public:
+    ManualMatchingSeeder(std::vector<Seed>&& seeds,
+                         size_t num_matching,
+                         const DBGAlignerConfig &config)
+          : config_(config), seeds_(std::move(seeds)), num_matching_(num_matching) {}
+
+    virtual ~ManualMatchingSeeder() {}
+
+    std::vector<Seed> get_seeds() const override { return seeds_; }
+    const DBGAlignerConfig& get_config() const override { return config_; }
+    size_t get_num_matches() const override final { return num_matching_; }
+    std::vector<Seed>& data() { return seeds_; }
+
+  private:
+    const DBGAlignerConfig &config_;
+    std::vector<Seed> seeds_;
+    size_t num_matching_;
 };
 
 class ManualSeeder : public ISeeder {
   public:
-    ManualSeeder(std::vector<Seed>&& seeds = {}, size_t num_matching = 0)
+    ManualSeeder(std::vector<Alignment>&& seeds = {}, size_t num_matching = 0)
         : seeds_(std::move(seeds)), num_matching_(num_matching) {}
 
     virtual ~ManualSeeder() {}
 
-    std::vector<Seed> get_seeds() const override { return seeds_; }
+    std::vector<Seed> get_seeds() const override {
+        throw std::runtime_error("Not implemented");
+    }
+
+    const DBGAlignerConfig& get_config() const override {
+        throw std::runtime_error("Not implemented");
+    }
+
+    std::vector<Alignment> get_alignments() const override { return seeds_; }
     size_t get_num_matches() const override final { return num_matching_; }
 
-    std::vector<Seed>& data() { return seeds_; }
+    std::vector<Alignment>& data() { return seeds_; }
 
   private:
-    std::vector<Seed> seeds_;
+    std::vector<Alignment> seeds_;
     size_t num_matching_;
 };
 
@@ -51,6 +86,7 @@ class ExactSeeder : public ISeeder {
 
     virtual ~ExactSeeder() {}
 
+    const DBGAlignerConfig& get_config() const override { return config_; }
     std::vector<Seed> get_seeds() const override;
     size_t get_num_matches() const override final { return num_matching_; }
 
@@ -60,7 +96,6 @@ class ExactSeeder : public ISeeder {
     bool orientation_;
     std::vector<node_index> query_nodes_;
     const DBGAlignerConfig &config_;
-    std::vector<Alignment::score_t> partial_sum_;
     size_t num_matching_;
 
     size_t num_exact_matching() const;
@@ -102,8 +137,6 @@ class UniMEMSeeder : public MEMSeeder {
 template <class BaseSeeder>
 class SuffixSeeder : public BaseSeeder {
   public:
-    typedef typename BaseSeeder::Seed Seed;
-
     template <typename... Args>
     SuffixSeeder(Args&&... args) : BaseSeeder(std::forward<Args>(args)...) {
         generate_seeds();

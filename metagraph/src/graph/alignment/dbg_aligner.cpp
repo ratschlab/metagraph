@@ -13,10 +13,9 @@ namespace align {
 
 using mtg::common::logger;
 
-AlignmentResults IDBGAligner::align(std::string_view query,
-                                    bool is_reverse_complement) const {
+AlignmentResults IDBGAligner::align(std::string_view query) const {
     AlignmentResults result;
-    align_batch({ Query{ std::string{}, query, is_reverse_complement} },
+    align_batch({ Query{ std::string{}, query } },
         [&](const std::string&, AlignmentResults&& alignment) {
             std::swap(result, alignment);
         }
@@ -61,7 +60,9 @@ std::pair<Alignment, Alignment> split_seed(const DeBruijnGraph &graph,
                                            const Alignment &alignment) {
     assert(alignment.is_valid(graph, &config));
     if (alignment.get_sequence().size() < graph.get_k() * 2
-            || std::find(alignment.get_nodes().begin(), alignment.get_nodes().end(), DeBruijnGraph::npos) != alignment.get_nodes().end()) {
+            || std::find(alignment.get_nodes().begin(),
+                         alignment.get_nodes().end(), DeBruijnGraph::npos)
+                            != alignment.get_nodes().end()) {
         return std::make_pair(Alignment(), alignment);
     }
 
@@ -191,8 +192,8 @@ auto DBGAligner<Seeder, Extender, AlignmentCompare>
     ProgressBar progress_bar(seq_batch.size(), "Seeding sequences",
                              std::cerr, !common::get_verbose());
     for (size_t i = 0; i < seq_batch.size(); ++i, ++progress_bar) {
-        const auto &[header, query, is_reverse_complement] = seq_batch[i];
-        std::string_view this_query = wrapped_seqs[i].get_query(is_reverse_complement);
+        const auto &[header, query] = seq_batch[i];
+        std::string_view this_query = wrapped_seqs[i].get_query(false);
         assert(this_query == query);
 
         std::vector<node_index> nodes;
@@ -202,7 +203,7 @@ auto DBGAligner<Seeder, Extender, AlignmentCompare>
             nodes.resize(this_query.size() - graph_.get_k() + 1);
         }
 
-        auto seeder = std::make_shared<Seeder>(graph_, this_query, is_reverse_complement,
+        auto seeder = std::make_shared<Seeder>(graph_, this_query, false,
                                                std::vector<node_index>(nodes), config_);
         std::shared_ptr<Seeder> seeder_rc;
         std::vector<node_index> nodes_rc;
@@ -214,19 +215,18 @@ auto DBGAligner<Seeder, Extender, AlignmentCompare>
             std::string dummy(query);
             if (config_.max_seed_length >= graph_.get_k()) {
                 reverse_complement_seq_path(graph_, dummy, nodes_rc);
-                assert(dummy == wrapped_seqs[i].get_query(!is_reverse_complement));
+                assert(dummy == wrapped_seqs[i].get_query(true));
             }
 
             assert(nodes_rc.size() == nodes.size());
 
-            std::string_view reverse = wrapped_seqs[i].get_query(!is_reverse_complement);
+            std::string_view reverse = wrapped_seqs[i].get_query(true);
 
-            seeder_rc = std::make_shared<Seeder>(graph_, reverse, !is_reverse_complement,
+            seeder_rc = std::make_shared<Seeder>(graph_, reverse, true,
                                                  std::move(nodes_rc), config_);
         }
 #endif
-        result.emplace_back(std::move(seeder), std::move(nodes),
-                            std::move(seeder_rc), std::move(nodes_rc));
+        result.emplace_back(std::move(seeder), std::move(seeder_rc));
     }
 
     return result;
@@ -238,16 +238,16 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
               const AlignmentCallback &callback) const {
     std::vector<AlignmentResults> paths;
     paths.reserve(seq_batch.size());
-    for (const auto &[header, query, is_reverse_complement] : seq_batch) {
-        paths.emplace_back(query, is_reverse_complement);
+    for (const auto &[header, query] : seq_batch) {
+        paths.emplace_back(query);
     }
 
     auto seeders = build_seeders(seq_batch, paths);
     assert(seeders.size() == seq_batch.size());
 
     for (size_t i = 0; i < seq_batch.size(); ++i) {
-        const auto &[header, query, is_reverse_complement] = seq_batch[i];
-        auto &[seeder, nodes, seeder_rc, nodes_rc] = seeders[i];
+        const auto &[header, query] = seq_batch[i];
+        auto &[seeder, seeder_rc] = seeders[i];
         AlignmentAggregator<AlignmentCompare> aggregator(config_);
 
         size_t num_seeds = 0;
@@ -266,14 +266,14 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
                                 : aggregator.get_global_cutoff());
         };
 
-        std::string_view this_query = paths[i].get_query(is_reverse_complement);
+        std::string_view this_query = paths[i].get_query(false);
         assert(this_query == query);
 
         Extender extender(*this, this_query);
 
 #if ! _PROTEIN_GRAPH
         if (seeder_rc) {
-            std::string_view reverse = paths[i].get_query(!is_reverse_complement);
+            std::string_view reverse = paths[i].get_query(true);
             Extender extender_rc(*this, reverse);
 
             auto [seeds, extensions, explored_nodes] =
@@ -337,7 +337,7 @@ void align_core(const Seeder &seeder,
                 const std::function<void(Alignment&&)> &callback,
                 const std::function<score_t(const Alignment&)> &get_min_path_score,
                 bool force_fixed_seed) {
-    auto seeds = seeder.get_seeds();
+    auto seeds = seeder.get_alignments();
 
     for (size_t i = 0; i < seeds.size(); ++i) {
         if (seeds[i].empty())
@@ -345,11 +345,8 @@ void align_core(const Seeder &seeder,
 
         score_t min_path_score = get_min_path_score(seeds[i]);
 
-        DEBUG_LOG("Min path score: {}\tSeed: {}", min_path_score, seeds[i]);
-
         for (auto&& extension : extender.get_extensions(seeds[i], min_path_score,
                                                         force_fixed_seed)) {
-            DEBUG_LOG("\tExtension: {}", extension);
             callback(std::move(extension));
         }
 
@@ -506,15 +503,14 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
     size_t num_extensions = 0;
     size_t num_explored_nodes = 0;
 
-    auto fwd_seeds = forward_seeder.get_seeds();
-    auto bwd_seeds = reverse_seeder.get_seeds();
-
     if (config_.chain_alignments) {
+        auto fwd_seeds = forward_seeder.get_seeds();
+        auto bwd_seeds = reverse_seeder.get_seeds();
         if (fwd_seeds.empty() && bwd_seeds.empty())
             return std::make_tuple(num_seeds, num_extensions, num_explored_nodes);
 
         bool can_chain = false;
-        for (const Alignment &seed : fwd_seeds) {
+        for (const Seed &seed : fwd_seeds) {
             if (seed.label_coordinates.size()) {
                 can_chain = true;
                 break;
@@ -522,7 +518,7 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
         }
 
         if (!can_chain) {
-            for (const Alignment &seed : bwd_seeds) {
+            for (const Seed &seed : bwd_seeds) {
                 if (seed.label_coordinates.size()) {
                     can_chain = true;
                     break;
@@ -538,12 +534,14 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
         AlignmentAggregator<AlignmentCompare> aggregator(config_);
 
         try {
+            tsl::hopscotch_set<Alignment::Column> finished_columns;
             size_t this_num_explored;
             std::tie(num_seeds, this_num_explored) = call_seed_chains_both_strands(
                 forward, reverse, graph_.get_k() - 1, config_,
                 std::move(fwd_seeds), std::move(bwd_seeds),
                 [&](Chain&& chain, score_t score) {
                     std::ignore = score;
+                    bool any_added = false;
                     extend_chain(chain[0].first.get_orientation() ? reverse : forward,
                                  chain[0].first.get_orientation() ? forward : reverse,
                                  chain[0].first.get_orientation()
@@ -551,10 +549,21 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
                                      : forward_extender,
                                  std::move(chain), num_extensions, num_explored_nodes,
                                  [&](Alignment&& aln) {
-                                     if (aggregator.add_alignment(std::move(aln)))
-                                        throw std::bad_function_call();
-                                 });
-                }
+                        auto cur_columns = aln.label_columns;
+                        if (!aggregator.add_alignment(std::move(aln))) {
+                            if (cur_columns.size()) {
+                                any_added = true;
+                                finished_columns.insert(cur_columns.begin(), cur_columns.end());
+                            }
+                        } else {
+                            any_added = true;
+                        }
+                    });
+
+                    if (!any_added)
+                        throw std::bad_function_call();
+                },
+                [&](Alignment::Column column) { return finished_columns.count(column); }
             );
             num_explored_nodes += this_num_explored;
         } catch (const std::bad_function_call&) {}
@@ -575,6 +584,9 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
 
         return std::make_tuple(num_seeds, num_extensions, num_explored_nodes);
     }
+
+    auto fwd_seeds = forward_seeder.get_alignments();
+    auto bwd_seeds = reverse_seeder.get_alignments();
 
     RCDBG rc_dbg(std::shared_ptr<const DeBruijnGraph>(
                     std::shared_ptr<const DeBruijnGraph>(), &graph_));
@@ -607,13 +619,9 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
                 continue;
 
             score_t min_path_score = config_.min_cell_score;
-
-            DEBUG_LOG("Min path score: {}\tSeed: {}", min_path_score, seeds[i]);
-
             auto extensions = fwd_extender.get_extensions(seeds[i], min_path_score, false);
 
             std::vector<Alignment> rc_of_alignments;
-
             for (Alignment &path : extensions) {
                 if (path.get_score() >= get_min_path_score(path)) {
                     if (is_reversible(path)) {

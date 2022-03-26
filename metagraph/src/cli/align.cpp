@@ -108,7 +108,7 @@ void map_sequences_in_file(const std::string &file,
         } else {
             // TODO: make more efficient
             // TODO: canonicalization
-            const DBGSuccinct &dbg = dynamic_cast<const DBGSuccinct&>(graph);
+            const DBGSuccinct &dbg = static_cast<const DBGSuccinct&>(graph);
             if (dbg.get_mode() == DeBruijnGraph::PRIMARY)
                 logger->warn("Sub-k-mers will be mapped to unwrapped primary graph");
 
@@ -378,8 +378,6 @@ int align_to_graph(Config *config) {
 
         size_t num_batches = 0;
 
-        bool is_reverse_complement = false;
-
         while (it != end) {
             uint64_t num_bytes_read = 0;
 
@@ -394,10 +392,8 @@ int align_to_graph(Config *config) {
                             ? utils::join_strings({ it->name.s, it->comment.s },
                                                   config->fasta_anno_comment_delim, true)
                             : std::string(it->name.s);
-                seq_batch.emplace_back(std::move(header), it->seq.s, is_reverse_complement);
+                seq_batch.emplace_back(std::move(header), it->seq.s);
                 num_bytes_read += it->seq.l;
-                // alternate between forward and rc sequences if |forward_and_reverse| is true
-                is_reverse_complement ^= config->forward_and_reverse;
             }
 
             ++num_batches;

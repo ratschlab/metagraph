@@ -17,9 +17,11 @@ call_seed_chains_both_strands(std::string_view forward,
                               std::string_view reverse,
                               size_t node_overlap,
                               const DBGAlignerConfig &config,
-                              std::vector<Alignment>&& fwd_seeds,
-                              std::vector<Alignment>&& bwd_seeds,
-                              const std::function<void(Chain&&, score_t)> &callback);
+                              std::vector<Seed>&& fwd_seeds,
+                              std::vector<Seed>&& bwd_seeds,
+                              const std::function<void(Chain&&, score_t)> &callback,
+                              const std::function<bool(Alignment::Column)> &skip_column
+                                  = [](Alignment::Column) { return false; });
 
 // Given a set of local alignments, use sparse dynamic programming to construct
 // longer alignments, potentially with gaps.

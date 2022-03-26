@@ -15,40 +15,21 @@ namespace align {
 
 using mtg::common::logger;
 
-Alignment::Alignment(std::string_view query,
-                     std::vector<node_index>&& nodes,
-                     std::string&& sequence,
-                     score_t score,
-                     size_t clipping,
-                     bool orientation,
-                     size_t offset)
-      : query_view_(query), nodes_(std::move(nodes)), sequence_(std::move(sequence)),
-        score_(score),
-        orientation_(orientation),
-        offset_(offset) {
-    assert(query_view_.size() == sequence_.size());
-    cigar_ = std::inner_product(query_view_.begin(), query_view_.end(), sequence_.begin(),
-                                Cigar(Cigar::CLIPPED, clipping),
-                                [&](Cigar &cigar, bool equal) -> Cigar& {
-                                    cigar.append(equal ? Cigar::MATCH : Cigar::MISMATCH);
-                                    return cigar;
-                                },
-                                std::equal_to<char>());
-}
-
 std::string Alignment::format_coords() const {
     if (!label_coordinates.size())
         return "";
 
     assert(label_columns.size());
-    assert(label_encoder);
     assert(label_coordinates.size() == label_columns.size());
 
     std::vector<std::string> decoded_labels;
     decoded_labels.reserve(label_columns.size());
 
     for (size_t i = 0; i < label_columns.size(); ++i) {
-        decoded_labels.emplace_back(label_encoder->decode(label_columns[i]));
+        decoded_labels.emplace_back(label_encoder
+            ? label_encoder->decode(label_columns[i])
+            : std::to_string(label_columns[i])
+        );
         for (uint64_t coord : label_coordinates[i]) {
             // alignment coordinates are 1-based inclusive ranges
             decoded_labels.back()
@@ -552,7 +533,7 @@ void Alignment::reverse_complement(const DeBruijnGraph &graph,
             if (canonical)
                 base_graph = &canonical->get_graph();
 
-            const auto &dbg_succ = dynamic_cast<const DBGSuccinct&>(*base_graph);
+            const auto &dbg_succ = static_cast<const DBGSuccinct&>(*base_graph);
 
             size_t num_sentinels = sequence_.find_last_of(boss::BOSS::kSentinel) + 1;
             assert(offset_ >= num_sentinels);
@@ -1302,10 +1283,10 @@ bool Alignment::is_valid(const DeBruijnGraph &graph, const DBGAlignerConfig *con
     }
 
     score_t cigar_score = config ? config->score_cigar(sequence_, query_view_, cigar_) : 0;
-    cigar_score += extra_penalty;
+    cigar_score += extra_score;
     if (config && score_ != cigar_score) {
         logger->error("Mismatch between CIGAR and score\nCigar score: {} ({} from extra)\n{}\t{}",
-                      cigar_score, extra_penalty, query_view_, *this);
+                      cigar_score, extra_score, query_view_, *this);
         return false;
     }
 
@@ -1313,7 +1294,7 @@ bool Alignment::is_valid(const DeBruijnGraph &graph, const DBGAlignerConfig *con
 }
 
 
-AlignmentResults::AlignmentResults(std::string_view query, bool is_reverse_complement) {
+AlignmentResults::AlignmentResults(std::string_view query) {
     // Pad sequences for easier access in 64-bit blocks.
     // Take the max of the query size and sizeof(query_view_) to ensure that small-string
     // optimizations are disabled. Implementation taken from:
@@ -1337,8 +1318,6 @@ AlignmentResults::AlignmentResults(std::string_view query, bool is_reverse_compl
 
     // reverse complement
     reverse_complement(query_rc_.begin(), query_rc_.end());
-    if (is_reverse_complement)
-        std::swap(query_, query_rc_);
 }
 
 } // namespace align
