@@ -23,10 +23,11 @@ namespace mtg {
 namespace graph {
 namespace align {
 
+
 // Note: this object stores pointers to the query sequence, so it is the user's
 //       responsibility to ensure that the query sequence is not destroyed when
 //       calling this class' methods
-class Matching {
+class Seed {
   public:
     typedef DeBruijnGraph::node_index node_index;
     typedef annot::binmat::BinaryMatrix::Column Column;
@@ -34,16 +35,15 @@ class Matching {
     typedef Vector<Column> Columns;
     typedef Vector<Tuple> CoordinateSet;
 
-    Matching() : orientation_(false), offset_(0) {}
-
-    Matching(std::string_view query_view,
-             std::vector<node_index>&& nodes,
-             bool orientation,
-             size_t offset)
+    Seed() : orientation_(false), offset_(0), clipping_(0), end_clipping_(0) {}
+    Seed(std::string_view query_view,
+         std::vector<node_index>&& nodes,
+         bool orientation,
+         size_t offset,
+         size_t clipping,
+         size_t end_clipping)
           : query_view_(query_view), nodes_(std::move(nodes)), orientation_(orientation),
-            offset_(offset) {}
-
-    virtual ~Matching() {}
+            offset_(offset), clipping_(clipping), end_clipping_(end_clipping) {}
 
     std::string_view get_query_view() const { return query_view_; }
 
@@ -53,7 +53,7 @@ class Matching {
     const std::vector<node_index>& get_nodes() const { return nodes_; }
 
     // get the spelling of the matched path
-    virtual std::string_view get_sequence() const = 0;
+    std::string_view get_sequence() const { return query_view_; }
 
     // The number of characters discarded from the prefix of the first node in the path.
     size_t get_offset() const { return offset_; }
@@ -66,8 +66,16 @@ class Matching {
     // complement is matched to the path.
     bool get_orientation() const { return orientation_; }
 
-    virtual Cigar::LengthType get_clipping() const = 0;
-    virtual Cigar::LengthType get_end_clipping() const = 0;
+    Cigar::LengthType get_clipping() const { return clipping_; }
+    Cigar::LengthType get_end_clipping() const { return end_clipping_; }
+
+    // Add more nodes to the Seed. This assumes that the original query has |next|
+    // extra characters and that the updated path still spells the query view.
+    void expand(const std::vector<node_index> &next) {
+        query_view_ = std::string_view(query_view_.data(), query_view_.size() + next.size());
+        end_clipping_ -= next.size();
+        nodes_.insert(nodes_.end(), next.begin(), next.end());
+    }
 
     const annot::LabelEncoder<> *label_encoder = nullptr;
 
@@ -78,64 +86,73 @@ class Matching {
     // (i.e., the first node's coordinate + the alignment offset)
     CoordinateSet label_coordinates;
 
-  protected:
+  private:
     std::string_view query_view_;
     std::vector<node_index> nodes_;
     bool orientation_;
     size_t offset_;
-};
-
-class Seed : public Matching {
-  public:
-    Seed() : Matching(), clipping_(0), end_clipping_(0) {}
-    Seed(std::string_view query_view,
-         std::vector<node_index>&& nodes,
-         bool orientation,
-         size_t offset,
-         size_t clipping,
-         size_t end_clipping)
-          : Matching(query_view, std::move(nodes), orientation, offset),
-            clipping_(clipping), end_clipping_(end_clipping) {}
-
-    virtual ~Seed() {}
-
-    virtual Cigar::LengthType get_clipping() const override final { return clipping_; }
-    virtual Cigar::LengthType get_end_clipping() const override final { return end_clipping_; }
-    virtual std::string_view get_sequence() const override final { return query_view_; }
-
-    // Add more nodes to the Seed. This assumes that the original query has |next|
-    // extra characters and that the updated path still spells the query view.
-    void expand(const std::vector<node_index> &next) {
-        query_view_ = std::string_view(query_view_.data(), query_view_.size() + next.size());
-        end_clipping_ -= next.size();
-        nodes_.insert(nodes_.end(), next.begin(), next.end());
-    }
-
-  private:
     Cigar::LengthType clipping_;
     Cigar::LengthType end_clipping_;
 };
 
-class Alignment : public Matching {
+// Note: this object stores pointers to the query sequence, so it is the user's
+//       responsibility to ensure that the query sequence is not destroyed when
+//       calling this class' methods
+class Alignment {
   public:
+    typedef DeBruijnGraph::node_index node_index;
+    typedef annot::binmat::BinaryMatrix::Column Column;
+    typedef SmallVector<int64_t> Tuple;
+    typedef Vector<Column> Columns;
+    typedef Vector<Tuple> CoordinateSet;
     typedef DBGAlignerConfig::score_t score_t;
     static const score_t ninf = DBGAlignerConfig::ninf;
 
-    Alignment() {}
-
-    Alignment(std::string_view query,
-              std::vector<node_index>&& nodes,
-              std::string&& sequence,
-              score_t score,
-              Cigar&& cigar,
-              size_t clipping,
-              bool orientation,
-              size_t offset)
-          : Matching(query, std::move(nodes), orientation, offset),
-            sequence_(std::move(sequence)), score_(score),
+    Alignment(std::string_view query = {},
+              std::vector<node_index>&& nodes = {},
+              std::string&& sequence = "",
+              score_t score = 0,
+              Cigar&& cigar = {},
+              size_t clipping = 0,
+              bool orientation = false,
+              size_t offset = 0)
+          : query_view_(query), nodes_(std::move(nodes)), orientation_(orientation),
+            offset_(offset), sequence_(std::move(sequence)), score_(score),
             cigar_(Cigar::CLIPPED, clipping) { cigar_.append(std::move(cigar)); }
 
-    Alignment(const Seed &seed, const DBGAlignerConfig &config);
+    Alignment(const Seed &seed, const DBGAlignerConfig &config)
+          : label_encoder(seed.label_encoder), label_columns(seed.label_columns),
+            label_coordinates(seed.label_coordinates), query_view_(seed.get_query_view()),
+            nodes_(std::vector<node_index>(seed.get_nodes())),
+            orientation_(seed.get_orientation()), offset_(seed.get_offset()),
+            sequence_(query_view_),
+            score_(config.match_score(query_view_) + (!seed.get_clipping() ? config.left_end_bonus : 0)
+                     + (!seed.get_end_clipping() ? config.right_end_bonus : 0)),
+            cigar_(Cigar::CLIPPED, seed.get_clipping()) {
+        cigar_.append(Cigar::MATCH, query_view_.size());
+        cigar_.append(Cigar::CLIPPED, seed.get_end_clipping());
+    }
+
+    std::string_view get_query_view() const { return query_view_; }
+
+    bool empty() const { return nodes_.empty(); }
+
+    // The matched path in the graph
+    const std::vector<node_index>& get_nodes() const { return nodes_; }
+
+    // get the spelling of the matched path
+    std::string_view get_sequence() const { return sequence_; }
+
+    // The number of characters discarded from the prefix of the first node in the path.
+    size_t get_offset() const { return offset_; }
+
+    // The number of nodes in the matched path.
+    // This is equal to get_sequence().size() - graph.get_k() + 1 + get_offset()
+    size_t size() const { return nodes_.size(); }
+
+    // The orientation of the original query sequence. Return true iff the reverse
+    // complement is matched to the path.
+    bool get_orientation() const { return orientation_; }
 
     // Append |next| to the end of the current alignment. In this process, alignment
     // labels are intersected. If coordinates are present, then the append is only
@@ -205,11 +222,10 @@ class Alignment : public Matching {
 
     void reverse_complement(const DeBruijnGraph &graph, std::string_view query_rev_comp);
 
-    virtual std::string_view get_sequence() const override final { return sequence_; }
     const Cigar& get_cigar() const { return cigar_; }
     Cigar& get_cigar() { return cigar_; }
-    virtual Cigar::LengthType get_clipping() const override final { return cigar_.get_clipping(); }
-    virtual Cigar::LengthType get_end_clipping() const override final { return cigar_.get_end_clipping(); }
+    Cigar::LengthType get_clipping() const { return cigar_.get_clipping(); }
+    Cigar::LengthType get_end_clipping() const { return cigar_.get_end_clipping(); }
 
     bool operator==(const Alignment &other) const {
         return orientation_ == other.orientation_
@@ -235,6 +251,15 @@ class Alignment : public Matching {
 
     bool is_valid(const DeBruijnGraph &graph, const DBGAlignerConfig *config = nullptr) const;
 
+    const annot::LabelEncoder<> *label_encoder = nullptr;
+
+    Columns label_columns;
+
+    // for each column in |label_columns|, store a vector of coordinates for the
+    // alignment's first nucleotide
+    // (i.e., the first node's coordinate + the alignment offset)
+    CoordinateSet label_coordinates;
+
     static bool coordinates_less(const Alignment &a, const Alignment &b);
 
     score_t extra_score = 0;
@@ -242,8 +267,12 @@ class Alignment : public Matching {
     std::string format_coords() const;
 
   private:
+    std::string_view query_view_;
+    std::vector<node_index> nodes_;
+    bool orientation_;
+    size_t offset_;
     std::string sequence_;
-    score_t score_ = 0;
+    score_t score_;
     Cigar cigar_;
 };
 

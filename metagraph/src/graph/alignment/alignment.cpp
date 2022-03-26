@@ -15,15 +15,6 @@ namespace align {
 
 using mtg::common::logger;
 
-Alignment::Alignment(const Seed &seed, const DBGAlignerConfig &config)
-      : Matching(seed), sequence_(query_view_),
-        score_(config.match_score(query_view_) + (!seed.get_clipping() ? config.left_end_bonus : 0)
-                    + (!seed.get_end_clipping() ? config.right_end_bonus : 0)),
-        cigar_(Cigar::CLIPPED, seed.get_clipping()) {
-    cigar_.append(Cigar::MATCH, query_view_.size());
-    cigar_.append(Cigar::CLIPPED, seed.get_end_clipping());
-}
-
 std::string Alignment::format_coords() const {
     if (!label_coordinates.size())
         return "";
