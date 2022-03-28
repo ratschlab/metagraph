@@ -643,9 +643,12 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
             if (max_seed_length_ > this->config_.max_seed_length)
                 node_to_seeds[node].emplace_back(j);
 
-            assert(annotation_buffer_.get_labels(node));
+            auto [labels, coords] = annotation_buffer_.get_labels_and_coords(node);
+            assert(labels);
+            if (coords && coords->empty())
+                continue;
 
-            for (uint64_t label : *annotation_buffer_.get_labels(node)) {
+            for (uint64_t label : *labels) {
                 auto &indicator = label_mapper[label];
                 if (indicator.empty())
                     indicator = sdsl::bit_vector(query_size, false);
