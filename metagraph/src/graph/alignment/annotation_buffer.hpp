@@ -40,8 +40,8 @@ class AnnotationBuffer {
 
     // Get the annotations and coordinates of a node if they have been fetched.
     // The returned pointers are valid until next fetch_queued_annotations().
-    std::pair<const Columns*, const CoordinateSet*>
-    get_labels_and_coords(node_index node) const;
+    std::pair<const Columns*, std::shared_ptr<const CoordinateSet>>
+    get_labels_and_coords(node_index node, bool skip_unfetched = true) const;
 
     // get the labels of a node if they have been fetched
     inline const Columns* get_labels(node_index node) const {

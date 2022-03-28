@@ -260,9 +260,11 @@ void LabeledExtender
 
     for (const auto &[next, c, score] : outgoing) {
         const Columns *base_labels = &seed_->label_columns;
-        const CoordinateSet *base_coords = &base_coords_;
+        std::shared_ptr<const CoordinateSet> base_coords {
+            std::shared_ptr<const CoordinateSet>{}, &base_coords_
+        };
         auto [next_labels, next_coords]
-            = annotation_buffer_.get_labels_and_coords(next);
+            = annotation_buffer_.get_labels_and_coords(next, false);
 
         assert(next_coords);
 
@@ -349,7 +351,7 @@ void LabeledExtender::call_alignments(score_t end_score,
     alignment.label_encoder = &annotation_buffer_.get_annotator().get_label_encoder();
 
     auto [base_labels, base_coords]
-        = annotation_buffer_.get_labels_and_coords(alignment.get_nodes().front());
+        = annotation_buffer_.get_labels_and_coords(alignment.get_nodes().front(), false);
     assert(base_labels);
     assert(base_labels->size());
 
@@ -376,7 +378,9 @@ void LabeledExtender::call_alignments(score_t end_score,
 
     ssize_t dist = alignment.get_nodes().size() - 1;
     if (!clipping) {
-        base_coords = &seed_->label_coordinates;
+        base_coords = std::shared_ptr<const CoordinateSet> {
+            std::shared_ptr<const CoordinateSet>{}, &seed_->label_coordinates
+        };
         dist -= seed_->get_offset();
         if (dynamic_cast<const RCDBG*>(graph_))
             dist = alignment.get_sequence().size() - seed_->get_sequence().size();
@@ -405,7 +409,7 @@ void LabeledExtender::call_alignments(score_t end_score,
         }
     } else {
         auto [cur_labels, cur_coords]
-            = annotation_buffer_.get_labels_and_coords(alignment.get_nodes().back());
+            = annotation_buffer_.get_labels_and_coords(alignment.get_nodes().back(), false);
         assert(cur_labels);
         assert(cur_labels->size());
         assert(cur_coords);
@@ -639,11 +643,9 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
             if (max_seed_length_ > this->config_.max_seed_length)
                 node_to_seeds[node].emplace_back(j);
 
-            const auto *labels = annotation_buffer_.get_labels(node);
-            if (!labels)
-                continue;
+            assert(annotation_buffer_.get_labels(node));
 
-            for (uint64_t label : *labels) {
+            for (uint64_t label : *annotation_buffer_.get_labels(node)) {
                 auto &indicator = label_mapper[label];
                 if (indicator.empty())
                     indicator = sdsl::bit_vector(query_size, false);
@@ -695,8 +697,9 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
         if (!seed.label_encoder) {
             auto [fetch_labels, fetch_coords]
                 = annotation_buffer_.get_labels_and_coords(nodes[0]);
+            assert(fetch_labels);
 
-            if (!fetch_labels)
+            if (fetch_coords && fetch_coords->empty())
                 continue;
 
             seed.label_encoder = &annotation_buffer_.get_annotator().get_label_encoder();
