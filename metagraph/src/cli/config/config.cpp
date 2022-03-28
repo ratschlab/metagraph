@@ -1010,7 +1010,7 @@ if (advanced) {
             fprintf(stderr, "\t   --query-presence \t\ttest sequences for presence, report as 0 or 1 [off]\n");
             fprintf(stderr, "\t   --filter-present \t\treport only present input sequences as FASTA [off]\n");
 if (advanced) {
-            fprintf(stderr, "\t   --batch-size \t\tquery batch size (number of base pairs) [100000000]\n");
+            fprintf(stderr, "\t   --batch-size \t\tquery batch size (number of base pairs and number of rows per annotator query) [100000000]\n");
 }
             fprintf(stderr, "\n");
             fprintf(stderr, "Available options for alignment:\n");

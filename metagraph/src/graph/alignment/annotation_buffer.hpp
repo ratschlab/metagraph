@@ -24,7 +24,9 @@ class AnnotationBuffer {
     typedef Alignment::Columns Columns;
     typedef Alignment::CoordinateSet CoordinateSet;
 
-    AnnotationBuffer(const DeBruijnGraph &graph, const Annotator &annotator);
+    AnnotationBuffer(const DeBruijnGraph &graph,
+                     const Annotator &annotator,
+                     size_t row_batch_size = std::numeric_limits<size_t>::max());
 
     void queue_path(std::vector<node_index>&& path) {
         queued_paths_.push_back(std::move(path));
@@ -80,6 +82,8 @@ class AnnotationBuffer {
     std::vector<CoordinateSet> label_coords_;
     // buffer of paths to later querying with fetch_queued_annotations()
     std::vector<std::vector<node_index>> queued_paths_;
+
+    size_t row_batch_size_;
 };
 
 } // namespace align

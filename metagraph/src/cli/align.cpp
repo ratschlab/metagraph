@@ -35,6 +35,7 @@ DBGAlignerConfig initialize_aligner_config(const Config &config) {
         .min_seed_length = config.alignment_min_seed_length,
         .max_seed_length = config.alignment_max_seed_length,
         .max_num_seeds_per_locus = config.alignment_max_num_seeds_per_locus,
+        .row_batch_size = config.query_batch_size_in_bytes,
         .min_path_score = config.alignment_min_path_score,
         .xdrop = config.alignment_xdrop,
         .min_exact_match = config.alignment_min_exact_match,
