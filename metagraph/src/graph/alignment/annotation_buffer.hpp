@@ -26,7 +26,8 @@ class AnnotationBuffer {
 
     AnnotationBuffer(const DeBruijnGraph &graph,
                      const Annotator &annotator,
-                     size_t row_batch_size = std::numeric_limits<size_t>::max());
+                     size_t row_batch_size = std::numeric_limits<size_t>::max(),
+                     size_t max_coords_per_node = std::numeric_limits<size_t>::max());
 
     void queue_path(std::vector<node_index>&& path) {
         queued_paths_.push_back(std::move(path));
@@ -84,6 +85,7 @@ class AnnotationBuffer {
     std::vector<std::vector<node_index>> queued_paths_;
 
     size_t row_batch_size_;
+    size_t max_coords_per_node_;
 };
 
 } // namespace align

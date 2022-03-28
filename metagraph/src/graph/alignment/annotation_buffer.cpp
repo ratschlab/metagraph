@@ -20,13 +20,15 @@ static constexpr size_t nannot = std::numeric_limits<size_t>::max();
 
 AnnotationBuffer::AnnotationBuffer(const DeBruijnGraph &graph,
                                    const Annotator &annotator,
-                                   size_t row_batch_size)
+                                   size_t row_batch_size,
+                                   size_t max_coords_per_node)
       : graph_(graph),
         annotator_(annotator),
         multi_int_(dynamic_cast<const annot::matrix::MultiIntMatrix*>(&annotator_.get_matrix())),
         canonical_(dynamic_cast<const CanonicalDBG*>(&graph_)),
         column_sets_({ {} }),
-        row_batch_size_(row_batch_size) {
+        row_batch_size_(row_batch_size),
+        max_coords_per_node_(max_coords_per_node) {
     if (multi_int_ && graph_.get_mode() != DeBruijnGraph::BASIC) {
         multi_int_ = nullptr;
         logger->warn("Coordinates not supported when aligning to CANONICAL "
@@ -83,6 +85,12 @@ void AnnotationBuffer::fetch_queued_annotations() {
                 label_coords_.emplace_back();
                 label_coords_.back().reserve(row_tuples.size());
                 for (auto&& [label, coords] : row_tuples) {
+                    if (coords.size() > max_coords_per_node_) {
+                        ++node_it;
+                        ++row_it;
+                        continue;
+                    }
+
                     labels.push_back(label);
                     label_coords_.back().emplace_back(coords.begin(), coords.end());
                 }
@@ -196,12 +204,6 @@ void AnnotationBuffer::fetch_queued_annotations() {
     fetch_row_batch(std::move(queued_nodes), std::move(queued_rows));
 
     queued_paths_.clear();
-
-#ifndef NDEBUG
-    for (const auto &[node, val] : node_to_cols_) {
-        assert(val != nannot);
-    }
-#endif
 }
 
 auto AnnotationBuffer::get_labels_and_coords(node_index node) const

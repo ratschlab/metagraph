@@ -463,7 +463,8 @@ LabeledAligner<Seeder, Extender, AlignmentCompare>
                  const DBGAlignerConfig &config,
                  const Annotator &annotator)
       : DBGAligner<Seeder, Extender, AlignmentCompare>(graph, config),
-        annotation_buffer_(graph, annotator, config.row_batch_size),
+        annotation_buffer_(graph, annotator, config.row_batch_size,
+                           config.max_num_seeds_per_locus),
         max_seed_length_(config.max_seed_length) {
     // do not use a global xdrop cutoff since we need separate cutoffs for each label
     if (annotation_buffer_.has_coordinates())
@@ -638,8 +639,11 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
             if (max_seed_length_ > this->config_.max_seed_length)
                 node_to_seeds[node].emplace_back(j);
 
-            assert(annotation_buffer_.get_labels(node));
-            for (uint64_t label : *annotation_buffer_.get_labels(node)) {
+            const auto *labels = annotation_buffer_.get_labels(node);
+            if (!labels)
+                continue;
+
+            for (uint64_t label : *labels) {
                 auto &indicator = label_mapper[label];
                 if (indicator.empty())
                     indicator = sdsl::bit_vector(query_size, false);
@@ -689,10 +693,13 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
         assert(nodes.size() == 1);
         Vector<Column> columns;
         if (!seed.label_encoder) {
-            seed.label_encoder = &annotation_buffer_.get_annotator().get_label_encoder();
             auto [fetch_labels, fetch_coords]
                 = annotation_buffer_.get_labels_and_coords(nodes[0]);
-            assert(fetch_labels);
+
+            if (!fetch_labels)
+                continue;
+
+            seed.label_encoder = &annotation_buffer_.get_annotator().get_label_encoder();
 
             if (fetch_coords) {
                 matched_intersection(fetch_labels->begin(), fetch_labels->end(),
