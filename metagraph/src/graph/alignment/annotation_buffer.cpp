@@ -79,6 +79,10 @@ void AnnotationBuffer::fetch_queued_annotations() {
             assert(multi_int_);
             // extract both labels and coordinates, then store them separately
             for (auto&& row_tuples : multi_int_->get_row_tuples(queued_rows)) {
+                for (auto &[label, coords] : row_tuples) {
+                    if (coords.size() > max_coords_per_node_)
+                        coords = decltype(coords)();
+                }
                 std::sort(row_tuples.begin(), row_tuples.end(), utils::LessFirst());
                 Columns labels;
                 labels.reserve(row_tuples.size());
@@ -86,11 +90,7 @@ void AnnotationBuffer::fetch_queued_annotations() {
                 label_coords_.back().reserve(row_tuples.size());
                 for (auto&& [label, coords] : row_tuples) {
                     labels.push_back(label);
-                    if (coords.size() <= max_coords_per_node_) {
-                        label_coords_.back().emplace_back(coords.begin(), coords.end());
-                    } else {
-                        label_coords_.back().emplace_back();
-                    }
+                    label_coords_.back().emplace_back(coords.begin(), coords.end());
                 }
                 push_node_labels(node_it++, row_it++, std::move(labels));
             }
@@ -232,15 +232,16 @@ auto AnnotationBuffer::get_labels_and_coords(node_index node, bool skip_unfetche
             &label_coords_[it - node_to_cols_.begin()]
         };
 
-        if (!skip_unfetched && ret_val.second->empty()) {
+        if (!skip_unfetched && std::any_of(ret_val.second->begin(), ret_val.second->end(),
+                                           [](const auto &c) { return c.empty(); })) {
             node_index base_node = node;
 
             // TODO: avoid this get_node_sequence call
             if (graph_.get_mode() == DeBruijnGraph::CANONICAL && !canonical_)
                 base_node = map_to_nodes(graph_, graph_.get_node_sequence(node))[0];
 
-            Row row = AnnotatedDBG::graph_to_anno_index(base_node);
-            auto fetch = multi_int_->get_row_tuples(row);
+            auto fetch
+                = multi_int_->get_row_tuples(AnnotatedDBG::graph_to_anno_index(base_node));
             std::sort(fetch.begin(), fetch.end());
             CoordinateSet coord_set;
             assert(fetch.size() == ret_val.first->size());

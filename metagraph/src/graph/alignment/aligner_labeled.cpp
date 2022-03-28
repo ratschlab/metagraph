@@ -643,12 +643,9 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
             if (max_seed_length_ > this->config_.max_seed_length)
                 node_to_seeds[node].emplace_back(j);
 
-            auto [labels, coords] = annotation_buffer_.get_labels_and_coords(node);
-            assert(labels);
-            if (coords && coords->empty())
-                continue;
+            assert(annotation_buffer_.get_labels(node));
 
-            for (uint64_t label : *labels) {
+            for (uint64_t label : *annotation_buffer_.get_labels(node)) {
                 auto &indicator = label_mapper[label];
                 if (indicator.empty())
                     indicator = sdsl::bit_vector(query_size, false);
@@ -699,11 +696,8 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
         Vector<Column> columns;
         if (!seed.label_encoder) {
             auto [fetch_labels, fetch_coords]
-                = annotation_buffer_.get_labels_and_coords(nodes[0]);
+                = annotation_buffer_.get_labels_and_coords(nodes[0], false);
             assert(fetch_labels);
-
-            if (fetch_coords && fetch_coords->empty())
-                continue;
 
             seed.label_encoder = &annotation_buffer_.get_annotator().get_label_encoder();
 
@@ -719,10 +713,54 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
             }
         }
 
-        if (columns.size()) {
-            seed.label_columns = std::move(columns);
-        } else {
+        if (columns.empty()) {
             seed.label_encoder = nullptr;
+            continue;
+        }
+
+        seed.label_columns = std::move(columns);
+        if (max_seed_length_ <= this->config_.max_seed_length || seed.get_end_clipping())
+            continue;
+
+        node_index next_node = this->graph_.traverse(
+            seed.get_nodes().back(),
+            seed.get_query_view().data()[seed.get_query_view().size()]
+        );
+
+        if (!next_node)
+            continue;
+
+        auto find = node_to_seeds.find(next_node);
+        if (find == node_to_seeds.end())
+            continue;
+
+        for (size_t j : find->second) {
+            auto &next_seed = seeds[j];
+            if (next_seed.empty() || !next_seed.label_encoder
+                    || next_seed.get_end_clipping() >= seed.get_end_clipping()
+                    || next_seed.get_offset() != seed.get_offset()
+                    || next_seed.label_columns != seed.label_columns
+                    || next_seed.label_coordinates.size() != seed.label_coordinates.size()) {
+                continue;
+            }
+            assert(next_node == next_seed.get_nodes()[0]);
+
+            size_t k = 0;
+            for ( ; k < seed.label_coordinates.size(); ++k) {
+                if (!overlap_with_diff(seed.label_coordinates[k],
+                                       next_seed.label_coordinates[k],
+                                       seed.get_nodes().size())) {
+                    break;
+                }
+            }
+
+            if (k != seed.label_coordinates.size())
+                continue;
+
+            // they can be merged
+            seed.expand(next_seed.get_nodes());
+            next_seed = Seed();
+            assert(next_seed.empty());
         }
     }
 
@@ -773,6 +811,19 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
                 assert(next_seed.empty());
             }
         }
+    }
+
+    for (Seed &seed : seeds) {
+        size_t removed_labels = 0;
+        for (size_t i = 0; i < seed.label_coordinates.size(); ++i) {
+            if (seed.label_coordinates[i].size() > this->config_.max_num_seeds_per_locus) {
+                seed.label_coordinates[i] = Alignment::Tuple();
+                ++removed_labels;
+            }
+        }
+
+        if (removed_labels == seed.label_coordinates.size())
+            seed.label_encoder = nullptr;
     }
 
     auto seed_it = std::remove_if(seeds.begin(), seeds.end(), [&](const auto &a) {
