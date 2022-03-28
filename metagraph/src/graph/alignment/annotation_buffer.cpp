@@ -155,6 +155,11 @@ void AnnotationBuffer::fetch_queued_annotations() {
                 if (node_to_cols_.try_emplace(base_path[i], nannot).second) {
                     queued_rows.push_back(row);
                     queued_nodes.push_back(base_path[i]);
+                    if (queued_rows.size() >= row_batch_size_) {
+                        fetch_row_batch(std::move(queued_nodes), std::move(queued_rows));
+                        queued_nodes = decltype(queued_nodes){};
+                        queued_rows = decltype(queued_rows){};
+                    }
                 }
 
                 continue;
