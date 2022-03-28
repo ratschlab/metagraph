@@ -351,7 +351,7 @@ void LabeledExtender::call_alignments(score_t end_score,
     alignment.label_encoder = &annotation_buffer_.get_annotator().get_label_encoder();
 
     auto [base_labels, base_coords]
-        = annotation_buffer_.get_labels_and_coords(alignment.get_nodes().front(), false);
+        = annotation_buffer_.get_labels_and_coords(alignment.get_nodes().front(), clipping);
     assert(base_labels);
     assert(base_labels->size());
 
