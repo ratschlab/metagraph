@@ -38,6 +38,8 @@ class TupleRowDiff : public binmat::IRowDiff, public MultiIntMatrix {
     std::vector<Row> get_column(Column j) const override;
     RowTuples get_row_tuples(Row i) const override;
     std::vector<RowTuples> get_row_tuples(const std::vector<Row> &rows) const override;
+    RowValues get_row_values(Row row) const override;
+    std::vector<RowValues> get_row_values(const std::vector<Row> &rows) const override;
 
     uint64_t num_columns() const override { return diffs_.num_columns(); }
     uint64_t num_relations() const override { return diffs_.num_relations(); }
@@ -126,6 +128,54 @@ TupleRowDiff<BaseMatrix>::get_row_tuples(const std::vector<Row> &row_ids) const 
         }
         assert(std::all_of(result.begin(), result.end(),
                            [](auto &p) { return p.second.size(); }));
+    }
+
+    return rows;
+}
+
+template <class BaseMatrix>
+MultiIntMatrix::RowValues TupleRowDiff<BaseMatrix>::get_row_values(Row row) const {
+    return get_row_values(std::vector<Row>{ row })[0];
+}
+
+template <class BaseMatrix>
+std::vector<MultiIntMatrix::RowValues>
+TupleRowDiff<BaseMatrix>::get_row_values(const std::vector<Row> &row_ids) const {
+    assert(graph_ && "graph must be loaded");
+    assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
+    assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());
+
+    // get row-diff paths
+    auto [rd_ids, rd_paths_trunc] = get_rd_ids(row_ids);
+
+    std::vector<RowTuples> rd_rows = diffs_.get_row_tuples(rd_ids);
+    for (auto &row : rd_rows) {
+        decode_diffs(&row);
+    }
+
+    rd_ids = std::vector<Row>();
+
+    // reconstruct annotation rows from row-diff
+    std::vector<RowValues> rows(row_ids.size());
+
+    for (size_t i = 0; i < row_ids.size(); ++i) {
+        RowTuples result;
+
+        auto it = rd_paths_trunc[i].rbegin();
+        std::sort(rd_rows[*it].begin(), rd_rows[*it].end());
+        result = rd_rows[*it];
+        // propagate back and reconstruct full annotations for predecessors
+        for (++it ; it != rd_paths_trunc[i].rend(); ++it) {
+            std::sort(rd_rows[*it].begin(), rd_rows[*it].end());
+            add_diff(rd_rows[*it], &result);
+            // replace diff row with full reconstructed annotation
+            rd_rows[*it] = result;
+        }
+        assert(std::all_of(result.begin(), result.end(),
+                           [](auto &p) { return p.second.size(); }));
+        rows[i].reserve(result.size());
+        std::transform(result.begin(), result.end(), std::back_inserter(rows[i]),
+                       [&](const auto &p) { return std::make_pair(p.first, p.second.size()); });
     }
 
     return rows;

@@ -46,6 +46,8 @@ class AnnotationBuffer {
     std::pair<const Columns*, std::shared_ptr<const CoordinateSet>>
     get_labels_and_coords(node_index node, bool skip_unfetched = true) const;
 
+    void prefetch_coords(const std::vector<node_index> &nodes) const;
+
     // get the labels of a node if they have been fetched
     inline const Columns* get_labels(node_index node) const {
         return get_labels_and_coords(node).first;

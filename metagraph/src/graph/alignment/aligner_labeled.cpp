@@ -709,7 +709,17 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
 
     if (max_seed_length_ > this->config_.max_seed_length) {
         // merge seeds
-        for (Seed &seed : seeds) {
+        for (size_t j = 0; j < seeds.size(); ++j) {
+            Seed &seed = seeds[j];
+            if (annotation_buffer_.has_coordinates() && !(j % 100)) {
+                std::vector<node_index> nodes;
+                for (size_t k = j; k < std::min(j + 100, seeds.size()); ++k) {
+                    if (seeds[k].size())
+                        nodes.emplace_back(seeds[k].get_nodes()[0]);
+                }
+                annotation_buffer_.prefetch_coords(nodes);
+            }
+
             if (seed.empty() || !seed.get_end_clipping() || !seed.label_encoder)
                 continue;
 

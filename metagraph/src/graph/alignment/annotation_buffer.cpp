@@ -77,29 +77,9 @@ void AnnotationBuffer::fetch_queued_annotations() {
 
         auto node_it = queued_nodes.begin();
         auto row_it = queued_rows.begin();
-        if (has_coordinates()) {
-            assert(multi_int_);
-            // extract both labels and coordinates, then store them separately
-            for (auto&& row_tuples : multi_int_->get_row_tuples(queued_rows)) {
-                std::sort(row_tuples.begin(), row_tuples.end(), utils::LessFirst());
-                Columns labels;
-                labels.reserve(row_tuples.size());
-                CoordinateSet coord_set;
-                coord_set.reserve(row_tuples.size());
-                for (auto&& [label, coords] : row_tuples) {
-                    labels.push_back(label);
-                    coord_set.emplace_back(coords.begin(), coords.end());
-                }
-                label_coords_cache_.Put(*node_it, coord_set);
-                if (node_index base_node = push_node_labels(node_it++, row_it++, std::move(labels))) {
-                    label_coords_cache_.Put(base_node, std::move(coord_set));
-                }
-            }
-        } else {
-            for (auto&& labels : annotator_.get_matrix().get_rows(queued_rows)) {
-                std::sort(labels.begin(), labels.end());
-                push_node_labels(node_it++, row_it++, std::move(labels));
-            }
+        for (auto&& labels : annotator_.get_matrix().get_rows(queued_rows)) {
+            std::sort(labels.begin(), labels.end());
+            push_node_labels(node_it++, row_it++, std::move(labels));
         }
     };
 
@@ -201,6 +181,48 @@ void AnnotationBuffer::fetch_queued_annotations() {
     fetch_row_batch(std::move(queued_nodes), std::move(queued_rows));
 
     queued_paths_.clear();
+}
+
+void AnnotationBuffer::prefetch_coords(const std::vector<node_index> &nodes) const {
+    if (!has_coordinates())
+        return;
+
+    std::vector<Row> rows;
+    rows.reserve(nodes.size());
+    std::vector<size_t> indices;
+    indices.reserve(nodes.size());
+    for (node_index node : nodes) {
+        if (canonical_)
+            node = canonical_->get_base_node(node);
+
+        auto it = node_to_cols_.find(node);
+        if (it == node_to_cols_.end() || it->second == nannot)
+            continue;
+
+        size_t index = it - node_to_cols_.begin();
+        if (label_coords_cache_.TryGet(index))
+            continue;
+
+        node_index base_node = node;
+
+        // TODO: avoid this get_node_sequence call
+        if (graph_.get_mode() == DeBruijnGraph::CANONICAL && !canonical_)
+            base_node = map_to_nodes(graph_, graph_.get_node_sequence(node))[0];
+
+        rows.emplace_back(AnnotatedDBG::graph_to_anno_index(base_node));
+        indices.emplace_back(index);
+    }
+
+    auto it = indices.begin();
+    for (auto&& fetch : multi_int_->get_row_tuples(rows)) {
+        std::sort(fetch.begin(), fetch.end());
+        CoordinateSet coord_set;
+        for (auto&& [column, coords] : fetch) {
+            coord_set.emplace_back(coords.begin(), coords.end());
+        }
+        label_coords_cache_.Put(*it, std::move(coord_set));
+        ++it;
+    }
 }
 
 auto AnnotationBuffer::get_labels_and_coords(node_index node, bool skip_unfetched) const
