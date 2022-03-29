@@ -693,17 +693,15 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
         Seed &seed = seeds[j];
         const std::vector<node_index> &nodes = seed.get_nodes();
         assert(nodes.size() == 1);
-        Vector<Column> columns;
         if (!seed.label_encoder) {
+            seed.label_columns.clear();
             auto fetch_labels = annotation_buffer_.get_labels(nodes[0]);
             assert(fetch_labels);
             std::set_intersection(fetch_labels->begin(), fetch_labels->end(),
                                   labels.begin(), labels.end(),
-                                  std::back_inserter(columns));
-            if (columns.size()) {
+                                  std::back_inserter(seed.label_columns));
+            if (seed.label_columns.size())
                 seed.label_encoder = &annotation_buffer_.get_annotator().get_label_encoder();
-                seed.label_columns = std::move(columns);
-            }
         }
     }
 
@@ -794,16 +792,18 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
     }
 
     for (Seed &seed : seeds) {
-        size_t removed_labels = 0;
-        for (size_t i = 0; i < seed.label_coordinates.size(); ++i) {
-            if (seed.label_coordinates[i].size() > this->config_.max_num_seeds_per_locus) {
-                seed.label_coordinates[i] = Alignment::Tuple();
-                ++removed_labels;
+        if (seed.label_coordinates.size()) {
+            size_t removed_labels = 0;
+            for (size_t i = 0; i < seed.label_coordinates.size(); ++i) {
+                if (seed.label_coordinates[i].size() > this->config_.max_num_seeds_per_locus) {
+                    seed.label_coordinates[i] = Alignment::Tuple();
+                    ++removed_labels;
+                }
             }
-        }
 
-        if (removed_labels == seed.label_coordinates.size())
-            seed.label_encoder = nullptr;
+            if (removed_labels == seed.label_coordinates.size())
+                seed.label_encoder = nullptr;
+        }
     }
 
     auto seed_it = std::remove_if(seeds.begin(), seeds.end(), [&](const auto &a) {
