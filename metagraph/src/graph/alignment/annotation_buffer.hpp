@@ -73,6 +73,8 @@ class AnnotationBuffer {
         return column_sets_.data()[i];
     }
 
+    size_t get_batch_size() const { return row_batch_size_; }
+
   private:
     const DeBruijnGraph &graph_;
     const Annotator &annotator_;
