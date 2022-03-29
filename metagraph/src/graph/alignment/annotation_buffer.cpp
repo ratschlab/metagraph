@@ -52,7 +52,10 @@ void AnnotationBuffer::fetch_queued_annotations() {
         if (queued_nodes.empty())
             return;
 
-        auto push_node_labels = [&](auto node_it, auto row_it, auto&& labels) -> node_index {
+        auto node_it = queued_nodes.begin();
+        auto row_it = queued_rows.begin();
+        for (auto&& labels : annotator_.get_matrix().get_rows(queued_rows)) {
+            std::sort(labels.begin(), labels.end());
             assert(node_it != queued_nodes.end());
             assert(node_to_cols_.count(*node_it));
             assert(node_to_cols_.count(AnnotatedDBG::anno_to_graph_index(*row_it)));
@@ -66,20 +69,11 @@ void AnnotationBuffer::fetch_queued_annotations() {
                 node_to_cols_[base_node] = label_i;
             } else {
                 node_to_cols_[*node_it] = label_i;
-                if (base_node != *node_it && node_to_cols_.try_emplace(base_node, label_i).second
-                        && has_coordinates()) {
-                    return base_node;
-                }
+                if (base_node != *node_it)
+                    node_to_cols_.try_emplace(base_node, label_i);
             }
-
-            return 0;
-        };
-
-        auto node_it = queued_nodes.begin();
-        auto row_it = queued_rows.begin();
-        for (auto&& labels : annotator_.get_matrix().get_rows(queued_rows)) {
-            std::sort(labels.begin(), labels.end());
-            push_node_labels(node_it++, row_it++, std::move(labels));
+            ++node_it;
+            ++row_it;
         }
     };
 
