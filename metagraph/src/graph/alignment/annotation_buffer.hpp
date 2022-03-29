@@ -1,6 +1,9 @@
 #ifndef __ANNOTATION_BUFFER_HPP__
 #define __ANNOTATION_BUFFER_HPP__
 
+#include <cache.hpp>
+#include <lru_cache_policy.hpp>
+
 #include "alignment.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "annotation/int_matrix/base/int_matrix.hpp"
@@ -79,13 +82,13 @@ class AnnotationBuffer {
     VectorSet<Columns, utils::VectorHash> column_sets_;
      // map node to index in |column_sets_|
     VectorMap<node_index, size_t> node_to_cols_;
-    // coordinate sets for all nodes in |node_to_cols_| in the same order
-    std::vector<CoordinateSet> label_coords_;
+    // cache the coordinate sets for the nodes in |node_to_cols_|
+    mutable caches::fixed_sized_cache<size_t, CoordinateSet,
+                                      caches::LRUCachePolicy<node_index>> label_coords_cache_;
     // buffer of paths to later querying with fetch_queued_annotations()
     std::vector<std::vector<node_index>> queued_paths_;
 
     size_t row_batch_size_;
-    size_t max_coords_per_node_;
 };
 
 } // namespace align

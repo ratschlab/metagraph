@@ -695,72 +695,15 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
         assert(nodes.size() == 1);
         Vector<Column> columns;
         if (!seed.label_encoder) {
-            auto [fetch_labels, fetch_coords]
-                = annotation_buffer_.get_labels_and_coords(nodes[0], false);
+            auto fetch_labels = annotation_buffer_.get_labels(nodes[0]);
             assert(fetch_labels);
-
-            seed.label_encoder = &annotation_buffer_.get_annotator().get_label_encoder();
-
-            if (fetch_coords) {
-                matched_intersection(fetch_labels->begin(), fetch_labels->end(),
-                                     fetch_coords->begin(), labels.begin(), labels.end(),
-                                     std::back_inserter(columns),
-                                     std::back_inserter(seed.label_coordinates));
-            } else {
-                std::set_intersection(fetch_labels->begin(), fetch_labels->end(),
-                                      labels.begin(), labels.end(),
-                                      std::back_inserter(columns));
+            std::set_intersection(fetch_labels->begin(), fetch_labels->end(),
+                                  labels.begin(), labels.end(),
+                                  std::back_inserter(columns));
+            if (columns.size()) {
+                seed.label_encoder = &annotation_buffer_.get_annotator().get_label_encoder();
+                seed.label_columns = std::move(columns);
             }
-        }
-
-        if (columns.empty()) {
-            seed.label_encoder = nullptr;
-            continue;
-        }
-
-        seed.label_columns = std::move(columns);
-        if (max_seed_length_ <= this->config_.max_seed_length || seed.get_end_clipping())
-            continue;
-
-        node_index next_node = this->graph_.traverse(
-            seed.get_nodes().back(),
-            seed.get_query_view().data()[seed.get_query_view().size()]
-        );
-
-        if (!next_node)
-            continue;
-
-        auto find = node_to_seeds.find(next_node);
-        if (find == node_to_seeds.end())
-            continue;
-
-        for (size_t j : find->second) {
-            auto &next_seed = seeds[j];
-            if (next_seed.empty() || !next_seed.label_encoder
-                    || next_seed.get_end_clipping() >= seed.get_end_clipping()
-                    || next_seed.get_offset() != seed.get_offset()
-                    || next_seed.label_columns != seed.label_columns
-                    || next_seed.label_coordinates.size() != seed.label_coordinates.size()) {
-                continue;
-            }
-            assert(next_node == next_seed.get_nodes()[0]);
-
-            size_t k = 0;
-            for ( ; k < seed.label_coordinates.size(); ++k) {
-                if (!overlap_with_diff(seed.label_coordinates[k],
-                                       next_seed.label_coordinates[k],
-                                       seed.get_nodes().size())) {
-                    break;
-                }
-            }
-
-            if (k != seed.label_coordinates.size())
-                continue;
-
-            // they can be merged
-            seed.expand(next_seed.get_nodes());
-            next_seed = Seed();
-            assert(next_seed.empty());
         }
     }
 
@@ -787,11 +730,38 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
                 if (next_seed.empty() || !next_seed.label_encoder
                         || next_seed.get_end_clipping() >= seed.get_end_clipping()
                         || next_seed.get_offset() != seed.get_offset()
-                        || next_seed.label_columns != seed.label_columns
-                        || next_seed.label_coordinates.size() != seed.label_coordinates.size()) {
+                        || next_seed.label_columns != seed.label_columns) {
                     continue;
                 }
                 assert(next_node == next_seed.get_nodes()[0]);
+
+                if (annotation_buffer_.has_coordinates()) {
+                    if (seed.label_coordinates.size() != seed.label_columns.size()) {
+                        auto [fetch_labels, fetch_coords]
+                            = annotation_buffer_.get_labels_and_coords(seed.get_nodes()[0], false);
+                        Columns dummy;
+                        matched_intersection(fetch_labels->begin(), fetch_labels->end(),
+                                             fetch_coords->begin(),
+                                             seed.label_columns.begin(),
+                                             seed.label_columns.end(),
+                                             std::back_inserter(dummy),
+                                             std::back_inserter(seed.label_coordinates));
+                        assert(dummy == seed.label_columns);
+                    }
+
+                    if (next_seed.label_coordinates.size() != next_seed.label_columns.size()) {
+                        auto [fetch_labels, fetch_coords]
+                            = annotation_buffer_.get_labels_and_coords(next_seed.get_nodes()[0], false);
+                        Columns dummy;
+                        matched_intersection(fetch_labels->begin(), fetch_labels->end(),
+                                             fetch_coords->begin(),
+                                             next_seed.label_columns.begin(),
+                                             next_seed.label_columns.end(),
+                                             std::back_inserter(dummy),
+                                             std::back_inserter(next_seed.label_coordinates));
+                        assert(dummy == next_seed.label_columns);
+                    }
+                }
 
                 size_t k = 0;
                 for ( ; k < seed.label_coordinates.size(); ++k) {

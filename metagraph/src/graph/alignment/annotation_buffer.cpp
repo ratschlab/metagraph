@@ -27,8 +27,8 @@ AnnotationBuffer::AnnotationBuffer(const DeBruijnGraph &graph,
         multi_int_(dynamic_cast<const annot::matrix::MultiIntMatrix*>(&annotator_.get_matrix())),
         canonical_(dynamic_cast<const CanonicalDBG*>(&graph_)),
         column_sets_({ {} }),
-        row_batch_size_(row_batch_size),
-        max_coords_per_node_(max_coords_per_node) {
+        label_coords_cache_(max_coords_per_node),
+        row_batch_size_(row_batch_size) {
     if (multi_int_ && graph_.get_mode() != DeBruijnGraph::BASIC) {
         multi_int_ = nullptr;
         logger->warn("Coordinates not supported when aligning to CANONICAL "
@@ -52,7 +52,7 @@ void AnnotationBuffer::fetch_queued_annotations() {
         if (queued_nodes.empty())
             return;
 
-        auto push_node_labels = [&](auto node_it, auto row_it, auto&& labels) {
+        auto push_node_labels = [&](auto node_it, auto row_it, auto&& labels) -> node_index {
             assert(node_it != queued_nodes.end());
             assert(node_to_cols_.count(*node_it));
             assert(node_to_cols_.count(AnnotatedDBG::anno_to_graph_index(*row_it)));
@@ -68,9 +68,11 @@ void AnnotationBuffer::fetch_queued_annotations() {
                 node_to_cols_[*node_it] = label_i;
                 if (base_node != *node_it && node_to_cols_.try_emplace(base_node, label_i).second
                         && has_coordinates()) {
-                    label_coords_.emplace_back(label_coords_.back());
+                    return base_node;
                 }
             }
+
+            return 0;
         };
 
         auto node_it = queued_nodes.begin();
@@ -79,20 +81,19 @@ void AnnotationBuffer::fetch_queued_annotations() {
             assert(multi_int_);
             // extract both labels and coordinates, then store them separately
             for (auto&& row_tuples : multi_int_->get_row_tuples(queued_rows)) {
-                for (auto &[label, coords] : row_tuples) {
-                    if (coords.size() > max_coords_per_node_)
-                        coords = decltype(coords)();
-                }
                 std::sort(row_tuples.begin(), row_tuples.end(), utils::LessFirst());
                 Columns labels;
                 labels.reserve(row_tuples.size());
-                label_coords_.emplace_back();
-                label_coords_.back().reserve(row_tuples.size());
+                CoordinateSet coord_set;
+                coord_set.reserve(row_tuples.size());
                 for (auto&& [label, coords] : row_tuples) {
                     labels.push_back(label);
-                    label_coords_.back().emplace_back(coords.begin(), coords.end());
+                    coord_set.emplace_back(coords.begin(), coords.end());
                 }
-                push_node_labels(node_it++, row_it++, std::move(labels));
+                label_coords_cache_.Put(*node_it, coord_set);
+                if (node_index base_node = push_node_labels(node_it++, row_it++, std::move(labels))) {
+                    label_coords_cache_.Put(base_node, std::move(coord_set));
+                }
             }
         } else {
             for (auto&& labels : annotator_.get_matrix().get_rows(queued_rows)) {
@@ -130,22 +131,15 @@ void AnnotationBuffer::fetch_queued_annotations() {
             if (base_path[i] == DeBruijnGraph::npos) {
                 // this can happen when the base graph is CANONICAL and path[i] is a
                 // dummy node
-                if (node_to_cols_.try_emplace(path[i], 0).second && has_coordinates())
-                    label_coords_.emplace_back();
-
+                node_to_cols_.try_emplace(path[i], 0);
                 continue;
             }
 
             if (boss && !boss->get_W(dbg_succ->kmer_to_boss_index(base_path[i]))) {
                 // skip dummy nodes
-                if (node_to_cols_.try_emplace(base_path[i], 0).second && has_coordinates())
-                    label_coords_.emplace_back();
-
-                if (graph_.get_mode() == DeBruijnGraph::CANONICAL
-                        && base_path[i] != path[i]
-                        && node_to_cols_.emplace(path[i], 0).second && has_coordinates()) {
-                    label_coords_.emplace_back();
-                }
+                node_to_cols_.try_emplace(base_path[i], 0);
+                if (graph_.get_mode() == DeBruijnGraph::CANONICAL && base_path[i] != path[i])
+                    node_to_cols_.try_emplace(path[i], 0);
 
                 continue;
             }
@@ -226,14 +220,14 @@ auto AnnotationBuffer::get_labels_and_coords(node_index node, bool skip_unfetche
     ret_val.first = &column_sets_.data()[it->second];
 
     if (has_coordinates()) {
-        assert(static_cast<size_t>(it - node_to_cols_.begin()) < label_coords_.size());
-        ret_val.second = std::shared_ptr<const CoordinateSet>{
-            std::shared_ptr<const CoordinateSet>{},
-            &label_coords_[it - node_to_cols_.begin()]
-        };
+        if (ret_val.first->empty()) {
+            ret_val.second = std::make_shared<const CoordinateSet>();
+            return ret_val;
+        }
 
-        if (!skip_unfetched && std::any_of(ret_val.second->begin(), ret_val.second->end(),
-                                           [](const auto &c) { return c.empty(); })) {
+        if (auto fetch = label_coords_cache_.TryGet(it - node_to_cols_.begin())) {
+            ret_val.second = std::make_shared<const CoordinateSet>(std::move(*fetch));
+        } else if (!skip_unfetched) {
             node_index base_node = node;
 
             // TODO: avoid this get_node_sequence call
@@ -250,6 +244,7 @@ auto AnnotationBuffer::get_labels_and_coords(node_index node, bool skip_unfetche
                 assert(column == (*ret_val.first)[i]);
                 coord_set.emplace_back(coords.begin(), coords.end());
             }
+            label_coords_cache_.Put(it - node_to_cols_.begin(), coord_set);
             ret_val.second = std::make_shared<const CoordinateSet>(std::move(coord_set));
         }
     }
