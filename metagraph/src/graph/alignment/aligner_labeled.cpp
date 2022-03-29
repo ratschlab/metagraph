@@ -709,13 +709,16 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
     size_t row_batch_size = annotation_buffer_.get_batch_size();
     for (size_t j = 0; j < seeds.size(); ++j) {
         Seed &seed = seeds[j];
-        if (annotation_buffer_.has_coordinates() && !(j % row_batch_size)) {
-            std::vector<node_index> nodes;
-            for (size_t k = j; k < std::min(j + row_batch_size, seeds.size()); ++k) {
-                if (seeds[k].size())
-                    nodes.emplace_back(seeds[k].get_nodes()[0]);
+        if (annotation_buffer_.has_coordinates()) {
+            if (!(j % row_batch_size)) {
+                std::vector<node_index> nodes;
+                for (size_t k = j; k < std::min(j + row_batch_size, seeds.size()); ++k) {
+                    if (seeds[k].size())
+                        nodes.emplace_back(seeds[k].get_nodes()[0]);
+                }
+                annotation_buffer_.prefetch_coords(nodes);
             }
-            annotation_buffer_.prefetch_coords(nodes);
+
             if (seed.label_coordinates.size() != seed.label_columns.size()) {
                 auto [fetch_labels, fetch_coords]
                     = annotation_buffer_.get_labels_and_coords(seed.get_nodes()[0], false);
