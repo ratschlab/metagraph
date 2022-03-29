@@ -15,29 +15,38 @@ namespace align {
 
 using mtg::common::logger;
 
-std::string Alignment::format_coords() const {
-    if (!label_coordinates.size())
+template <class Matching>
+std::string format_coords(const Matching &a) {
+    if (!a.label_coordinates.size())
         return "";
 
-    assert(label_columns.size());
-    assert(label_coordinates.size() == label_columns.size());
+    assert(a.label_columns.size());
+    assert(a.label_coordinates.size() == a.label_columns.size());
 
     std::vector<std::string> decoded_labels;
-    decoded_labels.reserve(label_columns.size());
+    decoded_labels.reserve(a.label_columns.size());
 
-    for (size_t i = 0; i < label_columns.size(); ++i) {
-        decoded_labels.emplace_back(label_encoder
-            ? label_encoder->decode(label_columns[i])
-            : std::to_string(label_columns[i])
+    for (size_t i = 0; i < a.label_columns.size(); ++i) {
+        decoded_labels.emplace_back(a.label_encoder
+            ? a.label_encoder->decode(a.label_columns[i])
+            : std::to_string(a.label_columns[i])
         );
-        for (uint64_t coord : label_coordinates[i]) {
+        for (uint64_t coord : a.label_coordinates[i]) {
             // alignment coordinates are 1-based inclusive ranges
             decoded_labels.back()
-                += fmt::format(":{}-{}", coord + 1, coord + sequence_.size());
+                += fmt::format(":{}-{}", coord + 1, coord + a.get_sequence().size());
         }
     }
 
     return fmt::format("{}", fmt::join(decoded_labels, ";"));
+}
+
+std::string Seed::format_coords() const {
+    return ::mtg::graph::align::format_coords(*this);
+}
+
+std::string Alignment::format_coords() const {
+    return ::mtg::graph::align::format_coords(*this);
 }
 
 bool Alignment::append(Alignment&& other) {

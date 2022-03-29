@@ -540,6 +540,12 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
                 forward, reverse, graph_.get_k() - 1, config_,
                 std::move(fwd_seeds), std::move(bwd_seeds),
                 [&](Chain&& chain, score_t score) {
+#ifndef NDEBUG
+                    DEBUG_LOG("Chain: score: {}", score);
+                    for (const auto &[chain, dist] : chain) {
+                        DEBUG_LOG("\t{}\tdist: {}", chain, dist);
+                    }
+#endif
                     std::ignore = score;
                     bool any_added = false;
                     extend_chain(chain[0].first.get_orientation() ? reverse : forward,
