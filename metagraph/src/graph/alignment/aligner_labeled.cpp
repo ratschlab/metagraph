@@ -738,8 +738,6 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
             continue;
         }
 
-        continue;
-
         node_index next_node = this->graph_.traverse(
             seed.get_nodes().back(),
             seed.get_query_view().data()[seed.get_query_view().size()]
@@ -756,8 +754,9 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
             auto &next_seed = seeds[j];
             if (next_seed.empty() || !next_seed.label_encoder
                     || next_seed.label_columns != seed.label_columns
-                    || seed.get_query_view().data() + seed.get_query_view().size() - this->graph_.get_k() + 1
-                        != next_seed.get_query_view().data() - next_seed.get_offset()) {
+                    || seed.get_query_view().data() + seed.get_query_view().size()
+                        - this->graph_.get_k() + 1
+                            != next_seed.get_query_view().data() - next_seed.get_offset()) {
                 continue;
             }
 
