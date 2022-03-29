@@ -21,13 +21,13 @@ static constexpr size_t nannot = std::numeric_limits<size_t>::max();
 AnnotationBuffer::AnnotationBuffer(const DeBruijnGraph &graph,
                                    const Annotator &annotator,
                                    size_t row_batch_size,
-                                   size_t max_coords_per_node)
+                                   size_t max_coords_buffered)
       : graph_(graph),
         annotator_(annotator),
         multi_int_(dynamic_cast<const annot::matrix::MultiIntMatrix*>(&annotator_.get_matrix())),
         canonical_(dynamic_cast<const CanonicalDBG*>(&graph_)),
         column_sets_({ {} }),
-        label_coords_cache_(max_coords_per_node),
+        label_coords_cache_(max_coords_buffered),
         row_batch_size_(row_batch_size) {
     if (multi_int_ && graph_.get_mode() != DeBruijnGraph::BASIC) {
         multi_int_ = nullptr;
