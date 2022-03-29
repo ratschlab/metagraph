@@ -62,15 +62,14 @@ void AnnotationBuffer::fetch_queued_annotations() {
 
             size_t label_i = cache_column_set(std::move(labels));
             node_index base_node = AnnotatedDBG::anno_to_graph_index(*row_it);
-            if (graph_.get_mode() == DeBruijnGraph::BASIC) {
-                assert(base_node == *node_it);
-                node_to_cols_[*node_it] = label_i;
-            } else if (canonical_) {
+            if (canonical_) {
                 node_to_cols_[base_node] = label_i;
             } else {
                 node_to_cols_[*node_it] = label_i;
-                if (base_node != *node_it)
+                if (base_node != *node_it) {
+                    assert(graph_.get_mode() != DeBruijnGraph::BASIC);
                     node_to_cols_.try_emplace(base_node, label_i);
+                }
             }
             ++node_it;
             ++row_it;
