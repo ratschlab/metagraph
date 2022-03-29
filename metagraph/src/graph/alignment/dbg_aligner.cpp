@@ -537,8 +537,7 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
             tsl::hopscotch_set<Alignment::Column> finished_columns;
             size_t this_num_explored;
             std::tie(num_seeds, this_num_explored) = call_seed_chains_both_strands(
-                forward, reverse, graph_.get_k() - 1, config_,
-                std::move(fwd_seeds), std::move(bwd_seeds),
+                forward, reverse, config_, std::move(fwd_seeds), std::move(bwd_seeds),
                 [&](Chain&& chain, score_t score) {
 #ifndef NDEBUG
                     DEBUG_LOG("Chain: score: {}", score);

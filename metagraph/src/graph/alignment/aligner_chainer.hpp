@@ -15,7 +15,6 @@ typedef Alignment::score_t score_t;
 std::pair<size_t, size_t>
 call_seed_chains_both_strands(std::string_view forward,
                               std::string_view reverse,
-                              size_t node_overlap,
                               const DBGAlignerConfig &config,
                               std::vector<Seed>&& fwd_seeds,
                               std::vector<Seed>&& bwd_seeds,

@@ -31,7 +31,6 @@ chain_seeds(const DBGAlignerConfig &config,
 std::pair<size_t, size_t>
 call_seed_chains_both_strands(std::string_view forward,
                               std::string_view reverse,
-                              size_t node_overlap,
                               const DBGAlignerConfig &config,
                               std::vector<Seed>&& fwd_seeds,
                               std::vector<Seed>&& bwd_seeds,
@@ -143,28 +142,33 @@ call_seed_chains_both_strands(std::string_view forward,
         if (chain_seeds.empty())
             continue;
 
-        std::ignore = node_overlap;
-
         // clean chain by merging overlapping seeds
-        // if (has_coords) {
-        //     for (size_t i = 0; i < chain_seeds.size(); ++i) {
-        //         if (chain_seeds[i].first.empty())
-        //             continue;
+        if (has_coords) {
+            for (size_t i = chain_seeds.size() - 1; i > 0; --i) {
+                auto &cur_seed = chain_seeds[i].first;
+                if (cur_seed.empty())
+                    continue;
 
-        //         for (size_t j = i + 1; j < chain_seeds.size(); ++j) {
-        //             if (chain_seeds[j].first.empty())
-        //                 continue;
+                auto &prev_seed = chain_seeds[i - 1].first;
+                size_t prev_end = prev_seed.get_clipping()
+                                    + prev_seed.get_query_view().size();
+                if (prev_end > cur_seed.get_clipping()) {
+                    // they overlap
+                    size_t coord_dist = cur_seed.label_coordinates[0][0]
+                                            + cur_seed.get_query_view().size()
+                                            - prev_seed.label_coordinates[0][0]
+                                            - prev_seed.get_query_view().size();
+                    size_t dist = cur_seed.get_clipping()
+                                    + cur_seed.get_query_view().size() - prev_end;
 
-        //             if (chain_seeds[j].first.label_coordinates[0][0] + chain_seeds[j].first.get_query_view().size()
-        //                     > chain_seeds[i].first.label_coordinates[0][0] + chain_seeds[i].first.get_query_view().size() + 1)
-        //                 break;
-
-        //             chain_seeds[i].first.expand({ chain_seeds[j].first.get_nodes().back() });
-        //             chain_seeds[j].first = Seed();
-        //         }
-        //     }
-        //     std::ignore = node_overlap;
-        // }
+                    if (dist == coord_dist) {
+                        prev_seed.expand({ cur_seed.get_nodes().end() - dist,
+                                           cur_seed.get_nodes().end() });
+                        cur_seed = Seed();
+                    }
+                }
+            }
+        }
 
         chain_seeds.erase(std::remove_if(chain_seeds.begin(), chain_seeds.end(),
                                          [](const auto &a) { return a.first.empty(); }),
@@ -182,34 +186,9 @@ call_seed_chains_both_strands(std::string_view forward,
         Chain chain;
         chain.reserve(chain_seeds.size());
         std::transform(chain_seeds.begin(), chain_seeds.end(), std::back_inserter(chain),
-                       [&](const auto &c) { return std::make_pair(Alignment(c.first, config), c.second); });
-
-
-        // for (size_t i = chain.size() - 1; i > 0; --i) {
-        //     const char *prev_end = chain[i - 1].first.get_query_view().data()
-        //                             + chain[i - 1].first.get_query_view().size();
-        //     const char *cur_begin = chain[i].first.get_query_view().data();
-        //     if ((prev_end + chain[i].first.get_offset() >= cur_begin + node_overlap
-        //             && chain[i - 1].first.get_query_view().size() >= node_overlap)
-        //             || (chain[i - 1].first.get_offset() == chain[i].first.get_offset()
-        //                     && chain[i - 1].first.get_sequence().size() == chain[i].first.get_sequence().size()
-        //                     && has_coords
-        //                     && chain[i].first.label_coordinates[0][0] - chain[i - 1].first.label_coordinates[0][0] == 1)) {
-        //         std::cerr << "\ttry\n";
-        //         assert(chain[i].first.get_end_clipping() < chain[i - 1].first.get_clipping());
-        //         Alignment trim = chain[i].first;
-        //         Alignment merge = chain[i - 1].first;
-        //         trim.trim_query_prefix(prev_end - cur_begin, node_overlap, config);
-        //         std::cerr << "\t\t" << trim << "\n";
-        //         assert(trim.size());
-        //         merge.splice(std::move(trim));
-        //         std::cerr << "\t\t" << merge << "\n";
-        //         if (merge.size()) {
-        //             std::swap(merge, chain[i - 1].first);
-        //             chain[i].first = Alignment();
-        //         }
-        //     }
-        // }
+                       [&](const auto &c) {
+                           return std::make_pair(Alignment(c.first, config), c.second);
+                       });
 
         if (last_chain.empty()) {
             std::swap(last_chain, chain);
