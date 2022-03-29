@@ -803,6 +803,8 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
 
             if (removed_labels == seed.label_coordinates.size())
                 seed.label_encoder = nullptr;
+        } else if (annotation_buffer_.has_coordinates() && seed.label_columns.size()) {
+            seed.label_encoder = nullptr;
         }
     }
 
