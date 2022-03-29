@@ -148,11 +148,13 @@ call_seed_chains_both_strands(std::string_view forward,
             const char *prev_end = chain[i - 1].first.get_query_view().data()
                                     + chain[i - 1].first.get_query_view().size();
             const char *cur_begin = chain[i].first.get_query_view().data();
-            if (prev_end + chain[i].first.get_offset() >= cur_begin + node_overlap) {
+            if (prev_end + chain[i].first.get_offset() >= cur_begin + node_overlap
+                    && chain[i - 1].first.get_query_view().size() >= node_overlap) {
+                assert(chain[i].first.get_end_clipping() < chain[i - 1].first.get_clipping());
                 Alignment trim = chain[i].first;
                 Alignment merge = chain[i - 1].first;
-                merge.trim_end_clipping();
                 trim.trim_query_prefix(prev_end - cur_begin, node_overlap, config);
+                assert(trim.size());
                 merge.splice(std::move(trim));
                 if (merge.size()) {
                     std::swap(merge, chain[i - 1].first);
@@ -293,17 +295,18 @@ chain_seeds(const DBGAlignerConfig &config,
             continue;
 
         size_t end = std::min(bandwidth, dp_table.size() - i) + i;
+        size_t prev_end = prev_clipping + prev_length;
 
         for (size_t j = i + 1; j < end; ++j) {
             auto &[label, coord, clipping, node, length, score, pred, seed_i] = dp_table[j];
             if (label != prev_label)
                 break;
 
-            if (clipping >= prev_clipping)
+            if (clipping >= prev_clipping || prev_end == clipping + length)
                 continue;
 
             ssize_t dist = prev_clipping - clipping;
-            if (dist > query_size || prev_clipping + prev_length == clipping + length)
+            if (dist > query_size)
                 continue;
 
             ssize_t coord_dist = prev_coord - coord;
