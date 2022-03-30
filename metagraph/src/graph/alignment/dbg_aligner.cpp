@@ -539,13 +539,10 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
             std::tie(num_seeds, this_num_explored) = call_seed_chains_both_strands(
                 forward, reverse, config_, std::move(fwd_seeds), std::move(bwd_seeds),
                 [&](Chain&& chain, score_t score) {
-#ifndef NDEBUG
-                    DEBUG_LOG("Chain: score: {}", score);
+                    logger->trace("Chain: score: {}", score);
                     for (const auto &[chain, dist] : chain) {
-                        DEBUG_LOG("\t{}\tdist: {}", chain, dist);
+                        logger->trace("\t{}\tdist: {}", chain, dist);
                     }
-#endif
-                    std::ignore = score;
                     bool any_added = false;
                     extend_chain(chain[0].first.get_orientation() ? reverse : forward,
                                  chain[0].first.get_orientation() ? forward : reverse,
