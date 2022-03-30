@@ -251,6 +251,12 @@ void LabeledExtender
         return;
     }
 
+    std::vector<node_index> outnodes(outgoing.size());
+    for (const auto &[next, c, score] : outgoing) {
+        outnodes.push_back(next);
+    }
+    annotation_buffer_.prefetch_coords(outnodes);
+
     // check label and coordinate consistency
     // use the seed as the basis for labels and coordinates
     assert(seed_->label_coordinates.size());
@@ -263,6 +269,7 @@ void LabeledExtender
         std::shared_ptr<const CoordinateSet> base_coords {
             std::shared_ptr<const CoordinateSet>{}, &base_coords_
         };
+
         auto [next_labels, next_coords]
             = annotation_buffer_.get_labels_and_coords(next, false);
 
