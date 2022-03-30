@@ -370,7 +370,7 @@ void LabeledExtender::call_alignments(score_t end_score,
         callback(std::move(alignment));
     };
 
-    if (!base_coords) {
+    if (!annotation_buffer_.has_coordinates()) {
         alignment.label_columns = std::move(label_intersection_);
         call_alignment();
         return;
@@ -385,6 +385,7 @@ void LabeledExtender::call_alignments(score_t end_score,
         if (dynamic_cast<const RCDBG*>(graph_))
             dist = alignment.get_sequence().size() - seed_->get_sequence().size();
     }
+    assert(base_coords);
 
     auto label_it = label_intersection_.begin();
     auto label_end_it = label_intersection_.end();
@@ -776,23 +777,39 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
                 assert(dummy == next_seed.label_columns);
             }
 
+            // we want seed to have a subset of the coordinates in next_seed
             size_t k = 0;
+            Columns next_columns;
+            Alignment::CoordinateSet coord_set;
             for ( ; k < seed.label_coordinates.size(); ++k) {
-                if (!overlap_with_diff(seed.label_coordinates[k],
-                                       next_seed.label_coordinates[k],
-                                       seed.get_nodes().size())) {
+                coord_set.emplace_back();
+                utils::set_difference(next_seed.label_coordinates[k].begin(),
+                                      next_seed.label_coordinates[k].end(),
+                                      seed.label_coordinates[k].begin(),
+                                      seed.label_coordinates[k].end(),
+                                      std::back_inserter(coord_set.back()),
+                                      -static_cast<int64_t>(seed.get_nodes().size()));
+                if (next_seed.label_coordinates[k].size() - coord_set.size() < seed.label_coordinates[k].size())
                     break;
+
+                if (coord_set.back().size()) {
+                    next_columns.emplace_back(seed.label_columns[k]);
+                } else {
+                    coord_set.pop_back();
                 }
             }
 
             if (k != seed.label_coordinates.size())
                 continue;
 
-            // they can be merged
             seed.expand(next_seed.get_nodes());
             assert(Alignment(seed, this->config_).is_valid(this->graph_, &this->config_));
-            next_seed = Seed();
-            assert(next_seed.empty());
+            if (next_columns.empty()) {
+                next_seed = Seed();
+            } else {
+                std::swap(next_seed.label_columns, next_columns);
+                std::swap(next_seed.label_coordinates, coord_set);
+            }
         }
     }
 

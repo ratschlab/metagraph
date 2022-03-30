@@ -240,7 +240,9 @@ auto AnnotationBuffer::get_labels_and_coords(node_index node, bool skip_unfetche
             return ret_val;
         }
 
-        if (auto fetch = label_coords_cache_.TryGet(it - node_to_cols_.begin())) {
+        size_t index = it - node_to_cols_.begin();
+
+        if (auto fetch = label_coords_cache_.TryGet(index)) {
             ret_val.second = std::make_shared<const CoordinateSet>(std::move(*fetch));
         } else if (!skip_unfetched) {
             node_index base_node = node;
@@ -259,7 +261,7 @@ auto AnnotationBuffer::get_labels_and_coords(node_index node, bool skip_unfetche
                 assert(column == (*ret_val.first)[i]);
                 coord_set.emplace_back(coords.begin(), coords.end());
             }
-            label_coords_cache_.Put(it - node_to_cols_.begin(), coord_set);
+            label_coords_cache_.Put(index, coord_set);
             ret_val.second = std::make_shared<const CoordinateSet>(std::move(coord_set));
         }
     }
