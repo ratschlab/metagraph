@@ -784,7 +784,7 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
                                      std::back_inserter(next_seed.label_coordinates));
                 assert(dummy == next_seed.label_columns);
                 size_t num_coords = 0;
-                for (const auto &c : seed.label_coordinates) {
+                for (const auto &c : next_seed.label_coordinates) {
                     num_coords += c.size();
                     if (num_coords >= this->config_.max_num_seeds_per_locus)
                         break;
