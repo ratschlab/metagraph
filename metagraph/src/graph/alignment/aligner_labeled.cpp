@@ -731,6 +731,14 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
                                      std::back_inserter(dummy),
                                      std::back_inserter(seed.label_coordinates));
                 assert(dummy == seed.label_columns);
+                size_t num_coords = 0;
+                for (const auto &c : seed.label_coordinates) {
+                    num_coords += c.size();
+                    if (num_coords >= this->config_.max_num_seeds_per_locus)
+                        break;
+                }
+                if (num_coords >= this->config_.max_num_seeds_per_locus)
+                    seed = Seed();
             }
         }
 
@@ -775,6 +783,16 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
                                      std::back_inserter(dummy),
                                      std::back_inserter(next_seed.label_coordinates));
                 assert(dummy == next_seed.label_columns);
+                size_t num_coords = 0;
+                for (const auto &c : seed.label_coordinates) {
+                    num_coords += c.size();
+                    if (num_coords >= this->config_.max_num_seeds_per_locus)
+                        break;
+                }
+                if (num_coords >= this->config_.max_num_seeds_per_locus) {
+                    next_seed = Seed();
+                    continue;
+                }
             }
 
             // we want seed to have a subset of the coordinates in next_seed
