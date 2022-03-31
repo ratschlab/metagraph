@@ -47,58 +47,6 @@ IntMatrix::sum_row_values(const std::vector<std::pair<Row, size_t>> &index_count
     return result;
 }
 
-IntMatrix::SetBitPositions IntMatrix::get_row(Row i) const {
-    RowValues row = get_row_values(i);
-    SetBitPositions result(row.size());
-    for (size_t k = 0; k < row.size(); ++k) {
-        result[k] = row[k].first;
-    }
-    return result;
-}
-
-std::vector<IntMatrix::SetBitPositions>
-IntMatrix::get_rows(const std::vector<Row> &row_ids) const {
-    std::vector<SetBitPositions> result;
-    result.reserve(row_ids.size());
-
-    for (auto&& row : get_row_values(row_ids)) {
-        result.emplace_back(row.size());
-        for (size_t k = 0; k < row.size(); ++k) {
-            result.back()[k] = row[k].first;
-        }
-        row = RowValues();
-    }
-
-    return result;
-}
-
-// return the positions of all non-empty tuples in the row
-MultiIntMatrix::SetBitPositions MultiIntMatrix::get_row(Row i) const {
-    RowTuples row = get_row_tuples(i);
-    SetBitPositions result(row.size());
-    for (size_t k = 0; k < row.size(); ++k) {
-        result[k] = row[k].first;
-    }
-    return result;
-}
-
-// for each row return the positions of all non-empty tuples
-std::vector<MultiIntMatrix::SetBitPositions>
-MultiIntMatrix::get_rows(const std::vector<Row> &row_ids) const {
-    std::vector<SetBitPositions> result;
-    result.reserve(row_ids.size());
-
-    for (auto&& row : get_row_tuples(row_ids)) {
-        result.emplace_back(row.size());
-        for (size_t k = 0; k < row.size(); ++k) {
-            result.back()[k] = row[k].first;
-        }
-        row = RowTuples();
-    }
-
-    return result;
-}
-
 // return sizes of all non-empty tuples in the row
 MultiIntMatrix::RowValues MultiIntMatrix::get_row_values(Row row) const {
     RowTuples row_tuples = get_row_tuples(row);

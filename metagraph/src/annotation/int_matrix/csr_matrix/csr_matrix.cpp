@@ -16,6 +16,19 @@ CSRMatrix::CSRMatrix(Vector<RowValues>&& rows, uint64_t num_columns)
     }));
 }
 
+std::vector<CSRMatrix::SetBitPositions>
+CSRMatrix::get_rows(const std::vector<Row> &row_ids) const {
+    std::vector<SetBitPositions> rows(row_ids.size());
+    for (size_t i = 0; i < rows.size(); ++i) {
+        const auto &cur_row = vector_[row_ids[i]];
+        rows[i].reserve(cur_row.size());
+        for (const auto &[col, val] : cur_row) {
+            rows[i].push_back(col);
+        }
+    }
+    return rows;
+}
+
 std::vector<CSRMatrix::RowValues>
 CSRMatrix::get_row_values(const std::vector<Row> &rows) const {
     std::vector<RowValues> row_values(rows.size());

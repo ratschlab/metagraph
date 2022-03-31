@@ -36,6 +36,7 @@ class TupleRowDiff : public binmat::IRowDiff, public MultiIntMatrix {
 
     bool get(Row i, Column j) const override;
     std::vector<Row> get_column(Column j) const override;
+    std::vector<SetBitPositions> get_rows(const std::vector<Row> &row_ids) const override;
     RowTuples get_row_tuples(Row i) const override;
     std::vector<RowTuples> get_row_tuples(const std::vector<Row> &rows) const override;
 
@@ -127,6 +128,100 @@ TupleRowDiff<BaseMatrix>::get_row_tuples(const std::vector<Row> &row_ids) const 
         assert(std::all_of(result.begin(), result.end(),
                            [](auto &p) { return p.second.size(); }));
     }
+
+    return rows;
+}
+
+template <class BaseMatrix>
+std::vector<MultiIntMatrix::SetBitPositions>
+TupleRowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
+    assert(graph_ && "graph must be loaded");
+    assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
+    assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());
+
+    // diff rows annotating nodes along the row-diff paths
+    std::vector<Row> rd_ids;
+    rd_ids.reserve(row_ids.size() * binmat::RD_PATH_RESERVE_SIZE);
+
+    // map row index to its index in |rd_rows|
+    VectorMap<Row, size_t> node_to_rd;
+    node_to_rd.reserve(row_ids.size() * binmat::RD_PATH_RESERVE_SIZE);
+
+    // keeps how many times rows in |rd_rows| will be queried
+    std::vector<size_t> times_traversed;
+    times_traversed.reserve(row_ids.size() * binmat::RD_PATH_RESERVE_SIZE);
+
+    // Truncated row-diff paths, indexes to |rd_rows|.
+    // The last index in each path points to an anchor or to a row which had
+    // been reached before, and thus, will be reconstructed before this one.
+    std::vector<std::vector<size_t>> rd_paths_trunc(row_ids.size());
+
+    const graph::boss::BOSS &boss = graph_->get_boss();
+    const bit_vector &rd_succ = fork_succ_.size() ? fork_succ_ : boss.get_last();
+
+    for (size_t i = 0; i < row_ids.size(); ++i) {
+        Row row = row_ids[i];
+
+        graph::boss::BOSS::edge_index boss_edge = graph_->kmer_to_boss_index(
+                graph::AnnotatedSequenceGraph::anno_to_graph_index(row));
+
+        while (true) {
+            row = graph::AnnotatedSequenceGraph::graph_to_anno_index(
+                    graph_->boss_to_kmer_index(boss_edge));
+
+            auto [it, is_new] = node_to_rd.try_emplace(row, rd_ids.size());
+            rd_paths_trunc[i].push_back(it.value());
+
+            // If a node had been reached before, we interrupt the diff path.
+            // The annotation for that node will have been reconstructed earlier
+            // than for other nodes in this path as well. Thus, we will start
+            // reconstruction from that node and don't need its successors.
+            if (!is_new) {
+                times_traversed[it.value()]++;
+                break;
+            }
+
+            rd_ids.push_back(row);
+            times_traversed.push_back(1);
+
+            if (anchor_[row])
+                break;
+
+            boss_edge = boss.row_diff_successor(boss_edge, rd_succ);
+        }
+    }
+
+    node_to_rd = VectorMap<Row, size_t>();
+
+    std::vector<RowTuples> rd_rows = diffs_.get_row_tuples(rd_ids);
+    for (auto &row : rd_rows) {
+        decode_diffs(&row);
+    }
+
+    // reconstruct annotation rows from row-diff
+    std::vector<SetBitPositions> rows(row_ids.size());
+
+    for (size_t i = 0; i < row_ids.size(); ++i) {
+        RowTuples result;
+        // propagate back and reconstruct full annotations for predecessors
+        for (auto it = rd_paths_trunc[i].rbegin(); it != rd_paths_trunc[i].rend(); ++it) {
+            std::sort(rd_rows[*it].begin(), rd_rows[*it].end());
+            add_diff(rd_rows[*it], &result);
+            // replace diff row with full reconstructed annotation
+            if (--times_traversed[*it]) {
+                rd_rows[*it] = result;
+            } else {
+                // free memory
+                rd_rows[*it] = {};
+            }
+        }
+        rows[i].reserve(result.size());
+        for (auto&& [c, vals] : result) {
+            assert(vals.size());
+            rows[i].emplace_back(c);
+        }
+    }
+    assert(times_traversed == std::vector<size_t>(rd_rows.size(), 0));
 
     return rows;
 }

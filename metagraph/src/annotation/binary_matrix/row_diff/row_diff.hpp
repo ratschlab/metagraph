@@ -24,7 +24,7 @@ namespace binmat {
 const std::string kRowDiffAnchorExt = ".anchors";
 const std::string kRowDiffForkSuccExt = ".rd_succ";
 
-const size_t RD_PATH_RESERVE_SIZE = 2;
+static constexpr size_t RD_PATH_RESERVE_SIZE = 2;
 
 
 class IRowDiff {

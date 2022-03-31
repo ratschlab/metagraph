@@ -24,6 +24,8 @@ class CSRMatrix : public IntMatrix {
     // row is in [0, num_rows), column is in [0, num_columns)
     RowValues get_row_values(Row row) const { return vector_[row]; }
 
+    std::vector<SetBitPositions> get_rows(const std::vector<Row> &row_ids) const;
+
     std::vector<RowValues>
     get_row_values(const std::vector<Row> &rows) const;
 

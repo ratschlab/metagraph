@@ -17,8 +17,11 @@ class IntMatrix : public binmat::BinaryMatrix {
 
     virtual ~IntMatrix() {}
 
-    virtual SetBitPositions get_row(Row i) const;
-    virtual std::vector<SetBitPositions> get_rows(const std::vector<Row> &row_ids) const;
+    virtual SetBitPositions get_row(Row i) const {
+        return get_rows({ i })[0];
+    }
+
+    virtual std::vector<SetBitPositions> get_rows(const std::vector<Row> &row_ids) const = 0;
 
     // |row| is in [0, num_rows), |column| is in [0, num_columns)
     virtual RowValues get_row_values(Row row) const = 0;
@@ -43,8 +46,11 @@ class MultiIntMatrix : public IntMatrix {
 
     virtual ~MultiIntMatrix() {}
 
-    virtual SetBitPositions get_row(Row i) const;
-    virtual std::vector<SetBitPositions> get_rows(const std::vector<Row> &row_ids) const;
+    virtual SetBitPositions get_row(Row i) const {
+        return get_rows({ i })[0];
+    }
+
+    virtual std::vector<SetBitPositions> get_rows(const std::vector<Row> &row_ids) const = 0;
 
     // return tuple sizes (if not zero) at each entry
     virtual RowValues get_row_values(Row row) const;
