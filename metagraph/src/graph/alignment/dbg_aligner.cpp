@@ -381,6 +381,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
     for (size_t i = 1; i < chain.size(); ++i) {
         assert(chain[i].first.is_valid(graph_, &config_));
         coord_offset += chain[i].second;
+        assert(coord_offset > 0);
         if (!align_connect(graph_, config_, cur, chain[i].first, coord_offset,
                            extender, partial_alignments)) {
             if (AlignmentCompare()(best, partial_alignments.back()))
@@ -509,41 +510,36 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
         if (fwd_seeds.empty() && bwd_seeds.empty())
             return std::make_tuple(num_seeds, num_extensions, num_explored_nodes);
 
-        bool can_chain = false;
-        for (const Seed &seed : fwd_seeds) {
-            if (seed.label_coordinates.size()) {
-                can_chain = true;
-                break;
-            }
-        }
-
-        if (!can_chain) {
-            for (const Seed &seed : bwd_seeds) {
-                if (seed.label_coordinates.size()) {
-                    can_chain = true;
-                    break;
-                }
-            }
-        }
-
-        if (!can_chain) {
+        if (!has_coordinates()) {
             logger->error("Chaining only supported for seeds with coordinates. Skipping seed chaining.");
             exit(1);
         }
 
         AlignmentAggregator<AlignmentCompare> aggregator(config_);
+        tsl::hopscotch_set<Alignment::Column> all_columns;
+        for (const auto &seed : fwd_seeds) {
+            all_columns.insert(seed.label_columns.begin(), seed.label_columns.end());
+        }
+        for (const auto &seed : bwd_seeds) {
+            all_columns.insert(seed.label_columns.begin(), seed.label_columns.end());
+        }
 
         try {
             tsl::hopscotch_set<Alignment::Column> finished_columns;
             size_t this_num_explored;
             std::tie(num_seeds, this_num_explored) = call_seed_chains_both_strands(
-                forward, reverse, config_, std::move(fwd_seeds), std::move(bwd_seeds),
+                *this, forward, reverse, config_, std::move(fwd_seeds), std::move(bwd_seeds),
                 [&](Chain&& chain, score_t score) {
+                    if (config_.num_alternative_paths <= 1
+                            && finished_columns.size() == all_columns.size()) {
+                        throw std::bad_function_call();
+                    }
+
                     logger->trace("Chain: score: {}", score);
                     for (const auto &[chain, dist] : chain) {
                         logger->trace("\t{}\tdist: {}", chain, dist);
                     }
-                    bool any_added = false;
+
                     extend_chain(chain[0].first.get_orientation() ? reverse : forward,
                                  chain[0].first.get_orientation() ? forward : reverse,
                                  chain[0].first.get_orientation()
@@ -553,17 +549,10 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
                                  [&](Alignment&& aln) {
                         auto cur_columns = aln.label_columns;
                         if (!aggregator.add_alignment(std::move(aln))) {
-                            if (cur_columns.size()) {
-                                any_added = true;
-                                finished_columns.insert(cur_columns.begin(), cur_columns.end());
-                            }
-                        } else {
-                            any_added = true;
+                            finished_columns.insert(cur_columns.begin(),
+                                                    cur_columns.end());
                         }
                     });
-
-                    if (!any_added)
-                        throw std::bad_function_call();
                 },
                 [&](Alignment::Column column) { return finished_columns.count(column); }
             );

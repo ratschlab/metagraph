@@ -1,11 +1,16 @@
 #include "aligner_chainer.hpp"
 
+#include <progress_bar.hpp>
+
 #include "aligner_seeder_methods.hpp"
 #include "aligner_aggregator.hpp"
+#include "aligner_labeled.hpp"
 
 namespace mtg {
 namespace graph {
 namespace align {
+
+using common::logger;
 
 #define LOG2(X) ((unsigned) (8 * sizeof(unsigned long long) - __builtin_clzll((X)) - 1))
 
@@ -24,39 +29,37 @@ typedef std::tuple<Alignment::Column /* label */,
 typedef std::vector<TableElem> ChainDPTable;
 
 std::tuple<ChainDPTable, size_t, size_t>
-chain_seeds(const DBGAlignerConfig &config,
+chain_seeds(const IDBGAligner &aligner,
+            const DBGAlignerConfig &config,
             std::string_view query,
-            const std::vector<Seed> &seeds);
+            std::vector<Seed> &seeds);
 
 std::pair<size_t, size_t>
-call_seed_chains_both_strands(std::string_view forward,
+call_seed_chains_both_strands(const IDBGAligner &aligner,
+                              std::string_view forward,
                               std::string_view reverse,
                               const DBGAlignerConfig &config,
                               std::vector<Seed>&& fwd_seeds,
                               std::vector<Seed>&& bwd_seeds,
                               const std::function<void(Chain&&, score_t)> &callback,
                               const std::function<bool(Alignment::Column)> &skip_column) {
+    fwd_seeds.erase(std::remove_if(fwd_seeds.begin(), fwd_seeds.end(),
+                                   [](const auto &a) {
+                                       return a.empty() || a.label_columns.empty();
+                                   }),
+                    fwd_seeds.end());
+    bwd_seeds.erase(std::remove_if(bwd_seeds.begin(), bwd_seeds.end(),
+                                   [](const auto &a) {
+                                       return a.empty() || a.label_columns.empty();
+                                   }),
+                    bwd_seeds.end());
+
     if (fwd_seeds.empty() && bwd_seeds.empty())
         return { 0, 0 };
 
-    bool has_labels = false;
-    bool has_coords = false;
 
-    if (fwd_seeds.size()) {
-        if (fwd_seeds[0].label_coordinates.size()) {
-            has_labels = true;
-            has_coords = true;
-        } else if (fwd_seeds[0].label_columns.size()) {
-            has_labels = true;
-        }
-    } else {
-        if (bwd_seeds[0].label_coordinates.size()) {
-            has_labels = true;
-            has_coords = true;
-        } else if (bwd_seeds[0].label_columns.size()) {
-            has_labels = true;
-        }
-    }
+    bool has_labels = dynamic_cast<const ILabeledAligner*>(&aligner);
+
     // filter out empty seeds
     std::vector<Seed> both_seeds[2];
     both_seeds[0].reserve(fwd_seeds.size());
@@ -75,15 +78,18 @@ call_seed_chains_both_strands(std::string_view forward,
 
     // perform chaining on the forward, and the reverse-complement seeds
     ChainDPTable dp_tables[2];
+
+    logger->trace("Chaining forward seeds");
     size_t num_seeds;
     size_t num_nodes;
     std::tie(dp_tables[0], num_seeds, num_nodes)
-        = chain_seeds(config, forward, both_seeds[0]);
+        = chain_seeds(aligner, config, forward, both_seeds[0]);
 
+    logger->trace("Chaining reverse complement seeds");
     size_t num_seeds_bwd;
     size_t num_nodes_bwd;
     std::tie(dp_tables[1], num_seeds_bwd, num_nodes_bwd)
-        = chain_seeds(config, reverse, both_seeds[1]);
+        = chain_seeds(aligner, config, reverse, both_seeds[1]);
 
     num_seeds += num_seeds_bwd;
     num_nodes += num_nodes_bwd;
@@ -131,7 +137,7 @@ call_seed_chains_both_strands(std::string_view forward,
             chain_seeds.back().first.label_coordinates.clear();
             if (has_labels) {
                 chain_seeds.back().first.label_columns.assign(1, label);
-                if (has_coords) {
+                if (aligner.has_coordinates()) {
                     chain_seeds.back().first.label_coordinates.resize(1);
                     chain_seeds.back().first.label_coordinates[0].assign(1, coord);
                 }
@@ -143,13 +149,16 @@ call_seed_chains_both_strands(std::string_view forward,
             continue;
 
         // clean chain by merging overlapping seeds
-        if (has_coords) {
+        if (aligner.has_coordinates()) {
             for (size_t i = chain_seeds.size() - 1; i > 0; --i) {
                 auto &cur_seed = chain_seeds[i].first;
-                if (cur_seed.empty())
-                    continue;
-
                 auto &prev_seed = chain_seeds[i - 1].first;
+
+                assert(cur_seed.size());
+                assert(prev_seed.size());
+                assert(prev_seed.get_clipping() < cur_seed.get_clipping());
+                assert(prev_seed.get_end_clipping() > cur_seed.get_end_clipping());
+
                 size_t prev_end = prev_seed.get_clipping()
                                     + prev_seed.get_query_view().size();
                 if (prev_end > cur_seed.get_clipping()) {
@@ -161,7 +170,7 @@ call_seed_chains_both_strands(std::string_view forward,
                     size_t dist = cur_seed.get_clipping()
                                     + cur_seed.get_query_view().size() - prev_end;
 
-                    if (dist == coord_dist) {
+                    if (dist == coord_dist && cur_seed.get_nodes().size() >= dist) {
                         prev_seed.expand({ cur_seed.get_nodes().end() - dist,
                                            cur_seed.get_nodes().end() });
                         cur_seed = Seed();
@@ -173,12 +182,15 @@ call_seed_chains_both_strands(std::string_view forward,
         chain_seeds.erase(std::remove_if(chain_seeds.begin(), chain_seeds.end(),
                                          [](const auto &a) { return a.first.empty(); }),
                           chain_seeds.end());
-
-        if (chain_seeds.empty())
-            continue;
+        assert(chain_seeds.size());
 
         for (size_t i = chain_seeds.size() - 1; i > 0; --i) {
+            assert(chain_seeds[i].first.get_clipping()
+                        > chain_seeds[i - 1].first.get_clipping());
+            assert(chain_seeds[i].first.get_end_clipping()
+                        < chain_seeds[i - 1].first.get_end_clipping());
             chain_seeds[i].second -= chain_seeds[i - 1].second;
+            assert(chain_seeds[i].second > 0);
         }
 
         chain_seeds[0].second = 0;
@@ -255,47 +267,65 @@ call_seed_chains_both_strands(std::string_view forward,
 }
 
 std::tuple<ChainDPTable, size_t, size_t>
-chain_seeds(const DBGAlignerConfig &config,
+chain_seeds(const IDBGAligner &aligner,
+            const DBGAlignerConfig &config,
             std::string_view query,
-            const std::vector<Seed> &seeds) {
-    if (seeds.empty())
+            std::vector<Seed> &seeds) {
+    const auto *labeled_aligner = dynamic_cast<const ILabeledAligner*>(&aligner);
+    if (seeds.empty() || !labeled_aligner || !aligner.has_coordinates())
         return {};
 
+    AnnotationBuffer &buffer = labeled_aligner->get_annotation_buffer();
+
     size_t num_nodes = 0;
-    size_t num_seeds = 0;
 
     ssize_t query_size = query.size();
 
     ChainDPTable dp_table;
-    dp_table.reserve(num_seeds);
+    dp_table.reserve(seeds.size());
 
-    for (size_t i = 0; i < seeds.size(); ++i) {
-        if (seeds[i].empty() || seeds[i].label_columns.empty()
-                || seeds[i].label_coordinates.empty())
-            continue;
+    logger->trace("Sorting seeds");
+    std::sort(seeds.begin(), seeds.end(), [](const auto &a, const auto &b) {
+        return a.get_clipping() > b.get_clipping();
+    });
 
-        size_t seed_count = 0;
-        for (const auto &tuple : seeds[i].label_coordinates) {
-            seed_count += tuple.size();
+    ProgressBar progress_bar(seeds.size(), "Finding anchors",
+                             std::cerr, !common::get_verbose());
+    for (size_t i = 0; i < seeds.size(); ++i, ++progress_bar) {
+        if (!(i % config.row_batch_size)) {
+            size_t end = std::min(i + config.row_batch_size, seeds.size());
+            std::vector<node_index> nodes;
+            nodes.reserve(end - i);
+            for (size_t j = i; j < end; ++j) {
+                nodes.emplace_back(seeds[j].get_nodes()[0]);
+            }
+            buffer.prefetch_coords(nodes);
         }
 
-        if (seed_count > config.max_num_seeds_per_locus)
-            continue;
+        auto fetch_coords = buffer.get_coords(seeds[i].get_nodes()[0], false,
+                                              &seeds[i].label_columns);
+        assert(fetch_coords);
 
-        num_seeds += seed_count;
-
-        for (size_t j = 0; j < seeds[i].label_coordinates.size(); ++j) {
+        for (size_t j = 0; j < fetch_coords->size(); ++j) {
             Alignment::Column c = seeds[i].label_columns[j];
-            for (auto coord : seeds[i].label_coordinates[j]) {
-                dp_table.emplace_back(c, coord, seeds[i].get_clipping(),
+            size_t num_seeds = std::min((*fetch_coords)[j].size(),
+                                        config.max_num_seeds_per_locus);
+            auto rbegin = (*fetch_coords)[j].rbegin();
+            auto rend = rbegin + num_seeds;
+            std::for_each(rbegin, rend, [&](auto coord) {
+                dp_table.emplace_back(c, coord + seeds[i].get_offset(), seeds[i].get_clipping(),
                                       seeds[i].get_nodes()[0], seeds[i].get_query_view().size(),
                                       seeds[i].get_query_view().size(), nid, i);
-            }
+            });
         }
     }
 
+    size_t num_seeds = dp_table.size();
+
+    logger->trace("Sorting {} anchors", dp_table.size());
     // sort seeds by label, then by decreasing reference coordinate
     std::sort(dp_table.begin(), dp_table.end(), std::greater<TableElem>());
+    logger->trace("Chaining anchors");
 
     // scoring function derived from minimap2
     // https://academic.oup.com/bioinformatics/article/34/18/3094/4994778
@@ -319,17 +349,17 @@ chain_seeds(const DBGAlignerConfig &config,
             if (label != prev_label)
                 break;
 
-            if (clipping >= prev_clipping || prev_end == clipping + length)
+            assert(prev_coord >= coord);
+            ssize_t coord_dist = prev_coord - coord;
+            if (coord_dist > query_size)
+                break;
+
+            if (clipping >= prev_clipping || clipping + length >= prev_end)
                 continue;
 
             ssize_t dist = prev_clipping - clipping;
             if (dist > query_size)
                 continue;
-
-            ssize_t coord_dist = prev_coord - coord;
-
-            if (coord_dist > query_size)
-                break;
 
             score_t cur_score = prev_score + std::min(std::min(length, dist), coord_dist)
                 - gap_penalty(std::abs(coord_dist - dist));

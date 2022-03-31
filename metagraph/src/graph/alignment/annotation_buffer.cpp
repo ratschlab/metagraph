@@ -18,6 +18,28 @@ typedef annot::binmat::BinaryMatrix::Column Column;
 // dummy index for an unfetched annotations
 static constexpr size_t nannot = std::numeric_limits<size_t>::max();
 
+template <class AIt, class BIt, class CIt, class OutIt, class OutIt2>
+void matched_intersection(AIt a_begin, AIt a_end, BIt a_c_begin,
+                          CIt b_begin, CIt b_end,
+                          OutIt out1, OutIt2 out2) {
+    while (a_begin != a_end && b_begin != b_end) {
+        if (*a_begin < *b_begin) {
+            ++a_begin;
+            ++a_c_begin;
+        } else if (*a_begin > *b_begin) {
+            ++b_begin;
+        } else {
+            *out1 = *a_begin;
+            *out2 = *a_c_begin;
+            ++out1;
+            ++out2;
+            ++a_begin;
+            ++a_c_begin;
+            ++b_begin;
+        }
+    }
+}
+
 AnnotationBuffer::AnnotationBuffer(const DeBruijnGraph &graph,
                                    const Annotator &annotator,
                                    size_t row_batch_size,
@@ -267,6 +289,67 @@ auto AnnotationBuffer::get_labels_and_coords(node_index node, bool skip_unfetche
     }
 
     return ret_val;
+}
+
+auto AnnotationBuffer::get_coords(node_index node,
+                                  bool skip_unfetched,
+                                  const Columns *label_subset) const
+        -> std::shared_ptr<const CoordinateSet> {
+    if (!has_coordinates())
+        return {};
+
+    if (canonical_)
+        node = canonical_->get_base_node(node);
+
+    auto it = node_to_cols_.find(node);
+
+    // if the node hasn't been seen before, or if its annotations haven't
+    // been fetched, return nothing
+    if (it == node_to_cols_.end() || it->second == nannot)
+        return {};
+
+    const auto &columns = column_sets_.data()[it->second];
+
+    if (columns.empty())
+        return {};
+
+    size_t index = it - node_to_cols_.begin();
+
+    if (auto fetch = label_coords_cache_.TryGet(index))
+        return std::make_shared<const CoordinateSet>(std::move(*fetch));
+
+    if (skip_unfetched)
+        return {};
+
+    node_index base_node = node;
+
+    // TODO: avoid this get_node_sequence call
+    if (graph_.get_mode() == DeBruijnGraph::CANONICAL && !canonical_)
+        base_node = map_to_nodes(graph_, graph_.get_node_sequence(node))[0];
+
+    auto fetch
+        = multi_int_->get_row_tuples(AnnotatedDBG::graph_to_anno_index(base_node));
+    std::sort(fetch.begin(), fetch.end());
+    CoordinateSet coord_set;
+    assert(fetch.size() == columns.size());
+    for (size_t i = 0; i < fetch.size(); ++i) {
+        auto &[column, coords] = fetch[i];
+        assert(column == columns[i]);
+        coord_set.emplace_back(coords.begin(), coords.end());
+    }
+
+    label_coords_cache_.Put(index, coord_set);
+
+    if (!label_subset)
+        return std::make_shared<const CoordinateSet>(std::move(coord_set));
+
+    Columns dummy;
+    CoordinateSet coord_subset;
+    matched_intersection(columns.begin(), columns.end(), coord_set.begin(),
+                         label_subset->begin(), label_subset->end(),
+                         std::back_inserter(dummy),
+                         std::back_inserter(coord_subset));
+    return std::make_shared<const CoordinateSet>(std::move(coord_subset));
 }
 
 } // namespace align
