@@ -705,12 +705,10 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
     }
 
     // merge seeds
-    size_t row_batch_size = annotation_buffer_.get_batch_size();
-    for (size_t j = 0; j < seeds.size(); ++j) {
-        Seed &seed = seeds[j];
-        bool expanded = true;
-        while (expanded) {
-            expanded = false;
+    if (max_seed_length_ > this->config_.max_seed_length) {
+        size_t row_batch_size = annotation_buffer_.get_batch_size();
+        for (size_t j = 0; j < seeds.size(); ++j) {
+            Seed &seed = seeds[j];
             if (annotation_buffer_.has_coordinates()) {
                 if (!(j % row_batch_size)) {
                     std::vector<node_index> nodes;
@@ -727,90 +725,92 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
                     );
                 }
             }
+            bool expanded = true;
+            while (expanded) {
+                expanded = false;
 
-            if (seed.empty() || !seed.get_end_clipping() || !seed.label_encoder
-                    || max_seed_length_ <= this->config_.max_seed_length) {
-                continue;
-            }
-
-            node_index next_node = this->graph_.traverse(
-                seed.get_nodes().back(),
-                seed.get_query_view().data()[seed.get_query_view().size()]
-            );
-
-            if (!next_node)
-                continue;
-
-            auto find = node_to_seeds.find(next_node);
-            if (find == node_to_seeds.end())
-                continue;
-
-            std::vector<node_index> next_nodes;
-            next_nodes.reserve(find->second.size());
-            for (size_t j : find->second) {
-                if (seeds[j].size())
-                    next_nodes.emplace_back(seeds[j].get_nodes()[0]);
-            }
-            annotation_buffer_.prefetch_coords(next_nodes);
-
-            for (size_t j : find->second) {
-                auto &next_seed = seeds[j];
-                if (next_seed.empty() || !next_seed.label_encoder
-                        || next_seed.label_columns != seed.label_columns
-                        || seed.get_query_view().data() + seed.get_query_view().size()
-                            - this->graph_.get_k() + 1
-                                != next_seed.get_query_view().data() - next_seed.get_offset()) {
+                if (seed.empty() || !seed.get_end_clipping() || !seed.label_encoder)
                     continue;
+
+                node_index next_node = this->graph_.traverse(
+                    seed.get_nodes().back(),
+                    seed.get_query_view().data()[seed.get_query_view().size()]
+                );
+
+                if (!next_node)
+                    continue;
+
+                auto find = node_to_seeds.find(next_node);
+                if (find == node_to_seeds.end())
+                    continue;
+
+                std::vector<node_index> next_nodes;
+                next_nodes.reserve(find->second.size());
+                for (size_t j : find->second) {
+                    if (seeds[j].size())
+                        next_nodes.emplace_back(seeds[j].get_nodes()[0]);
                 }
+                annotation_buffer_.prefetch_coords(next_nodes);
 
-                assert(next_node == next_seed.get_nodes()[0]);
-
-                if (annotation_buffer_.has_coordinates()
-                        && next_seed.label_coordinates.size() != next_seed.label_columns.size()) {
-                    next_seed.label_coordinates = *annotation_buffer_.get_coords(
-                        next_seed.get_nodes()[0], false, &next_seed.label_columns
-                    );
-                }
-
-                // we want seed to have a subset of the coordinates in next_seed
-                size_t k = 0;
-                Columns next_columns;
-                Alignment::CoordinateSet coord_set;
-                for ( ; k < seed.label_coordinates.size(); ++k) {
-                    coord_set.emplace_back();
-                    utils::set_difference(next_seed.label_coordinates[k].begin(),
-                                          next_seed.label_coordinates[k].end(),
-                                          seed.label_coordinates[k].begin(),
-                                          seed.label_coordinates[k].end(),
-                                          std::back_inserter(coord_set.back()),
-                                          -static_cast<int64_t>(seed.get_nodes().size()));
-                    if (next_seed.label_coordinates[k].size() - coord_set.back().size() < seed.label_coordinates[k].size())
-                        break;
-
-                    if (coord_set.back().size()) {
-                        next_columns.emplace_back(seed.label_columns[k]);
-                    } else {
-                        coord_set.pop_back();
+                for (size_t j : find->second) {
+                    auto &next_seed = seeds[j];
+                    if (next_seed.empty() || !next_seed.label_encoder
+                            || next_seed.label_columns != seed.label_columns
+                            || seed.get_query_view().data() + seed.get_query_view().size()
+                                - this->graph_.get_k() + 1
+                                    != next_seed.get_query_view().data() - next_seed.get_offset()) {
+                        continue;
                     }
-                }
 
-                if (k != seed.label_coordinates.size())
-                    continue;
+                    assert(next_node == next_seed.get_nodes()[0]);
 
-                seed.expand(next_seed.get_nodes());
-                assert(Alignment(seed, this->config_).is_valid(this->graph_, &this->config_));
-                if (next_columns.empty()) {
-                    next_seed = Seed();
-                } else {
-                    std::swap(next_seed.label_columns, next_columns);
-                    std::swap(next_seed.label_coordinates, coord_set);
+                    if (annotation_buffer_.has_coordinates()
+                            && next_seed.label_coordinates.size() != next_seed.label_columns.size()) {
+                        next_seed.label_coordinates = *annotation_buffer_.get_coords(
+                            next_seed.get_nodes()[0], false, &next_seed.label_columns
+                        );
+                    }
+
+                    // we want seed to have a subset of the coordinates in next_seed
+                    size_t k = 0;
+                    Columns next_columns;
+                    Alignment::CoordinateSet coord_set;
+                    for ( ; k < seed.label_coordinates.size(); ++k) {
+                        coord_set.emplace_back();
+                        utils::set_difference(next_seed.label_coordinates[k].begin(),
+                                              next_seed.label_coordinates[k].end(),
+                                              seed.label_coordinates[k].begin(),
+                                              seed.label_coordinates[k].end(),
+                                              std::back_inserter(coord_set.back()),
+                                              -static_cast<int64_t>(seed.get_nodes().size()));
+                        if (next_seed.label_coordinates[k].size() - coord_set.back().size() < seed.label_coordinates[k].size())
+                            break;
+
+                        if (coord_set.back().size()) {
+                            next_columns.emplace_back(seed.label_columns[k]);
+                        } else {
+                            coord_set.pop_back();
+                        }
+                    }
+
+                    if (k != seed.label_coordinates.size())
+                        continue;
+
+                    seed.expand(next_seed.get_nodes());
+                    assert(Alignment(seed, this->config_).is_valid(this->graph_, &this->config_));
+                    if (next_columns.empty()) {
+                        next_seed = Seed();
+                    } else {
+                        std::swap(next_seed.label_columns, next_columns);
+                        std::swap(next_seed.label_coordinates, coord_set);
+                    }
+                    expanded = true;
+                    break;
                 }
-                expanded = true;
-                break;
             }
-        }
 
-        seed.label_coordinates.clear();
+            seed.label_coordinates.clear();
+        }
     }
 
     auto seed_it = std::remove_if(seeds.begin(), seeds.end(), [&](const auto &a) {
