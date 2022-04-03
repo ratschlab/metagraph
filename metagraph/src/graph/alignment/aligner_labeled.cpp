@@ -639,8 +639,11 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
             size_t end = seed.get_clipping() + this->graph_.get_k() - seed.get_offset();
             node_index node = seed.get_nodes()[0];
 
-            if (max_seed_length_ > this->config_.max_seed_length)
+            if (max_seed_length_ > this->config_.max_seed_length
+                    && (this->config_.max_seed_length < this->graph_.get_k()
+                        || !seed.get_offset())) {
                 node_to_seeds[node].emplace_back(j);
+            }
 
             assert(annotation_buffer_.get_labels(node));
 
@@ -724,6 +727,10 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
                         seed.get_nodes()[0], false, &seed.label_columns
                     );
                 }
+            }
+            if (this->config_.max_seed_length >= this->graph_.get_k()
+                    && seed.get_offset()) {
+                continue;
             }
             bool expanded = true;
             while (expanded) {
