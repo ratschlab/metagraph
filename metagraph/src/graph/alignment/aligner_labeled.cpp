@@ -629,7 +629,7 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
                             + seeds[0].get_query_view().size();
 
     Columns labels;
-    tsl::hopscotch_map<node_index, std::vector<size_t>> node_to_seeds;
+    tsl::hopscotch_map<size_t, std::vector<size_t>> clipping_to_seeds;
 
     {
         VectorMap<Column, sdsl::bit_vector> label_mapper;
@@ -639,11 +639,8 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
             size_t end = seed.get_clipping() + this->graph_.get_k() - seed.get_offset();
             node_index node = seed.get_nodes()[0];
 
-            if (max_seed_length_ > this->config_.max_seed_length
-                    && (this->config_.max_seed_length < this->graph_.get_k()
-                        || !seed.get_offset())) {
-                node_to_seeds[node].emplace_back(j);
-            }
+            if (max_seed_length_ > this->config_.max_seed_length && !seed.get_offset())
+                clipping_to_seeds[seed.get_clipping()].emplace_back(j);
 
             assert(annotation_buffer_.get_labels(node));
 
@@ -728,27 +725,17 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
                     );
                 }
             }
-            if (this->config_.max_seed_length >= this->graph_.get_k()
-                    && seed.get_offset()) {
+
+            if (seed.empty() || !seed.get_end_clipping() || !seed.label_encoder || seed.get_offset())
                 continue;
-            }
+
             bool expanded = true;
+            size_t next_clipping = seed.get_clipping() + seed.get_query_view().size() - this->graph_.get_k() + 1;
             while (expanded) {
                 expanded = false;
 
-                if (seed.empty() || !seed.get_end_clipping() || !seed.label_encoder)
-                    continue;
-
-                node_index next_node = this->graph_.traverse(
-                    seed.get_nodes().back(),
-                    seed.get_query_view().data()[seed.get_query_view().size()]
-                );
-
-                if (!next_node)
-                    continue;
-
-                auto find = node_to_seeds.find(next_node);
-                if (find == node_to_seeds.end())
+                auto find = clipping_to_seeds.find(next_clipping);
+                if (find == clipping_to_seeds.end())
                     continue;
 
                 std::vector<node_index> next_nodes;
@@ -762,14 +749,9 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
                 for (size_t j : find->second) {
                     auto &next_seed = seeds[j];
                     if (next_seed.empty() || !next_seed.label_encoder
-                            || next_seed.label_columns != seed.label_columns
-                            || seed.get_query_view().data() + seed.get_query_view().size()
-                                - this->graph_.get_k() + 1
-                                    != next_seed.get_query_view().data() - next_seed.get_offset()) {
+                            || next_seed.label_columns != seed.label_columns) {
                         continue;
                     }
-
-                    assert(next_node == next_seed.get_nodes()[0]);
 
                     if (annotation_buffer_.has_coordinates()
                             && next_seed.label_coordinates.size() != next_seed.label_columns.size()) {
@@ -804,6 +786,7 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
                         continue;
 
                     seed.expand(next_seed.get_nodes());
+                    next_clipping += next_seed.get_nodes().size();
                     assert(Alignment(seed, this->config_).is_valid(this->graph_, &this->config_));
                     if (next_columns.empty()) {
                         next_seed = Seed();
