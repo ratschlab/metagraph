@@ -160,6 +160,7 @@ bool LabeledExtender::set_seed(const Alignment &seed) {
     last_flushed_table_i_ = 1;
 
     remaining_labels_i_ = annotation_buffer_.cache_column_set(seed.label_columns);
+    assert(remaining_labels_i_);
     assert(remaining_labels_i_ != nannot);
     node_labels_.assign(1, remaining_labels_i_);
     base_coords_ = seed.label_coordinates;
@@ -655,8 +656,10 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
             }
         }
 
-        if (label_mapper.empty())
+        if (label_mapper.empty()) {
+            seeds.clear();
             return get_num_matches(seeds);
+        }
 
         std::vector<std::pair<Column, uint64_t>> label_counts;
         label_counts.reserve(label_mapper.size());
@@ -804,7 +807,7 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
     }
 
     auto seed_it = std::remove_if(seeds.begin(), seeds.end(), [&](const auto &a) {
-        return !a.label_encoder;
+        return !a.label_encoder || a.label_columns.empty();
     });
 
     seeds.erase(seed_it, seeds.end());
