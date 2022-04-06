@@ -490,8 +490,7 @@ LabeledAligner<Seeder, Extender, AlignmentCompare>
                  const Annotator &annotator)
       : DBGAligner<Seeder, Extender, AlignmentCompare>(graph, config),
         annotation_buffer_(graph, annotator, config.row_batch_size,
-                           config.row_batch_size),
-        max_seed_length_(config.max_seed_length) {
+                           config.row_batch_size) {
     // do not use a global xdrop cutoff since we need separate cutoffs for each label
     if (annotation_buffer_.has_coordinates())
         this->config_.global_xdrop = false;
@@ -630,7 +629,6 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
                             + seeds[0].get_query_view().size();
 
     Columns labels;
-    tsl::hopscotch_map<size_t, std::vector<size_t>> clipping_to_seeds;
 
     {
         VectorMap<Column, sdsl::bit_vector> label_mapper;
@@ -639,9 +637,6 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
             assert(seed.get_nodes().size() == 1);
             size_t end = seed.get_clipping() + this->graph_.get_k() - seed.get_offset();
             node_index node = seed.get_nodes()[0];
-
-            if (max_seed_length_ > this->config_.max_seed_length && !seed.get_offset())
-                clipping_to_seeds[seed.get_clipping()].emplace_back(j);
 
             assert(annotation_buffer_.get_labels(node));
 
@@ -704,105 +699,6 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
                                   std::back_inserter(seed.label_columns));
             if (seed.label_columns.size())
                 seed.label_encoder = &annotation_buffer_.get_annotator().get_label_encoder();
-        }
-    }
-
-    // merge seeds
-    if (max_seed_length_ > this->config_.max_seed_length) {
-        size_t row_batch_size = annotation_buffer_.get_batch_size();
-        for (size_t j = 0; j < seeds.size(); ++j) {
-            Seed &seed = seeds[j];
-            if (annotation_buffer_.has_coordinates()) {
-                if (!(j % row_batch_size)) {
-                    std::vector<node_index> nodes;
-                    for (size_t k = j; k < std::min(j + row_batch_size, seeds.size()); ++k) {
-                        if (seeds[k].size())
-                            nodes.emplace_back(seeds[k].get_nodes()[0]);
-                    }
-                    annotation_buffer_.prefetch_coords(nodes);
-                }
-
-                if (seed.label_coordinates.size() != seed.label_columns.size()) {
-                    seed.label_coordinates = *annotation_buffer_.get_coords(
-                        seed.get_nodes()[0], false, &seed.label_columns
-                    );
-                }
-            }
-
-            if (seed.empty() || !seed.get_end_clipping() || !seed.label_encoder || seed.get_offset())
-                continue;
-
-            bool expanded = true;
-            size_t next_clipping = seed.get_clipping() + seed.get_query_view().size() - this->graph_.get_k() + 1;
-            while (expanded) {
-                expanded = false;
-
-                auto find = clipping_to_seeds.find(next_clipping);
-                if (find == clipping_to_seeds.end())
-                    continue;
-
-                std::vector<node_index> next_nodes;
-                next_nodes.reserve(find->second.size());
-                for (size_t j : find->second) {
-                    if (seeds[j].size())
-                        next_nodes.emplace_back(seeds[j].get_nodes()[0]);
-                }
-                annotation_buffer_.prefetch_coords(next_nodes);
-
-                for (size_t j : find->second) {
-                    auto &next_seed = seeds[j];
-                    if (next_seed.empty() || !next_seed.label_encoder
-                            || next_seed.label_columns != seed.label_columns) {
-                        continue;
-                    }
-
-                    if (annotation_buffer_.has_coordinates()
-                            && next_seed.label_coordinates.size() != next_seed.label_columns.size()) {
-                        next_seed.label_coordinates = *annotation_buffer_.get_coords(
-                            next_seed.get_nodes()[0], false, &next_seed.label_columns
-                        );
-                    }
-
-                    // we want seed to have a subset of the coordinates in next_seed
-                    size_t k = 0;
-                    Columns next_columns;
-                    Alignment::CoordinateSet coord_set;
-                    for ( ; k < seed.label_coordinates.size(); ++k) {
-                        coord_set.emplace_back();
-                        utils::set_difference(next_seed.label_coordinates[k].begin(),
-                                              next_seed.label_coordinates[k].end(),
-                                              seed.label_coordinates[k].begin(),
-                                              seed.label_coordinates[k].end(),
-                                              std::back_inserter(coord_set.back()),
-                                              -static_cast<int64_t>(seed.get_nodes().size()));
-                        if (next_seed.label_coordinates[k].size() - coord_set.back().size() < seed.label_coordinates[k].size())
-                            break;
-
-                        if (coord_set.back().size()) {
-                            next_columns.emplace_back(seed.label_columns[k]);
-                        } else {
-                            coord_set.pop_back();
-                        }
-                    }
-
-                    if (k != seed.label_coordinates.size())
-                        continue;
-
-                    seed.expand(next_seed.get_nodes());
-                    next_clipping += next_seed.get_nodes().size();
-                    assert(Alignment(seed, this->config_).is_valid(this->graph_, &this->config_));
-                    if (next_columns.empty()) {
-                        next_seed = Seed();
-                    } else {
-                        std::swap(next_seed.label_columns, next_columns);
-                        std::swap(next_seed.label_coordinates, coord_set);
-                    }
-                    expanded = true;
-                    break;
-                }
-            }
-
-            seed.label_coordinates.clear();
         }
     }
 

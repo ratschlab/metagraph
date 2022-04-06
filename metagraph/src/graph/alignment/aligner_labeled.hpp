@@ -120,7 +120,7 @@ class ILabeledAligner {
 };
 
 
-template <class Seeder = SuffixSeeder<UniMEMSeeder>,
+template <class Seeder = SuffixSeeder<ExactSeeder>,
           class Extender = LabeledExtender,
           class AlignmentCompare = LocalAlignmentLess>
 class LabeledAligner : public DBGAligner<Seeder, Extender, AlignmentCompare>, public ILabeledAligner {
@@ -144,7 +144,6 @@ class LabeledAligner : public DBGAligner<Seeder, Extender, AlignmentCompare>, pu
 
   private:
     mutable AnnotationBuffer annotation_buffer_;
-    size_t max_seed_length_;
 
     typedef typename DBGAligner<Seeder, Extender, AlignmentCompare>::BatchSeeders BatchSeeders;
     BatchSeeders
