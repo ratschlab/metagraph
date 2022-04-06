@@ -4,6 +4,8 @@
 #include "aligner_aggregator.hpp"
 #include "aligner_labeled.hpp"
 
+#include "common/aligned_vector.hpp"
+
 namespace mtg {
 namespace graph {
 namespace align {
@@ -19,11 +21,11 @@ typedef std::tuple<Alignment::Column /* label */,
                    int32_t /* seed clipping */,
                    int32_t /* seed end */,
                    score_t /* chain score */,
-                   uint32_t /* previous seed index */,
                    uint32_t /* current seed index */> TableElem;
-typedef std::vector<TableElem> ChainDPTable;
+static_assert(sizeof(TableElem) == 32);
+typedef AlignedVector<TableElem> ChainDPTable;
 
-std::tuple<ChainDPTable, size_t, size_t>
+std::tuple<ChainDPTable, std::vector<uint32_t>, size_t, size_t>
 chain_seeds(const IDBGAligner &aligner,
             const DBGAlignerConfig &config,
             std::string_view query,
@@ -73,17 +75,18 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
 
     // perform chaining on the forward, and the reverse-complement seeds
     ChainDPTable dp_tables[2];
+    std::vector<uint32_t> seed_backtraces[2];
 
     logger->trace("Chaining forward seeds");
     size_t num_seeds;
     size_t num_nodes;
-    std::tie(dp_tables[0], num_seeds, num_nodes)
+    std::tie(dp_tables[0], seed_backtraces[0], num_seeds, num_nodes)
         = chain_seeds(aligner, config, forward, both_seeds[0]);
 
     logger->trace("Chaining reverse complement seeds");
     size_t num_seeds_bwd;
     size_t num_nodes_bwd;
-    std::tie(dp_tables[1], num_seeds_bwd, num_nodes_bwd)
+    std::tie(dp_tables[1], seed_backtraces[1], num_seeds_bwd, num_nodes_bwd)
         = chain_seeds(aligner, config, reverse, both_seeds[1]);
 
     num_seeds += num_seeds_bwd;
@@ -113,6 +116,7 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
         score_t chain_score = std::get<0>(*it);
         const auto &dp_table = dp_tables[std::get<1>(*it)];
         const auto &seeds = both_seeds[std::get<1>(*it)];
+        const auto &seed_backtrace = seed_backtraces[std::get<1>(*it)];
         auto &used = both_used[std::get<1>(*it)];
         uint32_t i = -std::get<2>(*it);
         if (used[i])
@@ -122,7 +126,7 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
         std::vector<std::pair<Seed, int64_t>> chain_seeds;
 
         while (i != nid) {
-            const auto &[label, coord, clipping, end, score, pred, seed_i] = dp_table[i];
+            const auto &[label, coord, clipping, end, score, seed_i] = dp_table[i];
             if (skip_column(label))
                 break;
 
@@ -137,7 +141,7 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
                     chain_seeds.back().first.label_coordinates[0].assign(1, coord);
                 }
             }
-            i = pred;
+            i = seed_backtrace[i];
         }
 
         if (chain_seeds.empty())
@@ -261,7 +265,7 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
     return std::make_pair(num_seeds, num_nodes);
 }
 
-std::tuple<ChainDPTable, size_t, size_t>
+std::tuple<ChainDPTable, std::vector<uint32_t>, size_t, size_t>
 chain_seeds(const IDBGAligner &aligner,
             const DBGAlignerConfig &config,
             std::string_view query,
@@ -308,14 +312,16 @@ chain_seeds(const IDBGAligner &aligner,
             std::for_each(rbegin, rend, [&](auto coord) {
                 dp_table.emplace_back(c, coord + seeds[i].get_offset(), seeds[i].get_clipping(),
                                       seeds[i].get_clipping() + seeds[i].get_query_view().size(),
-                                      seeds[i].get_query_view().size(), nid, i);
+                                      seeds[i].get_query_view().size(), i);
             });
         }
     }
 
     size_t num_seeds = dp_table.size();
+    std::vector<uint32_t> backtrace(dp_table.size(), nid);
     if (dp_table.empty())
-        return std::make_tuple(std::move(dp_table), num_seeds, num_nodes);
+        return std::make_tuple(std::move(dp_table), std::move(backtrace), num_seeds, num_nodes);
+
 
     logger->trace("Sorting {} anchors", dp_table.size());
     // sort seeds by label, then by decreasing reference coordinate
@@ -333,14 +339,14 @@ chain_seeds(const IDBGAligner &aligner,
 
     for (size_t i = 0; i < dp_table.size() - 1; ++i) {
         const auto &[prev_label, prev_coord, prev_clipping, prev_end,
-                     prev_score, prev_pred, prev_seed_i] = dp_table[i];
+                     prev_score, prev_seed_i] = dp_table[i];
         if (!prev_clipping)
             continue;
 
         size_t end = std::min(bandwidth, dp_table.size() - i) + i;
 
         for (size_t j = i + 1; j < end; ++j) {
-            auto &[label, coord, clipping, end, score, pred, seed_i] = dp_table[j];
+            auto &[label, coord, clipping, end, score, seed_i] = dp_table[j];
             if (label != prev_label)
                 break;
 
@@ -361,12 +367,12 @@ chain_seeds(const IDBGAligner &aligner,
 
             if (cur_score >= score) {
                 score = cur_score;
-                pred = i;
+                backtrace[j] = i;
             }
         }
     }
 
-    return std::make_tuple(std::move(dp_table), num_seeds, num_nodes);
+    return std::make_tuple(std::move(dp_table), std::move(backtrace), num_seeds, num_nodes);
 }
 
 template <class AlignmentCompare>
