@@ -1,7 +1,5 @@
 #include "aligner_chainer.hpp"
 
-#include <progress_bar.hpp>
-
 #include "aligner_seeder_methods.hpp"
 #include "aligner_aggregator.hpp"
 #include "aligner_labeled.hpp"
@@ -289,9 +287,7 @@ chain_seeds(const IDBGAligner &aligner,
         return a.get_clipping() > b.get_clipping();
     });
 
-    ProgressBar progress_bar(seeds.size(), "Finding anchors",
-                             std::cerr, !common::get_verbose());
-    for (size_t i = 0; i < seeds.size(); ++i, ++progress_bar) {
+    for (size_t i = 0; i < seeds.size(); ++i) {
         if (!(i % config.row_batch_size)) {
             size_t end = std::min(i + config.row_batch_size, seeds.size());
             std::vector<node_index> nodes;
