@@ -351,14 +351,13 @@ chain_seeds(const IDBGAligner &aligner,
                 continue;
 
             size_t end = std::min(bandwidth, cur_label_end - i) + i;
+            ssize_t coord_cutoff = prev_coord - query_size;
 
             for (size_t j = i + 1; j < end; ++j) {
                 auto &[label, coord, clipping, end, score, seed_i] = dp_table[j];
                 assert(label == prev_label);
 
-                assert(prev_coord >= coord);
-                ssize_t coord_dist = prev_coord - coord;
-                if (coord_dist > query_size)
+                if (coord_cutoff > coord)
                     break;
 
                 if (clipping >= prev_clipping || end >= prev_end)
@@ -368,7 +367,8 @@ chain_seeds(const IDBGAligner &aligner,
                 if (dist > query_size)
                     continue;
 
-                score_t cur_score = prev_score + std::min({ end - clipping, dist, static_cast<int32_t>(coord_dist) })
+                int32_t coord_dist = prev_coord - coord;
+                score_t cur_score = prev_score + std::min({ end - clipping, dist, coord_dist })
                     - gap_penalty(std::abs(coord_dist - dist));
 
                 if (cur_score >= score) {
