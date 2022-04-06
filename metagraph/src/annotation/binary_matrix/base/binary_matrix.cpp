@@ -23,6 +23,23 @@ BinaryMatrix::get_rows(const std::vector<Row> &row_ids) const {
     return rows;
 }
 
+std::vector<BinaryMatrix::SetBitPositions>
+BinaryMatrix::get_diffs(const std::vector<Row> &row_ids) const {
+    if (row_ids.size() <= 1)
+        return get_rows(row_ids);
+
+    auto row_vals = get_rows(row_ids);
+    std::vector<SetBitPositions> diffs(row_ids.size());
+    for (size_t i = 1; i < row_vals.size(); ++i) {
+        std::set_symmetric_difference(row_vals[i - 1].begin(), row_vals[i - 1].end(),
+                                      row_vals[i].begin(), row_vals[i].end(),
+                                      std::back_inserter(diffs[i]));
+    }
+    diffs[0] = std::move(row_vals[0]);
+
+    return diffs;
+}
+
 std::vector<BinaryMatrix::Column>
 BinaryMatrix::slice_rows(const std::vector<Row> &row_ids) const {
     std::vector<BinaryMatrix::Column> slice;

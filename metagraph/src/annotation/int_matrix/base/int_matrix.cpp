@@ -5,6 +5,84 @@ namespace mtg {
 namespace annot {
 namespace matrix {
 
+std::vector<IntMatrix::RowValueDiffs>
+IntMatrix::get_row_value_diffs(const std::vector<Row> &rows) const {
+    if (rows.empty())
+        return {};
+
+    auto row_values = get_row_values(rows);
+    std::vector<RowValueDiffs> row_value_diffs(rows.size());
+    std::sort(row_values[0].begin(), row_values[0].end());
+
+    for (size_t i = 1; i < rows.size(); ++i) {
+        auto &result = row_value_diffs[i];
+        std::sort(row_values[i].begin(), row_values[i].end());
+        auto it = row_values[i].begin();
+        auto it2 = row_values[i - 1].begin();
+        while (it != row_values[i].end() && it2 != row_values[i - 1].end()) {
+            if (it->first < it2->first) {
+                result.push_back(*it);
+                ++it;
+            } else if (it->first > it2->first) {
+                result.emplace_back(it2->first, -static_cast<ValueDiff>(it2->second));
+                ++it2;
+            } else {
+                if (int64_t diff = it->second - it2->second)
+                    result.emplace_back(it->first, diff);
+                ++it;
+                ++it2;
+            }
+        }
+        std::copy(it, row_values[i].end(), std::back_inserter(result));
+        std::transform(it2, row_values[i - 1].end(), std::back_inserter(result),
+                       [](const auto &val) {
+                           return std::make_pair(val.first,
+                                                 -static_cast<ValueDiff>(val.second));
+                       });
+    }
+
+    row_value_diffs[0] = RowValueDiffs(row_values[0].begin(), row_values[0].end());
+
+    return row_value_diffs;
+}
+
+std::vector<MultiIntMatrix::RowTuples>
+MultiIntMatrix::get_row_tuple_diffs(const std::vector<Row> &rows) const {
+    if (rows.size() <= 1)
+        return get_row_tuples(rows);
+
+    auto row_tuples = get_row_tuples(rows);
+    std::vector<RowTuples> row_tuple_diffs(rows.size() - 1);
+    std::sort(row_tuples[0].begin(), row_tuples[0].end());
+    for (size_t i = 1; i < rows.size(); ++i) {
+        auto &result = row_tuple_diffs[i];
+        std::sort(row_tuples[i].begin(), row_tuples[i].end());
+        auto it = row_tuples[i].begin();
+        auto it2 = row_tuples[i - 1].begin();
+        while (it != row_tuples[i].end() && it2 != row_tuples[i - 1].end()) {
+            if (it->first < it2->first) {
+                result.push_back(*it);
+                ++it;
+            } else if (it->first > it2->first) {
+                result.push_back(*it2);
+                ++it2;
+            } else {
+                result.emplace_back(it->first, Tuple{});
+                std::set_symmetric_difference(it->second.begin(), it->second.end(),
+                                              it2->second.begin(), it2->second.end(),
+                                              std::back_inserter(result.back().second));
+                ++it;
+                ++it2;
+            }
+        }
+        std::copy(it, row_tuples[i].end(), std::back_inserter(result));
+        std::copy(it2, row_tuples[i - 1].end(), std::back_inserter(result));
+    }
+    row_tuple_diffs[0] = std::move(row_tuples[0]);
+
+    return row_tuple_diffs;
+}
+
 IntMatrix::RowValues
 IntMatrix::sum_row_values(const std::vector<std::pair<Row, size_t>> &index_counts,
                           size_t min_count) const {

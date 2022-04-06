@@ -13,7 +13,9 @@ namespace matrix {
 class IntMatrix : public binmat::BinaryMatrix {
   public:
     typedef uint64_t Value;
+    typedef int64_t ValueDiff;
     typedef Vector<std::pair<Column, Value>> RowValues;
+    typedef Vector<std::pair<Column, ValueDiff>> RowValueDiffs;
 
     virtual ~IntMatrix() {}
 
@@ -28,6 +30,9 @@ class IntMatrix : public binmat::BinaryMatrix {
 
     virtual std::vector<RowValues>
     get_row_values(const std::vector<Row> &rows) const = 0;
+
+    virtual std::vector<RowValueDiffs>
+    get_row_value_diffs(const std::vector<Row> &rows) const;
 
     // sum up values for each column with at least |min_count| non-zero values
     virtual RowValues
@@ -66,6 +71,9 @@ class MultiIntMatrix : public IntMatrix {
 
     virtual std::vector<RowTuples>
     get_row_tuples(const std::vector<Row> &rows) const = 0;
+
+    virtual std::vector<RowTuples>
+    get_row_tuple_diffs(const std::vector<Row> &rows) const;
 };
 
 } // namespace matrix
