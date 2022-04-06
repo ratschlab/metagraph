@@ -288,6 +288,8 @@ chain_seeds(const IDBGAligner &aligner,
         return a.get_clipping() > b.get_clipping();
     });
 
+    tsl::hopscotch_map<Alignment::Column, size_t> label_sizes;
+
     for (size_t i = 0; i < seeds.size(); ++i) {
         if (!(i % config.row_batch_size)) {
             size_t end = std::min(i + config.row_batch_size, seeds.size());
@@ -310,6 +312,7 @@ chain_seeds(const IDBGAligner &aligner,
             auto rbegin = (*fetch_coords)[j].rbegin();
             auto rend = rbegin + num_seeds;
             std::for_each(rbegin, rend, [&](auto coord) {
+                ++label_sizes[c];
                 dp_table.emplace_back(c, coord + seeds[i].get_offset(), seeds[i].get_clipping(),
                                       seeds[i].get_clipping() + seeds[i].get_query_view().size(),
                                       seeds[i].get_query_view().size(), i);
@@ -321,7 +324,6 @@ chain_seeds(const IDBGAligner &aligner,
     std::vector<uint32_t> backtrace(dp_table.size(), nid);
     if (dp_table.empty())
         return std::make_tuple(std::move(dp_table), std::move(backtrace), num_seeds, num_nodes);
-
 
     logger->trace("Sorting {} anchors", dp_table.size());
     // sort seeds by label, then by decreasing reference coordinate
@@ -337,37 +339,42 @@ chain_seeds(const IDBGAligner &aligner,
 
     size_t bandwidth = 201;
 
-    for (size_t i = 0; i < dp_table.size() - 1; ++i) {
-        const auto &[prev_label, prev_coord, prev_clipping, prev_end,
-                     prev_score, prev_seed_i] = dp_table[i];
-        if (!prev_clipping)
-            continue;
+    size_t cur_label_end = 0;
+    size_t i = 0;
+    while (cur_label_end < dp_table.size()) {
+        cur_label_end += label_sizes[std::get<0>(dp_table[i])];
+        for ( ; i < cur_label_end; ++i) {
+            const auto &[prev_label, prev_coord, prev_clipping, prev_end,
+                         prev_score, prev_seed_i] = dp_table[i];
 
-        size_t end = std::min(bandwidth, dp_table.size() - i) + i;
-
-        for (size_t j = i + 1; j < end; ++j) {
-            auto &[label, coord, clipping, end, score, seed_i] = dp_table[j];
-            if (label != prev_label)
-                break;
-
-            assert(prev_coord >= coord);
-            ssize_t coord_dist = prev_coord - coord;
-            if (coord_dist > query_size)
-                break;
-
-            if (clipping >= prev_clipping || end >= prev_end)
+            if (!prev_clipping)
                 continue;
 
-            int32_t dist = prev_clipping - clipping;
-            if (dist > query_size)
-                continue;
+            size_t end = std::min(bandwidth, cur_label_end - i) + i;
 
-            score_t cur_score = prev_score + std::min({ end - clipping, dist, static_cast<int32_t>(coord_dist) })
-                - gap_penalty(std::abs(coord_dist - dist));
+            for (size_t j = i + 1; j < end; ++j) {
+                auto &[label, coord, clipping, end, score, seed_i] = dp_table[j];
+                assert(label == prev_label);
 
-            if (cur_score >= score) {
-                score = cur_score;
-                backtrace[j] = i;
+                assert(prev_coord >= coord);
+                ssize_t coord_dist = prev_coord - coord;
+                if (coord_dist > query_size)
+                    break;
+
+                if (clipping >= prev_clipping || end >= prev_end)
+                    continue;
+
+                int32_t dist = prev_clipping - clipping;
+                if (dist > query_size)
+                    continue;
+
+                score_t cur_score = prev_score + std::min({ end - clipping, dist, static_cast<int32_t>(coord_dist) })
+                    - gap_penalty(std::abs(coord_dist - dist));
+
+                if (cur_score >= score) {
+                    score = cur_score;
+                    backtrace[j] = i;
+                }
             }
         }
     }
