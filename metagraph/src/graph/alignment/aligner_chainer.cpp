@@ -332,10 +332,10 @@ chain_seeds(const IDBGAligner &aligner,
     // https://academic.oup.com/bioinformatics/article/34/18/3094/4994778
 #define LOG2(X) ((unsigned) (8 * sizeof(unsigned long long) - __builtin_clzll((X)) - 1))
     auto gap_penalty = [sl=config.min_seed_length](size_t len) -> score_t {
-        return !len ? 0 : (len * sl + 99) / 100 + (LOG2(len) / 2);
+        return !len ? 0 : (len * sl + 127) / 128 + (LOG2(len) / 2);
     };
 
-    size_t bandwidth = 200;
+    size_t bandwidth = 201;
 
     for (size_t i = 0; i < dp_table.size() - 1; ++i) {
         const auto &[prev_label, prev_coord, prev_clipping, prev_end,
