@@ -10,17 +10,14 @@ namespace align {
 
 using common::logger;
 
-#define LOG2(X) ((unsigned) (8 * sizeof(unsigned long long) - __builtin_clzll((X)) - 1))
-
 typedef DeBruijnGraph::node_index node_index;
 
-constexpr size_t nid = std::numeric_limits<uint32_t>::max();
+constexpr uint32_t nid = std::numeric_limits<uint32_t>::max();
 
 typedef std::tuple<Alignment::Column /* label */,
                    ssize_t /* coordinate */,
-                   size_t /* seed clipping */,
-                   Alignment::node_index /* first node of seed */,
-                   ssize_t /* seed length */,
+                   uint32_t /* seed clipping */,
+                   int32_t /* seed length */,
                    score_t /* chain score */,
                    uint32_t /* previous seed index */,
                    uint32_t /* current seed index */> TableElem;
@@ -93,15 +90,15 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
     num_nodes += num_nodes_bwd;
 
     // construct chains by backtracking
-    std::vector<std::tuple<score_t, size_t, ssize_t>> starts;
+    std::vector<std::tuple<score_t, uint32_t, ssize_t>> starts;
     sdsl::bit_vector both_used[2] {
         sdsl::bit_vector(dp_tables[0].size(), false),
         sdsl::bit_vector(dp_tables[1].size(), false)
     };
 
-    for (size_t j : { 0, 1 }) {
+    for (uint32_t j : { 0, 1 }) {
         for (size_t i = 0; i < dp_tables[j].size(); ++i) {
-            starts.emplace_back(std::get<5>(dp_tables[j][i]), j, -static_cast<ssize_t>(i));
+            starts.emplace_back(std::get<4>(dp_tables[j][i]), j, -static_cast<ssize_t>(i));
         }
     }
 
@@ -117,7 +114,7 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
         const auto &dp_table = dp_tables[std::get<1>(*it)];
         const auto &seeds = both_seeds[std::get<1>(*it)];
         auto &used = both_used[std::get<1>(*it)];
-        size_t i = -std::get<2>(*it);
+        uint32_t i = -std::get<2>(*it);
         if (used[i])
             continue;
 
@@ -125,7 +122,7 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
         std::vector<std::pair<Seed, int64_t>> chain_seeds;
 
         while (i != nid) {
-            const auto &[label, coord, clipping, node, length, score, pred, seed_i] = dp_table[i];
+            const auto &[label, coord, clipping, length, score, pred, seed_i] = dp_table[i];
             if (skip_column(label))
                 break;
 
@@ -310,13 +307,15 @@ chain_seeds(const IDBGAligner &aligner,
             auto rend = rbegin + num_seeds;
             std::for_each(rbegin, rend, [&](auto coord) {
                 dp_table.emplace_back(c, coord + seeds[i].get_offset(), seeds[i].get_clipping(),
-                                      seeds[i].get_nodes()[0], seeds[i].get_query_view().size(),
+                                      seeds[i].get_query_view().size(),
                                       seeds[i].get_query_view().size(), nid, i);
             });
         }
     }
 
     size_t num_seeds = dp_table.size();
+    if (dp_table.empty())
+        return std::make_tuple(std::move(dp_table), num_seeds, num_nodes);
 
     logger->trace("Sorting {} anchors", dp_table.size());
     // sort seeds by label, then by decreasing reference coordinate
@@ -325,6 +324,7 @@ chain_seeds(const IDBGAligner &aligner,
 
     // scoring function derived from minimap2
     // https://academic.oup.com/bioinformatics/article/34/18/3094/4994778
+#define LOG2(X) ((unsigned) (8 * sizeof(unsigned long long) - __builtin_clzll((X)) - 1))
     auto gap_penalty = [sl=config.min_seed_length](size_t len) -> score_t {
         return !len ? 0 : (len * sl + 99) / 100 + (LOG2(len) / 2);
     };
@@ -332,16 +332,16 @@ chain_seeds(const IDBGAligner &aligner,
     size_t bandwidth = 200;
 
     for (size_t i = 0; i < dp_table.size() - 1; ++i) {
-        const auto &[prev_label, prev_coord, prev_clipping, prev_node, prev_length,
+        const auto &[prev_label, prev_coord, prev_clipping, prev_length,
                      prev_score, prev_pred, prev_seed_i] = dp_table[i];
         if (!prev_clipping)
             continue;
 
         size_t end = std::min(bandwidth, dp_table.size() - i) + i;
-        size_t prev_end = prev_clipping + prev_length;
+        uint32_t prev_end = prev_clipping + prev_length;
 
         for (size_t j = i + 1; j < end; ++j) {
-            auto &[label, coord, clipping, node, length, score, pred, seed_i] = dp_table[j];
+            auto &[label, coord, clipping, length, score, pred, seed_i] = dp_table[j];
             if (label != prev_label)
                 break;
 
@@ -353,11 +353,11 @@ chain_seeds(const IDBGAligner &aligner,
             if (clipping >= prev_clipping || clipping + length >= prev_end)
                 continue;
 
-            ssize_t dist = prev_clipping - clipping;
+            int32_t dist = prev_clipping - clipping;
             if (dist > query_size)
                 continue;
 
-            score_t cur_score = prev_score + std::min(std::min(length, dist), coord_dist)
+            score_t cur_score = prev_score + std::min({ length, dist, static_cast<int32_t>(coord_dist) })
                 - gap_penalty(std::abs(coord_dist - dist));
 
             if (cur_score >= score) {
