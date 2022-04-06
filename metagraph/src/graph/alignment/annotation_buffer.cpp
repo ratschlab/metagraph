@@ -76,25 +76,51 @@ void AnnotationBuffer::fetch_queued_annotations() {
 
         auto node_it = queued_nodes.begin();
         auto row_it = queued_rows.begin();
-        for (auto&& labels : annotator_.get_matrix().get_rows(queued_rows)) {
-            std::sort(labels.begin(), labels.end());
-            assert(node_it != queued_nodes.end());
-            assert(node_to_cols_.count(*node_it));
-            assert(node_to_cols_.count(AnnotatedDBG::anno_to_graph_index(*row_it)));
+        if (has_coordinates()) {
+            for (auto&& tuples : multi_int_->get_row_tuples(queued_rows)) {
+                std::sort(tuples.begin(), tuples.end());
+                assert(node_it != queued_nodes.end());
+                assert(node_to_cols_.count(*node_it));
+                assert(node_to_cols_.count(AnnotatedDBG::anno_to_graph_index(*row_it)));
 
-            size_t label_i = cache_column_set(std::move(labels));
-            node_index base_node = AnnotatedDBG::anno_to_graph_index(*row_it);
-            if (canonical_) {
-                node_to_cols_[base_node] = label_i;
-            } else {
-                node_to_cols_[*node_it] = label_i;
-                if (base_node != *node_it) {
-                    assert(graph_.get_mode() != DeBruijnGraph::BASIC);
-                    node_to_cols_.try_emplace(base_node, label_i);
+                Columns columns;
+                CoordinateSet coord_set;
+                columns.reserve(tuples.size());
+                for (auto&& [c, tuple] : tuples) {
+                    columns.push_back(c);
+                    coord_set.emplace_back(tuple.begin(), tuple.end());
                 }
+                size_t label_i = cache_column_set(std::move(columns));
+                assert(AnnotatedDBG::anno_to_graph_index(*row_it) == *node_it
+                        && "coordinates only supported for BASIC graphs");
+                auto find = node_to_cols_.find(*node_it);
+                assert(find != node_to_cols_.end());
+                find.value() = label_i;
+                label_coords_cache_.Put(find - node_to_cols_.begin(), std::move(coord_set));
+                ++node_it;
+                ++row_it;
             }
-            ++node_it;
-            ++row_it;
+        } else {
+            for (auto&& labels : annotator_.get_matrix().get_rows(queued_rows)) {
+                std::sort(labels.begin(), labels.end());
+                assert(node_it != queued_nodes.end());
+                assert(node_to_cols_.count(*node_it));
+                assert(node_to_cols_.count(AnnotatedDBG::anno_to_graph_index(*row_it)));
+
+                size_t label_i = cache_column_set(std::move(labels));
+                node_index base_node = AnnotatedDBG::anno_to_graph_index(*row_it);
+                if (canonical_) {
+                    node_to_cols_[base_node] = label_i;
+                } else {
+                    node_to_cols_[*node_it] = label_i;
+                    if (base_node != *node_it) {
+                        assert(graph_.get_mode() != DeBruijnGraph::BASIC);
+                        node_to_cols_[base_node] = label_i;
+                    }
+                }
+                ++node_it;
+                ++row_it;
+            }
         }
     };
 
