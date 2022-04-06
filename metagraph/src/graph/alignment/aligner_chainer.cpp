@@ -17,7 +17,7 @@ constexpr uint32_t nid = std::numeric_limits<uint32_t>::max();
 typedef std::tuple<Alignment::Column /* label */,
                    ssize_t /* coordinate */,
                    uint32_t /* seed clipping */,
-                   int32_t /* seed length */,
+                   uint32_t /* seed end */,
                    score_t /* chain score */,
                    uint32_t /* previous seed index */,
                    uint32_t /* current seed index */> TableElem;
@@ -122,7 +122,7 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
         std::vector<std::pair<Seed, int64_t>> chain_seeds;
 
         while (i != nid) {
-            const auto &[label, coord, clipping, length, score, pred, seed_i] = dp_table[i];
+            const auto &[label, coord, clipping, end, score, pred, seed_i] = dp_table[i];
             if (skip_column(label))
                 break;
 
@@ -307,7 +307,7 @@ chain_seeds(const IDBGAligner &aligner,
             auto rend = rbegin + num_seeds;
             std::for_each(rbegin, rend, [&](auto coord) {
                 dp_table.emplace_back(c, coord + seeds[i].get_offset(), seeds[i].get_clipping(),
-                                      seeds[i].get_query_view().size(),
+                                      seeds[i].get_clipping() + seeds[i].get_query_view().size(),
                                       seeds[i].get_query_view().size(), nid, i);
             });
         }
@@ -332,16 +332,15 @@ chain_seeds(const IDBGAligner &aligner,
     size_t bandwidth = 200;
 
     for (size_t i = 0; i < dp_table.size() - 1; ++i) {
-        const auto &[prev_label, prev_coord, prev_clipping, prev_length,
+        const auto &[prev_label, prev_coord, prev_clipping, prev_end,
                      prev_score, prev_pred, prev_seed_i] = dp_table[i];
         if (!prev_clipping)
             continue;
 
         size_t end = std::min(bandwidth, dp_table.size() - i) + i;
-        uint32_t prev_end = prev_clipping + prev_length;
 
         for (size_t j = i + 1; j < end; ++j) {
-            auto &[label, coord, clipping, length, score, pred, seed_i] = dp_table[j];
+            auto &[label, coord, clipping, end, score, pred, seed_i] = dp_table[j];
             if (label != prev_label)
                 break;
 
@@ -350,14 +349,14 @@ chain_seeds(const IDBGAligner &aligner,
             if (coord_dist > query_size)
                 break;
 
-            if (clipping >= prev_clipping || clipping + length >= prev_end)
+            if (clipping >= prev_clipping || end >= prev_end)
                 continue;
 
             int32_t dist = prev_clipping - clipping;
             if (dist > query_size)
                 continue;
 
-            score_t cur_score = prev_score + std::min({ length, dist, static_cast<int32_t>(coord_dist) })
+            score_t cur_score = prev_score + std::min({ static_cast<int32_t>(end - clipping), dist, static_cast<int32_t>(coord_dist) })
                 - gap_penalty(std::abs(coord_dist - dist));
 
             if (cur_score >= score) {
