@@ -16,8 +16,8 @@ constexpr uint32_t nid = std::numeric_limits<uint32_t>::max();
 
 typedef std::tuple<Alignment::Column /* label */,
                    ssize_t /* coordinate */,
-                   uint32_t /* seed clipping */,
-                   uint32_t /* seed end */,
+                   int32_t /* seed clipping */,
+                   int32_t /* seed end */,
                    score_t /* chain score */,
                    uint32_t /* previous seed index */,
                    uint32_t /* current seed index */> TableElem;
@@ -356,7 +356,7 @@ chain_seeds(const IDBGAligner &aligner,
             if (dist > query_size)
                 continue;
 
-            score_t cur_score = prev_score + std::min({ static_cast<int32_t>(end - clipping), dist, static_cast<int32_t>(coord_dist) })
+            score_t cur_score = prev_score + std::min({ end - clipping, dist, static_cast<int32_t>(coord_dist) })
                 - gap_penalty(std::abs(coord_dist - dist));
 
             if (cur_score >= score) {
