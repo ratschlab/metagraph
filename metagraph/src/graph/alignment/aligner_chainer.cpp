@@ -94,15 +94,17 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
 
     // construct chains by backtracking
     std::vector<std::tuple<score_t, uint32_t, ssize_t>> starts;
+    starts.reserve(dp_tables[0].size() + dp_tables[1].size());
     sdsl::bit_vector both_used[2] {
         sdsl::bit_vector(dp_tables[0].size(), false),
         sdsl::bit_vector(dp_tables[1].size(), false)
     };
 
-    for (uint32_t j : { 0, 1 }) {
-        for (size_t i = 0; i < dp_tables[j].size(); ++i) {
-            starts.emplace_back(std::get<4>(dp_tables[j][i]), j, -static_cast<ssize_t>(i));
-        }
+    for (size_t i = 0; i < dp_tables[0].size(); ++i) {
+        starts.emplace_back(dp_tables[0][i].chain_score, 0, -static_cast<ssize_t>(i));
+    }
+    for (size_t i = 0; i < dp_tables[1].size(); ++i) {
+        starts.emplace_back(dp_tables[1][i].chain_score, 1, -static_cast<ssize_t>(i));
     }
 
     // use heap sort to keep extracting chains
@@ -113,12 +115,12 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
 
     for (auto it = starts.rbegin(); it != starts.rend(); ++it) {
         std::pop_heap(starts.begin(), it.base());
-        score_t chain_score = std::get<0>(*it);
-        const auto &dp_table = dp_tables[std::get<1>(*it)];
-        const auto &seeds = both_seeds[std::get<1>(*it)];
-        const auto &seed_backtrace = seed_backtraces[std::get<1>(*it)];
-        auto &used = both_used[std::get<1>(*it)];
-        uint32_t i = -std::get<2>(*it);
+        auto [chain_score, j, neg_i] = *it;
+        const auto &dp_table = dp_tables[j];
+        const auto &seeds = both_seeds[j];
+        const auto &seed_backtrace = seed_backtraces[j];
+        auto &used = both_used[j];
+        uint32_t i = -neg_i;
         if (used[i])
             continue;
 
@@ -311,7 +313,7 @@ chain_seeds(const IDBGAligner &aligner,
                                         config.max_num_seeds_per_locus);
             auto rbegin = (*fetch_coords)[j].rbegin();
             auto rend = rbegin + num_seeds;
-            std::for_each(rbegin, rend, [&](auto coord) {
+            std::for_each(rbegin, rend, [&](ssize_t coord) {
                 ++label_sizes[c];
                 dp_table.emplace_back(c, coord + seeds[i].get_offset(), seeds[i].get_clipping(),
                                       seeds[i].get_clipping() + seeds[i].get_query_view().size(),
