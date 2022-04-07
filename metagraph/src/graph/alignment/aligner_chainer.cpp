@@ -128,15 +128,17 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
     score_t last_chain_score = std::numeric_limits<score_t>::min();
 
     for (auto it = starts.rbegin(); it != starts.rend(); ++it) {
-        std::pop_heap(starts.begin(), it.base());
-        auto [chain_score, j, neg_i] = *it;
+        auto [chain_score, j, neg_i] = starts.front();
+        auto &used = both_used[j];
+        uint32_t i = -neg_i;
+        if (used[i]) {
+            std::pop_heap(starts.begin(), it.base());
+            continue;
+        }
+
         const auto &dp_table = dp_tables[j];
         const auto &seeds = both_seeds[j];
         const auto &seed_backtrace = seed_backtraces[j];
-        auto &used = both_used[j];
-        uint32_t i = -neg_i;
-        if (used[i])
-            continue;
 
         // iterate through the DP table, adding seeds to the chain
         std::vector<std::pair<Seed, int64_t>> chain_seeds;
@@ -160,8 +162,10 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
             i = seed_backtrace[i];
         }
 
-        if (chain_seeds.empty())
+        if (chain_seeds.empty()) {
+            std::pop_heap(starts.begin(), it.base());
             continue;
+        }
 
         // clean chain by merging overlapping seeds
         if (aligner.has_coordinates()) {
@@ -220,6 +224,7 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
         if (last_chain.empty()) {
             std::swap(last_chain, chain);
             last_chain_score = chain_score;
+            std::pop_heap(starts.begin(), it.base());
             continue;
         }
 
@@ -227,11 +232,14 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
             callback(std::move(last_chain), last_chain_score);
             std::swap(last_chain, chain);
             last_chain_score = chain_score;
+            std::pop_heap(starts.begin(), it.base());
             continue;
         }
 
-        if (chain[0].first.label_columns.empty())
+        if (chain[0].first.label_columns.empty()) {
+            std::pop_heap(starts.begin(), it.base());
             continue;
+        }
 
         // if this chain has the same seeds as the last one, merge their coordinate sets
         for (size_t i = 0; i < chain.size(); ++i) {
@@ -273,12 +281,29 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
             }
             std::swap(last_chain[i].first.label_columns, columns);
         }
+        std::pop_heap(starts.begin(), it.base());
     }
 
     if (last_chain.size())
         callback(std::move(last_chain), last_chain_score);
 
     return std::make_pair(num_seeds, num_nodes);
+}
+
+inline __m256i avx2_log2_epi32(__m256i v) {
+    //avx2_lzcnt_epi32
+    // prevent value from being rounded up to the next power of two
+    v = _mm256_andnot_si256(_mm256_srli_epi32(v, 8), v); // keep 8 MSB
+
+    v = _mm256_castps_si256(_mm256_cvtepi32_ps(v)); // convert an integer to float
+    v = _mm256_srli_epi32(v, 23); // shift down the exponent
+    v = _mm256_subs_epu16(_mm256_set1_epi32(158), v); // undo bias
+    v = _mm256_min_epi16(v, _mm256_set1_epi32(32)); // clamp at 32
+
+    // log2
+    v = _mm256_sub_epi32(_mm256_set1_epi32(31), v);
+
+    return v;
 }
 
 std::tuple<ChainDPTable, AlignedVector<int32_t>, size_t, size_t>
@@ -355,21 +380,10 @@ chain_seeds(const IDBGAligner &aligner,
 #if __AVX2__
     const __m256i sl_v = _mm256_set1_epi32(config.min_seed_length);
     const __m256i idx_selector = _mm256_set_epi32(56, 48, 40, 32, 24, 16, 8, 0);
-    auto avx2_log2_epi32 = [](__m256i v) {
-        //avx2_lzcnt_epi32
-        // prevent value from being rounded up to the next power of two
-        v = _mm256_andnot_si256(_mm256_srli_epi32(v, 8), v); // keep 8 MSB
-
-        v = _mm256_castps_si256(_mm256_cvtepi32_ps(v)); // convert an integer to float
-        v = _mm256_srli_epi32(v, 23); // shift down the exponent
-        v = _mm256_subs_epu16(_mm256_set1_epi32(158), v); // undo bias
-        v = _mm256_min_epi16(v, _mm256_set1_epi32(32)); // clamp at 32
-
-        // log2
-        v = _mm256_sub_epi32(_mm256_set1_epi32(31), v);
-
-        return v;
-    };
+    const __m256i adder = _mm256_set1_epi32(127);
+    const __m256i ones = _mm256_set1_epi32(1);
+    const __m128i big_idx_selector = _mm_set_epi32(12, 8, 4, 0);
+    const __m256i inc_v = _mm256_set_epi32(7, 6, 5, 4, 3, 2, 1, 0);
 #else
     #define LOG2(X) ((unsigned) (8 * sizeof(long) - __builtin_clzl((X)) - 1))
     auto gap_penalty = [sl=config.min_seed_length](int32_t len) -> score_t {
@@ -399,6 +413,7 @@ chain_seeds(const IDBGAligner &aligner,
             const __m256i query_size_v = _mm256_set1_epi32(query_size);
             const __m256i prev_score_v = _mm256_set1_epi32(prev_score);
             const __m256i it_end_v = _mm256_set1_epi32(it_end);
+            const __m256i i_v = _mm256_set1_epi32(i);
             auto epi64_to_epi32 = [](__m256i v) {
                 return _mm256_castsi256_si128(_mm256_permute4x64_epi64(_mm256_shuffle_epi32(v, 8), 0 + 4 * 2));
             };
@@ -406,8 +421,8 @@ chain_seeds(const IDBGAligner &aligner,
 
 #if __AVX2__
             for (size_t j = i + 1; j < it_end; j += 8) {
-                __m256i coord_1_v = _mm256_i32gather_epi64(&dp_table[j].coordinate, _mm_set_epi32(12, 8, 4, 0), 8);
-                __m256i coord_2_v = _mm256_i32gather_epi64(&dp_table[j + 4].coordinate, _mm_set_epi32(12, 8, 4, 0), 8);
+                __m256i coord_1_v = _mm256_i32gather_epi64(&dp_table[j].coordinate, big_idx_selector, 8);
+                __m256i coord_2_v = _mm256_i32gather_epi64(&dp_table[j + 4].coordinate, big_idx_selector, 8);
                 __m256i coord_1_mask = _mm256_cmpgt_epi64(coord_cutoff_v, coord_1_v);
                 __m256i coord_2_mask = _mm256_cmpgt_epi64(coord_cutoff_v, coord_2_v);
                 __m256i coord_mask = _mm256_blend_epi32(coord_1_mask, coord_2_mask, 0b10101010);
@@ -419,7 +434,7 @@ chain_seeds(const IDBGAligner &aligner,
 
                 // query_mask = dist_v >= 1 && dist_v <= query_size && end < prev_end
                 __m256i query_mask = _mm256_cmpgt_epi32(dist_v, query_size_v);
-                query_mask = _mm256_or_si256(query_mask, _mm256_cmpgt_epi32(_mm256_set1_epi32(1), dist_v));
+                query_mask = _mm256_or_si256(query_mask, _mm256_cmpgt_epi32(ones, dist_v));
                 query_mask = _mm256_andnot_si256(query_mask, _mm256_cmpgt_epi32(prev_end_v, end_v));
 
                 __m256i mask = _mm256_andnot_si256(coord_mask, query_mask);
@@ -435,10 +450,10 @@ chain_seeds(const IDBGAligner &aligner,
 
                     __m256i dist_diff_v = _mm256_abs_epi32(_mm256_sub_epi32(coord_dist_v, dist_v));
                     __m256i dmul = _mm256_mullo_epi32(dist_diff_v, sl_v);
-                    __m256i gap_first_v = _mm256_srli_epi32(_mm256_add_epi32(dmul, _mm256_set1_epi32(127)), 7);
+                    __m256i gap_first_v = _mm256_srli_epi32(_mm256_add_epi32(dmul, adder), 7);
 
                     __m256i gap_second_v = _mm256_srli_epi32(avx2_log2_epi32(dist_diff_v), 1);
-                    __m256i dist_diff_mask = _mm256_cmpgt_epi32(dist_diff_v, _mm256_set1_epi32(1));
+                    __m256i dist_diff_mask = _mm256_cmpgt_epi32(dist_diff_v, ones);
                     gap_second_v = _mm256_blendv_epi8(_mm256_setzero_si256(), gap_second_v, dist_diff_mask);
 
                     __m256i gap_penalty = _mm256_add_epi32(gap_first_v, gap_second_v);
@@ -446,11 +461,11 @@ chain_seeds(const IDBGAligner &aligner,
                     score_v = _mm256_sub_epi32(score_v, gap_penalty);
 
                     __m256i old_scores_v = _mm256_i32gather_epi32(&dp_table[j].chain_score, idx_selector, 4);
-                    __m256i update_mask = _mm256_cmpgt_epi32(score_v, _mm256_sub_epi32(old_scores_v, _mm256_set1_epi32(1)));
+                    __m256i update_mask = _mm256_cmpgt_epi32(score_v, _mm256_sub_epi32(old_scores_v, ones));
                     update_mask = _mm256_and_si256(update_mask, mask);
-                    __m256i j_v = _mm256_add_epi32(_mm256_set1_epi32(j), _mm256_set_epi32(7, 6, 5, 4, 3, 2, 1, 0));
+                    __m256i j_v = _mm256_add_epi32(_mm256_set1_epi32(j), inc_v);
                     update_mask = _mm256_and_si256(update_mask, _mm256_cmpgt_epi32(it_end_v, j_v));
-                    _mm256_maskstore_epi32(&backtrace[j], update_mask, _mm256_set1_epi32(i));
+                    _mm256_maskstore_epi32(&backtrace[j], update_mask, i_v);
                     score_v = _mm256_blendv_epi8(old_scores_v, score_v, update_mask);
 
                     // note: _mm256_i32scatter_epi32 not supported in AVX2
