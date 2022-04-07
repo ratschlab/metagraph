@@ -121,20 +121,16 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
         starts.emplace_back(dp_tables[1][i].chain_score, 1, -static_cast<ssize_t>(i));
     }
 
-    // use heap sort to keep extracting chains
-    std::make_heap(starts.begin(), starts.end());
+    std::sort(starts.begin(), starts.end(), std::greater<decltype(starts)::value_type>());
 
     Chain last_chain;
     score_t last_chain_score = std::numeric_limits<score_t>::min();
 
-    for (auto it = starts.rbegin(); it != starts.rend(); ++it) {
-        auto [chain_score, j, neg_i] = starts.front();
+    for (const auto &[chain_score, j, neg_i] : starts) {
         auto &used = both_used[j];
         uint32_t i = -neg_i;
-        if (used[i]) {
-            std::pop_heap(starts.begin(), it.base());
+        if (used[i])
             continue;
-        }
 
         const auto &dp_table = dp_tables[j];
         const auto &seeds = both_seeds[j];
@@ -162,10 +158,8 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
             i = seed_backtrace[i];
         }
 
-        if (chain_seeds.empty()) {
-            std::pop_heap(starts.begin(), it.base());
+        if (chain_seeds.empty())
             continue;
-        }
 
         // clean chain by merging overlapping seeds
         if (aligner.has_coordinates()) {
@@ -224,7 +218,6 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
         if (last_chain.empty()) {
             std::swap(last_chain, chain);
             last_chain_score = chain_score;
-            std::pop_heap(starts.begin(), it.base());
             continue;
         }
 
@@ -232,14 +225,11 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
             callback(std::move(last_chain), last_chain_score);
             std::swap(last_chain, chain);
             last_chain_score = chain_score;
-            std::pop_heap(starts.begin(), it.base());
             continue;
         }
 
-        if (chain[0].first.label_columns.empty()) {
-            std::pop_heap(starts.begin(), it.base());
+        if (chain[0].first.label_columns.empty())
             continue;
-        }
 
         // if this chain has the same seeds as the last one, merge their coordinate sets
         for (size_t i = 0; i < chain.size(); ++i) {
@@ -281,7 +271,6 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
             }
             std::swap(last_chain[i].first.label_columns, columns);
         }
-        std::pop_heap(starts.begin(), it.base());
     }
 
     if (last_chain.size())
