@@ -384,11 +384,6 @@ chain_seeds(const IDBGAligner &aligner,
     const __m256i ones = _mm256_set1_epi32(1);
     const __m128i big_idx_selector = _mm_set_epi32(12, 8, 4, 0);
     const __m256i inc_v = _mm256_set_epi32(7, 6, 5, 4, 3, 2, 1, 0);
-#else
-    #define LOG2(X) ((unsigned) (8 * sizeof(long) - __builtin_clzl((X)) - 1))
-    auto gap_penalty = [sl=config.min_seed_length](int32_t len) -> score_t {
-        return (len * sl + 127) / 128 + (LOG2(len) / 2);
-    };
 #endif
 
     size_t cur_label_end = 0;
@@ -417,9 +412,7 @@ chain_seeds(const IDBGAligner &aligner,
             auto epi64_to_epi32 = [](__m256i v) {
                 return _mm256_castsi256_si128(_mm256_permute4x64_epi64(_mm256_shuffle_epi32(v, 8), 0 + 4 * 2));
             };
-#endif
 
-#if __AVX2__
             for (size_t j = i + 1; j < it_end; j += 8) {
                 __m256i coord_1_v = _mm256_i32gather_epi64(&dp_table[j].coordinate, big_idx_selector, 8);
                 __m256i coord_2_v = _mm256_i32gather_epi64(&dp_table[j + 4].coordinate, big_idx_selector, 8);
@@ -505,6 +498,10 @@ chain_seeds(const IDBGAligner &aligner,
                 if (cur_score >= score) {
                     int32_t coord_diff = coord_dist - dist;
                     if (coord_diff != 0) {
+                        #define LOG2(X) ((unsigned) (8 * sizeof(long) - __builtin_clzl((X)) - 1))
+                        auto gap_penalty = [sl=config.min_seed_length](int32_t len) -> score_t {
+                            return (len * sl + 127) / 128 + (LOG2(len) / 2);
+                        };
                         cur_score -= gap_penalty(std::labs(coord_diff));
                         if (cur_score >= score) {
                             score = cur_score;
