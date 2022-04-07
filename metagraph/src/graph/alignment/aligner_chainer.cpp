@@ -377,7 +377,7 @@ chain_seeds(const IDBGAligner &aligner,
 
     // scoring function derived from minimap2
     // https://academic.oup.com/bioinformatics/article/34/18/3094/4994778
-#if __AVX2__
+#ifndef __AVX2__
     const __m256i sl_v = _mm256_set1_epi32(config.min_seed_length);
     const __m256i idx_selector = _mm256_set_epi32(56, 48, 40, 32, 24, 16, 8, 0);
     const __m256i adder = _mm256_set1_epi32(127);
@@ -399,7 +399,7 @@ chain_seeds(const IDBGAligner &aligner,
 
             size_t it_end = std::min(bandwidth, cur_label_end - i) + i;
             ssize_t coord_cutoff = prev_coord - query_size;
-#if __AVX2__
+#ifndef __AVX2__
             const __m256i coord_cutoff_v = _mm256_set1_epi64x(coord_cutoff);
             const __m256i prev_coord_v = _mm256_set1_epi64x(prev_coord);
 
@@ -485,32 +485,27 @@ chain_seeds(const IDBGAligner &aligner,
                 if (coord_cutoff > coord)
                     break;
 
-                if (clipping >= prev_clipping || end >= prev_end)
-                    continue;
-
-                int32_t dist = prev_clipping - clipping;
-                if (dist > query_size)
-                    continue;
+                int32_t dist = prev_clipping > clipping && prev_end > end
+                    ? prev_clipping - clipping
+                    : std::numeric_limits<int32_t>::max();
 
                 int32_t coord_dist = prev_coord - coord;
-                score_t cur_score = prev_score + std::min({ end - clipping, dist, coord_dist });
+                int32_t min_dist = std::min(coord_dist, dist);
 
+                if (min_dist > query_size)
+                    continue;
+
+                score_t cur_score = prev_score + std::min(end - clipping, min_dist);
+
+                #define LOG2(X) ((unsigned) (8 * sizeof(long) - __builtin_clzl((X)) - 1))
+                auto gap_penalty = [sl=config.min_seed_length](int32_t len) -> score_t {
+                    return (len * sl + 127) / 128 + (LOG2(len) / 2);
+                };
+                int32_t coord_diff = coord_dist - dist;
+                cur_score -= coord_diff == 0 ? 0 : gap_penalty(std::labs(coord_diff));
                 if (cur_score >= score) {
-                    int32_t coord_diff = coord_dist - dist;
-                    if (coord_diff != 0) {
-                        #define LOG2(X) ((unsigned) (8 * sizeof(long) - __builtin_clzl((X)) - 1))
-                        auto gap_penalty = [sl=config.min_seed_length](int32_t len) -> score_t {
-                            return (len * sl + 127) / 128 + (LOG2(len) / 2);
-                        };
-                        cur_score -= gap_penalty(std::labs(coord_diff));
-                        if (cur_score >= score) {
-                            score = cur_score;
-                            backtrace[j] = i;
-                        }
-                    } else {
-                        score = cur_score;
-                        backtrace[j] = i;
-                    }
+                    score = cur_score;
+                    backtrace[j] = i;
                 }
             }
 #endif
