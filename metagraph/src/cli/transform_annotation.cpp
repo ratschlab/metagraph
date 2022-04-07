@@ -842,12 +842,18 @@ int transform_annotation(Config *config) {
             case Config::RowDiffBRWT: {
                 logger->error("Convert to row_diff first, and then to row_diff_brwt");
                 return 0;
-
+            }
+            case Config::RowDiffBRWTDisk: {
+                logger->error("Convert to row_diff first, and then to row_diff_brwt_disk");
+                return 0;
             }
             case Config::RowDiffRowSparse: {
                 logger->error("Convert to row_diff first, and then to row_diff_sparse");
                 return 0;
-
+            }
+            case Config::RowDiffRowSparseDisk: {
+                logger->error("Convert to row_diff first, and then to row_diff_sparse_disk");
+                return 0;
             }
             case Config::RowDiff: {
                 auto out_dir = std::filesystem::path(config->outfbase).remove_filename();
@@ -882,6 +888,11 @@ int transform_annotation(Config *config) {
                 }
                 break;
             }
+            case Config::BRWT_Disk: { // mkokot, in fact should never be here
+                logger->error("brwt_disk is same as brwt "
+                              "to use disk version for quierying just rename *.brwt.annodbg to *.brwt_disk.annodbg");
+                exit(1);
+            }
             case Config::BRWT: {
                 auto brwt_annotator = convert_to_MultiBRWT(files, *config);
                 logger->trace("Annotation converted in {} sec", timer.elapsed());
@@ -912,6 +923,9 @@ int transform_annotation(Config *config) {
                 convert<RowSparseAnnotator>(std::move(annotator), *config, timer);
                 break;
             }
+            case Config::RowSparseDisk:
+                convert_to_row_sparse_disk(*annotator, config->outfbase, get_num_threads());
+                break;
             case Config::RBFish: {
                 convert<RainbowfishAnnotator>(std::move(annotator), *config, timer);
                 break;
@@ -957,10 +971,12 @@ int transform_annotation(Config *config) {
 
     } else if (input_anno_type == Config::RowDiff) {
         if (config->anno_type != Config::RowDiffBRWT
+                && config->anno_type != Config::RowDiffBRWTDisk
                 && config->anno_type != Config::ColumnCompressed
-                && config->anno_type != Config::RowDiffRowSparse) {
+                && config->anno_type != Config::RowDiffRowSparse
+                && config->anno_type != Config::RowDiffRowSparseDisk) {
             logger->error(
-                    "Only conversion to 'column', 'row_diff_sparse', and 'row_diff_brwt' "
+                    "Only conversion to 'column', 'row_diff_sparse', 'row_diff_sparse_disk' and 'row_diff_brwt' "
                     "supported for row_diff");
             exit(1);
         }
@@ -1006,6 +1022,15 @@ int transform_annotation(Config *config) {
                 const_cast<binmat::RowDiff<binmat::BRWT> &>(brwt_annotator->get_matrix())
                         .load_fork_succ(fork_succ_file);
                 brwt_annotator->serialize(config->outfbase);
+
+            } else if (config->anno_type == Config::RowDiffBRWTDisk) { // mkokot, in fact should never be here
+                logger->error("row_diff_brwt_disk is same as row_diff_brwt "
+                              "to use disk version for quierying just rename *.row_diff_brwt.annodbg to *.row_diff_brwt_disk.annodbg");
+                exit(1);
+
+            } else if (config->anno_type == Config::RowDiffRowSparseDisk) {
+                logger->trace("Loading annotation from disk...");
+                convert_row_diff_to_RowDiffSparseDisk(files, config->outfbase, timer, anchors_file, fork_succ_file);
 
             } else { // RowDiff<RowSparse>
                 logger->trace("Loading annotation from disk...");

@@ -6,6 +6,7 @@
 #include <filesystem>
 
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
+#include "common/unix_tools.hpp" // mkokot
 
 namespace mtg {
 namespace annot {
@@ -86,6 +87,11 @@ void convert_to_row_annotator(const ColumnCompressed<Label> &annotator,
                               RowCompressed<Label> *target,
                               size_t num_threads = 1);
 
+
+template <typename Label>
+void convert_to_row_sparse_disk(const ColumnCompressed<Label> &annotator,
+                              const std::string &outfbase,
+                              size_t num_threads);
 /**
  * Sparsifies annotations in #ColumnCompressed format by storing diffs between sucessive
  * nodes rather than the actual annotation.
@@ -123,6 +129,13 @@ void convert_to_row_diff(const std::vector<std::string> &files,
 
 void convert_row_diff_to_col_compressed(const std::vector<std::string> &files,
                                         const std::string &outfbase);
+
+void
+convert_row_diff_to_RowDiffSparseDisk(const std::vector<std::string> &filenames,
+                                      const std::string& outfbase,
+                                      Timer& timer,
+                                      const std::string& anchors_file,
+                                      const std::string& fork_succ_file);
 
 /**
  * Converts a RowDiff annotation into RowDiff<RowSparse>.

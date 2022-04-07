@@ -3,6 +3,7 @@
 #include "common/threads/threading.hpp"
 #include "common/utils/string_utils.hpp"
 #include "common/serialization.hpp"
+#include "common/ifstream_with_name_and_offset.hpp"
 #include "static_annotators_def.hpp"
 
 
@@ -61,7 +62,9 @@ StaticBinRelAnnotator<BinaryMatrixType, Label>
 
 template <class BinaryMatrixType, typename Label>
 bool StaticBinRelAnnotator<BinaryMatrixType, Label>::load(const std::string &filename) {
-    std::ifstream instream(make_suffix(filename, kExtension), std::ios::binary);
+    // mkokot
+    //std::ifstream instream(make_suffix(filename, kExtension), std::ios::binary);
+    IfstreamWithNameAndOffset instream(make_suffix(filename, kExtension), std::ios::binary);
     if (!instream.good())
         return false;
 
@@ -192,6 +195,8 @@ template class StaticBinRelAnnotator<binmat::Rainbowfish, std::string>;
 
 template class StaticBinRelAnnotator<binmat::BRWT, std::string>;
 
+template class StaticBinRelAnnotator<binmat::BRWT_Disk, std::string>; // mkokot
+
 template class StaticBinRelAnnotator<binmat::BinRelWT_sdsl, std::string>;
 
 template class StaticBinRelAnnotator<binmat::BinRelWT, std::string>;
@@ -204,9 +209,15 @@ template class StaticBinRelAnnotator<binmat::RowDiff<binmat::ColumnMajor>, std::
 
 template class StaticBinRelAnnotator<binmat::RowDiff<binmat::BRWT>, std::string>;
 
+template class StaticBinRelAnnotator<binmat::RowDiff<binmat::BRWT_Disk>, std::string>;
+
 template class StaticBinRelAnnotator<binmat::RowSparse, std::string>;
 
+template class StaticBinRelAnnotator<binmat::RowSparseDisk, std::string>;
+
 template class StaticBinRelAnnotator<binmat::RowDiff<binmat::RowSparse>, std::string>;
+
+template class StaticBinRelAnnotator<binmat::RowDiff<binmat::RowSparseDisk>, std::string>;
 
 template class StaticBinRelAnnotator<matrix::CSCMatrix<binmat::BRWT, CountsVector>, std::string>;
 

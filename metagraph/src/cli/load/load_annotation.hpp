@@ -19,7 +19,8 @@ initialize_annotation(Config::AnnotationType anno_type,
                       uint64_t num_rows = 0,
                       const std::string &swap_dir = "",
                       double memory_available_gb = 1,
-                      uint8_t count_width = 8);
+                      uint8_t count_width = 8,
+                      size_t brwt_max_anno_mem = 1ull << 33);
 
 inline std::unique_ptr<annot::MultiLabelEncoded<std::string>>
 initialize_annotation(Config::AnnotationType anno_type,
@@ -27,7 +28,7 @@ initialize_annotation(Config::AnnotationType anno_type,
                       uint64_t num_rows = 0) {
     return initialize_annotation(anno_type, config.num_columns_cached, config.sparse,
                                  num_rows, config.tmp_dir, config.memory_available,
-                                 config.count_width);
+                                 config.count_width, config.brwt_max_anno_mem);
 }
 
 template <typename... Args>

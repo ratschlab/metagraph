@@ -1,9 +1,8 @@
-#include "brwt.hpp"
+#include "brwt_disk.hpp"
 
 #include <queue>
 #include <numeric>
 
-#include "common/logger.hpp"
 #include "common/algorithms.hpp"
 #include "common/serialization.hpp"
 #include "common/utils/template_utils.hpp"
@@ -13,12 +12,15 @@ namespace mtg {
 namespace annot {
 namespace binmat {
 
-bool BRWT::get(Row row, Column column) const {
+bool BRWT_Disk::get(Row row, Column column) const {
+    disk_manager->notify_get_called(); // mkokot, TODO: for debuging, remove
     assert(row < num_rows());
     assert(column < num_columns());
 
     // terminate if the index bit is unset
-    if (!(*nonzero_rows_)[row])
+    //if (!(*nonzero_rows_)[row])
+    auto bv = get_bit_vector();
+    if (!(*bv)[row])
         return false;
 
     // return true if this is a leaf
@@ -26,15 +28,17 @@ bool BRWT::get(Row row, Column column) const {
         return true;
 
     auto child_node = assignments_.group(column);
-    return child_nodes_[child_node]->get(nonzero_rows_->rank1(row) - 1,
+    return child_nodes_[child_node]->get(bv->rank1(row) - 1,
                                          assignments_.rank(column));
 }
 
-BRWT::SetBitPositions BRWT::get_row(Row row) const {
+BRWT_Disk::SetBitPositions BRWT_Disk::get_row(Row row) const {
+    disk_manager->notify_get_row_called(); // mkokot, TODO: for debuging, remove
     assert(row < num_rows());
-
+    
+    auto bv = get_bit_vector();
     // check if the row is empty
-    if (!(*nonzero_rows_)[row])
+    if (!(*bv)[row])
         return {};
 
     // check whether it is a leaf
@@ -46,7 +50,7 @@ BRWT::SetBitPositions BRWT::get_row(Row row) const {
 
     // check all child nodes
     SetBitPositions row_set_bits;
-    uint64_t index_in_child = nonzero_rows_->rank1(row) - 1;
+    uint64_t index_in_child = bv->rank1(row) - 1;
 
     for (size_t i = 0; i < child_nodes_.size(); ++i) {
         const auto &child = *child_nodes_[i];
@@ -58,11 +62,12 @@ BRWT::SetBitPositions BRWT::get_row(Row row) const {
     return row_set_bits;
 }
 
-Vector<std::pair<BRWT::Column, uint64_t>> BRWT::get_column_ranks(Row i) const {
+Vector<std::pair<BRWT_Disk::Column, uint64_t>> BRWT_Disk::get_column_ranks(Row i) const {
     assert(i < num_rows());
 
+    auto bv = get_bit_vector();
     // check if the row is empty
-    uint64_t rank = nonzero_rows_->conditional_rank1(i);
+    uint64_t rank = bv->conditional_rank1(i);
     if (!rank)
         return {};
 
@@ -74,7 +79,7 @@ Vector<std::pair<BRWT::Column, uint64_t>> BRWT::get_column_ranks(Row i) const {
     }
 
     // check all child nodes
-    Vector<std::pair<BRWT::Column, uint64_t>> row;
+    Vector<std::pair<BRWT_Disk::Column, uint64_t>> row;
     uint64_t index_in_child = rank - 1;
 
     for (size_t k = 0; k < child_nodes_.size(); ++k) {
@@ -87,8 +92,9 @@ Vector<std::pair<BRWT::Column, uint64_t>> BRWT::get_column_ranks(Row i) const {
     return row;
 }
 
-std::vector<BRWT::SetBitPositions>
-BRWT::get_rows(const std::vector<Row> &row_ids) const {
+std::vector<BRWT_Disk::SetBitPositions>
+BRWT_Disk::get_rows(const std::vector<Row> &row_ids) const {
+    disk_manager->notify_get_rows_called(); // mkokot, TODO: for debuging, remove
     std::vector<SetBitPositions> rows(row_ids.size());
 
     auto slice = slice_rows(row_ids);
@@ -108,7 +114,7 @@ BRWT::get_rows(const std::vector<Row> &row_ids) const {
     return rows;
 }
 
-std::vector<BRWT::Column> BRWT::slice_rows(const std::vector<Row> &row_ids) const {
+std::vector<BRWT_Disk::Column> BRWT_Disk::slice_rows(const std::vector<Row> &row_ids) const {
     return slice_rows<Column>(row_ids);
 }
 
@@ -117,15 +123,15 @@ std::vector<BRWT::Column> BRWT::slice_rows(const std::vector<Row> &row_ids) cons
 // If T = std::pair<Column, uint64_t>
 //      return positions of set bits with their column ranks.
 template <typename T>
-std::vector<T> BRWT::slice_rows(const std::vector<Row> &row_ids) const {
+std::vector<T> BRWT_Disk::slice_rows(const std::vector<Row> &row_ids) const {
     // mkokot, TODO: remove, time measurements with strange trick to detect top recurrence level
     //it will NOT work for multithreaded
     static size_t reku_depth = 0;
     std::chrono::high_resolution_clock::time_point start;
     if (++reku_depth == 1)
-        start = std::chrono::high_resolution_clock::now();
-    //
-
+        start = std::chrono::high_resolution_clock::now();        
+    //    
+    nonzero_rows_->slice_rows_cals++;
     std::vector<T> slice;
     // expect at least one relation per row
     slice.reserve(row_ids.size() * 2);
@@ -145,20 +151,21 @@ std::vector<T> BRWT::slice_rows(const std::vector<Row> &row_ids) const {
             assert(i < num_rows());
 
             if constexpr(utils::is_pair_v<T>) {
-                if (uint64_t rank = nonzero_rows_->conditional_rank1(i)) {
+                if (uint64_t rank = get_bit_vector()->conditional_rank1(i)) {
                     // only a single column is stored in leaves
                     slice.emplace_back(0, rank);
                 }
             } else {
-                if ((*nonzero_rows_)[i]) {
+                if ((*get_bit_vector())[i]) {
                     // only a single column is stored in leaves
                     slice.push_back(0);
                 }
             }
             slice.push_back(delim);
         }
-        if (--reku_depth == 0) // mkokot, TODO: remove
-            mtg::common::logger->trace("slice_rows time: {}", std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start).count());
+        count_as_new_access = true;
+        if (--reku_depth == 0)
+            mtg::common::logger->trace("slice_rows time: {}", std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start).count());        
         return slice;
     }
 
@@ -175,12 +182,13 @@ std::vector<T> BRWT::slice_rows(const std::vector<Row> &row_ids) const {
 
         // if next word contains 5 or more positions, query the whole word
         // we assume that get_int is roughly 5 times slower than operator[]
+        auto bv = get_bit_vector();
         if (i + 4 < row_ids.size()
                 && row_ids[i + 4] < global_offset + 64
                 && row_ids[i + 4] >= global_offset
-                && global_offset + 64 <= nonzero_rows_->size()) {
+                && global_offset + 64 <= bv->size()) {
             // get the word
-            uint64_t word = nonzero_rows_->get_int(global_offset, 64);
+            uint64_t word = bv->get_int(global_offset, 64);
             uint64_t rank = -1ULL;
 
             do {
@@ -189,7 +197,7 @@ std::vector<T> BRWT::slice_rows(const std::vector<Row> &row_ids) const {
                 if (word & (1ULL << offset)) {
                     if (rank == -1ULL)
                         rank = global_offset > 0
-                                ? nonzero_rows_->rank1(global_offset - 1)
+                                ? bv->rank1(global_offset - 1)
                                 : 0;
 
                     // map index from parent's to children's coordinate system
@@ -203,7 +211,7 @@ std::vector<T> BRWT::slice_rows(const std::vector<Row> &row_ids) const {
 
         } else {
             // check index
-            if (uint64_t rank = nonzero_rows_->conditional_rank1(global_offset)) {
+            if (uint64_t rank = bv->conditional_rank1(global_offset)) {
                 // map index from parent's to children's coordinate system
                 child_row_ids.push_back(rank - 1);
                 skip_row[i] = false;
@@ -211,11 +219,14 @@ std::vector<T> BRWT::slice_rows(const std::vector<Row> &row_ids) const {
         }
     }
 
-    if (!child_row_ids.size()) {
-        if (--reku_depth == 0) // mkokot, TODO: remove
+    if (!child_row_ids.size())
+    {
+        count_as_new_access = true;
+        if (--reku_depth == 0)
             mtg::common::logger->trace("slice_rows time: {}", std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start).count());
         return std::vector<T>(row_ids.size(), delim);
     }
+        
 
     // TODO: query by columns and merge them in the very end to avoid remapping
     //       the same column indexes many times when propagating to the root.
@@ -250,13 +261,15 @@ std::vector<T> BRWT::slice_rows(const std::vector<Row> &row_ids) const {
         }
         slice.push_back(delim);
     }
-    if (--reku_depth == 0) // mkokot, TODO: remove
+
+    count_as_new_access = true;
+    if (--reku_depth == 0)
         mtg::common::logger->trace("slice_rows time: {}", std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start).count());
     return slice;
 }
 
-std::vector<Vector<std::pair<BRWT::Column, uint64_t>>>
-BRWT::get_column_ranks(const std::vector<Row> &row_ids) const {
+std::vector<Vector<std::pair<BRWT_Disk::Column, uint64_t>>>
+BRWT_Disk::get_column_ranks(const std::vector<Row> &row_ids) const {
     std::vector<Vector<std::pair<Column, uint64_t>>> rows(row_ids.size());
 
     std::vector<std::pair<Column, uint64_t>> slice
@@ -280,10 +293,11 @@ BRWT::get_column_ranks(const std::vector<Row> &row_ids) const {
     return rows;
 }
 
-std::vector<BRWT::Row> BRWT::get_column(Column column) const {
+std::vector<BRWT_Disk::Row> BRWT_Disk::get_column(Column column) const {
     assert(column < num_columns());
 
-    auto num_nonzero_rows = nonzero_rows_->num_set_bits();
+    auto bv = get_bit_vector();
+    auto num_nonzero_rows = bv->num_set_bits();
 
     // check if the column is empty
     if (!num_nonzero_rows)
@@ -292,9 +306,9 @@ std::vector<BRWT::Row> BRWT::get_column(Column column) const {
     // check whether it is a leaf
     if (!child_nodes_.size()) {
         // return the index column
-        std::vector<BRWT::Row> result;
+        std::vector<BRWT_Disk::Row> result;
         result.reserve(num_nonzero_rows);
-        nonzero_rows_->call_ones([&](auto i) { result.push_back(i); });
+        bv->call_ones([&](auto i) { result.push_back(i); });
         return result;
     }
 
@@ -302,17 +316,19 @@ std::vector<BRWT::Row> BRWT::get_column(Column column) const {
     auto rows = child_nodes_[child_node]->get_column(assignments_.rank(column));
 
     // check if we need to update the row indexes
-    if (num_nonzero_rows == nonzero_rows_->size())
+    if (num_nonzero_rows == bv->size())
         return rows;
 
     // shift indexes
     for (size_t i = 0; i < rows.size(); ++i) {
-        rows[i] = nonzero_rows_->select1(rows[i] + 1);
+        rows[i] = bv->select1(rows[i] + 1);
     }
     return rows;
 }
 
-bool BRWT::load(std::istream &in) {
+
+bool BRWT_Disk::load_impl(std::istream &in, NodeDepth depth)
+{
     if (!in.good())
         return false;
 
@@ -320,15 +336,25 @@ bool BRWT::load(std::istream &in) {
         if (!assignments_.load(in))
             return false;
 
-        if (!nonzero_rows_->load(in))
+        auto start_pos = in.tellg();
+        std::unique_ptr<bit_vector> nonzero_rows_tmp = std::make_unique<bit_vector_smallrank>(); // mkokot TODO: find a better way to determine the offset than reading
+
+        if (!nonzero_rows_tmp->load(in))
             return false;
+
+        nonzero_rows_tmp.reset();
+
+        auto end_pos = in.tellg();
+        auto in_file_size = end_pos - start_pos;
+        
+        nonzero_rows_ = std::make_unique<NonZeroRows>(start_pos, in_file_size, depth);
 
         size_t num_child_nodes = load_number(in);
         child_nodes_.clear();
         child_nodes_.reserve(num_child_nodes);
         for (size_t i = 0; i < num_child_nodes; ++i) {
-            child_nodes_.emplace_back(new BRWT());
-            if (!child_nodes_.back()->load(in))
+            child_nodes_.emplace_back(new BRWT_Disk(disk_manager));
+            if (!child_nodes_.back()->load_impl(in, depth + 1))
                 return false;
         }
         return !child_nodes_.size()
@@ -338,16 +364,68 @@ bool BRWT::load(std::istream &in) {
     }
 }
 
-void BRWT::serialize(std::ostream &out) const {
+bool BRWT_Disk::load(std::istream &in) {    
+    
+    auto ptr = dynamic_cast<IfstreamWithNameAndOffset*>(&in);
+    if (!ptr) {                
+        logger->error("BRWT_Disk::load requires IfstreamWithNameAndOffset object");
+        return false;
+    }   
+
+    //auto brwt_max_anno_mem = mtg::cli::GlobalConfigAccess::Inst().Get()->brwt_max_anno_mem;
+    assert(brwt_max_anno_mem);
+    std::cerr << "Maximum memory for brwt is " << brwt_max_anno_mem << "\n";
+    disk_manager = std::make_shared<BRWT_DiskManager>(brwt_max_anno_mem, ptr->GetFName()); // mkokot TODO: consider how to set the allowed memory
+
+    auto time_start = std::chrono::high_resolution_clock::now(); // mkokot, TODO: remove
+    if (!load_impl(in, 0))
+        return false;
+
+    auto time = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - time_start).count(); // mkokot, TODO: remove
+    std::cerr << "BRWT_Disk::load_impl time: " << time << "s\n";
+
+    // mkokot TODO: this is for debuging and logging, consider removing
+    std::queue<const BRWT_Disk*> nodes_queue;
+    std::map<size_t, size_t> nodes_per_depth;
+    nodes_queue.push(this);
+    nodes_per_depth[0] = 1;
+
+    uint32_t depth{};
+    while (!nodes_queue.empty()) {
+        const auto &node = *nodes_queue.front();
+
+        disk_manager->register_node(depth, node.nonzero_rows_.get());
+
+        nodes_per_depth[depth+1] += node.child_nodes_.size();
+        if (!--nodes_per_depth[depth])
+            ++depth;
+
+        for (const auto &child_node : node.child_nodes_) {
+            const auto *brwt_node_ptr = dynamic_cast<const BRWT_Disk*>(child_node.get());
+            if (brwt_node_ptr)
+                nodes_queue.push(brwt_node_ptr);
+        }
+        nodes_queue.pop();
+    }    
+    ////////////////////////////////////////////////////////////////////////////////
+    // mkokot, debugowe to check what is going on with tot_req_size
+    //disk_manager->printStats();
+    //exit(1);
+    
+    
+    return true;
+}
+
+void BRWT_Disk::serialize(std::ostream &out) const {
     if (!out.good())
-        throw std::ofstream::failure("Error when dumping BRWT");
+        throw std::ofstream::failure("Error when dumping BRWT_Disk");
 
     assignments_.serialize(out);
 
     assert(!child_nodes_.size()
                 || child_nodes_.size() == assignments_.num_groups());
 
-    nonzero_rows_->serialize(out);
+    get_bit_vector()->serialize(out);
 
     serialize_number(out, child_nodes_.size());
     for (const auto &child : child_nodes_) {
@@ -355,9 +433,9 @@ void BRWT::serialize(std::ostream &out) const {
     }
 }
 
-uint64_t BRWT::num_relations() const {
+uint64_t BRWT_Disk::num_relations() const {
     if (!child_nodes_.size())
-        return nonzero_rows_->num_set_bits();
+        return get_bit_vector()->num_set_bits();
 
     uint64_t num_set_bits = 0;
     for (const auto &submatrix_ptr : child_nodes_) {
@@ -367,14 +445,14 @@ uint64_t BRWT::num_relations() const {
     return num_set_bits;
 }
 
-double BRWT::avg_arity() const {
+double BRWT_Disk::avg_arity() const {
     if (!child_nodes_.size())
         return 0;
 
     uint64_t num_nodes = 0;
     uint64_t total_num_child_nodes = 0;
 
-    BFT([&](const BRWT &node) {
+    BFT([&](const BRWT_Disk &node) {
         if (node.child_nodes_.size()) {
             num_nodes++;
             total_num_child_nodes += node.child_nodes_.size();
@@ -386,54 +464,55 @@ double BRWT::avg_arity() const {
             : 0;
 }
 
-uint64_t BRWT::num_nodes() const {
+uint64_t BRWT_Disk::num_nodes() const {
     uint64_t num_nodes = 0;
 
-    BFT([&num_nodes](const BRWT &) { num_nodes++; });
+    BFT([&num_nodes](const BRWT_Disk &) { num_nodes++; });
 
     return num_nodes;
 }
 
-double BRWT::shrinking_rate() const {
+double BRWT_Disk::shrinking_rate() const {
     double rate_sum = 0;
     uint64_t num_nodes = 0;
 
-    BFT([&](const BRWT &node) {
+    BFT([&](const BRWT_Disk &node) {
         if (node.child_nodes_.size()) {
             num_nodes++;
-            rate_sum += static_cast<double>(node.nonzero_rows_->num_set_bits())
-                            / node.nonzero_rows_->size();
+            auto bv = node.get_bit_vector();
+            rate_sum += static_cast<double>(bv->num_set_bits())
+                            / bv->size();
         }
     });
 
     return rate_sum / num_nodes;
 }
 
-uint64_t BRWT::total_column_size() const {
+uint64_t BRWT_Disk::total_column_size() const {
     uint64_t total_size = 0;
 
-    BFT([&](const BRWT &node) {
-        total_size += node.nonzero_rows_->size();
+    BFT([&](const BRWT_Disk &node) {
+        total_size += node.get_bit_vector()->size();
     });
 
     return total_size;
 }
 
-uint64_t BRWT::total_num_set_bits() const {
+uint64_t BRWT_Disk::total_num_set_bits() const {
     uint64_t total_num_set_bits = 0;
 
-    BFT([&](const BRWT &node) {
-        total_num_set_bits += node.nonzero_rows_->num_set_bits();
+    BFT([&](const BRWT_Disk &node) {
+        total_num_set_bits += node.get_bit_vector()->num_set_bits();
     });
 
     return total_num_set_bits;
 }
 
-void BRWT::print_tree_structure(std::ostream &os) const {
-    BFT([&os](const BRWT &node) {
+void BRWT_Disk::print_tree_structure(std::ostream &os) const {
+    BFT([&os](const BRWT_Disk &node) {
         // print node and its stats
-        os << &node << "," << node.nonzero_rows_->size()
-                    << "," << node.nonzero_rows_->num_set_bits();
+        os << &node << "," << node.get_bit_vector()->size()
+                    << "," << node.get_bit_vector()->num_set_bits();
         // print all its children
         for (const auto &child : node.child_nodes_) {
             os << "," << child.get();
@@ -442,8 +521,8 @@ void BRWT::print_tree_structure(std::ostream &os) const {
     });
 }
 
-void BRWT::BFT(std::function<void(const BRWT &node)> callback) const {
-    std::queue<const BRWT*> nodes_queue;
+void BRWT_Disk::BFT(std::function<void(const BRWT_Disk &node)> callback) const {
+    std::queue<const BRWT_Disk*> nodes_queue;
     nodes_queue.push(this);
 
     while (!nodes_queue.empty()) {
@@ -452,7 +531,7 @@ void BRWT::BFT(std::function<void(const BRWT &node)> callback) const {
         callback(node);
 
         for (const auto &child_node : node.child_nodes_) {
-            const auto *brwt_node_ptr = dynamic_cast<const BRWT*>(child_node.get());
+            const auto *brwt_node_ptr = dynamic_cast<const BRWT_Disk*>(child_node.get());
             if (brwt_node_ptr)
                 nodes_queue.push(brwt_node_ptr);
         }

@@ -413,6 +413,106 @@ convert_row_diff_to_RowDiffSparse(const std::vector<std::string> &filenames) {
 }
 
 
+void
+convert_row_diff_to_RowDiffSparseDisk(const std::vector<std::string> &filenames,
+                                      const std::string& outfbase,
+                                      Timer& timer,
+                                      const std::string& anchors_file,
+                                      const std::string& fork_succ_file) {
+    std::vector<std::unique_ptr<bit_vector>> columns;
+    LabelEncoder<std::string> label_encoder;
+
+    std::mutex mu;
+    uint64_t total_num_set_bits = 0;
+    bool load_successful = merge_load_row_diff(
+        filenames,
+        [&](uint64_t, const std::string &label, std::unique_ptr<bit_vector> &&column) {
+            uint64_t num_set_bits = column->num_set_bits();
+            logger->trace("RowDiff column: {}, Density: {}, Set bits: {}", label,
+                          static_cast<double>(num_set_bits) / column->size(),
+                          num_set_bits);
+
+            std::lock_guard<std::mutex> lock(mu);
+
+            if (columns.size() && column->size() != columns.back()->size()) {
+                logger->error("Column {} has {} rows, previous column has {} rows",
+                              label, column->size(), columns.back()->size());
+                exit(1);
+            }
+            size_t col = label_encoder.insert_and_encode(label);
+            if (col != columns.size()) {
+                logger->error("Duplicate columns {}", label);
+                exit(1);
+            }
+            columns.push_back(std::move(column));
+            total_num_set_bits += num_set_bits;
+        },
+        get_num_threads()
+    );
+
+    if (!load_successful) {
+        logger->error("Error while loading row-diff columns");
+        exit(1);
+    }
+
+    uint64_t num_rows = columns.at(0)->size();
+    uint64_t num_columns = columns.size();
+
+    IRowDiff::anchor_bv_type anchor_;
+    IRowDiff::fork_succ_bv_type fork_succ_;
+
+    // mkokot, this is ugly code duplication of IRowDiff::load_anchor
+    auto load_anchor = [](IRowDiff::anchor_bv_type& anchor_, const std::string &filename) {
+        if (!std::filesystem::exists(filename)) {
+            common::logger->error("Can't read anchor file: {}", filename);
+            std::exit(1);
+        }
+        std::ifstream f(filename, ios::binary);
+        if (!f.good()) {
+            common::logger->error("Could not open anchor file {}", filename);
+            std::exit(1);
+        }
+        anchor_.load(f);
+    };
+
+    // mkokot, this is ugly code duplication of IRowDiff::load_fork_succ
+    auto load_fork_succ = [](IRowDiff::fork_succ_bv_type& fork_succ_, const std::string &filename) {
+        if (!std::filesystem::exists(filename)) {
+            common::logger->error("Can't read fork successor file: {}", filename);
+            std::exit(1);
+        }
+        std::ifstream f(filename, ios::binary);
+        if (!f.good()) {
+            common::logger->error("Could not open fork successor file {}", filename);
+            std::exit(1);
+        }
+        fork_succ_.load(f);
+    };
+
+    load_anchor(anchor_, anchors_file);
+    load_fork_succ(fork_succ_, fork_succ_file);
+
+
+    auto fname = utils::make_suffix(outfbase, RowDiffRowSparseDiskAnnotator::kExtension);
+    std::ofstream outstream(fname, std::ios::binary);
+    if (!outstream.good()) {
+        throw std::ofstream::failure("Bad stream");
+    }
+    label_encoder.serialize(outstream);
+    outstream.write("v2.0", 4);
+    anchor_.serialize(outstream);
+    fork_succ_.serialize(outstream);
+    outstream.close();
+
+    RowSparseDisk::serialize(
+        [&](auto callback) {
+            utils::RowsFromColumnsTransformer(columns).call_rows(callback);
+        }, fname, num_columns, total_num_set_bits, num_rows
+    );
+
+    logger->trace("Annotation converted in {} sec", timer.elapsed());
+}
+
 std::unique_ptr<MultiBRWTAnnotator>
 convert_to_BRWT(
         const std::vector<std::vector<uint64_t>> &linkage,
@@ -1042,6 +1142,62 @@ void convert_to_row_annotator(const ColumnCompressed<Label> &annotator,
         }
     );
 }
+
+template
+void convert_to_row_sparse_disk(const ColumnCompressed<std::string> &annotator,
+                              const std::string &outfbase,
+                              size_t num_threads);
+
+template <typename Label>
+void convert_to_row_sparse_disk(const ColumnCompressed<Label> &annotator,
+                              const std::string &outfbase,
+                              size_t num_threads) {
+    uint64_t num_rows = annotator.num_objects();
+
+    ProgressBar progress_bar(num_rows, "Serialize rows",
+                             std::cerr, !common::get_verbose());
+    auto fname = utils::make_suffix(outfbase, RowSparseDiskAnnotator::kExtension);
+    std::ofstream outstream(fname, std::ios::binary);
+    if (!outstream.good()) {
+        throw std::ofstream::failure("Bad stream");
+    }
+    annotator.get_label_encoder().serialize(outstream);
+    outstream.close();
+
+    RowSparseDisk::serialize(
+        [&](BinaryMatrix::RowCallback write_row) {
+
+            #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic)
+            for (uint64_t i = 0; i < num_rows; i += kNumRowsInBlock) {
+
+                uint64_t begin = i;
+                uint64_t end = std::min(i + kNumRowsInBlock, num_rows);
+
+                std::vector<BinaryMatrix::SetBitPositions> rows(end - begin);
+
+                assert(begin <= end);
+                assert(end <= num_rows);
+
+                // TODO: use RowsFromColumnsTransformer
+                for (const auto &label : annotator.get_all_labels()) {
+                    size_t j = annotator.get_label_encoder().encode(label);
+                    annotator.get_column(label).call_ones_in_range(begin, end,
+                        [&](uint64_t idx) { rows[idx - begin].push_back(j); }
+                    );
+                }
+
+                #pragma omp ordered
+                {
+                    for (const auto &row : rows) {
+                        write_row(row);
+                        ++progress_bar;
+                    }
+                }
+            }
+        }, fname, annotator.num_labels(), annotator.num_relations(), num_rows
+    );
+}
+
 
 template
 void convert_to_row_annotator(const ColumnCompressed<std::string> &annotator,

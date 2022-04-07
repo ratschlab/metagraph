@@ -28,6 +28,22 @@ void print_welcome_message() {
     fprintf(stderr, "#############################\n\n");
 }
 
+auto parse_brwt_max_anno_mem(std::string s) {
+    unsigned long long multiplier = 1;
+
+    if (s.back() == 'G' || s.back() == 'M' || s.back() == 'k') {
+        if (s.back() == 'G')
+            multiplier = 1'000'000'000;
+        else if (s.back() == 'M')
+            multiplier = 1'000'000;
+        else if (s.back() == 'k')
+            multiplier = 1'000;
+
+        s.pop_back();
+    }
+    return stoull(s) * multiplier;
+}
+
 Config::Config(int argc, char *argv[]) {
     // provide help overview if no identity was given
     if (argc == 1) {
@@ -395,6 +411,8 @@ Config::Config(int argc, char *argv[]) {
             relax_arity_brwt = atoi(get_value(i++));
         // } else if (!strcmp(argv[i], "--cache-size")) {
         //     row_cache_size = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--brwt-max-anno-mem")) {
+            brwt_max_anno_mem = parse_brwt_max_anno_mem(get_value(i++));
         } else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) {
             print_welcome_message();
             print_usage(argv[0], identity);
@@ -614,8 +632,10 @@ Config::Config(int argc, char *argv[]) {
     if (identity == TRANSFORM_ANNOTATION) {
         const bool to_row_diff = anno_type == RowDiff
                                     || anno_type == RowDiffBRWT
+                                    || anno_type == RowDiffBRWTDisk
                                     || anno_type == IntRowDiffBRWT
                                     || anno_type == RowDiffRowSparse
+                                    || anno_type == RowDiffRowSparseDisk
                                     || anno_type == RowDiffBRWTCoord
                                     || anno_type == RowDiffCoord;
         if (to_row_diff && !infbase.size()) {
@@ -717,6 +737,8 @@ std::string Config::annotype_to_string(AnnotationType state) {
             return "row";
         case BRWT:
             return "brwt";
+        case BRWT_Disk:
+            return "brwt_disk";
         case BinRelWT_sdsl:
             return "bin_rel_wt_sdsl";
         case BinRelWT:
@@ -731,10 +753,16 @@ std::string Config::annotype_to_string(AnnotationType state) {
             return "row_diff";
         case RowDiffBRWT:
             return "row_diff_brwt";
+        case RowDiffBRWTDisk:
+            return "row_diff_brwt_disk";
         case RowDiffRowSparse:
             return "row_diff_sparse";
+        case RowDiffRowSparseDisk:
+            return "row_diff_sparse_disk";
         case RowSparse:
             return "row_sparse";
+        case RowSparseDisk:
+            return "row_sparse_disk";
         case IntBRWT:
             return "int_brwt";
         case IntRowDiffBRWT:
@@ -774,8 +802,12 @@ Config::AnnotationType Config::string_to_annotype(const std::string &string) {
         return AnnotationType::RowDiffBRWT;
     } else if (string == "row_diff_sparse") {
         return AnnotationType::RowDiffRowSparse;
+    } else if (string == "row_diff_sparse_disk") {
+        return AnnotationType::RowDiffRowSparseDisk;
     } else if (string == "row_sparse") {
         return AnnotationType::RowSparse;
+    } else if (string == "row_sparse_disk") {
+        return AnnotationType::RowSparseDisk;
     } else if (string == "int_brwt") {
         return AnnotationType::IntBRWT;
     } else if (string == "row_diff_int_brwt") {
@@ -847,12 +879,11 @@ DeBruijnGraph::Mode Config::string_to_graphmode(const std::string &string) {
     }
 }
 
-
 void Config::print_usage(const std::string &prog_name, IdentityType identity) {
     const char annotation_list[] = "\t\t( column, brwt, rb_brwt, int_brwt,\n"
                                    "\t\t  column_coord, brwt_coord, row_diff_coord, row_diff_brwt_coord,\n"
-                                   "\t\t  row_diff, row_diff_brwt, row_diff_sparse, row_diff_int_brwt,\n"
-                                   "\t\t  row, flat, row_sparse, rbfish, bin_rel_wt, bin_rel_wt_sdsl )";
+                                   "\t\t  row_diff, row_diff_brwt, row_diff_sparse, row_diff_sparse_disk, row_diff_int_brwt,\n"
+                                   "\t\t  row, flat, row_sparse, row_sparse_disk, rbfish, bin_rel_wt, bin_rel_wt_sdsl )";
 
     switch (identity) {
         case NO_IDENTITY: {

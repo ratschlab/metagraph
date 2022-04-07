@@ -91,6 +91,7 @@ class Config {
     unsigned int genome_binsize_anno = 1000;
     unsigned int arity_brwt = 2;
     unsigned int relax_arity_brwt = 10;
+    unsigned long long brwt_max_anno_mem = 1ull << 33;
     unsigned int min_tip_size = 1;
     unsigned int min_unitig_median_kmer_abundance = 1;
     int fallback_abundance_cutoff = 1;
@@ -199,13 +200,17 @@ class Config {
         ColumnCompressed = 1,
         RowCompressed,
         BRWT,
+        BRWT_Disk,
         BinRelWT_sdsl,
         BinRelWT,
         RowDiff,
         RowDiffBRWT,
+        RowDiffBRWTDisk,
         RowDiffRowSparse,
+        RowDiffRowSparseDisk,
         RowFlat,
         RowSparse,
+        RowSparseDisk,
         RBFish,
         RbBRWT,
         IntBRWT,
