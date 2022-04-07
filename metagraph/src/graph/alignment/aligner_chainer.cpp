@@ -407,23 +407,23 @@ chain_seeds(const IDBGAligner &aligner,
             const __m256i prev_end_v = _mm256_set1_epi32(prev_end);
             const __m256i query_size_v = _mm256_set1_epi32(query_size);
             const __m256i prev_score_v = _mm256_set1_epi32(prev_score);
-            const __m256i it_end_v = _mm256_set1_epi32(it_end);
+            const __m256i it_end_v = _mm256_set1_epi32(it_end - 1);
             const __m256i i_v = _mm256_set1_epi32(i);
             auto epi64_to_epi32 = [](__m256i v) {
                 return _mm256_castsi256_si128(_mm256_permute4x64_epi64(_mm256_shuffle_epi32(v, 8), 0 + 4 * 2));
             };
 
             __m256i j_v = _mm256_add_epi32(_mm256_set1_epi32(i + 1), inc_v);
-            for (size_t j = i + 1; j < it_end; j += 8) {
-                // if (coord_cutoff > coord)
+            for (size_t j = i + 1; true; j += 8) {
+                // if (coord_cutoff > coord || j > it_end - 1)
                 //     break;
                 __m256i coord_1_v = _mm256_i32gather_epi64(&dp_table[j].coordinate, big_idx_selector, 8);
                 __m256i coord_2_v = _mm256_i32gather_epi64(&dp_table[j + 4].coordinate, big_idx_selector, 8);
                 __m256i coord_1_mask = _mm256_cmpgt_epi64(coord_cutoff_v, coord_1_v);
                 __m256i coord_2_mask = _mm256_cmpgt_epi64(coord_cutoff_v, coord_2_v);
                 __m256i coord_neg_mask = _mm256_blend_epi32(coord_1_mask, coord_2_mask, 0b10101010);
-                __m256i j_mask = _mm256_cmpgt_epi32(it_end_v, j_v);
-                coord_neg_mask = _mm256_andnot_si256(j_mask, coord_neg_mask);
+                __m256i j_neg_mask = _mm256_cmpgt_epi32(j_v, it_end_v);
+                coord_neg_mask = _mm256_or_si256(j_neg_mask, coord_neg_mask);
 
                 // int32_t dist = prev_clipping > clipping && prev_end > end
                 //     ? prev_clipping - clipping
