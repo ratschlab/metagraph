@@ -364,6 +364,8 @@ chain_seeds(const IDBGAligner &aligner,
         v = _mm256_srli_epi32(v, 23); // shift down the exponent
         v = _mm256_subs_epu16(_mm256_set1_epi32(158), v); // undo bias
         v = _mm256_min_epi16(v, _mm256_set1_epi32(32)); // clamp at 32
+
+        // log2
         v = _mm256_sub_epi32(_mm256_set1_epi32(31), v);
 
         return v;
@@ -434,9 +436,11 @@ chain_seeds(const IDBGAligner &aligner,
                     __m256i dist_diff_v = _mm256_abs_epi32(_mm256_sub_epi32(coord_dist_v, dist_v));
                     __m256i dmul = _mm256_mullo_epi32(dist_diff_v, sl_v);
                     __m256i gap_first_v = _mm256_srli_epi32(_mm256_add_epi32(dmul, _mm256_set1_epi32(127)), 7);
+
                     __m256i gap_second_v = _mm256_srli_epi32(avx2_log2_epi32(dist_diff_v), 1);
                     __m256i dist_diff_mask = _mm256_cmpgt_epi32(dist_diff_v, _mm256_set1_epi32(1));
                     gap_second_v = _mm256_blendv_epi8(_mm256_setzero_si256(), gap_second_v, dist_diff_mask);
+
                     __m256i gap_penalty = _mm256_add_epi32(gap_first_v, gap_second_v);
 
                     score_v = _mm256_sub_epi32(score_v, gap_penalty);
