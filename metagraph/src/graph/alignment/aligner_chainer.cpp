@@ -312,11 +312,7 @@ chain_seeds(const IDBGAligner &aligner,
 
     ChainDPTable dp_table;
     dp_table.reserve(seeds.size());
-
-    logger->trace("Sorting seeds");
-    std::sort(seeds.begin(), seeds.end(), [](const auto &a, const auto &b) {
-        return a.get_clipping() > b.get_clipping();
-    });
+    std::reverse(seeds.begin(), seeds.end());
 
     tsl::hopscotch_map<Alignment::Column, size_t> label_sizes;
 
@@ -362,7 +358,7 @@ chain_seeds(const IDBGAligner &aligner,
     std::sort(dp_table.begin(), dp_table.end(), std::greater<TableElem>());
     logger->trace("Chaining anchors");
 
-    size_t bandwidth = 201;
+    size_t bandwidth = 65;
 
     // scoring function derived from minimap2
     // https://academic.oup.com/bioinformatics/article/34/18/3094/4994778
