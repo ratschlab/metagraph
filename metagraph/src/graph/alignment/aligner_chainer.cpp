@@ -367,12 +367,15 @@ chain_seeds(const IDBGAligner &aligner,
     // scoring function derived from minimap2
     // https://academic.oup.com/bioinformatics/article/34/18/3094/4994778
 #if __AVX2__
-    const __m256i sl_v = _mm256_set1_epi32(config.min_seed_length);
+    const __m256 sl_f = _mm256_set1_ps(static_cast<float>(config.min_seed_length) * 0.01);
+    const __m256 half_f = _mm256_set1_ps(0.5);
     const __m256i idx_selector = _mm256_set_epi32(56, 48, 40, 32, 24, 16, 8, 0);
-    const __m256i adder = _mm256_set1_epi32(127);
     const __m128i big_idx_selector = _mm_set_epi32(12, 8, 4, 0);
     const __m256i inc_v = _mm256_set_epi32(7, 6, 5, 4, 3, 2, 1, 0);
     const __m256i step_v = _mm256_set1_epi32(8);
+    const __m256i ones_v = _mm256_set1_epi32(1);
+#else
+    float sl = static_cast<float>(config.min_seed_length) * 0.01;
 #endif
 
     size_t cur_label_end = 0;
@@ -393,7 +396,6 @@ chain_seeds(const IDBGAligner &aligner,
             const __m256i prev_coord_v = _mm256_set1_epi64x(prev_coord);
 
             const __m256i prev_clipping_v = _mm256_set1_epi32(prev_clipping);
-            const __m256i prev_end_v = _mm256_set1_epi32(prev_end);
             const __m256i query_size_v = _mm256_set1_epi32(query_size);
             const __m256i prev_score_v = _mm256_set1_epi32(prev_score);
             const __m256i it_end_v = _mm256_set1_epi32(it_end - 1);
@@ -414,17 +416,9 @@ chain_seeds(const IDBGAligner &aligner,
                 __m256i j_neg_mask = _mm256_cmpgt_epi32(j_v, it_end_v);
                 coord_neg_mask = _mm256_or_si256(j_neg_mask, coord_neg_mask);
 
-                // int32_t dist = prev_clipping > clipping && prev_end > end
-                //     ? prev_clipping - clipping
+                // int32_t dist = prev_clipping - clipping;
                 __m256i clipping_v = _mm256_i32gather_epi32(&dp_table[j].seed_clipping, idx_selector, 4);
-                __m256i clipping_mask = _mm256_cmpgt_epi32(prev_clipping_v, clipping_v);
                 __m256i dist_v = _mm256_sub_epi32(prev_clipping_v, clipping_v);
-
-                __m256i end_v = _mm256_i32gather_epi32(&dp_table[j].seed_end, idx_selector, 4);
-                __m256i end_mask = _mm256_cmpgt_epi32(prev_end_v, end_v);
-
-                __m256i mask = _mm256_and_si256(clipping_mask, end_mask);
-                mask = _mm256_andnot_si256(coord_neg_mask, mask);
 
                 // int32_t coord_dist = prev_coord - coord;
                 // a[0:32],b[0:32],a[64:96],b[64:96],a[128:160],b[128:160],a[192:224],b[192:224]
@@ -432,40 +426,70 @@ chain_seeds(const IDBGAligner &aligner,
                 __m128i coord_dist_2_v = epi64_to_epi32(_mm256_sub_epi64(prev_coord_v, coord_2_v));
                 __m256i coord_dist_v = _mm256_set_m128i(coord_dist_2_v, coord_dist_1_v);
 
-                // int32_t min_dist = std::min(coord_dist, dist);
-                __m256i min_dist_v = _mm256_min_epi32(coord_dist_v, dist_v);
+                __m256i dist_mask = _mm256_cmpgt_epi32(dist_v, _mm256_setzero_si256());
+                __m256i dmax = _mm256_max_epi32(dist_v, coord_dist_v);
+                __m256i dmax_mask = _mm256_cmpgt_epi32(query_size_v, dmax);
+                dist_mask = _mm256_and_si256(dist_mask, dmax_mask);
+                dist_mask = _mm256_andnot_si256(coord_neg_mask, dist_mask);
 
-                // if (min_dist > query_size)
-                //     continue
-                __m256i min_dist_neg_mask = _mm256_cmpgt_epi32(min_dist_v, query_size_v);
-                mask = _mm256_andnot_si256(min_dist_neg_mask, mask);
-
-                if (_mm256_movemask_epi8(mask)) {
-                    // score_t cur_score = prev_score + std::min(end - clipping, min_dist);
+                // if (dist > 0 && std::max(dist, coord_dist) < query_size) {
+                if (_mm256_movemask_epi8(dist_mask)) {
+                    // score_t match = std::min({ dist, coord_dist, end - clipping });
+                    __m256i match_v = _mm256_min_epi32(dist_v, coord_dist_v);
+                    __m256i end_v = _mm256_i32gather_epi32(&dp_table[j].seed_end, idx_selector, 4);
                     __m256i length_v = _mm256_sub_epi32(end_v, clipping_v);
-                    __m256i match_v = _mm256_min_epi32(length_v, min_dist_v);
+                    match_v = _mm256_min_epi32(match_v, length_v);
+
+                    // score_t cur_score = prev_score + match;
                     __m256i cur_score_v = _mm256_add_epi32(prev_score_v, match_v);
 
-                    // int32_t coord_diff = coord_dist - dist;
-                    __m256i coord_diff_v = _mm256_sub_epi32(coord_dist_v, dist_v);
+                    // float coord_diff = std::abs(coord_dist - dist);
+                    __m256i coord_diff = _mm256_sub_epi32(coord_dist_v, dist_v);
+                    coord_diff = _mm256_abs_epi32(coord_diff);
+                    __m256 coord_diff_f = _mm256_cvtepi32_ps(coord_diff);
 
-                    // #define LOG2(X) ((unsigned) (8 * sizeof(long) - __builtin_clzl((X)) - 1))
-                    // auto gap_penalty = [sl=config.min_seed_length](int32_t len) -> score_t {
-                    //     return (len * sl + 127) / 128 + (LOG2(len) / 2);
-                    // };
-                    // cur_score -= coord_diff == 0 ? 0 : gap_penalty(std::labs(coord_diff));
-                    __m256i acoord_diff_v = _mm256_abs_epi32(coord_diff_v);
-                    __m256i gap_penalty_1_v = _mm256_mullo_epi32(acoord_diff_v, sl_v);
-                    gap_penalty_1_v = _mm256_add_epi32(gap_penalty_1_v, adder);
-                    gap_penalty_1_v = _mm256_srli_epi32(gap_penalty_1_v, 7);
+                    // float linear_penalty = coord_diff * sl;
+                    __m256 linear_penalty_v = _mm256_mul_ps(coord_diff_f, sl_f);
 
-                    __m256i gap_penalty_2_v = avx2_log2_epi32(acoord_diff_v);
-                    gap_penalty_2_v = _mm256_srli_epi32(gap_penalty_2_v, 1);
+                    // from:
+                    // https://github.com/IntelLabs/Trans-Omics-Acceleration-Library/blob/master/src/dynamic-programming/parallel_chaining_v2_22.h
+                    auto mg_log2_avx2 = [](__m256 dd_v_f) -> __m256 // NB: this doesn't work when x<2
+                    {
+                        // -------- constant vectors --------------------
+                        __m256i v255 = _mm256_set1_epi32(255);
+                        __m256i v128 = _mm256_set1_epi32(128);
+                        __m256i shift1 =  _mm256_set1_epi32(~(255 << 23));
+                        __m256i shift2 =  _mm256_set1_epi32(127 << 23);
+                            __m256 fc1 = _mm256_set1_ps(-0.34484843f);
+                            __m256 fc2 = _mm256_set1_ps(2.02466578f);
+                            __m256 fc3 = _mm256_set1_ps(0.67487759f);
+                        // ---------------------------------------------
+                            __m256i dd_v_i = _mm256_castps_si256(dd_v_f);
 
-                    __m256i gap_penalty_v = _mm256_add_epi32(gap_penalty_1_v, gap_penalty_2_v);
-                    __m256i gap_penalty_mask = _mm256_cmpeq_epi32(coord_dist_v, dist_v);
-                    gap_penalty_v = _mm256_blendv_epi8(gap_penalty_v, _mm256_setzero_si256(), gap_penalty_mask);
+                        __m256i log2_v_i = _mm256_sub_epi32 (_mm256_and_si256( _mm256_srli_epi32(dd_v_i, 23), v255) , v128);
 
+                        dd_v_i = _mm256_and_si256(dd_v_i, shift1);
+                        dd_v_i = _mm256_add_epi32(dd_v_i, shift2);
+
+                        dd_v_f = _mm256_castsi256_ps(dd_v_i);
+
+                        __m256 t1 =_mm256_add_ps (_mm256_mul_ps(fc1, dd_v_f), fc2);
+                        __m256 t2 = _mm256_sub_ps(_mm256_mul_ps(t1, dd_v_f), fc3);
+
+                        __m256 log2_v_f = _mm256_add_ps(_mm256_cvtepi32_ps(log2_v_i), t2);
+
+                        return log2_v_f;
+                    };
+
+                    // float log_penalty = log2(coord_diff) * 0.5;
+                    __m256 log_penalty_v = mg_log2_avx2(coord_diff_f);
+                    log_penalty_v = _mm256_mul_ps(log_penalty_v, half_f);
+
+                    // cur_score -= linear_penalty + log_penalty;
+                    __m256 gap_penalty_f = _mm256_add_ps(linear_penalty_v, log_penalty_v);
+                    __m256i gap_penalty_v = _mm256_cvtps_epi32(gap_penalty_f);
+                    __m256i dist_cutoff_mask = _mm256_cmpgt_epi32(coord_diff, ones_v);
+                    gap_penalty_v = _mm256_blendv_epi8(_mm256_setzero_si256(), gap_penalty_v, dist_cutoff_mask);
                     cur_score_v = _mm256_sub_epi32(cur_score_v, gap_penalty_v);
 
                     // if (cur_score >= score) {
@@ -474,7 +498,7 @@ chain_seeds(const IDBGAligner &aligner,
                     // }
                     __m256i old_scores_v = _mm256_i32gather_epi32(&dp_table[j].chain_score, idx_selector, 4);
                     __m256i score_neg_mask = _mm256_cmpgt_epi32(old_scores_v, cur_score_v);
-                    mask = _mm256_andnot_si256(score_neg_mask, mask);
+                    __m256i mask = _mm256_andnot_si256(score_neg_mask, dist_mask);
 
                     cur_score_v = _mm256_blendv_epi8(old_scores_v, cur_score_v, mask);
                     _mm256_maskstore_epi32(&backtrace[j], mask, i_v);
@@ -505,27 +529,21 @@ chain_seeds(const IDBGAligner &aligner,
                 if (coord_cutoff > coord)
                     break;
 
-                int32_t dist = prev_clipping > clipping && prev_end > end
-                    ? prev_clipping - clipping
-                    : std::numeric_limits<int32_t>::max();
-
+                int32_t dist = prev_clipping - clipping;
                 int32_t coord_dist = prev_coord - coord;
-                int32_t min_dist = std::min(coord_dist, dist);
-
-                if (min_dist > query_size)
-                    continue;
-
-                score_t cur_score = prev_score + std::min(end - clipping, min_dist);
-
-                #define LOG2(X) ((unsigned) (8 * sizeof(long) - __builtin_clzl((X)) - 1))
-                auto gap_penalty = [sl=config.min_seed_length](int32_t len) -> score_t {
-                    return (len * sl + 127) / 128 + (LOG2(len) / 2);
-                };
-                int32_t coord_diff = coord_dist - dist;
-                cur_score -= coord_diff == 0 ? 0 : gap_penalty(std::labs(coord_diff));
-                if (cur_score >= score) {
-                    score = cur_score;
-                    backtrace[j] = i;
+                if (dist > 0 && std::max(dist, coord_dist) < query_size) {
+                    score_t match = std::min({ dist, coord_dist, end - clipping });
+                    score_t cur_score = prev_score + match;
+                    if (coord_dist != dist) {
+                        float coord_diff = std::abs(coord_dist - dist);
+                        float linear_penalty = coord_diff * sl;
+                        float log_penalty = log2(coord_diff) * 0.5;
+                        cur_score -= linear_penalty + log_penalty;
+                    }
+                    if (cur_score >= score) {
+                        score = cur_score;
+                        backtrace[j] = i;
+                    }
                 }
             }
 #endif
