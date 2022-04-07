@@ -438,7 +438,7 @@ chain_seeds(const IDBGAligner &aligner,
 
                     // from:
                     // https://github.com/IntelLabs/Trans-Omics-Acceleration-Library/blob/master/src/dynamic-programming/parallel_chaining_v2_22.h
-                    auto mg_log2_avx2 = [](__m256 dd_v_f) -> __m256 // NB: this doesn't work when x<2
+                    auto mg_log2_avx2 = [](__m256i dd_v) -> __m256 // NB: this doesn't work when x<2
                     {
                         // -------- constant vectors --------------------
                         __m256i v255 = _mm256_set1_epi32(255);
@@ -449,6 +449,8 @@ chain_seeds(const IDBGAligner &aligner,
                             __m256 fc2 = _mm256_set1_ps(2.02466578f);
                             __m256 fc3 = _mm256_set1_ps(0.67487759f);
                         // ---------------------------------------------
+
+                        __m256 dd_v_f = _mm256_cvtepi32_ps(dd_v);
                             __m256i dd_v_i = _mm256_castps_si256(dd_v_f);
 
                         __m256i log2_v_i = _mm256_sub_epi32 (_mm256_and_si256( _mm256_srli_epi32(dd_v_i, 23), v255) , v128);
@@ -466,8 +468,8 @@ chain_seeds(const IDBGAligner &aligner,
                         return log2_v_f;
                     };
 
-                    // float log_penalty = log2(coord_diff) * 0.5;
-                    __m256 log_penalty_v = mg_log2_avx2(coord_diff_f);
+                    // float log_penalty = log2(coord_diff + 1) * 0.5;
+                    __m256 log_penalty_v = mg_log2_avx2(_mm256_add_epi32(coord_diff, _mm256_set1_epi32(1)));
                     log_penalty_v = _mm256_mul_ps(log_penalty_v, _mm256_set1_ps(0.5));
 
                     // cur_score -= linear_penalty + log_penalty;
