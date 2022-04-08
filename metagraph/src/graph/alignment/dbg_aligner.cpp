@@ -535,6 +535,10 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
                         throw std::bad_function_call();
                     }
 
+                    double num_exact_matches = get_num_char_matches_in_chain(chain.begin(), chain.end());
+                    if (num_exact_matches / forward.size() < config_.min_exact_match)
+                        throw std::bad_function_call();
+
                     logger->trace("Chain: score: {}", score);
                     for (const auto &[chain, dist] : chain) {
                         logger->trace("\t{}\tdist: {}", chain, dist);

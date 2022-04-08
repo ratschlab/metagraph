@@ -492,8 +492,11 @@ LabeledAligner<Seeder, Extender, AlignmentCompare>
         annotation_buffer_(graph, annotator, config.row_batch_size,
                            config.row_batch_size) {
     // do not use a global xdrop cutoff since we need separate cutoffs for each label
-    if (annotation_buffer_.has_coordinates())
+    if (annotation_buffer_.has_coordinates()) {
+        logger->trace("Coordinates detected. Enabling seed chaining");
         this->config_.global_xdrop = false;
+        this->config_.chain_alignments = true;
+    }
 
     this->config_.min_seed_length = std::min(graph.get_k(), this->config_.min_seed_length);
     this->config_.max_seed_length = std::min(graph.get_k(), this->config_.max_seed_length);
@@ -591,34 +594,6 @@ auto LabeledAligner<Seeder, Extender, AlignmentCompare>
     return seeders;
 }
 
-inline size_t get_num_matches(const std::vector<Seed> &seeds) {
-    size_t num_matching = 0;
-    size_t last_end = 0;
-    for (size_t i = 0; i < seeds.size(); ++i) {
-        if (seeds[i].empty())
-            continue;
-
-        size_t begin = seeds[i].get_clipping();
-        size_t end = begin + seeds[i].get_query_view().size();
-        if (end > last_end) {
-            num_matching += end - begin;
-            if (begin < last_end)
-                num_matching -= last_end - begin;
-        }
-
-        if (size_t offset = seeds[i].get_offset()) {
-            size_t clipping = seeds[i].get_clipping();
-            for (++i; i < seeds.size()
-                        && seeds[i].get_offset() == offset
-                        && seeds[i].get_clipping() == clipping; ++i) {}
-            --i;
-        }
-
-        last_end = end;
-    }
-    return num_matching;
-}
-
 template <class Seeder, class Extender, class AlignmentCompare>
 size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
 ::filter_seeds(std::vector<Seed> &seeds) const {
@@ -653,7 +628,7 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
 
         if (label_mapper.empty()) {
             seeds.clear();
-            return get_num_matches(seeds);
+            return 0;
         }
 
         std::vector<std::pair<Column, uint64_t>> label_counts;
@@ -681,7 +656,7 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
 
     if (labels.empty()) {
         seeds.clear();
-        return get_num_matches(seeds);
+        return 0;
     }
 
     std::sort(labels.begin(), labels.end());
@@ -712,7 +687,7 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
         return a.get_query_view().size() >= this->config_.min_seed_length;
     }));
 
-    return get_num_matches(seeds);
+    return get_num_char_matches_in_seeds(seeds.begin(), seeds.end());
 }
 
 template class LabeledAligner<>;

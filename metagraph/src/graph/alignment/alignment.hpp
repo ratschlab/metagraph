@@ -97,6 +97,47 @@ class Seed {
     Cigar::LengthType end_clipping_;
 };
 
+template <class T>
+struct Dereferencer {
+    template <class It>
+    inline T& operator()(It it) const { return *it; }
+};
+
+template <class T>
+struct FirstDereferencer {
+    template <class It>
+    inline typename T::first_type& operator()(It it) const { return it->first; }
+};
+
+template <class It, class Transformer = Dereferencer<typename std::iterator_traits<It>::value_type>>
+inline size_t get_num_char_matches_in_seeds(It begin, It end) {
+    Transformer transformer;
+    size_t num_matching = 0;
+    size_t last_q_end = 0;
+    for (auto it = begin; it != end; ++it) {
+        if (transformer(it).empty())
+            continue;
+
+        size_t q_begin = transformer(it).get_clipping();
+        size_t q_end = q_begin + transformer(it).get_query_view().size();
+        if (q_end > last_q_end) {
+            num_matching += q_end - q_begin;
+            if (q_begin < last_q_end)
+                num_matching -= last_q_end - q_begin;
+        }
+
+        if (size_t offset = transformer(it).get_offset()) {
+            size_t clipping = transformer(it).get_clipping();
+            for (++it; it != end && transformer(it).get_offset() == offset
+                                    && transformer(it).get_clipping() == clipping; ++it) {}
+            --it;
+        }
+
+        last_q_end = q_end;
+    }
+    return num_matching;
+}
+
 // Note: this object stores pointers to the query sequence, so it is the user's
 //       responsibility to ensure that the query sequence is not destroyed when
 //       calling this class' methods
