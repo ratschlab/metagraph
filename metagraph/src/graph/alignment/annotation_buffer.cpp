@@ -268,8 +268,6 @@ void AnnotationBuffer::prefetch_coords(const std::vector<node_index> &nodes) con
 
 auto AnnotationBuffer::get_labels_and_coords(node_index node, bool skip_unfetched) const
         -> std::pair<const Columns*, std::shared_ptr<const CoordinateSet>> {
-    std::pair<const Columns*, std::shared_ptr<const CoordinateSet>> ret_val;
-
     if (canonical_)
         node = canonical_->get_base_node(node);
 
@@ -278,61 +276,20 @@ auto AnnotationBuffer::get_labels_and_coords(node_index node, bool skip_unfetche
     // if the node hasn't been seen before, or if its annotations haven't
     // been fetched, return nothing
     if (it == node_to_cols_.end() || it->second == nannot)
-        return ret_val;
+        return {};
 
-    ret_val.first = &column_sets_.data()[it->second];
-
-    if (has_coordinates()) {
-        if (ret_val.first->empty()) {
-            ret_val.second = std::make_shared<const CoordinateSet>();
-            return ret_val;
-        }
-
-        size_t index = it - node_to_cols_.begin();
-
-        if (auto fetch = label_coords_cache_.TryGet(index)) {
-            ret_val.second = std::make_shared<const CoordinateSet>(std::move(*fetch));
-        } else if (!skip_unfetched) {
-            node_index base_node = node;
-
-            // TODO: avoid this get_node_sequence call
-            if (graph_.get_mode() == DeBruijnGraph::CANONICAL && !canonical_)
-                base_node = map_to_nodes(graph_, graph_.get_node_sequence(node))[0];
-
-            auto fetch
-                = multi_int_->get_row_tuples(AnnotatedDBG::graph_to_anno_index(base_node));
-            std::sort(fetch.begin(), fetch.end());
-            CoordinateSet coord_set;
-            assert(fetch.size() == ret_val.first->size());
-            for (size_t i = 0; i < fetch.size(); ++i) {
-                auto &[column, coords] = fetch[i];
-                assert(column == (*ret_val.first)[i]);
-                coord_set.emplace_back(coords.begin(), coords.end());
-            }
-            label_coords_cache_.Put(index, coord_set);
-            ret_val.second = std::make_shared<const CoordinateSet>(std::move(coord_set));
-        }
-    }
-
-    return ret_val;
+    return std::make_pair(&column_sets_.data()[it->second],
+                          has_coordinates() ? get_coords_from_it(it, skip_unfetched)
+                                            : std::shared_ptr<const CoordinateSet>{});
 }
 
-auto AnnotationBuffer::get_coords(node_index node,
-                                  bool skip_unfetched,
-                                  const Columns *label_subset) const
+auto AnnotationBuffer::get_coords_from_it(VectorMap<node_index, size_t>::const_iterator it,
+                                          bool skip_unfetched,
+                                          const Columns *label_subset) const
         -> std::shared_ptr<const CoordinateSet> {
-    if (!has_coordinates())
-        return {};
-
-    if (canonical_)
-        node = canonical_->get_base_node(node);
-
-    auto it = node_to_cols_.find(node);
-
-    // if the node hasn't been seen before, or if its annotations haven't
-    // been fetched, return nothing
-    if (it == node_to_cols_.end() || it->second == nannot)
-        return {};
+    assert(has_coordinates());
+    assert(it != node_to_cols_.end());
+    assert(it->second == nannot);
 
     const auto &columns = column_sets_.data()[it->second];
 
@@ -346,6 +303,7 @@ auto AnnotationBuffer::get_coords(node_index node,
         if (skip_unfetched)
             return {};
 
+        node_index node = it->first;
         node_index base_node = node;
 
         // TODO: avoid this get_node_sequence call
@@ -376,6 +334,26 @@ auto AnnotationBuffer::get_coords(node_index node,
                          std::back_inserter(dummy),
                          std::back_inserter(coord_subset));
     return std::make_shared<const CoordinateSet>(std::move(coord_subset));
+}
+
+auto AnnotationBuffer::get_coords(node_index node,
+                                  bool skip_unfetched,
+                                  const Columns *label_subset) const
+        -> std::shared_ptr<const CoordinateSet> {
+    if (!has_coordinates())
+        return {};
+
+    if (canonical_)
+        node = canonical_->get_base_node(node);
+
+    auto it = node_to_cols_.find(node);
+
+    // if the node hasn't been seen before, or if its annotations haven't
+    // been fetched, return nothing
+    if (it == node_to_cols_.end() || it->second == nannot)
+        return {};
+
+    return get_coords_from_it(it, skip_unfetched, label_subset);
 }
 
 } // namespace align

@@ -99,6 +99,11 @@ class AnnotationBuffer {
     std::vector<std::vector<node_index>> queued_paths_;
 
     size_t row_batch_size_;
+
+    std::shared_ptr<const CoordinateSet>
+    get_coords_from_it(VectorMap<node_index, size_t>::const_iterator it,
+                       bool skip_unfetched = true,
+                       const Columns *label_subset_begin = nullptr) const;
 };
 
 } // namespace align

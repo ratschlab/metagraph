@@ -236,12 +236,6 @@ void LabeledExtender
                 bool force_fixed_seed) {
     assert(table.size() == node_labels_.size());
 
-    // if we are in the seed and want to force the seed to be fixed, automatically
-    // take the next node in the seed
-    size_t next_offset = table[table_i].offset + 1;
-    bool in_seed = next_offset - seed_->get_offset() < seed_->get_sequence().size()
-                    && (next_offset < graph_->get_k() || force_fixed_seed);
-
     std::vector<std::tuple<node_index, char, score_t>> outgoing;
     DefaultColumnExtender::call_outgoing(node, max_prefetch_distance,
         [&](node_index next, char c, score_t score) {
@@ -253,9 +247,12 @@ void LabeledExtender
     if (outgoing.empty())
         return;
 
+    size_t next_offset = table[table_i].offset + 1;
     if (outgoing.size() == 1) {
         // Assume that annotations are preserved in unitigs. Violations of this
         // assumption are corrected after the next flush
+        bool in_seed = next_offset - seed_->get_offset() < seed_->get_sequence().size()
+                        && (next_offset < graph_->get_k() || force_fixed_seed);
         const auto &[next, c, score] = outgoing[0];
         node_labels_.emplace_back(!in_seed ? nannot : node_labels_[table_i]);
         callback(next, c, score);
