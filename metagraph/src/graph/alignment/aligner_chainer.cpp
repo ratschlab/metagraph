@@ -330,6 +330,7 @@ chain_seeds(const IDBGAligner &aligner,
         auto fetch_coords = buffer.get_coords(seeds[i].get_nodes()[0], false,
                                               &seeds[i].label_columns);
         assert(fetch_coords);
+        assert(fetch_coords->size() == seeds[i].label_columns.size());
 
         for (size_t j = 0; j < fetch_coords->size(); ++j) {
             Alignment::Column c = seeds[i].label_columns[j];

@@ -32,8 +32,9 @@ class AnnotationBuffer {
                      size_t row_batch_size = std::numeric_limits<size_t>::max(),
                      size_t max_coords_buffered = std::numeric_limits<size_t>::max());
 
-    void queue_path(std::vector<node_index>&& path) {
-        queued_paths_.push_back(std::move(path));
+    template <typename... Args>
+    inline void queue_path(Args&&... args) {
+        queued_paths_.emplace_back(std::forward<Args>(args)...);
     }
 
     // fetch annotations for the queued nodes from the buffer and reset the buffer

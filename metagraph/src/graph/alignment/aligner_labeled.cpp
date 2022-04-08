@@ -89,17 +89,46 @@ LabeledExtender::LabeledExtender(const IDBGAligner &aligner, std::string_view qu
                       dynamic_cast<const LabeledAligner<>&>(aligner).annotation_buffer_,
                       query) {}
 
-void LabeledExtender::flush() {
+void LabeledExtender::flush(size_t table_i, const std::vector<node_index> &outnodes) {
+    if (!table_i) {
+        // flush everything
+        for (size_t i = table.size(); i > 1; --i) {
+            if (node_labels_[i - 1] == nannot)
+                flush(i - 1);
+        }
+
+        return;
+    }
+
+    assert(node_labels_.size() == table.size());
+
+    // construct path
+    std::vector<node_index> path;
+    std::vector<size_t> table_path;
+    while (node_labels_[table_i] == nannot) {
+        assert(table[table_i].node != DeBruijnGraph::npos);
+        path.push_back(table[table_i].node);
+        table_path.push_back(table_i);
+        table_i = table[table_i].parent_i;
+    }
+
+    assert(table[table_i].node != DeBruijnGraph::npos);
+    path.push_back(table[table_i].node);
+    std::reverse(path.begin(), path.end());
+    annotation_buffer_.queue_path(std::move(path));
+    annotation_buffer_.queue_path(outnodes);
     annotation_buffer_.fetch_queued_annotations();
-    for ( ; last_flushed_table_i_ < table.size(); ++last_flushed_table_i_) {
-        auto &table_elem = table[last_flushed_table_i_];
+
+    for (auto it = table_path.rbegin(); it != table_path.rend(); ++it) {
+        size_t table_i = *it;
+        auto &table_elem = table[table_i];
 
         size_t parent_i = table_elem.parent_i;
-        assert(parent_i < last_flushed_table_i_);
+        assert(parent_i < table_i);
 
         auto clear = [&]() {
-            DEBUG_LOG("Removed table element {}", last_flushed_table_i_);
-            node_labels_[last_flushed_table_i_] = 0;
+            DEBUG_LOG("Removed table element {}", table_i);
+            node_labels_[table_i] = 0;
             std::fill(table_elem.S.begin(), table_elem.S.end(), config_.ninf);
             std::fill(table_elem.E.begin(), table_elem.E.end(), config_.ninf);
             std::fill(table_elem.F.begin(), table_elem.F.end(), config_.ninf);
@@ -141,7 +170,7 @@ void LabeledExtender::flush() {
         if (intersect_labels.empty()) {
             clear();
         } else {
-            node_labels_[last_flushed_table_i_]
+            node_labels_[table_i]
                 = annotation_buffer_.cache_column_set(std::move(intersect_labels));
         }
     }
@@ -155,9 +184,6 @@ bool LabeledExtender::set_seed(const Alignment &seed) {
                     [&](node_index n) {
                         return n == DeBruijnGraph::npos || annotation_buffer_.get_labels(n);
                     }));
-
-    // the first node of the seed has already been flushed
-    last_flushed_table_i_ = 1;
 
     remaining_labels_i_ = annotation_buffer_.cache_column_set(seed.label_columns);
     assert(remaining_labels_i_);
@@ -213,8 +239,6 @@ void LabeledExtender
     DefaultColumnExtender::call_outgoing(node, max_prefetch_distance,
         [&](node_index next, char c, score_t score) {
             outgoing.emplace_back(next, c, score);
-            if (!in_seed)
-                annotation_buffer_.queue_path({ next });
         },
         table_i, force_fixed_seed
     );
@@ -226,13 +250,20 @@ void LabeledExtender
         // Assume that annotations are preserved in unitigs. Violations of this
         // assumption are corrected after the next flush
         const auto &[next, c, score] = outgoing[0];
-        node_labels_.emplace_back(node_labels_[table_i]);
+        node_labels_.emplace_back(!in_seed ? nannot : node_labels_[table_i]);
         callback(next, c, score);
         return;
     }
 
+    std::vector<node_index> outnodes;
+    outnodes.reserve(outgoing.size());
+    for (const auto &[next, c, score] : outgoing) {
+        assert(next != DeBruijnGraph::npos);
+        outnodes.push_back(next);
+    }
+
     // flush the AnnotationBuffer and correct for annotation errors introduced above
-    flush();
+    flush(table_i, outnodes);
 
     if (!node_labels_[table_i])
         return;
@@ -265,10 +296,6 @@ void LabeledExtender
         return;
     }
 
-    std::vector<node_index> outnodes(outgoing.size());
-    for (const auto &[next, c, score] : outgoing) {
-        outnodes.push_back(next);
-    }
     annotation_buffer_.prefetch_coords(outnodes);
 
     // check label and coordinate consistency
@@ -538,7 +565,7 @@ auto LabeledAligner<Seeder, Extender, AlignmentCompare>
 
         auto add_seeds = [&](const auto &seeds) {
             for (const Seed &seed : seeds) {
-                annotation_buffer_.queue_path(std::vector<node_index>(seed.get_nodes()));
+                annotation_buffer_.queue_path(seed.get_nodes());
             }
         };
 

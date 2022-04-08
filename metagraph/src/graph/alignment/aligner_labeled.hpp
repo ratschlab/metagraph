@@ -84,19 +84,15 @@ class LabeledExtender : public DefaultColumnExtender {
     virtual void pop(size_t i) override final {
         assert(i < node_labels_.size());
         DefaultColumnExtender::pop(i);
-        last_flushed_table_i_ = std::min(i, last_flushed_table_i_);
         node_labels_.erase(node_labels_.begin() + i);
     }
 
     // this override flushes the AnnotationBuffer, and checks elements in the
     // dynamic programming table for label- (and coordinate-)consistency
-    void flush();
+    void flush(size_t table_i = 0, const std::vector<node_index> &outgoing = {});
 
     // stores annotations for nodes
     AnnotationBuffer &annotation_buffer_;
-
-    // index of the last dynamic programming table element whose node was flushed
-    size_t last_flushed_table_i_;
 
     // map each table element to a corresponding label set index
     std::vector<size_t> node_labels_;

@@ -341,37 +341,37 @@ auto AnnotationBuffer::get_coords(node_index node,
 
     size_t index = it - node_to_cols_.begin();
 
-    if (auto fetch = label_coords_cache_.TryGet(index))
-        return std::make_shared<const CoordinateSet>(std::move(*fetch));
+    auto coord_set = label_coords_cache_.TryGet(index);
+    if (!coord_set) {
+        if (skip_unfetched)
+            return {};
 
-    if (skip_unfetched)
-        return {};
+        node_index base_node = node;
 
-    node_index base_node = node;
+        // TODO: avoid this get_node_sequence call
+        if (graph_.get_mode() == DeBruijnGraph::CANONICAL && !canonical_)
+            base_node = map_to_nodes(graph_, graph_.get_node_sequence(node))[0];
 
-    // TODO: avoid this get_node_sequence call
-    if (graph_.get_mode() == DeBruijnGraph::CANONICAL && !canonical_)
-        base_node = map_to_nodes(graph_, graph_.get_node_sequence(node))[0];
+        auto fetch
+            = multi_int_->get_row_tuples(AnnotatedDBG::graph_to_anno_index(base_node));
+        std::sort(fetch.begin(), fetch.end());
+        coord_set = CoordinateSet{};
+        assert(fetch.size() == columns.size());
+        for (size_t i = 0; i < fetch.size(); ++i) {
+            auto &[column, coords] = fetch[i];
+            assert(column == columns[i]);
+            coord_set->emplace_back(coords.begin(), coords.end());
+        }
 
-    auto fetch
-        = multi_int_->get_row_tuples(AnnotatedDBG::graph_to_anno_index(base_node));
-    std::sort(fetch.begin(), fetch.end());
-    CoordinateSet coord_set;
-    assert(fetch.size() == columns.size());
-    for (size_t i = 0; i < fetch.size(); ++i) {
-        auto &[column, coords] = fetch[i];
-        assert(column == columns[i]);
-        coord_set.emplace_back(coords.begin(), coords.end());
+        label_coords_cache_.Put(index, *coord_set);
     }
 
-    label_coords_cache_.Put(index, coord_set);
-
     if (!label_subset)
-        return std::make_shared<const CoordinateSet>(std::move(coord_set));
+        return std::make_shared<const CoordinateSet>(std::move(*coord_set));
 
     Columns dummy;
     CoordinateSet coord_subset;
-    matched_intersection(columns.begin(), columns.end(), coord_set.begin(),
+    matched_intersection(columns.begin(), columns.end(), coord_set->begin(),
                          label_subset->begin(), label_subset->end(),
                          std::back_inserter(dummy),
                          std::back_inserter(coord_subset));
