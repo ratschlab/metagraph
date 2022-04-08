@@ -73,7 +73,7 @@ class MultiIntMatrix : public IntMatrix {
     get_row_tuples(const std::vector<Row> &rows) const = 0;
 
     virtual std::vector<RowTuples>
-    get_row_tuple_diffs(const std::vector<Row> &rows) const;
+    get_row_tuple_diffs(const std::vector<Row> &rows, const RowTuples *first_tuple = nullptr) const;
 };
 
 } // namespace matrix

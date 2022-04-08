@@ -47,9 +47,16 @@ IntMatrix::get_row_value_diffs(const std::vector<Row> &rows) const {
 }
 
 std::vector<MultiIntMatrix::RowTuples>
-MultiIntMatrix::get_row_tuple_diffs(const std::vector<Row> &rows) const {
-    if (rows.size() <= 1)
+MultiIntMatrix::get_row_tuple_diffs(const std::vector<Row> &rows, const RowTuples *first_tuple) const {
+    if (rows.empty())
+        return {};
+
+    if (rows.size() == 1) {
+        if (first_tuple)
+            return { *first_tuple };
+
         return get_row_tuples(rows);
+    }
 
     auto row_tuples = get_row_tuples(rows);
     std::vector<RowTuples> row_tuple_diffs(rows.size() - 1);

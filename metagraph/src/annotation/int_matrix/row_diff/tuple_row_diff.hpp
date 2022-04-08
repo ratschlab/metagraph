@@ -39,7 +39,7 @@ class TupleRowDiff : public binmat::IRowDiff, public MultiIntMatrix {
     std::vector<SetBitPositions> get_rows(const std::vector<Row> &row_ids) const override;
     RowTuples get_row_tuples(Row i) const override;
     std::vector<RowTuples> get_row_tuples(const std::vector<Row> &rows) const override;
-    std::vector<RowTuples> get_row_tuple_diffs(const std::vector<Row> &rows) const override;
+    std::vector<RowTuples> get_row_tuple_diffs(const std::vector<Row> &rows, const RowTuples *first_tuple = nullptr) const override;
 
     uint64_t num_columns() const override { return diffs_.num_columns(); }
     uint64_t num_relations() const override { return diffs_.num_relations(); }
@@ -135,19 +135,78 @@ TupleRowDiff<BaseMatrix>::get_row_tuples(const std::vector<Row> &row_ids) const 
 
 template <class BaseMatrix>
 std::vector<MultiIntMatrix::RowTuples>
-TupleRowDiff<BaseMatrix>::get_row_tuple_diffs(const std::vector<Row> &row_ids) const {
-    if (row_ids.size() <= 1)
+TupleRowDiff<BaseMatrix>::get_row_tuple_diffs(const std::vector<Row> &row_ids, const RowTuples *first_tuple) const {
+    if (row_ids.empty())
+        return {};
+
+    if (row_ids.size() == 1) {
+        if (first_tuple)
+            return { *first_tuple };
+
         return get_row_tuples(row_ids);
+    }
 
     assert(graph_ && "graph must be loaded");
     assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
     assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());
 
     // get row-diff paths
-    auto [rd_ids, rd_paths_trunc] = get_rd_ids(row_ids);
+    // diff rows annotating nodes along the row-diff paths
+    std::vector<Row> rd_ids;
+    rd_ids.reserve(row_ids.size() * binmat::RD_PATH_RESERVE_SIZE);
+    if (first_tuple) {
+        rd_ids.push_back(row_ids[0]);
+    }
+
+    // Truncated row-diff paths, indexes to |rd_rows|.
+    // The last index in each path points to an anchor or to a row which had
+    // been reached before, and thus, will be reconstructed before this one.
+    std::vector<std::vector<size_t>> rd_paths_trunc(row_ids.size());
 
     const graph::boss::BOSS &boss = graph_->get_boss();
     const bit_vector &rd_succ = fork_succ_.size() ? fork_succ_ : boss.get_last();
+
+    {
+        // map row index to its index in |rd_rows|
+        VectorMap<Row, size_t> node_to_rd;
+        node_to_rd.reserve(row_ids.size() * binmat::RD_PATH_RESERVE_SIZE);
+        size_t i = 0;
+        if (first_tuple) {
+            node_to_rd[row_ids[0]] = 0;
+            rd_paths_trunc[0].assign(1, 0);
+            ++i;
+        }
+
+        for ( ; i < row_ids.size(); ++i) {
+            Row row = row_ids[i];
+
+            graph::boss::BOSS::edge_index boss_edge = graph_->kmer_to_boss_index(
+                    graph::AnnotatedSequenceGraph::anno_to_graph_index(row));
+
+            while (true) {
+                row = graph::AnnotatedSequenceGraph::graph_to_anno_index(
+                        graph_->boss_to_kmer_index(boss_edge));
+
+                auto [it, is_new] = node_to_rd.try_emplace(row, rd_ids.size());
+                rd_paths_trunc[i].push_back(it.value());
+
+                // If a node had been reached before, we interrupt the diff path.
+                // The annotation for that node will have been reconstructed earlier
+                // than for other nodes in this path as well. Thus, we will start
+                // reconstruction from that node and don't need its successors.
+                if (!is_new)
+                    break;
+
+                rd_ids.push_back(row);
+
+                if (anchor_[row])
+                    break;
+
+                boss_edge = boss.row_diff_successor(boss_edge, rd_succ);
+            }
+        }
+    }
+
     std::vector<bool> next_is_succ(row_ids.size(), false);
     for (size_t i = 0; i < row_ids.size() - 1; ++i) {
         graph::boss::BOSS::edge_index boss_edge = graph_->kmer_to_boss_index(
@@ -157,12 +216,18 @@ TupleRowDiff<BaseMatrix>::get_row_tuple_diffs(const std::vector<Row> &row_ids) c
         next_is_succ[i] = (boss.row_diff_successor(boss_edge, rd_succ) == next_boss_edge);
     }
 
+    if (first_tuple)
+        rd_ids.erase(rd_ids.begin(), rd_ids.begin() + 1);
+
     std::vector<RowTuples> rd_rows = diffs_.get_row_tuples(rd_ids);
     for (auto &row : rd_rows) {
         decode_diffs(&row);
     }
 
     rd_ids = std::vector<Row>();
+
+    if (first_tuple)
+        rd_rows.insert(rd_rows.begin(), *first_tuple);
 
     // reconstruct annotation rows from row-diff
     std::vector<RowTuples> rows(row_ids.size());
@@ -206,6 +271,9 @@ TupleRowDiff<BaseMatrix>::get_row_tuple_diffs(const std::vector<Row> &row_ids) c
                     std::set_symmetric_difference(it->second.begin(), it->second.end(),
                                                   it2->second.begin(), it2->second.end(),
                                                   std::back_inserter(result_diff.back().second));
+                    if (result_diff.back().second.empty())
+                        result_diff.pop_back();
+
                     ++it;
                     ++it2;
                 }

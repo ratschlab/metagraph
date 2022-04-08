@@ -58,6 +58,28 @@ AnnotationBuffer::AnnotationBuffer(const DeBruijnGraph &graph,
     }
 }
 
+#ifndef NDEBUG
+bool check_coords(const annot::matrix::MultiIntMatrix &mat,
+                  annot::binmat::BinaryMatrix::Row row,
+                  const AnnotationBuffer::Columns &columns,
+                  const std::optional<const AnnotationBuffer::CoordinateSet> &coord_set = std::nullopt) {
+    assert(!coord_set || columns.size() == coord_set->size());
+    auto row_tuples = mat.get_row_tuples(row);
+    assert(row_tuples.size() == columns.size());
+
+    std::sort(row_tuples.begin(), row_tuples.end());
+    for (size_t i = 0; i < row_tuples.size(); ++i) {
+        const auto &[c, tuple] = row_tuples[i];
+        assert(c == columns[i]);
+        assert(std::is_sorted(tuple.begin(), tuple.end()));
+        assert(!coord_set
+            || std::equal(tuple.begin(), tuple.end(), (*coord_set)[i].begin(), (*coord_set)[i].end()));
+    }
+
+    return true;
+}
+#endif
+
 void AnnotationBuffer::fetch_queued_annotations() {
     assert(graph_.get_mode() != DeBruijnGraph::PRIMARY
                 && "PRIMARY graphs must be wrapped into CANONICAL");
@@ -79,6 +101,9 @@ void AnnotationBuffer::fetch_queued_annotations() {
         if (has_coordinates()) {
             for (auto&& tuples : multi_int_->get_row_tuples(queued_rows)) {
                 std::sort(tuples.begin(), tuples.end());
+                std::all_of(tuples.begin(), tuples.end(), [&](const auto &a) {
+                    return a.second.size();
+                });
                 assert(node_it != queued_nodes.end());
                 assert(node_to_cols_.count(*node_it));
                 assert(node_to_cols_.count(AnnotatedDBG::anno_to_graph_index(*row_it)));
@@ -86,6 +111,7 @@ void AnnotationBuffer::fetch_queued_annotations() {
                 Columns columns;
                 CoordinateSet coord_set;
                 columns.reserve(tuples.size());
+                coord_set.reserve(tuples.size());
                 for (auto&& [c, tuple] : tuples) {
                     columns.push_back(c);
                     coord_set.emplace_back(tuple.begin(), tuple.end());
@@ -225,44 +251,124 @@ void AnnotationBuffer::fetch_queued_annotations() {
 }
 
 void AnnotationBuffer::prefetch_coords(const std::vector<node_index> &nodes) const {
-    if (!has_coordinates())
+    if (!has_coordinates() || nodes.empty())
         return;
+
+    assert(graph_.get_mode() == DeBruijnGraph::BASIC && "coordinates only supported for BASIC graphs");
 
     std::vector<Row> rows;
     rows.reserve(nodes.size());
     std::vector<size_t> indices;
     indices.reserve(nodes.size());
+    std::vector<size_t> label_is;
+    label_is.reserve(nodes.size());
     for (node_index node : nodes) {
-        if (canonical_)
-            node = canonical_->get_base_node(node);
+        rows.emplace_back(AnnotatedDBG::graph_to_anno_index(node));
 
         auto it = node_to_cols_.find(node);
-        if (it == node_to_cols_.end() || it->second == nannot)
-            continue;
-
-        size_t index = it - node_to_cols_.begin();
-        if (label_coords_cache_.TryGet(index))
-            continue;
-
-        node_index base_node = node;
-
-        // TODO: avoid this get_node_sequence call
-        if (graph_.get_mode() == DeBruijnGraph::CANONICAL && !canonical_)
-            base_node = map_to_nodes(graph_, graph_.get_node_sequence(node))[0];
-
-        rows.emplace_back(AnnotatedDBG::graph_to_anno_index(base_node));
-        indices.emplace_back(index);
+        assert(it != node_to_cols_.end());
+        assert(it->second != nannot);
+        indices.emplace_back(it - node_to_cols_.begin());
+        label_is.emplace_back(it->second);
     }
 
-    auto it = indices.begin();
-    for (auto&& fetch : multi_int_->get_row_tuples(rows)) {
-        std::sort(fetch.begin(), fetch.end());
+    if (std::all_of(indices.begin(), indices.end(), [&](size_t index) {
+                return label_coords_cache_.Cached(index);
+            })) {
+        return;
+    }
+
+    auto id_it = indices.begin();
+    auto label_it = label_is.begin();
+    const Columns *columns = &column_sets_.data()[*label_it];
+
+    auto fetch = label_coords_cache_.TryGet(*id_it);
+    assert(check_coords(*multi_int_, rows[0], *columns, fetch));
+    if (!fetch) {
+        auto first_tuple = multi_int_->get_row_tuples(rows[0]);
+        std::all_of(first_tuple.begin(), first_tuple.end(), [&](const auto &a) {
+            return a.second.size();
+        });
+        std::sort(first_tuple.begin(), first_tuple.end());
         CoordinateSet coord_set;
-        for (auto&& [column, coords] : fetch) {
+        coord_set.reserve(first_tuple.size());
+        for (auto&& [column, coords] : first_tuple) {
             coord_set.emplace_back(coords.begin(), coords.end());
         }
-        label_coords_cache_.Put(*it, std::move(coord_set));
-        ++it;
+        fetch = coord_set;
+        assert(check_coords(*multi_int_, rows[0], *columns, fetch));
+        label_coords_cache_.Put(*id_it, std::move(coord_set));
+    }
+
+    // fetch diffs instead
+    assert(fetch);
+    assert(columns->size() == fetch->size());
+    annot::matrix::MultiIntMatrix::RowTuples first_tuples;
+    first_tuples.reserve(columns->size());
+    for (size_t i = 0; i < columns->size(); ++i) {
+        first_tuples.emplace_back((*columns)[i], annot::matrix::MultiIntMatrix::Tuple((*fetch)[i].begin(), (*fetch)[i].end()));
+    }
+
+    ++id_it;
+    ++label_it;
+    auto tuple_diffs = multi_int_->get_row_tuple_diffs(rows, &first_tuples);
+    assert(tuple_diffs[0] == first_tuples);
+
+    for (size_t i = 1; i < tuple_diffs.size(); ++i) {
+        auto &tuple_diff = tuple_diffs[i];
+        assert(std::is_sorted(tuple_diff.begin(), tuple_diff.end()));
+        columns = &column_sets_.data()[*label_it];
+        assert(*columns == multi_int_->get_row(nodes[i]));
+
+        for (auto &tuple : *fetch) {
+            for (auto &c : tuple) {
+                ++c;
+            }
+        }
+        if (tuple_diff.size()) {
+            CoordinateSet next_coord_set;
+            auto it = columns->begin();
+            auto it_c = fetch->begin();
+            auto jt = tuple_diff.begin();
+            while (it != columns->end() && jt != tuple_diff.end()) {
+                if (*it < jt->first) {
+                    next_coord_set.push_back(*it_c);
+                    ++it;
+                    ++it_c;
+                } else if (*it > jt->first) {
+                    next_coord_set.emplace_back(jt->second.begin(), jt->second.end());
+                    ++jt;
+                } else {
+                    next_coord_set.emplace_back();
+                    auto c_it = it_c->begin();
+                    auto d_it = jt->second.begin();
+                    while (c_it != it_c->end() && d_it != jt->second.end()) {
+                        int64_t d_coord = *d_it;
+                        if (*c_it < d_coord) {
+                            next_coord_set.back().emplace_back(*c_it);
+                            ++c_it;
+                        } else if (*c_it > d_coord) {
+                            next_coord_set.back().emplace_back(d_coord);
+                            ++d_it;
+                        }
+                    }
+                    std::copy(c_it, it_c->end(), std::back_inserter(next_coord_set.back()));
+                    std::copy(d_it, jt->second.end(), std::back_inserter(next_coord_set.back()));
+                    ++it;
+                    ++it_c;
+                    ++jt;
+                }
+
+            }
+            std::copy(it_c, fetch->end(), std::back_inserter(next_coord_set));
+            std::transform(jt, tuple_diff.end(), std::back_inserter(next_coord_set),
+                           [&](const auto &t) { return CoordinateSet::value_type(t.second.begin(), t.second.end()); });
+            std::swap(*fetch, next_coord_set);
+        }
+        assert(check_coords(*multi_int_, rows[i], *columns, *fetch));
+        label_coords_cache_.Put(*id_it, *fetch);
+        ++id_it;
+        ++label_it;
     }
 }
 
@@ -289,7 +395,7 @@ auto AnnotationBuffer::get_coords_from_it(VectorMap<node_index, size_t>::const_i
         -> std::shared_ptr<const CoordinateSet> {
     assert(has_coordinates());
     assert(it != node_to_cols_.end());
-    assert(it->second == nannot);
+    assert(it->second != nannot);
 
     const auto &columns = column_sets_.data()[it->second];
 
@@ -303,15 +409,8 @@ auto AnnotationBuffer::get_coords_from_it(VectorMap<node_index, size_t>::const_i
         if (skip_unfetched)
             return {};
 
-        node_index node = it->first;
-        node_index base_node = node;
-
-        // TODO: avoid this get_node_sequence call
-        if (graph_.get_mode() == DeBruijnGraph::CANONICAL && !canonical_)
-            base_node = map_to_nodes(graph_, graph_.get_node_sequence(node))[0];
-
         auto fetch
-            = multi_int_->get_row_tuples(AnnotatedDBG::graph_to_anno_index(base_node));
+            = multi_int_->get_row_tuples(AnnotatedDBG::graph_to_anno_index(it->first));
         std::sort(fetch.begin(), fetch.end());
         coord_set = CoordinateSet{};
         assert(fetch.size() == columns.size());
@@ -323,6 +422,8 @@ auto AnnotationBuffer::get_coords_from_it(VectorMap<node_index, size_t>::const_i
 
         label_coords_cache_.Put(index, *coord_set);
     }
+
+    assert(check_coords(*multi_int_, AnnotatedDBG::graph_to_anno_index(it->first), columns, *coord_set));
 
     if (!label_subset)
         return std::make_shared<const CoordinateSet>(std::move(*coord_set));
@@ -343,8 +444,7 @@ auto AnnotationBuffer::get_coords(node_index node,
     if (!has_coordinates())
         return {};
 
-    if (canonical_)
-        node = canonical_->get_base_node(node);
+    assert(graph_.get_mode() == DeBruijnGraph::BASIC && "coordinates only supported for BASIC graphs");
 
     auto it = node_to_cols_.find(node);
 
