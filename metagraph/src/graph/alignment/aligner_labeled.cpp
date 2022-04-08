@@ -116,14 +116,16 @@ void LabeledExtender::flush(size_t table_i, const std::vector<node_index> &outno
     path.push_back(table[table_i].node);
     std::reverse(path.begin(), path.end());
     annotation_buffer_.queue_path(std::move(path));
-    annotation_buffer_.queue_path(outnodes);
+    for (node_index next : outnodes) {
+        annotation_buffer_.queue_path(1, next);
+    }
     annotation_buffer_.fetch_queued_annotations();
 
+    size_t parent_i = table_i;
     for (auto it = table_path.rbegin(); it != table_path.rend(); ++it) {
         size_t table_i = *it;
         auto &table_elem = table[table_i];
 
-        size_t parent_i = table_elem.parent_i;
         assert(parent_i < table_i);
 
         auto clear = [&]() {
@@ -136,11 +138,14 @@ void LabeledExtender::flush(size_t table_i, const std::vector<node_index> &outno
 
         if (!node_labels_[parent_i]) {
             clear();
+            std::swap(table_i, parent_i);
             continue;
         }
 
-        if (table_elem.node == DeBruijnGraph::npos)
+        if (table_elem.node == DeBruijnGraph::npos) {
+            std::swap(table_i, parent_i);
             continue;
+        }
 
         const auto &parent_labels
             = annotation_buffer_.get_cached_column_set(node_labels_[parent_i]);
@@ -173,6 +178,8 @@ void LabeledExtender::flush(size_t table_i, const std::vector<node_index> &outno
             node_labels_[table_i]
                 = annotation_buffer_.cache_column_set(std::move(intersect_labels));
         }
+
+        std::swap(table_i, parent_i);
     }
 }
 
