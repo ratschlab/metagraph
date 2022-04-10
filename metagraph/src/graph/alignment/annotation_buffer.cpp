@@ -5,6 +5,7 @@
 #include "graph/representation/canonical_dbg.hpp"
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
 #include "common/utils/template_utils.hpp"
+#include "common/algorithms.hpp"
 
 namespace mtg {
 namespace graph {
@@ -78,7 +79,168 @@ bool check_coords(const annot::matrix::MultiIntMatrix &mat,
 
     return true;
 }
+
+template <class T>
+inline T sorted(T&& v) {
+    std::sort(v.begin(), v.end());
+    return v;
+}
+
 #endif
+
+auto AnnotationBuffer
+::get_label_and_coord_diff(node_index node, node_index next)
+        -> std::pair<Columns, std::shared_ptr<const CoordinateSet>> {
+    node_index a = node;
+    node_index b = next;
+    if (canonical_) {
+        a = canonical_->get_base_node(node);
+        b = canonical_->get_base_node(next);
+    } else if (graph_.get_mode() == DeBruijnGraph::CANONICAL) {
+        a = map_to_nodes(graph_, graph_.get_node_sequence(node))[0];
+        b = map_to_nodes(graph_, graph_.get_node_sequence(next))[0];
+    }
+
+    auto find_a = node_to_cols_.find(a);
+    assert(find_a != node_to_cols_.end());
+    size_t labels_a = find_a->second;
+
+    bool flipped = false;
+    if (dynamic_cast<const RCDBG*>(&graph_) || (a != node && b != next)) {
+        std::swap(a, b);
+        flipped = true;
+    }
+
+    auto row_a = AnnotatedDBG::graph_to_anno_index(a);
+    auto row_b = AnnotatedDBG::graph_to_anno_index(b);
+
+    std::pair<Columns, std::shared_ptr<CoordinateSet>> ret_val;
+    auto &[columns, coords] = ret_val;
+
+    if (has_coordinates()) {
+        Columns next_columns;
+        CoordinateSet next_coords;
+        auto diff = multi_int_->get_row_tuple_diff(row_a, row_b);
+        assert(std::is_sorted(diff.begin(), diff.end()));
+        next_columns.reserve(diff.size());
+        next_coords.reserve(diff.size());
+        for (auto&& [c, tuple] : diff) {
+            assert(std::is_sorted(tuple.begin(), tuple.end()));
+            next_columns.push_back(c);
+            next_coords.emplace_back(tuple.begin(), tuple.end());
+        }
+
+        std::swap(next_columns, columns);
+        coords = std::make_shared<CoordinateSet>(std::move(next_coords));
+    } else {
+        columns = annotator_.get_matrix().get_diff(row_a, row_b);
+        assert(std::is_sorted(columns.begin(), columns.end()));
+    }
+
+    if (flipped) {
+        std::swap(a, b);
+#ifndef NDEBUG
+        std::swap(row_a, row_b);
+#endif
+        for (auto &tuple : *coords) {
+            for (auto &c : tuple) {
+                ++c;
+            }
+        }
+    }
+
+    auto find_b = node_to_cols_.find(b);
+    if (find_b == node_to_cols_.end() || find_b->second == nannot) {
+        if (columns.size()) {
+            const auto &node_columns = column_sets_.data()[labels_a];
+            Columns next_columns;
+            if (coords) {
+                auto node_coords = get_coords_from_it(find_a, false);
+                utils::match_indexed_values(
+                    node_columns.begin(), node_columns.end(), node_coords->begin(),
+                    columns.begin(), columns.end(), coords->begin(),
+                    [&](Column c, const auto &coords, const auto &other_coords) {
+                        if (other_coords.size()) {
+                            Alignment::Tuple ssd_coord;
+                            std::set_symmetric_difference(coords.begin(), coords.end(),
+                                                          other_coords.begin(), other_coords.end(),
+                                                          std::back_inserter(ssd_coord));
+                            std::cerr << "\t\tcheck\t" << c << "\t" << coords.size() << "\t" << other_coords.size() << "\t" << ssd_coord.size() << "\n";
+                            std::cerr << "\t\t\tttt\t" << coords[0] << "\t" << other_coords[0] << "\n";
+                            if (ssd_coord.size())
+                                next_columns.push_back(c);
+                        }
+                    },
+                    [&](Column c, const auto &coords) {
+                        assert(coords.size());
+                        next_columns.push_back(c);
+                    },
+                    [&](Column c, const auto &coords) {
+                        if (coords.size())
+                            next_columns.push_back(c);
+                    }
+                );
+            } else {
+                std::set_symmetric_difference(node_columns.begin(), node_columns.end(),
+                                              columns.begin(), columns.end(),
+                                              std::back_inserter(next_columns));
+            }
+
+            std::cerr << "FOO\t" << graph_.get_node_sequence(node) << "\t" << graph_.get_node_sequence(next) << "\t" << flipped << "\n";
+            auto real_next_columns = sorted(annotator_.get_matrix().get_row(row_b));
+            for (size_t i = 0; i < real_next_columns.size(); ++i) {
+                std::cerr << "\t" << real_next_columns[i];
+            }
+            std::cerr << "\n";
+            for (size_t i = 0; i < next_columns.size(); ++i) {
+                std::cerr << "\t" << next_columns[i];
+            }
+            std::cerr << "\n";
+
+            assert(next_columns == sorted(annotator_.get_matrix().get_row(row_b)));
+
+            labels_a = next_columns.size()
+                ? cache_column_set(std::move(next_columns))
+                : 0;
+        }
+
+
+        auto [it, inserted] = node_to_cols_.try_emplace(b, labels_a);
+        if (!inserted)
+            it.value() = labels_a;
+
+        if (b != next) {
+            auto [it, inserted] = node_to_cols_.try_emplace(next, labels_a);
+            if (!inserted)
+                it.value() = labels_a;
+        }
+    }
+
+    return ret_val;
+}
+
+bool AnnotationBuffer::set_node_labels(node_index node, size_t label_i) {
+    node_index base_node = node;
+    if (canonical_) {
+        base_node = canonical_->get_base_node(node);
+        node = base_node;
+    } else if (graph_.get_mode() == DeBruijnGraph::CANONICAL) {
+        base_node = map_to_nodes(graph_, graph_.get_node_sequence(node))[0];
+    }
+
+    auto [it, inserted] = node_to_cols_.try_emplace(node, label_i);
+    if (!inserted)
+        it.value() = label_i;
+
+    if (base_node != node) {
+        auto [jt, inserted_j] = node_to_cols_.try_emplace(base_node, label_i);
+        inserted |= inserted_j;
+        if (!inserted_j)
+            jt.value() = label_i;
+    }
+
+    return inserted;
+}
 
 void AnnotationBuffer::fetch_queued_annotations() {
     assert(graph_.get_mode() != DeBruijnGraph::PRIMARY

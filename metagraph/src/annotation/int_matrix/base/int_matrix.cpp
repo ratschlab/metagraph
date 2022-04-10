@@ -46,6 +46,47 @@ IntMatrix::get_row_value_diffs(const std::vector<Row> &rows) const {
     return row_value_diffs;
 }
 
+MultiIntMatrix::RowTuples MultiIntMatrix::get_row_tuple_diff(Row a, Row b) const {
+    auto row_tuples = get_row_tuples(std::vector<Row>{ a, b });
+    for (auto &[j, tuple] : row_tuples[0]) {
+        for (auto &c : tuple) {
+            c += 1;
+        }
+    }
+    std::sort(row_tuples[0].begin(), row_tuples[0].end());
+    std::sort(row_tuples[1].begin(), row_tuples[1].end());
+
+    RowTuples result;
+    auto it = row_tuples[1].begin();
+    auto it2 = row_tuples[0].begin();
+    while (it != row_tuples[1].end() && it2 != row_tuples[0].end()) {
+        if (it->first < it2->first) {
+            assert(std::is_sorted(it->second.begin(), it->second.end()));
+            result.push_back(*it);
+            ++it;
+        } else if (it->first > it2->first) {
+            assert(std::is_sorted(it2->second.begin(), it2->second.end()));
+            result.push_back(*it2);
+            ++it2;
+        } else {
+            assert(std::is_sorted(it->second.begin(), it->second.end()));
+            assert(std::is_sorted(it2->second.begin(), it2->second.end()));
+            result.emplace_back(it->first, Tuple{});
+            std::set_symmetric_difference(it->second.begin(), it->second.end(),
+                                          it2->second.begin(), it2->second.end(),
+                                          std::back_inserter(result.back().second));
+            if (result.back().second.empty())
+                result.pop_back();
+
+            ++it;
+            ++it2;
+        }
+    }
+    std::copy(it, row_tuples[1].end(), std::back_inserter(result));
+    std::copy(it2, row_tuples[0].end(), std::back_inserter(result));
+    return result;
+}
+
 std::vector<MultiIntMatrix::RowTuples>
 MultiIntMatrix::get_row_tuple_diffs(const std::vector<Row> &rows, const RowTuples *first_tuple) const {
     if (rows.empty())

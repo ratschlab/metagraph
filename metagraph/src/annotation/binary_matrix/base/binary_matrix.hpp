@@ -32,6 +32,7 @@ class BinaryMatrix {
     // row is in [0, num_rows), column is in [0, num_columns)
     virtual bool get(Row row, Column column) const = 0;
     virtual SetBitPositions get_row(Row row) const = 0;
+    virtual SetBitPositions get_diff(Row a, Row b) const;
     virtual std::vector<SetBitPositions> get_diffs(const std::vector<Row> &rows) const;
     virtual std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const;
     virtual std::vector<Row> get_column(Column column) const = 0;

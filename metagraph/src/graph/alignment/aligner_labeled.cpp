@@ -251,10 +251,87 @@ void LabeledExtender
     if (outgoing.size() == 1) {
         // Assume that annotations are preserved in unitigs. Violations of this
         // assumption are corrected after the next flush
+        const auto &[next, c, score] = outgoing[0];
         bool in_seed = next_offset - seed_->get_offset() < seed_->get_sequence().size()
                         && (next_offset < graph_->get_k() || force_fixed_seed);
-        const auto &[next, c, score] = outgoing[0];
-        node_labels_.emplace_back(!in_seed ? nannot : node_labels_[table_i]);
+        if (in_seed) {
+            node_labels_.emplace_back(node_labels_[table_i]);
+        } else {
+            auto [column_diff, coord_diff] = annotation_buffer_.get_label_and_coord_diff(node, next);
+            if (column_diff.empty()) {
+                node_labels_.emplace_back(node_labels_[table_i]);
+            } else if (coord_diff) {
+                Columns next_columns;
+                size_t dist = next_offset - graph_->get_k() + 1;
+                if (dynamic_cast<const RCDBG*>(graph_))
+                    dist *= -1;
+
+                auto b_it = seed_->label_columns.begin();
+                auto b_c_it = base_coords_.begin();
+                const auto &columns = annotation_buffer_.get_cached_column_set(node_labels_[table_i]);
+                auto c_it = columns.begin();
+
+                auto d_it = column_diff.begin();
+                auto d_c_it = coord_diff->begin();
+
+                while (c_it != columns.end()) {
+                    assert(b_it != seed_->label_columns.end());
+                    while (*b_it < *c_it) {
+                        ++b_it;
+                        ++b_c_it;
+                        assert(b_it != seed_->label_columns.end());
+                    }
+                    assert(*b_it == *c_it);
+                    while (d_it != column_diff.end() && *d_it < *c_it) {
+                        ++d_it;
+                        ++d_c_it;
+                    }
+
+                    if (d_it == column_diff.end() || *d_it > *c_it) {
+                        next_columns.push_back(*c_it);
+
+                    } else {
+                        assert(*d_it == *c_it);
+                        if (d_c_it->size()) {
+                            Alignment::Tuple next_tuple;
+                            utils::set_difference(b_c_it->begin(), b_c_it->end(),
+                                                  d_c_it->begin(), d_c_it->end(),
+                                                  std::back_inserter(next_tuple),
+                                                  dist);
+                            if (next_tuple.size())
+                                next_columns.push_back(*c_it);
+                        }
+
+                        ++d_it;
+                        ++d_c_it;
+                    }
+                    ++c_it;
+                    ++b_it;
+                    ++b_c_it;
+                }
+
+                if (next_columns.empty())
+                    return;
+
+                size_t next_label_i = annotation_buffer_.cache_column_set(std::move(next_columns));
+                node_labels_.emplace_back(next_label_i);
+                // annotation_buffer_.set_node_labels(next, next_label_i);
+
+            } else {
+                const auto &columns = annotation_buffer_.get_cached_column_set(node_labels_[table_i]);
+                Columns next_columns;
+                std::set_difference(columns.begin(), columns.end(),
+                                    column_diff.begin(), column_diff.end(),
+                                    std::back_inserter(next_columns));
+
+                if (next_columns.empty())
+                    return;
+
+                size_t next_label_i = annotation_buffer_.cache_column_set(std::move(next_columns));
+                node_labels_.emplace_back(next_label_i);
+                // annotation_buffer_.set_node_labels(next, next_label_i);
+            }
+        }
         callback(next, c, score);
         return;
     }

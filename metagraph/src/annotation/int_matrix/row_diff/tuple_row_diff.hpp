@@ -40,6 +40,7 @@ class TupleRowDiff : public binmat::IRowDiff, public MultiIntMatrix {
     RowTuples get_row_tuples(Row i) const override;
     std::vector<RowTuples> get_row_tuples(const std::vector<Row> &rows) const override;
     std::vector<RowTuples> get_row_tuple_diffs(const std::vector<Row> &rows, const RowTuples *first_tuple = nullptr) const override;
+    RowTuples get_row_tuple_diff(Row a, Row b) const override;
 
     uint64_t num_columns() const override { return diffs_.num_columns(); }
     uint64_t num_relations() const override { return diffs_.num_relations(); }
@@ -131,6 +132,47 @@ TupleRowDiff<BaseMatrix>::get_row_tuples(const std::vector<Row> &row_ids) const 
     }
 
     return rows;
+}
+
+template <class BaseMatrix>
+MultiIntMatrix::RowTuples TupleRowDiff<BaseMatrix>::get_row_tuple_diff(Row a, Row b) const {
+    if (anchor_[a])
+        return MultiIntMatrix::get_row_tuple_diff(a, b);
+
+    graph::boss::BOSS::edge_index boss_edge_a = graph_->kmer_to_boss_index(
+                    graph::AnnotatedSequenceGraph::anno_to_graph_index(a));
+    graph::boss::BOSS::edge_index boss_edge_b = graph_->kmer_to_boss_index(
+                    graph::AnnotatedSequenceGraph::anno_to_graph_index(b));
+
+    const graph::boss::BOSS &boss = graph_->get_boss();
+    const bit_vector &rd_succ = fork_succ_.size() ? fork_succ_ : boss.get_last();
+
+    if (boss_edge_b == boss.row_diff_successor(boss_edge_a, rd_succ)) {
+        auto result = diffs_.get_row_tuples(a);
+        decode_diffs(&result);
+        std::sort(result.begin(), result.end());
+        std::cerr << "FIRST\t";
+        for (auto &[c, tuple] : result) {
+            std::cerr << c << ":";
+            for (auto t : tuple) {
+                std::cerr << t << ",";
+            }
+            std::cerr << "\t";
+        }
+        std::cerr << "SECOND\t";
+        for (auto &[c, tuple] : MultiIntMatrix::get_row_tuple_diff(a, b)) {
+            std::cerr << c << ":";
+            for (auto t : tuple) {
+                std::cerr << t << ",";
+            }
+            std::cerr << "\t";
+        }
+        std::cerr << "\n";
+        assert(result == MultiIntMatrix::get_row_tuple_diff(a, b));
+        return result;
+    }
+
+    return MultiIntMatrix::get_row_tuple_diff(a, b);
 }
 
 template <class BaseMatrix>
