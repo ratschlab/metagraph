@@ -90,7 +90,7 @@ inline T sorted(T&& v) {
 
 auto AnnotationBuffer
 ::get_label_and_coord_diff(node_index node, node_index next)
-        -> std::pair<Columns, std::shared_ptr<const CoordinateSet>> {
+        -> std::pair<Columns, std::shared_ptr<CoordinateSet>> {
     node_index a = node;
     node_index b = next;
     if (canonical_) {
@@ -106,10 +106,10 @@ auto AnnotationBuffer
     size_t labels_a = find_a->second;
 
     bool flipped = false;
-    if (dynamic_cast<const RCDBG*>(&graph_) || (a != node && b != next)) {
-        std::swap(a, b);
-        flipped = true;
-    }
+    // if (dynamic_cast<const RCDBG*>(&graph_) || (a != node && b != next)) {
+    //     std::swap(a, b);
+    //     flipped = true;
+    // }
 
     auto row_a = AnnotatedDBG::graph_to_anno_index(a);
     auto row_b = AnnotatedDBG::graph_to_anno_index(b);
@@ -156,29 +156,29 @@ auto AnnotationBuffer
             Columns next_columns;
             if (coords) {
                 auto node_coords = get_coords_from_it(find_a, false);
+                for (auto &tuple : *node_coords) {
+                    for (auto &c : tuple) {
+                        ++c;
+                    }
+                }
                 utils::match_indexed_values(
                     node_columns.begin(), node_columns.end(), node_coords->begin(),
                     columns.begin(), columns.end(), coords->begin(),
                     [&](Column c, const auto &coords, const auto &other_coords) {
-                        if (other_coords.size()) {
-                            Alignment::Tuple ssd_coord;
-                            std::set_symmetric_difference(coords.begin(), coords.end(),
-                                                          other_coords.begin(), other_coords.end(),
-                                                          std::back_inserter(ssd_coord));
-                            std::cerr << "\t\tcheck\t" << c << "\t" << coords.size() << "\t" << other_coords.size() << "\t" << ssd_coord.size() << "\n";
-                            std::cerr << "\t\t\tttt\t" << coords[0] << "\t" << other_coords[0] << "\n";
-                            if (ssd_coord.size())
-                                next_columns.push_back(c);
-                        }
-                    },
-                    [&](Column c, const auto &coords) {
-                        assert(coords.size());
-                        next_columns.push_back(c);
-                    },
-                    [&](Column c, const auto &coords) {
-                        if (coords.size())
+                        // if other_coords is empty, then it means that there
+                        // was a column in next, but not in node
+                        assert(other_coords.size());
+                        Alignment::Tuple ssd_coord;
+                        std::set_symmetric_difference(coords.begin(), coords.end(),
+                                                      other_coords.begin(), other_coords.end(),
+                                                      std::back_inserter(ssd_coord));
+                        std::cerr << "\t\tcheck\t" << c << "\t" << coords.size() << "\t" << other_coords.size() << "\t" << ssd_coord.size() << "\n";
+                        std::cerr << "\t\t\tttt\t" << coords[0] << "\t" << other_coords[0] << "\n";
+                        if (ssd_coord.size())
                             next_columns.push_back(c);
-                    }
+                    },
+                    [&](Column c, const auto &) { next_columns.push_back(c); },
+                    [&](Column c, const auto &) { next_columns.push_back(c); }
                 );
             } else {
                 std::set_symmetric_difference(node_columns.begin(), node_columns.end(),
@@ -535,7 +535,7 @@ void AnnotationBuffer::prefetch_coords(const std::vector<node_index> &nodes) con
 }
 
 auto AnnotationBuffer::get_labels_and_coords(node_index node, bool skip_unfetched) const
-        -> std::pair<const Columns*, std::shared_ptr<const CoordinateSet>> {
+        -> std::pair<const Columns*, std::shared_ptr<CoordinateSet>> {
     if (canonical_)
         node = canonical_->get_base_node(node);
 
@@ -548,13 +548,13 @@ auto AnnotationBuffer::get_labels_and_coords(node_index node, bool skip_unfetche
 
     return std::make_pair(&column_sets_.data()[it->second],
                           has_coordinates() ? get_coords_from_it(it, skip_unfetched)
-                                            : std::shared_ptr<const CoordinateSet>{});
+                                            : std::shared_ptr<CoordinateSet>{});
 }
 
 auto AnnotationBuffer::get_coords_from_it(VectorMap<node_index, size_t>::const_iterator it,
                                           bool skip_unfetched,
                                           const Columns *label_subset) const
-        -> std::shared_ptr<const CoordinateSet> {
+        -> std::shared_ptr<CoordinateSet> {
     assert(has_coordinates());
     assert(it != node_to_cols_.end());
     assert(it->second != nannot);
@@ -588,7 +588,7 @@ auto AnnotationBuffer::get_coords_from_it(VectorMap<node_index, size_t>::const_i
     assert(check_coords(*multi_int_, AnnotatedDBG::graph_to_anno_index(it->first), columns, *coord_set));
 
     if (!label_subset)
-        return std::make_shared<const CoordinateSet>(std::move(*coord_set));
+        return std::make_shared<CoordinateSet>(std::move(*coord_set));
 
     Columns dummy;
     CoordinateSet coord_subset;
@@ -596,13 +596,13 @@ auto AnnotationBuffer::get_coords_from_it(VectorMap<node_index, size_t>::const_i
                          label_subset->begin(), label_subset->end(),
                          std::back_inserter(dummy),
                          std::back_inserter(coord_subset));
-    return std::make_shared<const CoordinateSet>(std::move(coord_subset));
+    return std::make_shared<CoordinateSet>(std::move(coord_subset));
 }
 
 auto AnnotationBuffer::get_coords(node_index node,
                                   bool skip_unfetched,
                                   const Columns *label_subset) const
-        -> std::shared_ptr<const CoordinateSet> {
+        -> std::shared_ptr<CoordinateSet> {
     if (!has_coordinates())
         return {};
 

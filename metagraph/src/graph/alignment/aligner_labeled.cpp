@@ -392,10 +392,11 @@ void LabeledExtender
             std::shared_ptr<const CoordinateSet>{}, &base_coords_
         };
 
-        auto [next_labels, next_coords]
+        auto [next_labels, next_coords_mut]
             = annotation_buffer_.get_labels_and_coords(next, false);
 
-        assert(next_coords);
+        assert(next_coords_mut);
+        std::shared_ptr<const CoordinateSet> next_coords = next_coords_mut;
 
         // if we are traversing backwards, then negate the coordinate delta
         if (dynamic_cast<const RCDBG*>(graph_)) {
@@ -479,10 +480,11 @@ void LabeledExtender::call_alignments(score_t end_score,
                                               end_score, offset, extra_score);
     alignment.label_encoder = &annotation_buffer_.get_annotator().get_label_encoder();
 
-    auto [base_labels, base_coords]
+    auto [base_labels, base_coords_mut]
         = annotation_buffer_.get_labels_and_coords(alignment.get_nodes().front(), !clipping);
     assert(base_labels);
     assert(base_labels->size());
+    std::shared_ptr<const CoordinateSet> base_coords = base_coords_mut;
 
     if (!clipping)
         base_labels = &seed_->label_columns;
@@ -538,12 +540,13 @@ void LabeledExtender::call_alignments(score_t end_score,
             }
         }
     } else {
-        auto [cur_labels, cur_coords]
+        auto [cur_labels, cur_coords_mut]
             = annotation_buffer_.get_labels_and_coords(alignment.get_nodes().back(), false);
         assert(cur_labels);
         assert(cur_labels->size());
-        assert(cur_coords);
-        assert(cur_coords->size());
+        assert(cur_coords_mut);
+        assert(cur_coords_mut->size());
+        std::shared_ptr<const CoordinateSet> cur_coords = cur_coords_mut;
         if (dynamic_cast<const RCDBG*>(graph_)) {
             std::swap(cur_labels, base_labels);
             std::swap(cur_coords, base_coords);
