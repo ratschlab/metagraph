@@ -89,7 +89,7 @@ inline T sorted(T&& v) {
 #endif
 
 auto AnnotationBuffer
-::get_label_and_coord_diff(node_index node, node_index next)
+::get_label_and_coord_diff(node_index node, node_index next, bool flipped)
         -> std::pair<Columns, std::shared_ptr<CoordinateSet>> {
     node_index a = node;
     node_index b = next;
@@ -105,11 +105,10 @@ auto AnnotationBuffer
     assert(find_a != node_to_cols_.end());
     size_t labels_a = find_a->second;
 
-    bool flipped = false;
-    // if (dynamic_cast<const RCDBG*>(&graph_) || (a != node && b != next)) {
-    //     std::swap(a, b);
-    //     flipped = true;
-    // }
+    if (flipped || (a != node && b != next)) {
+        std::swap(a, b);
+        flipped = true;
+    }
 
     auto row_a = AnnotatedDBG::graph_to_anno_index(a);
     auto row_b = AnnotatedDBG::graph_to_anno_index(b);

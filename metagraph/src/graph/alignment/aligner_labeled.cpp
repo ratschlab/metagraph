@@ -257,14 +257,15 @@ void LabeledExtender
         if (in_seed) {
             node_labels_.emplace_back(node_labels_[table_i]);
         } else {
-            auto [column_diff, coord_diff] = annotation_buffer_.get_label_and_coord_diff(node, next);
+            bool flipped = dynamic_cast<const RCDBG*>(graph_);
+            auto [column_diff, coord_diff] = annotation_buffer_.get_label_and_coord_diff(node, next, flipped);
             if (column_diff.empty()) {
                 node_labels_.emplace_back(node_labels_[table_i]);
             } else if (coord_diff) {
                 Columns next_columns;
-                size_t dist = next_offset - graph_->get_k() + 1;
-                if (dynamic_cast<const RCDBG*>(graph_))
-                    dist *= -1;
+                ssize_t dist = next_offset - graph_->get_k() + 1;
+                if (flipped)
+                    dist = dist * -1;
 
                 auto b_it = seed_->label_columns.begin();
                 auto b_c_it = base_coords_.begin();
