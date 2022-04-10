@@ -56,28 +56,11 @@ MultiIntMatrix::RowTuples MultiIntMatrix::get_row_tuple_diff(Row a, Row b) const
     std::sort(row_tuples[0].begin(), row_tuples[0].end());
     std::sort(row_tuples[1].begin(), row_tuples[1].end());
 
-    std::cerr << "A";
-    for (auto &[c, tuple] : row_tuples[0]) {
-        std::cerr << "\t" << c << ":";
-        for (auto &co : tuple) {
-            std::cerr << co << ",";
-        }
-    }
-    std::cerr << "\tB";
-    for (auto &[c, tuple] : row_tuples[1]) {
-        std::cerr << "\t" << c << ":";
-        for (auto &co : tuple) {
-            std::cerr << co << ",";
-        }
-    }
-    std::cerr << "\n";
-
     RowTuples result;
     auto it = row_tuples[1].begin();
     auto it2 = row_tuples[0].begin();
     while (it != row_tuples[1].end() && it2 != row_tuples[0].end()) {
         if (it->first < it2->first) {
-            // assert(std::is_sorted(it->second.begin(), it->second.end()));
             result.emplace_back(it->first, Tuple{});
             ++it;
         } else if (it->first > it2->first) {

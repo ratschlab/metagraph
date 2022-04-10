@@ -292,15 +292,14 @@ void LabeledExtender
 
                     } else {
                         assert(*d_it == *c_it);
-                        if (d_c_it->size()) {
-                            Alignment::Tuple next_tuple;
-                            utils::set_difference(b_c_it->begin(), b_c_it->end(),
-                                                  d_c_it->begin(), d_c_it->end(),
-                                                  std::back_inserter(next_tuple),
-                                                  dist);
-                            if (next_tuple.size())
-                                next_columns.push_back(*c_it);
-                        }
+                        assert(d_c_it->size());
+                        Alignment::Tuple next_tuple;
+                        utils::set_difference(b_c_it->begin(), b_c_it->end(),
+                                              d_c_it->begin(), d_c_it->end(),
+                                              std::back_inserter(next_tuple),
+                                              dist);
+                        if (next_tuple.size())
+                            next_columns.push_back(*c_it);
 
                         ++d_it;
                         ++d_c_it;
@@ -315,7 +314,6 @@ void LabeledExtender
 
                 size_t next_label_i = annotation_buffer_.cache_column_set(std::move(next_columns));
                 node_labels_.emplace_back(next_label_i);
-                // annotation_buffer_.set_node_labels(next, next_label_i);
 
             } else {
                 const auto &columns = annotation_buffer_.get_cached_column_set(node_labels_[table_i]);
@@ -329,7 +327,6 @@ void LabeledExtender
 
                 size_t next_label_i = annotation_buffer_.cache_column_set(std::move(next_columns));
                 node_labels_.emplace_back(next_label_i);
-                // annotation_buffer_.set_node_labels(next, next_label_i);
             }
         }
         callback(next, c, score);

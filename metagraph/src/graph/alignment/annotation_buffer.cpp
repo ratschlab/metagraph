@@ -168,13 +168,7 @@ auto AnnotationBuffer
                         // if other_coords is empty, then it means that there
                         // was a column in next, but not in node
                         assert(other_coords.size());
-                        Alignment::Tuple ssd_coord;
-                        std::set_symmetric_difference(coords.begin(), coords.end(),
-                                                      other_coords.begin(), other_coords.end(),
-                                                      std::back_inserter(ssd_coord));
-                        std::cerr << "\t\tcheck\t" << c << "\t" << coords.size() << "\t" << other_coords.size() << "\t" << ssd_coord.size() << "\n";
-                        std::cerr << "\t\t\tttt\t" << coords[0] << "\t" << other_coords[0] << "\n";
-                        if (ssd_coord.size())
+                        if (coords != other_coords)
                             next_columns.push_back(c);
                     },
                     [&](Column c, const auto &) { next_columns.push_back(c); },
@@ -185,17 +179,6 @@ auto AnnotationBuffer
                                               columns.begin(), columns.end(),
                                               std::back_inserter(next_columns));
             }
-
-            std::cerr << "FOO\t" << graph_.get_node_sequence(node) << "\t" << graph_.get_node_sequence(next) << "\t" << flipped << "\n";
-            auto real_next_columns = sorted(annotator_.get_matrix().get_row(row_b));
-            for (size_t i = 0; i < real_next_columns.size(); ++i) {
-                std::cerr << "\t" << real_next_columns[i];
-            }
-            std::cerr << "\n";
-            for (size_t i = 0; i < next_columns.size(); ++i) {
-                std::cerr << "\t" << next_columns[i];
-            }
-            std::cerr << "\n";
 
             assert(next_columns == sorted(annotator_.get_matrix().get_row(row_b)));
 
@@ -217,29 +200,6 @@ auto AnnotationBuffer
     }
 
     return ret_val;
-}
-
-bool AnnotationBuffer::set_node_labels(node_index node, size_t label_i) {
-    node_index base_node = node;
-    if (canonical_) {
-        base_node = canonical_->get_base_node(node);
-        node = base_node;
-    } else if (graph_.get_mode() == DeBruijnGraph::CANONICAL) {
-        base_node = map_to_nodes(graph_, graph_.get_node_sequence(node))[0];
-    }
-
-    auto [it, inserted] = node_to_cols_.try_emplace(node, label_i);
-    if (!inserted)
-        it.value() = label_i;
-
-    if (base_node != node) {
-        auto [jt, inserted_j] = node_to_cols_.try_emplace(base_node, label_i);
-        inserted |= inserted_j;
-        if (!inserted_j)
-            jt.value() = label_i;
-    }
-
-    return inserted;
 }
 
 void AnnotationBuffer::fetch_queued_annotations() {

@@ -151,23 +151,6 @@ MultiIntMatrix::RowTuples TupleRowDiff<BaseMatrix>::get_row_tuple_diff(Row a, Ro
         auto result = diffs_.get_row_tuples(a);
         decode_diffs(&result);
         std::sort(result.begin(), result.end());
-        std::cerr << "FIRST\t";
-        for (auto &[c, tuple] : result) {
-            std::cerr << c << ":";
-            for (auto t : tuple) {
-                std::cerr << t << ",";
-            }
-            std::cerr << "\t";
-        }
-        std::cerr << "SECOND\t";
-        for (auto &[c, tuple] : MultiIntMatrix::get_row_tuple_diff(a, b)) {
-            std::cerr << c << ":";
-            for (auto t : tuple) {
-                std::cerr << t << ",";
-            }
-            std::cerr << "\t";
-        }
-        std::cerr << "\n";
         assert(result == MultiIntMatrix::get_row_tuple_diff(a, b));
         return result;
     }
