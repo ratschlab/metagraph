@@ -45,7 +45,7 @@ class AnnotationBuffer {
     const annot::matrix::MultiIntMatrix* get_tuple_matrix() const { return multi_int_; }
 
     std::vector<std::pair<Columns, std::shared_ptr<CoordinateSet>>>
-    get_label_and_coord_diffs(node_index node, const std::vector<node_index> &nexts, bool flipped = false);
+    get_label_and_coord_diffs(node_index node, const std::vector<node_index> &nexts, bool is_reverse = false);
 
     // Get the annotations and coordinates of a node if they have been fetched.
     // The returned pointers are valid until next fetch_queued_annotations().

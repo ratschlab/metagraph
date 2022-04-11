@@ -89,7 +89,7 @@ inline T sorted(T&& v) {
 #endif
 
 auto AnnotationBuffer
-::get_label_and_coord_diffs(node_index node, const std::vector<node_index> &nexts, bool flipped)
+::get_label_and_coord_diffs(node_index node, const std::vector<node_index> &nexts, bool is_reverse)
         -> std::vector<std::pair<Columns, std::shared_ptr<CoordinateSet>>> {
     node_index node_base = node;
     if (canonical_) {
@@ -98,25 +98,61 @@ auto AnnotationBuffer
         node_base = map_to_nodes(graph_, graph_.get_node_sequence(node))[0];
     }
 
-    std::vector<std::pair<Columns, std::shared_ptr<CoordinateSet>>> ret_vals;
-    ret_vals.reserve(nexts.size());
-
+    std::vector<node_index> nexts_base;
+    std::vector<Row> next_rows;
+    nexts_base.reserve(nexts.size());
     for (node_index next : nexts) {
-        node_index a = node_base;
-        auto find_a = node_to_cols_.find(a);
-        assert(find_a != node_to_cols_.end());
-        size_t labels_a = find_a->second;
-
         node_index b = next;
         if (canonical_) {
             b = canonical_->get_base_node(next);
         } else if (graph_.get_mode() == DeBruijnGraph::CANONICAL) {
             b = map_to_nodes(graph_, graph_.get_node_sequence(next))[0];
         }
+        nexts_base.push_back(b);
+        next_rows.push_back(AnnotatedDBG::graph_to_anno_index(b));
+    }
 
+    std::vector<std::pair<Columns, std::shared_ptr<CoordinateSet>>> ret_vals;
+    ret_vals.reserve(nexts.size());
+
+    std::vector<annot::matrix::MultiIntMatrix::RowTuples> coord_diffs;
+    if (has_coordinates() && !is_reverse && node_base == node) {
+        coord_diffs = multi_int_->get_row_tuple_diffs(
+            AnnotatedDBG::graph_to_anno_index(node_base),
+            next_rows
+        );
+    }
+
+    auto find_a = node_to_cols_.find(node_base);
+    assert(find_a != node_to_cols_.end());
+    // size_t a_idx = find_a - node_to_cols_.begin();
+    auto node_coords_base = get_coords_from_it(find_a, false);
+
+    for (size_t i = 0; i < nexts.size(); ++i) {
+        node_index next = nexts[i];
+        node_index a = node_base;
+        auto find_a = node_to_cols_.find(a);
+        assert(find_a != node_to_cols_.end());
+        size_t labels_a = find_a->second;
+
+        node_index b = nexts_base[i];
+
+        bool flipped = is_reverse;
         if (flipped || (a != node && b != next)) {
             std::swap(a, b);
             flipped = true;
+        }
+
+        CoordinateSet node_coords;
+        if (node_coords_base) {
+            node_coords = *node_coords_base;
+            if (!flipped) {
+                for (auto &tuple : node_coords) {
+                    for (auto &c : tuple) {
+                        ++c;
+                    }
+                }
+            }
         }
 
         auto row_a = AnnotatedDBG::graph_to_anno_index(a);
@@ -127,7 +163,9 @@ auto AnnotationBuffer
         if (has_coordinates()) {
             Columns next_columns;
             CoordinateSet next_coords;
-            auto diff = multi_int_->get_row_tuple_diff(row_a, row_b);
+            auto diff = coord_diffs.size()
+                ? std::move(coord_diffs[i])
+                : multi_int_->get_row_tuple_diff(row_a, row_b);
             assert(std::is_sorted(diff.begin(), diff.end()));
             next_columns.reserve(diff.size());
             next_coords.reserve(diff.size());
@@ -152,40 +190,42 @@ auto AnnotationBuffer
         }
 
         auto find_b = node_to_cols_.find(b);
+        size_t b_idx = find_b - node_to_cols_.begin();
         if (find_b == node_to_cols_.end() || find_b->second == nannot) {
             if (columns.size()) {
                 const auto &node_columns = column_sets_.data()[labels_a];
                 Columns next_columns;
+                CoordinateSet next_coords;
                 if (coords) {
-                    auto node_coords = get_coords_from_it(find_a, false);
-                    if (!flipped) {
-                        for (auto &tuple : *node_coords) {
-                            for (auto &c : tuple) {
-                                ++c;
-                            }
-                        }
-                    }
                     utils::match_indexed_values(
-                        node_columns.begin(), node_columns.end(), node_coords->begin(),
+                        node_columns.begin(), node_columns.end(), node_coords.begin(),
                         columns.begin(), columns.end(), coords->begin(),
                         [&](Column c, const auto &coords, const auto &other_coords) {
                             // if other_coords is empty, then it means that there
                             // was a column in next, but not in node
                             assert(coords.size());
                             assert(flipped || other_coords.size());
-                            if (other_coords.size() && coords != other_coords)
-                                next_columns.push_back(c);
-                        },
-                        [&](Column c, const auto &) { next_columns.push_back(c); },
-                        [&](Column c, const auto &) { next_columns.push_back(c); }
-                    );
-                    if (flipped) {
-                        for (auto &tuple : *coords) {
-                            for (auto &c : tuple) {
-                                ++c;
+                            if (other_coords.size()) {
+                                next_coords.emplace_back();
+                                std::set_symmetric_difference(coords.begin(), coords.end(),
+                                                              other_coords.begin(), other_coords.end(),
+                                                              std::back_inserter(next_coords.back()));
+                                if (next_coords.back().size()) {
+                                    next_columns.push_back(c);
+                                } else {
+                                    next_coords.pop_back();
+                                }
                             }
+                        },
+                        [&](Column c, const auto &coords) {
+                            next_coords.emplace_back(coords.begin(), coords.end());
+                            next_columns.push_back(c);
+                        },
+                        [&](Column c, const auto &coords) {
+                            next_coords.emplace_back(coords.begin(), coords.end());
+                            next_columns.push_back(c);
                         }
-                    }
+                    );
                 } else {
                     std::set_symmetric_difference(node_columns.begin(), node_columns.end(),
                                                   columns.begin(), columns.end(),
@@ -193,16 +233,29 @@ auto AnnotationBuffer
                 }
 
                 assert(next_columns == sorted(annotator_.get_matrix().get_row(row_b)));
+                std::swap(node_coords, next_coords);
 
                 labels_a = next_columns.size()
                     ? cache_column_set(std::move(next_columns))
                     : 0;
             }
 
-
             auto [it, inserted] = node_to_cols_.try_emplace(b, labels_a);
             if (!inserted)
                 it.value() = labels_a;
+
+            if (node_coords.size() && std::all_of(coords->begin(), coords->end(), [&](const auto &tuple) { return tuple.size(); })) {
+                if (flipped) {
+                    for (auto &tuple : node_coords) {
+                        for (auto &c : tuple) {
+                            assert(c > 0);
+                            --c;
+                        }
+                    }
+                }
+                label_coords_cache_.Put(b_idx, std::move(node_coords));
+                assert(get_coords_from_it(it, false));
+            }
 
             if (b != next) {
                 auto [it, inserted] = node_to_cols_.try_emplace(next, labels_a);
