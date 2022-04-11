@@ -91,6 +91,55 @@ inline T sorted(T&& v) {
 auto AnnotationBuffer
 ::get_label_and_coord_diffs(node_index node, const std::vector<node_index> &nexts, bool is_reverse)
         -> std::vector<std::pair<Columns, std::shared_ptr<CoordinateSet>>> {
+    if (std::all_of(nexts.begin(), nexts.end(), [&](node_index next) { return node_to_cols_.count(next); })) {
+        auto find_a = node_to_cols_.find(node);
+        assert(find_a != node_to_cols_.end());
+        auto node_coords = *get_coords_from_it(find_a, false);
+        for (auto &tuple : node_coords) {
+            for (auto &c : tuple) {
+                ++c;
+            }
+        }
+        const auto &node_columns = column_sets_.data()[find_a->second];
+        std::vector<std::pair<Columns, std::shared_ptr<CoordinateSet>>> results;
+        for (node_index next : nexts) {
+            Columns next_columns;
+            CoordinateSet next_coords;
+            auto find_b = node_to_cols_.find(next);
+            assert(find_b != node_to_cols_.end());
+            const auto &columns = column_sets_.data()[find_b->second];
+            auto coords = get_coords_from_it(find_b, false);
+            if (coords) {
+                utils::match_indexed_values(
+                    node_columns.begin(), node_columns.end(), node_coords.begin(),
+                    columns.begin(), columns.end(), coords->begin(),
+                    [&](Column c, const auto &coords, const auto &other_coords) {
+                        next_coords.emplace_back();
+                        std::set_symmetric_difference(coords.begin(), coords.end(),
+                                                      other_coords.begin(), other_coords.end(),
+                                                      std::back_inserter(next_coords.back()));
+                        if (next_coords.size()) {
+                            next_columns.push_back(c);
+                        } else {
+                            next_coords.pop_back();
+                        }
+                    },
+                    [&](Column c, const auto &coords) {
+                        next_coords.emplace_back(coords.begin(), coords.end());
+                        next_columns.push_back(c);
+                    },
+                    [&](Column c, const auto &) {
+                        next_columns.push_back(c);
+                        next_coords.emplace_back();
+                    }
+                );
+            }
+            results.emplace_back(std::move(next_columns), std::make_shared<CoordinateSet>(std::move(next_coords)));
+        }
+
+        return results;
+    }
+
     node_index node_base = node;
     if (canonical_) {
         node_base = canonical_->get_base_node(node);

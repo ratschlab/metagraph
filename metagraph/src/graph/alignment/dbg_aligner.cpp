@@ -456,7 +456,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
     best.trim_offset();
     assert(best.is_valid(graph_, &config_));
 
-    if (best.get_clipping()) {
+    if (false && best.get_clipping()) {
         logger->trace("Extending front");
         RCDBG rc_dbg(std::shared_ptr<const DeBruijnGraph>(
                         std::shared_ptr<const DeBruijnGraph>(), &graph_));
