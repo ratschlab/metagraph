@@ -89,121 +89,129 @@ inline T sorted(T&& v) {
 #endif
 
 auto AnnotationBuffer
-::get_label_and_coord_diff(node_index node, node_index next, bool flipped)
-        -> std::pair<Columns, std::shared_ptr<CoordinateSet>> {
-    node_index a = node;
-    node_index b = next;
+::get_label_and_coord_diffs(node_index node, const std::vector<node_index> &nexts, bool flipped)
+        -> std::vector<std::pair<Columns, std::shared_ptr<CoordinateSet>>> {
+    node_index node_base = node;
     if (canonical_) {
-        a = canonical_->get_base_node(node);
-        b = canonical_->get_base_node(next);
+        node_base = canonical_->get_base_node(node);
     } else if (graph_.get_mode() == DeBruijnGraph::CANONICAL) {
-        a = map_to_nodes(graph_, graph_.get_node_sequence(node))[0];
-        b = map_to_nodes(graph_, graph_.get_node_sequence(next))[0];
+        node_base = map_to_nodes(graph_, graph_.get_node_sequence(node))[0];
     }
 
-    auto find_a = node_to_cols_.find(a);
-    assert(find_a != node_to_cols_.end());
-    size_t labels_a = find_a->second;
+    std::vector<std::pair<Columns, std::shared_ptr<CoordinateSet>>> ret_vals;
+    ret_vals.reserve(nexts.size());
 
-    if (flipped || (a != node && b != next)) {
-        std::swap(a, b);
-        flipped = true;
-    }
+    for (node_index next : nexts) {
+        node_index a = node_base;
+        auto find_a = node_to_cols_.find(a);
+        assert(find_a != node_to_cols_.end());
+        size_t labels_a = find_a->second;
 
-    auto row_a = AnnotatedDBG::graph_to_anno_index(a);
-    auto row_b = AnnotatedDBG::graph_to_anno_index(b);
-
-    std::pair<Columns, std::shared_ptr<CoordinateSet>> ret_val;
-    auto &[columns, coords] = ret_val;
-
-    if (has_coordinates()) {
-        Columns next_columns;
-        CoordinateSet next_coords;
-        auto diff = multi_int_->get_row_tuple_diff(row_a, row_b);
-        assert(std::is_sorted(diff.begin(), diff.end()));
-        next_columns.reserve(diff.size());
-        next_coords.reserve(diff.size());
-        for (auto&& [c, tuple] : diff) {
-            assert(std::is_sorted(tuple.begin(), tuple.end()));
-            next_columns.push_back(c);
-            next_coords.emplace_back(tuple.begin(), tuple.end());
+        node_index b = next;
+        if (canonical_) {
+            b = canonical_->get_base_node(next);
+        } else if (graph_.get_mode() == DeBruijnGraph::CANONICAL) {
+            b = map_to_nodes(graph_, graph_.get_node_sequence(next))[0];
         }
 
-        std::swap(next_columns, columns);
-        coords = std::make_shared<CoordinateSet>(std::move(next_coords));
-    } else {
-        columns = annotator_.get_matrix().get_diff(row_a, row_b);
-        assert(std::is_sorted(columns.begin(), columns.end()));
-    }
+        if (flipped || (a != node && b != next)) {
+            std::swap(a, b);
+            flipped = true;
+        }
 
-    if (flipped) {
-        std::swap(a, b);
-#ifndef NDEBUG
-        std::swap(row_a, row_b);
-#endif
-    }
+        auto row_a = AnnotatedDBG::graph_to_anno_index(a);
+        auto row_b = AnnotatedDBG::graph_to_anno_index(b);
 
-    auto find_b = node_to_cols_.find(b);
-    if (find_b == node_to_cols_.end() || find_b->second == nannot) {
-        if (columns.size()) {
-            const auto &node_columns = column_sets_.data()[labels_a];
+        auto &[columns, coords] = ret_vals.emplace_back();
+
+        if (has_coordinates()) {
             Columns next_columns;
-            if (coords) {
-                auto node_coords = get_coords_from_it(find_a, false);
-                if (!flipped) {
-                    for (auto &tuple : *node_coords) {
-                        for (auto &c : tuple) {
-                            ++c;
-                        }
-                    }
-                }
-                utils::match_indexed_values(
-                    node_columns.begin(), node_columns.end(), node_coords->begin(),
-                    columns.begin(), columns.end(), coords->begin(),
-                    [&](Column c, const auto &coords, const auto &other_coords) {
-                        // if other_coords is empty, then it means that there
-                        // was a column in next, but not in node
-                        assert(coords.size());
-                        assert(flipped || other_coords.size());
-                        if (other_coords.size() && coords != other_coords)
-                            next_columns.push_back(c);
-                    },
-                    [&](Column c, const auto &) { next_columns.push_back(c); },
-                    [&](Column c, const auto &) { next_columns.push_back(c); }
-                );
-                if (flipped) {
-                    for (auto &tuple : *coords) {
-                        for (auto &c : tuple) {
-                            ++c;
-                        }
-                    }
-                }
-            } else {
-                std::set_symmetric_difference(node_columns.begin(), node_columns.end(),
-                                              columns.begin(), columns.end(),
-                                              std::back_inserter(next_columns));
+            CoordinateSet next_coords;
+            auto diff = multi_int_->get_row_tuple_diff(row_a, row_b);
+            assert(std::is_sorted(diff.begin(), diff.end()));
+            next_columns.reserve(diff.size());
+            next_coords.reserve(diff.size());
+            for (auto&& [c, tuple] : diff) {
+                assert(std::is_sorted(tuple.begin(), tuple.end()));
+                next_columns.push_back(c);
+                next_coords.emplace_back(tuple.begin(), tuple.end());
             }
 
-            assert(next_columns == sorted(annotator_.get_matrix().get_row(row_b)));
-
-            labels_a = next_columns.size()
-                ? cache_column_set(std::move(next_columns))
-                : 0;
+            std::swap(next_columns, columns);
+            coords = std::make_shared<CoordinateSet>(std::move(next_coords));
+        } else {
+            columns = annotator_.get_matrix().get_diff(row_a, row_b);
+            assert(std::is_sorted(columns.begin(), columns.end()));
         }
 
+        if (flipped) {
+            std::swap(a, b);
+#ifndef NDEBUG
+            std::swap(row_a, row_b);
+#endif
+        }
 
-        auto [it, inserted] = node_to_cols_.try_emplace(b, labels_a);
-        if (!inserted)
-            it.value() = labels_a;
+        auto find_b = node_to_cols_.find(b);
+        if (find_b == node_to_cols_.end() || find_b->second == nannot) {
+            if (columns.size()) {
+                const auto &node_columns = column_sets_.data()[labels_a];
+                Columns next_columns;
+                if (coords) {
+                    auto node_coords = get_coords_from_it(find_a, false);
+                    if (!flipped) {
+                        for (auto &tuple : *node_coords) {
+                            for (auto &c : tuple) {
+                                ++c;
+                            }
+                        }
+                    }
+                    utils::match_indexed_values(
+                        node_columns.begin(), node_columns.end(), node_coords->begin(),
+                        columns.begin(), columns.end(), coords->begin(),
+                        [&](Column c, const auto &coords, const auto &other_coords) {
+                            // if other_coords is empty, then it means that there
+                            // was a column in next, but not in node
+                            assert(coords.size());
+                            assert(flipped || other_coords.size());
+                            if (other_coords.size() && coords != other_coords)
+                                next_columns.push_back(c);
+                        },
+                        [&](Column c, const auto &) { next_columns.push_back(c); },
+                        [&](Column c, const auto &) { next_columns.push_back(c); }
+                    );
+                    if (flipped) {
+                        for (auto &tuple : *coords) {
+                            for (auto &c : tuple) {
+                                ++c;
+                            }
+                        }
+                    }
+                } else {
+                    std::set_symmetric_difference(node_columns.begin(), node_columns.end(),
+                                                  columns.begin(), columns.end(),
+                                                  std::back_inserter(next_columns));
+                }
 
-        if (b != next) {
-            auto [it, inserted] = node_to_cols_.try_emplace(next, labels_a);
+                assert(next_columns == sorted(annotator_.get_matrix().get_row(row_b)));
+
+                labels_a = next_columns.size()
+                    ? cache_column_set(std::move(next_columns))
+                    : 0;
+            }
+
+
+            auto [it, inserted] = node_to_cols_.try_emplace(b, labels_a);
             if (!inserted)
                 it.value() = labels_a;
+
+            if (b != next) {
+                auto [it, inserted] = node_to_cols_.try_emplace(next, labels_a);
+                if (!inserted)
+                    it.value() = labels_a;
+            }
         }
     }
-
-    return ret_val;
+    return ret_vals;
 }
 
 void AnnotationBuffer::fetch_queued_annotations() {

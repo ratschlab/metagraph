@@ -269,8 +269,11 @@ void LabeledExtender
     if (flipped)
         dist = dist * -1;
 
-    for (const auto &[next, c, score] : outgoing) {
-        auto [column_diff, coord_diff] = annotation_buffer_.get_label_and_coord_diff(node, next, flipped);
+    auto diffs = annotation_buffer_.get_label_and_coord_diffs(node, outnodes, flipped);
+
+    for (size_t i = 0; i < outgoing.size(); ++i) {
+        const auto &[next, c, score] = outgoing[i];
+        const auto &[column_diff, coord_diff] = diffs[i];
         if (column_diff.empty()) {
             node_labels_.emplace_back(node_labels_[table_i]);
             callback(next, c, score);
@@ -309,7 +312,7 @@ void LabeledExtender
 
                 } else {
                     assert(*d_it == *c_it);
-                    assert(flipped || d_c_it->size());
+                    // assert(flipped || d_c_it->size());
                     if (d_c_it->size()) {
                         Alignment::Tuple next_tuple;
                         utils::set_difference(b_c_it->begin(), b_c_it->end(),
