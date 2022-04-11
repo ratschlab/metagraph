@@ -104,17 +104,18 @@ auto AnnotationBuffer
     if (nexts_buffered.size()) {
         auto find_a = node_to_cols_.find(node);
         assert(find_a != node_to_cols_.end());
+        const auto &node_columns = column_sets_.data()[find_a->second];
         std::shared_ptr<CoordinateSet> node_coords;
         if (has_coordinates()) {
             node_coords = get_coords_from_it(find_a, false);
+            int64_t shift = is_reverse ? -1 : 1;
             for (auto &tuple : *node_coords) {
                 for (auto &c : tuple) {
-                    ++c;
+                    c += shift;
                 }
             }
         }
 
-        const auto &node_columns = column_sets_.data()[find_a->second];
         for (size_t i : nexts_buffered) {
             node_index next = nexts[i];
             auto find_b = node_to_cols_.find(next);
@@ -138,19 +139,19 @@ auto AnnotationBuffer
                         std::set_symmetric_difference(coords.begin(), coords.end(),
                                                       other_coords.begin(), other_coords.end(),
                                                       std::back_inserter(next_coords.back()));
-                        if (next_coords.size()) {
+                        if (next_coords.back().size()) {
                             next_columns.push_back(c);
                         } else {
                             next_coords.pop_back();
                         }
                     },
-                    [&](Column c, const auto &coords) {
-                        next_coords.emplace_back(coords.begin(), coords.end());
-                        next_columns.push_back(c);
-                    },
                     [&](Column c, const auto &) {
                         next_columns.push_back(c);
                         next_coords.emplace_back();
+                    },
+                    [&](Column c, const auto &coords) {
+                        next_columns.push_back(c);
+                        next_coords.emplace_back(coords.begin(), coords.end());
                     }
                 );
             } else {
