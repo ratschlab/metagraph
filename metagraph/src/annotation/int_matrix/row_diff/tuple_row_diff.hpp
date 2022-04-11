@@ -40,7 +40,7 @@ class TupleRowDiff : public binmat::IRowDiff, public MultiIntMatrix {
     RowTuples get_row_tuples(Row i) const override;
     std::vector<RowTuples> get_row_tuples(const std::vector<Row> &rows) const override;
     std::vector<RowTuples> get_row_tuple_diffs(const std::vector<Row> &rows, const RowTuples *first_tuple = nullptr) const override;
-    RowTuples get_row_tuple_diff(Row a, Row b) const override;
+    std::vector<RowTuples> get_row_tuple_diffs(Row a, const std::vector<Row> &rows) const override;
 
     uint64_t num_columns() const override { return diffs_.num_columns(); }
     uint64_t num_relations() const override { return diffs_.num_relations(); }
@@ -135,27 +135,30 @@ TupleRowDiff<BaseMatrix>::get_row_tuples(const std::vector<Row> &row_ids) const 
 }
 
 template <class BaseMatrix>
-MultiIntMatrix::RowTuples TupleRowDiff<BaseMatrix>::get_row_tuple_diff(Row a, Row b) const {
+std::vector<MultiIntMatrix::RowTuples>
+TupleRowDiff<BaseMatrix>::get_row_tuple_diffs(Row a, const std::vector<Row> &rows) const {
     if (anchor_[a])
-        return MultiIntMatrix::get_row_tuple_diff(a, b);
+        return MultiIntMatrix::get_row_tuple_diffs(a, rows);
 
-    graph::boss::BOSS::edge_index boss_edge_a = graph_->kmer_to_boss_index(
-                    graph::AnnotatedSequenceGraph::anno_to_graph_index(a));
-    graph::boss::BOSS::edge_index boss_edge_b = graph_->kmer_to_boss_index(
-                    graph::AnnotatedSequenceGraph::anno_to_graph_index(b));
+    if (rows.size() == 1) {
+        graph::boss::BOSS::edge_index boss_edge_a = graph_->kmer_to_boss_index(
+                        graph::AnnotatedSequenceGraph::anno_to_graph_index(a));
+        graph::boss::BOSS::edge_index boss_edge_b = graph_->kmer_to_boss_index(
+                        graph::AnnotatedSequenceGraph::anno_to_graph_index(rows[0]));
 
-    const graph::boss::BOSS &boss = graph_->get_boss();
-    const bit_vector &rd_succ = fork_succ_.size() ? fork_succ_ : boss.get_last();
+        const graph::boss::BOSS &boss = graph_->get_boss();
+        const bit_vector &rd_succ = fork_succ_.size() ? fork_succ_ : boss.get_last();
 
-    if (boss_edge_b == boss.row_diff_successor(boss_edge_a, rd_succ)) {
-        auto result = diffs_.get_row_tuples(a);
-        decode_diffs(&result);
-        std::sort(result.begin(), result.end());
-        assert(result == MultiIntMatrix::get_row_tuple_diff(a, b));
-        return result;
+        if (boss_edge_b == boss.row_diff_successor(boss_edge_a, rd_succ)) {
+            auto result = diffs_.get_row_tuples(a);
+            decode_diffs(&result);
+            std::sort(result.begin(), result.end());
+            assert(result == MultiIntMatrix::get_row_tuple_diffs(a, rows)[0]);
+            return { std::move(result) };
+        }
     }
 
-    return MultiIntMatrix::get_row_tuple_diff(a, b);
+    return MultiIntMatrix::get_row_tuple_diffs(a, rows);
 }
 
 template <class BaseMatrix>

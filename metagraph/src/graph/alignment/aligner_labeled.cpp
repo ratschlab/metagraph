@@ -248,89 +248,12 @@ void LabeledExtender
         return;
 
     size_t next_offset = table[table_i].offset + 1;
-    if (outgoing.size() == 1) {
-        // Assume that annotations are preserved in unitigs. Violations of this
-        // assumption are corrected after the next flush
-        const auto &[next, c, score] = outgoing[0];
-        bool in_seed = next_offset - seed_->get_offset() < seed_->get_sequence().size()
-                        && (next_offset < graph_->get_k() || force_fixed_seed);
-        if (in_seed) {
-            node_labels_.emplace_back(node_labels_[table_i]);
-        } else {
-            bool flipped = dynamic_cast<const RCDBG*>(graph_);
-            auto [column_diff, coord_diff] = annotation_buffer_.get_label_and_coord_diff(node, next, flipped);
-            if (column_diff.empty()) {
-                node_labels_.emplace_back(node_labels_[table_i]);
-            } else if (coord_diff) {
-                Columns next_columns;
-                ssize_t dist = next_offset - graph_->get_k() + 1;
-                if (flipped)
-                    dist = dist * -1;
-
-                auto b_it = seed_->label_columns.begin();
-                auto b_c_it = base_coords_.begin();
-                const auto &columns = annotation_buffer_.get_cached_column_set(node_labels_[table_i]);
-                auto c_it = columns.begin();
-
-                auto d_it = column_diff.begin();
-                auto d_c_it = coord_diff->begin();
-
-                while (c_it != columns.end()) {
-                    assert(b_it != seed_->label_columns.end());
-                    while (*b_it < *c_it) {
-                        ++b_it;
-                        ++b_c_it;
-                        assert(b_it != seed_->label_columns.end());
-                    }
-                    assert(*b_it == *c_it);
-                    while (d_it != column_diff.end() && *d_it < *c_it) {
-                        ++d_it;
-                        ++d_c_it;
-                    }
-
-                    if (d_it == column_diff.end() || *d_it > *c_it) {
-                        next_columns.push_back(*c_it);
-
-                    } else {
-                        assert(*d_it == *c_it);
-                        assert(d_c_it->size());
-                        Alignment::Tuple next_tuple;
-                        utils::set_difference(b_c_it->begin(), b_c_it->end(),
-                                              d_c_it->begin(), d_c_it->end(),
-                                              std::back_inserter(next_tuple),
-                                              dist);
-                        if (next_tuple.size())
-                            next_columns.push_back(*c_it);
-
-                        ++d_it;
-                        ++d_c_it;
-                    }
-                    ++c_it;
-                    ++b_it;
-                    ++b_c_it;
-                }
-
-                if (next_columns.empty())
-                    return;
-
-                size_t next_label_i = annotation_buffer_.cache_column_set(std::move(next_columns));
-                node_labels_.emplace_back(next_label_i);
-
-            } else {
-                const auto &columns = annotation_buffer_.get_cached_column_set(node_labels_[table_i]);
-                Columns next_columns;
-                std::set_difference(columns.begin(), columns.end(),
-                                    column_diff.begin(), column_diff.end(),
-                                    std::back_inserter(next_columns));
-
-                if (next_columns.empty())
-                    return;
-
-                size_t next_label_i = annotation_buffer_.cache_column_set(std::move(next_columns));
-                node_labels_.emplace_back(next_label_i);
-            }
-        }
-        callback(next, c, score);
+    bool in_seed = next_offset - seed_->get_offset() < seed_->get_sequence().size()
+                    && (next_offset < graph_->get_k() || force_fixed_seed);
+    if (in_seed) {
+        assert(outgoing.size() == 1);
+        node_labels_.emplace_back(node_labels_[table_i]);
+        std::apply(callback, std::move(outgoing[0]));
         return;
     }
 
@@ -341,100 +264,73 @@ void LabeledExtender
         outnodes.push_back(next);
     }
 
-    // flush the AnnotationBuffer and correct for annotation errors introduced above
-    flush(table_i, outnodes);
+    bool flipped = dynamic_cast<const RCDBG*>(graph_);
+    ssize_t dist = next_offset - graph_->get_k() + 1;
+    if (flipped)
+        dist = dist * -1;
 
-    if (!node_labels_[table_i])
-        return;
+    for (const auto &[next, c, score] : outgoing) {
+        auto [column_diff, coord_diff] = annotation_buffer_.get_label_and_coord_diff(node, next, flipped);
+        if (column_diff.empty()) {
+            node_labels_.emplace_back(node_labels_[table_i]);
+            callback(next, c, score);
+            continue;
+        }
 
-    assert(annotation_buffer_.get_labels(node));
+        Columns next_columns;
+        const auto &columns = annotation_buffer_.get_cached_column_set(node_labels_[table_i]);
+        if (!coord_diff) {
+            std::set_difference(columns.begin(), columns.end(),
+                                column_diff.begin(), column_diff.end(),
+                                std::back_inserter(next_columns));
+        } else {
+            auto b_it = seed_->label_columns.begin();
+            auto b_c_it = base_coords_.begin();
+            auto c_it = columns.begin();
 
-    // use the label set of the current node in the alignment tree as the basis
-    const auto &columns = annotation_buffer_.get_cached_column_set(node_labels_[table_i]);
+            auto d_it = column_diff.begin();
+            auto d_c_it = coord_diff->begin();
 
-    // no coordinates are present in the annotation
-    if (!annotation_buffer_.has_coordinates()) {
-        // label consistency (weaker than coordinate consistency):
-        // checks if there is at least one label shared between adjacent nodes
-        for (const auto &[next, c, score] : outgoing) {
-            auto next_labels = annotation_buffer_.get_labels(next);
-            assert(next_labels);
+            while (c_it != columns.end()) {
+                assert(b_it != seed_->label_columns.end());
+                while (*b_it < *c_it) {
+                    ++b_it;
+                    ++b_c_it;
+                    assert(b_it != seed_->label_columns.end());
+                }
+                assert(*b_it == *c_it);
+                while (d_it != column_diff.end() && *d_it < *c_it) {
+                    ++d_it;
+                    ++d_c_it;
+                }
 
-            Columns intersect_labels;
-            std::set_intersection(columns.begin(), columns.end(),
-                                  next_labels->begin(), next_labels->end(),
-                                  std::back_inserter(intersect_labels));
+                if (d_it == column_diff.end() || *d_it > *c_it) {
+                    next_columns.push_back(*c_it);
 
-            if (intersect_labels.size()) {
-                node_labels_.push_back(annotation_buffer_.cache_column_set(
-                                                std::move(intersect_labels)));
-                callback(next, c, score);
+                } else {
+                    assert(*d_it == *c_it);
+                    assert(flipped || d_c_it->size());
+                    if (d_c_it->size()) {
+                        Alignment::Tuple next_tuple;
+                        utils::set_difference(b_c_it->begin(), b_c_it->end(),
+                                              d_c_it->begin(), d_c_it->end(),
+                                              std::back_inserter(next_tuple),
+                                              dist);
+                        if (next_tuple.size())
+                            next_columns.push_back(*c_it);
+                    }
+
+                    ++d_it;
+                    ++d_c_it;
+                }
+                ++c_it;
+                ++b_it;
+                ++b_c_it;
             }
         }
 
-        return;
-    }
-
-    annotation_buffer_.prefetch_coords(outnodes);
-
-    // check label and coordinate consistency
-    // use the seed as the basis for labels and coordinates
-    assert(seed_->label_coordinates.size());
-
-    // compute the coordinate distance from base_coords
-    size_t dist = next_offset - graph_->get_k() + 1;
-
-    for (const auto &[next, c, score] : outgoing) {
-        const Columns *base_labels = &seed_->label_columns;
-        std::shared_ptr<const CoordinateSet> base_coords {
-            std::shared_ptr<const CoordinateSet>{}, &base_coords_
-        };
-
-        auto [next_labels, next_coords_mut]
-            = annotation_buffer_.get_labels_and_coords(next, false);
-
-        assert(next_coords_mut);
-        std::shared_ptr<const CoordinateSet> next_coords = next_coords_mut;
-
-        // if we are traversing backwards, then negate the coordinate delta
-        if (dynamic_cast<const RCDBG*>(graph_)) {
-            std::swap(base_labels, next_labels);
-            std::swap(base_coords, next_coords);
-        }
-
-        // check if at least one label has consistent coordinates
-        Columns intersect_labels;
-
-        try {
-            auto col_it = columns.begin();
-            auto col_end = columns.end();
-
-            utils::match_indexed_values(
-                base_labels->begin(), base_labels->end(), base_coords->begin(),
-                next_labels->begin(), next_labels->end(), next_coords->begin(),
-                [&](Column c, const auto &coords, const auto &other_coords) {
-                    // also, intersect with the label set of node
-                    while (col_it != col_end && c > *col_it) {
-                        ++col_it;
-                    }
-
-                    if (col_it == col_end)
-                        throw std::exception();
-
-                    if (c < *col_it)
-                        return;
-
-                    // then check coordinate consistency with the seed
-                    if (overlap_with_diff(coords, other_coords, dist))
-                        intersect_labels.push_back(c);
-                }
-            );
-        } catch (const std::exception&) {}
-
-        if (intersect_labels.size()) {
-            // found a consistent set of coordinates, so assign labels for this next node
-            node_labels_.push_back(annotation_buffer_.cache_column_set(
-                                                std::move(intersect_labels)));
+        if (next_columns.size()) {
+            node_labels_.emplace_back(annotation_buffer_.cache_column_set(std::move(next_columns)));
             callback(next, c, score);
         }
     }

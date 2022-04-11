@@ -72,7 +72,11 @@ class MultiIntMatrix : public IntMatrix {
     virtual std::vector<RowTuples>
     get_row_tuples(const std::vector<Row> &rows) const = 0;
 
-    virtual RowTuples get_row_tuple_diff(Row a, Row b) const;
+    virtual RowTuples get_row_tuple_diff(Row a, Row b) const {
+        return get_row_tuple_diffs(a, std::vector<Row>{ b })[0];
+    }
+
+    virtual std::vector<RowTuples> get_row_tuple_diffs(Row a, const std::vector<Row> &rows) const;
 
     virtual std::vector<RowTuples>
     get_row_tuple_diffs(const std::vector<Row> &rows, const RowTuples *first_tuple = nullptr) const;

@@ -46,46 +46,60 @@ IntMatrix::get_row_value_diffs(const std::vector<Row> &rows) const {
     return row_value_diffs;
 }
 
-MultiIntMatrix::RowTuples MultiIntMatrix::get_row_tuple_diff(Row a, Row b) const {
-    auto row_tuples = get_row_tuples(std::vector<Row>{ a, b });
+std::vector<MultiIntMatrix::RowTuples>
+MultiIntMatrix::get_row_tuple_diffs(Row a, const std::vector<Row> &rows) const {
+    if (rows.empty())
+        return {};
+
+    std::vector<MultiIntMatrix::RowTuples> results(rows.size());
+
+    std::vector<Row> queried_rows;
+    queried_rows.reserve(rows.size() + 1);
+    queried_rows.push_back(a);
+    std::copy(rows.begin(), rows.end(), std::back_inserter(queried_rows));
+
+    auto row_tuples = get_row_tuples(queried_rows);
     for (auto &[j, tuple] : row_tuples[0]) {
         for (auto &c : tuple) {
             c += 1;
         }
     }
     std::sort(row_tuples[0].begin(), row_tuples[0].end());
-    std::sort(row_tuples[1].begin(), row_tuples[1].end());
 
-    RowTuples result;
-    auto it = row_tuples[1].begin();
-    auto it2 = row_tuples[0].begin();
-    while (it != row_tuples[1].end() && it2 != row_tuples[0].end()) {
-        if (it->first < it2->first) {
-            result.emplace_back(it->first, Tuple{});
-            ++it;
-        } else if (it->first > it2->first) {
-            assert(std::is_sorted(it2->second.begin(), it2->second.end()));
-            result.push_back(*it2);
-            ++it2;
-        } else {
-            assert(std::is_sorted(it->second.begin(), it->second.end()));
-            assert(std::is_sorted(it2->second.begin(), it2->second.end()));
-            result.emplace_back(it->first, Tuple{});
-            std::set_symmetric_difference(it->second.begin(), it->second.end(),
-                                          it2->second.begin(), it2->second.end(),
-                                          std::back_inserter(result.back().second));
-            if (result.back().second.empty())
-                result.pop_back();
+    for (size_t i = 1; i < row_tuples.size(); ++i) {
+        std::sort(row_tuples[i].begin(), row_tuples[i].end());
+        RowTuples &result = results[i - 1];
+        auto it = row_tuples[i].begin();
+        auto it2 = row_tuples[0].begin();
+        while (it != row_tuples[i].end() && it2 != row_tuples[0].end()) {
+            if (it->first < it2->first) {
+                result.emplace_back(it->first, Tuple{});
+                ++it;
+            } else if (it->first > it2->first) {
+                assert(std::is_sorted(it2->second.begin(), it2->second.end()));
+                result.push_back(*it2);
+                ++it2;
+            } else {
+                assert(std::is_sorted(it->second.begin(), it->second.end()));
+                assert(std::is_sorted(it2->second.begin(), it2->second.end()));
+                result.emplace_back(it->first, Tuple{});
+                std::set_symmetric_difference(it->second.begin(), it->second.end(),
+                                              it2->second.begin(), it2->second.end(),
+                                              std::back_inserter(result.back().second));
+                if (result.back().second.empty())
+                    result.pop_back();
 
-            ++it;
-            ++it2;
+                ++it;
+                ++it2;
+            }
         }
+        std::transform(it, row_tuples[i].end(), std::back_inserter(result), [&](const auto &a) {
+            return std::make_pair(a.first, Tuple{});
+        });
+        std::copy(it2, row_tuples[0].end(), std::back_inserter(result));
     }
-    std::transform(it, row_tuples[1].end(), std::back_inserter(result), [&](const auto &a) {
-        return std::make_pair(a.first, Tuple{});
-    });
-    std::copy(it2, row_tuples[0].end(), std::back_inserter(result));
-    return result;
+
+    return results;
 }
 
 std::vector<MultiIntMatrix::RowTuples>

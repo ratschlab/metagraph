@@ -141,11 +141,6 @@ auto AnnotationBuffer
 #ifndef NDEBUG
         std::swap(row_a, row_b);
 #endif
-        for (auto &tuple : *coords) {
-            for (auto &c : tuple) {
-                ++c;
-            }
-        }
     }
 
     auto find_b = node_to_cols_.find(b);
@@ -155,9 +150,11 @@ auto AnnotationBuffer
             Columns next_columns;
             if (coords) {
                 auto node_coords = get_coords_from_it(find_a, false);
-                for (auto &tuple : *node_coords) {
-                    for (auto &c : tuple) {
-                        ++c;
+                if (!flipped) {
+                    for (auto &tuple : *node_coords) {
+                        for (auto &c : tuple) {
+                            ++c;
+                        }
                     }
                 }
                 utils::match_indexed_values(
@@ -166,13 +163,21 @@ auto AnnotationBuffer
                     [&](Column c, const auto &coords, const auto &other_coords) {
                         // if other_coords is empty, then it means that there
                         // was a column in next, but not in node
-                        assert(other_coords.size());
-                        if (coords != other_coords)
+                        assert(coords.size());
+                        assert(flipped || other_coords.size());
+                        if (other_coords.size() && coords != other_coords)
                             next_columns.push_back(c);
                     },
                     [&](Column c, const auto &) { next_columns.push_back(c); },
                     [&](Column c, const auto &) { next_columns.push_back(c); }
                 );
+                if (flipped) {
+                    for (auto &tuple : *coords) {
+                        for (auto &c : tuple) {
+                            ++c;
+                        }
+                    }
+                }
             } else {
                 std::set_symmetric_difference(node_columns.begin(), node_columns.end(),
                                               columns.begin(), columns.end(),
