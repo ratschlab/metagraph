@@ -59,13 +59,14 @@ class LabeledExtender : public DefaultColumnExtender {
 
     virtual bool skip_backtrack_start(size_t i) override final;
 
-    // this override ensures that outgoing nodes are label- and coordinate-consistent
-    // (when applicable)
-    virtual void call_outgoing(node_index node,
-                               size_t max_prefetch_distance,
-                               const std::function<void(node_index, char, score_t)> &callback,
-                               size_t table_i,
-                               bool force_fixed_seed = false) override final;
+    virtual sdsl::bit_vector pick_next(size_t table_i,
+                                       const std::vector<size_t> &next_is,
+                                       bool force_fixed_seed) override final;
+
+    virtual void clear(size_t table_i) override {
+        DefaultColumnExtender::clear(table_i);
+        node_labels_[table_i] = 0;
+    }
 
     // this method calls multiple label-consistent alignments by backtracking
     virtual void call_alignments(score_t end_score,
@@ -78,14 +79,6 @@ class LabeledExtender : public DefaultColumnExtender {
                                  const std::string &match,
                                  score_t extra_score,
                                  const std::function<void(Alignment&&)> &callback) override final;
-
-    // ensure that when terminating a path early, the per-node label storage is also
-    // correctly handled
-    virtual void pop(size_t i) override final {
-        assert(i < node_labels_.size());
-        DefaultColumnExtender::pop(i);
-        node_labels_.erase(node_labels_.begin() + i);
-    }
 
     // this override flushes the AnnotationBuffer, and checks elements in the
     // dynamic programming table for label- (and coordinate-)consistency

@@ -128,16 +128,8 @@ void LabeledExtender::flush(size_t table_i, const std::vector<node_index> &outno
 
         assert(parent_i < table_i);
 
-        auto clear = [&]() {
-            DEBUG_LOG("Removed table element {}", table_i);
-            node_labels_[table_i] = 0;
-            std::fill(table_elem.S.begin(), table_elem.S.end(), config_.ninf);
-            std::fill(table_elem.E.begin(), table_elem.E.end(), config_.ninf);
-            std::fill(table_elem.F.begin(), table_elem.F.end(), config_.ninf);
-        };
-
         if (!node_labels_[parent_i]) {
-            clear();
+            clear(table_i);
             std::swap(table_i, parent_i);
             continue;
         }
@@ -173,7 +165,7 @@ void LabeledExtender::flush(size_t table_i, const std::vector<node_index> &outno
                               std::back_inserter(intersect_labels));
 
         if (intersect_labels.empty()) {
-            clear();
+            clear(table_i);
         } else {
             node_labels_[table_i]
                 = annotation_buffer_.cache_column_set(std::move(intersect_labels));
@@ -228,40 +220,32 @@ bool LabeledExtender::set_seed(const Alignment &seed) {
     return true;
 }
 
-void LabeledExtender
-::call_outgoing(node_index node,
-                size_t max_prefetch_distance,
-                const std::function<void(node_index, char, score_t)> &callback,
-                size_t table_i,
-                bool force_fixed_seed) {
-    assert(table.size() == node_labels_.size());
+sdsl::bit_vector LabeledExtender::pick_next(size_t table_i,
+                                            const std::vector<size_t> &next_is,
+                                            bool force_fixed_seed) {
+    assert(table.size() == node_labels_.size() + next_is.size());
+    node_labels_.resize(table.size(), 0);
 
-    std::vector<std::tuple<node_index, char, score_t>> outgoing;
-    DefaultColumnExtender::call_outgoing(node, max_prefetch_distance,
-        [&](node_index next, char c, score_t score) {
-            outgoing.emplace_back(next, c, score);
-        },
-        table_i, force_fixed_seed
-    );
-
-    if (outgoing.empty())
-        return;
+    if (next_is.empty())
+        return sdsl::bit_vector();
 
     size_t next_offset = table[table_i].offset + 1;
     bool in_seed = next_offset - seed_->get_offset() < seed_->get_sequence().size()
                     && (next_offset < graph_->get_k() || force_fixed_seed);
     if (in_seed) {
-        assert(outgoing.size() == 1);
-        node_labels_.emplace_back(node_labels_[table_i]);
-        std::apply(callback, std::move(outgoing[0]));
-        return;
+        assert(next_is.size() == 1);
+        node_labels_[next_is[0]] = node_labels_[table_i];
+        return sdsl::bit_vector(1, true);
     }
 
+    node_index node = table[table_i].node;
+    sdsl::bit_vector picked(next_is.size(), false);
+
     std::vector<node_index> outnodes;
-    outnodes.reserve(outgoing.size());
-    for (const auto &[next, c, score] : outgoing) {
-        assert(next != DeBruijnGraph::npos);
-        outnodes.push_back(next);
+    outnodes.reserve(next_is.size());
+    for (size_t table_j : next_is) {
+        outnodes.push_back(table[table_j].node);
+        assert(outnodes.back() != DeBruijnGraph::npos);
     }
 
     bool flipped = dynamic_cast<const RCDBG*>(graph_);
@@ -271,12 +255,11 @@ void LabeledExtender
 
     auto diffs = annotation_buffer_.get_label_and_coord_diffs(node, outnodes, flipped);
 
-    for (size_t i = 0; i < outgoing.size(); ++i) {
-        const auto &[next, c, score] = outgoing[i];
+    for (size_t i = 0; i < outnodes.size(); ++i) {
         const auto &[column_diff, coord_diff] = diffs[i];
         if (column_diff.empty()) {
-            node_labels_.emplace_back(node_labels_[table_i]);
-            callback(next, c, score);
+            node_labels_[next_is[i]] = node_labels_[table_i];
+            picked[i] = true;
             continue;
         }
 
@@ -333,10 +316,12 @@ void LabeledExtender
         }
 
         if (next_columns.size()) {
-            node_labels_.emplace_back(annotation_buffer_.cache_column_set(std::move(next_columns)));
-            callback(next, c, score);
+            node_labels_[next_is[i]] = annotation_buffer_.cache_column_set(std::move(next_columns));
+            picked[i] = true;
         }
     }
+
+    return picked;
 }
 
 bool LabeledExtender::skip_backtrack_start(size_t i) {

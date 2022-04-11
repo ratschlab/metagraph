@@ -178,6 +178,12 @@ class DefaultColumnExtender : public SeedFilteringExtender {
     // there exist j,j' s.t. i<=j<j' and j is the parent of j'
     virtual void pop(size_t i) { table.erase(table.begin() + i); }
 
+    virtual sdsl::bit_vector pick_next(size_t /* table_i */,
+                                       const std::vector<size_t> &next_is,
+                                       bool /* force_fixed_seed */) {
+        return { next_is.size(), true };
+    }
+
     // Backtrack through the DP table to reconstruct alignments. If target_node
     // is set, then only backtrack from target_node.
     virtual std::vector<Alignment> backtrack(score_t min_path_score,
@@ -224,6 +230,12 @@ class DefaultColumnExtender : public SeedFilteringExtender {
                                   score_t score,
                                   size_t offset,
                                   score_t extra_score) const;
+
+    virtual void clear(size_t table_i) {
+        table[table_i].S = AlignedVector<score_t>{};
+        table[table_i].E = AlignedVector<score_t>{};
+        table[table_i].F = AlignedVector<score_t>{};
+    }
 
   private:
     // compute perfect match scores for all suffixes used for branch and bound checks

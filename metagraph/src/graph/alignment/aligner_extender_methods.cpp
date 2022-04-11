@@ -489,10 +489,12 @@ std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score,
     while (queue.size()) {
         size_t i = std::get<2>(queue.top());
         queue.pop();
-        bool has_single_outgoing = true;
 
+        bool has_single_outgoing = true;
         while (has_single_outgoing) {
+            std::vector<std::pair<TableIt, bool>> to_queue;
             has_single_outgoing = false;
+
             std::vector<std::tuple<node_index, char, score_t>> outgoing;
             size_t next_offset = table[i].offset + 1;
 
@@ -507,6 +509,8 @@ std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score,
             {
                 const auto &[S, E, F, node, i_prev, c, offset, max_pos, trim,
                              xdrop_cutoff_i, score] = table[i];
+                if (S.empty())
+                    continue;
 
                 double node_counter = config_.global_xdrop
                     ? table.size()
@@ -719,19 +723,42 @@ std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score,
                 score_t converged_score = update_seed_filter(
                     next, vec_offset, s_begin, s_end
                 );
-                if (converged_score != ninf) {
-                    // if this next node is the only next option, take it without pushing
-                    // to the queue
-                    if (outgoing.size() == 1) {
-                        has_single_outgoing = true;
-                        i = table.size() - 1;
-                    } else {
-                        queue.emplace(converged_score, -std::abs(max_pos - diag_i),
-                                      table.size() - 1, max_val);
-                    }
-                } else {
+                if (converged_score == ninf) {
                     DEBUG_LOG("Position {}: Dropped due to convergence",
                               next_offset - seed_->get_offset());
+                }
+
+                to_queue.emplace_back(TableIt{ converged_score, -std::abs(max_pos - diag_i),
+                                               table.size() - 1, max_val },
+                                      converged_score == ninf);
+            }
+
+            if (to_queue.size()) {
+                std::vector<size_t> table_is_to_queue;
+                table_is_to_queue.reserve(to_queue.size());
+                for (const auto &[elem, converged] : to_queue) {
+                    const auto &[max_change_val, neg_off_diag, table_i, max_score] = elem;
+                    table_is_to_queue.push_back(table_i);
+                }
+
+                sdsl::bit_vector picked = pick_next(i, table_is_to_queue, force_fixed_seed);
+                if (sdsl::util::cnt_one_bits(picked) == 1) {
+                    for (size_t j = 0; j < picked.size(); ++j) {
+                        if (!picked[j]) {
+                            clear(table_is_to_queue[j]);
+                        } else if (!to_queue[j].second) {
+                            has_single_outgoing = true;
+                            i = table_is_to_queue[j];
+                        }
+                    }
+                } else {
+                    for (size_t j = 0; j < picked.size(); ++j) {
+                        if (!picked[j]) {
+                            clear(table_is_to_queue[j]);
+                        } else if (!to_queue[j].second) {
+                            queue.emplace(std::move(to_queue[j].first));
+                        }
+                    }
                 }
             }
         }
@@ -801,6 +828,9 @@ std::vector<Alignment> DefaultColumnExtender::backtrack(score_t min_path_score,
     indices.reserve(table.size());
     auto it = tips.begin();
     for (size_t i = 1; i < table.size(); ++i) {
+        if (table[i].S.empty())
+            continue;
+
         while (it != tips.end() && i > *it) {
             ++it;
         }
