@@ -3,6 +3,7 @@
 #include <queue>
 #include <numeric>
 
+#include <progress_bar.hpp>
 #include "common/logger.hpp"
 #include "common/algorithms.hpp"
 #include "common/serialization.hpp"
@@ -12,6 +13,65 @@
 namespace mtg {
 namespace annot {
 namespace binmat {
+
+
+void BRWT::build_histo(std::vector<size_t>& cnts_per_row, const std::vector<uint64_t>& row_ids_mapping,  ProgressBar& progress_bar) const {
+    ++progress_bar;
+    //leaf
+    if (!child_nodes_.size()) {
+        nonzero_rows_->call_ones([&](uint64_t row_id) {
+            ++cnts_per_row[row_ids_mapping[row_id]];
+        });
+        ++progress_bar;
+        return;
+    }
+
+    //internal node
+    std::vector<uint64_t> new_row_ids_mapping;
+    new_row_ids_mapping.reserve(nonzero_rows_->num_set_bits());
+    nonzero_rows_->call_ones([&](uint64_t row_id) {
+        new_row_ids_mapping.push_back(row_ids_mapping[row_id]);
+    });
+
+    for (auto& child : child_nodes_)
+        child->build_histo(cnts_per_row, new_row_ids_mapping, progress_bar);
+    ++progress_bar;
+}
+
+std::vector<size_t> BRWT::get_rows_set_bits_histo() const {
+    mtg::common::logger->info("Calculating BRWT row bits histogram");
+    ProgressBar progress_bar(2 * this->num_nodes(), "Processing nodes",
+                             std::cerr, !common::get_verbose());
+
+    std::vector<size_t> cnts_per_row(num_rows());
+    ++progress_bar;
+    // there is only root?!
+    if (!child_nodes_.size()) {
+         nonzero_rows_->call_ones([&](uint64_t row_id){
+            ++cnts_per_row[row_id];
+        });
+    }
+    else {
+        assert((*nonzero_rows_).size() == num_rows());
+        std::vector<uint64_t> initial_row_ids;
+        initial_row_ids.reserve(nonzero_rows_->num_set_bits());
+        nonzero_rows_->call_ones([&](uint64_t row_id) {
+            initial_row_ids.push_back(row_id);
+        });
+
+        for (auto& child : child_nodes_)
+            child->build_histo(cnts_per_row, initial_row_ids, progress_bar);
+    }
+    ++progress_bar;
+    std::vector<size_t> histo;
+    for(auto cnt : cnts_per_row)
+    {
+        if(cnt >= histo.size())
+            histo.resize(cnt + 1);
+        ++histo[cnt];
+    }
+    return histo;
+}
 
 bool BRWT::get(Row row, Column column) const {
     assert(row < num_rows());

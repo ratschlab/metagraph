@@ -148,12 +148,12 @@ public:
             for (auto& node : nodes)
             {
                 // mkokot, this is very detailed (for each node), so probably not very informative
-                std::cerr 
-                    << node->load_disk_time << "\t" 
-                    << node->disk_load_was_needed 
-                    << "\t" << node->disk_load_was_not_needed 
-                    << "\t" << node->required_size() 
-                    << "\t" << node->read_bytes << "\n";
+                //std::cerr
+                //    << node->load_disk_time << "\t"
+                //    << node->disk_load_was_needed
+                //    << "\t" << node->disk_load_was_not_needed
+                //    << "\t" << node->required_size()
+                //    << "\t" << node->read_bytes << "\n";
 
                 sum_time += node->load_disk_time;
                 sum_load_was_needed += node->disk_load_was_needed;

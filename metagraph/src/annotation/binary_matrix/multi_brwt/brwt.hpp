@@ -5,6 +5,7 @@
 #include <unordered_map>
 #include <memory>
 
+#include <progress_bar.hpp>
 #include "common/vectors/bit_vector_adaptive.hpp"
 #include "common/range_partition.hpp"
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
@@ -22,11 +23,15 @@ class BRWT : public BinaryMatrix {
 
     typedef uint32_t Child;
 
+    void build_histo(std::vector<size_t>& cnts_per_row, const std::vector<uint64_t>& row_ids_mapping, ProgressBar& progress_bar) const;
+
   public:
     BRWT() : nonzero_rows_(new bit_vector_smallrank()) {}
 
     uint64_t num_columns() const override { return assignments_.size(); }
     uint64_t num_rows() const override { return nonzero_rows_->size(); }
+
+    std::vector<size_t> get_rows_set_bits_histo() const;
 
     bool get(Row row, Column column) const override;
     SetBitPositions get_row(Row row) const override;

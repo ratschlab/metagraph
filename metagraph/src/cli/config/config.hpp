@@ -164,6 +164,7 @@ class Config {
     std::string assembly_config_file;
     std::string linkage_file;
     std::string intersected_columns;
+    std::string row_bits_histo;
 
     std::filesystem::path tmp_dir;
 

@@ -664,6 +664,7 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
     RowSet unique_rows { BinaryMatrix::SetBitPositions() };
     std::vector<uint32_t> row_rank(num_rows, 0);
 
+    double tot_get_rows_time{}; // mkokot
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
     for (uint64_t batch_begin = 0;
                         batch_begin < full_to_small.size();
@@ -679,8 +680,11 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
 
             row_indexes.push_back(full_to_small[i].first);
         }
-
+        auto start = std::chrono::high_resolution_clock::now(); // mkokot
         auto rows = full_annotation.get_matrix().get_rows(row_indexes);
+        auto get_rows_time = std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - start).count(); // mkokot
+        tot_get_rows_time += get_rows_time;
+        logger->trace("get_rows time: {}", get_rows_time); // mkokot
 
         assert(rows.size() == batch_end - batch_begin);
 
@@ -696,6 +700,8 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
             }
         }
     }
+
+    logger->trace("total get_rows time: {}", tot_get_rows_time); // mkokot
 
     auto &annotation_rows = const_cast<std::vector<BinaryMatrix::SetBitPositions>&>(
         unique_rows.values_container()

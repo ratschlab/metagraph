@@ -2,6 +2,7 @@
 
 #include <ips4o/ips4o.hpp>
 
+#include <progress_bar.hpp>
 #include "common/algorithms.hpp"
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
@@ -15,6 +16,7 @@
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 #include "config/config.hpp"
 #include "load/load_graph.hpp"
+#include "load/load_annotated_graph.hpp"
 #include "load/load_annotation.hpp"
 
 
@@ -180,6 +182,107 @@ void print_brwt_stats(const annot::binmat::BRWT& brwt) {
     }
 }
 
+void get_row_bits_histo(std::ofstream& out, const annot::binmat::BinaryMatrix* mat) {
+    //TODO: the code below seems to be working, but consumes a lot of RAM
+    //using BRWT = annot::binmat::BRWT;
+    //using RowDiffBRWT = annot::binmat::RowDiff<BRWT>;
+    //if (auto brwt = dynamic_cast<const annot::binmat::BRWT*>(mat))
+    //{
+    //    std::cerr << "Building histo BRWT\n";
+    //    auto histo = brwt->get_rows_set_bits_histo();
+    //    std::cerr << "Done\n";
+    //    for (uint64_t i = 0 ; i < histo.size() ; ++i)
+    //        if (histo[i])
+    //            std::cout << i << "\t" << histo[i] << "\n";
+    //    //return;
+    //}
+    // in this case the results from diffs() is different than from calling get_rows() of row_diff
+    //else if(auto row_diff_brwt = dynamic_cast<const RowDiffBRWT*>(mat))
+    //{
+    //    std::cerr << "Building histo RowDiff<BRWT>\n";
+    //    auto histo = row_diff_brwt->diffs().get_rows_set_bits_histo();
+    //    std::cerr << "Done\n";
+    //    for (uint64_t i = 0 ; i < histo.size() ; ++i)
+    //        if (histo[i])
+    //            std::cout << i << "\t" << histo[i] << "\n";
+    //    //return;
+    //}
+
+    // mkokot, first naive approach to get number of ones per k-mer
+    // mkokot, this can probably be optimized, at least for brwt
+
+    struct HistoCollector {
+        std::vector<size_t> histo;
+
+        void process_batch(const std::vector<uint64_t>& row_ids, const annot::binmat::BinaryMatrix& mat) {
+            auto rows = mat.get_rows(row_ids);
+
+            for(const auto& R : rows) {
+                auto n_cols_with_set_bits = R.size();
+                if (n_cols_with_set_bits >= histo.size())
+                    histo.resize(n_cols_with_set_bits + 1);
+
+                histo[n_cols_with_set_bits]++;
+            }
+        }
+    };
+
+    uint64_t batch_size = 100000;
+    std::vector<HistoCollector> collectors(get_num_threads());
+    std::vector<std::thread> threads;
+    std::mutex mtx;
+    uint64_t start_row = 0;
+
+    logger->info("Calculating row bits histogram");
+    ProgressBar progress_bar(mat->num_rows(), "Processing rows",
+                             std::cerr, !common::get_verbose());
+
+    auto get_next_batch = [&](uint64_t& _start_row, uint64_t& _end_row) {
+        std::lock_guard<std::mutex> lck(mtx);
+
+        _start_row = start_row;
+        _end_row = _start_row + batch_size;
+        if (_end_row > mat->num_rows())
+            _end_row = mat->num_rows();
+
+        progress_bar += _end_row - _start_row;
+        start_row = _end_row;
+    };
+    for (uint32_t tid = 0 ; tid < get_num_threads() ; ++tid)
+    {
+        threads.emplace_back([&, collector = &collectors[tid]] () {
+            std::vector<uint64_t> row_ids;
+            uint64_t start_id, end_id;
+            get_next_batch(start_id, end_id);
+            while (start_id < end_id)
+            {
+                row_ids.resize(end_id - start_id);
+                for(uint64_t i = start_id ; i < end_id ; ++i)
+                    row_ids[i-start_id] = i;
+
+                collector->process_batch(row_ids, *mat);
+
+                get_next_batch(start_id, end_id);
+            }
+        });
+    }
+    for (auto& th: threads)
+        th.join();
+    uint64_t max_histo_size = 0;
+    for(auto& c : collectors)
+        if(c.histo.size() > max_histo_size)
+            max_histo_size = c.histo.size();
+
+    std::vector<uint64_t> histo(max_histo_size);
+    for(auto& c : collectors)
+        for(uint64_t i = 0 ; i < c.histo.size() ; ++i)
+            histo[i] += c.histo[i];
+
+    for (uint64_t n_cols_with_set_bits = 0 ; n_cols_with_set_bits < histo.size(); ++n_cols_with_set_bits)
+        if (histo[n_cols_with_set_bits])
+            out << n_cols_with_set_bits << "\t" << histo[n_cols_with_set_bits] << "\n";
+}
+
 void print_annotation_stats(const std::string &fname, const Config &config) {
     std::unique_ptr<annot::MultiLabelEncoded<std::string>> anno_p
             = initialize_annotation(fname, config);
@@ -211,6 +314,58 @@ void print_annotation_stats(const std::string &fname, const Config &config) {
     using namespace annot::binmat;
 
     const BinaryMatrix *mat = &annotation.get_matrix();
+
+    if (auto row_diff_brwt = dynamic_cast<RowDiff<BRWT>*>(const_cast<BinaryMatrix *>(mat))) {
+        std::cout << "=================== RowDiff<BRWT>* DIFFS STATS ===================" << std::endl;
+        std::cout << "labels:  " << row_diff_brwt->diffs().num_columns() << std::endl;
+        std::cout << "rows: " << row_diff_brwt->diffs().num_rows() << std::endl;
+        std::cout << "density: " << static_cast<double>(row_diff_brwt->diffs().num_relations())
+                                    / row_diff_brwt->diffs().num_rows()
+                                    / row_diff_brwt->diffs().num_columns() << std::endl;
+    }
+    if (config.row_bits_histo != "") {
+        std::ofstream out(config.row_bits_histo);
+        if (!out) {
+            logger->error("Cannot open file ", config.row_bits_histo);
+            exit(1);
+        }
+
+        if (auto row_diff = dynamic_cast<IRowDiff*>(const_cast<BinaryMatrix *>(mat))) {
+            if (config.infbase == "") {
+                logger->error("row_diff requires graph to be loaded, use -i");
+                exit(1);
+            }
+            std::shared_ptr<mtg::graph::DeBruijnGraph> graph = load_critical_dbg(config.infbase);
+            const auto *dbg_graph = dynamic_cast<const mtg::graph::DBGSuccinct*>(graph.get());
+            if (!dbg_graph) {
+                logger->error("Only succinct de Bruijn graph representations"
+                              " are supported for row-diff annotations");
+                std::exit(1);
+            }
+
+            row_diff->set_graph(dbg_graph);
+
+            std::unique_ptr<mtg::graph::AnnotatedDBG> anno_graph = initialize_annotated_dbg(graph, config);
+            if (!anno_graph->check_compatibility()) {
+                logger->error("Graph and annotation are not compatible");
+                exit(1);
+            }
+
+            // mkokot, TODO: consider this printing histo
+            if (auto row_diff_brwt = dynamic_cast<const annot::binmat::RowDiff<annot::binmat::BRWT>*>(&anno_graph->get_annotator().get_matrix())) {
+                logger->info("Calculating histo for just BRWT inside row_diff");
+                std::ofstream out_2(config.row_bits_histo + ".stats_for_brwt_in_row_diff");
+                if (!out_2)
+                    logger->warn("Cannot open file {}", config.row_bits_histo + ".stats_for_brwt_in_row_diff");
+                else
+                    get_row_bits_histo(out_2, &row_diff_brwt->diffs()); // mkokot, is the reasul the same as for get_row_bits_histo(out_2, mat); ??
+            }
+
+            get_row_bits_histo(out, &anno_graph->get_annotator().get_matrix());
+
+        } else
+            get_row_bits_histo(out, mat);
+    }
 
 #define CHECK_IF_DIFFED_AND_PRINT_STATS(RD_TYPE, NAME) \
     if (const auto *rd = dynamic_cast<const RD_TYPE *>(mat)) { \

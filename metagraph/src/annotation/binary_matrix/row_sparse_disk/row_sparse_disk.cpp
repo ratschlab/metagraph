@@ -12,10 +12,10 @@ namespace binmat {
 
 using mtg::common::logger;
 
-RowSparseDisk::RowSparseDisk(const std::function<void(const RowCallback &)> &call_rows,
+RowSparseDisk::RowSparseDisk(const std::function<void(const RowCallback &)> &/*call_rows*/,
                      uint64_t num_columns,
                      uint64_t num_rows,
-                     uint64_t num_relations)
+                     uint64_t /*num_relations*/)
       : num_columns_(num_columns),
         num_rows_(num_columns > 0 ? num_rows : 0) {
     

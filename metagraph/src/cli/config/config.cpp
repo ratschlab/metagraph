@@ -313,6 +313,8 @@ Config::Config(int argc, char *argv[]) {
             refpath = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--header-delimiter")) {
             fasta_header_delimiter = std::string(get_value(i++));
+        } else if (!strcmp(argv[i], "--row-bits-histo")) {
+            row_bits_histo = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--labels-delimiter")) {
             anno_labels_delimiter = std::string(get_value(i++));
         } else if (!strcmp(argv[i], "--separately")) {
