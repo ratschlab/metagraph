@@ -489,8 +489,9 @@ template <class Seeder, class Extender, class AlignmentCompare>
 LabeledAligner<Seeder, Extender, AlignmentCompare>
 ::LabeledAligner(const DeBruijnGraph &graph,
                  const DBGAlignerConfig &config,
-                 const Annotator &annotator)
-      : DBGAligner<Seeder, Extender, AlignmentCompare>(graph, config),
+                 const Annotator &annotator,
+                 size_t db_size)
+      : DBGAligner<Seeder, Extender, AlignmentCompare>(graph, config, db_size),
         annotation_buffer_(graph, annotator, config.row_batch_size,
                            config.row_batch_size) {
     // do not use a global xdrop cutoff since we need separate cutoffs for each label

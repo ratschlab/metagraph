@@ -44,7 +44,7 @@ template <class Seeder = SuffixSeeder<UniMEMSeeder>,
           class AlignmentCompare = LocalAlignmentLess>
 class DBGAligner : public IDBGAligner {
   public:
-    DBGAligner(const DeBruijnGraph &graph, const DBGAlignerConfig &config);
+    DBGAligner(const DeBruijnGraph &graph, const DBGAlignerConfig &config, size_t db_size = 0);
 
     virtual ~DBGAligner() {}
 
@@ -62,6 +62,7 @@ class DBGAligner : public IDBGAligner {
 
     const DeBruijnGraph &graph_;
     DBGAlignerConfig config_;
+    size_t db_size_;
 
     typedef std::vector<std::pair<std::shared_ptr<ISeeder>, std::shared_ptr<ISeeder>>> BatchSeeders;
 

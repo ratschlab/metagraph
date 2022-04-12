@@ -220,6 +220,8 @@ Config::Config(int argc, char *argv[]) {
             discovery_fraction = std::stof(get_value(i++));
         } else if (!strcmp(argv[i], "--align-rel-score-cutoff")) {
             alignment_rel_score_cutoff = std::stof(get_value(i++));
+        } else if (!strcmp(argv[i], "--align-evalue-cutoff")) {
+            alignment_evalue_cutoff = std::stof(get_value(i++));
         } else if (!strcmp(argv[i], "--presence-fraction")) {
             presence_fraction = std::stof(get_value(i++));
         } else if (!strcmp(argv[i], "--query-presence")) {
@@ -1033,6 +1035,7 @@ if (advanced) {
             fprintf(stderr, "\t   --align-xdrop [INT]\t\t\t\tthe maximum difference between the current score and the best alignment score [27, 100 if chaining is enabled]\n");
             fprintf(stderr, "\t   \t\t\t\t\t\t\tNote that this parameter should be scaled accordingly when changing the default scoring parameters.\n");
             fprintf(stderr, "\t   --align-rel-score-cutoff [FLOAT]\t\tmin score relative to the current best alignment to use as a lower bound for subsequent extensions [0.95]\n");
+            fprintf(stderr, "\t   --align-evalue-cutoff [FLOAT]\t\tmax E-value of a reported score [10.0]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "Advanced options for scoring:\n");
             fprintf(stderr, "\t   --align-match-score [INT]\t\t\tpositive match score [2]\n");

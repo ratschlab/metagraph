@@ -5,6 +5,7 @@
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
 #include "common/threads/threading.hpp"
+#include "annotation/int_matrix/base/int_matrix.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "graph/alignment/dbg_aligner.hpp"
@@ -42,6 +43,8 @@ DBGAlignerConfig initialize_aligner_config(const Config &config) {
         .max_nodes_per_seq_char = config.alignment_max_nodes_per_seq_char,
         .max_ram_per_alignment = config.alignment_max_ram,
         .rel_score_cutoff = config.alignment_rel_score_cutoff,
+        .log_evalue_cutoff = config.alignment_evalue_cutoff < std::numeric_limits<double>::max()
+            ? std::log2(config.alignment_evalue_cutoff) : std::numeric_limits<double>::max(),
         .gap_opening_penalty = static_cast<int8_t>(-config.alignment_gap_opening_penalty),
         .gap_extension_penalty = static_cast<int8_t>(-config.alignment_gap_extension_penalty),
         .left_end_bonus = config.alignment_end_bonus,
@@ -352,12 +355,20 @@ int align_to_graph(Config *config) {
         return 0;
     }
 
+    size_t db_size = graph->num_nodes();
+
     DBGAlignerConfig aligner_config = initialize_aligner_config(*config);
 
     std::unique_ptr<AnnotatedDBG> anno_dbg;
     if (config->infbase_annotators.size()) {
         assert(config->infbase_annotators.size() == 1);
         anno_dbg = initialize_annotated_dbg(graph, *config);
+        const auto &matrix = anno_dbg->get_annotator().get_matrix();
+        if (const auto *coords = dynamic_cast<const annot::matrix::MultiIntMatrix*>(&matrix)) {
+            db_size = coords->num_attributes();
+        } else {
+            db_size = matrix.num_relations();
+        }
     }
 
     for (const auto &file : files) {
@@ -418,9 +429,10 @@ int align_to_graph(Config *config) {
 
                 if (anno_dbg) {
                     aligner = std::make_unique<LabeledAligner<>>(*aln_graph, aligner_config,
-                                                                 anno_dbg->get_annotator());
+                                                                 anno_dbg->get_annotator(),
+                                                                 db_size);
                 } else {
-                    aligner = std::make_unique<DBGAligner<>>(*aln_graph, aligner_config);
+                    aligner = std::make_unique<DBGAligner<>>(*aln_graph, aligner_config, db_size);
                 }
 
                 aligner->align_batch(batch,

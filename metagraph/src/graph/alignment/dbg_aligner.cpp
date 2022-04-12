@@ -26,8 +26,8 @@ AlignmentResults IDBGAligner::align(std::string_view query) const {
 
 template <class Seeder, class Extender, class AlignmentCompare>
 DBGAligner<Seeder, Extender, AlignmentCompare>
-::DBGAligner(const DeBruijnGraph &graph, const DBGAlignerConfig &config)
-      : graph_(graph), config_(config) {
+::DBGAligner(const DeBruijnGraph &graph, const DBGAlignerConfig &config, size_t db_size)
+      : graph_(graph), config_(config), db_size_(db_size) {
     if (!config_.min_seed_length)
         config_.min_seed_length = graph_.get_k();
 
@@ -299,12 +299,21 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
         score_t best_score = std::numeric_limits<score_t>::min();
         size_t query_coverage = 0;
 
+        double log_evalue_size = db_size_
+            ? std::log2(static_cast<double>(db_size_))
+                + std::log2(static_cast<double>(query.size()))
+            : std::numeric_limits<double>::max();
+
         for (auto&& alignment : chain_alignments<AlignmentCompare>(aggregator.get_alignments(),
                                                                    paths[i].get_query(false),
                                                                    paths[i].get_query(true),
                                                                    config_,
                                                                    graph_.get_k() - 1)) {
             assert(alignment.is_valid(graph_, &config_));
+            double log_evalue = log_evalue_size - alignment.get_score();
+            if (log_evalue > config_.log_evalue_cutoff)
+                break;
+
             if (alignment.get_score() > best_score) {
                 best_score = alignment.get_score();
                 query_coverage = alignment.get_query_view().size();
@@ -531,6 +540,11 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
         try {
             tsl::hopscotch_set<Alignment::Column> finished_columns;
             size_t this_num_explored;
+            double log_evalue_size = db_size_
+                ? std::log2(static_cast<double>(db_size_))
+                    + std::log2(static_cast<double>(forward.size()))
+                : std::numeric_limits<double>::max();
+
             std::tie(num_seeds, this_num_explored) = call_seed_chains_both_strands(
                 *this, forward, reverse, config_, std::move(fwd_seeds), std::move(bwd_seeds),
                 [&](Chain&& chain, score_t score) {
@@ -548,6 +562,7 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
                         logger->trace("\t{}\tdist: {}", chain, dist);
                     }
 
+                    bool evalue_terminate = false;
                     extend_chain(chain[0].first.get_orientation() ? reverse : forward,
                                  chain[0].first.get_orientation() ? forward : reverse,
                                  chain[0].first.get_orientation()
@@ -555,12 +570,20 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
                                      : forward_extender,
                                  std::move(chain), num_extensions, num_explored_nodes,
                                  [&](Alignment&& aln) {
+                        double log_evalue = log_evalue_size - aln.get_score();
+                        if (log_evalue > config_.log_evalue_cutoff) {
+                            evalue_terminate = true;
+                            return;
+                        }
+
                         auto cur_columns = aln.label_columns;
                         if (!aggregator.add_alignment(std::move(aln))) {
                             finished_columns.insert(cur_columns.begin(),
                                                     cur_columns.end());
                         }
                     });
+                    if (evalue_terminate)
+                        throw std::bad_function_call();
                 },
                 [&](Alignment::Column column) { return finished_columns.count(column); }
             );
