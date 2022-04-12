@@ -92,15 +92,13 @@ LabeledExtender::LabeledExtender(const IDBGAligner &aligner, std::string_view qu
 void LabeledExtender::flush(size_t table_i, const std::vector<node_index> &outnodes) {
     if (!table_i) {
         // flush everything
-        for (size_t i = table.size(); i > 1; --i) {
+        for (size_t i = node_labels_.size(); i > 1; --i) {
             if (node_labels_[i - 1] == nannot)
                 flush(i - 1);
         }
 
         return;
     }
-
-    assert(node_labels_.size() == table.size());
 
     // construct path
     std::vector<node_index> path;
@@ -224,7 +222,6 @@ sdsl::bit_vector LabeledExtender::pick_next(size_t table_i,
                                             const std::vector<size_t> &next_is,
                                             bool force_fixed_seed) {
     assert(table.size() == node_labels_.size() + next_is.size());
-    node_labels_.resize(table.size(), nannot);
 
     if (next_is.empty())
         return sdsl::bit_vector();
@@ -234,19 +231,19 @@ sdsl::bit_vector LabeledExtender::pick_next(size_t table_i,
                     && (next_offset < graph_->get_k() || force_fixed_seed);
     if (in_seed) {
         assert(next_is.size() == 1);
-        node_labels_[next_is[0]] = node_labels_[table_i];
+        assert(next_is[0] == table.size() - 1);
+        node_labels_.push_back(node_labels_[table_i]);
         return sdsl::bit_vector(1, true);
     }
 
     if (next_is.size() > 1
             && static_cast<double>(table.size()) / next_offset < config_.max_nodes_per_seq_char) {
-        for (size_t i : next_is) {
-            node_labels_[i] = nannot;
-        }
+        node_labels_.resize(table.size(), nannot);
         return sdsl::bit_vector(next_is.size(), true);
     }
 
     flush();
+    node_labels_.resize(table.size(), nannot);
 
     node_index node = table[table_i].node;
     sdsl::bit_vector picked(next_is.size(), false);
@@ -327,6 +324,8 @@ sdsl::bit_vector LabeledExtender::pick_next(size_t table_i,
         if (next_columns.size()) {
             node_labels_[next_is[i]] = annotation_buffer_.cache_column_set(std::move(next_columns));
             picked[i] = true;
+        } else {
+            node_labels_[next_is[i]] = 0;
         }
     }
 

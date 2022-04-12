@@ -94,11 +94,19 @@ auto AnnotationBuffer
     std::vector<std::pair<Columns, std::shared_ptr<CoordinateSet>>> results(nexts.size());
     std::vector<size_t> nexts_fetch;
     std::vector<size_t> nexts_buffered;
-    for (size_t i = 0; i < nexts.size(); ++i) {
-        if (node_to_cols_.count(nexts[i])) {
-            nexts_buffered.push_back(i);
-        } else {
+    auto find_node = node_to_cols_.find(node);
+    if (find_node == node_to_cols_.end() || find_node->second == nannot) {
+        for (size_t i = 0; i < nexts.size(); ++i) {
             nexts_fetch.push_back(i);
+        }
+    } else {
+        for (size_t i = 0; i < nexts.size(); ++i) {
+            auto find_b = node_to_cols_.find(nexts[i]);
+            if (find_b == node_to_cols_.end() || find_b->second == nannot) {
+                nexts_fetch.push_back(i);
+            } else {
+                nexts_buffered.push_back(i);
+            }
         }
     }
     if (nexts_buffered.size()) {
