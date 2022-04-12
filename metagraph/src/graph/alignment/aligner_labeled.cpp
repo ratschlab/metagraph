@@ -224,7 +224,7 @@ sdsl::bit_vector LabeledExtender::pick_next(size_t table_i,
                                             const std::vector<size_t> &next_is,
                                             bool force_fixed_seed) {
     assert(table.size() == node_labels_.size() + next_is.size());
-    node_labels_.resize(table.size(), 0);
+    node_labels_.resize(table.size(), nannot);
 
     if (next_is.empty())
         return sdsl::bit_vector();
@@ -238,7 +238,8 @@ sdsl::bit_vector LabeledExtender::pick_next(size_t table_i,
         return sdsl::bit_vector(1, true);
     }
 
-    if (static_cast<double>(table.size()) / next_offset < config_.max_nodes_per_seq_char) {
+    if (next_is.size() > 1
+            && static_cast<double>(table.size()) / next_offset < config_.max_nodes_per_seq_char) {
         for (size_t i : next_is) {
             node_labels_[i] = nannot;
         }
@@ -304,7 +305,6 @@ sdsl::bit_vector LabeledExtender::pick_next(size_t table_i,
 
                 } else {
                     assert(*d_it == *c_it);
-                    // assert(flipped || d_c_it->size());
                     if (d_c_it->size()) {
                         Alignment::Tuple next_tuple;
                         utils::set_difference(b_c_it->begin(), b_c_it->end(),
