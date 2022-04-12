@@ -840,7 +840,7 @@ std::vector<Alignment> DefaultColumnExtender::backtrack(score_t min_path_score,
                          xdrop_cutoff_i, score] = table[i];
             const auto &[S_p, E_p, F_p, node_p, j_prev_p, c_p, offset_p, max_pos_p, trim_p,
                          xdrop_cutoff_i_p, score_p] = table[j_prev];
-            if (start_pos < trim_p + 1)
+            if (start_pos < trim_p + 1 || S_p.empty())
                 return;
 
             size_t pos = start_pos - trim;
@@ -934,12 +934,18 @@ std::vector<Alignment> DefaultColumnExtender::backtrack(score_t min_path_score,
             }
         };
 
+        bool failed = false;
+
         while (j) {
             assert(j != static_cast<size_t>(-1));
             const auto &[S, E, F, node, j_prev, c, offset, max_pos, trim,
                          xdrop_cutoff_i, score_cur] = table[j];
             const auto &[S_p, E_p, F_p, node_p, j_prev_p, c_p, offset_p, max_pos_p, trim_p,
                          xdrop_cutoff_i_p, score_cur_p] = table[j_prev];
+            if (S_p.empty()) {
+                failed = true;
+                break;
+            }
 
             assert(pos >= trim);
             assert(*std::max_element(S.begin(), S.end()) == S[max_pos - trim]);
@@ -993,6 +999,11 @@ std::vector<Alignment> DefaultColumnExtender::backtrack(score_t min_path_score,
                                  xdrop_cutoff_i, score_cur] = table[j];
                     const auto &[S_p, E_p, F_p, node_p, j_prev_p, c_p, offset_p, max_pos_p, trim_p,
                                  xdrop_cutoff_i_p, score_cur_p] = table[j_prev];
+                    if (S_p.empty()) {
+                        failed = true;
+                        j = 0;
+                        break;
+                    }
 
                     align_offset = std::min(offset, k_minus_1);
 
@@ -1018,7 +1029,7 @@ std::vector<Alignment> DefaultColumnExtender::backtrack(score_t min_path_score,
             }
         }
 
-        if (trace.size() >= min_trace_length && path.size() && path.back()) {
+        if (!failed && trace.size() >= min_trace_length && path.size() && path.back()) {
             assert(!dummy_counter);
             score_t cur_cell_score = table[j].S[pos - table[j].trim];
             best_score = std::max(best_score, score - cur_cell_score);

@@ -238,6 +238,15 @@ sdsl::bit_vector LabeledExtender::pick_next(size_t table_i,
         return sdsl::bit_vector(1, true);
     }
 
+    if (static_cast<double>(table.size()) / next_offset < config_.max_nodes_per_seq_char) {
+        for (size_t i : next_is) {
+            node_labels_[i] = nannot;
+        }
+        return sdsl::bit_vector(next_is.size(), true);
+    }
+
+    flush();
+
     node_index node = table[table_i].node;
     sdsl::bit_vector picked(next_is.size(), false);
 
