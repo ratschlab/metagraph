@@ -242,10 +242,11 @@ sdsl::bit_vector LabeledExtender::pick_next(size_t table_i,
         return sdsl::bit_vector(next_is.size(), true);
     }
 
-    flush();
+    if (node_labels_[table_i] == nannot)
+        flush();
+
     node_labels_.resize(table.size(), nannot);
 
-    node_index node = table[table_i].node;
     sdsl::bit_vector picked(next_is.size(), false);
 
     std::vector<node_index> outnodes;
@@ -260,7 +261,7 @@ sdsl::bit_vector LabeledExtender::pick_next(size_t table_i,
     if (flipped)
         dist = dist * -1;
 
-    auto diffs = annotation_buffer_.get_label_and_coord_diffs(node, outnodes, flipped);
+    auto diffs = annotation_buffer_.get_label_and_coord_diffs(table[table_i].node, outnodes, flipped);
 
     for (size_t i = 0; i < outnodes.size(); ++i) {
         const auto &[column_diff, coord_diff] = diffs[i];
