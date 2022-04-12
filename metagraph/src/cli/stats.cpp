@@ -361,7 +361,8 @@ void print_annotation_stats(const std::string &fname, const Config &config) {
                     get_row_bits_histo(out_2, &row_diff_brwt->diffs()); // mkokot, is the reasul the same as for get_row_bits_histo(out_2, mat); ??
             }
 
-            get_row_bits_histo(out, &anno_graph->get_annotator().get_matrix());
+            // mkokot, OK this is in fact not needed for our needs
+            //get_row_bits_histo(out, &anno_graph->get_annotator().get_matrix());
 
         } else
             get_row_bits_histo(out, mat);
