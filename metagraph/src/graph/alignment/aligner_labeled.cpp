@@ -236,16 +236,7 @@ sdsl::bit_vector LabeledExtender::pick_next(size_t table_i,
         return sdsl::bit_vector(1, true);
     }
 
-    if (next_is.size() > 1
-            && static_cast<double>(table.size()) / next_offset < config_.max_nodes_per_seq_char) {
-        node_labels_.resize(table.size(), nannot);
-        return sdsl::bit_vector(next_is.size(), true);
-    }
-
-    if (node_labels_[table_i] == nannot)
-        flush();
-
-    node_labels_.resize(table.size(), nannot);
+    node_labels_.resize(table.size(), 0);
 
     sdsl::bit_vector picked(next_is.size(), false);
 
@@ -325,8 +316,6 @@ sdsl::bit_vector LabeledExtender::pick_next(size_t table_i,
         if (next_columns.size()) {
             node_labels_[next_is[i]] = annotation_buffer_.cache_column_set(std::move(next_columns));
             picked[i] = true;
-        } else {
-            node_labels_[next_is[i]] = 0;
         }
     }
 
