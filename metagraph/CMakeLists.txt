@@ -263,6 +263,7 @@ include_directories(
   external-libraries/spdlog/include
   external-libraries/zlib
   external-libraries/Simple-Web-Server
+  external-libraries/sdust
   ${PROJECT_SOURCE_DIR}/src
 )
 
@@ -307,6 +308,11 @@ add_library(progress_bar STATIC
 add_library(mersenne_twister STATIC
   external-libraries/rollinghashcpp/mersennetwister.cpp
 )
+
+add_library(sdust STATIC
+  external-libraries/sdust/sdust.c
+)
+target_compile_options(sdust PRIVATE -Wall -Wc++-compat -Wno-error)
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH}
   "${CMAKE_SOURCE_DIR}/external-libraries/binrel_wt/cmake/modules"
@@ -373,6 +379,7 @@ set(METALIBS ${METALIBS}
   jsoncpp_lib
   progress_bar
   mersenne_twister
+  sdust
   spdlog::spdlog
 )
 if(APPLE)
