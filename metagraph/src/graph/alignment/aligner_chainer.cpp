@@ -317,22 +317,6 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
     return std::make_pair(num_seeds, num_nodes);
 }
 
-inline __m256i avx2_log2_epi32(__m256i v) {
-    //avx2_lzcnt_epi32
-    // prevent value from being rounded up to the next power of two
-    v = _mm256_andnot_si256(_mm256_srli_epi32(v, 8), v); // keep 8 MSB
-
-    v = _mm256_castps_si256(_mm256_cvtepi32_ps(v)); // convert an integer to float
-    v = _mm256_srli_epi32(v, 23); // shift down the exponent
-    v = _mm256_subs_epu16(_mm256_set1_epi32(158), v); // undo bias
-    v = _mm256_min_epi16(v, _mm256_set1_epi32(32)); // clamp at 32
-
-    // log2
-    v = _mm256_sub_epi32(_mm256_set1_epi32(31), v);
-
-    return v;
-}
-
 std::tuple<ChainDPTable, AlignedVector<int32_t>, size_t, size_t>
 chain_seeds(const IDBGAligner &aligner,
             const DBGAlignerConfig &config,
