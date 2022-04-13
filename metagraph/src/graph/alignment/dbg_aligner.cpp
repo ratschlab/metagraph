@@ -203,9 +203,13 @@ auto DBGAligner<Seeder, Extender, AlignmentCompare>
             nodes.resize(this_query.size() - graph_.get_k() + 1);
         }
 
-        auto seeder = std::make_shared<Seeder>(graph_, this_query, false,
-                                               std::vector<node_index>(nodes), config_);
-        std::shared_ptr<Seeder> seeder_rc;
+        std::shared_ptr<ISeeder> seeder
+            = std::make_shared<Seeder>(graph_, this_query, false,
+                                       std::vector<node_index>(nodes), config_);
+        if (this_query.size() * config_.min_exact_match > seeder->get_num_matches())
+            seeder = std::make_shared<ManualMatchingSeeder>(std::vector<Seed>{}, 0, config_);
+
+        std::shared_ptr<ISeeder> seeder_rc;
         std::vector<node_index> nodes_rc;
 
 #if ! _PROTEIN_GRAPH
@@ -224,6 +228,8 @@ auto DBGAligner<Seeder, Extender, AlignmentCompare>
 
             seeder_rc = std::make_shared<Seeder>(graph_, reverse, true,
                                                  std::move(nodes_rc), config_);
+            if (reverse.size() * config_.min_exact_match > seeder_rc->get_num_matches())
+                seeder_rc = std::make_shared<ManualMatchingSeeder>(std::vector<Seed>{}, 0, config_);
         }
 #endif
         result.emplace_back(std::move(seeder), std::move(seeder_rc));
