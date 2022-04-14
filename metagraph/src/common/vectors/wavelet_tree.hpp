@@ -216,6 +216,8 @@ class wavelet_tree_sdsl : public wavelet_tree {
 
     sdsl::int_vector<> to_vector() const;
 
+    const t_wt_sdsl& data() const { return wwt_; }
+
   private:
     t_wt_sdsl wwt_;
     uint8_t logsigma_;
