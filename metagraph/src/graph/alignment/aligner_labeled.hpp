@@ -117,8 +117,8 @@ class LabeledExtender : public DefaultColumnExtender {
 class ILabeledAligner {
   public:
     virtual AnnotationBuffer& get_annotation_buffer() const = 0;
+    virtual ~ILabeledAligner() {}
 };
-
 
 template <class Seeder = SuffixSeeder<ExactSeeder>,
           class Extender = LabeledExtender,
