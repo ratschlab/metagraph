@@ -167,9 +167,9 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
                     assert(chain[i].first.label_columns.size()
                             == chain[i].first.label_coordinates.size());
                     Alignment::CoordinateSet coord_union;
-                    auto add_col_coords = [&](auto col, const auto &coords) {
+                    auto add_col_coords = [&](auto col, auto &coords) {
                         columns.push_back(col);
-                        coord_union.push_back(coords);
+                        coord_union.emplace_back(std::move(coords));
                     };
                     utils::match_indexed_values(
                         last_chain[i].first.label_columns.begin(),
