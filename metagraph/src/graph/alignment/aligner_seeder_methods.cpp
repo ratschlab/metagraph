@@ -17,10 +17,15 @@ using mtg::common::logger;
 
 typedef Alignment::score_t score_t;
 
-bool is_low_complexity(std::string_view s, int T = 20, int W = 64) {
+inline bool is_low_complexity(std::string_view s, int T = 20, int W = 64) {
+#if ! _PROTEIN_GRAPH
     int n;
     std::unique_ptr<uint64_t> r { sdust(0, (const uint8_t*)s.data(), s.size(), T, W, &n) };
     return n > 0;
+#else
+    // TODO: implement a checker here
+    return false;
+#endif
 }
 
 ExactSeeder::ExactSeeder(const DeBruijnGraph &graph,
