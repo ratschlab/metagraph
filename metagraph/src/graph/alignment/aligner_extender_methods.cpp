@@ -367,12 +367,16 @@ void DefaultColumnExtender
                  0);
     } else if (in_seed && force_fixed_seed) {
         size_t node_i = next_offset - graph_->get_k() + 1;
+        assert(node_i);
+        assert(node_i < this->seed_->get_nodes().size());
         assert(node == this->seed_->get_nodes()[node_i - 1]);
         node_index next_node = this->seed_->get_nodes()[node_i];
         char next_c = this->seed_->get_sequence()[seed_pos];
-        callback(next_node, next_c, next_node
-            ? 0
-            : (!node ? config_.gap_extension_penalty : config_.gap_opening_penalty));
+        callback(next_node, next_c,
+            (next_node ? 0 : (!node ? config_.gap_extension_penalty : config_.gap_opening_penalty))
+                + (node_i - 1 < this->seed_->extra_scores.size() ? this->seed_->extra_scores[node_i - 1] : 0)
+
+        );
         assert(!node || next_c == boss::BOSS::kSentinel ||
                 graph_->traverse(node, next_c) == next_node);
     } else {
@@ -763,6 +767,7 @@ Alignment DefaultColumnExtender::construct_alignment(Cigar cigar,
                                                      std::string match,
                                                      score_t score,
                                                      size_t offset,
+                                                     const std::vector<score_t> &score_trace,
                                                      score_t extra_score) const {
     assert(final_path.size());
     assert(cigar.size());
@@ -777,6 +782,11 @@ Alignment DefaultColumnExtender::construct_alignment(Cigar cigar,
     extension.extend_query_begin(query_.data());
     extension.extend_query_end(query_.data() + query_.size());
     extension.extra_score = extra_score;
+    if (extra_score) {
+        auto score_it = score_trace.rend() - extension.get_nodes().size() + 1;
+        assert(!*(score_it - 1));
+        extension.extra_scores = std::vector<score_t>(score_it, score_trace.rend());
+    }
     assert(extension.is_valid(*this->graph_, &config_));
 
     return extension;
@@ -873,6 +883,7 @@ std::vector<Alignment> DefaultColumnExtender::backtrack(score_t min_path_score,
 
         std::vector<DeBruijnGraph::node_index> path;
         std::vector<size_t> trace;
+        std::vector<score_t> score_trace;
         Cigar ops;
         std::string seq;
         score_t score = start_score;
@@ -947,6 +958,7 @@ std::vector<Alignment> DefaultColumnExtender::backtrack(score_t min_path_score,
                         + profile_score_[s][seed_clipping + pos]) {
                 // match/mismatch
                 trace.emplace_back(j);
+                score_trace.emplace_back(score_cur);
 
                 extra_score += score_cur;
                 append_node(node, c, offset, profile_op_[s][seed_clipping + pos]);
@@ -976,6 +988,7 @@ std::vector<Alignment> DefaultColumnExtender::backtrack(score_t min_path_score,
                         : Cigar::MATCH;
 
                     trace.emplace_back(j);
+                    score_trace.emplace_back(score_cur);
                     extra_score += score_cur;
                     append_node(node, c, offset, Cigar::DELETION);
 
@@ -995,11 +1008,14 @@ std::vector<Alignment> DefaultColumnExtender::backtrack(score_t min_path_score,
             if (score - min_cell_score_ < best_score)
                 break;
 
+            assert(extra_score == std::accumulate(score_trace.begin(), score_trace.end(),
+                                                    score_t(0)));
+
             if (score >= min_start_score
                     && (!pos || cur_cell_score == 0)
                     && (pos || cur_cell_score == table[0].S[0])
                     && (config_.allow_left_trim || !j)) {
-                call_alignments(score, path, trace, ops, pos, align_offset,
+                call_alignments(score, path, trace, score_trace, ops, pos, align_offset,
                                 window.substr(pos, end_pos - pos), seq, extra_score,
                                 [&](Alignment&& alignment) {
                     DEBUG_LOG("Extension: {}", alignment);

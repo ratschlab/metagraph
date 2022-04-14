@@ -3,6 +3,7 @@
 
 #include "alignment.hpp"
 #include "common/vectors/bitmap.hpp"
+#include "graph/representation/succinct/dbg_succinct.hpp"
 
 
 namespace mtg {
@@ -134,12 +135,25 @@ class UniMEMSeeder : public MEMSeeder {
     bitmap_lazy is_mem_terminus_;
 };
 
+
+class ISuffixSeeder {};
+
 template <class BaseSeeder>
-class SuffixSeeder : public BaseSeeder {
+class SuffixSeeder : public BaseSeeder, public ISuffixSeeder {
   public:
-    template <typename... Args>
-    SuffixSeeder(Args&&... args) : BaseSeeder(std::forward<Args>(args)...) {
-        generate_seeds();
+    typedef typename BaseSeeder::node_index node_index;
+    typedef boss::BOSS::edge_index edge_index;
+    typedef std::pair<edge_index, edge_index> BOSSRange;
+
+    SuffixSeeder(const DeBruijnGraph &graph,
+                 std::string_view query,
+                 bool orientation,
+                 std::vector<node_index>&& nodes,
+                 const DBGAlignerConfig &config,
+                 const std::unique_ptr<boss::BOSS> &sample_boss = {},
+                 const std::vector<BOSSRange> &matching_ranges = {})
+            : BaseSeeder(graph, query, orientation, std::move(nodes), config) {
+        generate_seeds(sample_boss, matching_ranges);
     }
 
     virtual ~SuffixSeeder() {}
@@ -147,7 +161,8 @@ class SuffixSeeder : public BaseSeeder {
     std::vector<Seed> get_seeds() const override { return seeds_; }
 
   protected:
-    void generate_seeds();
+    void generate_seeds(const std::unique_ptr<boss::BOSS> &sample_boss,
+                        const std::vector<BOSSRange> &matching_ranges);
 
   private:
     std::vector<Seed> seeds_;
