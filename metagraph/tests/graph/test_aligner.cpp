@@ -1354,8 +1354,11 @@ TYPED_TEST(DBGAlignerTest, align_low_similarity3) {
         config.no_seed_complexity_filter = !seed_complexity_filter;
         DBGAligner<> aligner(*graph, config);
         auto paths = aligner.align(query);
-
+#if ! _PROTEIN_GRAPH
         EXPECT_EQ(seed_complexity_filter, paths.empty());
+#else
+        EXPECT_FALSE(paths.empty());
+#endif
     }
 }
 
