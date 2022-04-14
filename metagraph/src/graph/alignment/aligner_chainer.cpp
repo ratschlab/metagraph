@@ -225,8 +225,6 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
 
             used[i] = true;
             chain_seeds.emplace_back(seeds[seed_i], coord);
-            chain_seeds.back().first.label_columns.clear();
-            chain_seeds.back().first.label_coordinates.clear();
             if (has_labels) {
                 chain_seeds.back().first.label_columns.assign(1, label);
                 if (aligner.has_coordinates()) {
@@ -348,6 +346,8 @@ chain_seeds(const IDBGAligner &aligner,
                                       seeds[i].get_query_view().size(), i);
             });
         }
+        seeds[i].label_columns = Alignment::Columns{};
+        seeds[i].label_coordinates = Alignment::CoordinateSet{};
     }
 
     dp_table.reserve(dp_table.size() + 9);
