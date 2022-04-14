@@ -1025,7 +1025,7 @@ if (advanced) {
 }
             fprintf(stderr, "\t   --align-alternative-alignments \t\tthe number of alternative paths to report per seed [1]\n");
             fprintf(stderr, "\t   --align-chain \t\t\t\tconstruct seed chains before alignment. Useful for long error-prone reads. [off]\n");
-            fprintf(stderr, "\t   --align-post-chain \t\t\tperform multiple local alignments and chain them together into a single alignment. Useful for long error-prone reads. [off]\n");
+            fprintf(stderr, "\t   --align-post-chain \t\t\t\tperform multiple local alignments and chain them together into a single alignment. Useful for long error-prone reads. [off]\n");
             fprintf(stderr, "\t         \t\t\t\t\t\tA '$' inserted into the reference sequence indicates a jump in the graph.\n");
             fprintf(stderr, "\t         \t\t\t\t\t\tA 'G' in the reported CIGAR string indicates inserted graph nodes.\n");
 if (advanced) {
@@ -1043,7 +1043,7 @@ if (advanced) {
             fprintf(stderr, "\t   --align-mm-transversion-penalty [INT]\tpositive transversion penalty (DNA only) [3]\n");
             fprintf(stderr, "\t   --align-gap-open-penalty [INT]\t\tpositive gap opening penalty [6]\n");
             fprintf(stderr, "\t   --align-gap-extension-penalty [INT]\t\tpositive gap extension penalty [2]\n");
-            fprintf(stderr, "\t   --align-end-bonus [INT]\t\tscore bonus for each endpoint of the query covered by an alignment [5]\n");
+            fprintf(stderr, "\t   --align-end-bonus [INT]\t\t\tscore bonus for each endpoint of the query covered by an alignment [5]\n");
             fprintf(stderr, "\t   --align-edit-distance \t\t\tuse unit costs for scoring matrix [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "Advanced options for seeding:\n");
