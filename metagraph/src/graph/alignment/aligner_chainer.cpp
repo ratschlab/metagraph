@@ -528,7 +528,7 @@ chain_seeds(const IDBGAligner &aligner,
                     if (coord_dist != dist) {
                         float coord_diff = std::abs(coord_dist - dist);
                         float linear_penalty = coord_diff * sl;
-                        float log_penalty = log2(coord_diff) * 0.5;
+                        float log_penalty = log2(coord_diff + 1) * 0.5;
                         cur_score -= linear_penalty + log_penalty;
                     }
                     if (cur_score >= score) {
