@@ -1,5 +1,6 @@
 #include "alignment.hpp"
 
+#include "annotation_buffer.hpp"
 #include "graph/representation/base/sequence_graph.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/canonical_dbg.hpp"
@@ -19,20 +20,14 @@ std::string Alignment::format_coords() const {
     if (!label_coordinates.size())
         return "";
 
-    assert(label_columns.size());
-    assert(label_coordinates.size() == label_columns.size());
+    assert(has_annotation());
+    assert(label_coordinates.size() == get_columns(0).size());
 
-    std::vector<std::string> decoded_labels;
-    decoded_labels.reserve(label_columns.size());
-
-    for (size_t i = 0; i < label_columns.size(); ++i) {
-        decoded_labels.emplace_back(label_encoder
-            ? label_encoder->decode(label_columns[i])
-            : std::to_string(label_columns[i])
-        );
+    std::vector<std::string> decoded_labels = get_decoded_labels(0);
+    for (size_t i = 0; i < decoded_labels.size(); ++i) {
         for (uint64_t coord : label_coordinates[i]) {
             // alignment coordinates are 1-based inclusive ranges
-            decoded_labels.back()
+            decoded_labels[i]
                 += fmt::format(":{}-{}", coord + 1, coord + sequence_.size());
         }
     }
@@ -40,7 +35,144 @@ std::string Alignment::format_coords() const {
     return fmt::format("{}", fmt::join(decoded_labels, ";"));
 }
 
-bool Alignment::append(Alignment&& other) {
+void Seed::set_columns(Vector<Column>&& columns) {
+    if (columns.empty()) {
+        label_columns = 0;
+        return;
+    }
+
+    assert(label_encoder);
+    label_columns = label_encoder->cache_column_set(std::move(columns));
+}
+
+void Alignment::set_columns(Vector<Column>&& columns) {
+    if (columns.empty()) {
+        label_columns = 0;
+        return;
+    }
+
+    assert(label_encoder);
+    label_columns = label_encoder->cache_column_set(std::move(columns));
+}
+
+auto Seed::get_columns() const -> const Vector<Column>& {
+    assert(label_encoder);
+    return label_encoder->get_cached_column_set(label_columns);
+}
+
+auto Alignment::get_columns(size_t path_i) const -> const Vector<Column>& {
+    assert(path_i < nodes_.size());
+    assert(label_column_diffs.empty() || label_column_diffs.size() == nodes_.size() - 1);
+    assert(label_encoder);
+    return label_encoder->get_cached_column_set(!path_i || label_column_diffs.empty()
+        ? label_columns
+        : label_column_diffs[path_i - 1]
+    );
+}
+
+auto Alignment::get_column_union() const -> Vector<Column> {
+    assert(label_column_diffs.empty() || label_column_diffs.size() == nodes_.size() - 1);
+    assert(label_encoder);
+    Vector<Column> ret_val = label_encoder->get_cached_column_set(label_columns);
+    for (size_t diff : label_column_diffs) {
+        Vector<Column> merge;
+        const Vector<Column> &next = label_encoder->get_cached_column_set(diff);
+        std::set_union(ret_val.begin(), ret_val.end(), next.begin(), next.end(),
+                       std::back_inserter(merge));
+        std::swap(merge, ret_val);
+    }
+    return ret_val;
+}
+
+std::vector<std::string> Alignment::get_decoded_labels(size_t path_i) const {
+    assert(label_encoder);
+    const auto &columns = get_columns(path_i);
+    const auto &encoder = label_encoder->get_annotator().get_label_encoder();
+    std::vector<std::string> result;
+    result.reserve(columns.size());
+    for (Column c : columns) {
+        result.push_back(encoder.decode(c));
+    }
+
+    return result;
+}
+
+void Alignment::merge_annotations(const Alignment &other) {
+    if (this == &other)
+        return;
+
+    assert(*this == other);
+    assert(label_encoder);
+    if (label_coordinates.size()) {
+        assert(other.label_coordinates.size());
+        assert(label_column_diffs.empty() && "label changes not supported");
+        assert(extra_scores.empty());
+        const auto &a_col = get_columns();
+        const auto &b_col = other.get_columns();
+        Vector<Column> col_union;
+        CoordinateSet coord_union;
+        auto add_col_coords = [&](Column c, const auto &coords) {
+            col_union.push_back(c);
+            coord_union.push_back(coords);
+        };
+        utils::match_indexed_values(
+            a_col.begin(), a_col.end(), label_coordinates.begin(),
+            b_col.begin(), b_col.end(), other.label_coordinates.begin(),
+            [&](Column c, const auto &coords, const auto &other_coords) {
+                col_union.push_back(c);
+                Tuple merged_coords;
+                std::set_union(coords.begin(), coords.end(),
+                               other_coords.begin(), other_coords.end(),
+                               std::back_inserter(merged_coords));
+                coord_union.emplace_back(std::move(merged_coords));
+            },
+            add_col_coords, add_col_coords
+        );
+        std::swap(label_coordinates, coord_union);
+        set_columns(std::move(col_union));
+        return;
+    }
+
+    extra_scores.resize(std::max(extra_scores.size(), other.extra_scores.size()));
+
+    if (other.label_column_diffs.size() && label_column_diffs.empty())
+        label_column_diffs.resize(nodes_.size() - 1, label_columns);
+
+    for (size_t i = 0; i < nodes_.size(); ++i) {
+        if (!i || label_column_diffs.size()) {
+            const auto &a_col = get_columns(i);
+            const auto &b_col = other.get_columns(i);
+            Vector<Column> col_union;
+            std::set_union(a_col.begin(), a_col.end(), b_col.begin(), b_col.end(),
+                           std::back_inserter(col_union));
+            if (!i) {
+                set_columns(std::move(col_union));
+            } else {
+                label_column_diffs[i - 1] = label_encoder->cache_column_set(std::move(col_union));
+            }
+        }
+        if (i && i - 1 < extra_scores.size() && i - 1 < other.extra_scores.size())
+            extra_scores[i - 1] += other.extra_scores[i - 1];
+    }
+    score_ += other.extra_score;
+    extra_score += other.extra_score;
+}
+
+bool Alignment::splice(Alignment&& other) {
+    if (empty()) {
+        std::swap(*this, other);
+        return has_annotation();
+    }
+
+    trim_end_clipping();
+    other.trim_clipping();
+    return append(std::move(other));
+}
+
+bool Alignment
+::append(Alignment&& other,
+         const std::function<score_t(node_index, std::string_view, char)> &get_label_change_score,
+         bool label_change_union) {
     assert(query_view_.data() + query_view_.size() + other.get_clipping()
             == other.query_view_.data());
     assert(orientation_ == other.orientation_);
@@ -50,21 +182,27 @@ bool Alignment::append(Alignment&& other) {
     if (label_coordinates.size() && other.label_coordinates.empty())
         label_coordinates.clear();
 
-    if (label_columns.size() && other.label_columns.empty())
-        label_columns.clear();
+    if (has_annotation() && !other.has_annotation()) {
+        label_columns = 0;
+        label_column_diffs.clear();
+        label_encoder = nullptr;
+    }
 
     if (label_coordinates.size()) {
-        assert(label_columns.size() == label_coordinates.size());
-        Columns merged_label_columns;
+        assert(label_column_diffs.empty() && other.label_column_diffs.empty()
+                && !label_change_union
+                && "label change not supported with coordinates");
+        const auto &columns = get_columns(0);
+        const auto &other_columns = other.get_columns(0);
+        assert(columns.size() == label_coordinates.size());
+        Vector<Column> merged_label_columns;
         CoordinateSet merged_label_coordinates;
 
         // if the alignments fit together without gaps, make sure that the
         // coordinates form a contiguous range
         utils::match_indexed_values(
-            label_columns.begin(), label_columns.end(),
-            label_coordinates.begin(),
-            other.label_columns.begin(), other.label_columns.end(),
-            other.label_coordinates.begin(),
+            columns.begin(), columns.end(), label_coordinates.begin(),
+            other_columns.begin(), other_columns.end(), other.label_coordinates.begin(),
             [&](auto col, const auto &coords, const auto &other_coords) {
                 Tuple merged;
                 utils::set_intersection(coords.begin(), coords.end(),
@@ -83,10 +221,10 @@ bool Alignment::append(Alignment&& other) {
             return true;
         }
 
-        ret_val = merged_label_columns.size() < label_columns.size();
+        ret_val = merged_label_columns.size() < columns.size();
 
         if (!ret_val) {
-            for (size_t i = 0; i < label_columns.size(); ++i) {
+            for (size_t i = 0; i < columns.size(); ++i) {
                 if (merged_label_coordinates[i].size() < label_coordinates[i].size()) {
                     ret_val = true;
                     break;
@@ -94,28 +232,72 @@ bool Alignment::append(Alignment&& other) {
             }
         }
 
-        std::swap(label_columns, merged_label_columns);
+        label_columns = label_encoder->cache_column_set(std::move(merged_label_columns));
         std::swap(label_coordinates, merged_label_coordinates);
 
-    } else if (label_columns.size()) {
-        Columns merged_label_columns;
-        std::set_intersection(label_columns.begin(), label_columns.end(),
-                              other.label_columns.begin(), other.label_columns.end(),
-                              std::back_inserter(merged_label_columns));
+    } else if (has_annotation()) {
+        if (label_columns != other.label_columns) {
+            const Vector<Column> &other_columns = other.get_columns(0);
+            if (label_change_union) {
+                Vector<Column> label_union = get_column_union();
+                Vector<Column> diff;
+                std::set_difference(other_columns.begin(), other_columns.end(),
+                                    label_union.begin(), label_union.end(),
+                                    std::back_inserter(diff));
+                ret_val = diff.size();
+            } else {
+                const Vector<Column> &ref_columns = get_columns(nodes_.size() - 1);
+                ret_val = !utils::count_intersection(other_columns.begin(), other_columns.end(),
+                                                     ref_columns.begin(), ref_columns.end());
+            }
+        }
 
-        if (merged_label_columns.empty()) {
+        if (other.label_column_diffs.empty()) {
+            other.label_column_diffs.resize(other.nodes_.size(), other.label_columns);
+        } else {
+            other.label_column_diffs.insert(other.label_column_diffs.begin(), other.label_columns);
+        }
+
+        size_t k = sequence_.size() + offset_ + 1 - nodes_.size();
+        score_t label_change_score = ret_val
+            ? get_label_change_score(nodes_.back(),
+                                     get_sequence().substr(sequence_.size() - std::min(k, sequence_.size())),
+                                     other.sequence_[0]) : 0;
+        if (label_change_score == ninf) {
             *this = Alignment();
             return true;
         }
 
-        ret_val = merged_label_columns.size() < label_columns.size();
-
-        std::swap(label_columns, merged_label_columns);
+        if (other.extra_scores.empty()) {
+            other.extra_scores.resize(other.nodes_.size());
+            other.extra_scores[0] = label_change_score;
+        } else {
+            other.extra_scores.insert(other.extra_scores.begin(), label_change_score);
+        }
+        other.extra_score += other.extra_scores[0];
+        other.score_ += other.extra_scores[0];
     }
 
+    if (other.extra_scores.size() && extra_scores.empty())
+        extra_scores.resize(nodes_.size() - 1);
+
+    if (other.label_column_diffs.size() && label_column_diffs.empty())
+        label_column_diffs.resize(nodes_.size() - 1, label_columns);
+
     nodes_.insert(nodes_.end(), other.nodes_.begin(), other.nodes_.end());
+    if (other.extra_scores.size())
+        extra_scores.insert(extra_scores.end(), other.extra_scores.begin(), other.extra_scores.end());
+
+    if (other.label_column_diffs.size())
+        label_column_diffs.insert(label_column_diffs.end(), other.label_column_diffs.begin(), other.label_column_diffs.end());
+
+    assert(extra_scores.empty() || extra_scores.size() == nodes_.size() - 1);
+    assert(label_column_diffs.empty() || label_column_diffs.size() == nodes_.size() - 1);
+
     sequence_ += std::move(other.sequence_);
     score_ += other.score_;
+    extra_score += other.extra_score;
+
     cigar_.append(std::move(other.cigar_));
     // expand the query window to cover both alignments
     query_view_ = std::string_view(query_view_.data(),
@@ -127,15 +309,65 @@ size_t Alignment::trim_offset() {
     if (!offset_ || nodes_.size() <= 1)
         return 0;
 
+    assert(extra_scores.empty() || extra_scores.size() == nodes_.size() - 1);
+    assert(label_column_diffs.empty() || label_column_diffs.size() == nodes_.size() - 1);
+
     assert(nodes_.front());
 
     size_t first_dummy = (std::find(nodes_.begin(), nodes_.end(), DeBruijnGraph::npos)
         - nodes_.begin()) - 1;
-    size_t trim = std::min(std::min(offset_, nodes_.size() - 1), first_dummy);
+    size_t first_extra_score = extra_scores.empty()
+        ? nodes_.size()
+        : (std::find_if(extra_scores.begin(), extra_scores.end(), [](score_t s) { return s; })
+            - extra_scores.begin());
+    size_t trim = std::min({ offset_, nodes_.size() - 1, first_dummy, first_extra_score });
+    if (!trim)
+        return trim;
+
     offset_ -= trim;
     nodes_.erase(nodes_.begin(), nodes_.begin() + trim);
+    if (extra_scores.size())
+        extra_scores.erase(extra_scores.begin(), extra_scores.begin() + trim);
+
+    if (label_column_diffs.size())
+        label_column_diffs.erase(label_column_diffs.begin(), label_column_diffs.begin() + trim);
+
+    assert(extra_scores.empty() || extra_scores.size() == nodes_.size() - 1);
+    assert(label_column_diffs.empty() || label_column_diffs.size() == nodes_.size() - 1);
     assert(nodes_.front());
     return trim;
+}
+
+void Alignment::extend_offset(std::vector<node_index>&& path,
+                             std::vector<size_t>&& columns,
+                             std::vector<score_t>&& scores) {
+    offset_ += path.size();
+    if (columns.size()) {
+        assert(columns.size() == path.size());
+        if (label_column_diffs.empty())
+            label_column_diffs.resize(nodes_.size() - 1, label_columns);
+
+        std::rotate(columns.begin(), columns.begin() + 1, columns.end());
+        std::swap(label_columns, columns.back());
+        label_column_diffs.insert(label_column_diffs.begin(), columns.begin(), columns.end());
+    } else if (label_column_diffs.size()) {
+        label_column_diffs.insert(label_column_diffs.begin(), path.size(), label_columns);
+    }
+
+    if (scores.size()) {
+        assert(scores.size() == path.size());
+        if (extra_scores.empty())
+            extra_scores.resize(nodes_.size() - 1);
+
+        score_t added = std::accumulate(scores.begin(), scores.end(), score_t{0});
+        extra_score += added;
+        score_ += added;
+        extra_scores.insert(extra_scores.begin(), scores.begin(), scores.end());
+    } else if (extra_scores.size()) {
+        extra_scores.insert(extra_scores.begin(), path.size(), 0);
+    }
+
+    nodes_.insert(nodes_.begin(), path.begin(), path.end());
 }
 
 size_t Alignment::trim_query_prefix(size_t n,
@@ -218,6 +450,18 @@ size_t Alignment::trim_query_prefix(size_t n,
         score_ -= config.left_end_bonus;
 
     nodes_.erase(nodes_.begin(), node_it);
+    if (extra_scores.size() && node_it != nodes_.begin()) {
+        score_t removed = std::accumulate(extra_scores.begin(),
+                                          extra_scores.begin() + (node_it - nodes_.begin()),
+                                          score_t(0));
+        extra_score -= removed;
+        score_ -= removed;
+        extra_scores.erase(extra_scores.begin(), extra_scores.begin() + (node_it - nodes_.begin()));
+    }
+
+    if (label_column_diffs.size() && node_it != nodes_.begin())
+        label_column_diffs.erase(label_column_diffs.begin(), label_column_diffs.begin() + (node_it - nodes_.begin()));
+
     sequence_.erase(sequence_.begin(), s_it);
     it->second -= cigar_offset;
     cigar_.data().erase(cigar_.data().begin(), it);
@@ -298,6 +542,18 @@ size_t Alignment::trim_query_suffix(size_t n,
         score_ -= config.right_end_bonus;
 
     nodes_.erase(node_it.base(), nodes_.end());
+    if (extra_scores.size() >= nodes_.size()) {
+        score_t removed = std::accumulate(extra_scores.end() - nodes_.size() + 1,
+                                          extra_scores.end(),
+                                          score_t(0));
+        extra_score -= removed;
+        score_ -= removed;
+        extra_scores.resize(nodes_.size() - 1);
+    }
+
+    if (label_column_diffs.size() >= nodes_.size())
+        label_column_diffs.resize(nodes_.size() - 1);
+
     sequence_.erase(s_it.base(), sequence_.end());
     it->second -= cigar_offset;
     cigar_.data().erase(it.base(), cigar_.data().end());
@@ -370,11 +626,7 @@ size_t Alignment::trim_reference_prefix(size_t n,
                 if (empty())
                     return 0;
             } break;
-            case Cigar::NODE_INSERTION: {
-                score_ -= it->second - cigar_offset == 1
-                    ? config.gap_opening_penalty
-                    : config.gap_extension_penalty;
-            } break;
+            case Cigar::NODE_INSERTION: {} break;
             case Cigar::CLIPPED: {
                 assert(false && "this should not happen");
             } break;
@@ -397,6 +649,18 @@ size_t Alignment::trim_reference_prefix(size_t n,
         score_ -= config.left_end_bonus;
 
     nodes_.erase(nodes_.begin(), node_it);
+    if (extra_scores.size() && node_it != nodes_.begin()) {
+        score_t removed = std::accumulate(extra_scores.begin(),
+                                          extra_scores.begin() + (node_it - nodes_.begin()),
+                                          score_t(0));
+        extra_score -= removed;
+        score_ -= removed;
+        extra_scores.erase(extra_scores.begin(), extra_scores.begin() + (node_it - nodes_.begin()));
+    }
+
+    if (label_column_diffs.size() && node_it != nodes_.begin())
+        label_column_diffs.erase(label_column_diffs.begin(), label_column_diffs.begin() + (node_it - nodes_.begin()));
+
     sequence_.erase(sequence_.begin(), s_it);
     it->second -= cigar_offset;
     cigar_.data().erase(cigar_.data().begin(), it);
@@ -477,6 +741,18 @@ size_t Alignment::trim_reference_suffix(size_t n,
         score_ -= config.right_end_bonus;
 
     nodes_.erase(node_it.base(), nodes_.end());
+    if (extra_scores.size() >= nodes_.size()) {
+        score_t removed = std::accumulate(extra_scores.end() - nodes_.size() + 1,
+                                          extra_scores.end(),
+                                          score_t(0));
+        extra_score -= removed;
+        score_ -= removed;
+        extra_scores.resize(nodes_.size() - 1);
+    }
+
+    if (label_column_diffs.size() >= nodes_.size())
+        label_column_diffs.resize(nodes_.size() - 1);
+
     sequence_.erase(s_it.base(), sequence_.end());
     it->second -= cigar_offset;
     cigar_.data().erase(it.base(), cigar_.data().end());
@@ -492,6 +768,14 @@ void Alignment::reverse_complement(const DeBruijnGraph &graph,
 
     trim_offset();
     assert(!offset_ || nodes_.size() == 1);
+
+    if (label_column_diffs.size()) {
+        // TODO: make more efficient
+        std::reverse(label_column_diffs.begin(), label_column_diffs.end());
+        label_column_diffs.push_back(label_columns);
+        label_columns = label_column_diffs[0];
+        label_column_diffs.erase(label_column_diffs.begin());
+    }
 
     if (dynamic_cast<const RCDBG*>(&graph)) {
         if (offset_) {
@@ -833,6 +1117,9 @@ Json::Value Alignment::to_json(size_t node_size,
                                bool is_secondary,
                                const std::string &read_name,
                                const std::string &label) const {
+    if (extra_score)
+        throw std::runtime_error("Alignments from PSSMs not supported");
+
     if (sequence_.find("$") != std::string::npos
             || std::find(nodes_.begin(), nodes_.end(), DeBruijnGraph::npos) != nodes_.end()) {
         throw std::runtime_error("JSON output for chains not supported");
@@ -1048,9 +1335,6 @@ void Alignment::splice_with_unknown(Alignment&& other,
                                    Cigar::value_type{ Cigar::NODE_INSERTION,
                                                       node_overlap + num_unknown - other.offset_ });
         other.query_view_ = std::string_view(start, other.query_view_.size() + query_gap);
-        other.score_ += static_cast<score_t>(config.gap_opening_penalty)
-                            + static_cast<score_t>(node_overlap + num_unknown - other.offset_ - 1)
-                                * static_cast<score_t>(config.gap_extension_penalty);
         assert(query_view_.data() + query_view_.size() == other.query_view_.data());
     } else {
         // This can happen if there's a gap in the graph (due to N) at a point
@@ -1076,13 +1360,12 @@ void Alignment::splice_with_unknown(Alignment&& other,
 
         other.cigar_.data().insert(other.cigar_.data().begin(),
                                    Cigar::value_type{ Cigar::DELETION, num_unknown });
+        other.score_ += static_cast<score_t>(config.gap_opening_penalty)
+                            + static_cast<score_t>(num_unknown - 1)
+                                * static_cast<score_t>(config.gap_extension_penalty);
         other.cigar_.data().insert(other.cigar_.data().begin(),
                                    Cigar::value_type{ Cigar::NODE_INSERTION,
                                                       node_overlap + num_unknown });
-        other.score_ += static_cast<score_t>(config.gap_opening_penalty) * 2
-                        + static_cast<score_t>(node_overlap + num_unknown - 1
-                                                + overlap + num_unknown - 1)
-                            * static_cast<score_t>(config.gap_extension_penalty);
     }
 
     other.sequence_ = std::string(num_unknown, '$') + other.sequence_;
@@ -1124,6 +1407,19 @@ void Alignment::insert_gap_prefix(ssize_t gap_length,
             // part of the overlap
             assert(static_cast<ssize_t>(offset_) >= -gap_length);
             nodes_.erase(nodes_.begin(), nodes_.begin() + offset_ + gap_length);
+            if (offset_ + gap_length) {
+                if (extra_scores.size()) {
+                    score_t removed = std::accumulate(extra_scores.begin(),
+                                                      extra_scores.begin() + offset_ + gap_length,
+                                                      score_t(0));
+                    extra_score -= removed;
+                    score_ -= removed;
+                    extra_scores.erase(extra_scores.begin(), extra_scores.begin() + offset_ + gap_length);
+                }
+
+                if (label_column_diffs.size())
+                    label_column_diffs.erase(label_column_diffs.begin(), label_column_diffs.begin() + offset_ + gap_length);
+            }
         }
 
         if (extra_nodes) {
@@ -1135,8 +1431,6 @@ void Alignment::insert_gap_prefix(ssize_t gap_length,
             //         CAAC
             //          AACG
             //           ACGA
-            score_ += config.gap_opening_penalty
-                + (extra_nodes - 1) * config.gap_extension_penalty;
             cigar_.data().insert(cigar_.data().begin(),
                                  Cigar::value_type{ Cigar::NODE_INSERTION, extra_nodes });
         }
@@ -1166,16 +1460,27 @@ void Alignment::insert_gap_prefix(ssize_t gap_length,
             // overlap is small, so add only the required dummy nods
             trim_offset();
             assert(extra_nodes >= 2);
-            score_ += config.gap_opening_penalty
-                + (extra_nodes - 2) * config.gap_extension_penalty;
             cigar_.data().insert(cigar_.data().begin(),
                                  Cigar::value_type{ Cigar::NODE_INSERTION, extra_nodes - 1 });
         }
 
-        extend_query_begin(query_view_.data() - gap_length);
+        if (gap_length) {
+            cigar_.data().insert(cigar_.data().begin(), Cigar::value_type{ Cigar::INSERTION, gap_length });
+            score_ += config.gap_opening_penalty
+                        + (gap_length - 1) * config.gap_extension_penalty;
+            query_view_ = std::string_view(query_view_.data() - gap_length,
+                                           query_view_.size() + gap_length);
+        }
     }
 
     nodes_.insert(nodes_.begin(), extra_nodes, DeBruijnGraph::npos);
+    if (extra_scores.size() && extra_nodes)
+        extra_scores.insert(extra_scores.begin(), extra_nodes, 0);
+
+    if (label_column_diffs.size() && extra_nodes) {
+        label_column_diffs.insert(label_column_diffs.begin(), extra_nodes, 0);
+        std::swap(label_column_diffs[extra_nodes - 1], label_columns);
+    }
 
     assert(nodes_.size() == sequence_.size());
 
@@ -1282,11 +1587,31 @@ bool Alignment::is_valid(const DeBruijnGraph &graph, const DBGAlignerConfig *con
         return false;
     }
 
+    if (extra_scores.size() && extra_scores.size() != nodes_.size() - 1) {
+        logger->error("Extra score array incorrect size: {} vs. {}\n{}",
+                      extra_scores.size(), nodes_.size() - 1, *this);
+        return false;
+    }
+
+    score_t change_score_sum = std::accumulate(extra_scores.begin(), extra_scores.end(),
+                                               score_t(0));
+    if (extra_score != change_score_sum) {
+        logger->error("Mismatch between extra score array and extra score sum: {} vs. {}\n{}",
+                      fmt::join(extra_scores, ","), extra_score, *this);
+        return false;
+    }
+
     score_t cigar_score = config ? config->score_cigar(sequence_, query_view_, cigar_) : 0;
     cigar_score += extra_score;
     if (config && score_ != cigar_score) {
         logger->error("Mismatch between CIGAR and score\nCigar score: {} ({} from extra)\n{}\t{}",
                       cigar_score, extra_score, query_view_, *this);
+        return false;
+    }
+
+    if (label_column_diffs.size() && label_column_diffs.size() != nodes_.size() - 1) {
+        logger->error("Label storage array incorrect size: {} vs. {}\n{}",
+                      label_column_diffs.size(), nodes_.size() - 1, *this);
         return false;
     }
 

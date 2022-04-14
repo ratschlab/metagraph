@@ -21,7 +21,7 @@ class AnnotationBuffer {
     typedef AnnotatedDBG::Annotator Annotator;
     typedef DeBruijnGraph::node_index node_index;
     typedef Alignment::Tuple Tuple;
-    typedef Alignment::Columns Columns;
+    typedef Vector<Alignment::Columns> Columns;
     typedef Alignment::CoordinateSet CoordinateSet;
 
     AnnotationBuffer(const DeBruijnGraph &graph, const Annotator &annotator);

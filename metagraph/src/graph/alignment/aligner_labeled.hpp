@@ -43,7 +43,7 @@ class LabeledExtender : public DefaultColumnExtender {
         );
 
         for (Alignment &alignment : alignments) {
-            alignment.label_encoder = &annotation_buffer_.get_annotator().get_label_encoder();
+            alignment.label_encoder = &annotation_buffer_;
         }
 
         return alignments;
@@ -71,6 +71,7 @@ class LabeledExtender : public DefaultColumnExtender {
     virtual void call_alignments(score_t end_score,
                                  const std::vector<node_index> &path,
                                  const std::vector<size_t> &trace,
+                                 const std::vector<score_t> &score_trace,
                                  const Cigar &ops,
                                  size_t clipping,
                                  size_t offset,
@@ -82,10 +83,12 @@ class LabeledExtender : public DefaultColumnExtender {
     // ensure that when terminating a path early, the per-node label storage is also
     // correctly handled
     virtual void pop(size_t i) override final {
+        assert(node_labels_.size() == node_labels_switched_.size());
         assert(i < node_labels_.size());
         DefaultColumnExtender::pop(i);
         last_flushed_table_i_ = std::min(i, last_flushed_table_i_);
         node_labels_.erase(node_labels_.begin() + i);
+        node_labels_switched_.erase(node_labels_switched_.begin() + i);
     }
 
     // this override flushes the AnnotationBuffer, and checks elements in the
@@ -100,6 +103,7 @@ class LabeledExtender : public DefaultColumnExtender {
 
     // map each table element to a corresponding label set index
     std::vector<size_t> node_labels_;
+    std::vector<bool> node_labels_switched_;
 
     // if the seed has coordinates, then the coordinates of the initial node in the
     // extension is stored here

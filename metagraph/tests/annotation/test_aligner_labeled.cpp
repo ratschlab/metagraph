@@ -27,8 +27,9 @@ inline std::vector<std::string> get_alignment_labels(const AnnotatedDBG &anno_gr
     const auto &label_encoder = anno_graph.get_annotator().get_label_encoder();
     auto labels = anno_graph.get_labels(alignment.get_sequence(),
                                         check_full_coverage ? 1.0 : 0.0);
+    const auto &columns = alignment.get_columns();
     if (check_full_coverage) {
-        EXPECT_GE(labels.size(), alignment.label_columns.size());
+        EXPECT_GE(labels.size(), columns.size());
     }
 
     std::unordered_set<uint64_t> enc_labels;
@@ -37,7 +38,7 @@ inline std::vector<std::string> get_alignment_labels(const AnnotatedDBG &anno_gr
     }
 
     std::vector<std::string> dec_labels;
-    for (uint64_t label : alignment.label_columns) {
+    for (uint64_t label : columns) {
         EXPECT_TRUE(enc_labels.count(label)) << alignment;
         dec_labels.emplace_back(label_encoder.decode(label));
     }

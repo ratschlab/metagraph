@@ -2,12 +2,18 @@
 
 #include <unordered_set>
 
+#include "dbg_aligner.hpp"
 #include "aligner_seeder_methods.hpp"
 #include "aligner_aggregator.hpp"
 #include "aligner_labeled.hpp"
 
 #include "common/aligned_vector.hpp"
 #include "common/utils/simd_utils.hpp"
+#include "common/algorithms.hpp"
+#include "graph/representation/succinct/dbg_succinct.hpp"
+#include "graph/representation/canonical_dbg.hpp"
+#include "graph/representation/rc_dbg.hpp"
+#include "graph/graph_extensions/node_rc.hpp"
 
 namespace mtg {
 namespace graph {
@@ -70,14 +76,10 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
                               const std::function<void(Chain&&, score_t)> &callback,
                               const std::function<bool(Alignment::Column)> &skip_column) {
     fwd_seeds.erase(std::remove_if(fwd_seeds.begin(), fwd_seeds.end(),
-                                   [](const auto &a) {
-                                       return a.empty() || a.label_columns.empty();
-                                   }),
+                                   [](const auto &a) { return a.empty() || !a.label_columns; }),
                     fwd_seeds.end());
     bwd_seeds.erase(std::remove_if(bwd_seeds.begin(), bwd_seeds.end(),
-                                   [](const auto &a) {
-                                       return a.empty() || a.label_columns.empty();
-                                   }),
+                                   [](const auto &a) { return a.empty() || !a.label_columns; }),
                     bwd_seeds.end());
 
     if (fwd_seeds.empty() && bwd_seeds.empty())
@@ -160,23 +162,19 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
 
             // if this chain has the same seeds as the last one, merge their coordinate sets
             for (size_t i = 0; i < chain.size(); ++i) {
-                Alignment::Columns columns;
+                Vector<Alignment::Column> columns;
+                const Vector<Alignment::Column> &last_columns = last_chain[i].first.get_columns();
+                const Vector<Alignment::Column> &cur_columns = chain[i].first.get_columns();
                 if (chain[i].first.label_coordinates.size()) {
-                    assert(last_chain[i].first.label_columns.size()
-                            == last_chain[i].first.label_coordinates.size());
-                    assert(chain[i].first.label_columns.size()
-                            == chain[i].first.label_coordinates.size());
                     Alignment::CoordinateSet coord_union;
                     auto add_col_coords = [&](auto col, auto &coords) {
                         columns.push_back(col);
                         coord_union.emplace_back(std::move(coords));
                     };
                     utils::match_indexed_values(
-                        last_chain[i].first.label_columns.begin(),
-                        last_chain[i].first.label_columns.end(),
+                        last_columns.begin(), last_columns.end(),
                         last_chain[i].first.label_coordinates.begin(),
-                        chain[i].first.label_columns.begin(),
-                        chain[i].first.label_columns.end(),
+                        cur_columns.begin(), cur_columns.end(),
                         chain[i].first.label_coordinates.begin(),
                         [&](auto col, const auto &coords, const auto &other_coords) {
                             columns.push_back(col);
@@ -189,14 +187,11 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
                     );
                     std::swap(last_chain[i].first.label_coordinates, coord_union);
                 } else {
-                    assert(chain[i].first.label_columns.size());
-                    std::set_union(last_chain[i].first.label_columns.begin(),
-                                   last_chain[i].first.label_columns.end(),
-                                   chain[i].first.label_columns.begin(),
-                                   chain[i].first.label_columns.end(),
+                    std::set_union(last_columns.begin(), last_columns.end(),
+                                   cur_columns.begin(), cur_columns.end(),
                                    std::back_inserter(columns));
                 }
-                std::swap(last_chain[i].first.label_columns, columns);
+                last_chain[i].first.set_columns(std::move(columns));
             }
         }
 
@@ -226,11 +221,13 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
             used[i] = true;
             chain_seeds.emplace_back(seeds[seed_i], coord);
             if (has_labels) {
-                chain_seeds.back().first.label_columns.assign(1, label);
+                chain_seeds.back().first.set_columns(Vector<Alignment::Column>{ label });
                 if (aligner.has_coordinates()) {
                     chain_seeds.back().first.label_coordinates.resize(1);
                     chain_seeds.back().first.label_coordinates[0].assign(1, coord);
                 }
+            } else {
+                chain_seeds.back().first.label_encoder = nullptr;
             }
             i = seed_backtrace[i];
         }
@@ -284,7 +281,7 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
         }
 
         chain_seeds[0].second = 0;
-        if (chain_seeds[0].first.label_columns.empty())
+        if (!chain_seeds[0].first.label_columns)
             continue;
 
         Chain chain;
@@ -335,8 +332,9 @@ chain_seeds(const IDBGAligner &aligner,
     tsl::hopscotch_map<Alignment::Column, size_t> label_sizes;
 
     for (size_t i = 0; i < seeds.size(); ++i) {
+        const Vector<Alignment::Column> &columns = seeds[i].get_columns();
         for (size_t j = 0; j < seeds[i].label_coordinates.size(); ++j) {
-            Alignment::Column c = seeds[i].label_columns[j];
+            Alignment::Column c = columns[j];
             auto rbegin = seeds[i].label_coordinates[j].rbegin();
             auto rend = seeds[i].label_coordinates[j].rend();
             std::for_each(rbegin, rend, [&](ssize_t coord) {
@@ -346,7 +344,7 @@ chain_seeds(const IDBGAligner &aligner,
                                       seeds[i].get_query_view().size(), i);
             });
         }
-        seeds[i].label_columns = Alignment::Columns{};
+        seeds[i].label_columns = 0;
         seeds[i].label_coordinates = Alignment::CoordinateSet{};
     }
 
@@ -544,24 +542,30 @@ chain_seeds(const IDBGAligner &aligner,
     return std::make_tuple(std::move(dp_table), std::move(backtrace), num_seeds, num_nodes);
 }
 
-template <class AlignmentCompare>
-void construct_alignment_chain(size_t node_overlap,
-                               const DBGAlignerConfig &config,
+std::function<score_t(node_index, std::string_view, char)>
+make_label_change_scorer(const IDBGAligner &aligner);
+
+template <class AlignmentCompare, class LabelChangeScorer>
+void construct_alignment_chain(const IDBGAligner &aligner,
                                std::string_view query,
                                Alignment&& chain,
                                typename std::vector<Alignment>::iterator begin,
                                typename std::vector<Alignment>::iterator end,
                                std::vector<score_t> *best_score,
-                               const std::function<void(Alignment&&)> &callback);
+                               const std::function<void(Alignment&&)> &callback,
+                               LabelChangeScorer &get_label_change_score);
 
 template <class AlignmentCompare>
-std::vector<Alignment> chain_alignments(std::vector<Alignment>&& alignments,
+std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
+                                        std::vector<Alignment>&& alignments,
                                         std::string_view query,
-                                        std::string_view rc_query,
-                                        const DBGAlignerConfig &config,
-                                        size_t node_overlap) {
-    if (alignments.size() < 2 || !config.post_chain_alignments)
+                                        std::string_view rc_query) {
+    const DBGAlignerConfig &config = aligner.get_config();
+
+    if (alignments.size() < 2 || !config.post_chain_alignments) {
+        DEBUG_LOG("Too few alignments found, nothing to chain.");
         return std::move(alignments);
+    }
 
     for (const auto &a : alignments) {
         if (a.label_coordinates.size())
@@ -581,6 +585,9 @@ std::vector<Alignment> chain_alignments(std::vector<Alignment>&& alignments,
         return false;
     }), alignments.end());
 
+    if (alignments.empty())
+        return aggregator.get_alignments();
+
     std::sort(alignments.begin(), alignments.end(), [](const auto &a, const auto &b) {
         return std::make_tuple(a.get_orientation(),
                                a.get_clipping() + a.get_query_view().size(),
@@ -596,6 +603,7 @@ std::vector<Alignment> chain_alignments(std::vector<Alignment>&& alignments,
 
     DEBUG_LOG("Chaining alignments:\n{}", fmt::join(alignments, "\t\n"));
 
+    auto get_label_change_score = make_label_change_scorer(aligner);
 
     auto run = [&](std::string_view this_query, auto begin, auto end) {
         std::vector<score_t> best_score(this_query.size() + 1, 0);
@@ -605,8 +613,9 @@ std::vector<Alignment> chain_alignments(std::vector<Alignment>&& alignments,
             if (it->get_score() > best_score[end_pos]) {
                 best_score[end_pos] = it->get_score();
                 construct_alignment_chain<AlignmentCompare>(
-                    node_overlap, config, this_query, Alignment(*it), it + 1, end, &best_score,
-                    [&](Alignment&& chain) { aggregator.add_alignment(std::move(chain)); }
+                    aligner, this_query, Alignment(*it), it + 1, end, &best_score,
+                    [&](Alignment&& chain) { aggregator.add_alignment(std::move(chain)); },
+                    get_label_change_score
                 );
             }
         }
@@ -622,15 +631,15 @@ std::vector<Alignment> chain_alignments(std::vector<Alignment>&& alignments,
 }
 
 // TODO: rewrite this to not use recursion
-template <class AlignmentCompare>
-void construct_alignment_chain(size_t node_overlap,
-                               const DBGAlignerConfig &config,
+template <class AlignmentCompare, class LabelChangeScorer>
+void construct_alignment_chain(const IDBGAligner &aligner,
                                std::string_view query,
                                Alignment&& chain,
                                typename std::vector<Alignment>::iterator begin,
                                typename std::vector<Alignment>::iterator end,
                                std::vector<score_t> *best_score,
-                               const std::function<void(Alignment&&)> &callback) {
+                               const std::function<void(Alignment&&)> &callback,
+                               LabelChangeScorer &get_label_change_score) {
     assert(begin <= end);
     assert(chain.size());
 
@@ -641,7 +650,9 @@ void construct_alignment_chain(size_t node_overlap,
         return;
     }
 
-    score_t score = chain.get_score();
+    const DBGAlignerConfig &config = aligner.get_config();
+    const DeBruijnGraph &graph = aligner.get_graph();
+    size_t node_overlap = graph.get_k() - 1;
 
     bool called = false;
     for (auto it = begin; it != end; ++it) {
@@ -658,41 +669,125 @@ void construct_alignment_chain(size_t node_overlap,
         if (next_begin <= chain_begin || next_end == chain_end)
             continue;
 
-        if (chain.label_columns.size()
-                && !utils::share_element(it->label_columns.begin(),
-                                         it->label_columns.end(),
-                                         chain.label_columns.begin(),
-                                         chain.label_columns.end())) {
-            continue;
-        }
-
+        Alignment next_chain = chain;
         Alignment aln = *it;
 
-        if (next_begin >= chain_end) {
+        ssize_t query_overlap = chain_end - next_begin;
+
+        if (query_overlap <= 0) {
             // no overlap
-            aln.insert_gap_prefix(next_begin - chain_end, node_overlap, config);
+            aln.insert_gap_prefix(-query_overlap, node_overlap, config);
 
         } else {
             // trim, then fill in dummy nodes
             assert(chain.get_end_clipping());
 
             // first trim front of the incoming alignment
-            size_t overlap = std::min(
-                static_cast<size_t>((chain.get_cigar().data().end() - 2)->second),
-                aln.trim_query_prefix(chain_end - it->get_query_view().data(),
-                                      node_overlap, config)
-            );
+            size_t num_trimmed_from_last_match
+                = aln.trim_query_prefix(query_overlap, node_overlap, config);
 
-            if (aln.empty() || aln.get_sequence().size() <= node_overlap
-                    || (aln.get_cigar().data().begin()
-                            + static_cast<bool>(aln.get_clipping()))->first != Cigar::MATCH) {
+            if (aln.empty())
                 continue;
+
+            // try to connect the two alignments
+            size_t gap_fill_length = graph.get_k() - aln.get_offset();
+            std::vector<node_index> nodes;
+            std::string_view spelling(aln.get_sequence().data(), gap_fill_length);
+            if (aln.get_sequence().size() >= gap_fill_length) {
+                graph.traverse(next_chain.get_nodes().back(),
+                               spelling.data(), spelling.data() + gap_fill_length,
+                               [&](node_index next) { nodes.emplace_back(next); });
             }
 
-            assert(aln.get_query_view().data()
+            bool found = false;
+            if (nodes.size() == gap_fill_length && nodes.back() == aln.get_nodes()[0]) {
+                found = true;
+
+                // if the gap is too long, extend aln's offset
+                if (gap_fill_length > 1) {
+                    nodes.pop_back();
+                    std::vector<size_t> node_columns;
+                    std::vector<score_t> node_scores;
+                    if (const auto *labeled_aligner = dynamic_cast<const ILabeledAligner*>(&aligner)) {
+                        AnnotationBuffer &buffer = labeled_aligner->get_annotation_buffer();
+                        buffer.queue_path(std::vector<node_index>(nodes));
+                        buffer.fetch_queued_annotations();
+
+                        const auto *cur_columns = &aln.get_columns(0);
+
+                        node_columns.reserve(nodes.size());
+                        node_scores.reserve(nodes.size());
+                        bool had_diff = false;
+                        auto jt = spelling.rbegin();
+                        for (auto it = nodes.rbegin(); it != nodes.rend(); ++it) {
+                            assert(jt != spelling.rend());
+                            const auto *next_columns = buffer.get_labels(*it);
+                            assert(next_columns);
+                            Vector<Alignment::Column> inter;
+                            Vector<Alignment::Column> diff;
+                            utils::set_intersection_difference(next_columns->begin(),
+                                                               next_columns->end(),
+                                                               cur_columns->begin(),
+                                                               cur_columns->end(),
+                                                               std::back_inserter(inter),
+                                                               std::back_inserter(diff));
+                            if (inter.size()) {
+                                node_columns.emplace_back(buffer.cache_column_set(
+                                    std::move(inter)
+                                ));
+                                node_scores.emplace_back(0);
+                            } else {
+                                assert(diff.size());
+                                score_t label_change_score
+                                    = get_label_change_score(*it, std::string_view((jt + graph.get_k() + 1).base(), graph.get_k()), *jt);
+                                if (label_change_score == config.ninf) {
+                                    found = false;
+                                    break;
+                                }
+
+                                node_columns.emplace_back(buffer.cache_column_set(
+                                    std::move(diff)
+                                ));
+                                node_scores.emplace_back(label_change_score);
+                                had_diff = true;
+                            }
+                            cur_columns = &buffer.get_cached_column_set(node_columns.back());
+                            ++jt;
+                        }
+                        if (found) {
+                            std::reverse(node_columns.begin(), node_columns.end());
+                            if (had_diff) {
+                                std::reverse(node_scores.begin(), node_scores.end());
+                            } else {
+                                node_scores.clear();
+                            }
+                        }
+                    }
+
+                    if (found) {
+                        aln.extend_offset(std::move(nodes), std::move(node_columns),
+                                          std::move(node_scores));
+                    }
+                }
+            }
+
+            // if connection failed, then insert dummy graph nodes to connect the two
+            if (!found) {
+                size_t overlap = std::min(
+                    static_cast<size_t>((chain.get_cigar().data().end() - 2)->second),
+                    num_trimmed_from_last_match
+                );
+
+                if (aln.get_sequence().size() <= node_overlap
+                        || (aln.get_cigar().data().begin()
+                            + static_cast<bool>(aln.get_clipping()))->first != Cigar::MATCH) {
+                    continue;
+                }
+
+                assert(aln.get_query_view().data()
                     == chain.get_query_view().data() + chain.get_query_view().size());
 
-            if (overlap < node_overlap) {
+                assert(overlap < node_overlap);
                 aln.insert_gap_prefix(-overlap, node_overlap, config);
             } else {
                 aln.trim_clipping();
@@ -701,21 +796,21 @@ void construct_alignment_chain(size_t node_overlap,
 
         assert(!aln.empty());
 
-        score_t next_score = score + aln.get_score();
+        // use append instead of splice because any clipping in aln represents
+        // internally clipped characters
+        next_chain.trim_end_clipping();
+        bool changed = next_chain.append(
+                std::move(aln), get_label_change_score, config.label_change_union);
+        assert(next_chain.is_valid(graph, &config));
+        score_t next_score = next_chain.get_score();
         if (next_score <= (*best_score)[next_end - query.data()])
             continue;
 
         (*best_score)[next_end - query.data()] = next_score;
-        // use append instead of splice because any clipping in aln represents
-        // internally clipped characters
-        Alignment next_chain = chain;
-        next_chain.trim_end_clipping();
-        bool changed = next_chain.append(std::move(aln));
         if (next_chain.size()) {
-            assert(next_chain.get_score() == next_score);
             construct_alignment_chain<AlignmentCompare>(
-                    node_overlap, config, query, std::move(next_chain),
-                    it + 1, end, best_score, callback);
+                    aligner, query, std::move(next_chain),
+                    it + 1, end, best_score, callback, get_label_change_score);
             called |= changed;
         }
     }
@@ -724,12 +819,306 @@ void construct_alignment_chain(size_t node_overlap,
         callback(std::move(chain));
 }
 
+typedef boss::BOSS::edge_index edge_index;
+typedef std::pair<edge_index, edge_index> BOSSRange;
+
+void call_boss_edges(const DBGSuccinct &dbg_succ,
+                     const BOSSRange &node_range,
+                     const std::function<void(node_index, const SmallVector<node_index>&)> &callback) {
+    const boss::BOSS &boss = dbg_succ.get_boss();
+    std::vector<BOSSRange> next_ranges(boss.alph_size);
+    std::vector<BOSSRange> next_is(boss.alph_size);
+    boss.call_tightened_ranges(node_range.first, node_range.second, [&](edge_index first, edge_index second, boss::BOSS::TAlphabet s) {
+        next_ranges[s] = std::make_pair(first, second);
+        next_is[s].second = boss.succ_last(first);
+        next_is[s].first = boss.pred_last(next_is[s].second - 1) + 1;
+    });
+
+    boss::BOSS::TAlphabet s = boss.get_W(node_range.first);
+    edge_index succ_W = 0;
+    edge_index succ_Wp = 0;
+    if (node_range.first + 1 < boss.get_W().size()) {
+        succ_W = s < boss.alph_size ? node_range.first + 1 : boss.succ_W(node_range.first + 1, s + boss.alph_size);
+        succ_Wp = s >= boss.alph_size ? node_range.first + 1 : boss.succ_W(node_range.first + 1, s);
+    }
+    for (edge_index node_w = node_range.first; node_w <= node_range.second; ++node_w) {
+        if (!s) {
+            if (node_w + 1 <= node_range.second) {
+                s = boss.get_W(node_w + 1);
+                if (s < boss.alph_size) {
+                    succ_W = boss.succ_W(node_w + 1, s);
+                } else {
+                    succ_Wp = boss.succ_W(node_w + 1, s);
+                }
+            }
+
+            continue;
+        }
+
+        boss::BOSS::TAlphabet last_c = s % boss.alph_size;
+
+        auto &[i_start, i] = next_is[last_c];
+        assert(boss.fwd(node_w, last_c) == i);
+        assert(i <= next_ranges[last_c].second);
+
+        if (node_index n = dbg_succ.boss_to_kmer_index(node_w)) {
+            SmallVector<node_index> edges(boss.alph_size);
+            for (edge_index next_edge = i_start; next_edge <= i; ++next_edge) {
+                if (node_index m = dbg_succ.boss_to_kmer_index(next_edge))
+                    edges[boss.get_W(next_edge) % boss.alph_size] = m;
+            }
+            callback(n, edges);
+        }
+
+        assert(node_w + 1 < boss.get_W().size() || node_w == node_range.second);
+
+        if (node_w + 1 < boss.get_W().size()) {
+            if (succ_Wp >= succ_W) {
+                i_start = i + 1;
+                i = boss.succ_last(i_start);
+            }
+            s = boss.get_W(node_w + 1);
+            if (s < boss.alph_size) {
+                succ_W = boss.succ_W(node_w + 1, s);
+            } else {
+                succ_Wp = boss.succ_W(node_w + 1, s);
+            }
+        }
+    }
+}
+
+std::function<score_t(node_index, std::string_view, char)>
+make_label_change_scorer(const IDBGAligner &aligner) {
+    const DBGAlignerConfig &config = aligner.get_config();
+    const auto *labeled_aligner = dynamic_cast<const ILabeledAligner*>(&aligner);
+    if (!labeled_aligner)
+        return [ninf=config.ninf](node_index, std::string_view, char) { return ninf; };
+
+    const DeBruijnGraph *graph = &aligner.get_graph();
+    const auto *canonical = dynamic_cast<const CanonicalDBG*>(graph);
+    const DeBruijnGraph *base_graph = canonical
+        ? &canonical->get_graph() : graph;
+
+    const DBGSuccinct *dbg_succ = dynamic_cast<const DBGSuccinct*>(base_graph);
+    if (!dbg_succ || !config.label_change_edit_distance) {
+        return [ninf=config.ninf,score=config.label_change_score](node_index, std::string_view, char c) {
+            return c != boss::BOSS::kSentinel ? score : ninf;
+        };
+    }
+
+    const auto *node_rc = dbg_succ->get_extension_threadsafe<NodeRC>();
+
+    return [max_edits=config.label_change_edit_distance,ninf=config.ninf,
+            labeled_aligner,graph,dbg_succ,canonical,node_rc,
+            cache=tsl::hopscotch_map<node_index,SmallVector<score_t>>()](node_index node,
+                                                                         std::string_view seq,
+                                                                         char c) mutable -> score_t {
+        if (c == boss::BOSS::kSentinel)
+            return ninf;
+
+        typedef boss::BOSS::TAlphabet TAlphabet;
+        const boss::BOSS &boss = dbg_succ->get_boss();
+        TAlphabet s = boss.encode(c);
+
+        if (s == boss.alph_size)
+            return ninf;
+
+        SmallVector<score_t> &out_scores = cache[node];
+        if (out_scores.size()) {
+            logger->trace("Label change score: {}", out_scores[s]);
+            return out_scores[s];
+        }
+
+        out_scores.resize(boss.alph_size, ninf);
+
+        AnnotationBuffer &annotation_buffer = labeled_aligner->get_annotation_buffer();
+
+        auto encoded = boss.encode(seq);
+        std::vector<std::tuple<BOSSRange, size_t, size_t, size_t>> traversal_stack;
+        std::vector<std::tuple<node_index, node_index, TAlphabet>> parallel_edges;
+        std::vector<node_index> nodes_to_queue;
+        SmallVector<std::pair<size_t, size_t>> counts(boss.alph_size + 1);
+
+        std::vector<TAlphabet> encoded_rc;
+        bool node_is_rc = false;
+        if (canonical) {
+            std::string seq_rc(seq);
+            ::reverse_complement(seq_rc.begin(), seq_rc.end());
+            encoded_rc = boss.encode(seq_rc);
+            node_is_rc = (node != canonical->get_base_node(node));
+        }
+
+        for (TAlphabet s = 1; s < boss.alph_size; ++s) {
+            edge_index first = boss.get_F(s) + 1 < boss.get_W().size()
+                 ? boss.get_F(s) + 1
+                 : boss.get_W().size(); // lower bound
+            edge_index last = s + 1 < boss.alph_size
+                 ? boss.get_F(s + 1)
+                 : boss.get_W().size() - 1;
+            if (first <= last) {
+                traversal_stack.emplace_back(std::make_pair(first, last), 1,
+                                             s != encoded[0],
+                                             encoded_rc.size() ? s != encoded_rc[0] : max_edits + 1);
+            }
+        }
+
+        size_t traversal_steps = 2;
+        bool found_in = false;
+        while (traversal_stack.size()) {
+            auto [range, i, edits, edits_rc] = traversal_stack.back();
+            traversal_stack.pop_back();
+
+            if (i + 1 == encoded.size()) {
+                auto add_parallel_node = [&](node_index parallel_node) {
+                    if (parallel_node == node)
+                        found_in = true;
+
+                    bool found = false;
+                    graph->call_outgoing_kmers(parallel_node, [&](node_index next, char c) {
+                        TAlphabet s = boss.encode(c);
+                        found = true;
+                        parallel_edges.emplace_back(parallel_node, next, s);
+                        nodes_to_queue.emplace_back(next);
+                    });
+
+                    nodes_to_queue.emplace_back(parallel_node);
+                    if (!found)
+                        parallel_edges.emplace_back(parallel_node, DeBruijnGraph::npos, 0);
+                };
+
+                if (edits == max_edits) {
+                    if (encoded.back() != boss.alph_size) {
+                        if (auto edge = boss.pick_edge(range.second, encoded.back())) {
+                            if (auto parallel_node = dbg_succ->boss_to_kmer_index(edge))
+                                add_parallel_node(parallel_node);
+                        }
+                    }
+                } else if (edits < max_edits) {
+                    boss.call_outgoing(range.second, [&](edge_index pedge) {
+                        if (auto parallel_node = dbg_succ->boss_to_kmer_index(pedge))
+                            add_parallel_node(parallel_node);
+                    });
+                }
+
+                if (edits_rc == max_edits) {
+                    if (encoded_rc.back() != boss.alph_size) {
+                        if (auto edge = boss.pick_edge(range.second, encoded_rc.back())) {
+                            if (auto parallel_node = dbg_succ->boss_to_kmer_index(edge))
+                                add_parallel_node(canonical->reverse_complement(parallel_node));
+                        }
+                    }
+                } else if (edits_rc < max_edits) {
+                    boss.call_outgoing(range.second, [&](edge_index pedge) {
+                        if (auto parallel_node = dbg_succ->boss_to_kmer_index(pedge))
+                            add_parallel_node(canonical->reverse_complement(parallel_node));
+                    });
+                }
+
+                continue;
+            }
+
+            if (range.first == range.second) {
+                ++traversal_steps;
+                if (TAlphabet s = boss.get_W(range.second) % boss.alph_size) {
+                    size_t next_edits = edits <= max_edits ? edits + (s != encoded[i]) : max_edits + 1;
+                    size_t next_edits_rc = edits_rc <= max_edits ? edits_rc + (s != encoded_rc[i]) : max_edits + 1;
+                    if (next_edits <= max_edits || next_edits_rc <= max_edits) {
+                        range.second = boss.fwd(range.second, s);
+                        range.first = boss.pred_last(range.second - 1) + 1;
+                        traversal_stack.emplace_back(std::move(range), i + 1, next_edits, next_edits_rc);
+                    }
+                }
+            } else if (edits < max_edits || edits_rc < max_edits) {
+                traversal_steps += 2 * (boss.alph_size - 1);
+                boss.call_tightened_ranges(range.first, range.second, [&](edge_index first, edge_index second, TAlphabet s) {
+                    size_t next_edits = edits <= max_edits ? edits + (s != encoded[i]) : max_edits + 1;
+                    size_t next_edits_rc = edits_rc <= max_edits ? edits_rc + (s != encoded_rc[i]) : max_edits + 1;
+                    if (next_edits <= max_edits || next_edits_rc <= max_edits)
+                        traversal_stack.emplace_back(std::make_pair(first, second), i + 1, next_edits, next_edits_rc);
+                });
+            } else {
+                if (edits <= max_edits) {
+                    auto next_range = range;
+                    traversal_steps += 2;
+                    if (boss.tighten_range(&next_range.first, &next_range.second, encoded[i])) {
+                        traversal_stack.emplace_back(std::move(next_range), i + 1, edits,
+                                                     edits_rc <= max_edits ? edits_rc + (encoded[i] != encoded_rc[i]) : max_edits + 1);
+                    }
+                }
+
+                if (edits_rc <= max_edits && encoded[i] != encoded_rc[i]) {
+                    auto next_range = range;
+                    traversal_steps += 2;
+                    if (boss.tighten_range(&next_range.first, &next_range.second, encoded_rc[i])) {
+                        traversal_stack.emplace_back(std::move(next_range), i + 1,
+                                                     edits <= max_edits ? edits + (encoded[i] != encoded_rc[i]) : max_edits + 1,
+                                                     edits_rc);
+                    }
+                }
+            }
+        }
+
+        size_t num_nodes_covered = nodes_to_queue.size();
+        annotation_buffer.queue_path(std::move(nodes_to_queue));
+        annotation_buffer.fetch_queued_annotations();
+
+        for (const auto &[n, m, s] : parallel_edges) {
+            auto [n_labels, n_coords] = annotation_buffer.get_labels_and_coords(n);
+            assert(n_labels);
+            size_t to_add = 0;
+            if (n_coords) {
+                for (const auto &coord : *n_coords) {
+                    to_add += coord.size();
+                }
+            } else {
+                to_add += n_labels->size();
+            }
+
+            if (!m) {
+                for (TAlphabet s = 1; s < boss.alph_size; ++s) {
+                    auto &[total, matches] = counts[s];
+                    total += to_add;
+                }
+                continue;
+            }
+
+            auto &[total, matches] = counts[s];
+            total += to_add;
+
+            auto [m_labels, m_coords] = annotation_buffer.get_labels_and_coords(m);
+            assert(m_labels);
+            if (m_coords) {
+                utils::match_indexed_values(
+                    n_labels->begin(), n_labels->end(), n_coords->begin(),
+                    m_labels->begin(), m_labels->end(), m_coords->begin(),
+                    [&](auto, const auto &coords, const auto &other_coords) {
+                        matches += std::min(coords.size(), other_coords.size());
+                    }
+                );
+            } else if (size_t count = utils::count_intersection(n_labels->begin(),
+                                                                n_labels->end(),
+                                                                m_labels->begin(),
+                                                                m_labels->end())) {
+                matches += count;
+            }
+        }
+
+        for (TAlphabet s = 1; s < boss.alph_size; ++s) {
+            auto &[total, matches] = counts[s];
+            if (matches)
+                out_scores[s] = static_cast<score_t>(std::floor(log2(matches) - log2(total)));
+        }
+
+        logger->trace("Label change score: {}, {} / {}; node_is_rc: {}; found in: {}. Covered {} / {} nodes after {} traversal steps.", out_scores[s], counts[s].second, counts[s].first, node_is_rc, found_in, num_nodes_covered, dbg_succ->num_nodes(), traversal_steps);
+        return out_scores[s];
+    };
+}
+
 template
-std::vector<Alignment> chain_alignments<LocalAlignmentLess>(std::vector<Alignment>&&,
+std::vector<Alignment> chain_alignments<LocalAlignmentLess>(const IDBGAligner&,
+                                                            std::vector<Alignment>&&,
                                                             std::string_view,
-                                                            std::string_view,
-                                                            const DBGAlignerConfig&,
-                                                            size_t);
+                                                            std::string_view);
 
 } // namespace align
 } // namespace graph

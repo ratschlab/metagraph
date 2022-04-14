@@ -660,6 +660,17 @@ edge_index BOSS::fwd(edge_index i) const {
     return select_last(target_node);
 }
 
+void BOSS
+::call_tightened_ranges(edge_index rl, edge_index ru,
+                        const std::function<void(edge_index, edge_index, TAlphabet)> &callback) const {
+    for (TAlphabet s = 1; s < alph_size; ++s) {
+        edge_index rl_n = rl;
+        edge_index ru_n = ru;
+        if (tighten_range(&rl_n, &ru_n, s))
+            callback(rl_n, ru_n, s);
+    }
+}
+
 /**
  * Using the offset structure F this function returns the value of the last
  * position of the source node for edge i.
