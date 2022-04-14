@@ -70,7 +70,7 @@ auto ExactSeeder::get_seeds() const -> std::vector<Seed> {
         if (query_nodes_[i] != DeBruijnGraph::npos) {
             assert(i + k <= query_.size());
             std::string_view query_window = query_.substr(i, k);
-            if (!is_low_complexity(query_window)) {
+            if (config_.no_seed_complexity_filter || !is_low_complexity(query_window)) {
                 seeds.emplace_back(query_window,
                                    std::vector<node_index>{ query_nodes_[i] },
                                    orientation_, 0, i, end_clipping);
@@ -212,8 +212,10 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
         size_t seed_length = 0;
         std::vector<node_index> alt_nodes;
 
-        if (is_low_complexity(this->query_.substr(i, min_seed_length[i])))
+        if (!this->config_.no_seed_complexity_filter &&
+                is_low_complexity(this->query_.substr(i, min_seed_length[i]))) {
             continue;
+        }
 
         dbg_succ.call_nodes_with_suffix_matching_longest_prefix(
             this->query_.substr(i, max_seed_length),
@@ -284,7 +286,8 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
 
             if (seed_length < this->config_.min_seed_length
                     || seed_length < min_seed_length[j]
-                    || is_low_complexity(this->query_.substr(j, seed_length))) {
+                    || (!this->config_.no_seed_complexity_filter
+                            && is_low_complexity(this->query_.substr(j, seed_length)))) {
                 continue;
             }
 

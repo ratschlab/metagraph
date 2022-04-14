@@ -1348,13 +1348,15 @@ TYPED_TEST(DBGAlignerTest, align_low_similarity3) {
     std::string query =     "AAAAAAAAAAAAAAAAAAAAAAAAAAACGCCAAAAAGGGGGAATAGGGGGGGGGGAACCCCAACACCGGTATGTTTTTTTGTGTGTGGGGGATTTTTTTC";
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-    DBGAlignerConfig config;
-    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
-    DBGAligner<> aligner(*graph, config);
-    auto paths = aligner.align(query);
+    for (bool seed_complexity_filter : { false, true }) {
+        DBGAlignerConfig config;
+        config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
+        config.no_seed_complexity_filter = !seed_complexity_filter;
+        DBGAligner<> aligner(*graph, config);
+        auto paths = aligner.align(query);
 
-    ASSERT_EQ(1ull, paths.size());
-    auto path = paths[0];
+        EXPECT_EQ(seed_complexity_filter, paths.empty());
+    }
 }
 
 TYPED_TEST(DBGAlignerTest, align_low_similarity4) {
