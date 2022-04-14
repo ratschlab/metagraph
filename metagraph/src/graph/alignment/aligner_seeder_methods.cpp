@@ -17,16 +17,19 @@ using mtg::common::logger;
 
 typedef Alignment::score_t score_t;
 
-inline bool is_low_complexity(std::string_view s, int T = 20, int W = 64) {
+
 #if ! _PROTEIN_GRAPH
+inline bool is_low_complexity(std::string_view s, int T = 20, int W = 64) {
     int n;
     std::unique_ptr<uint64_t> r { sdust(0, (const uint8_t*)s.data(), s.size(), T, W, &n) };
     return n > 0;
+}
 #else
+inline bool is_low_complexity(std::string_view, int = 20, int = 64) {
     // TODO: implement a checker here
     return false;
-#endif
 }
+#endif
 
 ExactSeeder::ExactSeeder(const DeBruijnGraph &graph,
                          std::string_view query,
