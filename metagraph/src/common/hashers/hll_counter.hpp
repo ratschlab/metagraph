@@ -50,16 +50,16 @@ class HLLCounter {
     const libcount::HLL& data() const { return *counter_; }
     libcount::HLL& data() { return *counter_; }
 
-    bool operator==(const HLLCounter &other) const {
-        return std::equal(counter_->data(),
-                          counter_->data() + counter_->get_register_count(),
-                          other.counter_->data(),
-                          other.counter_->data() + other.counter_->get_register_count());
-    }
+    // bool operator==(const HLLCounter &other) const {
+    //     return std::equal(counter_->data(),
+    //                       counter_->data() + counter_->get_register_count(),
+    //                       other.counter_->data(),
+    //                       other.counter_->data() + other.counter_->get_register_count());
+    // }
 
-    bool operator!=(const HLLCounter &other) const {
-        return !operator==(other);
-    }
+    // bool operator!=(const HLLCounter &other) const {
+    //     return !operator==(other);
+    // }
 
   private:
     int precision_;

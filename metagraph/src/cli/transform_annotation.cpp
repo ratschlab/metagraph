@@ -9,6 +9,7 @@
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 #include "annotation/binary_matrix/multi_brwt/clustering.hpp"
+#include "annotation/binary_matrix/hll/hll_matrix.hpp"
 #include "annotation/annotation_converters.hpp"
 #include "config/config.hpp"
 #include "load/load_annotation.hpp"
@@ -677,6 +678,28 @@ int transform_annotation(Config *config) {
         return 0;
     }
 
+    if (config->sketch_precision != 0.0) {
+        if (input_anno_type != Config::ColumnCompressed) {
+            throw std::runtime_error("Only conversion from ColumnCompressed");
+        }
+
+        auto annotator = std::make_unique<ColumnCompressed<>>(0);
+        logger->trace("Loading annotation from disk...");
+        if (!annotator->merge_load(files)) {
+            logger->error("Cannot load annotations");
+            exit(1);
+        }
+        logger->trace("Annotation loaded in {} sec", timer.elapsed());
+
+        logger->trace("Sketching annotator");
+        annot::binmat::HLLMatrix<> hll(annotator->get_matrix().data(), config->sketch_precision);
+        std::ofstream fout(config->outfbase + ".hll", std::ios::binary);
+        hll.serialize(fout);
+        logger->trace("Done");
+
+        return 0;
+    }
+
     if (config->anno_type == input_anno_type) {
         logger->info("Skipping conversion: same input and target type: {}",
                       Config::annotype_to_string(config->anno_type));
@@ -687,7 +710,6 @@ int transform_annotation(Config *config) {
                   Config::annotype_to_string(config->anno_type));
 
     if (input_anno_type == Config::RowCompressed) {
-
         std::unique_ptr<const Annotator> target_annotator;
 
         switch (config->anno_type) {

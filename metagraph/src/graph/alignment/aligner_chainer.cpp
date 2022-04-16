@@ -14,6 +14,7 @@
 #include "graph/representation/canonical_dbg.hpp"
 #include "graph/representation/rc_dbg.hpp"
 #include "graph/graph_extensions/node_rc.hpp"
+#include "graph/graph_extensions/hll_wrapper.hpp"
 
 namespace mtg {
 namespace graph {
@@ -542,8 +543,7 @@ chain_seeds(const IDBGAligner &aligner,
     return std::make_tuple(std::move(dp_table), std::move(backtrace), num_seeds, num_nodes);
 }
 
-std::function<score_t(node_index, std::string_view, char)>
-make_label_change_scorer(const IDBGAligner &aligner);
+Alignment::LabelChangeScorer make_label_change_scorer(const IDBGAligner &aligner);
 
 template <class AlignmentCompare, class LabelChangeScorer>
 void construct_alignment_chain(const IDBGAligner &aligner,
@@ -631,7 +631,7 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
 }
 
 // TODO: rewrite this to not use recursion
-template <class AlignmentCompare, class LabelChangeScorer>
+template <class AlignmentCompare>
 void construct_alignment_chain(const IDBGAligner &aligner,
                                std::string_view query,
                                Alignment&& chain,
@@ -639,7 +639,7 @@ void construct_alignment_chain(const IDBGAligner &aligner,
                                typename std::vector<Alignment>::iterator end,
                                std::vector<score_t> *best_score,
                                const std::function<void(Alignment&&)> &callback,
-                               LabelChangeScorer &get_label_change_score) {
+                               Alignment::LabelChangeScorer &get_label_change_score) {
     assert(begin <= end);
     assert(chain.size());
 
@@ -739,7 +739,7 @@ void construct_alignment_chain(const IDBGAligner &aligner,
                             } else {
                                 assert(diff.size());
                                 score_t label_change_score
-                                    = get_label_change_score(*it, std::string_view((jt + graph.get_k() + 1).base(), graph.get_k()), *jt);
+                                    = get_label_change_score(*it, std::string_view((jt + graph.get_k() + 1).base(), graph.get_k()), *jt, *cur_columns, diff);
                                 if (label_change_score == config.ninf) {
                                     found = false;
                                     break;
@@ -887,12 +887,12 @@ void call_boss_edges(const DBGSuccinct &dbg_succ,
     }
 }
 
-std::function<score_t(node_index, std::string_view, char)>
+Alignment::LabelChangeScorer
 make_label_change_scorer(const IDBGAligner &aligner) {
     const DBGAlignerConfig &config = aligner.get_config();
     const auto *labeled_aligner = dynamic_cast<const ILabeledAligner*>(&aligner);
     if (!labeled_aligner)
-        return [ninf=config.ninf](node_index, std::string_view, char) { return ninf; };
+        return [ninf=config.ninf](auto, auto, auto, const auto&, const auto&) { return ninf; };
 
     const DeBruijnGraph *graph = &aligner.get_graph();
     const auto *canonical = dynamic_cast<const CanonicalDBG*>(graph);
@@ -901,8 +901,35 @@ make_label_change_scorer(const IDBGAligner &aligner) {
 
     const DBGSuccinct *dbg_succ = dynamic_cast<const DBGSuccinct*>(base_graph);
     if (!dbg_succ || !config.label_change_edit_distance) {
-        return [ninf=config.ninf,score=config.label_change_score](node_index, std::string_view, char c) {
+        return [ninf=config.ninf,score=config.label_change_score](auto, auto, char c, const auto&, const auto&) {
             return c != boss::BOSS::kSentinel ? score : ninf;
+        };
+    }
+
+    if (const auto *hll_wrapper = dbg_succ->get_extension_threadsafe<HLLWrapper<>>()) {
+        return [ninf=config.ninf,hll_wrapper,labeled_aligner](auto, auto, char c, const auto &ref_columns,
+                                              const auto &diff_columns) -> score_t {
+            if (c == boss::BOSS::kSentinel)
+                return ninf;
+
+            const auto &hll = hll_wrapper->data();
+            auto ref_merged = hll.merge_columns(ref_columns);
+            auto diff_merged = hll.merge_columns(diff_columns);
+            std::cerr << "ref\t" << ref_merged.estimate_cardinality() << "\t";
+            double jaccard = ref_merged.estimate_jaccard(diff_merged);
+
+            const auto &enc = labeled_aligner->get_annotation_buffer().get_annotator().get_label_encoder();
+            for (auto col : ref_columns) {
+                std::cerr << enc.decode(col) << ";";
+            }
+            std::cerr << "\t->\tdiff\t" << diff_merged.estimate_cardinality() << "\t";
+            for (auto col : diff_columns) {
+                std::cerr << enc.decode(col) << ";";
+            }
+            std::cerr << "\t";
+
+            std::cerr << "JACC\t" << jaccard << "\t" << (jaccard == 0.0 ? ninf : score_t(-log2(jaccard))) << "\n";
+            return jaccard == 0.0 ? ninf : -log2(jaccard);
         };
     }
 
@@ -912,7 +939,9 @@ make_label_change_scorer(const IDBGAligner &aligner) {
             labeled_aligner,graph,dbg_succ,canonical,node_rc,
             cache=tsl::hopscotch_map<node_index,SmallVector<score_t>>()](node_index node,
                                                                          std::string_view seq,
-                                                                         char c) mutable -> score_t {
+                                                                         char c,
+                                                                         const auto &,
+                                                                         const auto &) mutable -> score_t {
         if (c == boss::BOSS::kSentinel)
             return ninf;
 

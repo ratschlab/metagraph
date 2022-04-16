@@ -5,6 +5,7 @@
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
 #include "common/threads/threading.hpp"
+#include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "graph/alignment/dbg_aligner.hpp"
@@ -12,6 +13,8 @@
 #include "graph/annotated_dbg.hpp"
 #include "graph/graph_extensions/node_rc.hpp"
 #include "graph/graph_extensions/node_first_cache.hpp"
+#include "graph/graph_extensions/mer_distances.hpp"
+#include "graph/graph_extensions/hll_wrapper.hpp"
 #include "seq_io/sequence_io.hpp"
 #include "config/config.hpp"
 #include "load/load_graph.hpp"
@@ -318,6 +321,13 @@ int align_to_graph(Config *config) {
                              "Use metagraph transform to generate an adj-rc index.");
             }
         }
+        // auto hll = std::make_shared<HLLWrapper<>>();
+        // if (hll->load(utils::remove_suffix(config->infbase, dbg_succ->file_extension()))) {
+        //     logger->trace("Loaded HLL sketch");
+        //     dbg_succ->add_extension(std::move(hll));
+        // }
+
+        // dbg_succ->add_extension(std::make_shared<MerDistances>(*dbg_succ, 6));
     }
 
     Timer timer;
@@ -361,6 +371,12 @@ int align_to_graph(Config *config) {
     if (config->infbase_annotators.size()) {
         assert(config->infbase_annotators.size() == 1);
         anno_dbg = initialize_annotated_dbg(graph, *config);
+        if (const auto *col = dynamic_cast<const annot::ColumnCompressed<>*>(&anno_dbg->get_annotator())) {
+            if (dbg_succ) {
+                logger->trace("Making HLL");
+                dbg_succ->add_extension(std::make_shared<HLLWrapper<>>(col->get_matrix().data(), 0.05));
+            }
+        }
     }
 
     for (const auto &file : files) {

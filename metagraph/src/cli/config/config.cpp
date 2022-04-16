@@ -210,6 +210,8 @@ Config::Config(int argc, char *argv[]) {
             min_fraction = std::stod(get_value(i++));
         } else if (!strcmp(argv[i], "--max-fraction")) {
             max_fraction = std::stod(get_value(i++));
+        } else if (!strcmp(argv[i], "--sketch-precision")) {
+            sketch_precision = std::stod(get_value(i++));
         } else if (!strcmp(argv[i], "--min-value")) {
             min_value = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--max-value")) {

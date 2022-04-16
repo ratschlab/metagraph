@@ -149,6 +149,7 @@ class Config {
     double alignment_min_exact_match = 0.0;
     double min_fraction = 0.0;
     double max_fraction = 1.0;
+    double sketch_precision = 0.0;
     std::vector<double> count_slice_quantiles;
     std::vector<double> count_quantiles;
 
