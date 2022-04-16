@@ -198,6 +198,9 @@ class Alignment {
     // complement is matched to the path.
     bool get_orientation() const { return orientation_; }
 
+
+    typedef std::function<score_t(node_index, std::string_view, char, const Vector<Column>&, const Vector<Column>&)> LabelChangeScorer;
+
     // Append |next| to the end of the current alignment. In this process, alignment
     // labels are intersected. If coordinates are present, then the append is only
     // successful if at least one coordinate of |next| immediately proceeds the
@@ -205,8 +208,8 @@ class Alignment {
     // *this == {} afterwards.
     // Returns true if the label or coordinate set of this changed.
     bool append(Alignment&& next,
-                const std::function<score_t(node_index, std::string_view, char)> &get_label_change_score
-                    = [](node_index, std::string_view, char) { return ninf; },
+                const LabelChangeScorer &get_label_change_score
+                    = [](auto, auto, auto, const auto&, const auto&) { return ninf; },
                 bool label_change_union = false);
 
     bool splice(Alignment&& other);

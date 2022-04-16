@@ -169,10 +169,9 @@ bool Alignment::splice(Alignment&& other) {
     return append(std::move(other));
 }
 
-bool Alignment
-::append(Alignment&& other,
-         const std::function<score_t(node_index, std::string_view, char)> &get_label_change_score,
-         bool label_change_union) {
+bool Alignment::append(Alignment&& other,
+                       const LabelChangeScorer &get_label_change_score,
+                       bool label_change_union) {
     assert(query_view_.data() + query_view_.size() + other.get_clipping()
             == other.query_view_.data());
     assert(orientation_ == other.orientation_);
@@ -236,20 +235,22 @@ bool Alignment
         std::swap(label_coordinates, merged_label_coordinates);
 
     } else if (has_annotation()) {
+        std::shared_ptr<const Vector<Column>> ref_labels;
+        Vector<Column> diff;
         if (label_columns != other.label_columns) {
             const Vector<Column> &other_columns = other.get_columns(0);
             if (label_change_union) {
-                Vector<Column> label_union = get_column_union();
-                Vector<Column> diff;
-                std::set_difference(other_columns.begin(), other_columns.end(),
-                                    label_union.begin(), label_union.end(),
-                                    std::back_inserter(diff));
-                ret_val = diff.size();
+                ref_labels = std::make_shared<Vector<Column>>(get_column_union());
             } else {
-                const Vector<Column> &ref_columns = get_columns(nodes_.size() - 1);
-                ret_val = !utils::count_intersection(other_columns.begin(), other_columns.end(),
-                                                     ref_columns.begin(), ref_columns.end());
+                ref_labels = std::shared_ptr<const Vector<Column>>(
+                    std::shared_ptr<const Vector<Column>>{},
+                    &get_columns(nodes_.size() - 1)
+                );
             }
+            std::set_difference(other_columns.begin(), other_columns.end(),
+                                ref_labels->begin(), ref_labels->end(),
+                                std::back_inserter(diff));
+            ret_val = diff.size();
         }
 
         if (other.label_column_diffs.empty()) {
@@ -262,7 +263,9 @@ bool Alignment
         score_t label_change_score = ret_val
             ? get_label_change_score(nodes_.back(),
                                      get_sequence().substr(sequence_.size() - std::min(k, sequence_.size())),
-                                     other.sequence_[0]) : 0;
+                                     other.sequence_[0],
+                                     *ref_labels,
+                                     diff) : 0;
         if (label_change_score == ninf) {
             *this = Alignment();
             return true;
