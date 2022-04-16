@@ -65,3 +65,6 @@
 [submodule "metagraph/external-libraries/sdust"]
 	path = metagraph/external-libraries/sdust
 	url = https://github.com/lh3/sdust
+[submodule "metagraph/external-libraries/libcount"]
+	path = metagraph/external-libraries/libcount
+	url = https://github.com/hmusta/libcount
