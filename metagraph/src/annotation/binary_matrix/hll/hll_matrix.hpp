@@ -23,7 +23,7 @@ inline uint64_t IntHash<uint64_t>::operator()(const uint64_t &in) const {
     return x;
 }
 
-template <template <class T> class Hash = std::hash>
+template <template <class T> class Hash = IntHash>
 class HLLMatrix : public BinaryMatrix {
   public:
     typedef HLLCounter ColumnSketch;
@@ -39,11 +39,11 @@ class HLLMatrix : public BinaryMatrix {
 
         num_rows_ = columns[0]->size();
         columns_.resize(columns.size(), precision_);
+        num_set_bits_.reserve(columns.size());
         for (size_t j = 0; j < columns_.size(); ++j) {
-            std::cerr << "before: " << columns_[j].estimate_cardinality() << " + " << columns[j]->num_set_bits() << "\tafter: ";
-            num_relations_ += columns[j]->num_set_bits();
-            columns[j]->call_ones([&](size_t i) { columns_[j].insert(i); });
-            std::cerr << columns_[j].estimate_cardinality() << "\n";
+            num_set_bits_.push_back(columns[j]->num_set_bits());
+            num_relations_ += num_set_bits_.back();
+            columns[j]->call_ones([&](size_t i) { columns_[j].insert(hasher_(i)); });
         }
     }
 
@@ -63,6 +63,41 @@ class HLLMatrix : public BinaryMatrix {
         }
 
         return result;
+    }
+
+    template <class Columns>
+    std::pair<double, double> estimate_column_union_intersection_cardinality(const Columns &a, const Columns &b) const {
+        if (a.empty() && b.empty())
+            return {};
+
+        double a_cardinality_est;
+        std::shared_ptr<ColumnSketch> a_sketch;
+        if (a.empty()) {
+            a_sketch = std::make_shared<ColumnSketch>();
+            a_cardinality_est = 0.0;
+        } else {
+            a_sketch = std::make_shared<ColumnSketch>(merge_columns(a));
+            a_cardinality_est = a_sketch->estimate_cardinality();
+        }
+
+        double b_cardinality_est;
+        std::shared_ptr<const ColumnSketch> b_sketch;
+        if (b.empty()) {
+            b_sketch = std::make_shared<const ColumnSketch>();
+            b_cardinality_est = 0.0;
+        } else if (b.size() == 1) {
+            b_sketch = std::shared_ptr<const ColumnSketch>{
+                std::shared_ptr<const ColumnSketch>{}, &get_column_sketch(b[0])
+            };
+            b_cardinality_est = num_set_bits_[b[0]];
+        } else {
+            b_sketch = std::make_shared<const ColumnSketch>(merge_columns(b));
+            b_cardinality_est = b_sketch->estimate_cardinality();
+        }
+
+        a_sketch->merge(*b_sketch);
+        double union_est = a_sketch->estimate_cardinality();
+        return { union_est, a_cardinality_est + b_cardinality_est - union_est };
     }
 
     uint64_t num_columns() const override { return columns_.size(); }
@@ -101,18 +136,19 @@ class HLLMatrix : public BinaryMatrix {
         if (!in.good())
             return false;
 
-        size_t num_columns;
         try {
             Deserializer ds(in);
             precision_ = ds.operator()<double>();
             num_rows_ = load_number(in);
             num_relations_ = load_number(in);
-            num_columns = load_number(in);
         } catch (...) {
             return false;
         }
 
-        columns_.resize(num_columns);
+        if (!load_number_vector(in, &num_set_bits_))
+            return false;
+
+        columns_.resize(num_set_bits_.size());
         for (size_t i = 0; i < columns_.size(); ++i) {
             if (!columns_[i].load(in))
                 return false;
@@ -126,7 +162,7 @@ class HLLMatrix : public BinaryMatrix {
         s(precision_);
         serialize_number(out, num_rows_);
         serialize_number(out, num_relations_);
-        serialize_number(out, columns_.size());
+        serialize_number_vector(out, num_set_bits_);
         for (size_t i = 0; i < columns_.size(); ++i) {
             columns_[i].serialize(out);
         }
@@ -141,6 +177,7 @@ class HLLMatrix : public BinaryMatrix {
   private:
     double precision_;
     std::vector<ColumnSketch> columns_;
+    std::vector<uint64_t> num_set_bits_;
     size_t num_rows_;
     size_t num_relations_;
     Hash<Row> hasher_;
