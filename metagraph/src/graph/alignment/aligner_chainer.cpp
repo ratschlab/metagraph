@@ -892,7 +892,7 @@ make_label_change_scorer(const IDBGAligner &aligner) {
     const DBGAlignerConfig &config = aligner.get_config();
     const auto *labeled_aligner = dynamic_cast<const ILabeledAligner*>(&aligner);
     if (!labeled_aligner)
-        return [ninf=config.ninf](auto, auto, auto, const auto&, const auto&) { return ninf; };
+        return [ninf=config.ninf](auto&&...) { return ninf; };
 
     const DeBruijnGraph *graph = &aligner.get_graph();
     const auto *canonical = dynamic_cast<const CanonicalDBG*>(graph);
@@ -900,13 +900,19 @@ make_label_change_scorer(const IDBGAligner &aligner) {
         ? &canonical->get_graph() : graph;
 
     const DBGSuccinct *dbg_succ = dynamic_cast<const DBGSuccinct*>(base_graph);
-    if (!dbg_succ || !config.label_change_edit_distance) {
-        return [ninf=config.ninf,score=config.label_change_score](auto, auto, char c, const auto&, const auto&) {
-            return c != boss::BOSS::kSentinel ? score : ninf;
+    const HLLWrapper<> *hll_wrapper = dbg_succ ? dbg_succ->get_extension_threadsafe<HLLWrapper<>>() : nullptr;
+    if (!dbg_succ || !hll_wrapper) {
+        return [ninf=config.ninf,score=config.label_change_score](auto,
+                                                                  auto,
+                                                                  char c,
+                                                                  const auto &ref_columns,
+                                                                  const auto &diff_columns) {
+            return c != boss::BOSS::kSentinel && ref_columns.size() && diff_columns.size()
+                ? score : ninf;
         };
     }
 
-    if (const auto *hll_wrapper = dbg_succ->get_extension_threadsafe<HLLWrapper<>>()) {
+    if (!config.label_change_edit_distance) {
         return [&config,ninf=config.ninf,hll_wrapper](auto, auto, char c,
                                                       const auto &ref_columns,
                                                       const auto &diff_columns) -> score_t {
@@ -926,14 +932,16 @@ make_label_change_scorer(const IDBGAligner &aligner) {
 
     const auto *node_rc = dbg_succ->get_extension_threadsafe<NodeRC>();
 
+    constexpr double dninf = std::numeric_limits<double>::min();
+
     return [max_edits=config.label_change_edit_distance,ninf=config.ninf,
-            labeled_aligner,graph,dbg_succ,canonical,node_rc,
-            cache=tsl::hopscotch_map<node_index,SmallVector<score_t>>()](node_index node,
+            labeled_aligner,graph,dbg_succ,canonical,node_rc,hll_wrapper,
+            cache=tsl::hopscotch_map<node_index,SmallVector<double>>()](node_index node,
                                                                          std::string_view seq,
                                                                          char c,
-                                                                         const auto &,
-                                                                         const auto &) mutable -> score_t {
-        if (c == boss::BOSS::kSentinel)
+                                                                         const auto &ref_columns,
+                                                                         const auto &diff_columns) mutable -> score_t {
+        if (c == boss::BOSS::kSentinel || ref_columns.empty() || diff_columns.empty())
             return ninf;
 
         typedef boss::BOSS::TAlphabet TAlphabet;
@@ -943,10 +951,26 @@ make_label_change_scorer(const IDBGAligner &aligner) {
         if (s == boss.alph_size)
             return ninf;
 
-        SmallVector<score_t> &out_scores = cache[node];
+        const auto &hll = hll_wrapper->data();
+        auto [union_est, inter_est]
+                = hll.estimate_column_union_intersection_cardinality(ref_columns,
+                                                                     diff_columns);
+        if (inter_est <= 0.0)
+            return ninf;
+
+        if (inter_est == union_est)
+            return 0;
+
+        double log_jaccard_d_est = log2(1.0 - inter_est / union_est);
+
+        SmallVector<double> &out_scores = cache[node];
         if (out_scores.size()) {
-            logger->trace("Label change score: {}", out_scores[s]);
-            return out_scores[s];
+            score_t ret_val = out_scores[s] != dninf
+                ? std::floor(out_scores[s] + log_jaccard_d_est)
+                : ninf;
+            logger->trace("Label change score: {}, Jaccard score: {}",
+                          ret_val, log_jaccard_d_est);
+            return ret_val;
         }
 
         out_scores.resize(boss.alph_size, ninf);
@@ -1125,12 +1149,24 @@ make_label_change_scorer(const IDBGAligner &aligner) {
 
         for (TAlphabet s = 1; s < boss.alph_size; ++s) {
             auto &[total, matches] = counts[s];
-            if (matches)
-                out_scores[s] = static_cast<score_t>(std::floor(log2(matches) - log2(total)));
+            if (matches) {
+                out_scores[s] = log2(matches) - log2(total);
+            } else {
+                out_scores[s] = dninf;
+            }
         }
 
-        logger->trace("Label change score: {}, {} / {}; node_is_rc: {}; found in: {}. Covered {} / {} nodes after {} traversal steps.", out_scores[s], counts[s].second, counts[s].first, node_is_rc, found_in, num_nodes_covered, dbg_succ->num_nodes(), traversal_steps);
-        return out_scores[s];
+        score_t ret_val = out_scores[s] != dninf
+            ? std::floor(out_scores[s] + log_jaccard_d_est)
+            : ninf;
+
+        logger->trace("Label change score: {}, {} / {}; Jaccard score: {}; "
+                      "node_is_rc: {}; found in: {}. "
+                      "Covered {} / {} nodes after {} traversal steps.",
+                      ret_val, counts[s].second, counts[s].first,
+                      log_jaccard_d_est, node_is_rc, found_in, num_nodes_covered,
+                      dbg_succ->num_nodes(), traversal_steps);
+        return ret_val;
     };
 }
 
