@@ -821,6 +821,7 @@ void construct_alignment_chain(const IDBGAligner &aligner,
 
 typedef boss::BOSS::edge_index edge_index;
 typedef std::pair<edge_index, edge_index> BOSSRange;
+typedef boss::BOSS::TAlphabet TAlphabet;
 
 void call_boss_edges(const DBGSuccinct &dbg_succ,
                      const BOSSRange &node_range,
@@ -828,13 +829,13 @@ void call_boss_edges(const DBGSuccinct &dbg_succ,
     const boss::BOSS &boss = dbg_succ.get_boss();
     std::vector<BOSSRange> next_ranges(boss.alph_size);
     std::vector<BOSSRange> next_is(boss.alph_size);
-    boss.call_tightened_ranges(node_range.first, node_range.second, [&](edge_index first, edge_index second, boss::BOSS::TAlphabet s) {
+    boss.call_tightened_ranges(node_range.first, node_range.second, [&](edge_index first, edge_index second, TAlphabet s) {
         next_ranges[s] = std::make_pair(first, second);
         next_is[s].second = boss.succ_last(first);
         next_is[s].first = boss.pred_last(next_is[s].second - 1) + 1;
     });
 
-    boss::BOSS::TAlphabet s = boss.get_W(node_range.first);
+    TAlphabet s = boss.get_W(node_range.first);
     edge_index succ_W = 0;
     edge_index succ_Wp = 0;
     if (node_range.first + 1 < boss.get_W().size()) {
@@ -855,7 +856,7 @@ void call_boss_edges(const DBGSuccinct &dbg_succ,
             continue;
         }
 
-        boss::BOSS::TAlphabet last_c = s % boss.alph_size;
+        TAlphabet last_c = s % boss.alph_size;
 
         auto &[i_start, i] = next_is[last_c];
         assert(boss.fwd(node_w, last_c) == i);
@@ -885,6 +886,134 @@ void call_boss_edges(const DBGSuccinct &dbg_succ,
             }
         }
     }
+}
+
+typedef SmallVector<std::pair<node_index, TAlphabet>> Edges;
+typedef SmallVector<std::pair<node_index, Edges>> ParallelEdges;
+
+std::pair<ParallelEdges, size_t> get_parallel_edges(const DeBruijnGraph &graph,
+                                                    const DBGSuccinct &dbg_succ,
+                                                    const CanonicalDBG *canonical,
+                                                    std::string_view seq,
+                                                    size_t max_edits) {
+    const auto &boss = dbg_succ.get_boss();
+    auto encoded = boss.encode(seq);
+    std::vector<std::tuple<BOSSRange, size_t, size_t, size_t>> traversal_stack;
+    ParallelEdges result;
+
+    std::vector<TAlphabet> encoded_rc;
+    if (canonical) {
+        std::string seq_rc(seq);
+        ::reverse_complement(seq_rc.begin(), seq_rc.end());
+        encoded_rc = boss.encode(seq_rc);
+    }
+
+    for (TAlphabet s = 1; s < boss.alph_size; ++s) {
+        edge_index first = boss.get_F(s) + 1 < boss.get_W().size()
+             ? boss.get_F(s) + 1
+             : boss.get_W().size(); // lower bound
+        edge_index last = s + 1 < boss.alph_size
+             ? boss.get_F(s + 1)
+             : boss.get_W().size() - 1;
+        if (first <= last) {
+            traversal_stack.emplace_back(std::make_pair(first, last), 1,
+                                         s != encoded[0],
+                                         encoded_rc.size() ? s != encoded_rc[0] : max_edits + 1);
+        }
+    }
+
+    size_t traversal_steps = 2;
+    while (traversal_stack.size()) {
+        auto [range, i, edits, edits_rc] = traversal_stack.back();
+        traversal_stack.pop_back();
+
+        if (i + 1 == encoded.size()) {
+            auto add_parallel_node = [&](node_index parallel_node) {
+                bool found = false;
+                result.emplace_back(parallel_node, Edges{});
+                graph.call_outgoing_kmers(parallel_node, [&](node_index next, char c) {
+                    TAlphabet s = boss.encode(c);
+                    found = true;
+                    result.back().second.emplace_back(next, s);
+                });
+
+                if (!found)
+                    result.back().second.emplace_back(DeBruijnGraph::npos, 0);
+            };
+
+            if (edits == max_edits) {
+                if (encoded.back() != boss.alph_size) {
+                    if (auto edge = boss.pick_edge(range.second, encoded.back())) {
+                        if (auto parallel_node = dbg_succ.boss_to_kmer_index(edge))
+                            add_parallel_node(parallel_node);
+                    }
+                }
+            } else if (edits < max_edits) {
+                boss.call_outgoing(range.second, [&](edge_index pedge) {
+                    if (auto parallel_node = dbg_succ.boss_to_kmer_index(pedge))
+                        add_parallel_node(parallel_node);
+                });
+            }
+
+            if (edits_rc == max_edits) {
+                if (encoded_rc.back() != boss.alph_size) {
+                    if (auto edge = boss.pick_edge(range.second, encoded_rc.back())) {
+                        if (auto parallel_node = dbg_succ.boss_to_kmer_index(edge))
+                            add_parallel_node(canonical->reverse_complement(parallel_node));
+                    }
+                }
+            } else if (edits_rc < max_edits) {
+                boss.call_outgoing(range.second, [&](edge_index pedge) {
+                    if (auto parallel_node = dbg_succ.boss_to_kmer_index(pedge))
+                        add_parallel_node(canonical->reverse_complement(parallel_node));
+                });
+            }
+
+            continue;
+        }
+
+        if (range.first == range.second) {
+            ++traversal_steps;
+            if (TAlphabet s = boss.get_W(range.second) % boss.alph_size) {
+                size_t next_edits = edits <= max_edits ? edits + (s != encoded[i]) : max_edits + 1;
+                size_t next_edits_rc = edits_rc <= max_edits ? edits_rc + (s != encoded_rc[i]) : max_edits + 1;
+                if (next_edits <= max_edits || next_edits_rc <= max_edits) {
+                    range.second = boss.fwd(range.second, s);
+                    range.first = boss.pred_last(range.second - 1) + 1;
+                    traversal_stack.emplace_back(std::move(range), i + 1, next_edits, next_edits_rc);
+                }
+            }
+        } else if (edits < max_edits || edits_rc < max_edits) {
+            traversal_steps += 2 * (boss.alph_size - 1);
+            boss.call_tightened_ranges(range.first, range.second, [&](edge_index first, edge_index second, TAlphabet s) {
+                size_t next_edits = edits <= max_edits ? edits + (s != encoded[i]) : max_edits + 1;
+                size_t next_edits_rc = edits_rc <= max_edits ? edits_rc + (s != encoded_rc[i]) : max_edits + 1;
+                if (next_edits <= max_edits || next_edits_rc <= max_edits)
+                    traversal_stack.emplace_back(std::make_pair(first, second), i + 1, next_edits, next_edits_rc);
+            });
+        } else {
+            if (edits <= max_edits) {
+                auto next_range = range;
+                traversal_steps += 2;
+                if (boss.tighten_range(&next_range.first, &next_range.second, encoded[i])) {
+                    traversal_stack.emplace_back(std::move(next_range), i + 1, edits,
+                                                 edits_rc <= max_edits ? edits_rc + (encoded[i] != encoded_rc[i]) : max_edits + 1);
+                }
+            }
+
+            if (edits_rc <= max_edits && encoded[i] != encoded_rc[i]) {
+                auto next_range = range;
+                traversal_steps += 2;
+                if (boss.tighten_range(&next_range.first, &next_range.second, encoded_rc[i])) {
+                    traversal_stack.emplace_back(std::move(next_range), i + 1,
+                                                 edits <= max_edits ? edits + (encoded[i] != encoded_rc[i]) : max_edits + 1,
+                                                 edits_rc);
+                }
+            }
+        }
+    }
+
+    return { std::move(result), traversal_steps };
 }
 
 Alignment::LabelChangeScorer
@@ -935,237 +1064,128 @@ make_label_change_scorer(const IDBGAligner &aligner) {
 
     constexpr double dninf = std::numeric_limits<double>::min();
 
-    return [max_edits=config.label_change_edit_distance,ninf=config.ninf,
+    return [&config,max_edits=config.label_change_edit_distance,ninf=config.ninf,
             labeled_aligner,graph,dbg_succ,canonical,node_rc,hll_wrapper,
-            cache=tsl::hopscotch_map<node_index,SmallVector<double>>()](node_index node,
-                                                                         std::string_view seq,
-                                                                         char c,
-                                                                         const auto &ref_columns,
-                                                                         const auto &diff_columns) mutable -> score_t {
+            cache=tsl::hopscotch_map<node_index,ParallelEdges>()](node_index node,
+                                                                  std::string_view seq,
+                                                                  char c,
+                                                                  const auto &ref_columns,
+                                                                  const auto &diff_columns) mutable -> score_t {
         if (c == boss::BOSS::kSentinel || ref_columns.empty() || diff_columns.empty())
             return ninf;
 
-        typedef boss::BOSS::TAlphabet TAlphabet;
         const boss::BOSS &boss = dbg_succ->get_boss();
         TAlphabet s = boss.encode(c);
 
         if (s == boss.alph_size)
             return ninf;
 
-        const auto &hll = hll_wrapper->data();
-        auto [union_est, inter_est]
-                = hll.estimate_column_union_intersection_cardinality(ref_columns,
-                                                                     diff_columns);
-        if (inter_est <= 0.0)
-            return ninf;
-
-        if (inter_est == union_est)
-            return 0;
-
-        double log_jaccard_d_est = log2(1.0 - inter_est / union_est);
-
-        SmallVector<double> &out_scores = cache[node];
-        if (out_scores.size()) {
-            score_t ret_val = out_scores[s] != dninf
-                ? std::floor(out_scores[s] + log_jaccard_d_est)
-                : ninf;
-            logger->trace("Label change score: {}, Jaccard score: {}",
-                          ret_val, log_jaccard_d_est);
-            return ret_val;
-        }
-
-        out_scores.resize(boss.alph_size, ninf);
-
+        size_t num_nodes_covered = 0;
+        size_t traversal_steps = 0;
+        auto [parallel_edges, inserted] = cache.try_emplace(node, ParallelEdges{});
         AnnotationBuffer &annotation_buffer = labeled_aligner->get_annotation_buffer();
-
-        auto encoded = boss.encode(seq);
-        std::vector<std::tuple<BOSSRange, size_t, size_t, size_t>> traversal_stack;
-        std::vector<std::tuple<node_index, node_index, TAlphabet>> parallel_edges;
-        std::vector<node_index> nodes_to_queue;
-        SmallVector<std::pair<size_t, size_t>> counts(boss.alph_size + 1);
-
-        std::vector<TAlphabet> encoded_rc;
-        bool node_is_rc = false;
-        if (canonical) {
-            std::string seq_rc(seq);
-            ::reverse_complement(seq_rc.begin(), seq_rc.end());
-            encoded_rc = boss.encode(seq_rc);
-            node_is_rc = (node != canonical->get_base_node(node));
-        }
-
-        for (TAlphabet s = 1; s < boss.alph_size; ++s) {
-            edge_index first = boss.get_F(s) + 1 < boss.get_W().size()
-                 ? boss.get_F(s) + 1
-                 : boss.get_W().size(); // lower bound
-            edge_index last = s + 1 < boss.alph_size
-                 ? boss.get_F(s + 1)
-                 : boss.get_W().size() - 1;
-            if (first <= last) {
-                traversal_stack.emplace_back(std::make_pair(first, last), 1,
-                                             s != encoded[0],
-                                             encoded_rc.size() ? s != encoded_rc[0] : max_edits + 1);
-            }
-        }
-
-        size_t traversal_steps = 2;
-        bool found_in = false;
-        while (traversal_stack.size()) {
-            auto [range, i, edits, edits_rc] = traversal_stack.back();
-            traversal_stack.pop_back();
-
-            if (i + 1 == encoded.size()) {
-                auto add_parallel_node = [&](node_index parallel_node) {
-                    if (parallel_node == node)
-                        found_in = true;
-
-                    bool found = false;
-                    graph->call_outgoing_kmers(parallel_node, [&](node_index next, char c) {
-                        TAlphabet s = boss.encode(c);
-                        found = true;
-                        parallel_edges.emplace_back(parallel_node, next, s);
-                        nodes_to_queue.emplace_back(next);
-                    });
-
-                    nodes_to_queue.emplace_back(parallel_node);
-                    if (!found)
-                        parallel_edges.emplace_back(parallel_node, DeBruijnGraph::npos, 0);
-                };
-
-                if (edits == max_edits) {
-                    if (encoded.back() != boss.alph_size) {
-                        if (auto edge = boss.pick_edge(range.second, encoded.back())) {
-                            if (auto parallel_node = dbg_succ->boss_to_kmer_index(edge))
-                                add_parallel_node(parallel_node);
-                        }
-                    }
-                } else if (edits < max_edits) {
-                    boss.call_outgoing(range.second, [&](edge_index pedge) {
-                        if (auto parallel_node = dbg_succ->boss_to_kmer_index(pedge))
-                            add_parallel_node(parallel_node);
-                    });
-                }
-
-                if (edits_rc == max_edits) {
-                    if (encoded_rc.back() != boss.alph_size) {
-                        if (auto edge = boss.pick_edge(range.second, encoded_rc.back())) {
-                            if (auto parallel_node = dbg_succ->boss_to_kmer_index(edge))
-                                add_parallel_node(canonical->reverse_complement(parallel_node));
-                        }
-                    }
-                } else if (edits_rc < max_edits) {
-                    boss.call_outgoing(range.second, [&](edge_index pedge) {
-                        if (auto parallel_node = dbg_succ->boss_to_kmer_index(pedge))
-                            add_parallel_node(canonical->reverse_complement(parallel_node));
-                    });
-                }
-
-                continue;
-            }
-
-            if (range.first == range.second) {
-                ++traversal_steps;
-                if (TAlphabet s = boss.get_W(range.second) % boss.alph_size) {
-                    size_t next_edits = edits <= max_edits ? edits + (s != encoded[i]) : max_edits + 1;
-                    size_t next_edits_rc = edits_rc <= max_edits ? edits_rc + (s != encoded_rc[i]) : max_edits + 1;
-                    if (next_edits <= max_edits || next_edits_rc <= max_edits) {
-                        range.second = boss.fwd(range.second, s);
-                        range.first = boss.pred_last(range.second - 1) + 1;
-                        traversal_stack.emplace_back(std::move(range), i + 1, next_edits, next_edits_rc);
-                    }
-                }
-            } else if (edits < max_edits || edits_rc < max_edits) {
-                traversal_steps += 2 * (boss.alph_size - 1);
-                boss.call_tightened_ranges(range.first, range.second, [&](edge_index first, edge_index second, TAlphabet s) {
-                    size_t next_edits = edits <= max_edits ? edits + (s != encoded[i]) : max_edits + 1;
-                    size_t next_edits_rc = edits_rc <= max_edits ? edits_rc + (s != encoded_rc[i]) : max_edits + 1;
-                    if (next_edits <= max_edits || next_edits_rc <= max_edits)
-                        traversal_stack.emplace_back(std::make_pair(first, second), i + 1, next_edits, next_edits_rc);
-                });
-            } else {
-                if (edits <= max_edits) {
-                    auto next_range = range;
-                    traversal_steps += 2;
-                    if (boss.tighten_range(&next_range.first, &next_range.second, encoded[i])) {
-                        traversal_stack.emplace_back(std::move(next_range), i + 1, edits,
-                                                     edits_rc <= max_edits ? edits_rc + (encoded[i] != encoded_rc[i]) : max_edits + 1);
-                    }
-                }
-
-                if (edits_rc <= max_edits && encoded[i] != encoded_rc[i]) {
-                    auto next_range = range;
-                    traversal_steps += 2;
-                    if (boss.tighten_range(&next_range.first, &next_range.second, encoded_rc[i])) {
-                        traversal_stack.emplace_back(std::move(next_range), i + 1,
-                                                     edits <= max_edits ? edits + (encoded[i] != encoded_rc[i]) : max_edits + 1,
-                                                     edits_rc);
-                    }
+        if (inserted) {
+            std::tie(parallel_edges.value(), traversal_steps)
+                = get_parallel_edges(*graph, *dbg_succ, canonical, seq, max_edits);
+            std::vector<node_index> nodes_to_queue;
+            for (const auto &[parallel_node, edges] : parallel_edges->second) {
+                nodes_to_queue.push_back(parallel_node);
+                for (const auto &[next, s] : edges) {
+                    if (next)
+                        nodes_to_queue.push_back(next);
                 }
             }
+
+            num_nodes_covered = nodes_to_queue.size();
+            annotation_buffer.queue_path(std::move(nodes_to_queue));
+            annotation_buffer.fetch_queued_annotations();
         }
 
-        size_t num_nodes_covered = nodes_to_queue.size();
-        annotation_buffer.queue_path(std::move(nodes_to_queue));
-        annotation_buffer.fetch_queued_annotations();
-
-        for (const auto &[n, m, s] : parallel_edges) {
+        size_t total = 0;
+        size_t matches = 0;
+        for (const auto &[n, edges] : parallel_edges->second) {
             auto [n_labels, n_coords] = annotation_buffer.get_labels_and_coords(n);
             assert(n_labels);
-            size_t to_add = 0;
-            if (n_coords) {
-                for (const auto &coord : *n_coords) {
-                    to_add += coord.size();
-                }
-            } else {
-                to_add += n_labels->size();
-            }
 
-            if (!m) {
-                for (TAlphabet s = 1; s < boss.alph_size; ++s) {
-                    auto &[total, matches] = counts[s];
-                    total += to_add;
-                }
-                continue;
-            }
+            bool found = false;
+            for (const auto &[m, s_cur] : edges) {
+                if (s != s_cur)
+                    continue;
 
-            auto &[total, matches] = counts[s];
-            total += to_add;
+                found = true;
 
-            auto [m_labels, m_coords] = annotation_buffer.get_labels_and_coords(m);
-            assert(m_labels);
-            if (m_coords) {
-                utils::match_indexed_values(
-                    n_labels->begin(), n_labels->end(), n_coords->begin(),
-                    m_labels->begin(), m_labels->end(), m_coords->begin(),
-                    [&](auto, const auto &coords, const auto &other_coords) {
-                        matches += std::min(coords.size(), other_coords.size());
+                if (!m) {
+                    if (n_coords) {
+                        for (const auto &coords : *n_coords) {
+                            total += coords.size();
+                        }
+                    } else {
+                        total += n_labels->size();
                     }
-                );
-            } else if (size_t count = utils::count_intersection(n_labels->begin(),
-                                                                n_labels->end(),
-                                                                m_labels->begin(),
-                                                                m_labels->end())) {
-                matches += count;
+                    continue;
+                }
+
+                auto [m_labels, m_coords] = annotation_buffer.get_labels_and_coords(m);
+                assert(m_labels);
+                if (m_coords) {
+                    utils::match_indexed_values(
+                        n_labels->begin(), n_labels->end(), n_coords->begin(),
+                        m_labels->begin(), m_labels->end(), m_coords->begin(),
+                        [&](auto, const auto &coords, const auto &other_coords) {
+                            total += coords.size();
+                            matches += std::min(coords.size(), other_coords.size());
+                        },
+                        [&](auto, const auto &coords) { total += coords.size(); },
+                        [](auto&&...) {}
+                    );
+                } else {
+                    total += n_labels->size();
+                    matches += utils::count_intersection(n_labels->begin(), n_labels->end(),
+                                                         m_labels->begin(), m_labels->end());
+                }
+            }
+
+            if (!found) {
+                if (n_coords) {
+                    for (const auto &coords : *n_coords) {
+                        total += coords.size();
+                    }
+                } else {
+                    total += n_labels->size();
+                }
             }
         }
 
-        for (TAlphabet s = 1; s < boss.alph_size; ++s) {
-            auto &[total, matches] = counts[s];
-            if (matches) {
-                out_scores[s] = log2(matches) - log2(total);
+        double outscore = matches
+            ? log2(static_cast<double>(matches)) - log2(static_cast<double>(total))
+            : dninf;
+
+        if (matches) {
+            const auto &hll = hll_wrapper->data();
+            double best_jaccard = 0.0;
+            for (auto c : ref_columns) {
+                for (auto d : diff_columns) {
+                    auto [union_est, inter_est]
+                        = hll.estimate_column_union_intersection_cardinality(c, d);
+                    if (inter_est > 0.0)
+                        best_jaccard = std::max(best_jaccard, inter_est / union_est);
+                }
+            }
+
+            if (best_jaccard > 0.0) {
+                outscore += log2(best_jaccard);
             } else {
-                out_scores[s] = dninf;
+                outscore = dninf;
             }
         }
 
-        score_t ret_val = out_scores[s] != dninf
-            ? std::floor(out_scores[s] + log_jaccard_d_est)
+        score_t ret_val = outscore != dninf
+            ? std::floor(outscore) * config.score_matrix[c][c]
             : ninf;
 
-        logger->trace("Label change score: {}, {} / {}; Jaccard score: {}; "
-                      "node_is_rc: {}; found in: {}. "
+        logger->trace("Label change score: {}, {} / {}; "
                       "Covered {} / {} nodes after {} traversal steps.",
-                      ret_val, counts[s].second, counts[s].first,
-                      log_jaccard_d_est, node_is_rc, found_in, num_nodes_covered,
+                      ret_val, matches, total, num_nodes_covered,
                       dbg_succ->num_nodes(), traversal_steps);
         return ret_val;
     };

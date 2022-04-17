@@ -65,6 +65,15 @@ class HLLMatrix : public BinaryMatrix {
         return result;
     }
 
+    std::pair<double, double>
+    estimate_column_union_intersection_cardinality(Column a, Column b) const {
+        ColumnSketch a_sketch = get_column_sketch(a);
+        const ColumnSketch &b_sketch = get_column_sketch(b);
+        a_sketch.merge(b_sketch);
+        double union_est = a_sketch.estimate_cardinality();
+        return { union_est, num_set_bits_[a] + num_set_bits_[b] - union_est };
+    }
+
     template <class Columns>
     std::pair<double, double>
     estimate_column_union_intersection_cardinality(const Columns &a,
@@ -79,7 +88,9 @@ class HLLMatrix : public BinaryMatrix {
             a_cardinality_est = 0.0;
         } else {
             a_sketch = std::make_shared<ColumnSketch>(merge_columns(a));
-            a_cardinality_est = a_sketch->estimate_cardinality();
+            a_cardinality_est = a.size() == 1
+                ? num_set_bits_[a[0]]
+                : a_sketch->estimate_cardinality();
         }
 
         double b_cardinality_est;
