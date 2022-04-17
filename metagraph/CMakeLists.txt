@@ -320,6 +320,7 @@ add_library(hll STATIC
   "external-libraries/libcount/count/empirical_data.cc"
   "external-libraries/libcount/count/hll.cc"
   "external-libraries/libcount/count/hll_data.cc"
+  "external-libraries/libcount/count/utility.cc"
 )
 target_include_directories(hll PUBLIC external-libraries/libcount)
 

@@ -66,7 +66,9 @@ class HLLMatrix : public BinaryMatrix {
     }
 
     template <class Columns>
-    std::pair<double, double> estimate_column_union_intersection_cardinality(const Columns &a, const Columns &b) const {
+    std::pair<double, double>
+    estimate_column_union_intersection_cardinality(const Columns &a,
+                                                   const Columns &b) const {
         if (a.empty() && b.empty())
             return {};
 

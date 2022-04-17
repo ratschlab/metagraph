@@ -33,7 +33,7 @@ HLLCounter::HLLCounter(int precision) : precision_(precision) {
     assert(precision_ >= 4);
     assert(precision_ <= 18);
 
-    counter_ = libcount::HLL::Create(precision_);
+    counter_.reset(libcount::HLL::Create(precision_));
     assert(counter_);
 }
 
@@ -44,7 +44,7 @@ HLLCounter& HLLCounter::operator=(const HLLCounter &other) {
     if (!other.counter_)
         return *this;
 
-    counter_ = libcount::HLL::Create(precision_);
+    counter_.reset(libcount::HLL::Create(precision_));
 
     if (!counter_)
         return *this;
@@ -70,7 +70,7 @@ void HLLCounter::insert(const uint64_t *hashes_begin, const uint64_t *hashes_end
     assert(precision_ >= 4);
     assert(precision_ <= 18);
 
-    counter_->UpdateMany(hashes_begin, hashes_end - hashes_begin);
+    counter_->Update(hashes_begin, hashes_end - hashes_begin);
 }
 
 bool HLLCounter::check(uint64_t hash) const {
@@ -106,17 +106,6 @@ void HLLCounter::merge(const HLLCounter &other) {
     assert(other.precision_ <= 18);
 
     counter_->Merge(other.counter_.get());
-}
-
-double HLLCounter::estimate_cardinality() const {
-    return counter_->Estimate();
-}
-
-double HLLCounter::estimate_union_cardinality(const HLLCounter &other) const {
-    auto merged = libcount::HLL::Create(precision_);
-    merged->Merge(counter_.get());
-    merged->Merge(other.counter_.get());
-    return merged->Estimate();
 }
 
 double HLLCounter::estimate_intersection_cardinality(const HLLCounter &other) const {
@@ -158,7 +147,7 @@ bool HLLCounter::load(std::istream &in) {
             );
         }
 
-        counter_ = libcount::HLL::Create(precision_);
+        counter_.reset(libcount::HLL::Create(precision_));
 
         if (!counter_)
             return false;
