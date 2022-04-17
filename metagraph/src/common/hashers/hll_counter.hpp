@@ -40,8 +40,11 @@ class HLLCounter {
     void serialize(std::ostream &out) const;
     bool load(std::istream &in);
 
-    double estimate_cardinality() const;
-    double estimate_union_cardinality(const HLLCounter &other) const;
+    double estimate_cardinality() const { return counter_->Estimate(); }
+    double estimate_union_cardinality(const HLLCounter &other) const {
+        return counter_->EstimateUnion(other.counter_.get());
+    }
+
     double estimate_intersection_cardinality(const HLLCounter &other) const;
     double estimate_jaccard(const HLLCounter &other) const;
 

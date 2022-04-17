@@ -911,19 +911,17 @@ make_label_change_scorer(const IDBGAligner &aligner) {
         return [&config,ninf=config.ninf,hll_wrapper](auto, auto, char c,
                                                       const auto &ref_columns,
                                                       const auto &diff_columns) -> score_t {
-            if (c == boss::BOSS::kSentinel)
+            if (c == boss::BOSS::kSentinel || ref_columns.empty() || diff_columns.empty())
                 return ninf;
-
-            score_t match = config.score_matrix[c][c];
 
             const auto &hll = hll_wrapper->data();
             auto [union_est, inter_est]
                 = hll.estimate_column_union_intersection_cardinality(ref_columns,
                                                                      diff_columns);
-            if (union_est <= 0 || inter_est <= 0)
-                return ninf;
-
-            return score_t(log2(inter_est) - log2(union_est)) * match;
+            assert(union_est > 0.0);
+            return inter_est > 0.0
+                ? score_t(log2(inter_est) - log2(union_est)) * config.score_matrix[c][c]
+                : ninf;
         };
     }
 
