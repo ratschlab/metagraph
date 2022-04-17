@@ -891,9 +891,6 @@ void call_boss_edges(const DBGSuccinct &dbg_succ,
 Alignment::LabelChangeScorer
 make_label_change_scorer(const IDBGAligner &aligner) {
     const DBGAlignerConfig &config = aligner.get_config();
-    const auto *labeled_aligner = dynamic_cast<const ILabeledAligner*>(&aligner);
-    if (!labeled_aligner)
-        return [ninf=config.ninf](auto&&...) { return ninf; };
 
     const DeBruijnGraph *graph = &aligner.get_graph();
     const auto *canonical = dynamic_cast<const CanonicalDBG*>(graph);
@@ -902,7 +899,7 @@ make_label_change_scorer(const IDBGAligner &aligner) {
 
     const DBGSuccinct *dbg_succ = dynamic_cast<const DBGSuccinct*>(base_graph);
     const HLLWrapper<> *hll_wrapper = dbg_succ ? dbg_succ->get_extension_threadsafe<HLLWrapper<>>() : nullptr;
-    if (!dbg_succ || !hll_wrapper) {
+    if (!dbg_succ || !hll_wrapper || config.label_change_score != config.ninf) {
         return [ninf=config.ninf,score=config.label_change_score](auto,
                                                                   auto,
                                                                   char c,
@@ -930,6 +927,10 @@ make_label_change_scorer(const IDBGAligner &aligner) {
                 : ninf;
         };
     }
+
+    const auto *labeled_aligner = dynamic_cast<const ILabeledAligner*>(&aligner);
+    if (!labeled_aligner)
+        return [ninf=config.ninf](auto&&...) { return ninf; };
 
     const auto *node_rc = dbg_succ->get_extension_threadsafe<NodeRC>();
 
