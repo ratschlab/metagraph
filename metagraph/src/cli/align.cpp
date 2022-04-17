@@ -321,11 +321,11 @@ int align_to_graph(Config *config) {
                              "Use metagraph transform to generate an adj-rc index.");
             }
         }
-        // auto hll = std::make_shared<HLLWrapper<>>();
-        // if (hll->load(utils::remove_suffix(config->infbase, dbg_succ->file_extension()))) {
-        //     logger->trace("Loaded HLL sketch");
-        //     dbg_succ->add_extension(std::move(hll));
-        // }
+        auto hll = std::make_shared<HLLWrapper<>>();
+        if (hll->load(utils::remove_suffix(config->infbase, dbg_succ->file_extension()))) {
+            logger->trace("Loaded HLL sketch");
+            dbg_succ->add_extension(std::move(hll));
+        }
 
         // dbg_succ->add_extension(std::make_shared<MerDistances>(*dbg_succ, 6));
     }
@@ -371,12 +371,6 @@ int align_to_graph(Config *config) {
     if (config->infbase_annotators.size()) {
         assert(config->infbase_annotators.size() == 1);
         anno_dbg = initialize_annotated_dbg(graph, *config);
-        if (const auto *col = dynamic_cast<const annot::ColumnCompressed<>*>(&anno_dbg->get_annotator())) {
-            if (dbg_succ) {
-                logger->trace("Making HLL");
-                dbg_succ->add_extension(std::make_shared<HLLWrapper<>>(col->get_matrix().data(), 0.05));
-            }
-        }
     }
 
     for (const auto &file : files) {

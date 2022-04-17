@@ -908,29 +908,22 @@ make_label_change_scorer(const IDBGAligner &aligner) {
     }
 
     if (const auto *hll_wrapper = dbg_succ->get_extension_threadsafe<HLLWrapper<>>()) {
-        return [ninf=config.ninf,hll_wrapper,labeled_aligner](auto, auto, char c, const auto &ref_columns,
-                                              const auto &diff_columns) -> score_t {
+        return [&config,ninf=config.ninf,hll_wrapper](auto, auto, char c,
+                                                      const auto &ref_columns,
+                                                      const auto &diff_columns) -> score_t {
             if (c == boss::BOSS::kSentinel)
                 return ninf;
 
+            score_t match = config.score_matrix[c][c];
+
             const auto &hll = hll_wrapper->data();
-            auto ref_merged = hll.merge_columns(ref_columns);
-            auto diff_merged = hll.merge_columns(diff_columns);
-            std::cerr << "ref\t" << ref_merged.estimate_cardinality() << "\t";
-            double jaccard = ref_merged.estimate_jaccard(diff_merged);
+            auto [union_est, inter_est]
+                = hll.estimate_column_union_intersection_cardinality(ref_columns,
+                                                                     diff_columns);
+            if (union_est <= 0 || inter_est <= 0)
+                return ninf;
 
-            const auto &enc = labeled_aligner->get_annotation_buffer().get_annotator().get_label_encoder();
-            for (auto col : ref_columns) {
-                std::cerr << enc.decode(col) << ";";
-            }
-            std::cerr << "\t->\tdiff\t" << diff_merged.estimate_cardinality() << "\t";
-            for (auto col : diff_columns) {
-                std::cerr << enc.decode(col) << ";";
-            }
-            std::cerr << "\t";
-
-            std::cerr << "JACC\t" << jaccard << "\t" << (jaccard == 0.0 ? ninf : score_t(-log2(jaccard))) << "\n";
-            return jaccard == 0.0 ? ninf : -log2(jaccard);
+            return score_t(log2(inter_est) - log2(union_est)) * match;
         };
     }
 
