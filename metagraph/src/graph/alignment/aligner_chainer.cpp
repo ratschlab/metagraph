@@ -578,7 +578,8 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
     AlignmentAggregator<AlignmentCompare> aggregator(no_chain_config);
 
     alignments.erase(std::remove_if(alignments.begin(), alignments.end(), [&](Alignment &a) {
-        if (!a.get_clipping() && !a.get_end_clipping()) {
+        // TODO: handle offset case later
+        if ((!a.get_clipping() && !a.get_end_clipping()) || a.get_offset()) {
             aggregator.add_alignment(std::move(a));
             return true;
         }
@@ -657,10 +658,6 @@ void construct_alignment_chain(const IDBGAligner &aligner,
 
     bool called = false;
     for (auto it = begin; it != end; ++it) {
-        // TODO: handle this case later
-        if (it->get_offset())
-            continue;
-
         const char *next_begin = it->get_query_view().data();
         const char *next_end = it->get_query_view().data() + it->get_query_view().size();
 
@@ -1102,6 +1099,8 @@ make_label_change_scorer(const IDBGAligner &aligner) {
             annotation_buffer.fetch_queued_annotations();
         }
 
+        assert(parallel_edges->size());
+
         size_t total = 0;
         size_t matches = 0;
         for (const auto &[n, edges] : parallel_edges->second) {
@@ -1157,27 +1156,30 @@ make_label_change_scorer(const IDBGAligner &aligner) {
             }
         }
 
-        double outscore = matches
-            ? log2(static_cast<double>(matches)) - log2(static_cast<double>(total))
-            : dninf;
+        double pseudocount = 0.5;
+        double outscore = log2(static_cast<double>(matches + pseudocount))
+                            - log2(static_cast<double>(total + pseudocount));
 
-        if (matches) {
-            const auto &hll = hll_wrapper->data();
-            double best_jaccard = 0.0;
-            for (auto c : ref_columns) {
-                for (auto d : diff_columns) {
-                    auto [union_est, inter_est]
-                        = hll.estimate_column_union_intersection_cardinality(c, d);
-                    if (inter_est > 0.0)
-                        best_jaccard = std::max(best_jaccard, inter_est / union_est);
-                }
+        const auto &hll = hll_wrapper->data();
+        double best_jaccard = 0.0;
+        for (auto c : ref_columns) {
+            for (auto d : diff_columns) {
+                auto [union_est, inter_est]
+                    = hll.estimate_column_union_intersection_cardinality(c, d);
+                double jaccard = inter_est > 0.0 ? inter_est / union_est : 0.0;
+                best_jaccard = std::max(best_jaccard, jaccard);
+                DEBUG_LOG("Label Jaccard {} -> {}: {}",
+                    annotation_buffer.get_annotator().get_label_encoder().decode(c)
+                    annotation_buffer.get_annotator().get_label_encoder().decode(d)
+                    jaccard);
             }
+        }
 
-            if (best_jaccard > 0.0) {
-                outscore += log2(best_jaccard);
-            } else {
-                outscore = dninf;
-            }
+        if (best_jaccard > 0.0) {
+            DEBUG_LOG("Best Jaccard: {}", log2(best_jaccard));
+            outscore += log2(best_jaccard);
+        } else {
+            outscore = dninf;
         }
 
         score_t ret_val = outscore != dninf
