@@ -300,7 +300,8 @@ extract_subgraph(const DeBruijnGraph &graph,
                     }
                 });
             } else if (TAlphabet s = base_boss.get_W(base_range.second)) {
-                if (auto next_last = boss->pick_edge(last, s % base_boss.alph_size)) {
+                s %= base_boss.alph_size;
+                if (auto next_last = boss->pick_edge(last, s)) {
                     auto next_base_last = base_boss.fwd(base_range.second, s);
                     auto next_base_first = base_boss.pred_last(next_base_last - 1) + 1;
                     edge_stack.emplace_back(next_last, next_last, length);
