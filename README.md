@@ -19,7 +19,7 @@ At the same time, the provided workflows and their careful implementation, combi
 * **Sequence alignment** against very large annotated graphs
 * Scalable cleaning of very large de Bruijn graphs (to remove sequencing errors)
 * Support for custom alphabets (e.g., {A,C,G,T,N} or amino acids)
-* Algorithms for **differential assembly**
+* Algorithms for [differential assembly](https://metagraph.ethz.ch/static/docs/sequence_assembly.html#differential-assembly)
 
 #### Design choices in MetaGraph:
 * Use of succinct data structures and efficient representation schemes for extremely high scalability
