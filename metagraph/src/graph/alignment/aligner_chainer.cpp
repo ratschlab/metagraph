@@ -338,7 +338,8 @@ chain_seeds(const IDBGAligner &aligner,
         for (size_t j = 0; j < seeds[i].label_coordinates.size(); ++j) {
             Alignment::Column c = seeds[i].label_columns[j];
             auto rbegin = seeds[i].label_coordinates[j].rbegin();
-            auto rend = seeds[i].label_coordinates[j].rend();
+            auto rend = rbegin + std::min(seeds[i].label_coordinates[j].size(),
+                                          config.max_num_seeds_per_locus);
             std::for_each(rbegin, rend, [&](ssize_t coord) {
                 ++label_sizes[c];
                 dp_table.emplace_back(c, coord, seeds[i].get_clipping(),
