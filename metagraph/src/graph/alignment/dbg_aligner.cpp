@@ -5,6 +5,7 @@
 #include "common/logger.hpp"
 #include "common/algorithms.hpp"
 #include "graph/representation/rc_dbg.hpp"
+#include "graph/representation/canonical_dbg.hpp"
 #include "aligner_labeled.hpp"
 
 namespace mtg {
