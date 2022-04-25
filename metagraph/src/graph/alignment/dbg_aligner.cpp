@@ -200,10 +200,7 @@ extract_subgraph(const DeBruijnGraph &graph,
     if (config.min_seed_length >= graph.get_k())
         return {};
 
-    const auto *canonical = dynamic_cast<const CanonicalDBG*>(&graph);
-
-    const DBGSuccinct *base_dbg_succ = dynamic_cast<const DBGSuccinct*>(&(canonical
-        ? canonical->get_graph() : graph));
+    const auto *base_dbg_succ = get_dbg_succ(graph);
     if (!base_dbg_succ)
         return {};
 
