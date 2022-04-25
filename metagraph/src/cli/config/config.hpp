@@ -142,7 +142,7 @@ class Config {
     double alignment_max_nodes_per_seq_char = 5.0;
     double alignment_max_ram = 200;
     // TODO: rename to min_covered_by_seeds
-    double alignment_min_exact_match = 0.76;
+    double alignment_min_exact_match = 0.7;
     double min_fraction = 0.0;
     double max_fraction = 1.0;
     std::vector<double> count_slice_quantiles;
