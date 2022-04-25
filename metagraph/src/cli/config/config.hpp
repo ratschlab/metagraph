@@ -129,7 +129,7 @@ class Config {
     size_t alignment_num_alternative_paths = 1;
     size_t alignment_min_seed_length = 19;
     size_t alignment_max_seed_length = std::numeric_limits<size_t>::max();
-    size_t alignment_max_num_seeds_per_locus = 100;
+    size_t alignment_max_num_seeds_per_locus = 1000;
 
     double alignment_rel_score_cutoff = 0.95;
 

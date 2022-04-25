@@ -56,8 +56,10 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
         throw std::runtime_error("Error: sum of min_cell_score and lowest penalty too low.");
 
     // extensions should not trim characters from chain seed prefixes
-    if (config_.chain_alignments)
+    if (config_.chain_alignments) {
         config_.allow_left_trim = false;
+        config_.max_seed_length = config_.min_seed_length;
+    }
 }
 
 /**
