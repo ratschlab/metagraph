@@ -127,9 +127,9 @@ class Config {
     int32_t alignment_xdrop = 27;
 
     size_t alignment_num_alternative_paths = 1;
-    size_t alignment_min_seed_length = 0;
+    size_t alignment_min_seed_length = 19;
     size_t alignment_max_seed_length = std::numeric_limits<size_t>::max();
-    size_t alignment_max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
+    size_t alignment_max_num_seeds_per_locus = 100;
 
     double alignment_rel_score_cutoff = 0.95;
 
@@ -142,7 +142,7 @@ class Config {
     double alignment_max_nodes_per_seq_char = 5.0;
     double alignment_max_ram = 200;
     // TODO: rename to min_covered_by_seeds
-    double alignment_min_exact_match = 0.0;
+    double alignment_min_exact_match = 0.76;
     double min_fraction = 0.0;
     double max_fraction = 1.0;
     std::vector<double> count_slice_quantiles;

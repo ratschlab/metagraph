@@ -1047,11 +1047,11 @@ if (advanced) {
             fprintf(stderr, "\t   --align-edit-distance \t\t\tuse unit costs for scoring matrix [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "Advanced options for seeding:\n");
-            fprintf(stderr, "\t   --align-min-seed-length [INT]\t\tthe minimum length of a seed [graph k]\n");
+            fprintf(stderr, "\t   --align-min-seed-length [INT]\t\tthe minimum length of a seed [19]\n");
             fprintf(stderr, "\t   --align-max-seed-length [INT]\t\tthe maximum length of a seed [graph k]\n");
 if (advanced) {
-            fprintf(stderr, "\t   --align-min-exact-match [FLOAT] \t\tfraction of matching nucleotides required to align sequence [0.0]\n");
-            fprintf(stderr, "\t   --align-max-num-seeds-per-locus [INT]\tthe maximum number of allowed inexact seeds per locus [inf]\n");
+            fprintf(stderr, "\t   --align-min-exact-match [FLOAT] \t\tfraction of matching nucleotides required to align sequence [0.76]\n");
+            fprintf(stderr, "\t   --align-max-num-seeds-per-locus [INT]\tthe maximum number of allowed inexact seeds per locus [100]\n");
 }
         } break;
         case COMPARE: {
@@ -1314,10 +1314,10 @@ if (advanced) {
             fprintf(stderr, "\t   --align-edit-distance \t\t\tuse unit costs for scoring matrix [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "Advanced options for seeding:\n");
-            fprintf(stderr, "\t   --align-min-seed-length [INT]\t\tthe minimum length of a seed [graph k]\n");
+            fprintf(stderr, "\t   --align-min-seed-length [INT]\t\tthe minimum length of a seed [19]\n");
             fprintf(stderr, "\t   --align-max-seed-length [INT]\t\tthe maximum length of a seed [graph k]\n");
-            fprintf(stderr, "\t   --align-min-exact-match [FLOAT]\t\tfraction of matching nucleotides required to align sequence [0.0]\n");
-            fprintf(stderr, "\t   --align-max-num-seeds-per-locus [INT]\tthe maximum number of allowed inexact seeds per locus [inf]\n");
+            fprintf(stderr, "\t   --align-min-exact-match [FLOAT]\t\tfraction of matching nucleotides required to align sequence [0.76]\n");
+            fprintf(stderr, "\t   --align-max-num-seeds-per-locus [INT]\tthe maximum number of allowed inexact seeds per locus [100]\n");
         } break;
         case SERVER_QUERY: {
             fprintf(stderr, "Usage: %s server_query -i <GRAPH> -a <ANNOTATION> [options]\n\n", prog_name.c_str());

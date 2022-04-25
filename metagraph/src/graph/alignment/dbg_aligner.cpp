@@ -13,6 +13,11 @@ namespace align {
 
 using mtg::common::logger;
 
+const DBGSuccinct* get_dbg_succ(const DeBruijnGraph &graph) {
+    const auto *canonical = dynamic_cast<const CanonicalDBG*>(&graph);
+    return dynamic_cast<const DBGSuccinct*>(&(canonical ? canonical->get_graph() : graph));
+}
+
 AlignmentResults IDBGAligner::align(std::string_view query) const {
     AlignmentResults result;
     align_batch({ Query{ std::string{}, query } },
@@ -30,6 +35,9 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
       : graph_(graph), config_(config) {
     if (!config_.min_seed_length)
         config_.min_seed_length = graph_.get_k();
+
+    if (config_.min_seed_length < graph.get_k() && !get_dbg_succ(graph))
+        config_.min_seed_length = graph.get_k();
 
     if (!config_.max_seed_length)
         config_.max_seed_length = graph_.get_k();
