@@ -556,14 +556,19 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
                         throw std::bad_function_call();
                     }
 
-                    double num_exact_matches = get_num_char_matches_in_chain(chain.begin(), chain.end());
-                    if (num_exact_matches / forward.size() < config_.min_exact_match)
-                        throw std::bad_function_call();
+                    double exact_match_fraction
+                        = get_num_char_matches_in_chain(chain.begin(), chain.end())
+                            / forward.size();
 
-                    logger->trace("Chain: score: {}", score);
+                    logger->trace("Chain: score: {}; exact match fraction: {}",
+                                  score, exact_match_fraction);
+
                     for (const auto &[chain, dist] : chain) {
                         logger->trace("\t{}\tdist: {}", chain, dist);
                     }
+
+                    if (exact_match_fraction < config_.min_exact_match)
+                        throw std::bad_function_call();
 
                     extend_chain(chain[0].first.get_orientation() ? reverse : forward,
                                  chain[0].first.get_orientation() ? forward : reverse,
