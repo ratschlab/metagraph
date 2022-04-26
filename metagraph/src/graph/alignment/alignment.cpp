@@ -35,6 +35,26 @@ std::string Alignment::format_coords() const {
     return fmt::format("{}", fmt::join(decoded_labels, ";"));
 }
 
+std::string Alignment::format_annotations() const {
+    std::string out = fmt::format("{}", fmt::join(get_decoded_labels(0), ";"));
+    size_t count = 1;
+    size_t last_cols = label_columns;
+    for (size_t i = 0; i < label_column_diffs.size(); ++i) {
+        if (label_column_diffs[i] == last_cols) {
+            ++count;
+        } else {
+            out += fmt::format(":{}>{}", count, fmt::join(get_decoded_labels(i + 1), ";"));
+            last_cols = label_column_diffs[i];
+            count = 1;
+        }
+    }
+
+    if (label_column_diffs.size())
+        out += fmt::format(":{}", count);
+
+    return out;
+}
+
 void Seed::set_columns(Vector<Column>&& columns) {
     if (columns.empty()) {
         label_columns = 0;
@@ -1124,10 +1144,13 @@ std::string Alignment::to_gaf(const std::string &name) const {
     size_t begin = orientation_ ? get_end_clipping() : get_clipping();
 
     return fmt::format(
-        "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\tAS:i:{}\tcg:Z:{}\tMD:Z:{}",
+        "{}\t{}\t{}\t{}\t{}\t>{}\t{}\t{}\t{}\t{}\t{}\t{}\tAS:i:{}\tcg:Z:{}\tMD:Z:{}",
         name, query_size, begin, begin + query_view_.size(),
         orientation_ ? '-' : '+',
-        fmt::format(">{}", fmt::join(nodes_, ">")),
+        label_coordinates.size()
+            ? format_coords()
+            : (has_annotation() ? format_annotations()
+                                : fmt::format("{}", fmt::join(nodes_, ">"))),
         sequence_.size() + offset_,
         orientation_ ? offset_ : 0, !orientation_ ? offset_ : 0,
         cigar_.get_num_matches(), sequence_.size(), 255 /* quality missing */, score_,

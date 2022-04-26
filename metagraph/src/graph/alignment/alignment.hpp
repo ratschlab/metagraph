@@ -317,6 +317,7 @@ class Alignment {
     score_t extra_score = 0;
 
     std::string format_coords() const;
+    std::string format_annotations() const;
 
     void set_columns(Vector<Column>&& columns);
     const Vector<Column>& get_columns(size_t path_i = 0) const;
@@ -437,21 +438,7 @@ template <> struct formatter<mtg::graph::align::Alignment> {
         if (a.label_coordinates.size()) {
             format_to(ctx.out(), "\t{}", a.format_coords());
         } else if (a.has_annotation()) {
-            format_to(ctx.out(), "\t{}", fmt::join(a.get_decoded_labels(0), ";"));
-            size_t count = 1;
-            size_t last_cols = a.label_columns;
-            for (size_t i = 0; i < a.label_column_diffs.size(); ++i) {
-                if (a.label_column_diffs[i] == last_cols) {
-                    ++count;
-                } else {
-                    format_to(ctx.out(), ":{}>{}", count, fmt::join(a.get_decoded_labels(i + 1), ";"));
-                    last_cols = a.label_column_diffs[i];
-                    count = 1;
-                }
-            }
-
-            if (a.label_column_diffs.size())
-                format_to(ctx.out(), ":{}", count);
+            format_to(ctx.out(), "\t{}", a.format_annotations());
         }
 
         return ctx.out();
