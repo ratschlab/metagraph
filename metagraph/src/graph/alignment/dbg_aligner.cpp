@@ -577,8 +577,7 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
                                  [&](Alignment&& aln) {
                         auto cur_columns = aln.label_columns;
                         if (!aggregator.add_alignment(std::move(aln))) {
-                            finished_columns.insert(cur_columns.begin(),
-                                                    cur_columns.end());
+                            finished_columns.insert(cur_columns.begin(), cur_columns.end());
                         }
                     });
                 },
