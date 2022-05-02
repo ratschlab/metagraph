@@ -603,7 +603,7 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
                               b.get_sequence().size());
     });
 
-    DEBUG_LOG("Chaining alignments:\n{}", fmt::join(alignments, "\t\n"));
+    logger->trace("Chaining alignments:\n{}", fmt::join(alignments, "\t\n"));
 
     auto get_label_change_score = make_label_change_scorer(aligner);
 

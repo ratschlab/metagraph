@@ -283,7 +283,8 @@ bool Alignment::append(Alignment&& other,
         score_t label_change_score = ret_val
             ? get_label_change_score(nodes_.back(),
                                      get_sequence().substr(sequence_.size() - std::min(k, sequence_.size())),
-                                     other.sequence_[0],
+                                     other.sequence_[0] == boss::BOSS::kSentinel
+                                        ? other.sequence_[1] : other.sequence_[0],
                                      *ref_labels,
                                      diff) : 0;
         if (label_change_score == ninf) {
@@ -1144,7 +1145,7 @@ std::string Alignment::to_gaf(const std::string &name) const {
     size_t begin = orientation_ ? get_end_clipping() : get_clipping();
 
     return fmt::format(
-        "{}\t{}\t{}\t{}\t{}\t>{}\t{}\t{}\t{}\t{}\t{}\t{}\tAS:i:{}\tcg:Z:{}\tMD:Z:{}",
+        "{}\t{}\t{}\t{}\t{}\t>{}\t{}\t{}\t{}\t{}\t{}\t{}\tAS:i:{}\tcg:Z:{}\tMD:Z:{}\tZS:Z:{}",
         name, query_size, begin, begin + query_view_.size(),
         orientation_ ? '-' : '+',
         label_coordinates.size()
@@ -1154,7 +1155,8 @@ std::string Alignment::to_gaf(const std::string &name) const {
         sequence_.size() + offset_,
         orientation_ ? offset_ : 0, !orientation_ ? offset_ : 0,
         cigar_.get_num_matches(), sequence_.size(), 255 /* quality missing */, score_,
-        cigar_.to_string(), cigar_.to_md_string(sequence_)
+        cigar_.to_string(), cigar_.to_md_string(sequence_),
+        sequence_
     );
 }
 

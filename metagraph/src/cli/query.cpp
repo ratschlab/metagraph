@@ -1218,7 +1218,9 @@ Alignment align_sequence(std::string *seq,
 
         return { match.get_score(), match.get_cigar().to_string(), match.get_orientation() };
     } else {
-        return { 0, fmt::format("{}S", seq->length()), false };
+        size_t seq_length = seq->length();
+        *seq = "";
+        return { 0, fmt::format("{}S", seq_length), false };
     }
 }
 
