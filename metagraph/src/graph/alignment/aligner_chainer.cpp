@@ -608,18 +608,21 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
     auto get_label_change_score = make_label_change_scorer(aligner);
 
     auto run = [&](std::string_view this_query, auto begin, auto end) {
-        std::vector<score_t> best_score(this_query.size() + 1, 0);
         for (auto it = begin; it != end; ++it) {
-            size_t end_pos = it->get_query_view().data() + it->get_query_view().size()
-                                - this_query.data();
-            if (it->get_score() > best_score[end_pos]) {
-                best_score[end_pos] = it->get_score();
+            std::vector<score_t> best_score(end - it, 0);
+            for (auto jt = it; jt != end; ++jt) {
+                best_score[end - jt - 1] = jt->get_score();
+            }
+            // size_t end_pos = it->get_query_view().data() + it->get_query_view().size()
+                                // - this_query.data();
+            // if (it->get_score() > best_score[end_pos]) {
+                // best_score[end_pos] = it->get_score();
                 construct_alignment_chain<AlignmentCompare>(
                     aligner, this_query, Alignment(*it), it + 1, end, &best_score,
                     [&](Alignment&& chain) { aggregator.add_alignment(std::move(chain)); },
                     get_label_change_score
                 );
-            }
+            // }
         }
     };
 
@@ -794,17 +797,29 @@ void construct_alignment_chain(const IDBGAligner &aligner,
 
         assert(!aln.empty());
 
+        // std::cerr << "FOO\n" << next_chain.get_score() << "\t" << next_chain.get_cigar().to_string() << "\n";
+        // std::cerr << it->get_score() << "\t" << it->get_cigar().to_string() << "\n";
+        // std::cerr << aln.get_score() << "\t" << aln.get_cigar().to_string() << "\t" << aln.format_annotations() << "\n";
+
         // use append instead of splice because any clipping in aln represents
         // internally clipped characters
         next_chain.trim_end_clipping();
         bool changed = next_chain.append(
                 std::move(aln), get_label_change_score, config.label_change_union);
+        // std::cerr << next_chain.get_score() << "\t" << next_chain.get_cigar().to_string() << "\n\n";
         assert(next_chain.is_valid(graph, &config));
         score_t next_score = next_chain.get_score();
-        if (next_score <= (*best_score)[next_end - query.data()])
-            continue;
+        if (next_score < 0)
+            break;
 
-        (*best_score)[next_end - query.data()] = next_score;
+        // std::cerr << "FOO\t" << end - it << "\n" << next_chain << "\n" << next_score << " " << (*best_score)[end - it] << "\n\n";
+        // if (next_score <= (*best_score)[next_end - query.data()])
+        if (next_score <= (*best_score)[end - it - 1]) {
+            continue;
+        }
+
+        // (*best_score)[next_end - query.data()] = next_score;
+        (*best_score)[end - it - 1] = next_score;
         if (next_chain.size()) {
             construct_alignment_chain<AlignmentCompare>(
                     aligner, query, std::move(next_chain),
@@ -1099,7 +1114,7 @@ make_label_change_scorer(const IDBGAligner &aligner) {
             annotation_buffer.fetch_queued_annotations();
         }
 
-        assert(parallel_edges->size());
+        assert(parallel_edges.value().size());
 
         size_t total = 0;
         size_t matches = 0;
@@ -1169,8 +1184,8 @@ make_label_change_scorer(const IDBGAligner &aligner) {
                 double jaccard = inter_est > 0.0 ? inter_est / union_est : 0.0;
                 best_jaccard = std::max(best_jaccard, jaccard);
                 DEBUG_LOG("Label Jaccard {} -> {}: {}",
-                    annotation_buffer.get_annotator().get_label_encoder().decode(c)
-                    annotation_buffer.get_annotator().get_label_encoder().decode(d)
+                    annotation_buffer.get_annotator().get_label_encoder().decode(c),
+                    annotation_buffer.get_annotator().get_label_encoder().decode(d),
                     jaccard);
             }
         }
