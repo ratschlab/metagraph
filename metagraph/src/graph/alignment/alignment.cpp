@@ -1526,9 +1526,15 @@ void Alignment::insert_gap_prefix(ssize_t gap_length,
     if (extra_scores.size() && extra_nodes)
         extra_scores.insert(extra_scores.begin(), extra_nodes, 0);
 
-    if (label_column_diffs.size() && extra_nodes) {
-        label_column_diffs.insert(label_column_diffs.begin(), extra_nodes, 0);
-        std::swap(label_column_diffs[extra_nodes - 1], label_columns);
+    if (extra_nodes && has_annotation()) {
+        if (label_column_diffs.empty()) {
+            label_column_diffs.resize(nodes_.size() - 1);
+            std::fill(label_column_diffs.begin() + extra_nodes - 1, label_column_diffs.end(), label_columns);
+            label_columns = 0;
+        } else {
+            label_column_diffs.insert(label_column_diffs.begin(), extra_nodes, 0);
+            std::swap(label_column_diffs[extra_nodes - 1], label_columns);
+        }
     }
 
     assert(nodes_.size() == sequence_.size());
