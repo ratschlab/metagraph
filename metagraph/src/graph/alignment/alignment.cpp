@@ -97,6 +97,7 @@ auto Alignment::get_column_union() const -> Vector<Column> {
     for (size_t diff : label_column_diffs) {
         Vector<Column> merge;
         const Vector<Column> &next = label_encoder->get_cached_column_set(diff);
+        merge.reserve(ret_val.size() + next.size());
         std::set_union(ret_val.begin(), ret_val.end(), next.begin(), next.end(),
                        std::back_inserter(merge));
         std::swap(merge, ret_val);
@@ -408,18 +409,6 @@ size_t Alignment::trim_query_prefix(size_t n,
     auto s_it = sequence_.begin();
     auto node_it = nodes_.begin();
 
-    auto consume_ref = [&]() {
-        assert(s_it != sequence_.end());
-        ++s_it;
-        if (offset_ < node_overlap) {
-            ++offset_;
-        } else if (node_it + 1 < nodes_.end()) {
-            ++node_it;
-        } else {
-            *this = Alignment();
-        }
-    };
-
     while (n || (trim_excess_deletions && it->first == Cigar::DELETION)) {
         if (it == cigar_.data().end()) {
             *this = Alignment();
@@ -433,9 +422,16 @@ size_t Alignment::trim_query_prefix(size_t n,
                 score_ -= config.score_matrix[query_view_[0]][*s_it];
                 query_view_.remove_prefix(1);
                 --n;
-                consume_ref();
-                if (empty())
+                assert(s_it != sequence_.end());
+                ++s_it;
+                if (offset_ < node_overlap) {
+                    ++offset_;
+                } else if (node_it + 1 < nodes_.end()) {
+                    ++node_it;
+                } else {
+                    *this = Alignment();
                     return 0;
+                }
             } break;
             case Cigar::INSERTION: {
                 score_ -= it->second - cigar_offset == 1
@@ -448,9 +444,16 @@ size_t Alignment::trim_query_prefix(size_t n,
                 score_ -= it->second - cigar_offset == 1
                     ? config.gap_opening_penalty
                     : config.gap_extension_penalty;
-                consume_ref();
-                if (empty())
+                assert(s_it != sequence_.end());
+                ++s_it;
+                if (offset_ < node_overlap) {
+                    ++offset_;
+                } else if (node_it + 1 < nodes_.end()) {
+                    ++node_it;
+                } else {
+                    *this = Alignment();
                     return 0;
+                }
             } break;
             case Cigar::CLIPPED:
             case Cigar::NODE_INSERTION: {
