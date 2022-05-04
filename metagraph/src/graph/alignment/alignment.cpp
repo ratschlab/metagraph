@@ -353,8 +353,10 @@ size_t Alignment::trim_offset() {
     if (extra_scores.size())
         extra_scores.erase(extra_scores.begin(), extra_scores.begin() + trim);
 
-    if (label_column_diffs.size())
+    if (label_column_diffs.size()) {
+        std::swap(label_columns, label_column_diffs[trim - 1]);
         label_column_diffs.erase(label_column_diffs.begin(), label_column_diffs.begin() + trim);
+    }
 
     assert(extra_scores.empty() || extra_scores.size() == nodes_.size() - 1);
     assert(label_column_diffs.empty() || label_column_diffs.size() == nodes_.size() - 1);
