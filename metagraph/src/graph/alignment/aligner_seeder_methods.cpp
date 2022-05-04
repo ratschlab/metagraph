@@ -23,7 +23,8 @@ typedef boss::BOSS::edge_index edge_index;
 #if ! _PROTEIN_GRAPH
 inline bool is_low_complexity(std::string_view s, int T = 20, int W = 64) {
     int n;
-    std::unique_ptr<uint64_t> r { sdust(0, (const uint8_t*)s.data(), s.size(), T, W, &n) };
+    uint64_t *r = sdust(0, (const uint8_t*)s.data(), s.size(), T, W, &n);
+    free(r);
     return n > 0;
 }
 #else
