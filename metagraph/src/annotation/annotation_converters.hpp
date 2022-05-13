@@ -92,6 +92,13 @@ template <typename Label>
 void convert_to_row_sparse_disk(const ColumnCompressed<Label> &annotator,
                               const std::string &outfbase,
                               size_t num_threads);
+
+template<typename Label>
+void convert_to_row_sparse_brwt_disk(const ColumnCompressed<Label>& annotator, 
+                                     const std::string& outfbase, 
+                                     uint64_t row_sparse_threshold,
+                                     const std::function<std::unique_ptr<MultiBRWTAnnotator>(const std::vector<std::string> &)>& create_multi_brwt);
+
 /**
  * Sparsifies annotations in #ColumnCompressed format by storing diffs between sucessive
  * nodes rather than the actual annotation.
@@ -136,6 +143,15 @@ convert_row_diff_to_RowDiffSparseDisk(const std::vector<std::string> &filenames,
                                       Timer& timer,
                                       const std::string& anchors_file,
                                       const std::string& fork_succ_file);
+
+void 
+convert_row_diff_to_RowDiffRowSparseBRWTDisk(const std::vector<std::string> &filenames,
+                                      const std::string& outfbase,
+                                      uint64_t row_sparse_threshold,
+                                      Timer& timer,
+                                      const std::string& anchors_file,
+                                      const std::string& fork_succ_file,
+                                      const std::function<std::unique_ptr<RowDiffBRWTAnnotator>(const std::vector<std::string> &)>& create_row_diff_multi_brwt);
 
 /**
  * Converts a RowDiff annotation into RowDiff<RowSparse>.

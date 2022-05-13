@@ -56,6 +56,8 @@ void call_rows(const BinaryMatrix &row_major_matrix,
     }
 }
 
+// mkokot, TODO: write .row_diff.annodbg -> new hybrid monster
+// similar function that is in row_diff_builder (count_labels_per_row())
 
 // RowCompressed -> other
 
@@ -512,6 +514,293 @@ convert_row_diff_to_RowDiffSparseDisk(const std::vector<std::string> &filenames,
 
     logger->trace("Annotation converted in {} sec", timer.elapsed());
 }
+
+
+
+void
+convert_row_diff_to_RowDiffRowSparseBRWTDisk(const std::vector<std::string> &filenames,
+                                      const std::string& outfbase,
+                                      uint64_t row_sparse_threshold,
+                                      Timer& timer,
+                                      const std::string& anchors_file,
+                                      const std::string& fork_succ_file,
+                                      const std::function<std::unique_ptr<RowDiffBRWTAnnotator>(const std::vector<std::string> &)>& create_row_diff_multi_brwt) {
+    std::vector<std::unique_ptr<bit_vector>> columns;
+    LabelEncoder<std::string> label_encoder;
+
+
+// mkokot, TODO: in the new approach the code in count_labels_per_row function (row_diff_builder.cpp file)
+// may be useful (at least basing on function name)
+
+    std::mutex mu;
+    uint64_t total_num_set_bits = 0;
+    bool load_successful = merge_load_row_diff(
+        filenames,
+        [&](uint64_t, const std::string &label, std::unique_ptr<bit_vector> &&column) {
+            uint64_t num_set_bits = column->num_set_bits();
+            logger->trace("RowDiff column: {}, Density: {}, Set bits: {}", label,
+                          static_cast<double>(num_set_bits) / column->size(),
+                          num_set_bits);
+
+            std::lock_guard<std::mutex> lock(mu);
+
+            if (columns.size() && column->size() != columns.back()->size()) {
+                logger->error("Column {} has {} rows, previous column has {} rows",
+                              label, column->size(), columns.back()->size());
+                exit(1);
+            }
+            size_t col = label_encoder.insert_and_encode(label);
+            if (col != columns.size()) {
+                logger->error("Duplicate columns {}", label);
+                exit(1);
+            }
+            columns.push_back(std::move(column));
+
+            // mkokot, TODO: testing if it works as I think, remove it later
+            if(columns.size() - 1 != label_encoder.encode(label)) {
+                std::cerr << " mkokot, it works differently than I thought";
+                exit(1);
+            }
+
+            total_num_set_bits += num_set_bits;
+        },
+        get_num_threads()
+    );
+
+    if (!load_successful) {
+        logger->error("Error while loading row-diff columns");
+        exit(1);
+    }
+
+    uint64_t num_rows = columns.at(0)->size();
+    uint64_t num_columns = columns.size();
+
+    IRowDiff::anchor_bv_type anchor_;
+    IRowDiff::fork_succ_bv_type fork_succ_;
+
+    // mkokot, this is ugly code duplication of IRowDiff::load_anchor
+    auto load_anchor = [](IRowDiff::anchor_bv_type& anchor_, const std::string &filename) {
+        if (!std::filesystem::exists(filename)) {
+            common::logger->error("Can't read anchor file: {}", filename);
+            std::exit(1);
+        }
+        std::ifstream f(filename, ios::binary);
+        if (!f.good()) {
+            common::logger->error("Could not open anchor file {}", filename);
+            std::exit(1);
+        }
+        anchor_.load(f);
+    };
+
+    // mkokot, this is ugly code duplication of IRowDiff::load_fork_succ
+    auto load_fork_succ = [](IRowDiff::fork_succ_bv_type& fork_succ_, const std::string &filename) {
+        if (!std::filesystem::exists(filename)) {
+            common::logger->error("Can't read fork successor file: {}", filename);
+            std::exit(1);
+        }
+        std::ifstream f(filename, ios::binary);
+        if (!f.good()) {
+            common::logger->error("Could not open fork successor file {}", filename);
+            std::exit(1);
+        }
+        fork_succ_.load(f);
+    };
+
+    load_anchor(anchor_, anchors_file);
+    load_fork_succ(fork_succ_, fork_succ_file);
+
+
+    auto fname = utils::make_suffix(outfbase, RowDiffRowSparseBRWTDiskAnnotator::kExtension);
+    std::ofstream outstream(fname, std::ios::binary);
+    if (!outstream.good()) {
+        throw std::ofstream::failure("Bad stream");
+    }
+    label_encoder.serialize(outstream);
+    outstream.write("v2.0", 4);
+    anchor_.serialize(outstream);
+    fork_succ_.serialize(outstream);
+    
+
+    auto progress_bar = std::make_unique<ProgressBar>(num_rows, "Analyze rows",
+                             std::cerr, !common::get_verbose());
+
+    uint64_t num_set_bits_row_sparse = 0;
+    uint64_t num_rows_row_sparse = 0;
+
+    sdsl::bit_vector rows_as_row_sparse(num_rows, false);
+
+    auto num_threads = get_num_threads();
+
+    uint64_t tot_set_bits{};
+
+    #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic)
+    for (uint64_t i = 0; i < num_rows; i += kNumRowsInBlock) {
+        uint64_t begin = i;
+        uint64_t end = std::min(i + kNumRowsInBlock, num_rows);
+
+        std::vector<uint64_t> n_set_bits_per_row(end - begin);
+
+        assert(begin <= end);
+        assert(end <= num_rows);
+
+        for (const auto& column : columns) {
+            column->call_ones_in_range(begin, end,
+                [&](uint64_t idx) { ++n_set_bits_per_row[idx - begin]; }
+            );   
+        }
+        uint64_t loc_tot_set_bits{};
+
+        for (size_t j = 0 ; j < n_set_bits_per_row.size() ; ++j) {
+            loc_tot_set_bits += n_set_bits_per_row[j];
+            if (n_set_bits_per_row[j] > row_sparse_threshold) // mkokot, critical should not be harmful here, because this condition in most cases is not met
+                #pragma omp critical
+                {
+                    ++num_rows_row_sparse;
+                    num_set_bits_row_sparse += n_set_bits_per_row[j];
+                    rows_as_row_sparse[begin + j] = true;
+                }
+        }
+        *progress_bar += end - begin;
+        #pragma omp critical
+        {
+            tot_set_bits += loc_tot_set_bits;
+        }
+    }
+
+    RowSparseBRWT_Disk::stored_as_row_sparse_bv_type stored_as_row_sparse = RowSparseBRWT_Disk::stored_as_row_sparse_bv_type(std::move(rows_as_row_sparse));
+
+    logger->trace("# rows stored in row sparse: {}", num_rows_row_sparse);
+    logger->trace("# rows stored in BRWT: {}", num_rows - num_rows_row_sparse);
+    
+    logger->trace("# row sparse set bits: {}", num_set_bits_row_sparse);
+    logger->trace("# BRWT set bits: {}", tot_set_bits - num_set_bits_row_sparse);
+
+    logger->trace("# row sparse density: {}", (double)num_set_bits_row_sparse / (num_rows_row_sparse * columns.size()));
+    logger->trace("# BRWT sparse density: {}", (double)(tot_set_bits - num_set_bits_row_sparse) / ((num_rows - num_rows_row_sparse) * columns.size()));
+    
+    auto fpos = outstream.tellp();
+    stored_as_row_sparse.serialize(outstream);
+    logger->trace("stored_as_row_sparse bv size: {}", outstream.tellp() - fpos);
+    fpos = outstream.tellp();
+    outstream.close();
+
+    progress_bar = std::make_unique<ProgressBar>(num_rows_row_sparse, "Serialize row sparse rows",
+                             std::cerr, !common::get_verbose());
+
+    RowSparseDisk::serialize(
+        [&](BinaryMatrix::RowCallback write_row) {
+            #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic)
+            for (uint64_t i = 0; i < num_rows; i += kNumRowsInBlock) {
+
+                uint64_t begin = i;
+                uint64_t end = std::min(i + kNumRowsInBlock, num_rows);
+
+                std::vector<BinaryMatrix::SetBitPositions> rows(end - begin);                
+
+                assert(begin <= end);
+                assert(end <= num_rows);
+
+                // mkokot, does it makes sence?
+                for (size_t j = 0 ; j < columns.size() ; ++j) {
+                    columns[j]->call_ones_in_range(begin, end,
+                        [&](uint64_t idx) { rows[idx - begin].push_back(j); }
+                    );
+                }
+
+                #pragma omp ordered
+                {
+                    for (const auto &row : rows) {
+                        if (row.size() > row_sparse_threshold) {
+                            write_row(row);
+                            ++(*progress_bar);
+                        }                                                
+                    }
+                }
+            }
+        }, fname, num_columns, num_set_bits_row_sparse, num_rows_row_sparse
+    );
+
+    // mkokot, TODO: get tmp dir from params
+    const std::string tmp_dir_path = ".row_diff_row_sparse_brwt_disk-tmp";
+    std::filesystem::create_directory(tmp_dir_path);
+    
+    progress_bar = std::make_unique<ProgressBar>(num_columns, "Compute brwt cols",
+                             std::cerr, !common::get_verbose());
+
+    
+    std::vector<std::string> brwt_fnames(num_columns);
+    for (uint64_t i = 0 ; i < label_encoder.get_labels().size() ; ++i) {
+        const auto& label = label_encoder.get_labels()[i];
+        auto lab_id = label_encoder.encode(label);
+
+        // mkokot, just checking if works as I expect, TODO: remove later
+        if (lab_id != i) {
+            std::cerr << "mkokot, error, need to fix this...\n";
+            exit(1);
+        }
+        
+        std::string fname = std::filesystem::path(tmp_dir_path) / (std::to_string(lab_id) + RowDiffColumnAnnotator::kExtension);
+        
+        brwt_fnames[lab_id] = fname;
+    }
+
+    #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic)        
+    for (uint64_t i = 0 ; i < label_encoder.get_labels().size() ; ++i) {
+        const auto& label = label_encoder.get_labels()[i];
+        
+        auto lab_id = label_encoder.encode(label);
+
+        const std::string& fname = brwt_fnames[lab_id];
+        
+        std::ofstream out(fname, std::ios::binary);
+        if (!out) {
+            logger->error("Could not open file for writing: {}",
+                        fname);
+            throw std::ofstream::failure("Bad stream");
+        }
+
+        LabelEncoder<> label_encoder;
+        
+        label_encoder.insert_and_encode(label);
+        
+        
+        sdsl::bit_vector new_column(num_rows - num_rows_row_sparse, false);
+        // mkokot, TODO: remove this comment latter
+        // as I use columns[i] I think it is not needed to collect brwt_fnames in a loop before
+        // and some simplifications can be made        
+        columns[i]->call_ones([&](uint64_t row_id) {
+            // if stored as brwt
+            if (stored_as_row_sparse[row_id] == false) {
+                auto id_in_brwt_col = stored_as_row_sparse.rank0(row_id) - 1;
+                new_column[id_in_brwt_col] = true;
+            }
+        });
+
+        bit_vector_small new_column_bv = bit_vector_small(std::move(new_column));
+
+        // mkokot, prevent thread from fighting of disk access      
+        #pragma omp critical     
+        {
+            label_encoder.serialize(out);
+            new_column_bv.serialize(out);
+        }
+
+        ++(*progress_bar);
+    }
+    // mkokot, TODO: at this point it should be legal to deallocate colums vector
+
+    auto row_diff_brwt_anno = create_row_diff_multi_brwt(brwt_fnames);
+
+    outstream.open(fname, std::ios::binary | std::ios::ate | std::ios::in);
+    logger->trace("stored as row sparse size: {}", outstream.tellp() - fpos);
+    fpos = outstream.tellp();
+    row_diff_brwt_anno->get_matrix().diffs().serialize(outstream);
+
+    logger->trace("stored as brwt size: {}", outstream.tellp() - fpos);
+    
+    logger->trace("Annotation converted in {} sec", timer.elapsed());
+}
+
 
 std::unique_ptr<MultiBRWTAnnotator>
 convert_to_BRWT(
@@ -1196,6 +1485,208 @@ void convert_to_row_sparse_disk(const ColumnCompressed<Label> &annotator,
             }
         }, fname, annotator.num_labels(), annotator.num_relations(), num_rows
     );
+}
+
+template
+void convert_to_row_sparse_brwt_disk(const ColumnCompressed<std::string>& annotator, 
+                                     const std::string& outfbase, 
+                                     uint64_t row_sparse_threshold,
+                                     const std::function<std::unique_ptr<MultiBRWTAnnotator>(const std::vector<std::string> &)>& create_multi_brwt);
+
+template<typename Label>
+void convert_to_row_sparse_brwt_disk(const ColumnCompressed<Label>& annotator, 
+                                     const std::string& outfbase, 
+                                     uint64_t row_sparse_threshold,
+                                     const std::function<std::unique_ptr<MultiBRWTAnnotator>(const std::vector<std::string> &)>& create_multi_brwt) {
+    uint64_t num_rows = annotator.num_objects();
+    logger->trace("row sprase threshold: {}", row_sparse_threshold); // mkokot, TODO: remove ?
+    
+    auto progress_bar = std::make_unique<ProgressBar>(num_rows, "Analyze rows",
+                             std::cerr, !common::get_verbose());
+    auto fname = utils::make_suffix(outfbase, RowSparseBRWTDiskAnnotator::kExtension);
+    std::ofstream outstream(fname, std::ios::binary);
+    if (!outstream.good()) {
+        throw std::ofstream::failure("Bad stream");
+    }
+    annotator.get_label_encoder().serialize(outstream);
+    
+    sdsl::bit_vector rows_as_row_sparse(num_rows, false);
+
+    uint64_t num_set_bits_row_sparse = 0;
+    uint64_t num_rows_row_sparse = 0;
+
+    auto num_threads = get_num_threads();
+
+    uint64_t tot_set_bits{};
+
+    #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic)
+    for (uint64_t i = 0; i < num_rows; i += kNumRowsInBlock) {
+
+        uint64_t begin = i;
+        uint64_t end = std::min(i + kNumRowsInBlock, num_rows);
+        
+        std::vector<uint64_t> n_set_bits_per_row(end - begin);
+
+        assert(begin <= end);
+        assert(end <= num_rows);
+
+        // TODO: use RowsFromColumnsTransformer
+        for (const auto &label : annotator.get_all_labels()) {            
+            annotator.get_column(label).call_ones_in_range(begin, end,
+                [&](uint64_t idx) { ++n_set_bits_per_row[idx - begin]; }
+            );
+        }
+
+        uint64_t loc_tot_set_bits{};
+
+        for (size_t j = 0 ; j < n_set_bits_per_row.size() ; ++j) {
+            loc_tot_set_bits += n_set_bits_per_row[j];
+            if (n_set_bits_per_row[j] > row_sparse_threshold) // mkokot, critical should not be harmful here, because this condition in most cases is not met
+                #pragma omp critical
+                {
+                    ++num_rows_row_sparse;
+                    num_set_bits_row_sparse += n_set_bits_per_row[j];
+                    rows_as_row_sparse[begin + j] = true;
+                }
+        }
+        *progress_bar += end - begin;
+        #pragma omp critical
+        {
+            tot_set_bits += loc_tot_set_bits;
+        }
+    }
+
+    RowSparseBRWT_Disk::stored_as_row_sparse_bv_type stored_as_row_sparse = RowSparseBRWT_Disk::stored_as_row_sparse_bv_type(std::move(rows_as_row_sparse));
+
+    logger->trace("# rows stored in row sparse: {}", num_rows_row_sparse);
+    logger->trace("# rows stored in BRWT: {}", num_rows - num_rows_row_sparse);
+    
+    logger->trace("# row sparse set bits: {}", num_set_bits_row_sparse);
+    logger->trace("# BRWT set bits: {}", tot_set_bits - num_set_bits_row_sparse);
+
+    logger->trace("# row sparse density: {}", (double)num_set_bits_row_sparse / (num_rows_row_sparse * annotator.num_labels()));
+    logger->trace("# BRWT sparse density: {}", (double)(tot_set_bits - num_set_bits_row_sparse) / ((num_rows - num_rows_row_sparse) * annotator.num_labels()));
+    
+    auto fpos = outstream.tellp();
+    stored_as_row_sparse.serialize(outstream);    
+    fpos = outstream.tellp();
+    logger->trace("stored_as_row_sparse bv size: {}", outstream.tellp() - fpos);
+
+    progress_bar = std::make_unique<ProgressBar>(num_rows_row_sparse, "Serialize row sparse rows",
+                             std::cerr, !common::get_verbose());
+    outstream.close();
+
+    // mkokot, TODO: this probably may be merged with the previous utils::RowsFromColumnsTransformer call
+    // although for RowSparseDisk::serialize I need to have num_set_bits_row_sparse computed, it needs to be considered
+    RowSparseDisk::serialize(
+        [&](BinaryMatrix::RowCallback write_row) {
+
+            #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic)
+            for (uint64_t i = 0; i < num_rows; i += kNumRowsInBlock) {
+
+                uint64_t begin = i;
+                uint64_t end = std::min(i + kNumRowsInBlock, num_rows);
+
+                std::vector<BinaryMatrix::SetBitPositions> rows(end - begin);                
+
+                assert(begin <= end);
+                assert(end <= num_rows);
+
+                // TODO: use RowsFromColumnsTransformer
+                for (const auto &label : annotator.get_all_labels()) {
+                    size_t j = annotator.get_label_encoder().encode(label);
+                    annotator.get_column(label).call_ones_in_range(begin, end,
+                        [&](uint64_t idx) { rows[idx - begin].push_back(j); }
+                    );
+                }
+
+                #pragma omp ordered
+                {
+                    for (const auto &row : rows) {
+                        if (row.size() > row_sparse_threshold) {
+                            write_row(row);
+                            ++(*progress_bar);
+                        }                                                
+                    }
+                }
+            }
+        }, fname, annotator.num_labels(), num_set_bits_row_sparse, num_rows_row_sparse
+    );
+
+    // mkokot, OK for now I will do this in a very simple way, I will load all columns and remove rows that are to be represented as row_sparse_disk and store to the files
+    // I will call call_ones per each column and create a new column    
+    
+    // mkokot, TODO: get tmp dir from params
+    const std::string tmp_dir_path = ".row_sparse_brwt_disk-tmp";
+    std::filesystem::create_directory(tmp_dir_path);
+
+    progress_bar = std::make_unique<ProgressBar>(annotator.num_labels(), "Compute brwt cols",
+                             std::cerr, !common::get_verbose());
+    
+    
+    const auto& all_labels = annotator.get_all_labels();
+
+    std::vector<std::string> brwt_fnames(all_labels.size());
+    for (uint64_t i = 0 ; i < all_labels.size() ; ++i) {
+        const auto& label = all_labels[i];
+        auto lab_id = annotator.get_label_encoder().encode(label);
+        
+        std::string fname = std::filesystem::path(tmp_dir_path) / (std::to_string(lab_id) + ColumnCompressed<>::kExtension);
+        
+        brwt_fnames[lab_id] = fname;
+    }
+
+    #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic)        
+    for (uint64_t i = 0 ; i < all_labels.size() ; ++i) {
+        const auto& label = all_labels[i];
+        
+        auto lab_id = annotator.get_label_encoder().encode(label);
+
+        const std::string& fname = brwt_fnames[lab_id];
+        
+        std::ofstream out(fname, std::ios::binary);
+        if (!out) {
+            logger->error("Could not open file for writing: {}",
+                        fname);
+            throw std::ofstream::failure("Bad stream");
+        }
+
+        LabelEncoder<> label_encoder;
+        
+        label_encoder.insert_and_encode(label);
+        
+        
+        sdsl::bit_vector new_column(num_rows - num_rows_row_sparse, false);
+        annotator.get_column(label).call_ones([&](uint64_t row_id) {
+            // if stored as brwt
+            if (stored_as_row_sparse[row_id] == false) {
+                auto id_in_brwt_col = stored_as_row_sparse.rank0(row_id) - 1;
+                new_column[id_in_brwt_col] = true;
+            }
+        });
+
+        bit_vector_small new_column_bv = bit_vector_small(std::move(new_column));
+
+        // mkokot, prevent thread from fighting of disk access      
+        #pragma omp critical     
+        {
+            serialize_number(out, num_rows - num_rows_row_sparse);
+            label_encoder.serialize(out);
+            new_column_bv.serialize(out);
+        }
+
+        ++(*progress_bar);
+    }
+
+    auto brw_anno = create_multi_brwt(brwt_fnames);
+
+    // mkokot, TODO: remove tmp dir and files here
+
+    outstream.open(fname, std::ios::binary | std::ios::ate | std::ios::in);
+    logger->trace("stored as row sparse size: {}", outstream.tellp() - fpos);
+    fpos = outstream.tellp();
+    brw_anno->get_matrix().serialize(outstream);
+    logger->trace("stored as brwt size: {}", outstream.tellp() - fpos);
 }
 
 

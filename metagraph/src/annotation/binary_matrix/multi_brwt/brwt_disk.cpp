@@ -94,6 +94,10 @@ Vector<std::pair<BRWT_Disk::Column, uint64_t>> BRWT_Disk::get_column_ranks(Row i
 
 std::vector<BRWT_Disk::SetBitPositions>
 BRWT_Disk::get_rows(const std::vector<Row> &row_ids) const {
+    if (get_num_threads() > 1) { // mkokot, TODO: remove when multithreading support added
+        logger->error("Currentlt brwt_disk may be used only with one thread");
+        exit(1);
+    }
     disk_manager->notify_get_rows_called(); // mkokot, TODO: for debuging, remove
     std::vector<SetBitPositions> rows(row_ids.size());
 
@@ -328,7 +332,7 @@ std::vector<BRWT_Disk::Row> BRWT_Disk::get_column(Column column) const {
 
 
 bool BRWT_Disk::load_impl(std::istream &in, NodeDepth depth)
-{
+{    
     if (!in.good())
         return false;
 
@@ -364,10 +368,10 @@ bool BRWT_Disk::load_impl(std::istream &in, NodeDepth depth)
     }
 }
 
-bool BRWT_Disk::load(std::istream &in) {    
+bool BRWT_Disk::load(std::istream &in) {
     
     auto ptr = dynamic_cast<IfstreamWithNameAndOffset*>(&in);
-    if (!ptr) {                
+    if (!ptr) {        
         logger->error("BRWT_Disk::load requires IfstreamWithNameAndOffset object");
         return false;
     }   
@@ -375,7 +379,7 @@ bool BRWT_Disk::load(std::istream &in) {
     //auto brwt_max_anno_mem = mtg::cli::GlobalConfigAccess::Inst().Get()->brwt_max_anno_mem;
     assert(brwt_max_anno_mem);
     std::cerr << "Maximum memory for brwt is " << brwt_max_anno_mem << "\n";
-    disk_manager = std::make_shared<BRWT_DiskManager>(brwt_max_anno_mem, ptr->GetFName()); // mkokot TODO: consider how to set the allowed memory
+    disk_manager = std::make_shared<BRWT_DiskManager>(brwt_max_anno_mem, ptr->GetFName());
 
     auto time_start = std::chrono::high_resolution_clock::now(); // mkokot, TODO: remove
     if (!load_impl(in, 0))

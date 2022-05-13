@@ -415,6 +415,8 @@ Config::Config(int argc, char *argv[]) {
         //     row_cache_size = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--brwt-max-anno-mem")) {
             brwt_max_anno_mem = parse_brwt_max_anno_mem(get_value(i++));
+        } else if (!strcmp(argv[i], "--row-sparse-threshold")) {
+            row_sparse_threshold = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) {
             print_welcome_message();
             print_usage(argv[0], identity);
@@ -639,7 +641,8 @@ Config::Config(int argc, char *argv[]) {
                                     || anno_type == RowDiffRowSparse
                                     || anno_type == RowDiffRowSparseDisk
                                     || anno_type == RowDiffBRWTCoord
-                                    || anno_type == RowDiffCoord;
+                                    || anno_type == RowDiffCoord
+                                    || anno_type == RowDiffRowSparseBRWTDisk;
         if (to_row_diff && !infbase.size()) {
             std::cerr << "Path to graph must be passed with '-i <GRAPH>'" << std::endl;
             print_usage_and_exit = true;
@@ -741,6 +744,8 @@ std::string Config::annotype_to_string(AnnotationType state) {
             return "brwt";
         case BRWT_Disk:
             return "brwt_disk";
+        case RowSparseBRWTDisk:
+            return "row_sparse_brwt_disk";
         case BinRelWT_sdsl:
             return "bin_rel_wt_sdsl";
         case BinRelWT:
@@ -757,6 +762,8 @@ std::string Config::annotype_to_string(AnnotationType state) {
             return "row_diff_brwt";
         case RowDiffBRWTDisk:
             return "row_diff_brwt_disk";
+        case RowDiffRowSparseBRWTDisk:
+            return "row_diff_row_sparse_brwt_disk";
         case RowDiffRowSparse:
             return "row_diff_sparse";
         case RowDiffRowSparseDisk:
@@ -806,6 +813,10 @@ Config::AnnotationType Config::string_to_annotype(const std::string &string) {
         return AnnotationType::RowDiffRowSparse;
     } else if (string == "row_diff_sparse_disk") {
         return AnnotationType::RowDiffRowSparseDisk;
+    } else if (string == "row_sparse_brwt_disk") {
+        return AnnotationType::RowSparseBRWTDisk;        
+    } else if (string == "row_diff_row_sparse_brwt_disk") {
+        return AnnotationType::RowDiffRowSparseBRWTDisk;
     } else if (string == "row_sparse") {
         return AnnotationType::RowSparse;
     } else if (string == "row_sparse_disk") {

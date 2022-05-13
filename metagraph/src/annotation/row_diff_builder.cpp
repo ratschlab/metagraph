@@ -702,7 +702,7 @@ void convert_batch_to_row_diff_coord(const std::string &pred_succ_fprefix,
                                      uint64_t buf_size_bytes,
                                      bool compute_row_reduction,
                                      size_t num_coords_per_seq);
-
+// mkokot, find inspiration in here
 void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                                const std::vector<std::string> &source_files,
                                const fs::path &col_out_dir,

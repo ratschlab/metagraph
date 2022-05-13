@@ -92,6 +92,7 @@ class Config {
     unsigned int arity_brwt = 2;
     unsigned int relax_arity_brwt = 10;
     unsigned long long brwt_max_anno_mem = 1ull << 33;
+    unsigned long long row_sparse_threshold = 50;
     unsigned int min_tip_size = 1;
     unsigned int min_unitig_median_kmer_abundance = 1;
     int fallback_abundance_cutoff = 1;
@@ -200,6 +201,7 @@ class Config {
     enum AnnotationType {
         ColumnCompressed = 1,
         RowCompressed,
+        RowSparseBRWTDisk,
         BRWT,
         BRWT_Disk,
         BinRelWT_sdsl,
@@ -209,6 +211,7 @@ class Config {
         RowDiffBRWTDisk,
         RowDiffRowSparse,
         RowDiffRowSparseDisk,
+        RowDiffRowSparseBRWTDisk,
         RowFlat,
         RowSparse,
         RowSparseDisk,

@@ -144,7 +144,7 @@ bool merge_load_row_diff(const std::vector<std::string> &filenames,
         }
 
         LabelEncoder<std::string> label_encoder;
-        if (!label_encoder.load(instream)) {
+        if (!label_encoder.load(instream)) {            
             common::logger->error("Can't load label encoder from {}", filenames[i]);
             error_occurred = true;
         }
@@ -197,6 +197,8 @@ template class StaticBinRelAnnotator<binmat::BRWT, std::string>;
 
 template class StaticBinRelAnnotator<binmat::BRWT_Disk, std::string>; // mkokot
 
+template class StaticBinRelAnnotator<binmat::RowSparseBRWT_Disk, std::string>; // mkokot
+
 template class StaticBinRelAnnotator<binmat::BinRelWT_sdsl, std::string>;
 
 template class StaticBinRelAnnotator<binmat::BinRelWT, std::string>;
@@ -210,6 +212,8 @@ template class StaticBinRelAnnotator<binmat::RowDiff<binmat::ColumnMajor>, std::
 template class StaticBinRelAnnotator<binmat::RowDiff<binmat::BRWT>, std::string>;
 
 template class StaticBinRelAnnotator<binmat::RowDiff<binmat::BRWT_Disk>, std::string>;
+
+template class StaticBinRelAnnotator<binmat::RowDiff<binmat::RowSparseBRWT_Disk>, std::string>;
 
 template class StaticBinRelAnnotator<binmat::RowSparse, std::string>;
 

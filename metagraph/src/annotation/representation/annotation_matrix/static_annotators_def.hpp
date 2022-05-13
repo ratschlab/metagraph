@@ -9,6 +9,7 @@
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
 #include "annotation/binary_matrix/multi_brwt/brwt.hpp"
 #include "annotation/binary_matrix/multi_brwt/brwt_disk.hpp"
+#include "annotation/binary_matrix/multi_brwt/row_sparse_brwt_disk.hpp"
 #include "annotation/binary_matrix/rainbowfish/rainbowfish.hpp"
 #include "annotation/binary_matrix/rainbowfish/rainbow.hpp"
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
@@ -28,6 +29,8 @@ namespace annot {
 typedef StaticBinRelAnnotator<binmat::RowConcatenated<>, std::string> RowFlatAnnotator;
 
 typedef StaticBinRelAnnotator<binmat::RowSparse, std::string> RowSparseAnnotator;
+
+typedef StaticBinRelAnnotator<binmat::RowSparseBRWT_Disk, std::string> RowSparseBRWTDiskAnnotator;
 
 typedef StaticBinRelAnnotator<binmat::RowSparseDisk, std::string> RowSparseDiskAnnotator;
 
@@ -50,6 +53,8 @@ typedef StaticBinRelAnnotator<binmat::RowDiff<binmat::ColumnMajor>, std::string>
 typedef StaticBinRelAnnotator<binmat::RowDiff<binmat::BRWT>, std::string> RowDiffBRWTAnnotator;
 
 typedef StaticBinRelAnnotator<binmat::RowDiff<binmat::BRWT_Disk>, std::string> RowDiffBRWTDiskAnnotator;
+
+typedef StaticBinRelAnnotator<binmat::RowDiff<binmat::RowSparseBRWT_Disk>, std::string> RowDiffRowSparseBRWTDiskAnnotator;
 
 typedef StaticBinRelAnnotator<binmat::RowDiff<binmat::RowSparse>, std::string> RowDiffRowSparseAnnotator;
 
@@ -98,6 +103,10 @@ template <>
 inline const std::string RowDiffBRWTAnnotator::kExtension = ".row_diff_brwt.annodbg";
 template <>
 inline const std::string RowDiffBRWTDiskAnnotator::kExtension = ".row_diff_brwt_disk.annodbg";
+template <>
+inline const std::string RowSparseBRWTDiskAnnotator::kExtension = ".row_sparse_brwt_disk.annodbg";
+template <>
+inline const std::string RowDiffRowSparseBRWTDiskAnnotator::kExtension = ".row_diff_row_sparse_brwt_disk.annodbg";
 template <>
 inline const std::string RowDiffRowSparseAnnotator::kExtension = ".row_diff_sparse.annodbg";
 template <>

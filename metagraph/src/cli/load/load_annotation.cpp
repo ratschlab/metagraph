@@ -51,6 +51,9 @@ Config::AnnotationType parse_annotation_type(const std::string &filename) {
     } else if (utils::ends_with(filename, annot::RowDiffBRWTDiskAnnotator::kExtension)) {
         return Config::AnnotationType::RowDiffBRWTDisk;
 
+    } else if (utils::ends_with(filename, annot::RowDiffBRWTDiskAnnotator::kExtension)) {
+        return Config::AnnotationType::RowDiffBRWTDisk;
+
     } else if (utils::ends_with(filename, annot::BinRelWT_sdslAnnotator::kExtension)) {
         return Config::AnnotationType::BinRelWT_sdsl;
 
@@ -65,12 +68,18 @@ Config::AnnotationType parse_annotation_type(const std::string &filename) {
 
     } else if (utils::ends_with(filename, annot::RowSparseDiskAnnotator::kExtension)) {
         return Config::AnnotationType::RowSparseDisk;
+    
+    } else if (utils::ends_with(filename, annot::RowSparseBRWTDiskAnnotator::kExtension)) {
+        return Config::AnnotationType::RowSparseBRWTDisk;
 
     } else if (utils::ends_with(filename, annot::RowDiffRowSparseAnnotator ::kExtension)) {
         return Config::AnnotationType::RowDiffRowSparse;
 
     } else if (utils::ends_with(filename, annot::RowDiffRowSparseDiskAnnotator::kExtension)) {
         return Config::AnnotationType::RowDiffRowSparseDisk;
+
+    } else if (utils::ends_with(filename, annot::RowDiffRowSparseBRWTDiskAnnotator::kExtension)) {
+        return Config::AnnotationType::RowDiffRowSparseBRWTDisk;
 
     } else if (utils::ends_with(filename, annot::RainbowfishAnnotator::kExtension)) {
         return Config::AnnotationType::RBFish;
@@ -140,6 +149,12 @@ initialize_annotation(Config::AnnotationType anno_type,
             annotation.reset(x);
             break;
         }
+        case Config::RowSparseBRWTDisk: {
+            auto x = new annot::RowSparseBRWTDiskAnnotator();
+            const_cast<mtg::annot::binmat::RowSparseBRWT_Disk&>(x->get_matrix()).set_brwt_max_anno_mem(brwt_max_anno_mem);
+            annotation.reset(x);
+            break;
+        }
         case Config::RowDiffBRWT: {
             annotation.reset(new annot::RowDiffBRWTAnnotator());
             break;
@@ -150,6 +165,12 @@ initialize_annotation(Config::AnnotationType anno_type,
             annotation.reset(x);
             break;
         }
+        case Config::RowDiffRowSparseBRWTDisk: {            
+            auto x = new annot::RowDiffRowSparseBRWTDiskAnnotator();
+            const_cast<mtg::annot::binmat::RowSparseBRWT_Disk&>(x->get_matrix().diffs()).set_brwt_max_anno_mem(brwt_max_anno_mem);
+            annotation.reset(x);
+            break;
+        }        
         case Config::RowDiffRowSparse: {
             annotation.reset(new annot::RowDiffRowSparseAnnotator());
             break;

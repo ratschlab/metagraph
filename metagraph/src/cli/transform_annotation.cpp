@@ -2,6 +2,8 @@
 
 #include <progress_bar.hpp>
 
+#include <functional>
+
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
 #include "common/threads/threading.hpp"
@@ -847,6 +849,10 @@ int transform_annotation(Config *config) {
                 logger->error("Convert to row_diff first, and then to row_diff_brwt_disk");
                 return 0;
             }
+            case Config::RowDiffRowSparseBRWTDisk: {
+                logger->error("Convert to row_diff first, and then to row_diff_row_sparse_brwt_disk");
+                return 0;
+            }
             case Config::RowDiffRowSparse: {
                 logger->error("Convert to row_diff first, and then to row_diff_sparse");
                 return 0;
@@ -893,6 +899,13 @@ int transform_annotation(Config *config) {
                               "to use disk version for quierying just rename *.brwt.annodbg to *.brwt_disk.annodbg");
                 exit(1);
             }
+            case Config::RowSparseBRWTDisk: { 
+                std::function<std::unique_ptr<MultiBRWTAnnotator>(const std::vector<std::string> &)> create_multi_brwt = [&](const std::vector<std::string> & fnames) {
+                    return convert_to_MultiBRWT(fnames, *config);
+                };
+                convert_to_row_sparse_brwt_disk(*annotator, config->outfbase, config->row_sparse_threshold, create_multi_brwt);
+                break;
+            }
             case Config::BRWT: {
                 auto brwt_annotator = convert_to_MultiBRWT(files, *config);
                 logger->trace("Annotation converted in {} sec", timer.elapsed());
@@ -919,7 +932,7 @@ int transform_annotation(Config *config) {
                 convert<RowFlatAnnotator>(std::move(annotator), *config, timer);
                 break;
             }
-            case Config::RowSparse: {
+            case Config::RowSparse: { 
                 convert<RowSparseAnnotator>(std::move(annotator), *config, timer);
                 break;
             }
@@ -974,9 +987,10 @@ int transform_annotation(Config *config) {
                 && config->anno_type != Config::RowDiffBRWTDisk
                 && config->anno_type != Config::ColumnCompressed
                 && config->anno_type != Config::RowDiffRowSparse
-                && config->anno_type != Config::RowDiffRowSparseDisk) {
+                && config->anno_type != Config::RowDiffRowSparseDisk
+                && config->anno_type != Config::RowDiffRowSparseBRWTDisk) {
             logger->error(
-                    "Only conversion to 'column', 'row_diff_sparse', 'row_diff_sparse_disk' and 'row_diff_brwt' "
+                    "Only conversion to 'column', 'row_diff_sparse', 'row_diff_sparse_disk', 'row_diff_brwt' and 'row_diff_row_sparse_brwt_disk' "
                     "supported for row_diff");
             exit(1);
         }
@@ -1032,6 +1046,34 @@ int transform_annotation(Config *config) {
                 logger->trace("Loading annotation from disk...");
                 convert_row_diff_to_RowDiffSparseDisk(files, config->outfbase, timer, anchors_file, fork_succ_file);
 
+            } else if (config->anno_type == Config::RowDiffRowSparseBRWTDisk) {
+                logger->trace("Loading annotation from disk...");
+
+                // mkokot, TODO: this is a code duplication, check out 
+                //if (config->anno_type == Config::RowDiffBRWT) 
+                std::function<std::unique_ptr<RowDiffBRWTAnnotator>(const std::vector<std::string> &)> create_row_diff_multi_brwt = [&](const std::vector<std::string> & fnames){
+                    if (!config->linkage_file.size()) {
+                        logger->trace("Generating new column linkage...");
+                        binmat::LinkageMatrix linkage_matrix
+                                = compute_linkage(fnames, input_anno_type, *config);
+                        config->linkage_file = config->outfbase + ".linkage";
+                        std::ofstream out(config->linkage_file);
+                        out << linkage_matrix.format(CSVFormat) << std::endl;
+                        logger->trace("Generated new linkage and saved to {}",
+                                    config->linkage_file);
+                    }
+                    std::vector<std::vector<uint64_t>> linkage
+                            = parse_linkage_matrix(config->linkage_file);
+                    logger->trace("Linkage loaded from {}", config->linkage_file);
+
+                    auto brwt_annotator = convert_to_BRWT<RowDiffBRWTAnnotator>(
+                            fnames, linkage, config->parallel_nodes,
+                            get_num_threads(), config->tmp_dir);
+
+                    return brwt_annotator;
+                };
+
+                convert_row_diff_to_RowDiffRowSparseBRWTDisk(files, config->outfbase, config->row_sparse_threshold, timer, anchors_file, fork_succ_file, create_row_diff_multi_brwt);
             } else { // RowDiff<RowSparse>
                 logger->trace("Loading annotation from disk...");
                 std::unique_ptr<RowDiffRowSparseAnnotator> row_sparse
