@@ -620,10 +620,14 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
     size_t node_overlap = graph.get_k() - 1;
 
     std::vector<score_t> best_score;
+    std::vector<Alignment::Columns> columns;
     best_score.reserve(alignments.size());
+    columns.reserve(alignments.size());
     for (size_t i = 0; i < alignments.size(); ++i) {
         best_score.emplace_back(alignments[i].get_score());
+        columns.emplace_back(alignments[i].label_columns);
     }
+    const auto *labeled_aligner = dynamic_cast<const ILabeledAligner*>(&aligner);
 
     for (size_t i = 0; i < alignments.size() - 1; ++i) {
         // const Alignment &a = alignments[i];
@@ -663,26 +667,29 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
 
                 if (a.has_annotation() && b.has_annotation()
                         && best_score[i] + added_score + extra_score + b.get_score() > best_score[j]) {
-                    const auto &prev_cols = a.get_columns(a.get_nodes().size() - 1);
+                    // const auto &prev_cols = a.get_columns(a.get_nodes().size() - 1);
+                    const auto &prev_cols = labeled_aligner->get_annotation_buffer().get_cached_column_set(columns[i]);
                     const auto &cur_cols = b.get_columns(0);
                     Vector<Alignment::Column> diff;
                     std::set_difference(cur_cols.begin(), cur_cols.end(),
                                         prev_cols.begin(), prev_cols.end(),
                                         std::back_inserter(diff));
 
-                    std::string seq;
-                    if (a.get_sequence().size() >= graph.get_k()) {
-                        seq = a.get_sequence().substr(a.get_sequence().size() - graph.get_k());
-                    } else {
-                        seq = graph.get_node_sequence(a.get_nodes().back());
+                    if (diff.size()) {
+                        std::string seq;
+                        if (a.get_sequence().size() >= graph.get_k()) {
+                            seq = a.get_sequence().substr(a.get_sequence().size() - graph.get_k());
+                        } else {
+                            seq = graph.get_node_sequence(a.get_nodes().back());
+                        }
+                        extra_score = get_label_change_score(
+                            a.get_nodes().back(),
+                            seq,
+                            b.get_sequence()[0],
+                            prev_cols,
+                            diff
+                        );
                     }
-                    extra_score = get_label_change_score(
-                        a.get_nodes().back(),
-                        seq,
-                        b.get_sequence()[0],
-                        prev_cols,
-                        diff
-                    );
                 }
             } else {
                 size_t overlap = -query_overlap;
@@ -715,26 +722,29 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
 
                         score_t label_change_score = 0;
                         if (prev.has_annotation() && aln.has_annotation() && cur_score > added_score + extra_score) {
-                            const auto &prev_cols = prev.get_columns(prev.get_nodes().size() - 1);
+                            // const auto &prev_cols = prev.get_columns(prev.get_nodes().size() - 1);
+                            const auto &prev_cols = labeled_aligner->get_annotation_buffer().get_cached_column_set(columns[i]);
                             const auto &cur_cols = aln.get_columns(0);
                             Vector<Alignment::Column> diff;
                             std::set_difference(cur_cols.begin(), cur_cols.end(),
                                                 prev_cols.begin(), prev_cols.end(),
                                                 std::back_inserter(diff));
 
-                            std::string seq;
-                            if (prev.get_sequence().size() >= graph.get_k()) {
-                                seq = prev.get_sequence().substr(prev.get_sequence().size() - graph.get_k());
-                            } else {
-                                seq = graph.get_node_sequence(prev.get_nodes().back());
+                            if (diff.size()) {
+                                std::string seq;
+                                if (prev.get_sequence().size() >= graph.get_k()) {
+                                    seq = prev.get_sequence().substr(prev.get_sequence().size() - graph.get_k());
+                                } else {
+                                    seq = graph.get_node_sequence(prev.get_nodes().back());
+                                }
+                                label_change_score = get_label_change_score(
+                                    prev.get_nodes().back(),
+                                    seq,
+                                    aln.get_sequence()[0],
+                                    prev_cols,
+                                    diff
+                                );
                             }
-                            label_change_score = get_label_change_score(
-                                prev.get_nodes().back(),
-                                seq,
-                                aln.get_sequence()[0],
-                                prev_cols,
-                                diff
-                            );
                         }
 
                         // std::cerr << "check\t" << best_score[i] + cur_score + b.get_score() << ","
@@ -772,6 +782,16 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
                 cur_trim[j] = num_trim_b;
                 num_to_insert[j] = num_insert;
                 extra_scores[j] = extra_score;
+
+                if (config.label_change_union && columns[i] != columns[j]) {
+                    const auto &prev_cols = labeled_aligner->get_annotation_buffer().get_cached_column_set(columns[i]);
+                    const auto &cur_cols = labeled_aligner->get_annotation_buffer().get_cached_column_set(columns[j]);
+                    Vector<Alignment::Column> merge;
+                    std::set_union(prev_cols.begin(), prev_cols.end(),
+                                   cur_cols.begin(), cur_cols.end(),
+                                   std::back_inserter(merge));
+                    columns[j] = labeled_aligner->get_annotation_buffer().cache_column_set(std::move(merge));
+                }
             }
         }
     }

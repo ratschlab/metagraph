@@ -65,6 +65,11 @@ class AnnotationBuffer {
         return column_sets_.data()[i];
     }
 
+    inline const Columns& get_column_set_begin() const {
+        assert(column_sets_.size());
+        return column_sets_.data()[0];
+    }
+
   private:
     const DeBruijnGraph &graph_;
     const Annotator &annotator_;

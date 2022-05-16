@@ -3,6 +3,9 @@
 #include "graph/representation/rc_dbg.hpp"
 #include "common/algorithms.hpp"
 #include "common/unix_tools.hpp"
+#include "graph/graph_extensions/hll_wrapper.hpp"
+#include "graph/representation/canonical_dbg.hpp"
+#include "graph/representation/succinct/dbg_succinct.hpp"
 
 
 namespace mtg {
@@ -256,15 +259,54 @@ void LabeledExtender
             assert(next_labels);
 
             Columns intersect_labels;
-            std::set_intersection(columns.begin(), columns.end(),
-                                  next_labels->begin(), next_labels->end(),
-                                  std::back_inserter(intersect_labels));
+            Columns diff_labels;
+            utils::set_intersection_difference(next_labels->begin(), next_labels->end(),
+                                               columns.begin(), columns.end(),
+                                               std::back_inserter(intersect_labels),
+                                               std::back_inserter(diff_labels));
+            // std::set_intersection(columns.begin(), columns.end(),
+            //                       next_labels->begin(), next_labels->end(),
+            //                       std::back_inserter(intersect_labels));
 
             if (intersect_labels.size()) {
                 node_labels_.push_back(annotation_buffer_.cache_column_set(
                                                 std::move(intersect_labels)));
                 node_labels_switched_.emplace_back(false);
                 callback(next, c, score);
+            } else if (diff_labels.size()) {
+                const auto *canonical = dynamic_cast<const CanonicalDBG*>(graph_);
+                const DeBruijnGraph *base_graph = canonical
+                    ? &canonical->get_graph() : graph_;
+                const DBGSuccinct *dbg_succ = dynamic_cast<const DBGSuccinct*>(base_graph);
+                const HLLWrapper<> *hll_wrapper = dbg_succ ? dbg_succ->get_extension_threadsafe<HLLWrapper<>>() : nullptr;
+                if (!hll_wrapper || config_.label_change_score != config_.ninf) {
+                    const auto &csbegin = annotation_buffer_.get_column_set_begin();
+                    node_labels_.push_back(&*next_labels - &csbegin);
+                    node_labels_switched_.emplace_back(true);
+                    callback(next, c, score + config_.label_change_score);
+                } else if (!config_.label_change_edit_distance) {
+                    const auto &hll = hll_wrapper->data();
+                    for (auto d : diff_labels) {
+                        score_t best_score = config_.ninf;
+                        for (auto cc : columns) {
+                            auto [union_est, inter_est]
+                                = hll.estimate_column_union_intersection_cardinality({ cc }, { d });
+                            assert(union_est > 0.0);
+                            if (inter_est > 0.0) {
+                                best_score = std::max(best_score,
+                                    score_t(log2(inter_est) - log2(union_est)) * config_.score_matrix[c][c]
+                                );
+                            }
+                        }
+                        if (best_score > config_.ninf) {
+                            node_labels_.push_back(annotation_buffer_.cache_column_set(Vector<Column>{ d }));
+                            node_labels_switched_.emplace_back(true);
+                            callback(next, c, score + best_score);
+                        }
+                    }
+                } else {
+                    throw std::runtime_error("not implemented yet");
+                }
             }
         }
 
