@@ -498,9 +498,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
         size_t query_coverage = 0;
 
         for (auto&& alignment : chain_alignments<AlignmentCompare>(*this,
-                                                                   aggregator.get_alignments(),
-                                                                   paths[i].get_query(false),
-                                                                   paths[i].get_query(true))) {
+                                                                   aggregator.get_alignments())) {
             assert(alignment.is_valid(graph_, &config_));
             if (alignment.get_score() > best_score) {
                 best_score = alignment.get_score();

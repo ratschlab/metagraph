@@ -34,9 +34,7 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
 // longer alignments, potentially with gaps.
 template <class AlignmentCompare>
 std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
-                                        std::vector<Alignment>&& alignments,
-                                        std::string_view query,
-                                        std::string_view rc_query);
+                                        std::vector<Alignment>&& alignments);
 
 } // namespace align
 } // namespace graph

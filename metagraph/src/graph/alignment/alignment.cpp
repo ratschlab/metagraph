@@ -191,8 +191,7 @@ bool Alignment::splice(Alignment&& other) {
 }
 
 bool Alignment::append(Alignment&& other,
-                       const LabelChangeScorer &get_label_change_score,
-                       bool label_change_union) {
+                       const std::function<score_t()> &get_label_change_score) {
     assert(query_view_.data() + query_view_.size() + other.get_clipping()
             == other.query_view_.data());
     assert(orientation_ == other.orientation_);
@@ -210,7 +209,6 @@ bool Alignment::append(Alignment&& other,
 
     if (label_coordinates.size()) {
         assert(label_column_diffs.empty() && other.label_column_diffs.empty()
-                && !label_change_union
                 && "label change not supported with coordinates");
         const auto &columns = get_columns(0);
         const auto &other_columns = other.get_columns(0);
@@ -256,38 +254,13 @@ bool Alignment::append(Alignment&& other,
         std::swap(label_coordinates, merged_label_coordinates);
 
     } else if (has_annotation()) {
-        std::shared_ptr<const Vector<Column>> ref_labels;
-        Vector<Column> diff;
-        if (label_columns != other.label_columns) {
-            const Vector<Column> &other_columns = other.get_columns(0);
-            if (label_change_union) {
-                ref_labels = std::make_shared<Vector<Column>>(get_column_union());
-            } else {
-                ref_labels = std::shared_ptr<const Vector<Column>>(
-                    std::shared_ptr<const Vector<Column>>{},
-                    &get_columns(nodes_.size() - 1)
-                );
-            }
-            std::set_difference(other_columns.begin(), other_columns.end(),
-                                ref_labels->begin(), ref_labels->end(),
-                                std::back_inserter(diff));
-            ret_val = diff.size();
-        }
-
         if (other.label_column_diffs.empty()) {
             other.label_column_diffs.resize(other.nodes_.size(), other.label_columns);
         } else {
             other.label_column_diffs.insert(other.label_column_diffs.begin(), other.label_columns);
         }
 
-        size_t k = sequence_.size() + offset_ + 1 - nodes_.size();
-        score_t label_change_score = ret_val
-            ? get_label_change_score(nodes_.back(),
-                                     get_sequence().substr(sequence_.size() - std::min(k, sequence_.size())),
-                                     other.sequence_[0] == boss::BOSS::kSentinel
-                                        ? other.sequence_[1] : other.sequence_[0],
-                                     *ref_labels,
-                                     diff) : 0;
+        score_t label_change_score = get_label_change_score();
         if (label_change_score == ninf) {
             *this = Alignment();
             return true;
@@ -1458,6 +1431,7 @@ void Alignment::insert_gap_prefix(ssize_t gap_length,
             // if there are suffix-mapped nodes, only keep the ones that are
             // part of the overlap
             assert(static_cast<ssize_t>(offset_) >= -gap_length);
+            assert(nodes_.size() > offset_ + gap_length);
             nodes_.erase(nodes_.begin(), nodes_.begin() + offset_ + gap_length);
             if (offset_ + gap_length) {
                 if (extra_scores.size()) {
@@ -1501,6 +1475,10 @@ void Alignment::insert_gap_prefix(ssize_t gap_length,
         //           $ACG - added
         //            ACGT
 
+        trim_offset();
+        if (offset_) {
+            assert(false && "not implemented");
+        }
         assert(get_clipping() >= gap_length);
         trim_clipping();
 
@@ -1508,13 +1486,16 @@ void Alignment::insert_gap_prefix(ssize_t gap_length,
         cigar_.data().insert(cigar_.data().begin(), Cigar::value_type{ Cigar::DELETION, 1 });
         score_ += config.gap_opening_penalty;
 
-        if (static_cast<size_t>(gap_length) <= node_overlap) {
-            // overlap is small, so add only the required dummy nods
-            trim_offset();
-            assert(extra_nodes >= 2);
-            cigar_.data().insert(cigar_.data().begin(),
-                                 Cigar::value_type{ Cigar::NODE_INSERTION, extra_nodes - 1 });
-        }
+        // if (static_cast<size_t>(gap_length) <= node_overlap) {
+        //     // overlap is small, so add only the required dummy nodes
+        //     trim_offset();
+        assert(extra_nodes >= 2);
+        cigar_.data().insert(cigar_.data().begin(),
+                             Cigar::value_type{ Cigar::NODE_INSERTION, extra_nodes - 1 });
+        //     if (offset_) {
+        //         assert(false);
+        //     }
+        // }
 
         if (gap_length) {
             cigar_.data().insert(cigar_.data().begin(), Cigar::value_type{ Cigar::INSERTION, gap_length });
