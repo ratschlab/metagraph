@@ -299,7 +299,16 @@ void LabeledExtender
                             }
                         }
                         if (best_score > config_.ninf) {
-                            node_labels_.push_back(annotation_buffer_.cache_column_set(Vector<Column>{ d }));
+                            Columns cur { d };
+                            if (config_.label_change_union) {
+                                Columns merged;
+                                std::set_union(columns.begin(), columns.end(),
+                                               cur.begin(), cur.end(),
+                                               std::back_inserter(merged));
+                                node_labels_.push_back(annotation_buffer_.cache_column_set(std::move(merged)));
+                            } else {
+                                node_labels_.push_back(annotation_buffer_.cache_column_set(std::move(cur)));
+                            }
                             node_labels_switched_.emplace_back(true);
                             callback(next, c, score + best_score);
                         }

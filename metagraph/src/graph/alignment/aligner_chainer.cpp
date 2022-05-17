@@ -625,7 +625,11 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
     columns.reserve(alignments.size());
     for (size_t i = 0; i < alignments.size(); ++i) {
         best_score.emplace_back(alignments[i].get_score());
-        columns.emplace_back(alignments[i].label_columns);
+        if (alignments[i].label_column_diffs.size()) {
+            columns.emplace_back(alignments[i].label_column_diffs.back());
+        } else {
+            columns.emplace_back(alignments[i].label_columns);
+        }
     }
     const auto *labeled_aligner = dynamic_cast<const ILabeledAligner*>(&aligner);
 
