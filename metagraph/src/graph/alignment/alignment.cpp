@@ -545,7 +545,7 @@ size_t Alignment::trim_query_suffix(size_t n,
 
     nodes_.erase(node_it.base(), nodes_.end());
     if (extra_scores.size() >= nodes_.size()) {
-        score_t removed = std::accumulate(extra_scores.end() - nodes_.size() + 1,
+        score_t removed = std::accumulate(extra_scores.begin() + nodes_.size() - 1,
                                           extra_scores.end(),
                                           score_t(0));
         extra_score -= removed;
@@ -744,7 +744,7 @@ size_t Alignment::trim_reference_suffix(size_t n,
 
     nodes_.erase(node_it.base(), nodes_.end());
     if (extra_scores.size() >= nodes_.size()) {
-        score_t removed = std::accumulate(extra_scores.end() - nodes_.size() + 1,
+        score_t removed = std::accumulate(extra_scores.begin() + nodes_.size() - 1,
                                           extra_scores.end(),
                                           score_t(0));
         extra_score -= removed;
@@ -1635,8 +1635,8 @@ bool Alignment::is_valid(const DeBruijnGraph &graph, const DBGAlignerConfig *con
     score_t change_score_sum = std::accumulate(extra_scores.begin(), extra_scores.end(),
                                                score_t(0));
     if (extra_score != change_score_sum) {
-        logger->error("Mismatch between extra score array and extra score sum: {} vs. {}\n{}",
-                      fmt::join(extra_scores, ","), extra_score, *this);
+        logger->error("Mismatch between extra score array and extra score sum: {} {} vs. {}\n{}",
+                      fmt::join(extra_scores, ","), change_score_sum, extra_score, *this);
         return false;
     }
 

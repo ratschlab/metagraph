@@ -117,7 +117,12 @@ void LabeledExtender::flush() {
 #ifndef NDEBUG
         if (table[parent_i].offset >= 0
                 && static_cast<size_t>(table[parent_i].offset) >= graph_->get_k() - 1) {
-            auto parent_real_labels = annotation_buffer_.get_labels(table[parent_i].node);
+            const Columns *parent_real_labels;
+            if (config_.label_change_union) {
+                parent_real_labels = &annotation_buffer_.get_cached_column_set(remaining_labels_i_);
+            } else {
+                parent_real_labels = annotation_buffer_.get_labels(table[parent_i].node);
+            }
             assert(parent_real_labels);
             assert(parent_real_labels->size() >= parent_labels.size());
             Columns diff;
@@ -135,6 +140,8 @@ void LabeledExtender::flush() {
 
         if (intersect_labels.empty()) {
             clear();
+        } else if (config_.label_change_union) {
+            node_labels_[last_flushed_table_i_] = node_labels_[parent_i];
         } else {
             node_labels_[last_flushed_table_i_]
                 = annotation_buffer_.cache_column_set(std::move(intersect_labels));
@@ -269,8 +276,12 @@ void LabeledExtender
             //                       std::back_inserter(intersect_labels));
 
             if (intersect_labels.size()) {
-                node_labels_.push_back(annotation_buffer_.cache_column_set(
-                                                std::move(intersect_labels)));
+                if (config_.label_change_union) {
+                    node_labels_.push_back(node_labels_[table_i]);
+                } else {
+                    node_labels_.push_back(annotation_buffer_.cache_column_set(
+                                                    std::move(intersect_labels)));
+                }
                 node_labels_switched_.emplace_back(false);
                 callback(next, c, score);
             } else if (diff_labels.size()) {
@@ -281,8 +292,22 @@ void LabeledExtender
                 const HLLWrapper<> *hll_wrapper = dbg_succ ? dbg_succ->get_extension_threadsafe<HLLWrapper<>>() : nullptr;
                 if (!hll_wrapper || config_.label_change_score != config_.ninf) {
                     const auto &csbegin = annotation_buffer_.get_column_set_begin();
-                    node_labels_.push_back(&*next_labels - &csbegin);
                     node_labels_switched_.emplace_back(true);
+                    if (config_.label_change_union) {
+                        Columns merged;
+                        std::set_union(columns.begin(), columns.end(),
+                                       next_labels->begin(), next_labels->end(),
+                                       std::back_inserter(merged));
+                        node_labels_.push_back(annotation_buffer_.cache_column_set(std::move(merged)));
+                        merged = Columns{};
+                        const auto &remaining = annotation_buffer_.get_cached_column_set(remaining_labels_i_);
+                        std::set_union(remaining.begin(), remaining.end(),
+                                       next_labels->begin(), next_labels->end(),
+                                       std::back_inserter(merged));
+                        remaining_labels_i_ = annotation_buffer_.cache_column_set(std::move(merged));
+                    } else {
+                        node_labels_.push_back(&*next_labels - &csbegin);
+                    }
                     callback(next, c, score + config_.label_change_score);
                 } else if (!config_.label_change_edit_distance) {
                     const auto &hll = hll_wrapper->data();
@@ -306,6 +331,12 @@ void LabeledExtender
                                                cur.begin(), cur.end(),
                                                std::back_inserter(merged));
                                 node_labels_.push_back(annotation_buffer_.cache_column_set(std::move(merged)));
+                                merged = Columns{};
+                                const auto &remaining = annotation_buffer_.get_cached_column_set(remaining_labels_i_);
+                                std::set_union(remaining.begin(), remaining.end(),
+                                               next_labels->begin(), next_labels->end(),
+                                               std::back_inserter(merged));
+                                remaining_labels_i_ = annotation_buffer_.cache_column_set(std::move(merged));
                             } else {
                                 node_labels_.push_back(annotation_buffer_.cache_column_set(std::move(cur)));
                             }

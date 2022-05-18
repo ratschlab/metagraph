@@ -611,253 +611,316 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
 
     auto get_label_change_score = make_label_change_scorer(aligner);
 
-    std::vector<size_t> last(alignments.size(), std::numeric_limits<size_t>::max());
-    std::vector<size_t> cur_trim(alignments.size());
-    std::vector<size_t> prev_trim(alignments.size());
-    std::vector<ssize_t> num_to_insert(alignments.size());
-    std::vector<score_t> extra_scores(alignments.size());
+    // std::vector<std::vector<std::pair<size_t, size_t>>> last(alignments.size());
+    // std::vector<std::vector<size_t>> cur_trim(alignments.size());
+    // std::vector<std::vector<size_t>> prev_trim(alignments.size());
+    // std::vector<std::vector<ssize_t>> num_to_insert(alignments.size());
+    // std::vector<std::vector<score_t>> extra_scores(alignments.size());
+    // std::vector<std::vector<score_t>> best_score(alignments.size());
+    // std::vector<std::vector<Alignment::Columns>> columns(alignments.size());
+    typedef std::tuple<size_t /* last table i */,
+                       Alignment::Columns /* last col */,
+                       size_t /* prev trim */,
+                       size_t /* cur trim */,
+                       ssize_t /* num to insert */,
+                       score_t /* extra score */,
+                       score_t /* best score */> TableVal;
+    std::vector<tsl::hopscotch_map<Alignment::Columns, TableVal>> chain_table(alignments.size());
+
     const DeBruijnGraph &graph = aligner.get_graph();
     size_t node_overlap = graph.get_k() - 1;
 
-    std::vector<score_t> best_score;
-    std::vector<Alignment::Columns> columns;
-    best_score.reserve(alignments.size());
-    columns.reserve(alignments.size());
     for (size_t i = 0; i < alignments.size(); ++i) {
-        best_score.emplace_back(alignments[i].get_score());
-        if (alignments[i].label_column_diffs.size()) {
-            columns.emplace_back(alignments[i].label_column_diffs.back());
-        } else {
-            columns.emplace_back(alignments[i].label_columns);
-        }
+        auto cur_columns = alignments[i].label_column_diffs.size()
+            ? alignments[i].label_column_diffs.back()
+            : alignments[i].label_columns;
+
+        chain_table[i].emplace(
+            cur_columns,
+            TableVal {
+                std::numeric_limits<size_t>::max(), 0, 0, 0, 0, 0,
+                alignments[i].get_score()
+            }
+        );
     }
     const auto *labeled_aligner = dynamic_cast<const ILabeledAligner*>(&aligner);
 
-    for (size_t i = 0; i < alignments.size() - 1; ++i) {
-        // const Alignment &a = alignments[i];
-        auto a = alignments[i];
-        a.trim_query_prefix(cur_trim[i], node_overlap, config);
-        if (num_to_insert[i] && a.get_sequence().size() < graph.get_k())
-            continue;
-
-        const char *chain_begin = a.get_query_view().data();
-        const char *chain_end = chain_begin + a.get_query_view().size();
-        for (size_t j = i + 1; j < alignments.size(); ++j) {
-            const Alignment &b = alignments[j];
-            if (a.get_orientation() != b.get_orientation())
-                break;
-
-            const char *next_begin = b.get_query_view().data();
-            const char *next_end = next_begin + b.get_query_view().size();
-
-            if (next_begin <= chain_begin || next_end == chain_end)
+    for (size_t i = 0; i < chain_table.size() - 1; ++i) {
+        for (const auto &[a_col, cur_tuple] : chain_table[i]) {
+            const auto &[prev_i, prev_col, prev_prev_trim, prev_trim, prev_num_to_insert, prev_extra_score, prev_score] = cur_tuple;
+            auto a = alignments[i];
+            a.trim_query_prefix(prev_trim, node_overlap, config);
+            if (prev_num_to_insert && a.get_sequence().size() < graph.get_k())
                 continue;
 
-            ssize_t query_overlap = next_begin - chain_end;
-            score_t added_score = config.ninf;
-            size_t num_trim_a = 0;
-            size_t num_trim_b = 0;
-            size_t num_insert = 0;
-            score_t extra_score = 0;
+            const char *chain_begin = a.get_query_view().data();
+            const char *chain_end = chain_begin + a.get_query_view().size();
+            for (size_t j = i + 1; j < alignments.size(); ++j) {
+                const Alignment &b = alignments[j];
+                if (a.get_orientation() != b.get_orientation())
+                    break;
 
-            if (query_overlap >= 0) {
-                // no overlap
-                added_score = config.gap_opening_penalty;
-                if (size_t gap_length = query_overlap) {
-                    assert(b.get_clipping() >= gap_length);
-                    added_score += config.gap_opening_penalty
-                                + (gap_length - 1) * config.gap_extension_penalty;
-                }
+                const char *next_begin = b.get_query_view().data();
+                const char *next_end = next_begin + b.get_query_view().size();
 
-                if (a.has_annotation() && b.has_annotation()
-                        && best_score[i] + added_score + extra_score + b.get_score() > best_score[j]) {
-                    // const auto &prev_cols = a.get_columns(a.get_nodes().size() - 1);
-                    const auto &prev_cols = labeled_aligner->get_annotation_buffer().get_cached_column_set(columns[i]);
-                    const auto &cur_cols = b.get_columns(0);
-                    Vector<Alignment::Column> diff;
-                    std::set_difference(cur_cols.begin(), cur_cols.end(),
-                                        prev_cols.begin(), prev_cols.end(),
-                                        std::back_inserter(diff));
+                if (next_begin <= chain_begin || next_end == chain_end)
+                    continue;
 
-                    if (diff.size()) {
-                        std::string seq;
-                        if (a.get_sequence().size() >= graph.get_k()) {
-                            seq = a.get_sequence().substr(a.get_sequence().size() - graph.get_k());
-                        } else {
-                            seq = graph.get_node_sequence(a.get_nodes().back());
-                        }
-                        extra_score = get_label_change_score(
-                            a.get_nodes().back(),
-                            seq,
-                            b.get_sequence()[0],
-                            prev_cols,
-                            diff
-                        );
+                ssize_t query_overlap = next_begin - chain_end;
+
+                if (query_overlap >= 0) {
+                    // no overlap
+                    // add $
+                    score_t added_score = config.gap_opening_penalty;
+
+                    // score for sequence insertion from the query
+                    if (size_t gap_length = query_overlap) {
+                        assert(b.get_clipping() >= gap_length);
+                        added_score += config.gap_opening_penalty
+                                    + (gap_length - 1) * config.gap_extension_penalty;
                     }
-                }
-            } else {
-                size_t overlap = -query_overlap;
-                auto prev = a;
-                score_t base_score = a.get_score() + b.get_score();
-                // std::cerr << "start\t" << -query_overlap << "," << overlap << "\t" << a << "\t" << b << "\n";
-                for (size_t t = 0; t < overlap; ++t) {
-                    size_t cur_overlap = overlap - t;
-                    auto aln = b;
-                    aln.trim_query_prefix(cur_overlap, node_overlap, config);
 
-                    // std::cerr << "hghghg\t" << overlap << "," << t << "," << cur_overlap << "\n";
-                    assert(prev.get_query_view().data() + prev.get_query_view().size()
-                        == aln.get_query_view().data());
-                    size_t b_ref_front_trimmed = b.get_sequence().size() - aln.get_sequence().size();
-                    bool check = aln.get_nodes().size() >= aln.get_offset();
-                    size_t cutoff = check ? std::min(node_overlap, aln.get_nodes().size() - aln.get_offset()) : node_overlap;
-
-                    auto b_rit = b.get_sequence().rend() - b_ref_front_trimmed;
-                    auto b_rit_end = b_ref_front_trimmed > cutoff ? b_rit + cutoff : b.get_sequence().rend();
-
-                    auto a_rit = prev.get_sequence().rbegin();
-                    auto a_rit_end = prev.get_sequence().size() > cutoff ? a_rit + cutoff : prev.get_sequence().rend();
-                    auto [c1,c2] = std::mismatch(a_rit, a_rit_end, b_rit, b_rit_end);
-                    size_t ref_overlap = c1 - a_rit;
-                    assert(node_overlap >= ref_overlap);
-
-                    if (aln.get_sequence().size() >= graph.get_k() && (check || ref_overlap > aln.get_offset() - aln.get_nodes().size())) {
-                        score_t cur_score = prev.get_score() + aln.get_score() - base_score + (!ref_overlap ? config.gap_opening_penalty : 0);
-
-                        score_t label_change_score = 0;
-                        if (prev.has_annotation() && aln.has_annotation() && cur_score > added_score + extra_score) {
-                            // const auto &prev_cols = prev.get_columns(prev.get_nodes().size() - 1);
-                            const auto &prev_cols = labeled_aligner->get_annotation_buffer().get_cached_column_set(columns[i]);
-                            const auto &cur_cols = aln.get_columns(0);
-                            Vector<Alignment::Column> diff;
-                            std::set_difference(cur_cols.begin(), cur_cols.end(),
-                                                prev_cols.begin(), prev_cols.end(),
-                                                std::back_inserter(diff));
-
-                            if (diff.size()) {
-                                std::string seq;
-                                if (prev.get_sequence().size() >= graph.get_k()) {
-                                    seq = prev.get_sequence().substr(prev.get_sequence().size() - graph.get_k());
-                                } else {
-                                    seq = graph.get_node_sequence(prev.get_nodes().back());
+                    Vector<Alignment::Column> inter;
+                    Vector<Alignment::Column> diff;
+                    Alignment::Columns col_id;
+                    score_t cur_extra_score = 0;
+                    if (!a.has_annotation() || !b.has_annotation()) {
+                        inter.push_back(0);
+                        col_id = 0;
+                    } else {
+                        const auto &prev_cols = labeled_aligner->get_annotation_buffer().get_cached_column_set(a_col);
+                        const auto &cur_cols = b.get_columns(0);
+                        utils::set_intersection_difference(cur_cols.begin(), cur_cols.end(),
+                                                           prev_cols.begin(), prev_cols.end(),
+                                                           std::back_inserter(inter),
+                                                           std::back_inserter(diff));
+                        if (inter.size()) {
+                            col_id = labeled_aligner->get_annotation_buffer().cache_column_set(std::move(inter));
+                        } else if (diff.size()) {
+                            cur_extra_score = config.ninf;
+                            Alignment::Column next_col = std::numeric_limits<Alignment::Column>::max();
+                            std::string seq;
+                            if (a.get_sequence().size() >= graph.get_k()) {
+                                seq = a.get_sequence().substr(a.get_sequence().size() - graph.get_k());
+                            } else {
+                                seq = graph.get_node_sequence(a.get_nodes().back());
+                            }
+                            Vector<Alignment::Column> d_v { 0 };
+                            Vector<Alignment::Column> c_v { 0 };
+                            for (auto d : diff) {
+                                d_v[0] = d;
+                                for (auto c : prev_cols) {
+                                    c_v[0] = c;
+                                    score_t cur_cur_extra_score = get_label_change_score(
+                                        a.get_nodes().back(),
+                                        seq,
+                                        b.get_sequence()[0],
+                                        c_v, d_v
+                                    );
+                                    if (cur_cur_extra_score > cur_extra_score) {
+                                        cur_extra_score = cur_cur_extra_score;
+                                        next_col = d;
+                                    }
                                 }
-                                label_change_score = get_label_change_score(
-                                    prev.get_nodes().back(),
-                                    seq,
-                                    aln.get_sequence()[0],
-                                    prev_cols,
-                                    diff
-                                );
+                            }
+
+                            if (cur_extra_score == config.ninf)
+                                continue;
+
+                            d_v[0] = next_col;
+
+                            col_id = labeled_aligner->get_annotation_buffer().cache_column_set(std::move(d_v));
+                        } else {
+                            continue;
+                        }
+                    }
+
+                    auto &[last_i, last_col, prev_trim, cur_trim, num_to_insert, extra_score, score] = chain_table[j][col_id];
+                    if (prev_score + added_score + cur_extra_score + b.get_score() > score) {
+                        score = prev_score + added_score + extra_score + b.get_score();
+                        last_i = i;
+                        last_col = a_col;
+                        prev_trim = 0;
+                        cur_trim = 0;
+                        num_to_insert = 0;
+                        extra_score = cur_extra_score;
+                    }
+                } else {
+                    size_t overlap = -query_overlap;
+                    auto prev = a;
+                    score_t base_score = a.get_score() + b.get_score();
+                    for (size_t t = 0; t < overlap; ++t) {
+                        size_t cur_overlap = overlap - t;
+                        auto aln = b;
+                        aln.trim_query_prefix(cur_overlap, node_overlap, config);
+                        assert(aln.is_valid(graph, &config));
+
+                        assert(prev.get_query_view().data() + prev.get_query_view().size()
+                            == aln.get_query_view().data());
+                        size_t b_ref_front_trimmed = b.get_sequence().size() - aln.get_sequence().size();
+                        bool check = aln.get_nodes().size() >= aln.get_offset();
+                        size_t cutoff = check ? std::min(node_overlap, aln.get_nodes().size() - aln.get_offset()) : node_overlap;
+
+                        auto b_rit = b.get_sequence().rend() - b_ref_front_trimmed;
+                        auto b_rit_end = b_ref_front_trimmed > cutoff ? b_rit + cutoff : b.get_sequence().rend();
+
+                        auto a_rit = prev.get_sequence().rbegin();
+                        auto a_rit_end = prev.get_sequence().size() > cutoff ? a_rit + cutoff : prev.get_sequence().rend();
+                        auto [c1,c2] = std::mismatch(a_rit, a_rit_end, b_rit, b_rit_end);
+                        size_t ref_overlap = c1 - a_rit;
+                        assert(node_overlap >= ref_overlap);
+
+                        if (aln.get_sequence().size() >= graph.get_k() && (check || ref_overlap > aln.get_offset() - aln.get_nodes().size())) {
+                            score_t cur_score = prev.get_score() + aln.get_score() - base_score + (!ref_overlap ? config.gap_opening_penalty : 0);
+
+                            Vector<Alignment::Column> inter;
+                            Vector<Alignment::Column> diff;
+                            Alignment::Columns col_id;
+                            score_t cur_extra_score = 0;
+                            Alignment::Columns pccc = aln.label_column_diffs.size()
+                                ? aln.label_column_diffs.back()
+                                : aln.label_columns;
+                            if (!a.has_annotation() || !b.has_annotation()) {
+                                inter.push_back(0);
+                                col_id = 0;
+                            } else {
+                                const auto &prev_cols = labeled_aligner->get_annotation_buffer().get_cached_column_set(pccc);
+                                const auto &cur_cols = aln.get_columns(0);
+                                utils::set_intersection_difference(cur_cols.begin(), cur_cols.end(),
+                                                                   prev_cols.begin(), prev_cols.end(),
+                                                                   std::back_inserter(inter),
+                                                                   std::back_inserter(diff));
+                                if (inter.size()) {
+                                    col_id = labeled_aligner->get_annotation_buffer().cache_column_set(std::move(inter));
+                                } else if (diff.size()) {
+                                    cur_extra_score = config.ninf;
+                                    Alignment::Column next_col = std::numeric_limits<Alignment::Column>::max();
+                                    std::string seq;
+                                    if (prev.get_sequence().size() >= graph.get_k()) {
+                                        seq = prev.get_sequence().substr(prev.get_sequence().size() - graph.get_k());
+                                    } else {
+                                        seq = graph.get_node_sequence(prev.get_nodes().back());
+                                    }
+                                    Vector<Alignment::Column> d_v { 0 };
+                                    Vector<Alignment::Column> c_v { 0 };
+                                    for (auto d : diff) {
+                                        d_v[0] = d;
+                                        for (auto c : prev_cols) {
+                                            c_v[0] = c;
+                                            score_t cur_cur_extra_score = get_label_change_score(
+                                                prev.get_nodes().back(),
+                                                seq,
+                                                aln.get_sequence()[0],
+                                                c_v, d_v
+                                            );
+                                            if (cur_cur_extra_score > cur_extra_score) {
+                                                cur_extra_score = cur_cur_extra_score;
+                                                next_col = d;
+                                            }
+                                        }
+                                    }
+
+                                    if (cur_extra_score == config.ninf)
+                                        continue;
+
+                                    d_v[0] = next_col;
+
+                                    col_id = labeled_aligner->get_annotation_buffer().cache_column_set(std::move(d_v));
+                                } else {
+                                    continue;
+                                }
+                            }
+
+                            auto &[last_i, last_col, prev_trim, cur_trim, num_to_insert, extra_score, score] = chain_table[j][col_id];
+                            if (prev_score + cur_score + cur_extra_score + b.get_score() > score) {
+                                score = prev_score + cur_score + cur_extra_score + b.get_score();
+                                last_i = i;
+                                last_col = a_col;
+                                prev_trim = t;
+                                cur_trim = cur_overlap;
+                                num_to_insert = ref_overlap;
+                                extra_score = cur_extra_score;
                             }
                         }
 
-                        // std::cerr << "check\t" << best_score[i] + cur_score + b.get_score() << ","
-                        //                        << t << ","
-                        //                        << cur_overlap << "\t"
-                        //                        << a << "\t" << b << "\n"
-                        //  << "CYCEK\t" << best_score[i] + cur_score + b.get_score() << ","
-                        //               << t << ","
-                        //               << cur_overlap << "," << ref_overlap << "\t"
-                        //               << prev << "\t" << aln << "\n" << std::endl;
-                        if (cur_score + label_change_score > added_score + extra_score) {
-                            added_score = cur_score;
-                            num_trim_a = t;
-                            num_trim_b = cur_overlap;
-                            num_insert = ref_overlap;
-                            extra_score = label_change_score;
+                        if (cur_overlap > 1) {
+                            prev.trim_query_suffix(1, config);
+                            assert(prev.is_valid(graph, &config));
+                            if (prev.get_sequence().size() < graph.get_k())
+                                break;
                         }
                     }
-
-                    if (cur_overlap > 1) {
-                        prev.trim_query_suffix(1, config);
-                        if (prev.get_sequence().size() < graph.get_k())
-                            break;
-                    }
-                }
-
-                if (!num_trim_a && !num_trim_b)
-                    continue;
-            }
-
-            if (extra_score != config.ninf && best_score[i] + added_score + extra_score + b.get_score() > best_score[j]) {
-                best_score[j] = best_score[i] + added_score + extra_score + b.get_score();
-                last[j] = i;
-                prev_trim[j] = num_trim_a;
-                cur_trim[j] = num_trim_b;
-                num_to_insert[j] = num_insert;
-                extra_scores[j] = extra_score;
-
-                if (config.label_change_union && columns[i] != columns[j]) {
-                    const auto &prev_cols = labeled_aligner->get_annotation_buffer().get_cached_column_set(columns[i]);
-                    const auto &cur_cols = labeled_aligner->get_annotation_buffer().get_cached_column_set(columns[j]);
-                    Vector<Alignment::Column> merge;
-                    std::set_union(prev_cols.begin(), prev_cols.end(),
-                                   cur_cols.begin(), cur_cols.end(),
-                                   std::back_inserter(merge));
-                    columns[j] = labeled_aligner->get_annotation_buffer().cache_column_set(std::move(merge));
                 }
             }
         }
     }
 
-    std::vector<std::pair<score_t, size_t>> indices;
-    sdsl::bit_vector used(best_score.size(), false);
-    indices.reserve(best_score.size());
-    for (size_t i = 0; i < best_score.size(); ++i) {
-        indices.emplace_back(best_score[i], i);
+    std::vector<std::tuple<score_t, size_t, Alignment::Columns>> indices;
+    indices.reserve(chain_table.size());
+    sdsl::bit_vector used(chain_table.size(), false);
+    for (size_t i = 0; i < chain_table.size(); ++i) {
+        for (const auto &[col, tuple] : chain_table[i]) {
+            indices.emplace_back(std::get<6>(tuple), i, col);
+        }
     }
     std::sort(indices.begin(), indices.end());
     for (auto it = indices.rbegin(); it != indices.rend(); ++it) {
-        size_t i = it->second;
+        auto [start_score, i, col] = *it;
         if (used[i])
             continue;
 
         used[i] = true;
         Alignment cur = alignments[i];
+        auto [last_i, last_col, prev_trim, cur_trim, num_to_insert, extra_score, score] = chain_table[i][col];
         // std::cerr << "START\n";
-        while (last[i] != std::numeric_limits<size_t>::max()) {
+        while (last_i != std::numeric_limits<size_t>::max()) {
             used[i] = true;
-            if (!cur_trim[i] && !prev_trim[i]) {
+
+            if (!cur_trim && !prev_trim) {
                 // no overlap
                 // std::cerr << "\tno\n";
-                Alignment prev = alignments[last[i]];
+                Alignment prev = alignments[last_i];
                 size_t gap_size = cur.get_query_view().data() - prev.get_query_view().data() - prev.get_query_view().size();
                 // std::cerr << "ss\t" << gap_size << "\n";
                 cur.insert_gap_prefix(gap_size, node_overlap, config);
                 assert(!cur.empty());
                 prev.trim_end_clipping();
-                prev.append(std::move(cur), [&]() { return extra_scores[i]; });
+                prev.append(std::move(cur), [&]() { return extra_score; });
                 assert(!prev.empty());
                 assert(prev.is_valid(graph, &config));
                 std::swap(cur, prev);
             } else {
                 // overlap
                 // std::cerr << "\too\t" << num_to_insert[i] << "\n";
-                Alignment prev = alignments[last[i]];
+                Alignment prev = alignments[last_i];
                 // std::cerr << "checkit\t" << it->first << "," << prev_trim[i] << "," << cur_trim[i] << "\t" << prev << "\t" << cur << "\n";
                 // std::cerr << "OO\t" << prev_trim[i] << "," << cur_trim[i] << "\t" << prev << "\t" << cur << "\n";
-                cur.trim_query_prefix(cur_trim[i], node_overlap, config);
-                prev.trim_query_suffix(prev_trim[i], config);
+                cur.trim_query_prefix(cur_trim, node_overlap, config);
+                assert(cur.is_valid(graph, &config));
+                prev.trim_query_suffix(prev_trim, config);
+                assert(prev.is_valid(graph, &config));
                 // std::cerr << "TT\t" << num_to_insert[i] << "\t" << prev << "\t" << cur << "\n";
                 // std::cerr << "TT\t" << prev_trim[i] << "," << cur_trim[i] << "," << num_to_insert[i] << "\n";
-                if (num_to_insert[i] < static_cast<ssize_t>(node_overlap)) {
-                    cur.insert_gap_prefix(-num_to_insert[i], node_overlap, config);
+                if (num_to_insert < static_cast<ssize_t>(node_overlap)) {
+                    cur.insert_gap_prefix(-num_to_insert, node_overlap, config);
                 } else {
                     cur.trim_clipping();
                 }
                 assert(!cur.empty());
                 // std::cerr << "tt\t" << num_to_insert[i] << "\t" << prev << "\t" << cur << "\n";
                 prev.trim_end_clipping();
-                prev.append(std::move(cur), [&]() { return extra_scores[i]; });
+                prev.append(std::move(cur), [&]() { return extra_score; });
                 assert(!prev.empty());
                 assert(prev.is_valid(graph, &config));
                 std::swap(cur, prev);
             }
-            i = last[i];
+            i = last_i;
+            col = last_col;
+            std::tie(last_i, last_col, prev_trim, cur_trim, num_to_insert, extra_score, score) = chain_table[i][col];
         }
 
         // std::cerr << "FINAL\t" << it->first << "\t" << cur << std::endl;
-        assert(cur.get_score() == it->first);
+        assert(cur.get_score() == start_score);
 
         aggregator.add_alignment(std::move(cur));
     }
