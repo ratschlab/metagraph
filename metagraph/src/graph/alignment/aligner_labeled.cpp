@@ -497,6 +497,25 @@ void LabeledExtender::call_alignments(score_t end_score,
             label_intersection_ = Columns{};
         }
 
+        if (config_.label_change_union) {
+            const auto &cur_labels = annotation_buffer_.get_cached_column_set(alignment.label_columns);
+            const auto *true_labels = annotation_buffer_.get_labels(alignment.get_nodes()[0]);
+            Columns inter;
+            std::set_intersection(cur_labels.begin(), cur_labels.end(),
+                                  true_labels->begin(), true_labels->end(),
+                                  std::back_inserter(inter));
+            alignment.label_columns = annotation_buffer_.cache_column_set(std::move(inter));
+            for (size_t i = 0; i < alignment.label_column_diffs.size(); ++i) {
+                const auto &cur_labels = annotation_buffer_.get_cached_column_set(alignment.label_column_diffs[i]);
+                const auto *true_labels = annotation_buffer_.get_labels(alignment.get_nodes()[i + 1]);
+                Columns inter;
+                std::set_intersection(cur_labels.begin(), cur_labels.end(),
+                                      true_labels->begin(), true_labels->end(),
+                                      std::back_inserter(inter));
+                alignment.label_column_diffs[i] = annotation_buffer_.cache_column_set(std::move(inter));
+            }
+        }
+
         call_alignment();
         return;
     }

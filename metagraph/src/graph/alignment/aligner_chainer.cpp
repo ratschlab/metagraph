@@ -769,6 +769,15 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
                         auto [c1,c2] = std::mismatch(a_rit, a_rit_end, b_rit, b_rit_end);
                         size_t ref_overlap = c1 - a_rit;
                         assert(node_overlap >= ref_overlap);
+                        // std::string_view check_str(
+                        //     aln.get_sequence().data(),
+                        //     std::min(node_overlap + 1, aln.get_sequence().size())
+                        // );
+                        // size_t fwd_count = 0;
+                        // graph.traverse(prev.get_nodes().back(), check_str.begin(), check_str.end(),
+                        //     [&](node_index) { ++fwd_count; }
+                        // );
+                        // std::cerr << "FOO\t" << ref_overlap << "\t" << fwd_count << "\n";
 
                         if (aln.get_sequence().size() >= graph.get_k() && (check || ref_overlap > aln.get_offset() - aln.get_nodes().size())) {
                             score_t cur_score = prev.get_score() + aln.get_score() - base_score + (!ref_overlap ? config.gap_opening_penalty : 0);
