@@ -95,7 +95,7 @@ RUN apt-get update && apt-get install -y \
     libjemalloc2 \
     python3 \
     python3-pip \
-    && rm -rf /var/lib/apt/lists/* && pip3 install -U "pip>=21.1"
+    && rm -rf /var/lib/apt/lists/* && pip3 install -U "pip>=22.1"
 
 COPY --from=metagraph_bin ${CODE_BASE}/metagraph/build/metagraph_* /usr/local/bin/
 
@@ -104,7 +104,7 @@ RUN ln -s /usr/local/bin/metagraph_DNA /usr/local/bin/metagraph
 RUN mkdir ${CODE_BASE}
 COPY . ${CODE_BASE}
 
-RUN pip3 install --use-feature=in-tree-build ${CODE_BASE}/metagraph/api/python
-RUN pip3 install --use-feature=in-tree-build ${CODE_BASE}/metagraph/workflows
+RUN pip3 install ${CODE_BASE}/metagraph/api/python
+RUN pip3 install ${CODE_BASE}/metagraph/workflows
 
 ENTRYPOINT ["metagraph"]
