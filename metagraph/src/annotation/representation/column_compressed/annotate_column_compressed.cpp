@@ -253,11 +253,16 @@ void ColumnCompressed<Label>::serialize_counts(const std::string &filename) cons
             if (packed_width == relation_counts_[j].width()) {
                 relation_counts_[j].serialize(out);
             } else {
-                // TODO: use int_vector_buffer<>
-                sdsl::int_vector<> packed_counts(relation_counts_[j].size(), 0, packed_width);
-                std::copy(relation_counts_[j].begin(), relation_counts_[j].end(),
-                          packed_counts.begin());
-                packed_counts.serialize(out);
+                size_t offset = out.tellp();
+                out.close();
+                {
+                    sdsl::int_vector_buffer<> packed_counts(counts_fname, std::ios::out, 1024*1024,
+                                                            packed_width, false, offset);
+                    for (size_t c : relation_counts_[j]) {
+                        packed_counts.push_back(c);
+                    }
+                }
+                out = std::ofstream(counts_fname, std::ios::binary | std::ios::app);
             }
         }
     }
