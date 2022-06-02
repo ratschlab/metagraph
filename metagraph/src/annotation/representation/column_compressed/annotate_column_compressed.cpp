@@ -386,21 +386,18 @@ void ColumnCompressed<Label>::serialize_coordinates(const std::string &filename)
                 }
 
                 // transform rank to index
-                size_t it = 0;
-                for (size_t i = 0; i < buffer.size(); ++i) {
-                    if (buffer[i] == last) {
+                for (const auto &pair : buffer) {
+                    if (pair == last) {
                         logger->error("Found repeated coordinates. If flag --anno-header is passed,"
                                       " make sure sequence headers don't repeat.");
                         exit(1);
                     }
-                    last = buffer[i];
+                    last = pair;
 
-                    if (buffer[i].first)
-                        buffer[it++] = buffer[i];
-                }
+                    auto [r, coord] = pair;
+                    if (!r)
+                        continue;
 
-                for (size_t i = 0; i < it; ++i) {
-                    auto [r, coord] = buffer[i];
                     while (cur < r) {
                         delim.push_back(1);
                         cur++;
