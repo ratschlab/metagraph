@@ -28,7 +28,7 @@ class SortedVector {
             tmp_dir_ = utils::create_temp_dir(swap_dir, "sorted_vector");
     }
 
-    // Don't make the default move constructor and copy operator get removed
+    // Don't let the default move constructor and copy operator get removed
     // because of the destructor.
     SortedVector(SortedVector&& other) = default;
     SortedVector& operator=(SortedVector&& other) = default;

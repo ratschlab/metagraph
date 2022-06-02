@@ -359,10 +359,10 @@ void ColumnCompressed<Label>::serialize_coordinates(const std::string &filename)
 
             num_coordinates += c_v.size();
         } else {
-
+            auto &c_v = const_cast<ColumnCompressed*>(this)->coords_[j];
+            c_v.flush();
             std::vector<std::pair<Index, uint64_t>> buffer;
-            size_t BUFFER_SIZE = 100'000'000;
-            buffer.reserve(BUFFER_SIZE);
+            buffer.swap(c_v.get_buffer());
 
             std::pair<Index, uint64_t> last = { -1, -1 };
 
@@ -412,13 +412,15 @@ void ColumnCompressed<Label>::serialize_coordinates(const std::string &filename)
                 buffer.resize(0);
             };
 
-            const_cast<ColumnCompressed*>(this)->coords_[j].for_each([&](const auto &v) {
+            c_v.for_each([&](const auto &v) {
                 buffer.push_back(v);
-                if (buffer.size() == BUFFER_SIZE)
+                if (buffer.size() == buffer.capacity())
                     process_buffer();
             });
             if (buffer.size())
                 process_buffer();
+
+            buffer = std::vector<std::pair<Index, uint64_t>>();
 
             while (cur++ <= bitmatrix_[j]->num_set_bits()) {
                 delim.push_back(1);
