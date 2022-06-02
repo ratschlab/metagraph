@@ -19,6 +19,7 @@
 namespace mtg {
 namespace annot {
 
+namespace fs = std::filesystem;
 using utils::remove_suffix;
 using utils::make_suffix;
 using mtg::common::logger;
@@ -153,11 +154,17 @@ void ColumnCompressed<Label>::add_label_counts(const std::vector<Index> &indices
 // for each label and index 'i' add numeric attribute 'coord'
 template <typename Label>
 void ColumnCompressed<Label>::add_label_coord(Index i, const VLabels &labels, uint64_t coord) {
-    coords_.resize(num_labels());
+    while (coords_.size() < num_labels()) {
+        coords_.emplace_back(get_num_threads(),
+                             buffer_size_bytes_ / sizeof(std::pair<Index, uint64_t>),
+                             swap_dir_);
+    }
+    max_coord_.resize(num_labels(), 0);
 
     for (const auto &label : labels) {
         const size_t j = label_encoder_.encode(label);
         coords_[j].emplace_back(i, coord);
+        max_coord_[j] = std::max(max_coord_[j], coord);
     }
 }
 
@@ -165,11 +172,19 @@ void ColumnCompressed<Label>::add_label_coord(Index i, const VLabels &labels, ui
 template <typename Label>
 void ColumnCompressed<Label>::add_label_coords(const std::vector<std::pair<Index, uint64_t>> &coords,
                                                const VLabels &labels) {
-    coords_.resize(num_labels());
+    while (coords_.size() < num_labels()) {
+        coords_.emplace_back(get_num_threads(),
+                             buffer_size_bytes_ / sizeof(std::pair<Index, uint64_t>),
+                             swap_dir_);
+    }
+    max_coord_.resize(num_labels(), 0);
 
     for (const auto &label : labels) {
         const size_t j = label_encoder_.encode(label);
-        coords_[j].insert(coords_[j].end(), coords.begin(), coords.end());
+        for (const auto &v : coords) {
+            coords_[j].push_back(v);
+            max_coord_[j] = std::max(max_coord_[j], v.second);
+        }
     }
 }
 
@@ -286,62 +301,157 @@ void ColumnCompressed<Label>::serialize_coordinates(const std::string &filename)
 
     uint64_t num_coordinates = 0;
 
+    fs::path tmp_path;
+
+    if (swap_dir_.size())
+        tmp_path = utils::create_temp_dir(swap_dir_, "buffers");
+
     for (size_t j = 0; j < coords_.size(); ++j) {
-        // sort pairs <rank, coord>
-        auto &c_v = const_cast<ColumnCompressed*>(this)->coords_[j];
-
-        ips4o::parallel::sort(c_v.begin(), c_v.end(), std::less<>(), get_num_threads());
-        if (std::unique(c_v.begin(), c_v.end()) != c_v.end()) {
-            logger->error("Found repeated coordinates. If flag --anno-header is passed,"
-                          " make sure sequence headers don't repeat.");
-            exit(1);
-        }
-
-        #pragma omp parallel for num_threads(get_num_threads())
-        for (size_t i = 0; i < c_v.size(); ++i) {
-            if (uint64_t rank = bitmatrix_[j]->conditional_rank1(c_v[i].first)) {
-                c_v[i].first = rank;
-            } else {
-                logger->warn("Trying to add attribute {} for not annotated object {}."
-                             " The attribute is ignored.", c_v[i].second, c_v[i].first);
+        if (!swap_dir_.size()) {
+            // sort pairs <rank, coord>
+            auto &c_v = const_cast<ColumnCompressed*>(this)->coords_[j].get_buffer();
+            ips4o::parallel::sort(c_v.begin(), c_v.end(), std::less<>(), get_num_threads());
+            if (std::unique(c_v.begin(), c_v.end()) != c_v.end()) {
+                logger->error("Found repeated coordinates. If flag --anno-header is passed,"
+                              " make sure sequence headers don't repeat.");
+                exit(1);
             }
-        }
 
-        // transform rank to index
-        size_t it = 0;
-        for (size_t i = 0; i < c_v.size(); ++i) {
-            if (c_v[i].first)
-                c_v[it++] = c_v[i];
-        }
-        c_v.resize(it);
-
-        // marks where the next block starts
-        //  *- * *
-        // 1001010
-        sdsl::bit_vector delim(c_v.size() + bitmatrix_[j]->num_set_bits() + 1, 0);
-        // pack coordinates
-        uint64_t max_coord = 0;
-        for (auto [r, coord] : c_v) {
-            max_coord = std::max(max_coord, coord);
-        }
-        sdsl::int_vector<> coords(c_v.size(), 0, sdsl::bits::hi(max_coord) + 1);
-        uint64_t cur = 0;
-        for (size_t i = 0; i < c_v.size(); ++i) {
-            auto [r, coord] = c_v[i];
-            while (cur < r) {
-                delim[i + cur++] = 1;
+            #pragma omp parallel for num_threads(get_num_threads())
+            for (size_t i = 0; i < c_v.size(); ++i) {
+                if (uint64_t rank = bitmatrix_[j]->conditional_rank1(c_v[i].first)) {
+                    c_v[i].first = rank;
+                } else {
+                    logger->warn("Trying to add attribute {} for not annotated object {}."
+                                 " The attribute is ignored.", c_v[i].second, c_v[i].first);
+                }
             }
-            coords[i] = coord;
-        }
-        for (uint64_t t = cur + c_v.size(); t < delim.size(); ++t) {
-            delim[t] = 1;
-        }
 
-        bit_vector_smart(std::move(delim)).serialize(out);
-        coords.serialize(out);
+            // transform rank to index
+            size_t it = 0;
+            for (size_t i = 0; i < c_v.size(); ++i) {
+                if (c_v[i].first)
+                    c_v[it++] = c_v[i];
+            }
+            c_v.resize(it);
 
-        num_coordinates += c_v.size();
+            // marks where the next block starts
+            //  *- * *
+            // 1001010
+            sdsl::bit_vector delim(c_v.size() + bitmatrix_[j]->num_set_bits() + 1, 0);
+            // pack coordinates
+            sdsl::int_vector<> coords(c_v.size(), 0, sdsl::bits::hi(max_coord_[j]) + 1);
+            uint64_t cur = 0;
+            for (size_t i = 0; i < c_v.size(); ++i) {
+                auto [r, coord] = c_v[i];
+                while (cur < r) {
+                    delim[i + cur++] = 1;
+                }
+                coords[i] = coord;
+            }
+
+            for (uint64_t t = cur + c_v.size(); t < delim.size(); ++t) {
+                delim[t] = 1;
+            }
+
+            bit_vector_smart(std::move(delim)).serialize(out);
+            coords.serialize(out);
+
+            num_coordinates += c_v.size();
+        } else {
+
+            std::vector<std::pair<Index, uint64_t>> buffer;
+            size_t BUFFER_SIZE = 100'000'000;
+            buffer.reserve(BUFFER_SIZE);
+
+            std::pair<Index, uint64_t> last = { -1, -1 };
+
+            // marks where the next block starts
+            //  *- * *
+            // 1001010
+            sdsl::int_vector_buffer<1> delim(tmp_path/"delim", std::ios::out, 1024*1024);
+            // pack coordinates
+            sdsl::int_vector_buffer<> coords(tmp_path/"coords", std::ios::out, 1024*1024, sdsl::bits::hi(max_coord_[j]) + 1);
+            uint64_t cur = 0;
+
+            auto process_buffer = [&]() {
+                #pragma omp parallel for num_threads(get_num_threads())
+                for (size_t i = 0; i < buffer.size(); ++i) {
+                    if (uint64_t rank = bitmatrix_[j]->conditional_rank1(buffer[i].first)) {
+                        buffer[i].first = rank;
+                    } else {
+                        logger->warn("Trying to add attribute {} for not annotated object {}."
+                                     " The attribute is ignored.", buffer[i].second, buffer[i].first);
+                    }
+                }
+
+                // transform rank to index
+                size_t it = 0;
+                for (size_t i = 0; i < buffer.size(); ++i) {
+                    if (buffer[i] == last) {
+                        logger->error("Found repeated coordinates. If flag --anno-header is passed,"
+                                      " make sure sequence headers don't repeat.");
+                        exit(1);
+                    }
+                    last = buffer[i];
+
+                    if (buffer[i].first)
+                        buffer[it++] = buffer[i];
+                }
+
+                for (size_t i = 0; i < it; ++i) {
+                    auto [r, coord] = buffer[i];
+                    while (cur < r) {
+                        delim.push_back(1);
+                        cur++;
+                    }
+                    delim.push_back(0);
+                    coords.push_back(coord);
+                }
+
+                buffer.resize(0);
+            };
+
+            const_cast<ColumnCompressed*>(this)->coords_[j].for_each([&](const auto &v) {
+                buffer.push_back(v);
+                if (buffer.size() == BUFFER_SIZE)
+                    process_buffer();
+            });
+            if (buffer.size())
+                process_buffer();
+
+            while (cur++ <= bitmatrix_[j]->num_set_bits()) {
+                delim.push_back(1);
+            }
+
+            assert(delim.size() == coords.size() + bitmatrix_[j]->num_set_bits() + 1);
+
+            num_coordinates += coords.size();
+
+            delim.close(false);
+            coords.close(false);
+
+            {
+                sdsl::bit_vector delim_bv;
+                std::ifstream in(tmp_path/"delim", std::ios::binary);
+                delim_bv.load(in);
+                bit_vector_smart(std::move(delim_bv)).serialize(out);
+            }
+
+            out.close();
+
+            std::string concat_command = fmt::format("cat {} >> {}", tmp_path/"coords", coords_fname);
+            if (std::system(concat_command.c_str())) {
+                logger->error("Error while cat-ing files: {}", concat_command);
+                std::exit(EXIT_FAILURE);
+            }
+
+            out = std::ofstream(coords_fname, std::ios::binary | std::ios::app);
+        }
     }
+
+    if (swap_dir_.size())
+        utils::remove_temp_dir(tmp_path);
 
     logger->info("Number of coordinates: {} in {}", num_coordinates, coords_fname);
 }

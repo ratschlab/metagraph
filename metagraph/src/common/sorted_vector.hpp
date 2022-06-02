@@ -20,7 +20,7 @@ class SortedVector {
     SortedVector(size_t num_threads,
                  uint64_t buffer_size,
                  const std::string &swap_dir,
-                 size_t max_chunks_open = -1)
+                 size_t max_chunks_open = 1000)
           : num_threads_(num_threads),
             max_chunks_open_(max_chunks_open) {
         buffer_.reserve(buffer_size);
@@ -112,6 +112,8 @@ class SortedVector {
             buffer_.resize(0);
         }
     }
+
+    std::vector<T>& get_buffer() { return buffer_; }
 
   private:
     std::string tmp_file(size_t chunk) const {

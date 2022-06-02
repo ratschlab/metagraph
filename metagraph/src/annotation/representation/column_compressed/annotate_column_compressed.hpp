@@ -8,6 +8,7 @@
 
 #include "common/vectors/bit_vector.hpp"
 #include "common/vector.hpp"
+#include "common/sorted_vector.hpp"
 #include "annotation/representation/base/annotation.hpp"
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
 
@@ -166,7 +167,8 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
     uint8_t count_width_;
     uint64_t max_count_;
     std::vector<sdsl::int_vector<>> relation_counts_;
-    std::vector<Vector<std::pair<Index, uint64_t>>> coords_;
+    std::vector<common::SortedVector<std::pair<Index, uint64_t>>> coords_;
+    std::vector<uint64_t> max_coord_; // stores max coord stored in |coords_|
 
     using MultiLabelEncoded<Label>::label_encoder_;
 };
