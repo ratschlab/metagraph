@@ -167,6 +167,7 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
     uint8_t count_width_;
     uint64_t max_count_;
     std::vector<sdsl::int_vector<>> relation_counts_;
+    // depending on parameters, coords are stored in RAM or in chunks dumped to disk
     std::vector<common::SortedVector<std::pair<Index, uint64_t>>> coords_;
     std::vector<uint64_t> max_coord_; // stores max coord stored in |coords_|
 

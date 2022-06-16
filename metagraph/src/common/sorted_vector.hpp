@@ -14,6 +14,9 @@
 namespace mtg {
 namespace common {
 
+// A class for buffering unsorted objects. The collected objects can later be
+// iterated in the sorted order. All objects are either stored fully in RAM or
+// dumped to disk in smaller chunks of size `buffer_size`.
 template <typename T>
 class SortedVector {
   public:
@@ -42,7 +45,7 @@ class SortedVector {
             std::cerr << "ERROR: Failed to destruct SortedVector: "
                       << e.what() << std::endl;
         } catch (...) {
-            std::cerr << "ERROR: Failed to destruct SortedVector";
+            std::cerr << "ERROR: Failed to destruct SortedVector" << std::endl;
         }
     }
 
@@ -100,13 +103,13 @@ class SortedVector {
         merged_ = true;
     }
 
-    // release the buffer if `final = true`
-    void flush(bool final = false) {
+    // The object cannot be used after flush(true) is called
+    void flush(bool release_buffer = false) {
         if (tmp_dir_.empty() || (buffer_.empty() && num_chunks_))
             return;
         ips4o::parallel::sort(buffer_.begin(), buffer_.end(), std::less<>(), num_threads_);
         elias_fano::EliasFanoEncoderBuffered<T>::append_block(buffer_, tmp_file(num_chunks_++));
-        if (final) {
+        if (release_buffer) {
             buffer_ = std::vector<T>();
         } else {
             buffer_.resize(0);

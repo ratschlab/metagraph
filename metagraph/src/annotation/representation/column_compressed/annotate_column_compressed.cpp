@@ -10,6 +10,7 @@
 #include "common/serialization.hpp"
 #include "common/utils/string_utils.hpp"
 #include "common/logger.hpp"
+#include "common/unix_tools.hpp"
 #include "common/vectors/bitmap_builder.hpp"
 #include "common/vectors/bitmap_mergers.hpp"
 #include "common/vectors/bit_vector_adaptive.hpp"
@@ -243,9 +244,13 @@ void ColumnCompressed<Label>::serialize_counts(const std::string &filename) cons
         logger->error("Could not open file for writing: {}", counts_fname);
         throw std::ofstream::failure("Bad stream");
     }
+    logger->trace("Starting serializing counts to {}", counts_fname);
 
     uint64_t num_counts = 0;
     uint64_t sum_counts = 0;
+
+    Timer timer;
+    double reopen_file_time = 0;
 
     for (size_t j = 0; j < relation_counts_.size(); ++j) {
         if (!relation_counts_[j].size()) {
@@ -268,16 +273,20 @@ void ColumnCompressed<Label>::serialize_counts(const std::string &filename) cons
             if (packed_width == relation_counts_[j].width()) {
                 relation_counts_[j].serialize(out);
             } else {
+                timer.reset();
                 size_t offset = out.tellp();
                 out.close();
                 {
                     sdsl::int_vector_buffer<> packed_counts(counts_fname, std::ios::out, 1024*1024,
                                                             packed_width, false, offset);
+                    reopen_file_time += timer.elapsed();
                     for (size_t c : relation_counts_[j]) {
                         packed_counts.push_back(c);
                     }
                 }
+                timer.reset();
                 out = std::ofstream(counts_fname, std::ios::binary | std::ios::app);
+                reopen_file_time += timer.elapsed();
             }
         }
     }
@@ -285,6 +294,8 @@ void ColumnCompressed<Label>::serialize_counts(const std::string &filename) cons
     for (size_t j = relation_counts_.size(); j < bitmatrix_.size(); ++j) {
         sdsl::int_vector<>(bitmatrix_[j]->num_set_bits(), 0, 1).serialize(out);
     }
+
+    logger->trace("Time overhead to close/re-open the file: {:.2} sec", reopen_file_time);
 
     logger->info("Num relation counts: {}", num_counts);
     logger->info("Relation counts sum: {}", sum_counts);
