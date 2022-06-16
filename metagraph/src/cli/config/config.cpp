@@ -249,7 +249,7 @@ Config::Config(int argc, char *argv[]) {
         } else if (!strcmp(argv[i], "--align-post-chain")) {
             alignment_post_chain = true;
         } else if (!strcmp(argv[i], "--align-no-seed-complexity-filter")) {
-            alignment_no_seed_complexity_filter = true;
+            alignment_seed_complexity_filter = false;
         } else if (!strcmp(argv[i], "--max-hull-depth")) {
             max_hull_depth = atoll(get_value(i++));
         } else if (!strcmp(argv[i], "--batch-align")) {
