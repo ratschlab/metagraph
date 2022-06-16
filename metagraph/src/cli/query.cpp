@@ -1153,7 +1153,7 @@ int query_graph(Config *config) {
                 && "only the best alignment is used in query");
 
         aligner_config.reset(new align::DBGAlignerConfig(
-            initialize_aligner_config(*config)
+            initialize_aligner_config(*config, *graph)
         ));
     }
 

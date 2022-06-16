@@ -27,12 +27,14 @@ using mtg::seq_io::kseq_t;
 using mtg::common::logger;
 
 
-DBGAlignerConfig initialize_aligner_config(const Config &config) {
+DBGAlignerConfig initialize_aligner_config(const Config &config,
+                                           const DeBruijnGraph &graph) {
     assert(config.alignment_num_alternative_paths);
 
     DBGAlignerConfig c = {
         .num_alternative_paths = config.alignment_num_alternative_paths,
-        .min_seed_length = config.alignment_min_seed_length,
+        .min_seed_length = std::min(config.alignment_min_seed_length,
+                                    graph.get_k()),
         .max_seed_length = config.alignment_max_seed_length,
         .max_num_seeds_per_locus = config.alignment_max_num_seeds_per_locus,
         .min_path_score = config.alignment_min_path_score,
@@ -352,7 +354,7 @@ int align_to_graph(Config *config) {
         return 0;
     }
 
-    DBGAlignerConfig aligner_config = initialize_aligner_config(*config);
+    DBGAlignerConfig aligner_config = initialize_aligner_config(*config, *graph);
 
     std::unique_ptr<AnnotatedDBG> anno_dbg;
     if (config->infbase_annotators.size()) {
