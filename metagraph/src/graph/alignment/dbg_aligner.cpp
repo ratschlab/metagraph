@@ -105,6 +105,7 @@ std::pair<Alignment, Alignment> split_seed(const DeBruijnGraph &graph,
 
 void filter_seed(const Alignment &prev, Alignment &a) {
     if (!prev.has_annotation()) {
+        DEBUG_LOG("Skipping seed {}", a);
         a = Alignment();
     } else if (prev.label_coordinates.empty()) {
         Vector<Alignment::Column> diff;
@@ -114,6 +115,7 @@ void filter_seed(const Alignment &prev, Alignment &a) {
                             prev.get_columns().end(),
                             std::back_inserter(diff));
         if (diff.empty()) {
+            DEBUG_LOG("Skipping seed {}", a);
             a = Alignment();
         } else {
             a.set_columns(std::move(diff));
@@ -138,6 +140,7 @@ void filter_seed(const Alignment &prev, Alignment &a) {
             }
         );
         if (diff.empty()) {
+            DEBUG_LOG("Skipping seed {}", a);
             a = Alignment();
         } else {
             a.set_columns(std::move(diff));

@@ -240,6 +240,8 @@ void append_range_nodes(const DBGSuccinct &dbg_succ,
                     }
                 }
             }
+
+            // TODO: this skips some stuff
         }
 
         if (i < num_positions) {
@@ -283,9 +285,23 @@ void SuffixSeeder<BaseSeeder>
 
     const DBGSuccinct &dbg_succ = get_base_dbg_succ(&this->graph_);
     auto add_seed = [&](size_t clipping, size_t length, node_index n) {
+        std::vector<node_index> path { n };
+        size_t offset = dbg_succ.get_k() - length;
+        std::string_view query_rest = this->query_.substr(clipping + length);
+        this->graph_.traverse(n, query_rest.begin(), query_rest.end(),
+            [&](node_index n) {
+                if (offset) {
+                    path.back() = n;
+                    --offset;
+                } else {
+                    path.push_back(n);
+                }
+                ++length;
+            },
+            [&]() { return length >= this->config_.max_seed_length; }
+        );
         seeds_.emplace_back(std::string_view(this->query_.data() + clipping, length),
-                            std::vector<node_index>{ n }, this->orientation_,
-                            dbg_succ.get_k() - length, clipping,
+                            std::move(path), this->orientation_, offset, clipping,
                             this->query_.size() - clipping - length);
     };
 
