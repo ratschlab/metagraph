@@ -457,14 +457,14 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
     assert(!best.empty());
 
     if (best.get_end_clipping()) {
-        logger->trace("Extending back");
+        DEBUG_LOG("Extending back");
         auto extensions = extender.get_extensions(best, config_.ninf, true);
         if (extensions.size()
                 && extensions[0].get_end_clipping() < best.get_end_clipping()
                 && extensions[0].get_score() > best.get_score()) {
             std::swap(best, extensions[0]);
         }
-        logger->trace("done");
+        DEBUG_LOG("done");
     }
 
     assert(!best.empty());
@@ -472,7 +472,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
     assert(best.is_valid(graph_, &config_));
 
     if (best.get_clipping()) {
-        logger->trace("Extending front");
+        DEBUG_LOG("Extending front");
         RCDBG rc_dbg(std::shared_ptr<const DeBruijnGraph>(
                         std::shared_ptr<const DeBruijnGraph>(), &graph_));
         const DeBruijnGraph &rc_graph = graph_.get_mode() != DeBruijnGraph::CANONICAL
@@ -494,7 +494,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
                     std::swap(best, extensions[0]);
             }
         }
-        logger->trace("done");
+        DEBUG_LOG("done");
     }
 
     assert(!best.empty());
