@@ -406,6 +406,12 @@ the annotation should be transformed to a representation that combines both the 
 (from ``*.column.annodbg``) and the count values (from ``*.column.annodbg.counts``).
 For more details, see section :ref:`transform_count_annotations`.
 
+Once the annotation is transformed, k-mer abundances can be queried with::
+
+    metagraph query --query-counts ...
+
+Note that if flag ``--query-counts`` is not passed, the index will be queried in the default k-mer presence/absence regime.
+
 
 .. _indexing coordinates:
 
@@ -438,8 +444,12 @@ All other flags (e.g., ``--separately`` and ``--disk-swap``) described above are
 Query k-mer coordinates
 """""""""""""""""""""""
 Once a coordinate-aware annotation is constructed, it can be transformed into a more memory-efficient representation supporting
-querying (see :ref:`transform_coord_annotations` below).
+querying (see :ref:`transform_coord_annotations` below) and then queried with::
 
+    metagraph query --query-coords ...
+
+As the coordinate-aware annotations also contain the information about k-mer abundance, they can be queried to retrieve k-mer counts (simply pass ``--query-counts`` instead of ``--query-coords``).
+Note that if neither ``--query-coords`` nor ``--query-counts`` is passed, the index will be queried in the default k-mer presence/absence regime.
 
 .. _transform annotation:
 
