@@ -524,15 +524,15 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
     size_t num_explored_nodes = 0;
 
     if (config_.chain_alignments) {
-        auto fwd_seeds = forward_seeder.get_seeds();
-        auto bwd_seeds = reverse_seeder.get_seeds();
-        if (fwd_seeds.empty() && bwd_seeds.empty())
-            return std::make_tuple(num_seeds, num_extensions, num_explored_nodes);
-
         if (!has_coordinates()) {
             logger->error("Chaining only supported for seeds with coordinates. Skipping seed chaining.");
             exit(1);
         }
+
+        auto fwd_seeds = forward_seeder.get_seeds();
+        auto bwd_seeds = reverse_seeder.get_seeds();
+        if (fwd_seeds.empty() && bwd_seeds.empty())
+            return std::make_tuple(num_seeds, num_extensions, num_explored_nodes);
 
         AlignmentAggregator<AlignmentCompare> aggregator(config_);
         tsl::hopscotch_set<Alignment::Column> all_columns;
@@ -561,9 +561,11 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
                     logger->trace("Chain: score: {}; exact match fraction: {}",
                                   score, exact_match_fraction);
 
+#ifndef NDEBUG
                     for (const auto &[chain, dist] : chain) {
-                        logger->trace("\t{}\tdist: {}", chain, dist);
+                        DEBUG_LOG("\t{}\tdist: {}", chain, dist);
                     }
+#endif
 
                     if (exact_match_fraction < config_.min_exact_match)
                         throw std::bad_function_call();
