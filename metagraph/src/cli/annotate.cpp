@@ -203,8 +203,9 @@ void add_kmer_counts(const std::string &file,
 void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                    const Config &config,
                    const std::vector<std::string> &files,
-                   const std::string &annotator_filename) {
-    auto anno_graph = initialize_annotated_dbg(graph, config);
+                   const std::string &annotator_filename,
+                   size_t num_chunks_open = 2000) {
+    auto anno_graph = initialize_annotated_dbg(graph, config, num_chunks_open);
     const size_t k = anno_graph->get_graph().get_k();
 
     bool forward_and_reverse = config.forward_and_reverse;
@@ -507,7 +508,8 @@ int annotate_graph(Config *config) {
             annotate_data(graph, *config, { files[i] },
                 config->outfbase.size()
                     ? config->outfbase + "/" + utils::split_string(files[i], "/").back()
-                    : files[i]);
+                    : files[i],
+                2000 / std::max((size_t)1, num_threads));
         }
     }
 

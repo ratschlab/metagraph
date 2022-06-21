@@ -31,7 +31,8 @@ ColumnCompressed<Label>::ColumnCompressed(uint64_t num_rows,
                                           size_t num_columns_cached,
                                           const std::string &swap_dir,
                                           uint64_t buffer_size_bytes,
-                                          uint8_t count_width)
+                                          uint8_t count_width,
+                                          size_t max_chunks_open)
       : num_rows_(num_rows),
         swap_dir_(swap_dir),
         buffer_size_bytes_(buffer_size_bytes),
@@ -43,7 +44,8 @@ ColumnCompressed<Label>::ColumnCompressed(uint64_t num_rows,
                             delete column_builder;
                         }),
         count_width_(count_width),
-        max_count_(sdsl::bits::lo_set[count_width]) {}
+        max_count_(sdsl::bits::lo_set[count_width]),
+        max_chunks_open_(max_chunks_open) {}
 
 template <typename Label>
 ColumnCompressed<Label>::ColumnCompressed(sdsl::bit_vector&& column,
@@ -51,9 +53,10 @@ ColumnCompressed<Label>::ColumnCompressed(sdsl::bit_vector&& column,
                                           size_t num_columns_cached,
                                           const std::string &swap_dir,
                                           uint64_t buffer_size_bytes,
-                                          uint8_t count_width)
+                                          uint8_t count_width,
+                                          size_t max_chunks_open)
       : ColumnCompressed(column.size(),
-                         num_columns_cached, swap_dir, buffer_size_bytes, count_width) {
+                         num_columns_cached, swap_dir, buffer_size_bytes, count_width, max_chunks_open) {
     label_encoder_.insert_and_encode(column_label);
     bitmatrix_.resize(1);
     cached_columns_.Put(0, new bitmap_vector(std::move(column)));
@@ -66,9 +69,10 @@ ColumnCompressed<Label>::ColumnCompressed(std::vector<std::unique_ptr<bit_vector
                                           size_t num_columns_cached,
                                           const std::string &swap_dir,
                                           uint64_t buffer_size_bytes,
-                                          uint8_t count_width)
+                                          uint8_t count_width,
+                                          size_t max_chunks_open)
       : ColumnCompressed(columns.at(0)->size(),
-                         num_columns_cached, swap_dir, buffer_size_bytes, count_width) {
+                         num_columns_cached, swap_dir, buffer_size_bytes, count_width, max_chunks_open) {
     bitmatrix_ = std::move(columns);
     label_encoder_ = label_encoder;
     flushed_ = true;
@@ -176,7 +180,8 @@ void ColumnCompressed<Label>::add_label_coords(const std::vector<std::pair<Index
     while (coords_.size() < num_labels()) {
         coords_.emplace_back(get_num_threads(),
                              buffer_size_bytes_ / sizeof(std::pair<Index, uint64_t>),
-                             swap_dir_);
+                             swap_dir_,
+                             max_chunks_open_);
     }
     max_coord_.resize(num_labels(), 0);
 
