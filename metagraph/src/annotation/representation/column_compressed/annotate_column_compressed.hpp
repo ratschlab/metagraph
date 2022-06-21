@@ -8,6 +8,7 @@
 
 #include "common/vectors/bit_vector.hpp"
 #include "common/vector.hpp"
+#include "common/sorted_vector.hpp"
 #include "annotation/representation/base/annotation.hpp"
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
 
@@ -34,21 +35,24 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
                      size_t num_columns_cached = 1,
                      const std::string &swap_dir = "",
                      uint64_t buffer_size_bytes = 1e9,
-                     uint8_t count_width = 8);
+                     uint8_t count_width = 8,
+                     size_t max_chunks_open = 2000);
 
     ColumnCompressed(sdsl::bit_vector&& column,
                      const std::string &column_label,
                      size_t num_columns_cached = 1,
                      const std::string &swap_dir = "",
                      uint64_t buffer_size_bytes = 1e9,
-                     uint8_t count_width = 8);
+                     uint8_t count_width = 8,
+                     size_t max_chunks_open = 2000);
 
     ColumnCompressed(std::vector<std::unique_ptr<bit_vector>>&& columns,
                      const LabelEncoder<Label> &label_encoder,
                      size_t num_columns_cached = 1,
                      const std::string &swap_dir = "",
                      uint64_t buffer_size_bytes = 1e9,
-                     uint8_t count_width = 8);
+                     uint8_t count_width = 8,
+                     size_t max_chunks_open = 2000);
 
     ColumnCompressed(const ColumnCompressed&) = delete;
     ColumnCompressed& operator=(const ColumnCompressed&) = delete;
@@ -166,7 +170,10 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
     uint8_t count_width_;
     uint64_t max_count_;
     std::vector<sdsl::int_vector<>> relation_counts_;
-    std::vector<Vector<std::pair<Index, uint64_t>>> coords_;
+    // depending on parameters, coords are stored in RAM or in chunks dumped to disk
+    std::vector<common::SortedVector<std::pair<Index, uint64_t>>> coords_;
+    std::vector<uint64_t> max_coord_; // stores max coord stored in |coords_|
+    size_t max_chunks_open_;
 
     using MultiLabelEncoded<Label>::label_encoder_;
 };

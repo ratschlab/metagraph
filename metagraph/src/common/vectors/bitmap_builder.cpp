@@ -26,7 +26,7 @@ bitmap_builder_set_disk::~bitmap_builder_set_disk() {
         std::cerr << "ERROR: Failed to destruct bitmap_builder_set_disk: "
                   << e.what() << std::endl;
     } catch (...) {
-        std::cerr << "ERROR: Failed to destruct bitmap_builder_set_disk";
+        std::cerr << "ERROR: Failed to destruct bitmap_builder_set_disk" << std::endl;
     }
 }
 

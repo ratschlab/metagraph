@@ -3,6 +3,7 @@ from parameterized import parameterized
 import subprocess
 from subprocess import PIPE
 from tempfile import TemporaryDirectory
+import filecmp
 import glob
 import os
 from base import TestingBase
@@ -336,6 +337,41 @@ class TestAnnotate(TestingBase):
 
         res = subprocess.run([annotate_command], shell=True)
         self.assertEqual(res.returncode, 0)
+
+    @parameterized.expand(GRAPH_TYPES)
+    def test_annotate_coordinates_with_disk_swap(self, graph_repr):
+
+        construct_command = f'{METAGRAPH} build --mask-dummy -p {NUM_THREADS} \
+                              --graph {graph_repr} -k 11 \
+                              -o {self.tempdir.name}/graph \
+                              {TEST_DATA_DIR}/transcripts_100.fa'
+
+        res = subprocess.run([construct_command], shell=True)
+        self.assertEqual(res.returncode, 0)
+
+        # build annotation with disk swap
+        annotate_command = f'{METAGRAPH} annotate --anno-header -p {NUM_THREADS} --coordinates \
+                            --disk-swap {self.tempdir.name} --mem-cap-gb 1e-6 \
+                            -i {self.tempdir.name}/graph{graph_file_extension[graph_repr]} \
+                            -o {self.tempdir.name}/annotation \
+                            {TEST_DATA_DIR}/transcripts_100.fa'
+
+        res = subprocess.run([annotate_command], shell=True)
+        self.assertEqual(res.returncode, 0)
+
+        # build annotation in RAM
+        annotate_command = f'{METAGRAPH} annotate --anno-header -p {NUM_THREADS} --coordinates \
+                            -i {self.tempdir.name}/graph{graph_file_extension[graph_repr]} \
+                            -o {self.tempdir.name}/annotation_ram \
+                            {TEST_DATA_DIR}/transcripts_100.fa'
+
+        res = subprocess.run([annotate_command], shell=True)
+        self.assertEqual(res.returncode, 0)
+
+        self.assertTrue(filecmp.cmp(f'{self.tempdir.name}/annotation.column.annodbg',
+                                    f'{self.tempdir.name}/annotation_ram.column.annodbg'))
+        self.assertTrue(filecmp.cmp(f'{self.tempdir.name}/annotation.column.annodbg.coords',
+                                    f'{self.tempdir.name}/annotation_ram.column.annodbg.coords'))
 
 
 if __name__ == '__main__':
