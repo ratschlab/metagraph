@@ -83,9 +83,8 @@ void call_annotations(const std::string &file,
 
                 if (logger->level() <= spdlog::level::level_enum::trace
                                                 && total_seqs % 10000 == 0) {
-                    logger->trace(
-                        "processed {} sequences, trying to annotate as <{}>, {} sec",
-                        total_seqs, fmt::join(labels, "><"), timer.elapsed());
+                    logger->trace("processed {} sequences, annotated as <{}>, {} sec",
+                                  total_seqs, fmt::join(labels, "><"), timer.elapsed());
                 }
             },
             graph.get_mode() != graph::DeBruijnGraph::CANONICAL, // |call_both_from_canonical|
@@ -117,7 +116,7 @@ void call_annotations(const std::string &file,
 
                 if (logger->level() <= spdlog::level::level_enum::trace
                                                 && total_seqs % 10000 == 0) {
-                    logger->trace("processed {} sequences, last was {}, trying to annotate as <{}>, {} sec",
+                    logger->trace("processed {} sequences, last was {}, annotated as <{}>, {} sec",
                                   total_seqs, read_stream->name.s, fmt::join(labels, "><"), timer.elapsed());
                 }
 
@@ -191,7 +190,7 @@ void add_kmer_counts(const std::string &file,
 
             if (logger->level() <= spdlog::level::level_enum::trace
                                             && total_seqs % 10000 == 0) {
-                logger->trace("processed {} sequences, last was {}, trying to annotate as <{}>, {} sec",
+                logger->trace("processed {} sequences, last was {}, annotated as <{}>, {} sec",
                               total_seqs, read_stream->name.s, fmt::join(labels, "><"), timer.elapsed());
             }
 
@@ -450,7 +449,7 @@ void annotate_coordinates(const std::vector<std::string> &files,
 
                     if (logger->level() <= spdlog::level::level_enum::trace
                                                     && total_seqs % 10000 == 0) {
-                        logger->trace("processed {} sequences, last was {}, trying to annotate as <{}>, {} sec",
+                        logger->trace("processed {} sequences, last was {}, annotated as <{}>, {} sec",
                                       total_seqs, read_stream->name.s, fmt::join(labels, "><"), timer.elapsed());
                     }
 

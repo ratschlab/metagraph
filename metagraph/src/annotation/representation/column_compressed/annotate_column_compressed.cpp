@@ -374,6 +374,7 @@ void ColumnCompressed<Label>::serialize_coordinates(const std::string &filename)
             c_v.flush();
             std::vector<std::pair<Index, uint64_t>> buffer;
             buffer.swap(c_v.get_buffer());
+            buffer.resize(0);
 
             std::pair<Index, uint64_t> last = { -1, -1 };
 
