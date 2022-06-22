@@ -210,6 +210,13 @@ Examples:
 make build-metagraph env=docker alphabet=DNA
 ```
 
+### Update and create a new release
+
+Creating a new version release is done in three steps:
+
+1. Update package.json and set the version
+2. Add a tag with that new version
+3. Make a new release on github
 
 ## License
 Metagraph is distributed under the GPLv3 License (see LICENSE).
