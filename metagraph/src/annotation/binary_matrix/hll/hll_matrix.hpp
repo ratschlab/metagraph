@@ -39,9 +39,10 @@ class HLLMatrix : public BinaryMatrix {
         }
 
         columns_.resize(files.size(), precision_);
-        std::atomic<uint64_t> n_cols{columns_.size()};
+
         std::atomic<uint64_t> a_num_rows{0};
         std::atomic<uint64_t> a_num_rels{0};
+        /*
         std::mutex mu;
         ColumnCompressed<>::merge_load(files, [&](uint64_t idx, const auto&, auto&& col) {
             if (a_num_rows == 0)
@@ -58,6 +59,19 @@ class HLLMatrix : public BinaryMatrix {
 
             col->call_ones([&](size_t i) { columns_[idx].insert(hasher_(i)); });
         }, num_threads);
+        */
+        #pragma omp parallel for num_threads(num_threads)
+        for (size_t i = 0; i < files.size(); ++i) {
+            ColumnCompressed<> col;
+            col.load(files[i]);
+            if (a_num_rows == 0)
+                a_num_rows += col.get_matrix().num_rows();
+
+            a_num_rels += col.get_matrix().num_relations();
+            col.get_matrix().call_columns({0}, [&](size_t, const auto &bm) {
+                bm.call_ones([&](size_t j) { columns_[i].insert(hasher_(j)); });
+            });
+        }
 
         num_rows_ = a_num_rows;
         num_relations_ = a_num_rels;
