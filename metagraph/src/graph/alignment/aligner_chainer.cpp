@@ -1163,6 +1163,7 @@ LabelChangeScorer make_label_change_scorer(const IDBGAligner &aligner) {
                 return ninf;
 
             const auto &hll = hll_wrapper->data();
+            /*
             auto [union_est, inter_est]
                 = hll.estimate_column_union_intersection_cardinality(ref_columns,
                                                                      diff_columns);
@@ -1170,6 +1171,15 @@ LabelChangeScorer make_label_change_scorer(const IDBGAligner &aligner) {
             return inter_est > 0.0
                 ? score_t(log2(inter_est) - log2(union_est)) * config.score_matrix[c][c]
                 : ninf;
+            */
+            auto [a_size, b_size, union_size] = hll.estimate_column_sizes_union_cardinality(ref_columns[0], diff_columns[0]);
+            uint64_t size_sum = a_size + b_size;
+            if (union_size < size_sum)
+                return ninf;
+
+            double dbsize = b_size;
+            score_t label_change_score = log2(std::min(dbsize, size_sum - union_size)) - log2(dbsize);
+            return label_change_score * config.score_matrix[c][c];
         };
     }
 

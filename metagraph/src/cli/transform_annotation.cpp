@@ -684,15 +684,18 @@ int transform_annotation(Config *config) {
         }
 
         auto annotator = std::make_unique<ColumnCompressed<>>(0);
+        /*
         logger->trace("Loading annotation from disk...");
         if (!annotator->merge_load(files)) {
             logger->error("Cannot load annotations");
             exit(1);
         }
         logger->trace("Annotation loaded in {} sec", timer.elapsed());
+        */
 
         logger->trace("Sketching annotator");
-        annot::binmat::HLLMatrix<> hll(annotator->get_matrix().data(), config->sketch_precision);
+        annot::binmat::HLLMatrix<> hll(files, config->sketch_precision, get_num_threads());
+        //annot::binmat::HLLMatrix<> hll(annotator->get_matrix().data(), config->sketch_precision);
         std::ofstream fout(config->outfbase + ".hll", std::ios::binary);
         hll.serialize(fout);
         logger->trace("Done");

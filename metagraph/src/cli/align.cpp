@@ -13,7 +13,6 @@
 #include "graph/annotated_dbg.hpp"
 #include "graph/graph_extensions/node_rc.hpp"
 #include "graph/graph_extensions/node_first_cache.hpp"
-#include "graph/graph_extensions/mer_distances.hpp"
 #include "graph/graph_extensions/hll_wrapper.hpp"
 #include "seq_io/sequence_io.hpp"
 #include "config/config.hpp"

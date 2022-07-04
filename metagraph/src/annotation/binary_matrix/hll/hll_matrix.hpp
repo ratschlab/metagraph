@@ -2,6 +2,7 @@
 #define __HLL_MATRIX_HPP__
 
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
+#include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 #include "common/hashers/hll_counter.hpp"
 #include "common/serialization.hpp"
 
@@ -29,7 +30,40 @@ class HLLMatrix : public BinaryMatrix {
     typedef HLLCounter ColumnSketch;
 
     HLLMatrix() {}
-    HLLMatrix(const std::vector<std::unique_ptr<bit_vector>> &columns, double precision)
+    HLLMatrix(const std::vector<std::string> &files, double precision, size_t num_threads = 1)
+          : precision_(precision) {
+        if (files.empty()) {
+            num_rows_ = 0;
+            num_relations_ = 0;
+            return;
+        }
+
+        columns_.resize(files.size(), precision_);
+        std::atomic<uint64_t> n_cols{columns_.size()};
+        std::atomic<uint64_t> a_num_rows{0};
+        std::atomic<uint64_t> a_num_rels{0};
+        std::mutex mu;
+        ColumnCompressed<>::merge_load(files, [&](uint64_t idx, const auto&, auto&& col) {
+            if (a_num_rows == 0)
+                a_num_rows = col->size();
+
+            a_num_rels.fetch_add(col->size(), std::memory_order_relaxed);
+            if (idx >= n_cols) {
+                std::unique_lock<std::mutex> lock(mu);
+                if (idx >= n_cols) {
+                    n_cols = idx + 1;
+                    columns_.resize(n_cols, precision_);
+                }
+            }
+
+            col->call_ones([&](size_t i) { columns_[idx].insert(hasher_(i)); });
+        }, num_threads);
+
+        num_rows_ = a_num_rows;
+        num_relations_ = a_num_rels;
+    }
+
+    HLLMatrix(const std::vector<std::unique_ptr<bit_vector>> &columns, double precision, size_t num_threads = 1)
           : precision_(precision) {
         if (columns.empty()) {
             num_rows_ = 0;
@@ -63,6 +97,14 @@ class HLLMatrix : public BinaryMatrix {
         }
 
         return result;
+    }
+
+    std::tuple<uint64_t, uint64_t, double>
+    estimate_column_sizes_union_cardinality(Column a, Column b) const {
+        ColumnSketch a_sketch = get_column_sketch(a);
+        const ColumnSketch &b_sketch = get_column_sketch(b);
+        a_sketch.merge(b_sketch);
+        return { num_set_bits_[a], num_set_bits_[b], a_sketch.estimate_cardinality() };
     }
 
     std::pair<double, double>

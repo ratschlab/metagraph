@@ -266,15 +266,16 @@ void LabeledExtender
             assert(next_labels);
 
             Columns intersect_labels;
+            std::set_intersection(columns.begin(), columns.end(),
+                                  next_labels->begin(), next_labels->end(),
+                                  std::back_inserter(intersect_labels));
+            /*
             Columns diff_labels;
             utils::set_intersection_difference(next_labels->begin(), next_labels->end(),
                                                columns.begin(), columns.end(),
                                                std::back_inserter(intersect_labels),
                                                std::back_inserter(diff_labels));
-            // std::set_intersection(columns.begin(), columns.end(),
-            //                       next_labels->begin(), next_labels->end(),
-            //                       std::back_inserter(intersect_labels));
-
+            */
             if (intersect_labels.size()) {
                 if (config_.label_change_union) {
                     node_labels_.push_back(node_labels_[table_i]);
@@ -284,6 +285,7 @@ void LabeledExtender
                 }
                 node_labels_switched_.emplace_back(false);
                 callback(next, c, score);
+            /*
             } else if (diff_labels.size()) {
                 const auto *canonical = dynamic_cast<const CanonicalDBG*>(graph_);
                 const DeBruijnGraph *base_graph = canonical
@@ -344,9 +346,10 @@ void LabeledExtender
                             callback(next, c, score + best_score);
                         }
                     }
-                } else {
-                    throw std::runtime_error("not implemented yet");
+                // } else {
+                //     throw std::runtime_error("not implemented yet");
                 }
+                */
             }
         }
 
