@@ -698,7 +698,8 @@ BOSS::Chunk construct_boss_chunk_disk(KmerCollector &kmer_collector,
         // merge chunks into a single one and remove them
         const std::function<void(const T_INT_REAL &)> write
                 = [&](const T_INT_REAL &v) { out.add(v); };
-        elias_fano::merge_files(chunks_to_merge, write, true, std::max(1, 1000 / num_threads));
+        const size_t max_chunks_open = std::max((size_t)1, 1000 / num_threads);
+        elias_fano::merge_files(chunks_to_merge, write, true, max_chunks_open);
         out.finish();
         logger->trace("Merged {} chunks into {} with {} k-mers",
                       chunks_to_merge.size(), real_F_W[j], out.size());

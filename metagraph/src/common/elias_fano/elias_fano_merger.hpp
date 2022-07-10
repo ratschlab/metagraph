@@ -223,7 +223,7 @@ void merge_files(std::vector<std::string> sources,
                     EliasFanoEncoderBuffered<T>::append_block(buf, new_chunks.back());
                     buf.resize(0);
                 }
-            });
+            }, remove_sources);
             if (buf.size()) {
                 EliasFanoEncoderBuffered<T>::append_block(buf, new_chunks.back());
             }
