@@ -24,6 +24,9 @@ size_t get_curr_RSS();
 size_t get_peak_RSS();
 
 
+size_t get_max_files_open();
+
+
 class Timer {
   public:
     Timer() { reset(); }

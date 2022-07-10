@@ -111,6 +111,14 @@ size_t get_curr_RSS()
 }
 
 
+size_t get_max_files_open() {
+    struct rlimit lim;
+    getrlimit(RLIMIT_NOFILE, &lim);
+    rlim_t max_files = lim.rlim_cur;
+    return max_files;
+}
+
+
 bool stderr_to_terminal() {
     return isatty(STDERR_FILENO);
 }

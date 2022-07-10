@@ -685,6 +685,11 @@ BOSS::Chunk construct_boss_chunk_disk(KmerCollector &kmer_collector,
     // for a DNA alphabet, this will contain 16 chunks, split by kmer[0] and kmer[1]
     std::vector<std::string> real_F_W(std::pow(KmerExtractor2Bit().alphabet.size(), 2));
 
+    const size_t R = (2 + utils::is_pair_v<T>) * std::min(num_threads, real_F_W.size());
+    const size_t max_chunks_open = std::max((size_t)2, (get_max_files_open() - R) / R);
+    logger->trace("Max number of files open by process: {}", get_max_files_open());
+    logger->trace("Merging maximum {} chunks per thread at a time...", max_chunks_open);
+
     uint64_t total_num_kmers = 0;
     // merge each group of chunks into a single one for each F and W
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
@@ -698,7 +703,6 @@ BOSS::Chunk construct_boss_chunk_disk(KmerCollector &kmer_collector,
         // merge chunks into a single one and remove them
         const std::function<void(const T_INT_REAL &)> write
                 = [&](const T_INT_REAL &v) { out.add(v); };
-        const size_t max_chunks_open = std::max((size_t)1, 1000 / num_threads);
         elias_fano::merge_files(chunks_to_merge, write, true, max_chunks_open);
         out.finish();
         logger->trace("Merged {} chunks into {} with {} k-mers",
