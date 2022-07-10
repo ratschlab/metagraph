@@ -675,18 +675,31 @@ BOSS::Chunk construct_boss_chunk_disk(KmerCollector &kmer_collector,
     auto &container = kmer_collector.container();
     const std::vector<std::string> chunk_fnames = container.get_chunks();
 
+    const size_t max_files_open = get_max_files_open();
+    const size_t A2 = std::pow(KmerExtractor2Bit().alphabet.size(), 2);
+    size_t split_parallel = std::min(num_threads, chunk_fnames.size());
+    if (split_parallel * (A2 + 1) * (2 + utils::is_pair_v<T>) > max_files_open) {
+        if ((split_parallel = max_files_open / ((A2 + 1) * (2 + utils::is_pair_v<T>)))) {
+            logger->warn("Will use only {} threads in order not to exceed the allowed number of open files."
+                         " Consider increasing the limit.", split_parallel);
+        } else {
+            logger->error("The limit of the max number of files open by process is too low: {}. Increase it.",
+                          max_files_open);
+            exit(1);
+        }
+    }
     // split each chunk by F and W
     std::vector<std::vector<std::string>> chunks_split(chunk_fnames.size());
-    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+    #pragma omp parallel for num_threads(split_parallel) schedule(dynamic)
     for (size_t i = 0; i < chunk_fnames.size(); ++i) {
         chunks_split[i] = split<T_REAL>(k, chunk_fnames[i]);
     }
 
     // for a DNA alphabet, this will contain 16 chunks, split by kmer[0] and kmer[1]
-    std::vector<std::string> real_F_W(std::pow(KmerExtractor2Bit().alphabet.size(), 2));
+    std::vector<std::string> real_F_W(A2);
 
     const size_t R = (2 + utils::is_pair_v<T>) * std::min(num_threads, real_F_W.size());
-    const size_t max_chunks_open = std::max((size_t)2, (get_max_files_open() - R) / R);
+    const size_t max_chunks_open = std::max((size_t)2, (max_files_open - R) / R);
     logger->trace("Max number of files open by process: {}", get_max_files_open());
     logger->trace("Merging maximum {} chunks per thread at a time...", max_chunks_open);
 
