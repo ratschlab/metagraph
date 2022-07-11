@@ -193,7 +193,7 @@ void merge_files(std::vector<std::string> sources,
         return;
 
     // if there are too many chunks, merge them into larger ones
-    assert(max_sources_open >= 2);
+    assert(max_sources_open >= 3);
     while (sources.size() > max_sources_open) {
         // chunk 0 may be special (e.g. storing only fwd bits) and hence
         // never pre-merged
@@ -201,7 +201,7 @@ void merge_files(std::vector<std::string> sources,
         size_t i = 1;
         while (i < sources.size()) {
             std::vector<std::string> to_merge;
-            while (i < sources.size() && to_merge.size() < max_sources_open) {
+            while (i < sources.size() && to_merge.size() + 1 < max_sources_open) {
                 to_merge.push_back(sources[i++]);
             }
 
@@ -211,7 +211,7 @@ void merge_files(std::vector<std::string> sources,
                 continue;
             }
 
-            assert(to_merge.size() <= max_sources_open);
+            assert(to_merge.size() + 1 <= max_sources_open);
 
             new_chunks.push_back(to_merge.at(0) + "_premerged");
             std::vector<T> buf;

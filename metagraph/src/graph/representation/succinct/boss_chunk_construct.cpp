@@ -699,7 +699,7 @@ BOSS::Chunk construct_boss_chunk_disk(KmerCollector &kmer_collector,
     std::vector<std::string> real_F_W(A2);
 
     const size_t R = (2 + utils::is_pair_v<T>) * std::min(num_threads, real_F_W.size());
-    const size_t max_chunks_open = std::max((size_t)2, (max_files_open - R) / R);
+    const size_t max_chunks_open = std::max((size_t)3, (max_files_open - R) / R);
     logger->trace("Max number of files open by process: {}", get_max_files_open());
     logger->trace("Merging maximum {} chunks per thread at a time...", max_chunks_open);
 
