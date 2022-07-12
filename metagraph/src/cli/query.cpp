@@ -1204,7 +1204,9 @@ Alignment align_sequence(std::string *seq,
                          const align::DBGAlignerConfig &aligner_config) {
     const DeBruijnGraph &graph = anno_graph.get_graph();
     align::DBGAligner aligner(graph, aligner_config);
-    align::DBGAlignerConfig::score_t max_score = aligner.get_config().match_score(*seq);
+    const align::DBGAlignerConfig &revised_config = aligner.get_config();
+    align::DBGAlignerConfig::score_t max_score = revised_config.match_score(*seq)
+        + revised_config.left_end_bonus + revised_config.right_end_bonus;
     auto alignments = aligner.align(*seq);
 
     assert(alignments.size() <= 1 && "Only the best alignment is needed");
