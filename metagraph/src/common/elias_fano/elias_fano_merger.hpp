@@ -214,19 +214,9 @@ void merge_files(std::vector<std::string> sources,
             assert(to_merge.size() + 1 <= max_sources_open);
 
             new_chunks.push_back(to_merge.at(0) + "_premerged");
-            std::vector<T> buf;
-            buf.reserve(1024 * 1024);
-
-            merge_files<T>(to_merge, [&](T i) {
-                buf.push_back(i);
-                if (buf.size() == buf.capacity()) {
-                    EliasFanoEncoderBuffered<T>::append_block(buf, new_chunks.back());
-                    buf.resize(0);
-                }
-            }, remove_sources);
-            if (buf.size()) {
-                EliasFanoEncoderBuffered<T>::append_block(buf, new_chunks.back());
-            }
+            EliasFanoEncoderBuffered<T> out(new_chunks.back(), 1024 * 1024);
+            merge_files<T>(to_merge, [&](T i) { out.add(i); }, remove_sources);
+            out.finish();
         }
         sources.swap(new_chunks);
     }

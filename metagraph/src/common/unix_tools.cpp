@@ -27,6 +27,10 @@
 #error "Cannot define getPeakRSS( ) or getCurrentRSS( ) for an unknown OS."
 #endif
 
+#include "common/logger.hpp"
+
+using mtg::common::logger;
+
 
 /**
  * Returns the peak (maximum so far) resident set size (physical
@@ -118,6 +122,22 @@ size_t get_max_files_open() {
     return max_files;
 }
 
+int get_num_fds() {
+    FILE *p = popen(fmt::format("lsof -p {} | tail -n +2 | wc -l", getpid()).c_str(), "r");
+    if (!p) {
+        logger->error("Can't open pipe to check the number of file descriptors with `lsof`");
+        exit(1);
+    }
+
+    char buffer[1024];
+    char *ret = fgets(buffer, sizeof(buffer), p);
+    pclose(p);
+    if (!ret) {
+        logger->error("Can't parse output of `lsof` from pipe");
+        exit(1);
+    }
+    return std::atoi(buffer);
+}
 
 bool stderr_to_terminal() {
     return isatty(STDERR_FILENO);

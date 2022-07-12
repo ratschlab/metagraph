@@ -404,6 +404,27 @@ void skip_same_suffix(const KMER &el, Decoder &decoder, size_t suf) {
     }
 }
 
+int check_fd_and_adjust_threads(size_t num_threads, size_t fd_per_thread) {
+    const size_t max_fd = get_max_files_open() - std::min((size_t)get_num_fds(),
+                                                          get_max_files_open());
+
+    size_t n = max_fd / fd_per_thread;
+    if (!n) {
+        logger->error("The limit on the number of allowed file descriptors per process is too low"
+                      " (at least {}+{} are needed, the current limit is: {})."
+                      " Increase the limit with, e.g. `ulimit -S -n 4096`",
+                      get_max_files_open() - max_fd, fd_per_thread, get_max_files_open());
+        exit(1);
+    } else if (n < num_threads) {
+        logger->warn("Can open only {} more files. Only {} threads will be used"
+                     " in order not to exceed the allowed number of open files."
+                     " Consider increasing the limit with, e.g. `ulimit -S -n 4096`.",
+                     max_fd, n);
+        return n;
+    }
+    return num_threads;
+}
+
 /**
  * Generates ordered blocks of k-mers for the BOSS table.
  * Adds non-redundant dummy-1 source k-mers and dummy sink k-mers.
@@ -440,13 +461,20 @@ generate_dummy_1_kmers(size_t k,
         real_chunks.emplace_back(real_names[i], ENCODER_BUFFER_SIZE);
         dummy_sink_chunks.emplace_back(dummy_sink_names[i], ENCODER_BUFFER_SIZE);
     }
-    std::vector<Encoder<KMER_INT>> dummy_l1_chunks;
     std::vector<std::string> dummy_l1_names;
     for (TAlphabet F = 0; F <= alphabet_size; ++F) {
         for (TAlphabet W = 0; W <= alphabet_size; ++W) {
             dummy_l1_names.push_back(dir/fmt::format("dummy_source_1_{}_{}", F, W));
-            dummy_l1_chunks.emplace_back(dummy_l1_names.back(), ENCODER_BUFFER_SIZE);
         }
+    }
+    // write empty chunks
+    for (TAlphabet W = 0; W <= alphabet_size; ++W) {
+        Encoder<KMER_INT> out(dummy_l1_names[W * (alphabet_size+1)], ENCODER_BUFFER_SIZE);
+        out.finish();
+    }
+    for (TAlphabet F = 0; F < alphabet_size; ++F) {
+        Encoder<KMER_INT> out(dummy_l1_names[F+1], ENCODER_BUFFER_SIZE);
+        out.finish();
     }
 
     logger->trace("Generating dummy-1 source k-mers and dummy sink k-mers...");
@@ -456,8 +484,21 @@ generate_dummy_1_kmers(size_t k,
     // reset kmer[1] (the first character in k-mer, $ in dummy source) to zero
     KMER_INT kmer_delta_dummy = kmer_delta & ~KMER_INT(((1ull << L) - 1) << L);
 
-    #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 1)
+    size_t n_threads = check_fd_and_adjust_threads(num_threads,
+            2 * alphabet_size // `dummy_l1_chunks`
+                + (2 + utils::is_pair_v<T>) * alphabet_size // `it` (MergeDecoder)
+                + 2 // `sink_gen_it`
+    );
+
+    uint64_t num_source = 0;
+
+    #pragma omp parallel for num_threads(n_threads) schedule(dynamic, 1)
     for (TAlphabet F = 0; F < alphabet_size; ++F) {
+        std::vector<Encoder<KMER_INT>> dummy_l1_chunks;
+        for (TAlphabet next_F = 0; next_F < alphabet_size; ++next_F) {
+            dummy_l1_chunks.emplace_back(dummy_l1_names[(next_F+1) * (alphabet_size+1) + (F+1)],
+                                         ENCODER_BUFFER_SIZE);
+        }
         // stream k-mers of pattern ***F*
         std::vector<std::string> F_chunks(real_F_W.begin() + F * alphabet_size,
                                           real_F_W.begin() + (F + 1) * alphabet_size);
@@ -510,9 +551,15 @@ generate_dummy_1_kmers(size_t k,
             assert(F == dummy_source[0]);
             TAlphabet next_F = dummy_source[k];
             // lift all and reset the first character to the sentinel 0 (apply mask)
-            dummy_l1_chunks[(next_F+1) * (alphabet_size+1) + (F+1)].add(
-                kmer::transform<KMER>(dummy_source, k + 1) + kmer_delta_dummy);
+            dummy_l1_chunks[next_F].add(kmer::transform<KMER>(dummy_source, k + 1) + kmer_delta_dummy);
         }
+
+        for (auto &out : dummy_l1_chunks) {
+            out.finish();
+            #pragma omp atomic
+            num_source += out.size();
+        }
+
         // handle leftover sink_gen_it
         while (!sink_gen_it.empty()) {
             KMER_REAL v(sink_gen_it.pop());
@@ -525,15 +572,10 @@ generate_dummy_1_kmers(size_t k,
     elias_fano::remove_chunks(real_F_W);
 
     uint64_t num_sink = 0;
-    uint64_t num_source = 0;
     for (TAlphabet i = 0; i < alphabet_size; ++i) {
         real_chunks[i].finish();
         dummy_sink_chunks[i].finish();
         num_sink += dummy_sink_chunks[i].size();
-    }
-    for (auto &dummy_l1_chunk : dummy_l1_chunks) {
-        dummy_l1_chunk.finish();
-        num_source += dummy_l1_chunk.size();
     }
 
     logger->trace("Generated {} dummy sink and {} dummy source k-mers",
@@ -675,22 +717,12 @@ BOSS::Chunk construct_boss_chunk_disk(KmerCollector &kmer_collector,
     auto &container = kmer_collector.container();
     const std::vector<std::string> chunk_fnames = container.get_chunks();
 
-    const size_t max_files_open = get_max_files_open();
     const size_t A2 = std::pow(KmerExtractor2Bit().alphabet.size(), 2);
-    size_t split_parallel = std::min(num_threads, chunk_fnames.size());
-    if (split_parallel * (A2 + 1) * (2 + utils::is_pair_v<T>) > max_files_open) {
-        if ((split_parallel = max_files_open / ((A2 + 1) * (2 + utils::is_pair_v<T>)))) {
-            logger->warn("Will use only {} threads in order not to exceed the allowed number of open files."
-                         " Consider increasing the limit.", split_parallel);
-        } else {
-            logger->error("The limit of the max number of files open by process is too low: {}. Increase it.",
-                          max_files_open);
-            exit(1);
-        }
-    }
+    size_t n_threads = check_fd_and_adjust_threads(std::min(num_threads, chunk_fnames.size()),
+                                                   (A2 + 1) * (2 + utils::is_pair_v<T>));
     // split each chunk by F and W
     std::vector<std::vector<std::string>> chunks_split(chunk_fnames.size());
-    #pragma omp parallel for num_threads(split_parallel) schedule(dynamic)
+    #pragma omp parallel for num_threads(n_threads) schedule(dynamic)
     for (size_t i = 0; i < chunk_fnames.size(); ++i) {
         chunks_split[i] = split<T_REAL>(k, chunk_fnames[i]);
     }
@@ -698,14 +730,17 @@ BOSS::Chunk construct_boss_chunk_disk(KmerCollector &kmer_collector,
     // for a DNA alphabet, this will contain 16 chunks, split by kmer[0] and kmer[1]
     std::vector<std::string> real_F_W(A2);
 
-    const size_t R = (2 + utils::is_pair_v<T>) * std::min(num_threads, real_F_W.size());
-    const size_t max_chunks_open = std::max((size_t)3, (max_files_open - R) / R);
-    logger->trace("Max number of files open by process: {}", get_max_files_open());
+    n_threads = check_fd_and_adjust_threads(std::min(num_threads, real_F_W.size()),
+                                            4 * (2 + utils::is_pair_v<T>));
+    const size_t max_fd_open = get_max_files_open() - std::min((size_t)get_num_fds(),
+                                                               get_max_files_open());
+    const size_t max_chunks_open = max_fd_open / ((2 + utils::is_pair_v<T>) * n_threads) - 1;
+    assert(max_chunks_open >= 3);
     logger->trace("Merging maximum {} chunks per thread at a time...", max_chunks_open);
 
     uint64_t total_num_kmers = 0;
     // merge each group of chunks into a single one for each F and W
-    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+    #pragma omp parallel for num_threads(n_threads) schedule(dynamic)
     for (size_t j = 0; j < real_F_W.size(); ++j) {
         std::vector<std::string> chunks_to_merge(chunks_split.size());
         for (size_t i = 0; i < chunks_split.size(); ++i) {
@@ -758,12 +793,19 @@ reconstruct_dummy_source(const std::vector<std::string> &dummy_l1_names,
 
     // generate dummy k-mers of prefix length 1..k
     logger->trace("Starting generating dummy-1..k source k-mers...");
+
+    size_t n_threads = check_fd_and_adjust_threads(num_threads,
+            2 // `dummy_chunk`
+                + 2 * alphabet_size // `dummy_next_chunks`
+                + 2 * alphabet_size // `merge_files(F_chunk_names)`
+    );
+
     for (size_t dummy_pref_len = 1; dummy_pref_len <= k; ++dummy_pref_len) {
         // this will store blocks of source dummy k-mers of the current level
         uint64_t num_kmers = 0;
         result.emplace_back(alphabet_size);
         std::vector<std::string> next_names(alphabet_size * alphabet_size);
-        #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+        #pragma omp parallel for num_threads(n_threads) schedule(dynamic)
         for (TAlphabet F = 0; F < alphabet_size; ++F) {
             // will store sorted dummy source k-mers of pattern ***F*
             result.back()[F] = dir/fmt::format("dummy_source_{}_{}", dummy_pref_len, F);
@@ -927,7 +969,9 @@ BOSS::Chunk build_boss(const std::vector<std::string> &real_names,
                                             k, bits_per_count, swap_dir);
     logger->trace("Chunk ..$. constructed");
     // construct all other chunks in parallel
-    #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic)
+    size_t n_threads = check_fd_and_adjust_threads(num_threads,
+            (dummy_source_names.size() + 1) * 2 + (2 + utils::is_pair_v<T>) + 2);
+    #pragma omp parallel for ordered num_threads(n_threads) schedule(dynamic)
     for (size_t F = 0; F < real_names.size(); ++F) {
         std::vector<std::string> dummy_names { dummy_sink_names[F] };
         for (size_t i = 0; i < dummy_source_names.size(); ++i) {
