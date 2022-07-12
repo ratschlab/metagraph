@@ -76,6 +76,7 @@ struct QuerySequence {
 // Simple struct to wrap alignment results for a query sequence
 struct Alignment {
     graph::align::DBGAlignerConfig::score_t score;
+    graph::align::DBGAlignerConfig::score_t max_score;
     std::string cigar;
     bool orientation;
 };
@@ -111,6 +112,7 @@ class SeqSearchResult {
     static constexpr auto SIGNATURE_FIELD = "signature";
     static constexpr auto KMER_ABUNDANCE_FIELD = "kmer_abundances";
     static constexpr auto SCORE_JSON_FIELD = "score";
+    static constexpr auto MAX_SCORE_JSON_FIELD = "max_score";
     static constexpr auto SEQUENCE_JSON_FIELD = "sequence";
     static constexpr auto ALIGNMENT_JSON_FIELD = "alignments";
     static constexpr auto CIGAR_JSON_FIELD = "cigar";

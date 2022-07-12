@@ -25,12 +25,13 @@ def df_from_align_result(json_res):
     # flatten out json result
     lst = [(alignment['cigar'],
             alignment['score'],
+            alignment['max_score'],
             alignment['sequence'],
             alignment['orientation'],
             result['seq_description'])
            for result in json_res for alignment in result['alignments']]
 
     df = pd.DataFrame(lst,
-                      columns=['cigar', 'score', 'sequence', 'orientation', 'seq_description'])
+                      columns=['cigar', 'score', 'max_score', 'sequence', 'orientation', 'seq_description'])
 
     return df
