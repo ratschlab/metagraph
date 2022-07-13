@@ -604,7 +604,7 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
 
         score_t lambda = config.score_matrix[c][c];
 
-        std::vector<std::pair<size_t, score_t>> results;
+        tsl::hopscotch_map<score_t, tsl::hopscotch_set<Alignment::Column>> scores;
         for (auto d : diff_columns) {
             for (auto cc : ref_columns) {
                 auto [a_size, b_size, union_size]
@@ -615,9 +615,15 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
                     continue;
 
                 double dbsize = b_size;
-                score_t label_change_score = log2(std::min(dbsize, size_sum - union_size)) - log2(dbsize);
-                results.emplace_back(labeled_aligner->get_annotation_buffer().cache_column_set(Vector<Alignment::Column>{ d }), label_change_score * lambda);
+                score_t label_change_score = (log2(std::min(dbsize, size_sum - union_size)) - log2(dbsize)) * lambda;
+                scores[label_change_score].emplace(d);
             }
+        }
+
+        std::vector<std::pair<size_t, score_t>> results;
+        for (const auto &[score, diff] : scores) {
+            results.emplace_back(labeled_aligner->get_annotation_buffer().cache_column_set(diff.begin(), diff.end()),
+                                 score);
         }
 
         return results;
