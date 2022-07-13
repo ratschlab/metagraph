@@ -37,7 +37,6 @@ DBGAlignerConfig initialize_aligner_config(const Config &config) {
         .min_seed_length = config.alignment_min_seed_length,
         .max_seed_length = config.alignment_max_seed_length,
         .max_num_seeds_per_locus = config.alignment_max_num_seeds_per_locus,
-        .label_change_edit_distance = config.distance,
         .min_path_score = config.alignment_min_path_score,
         .xdrop = config.alignment_xdrop,
         .min_exact_match = config.alignment_min_exact_match,
@@ -307,6 +306,10 @@ int align_to_graph(Config *config) {
         return 0;
     }
 
+    auto hll = std::make_shared<HLLWrapper<>>();
+    if (hll->load(utils::remove_suffix(config->infbase, graph->file_extension())))
+        logger->trace("Loaded HLL sketch");
+
     // For graphs which still feature a mask, this speeds up mapping and allows
     // for dummy nodes to be matched by suffix seeding
     auto dbg_succ = std::dynamic_pointer_cast<DBGSuccinct>(graph);
@@ -323,13 +326,6 @@ int align_to_graph(Config *config) {
                              "Use metagraph transform to generate an adj-rc index.");
             }
         }
-        auto hll = std::make_shared<HLLWrapper<>>();
-        if (hll->load(utils::remove_suffix(config->infbase, dbg_succ->file_extension()))) {
-            logger->trace("Loaded HLL sketch");
-            dbg_succ->add_extension(std::move(hll));
-        }
-
-        // dbg_succ->add_extension(std::make_shared<MerDistances>(*dbg_succ, 6));
     }
 
     Timer timer;
@@ -428,6 +424,9 @@ int align_to_graph(Config *config) {
                     if (dbg_succ)
                         aln_graph->add_extension(std::make_shared<NodeFirstCache>(*dbg_succ));
                 }
+
+                if (hll)
+                    aln_graph->add_extension(hll);
 
                 std::unique_ptr<IDBGAligner> aligner;
 

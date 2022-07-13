@@ -204,8 +204,7 @@ class Alignment {
     // one of the coordinates in this. If this operation is unsuccessful, then
     // *this == {} afterwards.
     // Returns true if the label or coordinate set of this changed.
-    bool append(Alignment&& next,
-                const std::function<score_t()> &get_label_change_score = []() { return ninf; });
+    bool append(Alignment&& next, score_t label_change_score = DBGAlignerConfig::ninf);
 
     bool splice(Alignment&& other);
 

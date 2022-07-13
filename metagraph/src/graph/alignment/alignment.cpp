@@ -190,8 +190,7 @@ bool Alignment::splice(Alignment&& other) {
     return append(std::move(other));
 }
 
-bool Alignment::append(Alignment&& other,
-                       const std::function<score_t()> &get_label_change_score) {
+bool Alignment::append(Alignment&& other, score_t label_change_score) {
     assert(query_view_.data() + query_view_.size() + other.get_clipping()
             == other.query_view_.data());
     assert(orientation_ == other.orientation_);
@@ -254,16 +253,15 @@ bool Alignment::append(Alignment&& other,
         std::swap(label_coordinates, merged_label_coordinates);
 
     } else if (has_annotation()) {
+        if (label_change_score == ninf) {
+            *this = Alignment();
+            return true;
+        }
+
         if (other.label_column_diffs.empty()) {
             other.label_column_diffs.resize(other.nodes_.size(), other.label_columns);
         } else {
             other.label_column_diffs.insert(other.label_column_diffs.begin(), other.label_columns);
-        }
-
-        score_t label_change_score = get_label_change_score();
-        if (label_change_score == ninf) {
-            *this = Alignment();
-            return true;
         }
 
         if (other.extra_scores.empty()) {
