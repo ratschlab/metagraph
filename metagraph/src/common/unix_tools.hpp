@@ -28,6 +28,13 @@ size_t get_max_files_open();
 
 int get_num_fds();
 
+/**
+ * Estimate how many threads can be used without exceeding the max number of
+ * open files, if each thread needs to open `fd_per_thread` files.
+ * If the limit is too low and the limit is below `fd_per_thread`, print error and exit.
+ */
+int check_fd_and_adjust_threads(size_t num_threads, size_t fd_per_thread);
+
 
 class Timer {
   public:

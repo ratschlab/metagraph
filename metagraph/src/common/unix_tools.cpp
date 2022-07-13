@@ -139,6 +139,27 @@ int get_num_fds() {
     return std::atoi(buffer);
 }
 
+int check_fd_and_adjust_threads(size_t num_threads, size_t fd_per_thread) {
+    const size_t max_fd = get_max_files_open() - std::min((size_t)get_num_fds(),
+                                                          get_max_files_open());
+
+    size_t n = max_fd / fd_per_thread;
+    if (!n) {
+        logger->error("The limit on the number of allowed file descriptors per process is too low"
+                      " (at least {}+{} are needed, the current limit is: {})."
+                      " Increase the limit with, e.g. `ulimit -S -n 4096`",
+                      get_max_files_open() - max_fd, fd_per_thread, get_max_files_open());
+        exit(1);
+    } else if (n < num_threads) {
+        logger->warn("Can open only {} more files. Only {} threads will be used"
+                     " in order not to exceed the allowed number of open files."
+                     " Consider increasing the limit with, e.g. `ulimit -S -n 4096`.",
+                     max_fd, n);
+        return n;
+    }
+    return num_threads;
+}
+
 bool stderr_to_terminal() {
     return isatty(STDERR_FILENO);
 }

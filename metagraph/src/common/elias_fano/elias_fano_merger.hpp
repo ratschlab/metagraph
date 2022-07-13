@@ -201,6 +201,7 @@ void merge_files(std::vector<std::string> sources,
         size_t i = 1;
         while (i < sources.size()) {
             std::vector<std::string> to_merge;
+            // reserve +1 stream for output
             while (i < sources.size() && to_merge.size() + 1 < max_sources_open) {
                 to_merge.push_back(sources[i++]);
             }
