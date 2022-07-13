@@ -592,23 +592,35 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
     logger->trace("Chaining alignments:\n{}", fmt::join(alignments, "\t\n"));
 
     const HLLWrapper<> *hll_wrapper = aligner.get_graph().get_extension_threadsafe<HLLWrapper<>>();
-    auto get_label_change_score = [&](char c, const auto &ref_columns, const auto &diff_columns) -> score_t {
+    const auto *labeled_aligner = dynamic_cast<const ILabeledAligner*>(&aligner);
+    auto get_label_change_score = [&](char c, const auto &ref_columns, auto&& diff_columns) -> std::vector<std::pair<size_t, score_t>> {
         if (c == boss::BOSS::kSentinel || ref_columns.empty() || diff_columns.empty())
-            return config.ninf;
+            return {};
 
-        if (!hll_wrapper || config.label_change_score != config.ninf)
-            return config.label_change_score;
+        if (!hll_wrapper || config.label_change_score != config.ninf) {
+            return { std::make_pair(labeled_aligner->get_annotation_buffer().cache_column_set(std::move(diff_columns)),
+                                    config.label_change_score) };
+        }
 
-        auto [a_size, b_size, union_size]
-            = hll_wrapper->data().estimate_column_sizes_union_cardinality(ref_columns[0], diff_columns[0]);
+        score_t lambda = config.score_matrix[c][c];
 
-        uint64_t size_sum = a_size + b_size;
-        if (union_size < size_sum)
-            return config.ninf;
+        std::vector<std::pair<size_t, score_t>> results;
+        for (auto d : diff_columns) {
+            for (auto cc : ref_columns) {
+                auto [a_size, b_size, union_size]
+                    = hll_wrapper->data().estimate_column_sizes_union_cardinality(cc, d);
 
-        double dbsize = b_size;
-        score_t label_change_score = log2(std::min(dbsize, size_sum - union_size)) - log2(dbsize);
-        return label_change_score * config.score_matrix[c][c];
+                uint64_t size_sum = a_size + b_size;
+                if (union_size < size_sum)
+                    continue;
+
+                double dbsize = b_size;
+                score_t label_change_score = log2(std::min(dbsize, size_sum - union_size)) - log2(dbsize);
+                results.emplace_back(labeled_aligner->get_annotation_buffer().cache_column_set(Vector<Alignment::Column>{ d }), label_change_score * lambda);
+            }
+        }
+
+        return results;
     };
 
     typedef std::tuple<size_t /* last table i */,
@@ -636,7 +648,6 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
             }
         );
     }
-    const auto *labeled_aligner = dynamic_cast<const ILabeledAligner*>(&aligner);
 
     for (size_t i = 0; i < chain_table.size() - 1; ++i) {
         for (const auto &[a_col, cur_tuple] : chain_table[i]) {
@@ -694,30 +705,16 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
                             col_id = labeled_aligner->get_annotation_buffer().cache_column_set(std::move(inter));
                         } else if (diff.size()) {
                             cur_extra_score = config.ninf;
-                            Alignment::Column next_col = std::numeric_limits<Alignment::Column>::max();
-                            Vector<Alignment::Column> d_v { 0 };
-                            Vector<Alignment::Column> c_v { 0 };
-                            for (auto d : diff) {
-                                d_v[0] = d;
-                                for (auto c : prev_cols) {
-                                    c_v[0] = c;
-                                    score_t cur_cur_extra_score = get_label_change_score(
-                                        b.get_sequence()[0],
-                                        c_v, d_v
-                                    );
-                                    if (cur_cur_extra_score > cur_extra_score) {
-                                        cur_extra_score = cur_cur_extra_score;
-                                        next_col = d;
-                                    }
+                            for (const auto &[cur_col_id, cur_cur_extra_score] : get_label_change_score(b.get_sequence()[0], prev_cols, std::move(diff))) {
+                                if (cur_cur_extra_score > cur_extra_score) {
+                                    cur_extra_score = cur_cur_extra_score;
+                                    col_id = cur_col_id;
                                 }
                             }
 
                             if (cur_extra_score == config.ninf)
                                 continue;
 
-                            d_v[0] = next_col;
-
-                            col_id = labeled_aligner->get_annotation_buffer().cache_column_set(std::move(d_v));
                         } else {
                             continue;
                         }
@@ -785,30 +782,16 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
                                     col_id = labeled_aligner->get_annotation_buffer().cache_column_set(std::move(inter));
                                 } else if (diff.size()) {
                                     cur_extra_score = config.ninf;
-                                    Alignment::Column next_col = std::numeric_limits<Alignment::Column>::max();
-                                    Vector<Alignment::Column> d_v { 0 };
-                                    Vector<Alignment::Column> c_v { 0 };
-                                    for (auto d : diff) {
-                                        d_v[0] = d;
-                                        for (auto c : prev_cols) {
-                                            c_v[0] = c;
-                                            score_t cur_cur_extra_score = get_label_change_score(
-                                                aln.get_sequence()[0],
-                                                c_v, d_v
-                                            );
-                                            if (cur_cur_extra_score > cur_extra_score) {
-                                                cur_extra_score = cur_cur_extra_score;
-                                                next_col = d;
-                                            }
+                                    for (const auto &[cur_col_id, cur_cur_extra_score] : get_label_change_score(aln.get_sequence()[0], prev_cols, std::move(diff))) {
+                                        if (cur_cur_extra_score > cur_extra_score) {
+                                            cur_extra_score = cur_cur_extra_score;
+                                            col_id = cur_col_id;
                                         }
                                     }
 
                                     if (cur_extra_score == config.ninf)
                                         continue;
 
-                                    d_v[0] = next_col;
-
-                                    col_id = labeled_aligner->get_annotation_buffer().cache_column_set(std::move(d_v));
                                 } else {
                                     continue;
                                 }
