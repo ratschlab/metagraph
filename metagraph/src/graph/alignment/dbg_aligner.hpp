@@ -69,8 +69,6 @@ class DBGAligner : public IDBGAligner {
                                        const std::vector<AlignmentResults> &wrapped_seqs) const;
 
   private:
-// there are no reverse-complement for protein sequences
-#if ! _PROTEIN_GRAPH
     /**
      * Align the forward and reverse complement of the query sequence in both
      * directions and return the overall best alignment. e.g., for the forward query
@@ -88,7 +86,6 @@ class DBGAligner : public IDBGAligner {
                           Extender &reverse_extender,
                           const std::function<void(Alignment&&)> &callback,
                           const std::function<score_t(const Alignment&)> &get_min_path_score) const;
-#endif
 
     // Construct a full alignment from a chain by aligning the query agaisnt
     // the graph in the regions of the query in between the chain seeds.

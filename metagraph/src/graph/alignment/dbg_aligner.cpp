@@ -304,7 +304,18 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
             align_core(*seeder, extender, add_alignment, get_min_path_score, false);
         }
 #else
-        align_core(*seeder, extender, add_alignment, get_min_path_score, false);
+        if (config_.chain_alignments) {
+            std::string_view reverse = paths[i].get_query(true);
+            Extender extender_rc(*this, reverse);
+            auto [seeds, extensions, explored_nodes] =
+                align_both_directions(this_query, reverse, *seeder, *seeder_rc,
+                                      extender, extender_rc,
+                                      add_alignment, get_min_path_score);
+
+            num_seeds += seeds;
+        } else {
+            align_core(*seeder, extender, add_alignment, get_min_path_score, false);
+        }
 #endif
 
         num_explored_nodes += extender.num_explored_nodes();
@@ -471,6 +482,9 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
     best.trim_offset();
     assert(best.is_valid(graph_, &config_));
 
+    // for now, backwards alignment not supported for amino acids
+#if ! _PROTEIN_GRAPH
+
     if (best.get_clipping()) {
         DEBUG_LOG("Extending front");
         RCDBG rc_dbg(std::shared_ptr<const DeBruijnGraph>(
@@ -497,6 +511,14 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
         DEBUG_LOG("done");
     }
 
+#else
+
+    std::ignore = query;
+    std::ignore = query_rc;
+    std::ignore = num_explored_nodes;
+
+#endif
+
     assert(!best.empty());
     callback(std::move(best));
 
@@ -506,8 +528,6 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
     }
 }
 
-// there are no reverse-complement for protein sequences
-#if ! _PROTEIN_GRAPH
 template <class Seeder, class Extender, class AlignmentCompare>
 std::tuple<size_t, size_t, size_t>
 DBGAligner<Seeder, Extender, AlignmentCompare>
@@ -530,7 +550,14 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
         }
 
         auto fwd_seeds = forward_seeder.get_seeds();
+
+#if ! _PROTEIN_GRAPH
         auto bwd_seeds = reverse_seeder.get_seeds();
+#else
+        std::vector<Seed> bwd_seeds;
+        std::ignore = reverse_seeder;
+#endif
+
         if (fwd_seeds.empty() && bwd_seeds.empty())
             return std::make_tuple(num_seeds, num_extensions, num_explored_nodes);
 
@@ -604,6 +631,8 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
 
         return std::make_tuple(num_seeds, num_extensions, num_explored_nodes);
     }
+
+#if ! _PROTEIN_GRAPH
 
     auto fwd_seeds = forward_seeder.get_alignments();
     auto bwd_seeds = reverse_seeder.get_alignments();
@@ -722,8 +751,13 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
     }
 
     return std::make_tuple(num_seeds, num_extensions, num_explored_nodes);
-}
+
+#else
+
+    throw std::runtime_error("Reverse complements not defined for amino acids");
+
 #endif
+}
 
 template class DBGAligner<>;
 template class DBGAligner<SuffixSeeder<ExactSeeder>, LabeledExtender>;
