@@ -678,11 +678,11 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
             const char *chain_end = chain_begin + a.get_query_view().size();
             for (size_t j = i + 1; j < alignments.size(); ++j) {
                 const Alignment &b = alignments[j];
-                if (b.get_sequence()[0] == boss::BOSS::kSentinel)
-                    continue;
-
                 if (a.get_orientation() != b.get_orientation())
                     break;
+
+                if (b.get_sequence()[0] == boss::BOSS::kSentinel)
+                    continue;
 
                 const char *next_begin = b.get_query_view().data();
                 const char *next_end = next_begin + b.get_query_view().size();
