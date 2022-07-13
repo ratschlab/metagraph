@@ -32,6 +32,7 @@ class HLLMatrix : public BinaryMatrix {
     HLLMatrix() {}
     HLLMatrix(const std::vector<std::string> &files, double precision, size_t num_threads = 1)
           : precision_(precision) {
+        mtg::common::logger->trace("Sketching columns from {} files", files.size());
         if (files.empty()) {
             num_rows_ = 0;
             num_relations_ = 0;
@@ -39,9 +40,9 @@ class HLLMatrix : public BinaryMatrix {
         }
 
         columns_.resize(files.size(), precision_);
+        num_set_bits_.resize(files.size());
 
         std::atomic<uint64_t> a_num_rows{0};
-        std::atomic<uint64_t> a_num_rels{0};
         /*
         std::mutex mu;
         ColumnCompressed<>::merge_load(files, [&](uint64_t idx, const auto&, auto&& col) {
@@ -67,14 +68,16 @@ class HLLMatrix : public BinaryMatrix {
             if (a_num_rows == 0)
                 a_num_rows += col.get_matrix().num_rows();
 
-            a_num_rels += col.get_matrix().num_relations();
+            num_set_bits_[i] = col.get_matrix().num_relations();
             col.get_matrix().call_columns({0}, [&](size_t, const auto &bm) {
                 bm.call_ones([&](size_t j) { columns_[i].insert(hasher_(j)); });
             });
         }
 
         num_rows_ = a_num_rows;
-        num_relations_ = a_num_rels;
+        num_relations_ = std::accumulate(num_set_bits_.begin(), num_set_bits_.end(), (size_t)0);
+        mtg::common::logger->trace("HLL sketch contains {} columns, {} rows, {} relations",
+                                   num_columns(), num_rows(), num_relations());
     }
 
     HLLMatrix(const std::vector<std::unique_ptr<bit_vector>> &columns, double precision, size_t num_threads = 1)

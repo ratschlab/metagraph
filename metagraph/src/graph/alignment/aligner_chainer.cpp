@@ -621,9 +621,12 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
         }
 
         std::vector<std::pair<size_t, score_t>> results;
-        for (const auto &[score, diff] : scores) {
+
+        // TODO: a structured for-loop here crashes g++-8
+        for (const auto &score_diff : scores) {
+            const auto &diff = score_diff.second;
             results.emplace_back(labeled_aligner->get_annotation_buffer().cache_column_set(diff.begin(), diff.end()),
-                                 score);
+                                 score_diff.first);
         }
 
         return results;
