@@ -593,8 +593,16 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
 
     const HLLWrapper<> *hll_wrapper = aligner.get_graph().get_extension_threadsafe<HLLWrapper<>>();
     const auto *labeled_aligner = dynamic_cast<const ILabeledAligner*>(&aligner);
-    auto get_label_change_scores = [&](char c, const auto &ref_columns, auto&& diff_columns) -> std::vector<std::pair<size_t, score_t>> {
-        if (c == boss::BOSS::kSentinel || ref_columns.empty() || diff_columns.empty())
+    auto get_label_change_scores = [&](char c, const auto &ref_columns, auto&& inter_columns, auto&& diff_columns) -> std::vector<std::pair<size_t, score_t>> {
+        if (c == boss::BOSS::kSentinel)
+            return {};
+
+        if (inter_columns.size()) {
+            return { std::make_pair(labeled_aligner->get_annotation_buffer().cache_column_set(std::move(inter_columns)),
+                                    0) };
+        }
+
+        if (ref_columns.empty() || diff_columns.empty())
             return {};
 
         if (!hll_wrapper || config.label_change_score != config.ninf) {
@@ -696,48 +704,34 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
                                     + (gap_length - 1) * config.gap_extension_penalty;
                     }
 
-                    Vector<Alignment::Column> inter;
-                    Vector<Alignment::Column> diff;
-                    Alignment::Columns col_id;
-                    score_t cur_extra_score = 0;
+                    std::vector<std::pair<size_t, score_t>> label_changes;
                     if (!a.has_annotation() || !b.has_annotation()) {
-                        inter.push_back(0);
-                        col_id = 0;
+                        label_changes.emplace_back(0, 0);
                     } else {
+                        Vector<Alignment::Column> inter;
+                        Vector<Alignment::Column> diff;
                         const auto &prev_cols = labeled_aligner->get_annotation_buffer().get_cached_column_set(a_col);
                         const auto &cur_cols = b.get_columns(0);
                         utils::set_intersection_difference(cur_cols.begin(), cur_cols.end(),
                                                            prev_cols.begin(), prev_cols.end(),
                                                            std::back_inserter(inter),
                                                            std::back_inserter(diff));
-                        if (inter.size()) {
-                            col_id = labeled_aligner->get_annotation_buffer().cache_column_set(std::move(inter));
-                        } else if (diff.size()) {
-                            cur_extra_score = config.ninf;
-                            for (const auto &[cur_col_id, cur_cur_extra_score] : get_label_change_scores(b.get_sequence()[0], prev_cols, std::move(diff))) {
-                                if (cur_cur_extra_score > cur_extra_score) {
-                                    cur_extra_score = cur_cur_extra_score;
-                                    col_id = cur_col_id;
-                                }
-                            }
-
-                            if (cur_extra_score == config.ninf)
-                                continue;
-
-                        } else {
-                            continue;
-                        }
+                        label_changes = get_label_change_scores(
+                            b.get_sequence()[0], prev_cols, std::move(inter), std::move(diff)
+                        );
                     }
 
-                    auto &[last_i, last_col, prev_trim, cur_trim, num_to_insert, extra_score, score] = chain_table[j][col_id];
-                    if (prev_score + added_score + cur_extra_score + b.get_score() > score) {
-                        score = prev_score + added_score + extra_score + b.get_score();
-                        last_i = i;
-                        last_col = a_col;
-                        prev_trim = 0;
-                        cur_trim = 0;
-                        num_to_insert = 0;
-                        extra_score = cur_extra_score;
+                    for (const auto &[col_id, cur_extra_score] : label_changes) {
+                        auto &[last_i, last_col, prev_trim, cur_trim, num_to_insert, extra_score, score] = chain_table[j][col_id];
+                        if (prev_score + added_score + cur_extra_score + b.get_score() > score) {
+                            score = prev_score + added_score + extra_score + b.get_score();
+                            last_i = i;
+                            last_col = a_col;
+                            prev_trim = 0;
+                            cur_trim = 0;
+                            num_to_insert = 0;
+                            extra_score = cur_extra_score;
+                        }
                     }
                 } else {
                     size_t overlap = -query_overlap;
@@ -770,51 +764,36 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
                         if (aln.get_sequence().size() >= graph.get_k() && (check || ref_overlap > aln.get_offset() - aln.get_nodes().size())) {
                             score_t cur_score = prev.get_score() + aln.get_score() - base_score + (!ref_overlap ? config.gap_opening_penalty : 0);
 
-                            Vector<Alignment::Column> inter;
-                            Vector<Alignment::Column> diff;
-                            Alignment::Columns col_id;
-                            score_t cur_extra_score = 0;
+                            std::vector<std::pair<size_t, score_t>> label_changes;
                             Alignment::Columns pccc = aln.label_column_diffs.size()
                                 ? aln.label_column_diffs.back()
                                 : aln.label_columns;
+
                             if (!a.has_annotation() || !b.has_annotation()) {
-                                inter.push_back(0);
-                                col_id = 0;
+                                label_changes.emplace_back(0, 0);
                             } else {
+                                Vector<Alignment::Column> inter;
+                                Vector<Alignment::Column> diff;
                                 const auto &prev_cols = labeled_aligner->get_annotation_buffer().get_cached_column_set(pccc);
                                 const auto &cur_cols = aln.get_columns(0);
                                 utils::set_intersection_difference(cur_cols.begin(), cur_cols.end(),
                                                                    prev_cols.begin(), prev_cols.end(),
                                                                    std::back_inserter(inter),
                                                                    std::back_inserter(diff));
-                                if (inter.size()) {
-                                    col_id = labeled_aligner->get_annotation_buffer().cache_column_set(std::move(inter));
-                                } else if (diff.size()) {
-                                    cur_extra_score = config.ninf;
-                                    for (const auto &[cur_col_id, cur_cur_extra_score] : get_label_change_scores(aln.get_sequence()[0], prev_cols, std::move(diff))) {
-                                        if (cur_cur_extra_score > cur_extra_score) {
-                                            cur_extra_score = cur_cur_extra_score;
-                                            col_id = cur_col_id;
-                                        }
-                                    }
-
-                                    if (cur_extra_score == config.ninf)
-                                        continue;
-
-                                } else {
-                                    continue;
-                                }
+                                label_changes = get_label_change_scores(aln.get_sequence()[0], prev_cols, std::move(inter), std::move(diff));
                             }
 
-                            auto &[last_i, last_col, prev_trim, cur_trim, num_to_insert, extra_score, score] = chain_table[j][col_id];
-                            if (prev_score + cur_score + cur_extra_score + b.get_score() > score) {
-                                score = prev_score + cur_score + cur_extra_score + b.get_score();
-                                last_i = i;
-                                last_col = a_col;
-                                prev_trim = t;
-                                cur_trim = cur_overlap;
-                                num_to_insert = ref_overlap;
-                                extra_score = cur_extra_score;
+                            for (const auto &[col_id, cur_extra_score] : label_changes) {
+                                auto &[last_i, last_col, prev_trim, cur_trim, num_to_insert, extra_score, score] = chain_table[j][col_id];
+                                if (prev_score + cur_score + cur_extra_score + b.get_score() > score) {
+                                    score = prev_score + cur_score + cur_extra_score + b.get_score();
+                                    last_i = i;
+                                    last_col = a_col;
+                                    prev_trim = t;
+                                    cur_trim = cur_overlap;
+                                    num_to_insert = ref_overlap;
+                                    extra_score = cur_extra_score;
+                                }
                             }
                         }
 
