@@ -593,7 +593,7 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
 
     const HLLWrapper<> *hll_wrapper = aligner.get_graph().get_extension_threadsafe<HLLWrapper<>>();
     const auto *labeled_aligner = dynamic_cast<const ILabeledAligner*>(&aligner);
-    auto get_label_change_score = [&](char c, const auto &ref_columns, auto&& diff_columns) -> std::vector<std::pair<size_t, score_t>> {
+    auto get_label_change_scores = [&](char c, const auto &ref_columns, auto&& diff_columns) -> std::vector<std::pair<size_t, score_t>> {
         if (c == boss::BOSS::kSentinel || ref_columns.empty() || diff_columns.empty())
             return {};
 
@@ -711,7 +711,7 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
                             col_id = labeled_aligner->get_annotation_buffer().cache_column_set(std::move(inter));
                         } else if (diff.size()) {
                             cur_extra_score = config.ninf;
-                            for (const auto &[cur_col_id, cur_cur_extra_score] : get_label_change_score(b.get_sequence()[0], prev_cols, std::move(diff))) {
+                            for (const auto &[cur_col_id, cur_cur_extra_score] : get_label_change_scores(b.get_sequence()[0], prev_cols, std::move(diff))) {
                                 if (cur_cur_extra_score > cur_extra_score) {
                                     cur_extra_score = cur_cur_extra_score;
                                     col_id = cur_col_id;
@@ -788,7 +788,7 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
                                     col_id = labeled_aligner->get_annotation_buffer().cache_column_set(std::move(inter));
                                 } else if (diff.size()) {
                                     cur_extra_score = config.ninf;
-                                    for (const auto &[cur_col_id, cur_cur_extra_score] : get_label_change_score(aln.get_sequence()[0], prev_cols, std::move(diff))) {
+                                    for (const auto &[cur_col_id, cur_cur_extra_score] : get_label_change_scores(aln.get_sequence()[0], prev_cols, std::move(diff))) {
                                         if (cur_cur_extra_score > cur_extra_score) {
                                             cur_extra_score = cur_cur_extra_score;
                                             col_id = cur_col_id;
