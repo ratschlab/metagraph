@@ -1151,7 +1151,7 @@ int query_graph(Config *config) {
             } else {
                 logger->warn("adj-rc index missing or failed to load. "
                              "Alignment speed will be significantly slower. "
-                             "Use metagraph transform to generate an adj-rc index.");
+                             "Run `metagraph transform --adj-rc ...` to generate the adj-rc index.");
             }
         }
     }
