@@ -612,7 +612,7 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
 
         score_t lambda = config.score_matrix[c][c];
 
-        tsl::hopscotch_map<score_t, tsl::hopscotch_set<Alignment::Column>> scores;
+        tsl::hopscotch_map<score_t, VectorSet<Alignment::Column>> scores;
         for (auto d : diff_columns) {
             for (auto cc : ref_columns) {
                 auto [a_size, b_size, union_size]
@@ -633,6 +633,7 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
         // TODO: a structured for-loop here crashes g++-8
         for (const auto &score_diff : scores) {
             const auto &diff = score_diff.second;
+            assert(std::is_sorted(diff.begin(), diff.end()));
             results.emplace_back(labeled_aligner->get_annotation_buffer().cache_column_set(diff.begin(), diff.end()),
                                  score_diff.first);
         }
@@ -722,6 +723,9 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
                     }
 
                     for (const auto &[col_id, cur_extra_score] : label_changes) {
+                        if (prev_score + added_score + cur_extra_score + b.get_score() < 0)
+                            continue;
+
                         auto &[last_i, last_col, prev_trim, cur_trim, num_to_insert, extra_score, score] = chain_table[j][col_id];
                         if (prev_score + added_score + cur_extra_score + b.get_score() > score) {
                             score = prev_score + added_score + extra_score + b.get_score();
@@ -784,6 +788,9 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
                             }
 
                             for (const auto &[col_id, cur_extra_score] : label_changes) {
+                                if (prev_score + cur_score + cur_extra_score + b.get_score() < 0)
+                                    continue;
+
                                 auto &[last_i, last_col, prev_trim, cur_trim, num_to_insert, extra_score, score] = chain_table[j][col_id];
                                 if (prev_score + cur_score + cur_extra_score + b.get_score() > score) {
                                     score = prev_score + cur_score + cur_extra_score + b.get_score();
@@ -832,6 +839,8 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
             if (!cur_trim && !prev_trim) {
                 // no overlap
                 Alignment prev = alignments[last_i];
+                assert(cur.get_query_view().data() >= prev.get_query_view().data() + prev.get_query_view().size());
+
                 size_t gap_size = cur.get_query_view().data() - prev.get_query_view().data() - prev.get_query_view().size();
                 cur.insert_gap_prefix(gap_size, node_overlap, config);
                 assert(!cur.empty());
@@ -843,6 +852,8 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
             } else {
                 // overlap
                 Alignment prev = alignments[last_i];
+                assert(cur.get_query_view().data() < prev.get_query_view().data() + prev.get_query_view().size());
+
                 cur.trim_query_prefix(cur_trim, node_overlap, config);
                 assert(cur.is_valid(graph, &config));
                 prev.trim_query_suffix(prev_trim, config);
