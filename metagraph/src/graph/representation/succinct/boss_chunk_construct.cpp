@@ -463,7 +463,7 @@ generate_dummy_1_kmers(size_t k,
     // reset kmer[1] (the first character in k-mer, $ in dummy source) to zero
     KMER_INT kmer_delta_dummy = kmer_delta & ~KMER_INT(((1ull << L) - 1) << L);
 
-    size_t n_threads = check_fd_and_adjust_threads(num_threads,
+    size_t n_threads = check_fd_and_adjust_threads(std::min(num_threads, alphabet_size),
             2 * alphabet_size // `dummy_l1_chunks`
                 + (2 + utils::is_pair_v<T>) * alphabet_size // `it` (MergeDecoder)
                 + 2 // `sink_gen_it`
@@ -773,7 +773,7 @@ reconstruct_dummy_source(const std::vector<std::string> &dummy_l1_names,
     // generate dummy k-mers of prefix length 1..k
     logger->trace("Starting generating dummy-1..k source k-mers...");
 
-    size_t n_threads = check_fd_and_adjust_threads(num_threads,
+    size_t n_threads = check_fd_and_adjust_threads(std::min(num_threads, alphabet_size),
             2 // `dummy_chunk`
                 + 2 * alphabet_size // `dummy_next_chunks`
                 + 2 * alphabet_size // `merge_files(F_chunk_names)`
@@ -948,7 +948,7 @@ BOSS::Chunk build_boss(const std::vector<std::string> &real_names,
                                             k, bits_per_count, swap_dir);
     logger->trace("Chunk ..$. constructed");
     // construct all other chunks in parallel
-    size_t n_threads = check_fd_and_adjust_threads(num_threads,
+    size_t n_threads = check_fd_and_adjust_threads(std::min(num_threads, real_names.size()),
             (dummy_source_names.size() + 1) * 2 + (2 + utils::is_pair_v<T>) + 2);
     #pragma omp parallel for ordered num_threads(n_threads) schedule(dynamic)
     for (size_t F = 0; F < real_names.size(); ++F) {
