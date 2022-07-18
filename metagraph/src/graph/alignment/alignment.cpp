@@ -446,7 +446,7 @@ size_t Alignment::trim_query_prefix(size_t n,
         }
     }
 
-    if (!clipping && it != cigar_.data().begin())
+    if (!clipping && (cigar_offset || it != cigar_.data().begin()))
         score_ -= config.left_end_bonus;
 
     nodes_.erase(nodes_.begin(), node_it);
