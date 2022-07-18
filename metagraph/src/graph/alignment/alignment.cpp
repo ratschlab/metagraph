@@ -459,8 +459,10 @@ size_t Alignment::trim_query_prefix(size_t n,
         extra_scores.erase(extra_scores.begin(), extra_scores.begin() + (node_it - nodes_.begin()));
     }
 
-    if (label_column_diffs.size() && node_it != nodes_.begin())
+    if (label_column_diffs.size() && node_it != nodes_.begin()) {
+        label_columns = label_column_diffs[node_it - nodes_.begin() - 1];
         label_column_diffs.erase(label_column_diffs.begin(), label_column_diffs.begin() + (node_it - nodes_.begin()));
+    }
 
     sequence_.erase(sequence_.begin(), s_it);
     it->second -= cigar_offset;
@@ -658,8 +660,10 @@ size_t Alignment::trim_reference_prefix(size_t n,
         extra_scores.erase(extra_scores.begin(), extra_scores.begin() + (node_it - nodes_.begin()));
     }
 
-    if (label_column_diffs.size() && node_it != nodes_.begin())
+    if (label_column_diffs.size() && node_it != nodes_.begin()) {
+        label_columns = label_column_diffs[node_it - nodes_.begin() - 1];
         label_column_diffs.erase(label_column_diffs.begin(), label_column_diffs.begin() + (node_it - nodes_.begin()));
+    }
 
     sequence_.erase(sequence_.begin(), s_it);
     it->second -= cigar_offset;

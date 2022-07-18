@@ -294,7 +294,7 @@ class Alignment {
     AnnotationBuffer *label_encoder = nullptr;
     bool has_annotation() const { return label_encoder; }
 
-    Columns label_columns;
+    Columns label_columns = 0;
 
     // for each column in |label_columns|, store a vector of coordinates for the
     // alignment's first nucleotide
