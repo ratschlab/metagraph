@@ -673,8 +673,11 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
                 a.get_score(), 0, 0, 0, std::numeric_limits<size_t>::max(), 0, 0
             });
         }
-        std::reverse(vals.begin(), vals.end());
         chain_table[i].insert(vals.begin(), vals.end());
+        assert(std::is_sorted(chain_table[i].begin(), chain_table[i].end(),
+                              [&](const auto &a, const auto &b) {
+                                  return a.first < b.first;
+                              }));
         assert(chain_table[i].size() == vals.size());
     }
 
@@ -701,6 +704,11 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
                 for (size_t j = i + 1; j < alignments.size(); ++j) {
                     if (a.get_orientation() != alignments[j].get_orientation())
                         break;
+
+                    assert(std::is_sorted(chain_table[j].begin(), chain_table[j].end(),
+                                          [&](const auto &a, const auto &b) {
+                                              return a.first < b.first;
+                                          }));
 
                     for (auto it = chain_table[j].begin(); it != chain_table[j].end(); ++it) {
                         Alignment b = alignments[j];
