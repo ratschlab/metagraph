@@ -703,21 +703,23 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
                         break;
 
                     for (auto it = chain_table[j].begin(); it != chain_table[j].end(); ++it) {
-                        size_t b_suffix_trim = it->first;
-                        Table &b_tab = it.value();
                         Alignment b = alignments[j];
-                        b.trim_query_suffix(b_suffix_trim, config);
-                        assert(b.size());
-                        assert(b.is_valid(graph, &config));
-
-                        Alignment::Columns b_col = b.label_columns;
-                        auto label_change_scores = get_label_change_scores(cur_columns, b_col);
-
+                        size_t b_suffix_trim = it->first;
                         const char *next_begin = b.get_query_view().data();
-                        const char *next_end = next_begin + b.get_query_view().size();
-                        assert(chain_begin - a.get_clipping() == next_begin - b.get_clipping());
+                        const char *next_end = next_begin + b.get_query_view().size() - b_suffix_trim;
+                        Alignment::Columns b_col = b.label_columns;
+                        if (next_begin < chain_begin && cur_columns == b_col)
+                            continue;
+
                         if (next_end <= chain_end)
                             continue;
+
+                        Table &b_tab = it.value();
+                        b.trim_query_suffix(b_suffix_trim, config);
+                        assert(b.size());
+                        assert(chain_begin - a.get_clipping() == next_begin - b.get_clipping());
+                        assert(next_begin + b.get_query_view().size() == next_end);
+                        assert(b.is_valid(graph, &config));
 
                         size_t b_prefix_trim = 0;
                         if (next_begin < chain_begin) {
@@ -727,9 +729,11 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
                             if (b.empty())
                                 continue;
 
-                            assert(b.is_valid(graph, &config));
                             assert(chain_begin - a.get_clipping() == next_begin - b.get_clipping());
+                            assert(b.is_valid(graph, &config));
                         }
+
+                        auto label_change_scores = get_label_change_scores(cur_columns, b_col);
 
                         ssize_t gap = next_begin - chain_end;
 
