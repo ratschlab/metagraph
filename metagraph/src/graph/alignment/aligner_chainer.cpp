@@ -710,12 +710,13 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
                                               return a.first < b.first;
                                           }));
 
+                    size_t last_b_suffix_trim = 0;
+                    Alignment b_base = alignments[j];
                     for (auto it = chain_table[j].begin(); it != chain_table[j].end(); ++it) {
-                        Alignment b = alignments[j];
                         size_t b_suffix_trim = it->first;
-                        const char *next_begin = b.get_query_view().data();
-                        const char *next_end = next_begin + b.get_query_view().size() - b_suffix_trim;
-                        Alignment::Columns b_col = b.label_columns;
+                        const char *next_begin = b_base.get_query_view().data();
+                        const char *next_end = next_begin + b_base.get_query_view().size() - b_suffix_trim + last_b_suffix_trim;
+                        Alignment::Columns b_col = b_base.label_columns;
                         if (next_begin < chain_begin && cur_columns == b_col)
                             continue;
 
@@ -723,12 +724,18 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
                             continue;
 
                         Table &b_tab = it.value();
-                        b.trim_query_suffix(b_suffix_trim, config);
-                        assert(b.size());
-                        assert(chain_begin - a.get_clipping() == next_begin - b.get_clipping());
-                        assert(next_begin + b.get_query_view().size() == next_end);
-                        assert(b.is_valid(graph, &config));
+                        assert(b_suffix_trim >= last_b_suffix_trim);
+                        if (b_suffix_trim > last_b_suffix_trim) {
+                            b_base.trim_query_suffix(b_suffix_trim - last_b_suffix_trim, config);
+                            last_b_suffix_trim = b_suffix_trim;
+                        }
 
+                        assert(b_base.size());
+                        assert(chain_begin - a.get_clipping() == next_begin - b_base.get_clipping());
+                        assert(next_begin + b_base.get_query_view().size() == next_end);
+                        assert(b_base.is_valid(graph, &config));
+
+                        Alignment b = b_base;
                         size_t b_prefix_trim = 0;
                         if (next_begin < chain_begin) {
                             b_prefix_trim = chain_begin - next_begin;
