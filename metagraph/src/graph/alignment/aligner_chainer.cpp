@@ -658,16 +658,36 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
     const DeBruijnGraph &graph = aligner.get_graph();
     ssize_t node_overlap = graph.get_k() - 1;
 
+    auto last_is_indel = [](const Cigar &a) {
+        auto it = a.data().rbegin();
+        if (it->first == Cigar::CLIPPED)
+            ++it;
+
+        return it != a.data().rend() && (it->first == Cigar::INSERTION || it->first == Cigar::DELETION);
+    };
+
+    auto first_is_indel = [](const Cigar &a) {
+        auto it = a.data().begin();
+        if (it->first == Cigar::CLIPPED)
+            ++it;
+
+        return it != a.data().end() && (it->first == Cigar::INSERTION || it->first == Cigar::DELETION);
+    };
+
+
     for (size_t i = 0; i < alignments.size(); ++i) {
         Alignment a = alignments[i];
         std::vector<std::pair<size_t, Table>> vals;
         ssize_t max_suffix_trim = 0;
         const char *a_end = a.get_query_view().data() + a.get_query_view().size();
         for (size_t j = i + 1; j < alignments.size(); ++j) {
-            max_suffix_trim = std::max(alignments[j].get_query_view().data() - a_end,
+            max_suffix_trim = std::max(a_end - alignments[j].get_query_view().data(),
                                        max_suffix_trim);
         }
         for (ssize_t trim = 0; a.size() && trim <= max_suffix_trim; a.trim_query_suffix(1, config), ++trim) {
+            if (last_is_indel(a.get_cigar()))
+                continue;
+
             vals.emplace_back(trim, Table{});
             vals.back().second.try_emplace(a.label_columns, TableVal {
                 a.get_score(), 0, 0, 0, std::numeric_limits<size_t>::max(), 0, 0
@@ -690,6 +710,7 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
             a.trim_query_suffix(a_suffix_trim, config);
             assert(a.size());
             assert(a.is_valid(graph, &config));
+            assert(!last_is_indel(a.get_cigar()));
 
             for (const auto &[cur_columns, vals] : tab) {
                 const auto &[a_score, a_extra_score, a_gap, a_prefix_trim,
@@ -728,6 +749,7 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
                         if (b_suffix_trim > last_b_suffix_trim) {
                             b_base.trim_query_suffix(b_suffix_trim - last_b_suffix_trim, config);
                             last_b_suffix_trim = b_suffix_trim;
+                            assert(!last_is_indel(b_base.get_cigar()));
                         }
 
                         assert(b_base.size());
@@ -738,35 +760,12 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
 
                         auto label_change_scores = get_label_change_scores(cur_columns, b_col);
 
-                        auto last_is_insertion = [&](const Cigar &a) {
-                            auto it = a.data().rbegin();
-                            if (it->first == Cigar::CLIPPED)
-                                ++it;
-
-                            return it != a.data().rend() && it->first == Cigar::INSERTION;
-                        };
-
-                        auto is_insertion_junction = [&](const Cigar &a, const Cigar &b) {
-                            if (!last_is_insertion(a))
-                                return false;
-
-                            auto jt = b.data().begin();
-                            if (jt->first == Cigar::CLIPPED)
-                                ++jt;
-
-                            return jt != b.data().end() && jt->first == Cigar::INSERTION;
-                        };
-
                         score_t gap_score = 0;
                         score_t b_score = b_base.get_score();
                         char c = b_base.get_sequence()[0];
 
                         if (gap >= 0) {
                             // no overlap
-                            if (is_insertion_junction(a.get_cigar(), b_base.get_cigar())
-                                    || (gap > 0 && last_is_insertion(a.get_cigar())))
-                                continue;
-
                             gap_score = config.gap_opening_penalty;
                             if (gap > 0)
                                 gap_score += config.gap_opening_penalty + (gap - 1) * config.gap_extension_penalty;
@@ -780,21 +779,32 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
                             // TODO: this is expensive
                             b.trim_query_prefix(b_prefix_trim, node_overlap, config);
 
-                            if (b.empty() || is_insertion_junction(a.get_cigar(), b.get_cigar()))
+                            if (b.empty() || first_is_indel(b.get_cigar()))
                                 continue;
 
+                            assert(b_base.get_sequence().size() >= b.get_sequence().size());
                             std::string_view b_prefix(
                                 b_base.get_sequence().data(),
                                 b_base.get_sequence().size() - b.get_sequence().size()
                             );
+                            assert(b_prefix.data() + b_prefix.size()
+                                    <= b_base.get_sequence().data() + b_base.get_sequence().size());
+
+                            if (b_prefix.size() > static_cast<size_t>(node_overlap))
+                                b_prefix.remove_prefix(b_prefix.size() - node_overlap);
 
                             auto [a_mm, b_mm] = std::mismatch(a.get_sequence().rbegin(),
                                                               a.get_sequence().rend(),
                                                               b_prefix.rbegin(),
-                                                              std::min(b_prefix.rend(), b_prefix.rbegin() + node_overlap));
-                            gap = b_prefix.rbegin() - b_mm;
+                                                              b_prefix.rend());
+                            gap = -(b_mm - b_prefix.rbegin());
+                            assert(gap <= 0);
 
                             if (gap == 0) {
+                                b.trim_offset();
+                                if (b.get_offset())
+                                    continue;
+
                                 gap_score = config.gap_opening_penalty;
                             } else if (node_overlap + gap > 0) {
                                 ssize_t gapoffset = gap + static_cast<ssize_t>(b.get_offset());
@@ -804,6 +814,30 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
 
                             b_score = b.get_score();
                             c = b.get_sequence()[0];
+
+#ifndef NDEBUG
+                            Alignment prev = a;
+                            Alignment cur = b;
+                            prev.trim_query_prefix(a_prefix_trim, node_overlap, config);
+
+                            if (gap == 0) {
+                                cur.trim_offset();
+                                assert(!cur.get_offset());
+                                cur.trim_clipping();
+                            }
+
+                            if (gap == 0 || node_overlap + gap > 0) {
+                                cur.insert_gap_prefix(gap, node_overlap, config);
+                            } else {
+                                cur.trim_clipping();
+                            }
+
+                            prev.trim_end_clipping();
+                            prev.append(std::move(cur));
+                            assert(prev.size());
+                            assert(prev.is_valid(graph, &config));
+#endif
+                            // std::cerr << "sss\t" << a_score + b_score + gap_score << "\t" << a << "\t" << b << std::endl;
                         }
 
                         Table &b_tab = it.value();
@@ -877,8 +911,16 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
             prev.trim_query_prefix(prefix_trim, node_overlap, config);
             assert(prev.size());
 
-            if (last_gap >= 0 || node_overlap + last_gap > 0)
+            if (last_gap >= 0 || node_overlap + last_gap > 0) {
+                if (last_gap == 0 && cur.get_offset()) {
+                    cur.trim_offset();
+                    assert(!cur.get_offset());
+                    cur.trim_clipping();
+                }
                 cur.insert_gap_prefix(last_gap, node_overlap, config);
+            } else {
+                cur.trim_clipping();
+            }
 
             prev.trim_end_clipping();
             prev.append(std::move(cur), extra_score);
