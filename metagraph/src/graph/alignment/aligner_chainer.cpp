@@ -837,7 +837,6 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
                             assert(prev.size());
                             assert(prev.is_valid(graph, &config));
 #endif
-                            // std::cerr << "sss\t" << a_score + b_score + gap_score << "\t" << a << "\t" << b << std::endl;
                         }
 
                         Table &b_tab = it.value();
