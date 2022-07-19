@@ -193,7 +193,10 @@ void merge_files(std::vector<std::string> sources,
         return;
 
     // if there are too many chunks, merge them into larger ones
-    assert(max_sources_open >= 3);
+    if (max_sources_open < 3) {
+        common::logger->error("Can't merge with less than 3 open sources");
+        exit(1);
+    }
     while (sources.size() > max_sources_open) {
         // chunk 0 may be special (e.g. storing only fwd bits) and hence
         // never pre-merged
