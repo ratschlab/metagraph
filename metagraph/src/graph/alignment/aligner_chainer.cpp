@@ -802,8 +802,7 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
                             assert(gap <= 0);
 
                             if (gap == 0) {
-                                b.trim_offset();
-                                if (b.get_offset())
+                                if (b.get_offset() >= b.size())
                                     continue;
 
                                 gap_score = config.gap_opening_penalty;
