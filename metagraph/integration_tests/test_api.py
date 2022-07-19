@@ -169,7 +169,7 @@ class TestAPIRaw(TestAPIBase):
             ('6=1X1=', 'TCGATCCA'),
             ('6=1X1=', 'TCGATCAA'),
         ]
-        expecteds = [{'score': 21, 'sequence': sequence, 'cigar': cigar, 'orientation': False}
+        expecteds = [{'score': 21, 'max_score': 26, 'sequence': sequence, 'cigar': cigar, 'orientation': False}
                         for cigar, sequence in possible_alignments]
         found = False
         for cigar, sequence in possible_alignments:
@@ -330,6 +330,7 @@ class TestAPIClient(TestAPIBase):
 
         align_res = ret[self.graph_name]
         self.assertIn('cigar', align_res.columns)
+        self.assertIn('max_score', align_res.columns)
         self.assertIn('orientation', align_res.columns)
         # number of alignments returned per sequence is not necessarily equals max_alternative_alignments
         # but here it turns out to be the case
@@ -344,6 +345,7 @@ class TestAPIClient(TestAPIBase):
 
         align_res = ret[self.graph_name]
         self.assertIn('cigar', align_res.columns)
+        self.assertIn('max_score', align_res.columns)
         self.assertIn('orientation', align_res.columns)
         self.assertEqual(len(align_res), 0)
 
@@ -627,6 +629,7 @@ class TestAPIClientParallel(TestAPIBase):
             self.assertIn(graph, dfs)
             self.assertIsInstance(dfs[graph], pd.DataFrame)
             self.assertIn('cigar', dfs[graph].columns)
+            self.assertIn('max_score', dfs[graph].columns)
             self.assertIn('orientation', dfs[graph].columns)
             self.assertEqual(len(dfs[graph]), repetitions *  alignment_cnt)
 
