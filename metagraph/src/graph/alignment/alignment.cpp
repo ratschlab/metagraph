@@ -1558,15 +1558,16 @@ std::string spell_path(const DeBruijnGraph &graph,
                 seq += '$';
                 ++num_unknown;
                 std::string next_seq = graph.get_node_sequence(path[i]);
-                auto it = seq.end() - next_seq.size();
-                for (char c : next_seq) {
-                    if (*it == '$' && c != '$') {
-                        --num_unknown;
-                        *it = c;
-                    }
+                std::string_view window(next_seq);
+                if (next_seq.size() > seq.size())
+                    window.remove_prefix(next_seq.size() - seq.size());
 
-                    ++it;
-                }
+                std::transform(window.rbegin(), window.rend(), seq.rbegin(), [&](char c) {
+                    if (c != '$')
+                       --num_unknown;
+
+                    return c;
+                });
                 num_dummy = 0;
             } else {
                 char next = '\0';
