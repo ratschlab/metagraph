@@ -657,11 +657,12 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
         return results;
     };
 
+    std::vector<tsl::hopscotch_map<size_t, std::pair<size_t, score_t>>> size_score_diffs(alignments.size());
+
     typedef std::tuple<score_t /* best score */,
                        score_t /* extra score */,
                        ssize_t /* gap */,
                        size_t /* prefix trim */,
-                       size_t /* seq suffix trim */,
                        size_t /* last table i */,
                        Alignment::Columns /* last labels */,
                        size_t /* prev suffix trim */> TableVal;
@@ -700,11 +701,13 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
             if (last_is_indel(a.get_cigar()))
                 continue;
 
+            size_score_diffs[i][trim] = std::make_pair(alignments[i].size() - a.size(),
+                                                       alignments[i].get_score() - a.get_score());
+
             vals.emplace_back(trim, Table{});
             vals.back().second.try_emplace(a.label_columns, TableVal {
                 a.get_score(), 0 /* extra score */, 0 /* gap */,
                 0 /* prefix trim */,
-                alignments[i].get_sequence().size() - a.get_sequence().size() /* seq suffix trim */,
                 std::numeric_limits<size_t>::max() /* last table i */,
                 0 /* last labels */, 0 /* prev suffix trim */
             });
@@ -735,7 +738,7 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
                 const char *chain_end = alignments[i].get_query_view().data() + alignments[i].get_query_view().size() - a_suffix_trim;
 
                 for (const auto &[cur_columns, vals] : tab) {
-                    const auto &[a_score, a_extra_score, a_gap, a_prefix_trim, a_seq_suffix_trim,
+                    const auto &[a_score, a_extra_score, a_gap, a_prefix_trim,
                                  a_last_table_i, a_last_labels, a_last_suffix_trim] = vals;
                     const char *chain_begin = alignments[i].get_query_view().data() + a_prefix_trim;
 
@@ -791,6 +794,7 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
                         if (b_prefix.size() > static_cast<size_t>(node_overlap))
                             b_prefix.remove_prefix(b_prefix.size() - node_overlap);
 
+                        size_t a_seq_suffix_trim = size_score_diffs[i][a_suffix_trim].first;
                         auto [a_mm, b_mm] = std::mismatch(alignments[i].get_sequence().rbegin() + a_seq_suffix_trim,
                                                           alignments[i].get_sequence().rend(),
                                                           b_prefix.rbegin(),
@@ -814,33 +818,30 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
 
                     char c = b_base.get_sequence()[0];
 
-                    size_t last_b_suffix_trim = 0;
+                    // size_t last_b_suffix_trim = 0;
                     // std::cerr << "tt\t" << i << "," << j << "," << alignments.size()
                     //           << "\t"   << a_suffix_trim << "," << chain_table[j].size()
                     //           << "\t"   << cur_columns << "\n";
                     for (auto it = chain_table[j].begin(); it != chain_table[j].end(); ++it) {
                         size_t b_suffix_trim = it->first;
-                        const char *next_end = b_base.get_query_view().data() + b_base.get_query_view().size() - (b_suffix_trim - last_b_suffix_trim);
+                        const char *next_end = b_base.get_query_view().data() + b_base.get_query_view().size() - b_suffix_trim;
 
                         if (next_end <= chain_end)
                             break;
 
-                        assert(b_suffix_trim >= last_b_suffix_trim);
-                        if (b_suffix_trim > last_b_suffix_trim) {
-                            b_base.trim_query_suffix(b_suffix_trim - last_b_suffix_trim, config);
-                            last_b_suffix_trim = b_suffix_trim;
-                            assert(!last_is_indel(b_base.get_cigar()));
-                        }
+                        auto find = size_score_diffs[j].find(b_suffix_trim);
+                        assert(find != size_score_diffs[j].end());
+                        const auto &[b_seq_suffix_trim, score_diff] = find->second;
 
-                        assert(b_base.size());
-                        assert(next_begin + b_base.get_query_view().size() == next_end);
-                        assert(b_base.is_valid(graph, &config));
-
-                        if (b_base.size() - std::min(gap, (ssize_t)0) <= b_base.get_offset())
+                        if (b_seq_suffix_trim >= b_base.size())
                             break;
 
-                        score_t b_score = b_base.get_score();
-                        size_t b_seq_suffix_trim = alignments[j].get_sequence().size() - b_base.get_sequence().size();
+                        size_t b_base_size = b_base.size() - b_seq_suffix_trim;
+
+                        if (b_base_size - std::min(gap, (ssize_t)0) <= b_base.get_offset())
+                            break;
+
+                        score_t b_score = b_base.get_score() - score_diff;
 
                         Table &b_tab = it.value();
                         score_t next_base_score = a_score + b_score + gap_score;
@@ -871,7 +872,8 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
                         assert(a_score + cur.get_score() == next_base_score);
 
                         prev.trim_end_clipping();
-                        prev.append(std::move(cur));
+                        prev.append(std::move(cur),
+                                    -static_cast<score_t>((prev.label_column_diffs.size() ? prev.label_column_diffs.back() : prev.label_columns) != alignments[j].label_columns));
                         assert(prev.size());
                         assert(prev.is_valid(graph, &config));
 #endif
@@ -883,11 +885,11 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
                             auto find = b_tab.find(cols);
                             if (find == b_tab.end()) {
                                 b_tab.try_emplace(cols, TableVal{
-                                    next_score, lc_score, gap, b_prefix_trim, b_seq_suffix_trim, i, cur_columns, a_suffix_trim
+                                    next_score, lc_score, gap, b_prefix_trim, i, cur_columns, a_suffix_trim
                                 });
                             } else if (next_score > std::get<0>(find->second)) {
                                 find.value() = std::tie(
-                                    next_score, lc_score, gap, b_prefix_trim, b_seq_suffix_trim, i, cur_columns, a_suffix_trim
+                                    next_score, lc_score, gap, b_prefix_trim, i, cur_columns, a_suffix_trim
                                 );
                             }
                         }
@@ -916,7 +918,7 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
 
         used[i] = true;
         Alignment cur = alignments[i];
-        auto [score, extra_score, gap, prefix_trim, seq_suffix_trim,
+        auto [score, extra_score, gap, prefix_trim,
               last_i, last_cols, last_suffix_trim] = chain_table[i][suffix_trim][cols];
 
         cur.trim_query_suffix(suffix_trim, config);
@@ -932,7 +934,7 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
             suffix_trim = last_suffix_trim;
             cols = last_cols;
             ssize_t last_gap = gap;
-            std::tie(score, extra_score, gap, prefix_trim, seq_suffix_trim,
+            std::tie(score, extra_score, gap, prefix_trim,
                      last_i, last_cols, last_suffix_trim) = chain_table[i][suffix_trim][cols];
             used[i] = true;
 

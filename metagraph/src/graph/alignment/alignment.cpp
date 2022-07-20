@@ -253,7 +253,8 @@ bool Alignment::append(Alignment&& other, score_t label_change_score) {
         std::swap(label_coordinates, merged_label_coordinates);
 
     } else if (has_annotation()) {
-        if (label_change_score == ninf) {
+        if ((label_column_diffs.size() ? label_column_diffs.back() : label_columns)
+                != other.label_columns && label_change_score == DBGAlignerConfig::ninf) {
             *this = Alignment();
             return true;
         }
