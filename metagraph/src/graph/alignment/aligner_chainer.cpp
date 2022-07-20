@@ -806,12 +806,18 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
                         }
                     }
 
+                    auto label_change_scores = get_label_change_scores(cur_columns, alignments[j].label_columns);
+                    if (label_change_scores.empty())
+                        continue;
+
                     assert(next_begin == b_base.get_query_view().data());
 
-                    auto label_change_scores = get_label_change_scores(cur_columns, b_base.label_columns);
                     char c = b_base.get_sequence()[0];
 
                     size_t last_b_suffix_trim = 0;
+                    // std::cerr << "tt\t" << i << "," << j << "," << alignments.size()
+                    //           << "\t"   << a_suffix_trim << "," << chain_table[j].size()
+                    //           << "\t"   << cur_columns << "\n";
                     for (auto it = chain_table[j].begin(); it != chain_table[j].end(); ++it) {
                         size_t b_suffix_trim = it->first;
                         const char *next_end = b_base.get_query_view().data() + b_base.get_query_view().size() - (b_suffix_trim - last_b_suffix_trim);
