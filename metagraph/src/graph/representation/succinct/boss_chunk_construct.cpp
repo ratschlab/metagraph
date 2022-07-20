@@ -567,10 +567,10 @@ generate_dummy_1_kmers(size_t k,
  * Adds reverse complements
  */
 template <typename T_REAL>
-void add_reverse_complements(size_t k,
-                             size_t num_threads,
-                             size_t buffer_size,
-                             const std::vector<std::string> &real_F_W) {
+uint64_t add_reverse_complements(size_t k,
+                                 size_t num_threads,
+                                 size_t buffer_size,
+                                 const std::vector<std::string> &real_F_W) {
     using T_INT_REAL = get_int_t<T_REAL>; // either KMER_INT or <KMER_INT, count>
 
     const uint8_t alphabet_size = KmerExtractor2Bit().alphabet.size();
@@ -649,7 +649,7 @@ void add_reverse_complements(size_t k,
                                         real_F_W[j] + suffix);
         }
     }
-    logger->trace("Total number of real k-mers: {}", total_num_kmers);
+    return total_num_kmers;
 }
 
 template <typename KMER>
@@ -738,12 +738,11 @@ BOSS::Chunk construct_boss_chunk_disk(KmerCollector &kmer_collector,
         total_num_kmers += out.size();
     }
 
-    if (kmer_collector.get_mode() == KmerCollector::Mode::CANONICAL_ONLY) {
-        // compute reverse complements k-mers and update the blocks #real_F_W
-        add_reverse_complements<T_REAL>(k, num_threads, buffer_size, real_F_W);
-    } else {
-        logger->trace("Total number of real k-mers: {}", total_num_kmers);
-    }
+    // compute reverse complements k-mers and update the blocks #real_F_W
+    if (kmer_collector.get_mode() == KmerCollector::Mode::CANONICAL_ONLY)
+        total_num_kmers = add_reverse_complements<T_REAL>(k, num_threads, buffer_size, real_F_W);
+
+    logger->trace("Total number of real k-mers: {}", total_num_kmers);
 
     // k-mer blocks split by F
     auto [real_names, dummy_l1_names, dummy_sink_names]
@@ -1178,6 +1177,12 @@ IBOSSChunkConstructor::initialize(size_t k,
                                   size_t disk_cap_bytes) {
 #define OTHER_ARGS k, both_strands, bits_per_count, filter_suffix, \
                    num_threads, memory_preallocated, swap_dir, disk_cap_bytes
+
+    assert(k);
+    if (k < 2) {
+        logger->trace("Constructing graph with small k={}, thus no disk swap will be used", k + 1);
+        container_type = kmer::ContainerType::VECTOR;
+    }
 
     switch (container_type) {
         case kmer::ContainerType::VECTOR:

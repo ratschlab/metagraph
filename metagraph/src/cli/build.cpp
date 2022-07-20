@@ -103,6 +103,10 @@ int build_graph(Config *config) {
         graph.reset(new DBGBitmap(config->k, config->graph_mode));
 
     } else if (config->graph_type == Config::GraphType::SUCCINCT && !config->dynamic) {
+        if (config->k < 2) {
+            logger->error("For succinct graphs, k must be at least 2");
+            exit(1);
+        }
         auto boss_graph = std::make_unique<boss::BOSS>(config->k - 1);
 
         logger->trace("Start reading data and extracting k-mers");
