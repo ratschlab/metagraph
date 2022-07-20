@@ -626,8 +626,9 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
                                     config.label_change_score) };
         }
 
-        tsl::hopscotch_map<score_t, VectorSet<Alignment::Column>> scores;
+        VectorMap<Alignment::Column, score_t> diff_scores;
         for (Alignment::Column d : diff) {
+            auto find = diff_scores.find(d);
             for (Alignment::Column c : a_cols) {
                 auto [a_size, b_size, union_size]
                     = hll_wrapper->data().estimate_column_sizes_union_cardinality(c, d);
@@ -638,11 +639,20 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
 
                 double dbsize = b_size;
                 score_t label_change_score = (log2(std::min(dbsize, size_sum - union_size)) - log2(dbsize));
-                scores[label_change_score].emplace(d);
+                if (find == diff_scores.end()) {
+                    find = diff_scores.emplace(d, label_change_score).first;
+                } else {
+                    find.value() = std::max(find.value(), label_change_score);
+                }
             }
         }
 
-        std::vector<std::pair<size_t, score_t>> results;
+        tsl::hopscotch_map<score_t, Vector<Alignment::Column>> scores;
+        for (const auto &[d, score] : diff_scores) {
+            scores[score].push_back(d);
+        }
+
+        std::vector<std::pair<Alignment::Columns, score_t>> results;
 
         // TODO: a structured for-loop here crashes g++-8
         for (const auto &score_diff : scores) {
