@@ -593,10 +593,19 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
 
     const HLLWrapper<> *hll_wrapper = aligner.get_graph().get_extension_threadsafe<HLLWrapper<>>();
     const auto *labeled_aligner = dynamic_cast<const ILabeledAligner*>(&aligner);
+
+    typedef std::vector<std::pair<Alignment::Columns, score_t>> LabelChangeScores;
+    typedef std::pair<Alignment::Columns, Alignment::Columns> LabelPair;
+    tsl::hopscotch_map<LabelPair, LabelChangeScores, utils::Hash<LabelPair>> cache;
     auto get_label_change_scores = [&](Alignment::Columns a_col, Alignment::Columns b_col)
-            -> std::vector<std::pair<Alignment::Columns, score_t>> {
+            -> LabelChangeScores {
         if (a_col == b_col)
             return { std::make_pair(a_col, 0) };
+
+        auto key = std::make_pair(a_col, b_col);
+        auto find = cache.find(key);
+        if (find != cache.end())
+            return find->second;
 
         const auto &a_cols = labeled_aligner->get_annotation_buffer().get_cached_column_set(a_col);
         const auto &b_cols = labeled_aligner->get_annotation_buffer().get_cached_column_set(b_col);
@@ -642,6 +651,8 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
             results.emplace_back(labeled_aligner->get_annotation_buffer().cache_column_set(diff.begin(), diff.end()),
                                  score_diff.first);
         }
+
+        cache[key] = results;
 
         return results;
     };
