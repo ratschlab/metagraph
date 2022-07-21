@@ -194,6 +194,8 @@ bool Alignment::append(Alignment&& other, score_t label_change_score) {
     assert(query_view_.data() + query_view_.size() + other.get_clipping()
             == other.query_view_.data());
     assert(orientation_ == other.orientation_);
+    assert(nodes_.size());
+    assert(other.nodes_.size());
 
     bool ret_val = false;
 
@@ -275,11 +277,15 @@ bool Alignment::append(Alignment&& other, score_t label_change_score) {
         other.score_ += other.extra_scores[0];
     }
 
-    if (other.extra_scores.size() && extra_scores.empty())
+    if (other.extra_scores.size() && extra_scores.empty()) {
+        assert(nodes_.size());
         extra_scores.resize(nodes_.size() - 1);
+    }
 
-    if (other.label_column_diffs.size() && label_column_diffs.empty())
+    if (other.label_column_diffs.size() && label_column_diffs.empty()) {
+        assert(nodes_.size());
         label_column_diffs.resize(nodes_.size() - 1, label_columns);
+    }
 
     nodes_.insert(nodes_.end(), other.nodes_.begin(), other.nodes_.end());
     if (other.extra_scores.size())

@@ -409,8 +409,7 @@ int align_to_graph(Config *config) {
             }
 
             ++num_batches;
-            auto batch=std::move(seq_batch);
-            // thread_pool.enqueue([&,graph,batch=std::move(seq_batch)]() {
+            thread_pool.enqueue([&,graph,batch=std::move(seq_batch)]() {
                 // Make a dummy shared_ptr
                 auto aln_graph
                     = std::shared_ptr<DeBruijnGraph>(std::shared_ptr<DeBruijnGraph>{}, graph.get());
@@ -445,7 +444,7 @@ int align_to_graph(Config *config) {
                         *out << res;
                     }
                 );
-            // });
+            });
         };
 
         thread_pool.join();
