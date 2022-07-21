@@ -948,7 +948,9 @@ BOSS::Chunk build_boss(const std::vector<std::string> &real_names,
     logger->trace("Chunk ..$. constructed");
     // construct all other chunks in parallel
     size_t n_threads = check_fd_and_adjust_threads(std::min(num_threads, real_names.size()),
-            (dummy_source_names.size() + 1) + (1 + utils::is_pair_v<T>) + (2 + utils::is_pair_v<T>));
+            (dummy_source_names.size() + 1) // dummy source + dummy sink
+                + (1 + utils::is_pair_v<T>) // real
+                + (2 + utils::is_pair_v<T>)); // L, W, counts
     #pragma omp parallel for ordered num_threads(n_threads) schedule(dynamic)
     for (size_t F = 0; F < real_names.size(); ++F) {
         std::vector<std::string> dummy_names { dummy_sink_names[F] };
