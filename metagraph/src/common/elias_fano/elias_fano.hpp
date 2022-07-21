@@ -46,8 +46,10 @@ class EliasFanoDecoder {
     /** Returns the next compressed element or empty if all elements were read */
     inline std::optional<T> next() {
         if (buffer_pos_ == buffer_end_) {
-            if (!decompress_next_block())
-                return std::optional<T>{};
+            if (!decompress_next_block()) {
+                std::optional<T> no_value;
+                return no_value;
+            }
         }
         return buffer_[buffer_pos_++];
     }
