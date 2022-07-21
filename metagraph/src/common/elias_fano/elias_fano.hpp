@@ -46,10 +46,8 @@ class EliasFanoDecoder {
     /** Returns the next compressed element or empty if all elements were read */
     inline std::optional<T> next() {
         if (buffer_pos_ == buffer_end_) {
-            if (!decompress_next_block()) {
-                std::optional<T> no_value;
-                return no_value;
-            }
+            if (!decompress_next_block())
+                return {};
         }
         return buffer_[buffer_pos_++];
     }
@@ -77,18 +75,15 @@ class EliasFanoDecoder {
     /** Current position in the #upper_ vector */
     uint64_t upper_pos_;
 
-    /** Number of lower bits that were read from disk. */
-    size_t cur_pos_bits_;
+    /** Number of bytes that were read before #lower_. */
+    size_t cur_pos_bytes_;
 
     /**
      * The lower bits of the encoded number, obtained by simply concatenating the
      * binary representation of the lower bits of each number. To save memory, only the
-     * currently needed window of 16 bytes is read from the file.
+     * currently needed window is read from the file.
      */
-    T lower_[READ_BUF_SIZE];
-
-    /** Points to current element in #lower_ */
-    uint32_t lower_idx_;
+    char lower_[READ_BUF_SIZE];
 
     /**
      * Upper bits of the encoded numbers. Upper bits are stored using unary delta
@@ -204,7 +199,6 @@ class EliasFanoEncoderBuffered {
 
     std::vector<T> buffer_;
     std::ofstream sink_;
-    std::ofstream sink_upper_;
     std::string file_name_;
     size_t total_size_ = 0; // total encoded size in bytes
     size_t size_ = 0; // total number of encoded elements

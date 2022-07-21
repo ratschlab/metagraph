@@ -464,9 +464,9 @@ generate_dummy_1_kmers(size_t k,
     KMER_INT kmer_delta_dummy = kmer_delta & ~KMER_INT(((1ull << L) - 1) << L);
 
     size_t n_threads = check_fd_and_adjust_threads(std::min(num_threads, (size_t)alphabet_size),
-            2 * alphabet_size // `dummy_l1_chunks`
-                + (2 + utils::is_pair_v<T>) * alphabet_size // `it` (MergeDecoder)
-                + 2 // `sink_gen_it`
+            alphabet_size // `dummy_l1_chunks`
+                + (1 + utils::is_pair_v<T>) * alphabet_size // `it` (MergeDecoder)
+                + 1 // `sink_gen_it`
     );
 
     uint64_t num_source = 0;
@@ -643,7 +643,7 @@ uint64_t add_reverse_complements(size_t k,
         rc_set[j].reset();
         std::filesystem::remove_all(real_F_W[j] + "_rc");
 
-        for (const auto &suffix : { "", ".up", ".count" }) {
+        for (const auto &suffix : { "", ".count" }) {
             if (std::filesystem::exists(real_F_W[j] + "_new" + suffix))
                 std::filesystem::rename(real_F_W[j] + "_new" + suffix,
                                         real_F_W[j] + suffix);
@@ -698,7 +698,7 @@ BOSS::Chunk construct_boss_chunk_disk(KmerCollector &kmer_collector,
 
     const size_t A2 = std::pow(KmerExtractor2Bit().alphabet.size(), 2);
     size_t n_threads = check_fd_and_adjust_threads(std::min(num_threads, chunk_fnames.size()),
-                                                   (A2 + 1) * (2 + utils::is_pair_v<T>));
+                                                   (A2 + 1) * (1 + utils::is_pair_v<T>));
     // split each chunk by F and W
     std::vector<std::vector<std::string>> chunks_split(chunk_fnames.size());
     #pragma omp parallel for num_threads(n_threads) schedule(dynamic)
@@ -710,10 +710,10 @@ BOSS::Chunk construct_boss_chunk_disk(KmerCollector &kmer_collector,
     std::vector<std::string> real_F_W(A2);
 
     n_threads = check_fd_and_adjust_threads(std::min(num_threads, real_F_W.size()),
-                                            4 * (2 + utils::is_pair_v<T>));
+                                            4 * (1 + utils::is_pair_v<T>));
     const size_t max_fd_open = get_max_files_open() - std::min((size_t)get_num_fds(),
                                                                get_max_files_open());
-    const size_t max_chunks_open = max_fd_open / ((2 + utils::is_pair_v<T>) * n_threads) - 1;
+    const size_t max_chunks_open = max_fd_open / ((1 + utils::is_pair_v<T>) * n_threads) - 1;
     assert(max_chunks_open >= 3);
     logger->trace("Merging maximum {} chunks per thread at a time...", max_chunks_open);
 
@@ -773,9 +773,9 @@ reconstruct_dummy_source(const std::vector<std::string> &dummy_l1_names,
     logger->trace("Starting generating dummy-1..k source k-mers...");
 
     size_t n_threads = check_fd_and_adjust_threads(std::min(num_threads, (size_t)alphabet_size),
-            2 // `dummy_chunk`
-                + 2 * alphabet_size // `dummy_next_chunks`
-                + 2 * alphabet_size // `merge_files(F_chunk_names)`
+            1 // `dummy_chunk`
+                + alphabet_size // `dummy_next_chunks`
+                + alphabet_size // `merge_files(F_chunk_names)`
     );
 
     for (size_t dummy_pref_len = 1; dummy_pref_len <= k; ++dummy_pref_len) {
@@ -948,7 +948,7 @@ BOSS::Chunk build_boss(const std::vector<std::string> &real_names,
     logger->trace("Chunk ..$. constructed");
     // construct all other chunks in parallel
     size_t n_threads = check_fd_and_adjust_threads(std::min(num_threads, real_names.size()),
-            (dummy_source_names.size() + 1) * 2 + (2 + utils::is_pair_v<T>) + 2);
+            (dummy_source_names.size() + 1) + (1 + utils::is_pair_v<T>) + (2 + utils::is_pair_v<T>));
     #pragma omp parallel for ordered num_threads(n_threads) schedule(dynamic)
     for (size_t F = 0; F < real_names.size(); ++F) {
         std::vector<std::string> dummy_names { dummy_sink_names[F] };
@@ -1179,10 +1179,6 @@ IBOSSChunkConstructor::initialize(size_t k,
                    num_threads, memory_preallocated, swap_dir, disk_cap_bytes
 
     assert(k);
-    if (k < 2) {
-        logger->trace("Constructing graph with small k={}, thus no disk swap will be used", k + 1);
-        container_type = kmer::ContainerType::VECTOR;
-    }
 
     switch (container_type) {
         case kmer::ContainerType::VECTOR:
