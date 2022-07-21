@@ -621,6 +621,84 @@ LabelChangeScores get_label_change_scores(Alignment::Columns a_col, Alignment::C
     return results;
 }
 
+template <class Aggregator, class ChainTable>
+std::vector<Alignment> backtrack(Aggregator &aggregator,
+                                 ChainTable &chain_table,
+                                 const std::vector<Alignment> &alignments,
+                                 const DBGAlignerConfig &config,
+                                 ssize_t node_overlap) {
+    std::vector<std::tuple<score_t, size_t, Alignment::Columns, size_t>> indices;
+    sdsl::bit_vector used(chain_table.size(), false);
+    for (size_t i = 0; i < chain_table.size(); ++i) {
+        size_t j = 0;
+        for (const auto &[suffix_trim, tab] : chain_table[i]) {
+            for (const auto &[cols, vals] : tab) {
+                indices.emplace_back(std::get<0>(vals), j, cols, i);
+            }
+            ++j;
+        }
+    }
+    std::sort(indices.begin(), indices.end());
+    for (auto it = indices.rbegin(); it != indices.rend(); ++it) {
+        auto [start_score, suffix_trim_i, cols, i] = *it;
+        if (used[i])
+            continue;
+
+        used[i] = true;
+        Alignment cur = alignments[i];
+        auto [score, extra_score, gap, prefix_trim,
+              last_i, last_cols, last_suffix_trim_i] = chain_table[i][suffix_trim_i].second[cols];
+        size_t suffix_trim = chain_table[i][suffix_trim_i].first;
+
+        cur.trim_query_suffix(suffix_trim, config);
+        assert(cur.size());
+
+        cur.trim_query_prefix(prefix_trim, node_overlap, config);
+        assert(cur.size());
+
+        assert(cur.is_valid(graph, &config));
+
+        while (last_i != std::numeric_limits<size_t>::max()) {
+            i = last_i;
+            suffix_trim_i = last_suffix_trim_i;
+            cols = last_cols;
+            ssize_t last_gap = gap;
+            std::tie(score, extra_score, gap, prefix_trim,
+                     last_i, last_cols, last_suffix_trim_i) = chain_table[i][suffix_trim_i].second[cols];
+            suffix_trim = chain_table[i][suffix_trim_i].first;
+            used[i] = true;
+
+            Alignment prev = alignments[i];
+            prev.trim_query_suffix(suffix_trim, config);
+            assert(prev.size());
+
+            prev.trim_query_prefix(prefix_trim, node_overlap, config);
+            assert(prev.size());
+
+            if (last_gap >= 0) {
+                cur.trim_offset();
+                cur.insert_gap_prefix(last_gap, node_overlap, config);
+            } else if (last_gap > -node_overlap) {
+                cur.insert_gap_prefix(last_gap, node_overlap, config);
+            } else {
+                cur.trim_clipping();
+            }
+
+            prev.trim_end_clipping();
+            prev.append(std::move(cur), extra_score);
+            assert(prev.size());
+            std::swap(cur, prev);
+            assert(cur.is_valid(graph, &config));
+        }
+
+        assert(cur.get_score() == start_score);
+
+        aggregator.add_alignment(std::move(cur));
+    }
+
+    return aggregator.get_alignments();
+}
+
 template <class AlignmentCompare>
 std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
                                         std::vector<Alignment>&& alignments) {
@@ -681,9 +759,9 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
                        size_t /* prefix trim */,
                        size_t /* last table i */,
                        Alignment::Columns /* last labels */,
-                       size_t /* prev suffix trim */> TableVal;
+                       size_t /* prev suffix trim i */> TableVal;
     typedef tsl::hopscotch_map<Alignment::Columns, TableVal> Table;
-    std::vector<VectorMap<size_t, Table>> chain_table(alignments.size());
+    std::vector<std::vector<std::pair<size_t, Table>>> chain_table(alignments.size());
     const DeBruijnGraph &graph = aligner.get_graph();
     ssize_t node_overlap = graph.get_k() - 1;
 
@@ -732,7 +810,7 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
 
     for (size_t i = 0; i < alignments.size(); ++i) {
         Alignment a = alignments[i];
-        std::vector<std::pair<size_t, Table>> vals;
+        auto &vals = chain_table[i];
         ssize_t max_suffix_trim = 0;
         const char *a_end = a.get_query_view().data() + a.get_query_view().size();
         for (size_t j = i + 1; j < alignments.size(); ++j) {
@@ -751,15 +829,14 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
                 a.get_score(), 0 /* extra score */, 0 /* gap */,
                 0 /* prefix trim */,
                 std::numeric_limits<size_t>::max() /* last table i */,
-                0 /* last labels */, 0 /* prev suffix trim */
+                0 /* last labels */,
+                std::numeric_limits<size_t>::max() /* prev suffix trim i */
             });
         }
-        chain_table[i].insert(vals.begin(), vals.end());
-        assert(std::is_sorted(chain_table[i].begin(), chain_table[i].end(),
+        assert(std::is_sorted(vals.begin(), vals.end(),
                               [&](const auto &a, const auto &b) {
                                   return a.first < b.first;
                               }));
-        assert(chain_table[i].size() == vals.size());
     }
 
     for (size_t i = 0; i < alignments.size() - 1; ++i) {
@@ -784,6 +861,7 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
             Alignment b_base = alignments[j];
             for (auto jt = std::make_reverse_iterator(jt_end); jt != chain_table[i].rend(); ++jt) {
                 const auto &[a_suffix_trim, tab] = *jt;
+                size_t a_suffix_trim_i = jt.base() - chain_table[i].begin() - 1;
                 const char *chain_end = alignments[i].get_query_view().data() + alignments[i].get_query_view().size() - a_suffix_trim;
 
                 for (const auto &[cur_columns, vals] : tab) {
@@ -819,10 +897,10 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
                         if (b_prefix_trim != last_b_prefix_trim) {
                             b_base.trim_query_prefix(b_prefix_trim - last_b_prefix_trim, node_overlap, config);
                             last_b_prefix_trim = b_prefix_trim;
-                        }
 
-                        if (b_base.empty() || first_is_indel(b_base.get_cigar()) || b_base.get_offset() >= b_base.size())
-                            continue;
+                            if (b_base.empty() || first_is_indel(b_base.get_cigar()) || b_base.get_offset() >= b_base.size())
+                                continue;
+                        }
 
                         gap_score = config.gap_opening_penalty;
                         if (gap > 0)
@@ -841,10 +919,10 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
                         if (b_prefix_trim != last_b_prefix_trim) {
                             b_base.trim_query_prefix(b_prefix_trim - last_b_prefix_trim, node_overlap, config);
                             last_b_prefix_trim = b_prefix_trim;
-                        }
 
-                        if (b_base.empty() || first_is_indel(b_base.get_cigar()))
-                            continue;
+                            if (b_base.empty() || first_is_indel(b_base.get_cigar()))
+                                continue;
+                        }
 
                         assert(alignments[j].get_sequence().size() >= b_base.get_sequence().size());
                         std::string_view b_prefix(
@@ -905,7 +983,7 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
 
                         score_t b_score = b_base.get_score() - score_diff;
 
-                        Table &b_tab = it.value();
+                        Table &b_tab = it->second;
                         score_t next_base_score = a_score + b_score + gap_score;
 
 #ifndef NDEBUG
@@ -947,11 +1025,11 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
                             auto find = b_tab.find(cols);
                             if (find == b_tab.end()) {
                                 b_tab.try_emplace(cols, TableVal{
-                                    next_score, lc_score, gap, b_prefix_trim, i, cur_columns, a_suffix_trim
+                                    next_score, lc_score, gap, b_prefix_trim, i, cur_columns, a_suffix_trim_i
                                 });
                             } else if (next_score > std::get<0>(find->second)) {
                                 find.value() = std::tie(
-                                    next_score, lc_score, gap, b_prefix_trim, i, cur_columns, a_suffix_trim
+                                    next_score, lc_score, gap, b_prefix_trim, i, cur_columns, a_suffix_trim_i
                                 );
                             }
                         }
@@ -966,72 +1044,7 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
 
     DEBUG_LOG("Done chaining");
 
-    std::vector<std::tuple<score_t, size_t, Alignment::Columns, size_t>> indices;
-    sdsl::bit_vector used(chain_table.size(), false);
-    for (size_t i = 0; i < chain_table.size(); ++i) {
-        for (const auto &[suffix_trim, tab] : chain_table[i]) {
-            for (const auto &[cols, vals] : tab) {
-                indices.emplace_back(std::get<0>(vals), suffix_trim, cols, i);
-            }
-        }
-    }
-    std::sort(indices.begin(), indices.end());
-    for (auto it = indices.rbegin(); it != indices.rend(); ++it) {
-        auto [start_score, suffix_trim, cols, i] = *it;
-        if (used[i])
-            continue;
-
-        used[i] = true;
-        Alignment cur = alignments[i];
-        auto [score, extra_score, gap, prefix_trim,
-              last_i, last_cols, last_suffix_trim] = chain_table[i][suffix_trim][cols];
-
-        cur.trim_query_suffix(suffix_trim, config);
-        assert(cur.size());
-
-        cur.trim_query_prefix(prefix_trim, node_overlap, config);
-        assert(cur.size());
-
-        assert(cur.is_valid(graph, &config));
-
-        while (last_i != std::numeric_limits<size_t>::max()) {
-            i = last_i;
-            suffix_trim = last_suffix_trim;
-            cols = last_cols;
-            ssize_t last_gap = gap;
-            std::tie(score, extra_score, gap, prefix_trim,
-                     last_i, last_cols, last_suffix_trim) = chain_table[i][suffix_trim][cols];
-            used[i] = true;
-
-            Alignment prev = alignments[i];
-            prev.trim_query_suffix(suffix_trim, config);
-            assert(prev.size());
-
-            prev.trim_query_prefix(prefix_trim, node_overlap, config);
-            assert(prev.size());
-
-            if (last_gap >= 0) {
-                cur.trim_offset();
-                cur.insert_gap_prefix(last_gap, node_overlap, config);
-            } else if (last_gap > -node_overlap) {
-                cur.insert_gap_prefix(last_gap, node_overlap, config);
-            } else {
-                cur.trim_clipping();
-            }
-
-            prev.trim_end_clipping();
-            prev.append(std::move(cur), extra_score);
-            assert(prev.size());
-            std::swap(cur, prev);
-            assert(cur.is_valid(graph, &config));
-        }
-
-        assert(cur.get_score() == start_score);
-
-        aggregator.add_alignment(std::move(cur));
-    }
-
-    return aggregator.get_alignments();
+    return backtrack(aggregator, chain_table, alignments, config, node_overlap);
 }
 
 template
