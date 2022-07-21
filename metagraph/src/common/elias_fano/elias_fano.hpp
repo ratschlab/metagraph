@@ -47,7 +47,7 @@ class EliasFanoDecoder {
     inline std::optional<T> next() {
         if (buffer_pos_ == buffer_end_) {
             if (!decompress_next_block())
-                return {};
+                return std::optional<T>{};
         }
         return buffer_[buffer_pos_++];
     }
