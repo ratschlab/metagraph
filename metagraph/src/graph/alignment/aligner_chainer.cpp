@@ -591,7 +591,7 @@ LabelChangeScores get_label_change_scores(Alignment::Columns a_col, Alignment::C
             double union_size = hll_wrapper->data().estimate_column_union_cardinality(c, d);
 
             uint64_t size_sum = a_size + b_size;
-            if (union_size < size_sum)
+            if (union_size >= size_sum)
                 continue;
 
             score_t label_change_score = log2(std::min(dbsize, size_sum - union_size)) - logdbsize;
