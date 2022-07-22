@@ -751,7 +751,7 @@ void call_alignment_chains(const IDBGAligner &aligner,
                 assert(alignments[i].get_sequence().size() >= a.get_sequence().size());
                 score_t score = first_is_indel(a.get_cigar()) ? DBGAlignerConfig::ninf : alignments[i].get_score() - a.get_score();
                 prefix_score_size_diffs[i].emplace_back(score, alignments[i].get_sequence().size() - a.get_sequence().size());
-                if (a.get_query_view().data() > max_prev_char[i])
+                if (a.get_query_view().data() > max_prev_char[i] && !first_is_indel(a.get_cigar()))
                     break;
             }
         } else {
@@ -763,7 +763,7 @@ void call_alignment_chains(const IDBGAligner &aligner,
                 assert(alignments[i].get_sequence().size() >= a.get_sequence().size());
                 score_t score = last_is_indel(a.get_cigar()) ? DBGAlignerConfig::ninf : alignments[i].get_score() - a.get_score();
                 suffix_score_size_diffs[i].emplace_back(score, alignments[i].get_sequence().size() - a.get_sequence().size());
-                if (a.get_query_view().data() + a.get_query_view().size() < min_next_char[i])
+                if (a.get_query_view().data() + a.get_query_view().size() < min_next_char[i] && last_is_indel(a.get_cigar()))
                     break;
             }
         } else {
@@ -848,16 +848,20 @@ void call_alignment_chains(const IDBGAligner &aligner,
                     b_score = a_score + alignments[j].get_score() - prefix_score_diff + gap_score;
                 } else {
                     // overlap
+                    gap = std::max({
+                        gap,
+                        static_cast<ssize_t>(b_prefix_trim)
+                            - static_cast<ssize_t>(prefix_score_size_diffs[j].size()) + 1
+                    });
+
                     b_score = DBGAlignerConfig::ninf;
                     ssize_t best_mismatch = 0;
                     ssize_t best_gap = gap;
                     for (ssize_t cur_gap = 0; cur_gap >= gap; --cur_gap) {
                         size_t a_suffix_trim = cur_gap - gap;
 
-                        if (a_suffix_trim >= suffix_score_size_diffs[i].size()
-                                || b_prefix_trim - cur_gap >= prefix_score_size_diffs[j].size()) {
+                        if (a_suffix_trim >= suffix_score_size_diffs[i].size())
                             continue;
-                        }
 
                         if (a_suffix_trim + a_prefix_trim >= alignments[i].get_query_view().size())
                             continue;
@@ -891,8 +895,6 @@ void call_alignment_chains(const IDBGAligner &aligner,
 
                             cur_score += config.gap_opening_penalty;
                         } else {
-                            // std::cerr << "ttt\t" << alignments[j].get_sequence().size() << "," << b_seq_prefix_trim
-                            //           << "\t" << alignments[i].get_sequence().size() << "," << a_seq_suffix_trim << "," << a_seq_extra_trim << std::endl;
                             std::string_view b_prefix(alignments[j].get_sequence().begin(),
                                                       b_seq_prefix_trim);
 
@@ -904,6 +906,7 @@ void call_alignment_chains(const IDBGAligner &aligner,
                                 a_suffix.remove_prefix(a_suffix.size() - node_overlap);
                             }
 
+                            // TODO: optimize this later if needed
                             auto [a_mm, b_mm] = std::mismatch(a_suffix.rbegin(), a_suffix.rend(),
                                                               b_prefix.rbegin(), b_prefix.rend());
 
