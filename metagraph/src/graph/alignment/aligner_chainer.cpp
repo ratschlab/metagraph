@@ -582,17 +582,19 @@ LabelChangeScores get_label_change_scores(Alignment::Columns a_col, Alignment::C
 
     VectorMap<Alignment::Column, score_t> diff_scores;
     for (Alignment::Column d : diff) {
+        uint64_t b_size = hll_wrapper->data().num_relations_in_column(d);
+        double dbsize = b_size;
+        double logdbsize = log2(dbsize);
         auto find = diff_scores.find(d);
         for (Alignment::Column c : a_cols) {
-            auto [a_size, b_size, union_size]
-                = hll_wrapper->data().estimate_column_sizes_union_cardinality(c, d);
+            uint64_t a_size = hll_wrapper->data().num_relations_in_column(c);
+            double union_size = hll_wrapper->data().estimate_column_union_cardinality(c, d);
 
             uint64_t size_sum = a_size + b_size;
             if (union_size < size_sum)
                 continue;
 
-            double dbsize = b_size;
-            score_t label_change_score = (log2(std::min(dbsize, size_sum - union_size)) - log2(dbsize));
+            score_t label_change_score = log2(std::min(dbsize, size_sum - union_size)) - logdbsize;
             if (find == diff_scores.end()) {
                 find = diff_scores.emplace(d, label_change_score).first;
             } else {

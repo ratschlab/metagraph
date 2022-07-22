@@ -116,60 +116,10 @@ class HLLMatrix : public BinaryMatrix {
         return result;
     }
 
-    std::tuple<uint64_t, uint64_t, double>
-    estimate_column_sizes_union_cardinality(Column a, Column b) const {
-        ColumnSketch a_sketch = get_column_sketch(a);
-        const ColumnSketch &b_sketch = get_column_sketch(b);
-        a_sketch.merge(b_sketch);
-        return { num_set_bits_[a], num_set_bits_[b], a_sketch.estimate_cardinality() };
-    }
+    uint64_t num_relations_in_column(Column a) const { return num_set_bits_[a]; }
 
-    std::pair<double, double>
-    estimate_column_union_intersection_cardinality(Column a, Column b) const {
-        ColumnSketch a_sketch = get_column_sketch(a);
-        const ColumnSketch &b_sketch = get_column_sketch(b);
-        a_sketch.merge(b_sketch);
-        double union_est = a_sketch.estimate_cardinality();
-        return { union_est, num_set_bits_[a] + num_set_bits_[b] - union_est };
-    }
-
-    template <class Columns>
-    std::pair<double, double>
-    estimate_column_union_intersection_cardinality(const Columns &a,
-                                                   const Columns &b) const {
-        if (a.empty() && b.empty())
-            return {};
-
-        double a_cardinality_est;
-        std::shared_ptr<ColumnSketch> a_sketch;
-        if (a.empty()) {
-            a_sketch = std::make_shared<ColumnSketch>();
-            a_cardinality_est = 0.0;
-        } else {
-            a_sketch = std::make_shared<ColumnSketch>(merge_columns(a));
-            a_cardinality_est = a.size() == 1
-                ? num_set_bits_[a[0]]
-                : a_sketch->estimate_cardinality();
-        }
-
-        double b_cardinality_est;
-        std::shared_ptr<const ColumnSketch> b_sketch;
-        if (b.empty()) {
-            b_sketch = std::make_shared<const ColumnSketch>();
-            b_cardinality_est = 0.0;
-        } else if (b.size() == 1) {
-            b_sketch = std::shared_ptr<const ColumnSketch>{
-                std::shared_ptr<const ColumnSketch>{}, &get_column_sketch(b[0])
-            };
-            b_cardinality_est = num_set_bits_[b[0]];
-        } else {
-            b_sketch = std::make_shared<const ColumnSketch>(merge_columns(b));
-            b_cardinality_est = b_sketch->estimate_cardinality();
-        }
-
-        a_sketch->merge(*b_sketch);
-        double union_est = a_sketch->estimate_cardinality();
-        return { union_est, a_cardinality_est + b_cardinality_est - union_est };
+    double estimate_column_union_cardinality(Column a, Column b) const {
+        return get_column_sketch(a).estimate_union_cardinality(get_column_sketch(b));
     }
 
     uint64_t num_columns() const override { return columns_.size(); }
