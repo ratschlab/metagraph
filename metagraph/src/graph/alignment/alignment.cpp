@@ -95,6 +95,9 @@ auto Alignment::get_column_union() const -> Vector<Column> {
     assert(label_encoder);
     Vector<Column> ret_val = label_encoder->get_cached_column_set(label_columns);
     for (size_t diff : label_column_diffs) {
+        if (!diff)
+            continue;
+
         Vector<Column> merge;
         const Vector<Column> &next = label_encoder->get_cached_column_set(diff);
         merge.reserve(ret_val.size() + next.size());
