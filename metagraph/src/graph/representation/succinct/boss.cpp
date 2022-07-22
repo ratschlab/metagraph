@@ -65,7 +65,7 @@ BOSS::BOSS(size_t k)
         F_(alph_size, 0),
         NF_(alph_size, 0),
         W_(new wavelet_tree_dyn(bits_per_char_W_)) {
-
+    assert(k_);
     assert(bits_per_char_W_ <= sizeof(TAlphabet) * 8
             && "Choose type for TAlphabet properly");
 
