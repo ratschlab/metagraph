@@ -91,8 +91,7 @@ int transform_graph(Config *config) {
         timer.reset();
     }
 
-    if (config->node_suffix_length
-            && config->node_suffix_length != dbg_succ->get_boss().get_indexed_suffix_length()) {
+    if (config->node_suffix_length != dbg_succ->get_boss().get_indexed_suffix_length()) {
         size_t suffix_length = std::min((size_t)config->node_suffix_length,
                                         dbg_succ->get_boss().get_k());
 
@@ -106,9 +105,11 @@ int transform_graph(Config *config) {
                       suffix_length,
                       std::pow(dbg_succ->get_boss().alph_size - 1, suffix_length)
                             * 2. * sizeof(uint64_t) * 1e-6);
+        logger->trace("Compressed node ranges to {:.2f} MB",
+                      dbg_succ->get_boss().get_suffix_ranges_index_size() / 8e6);
         timer.reset();
 
-        dbg_succ->get_boss().index_suffix_ranges(suffix_length);
+        dbg_succ->get_boss().index_suffix_ranges(suffix_length, get_num_threads());
 
         logger->trace("Indexing of node ranges took {} sec", timer.elapsed());
         timer.reset();
