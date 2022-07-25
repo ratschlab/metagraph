@@ -556,11 +556,6 @@ LabelChangeScores get_label_change_scores(Alignment::Columns a_col, Alignment::C
     if (a_col == b_col)
         return { std::make_pair(a_col, 0) };
 
-    auto key = std::make_pair(a_col, b_col);
-    auto find = cache.find(key);
-    if (find != cache.end())
-        return find->second;
-
     const auto &a_cols = labeled_aligner->get_annotation_buffer().get_cached_column_set(a_col);
     const auto &b_cols = labeled_aligner->get_annotation_buffer().get_cached_column_set(b_col);
     Vector<Alignment::Column> inter;
@@ -588,7 +583,16 @@ LabelChangeScores get_label_change_scores(Alignment::Columns a_col, Alignment::C
         auto find = diff_scores.find(d);
         for (Alignment::Column c : a_cols) {
             uint64_t a_size = hll_wrapper->data().num_relations_in_column(c);
-            double union_size = hll_wrapper->data().estimate_column_union_cardinality(c, d);
+
+            auto key = std::make_pair(std::min(c, d), std::max(c, d));
+            auto [cache_find, cache_inserted] = cache.try_emplace(key, 0.0);
+            double union_size;
+            if (cache_inserted) {
+                union_size = hll_wrapper->data().estimate_column_union_cardinality(c, d);
+                cache_find.value() = union_size;
+            } else {
+                union_size = cache_find->second;
+            }
 
             uint64_t size_sum = a_size + b_size;
             if (union_size >= size_sum)
@@ -617,8 +621,6 @@ LabelChangeScores get_label_change_scores(Alignment::Columns a_col, Alignment::C
         results.emplace_back(labeled_aligner->get_annotation_buffer().cache_column_set(diff.begin(), diff.end()),
                              score_diff.first);
     }
-
-    cache[key] = results;
 
     return results;
 }
@@ -669,7 +671,7 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
 
         // TODO: handle offset and mixed label cases later
         if ((!a.get_clipping() && !a.get_end_clipping())
-                || a.get_offset() || a.label_column_diffs.size()) {
+                || a.size() == 1 || a.label_column_diffs.size()) {
             aggregator.add_alignment(std::move(a));
         } else {
             size_t orientation = a.get_orientation();
@@ -722,7 +724,7 @@ void call_alignment_chains(const IDBGAligner &aligner,
     const DeBruijnGraph &graph = aligner.get_graph();
     ssize_t node_overlap = graph.get_k() - 1;
 
-    tsl::hopscotch_map<LabelPair, LabelChangeScores, utils::Hash<LabelPair>> cache;
+    tsl::hopscotch_map<LabelPair, double, utils::Hash<LabelPair>> cache;
 
     DEBUG_LOG("Preprocessing alignments");
     std::vector<const char *> min_next_char;
