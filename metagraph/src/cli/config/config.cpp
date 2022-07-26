@@ -166,8 +166,6 @@ Config::Config(int argc, char *argv[]) {
             num_columns_cached = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--fast")) {
             fast = true;
-        } else if (!strcmp(argv[i], "--lcs")) {
-            lcs = true;
         } else if (!strcmp(argv[i], "--batch-size")) {
             query_batch_size_in_bytes = atoll(get_value(i++));
         } else if (!strcmp(argv[i], "-p") || !strcmp(argv[i], "--parallel")) {
