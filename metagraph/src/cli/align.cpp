@@ -13,6 +13,7 @@
 #include "graph/annotated_dbg.hpp"
 #include "graph/graph_extensions/node_rc.hpp"
 #include "graph/graph_extensions/node_first_cache.hpp"
+#include "graph/graph_extensions/unitigs.hpp"
 #include "graph/graph_extensions/hll_wrapper.hpp"
 #include "seq_io/sequence_io.hpp"
 #include "config/config.hpp"
@@ -328,6 +329,16 @@ int align_to_graph(Config *config) {
         }
     }
 
+    auto graph_unitigs = std::make_shared<Unitigs>(*graph);
+    if (graph_unitigs->load(config->infbase)) {
+        logger->trace("Loaded the unitig index");
+    } else {
+        graph_unitigs.reset();
+        logger->warn("Unitig index missing or failed to load. "
+                     "Alignment speed will be significantly slower. "
+                     "Use metagraph transform to generate a unitig index.");
+    }
+
     Timer timer;
     ThreadPool thread_pool(get_num_threads());
     std::mutex print_mutex;
@@ -427,6 +438,9 @@ int align_to_graph(Config *config) {
 
                 if (hll)
                     aln_graph->add_extension(hll);
+
+                if (graph_unitigs)
+                    aln_graph->add_extension(graph_unitigs);
 
                 std::unique_ptr<IDBGAligner> aligner;
 

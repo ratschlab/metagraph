@@ -8,6 +8,7 @@
 #include "aligner_labeled.hpp"
 #include "graph/representation/succinct/boss_construct.hpp"
 #include "graph/representation/canonical_dbg.hpp"
+#include "graph/graph_extensions/unitigs.hpp"
 
 namespace mtg {
 namespace graph {
@@ -360,6 +361,7 @@ auto DBGAligner<Seeder, Extender, AlignmentCompare>
 ::build_seeders(const std::vector<IDBGAligner::Query> &seq_batch,
                 const std::vector<AlignmentResults> &wrapped_seqs) const -> BatchSeeders {
     assert(seq_batch.size() == wrapped_seqs.size());
+    const auto *graph_unitigs = graph_.get_extension_threadsafe<Unitigs>();
     BatchSeeders result;
     result.reserve(seq_batch.size());
     size_t batch_size = 0;
@@ -394,8 +396,17 @@ auto DBGAligner<Seeder, Extender, AlignmentCompare>
                                               std::vector<node_index>(nodes), config_);
         }
 
-        if (this_query.size() * config_.min_exact_match > seeder->get_num_matches())
+        if (this_query.size() * config_.min_exact_match > seeder->get_num_matches()) {
             seeder = std::make_shared<ManualMatchingSeeder>(std::vector<Seed>{}, 0, config_);
+        } else if (graph_unitigs) {
+            auto filtered_seeds = graph_unitigs->cluster_and_filter_seeds(
+                seeder->get_seeds(), config_.min_seed_length
+            );
+            size_t num_matches = get_num_char_matches_in_seeds(filtered_seeds.begin(), filtered_seeds.end());
+            seeder = std::make_shared<ManualMatchingSeeder>(
+                std::move(filtered_seeds), num_matches, config_
+            );
+        }
 
         std::shared_ptr<ISeeder> seeder_rc;
         std::vector<node_index> nodes_rc;
@@ -422,8 +433,17 @@ auto DBGAligner<Seeder, Extender, AlignmentCompare>
                 seeder_rc = std::make_shared<Seeder>(graph_, reverse, true,
                                                      std::move(nodes_rc), config_);
             }
-            if (reverse.size() * config_.min_exact_match > seeder_rc->get_num_matches())
+            if (reverse.size() * config_.min_exact_match > seeder_rc->get_num_matches()) {
                 seeder_rc = std::make_shared<ManualMatchingSeeder>(std::vector<Seed>{}, 0, config_);
+            } else if (graph_unitigs) {
+                auto filtered_seeds = graph_unitigs->cluster_and_filter_seeds(
+                    seeder_rc->get_seeds(), config_.min_seed_length
+                );
+                size_t num_matches = get_num_char_matches_in_seeds(filtered_seeds.begin(), filtered_seeds.end());
+                seeder_rc = std::make_shared<ManualMatchingSeeder>(
+                    std::move(filtered_seeds), num_matches, config_
+                );
+            }
 
         }
 #endif

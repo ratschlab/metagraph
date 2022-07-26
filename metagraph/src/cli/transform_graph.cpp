@@ -8,6 +8,7 @@
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/graph_extensions/node_rc.hpp"
 #include "graph/graph_extensions/node_lcs.hpp"
+#include "graph/graph_extensions/unitigs.hpp"
 #include "config/config.hpp"
 #include "load/load_graph.hpp"
 
@@ -43,6 +44,15 @@ int transform_graph(Config *config) {
 
     if (config->lcs) {
         graph::NodeLCS(*dbg_succ).serialize(config->outfbase + dbg_succ->file_extension());
+        return 0;
+    }
+
+    if (config->index_unitigs) {
+        graph::align::Unitigs(*dbg_succ, [&](const auto &callback) {
+            dbg_succ->call_unitigs([&](const std::string&, const auto &path) {
+                callback(path);
+            });
+        }).serialize(config->outfbase + dbg_succ->file_extension());
         return 0;
     }
 

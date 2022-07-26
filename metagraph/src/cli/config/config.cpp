@@ -361,6 +361,8 @@ Config::Config(int argc, char *argv[]) {
         } else if (!strcmp(argv[i], "--unitigs")) {
             to_fasta = true;
             unitigs = true;
+        } else if (!strcmp(argv[i], "--index-unitigs")) {
+            index_unitigs = true;
         } else if (!strcmp(argv[i], "--primary-kmers")) {
             kmers_in_single_form = true;
         } else if (!strcmp(argv[i], "--header")) {
