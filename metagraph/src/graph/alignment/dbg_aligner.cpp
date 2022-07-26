@@ -475,26 +475,18 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
 #if ! _PROTEIN_GRAPH
         if (seeder_rc) {
             std::string_view reverse = paths[i].get_query(true);
-            Extender extender_rc(*this, reverse);
-
-            auto [seeds, extensions, explored_nodes] =
+            std::tie(num_seeds, num_extensions, num_explored_nodes) =
                 align_both_directions(this_query, reverse, *seeder, *seeder_rc,
-                                      extender, extender_rc,
-                                      add_alignment, get_min_path_score);
-
-            num_seeds += seeds;
-            num_extensions += extensions + extender_rc.num_extensions();
-            num_explored_nodes += explored_nodes + extender_rc.num_explored_nodes();
+                                      extender, add_alignment, get_min_path_score);
 
         } else {
-            align_core(*seeder, extender, add_alignment, get_min_path_score, false);
+            std::tie(num_seeds, num_extensions, num_explored_nodes) =
+                align_core(*seeder, extender, add_alignment, get_min_path_score, false);
         }
 #else
-        align_core(*seeder, extender, add_alignment, get_min_path_score, false);
+        std::tie(num_seeds, num_extensions, num_explored_nodes) =
+            align_core(*seeder, extender, add_alignment, get_min_path_score, false);
 #endif
-
-        num_explored_nodes += extender.num_explored_nodes();
-        num_extensions += extender.num_extensions();
 
         size_t aligned_labels = aggregator.num_aligned_labels();
         score_t best_score = std::numeric_limits<score_t>::min();
@@ -530,11 +522,12 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
 // all alignments must have the seed as a prefix. Otherwise, only the first
 // node of the seed is used as an alignment starting node.
 template <class Seeder, class Extender>
-void align_core(const Seeder &seeder,
-                Extender &extender,
-                const std::function<void(Alignment&&)> &callback,
-                const std::function<score_t(const Alignment&)> &get_min_path_score,
-                bool force_fixed_seed) {
+std::tuple<size_t, size_t, size_t>
+align_core(const Seeder &seeder,
+           Extender &extender,
+           const std::function<void(Alignment&&)> &callback,
+           const std::function<score_t(const Alignment&)> &get_min_path_score,
+           bool force_fixed_seed) {
     auto seeds = seeder.get_alignments();
 
     for (size_t i = 0; i < seeds.size(); ++i) {
@@ -553,6 +546,8 @@ void align_core(const Seeder &seeder,
                 filter_seed(seeds[i], seeds[j]);
         }
     }
+
+    return { seeds.size(), extender.num_extensions(), extender.num_explored_nodes() };
 }
 
 // Construct a full alignment from a chain by aligning the query agaisnt
@@ -699,12 +694,12 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
                         const ISeeder &forward_seeder,
                         const ISeeder &reverse_seeder,
                         Extender &forward_extender,
-                        Extender &reverse_extender,
                         const std::function<void(Alignment&&)> &callback,
                         const std::function<score_t(const Alignment&)> &get_min_path_score) const {
     size_t num_seeds = 0;
     size_t num_extensions = 0;
     size_t num_explored_nodes = 0;
+    Extender reverse_extender(*this, reverse);
 
     if (config_.chain_alignments) {
         auto fwd_seeds = forward_seeder.get_seeds();
@@ -781,7 +776,9 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
             callback(std::move(alignment));
         }
 
-        return std::make_tuple(num_seeds, num_extensions, num_explored_nodes);
+        return std::make_tuple(num_seeds,
+                               num_extensions + reverse_extender.num_extensions(),
+                               num_explored_nodes + reverse_extender.num_explored_nodes());
     }
 
     auto fwd_seeds = forward_seeder.get_alignments();
@@ -900,7 +897,9 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
         }
     }
 
-    return std::make_tuple(num_seeds, num_extensions, num_explored_nodes);
+    return std::make_tuple(num_seeds,
+                           num_extensions + reverse_extender.num_extensions(),
+                           num_explored_nodes + reverse_extender.num_explored_nodes());
 }
 #endif
 

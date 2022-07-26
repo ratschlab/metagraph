@@ -85,7 +85,6 @@ class DBGAligner : public IDBGAligner {
                           const ISeeder &forward_seeder,
                           const ISeeder &reverse_seeder,
                           Extender &forward_extender,
-                          Extender &reverse_extender,
                           const std::function<void(Alignment&&)> &callback,
                           const std::function<score_t(const Alignment&)> &get_min_path_score) const;
 #endif
