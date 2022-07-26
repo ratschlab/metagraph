@@ -525,14 +525,22 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
         double explored_nodes_d = num_explored_nodes;
         double explored_nodes_per_kmer =
             explored_nodes_d / (query.size() - graph_.get_k() + 1);
-        logger->trace("{}\tlength: {}\tcovered: {}\tbest score: {}\tseeds: {}\t"
-                "extensions: {}\texplored nodes: {}\texplored nodes/extension: {:.2f}\t"
-                "explored nodes/k-mer: {:.2f}\tlabels: {}\texplored nodes/k-mer/label: {:.2f}",
-                header, query.size(), query_coverage, best_score, num_seeds, num_extensions,
-                num_explored_nodes,
-                num_explored_nodes ? explored_nodes_d / num_extensions : 0,
-                explored_nodes_per_kmer, aligned_labels,
-                aligned_labels ? explored_nodes_per_kmer / aligned_labels : 0);
+        if (common::get_verbose()) {
+            std::string label_trace;
+            if (dynamic_cast<const ILabeledAligner*>(this)) {
+                label_trace = fmt::format("\tlabels: {}\texplored nodes/k-mer/label: {:.2f}",
+                                          aligned_labels,
+                                          aligned_labels ? explored_nodes_per_kmer / aligned_labels : 0);
+            }
+
+            logger->trace("{}\tlength: {}\tcovered: {}\tbest score: {}\tseeds: {}\t"
+                    "extensions: {}\texplored nodes: {}\texplored nodes/extension: {:.2f}\t"
+                    "explored nodes/k-mer: {:.2f}{}",
+                    header, query.size(), query_coverage, best_score, num_seeds, num_extensions,
+                    num_explored_nodes,
+                    num_explored_nodes ? explored_nodes_d / num_extensions : 0,
+                    explored_nodes_per_kmer, label_trace);
+        }
 
         callback(header, std::move(paths[i]));
     };
