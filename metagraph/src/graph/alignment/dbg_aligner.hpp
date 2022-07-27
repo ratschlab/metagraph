@@ -22,6 +22,7 @@ class IDBGAligner {
     typedef std::pair<std::string /* header */, std::string /* seq */> Query;
     typedef std::function<void(const std::string& /* header */,
                                AlignmentResults&& /* alignments */)> AlignmentCallback;
+    typedef std::vector<std::pair<std::shared_ptr<ISeeder>, std::shared_ptr<ISeeder>>> BatchSeeders;
 
     virtual ~IDBGAligner() {}
 
@@ -62,8 +63,6 @@ class DBGAligner : public IDBGAligner {
 
     const DeBruijnGraph &graph_;
     DBGAlignerConfig config_;
-
-    typedef std::vector<std::pair<std::shared_ptr<ISeeder>, std::shared_ptr<ISeeder>>> BatchSeeders;
 
     virtual BatchSeeders build_seeders(const std::vector<Query> &seq_batch,
                                        const std::vector<AlignmentResults> &wrapped_seqs) const;

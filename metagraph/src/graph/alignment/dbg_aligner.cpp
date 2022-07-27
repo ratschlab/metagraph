@@ -376,7 +376,6 @@ auto DBGAligner<Seeder, Extender, AlignmentCompare>
         = extract_subgraph(graph_, seq_batch, config_, batch_size * 16);
 
     size_t old_seed_count = 0;
-    size_t new_seed_count = 0;
     ProgressBar progress_bar(seq_batch.size(), "Seeding sequences",
                              std::cerr, !common::get_verbose());
     for (size_t i = 0; i < seq_batch.size(); ++i, ++progress_bar) {
@@ -401,20 +400,10 @@ auto DBGAligner<Seeder, Extender, AlignmentCompare>
                                               std::vector<node_index>(nodes), config_);
         }
 
-        if (this_query.size() * config_.min_exact_match > seeder->get_num_matches()) {
+        if (this_query.size() * config_.min_exact_match > seeder->get_num_matches())
             seeder = std::make_shared<ManualMatchingSeeder>(std::vector<Seed>{}, 0, config_);
-        } else if (graph_unitigs) {
-            const auto &old_seeds = seeder->get_seeds();
-            old_seed_count += old_seeds.size();
-            auto filtered_seeds = graph_unitigs->cluster_and_filter_seeds(
-                old_seeds, config_.min_seed_length
-            );
-            new_seed_count += filtered_seeds.size();
-            size_t num_matches = get_num_char_matches_in_seeds(filtered_seeds.begin(), filtered_seeds.end());
-            seeder = std::make_shared<ManualMatchingSeeder>(
-                std::move(filtered_seeds), num_matches, config_
-            );
-        }
+
+        old_seed_count += seeder->get_seeds().size();
 
         std::shared_ptr<ISeeder> seeder_rc;
         std::vector<node_index> nodes_rc;
@@ -441,30 +430,21 @@ auto DBGAligner<Seeder, Extender, AlignmentCompare>
                 seeder_rc = std::make_shared<Seeder>(graph_, reverse, true,
                                                      std::move(nodes_rc), config_);
             }
-            if (reverse.size() * config_.min_exact_match > seeder_rc->get_num_matches()) {
+            if (reverse.size() * config_.min_exact_match > seeder_rc->get_num_matches())
                 seeder_rc = std::make_shared<ManualMatchingSeeder>(std::vector<Seed>{}, 0, config_);
-            } else if (graph_unitigs) {
-                const auto &old_seeds = seeder_rc->get_seeds();
-                old_seed_count += old_seeds.size();
-                auto filtered_seeds = graph_unitigs->cluster_and_filter_seeds(
-                    old_seeds, config_.min_seed_length
-                );
-                new_seed_count += filtered_seeds.size();
-                size_t num_matches = get_num_char_matches_in_seeds(filtered_seeds.begin(), filtered_seeds.end());
-                seeder_rc = std::make_shared<ManualMatchingSeeder>(
-                    std::move(filtered_seeds), num_matches, config_
-                );
-            }
 
+            old_seed_count += seeder_rc->get_seeds().size();
         }
 #endif
         result.emplace_back(std::move(seeder), std::move(seeder_rc));
     }
 
     if (graph_unitigs) {
+        size_t new_seed_count = graph_unitigs->cluster_and_filter_seeds(result, config_);
         logger->trace("Seed count:\tbefore clustering: {}\tafter clustering: {}",
                       old_seed_count, new_seed_count);
     }
+
 
     return result;
 }
