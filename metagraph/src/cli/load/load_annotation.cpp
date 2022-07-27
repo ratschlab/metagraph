@@ -57,8 +57,14 @@ Config::AnnotationType parse_annotation_type(const std::string &filename) {
     } else if (utils::ends_with(filename, annot::RowSparseAnnotator::kExtension)) {
         return Config::AnnotationType::RowSparse;
 
+    } else if (utils::ends_with(filename, annot::RowSparseDiskAnnotator::kExtension)) {
+        return Config::AnnotationType::RowSparseDisk;
+
     } else if (utils::ends_with(filename, annot::RowDiffRowSparseAnnotator ::kExtension)) {
         return Config::AnnotationType::RowDiffRowSparse;
+
+    } else if (utils::ends_with(filename, annot::RowDiffSparseDiskAnnotator::kExtension)) {
+        return Config::AnnotationType::RowDiffSparseDisk;
 
     } else if (utils::ends_with(filename, annot::RainbowfishAnnotator::kExtension)) {
         return Config::AnnotationType::RBFish;
@@ -86,7 +92,8 @@ initialize_annotation(Config::AnnotationType anno_type,
                       const std::string &swap_dir,
                       double memory_available_gb,
                       uint8_t count_width,
-                      size_t max_chunks_open) {
+                      size_t max_chunks_open,
+                      size_t row_sparse_disk_buff_size) {
     std::unique_ptr<annot::MultiLabelEncoded<std::string>> annotation;
 
     switch (anno_type) {
@@ -108,6 +115,18 @@ initialize_annotation(Config::AnnotationType anno_type,
         }
         case Config::RowSparse: {
             annotation.reset(new annot::RowSparseAnnotator());
+            break;
+        }
+        case Config::RowSparseDisk: {
+            auto x = new annot::RowSparseDiskAnnotator();
+            const_cast<mtg::annot::binmat::RowSparseDisk&>(x->get_matrix()).set_buff_size(row_sparse_disk_buff_size);
+            annotation.reset(x);
+            break;
+        }
+        case Config::RowDiffSparseDisk: {
+            auto x = new annot::RowDiffSparseDiskAnnotator();
+            const_cast<mtg::annot::binmat::RowSparseDisk&>(x->get_matrix().diffs()).set_buff_size(row_sparse_disk_buff_size);
+            annotation.reset(x);
             break;
         }
         case Config::BRWT: {

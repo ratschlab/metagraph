@@ -849,6 +849,11 @@ int transform_annotation(Config *config) {
                 return 0;
 
             }
+            case Config::RowDiffSparseDisk: {
+                logger->error("Convert to row_diff first, and then to row_diff_sparse_disk");
+                return 0;
+
+            }
             case Config::RowDiff: {
                 auto out_dir = std::filesystem::path(config->outfbase).remove_filename();
                 convert_to_row_diff(files, config->infbase, config->memory_available * 1e9,
@@ -912,6 +917,11 @@ int transform_annotation(Config *config) {
                 convert<RowSparseAnnotator>(std::move(annotator), *config, timer);
                 break;
             }
+            case Config::RowSparseDisk: {
+                convert_to_row_sparse_disk(*annotator, config->outfbase, get_num_threads());
+                break;
+            }
+
             case Config::RBFish: {
                 convert<RainbowfishAnnotator>(std::move(annotator), *config, timer);
                 break;
@@ -958,9 +968,10 @@ int transform_annotation(Config *config) {
     } else if (input_anno_type == Config::RowDiff) {
         if (config->anno_type != Config::RowDiffBRWT
                 && config->anno_type != Config::ColumnCompressed
-                && config->anno_type != Config::RowDiffRowSparse) {
+                && config->anno_type != Config::RowDiffRowSparse
+                && config->anno_type != Config::RowDiffSparseDisk) {
             logger->error(
-                    "Only conversion to 'column', 'row_diff_sparse', and 'row_diff_brwt' "
+                    "Only conversion to 'column', 'row_diff_sparse', 'row_diff_sparse_disk', and 'row_diff_brwt' "
                     "supported for row_diff");
             exit(1);
         }
@@ -1007,6 +1018,12 @@ int transform_annotation(Config *config) {
                         .load_fork_succ(fork_succ_file);
                 brwt_annotator->serialize(config->outfbase);
 
+            } else if (config->anno_type == Config::RowDiffSparseDisk) {
+                logger->trace("Loading annotation from disk...");
+                convert_row_diff_to_row_diff_sparse_disk(files, config->outfbase,
+                                                         anchors_file, fork_succ_file);
+
+                logger->trace("Annotation converted in {} sec", timer.elapsed());
             } else { // RowDiff<RowSparse>
                 logger->trace("Loading annotation from disk...");
                 std::unique_ptr<RowDiffRowSparseAnnotator> row_sparse

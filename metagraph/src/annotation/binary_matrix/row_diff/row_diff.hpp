@@ -42,6 +42,8 @@ class IRowDiff {
 
     const anchor_bv_type& anchor() const { return anchor_; }
 
+    const fork_succ_bv_type& fork_succ() const { return fork_succ_; }
+
   protected:
     // get row-diff paths starting at |row_ids|
     std::pair<std::vector<BinaryMatrix::Row>, std::vector<std::vector<size_t>>>
