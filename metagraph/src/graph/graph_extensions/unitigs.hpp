@@ -183,7 +183,6 @@ class Unitigs : public SequenceGraph::GraphExtension {
                                                size_t min_seed_length) const {
         const auto *canonical = dynamic_cast<const CanonicalDBG*>(graph_.get());
 
-        common::logger->trace("Clustering: old seed count: {}", seeds.size());
         tsl::hopscotch_map<size_t, std::vector<size_t>> unitig_to_bucket;
         for (size_t i = 0; i < seeds.size(); ++i) {
             node_index node = seeds[i].get_nodes().back();
@@ -205,7 +204,6 @@ class Unitigs : public SequenceGraph::GraphExtension {
                 )]));
             }
         }
-        common::logger->trace("Done clustering: new seed count: {}", filtered_seeds.size());
         return filtered_seeds;
     }
 
