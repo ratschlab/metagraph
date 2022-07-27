@@ -314,6 +314,7 @@ int align_to_graph(Config *config) {
     // For graphs which still feature a mask, this speeds up mapping and allows
     // for dummy nodes to be matched by suffix seeding
     auto dbg_succ = std::dynamic_pointer_cast<DBGSuccinct>(graph);
+    std::shared_ptr<Unitigs> graph_unitigs;
     if (dbg_succ) {
         dbg_succ->reset_mask();
         if (dbg_succ->get_mode() == DeBruijnGraph::PRIMARY) {
@@ -327,16 +328,16 @@ int align_to_graph(Config *config) {
                              "Use metagraph transform to generate an adj-rc index.");
             }
         }
-    }
 
-    auto graph_unitigs = std::make_shared<Unitigs>(*graph);
-    if (graph_unitigs->load(config->infbase)) {
-        logger->trace("Loaded the unitig index");
-    } else {
-        graph_unitigs.reset();
-        logger->warn("Unitig index missing or failed to load. "
-                     "Alignment speed will be significantly slower. "
-                     "Use metagraph transform to generate a unitig index.");
+        graph_unitigs = std::make_shared<Unitigs>(*dbg_succ);
+        if (graph_unitigs->load(config->infbase)) {
+            logger->trace("Loaded the unitig index");
+        } else {
+            graph_unitigs.reset();
+            logger->warn("Unitig index missing or failed to load. "
+                         "Alignment speed will be significantly slower. "
+                         "Use metagraph transform to generate a unitig index.");
+        }
     }
 
     Timer timer;

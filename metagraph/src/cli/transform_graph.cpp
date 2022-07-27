@@ -29,6 +29,11 @@ int transform_graph(Config *config) {
     if (config->initialize_bloom)
         std::filesystem::remove(utils::make_suffix(config->outfbase, ".bloom"));
 
+    if (config->index_unitigs) {
+        graph::align::Unitigs(*config, false).serialize(config->outfbase + ".dbg");
+        return 0;
+    }
+
     Timer timer;
     logger->trace("Graph loading...");
 
@@ -40,15 +45,6 @@ int transform_graph(Config *config) {
 
     if (!dbg_succ.get())
         throw std::runtime_error("Only implemented for DBGSuccinct");
-
-    if (config->index_unitigs) {
-        graph::align::Unitigs(*dbg_succ, [&](const auto &callback) {
-            dbg_succ->call_unitigs([&](const std::string&, const auto &path) {
-                callback(path);
-            });
-        }).serialize(config->outfbase + dbg_succ->file_extension());
-        return 0;
-    }
 
     if (config->adjrc) {
         graph::NodeRC(*dbg_succ, true).serialize(config->outfbase + dbg_succ->file_extension());
