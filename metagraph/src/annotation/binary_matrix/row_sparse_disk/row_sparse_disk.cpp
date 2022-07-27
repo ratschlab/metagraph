@@ -12,22 +12,22 @@ namespace binmat {
 
 using mtg::common::logger;
 
-bool RowSparseDisk::get(Row row, Column column) const {
+bool RowSparseDisk::Impl::get(Row row, Column column) const {
     SetBitPositions set_bits = get_row(row);
     SetBitPositions::iterator v = std::lower_bound(set_bits.begin(), set_bits.end(), column);
     return v != set_bits.end() && *v == column;
 }
 
-std::vector<BinaryMatrix::Row> RowSparseDisk::get_column(Column column) const {
+std::vector<BinaryMatrix::Row> RowSparseDisk::Impl::get_column(uint64_t num_rows, Column column) const {
     std::vector<Row> result;
-    for (Row row = 0; row < num_rows(); ++row) {
+    for (Row row = 0; row < num_rows; ++row) {
         if (get(row, column))
             result.push_back(row);
     }
     return result;
 }
 
-BinaryMatrix::SetBitPositions RowSparseDisk::get_row(Row row) const {
+BinaryMatrix::SetBitPositions RowSparseDisk::Impl::get_row(Row row) const {
     assert(boundary_[boundary_.size() - 1] == 1);
     uint64_t start_idx = row == 0 ? 0 : boundary_.select1(row) + 1;
     uint64_t end_idx = boundary_.next1(start_idx);
@@ -53,7 +53,8 @@ bool RowSparseDisk::load(std::istream &f) {
 
         _f->SetOffset(static_cast<uint64_t>(f.tellg()));
 
-        set_bits_ = sdsl::int_vector_buffer<>(_f->GetFName(), std::ios::in, buff_size, 0, false, _f->GetOffset());
+        int_vector_buffer_params.filename = _f->GetFName();
+        int_vector_buffer_params.offset = _f->GetOffset();
 
         f.seekg(-sizeof(std::streampos), ios_base::end);
 
@@ -84,6 +85,7 @@ void RowSparseDisk::serialize(const std::function<void(binmat::BinaryMatrix::Row
 
     outstream.write(reinterpret_cast<char *>(&num_cols), sizeof(uint64_t));
     auto boundary_start_pos = outstream.tellp();
+    // write "empty" boundary start
     std::streampos boundary_start = 0;
     outstream.write(reinterpret_cast<char*>(&boundary_start), sizeof(std::streampos));
 
