@@ -48,16 +48,16 @@ bool RowSparseDisk::load(std::istream &f) {
     try {
         f.read(reinterpret_cast<char *>(&num_columns_), sizeof(uint64_t));
 
+        std::streampos boundary_start;
+        f.read(reinterpret_cast<char*>(&boundary_start), sizeof(boundary_start));
+
         _f->SetOffset(static_cast<uint64_t>(f.tellg()));
 
         set_bits_ = sdsl::int_vector_buffer<>(_f->GetFName(), std::ios::in, buff_size, 0, false, _f->GetOffset());
 
         f.seekg(-sizeof(std::streampos), ios_base::end);
-        std::streampos boundary_start;
-        f.read(reinterpret_cast<char*>(&boundary_start), sizeof(boundary_start));
 
         f.seekg(boundary_start, ios_base::beg);
-
         boundary_.load(f);
 
         num_rows_ = boundary_.num_set_bits();
@@ -83,6 +83,9 @@ void RowSparseDisk::serialize(const std::function<void(binmat::BinaryMatrix::Row
         throw std::ofstream::failure("Cannot write to file " + filename);
 
     outstream.write(reinterpret_cast<char *>(&num_cols), sizeof(uint64_t));
+    auto boundary_start_pos = outstream.tellp();
+    std::streampos boundary_start = 0;
+    outstream.write(reinterpret_cast<char*>(&boundary_start), sizeof(std::streampos));
 
     const uint64_t iv_offs = outstream.tellp();
     outstream.close();
@@ -110,8 +113,9 @@ void RowSparseDisk::serialize(const std::function<void(binmat::BinaryMatrix::Row
     bit_vector_small boundary(call_bits, num_rows + num_set_bits, num_rows);
 
     outstream.open(filename, std::ios::in | std::ios::out | std::ios::binary | std::ios::ate | std::ios::in);
-    std::streampos boundary_start = outstream.tellp();
+    boundary_start = outstream.tellp();
     boundary.serialize(outstream);
+    outstream.seekp(boundary_start_pos, ios_base::beg);
     outstream.write(reinterpret_cast<char*>(&boundary_start), sizeof(std::streampos));
 }
 
