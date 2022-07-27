@@ -668,22 +668,22 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
 
     std::vector<Alignment> split_alignments[2];
 
-    const HLLWrapper<> *hll_wrapper = aligner.get_graph().get_extension_threadsafe<HLLWrapper<>>();
-    std::vector<double> evalues;
+    // const HLLWrapper<> *hll_wrapper = aligner.get_graph().get_extension_threadsafe<HLLWrapper<>>();
+    // std::vector<double> evalues;
 
-    if (hll_wrapper) {
-        constexpr double lambda = 0.64;
-        constexpr double K = 0.46;
-        evalues.reserve(alignments.size());
-        size_t num_relations = hll_wrapper->data().num_relations();
-        size_t query_length = alignments[0].get_query_view().size() + alignments[0].get_clipping() + alignments[0].get_end_clipping();
-        double Knm = K * num_relations * query_length;
+    // if (hll_wrapper) {
+    //     constexpr double lambda = 0.64;
+    //     constexpr double K = 0.46;
+    //     evalues.reserve(alignments.size());
+    //     size_t num_relations = hll_wrapper->data().num_relations();
+    //     size_t query_length = alignments[0].get_query_view().size() + alignments[0].get_clipping() + alignments[0].get_end_clipping();
+    //     double Knm = K * num_relations * query_length;
 
-        for (const auto &a : alignments) {
-            double nscore = -a.get_score();
-            evalues.emplace_back(Knm * exp(lambda * nscore));
-        }
-    }
+    //     for (const auto &a : alignments) {
+    //         double nscore = -a.get_score();
+    //         evalues.emplace_back(Knm * exp(lambda * nscore));
+    //     }
+    // }
 
     logger->trace("Chaining alignments:");
     for (size_t i = 0; i < alignments.size(); ++i) {
@@ -692,15 +692,14 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
 
         // TODO: handle offset and mixed label cases later
         if ((!a.get_clipping() && !a.get_end_clipping())
-                || a.size() == 1 || a.label_column_diffs.size()
-                || (evalues.size() && evalues[i] > 0.01)) {
+                || a.size() == 1 || a.label_column_diffs.size()) {
             aggregator.add_alignment(std::move(a));
         } else {
-            if (evalues.size()) {
-                logger->trace("\t{}\t{}", evalues[i], a);
-            } else {
+            // if (evalues.size()) {
+                // logger->trace("\t{}\t{}", evalues[i], a);
+            // } else {
                 logger->trace("\t{}", a);
-            }
+            // }
             size_t orientation = a.get_orientation();
             split_alignments[orientation].emplace_back(std::move(a));
         }
