@@ -7,7 +7,6 @@
 #include "cli/load/load_graph.hpp"
 #include "graph/representation/base/sequence_graph.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
-#include "graph/representation/canonical_dbg.hpp"
 #include "graph/alignment/aligner_seeder_methods.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 #include "annotation/int_matrix/rank_extended/csc_matrix.hpp"
@@ -31,11 +30,7 @@ class Unitigs : public SequenceGraph::GraphExtension {
     Unitigs(const DBGSuccinct &graph) : graph_(std::shared_ptr<const DeBruijnGraph>{}, &graph) {}
 
     Unitigs(const cli::Config &config, bool keep_graph = true) : graph_(load_graph_impl(config.fnames[0])) {
-        const DeBruijnGraph *base_dbg = graph_.get();
-        if (const auto *canonical = dynamic_cast<const CanonicalDBG*>(base_dbg))
-            base_dbg = &canonical->get_graph();
-
-        std::vector<size_t> unitigs(base_dbg->num_nodes(), 0);
+        std::vector<size_t> unitigs(graph_->num_nodes(), 0);
         sdsl::bit_vector indicator(unitigs.size(), false);
 
         std::atomic<size_t> i { 1 };
@@ -181,13 +176,16 @@ class Unitigs : public SequenceGraph::GraphExtension {
 
     std::vector<Seed> cluster_and_filter_seeds(const std::vector<Seed> &seeds,
                                                size_t min_seed_length) const {
-        const auto *canonical = dynamic_cast<const CanonicalDBG*>(graph_.get());
-
         tsl::hopscotch_map<size_t, std::vector<size_t>> unitig_to_bucket;
         for (size_t i = 0; i < seeds.size(); ++i) {
             node_index node = seeds[i].get_nodes().back();
-            if (canonical)
-                node = canonical->get_base_node(node);
+            if (node > graph_->max_index()) {
+                node_index base_node = node - graph_->max_index();
+                if (seeds[i].size() == 1 && graph_->get_boss().get_W(graph_->kmer_to_boss_index(base_node)) == boss::BOSS::kSentinel)
+                    continue;
+
+                node = base_node;
+            }
 
             auto values = unitigs_.get_row_values(node - 1);
             if (values.size())
