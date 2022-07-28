@@ -247,9 +247,12 @@ class Unitigs : public SequenceGraph::GraphExtension {
                     std::vector<Seed> filtered_seeds;
                     for (auto it = unitig_to_bucket.begin(); it != unitig_to_bucket.end(); ++it) {
                         if (it->second.size() > 1 || seeds[it->second[0]].get_query_view().size() > config.min_seed_length) {
-                            filtered_seeds.emplace_back(seeds[*std::min_element(
+                            filtered_seeds.emplace_back(seeds[*std::max_element(
                                 it.value().begin(), it.value().end(), [&seeds](size_t a, size_t b) {
-                                    return seeds[a].get_query_view().data() < seeds[b].get_query_view().data();
+                                    return std::make_pair(seeds[a].get_query_view().size(),
+                                                          seeds[b].get_query_view().data())
+                                         < std::make_pair(seeds[b].get_query_view().size(),
+                                                          seeds[a].get_query_view().data());
                                 }
                             )]);
                         }

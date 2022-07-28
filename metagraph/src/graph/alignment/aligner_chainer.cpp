@@ -1,7 +1,5 @@
 #include "aligner_chainer.hpp"
 
-#include <unordered_set>
-
 #include "dbg_aligner.hpp"
 #include "aligner_seeder_methods.hpp"
 #include "aligner_aggregator.hpp"
@@ -14,7 +12,6 @@
 #include "graph/representation/canonical_dbg.hpp"
 #include "graph/representation/rc_dbg.hpp"
 #include "graph/graph_extensions/node_rc.hpp"
-#include "graph/graph_extensions/hll_wrapper.hpp"
 
 namespace mtg {
 namespace graph {
@@ -544,89 +541,6 @@ chain_seeds(const IDBGAligner &aligner,
     return std::make_tuple(std::move(dp_table), std::move(backtrace), num_seeds, num_nodes);
 }
 
-typedef std::vector<std::pair<Alignment::Columns, score_t>> LabelChangeScores;
-typedef std::pair<Alignment::Columns, Alignment::Columns> LabelPair;
-
-template <typename Column>
-LabelChangeScores get_label_change_scores(Alignment::Columns a_col, Alignment::Columns b_col,
-                                          const DBGAlignerConfig &config,
-                                          const ILabeledAligner* labeled_aligner,
-                                          const HLLWrapper<> *hll_wrapper,
-                                          tsl::hopscotch_map<Column, tsl::hopscotch_map<Column, double>> &cache) {
-    if (a_col == b_col)
-        return { std::make_pair(a_col, 0) };
-
-    const auto &a_cols = labeled_aligner->get_annotation_buffer().get_cached_column_set(a_col);
-    const auto &b_cols = labeled_aligner->get_annotation_buffer().get_cached_column_set(b_col);
-    Vector<Alignment::Column> inter;
-    Vector<Alignment::Column> diff;
-    utils::set_intersection_difference(b_cols.begin(), b_cols.end(),
-                                       a_cols.begin(), a_cols.end(),
-                                       std::back_inserter(inter),
-                                       std::back_inserter(diff));
-    if (inter.size()) {
-        return { std::make_pair(
-            labeled_aligner->get_annotation_buffer().cache_column_set(std::move(inter)), 0
-        ) };
-    }
-
-    if (!hll_wrapper || config.label_change_score != config.ninf) {
-        return { std::make_pair(labeled_aligner->get_annotation_buffer().cache_column_set(std::move(diff)),
-                                config.label_change_score) };
-    }
-
-    VectorMap<Alignment::Column, score_t> diff_scores;
-    for (Alignment::Column d : diff) {
-        uint64_t b_size = hll_wrapper->data().num_relations_in_column(d);
-        double dbsize = b_size;
-        double logdbsize = log2(dbsize);
-        auto find = diff_scores.find(d);
-        for (Alignment::Column c : a_cols) {
-            auto first = std::min(c, d);
-            auto second = std::max(c, d);
-            auto &cache_first = cache[first];
-            auto [cache_find, cache_inserted] = cache_first.try_emplace(second, 0.0);
-            uint64_t a_size = hll_wrapper->data().num_relations_in_column(c);
-
-            double union_size;
-            if (cache_inserted) {
-                union_size = hll_wrapper->data().estimate_column_union_cardinality(c, d);
-                cache_find.value() = union_size;
-            } else {
-                union_size = cache_find->second;
-            }
-
-            uint64_t size_sum = a_size + b_size;
-            if (union_size >= size_sum)
-                continue;
-
-            score_t label_change_score = log2(std::min(dbsize, size_sum - union_size)) - logdbsize;
-            if (find == diff_scores.end()) {
-                find = diff_scores.emplace(d, label_change_score).first;
-            } else {
-                find.value() = std::max(find.value(), label_change_score);
-            }
-        }
-    }
-
-    tsl::hopscotch_map<score_t, Vector<Alignment::Column>> scores;
-    for (const auto &[d, score] : diff_scores) {
-        scores[score].push_back(d);
-    }
-
-    std::vector<std::pair<Alignment::Columns, score_t>> results;
-
-    // TODO: a structured for-loop here crashes g++-8
-    for (const auto &score_diff : scores) {
-        const auto &diff = score_diff.second;
-        assert(std::is_sorted(diff.begin(), diff.end()));
-        results.emplace_back(labeled_aligner->get_annotation_buffer().cache_column_set(diff.begin(), diff.end()),
-                             score_diff.first);
-    }
-
-    return results;
-}
-
 bool last_is_indel(const Cigar &a) {
     auto it = a.data().rbegin();
     if (it->first == Cigar::CLIPPED)
@@ -667,23 +581,6 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
     AlignmentAggregator<AlignmentCompare> aggregator(no_chain_config);
 
     std::vector<Alignment> split_alignments[2];
-
-    // const HLLWrapper<> *hll_wrapper = aligner.get_graph().get_extension_threadsafe<HLLWrapper<>>();
-    // std::vector<double> evalues;
-
-    // if (hll_wrapper) {
-    //     constexpr double lambda = 0.64;
-    //     constexpr double K = 0.46;
-    //     evalues.reserve(alignments.size());
-    //     size_t num_relations = hll_wrapper->data().num_relations();
-    //     size_t query_length = alignments[0].get_query_view().size() + alignments[0].get_clipping() + alignments[0].get_end_clipping();
-    //     double Knm = K * num_relations * query_length;
-
-    //     for (const auto &a : alignments) {
-    //         double nscore = -a.get_score();
-    //         evalues.emplace_back(Knm * exp(lambda * nscore));
-    //     }
-    // }
 
     logger->trace("Chaining alignments:");
     for (size_t i = 0; i < alignments.size(); ++i) {
@@ -737,8 +634,6 @@ void call_alignment_chains(const IDBGAligner &aligner,
     if (alignments.empty())
         return;
 
-    const HLLWrapper<> *hll_wrapper = aligner.get_graph().get_extension_threadsafe<HLLWrapper<>>();
-
     assert(std::all_of(alignments.begin(), alignments.end(), [](const auto &a) { return a.size(); }));
     assert(std::all_of(alignments.begin(), alignments.end(), [](const auto &a) { return !a.get_offset(); }));
 
@@ -746,8 +641,6 @@ void call_alignment_chains(const IDBGAligner &aligner,
     const DBGAlignerConfig &config = aligner.get_config();
     const DeBruijnGraph &graph = aligner.get_graph();
     ssize_t node_overlap = graph.get_k() - 1;
-
-    tsl::hopscotch_map<Alignment::Column, tsl::hopscotch_map<Alignment::Column, double>> cache;
 
     DEBUG_LOG("Preprocessing alignments");
     std::vector<const char *> min_next_char;
@@ -1014,10 +907,14 @@ void call_alignment_chains(const IDBGAligner &aligner,
                 assert(a.is_valid(graph, &config));
 #endif
 
-                auto label_change_scores = get_label_change_scores(
-                    cur_columns, alignments[j].label_columns,
-                    config, labeled_aligner, hll_wrapper, cache
-                );
+                ILabeledAligner::LabelChangeScores label_change_scores;
+                if (!labeled_aligner) {
+                    label_change_scores.emplace_back(0, 0);
+                } else {
+                    label_change_scores = labeled_aligner->get_label_change_scores(
+                        cur_columns, alignments[j].label_columns
+                    );
+                }
 
                 auto &b_tab = chain_table[j];
                 score_t lambda = config.score_matrix[c][c];

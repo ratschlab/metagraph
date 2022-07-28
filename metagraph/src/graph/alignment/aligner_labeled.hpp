@@ -120,8 +120,19 @@ class LabeledExtender : public DefaultColumnExtender {
 
 class ILabeledAligner {
   public:
+    typedef std::vector<std::pair<Alignment::Columns, score_t>> LabelChangeScores;
+    typedef std::pair<Alignment::Columns, Alignment::Columns> LabelPair;
+
     virtual AnnotationBuffer& get_annotation_buffer() const = 0;
     virtual ~ILabeledAligner() {}
+
+    LabelChangeScores get_label_change_scores(Alignment::Columns a_col, Alignment::Columns b_col) const;
+
+  protected:
+    score_t label_change_score_;
+
+  private:
+    mutable tsl::hopscotch_map<Alignment::Column, tsl::hopscotch_map<Alignment::Column, double>> cache_;
 };
 
 template <class Seeder = SuffixSeeder<ExactSeeder>,

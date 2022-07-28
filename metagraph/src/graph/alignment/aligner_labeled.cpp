@@ -187,6 +187,83 @@ bool LabeledExtender::set_seed(const Alignment &seed) {
     return true;
 }
 
+auto ILabeledAligner
+::get_label_change_scores(Alignment::Columns a_col, Alignment::Columns b_col) const -> LabelChangeScores {
+    if (a_col == b_col)
+        return { std::make_pair(a_col, 0) };
+
+    AnnotationBuffer& annotation_buffer = get_annotation_buffer();
+
+    const auto &a_cols = annotation_buffer.get_cached_column_set(a_col);
+    const auto &b_cols = annotation_buffer.get_cached_column_set(b_col);
+    Vector<Alignment::Column> inter;
+    Vector<Alignment::Column> diff;
+    utils::set_intersection_difference(b_cols.begin(), b_cols.end(),
+                                       a_cols.begin(), a_cols.end(),
+                                       std::back_inserter(inter),
+                                       std::back_inserter(diff));
+    if (inter.size())
+        return { std::make_pair(annotation_buffer.cache_column_set(std::move(inter)), 0) };
+
+    const auto *hll_wrapper = annotation_buffer.get_hll_wrapper();
+
+    if (!hll_wrapper || label_change_score_ != DBGAlignerConfig::ninf) {
+        return { std::make_pair(annotation_buffer.cache_column_set(std::move(diff)),
+                                label_change_score_) };
+    }
+
+    VectorMap<Alignment::Column, score_t> diff_scores;
+    for (Alignment::Column d : diff) {
+        uint64_t b_size = hll_wrapper->data().num_relations_in_column(d);
+        double dbsize = b_size;
+        double logdbsize = log2(dbsize);
+        auto find = diff_scores.find(d);
+        for (Alignment::Column c : a_cols) {
+            auto first = std::min(c, d);
+            auto second = std::max(c, d);
+            auto &cache_first = cache_[first];
+            auto [cache_find, cache_inserted] = cache_first.try_emplace(second, 0.0);
+            uint64_t a_size = hll_wrapper->data().num_relations_in_column(c);
+
+            double union_size;
+            if (cache_inserted) {
+                union_size = hll_wrapper->data().estimate_column_union_cardinality(c, d);
+                cache_find.value() = union_size;
+            } else {
+                union_size = cache_find->second;
+            }
+
+            uint64_t size_sum = a_size + b_size;
+            if (union_size >= size_sum)
+                continue;
+
+            score_t label_change_score = log2(std::min(dbsize, size_sum - union_size)) - logdbsize;
+            if (find == diff_scores.end()) {
+                find = diff_scores.emplace(d, label_change_score).first;
+            } else {
+                find.value() = std::max(find.value(), label_change_score);
+            }
+        }
+    }
+
+    tsl::hopscotch_map<score_t, Vector<Alignment::Column>> scores;
+    for (const auto &[d, score] : diff_scores) {
+        scores[score].push_back(d);
+    }
+
+    std::vector<std::pair<Alignment::Columns, score_t>> results;
+
+    // TODO: a structured for-loop here crashes g++-8
+    for (const auto &score_diff : scores) {
+        const auto &diff = score_diff.second;
+        assert(std::is_sorted(diff.begin(), diff.end()));
+        results.emplace_back(annotation_buffer.cache_column_set(diff.begin(), diff.end()),
+                             score_diff.first);
+    }
+
+    return results;
+}
+
 void LabeledExtender
 ::call_outgoing(node_index node,
                 size_t max_prefetch_distance,
@@ -623,6 +700,7 @@ LabeledAligner<Seeder, Extender, AlignmentCompare>
 
     this->config_.min_seed_length = std::min(graph.get_k(), this->config_.min_seed_length);
     this->config_.max_seed_length = std::min(graph.get_k(), this->config_.max_seed_length);
+    this->label_change_score_ = config.label_change_score;
 }
 
 template <class Seeder, class Extender, class AlignmentCompare>

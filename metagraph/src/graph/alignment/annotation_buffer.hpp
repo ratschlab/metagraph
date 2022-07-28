@@ -7,6 +7,7 @@
 #include "common/vector_set.hpp"
 #include "common/vector_map.hpp"
 #include "common/hashers/hash.hpp"
+#include "graph/graph_extensions/hll_wrapper.hpp"
 
 namespace mtg {
 namespace graph {
@@ -46,6 +47,7 @@ class AnnotationBuffer {
     }
 
     const Annotator& get_annotator() const { return annotator_; }
+    const HLLWrapper<>* get_hll_wrapper() const { return graph_.get_extension_threadsafe<HLLWrapper<>>(); }
 
     size_t num_nodes_buffered() const { return node_to_cols_.size(); }
     size_t num_column_sets() const { return column_sets_.size(); }
