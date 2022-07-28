@@ -25,7 +25,10 @@ namespace align {
 class Unitigs : public SequenceGraph::GraphExtension {
   public:
     typedef DeBruijnGraph::node_index node_index;
-    typedef std::function<void(std::function<void(const std::vector<node_index>&)>)> PathGenerator;
+    typedef bit_vector_small Indicator;
+    typedef annot::CountsVector IDVector;
+    typedef annot::matrix::CSCMatrix<annot::binmat::ColumnMajor, IDVector> RawUnitigs;
+    typedef annot::matrix::IntRowDiff<RawUnitigs> CompUnitigs;
 
     Unitigs(const DBGSuccinct &graph) : graph_(std::shared_ptr<const DeBruijnGraph>{}, &graph) {}
 
@@ -56,8 +59,12 @@ class Unitigs : public SequenceGraph::GraphExtension {
         std::string out_path = tmp_dir/"unitigs";
         std::vector<std::string> files;
         {
+            annot::LabelEncoder<> encoder;
+            encoder.insert_and_encode("");
+            std::vector<std::unique_ptr<bit_vector>> cols;
+            cols.emplace_back(std::make_unique<Indicator>(std::move(indicator)));
             annot::ColumnCompressed<> colcomp(
-                std::move(indicator), "", 1, tmp_dir, 1e9, sdsl::bits::hi(i - 1) + 1
+                std::move(cols), std::move(encoder), 1, tmp_dir, 1e9, sdsl::bits::hi(i - 1) + 1
             );
 
             std::vector<std::string> labels;
@@ -128,7 +135,7 @@ class Unitigs : public SequenceGraph::GraphExtension {
                 std::exit(1);
             }
 
-            std::vector<sdsl::int_vector<>> column_values;
+            std::vector<IDVector> column_values;
             annot::ColumnCompressed<>::load_column_values(files,
                 [&](size_t, const std::string &, sdsl::int_vector<>&& values) {
                     column_values.emplace_back(std::move(values));
@@ -274,8 +281,6 @@ class Unitigs : public SequenceGraph::GraphExtension {
     }
 
   private:
-    typedef annot::matrix::CSCMatrix<annot::binmat::ColumnMajor> RawUnitigs;
-    typedef annot::matrix::IntRowDiff<RawUnitigs> CompUnitigs;
     std::shared_ptr<const DBGSuccinct> graph_;
     CompUnitigs unitigs_;
     static constexpr auto kUnitigsExtension = ".unitigs";
