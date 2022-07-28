@@ -128,7 +128,7 @@ class Unitigs : public SequenceGraph::GraphExtension {
                 std::exit(1);
             }
 
-            common::logger->trace("Wrapping as RD");
+            common::logger->trace("Wrapping as IntRowDiff");
             annot::ColumnCompressed<> colcomp;
             if (!colcomp.merge_load(files) || !colcomp.num_labels()) {
                 common::logger->error("Failed to reload matrix from {}", files[0]);
