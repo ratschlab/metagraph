@@ -361,9 +361,6 @@ auto DBGAligner<Seeder, Extender, AlignmentCompare>
 ::build_seeders(const std::vector<IDBGAligner::Query> &seq_batch,
                 const std::vector<AlignmentResults> &wrapped_seqs) const -> BatchSeeders {
     assert(seq_batch.size() == wrapped_seqs.size());
-    const Unitigs *graph_unitigs = nullptr;
-    if (!config_.chain_alignments)
-        graph_unitigs = graph_.get_extension_threadsafe<Unitigs>();
 
     BatchSeeders result;
     result.reserve(seq_batch.size());
@@ -375,7 +372,6 @@ auto DBGAligner<Seeder, Extender, AlignmentCompare>
     auto [sample_boss, matching_ranges]
         = extract_subgraph(graph_, seq_batch, config_, batch_size * 16);
 
-    size_t old_seed_count = 0;
     ProgressBar progress_bar(seq_batch.size(), "Seeding sequences",
                              std::cerr, !common::get_verbose());
     for (size_t i = 0; i < seq_batch.size(); ++i, ++progress_bar) {
@@ -402,8 +398,6 @@ auto DBGAligner<Seeder, Extender, AlignmentCompare>
 
         if (this_query.size() * config_.min_exact_match > seeder->get_num_matches())
             seeder = std::make_shared<ManualMatchingSeeder>(std::vector<Seed>{}, 0, config_);
-
-        old_seed_count += seeder->get_seeds().size();
 
         std::shared_ptr<ISeeder> seeder_rc;
         std::vector<node_index> nodes_rc;
@@ -432,19 +426,10 @@ auto DBGAligner<Seeder, Extender, AlignmentCompare>
             }
             if (reverse.size() * config_.min_exact_match > seeder_rc->get_num_matches())
                 seeder_rc = std::make_shared<ManualMatchingSeeder>(std::vector<Seed>{}, 0, config_);
-
-            old_seed_count += seeder_rc->get_seeds().size();
         }
 #endif
         result.emplace_back(std::move(seeder), std::move(seeder_rc));
     }
-
-    if (graph_unitigs) {
-        size_t new_seed_count = graph_unitigs->cluster_and_filter_seeds(result, config_);
-        logger->trace("Seed count:\tbefore clustering: {}\tafter clustering: {}",
-                      old_seed_count, new_seed_count);
-    }
-
 
     return result;
 }
@@ -460,6 +445,23 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
     }
 
     auto seeders = build_seeders(seq_batch, paths);
+    if (!config_.chain_alignments) {
+        if (const auto *graph_unitigs = graph_.get_extension_threadsafe<Unitigs>()) {
+            size_t old_seed_count = 0;
+            for (const auto &[seeder, seeder_rc] : seeders) {
+                if (seeder)
+                    old_seed_count += seeder->get_seeds().size();
+
+                if (seeder_rc)
+                    old_seed_count += seeder_rc->get_seeds().size();
+            }
+
+            size_t new_seed_count = graph_unitigs->cluster_and_filter_seeds(seeders, config_);
+            logger->trace("Seed count:\tbefore clustering: {}\tafter clustering: {}",
+                          old_seed_count, new_seed_count);
+        }
+    }
+
     assert(seeders.size() == seq_batch.size());
 
     for (size_t i = 0; i < seq_batch.size(); ++i) {
