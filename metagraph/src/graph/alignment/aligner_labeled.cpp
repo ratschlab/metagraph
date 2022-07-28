@@ -77,9 +77,9 @@ void set_intersection_difference(AIt a_begin, AIt a_end,
 }
 
 LabeledExtender::LabeledExtender(const IDBGAligner &aligner, std::string_view query)
-    : LabeledExtender(aligner.get_graph(), aligner.get_config(),
-                      dynamic_cast<const LabeledAligner<>&>(aligner).annotation_buffer_,
-                      query) {}
+    : DefaultColumnExtender(aligner.get_graph(), aligner.get_config(), query),
+      aligner_(dynamic_cast<const ILabeledAligner&>(aligner)),
+      annotation_buffer_(aligner_.get_annotation_buffer()) {}
 
 void LabeledExtender::flush() {
     annotation_buffer_.fetch_queued_annotations();
@@ -331,107 +331,28 @@ void LabeledExtender
 
     assert(annotation_buffer_.get_labels(node));
 
-    // use the label set of the current node in the alignment tree as the basis
-    const auto &columns = annotation_buffer_.get_cached_column_set(node_labels_[table_i]);
-
     // no coordinates are present in the annotation
     if (!annotation_buffer_.get_labels_and_coords(node).second) {
         // label consistency (weaker than coordinate consistency):
         // checks if there is at least one label shared between adjacent nodes
         for (const auto &[next, c, score] : outgoing) {
-            auto next_labels = annotation_buffer_.get_labels(next);
-            assert(next_labels);
+            assert(annotation_buffer_.get_labels(next));
+            auto label_change_scores = aligner_.get_label_change_scores(
+                node_labels_[table_i], annotation_buffer_.get_labels_id(next)
+            );
 
-            Columns intersect_labels;
-            std::set_intersection(columns.begin(), columns.end(),
-                                  next_labels->begin(), next_labels->end(),
-                                  std::back_inserter(intersect_labels));
-            /*
-            Columns diff_labels;
-            utils::set_intersection_difference(next_labels->begin(), next_labels->end(),
-                                               columns.begin(), columns.end(),
-                                               std::back_inserter(intersect_labels),
-                                               std::back_inserter(diff_labels));
-            */
-            if (intersect_labels.size()) {
-                if (config_.label_change_union) {
-                    node_labels_.push_back(node_labels_[table_i]);
-                } else {
-                    node_labels_.push_back(annotation_buffer_.cache_column_set(
-                                                    std::move(intersect_labels)));
-                }
-                node_labels_switched_.emplace_back(false);
+            for (const auto &[labels, score] : label_change_scores) {
+                node_labels_.emplace_back(labels);
+                node_labels_switched_.emplace_back(score != 0);
                 callback(next, c, score);
-            /*
-            } else if (diff_labels.size()) {
-                const auto *canonical = dynamic_cast<const CanonicalDBG*>(graph_);
-                const DeBruijnGraph *base_graph = canonical
-                    ? &canonical->get_graph() : graph_;
-                const DBGSuccinct *dbg_succ = dynamic_cast<const DBGSuccinct*>(base_graph);
-                const HLLWrapper<> *hll_wrapper = dbg_succ ? dbg_succ->get_extension_threadsafe<HLLWrapper<>>() : nullptr;
-                if (!hll_wrapper || config_.label_change_score != config_.ninf) {
-                    const auto &csbegin = annotation_buffer_.get_column_set_begin();
-                    node_labels_switched_.emplace_back(true);
-                    if (config_.label_change_union) {
-                        Columns merged;
-                        std::set_union(columns.begin(), columns.end(),
-                                       next_labels->begin(), next_labels->end(),
-                                       std::back_inserter(merged));
-                        node_labels_.push_back(annotation_buffer_.cache_column_set(std::move(merged)));
-                        merged = Columns{};
-                        const auto &remaining = annotation_buffer_.get_cached_column_set(remaining_labels_i_);
-                        std::set_union(remaining.begin(), remaining.end(),
-                                       next_labels->begin(), next_labels->end(),
-                                       std::back_inserter(merged));
-                        remaining_labels_i_ = annotation_buffer_.cache_column_set(std::move(merged));
-                    } else {
-                        node_labels_.push_back(&*next_labels - &csbegin);
-                    }
-                    callback(next, c, score + config_.label_change_score);
-                } else if (!config_.label_change_edit_distance) {
-                    const auto &hll = hll_wrapper->data();
-                    for (auto d : diff_labels) {
-                        score_t best_score = config_.ninf;
-                        for (auto cc : columns) {
-                            auto [union_est, inter_est]
-                                = hll.estimate_column_union_intersection_cardinality({ cc }, { d });
-                            assert(union_est > 0.0);
-                            if (inter_est > 0.0) {
-                                best_score = std::max(best_score,
-                                    score_t(log2(inter_est) - log2(union_est)) * config_.score_matrix[c][c]
-                                );
-                            }
-                        }
-                        if (best_score > config_.ninf) {
-                            Columns cur { d };
-                            if (config_.label_change_union) {
-                                Columns merged;
-                                std::set_union(columns.begin(), columns.end(),
-                                               cur.begin(), cur.end(),
-                                               std::back_inserter(merged));
-                                node_labels_.push_back(annotation_buffer_.cache_column_set(std::move(merged)));
-                                merged = Columns{};
-                                const auto &remaining = annotation_buffer_.get_cached_column_set(remaining_labels_i_);
-                                std::set_union(remaining.begin(), remaining.end(),
-                                               next_labels->begin(), next_labels->end(),
-                                               std::back_inserter(merged));
-                                remaining_labels_i_ = annotation_buffer_.cache_column_set(std::move(merged));
-                            } else {
-                                node_labels_.push_back(annotation_buffer_.cache_column_set(std::move(cur)));
-                            }
-                            node_labels_switched_.emplace_back(true);
-                            callback(next, c, score + best_score);
-                        }
-                    }
-                // } else {
-                //     throw std::runtime_error("not implemented yet");
-                }
-                */
             }
         }
 
         return;
     }
+
+    // use the label set of the current node in the alignment tree as the basis
+    const auto &columns = annotation_buffer_.get_cached_column_set(node_labels_[table_i]);
 
     // check label and coordinate consistency
     // use the seed as the basis for labels and coordinates

@@ -46,6 +46,11 @@ class AnnotationBuffer {
         return get_labels_and_coords(node).first;
     }
 
+    inline size_t get_labels_id(node_index node) const {
+        auto it = get_labels_it(node);
+        return it != node_to_cols_.cend() ? it->second : 0;
+    }
+
     const Annotator& get_annotator() const { return annotator_; }
     const HLLWrapper<>* get_hll_wrapper() const { return graph_.get_extension_threadsafe<HLLWrapper<>>(); }
 
@@ -87,6 +92,8 @@ class AnnotationBuffer {
     std::vector<CoordinateSet> label_coords_;
     // buffer of paths to later querying with fetch_queued_annotations()
     std::vector<std::vector<node_index>> queued_paths_;
+
+    VectorMap<node_index, size_t>::const_iterator get_labels_it(node_index node) const;
 };
 
 } // namespace align

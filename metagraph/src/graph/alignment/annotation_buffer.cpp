@@ -192,18 +192,26 @@ void AnnotationBuffer::fetch_queued_annotations() {
 #endif
 }
 
+auto AnnotationBuffer::get_labels_it(node_index node) const
+        -> VectorMap<node_index, size_t>::const_iterator {
+    if (canonical_)
+        node = canonical_->get_base_node(node);
+
+    // if the node hasn't been seen before, or if its annotations haven't
+    // been fetched, return nothing
+    auto it = node_to_cols_.find(node);
+    if (it != node_to_cols_.end() && it->second == nannot)
+        it = node_to_cols_.end();
+
+    return it;
+}
+
 auto AnnotationBuffer::get_labels_and_coords(node_index node) const
         -> std::pair<const Columns*, const CoordinateSet*> {
     std::pair<const Columns*, const CoordinateSet*> ret_val { nullptr, nullptr };
 
-    if (canonical_)
-        node = canonical_->get_base_node(node);
-
-    auto it = node_to_cols_.find(node);
-
-    // if the node hasn't been seen before, or if its annotations haven't
-    // been fetched, return nothing
-    if (it == node_to_cols_.end() || it->second == nannot)
+    auto it = get_labels_it(node);
+    if (it == node_to_cols_.cend())
         return ret_val;
 
     ret_val.first = &column_sets_.data()[it->second];

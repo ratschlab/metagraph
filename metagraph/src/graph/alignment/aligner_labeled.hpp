@@ -11,17 +11,28 @@ namespace graph {
 namespace align {
 
 
+class ILabeledAligner {
+  public:
+    typedef std::vector<std::pair<Alignment::Columns, score_t>> LabelChangeScores;
+    typedef std::pair<Alignment::Columns, Alignment::Columns> LabelPair;
+
+    virtual AnnotationBuffer& get_annotation_buffer() const = 0;
+    virtual ~ILabeledAligner() {}
+
+    LabelChangeScores get_label_change_scores(Alignment::Columns a_col, Alignment::Columns b_col) const;
+
+  protected:
+    score_t label_change_score_;
+
+  private:
+    mutable tsl::hopscotch_map<Alignment::Column, tsl::hopscotch_map<Alignment::Column, double>> cache_;
+};
+
+
 class LabeledExtender : public DefaultColumnExtender {
   public:
     typedef AnnotationBuffer::Columns Columns;
     typedef AnnotationBuffer::CoordinateSet CoordinateSet;
-
-    LabeledExtender(const DeBruijnGraph &graph,
-                    const DBGAlignerConfig &config,
-                    AnnotationBuffer &annotation_buffer,
-                    std::string_view query)
-          : DefaultColumnExtender(graph, config, query),
-            annotation_buffer_(annotation_buffer) {}
 
     // |aligner| must be an instance of LabeledAligner<>
     LabeledExtender(const IDBGAligner &aligner, std::string_view query);
@@ -95,6 +106,8 @@ class LabeledExtender : public DefaultColumnExtender {
     // dynamic programming table for label- (and coordinate-)consistency
     void flush();
 
+    const ILabeledAligner &aligner_;
+
     // stores annotations for nodes
     AnnotationBuffer &annotation_buffer_;
 
@@ -116,23 +129,6 @@ class LabeledExtender : public DefaultColumnExtender {
     // operation and the ones still left to be observed
     Columns label_intersection_;
     Columns label_diff_;
-};
-
-class ILabeledAligner {
-  public:
-    typedef std::vector<std::pair<Alignment::Columns, score_t>> LabelChangeScores;
-    typedef std::pair<Alignment::Columns, Alignment::Columns> LabelPair;
-
-    virtual AnnotationBuffer& get_annotation_buffer() const = 0;
-    virtual ~ILabeledAligner() {}
-
-    LabelChangeScores get_label_change_scores(Alignment::Columns a_col, Alignment::Columns b_col) const;
-
-  protected:
-    score_t label_change_score_;
-
-  private:
-    mutable tsl::hopscotch_map<Alignment::Column, tsl::hopscotch_map<Alignment::Column, double>> cache_;
 };
 
 template <class Seeder = SuffixSeeder<ExactSeeder>,
