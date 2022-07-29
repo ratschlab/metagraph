@@ -31,7 +31,8 @@ class IDBGAligner {
 
     // Main aligner
     virtual void align_batch(const std::vector<Query> &seq_batch,
-                             const AlignmentCallback &callback) const = 0;
+                             const AlignmentCallback &callback,
+                             size_t first_seq_offset = 0) const = 0;
 
     // Convenience method
     AlignmentResults align(std::string_view query) const;
@@ -50,7 +51,8 @@ class DBGAligner : public IDBGAligner {
     virtual ~DBGAligner() {}
 
     virtual void align_batch(const std::vector<IDBGAligner::Query> &seq_batch,
-                             const AlignmentCallback &callback) const override;
+                             const AlignmentCallback &callback,
+                             size_t first_seq_offset = 0) const override;
 
     const DeBruijnGraph& get_graph() const override { return graph_; }
     const DBGAlignerConfig& get_config() const override { return config_; }

@@ -51,9 +51,7 @@ class SeedFilteringExtender {
     }
 
     // report alignment extension statistics
-    size_t num_explored_nodes() const {
-        return explored_nodes_previous_ + conv_checker_.size();
-    }
+    virtual size_t num_explored_nodes() const = 0;
 
     // return true if the nodes in this seed have been traversed previously with
     // better or equal scores
@@ -61,10 +59,7 @@ class SeedFilteringExtender {
 
     virtual bool filter_nodes(node_index node, size_t query_start, size_t query_end);
 
-    void clear_conv_checker() {
-        explored_nodes_previous_ += conv_checker_.size();
-        conv_checker_.clear();
-    }
+    virtual void clear_conv_checker() = 0;
 
   protected:
     const DeBruijnGraph *graph_;
@@ -145,6 +140,16 @@ class DefaultColumnExtender : public SeedFilteringExtender {
         template <typename... RestArgs>
         static DPTColumn create(size_t size, RestArgs&&... args);
     };
+
+    void clear_conv_checker() {
+        explored_nodes_previous_ += table.size();
+        table.clear();
+        conv_checker_.clear();
+    }
+
+    size_t num_explored_nodes() const {
+        return explored_nodes_previous_ + table.size();
+    }
 
   protected:
     std::string_view query_;

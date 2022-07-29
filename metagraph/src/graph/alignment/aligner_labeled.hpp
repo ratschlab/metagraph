@@ -4,6 +4,7 @@
 #include "dbg_aligner.hpp"
 #include "annotation_buffer.hpp"
 #include "graph/annotated_dbg.hpp"
+#include "graph/graph_extensions/hll_wrapper.hpp"
 
 
 namespace mtg {
@@ -19,7 +20,9 @@ class ILabeledAligner {
     virtual AnnotationBuffer& get_annotation_buffer() const = 0;
     virtual ~ILabeledAligner() {}
 
-    LabelChangeScores get_label_change_scores(Alignment::Columns a_col, Alignment::Columns b_col) const;
+    LabelChangeScores get_label_change_scores(Alignment::Columns a_col,
+                                              Alignment::Columns b_col,
+                                              const HLLWrapper<> *hll_wrapper = nullptr) const;
 
   protected:
     score_t label_change_score_;

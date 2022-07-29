@@ -3,7 +3,6 @@
 #include "graph/representation/rc_dbg.hpp"
 #include "common/algorithms.hpp"
 #include "common/unix_tools.hpp"
-#include "graph/graph_extensions/hll_wrapper.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 
@@ -83,6 +82,7 @@ LabeledExtender::LabeledExtender(const IDBGAligner &aligner, std::string_view qu
 
 void LabeledExtender::flush() {
     annotation_buffer_.fetch_queued_annotations();
+
     for ( ; last_flushed_table_i_ < table.size(); ++last_flushed_table_i_) {
         auto &table_elem = table[last_flushed_table_i_];
 
@@ -188,7 +188,9 @@ bool LabeledExtender::set_seed(const Alignment &seed) {
 }
 
 auto ILabeledAligner
-::get_label_change_scores(Alignment::Columns a_col, Alignment::Columns b_col) const -> LabelChangeScores {
+::get_label_change_scores(Alignment::Columns a_col,
+                          Alignment::Columns b_col,
+                          const HLLWrapper<> *hll_wrapper) const -> LabelChangeScores {
     if (a_col == b_col)
         return { std::make_pair(a_col, 0) };
 
@@ -202,14 +204,20 @@ auto ILabeledAligner
                                        a_cols.begin(), a_cols.end(),
                                        std::back_inserter(inter),
                                        std::back_inserter(diff));
-    if (inter.size())
-        return { std::make_pair(annotation_buffer.cache_column_set(std::move(inter)), 0) };
 
-    const auto *hll_wrapper = annotation_buffer.get_hll_wrapper();
+    std::vector<std::pair<Alignment::Columns, score_t>> results;
+    if (inter.size()) {
+        results.emplace_back(annotation_buffer.cache_column_set(std::move(inter)), 0);
+        return results;
+    }
 
-    if (!hll_wrapper || label_change_score_ != DBGAlignerConfig::ninf) {
-        return { std::make_pair(annotation_buffer.cache_column_set(std::move(diff)),
-                                label_change_score_) };
+    if (!hll_wrapper) {
+        if (label_change_score_ != DBGAlignerConfig::ninf && inter.empty()) {
+            results.emplace_back(annotation_buffer.cache_column_set(std::move(diff)),
+                                 label_change_score_);
+        }
+
+        return results;
     }
 
     VectorMap<Alignment::Column, score_t> diff_scores;
@@ -251,14 +259,19 @@ auto ILabeledAligner
         scores[score].push_back(d);
     }
 
-    std::vector<std::pair<Alignment::Columns, score_t>> results;
-
-    // TODO: a structured for-loop here crashes g++-8
-    for (const auto &score_diff : scores) {
-        const auto &diff = score_diff.second;
+    for (auto it = scores.begin(); it != scores.end(); ++it) {
+        score_t score = it->first;
+        auto &diff = it.value();
         assert(std::is_sorted(diff.begin(), diff.end()));
+        if (inter.size()) {
+            Vector<Alignment::Column> merged;
+            merged.reserve(diff.size() + inter.size());
+            std::set_union(diff.begin(), diff.end(), inter.begin(), inter.end(),
+                           std::back_inserter(merged));
+            std::swap(merged, diff);
+        }
         results.emplace_back(annotation_buffer.cache_column_set(diff.begin(), diff.end()),
-                             score_diff.first);
+                             score);
     }
 
     return results;
@@ -302,6 +315,8 @@ void LabeledExtender
             node_labels_switched_.emplace_back(config_.label_change_union
                 ? node_labels_switched_.back()
                 : false);
+            callback(next, c, score);
+            return;
         } else {
             size_t pos = next_offset - graph_->get_k() - 1;
             if ((!pos && seed_->label_column_diffs[0] == seed_->label_columns)
@@ -312,15 +327,15 @@ void LabeledExtender
                 node_labels_switched_.emplace_back(config_.label_change_union
                     ? node_labels_switched_.back()
                     : false);
-            } else {
+
+                callback(next, c, score);
+                return;
+            } else if (false) {
                 node_labels_.emplace_back(seed_->label_column_diffs[pos]);
                 node_labels_switched_.emplace_back(true);
                 last_flushed_table_i_ = std::max(last_flushed_table_i_, node_labels_.size());
             }
         }
-
-        callback(next, c, score);
-        return;
     }
 
     // flush the AnnotationBuffer and correct for annotation errors introduced above
@@ -336,15 +351,16 @@ void LabeledExtender
         // label consistency (weaker than coordinate consistency):
         // checks if there is at least one label shared between adjacent nodes
         for (const auto &[next, c, score] : outgoing) {
-            assert(annotation_buffer_.get_labels(next));
+            assert(annotation_buffer_.get_labels_id(next));
             auto label_change_scores = aligner_.get_label_change_scores(
-                node_labels_[table_i], annotation_buffer_.get_labels_id(next)
+                node_labels_[table_i], annotation_buffer_.get_labels_id(next),
+                labeled_aligner->get_annotation_buffer().get_hll_wrapper()
             );
 
             for (const auto &[labels, score] : label_change_scores) {
                 node_labels_.emplace_back(labels);
                 node_labels_switched_.emplace_back(score != 0);
-                callback(next, c, score);
+                callback(next, c, score * config_.score_matrix[c][c]);
             }
         }
 

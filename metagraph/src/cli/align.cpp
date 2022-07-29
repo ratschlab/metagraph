@@ -401,6 +401,7 @@ int align_to_graph(Config *config) {
         auto end = fasta_parser.end();
 
         size_t num_batches = 0;
+        size_t seq_id = 0;
 
         while (it != end) {
             uint64_t num_bytes_read = 0;
@@ -418,10 +419,11 @@ int align_to_graph(Config *config) {
                             : std::string(it->name.s);
                 seq_batch.emplace_back(std::move(header), it->seq.s);
                 num_bytes_read += it->seq.l;
+                ++seq_id;
             }
 
             ++num_batches;
-            thread_pool.enqueue([&,graph,batch=std::move(seq_batch)]() {
+            thread_pool.enqueue([&,graph,seq_id,batch=std::move(seq_batch)]() {
                 // Make a dummy shared_ptr
                 auto aln_graph
                     = std::shared_ptr<DeBruijnGraph>(std::shared_ptr<DeBruijnGraph>{}, graph.get());
@@ -457,7 +459,7 @@ int align_to_graph(Config *config) {
                         const auto &res = format_alignment(header, paths, *graph, *config);
                         std::lock_guard<std::mutex> lock(print_mutex);
                         *out << res;
-                    }
+                    }, seq_id - batch.size()
                 );
             });
         };

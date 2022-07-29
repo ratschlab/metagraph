@@ -221,7 +221,7 @@ extract_subgraph(const DeBruijnGraph &graph,
     logger->trace("Found {} {}-mers in the batch", boss->num_edges(),
                   config.min_seed_length);
 
-    logger->trace("Getting initial matching ranges");
+    logger->trace("Getting matching ranges");
     typedef boss::BOSS::TAlphabet TAlphabet;
     const auto &base_boss = base_dbg_succ->get_boss();
     std::vector<std::tuple<edge_index, edge_index, SmallVector<TAlphabet>>> initial_edge_stack;
@@ -268,7 +268,6 @@ extract_subgraph(const DeBruijnGraph &graph,
         }
     }
 
-    logger->trace("Getting full matching ranges");
     std::vector<BOSSRange> matching_ranges(boss->num_edges() + 1);
     size_t total_matches = 0;
     size_t total_ranges = 0;
@@ -437,7 +436,8 @@ auto DBGAligner<Seeder, Extender, AlignmentCompare>
 template <class Seeder, class Extender, class AlignmentCompare>
 void DBGAligner<Seeder, Extender, AlignmentCompare>
 ::align_batch(const std::vector<IDBGAligner::Query> &seq_batch,
-              const AlignmentCallback &callback) const {
+              const AlignmentCallback &callback,
+              size_t first_seq_offset) const {
     std::vector<AlignmentResults> paths;
     paths.reserve(seq_batch.size());
     for (const auto &[header, query] : seq_batch) {
@@ -531,11 +531,11 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
                                           aligned_labels ? explored_nodes_per_kmer / aligned_labels : 0);
             }
 
-            logger->trace("{}\tlength: {}\tcovered: {}\tbest score: {}\tseeds: {}\t"
+            logger->trace("{}\t{}\tlength: {}\tcovered: {}\tbest score: {}\tseeds: {}\t"
                     "extensions: {}\texplored nodes: {}\texplored nodes/extension: {:.2f}\t"
                     "explored nodes/k-mer: {:.2f}{}",
-                    header, query.size(), query_coverage, best_score, num_seeds, num_extensions,
-                    num_explored_nodes,
+                    first_seq_offset + i, header, query.size(), query_coverage,
+                    best_score, num_seeds, num_extensions, num_explored_nodes,
                     num_explored_nodes ? explored_nodes_d / num_extensions : 0,
                     explored_nodes_per_kmer, label_trace);
         }
