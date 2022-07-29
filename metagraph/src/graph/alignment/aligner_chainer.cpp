@@ -586,7 +586,7 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
 
     std::vector<Alignment> split_alignments[2];
 
-    logger->trace("Chaining alignments:");
+    DEBUG_LOG("Chaining alignments:");
     for (size_t i = 0; i < alignments.size(); ++i) {
         auto &a = alignments[i];
         assert(a.size());
@@ -599,7 +599,7 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
             // if (evalues.size()) {
                 // logger->trace("\t{}\t{}", evalues[i], a);
             // } else {
-                logger->trace("\t{}", a);
+                DEBUG_LOG("\t{}", a);
             // }
             size_t orientation = a.get_orientation();
             split_alignments[orientation].emplace_back(std::move(a));
