@@ -514,10 +514,15 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
         if (config_.post_chain_alignments) {
             bool &post_chain = const_cast<bool&>(config_.post_chain_alignments);
             post_chain = false;
-            alignments = chain_alignments<AlignmentCompare>(*this, std::move(alignments),
-                                                            paths[i].get_query(false),
-                                                            paths[i].get_query(true));
+            size_t n_ext;
+            size_t n_exp;
+            std::tie(alignments, n_ext, n_exp)
+                = chain_alignments<AlignmentCompare>(*this, std::move(alignments),
+                                                     paths[i].get_query(false),
+                                                     paths[i].get_query(true));
             post_chain = true;
+            num_extensions += n_ext;
+            num_explored_nodes += n_exp;
         }
 
         for (auto&& alignment : alignments) {
