@@ -246,6 +246,7 @@ auto ILabeledAligner
                 continue;
 
             score_t label_change_score = log2(std::min(dbsize, size_sum - union_size)) - logdbsize;
+            assert(label_change_score <= 0);
             if (find == diff_scores.end()) {
                 find = diff_scores.emplace(d, label_change_score).first;
             } else {
@@ -340,6 +341,7 @@ void LabeledExtender
             for (const auto &[labels, lc_score] : label_change_scores) {
                 node_labels_.emplace_back(labels);
                 node_labels_switched_.emplace_back(lc_score != 0);
+                assert(lc_score * config_.score_matrix[c][c] <= 0);
                 callback(next, c, score + lc_score * config_.score_matrix[c][c]);
             }
         }

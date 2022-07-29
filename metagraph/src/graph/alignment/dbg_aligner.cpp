@@ -513,6 +513,9 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
         auto alignments = aggregator.get_alignments();
         if (config_.post_chain_alignments) {
             bool &post_chain = const_cast<bool&>(config_.post_chain_alignments);
+            bool &allow_left_trim = const_cast<bool&>(config_.allow_left_trim);
+            bool old_allow_left_trim = allow_left_trim;
+            allow_left_trim = false;
             post_chain = false;
             size_t n_ext;
             size_t n_exp;
@@ -521,6 +524,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
                                                      paths[i].get_query(false),
                                                      paths[i].get_query(true));
             post_chain = true;
+            allow_left_trim = old_allow_left_trim;
             num_extensions += n_ext;
             num_explored_nodes += n_exp;
         }

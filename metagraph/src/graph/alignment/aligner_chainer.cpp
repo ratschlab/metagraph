@@ -922,7 +922,8 @@ std::pair<size_t, size_t> call_alignment_chains(const IDBGAligner &aligner,
                     label_change_scores.emplace_back(0, 0);
                 } else {
                     label_change_scores = labeled_aligner->get_label_change_scores(
-                        cur_columns, alignments[j].label_columns
+                        cur_columns, alignments[j].label_columns,
+                        labeled_aligner->get_annotation_buffer().get_hll_wrapper()
                     );
                 }
 
@@ -930,6 +931,7 @@ std::pair<size_t, size_t> call_alignment_chains(const IDBGAligner &aligner,
                 score_t lambda = config.score_matrix[c][c];
                 for (auto &[cols, lc_score] : label_change_scores) {
                     lc_score *= lambda;
+                    assert(lc_score <= 0);
                     score_t next_score = b_score + lc_score;
                     auto find = b_tab.find(cols);
                     if (find == b_tab.end()) {
@@ -968,23 +970,27 @@ std::pair<size_t, size_t> call_alignment_chains(const IDBGAligner &aligner,
         used[i] = true;
         Alignment cur = alignments[i];
 
+        auto [score, extra_score, gap, prefix_trim,
+              last_i, last_cols, last_suffix_trim] = chain_table[i][cols];
+
         if (cur.get_end_clipping()) {
             // extend forwards
             auto extender = aligner.make_extender(query);
             auto extensions = extender->get_extensions(cur, config.ninf, true);
             if (extensions.size() && extensions[0].get_score() > cur.get_score()) {
-                start_score += extensions[0].get_score() - cur.get_score();
+                assert(extensions[0].get_clipping() == cur.get_clipping());
                 std::swap(cur, extensions[0]);
             }
             ++num_extensions;
             num_explored_nodes += extender->num_explored_nodes();
         }
 
-        auto [score, extra_score, gap, prefix_trim,
-              last_i, last_cols, last_suffix_trim] = chain_table[i][cols];
-
         if (prefix_trim) {
             cur.trim_query_prefix(prefix_trim, node_overlap, config);
+            if (first_is_indel(cur.get_cigar())) {
+                cur = alignments[i];
+                cur.trim_query_prefix(prefix_trim, node_overlap, config);
+            }
             assert(cur.size());
             assert(cur.is_valid(graph, &config));
         }
@@ -992,38 +998,13 @@ std::pair<size_t, size_t> call_alignment_chains(const IDBGAligner &aligner,
         while (last_i != std::numeric_limits<size_t>::max()) {
             Alignment prev = alignments[last_i];
 
-            if (last_suffix_trim) {
-                prev.trim_query_suffix(last_suffix_trim, config);
-                assert(prev.size());
-                assert(prev.is_valid(graph, &config));
-            }
-
-            used[last_i] = true;
-            i = last_i;
-            cols = last_cols;
-            ssize_t last_gap = gap;
-            std::tie(score, extra_score, gap, prefix_trim,
-                     last_i, last_cols, last_suffix_trim) = chain_table[i][cols];
-
-            if (prefix_trim) {
-                prev.trim_query_prefix(prefix_trim, node_overlap, config);
-                assert(prev.size());
-                assert(prev.is_valid(graph, &config));
-            }
-
-            if (last_gap > -node_overlap) {
-                cur.insert_gap_prefix(last_gap, node_overlap, config);
-            } else {
-                cur.trim_clipping();
-            }
-
-            if (last_i == std::numeric_limits<size_t>::max()) {
-                assert(!prefix_trim);
+            if (std::get<4>(chain_table[last_i][cols]) == std::numeric_limits<size_t>::max()) {
+                assert(!std::get<3>(chain_table[last_i][cols]));
                 if (prev.get_clipping()) {
                     auto find = front_ext_map.find(i);
                     if (find != front_ext_map.end()) {
                         if (find->second.size()) {
-                            start_score += find->second.get_score() - prev.get_score();
+                            // start_score += find->second.get_score() - prev.get_score();
                             prev = find->second;
                         }
                     } else {
@@ -1053,7 +1034,8 @@ std::pair<size_t, size_t> call_alignment_chains(const IDBGAligner &aligner,
 
                             if (extensions.size()) {
                                 front_ext_map[i] = extensions[0];
-                                start_score += extensions[0].get_score() - prev.get_score();
+                                // start_score += extensions[0].get_score() - prev.get_score();
+                                assert(extensions[0].get_end_clipping() == prev.get_end_clipping());
                                 std::swap(prev, extensions[0]);
                             } else {
                                 front_ext_map[i] = Alignment();
@@ -1061,6 +1043,36 @@ std::pair<size_t, size_t> call_alignment_chains(const IDBGAligner &aligner,
                         }
                     }
                 }
+            }
+            if (last_suffix_trim) {
+                // score_t cur_prev_score = prev.get_score();
+                prev.trim_query_suffix(last_suffix_trim, config);
+                if (last_is_indel(prev.get_cigar())) {
+                    // start_score -= cur_prev_score - alignments[last_i].get_score();
+                    prev = alignments[last_i];
+                    prev.trim_query_suffix(last_suffix_trim, config);
+                }
+                assert(prev.size());
+                assert(prev.is_valid(graph, &config));
+            }
+
+            used[last_i] = true;
+            i = last_i;
+            cols = last_cols;
+            ssize_t last_gap = gap;
+            std::tie(score, extra_score, gap, prefix_trim,
+                     last_i, last_cols, last_suffix_trim) = chain_table[i][cols];
+
+            if (prefix_trim) {
+                prev.trim_query_prefix(prefix_trim, node_overlap, config);
+                assert(prev.size());
+                assert(prev.is_valid(graph, &config));
+            }
+
+            if (last_gap > -node_overlap) {
+                cur.insert_gap_prefix(last_gap, node_overlap, config);
+            } else {
+                cur.trim_clipping();
             }
 
             prev.trim_end_clipping();
@@ -1070,8 +1082,10 @@ std::pair<size_t, size_t> call_alignment_chains(const IDBGAligner &aligner,
             assert(cur.is_valid(graph, &config));
         }
 
-        assert(cur.get_score() == start_score);
+        // assert(cur.get_score() == start_score);
 
+        assert(cur.get_clipping() + cur.get_query_view().size() + cur.get_end_clipping()
+            == query.size());
         callback(std::move(cur));
     }
 

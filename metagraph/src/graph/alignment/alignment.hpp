@@ -228,7 +228,7 @@ class Alignment {
     inline size_t trim_clipping() { return cigar_.trim_clipping(); }
     inline size_t trim_end_clipping() { return cigar_.trim_end_clipping(); }
 
-    size_t trim_offset();
+    size_t trim_offset(size_t num_nodes = std::numeric_limits<size_t>::max());
     void extend_offset(std::vector<node_index>&& path,
                        std::vector<size_t>&& columns = {},
                        std::vector<score_t>&& scores = {});

@@ -311,7 +311,7 @@ bool Alignment::append(Alignment&& other, score_t label_change_score) {
     return ret_val;
 }
 
-size_t Alignment::trim_offset() {
+size_t Alignment::trim_offset(size_t num_nodes) {
     if (!offset_ || nodes_.size() <= 1)
         return 0;
 
@@ -326,7 +326,7 @@ size_t Alignment::trim_offset() {
         ? nodes_.size()
         : (std::find_if(extra_scores.begin(), extra_scores.end(), [](score_t s) { return s; })
             - extra_scores.begin());
-    size_t trim = std::min({ offset_, nodes_.size() - 1, first_dummy, first_extra_score });
+    size_t trim = std::min({ num_nodes, offset_, nodes_.size() - 1, first_dummy, first_extra_score });
     if (!trim)
         return trim;
 
