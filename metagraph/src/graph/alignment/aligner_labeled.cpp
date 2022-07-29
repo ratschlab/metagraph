@@ -211,12 +211,12 @@ auto ILabeledAligner
         return results;
     }
 
-    if (!hll_wrapper) {
-        if (label_change_score_ != DBGAlignerConfig::ninf && inter.empty()) {
-            results.emplace_back(annotation_buffer.cache_column_set(std::move(diff)),
-                                 label_change_score_);
-        }
+    if (!hll_wrapper)
+        return results;
 
+    if (label_change_score_ != DBGAlignerConfig::ninf) {
+        results.emplace_back(annotation_buffer.cache_column_set(std::move(diff)),
+                             label_change_score_);
         return results;
     }
 
@@ -307,35 +307,45 @@ void LabeledExtender
 
     if (outgoing.size() == 1) {
         const auto &[next, c, score] = outgoing[0];
-        if (next_offset <= graph_->get_k()
-                || next_offset - graph_->get_k() - 1 >= seed_->label_column_diffs.size()) {
-            // Assume that annotations are preserved in unitigs. Violations of this
-            // assumption are corrected after the next flush
+        assert(seed_->label_column_diffs.empty());
+        if (in_seed) {
             node_labels_.emplace_back(node_labels_[table_i]);
-            node_labels_switched_.emplace_back(config_.label_change_union
-                ? node_labels_switched_.back()
-                : false);
+            node_labels_switched_.emplace_back(false);
+            last_flushed_table_i_ = std::max(last_flushed_table_i_, node_labels_.size());
             callback(next, c, score);
             return;
-        } else {
-            size_t pos = next_offset - graph_->get_k() - 1;
-            if ((!pos && seed_->label_column_diffs[0] == seed_->label_columns)
-                    || (pos && seed_->label_column_diffs[pos] == seed_->label_column_diffs[pos - 1])) {
-                // Assume that annotations are preserved in unitigs. Violations of this
-                // assumption are corrected after the next flush
-                node_labels_.emplace_back(node_labels_[table_i]);
-                node_labels_switched_.emplace_back(config_.label_change_union
-                    ? node_labels_switched_.back()
-                    : false);
-
-                callback(next, c, score);
-                return;
-            } else if (false) {
-                node_labels_.emplace_back(seed_->label_column_diffs[pos]);
-                node_labels_switched_.emplace_back(true);
-                last_flushed_table_i_ = std::max(last_flushed_table_i_, node_labels_.size());
-            }
         }
+        // if (next_offset <= graph_->get_k()
+        //         || next_offset - graph_->get_k() - 1 >= seed_->label_column_diffs.size()) {
+        //     // Assume that annotations are preserved in unitigs. Violations of this
+        //     // assumption are corrected after the next flush
+        //     node_labels_.emplace_back(node_labels_[table_i]);
+        //     node_labels_switched_.emplace_back(config_.label_change_union
+        //         ? node_labels_switched_.back()
+        //         : false);
+        //     callback(next, c, score);
+        //     return;
+        // } else {
+        //     size_t pos = next_offset - graph_->get_k() - 1;
+        //     if ((!pos && seed_->label_column_diffs[0] == seed_->label_columns)
+        //             || (pos && seed_->label_column_diffs[pos] == seed_->label_column_diffs[pos - 1])) {
+        //         // Assume that annotations are preserved in unitigs. Violations of this
+        //         // assumption are corrected after the next flush
+        //         node_labels_.emplace_back(node_labels_[table_i]);
+        //         node_labels_switched_.emplace_back(config_.label_change_union
+        //             ? node_labels_switched_.back()
+        //             : false);
+
+        //         callback(next, c, score);
+        //         return;
+        //     } else {
+        //         node_labels_.emplace_back(seed_->label_column_diffs[pos]);
+        //         node_labels_switched_.emplace_back(true);
+        //         last_flushed_table_i_ = std::max(last_flushed_table_i_, node_labels_.size());
+        //         callback(next, c, score);
+        //         return;
+        //     }
+        // }
     }
 
     // flush the AnnotationBuffer and correct for annotation errors introduced above
@@ -354,13 +364,14 @@ void LabeledExtender
             assert(annotation_buffer_.get_labels_id(next));
             auto label_change_scores = aligner_.get_label_change_scores(
                 node_labels_[table_i], annotation_buffer_.get_labels_id(next),
-                labeled_aligner->get_annotation_buffer().get_hll_wrapper()
+                config_.post_chain_alignments ? nullptr
+                                              : annotation_buffer_.get_hll_wrapper()
             );
 
-            for (const auto &[labels, score] : label_change_scores) {
+            for (const auto &[labels, lc_score] : label_change_scores) {
                 node_labels_.emplace_back(labels);
-                node_labels_switched_.emplace_back(score != 0);
-                callback(next, c, score * config_.score_matrix[c][c]);
+                node_labels_switched_.emplace_back(lc_score != 0);
+                callback(next, c, score + lc_score * config_.score_matrix[c][c]);
             }
         }
 

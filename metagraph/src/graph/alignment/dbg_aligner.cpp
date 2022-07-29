@@ -510,8 +510,17 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
         score_t best_score = std::numeric_limits<score_t>::min();
         size_t query_coverage = 0;
 
-        for (auto&& alignment : chain_alignments<AlignmentCompare>(*this,
-                                                                   aggregator.get_alignments())) {
+        auto alignments = aggregator.get_alignments();
+        if (config_.post_chain_alignments) {
+            bool &post_chain = const_cast<bool&>(config_.post_chain_alignments);
+            post_chain = false;
+            alignments = chain_alignments<AlignmentCompare>(*this, std::move(alignments),
+                                                            paths[i].get_query(false),
+                                                            paths[i].get_query(true));
+            post_chain = true;
+        }
+
+        for (auto&& alignment : alignments) {
             assert(alignment.is_valid(graph_, &config_));
             if (alignment.get_score() > best_score) {
                 best_score = alignment.get_score();

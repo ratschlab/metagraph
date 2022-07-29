@@ -37,6 +37,8 @@ class IDBGAligner {
     // Convenience method
     AlignmentResults align(std::string_view query) const;
 
+    virtual std::unique_ptr<SeedFilteringExtender> make_extender(std::string_view query) const = 0;
+
     virtual bool has_coordinates() const = 0;
 };
 
@@ -58,6 +60,10 @@ class DBGAligner : public IDBGAligner {
     const DBGAlignerConfig& get_config() const override { return config_; }
 
     virtual bool has_coordinates() const override { return false; }
+
+    std::unique_ptr<SeedFilteringExtender> make_extender(std::string_view query) const {
+        return std::make_unique<Extender>(*this, query);
+    }
 
   protected:
     typedef typename Seeder::node_index node_index;

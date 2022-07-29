@@ -61,6 +61,8 @@ class SeedFilteringExtender {
 
     virtual void clear_conv_checker() = 0;
 
+    void set_graph(const DeBruijnGraph &graph) { graph_ = &graph; }
+
   protected:
     const DeBruijnGraph *graph_;
     const DBGAlignerConfig &config_;
@@ -108,8 +110,6 @@ class DefaultColumnExtender : public SeedFilteringExtender {
     DefaultColumnExtender(const IDBGAligner &aligner, std::string_view query);
 
     virtual ~DefaultColumnExtender() {}
-
-    void set_graph(const DeBruijnGraph &graph) { graph_ = &graph; }
 
     size_t num_extensions() const { return num_extensions_; }
 

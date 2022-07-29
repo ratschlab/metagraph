@@ -559,14 +559,18 @@ bool first_is_indel(const Cigar &a) {
 
 void call_alignment_chains(const IDBGAligner &aligner,
                            const std::vector<Alignment> &alignments,
-                           const std::function<void(Alignment&&)> &callback);
+                           const std::function<void(Alignment&&)> &callback,
+                           std::string_view query,
+                           std::string_view query_rc);
 
 template <class AlignmentCompare>
 std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
-                                        std::vector<Alignment>&& alignments) {
+                                        std::vector<Alignment>&& alignments,
+                                        std::string_view query,
+                                        std::string_view query_rc) {
     const DBGAlignerConfig &config = aligner.get_config();
 
-    if (alignments.size() < 2 || !config.post_chain_alignments) {
+    if (alignments.size() < 2) {
         DEBUG_LOG("Too few alignments found, nothing to chain.");
         return std::move(alignments);
     }
@@ -623,14 +627,16 @@ std::vector<Alignment> chain_alignments(const IDBGAligner &aligner,
         aggregator.add_alignment(std::move(a));
     };
 
-    call_alignment_chains(aligner, split_alignments[0], callback);
-    call_alignment_chains(aligner, split_alignments[1], callback);
+    call_alignment_chains(aligner, split_alignments[0], callback, query, query_rc);
+    call_alignment_chains(aligner, split_alignments[1], callback, query_rc, query);
     return aggregator.get_alignments();
 }
 
 void call_alignment_chains(const IDBGAligner &aligner,
                            const std::vector<Alignment> &alignments,
-                           const std::function<void(Alignment&&)> &callback) {
+                           const std::function<void(Alignment&&)> &callback,
+                           std::string_view query,
+                           std::string_view query_rc) {
     if (alignments.empty())
         return;
 
@@ -953,6 +959,16 @@ void call_alignment_chains(const IDBGAligner &aligner,
 
         used[i] = true;
         Alignment cur = alignments[i];
+
+        if (cur.get_end_clipping()) {
+            // extend forwards
+            auto extensions = aligner.make_extender(query)->get_extensions(cur, config.ninf, true);
+            if (extensions.size() && extensions[0].get_score() > cur.get_score()) {
+                start_score += extensions[0].get_score() - cur.get_score();
+                std::swap(cur, extensions[0]);
+            }
+        }
+
         auto [score, extra_score, gap, prefix_trim,
               last_i, last_cols, last_suffix_trim] = chain_table[i][cols];
 
@@ -990,6 +1006,33 @@ void call_alignment_chains(const IDBGAligner &aligner,
                 cur.trim_clipping();
             }
 
+            if (last_i == std::numeric_limits<size_t>::max()) {
+                assert(!prefix_trim);
+                if (prev.get_clipping()) {
+                    // extend backwards
+                    RCDBG rc_dbg(std::shared_ptr<const DeBruijnGraph>(
+                                    std::shared_ptr<const DeBruijnGraph>(), &graph));
+                    const DeBruijnGraph &rc_graph = graph.get_mode() != DeBruijnGraph::CANONICAL
+                        ? rc_dbg : graph;
+
+                    auto rev = prev;
+                    rev.reverse_complement(rc_graph, query_rc);
+                    if (rev.size() && rev.get_nodes().back()) {
+                        assert(rev.get_end_clipping());
+                        auto extender_rc = aligner.make_extender(query_rc);
+                        extender_rc->set_graph(rc_graph);
+                        auto extensions = extender_rc->get_extensions(rev, config.ninf, true);
+                        if (extensions.size() && extensions[0].get_score() > prev.get_score()) {
+                            extensions[0].reverse_complement(rc_graph, query);
+                            if (extensions[0].size()) {
+                                start_score += extensions[0].get_score() - prev.get_score();
+                                std::swap(prev, extensions[0]);
+                            }
+                        }
+                    }
+                }
+            }
+
             prev.trim_end_clipping();
             prev.append(std::move(cur), extra_score);
             assert(prev.size());
@@ -998,13 +1041,16 @@ void call_alignment_chains(const IDBGAligner &aligner,
         }
 
         assert(cur.get_score() == start_score);
+
         callback(std::move(cur));
     }
 }
 
 template
 std::vector<Alignment> chain_alignments<LocalAlignmentLess>(const IDBGAligner&,
-                                                            std::vector<Alignment>&&);
+                                                            std::vector<Alignment>&&,
+                                                            std::string_view,
+                                                            std::string_view);
 
 } // namespace align
 } // namespace graph
