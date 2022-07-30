@@ -42,6 +42,16 @@ BinaryMatrix::SetBitPositions RowSparseDisk::Impl::get_row(Row row) const {
     return result;
 }
 
+std::vector<BinaryMatrix::SetBitPositions> RowSparseDisk::Impl::get_rows(const std::vector<Row> &row_ids) const {
+    std::vector<SetBitPositions> rows(row_ids.size());
+
+    for (size_t i = 0; i < row_ids.size(); ++i) {
+        rows[i] = get_row(row_ids[i]);
+    }
+
+    return rows;
+}
+
 bool RowSparseDisk::load(std::istream &f) {
     auto _f = dynamic_cast<mtg::common::IfstreamWithNameAndOffset*>(&f);
     assert(_f);

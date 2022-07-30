@@ -39,6 +39,12 @@ class RowSparseDisk : public BinaryMatrix {
                 .get_column(num_rows(), column);
     }
 
+    std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const override {
+        return Impl(boundary_, int_vector_buffer_params.filename, int_vector_buffer_params.offset,
+                    int_vector_buffer_params.buff_size)
+                .get_rows(rows);
+    }
+
     bool load(std::istream &in) override;
     void serialize(std::ostream &out) const override;
 
@@ -69,6 +75,7 @@ class RowSparseDisk : public BinaryMatrix {
             uint64_t num_relations_impl() const { return set_bits_.size(); }
             bool get(Row row, Column column) const;
             BinaryMatrix::SetBitPositions get_row(Row row) const;
+            std::vector<SetBitPositions> get_rows(const std::vector<Row> &row_ids) const;
             std::vector<BinaryMatrix::Row> get_column(uint64_t num_rows, Column column) const;
     };
 

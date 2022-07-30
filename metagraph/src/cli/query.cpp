@@ -1178,7 +1178,7 @@ int query_graph(Config *config) {
                                               config->suppress_unlabeled,
                                               config->verbose_output
                                                 || !(config->query_counts || config->query_coords),
-                                              anno_graph) << "\n";
+                                              anno_graph) + "\n";
             }
         });
         logger->trace("File '{}' was processed in {} sec, total time: {}", file,
