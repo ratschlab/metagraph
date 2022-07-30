@@ -16,6 +16,7 @@
 #include "common/utils/file_utils.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 #include "common/unix_tools.hpp"
+#include "common/vectors/bit_vector_dyn.hpp"
 
 
 namespace mtg {
@@ -32,7 +33,7 @@ class Unitigs : public SequenceGraph::GraphExtension {
 
     Unitigs(const DBGSuccinct &graph) : graph_(std::shared_ptr<const DeBruijnGraph>{}, &graph) {}
 
-    Unitigs(const cli::Config &config, bool keep_graph = true) : graph_(load_graph_impl(config.fnames[0])) {
+    Unitigs(const cli::Config &config) : graph_(load_graph_impl(config.fnames[0])) {
         std::vector<size_t> unitigs(graph_->num_nodes(), 0);
         sdsl::bit_vector indicator(unitigs.size(), false);
 
@@ -53,6 +54,12 @@ class Unitigs : public SequenceGraph::GraphExtension {
         std::atomic_thread_fence(std::memory_order_acquire);
 
         common::logger->trace("Indexed {} unitigs from {} nodes", i - 1, graph_->num_nodes());
+        common::logger->trace("Marking dummy k-mers");
+        {
+            DBGSuccinct &ncgraph = const_cast<DBGSuccinct&>(*graph_);
+            ncgraph.mask_dummy_kmers(get_num_threads(), false);
+            valid_edges_.reset(ncgraph.release_mask());
+        }
         graph_.reset();
 
         std::filesystem::path tmp_dir = utils::create_temp_dir(config.tmp_dir, "unitigs");
@@ -152,10 +159,8 @@ class Unitigs : public SequenceGraph::GraphExtension {
             unitigs_ = CompUnitigs(nullptr, std::move(*colmat));
             unitigs_.load_anchor(anchors_file);
             unitigs_.load_fork_succ(fork_succ_file);
-        }
-
-        if (keep_graph)
             load_graph(config.fnames[0]);
+        }
     }
 
     bool load(const std::string &filename_base) {
@@ -164,19 +169,36 @@ class Unitigs : public SequenceGraph::GraphExtension {
         if (!fin.good())
             return false;
 
-        try {
-            unitigs_.load(fin);
-            unitigs_.set_graph(graph_.get());
-            return true;
-        } catch (...) {
+        if (!unitigs_.load(fin))
             return false;
+
+        unitigs_.set_graph(graph_.get());
+        switch (graph_->get_state()) {
+            case boss::BOSS::State::STAT: {
+                valid_edges_.reset(new bit_vector_small());
+                break;
+            }
+            case boss::BOSS::State::FAST: {
+                valid_edges_.reset(new bit_vector_stat());
+                break;
+            }
+            case boss::BOSS::State::DYN: {
+                valid_edges_.reset(new bit_vector_dyn());
+                break;
+            }
+            case boss::BOSS::State::SMALL: {
+                valid_edges_.reset(new bit_vector_small());
+                break;
+            }
         }
+        return valid_edges_->load(fin);
     }
 
     void serialize(const std::string &filename_base) const {
         std::string fname = utils::make_suffix(filename_base, kUnitigsExtension);
         std::ofstream fout(fname, std::ios::binary);
         unitigs_.serialize(fout);
+        valid_edges_->serialize(fout);
     }
 
     bool is_compatible(const SequenceGraph &, bool = true) const { return true; }
@@ -193,18 +215,15 @@ class Unitigs : public SequenceGraph::GraphExtension {
                 auto parse_seeder = [&](const auto &cur_seeder) {
                     for (const auto &seed : cur_seeder.get_seeds()) {
                         node_index node = seed.get_nodes().back();
-                        if (node > graph_->max_index()) {
-                            node_index base_node = node - graph_->max_index();
-                            if (seed.get_offset() && graph_->get_boss().get_W(graph_->kmer_to_boss_index(base_node)) == boss::BOSS::kSentinel) {
-                                indicator.emplace_back(false);
-                                continue;
-                            }
+                        if (node > graph_->max_index())
+                            node = node - graph_->max_index();
 
-                            node = base_node;
+                        if ((*valid_edges_)[graph_->kmer_to_boss_index(node)]) {
+                            indicator.emplace_back(true);
+                            nodes.emplace_back(node - 1);
+                        } else {
+                            indicator.emplace_back(false);
                         }
-
-                        indicator.emplace_back(true);
-                        nodes.emplace_back(node);
                     }
                 };
 
@@ -286,6 +305,7 @@ class Unitigs : public SequenceGraph::GraphExtension {
   private:
     std::shared_ptr<const DBGSuccinct> graph_;
     CompUnitigs unitigs_;
+    std::unique_ptr<bit_vector> valid_edges_;
     static constexpr auto kUnitigsExtension = ".unitigs";
 
     static std::shared_ptr<const DBGSuccinct> load_graph_impl(const std::string &fname) {

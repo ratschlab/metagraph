@@ -30,7 +30,7 @@ int transform_graph(Config *config) {
         std::filesystem::remove(utils::make_suffix(config->outfbase, ".bloom"));
 
     if (config->index_unitigs) {
-        graph::align::Unitigs(*config, false).serialize(config->outfbase + ".dbg");
+        graph::align::Unitigs(*config).serialize(config->outfbase + ".dbg");
         return 0;
     }
 

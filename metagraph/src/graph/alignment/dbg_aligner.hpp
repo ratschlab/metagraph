@@ -107,6 +107,10 @@ class DBGAligner : public IDBGAligner {
                       const std::function<void(Alignment&&)> &callback) const;
 };
 
+std::pair<Alignment, Alignment> split_seed(const DeBruijnGraph &graph,
+                                           const DBGAlignerConfig &config,
+                                           const Alignment &alignment);
+
 } // namespace align
 } // namespace graph
 } // namespace mtg

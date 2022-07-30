@@ -976,10 +976,21 @@ std::pair<size_t, size_t> call_alignment_chains(const IDBGAligner &aligner,
         if (cur.get_end_clipping()) {
             // extend forwards
             auto extender = aligner.make_extender(query);
-            auto extensions = extender->get_extensions(cur, config.ninf, true);
-            if (extensions.size() && extensions[0].get_score() > cur.get_score()) {
-                assert(extensions[0].get_clipping() == cur.get_clipping());
-                std::swap(cur, extensions[0]);
+            auto [left, next] = split_seed(graph, config, cur);
+            auto extensions = extender->get_extensions(next,
+                config.ninf,                         // min_path_score
+                true,                                // force_fixed_seed
+                0,                                   // target_length
+                DeBruijnGraph::npos,                 // target_node
+                false
+            );
+
+            if (extensions.size() && extensions[0].get_end_clipping() < cur.get_end_clipping()) {
+                assert(extensions[0].get_nodes().front() == next.get_nodes().front());
+                left.splice(std::move(extensions[0]));
+                assert(cur.get_offset() == left.get_offset());
+                std::swap(left, cur);
+                assert(cur.is_valid(graph, &config));
             }
             ++num_extensions;
             num_explored_nodes += extender->num_explored_nodes();
@@ -990,6 +1001,12 @@ std::pair<size_t, size_t> call_alignment_chains(const IDBGAligner &aligner,
             if (first_is_indel(cur.get_cigar())) {
                 cur = alignments[i];
                 cur.trim_query_prefix(prefix_trim, node_overlap, config);
+#ifndef NDEBUG
+            } else {
+                Alignment alt_cur = alignments[i];
+                alt_cur.trim_query_prefix(prefix_trim, node_overlap, config);
+                assert(alt_cur.get_offset() == cur.get_offset());
+#endif
             }
             assert(cur.size());
             assert(cur.is_valid(graph, &config));
@@ -997,6 +1014,7 @@ std::pair<size_t, size_t> call_alignment_chains(const IDBGAligner &aligner,
 
         while (last_i != std::numeric_limits<size_t>::max()) {
             Alignment prev = alignments[last_i];
+            used[last_i] = true;
 
             if (std::get<4>(chain_table[last_i][cols]) == std::numeric_limits<size_t>::max()) {
                 assert(!std::get<3>(chain_table[last_i][cols]));
@@ -1056,10 +1074,15 @@ std::pair<size_t, size_t> call_alignment_chains(const IDBGAligner &aligner,
                 assert(prev.is_valid(graph, &config));
             }
 
-            used[last_i] = true;
+            if (gap > -node_overlap) {
+                std::cerr << "tt\t" << prefix_trim << "," << gap << "\t" << cur << std::endl;
+                cur.insert_gap_prefix(gap, node_overlap, config);
+            } else {
+                cur.trim_clipping();
+            }
+
             i = last_i;
             cols = last_cols;
-            ssize_t last_gap = gap;
             std::tie(score, extra_score, gap, prefix_trim,
                      last_i, last_cols, last_suffix_trim) = chain_table[i][cols];
 
@@ -1067,12 +1090,6 @@ std::pair<size_t, size_t> call_alignment_chains(const IDBGAligner &aligner,
                 prev.trim_query_prefix(prefix_trim, node_overlap, config);
                 assert(prev.size());
                 assert(prev.is_valid(graph, &config));
-            }
-
-            if (last_gap > -node_overlap) {
-                cur.insert_gap_prefix(last_gap, node_overlap, config);
-            } else {
-                cur.trim_clipping();
             }
 
             prev.trim_end_clipping();

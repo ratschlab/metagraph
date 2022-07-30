@@ -308,10 +308,10 @@ void LabeledExtender
 
     if (outgoing.size() == 1) {
         const auto &[next, c, score] = outgoing[0];
-        assert(seed_->label_column_diffs.empty());
         if (in_seed) {
+            assert(seed_->label_column_diffs.empty() || force_fixed_seed);
             node_labels_.emplace_back(node_labels_[table_i]);
-            node_labels_switched_.emplace_back(false);
+            node_labels_switched_.emplace_back(force_fixed_seed);
             last_flushed_table_i_ = std::max(last_flushed_table_i_, node_labels_.size());
             callback(next, c, score);
             return;
@@ -330,6 +330,7 @@ void LabeledExtender
     if (!annotation_buffer_.get_labels_and_coords(node).second) {
         // label consistency (weaker than coordinate consistency):
         // checks if there is at least one label shared between adjacent nodes
+        // std::cerr << "a\n";
         for (const auto &[next, c, score] : outgoing) {
             assert(annotation_buffer_.get_labels_id(next));
             auto label_change_scores = aligner_.get_label_change_scores(
@@ -338,12 +339,15 @@ void LabeledExtender
                                               : annotation_buffer_.get_hll_wrapper()
             );
 
-            for (const auto &[labels, lc_score] : label_change_scores) {
+            for (auto&& [labels, lc_score] : label_change_scores) {
+                lc_score *= config_.score_matrix[c][c];
+                // if (labels != node_labels_[table_i])
+                    // std::cerr << "\tllc\t" << c << "\t" << node_labels_[table_i] << "," << labels << "\t" << lc_score << "\n";
                 node_labels_.emplace_back(labels);
                 node_labels_switched_.emplace_back(lc_score != 0);
-                assert(lc_score * config_.score_matrix[c][c] <= 0);
-                callback(next, c, score + lc_score * config_.score_matrix[c][c]);
+                callback(next, c, score + lc_score);
             }
+            // std::cerr << "\n";
         }
 
         return;
