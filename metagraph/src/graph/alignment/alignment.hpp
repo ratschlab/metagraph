@@ -206,7 +206,7 @@ class Alignment {
     // Returns true if the label or coordinate set of this changed.
     bool append(Alignment&& next, score_t label_change_score = DBGAlignerConfig::ninf);
 
-    bool splice(Alignment&& other);
+    bool splice(Alignment&& other, score_t label_change_score = DBGAlignerConfig::ninf);
 
     score_t get_score() const { return score_; }
 

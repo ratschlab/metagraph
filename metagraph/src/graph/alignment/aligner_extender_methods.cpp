@@ -872,14 +872,17 @@ std::vector<Alignment> DefaultColumnExtender::backtrack(score_t min_path_score,
     for (auto it = indices.rbegin(); it != indices.rend(); ++it) {
         std::pop_heap(indices.begin(), it.base());
         const auto &[start_score, neg_off_diag, neg_j_start, start_pos] = *it;
+        DEBUG_LOG("Trying backtracking from score {}", start_score);
 
         if (terminate_backtrack_start(extensions))
             break;
 
         size_t j = -neg_j_start;
 
-        if (skip_backtrack_start(j))
+        if (skip_backtrack_start(j)) {
+            DEBUG_LOG("\tskipped");
             continue;
+        }
 
         std::vector<DeBruijnGraph::node_index> path;
         std::vector<size_t> trace;
@@ -996,7 +999,7 @@ std::vector<Alignment> DefaultColumnExtender::backtrack(score_t min_path_score,
                     j = j_prev;
                 }
             } else {
-                DEBUG_LOG("Backtracking failed, trying next start point");
+                DEBUG_LOG("\tBacktracking failed, trying next start point");
                 break;
             }
         }

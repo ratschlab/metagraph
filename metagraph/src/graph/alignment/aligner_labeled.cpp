@@ -422,8 +422,18 @@ bool LabeledExtender::skip_backtrack_start(size_t i) {
 
     // if this alignment tree node has been visited previously, ignore it
     assert(remaining_labels_i_);
-    if (!prev_starts.emplace(i).second)
+    if (!prev_starts.emplace(i).second) {
+        DEBUG_LOG("\tPreviously visited");
         return true;
+    }
+
+    if (!config_.post_chain_alignments
+            && (annotation_buffer_.get_hll_wrapper()
+                || config_.label_change_score != DBGAlignerConfig::ninf)) {
+        DEBUG_LOG("\tOnly picking the top alignment");
+        remaining_labels_i_ = 0;
+        return false;
+    }
 
     // check if this starting point involves seed labels which have not been considered yet
     const auto &end_labels = annotation_buffer_.get_cached_column_set(node_labels_[i]);
@@ -437,6 +447,7 @@ bool LabeledExtender::skip_backtrack_start(size_t i) {
                                        std::back_inserter(label_diff_));
     label_diff_.push_back(nannot);
 
+    DEBUG_LOG("\tAlready visited?: {}", label_intersection_.empty());
     return label_intersection_.empty();
 }
 

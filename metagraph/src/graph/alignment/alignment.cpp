@@ -182,7 +182,7 @@ void Alignment::merge_annotations(const Alignment &other) {
     extra_score += other.extra_score;
 }
 
-bool Alignment::splice(Alignment&& other) {
+bool Alignment::splice(Alignment&& other, score_t label_change_score) {
     if (empty()) {
         std::swap(*this, other);
         return has_annotation();
@@ -190,7 +190,7 @@ bool Alignment::splice(Alignment&& other) {
 
     trim_end_clipping();
     other.trim_clipping();
-    return append(std::move(other));
+    return append(std::move(other), label_change_score);
 }
 
 bool Alignment::append(Alignment&& other, score_t label_change_score) {
@@ -259,7 +259,12 @@ bool Alignment::append(Alignment&& other, score_t label_change_score) {
 
     } else if (has_annotation()) {
         if ((label_column_diffs.size() ? label_column_diffs.back() : label_columns)
-                != other.label_columns && label_change_score == DBGAlignerConfig::ninf) {
+                == other.label_columns) {
+            label_change_score = 0;
+        }
+
+        if (label_change_score == DBGAlignerConfig::ninf) {
+            DEBUG_LOG("Splice failed");
             *this = Alignment();
             return true;
         }
