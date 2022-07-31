@@ -990,12 +990,20 @@ std::pair<size_t, size_t> call_alignment_chains(const IDBGAligner &aligner,
 
             if (extensions.size() && extensions[0].get_end_clipping() < cur.get_end_clipping()) {
                 assert(extensions[0].get_nodes().front() == next.get_nodes().front());
-                DEBUG_LOG("left:\n\t{}\next\n\t{}", left, extensions[0]);
+                DEBUG_LOG("cur:\n\t{}\nleft:\n\t{}\nnext:\n\t{}\next\n\t{}", cur, left, next, extensions[0]);
                 left.splice(std::move(extensions[0]));
-                assert(cur.get_offset() == left.get_offset());
-                std::swap(left, cur);
-                assert(cur.is_valid(graph, &config));
-                DEBUG_LOG("Extended successfully:\n\t{}", cur);
+                DEBUG_LOG("result:\n\t{}", left);
+                if (left.size()) {
+                    assert(left.get_offset() >= cur.get_offset());
+                    if (left.get_offset() > cur.get_offset())
+                        left.trim_offset(left.get_offset() - cur.get_offset());
+
+                    std::swap(left, cur);
+                    assert(cur.is_valid(graph, &config));
+                    DEBUG_LOG("Extended successfully:\n\t{}", cur);
+                }
+                // TODO: if the extension uses a different subset of labels in its extension
+                // this will fail
             }
             ++num_extensions;
             num_explored_nodes += extender->num_explored_nodes();
@@ -1077,11 +1085,15 @@ std::pair<size_t, size_t> call_alignment_chains(const IDBGAligner &aligner,
                     assert(extension.get_nodes().front() == next.get_nodes().front());
                     DEBUG_LOG("left:\n\t{}\next\n\t{}", left, extension);
                     left.splice(std::move(extension));
-                    assert(rev.get_offset() == left.get_offset());
-                    std::swap(left, rev);
-                    rev.reverse_complement(rc_graph, query);
-                    assert(rev.is_valid(graph, &config));
-                    DEBUG_LOG("Extended successfully:\n\t{}", rev);
+                    if (left.size()) {
+                        assert(rev.get_offset() == left.get_offset());
+                        std::swap(left, rev);
+                        rev.reverse_complement(rc_graph, query);
+                        assert(rev.is_valid(graph, &config));
+                        DEBUG_LOG("Extended successfully:\n\t{}", rev);
+                    }
+                    // TODO: if the extension uses a different subset of labels in its extension
+                    // this will fail
                 } else {
                     rev = Alignment();
                 }

@@ -75,6 +75,7 @@ std::pair<Alignment, Alignment> split_seed(const DeBruijnGraph &graph,
 
     auto ret_val = std::make_pair(alignment, alignment);
     ret_val.first.trim_reference_suffix(graph.get_k(), config, false);
+    auto jt = alignment.get_nodes().rbegin() + graph.get_k() - 1;
 
     // ensure that there's no DELETION at the splice point
     size_t trim_nodes = graph.get_k();
@@ -85,11 +86,22 @@ std::pair<Alignment, Alignment> split_seed(const DeBruijnGraph &graph,
 
         if (it->first == Cigar::DELETION) {
             trim_nodes += it->second;
+            jt += trim_nodes;
             ret_val.first.trim_reference_suffix(it->second, config, false);
         }
 
         assert(ret_val.first.size());
+        while (ret_val.first.size()
+                && (ret_val.first.get_nodes().back() == DeBruijnGraph::npos
+                        || *jt == DeBruijnGraph::npos)) {
+            ++trim_nodes;
+            ++jt;
+            ret_val.first.trim_reference_suffix(1, config, false);
+        }
     }
+
+    if (ret_val.first.empty())
+        return std::make_pair(Alignment(), alignment);
 
     ret_val.second.trim_reference_prefix(alignment.get_sequence().size() - trim_nodes,
                                          graph.get_k() - 1, config, true);
