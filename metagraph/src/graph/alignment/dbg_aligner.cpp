@@ -70,12 +70,8 @@ std::pair<Alignment, Alignment> split_seed(const DeBruijnGraph &graph,
                                            const DBGAlignerConfig &config,
                                            const Alignment &alignment) {
     assert(alignment.is_valid(graph, &config));
-    if (alignment.get_sequence().size() < graph.get_k() * 2
-            || std::find(alignment.get_nodes().begin(),
-                         alignment.get_nodes().end(), DeBruijnGraph::npos)
-                            != alignment.get_nodes().end()) {
+    if (alignment.get_sequence().size() < graph.get_k() * 2)
         return std::make_pair(Alignment(), alignment);
-    }
 
     auto ret_val = std::make_pair(alignment, alignment);
     ret_val.first.trim_reference_suffix(graph.get_k(), config, false);

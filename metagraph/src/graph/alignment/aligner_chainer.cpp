@@ -778,12 +778,6 @@ std::pair<size_t, size_t> call_alignment_chains(const IDBGAligner &aligner,
                     b_score = a_score + alignments[j].get_score() - prefix_score_diff + gap_score;
                 } else {
                     // overlap
-                    gap = std::max({
-                        gap,
-                        static_cast<ssize_t>(b_prefix_trim)
-                            - static_cast<ssize_t>(prefix_score_size_diffs[j].size()) + 1
-                    });
-
                     b_score = DBGAlignerConfig::ninf;
                     ssize_t best_mismatch = 0;
                     ssize_t best_gap = gap;
@@ -793,10 +787,13 @@ std::pair<size_t, size_t> call_alignment_chains(const IDBGAligner &aligner,
                         if (a_suffix_trim >= suffix_score_size_diffs[i].size())
                             continue;
 
+                        if (b_prefix_trim - cur_gap >= prefix_score_size_diffs[j].size())
+                            continue;
+
                         if (a_suffix_trim + a_prefix_trim >= alignments[i].get_query_view().size())
                             continue;
 
-                        assert(alignments[i].get_query_view().data() + alignments[i].get_query_view().size() - (cur_gap - gap)
+                        assert(alignments[i].get_query_view().data() + alignments[i].get_query_view().size() - a_suffix_trim
                             == alignments[j].get_query_view().data() + (b_prefix_trim - cur_gap));
                         auto [b_prefix_score_diff, b_seq_prefix_trim] = prefix_score_size_diffs[j][b_prefix_trim - cur_gap];
                         auto [a_suffix_score_diff, a_seq_suffix_trim] = suffix_score_size_diffs[i][a_suffix_trim];
@@ -1008,63 +1005,9 @@ std::pair<size_t, size_t> call_alignment_chains(const IDBGAligner &aligner,
             Alignment prev = alignments[last_i];
             used[last_i] = true;
 
-            if (std::get<4>(chain_table[last_i][last_cols]) == std::numeric_limits<size_t>::max()) {
-                assert(!std::get<3>(chain_table[last_i][last_cols]));
-                if (prev.get_clipping()) {
-                    DEBUG_LOG("Extending chain front");
-                    auto find = front_ext_map.find(i);
-                    if (find != front_ext_map.end()) {
-                        if (find->second.size()) {
-                            // start_score += find->second.get_score() - prev.get_score();
-                            prev = find->second;
-                        }
-                    } else {
-                        // extend backwards
-                        RCDBG rc_dbg(std::shared_ptr<const DeBruijnGraph>(
-                                        std::shared_ptr<const DeBruijnGraph>(), &graph));
-                        const DeBruijnGraph &rc_graph = graph.get_mode() != DeBruijnGraph::CANONICAL
-                            ? rc_dbg : graph;
-
-                        auto rev = prev;
-                        rev.reverse_complement(rc_graph, query_rc);
-                        if (rev.size() && rev.get_nodes().back()) {
-                            assert(rev.get_end_clipping());
-                            auto extender_rc = aligner.make_extender(query_rc);
-                            extender_rc->set_graph(rc_graph);
-                            auto extensions = extender_rc->get_extensions(rev, config.ninf, true);
-                            ++num_extensions;
-                            num_explored_nodes += extender_rc->num_explored_nodes();
-                            if (extensions.size() && extensions[0].get_score() <= prev.get_score())
-                                extensions.clear();
-
-                            if (extensions.size()) {
-                                extensions[0].reverse_complement(rc_graph, query);
-                                if (extensions[0].empty())
-                                    extensions.clear();
-                            }
-
-                            if (extensions.size()) {
-                                front_ext_map[i] = extensions[0];
-                                // start_score += extensions[0].get_score() - prev.get_score();
-                                assert(extensions[0].get_end_clipping() == prev.get_end_clipping());
-                                DEBUG_LOG("\tsuccess");
-                                std::swap(prev, extensions[0]);
-                            } else {
-                                front_ext_map[i] = Alignment();
-                            }
-                        }
-                    }
-                }
-            }
             if (last_suffix_trim) {
                 // score_t cur_prev_score = prev.get_score();
                 prev.trim_query_suffix(last_suffix_trim, config);
-                if (last_is_indel(prev.get_cigar())) {
-                    DEBUG_LOG("Invalid front extension");
-                    // start_score -= cur_prev_score - alignments[last_i].get_score();
-                    prev = alignments[last_i];
-                    prev.trim_query_suffix(last_suffix_trim, config);
-                }
                 assert(prev.size());
                 assert(prev.is_valid(graph, &config));
             }
@@ -1092,6 +1035,52 @@ std::pair<size_t, size_t> call_alignment_chains(const IDBGAligner &aligner,
             std::swap(cur, prev);
             assert(cur.is_valid(graph, &config));
             DEBUG_LOG("Partial alignment: {}\n\t{}", extra_score, cur);
+        }
+
+        if (cur.get_clipping()) {
+            // extend backwards
+            DEBUG_LOG("Extending chain front");
+            RCDBG rc_dbg(std::shared_ptr<const DeBruijnGraph>(
+                            std::shared_ptr<const DeBruijnGraph>(), &graph));
+            const DeBruijnGraph &rc_graph = graph.get_mode() != DeBruijnGraph::CANONICAL
+                ? rc_dbg : graph;
+
+            auto rev = cur;
+            rev.reverse_complement(rc_graph, query_rc);
+            if (rev.size() && rev.get_nodes().back()) {
+                assert(rev.get_end_clipping());
+                auto extender_rc = aligner.make_extender(query_rc);
+                extender_rc->set_graph(rc_graph);
+                auto [left, next] = split_seed(graph, config, rev);
+                DEBUG_LOG("left:\n\t{}\nnext\n\t{}", left, next);
+                auto extensions = extender_rc->get_extensions(next,
+                    config.ninf,                         // min_path_score
+                    true,                                // force_fixed_seed
+                    0,                                   // target_length
+                    DeBruijnGraph::npos,                 // target_node
+                    false
+                );
+
+                if (extensions.size() && extensions[0].get_end_clipping() < rev.get_end_clipping()) {
+                    assert(extensions[0].get_nodes().front() == next.get_nodes().front());
+                    DEBUG_LOG("left:\n\t{}\next\n\t{}", left, extensions[0]);
+                    left.splice(std::move(extensions[0]));
+                    assert(rev.get_offset() == left.get_offset());
+                    std::swap(left, rev);
+                    rev.reverse_complement(rc_graph, query);
+                    assert(rev.is_valid(graph, &config));
+                    DEBUG_LOG("Extended successfully:\n\t{}", rev);
+                } else {
+                    rev = Alignment();
+                }
+
+                ++num_extensions;
+                num_explored_nodes += extender_rc->num_explored_nodes();
+                if (rev.size()) {
+                    assert(rev.get_end_clipping() == cur.get_end_clipping());
+                    std::swap(cur, rev);
+                }
+            }
         }
 
         // assert(cur.get_score() == start_score);

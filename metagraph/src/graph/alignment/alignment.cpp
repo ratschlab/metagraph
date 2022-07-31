@@ -796,6 +796,9 @@ void Alignment::reverse_complement(const DeBruijnGraph &graph,
         label_column_diffs.erase(label_column_diffs.begin());
     }
 
+    if (extra_scores.size())
+        std::reverse(extra_scores.begin(), extra_scores.end());
+
     if (dynamic_cast<const RCDBG*>(&graph)) {
         if (offset_) {
             *this = Alignment();
