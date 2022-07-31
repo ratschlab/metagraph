@@ -1038,6 +1038,7 @@ std::pair<size_t, size_t> call_alignment_chains(const IDBGAligner &aligner,
         }
 
         if (cur.get_clipping()) {
+            assert(!prefix_trim);
             // extend backwards
             DEBUG_LOG("Extending chain front");
             RCDBG rc_dbg(std::shared_ptr<const DeBruijnGraph>(
@@ -1049,22 +1050,33 @@ std::pair<size_t, size_t> call_alignment_chains(const IDBGAligner &aligner,
             rev.reverse_complement(rc_graph, query_rc);
             if (rev.size() && rev.get_nodes().back()) {
                 assert(rev.get_end_clipping());
-                auto extender_rc = aligner.make_extender(query_rc);
-                extender_rc->set_graph(rc_graph);
                 auto [left, next] = split_seed(graph, config, rev);
+                DEBUG_LOG("check:\n\t{}", cur);
                 DEBUG_LOG("left:\n\t{}\nnext\n\t{}", left, next);
-                auto extensions = extender_rc->get_extensions(next,
-                    config.ninf,                         // min_path_score
-                    true,                                // force_fixed_seed
-                    0,                                   // target_length
-                    DeBruijnGraph::npos,                 // target_node
-                    false
-                );
-
-                if (extensions.size() && extensions[0].get_end_clipping() < rev.get_end_clipping()) {
-                    assert(extensions[0].get_nodes().front() == next.get_nodes().front());
-                    DEBUG_LOG("left:\n\t{}\next\n\t{}", left, extensions[0]);
-                    left.splice(std::move(extensions[0]));
+                Alignment extension;
+                // if (find == front_ext_map.end()) {
+                    auto extender_rc = aligner.make_extender(query_rc);
+                    extender_rc->set_graph(rc_graph);
+                    auto extensions = extender_rc->get_extensions(next,
+                        config.ninf,                         // min_path_score
+                        true,                                // force_fixed_seed
+                        0,                                   // target_length
+                        DeBruijnGraph::npos,                 // target_node
+                        false
+                    );
+                    ++num_extensions;
+                    num_explored_nodes += extender_rc->num_explored_nodes();
+                    if (extensions.size() && extensions[0].get_end_clipping() < rev.get_end_clipping()) {
+                        extension = std::move(extensions[0]);
+                        // find = front_ext_map.try_emplace(i, std::move(extensions[0])).first;
+                    // } else {
+                        // find = front_ext_map.try_emplace(i, Alignment()).first;
+                    }
+                // }
+                if (extension.size()) {
+                    assert(extension.get_nodes().front() == next.get_nodes().front());
+                    DEBUG_LOG("left:\n\t{}\next\n\t{}", left, extension);
+                    left.splice(std::move(extension));
                     assert(rev.get_offset() == left.get_offset());
                     std::swap(left, rev);
                     rev.reverse_complement(rc_graph, query);
@@ -1074,8 +1086,6 @@ std::pair<size_t, size_t> call_alignment_chains(const IDBGAligner &aligner,
                     rev = Alignment();
                 }
 
-                ++num_extensions;
-                num_explored_nodes += extender_rc->num_explored_nodes();
                 if (rev.size()) {
                     assert(rev.get_end_clipping() == cur.get_end_clipping());
                     std::swap(cur, rev);
