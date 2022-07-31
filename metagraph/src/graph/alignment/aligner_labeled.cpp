@@ -307,11 +307,17 @@ void LabeledExtender
         return;
 
     if (outgoing.size() == 1) {
-        const auto &[next, c, score] = outgoing[0];
         if (in_seed) {
-            assert(seed_->label_column_diffs.empty() || force_fixed_seed);
-            node_labels_.emplace_back(node_labels_[table_i]);
-            node_labels_switched_.emplace_back(force_fixed_seed);
+            const auto &[next, c, score] = outgoing[0];
+            size_t node_i = next_offset >= graph_->get_k() ? next_offset - graph_->get_k() + 1 : 0;
+            if (!node_i || seed_->label_column_diffs.empty() || node_labels_[table_i] == seed_->label_column_diffs[node_i - 1]) {
+                node_labels_.emplace_back(node_labels_[table_i]);
+                node_labels_switched_.emplace_back(false);
+            } else {
+                node_labels_.emplace_back(seed_->label_column_diffs[node_i - 1]);
+                node_labels_switched_.emplace_back(true);
+                remaining_labels_i_ = node_labels_.back();
+            }
             last_flushed_table_i_ = std::max(last_flushed_table_i_, node_labels_.size());
             callback(next, c, score);
             return;
