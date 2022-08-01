@@ -308,8 +308,16 @@ int align_to_graph(Config *config) {
     }
 
     auto hll = std::make_shared<HLLWrapper<>>();
-    if (hll->load(utils::remove_suffix(config->infbase, graph->file_extension())))
-        logger->trace("Loaded HLL sketch with {} columns", hll->data().num_columns());
+    if (config->alignment_post_chain) {
+        if (hll->load(utils::remove_suffix(config->infbase, graph->file_extension()))) {
+            logger->trace("Loaded HLL sketch with {} columns", hll->data().num_columns());
+        } else {
+            logger->warn("HLL sketch not present or failed to load");
+            hll.reset();
+        }
+    } else {
+        hll.reset();
+    }
 
     // For graphs which still feature a mask, this speeds up mapping and allows
     // for dummy nodes to be matched by suffix seeding
