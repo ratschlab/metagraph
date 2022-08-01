@@ -1009,45 +1009,7 @@ std::pair<size_t, size_t> call_alignment_chains(const IDBGAligner &aligner,
             num_explored_nodes += extender->num_explored_nodes();
         }
 
-        while (last_i != std::numeric_limits<size_t>::max()) {
-            Alignment prev = alignments[last_i];
-            used[last_i] = true;
-
-            if (last_suffix_trim) {
-                // score_t cur_prev_score = prev.get_score();
-                prev.trim_query_suffix(last_suffix_trim, config);
-                assert(prev.size());
-                assert(prev.is_valid(graph, &config));
-            }
-
-            if (gap > -node_overlap) {
-                cur.insert_gap_prefix(gap, node_overlap, config);
-            } else {
-                cur.trim_clipping();
-            }
-
-            i = last_i;
-            cols = last_cols;
-            std::tie(score, extra_score, gap, prefix_trim,
-                     last_i, last_cols, last_suffix_trim) = chain_table[i][cols];
-
-            if (prefix_trim) {
-                prev.trim_query_prefix(prefix_trim, node_overlap, config);
-                assert(prev.size());
-                assert(prev.is_valid(graph, &config));
-            }
-
-            prev.trim_end_clipping();
-            prev.append(std::move(cur), extra_score);
-            assert(prev.size());
-            std::swap(cur, prev);
-            assert(cur.is_valid(graph, &config));
-            DEBUG_LOG("Partial alignment: {}\n\t{}", extra_score, cur);
-        }
-
-        if (cur.get_clipping()) {
-            assert(!prefix_trim);
-            // extend backwards
+        if (last_i == std::numeric_limits<size_t>::max() && cur.get_clipping()) {
             DEBUG_LOG("Extending chain front");
             RCDBG rc_dbg(std::shared_ptr<const DeBruijnGraph>(
                             std::shared_ptr<const DeBruijnGraph>(), &graph));
@@ -1058,8 +1020,8 @@ std::pair<size_t, size_t> call_alignment_chains(const IDBGAligner &aligner,
             rev.reverse_complement(rc_graph, query_rc);
             if (rev.size() && rev.get_nodes().back()) {
                 assert(rev.get_end_clipping());
+                DEBUG_LOG("check:\n\t{}\nrev:\n\t{}", cur, rev);
                 auto [left, next] = split_seed(graph, config, rev);
-                DEBUG_LOG("check:\n\t{}", cur);
                 DEBUG_LOG("left:\n\t{}\nnext\n\t{}", left, next);
                 Alignment extension;
                 // if (find == front_ext_map.end()) {
@@ -1091,6 +1053,8 @@ std::pair<size_t, size_t> call_alignment_chains(const IDBGAligner &aligner,
                         rev.reverse_complement(rc_graph, query);
                         assert(rev.is_valid(graph, &config));
                         DEBUG_LOG("Extended successfully:\n\t{}", rev);
+                    } else {
+                        rev = Alignment();
                     }
                     // TODO: if the extension uses a different subset of labels in its extension
                     // this will fail
@@ -1103,6 +1067,100 @@ std::pair<size_t, size_t> call_alignment_chains(const IDBGAligner &aligner,
                     std::swap(cur, rev);
                 }
             }
+        }
+
+        while (last_i != std::numeric_limits<size_t>::max()) {
+            Alignment prev = alignments[last_i];
+            used[last_i] = true;
+
+            if (last_suffix_trim) {
+                // score_t cur_prev_score = prev.get_score();
+                prev.trim_query_suffix(last_suffix_trim, config);
+                assert(prev.size());
+                assert(prev.is_valid(graph, &config));
+            }
+
+            if (gap > -node_overlap) {
+                cur.insert_gap_prefix(gap, node_overlap, config);
+            } else {
+                cur.trim_clipping();
+            }
+
+            i = last_i;
+            cols = last_cols;
+            std::tie(score, extra_score, gap, prefix_trim,
+                     last_i, last_cols, last_suffix_trim) = chain_table[i][cols];
+
+            if (prefix_trim) {
+                prev.trim_query_prefix(prefix_trim, node_overlap, config);
+                assert(prev.size());
+                assert(prev.is_valid(graph, &config));
+            } else if (last_i == std::numeric_limits<size_t>::max() && prev.get_clipping()) {
+                DEBUG_LOG("Extending chain front");
+                RCDBG rc_dbg(std::shared_ptr<const DeBruijnGraph>(
+                                std::shared_ptr<const DeBruijnGraph>(), &graph));
+                const DeBruijnGraph &rc_graph = graph.get_mode() != DeBruijnGraph::CANONICAL
+                    ? rc_dbg : graph;
+
+                auto rev = prev;
+                rev.reverse_complement(rc_graph, query_rc);
+                if (rev.size() && rev.get_nodes().back()) {
+                    assert(rev.get_end_clipping());
+                    DEBUG_LOG("check:\n\t{}\nrev:\n\t{}", prev, rev);
+                    auto [left, next] = split_seed(graph, config, rev);
+                    DEBUG_LOG("left:\n\t{}\nnext\n\t{}", left, next);
+                    Alignment extension;
+                    // if (find == front_ext_map.end()) {
+                        auto extender_rc = aligner.make_extender(query_rc);
+                        extender_rc->set_graph(rc_graph);
+                        auto extensions = extender_rc->get_extensions(next,
+                            config.ninf,                         // min_path_score
+                            true,                                // force_fixed_seed
+                            0,                                   // target_length
+                            DeBruijnGraph::npos,                 // target_node
+                            false
+                        );
+                        ++num_extensions;
+                        num_explored_nodes += extender_rc->num_explored_nodes();
+                        if (extensions.size() && extensions[0].get_end_clipping() < rev.get_end_clipping()) {
+                            extension = std::move(extensions[0]);
+                            // find = front_ext_map.try_emplace(i, std::move(extensions[0])).first;
+                        // } else {
+                            // find = front_ext_map.try_emplace(i, Alignment()).first;
+                        }
+                    // }
+                    if (extension.size()) {
+                        assert(extension.get_nodes().front() == next.get_nodes().front());
+                        DEBUG_LOG("left:\n\t{}\next\n\t{}", left, extension);
+                        left.splice(std::move(extension));
+                        if (left.size()) {
+                            assert(rev.get_offset() == left.get_offset());
+                            std::swap(left, rev);
+                            rev.reverse_complement(rc_graph, query);
+                            assert(rev.is_valid(graph, &config));
+                            DEBUG_LOG("Extended successfully:\n\t{}", rev);
+                        } else {
+                            rev = Alignment();
+                        }
+                        // TODO: if the extension uses a different subset of labels in its extension
+                        // this will fail
+                    } else {
+                        rev = Alignment();
+                    }
+
+                    if (rev.size()) {
+                        assert(rev.get_end_clipping() == prev.get_end_clipping());
+                        std::swap(prev, rev);
+                    }
+                }
+            }
+
+            prev.trim_end_clipping();
+            prev.append(std::move(cur), extra_score);
+            assert(prev.size());
+            std::swap(cur, prev);
+            assert(cur.is_valid(graph, &config));
+            DEBUG_LOG("Partial alignment: {}\n\t{}", extra_score, cur);
         }
 
         // assert(cur.get_score() == start_score);

@@ -377,7 +377,7 @@ void DefaultColumnExtender
                 (node_i - 1 < this->seed_->extra_scores.size() ? this->seed_->extra_scores[node_i - 1] : 0)
 
         );
-        assert(!node || next_c == boss::BOSS::kSentinel ||
+        assert(!node || next_c == boss::BOSS::kSentinel || !next_node ||
                 graph_->traverse(node, next_c) == next_node);
     } else {
         assert(node);
