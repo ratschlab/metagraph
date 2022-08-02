@@ -34,6 +34,7 @@ class Unitigs : public SequenceGraph::GraphExtension {
     Unitigs(const DBGSuccinct &graph) : graph_(std::shared_ptr<const DeBruijnGraph>{}, &graph) {}
 
     Unitigs(const cli::Config &config) : graph_(load_graph_impl(config.fnames[0])) {
+        common::logger->trace("Allocating unitig array");
         std::vector<size_t> unitigs(graph_->num_nodes(), 0);
         sdsl::bit_vector indicator(unitigs.size(), false);
 
