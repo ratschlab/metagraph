@@ -73,6 +73,8 @@ class Cigar {
         return cigar_.size() && cigar_.back().first == CLIPPED ? cigar_.back().second : 0;
     }
 
+    size_t get_coverage() const;
+
     void extend_clipping(LengthType n) {
         assert(cigar_.size());
         if (cigar_.front().first != CLIPPED) {

@@ -14,7 +14,7 @@ namespace align {
 
 class ILabeledAligner {
   public:
-    typedef std::vector<std::pair<Alignment::Columns, score_t>> LabelChangeScores;
+    typedef std::vector<std::tuple<Alignment::Columns, score_t, bool>> LabelChangeScores;
     typedef std::pair<Alignment::Columns, Alignment::Columns> LabelPair;
 
     virtual AnnotationBuffer& get_annotation_buffer() const = 0;

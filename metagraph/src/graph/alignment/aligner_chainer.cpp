@@ -917,7 +917,7 @@ std::pair<size_t, size_t> call_alignment_chains(const IDBGAligner &aligner,
 
                 ILabeledAligner::LabelChangeScores label_change_scores;
                 if (!labeled_aligner) {
-                    label_change_scores.emplace_back(0, 0);
+                    label_change_scores.emplace_back(0, 0, true);
                 } else {
                     label_change_scores = labeled_aligner->get_label_change_scores(
                         cur_columns, alignments[j].label_columns,
@@ -927,7 +927,7 @@ std::pair<size_t, size_t> call_alignment_chains(const IDBGAligner &aligner,
 
                 auto &b_tab = chain_table[j];
                 score_t lambda = config.score_matrix[c][c];
-                for (auto &[cols, lc_score] : label_change_scores) {
+                for (auto &[cols, lc_score, is_subset] : label_change_scores) {
                     lc_score *= lambda;
                     assert(lc_score <= 0);
                     score_t next_score = b_score + lc_score;
@@ -964,8 +964,8 @@ std::pair<size_t, size_t> call_alignment_chains(const IDBGAligner &aligner,
     std::vector<std::vector<std::tuple<size_t, size_t, size_t, ssize_t, Alignment::Columns, score_t>>> chains;
     for (auto it = indices.rbegin(); it != indices.rend(); ++it) {
         auto [start_score, cols, i] = *it;
-        if (start_score < std::get<0>(indices.back()) * config.rel_score_cutoff)
-            break;
+        // if (start_score < std::get<0>(indices.back()) * config.rel_score_cutoff)
+            // break;
 
         if (used[i])
             continue;

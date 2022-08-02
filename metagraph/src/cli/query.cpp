@@ -16,6 +16,7 @@
 #include "graph/representation/hash/dbg_hash_ordered.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/succinct/boss_construct.hpp"
+#include "graph/graph_extensions/unitigs.hpp"
 #include "seq_io/sequence_io.hpp"
 #include "config/config.hpp"
 #include "load/load_graph.hpp"
@@ -1140,8 +1141,22 @@ int query_graph(Config *config) {
     assert(config->infbase_annotators.size() == 1);
 
     std::shared_ptr<DeBruijnGraph> graph = load_critical_dbg(config->infbase);
+    std::shared_ptr<align::Unitigs> graph_unitigs;
+    if (auto dbg_succ = std::dynamic_pointer_cast<DBGSuccinct>(graph)) {
+        graph_unitigs = std::make_shared<align::Unitigs>(*dbg_succ);
+        if (graph_unitigs->load(config->infbase)) {
+            logger->trace("Loaded the unitig index");
+        } else {
+            graph_unitigs.reset();
+            logger->warn("Unitig index missing or failed to load. "
+                         "Alignment speed will be significantly slower. "
+                         "Use metagraph transform to generate a unitig index.");
+        }
+    }
 
     std::unique_ptr<AnnotatedDBG> anno_graph = initialize_annotated_dbg(graph, *config);
+    if (graph_unitigs)
+        const_cast<DeBruijnGraph&>(anno_graph->get_graph()).add_extension(graph_unitigs);
 
     ThreadPool thread_pool(std::max(1u, get_num_threads()) - 1, 1000);
 

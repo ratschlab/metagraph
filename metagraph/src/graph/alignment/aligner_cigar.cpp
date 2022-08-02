@@ -84,6 +84,30 @@ Cigar::Cigar(std::string_view cigar_str) {
     }
 }
 
+size_t Cigar::get_coverage() const {
+    size_t coverage = 0;
+    for (size_t i = 0; i < cigar_.size(); ++i) {
+        const auto &[op, len] = cigar_[i];
+        switch (op) {
+            case MATCH:
+            case MISMATCH:
+            case INSERTION: {
+                coverage += len;
+            } break;
+            case NODE_INSERTION:
+            case CLIPPED: {
+                // do nothing
+            } break;
+            case DELETION: {
+                if (len == 1 && i >= 2 && cigar_[i - 1].first == NODE_INSERTION && cigar_[i - 2].first == INSERTION)
+                    coverage -= cigar_[i - 2].second;
+            }
+        }
+    }
+
+    return coverage;
+}
+
 std::string Cigar::to_string() const {
     std::string cigar_string;
 

@@ -90,7 +90,6 @@ void LabeledExtender::flush() {
         assert(parent_i < last_flushed_table_i_);
 
         auto clear = [&]() {
-            DEBUG_LOG("Removed table element {}", last_flushed_table_i_);
             node_labels_[last_flushed_table_i_] = 0;
             node_labels_switched_[last_flushed_table_i_] = false;
             std::fill(table_elem.S.begin(), table_elem.S.end(), config_.ninf);
@@ -99,6 +98,7 @@ void LabeledExtender::flush() {
         };
 
         if (!node_labels_[parent_i]) {
+            DEBUG_LOG("Removed table element {}, empty label", last_flushed_table_i_);
             clear();
             continue;
         }
@@ -139,6 +139,7 @@ void LabeledExtender::flush() {
                               std::back_inserter(intersect_labels));
 
         if (intersect_labels.empty()) {
+            DEBUG_LOG("Removed table element {}, empty intersection", last_flushed_table_i_);
             clear();
         } else if (config_.label_change_union) {
             node_labels_[last_flushed_table_i_] = node_labels_[parent_i];
@@ -192,7 +193,7 @@ auto ILabeledAligner
                           Alignment::Columns b_col,
                           const HLLWrapper<> *hll_wrapper) const -> LabelChangeScores {
     if (a_col == b_col)
-        return { std::make_pair(a_col, 0) };
+        return { std::make_tuple(a_col, 0, true) };
 
     AnnotationBuffer& annotation_buffer = get_annotation_buffer();
 
@@ -205,9 +206,9 @@ auto ILabeledAligner
                                        std::back_inserter(inter),
                                        std::back_inserter(diff));
 
-    std::vector<std::pair<Alignment::Columns, score_t>> results;
+    LabelChangeScores results;
     if (inter.size()) {
-        results.emplace_back(annotation_buffer.cache_column_set(std::move(inter)), 0);
+        results.emplace_back(annotation_buffer.cache_column_set(std::move(inter)), 0, true);
         return results;
     }
 
@@ -216,7 +217,7 @@ auto ILabeledAligner
 
     if (label_change_score_ != DBGAlignerConfig::ninf) {
         results.emplace_back(annotation_buffer.cache_column_set(std::move(diff)),
-                             label_change_score_);
+                             label_change_score_, false);
         return results;
     }
 
@@ -272,7 +273,7 @@ auto ILabeledAligner
             std::swap(merged, diff);
         }
         results.emplace_back(annotation_buffer.cache_column_set(diff.begin(), diff.end()),
-                             score);
+                             score, false);
     }
 
     return results;
@@ -345,12 +346,12 @@ void LabeledExtender
                                               : annotation_buffer_.get_hll_wrapper()
             );
 
-            for (auto&& [labels, lc_score] : label_change_scores) {
+            for (auto&& [labels, lc_score, is_subset] : label_change_scores) {
                 lc_score *= config_.score_matrix[c][c];
                 // if (labels != node_labels_[table_i])
                     // std::cerr << "\tllc\t" << c << "\t" << node_labels_[table_i] << "," << labels << "\t" << lc_score << "\n";
                 node_labels_.emplace_back(labels);
-                node_labels_switched_.emplace_back(lc_score != 0);
+                node_labels_switched_.emplace_back(!is_subset);
                 callback(next, c, score + lc_score);
             }
             // std::cerr << "\n";

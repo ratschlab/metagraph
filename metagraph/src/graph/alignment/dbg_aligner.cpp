@@ -534,7 +534,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
             assert(alignment.is_valid(graph_, &config_));
             if (alignment.get_score() > best_score) {
                 best_score = alignment.get_score();
-                query_coverage = alignment.get_query_view().size();
+                query_coverage = alignment.get_cigar().get_coverage();
             }
             paths[i].emplace_back(std::move(alignment));
         }
