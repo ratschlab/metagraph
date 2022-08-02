@@ -60,6 +60,9 @@ class RowSparseDisk : public BinaryMatrix {
 
     void set_buff_size(uint64_t _buff_size) { int_vector_buffer_params.buff_size = _buff_size; }
 
+    const bit_vector_small get_boundary() const {
+        return boundary_;
+    }
   private:
 
     //For the multithreading to work properly the idea is to open int_vector_buffer<> per each public method call that needs to work with int_vector_buffer<>

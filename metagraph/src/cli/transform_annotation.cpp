@@ -737,14 +737,15 @@ int transform_annotation(Config *config) {
         std::unique_ptr<ColumnCompressed<>> annotator;
 
         // The entire annotation is loaded in all cases except for transforms
-        // to BRWT or RbBRWT, for which the construction is done with streaming
+        // to BRWT or RbBRWT or RowSparseDisk, for which the construction is done with streaming
         // columns from disk.
         if (config->anno_type != Config::BRWT
                 && config->anno_type != Config::RbBRWT
                 && config->anno_type != Config::IntBRWT
                 && config->anno_type != Config::BRWTCoord
                 && config->anno_type != Config::RowDiffBRWTCoord
-                && config->anno_type != Config::RowDiff) {
+                && config->anno_type != Config::RowDiff
+                && config->anno_type != Config::RowSparseDisk) {
             annotator = std::make_unique<ColumnCompressed<>>(0);
             logger->trace("Loading annotation from disk...");
             if (!annotator->merge_load(files)) {
@@ -918,7 +919,8 @@ int transform_annotation(Config *config) {
                 break;
             }
             case Config::RowSparseDisk: {
-                convert_to_row_sparse_disk(*annotator, config->outfbase, get_num_threads());
+                convert_to_row_sparse_disk(files, config->outfbase, get_num_threads(),
+                                           config->memory_available * 1e9, config->tmp_dir);
                 break;
             }
 

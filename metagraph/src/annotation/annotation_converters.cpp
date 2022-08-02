@@ -11,6 +11,7 @@
 
 #include "annotation/row_diff_builder.hpp"
 #include "common/logger.hpp"
+#include "common/ifstream_with_name_and_offset.hpp"
 #include "common/algorithms.hpp"
 #include "common/hashers/hash.hpp"
 #include "common/sorted_sets/sorted_multiset.hpp"
@@ -742,26 +743,54 @@ convert_to_RbBRWT<RbBRWTAnnotator>(const std::vector<std::string> &annotation_fi
     return std::make_unique<RbBRWTAnnotator>(std::move(matrix), label_encoder);
 }
 
-template
-void convert_to_row_sparse_disk(const ColumnCompressed<std::string> &annotator,
-                              const std::string &outfbase,
-                              size_t num_threads);
 
-template <typename Label>
-void convert_to_row_sparse_disk(const ColumnCompressed<Label> &annotator,
-                              const std::string &outfbase,
-                              size_t num_threads) {
-    uint64_t num_rows = annotator.num_objects();
+std::string convert_batch_to_row_sparse_disk(const std::vector<std::string> &source_files, const std::string& outfbase, size_t num_threads, uint64_t num_rows) {
+    std::vector<std::string> col_names;
 
-    ProgressBar progress_bar(num_rows, "Serialize rows",
-                             std::cerr, !common::get_verbose());
+    std::vector<std::unique_ptr<bit_vector>> columns;
+    uint64_t num_set_bits{};
+    std::mutex mtx;
+    bool success = annot::ColumnCompressed<>::merge_load(
+            source_files,
+            [&](uint64_t column_index, const std::string &label,
+                std::unique_ptr<bit_vector> &&column) {
+                std::lock_guard<std::mutex> lck(mtx);
+
+                if (num_rows != column->size()) {
+                    logger->error("Annotations have different number of rows");
+                    std::exit(1);
+                }
+
+                num_set_bits += column->num_set_bits();
+                if (columns.size() <= column_index) {
+                    columns.resize(column_index + 1);
+                    col_names.resize(column_index + 1);
+                }
+                columns[column_index] = std::move(column);
+                col_names[column_index] = label;
+            },
+            num_threads);
+
+    if (!success) {
+        logger->error("Can't load annotation columns");
+        exit(1);
+    }
+
+    LEncoder label_encoder;
+        for (const auto &label : col_names) {
+        label_encoder.insert_and_encode(label);
+    }
+
     auto fname = utils::make_suffix(outfbase, RowSparseDiskAnnotator::kExtension);
     std::ofstream outstream(fname, std::ios::binary);
     if (!outstream.good()) {
         throw std::ofstream::failure("Bad stream");
     }
-    annotator.get_label_encoder().serialize(outstream);
+    label_encoder.serialize(outstream);
     outstream.close();
+
+    ProgressBar progress_bar(num_rows, "Serialize rows",
+                             std::cerr, !common::get_verbose());
 
     RowSparseDisk::serialize(
         [&](BinaryMatrix::RowCallback write_row) {
@@ -777,12 +806,10 @@ void convert_to_row_sparse_disk(const ColumnCompressed<Label> &annotator,
                 assert(begin <= end);
                 assert(end <= num_rows);
 
-                // TODO: use RowsFromColumnsTransformer
-                for (const auto &label : annotator.get_all_labels()) {
-                    size_t j = annotator.get_label_encoder().encode(label);
-                    annotator.get_column(label).call_ones_in_range(begin, end,
-                        [&](uint64_t idx) { rows[idx - begin].push_back(j); }
-                    );
+                for (size_t col_idx = 0; col_idx < columns.size(); ++col_idx) {
+                    columns[col_idx]->call_ones_in_range(begin, end, [&](uint64_t row_idx) {
+                        rows[row_idx - begin].push_back(col_idx);
+                    });
                 }
 
                 #pragma omp ordered
@@ -793,8 +820,215 @@ void convert_to_row_sparse_disk(const ColumnCompressed<Label> &annotator,
                     }
                 }
             }
-        }, fname, annotator.num_labels(), annotator.num_relations(), num_rows
+        }, fname, label_encoder.size(), num_set_bits, num_rows
     );
+
+    return fname;
+}
+
+uint64_t get_num_rows_from_column_anno(const std::string& fname) {
+    std::ifstream in(fname, std::ios::binary);
+    if (!in.good())
+        throw std::ifstream::failure("can't open file");
+
+    return load_number(in);
+}
+
+void merge_row_sparse_disk_annotations(const std::vector<std::string> &files,
+                                  const std::string &outfbase,
+                                  uint64_t num_rows,
+                                  size_t num_threads,
+                                  size_t mem_bytes) {
+
+    logger->info("Merge {} row_sparse_disk annotations", files.size());
+    std::vector<std::unique_ptr<LEncoder>> label_encoders(files.size());
+
+    LEncoder label_encoder;
+
+    std::vector<std::unique_ptr<RowSparseDisk>> matrices(files.size());
+
+    std::vector<uint64_t> offsets(files.size() + 1, 0);
+
+    uint64_t num_set_bits {};
+    size_t tot_boundary_bytes{};
+    size_t num_cols{};
+    for (size_t batch_idx = 0; batch_idx < files.size(); ++batch_idx) {
+        std::string fname = files[batch_idx];
+        label_encoders[batch_idx] = std::make_unique<LEncoder>();
+        matrices[batch_idx] = std::make_unique<RowSparseDisk>();
+
+        mtg::common::IfstreamWithNameAndOffset in(fname, std::ios::in);
+        if (!label_encoders[batch_idx]->load(in)) {
+            logger->error("Can't load label encoder from {}", fname);
+            exit(1);
+        }
+
+        for (const auto &label : label_encoders[batch_idx]->get_labels())
+            label_encoder.insert_and_encode(label);
+
+        offsets[batch_idx + 1] = label_encoders[batch_idx]->size();
+        if (!matrices[batch_idx]->load(in)) {
+            logger->error("Can't load matrix from {}", fname);
+            exit(1);
+        }
+
+        num_set_bits += matrices[batch_idx]->num_relations();
+        num_cols += matrices[batch_idx]->num_columns();
+        tot_boundary_bytes += matrices[batch_idx]->get_boundary().size() / 8;
+
+        if (tot_boundary_bytes > mem_bytes) {
+            logger->error("{} MB is not enough to complete conversion", mem_bytes / 1e6);
+            exit(1);
+        }
+    }
+
+    double density = (double)num_set_bits / (num_cols * num_rows);
+    size_t predicted_serialize_memory = bit_vector_small::predict_size(num_set_bits + num_rows, num_rows) / 8; //boundary
+    predicted_serialize_memory += num_threads * (2 * kNumRowsInBlock * sizeof(uint64_t) * num_cols * density + kNumRowsInBlock * sizeof(BinaryMatrix::Row));
+
+    size_t tot_predicted_mem = predicted_serialize_memory +  tot_boundary_bytes;
+    if (tot_predicted_mem > mem_bytes) {
+       logger->error("{} MB is not enough to complete conversion, {} MB is requred for {} threads in current configuration.", mem_bytes / 1e6, tot_predicted_mem / 1e6, num_threads);
+        exit(1);
+    }
+
+    std::string fname = utils::make_suffix(outfbase, RowSparseDiskAnnotator::kExtension);
+    std::ofstream out(fname, std::ios::binary);
+    if (!out.good()) {
+        throw std::ofstream::failure("Bad stream");
+    }
+    label_encoder.serialize(out);
+    out.close();
+
+    // compute global offsets (partial sums)
+    std::partial_sum(offsets.begin(), offsets.end(), offsets.begin());
+
+    ProgressBar progress_bar(num_rows, "Merge rows", std::cerr, !common::get_verbose());
+
+    RowSparseDisk::serialize(
+            [&](BinaryMatrix::RowCallback write_row) {
+                //maybe better if single thread reads single annotation?
+                #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic)
+                for (uint64_t i = 0; i < num_rows; i += kNumRowsInBlock) {
+                    uint64_t begin = i;
+                    uint64_t end = std::min(i + kNumRowsInBlock, num_rows);
+
+                    assert(begin <= end);
+                    assert(end <= num_rows);
+
+                    std::vector<std::vector<BinaryMatrix::SetBitPositions>> input_rows_parts(
+                            files.size(),
+                            std::vector<BinaryMatrix::SetBitPositions>(end - begin));
+
+                    std::vector<BinaryMatrix::SetBitPositions> rows(end - begin);
+
+                    std::vector<BinaryMatrix::Row> query_row_id(end - begin);
+                    std::iota(query_row_id.begin(), query_row_id.end(), begin);
+
+                    for (size_t batch_idx = 0; batch_idx < files.size(); ++batch_idx) {
+                        input_rows_parts[batch_idx]
+                                = matrices[batch_idx]->get_rows(query_row_id);
+
+                        if (batch_idx > 0) { // first batch has a 0 offset
+                            for (auto &rp : input_rows_parts[batch_idx])
+                                for (auto &set_bit_pos : rp)
+                                    set_bit_pos += offsets[batch_idx];
+                        }
+                    }
+
+                    for (size_t j = 0; j < rows.size(); ++j) {
+                        auto &row = rows[j];
+                        for (size_t batch_idx = 0; batch_idx < files.size(); ++batch_idx) {
+                            auto &row_to_append = input_rows_parts[batch_idx][j];
+                            row.insert(row.end(), row_to_append.begin(), row_to_append.end());
+                        }
+                    }
+                    #pragma omp ordered
+                    {
+                        for (const auto &row : rows) {
+                            write_row(row);
+                            ++progress_bar;
+                        }
+                    }
+                }
+            },
+            fname, label_encoder.size(), num_set_bits, num_rows);
+}
+
+
+void convert_to_row_sparse_disk(const std::vector<std::string> &files,
+                                const std::string &outfbase,
+                                size_t num_threads,
+                                size_t mem_bytes,
+                                fs::path tmp_dir) {
+    if (!files.size())
+        return;
+
+    uint64_t num_rows = get_num_rows_from_column_anno(files[0]);
+    double density_prediction = 0.01; //TODO: predict it better?
+
+    size_t conversion_overhead_per_column = num_threads * kNumRowsInBlock * 8 * 2 * density_prediction; //8 bytes per stored position, times 2 because of capacity
+
+    std::vector<std::string> parts;
+    // load as many columns as we can fit in memory, and convert them
+    for (uint32_t i = 0; i < files.size(); ) {
+        logger->trace("Loading columns for batch-conversion...");
+        size_t mem_bytes_left = mem_bytes;
+        std::vector<std::string> file_batch;
+
+        size_t current_boundary_cost = 0;
+        for ( ; i < files.size(); ++i) {
+
+            uint64_t file_size = fs::file_size(files[i]);
+
+            if (file_size > mem_bytes) {
+                logger->warn("Not enough memory to process {}, requires {} MB, skipped",
+                             files[i], file_size / 1e6);
+                continue;
+            }
+
+            size_t new_predicted_boundary_cost = bit_vector_small::predict_size(num_rows * (file_batch.size() + 1) * density_prediction + num_rows, num_rows) / 8;
+
+            size_t conversion_overhead = conversion_overhead_per_column * (file_batch.size() + 1);
+
+            if (file_size + new_predicted_boundary_cost + conversion_overhead > mem_bytes_left) {
+                if (file_batch.empty()) {
+                    logger->error("{} MB is not enough memory to perform conversion", mem_bytes / 1e6);
+                    exit(1);
+                }
+                break;
+            }
+
+            mem_bytes_left += current_boundary_cost;
+            current_boundary_cost = new_predicted_boundary_cost;
+            mem_bytes_left -= file_size;
+            mem_bytes_left -= current_boundary_cost;
+
+            file_batch.push_back(files[i]);
+        }
+
+        std::string fname = tmp_dir / (outfbase + "-" + std::to_string(parts.size()));
+
+        if (file_batch.size() == files.size()) {
+            fname = utils::make_suffix(outfbase, RowSparseDiskAnnotator::kExtension);
+            logger->info("All annotations fit in single batch");
+        }
+        Timer timer;
+        logger->trace("Annotations in batch: {}", file_batch.size());
+        auto res_fname = convert_batch_to_row_sparse_disk(file_batch, fname, num_threads, num_rows);
+        parts.push_back(res_fname);
+
+        logger->trace("Batch processed in {} sec", timer.elapsed());
+    }
+
+    //need to merge multiple temp row sparse disk annotations
+    if (parts.size() > 1) {
+        merge_row_sparse_disk_annotations(parts, outfbase, num_rows, num_threads, mem_bytes);
+
+        for (const auto& fname : parts) {
+            fs::remove(fname);
+        }
+    }
 }
 
 void
