@@ -1023,7 +1023,10 @@ int transform_annotation(Config *config) {
             } else if (config->anno_type == Config::RowDiffSparseDisk) {
                 logger->trace("Loading annotation from disk...");
                 convert_row_diff_to_row_diff_sparse_disk(files, config->outfbase,
-                                                         anchors_file, fork_succ_file);
+                                                         anchors_file, fork_succ_file,
+                                                         get_num_threads(),
+                                                         config->memory_available * 1e9,
+                                                         config->tmp_dir);
 
                 logger->trace("Annotation converted in {} sec", timer.elapsed());
             } else { // RowDiff<RowSparse>
