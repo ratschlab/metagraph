@@ -256,6 +256,79 @@ class Unitigs : public SequenceGraph::GraphExtension {
 
     bool is_compatible(const SequenceGraph &, bool = true) const { return true; }
 
+    std::vector<std::pair<size_t, size_t>>
+    get_unitig_ids_and_coordinates(const std::vector<node_index> &nodes) const {
+        sdsl::bit_vector indicator(nodes.size(), false);
+        std::vector<uint64_t> rows;
+        for (size_t i = 0; i < nodes.size(); ++i) {
+            node_index node = nodes[i];
+            if (node > graph_->max_index())
+                node -= graph_->max_index();
+
+            if ((*valid_edges_)[graph_->kmer_to_boss_index(node)]) {
+                indicator[i] = true;
+                rows.emplace_back(node - 1);
+            }
+        }
+
+        common::logger->trace("Fetching unitig IDs");
+        auto seed_tuples = unitigs_.get_row_tuples(rows);
+        std::vector<std::pair<size_t, size_t>> results;
+        results.reserve(nodes.size());
+
+        size_t j = 0;
+        size_t unitig_id_offset = graph_->max_index() + 1;
+        for (size_t i = 0; i < nodes.size(); ++i) {
+            if (!indicator[i]) {
+                results.emplace_back(nodes[i] > graph_->max_index()
+                                         ? nodes[i] - graph_->max_index()
+                                         : nodes[i],
+                                     0);
+                continue;
+            }
+
+            const auto &coordinates = seed_tuples[j];
+            size_t unitig_id = std::numeric_limits<size_t>::max();
+            if (coordinates.size()) {
+                assert(coordinates.size() == 1);
+                assert(!coordinates[0].first);
+                if (coordinates[0].second.size()) {
+                    assert(coordinates[0].second.size() == 1);
+                    unitig_id = indicator_.rank1(coordinates[0].second[0]);
+                    results.emplace_back(
+                        unitig_id + unitig_id_offset,
+                        indicator_.select1(unitig_id) - coordinates[0].second[0]
+                    );
+                }
+            }
+
+            if (unitig_id == std::numeric_limits<size_t>::max()) {
+                results.emplace_back(nodes[i] > graph_->max_index()
+                                         ? nodes[i] - graph_->max_index()
+                                         : nodes[i],
+                                     0);
+
+#ifndef NDEBUG
+                if (graph_->has_single_outgoing(nodes[i])
+                        && graph_->has_single_incoming(nodes[i])) {
+                    graph_->adjacent_outgoing_nodes(nodes[i], [&](node_index next) {
+                        assert(next == nodes[i] || !(*valid_edges_)[next]
+                                || graph_->indegree(next) > 1);
+                    });
+                    graph_->adjacent_incoming_nodes(nodes[i], [&](node_index prev) {
+                        assert(prev == nodes[i] || !(*valid_edges_)[prev]
+                                || graph_->outdegree(prev) > 1);
+                    });
+                }
+#endif
+
+            }
+            ++j;
+        }
+
+        return results;
+    }
+
     size_t cluster_and_filter_seeds(IDBGAligner::BatchSeeders &batch_seeders,
                                     const DBGAlignerConfig &config) const {
         std::vector<bool> indicator;
