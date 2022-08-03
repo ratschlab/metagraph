@@ -14,6 +14,7 @@
 #include "annotation/annotation_converters.hpp"
 #include "common/utils/file_utils.hpp"
 #include "common/unix_tools.hpp"
+#include "common/vectors/bit_vector_dyn.hpp"
 
 
 namespace mtg {
@@ -71,6 +72,20 @@ class Unitigs : public SequenceGraph::GraphExtension {
             if (path.size() == 1)
                 return;
 
+#ifndef NDEBUG
+            if (graph_->has_single_outgoing(path.back())
+                    && graph_->has_single_incoming(path.front())) {
+                graph_->adjacent_outgoing_nodes(path.back(), [&](node_index next) {
+                    assert(next == path.front() || !(*valid_edges_)[next]
+                            || graph_->indegree(next) > 1);
+                });
+                graph_->adjacent_incoming_nodes(path.front(), [&](node_index prev) {
+                    assert(prev == path.back() || !(*valid_edges_)[prev]
+                            || graph_->outdegree(prev) > 1);
+                });
+            }
+#endif
+
             std::lock_guard<std::mutex> lock(mu);
             unitigs.emplace_back(path.front());
             unitigs.emplace_back(path.back());
@@ -83,7 +98,7 @@ class Unitigs : public SequenceGraph::GraphExtension {
             }
 
             colcomp->add_label_coords(coords, labels);
-        }, get_num_threads());
+        });
 
         common::logger->trace("Initializing unitig vector");
         size_t num_unitigs = unitigs.size() / 3;
@@ -164,9 +179,8 @@ class Unitigs : public SequenceGraph::GraphExtension {
         std::ifstream in(coords_fname, std::ios::binary);
         try {
             RawUnitigs::load_tuples(in, 1, [&](auto&& delims, auto&& values) {
-                size_t idx = 0;
-                delimiters[idx] = std::move(delims);
-                column_values[idx] = std::move(values);
+                delimiters[0] = std::move(delims);
+                column_values[0] = std::move(values);
             });
         } catch (const std::exception &e) {
             common::logger->error("Couldn't load coordinates from {}\nException: {}", coords_fname, e.what());
@@ -198,6 +212,25 @@ class Unitigs : public SequenceGraph::GraphExtension {
             return false;
 
         unitigs_.set_graph(graph_.get());
+
+        switch (graph_->get_state()) {
+            case boss::BOSS::State::STAT: {
+                valid_edges_.reset(new bit_vector_small());
+                break;
+            }
+            case boss::BOSS::State::FAST: {
+                valid_edges_.reset(new bit_vector_stat());
+                break;
+            }
+            case boss::BOSS::State::DYN: {
+                valid_edges_.reset(new bit_vector_dyn());
+                break;
+            }
+            case boss::BOSS::State::SMALL: {
+                valid_edges_.reset(new bit_vector_small());
+                break;
+            }
+        }
 
         if (!valid_edges_->load(fin))
             return false;
@@ -267,19 +300,39 @@ class Unitigs : public SequenceGraph::GraphExtension {
             for (auto &[seeder, seeder_rc] : batch_seeders) {
                 size_t j = 0;
                 auto parse_seeder = [&](auto &cur_seeder) {
-                    tsl::hopscotch_map<size_t, std::vector<size_t>> unitig_to_bucket;
+                    tsl::hopscotch_map<size_t, std::vector<std::pair<size_t, size_t>>> unitig_to_bucket;
                     const auto &seeds = cur_seeder->get_seeds();
                     for (size_t k = 0; k < seeds.size(); ++k) {
                         if (!indicator[j++])
                             continue;
 
-                        const auto &coordinates = seed_tuples[i++];
+                        const auto &coordinates = seed_tuples[i];
+                        size_t unitig_id = std::numeric_limits<size_t>::max();
                         if (coordinates.size()) {
                             assert(coordinates.size() == 1);
                             assert(!coordinates[0].first);
-                            size_t unitig_id = indicator_.rank1(coordinates[0].second[0]);
-                            unitig_to_bucket[unitig_id].emplace_back(k);
+                            if (coordinates[0].second.size()) {
+                                assert(coordinates[0].second.size() == 1);
+                                unitig_id = indicator_.rank1(coordinates[0].second[0]);
+                                unitig_to_bucket[unitig_id].emplace_back(k, coordinates[0].second[0]);
+                            }
                         }
+#ifndef NDEBUG
+                        if (unitig_id == std::numeric_limits<size_t>::max()) {
+                            if (graph_->has_single_outgoing(nodes[i] + 1)
+                                    && graph_->has_single_incoming(nodes[i] + 1)) {
+                                graph_->adjacent_outgoing_nodes(nodes[i] + 1, [&](node_index next) {
+                                    assert(next == nodes[i] + 1 || !(*valid_edges_)[next]
+                                            || graph_->indegree(next) > 1);
+                                });
+                                graph_->adjacent_incoming_nodes(nodes[i] + 1, [&](node_index prev) {
+                                    assert(prev == nodes[i] + 1 || !(*valid_edges_)[prev]
+                                            || graph_->outdegree(prev) > 1);
+                                });
+                            }
+                        }
+#endif
+                        ++i;
                     }
 
                     if (unitig_to_bucket.empty()) {
@@ -289,15 +342,18 @@ class Unitigs : public SequenceGraph::GraphExtension {
 
                     std::vector<Seed> filtered_seeds;
                     for (auto it = unitig_to_bucket.begin(); it != unitig_to_bucket.end(); ++it) {
-                        if (it->second.size() > 1 || seeds[it->second[0]].get_query_view().size() > config.min_seed_length) {
-                            filtered_seeds.emplace_back(seeds[*std::max_element(
-                                it.value().begin(), it.value().end(), [&seeds](size_t a, size_t b) {
-                                    return std::make_pair(seeds[a].get_query_view().size(),
-                                                          seeds[b].get_query_view().data())
-                                         < std::make_pair(seeds[b].get_query_view().size(),
-                                                          seeds[a].get_query_view().data());
+                        const auto &bucket = it->second;
+                        if (bucket.size() > 1 || seeds[bucket[0].first].get_query_view().size() > config.min_seed_length) {
+                            filtered_seeds.emplace_back(seeds[std::max_element(
+                                it.value().begin(), it.value().end(), [&seeds](const auto &a, const auto &b) {
+                                    return std::make_pair(seeds[a.first].get_query_view().size(),
+                                                          seeds[b.first].get_query_view().data())
+                                         < std::make_pair(seeds[b.first].get_query_view().size(),
+                                                          seeds[a.first].get_query_view().data());
                                 }
-                            )]);
+                            )->first]);
+                        } else {
+                            // TODO: check if there are any neighboring buckets
                         }
                     }
 
