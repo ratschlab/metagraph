@@ -1,22 +1,19 @@
 #ifndef __UNITIGS_HPP__
 #define __UNITIGS_HPP__
 
+#include <mutex>
+
 #include <progress_bar.hpp>
 
 #include "cli/config/config.hpp"
 #include "cli/load/load_graph.hpp"
-#include "graph/representation/base/sequence_graph.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/alignment/dbg_aligner.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
-#include "annotation/int_matrix/rank_extended/csc_matrix.hpp"
-#include "annotation/binary_matrix/column_sparse/column_major.hpp"
-#include "annotation/int_matrix/row_diff/int_row_diff.hpp"
+#include "annotation/int_matrix/row_diff/tuple_row_diff.hpp"
 #include "annotation/annotation_converters.hpp"
 #include "common/utils/file_utils.hpp"
-#include "common/vectors/vector_algorithm.hpp"
 #include "common/unix_tools.hpp"
-#include "common/vectors/bit_vector_dyn.hpp"
 
 
 namespace mtg {
@@ -28,140 +25,167 @@ class Unitigs : public SequenceGraph::GraphExtension {
     typedef DeBruijnGraph::node_index node_index;
     typedef bit_vector_small Indicator;
     typedef annot::CountsVector IDVector;
-    typedef annot::matrix::CSCMatrix<annot::binmat::ColumnMajor, IDVector> RawUnitigs;
-    typedef annot::matrix::IntRowDiff<RawUnitigs> CompUnitigs;
+    typedef annot::ColumnCoordAnnotator::binary_matrix_type RawUnitigs;
+    typedef annot::matrix::TupleRowDiff<RawUnitigs> CompUnitigs;
 
     Unitigs(const DBGSuccinct &graph) : graph_(std::shared_ptr<const DeBruijnGraph>{}, &graph) {}
 
     Unitigs(const cli::Config &config) : graph_(load_graph_impl(config.fnames[0])) {
-        common::logger->trace("Allocating unitig array");
-        std::vector<size_t> unitigs(graph_->num_nodes(), 0);
-        sdsl::bit_vector indicator(unitigs.size(), false);
+        std::filesystem::path tmp_dir = utils::create_temp_dir(config.tmp_dir, "unitigs");
+        std::string out_path = tmp_dir/"unitigs";
+        std::vector<std::string> files;
+        size_t width = sdsl::bits::hi(graph_->num_nodes()) + 1;
+        std::vector<size_t> unitigs;
+        std::vector<std::unique_ptr<bit_vector>> cols;
 
-        std::atomic<size_t> i { 1 };
-        std::atomic_thread_fence(std::memory_order_release);
-        graph_->call_unitigs([&](const std::string&, const auto &path) {
-            if (path.size() == 1)
-                return;
-
-            size_t idx = i.fetch_add(1, std::memory_order_relaxed);
-            for (node_index node : path) {
-                assert(node);
-
-                unitigs[node - 1] = idx;
-                set_bit(indicator.data(), node - 1, true, std::memory_order_relaxed);
-            }
-        }, get_num_threads());
-        std::atomic_thread_fence(std::memory_order_acquire);
-
-        common::logger->trace("Indexed {} unitigs from {} nodes", i - 1, graph_->num_nodes());
         common::logger->trace("Marking dummy k-mers");
         {
             DBGSuccinct &ncgraph = const_cast<DBGSuccinct&>(*graph_);
             ncgraph.mask_dummy_kmers(get_num_threads(), false);
             valid_edges_.reset(ncgraph.release_mask());
-        }
-        graph_.reset();
-
-        std::filesystem::path tmp_dir = utils::create_temp_dir(config.tmp_dir, "unitigs");
-        std::string out_path = tmp_dir/"unitigs";
-        std::vector<std::string> files;
-        {
-            annot::LabelEncoder<> encoder;
-            encoder.insert_and_encode("");
-            std::vector<std::unique_ptr<bit_vector>> cols;
-            cols.emplace_back(std::make_unique<Indicator>(std::move(indicator)));
-            annot::ColumnCompressed<> colcomp(
-                std::move(cols), std::move(encoder), 1, tmp_dir, 1e9, sdsl::bits::hi(i - 1) + 1
-            );
-
-            std::vector<std::string> labels;
-            labels.push_back("");
-            std::vector<annot::ColumnCompressed<>::Index> indices;
-            indices.push_back(0);
-            std::vector<uint64_t> counts;
-            counts.push_back(0);
-            ProgressBar progress_bar(unitigs.size(), "Packing unitig ids",
+            ProgressBar progress_bar(valid_edges_->num_set_bits(), "Transforming mask",
                                      std::cerr, !common::get_verbose());
-            for (size_t i = 0; i < unitigs.size(); ++i) {
-                if (unitigs[i]) {
-                    indices.back() = i;
-                    counts.back() = unitigs[i];
-                    colcomp.add_label_counts(indices, labels, counts);
-                }
+            cols.emplace_back(std::make_unique<bit_vector_smart>([&](const auto &callback) {
+                valid_edges_->call_ones([&](node_index i) {
+                    assert(i);
+                    callback(i - 1);
+                    ++progress_bar;
+                });
+            }, ncgraph.num_nodes(), valid_edges_->num_set_bits()));
+        }
+
+        annot::LabelEncoder<> encoder;
+        encoder.insert_and_encode("");
+        auto colcomp = std::make_unique<annot::ColumnCompressed<>>(
+            std::move(cols), std::move(encoder), 1, tmp_dir, 1e9, width
+        );
+
+        std::vector<std::string> labels;
+        labels.push_back("");
+
+        common::logger->trace("Annotating unitigs");
+        std::mutex mu;
+        size_t counter = 0;
+        size_t max_unitig = 0;
+        graph_->call_unitigs([&](const std::string&, const auto &path) {
+            if (path.size() == 1)
+                return;
+
+            std::lock_guard<std::mutex> lock(mu);
+            unitigs.emplace_back(path.front());
+            unitigs.emplace_back(path.back());
+            unitigs.emplace_back(counter);
+            max_unitig = std::max({ path.front(), path.back(), max_unitig });
+            counter += path.size();
+            std::vector<std::pair<annot::ColumnCompressed<>::Index, uint64_t>> coords;
+            for (size_t i = 0; i < path.size(); ++i) {
+                coords.emplace_back(path[i] - 1, i + unitigs.back());
+            }
+
+            colcomp->add_label_coords(coords, labels);
+        }, get_num_threads());
+
+        common::logger->trace("Initializing unitig vector");
+        size_t num_unitigs = unitigs.size() / 3;
+        // TODO: replace with int_vector_buffer
+        sdsl::int_vector<> boundaries(num_unitigs * 2, 0, sdsl::bits::hi(max_unitig + 1) + 1);
+        indicator_ = Indicator([&](const auto &callback) {
+            ProgressBar progress_bar(num_unitigs, "Packing unitigs",
+                                     std::cerr, !common::get_verbose());
+            for (size_t i = 0, j = 0; i < unitigs.size(); i += 3, j += 2) {
+                boundaries[j] = unitigs[i];
+                boundaries[j + 1] = unitigs[i + 1];
+                callback(unitigs[i + 2]);
                 ++progress_bar;
             }
-            files.push_back(out_path + colcomp.file_extension());
-            colcomp.serialize(files[0]);
-        }
+        }, counter, num_unitigs);
+        boundaries_ = IDVector(std::move(boundaries));
         unitigs = std::vector<size_t>();
-        {
-            common::logger->trace("Compressing unitig index");
-            common::logger->trace("Step 0");
-            convert_to_row_diff(files,
-                                config.fnames[0],
-                                config.memory_available * 1e9,
-                                config.max_path_length,
-                                tmp_dir,
-                                tmp_dir,
-                                static_cast<annot::RowDiffStage>(0),
-                                out_path + ".row_count", true);
-            common::logger->trace("Step 1");
-            convert_to_row_diff(files,
-                                config.fnames[0],
-                                config.memory_available * 1e9,
-                                config.max_path_length,
-                                tmp_dir,
-                                tmp_dir,
-                                static_cast<annot::RowDiffStage>(1),
-                                out_path + ".row_reduction", true);
-            common::logger->trace("Step 2");
-            convert_to_row_diff(files,
-                                config.fnames[0],
-                                config.memory_available * 1e9,
-                                config.max_path_length,
-                                tmp_dir,
-                                tmp_dir,
-                                static_cast<annot::RowDiffStage>(2),
-                                out_path + ".row_reduction", true);
-            common::logger->trace("done");
-            const std::string anchors_file = config.fnames[0] + annot::binmat::kRowDiffAnchorExt;
-            if (!std::filesystem::exists(anchors_file)) {
-                common::logger->error("Anchor bitmap {} does not exist.", anchors_file);
-                std::exit(1);
-            }
-            const std::string fork_succ_file = config.fnames[0] + annot::binmat::kRowDiffForkSuccExt;
-            if (!std::filesystem::exists(fork_succ_file)) {
-                common::logger->error("Fork successor bitmap {} does not exist", fork_succ_file);
-                std::exit(1);
-            }
 
-            common::logger->trace("Wrapping as IntRowDiff");
-            annot::ColumnCompressed<> colcomp;
-            if (!colcomp.merge_load(files) || !colcomp.num_labels()) {
-                common::logger->error("Failed to reload matrix from {}", files[0]);
-                std::exit(1);
-            }
-
-            std::vector<IDVector> column_values;
-            annot::ColumnCompressed<>::load_column_values(files,
-                [&](size_t, const std::string &, sdsl::int_vector<>&& values) {
-                    column_values.emplace_back(std::move(values));
-                }
-            );
-            if (column_values.size() != 1) {
-                common::logger->error("Failed to reload values from {}", files[0]);
-                std::exit(1);
-            }
-
-            auto colmap = colcomp.release_matrix();
-
-            auto colmat = std::make_unique<RawUnitigs>(std::move(*colmap), std::move(column_values));
-            unitigs_ = CompUnitigs(nullptr, std::move(*colmat));
-            unitigs_.load_anchor(anchors_file);
-            unitigs_.load_fork_succ(fork_succ_file);
-            load_graph(config.fnames[0]);
+        common::logger->trace("Serializing initial annotation");
+        files.push_back(out_path + colcomp->file_extension());
+        colcomp->serialize(files[0]);
+        colcomp.reset();
+        graph_.reset();
+        common::logger->trace("Compressing unitig index");
+        common::logger->trace("Step 0");
+        convert_to_row_diff(files,
+                            config.fnames[0],
+                            config.memory_available * 1e9,
+                            config.max_path_length,
+                            tmp_dir,
+                            tmp_dir,
+                            static_cast<annot::RowDiffStage>(0),
+                            out_path + ".row_count", false, true);
+        common::logger->trace("Step 1");
+        convert_to_row_diff(files,
+                            config.fnames[0],
+                            config.memory_available * 1e9,
+                            config.max_path_length,
+                            tmp_dir,
+                            tmp_dir,
+                            static_cast<annot::RowDiffStage>(1),
+                            out_path + ".row_reduction", false, true);
+        common::logger->trace("Step 2");
+        convert_to_row_diff(files,
+                            config.fnames[0],
+                            config.memory_available * 1e9,
+                            config.max_path_length,
+                            tmp_dir,
+                            tmp_dir,
+                            static_cast<annot::RowDiffStage>(2),
+                            out_path + ".row_reduction", false, true);
+        common::logger->trace("done");
+        const std::string anchors_file = config.fnames[0] + annot::binmat::kRowDiffAnchorExt;
+        if (!std::filesystem::exists(anchors_file)) {
+            common::logger->error("Anchor bitmap {} does not exist.", anchors_file);
+            std::exit(1);
         }
+        const std::string fork_succ_file = config.fnames[0] + annot::binmat::kRowDiffForkSuccExt;
+        if (!std::filesystem::exists(fork_succ_file)) {
+            common::logger->error("Fork successor bitmap {} does not exist", fork_succ_file);
+            std::exit(1);
+        }
+
+        common::logger->trace("Loading column");
+        auto annotator = std::make_unique<annot::ColumnCompressed<>>(0);
+        if (!annotator->merge_load(files)) {
+            common::logger->error("Cannot load annotations");
+            exit(1);
+        }
+
+        common::logger->trace("Wrapping as TupleRowDiff");
+
+        std::vector<bit_vector_smart> delimiters(1);
+        std::vector<sdsl::int_vector<>> column_values(1);
+
+        auto coords_fname = utils::remove_suffix(files[0], annot::ColumnCompressed<>::kExtension)
+                                                        + annot::ColumnCompressed<>::kCoordExtension;
+        std::ifstream in(coords_fname, std::ios::binary);
+        try {
+            RawUnitigs::load_tuples(in, 1, [&](auto&& delims, auto&& values) {
+                size_t idx = 0;
+                delimiters[idx] = std::move(delims);
+                column_values[idx] = std::move(values);
+            });
+        } catch (const std::exception &e) {
+            common::logger->error("Couldn't load coordinates from {}\nException: {}", coords_fname, e.what());
+            exit(1);
+        } catch (...) {
+            common::logger->error("Couldn't load coordinates from {}", coords_fname);
+            exit(1);
+        }
+
+        unitigs_ = CompUnitigs(nullptr,
+                               RawUnitigs(std::move(*annotator->release_matrix()),
+                                          std::move(delimiters),
+                                          std::move(column_values)));
+
+        unitigs_.load_anchor(anchors_file);
+        unitigs_.load_fork_succ(fork_succ_file);
+        common::logger->trace("RowDiff support bitmaps loaded");
+        load_graph(config.fnames[0]);
+        unitigs_.set_graph(graph_.get());
     }
 
     bool load(const std::string &filename_base) {
@@ -174,25 +198,18 @@ class Unitigs : public SequenceGraph::GraphExtension {
             return false;
 
         unitigs_.set_graph(graph_.get());
-        switch (graph_->get_state()) {
-            case boss::BOSS::State::STAT: {
-                valid_edges_.reset(new bit_vector_small());
-                break;
-            }
-            case boss::BOSS::State::FAST: {
-                valid_edges_.reset(new bit_vector_stat());
-                break;
-            }
-            case boss::BOSS::State::DYN: {
-                valid_edges_.reset(new bit_vector_dyn());
-                break;
-            }
-            case boss::BOSS::State::SMALL: {
-                valid_edges_.reset(new bit_vector_small());
-                break;
-            }
+
+        if (!valid_edges_->load(fin))
+            return false;
+
+        try {
+            boundaries_.load(fin);
+            return true;
+        } catch (...) {
+            return false;
         }
-        return valid_edges_->load(fin);
+
+        return indicator_.load(fin);
     }
 
     void serialize(const std::string &filename_base) const {
@@ -200,6 +217,8 @@ class Unitigs : public SequenceGraph::GraphExtension {
         std::ofstream fout(fname, std::ios::binary);
         unitigs_.serialize(fout);
         valid_edges_->serialize(fout);
+        boundaries_.serialize(fout);
+        indicator_.serialize(fout);
     }
 
     bool is_compatible(const SequenceGraph &, bool = true) const { return true; }
@@ -239,7 +258,7 @@ class Unitigs : public SequenceGraph::GraphExtension {
         }
 
         common::logger->trace("Fetching unitig IDs");
-        auto seed_values = unitigs_.get_row_values(nodes);
+        auto seed_tuples = unitigs_.get_row_tuples(nodes);
 
         {
             ProgressBar progress_bar(batch_seeders.size(), "Clustering and filtering seeds",
@@ -254,9 +273,13 @@ class Unitigs : public SequenceGraph::GraphExtension {
                         if (!indicator[j++])
                             continue;
 
-                        const auto &unitig_ids = seed_values[i++];
-                        if (unitig_ids.size())
-                            unitig_to_bucket[unitig_ids[0].second].emplace_back(k);
+                        const auto &coordinates = seed_tuples[i++];
+                        if (coordinates.size()) {
+                            assert(coordinates.size() == 1);
+                            assert(!coordinates[0].first);
+                            size_t unitig_id = indicator_.rank1(coordinates[0].second[0]);
+                            unitig_to_bucket[unitig_id].emplace_back(k);
+                        }
                     }
 
                     if (unitig_to_bucket.empty()) {
@@ -306,6 +329,8 @@ class Unitigs : public SequenceGraph::GraphExtension {
   private:
     std::shared_ptr<const DBGSuccinct> graph_;
     CompUnitigs unitigs_;
+    IDVector boundaries_;
+    Indicator indicator_;
     std::unique_ptr<bit_vector> valid_edges_;
     static constexpr auto kUnitigsExtension = ".unitigs";
 
