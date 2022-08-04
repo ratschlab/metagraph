@@ -257,6 +257,48 @@ class Unitigs : public SequenceGraph::GraphExtension {
 
     bool is_compatible(const SequenceGraph &, bool = true) const { return true; }
 
+    void adjacent_outgoing_nodes(size_t unitig_id,
+                                 const std::function<void(size_t)> &callback) const {
+        graph_->adjacent_outgoing_nodes(get_unitig(unitig_id).second, [&](node_index next) {
+            auto next_unitig_ids = get_unitig_ids({ next });
+            callback(next_unitig_ids.size() ? next_unitig_ids[0] : next);
+        });
+    }
+
+    void adjacent_incoming_nodes(size_t unitig_id,
+                                 const std::function<void(size_t)> &callback) const {
+        graph_->adjacent_incoming_nodes(get_unitig(unitig_id).second, [&](node_index prev) {
+            auto prev_unitig_ids = get_unitig_ids({ prev });
+            callback(prev_unitig_ids.size() ? prev_unitig_ids[0] : prev);
+        });
+    }
+
+    std::pair<node_index, node_index> get_unitig(size_t unitig_id) const {
+        size_t unitig_id_offset = get_unitig_id_offset();
+        if (unitig_id <= unitig_id_offset)
+            return std::make_pair(unitig_id, unitig_id);
+
+        unitig_id -= unitig_id_offset;
+        return std::make_pair(boundaries_[(unitig_id - 1) * 2],
+                              boundaries_[(unitig_id - 1) * 2 + 1]);
+    }
+
+    std::pair<std::pair<node_index, node_index>, std::pair<size_t, size_t>>
+    get_unitig_bounds(size_t unitig_id) const {
+        size_t unitig_id_offset = get_unitig_id_offset();
+        if (unitig_id <= unitig_id_offset) {
+            return std::make_pair(std::make_pair(unitig_id, unitig_id),
+                                  std::make_pair(0, 1));
+        }
+
+        unitig_id -= unitig_id_offset;
+        return std::make_pair(std::make_pair(boundaries_[(unitig_id - 1) * 2],
+                                             boundaries_[(unitig_id - 1) * 2 + 1]),
+                              std::make_pair(indicator_.select1(unitig_id),
+                                             indicator_.select1(unitig_id + 1))
+        );
+    }
+
     std::vector<size_t> get_unitig_ids(const std::vector<node_index> &nodes) const {
         auto [indicator, rows] = nodes_to_rows(nodes);
         common::logger->trace("Fetching unitig IDs");
@@ -265,7 +307,7 @@ class Unitigs : public SequenceGraph::GraphExtension {
         results.reserve(nodes.size());
 
         size_t j = 0;
-        size_t unitig_id_offset = graph_->max_index() + 1;
+        size_t unitig_id_offset = get_unitig_id_offset();
         for (size_t i = 0; i < nodes.size(); ++i) {
             size_t unitig_id = std::numeric_limits<size_t>::max();
             if (indicator[i]) {
@@ -401,6 +443,7 @@ class Unitigs : public SequenceGraph::GraphExtension {
                     }
 
                     std::vector<Seed> filtered_seeds;
+                    DEBUG_LOG("Found {} unitigs", unitig_to_bucket.size());
                     for (auto it = unitig_to_bucket.begin(); it != unitig_to_bucket.end(); ++it) {
                         auto &bucket = it.value();
                         if (bucket.size() == 1 && seeds[bucket[0].first].get_query_view().size() > config.min_seed_length) {
@@ -554,6 +597,8 @@ class Unitigs : public SequenceGraph::GraphExtension {
 
         return std::make_pair(std::move(indicator), std::move(rows));
     }
+
+    size_t get_unitig_id_offset() const { return graph_->max_index() + 1; }
 };
 
 } // namespace align
