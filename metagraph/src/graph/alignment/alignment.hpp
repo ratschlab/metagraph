@@ -76,6 +76,14 @@ class Seed {
         nodes_.insert(nodes_.end(), next.begin(), next.end());
     }
 
+    bool operator==(const Seed &b) const {
+        return std::make_tuple(query_view_.data(), query_view_.size(), orientation_,
+                               offset_, clipping_, end_clipping_)
+            == std::make_tuple(b.query_view_.data(), b.query_view_.size(), b.orientation_,
+                               b.offset_, b.clipping_, b.end_clipping_)
+                && nodes_ == b.nodes_;
+    }
+
     AnnotationBuffer *label_encoder = nullptr;
     bool has_annotation() const { return label_encoder; }
 

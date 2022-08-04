@@ -15,6 +15,7 @@
 #include "common/utils/file_utils.hpp"
 #include "common/unix_tools.hpp"
 #include "common/vectors/bit_vector_dyn.hpp"
+#include "graph/alignment/aligner_labeled.hpp"
 
 
 namespace mtg {
@@ -256,21 +257,43 @@ class Unitigs : public SequenceGraph::GraphExtension {
 
     bool is_compatible(const SequenceGraph &, bool = true) const { return true; }
 
-    std::vector<std::pair<size_t, size_t>>
-    get_unitig_ids_and_coordinates(const std::vector<node_index> &nodes) const {
-        sdsl::bit_vector indicator(nodes.size(), false);
-        std::vector<uint64_t> rows;
-        for (size_t i = 0; i < nodes.size(); ++i) {
-            node_index node = nodes[i];
-            if (node > graph_->max_index())
-                node -= graph_->max_index();
+    std::vector<size_t> get_unitig_ids(const std::vector<node_index> &nodes) const {
+        auto [indicator, rows] = nodes_to_rows(nodes);
+        common::logger->trace("Fetching unitig IDs");
+        auto seed_tuples = unitigs_.get_row_tuples(rows);
+        std::vector<size_t> results;
+        results.reserve(nodes.size());
 
-            if ((*valid_edges_)[graph_->kmer_to_boss_index(node)]) {
-                indicator[i] = true;
-                rows.emplace_back(node - 1);
+        size_t j = 0;
+        size_t unitig_id_offset = graph_->max_index() + 1;
+        for (size_t i = 0; i < nodes.size(); ++i) {
+            size_t unitig_id = std::numeric_limits<size_t>::max();
+            if (indicator[i]) {
+                const auto &coordinates = seed_tuples[j++];
+                if (coordinates.size()) {
+                    assert(coordinates.size() == 1);
+                    assert(!coordinates[0].first);
+                    if (coordinates[0].second.size()) {
+                        assert(coordinates[0].second.size() == 1);
+                        unitig_id = indicator_.rank1(coordinates[0].second[0]);
+                        results.emplace_back(unitig_id + unitig_id_offset);
+                    }
+                }
+            }
+
+            if (unitig_id == std::numeric_limits<size_t>::max()) {
+                results.emplace_back(nodes[i] > graph_->max_index()
+                                         ? nodes[i] - graph_->max_index()
+                                         : nodes[i]);
             }
         }
 
+        return results;
+    }
+
+    std::vector<std::pair<size_t, size_t>>
+    get_unitig_ids_and_coordinates(const std::vector<node_index> &nodes) const {
+        auto [indicator, rows] = nodes_to_rows(nodes);
         common::logger->trace("Fetching unitig IDs");
         auto seed_tuples = unitigs_.get_row_tuples(rows);
         std::vector<std::pair<size_t, size_t>> results;
@@ -279,26 +302,20 @@ class Unitigs : public SequenceGraph::GraphExtension {
         size_t j = 0;
         size_t unitig_id_offset = graph_->max_index() + 1;
         for (size_t i = 0; i < nodes.size(); ++i) {
-            if (!indicator[i]) {
-                results.emplace_back(nodes[i] > graph_->max_index()
-                                         ? nodes[i] - graph_->max_index()
-                                         : nodes[i],
-                                     0);
-                continue;
-            }
-
-            const auto &coordinates = seed_tuples[j];
             size_t unitig_id = std::numeric_limits<size_t>::max();
-            if (coordinates.size()) {
-                assert(coordinates.size() == 1);
-                assert(!coordinates[0].first);
-                if (coordinates[0].second.size()) {
-                    assert(coordinates[0].second.size() == 1);
-                    unitig_id = indicator_.rank1(coordinates[0].second[0]);
-                    results.emplace_back(
-                        unitig_id + unitig_id_offset,
-                        indicator_.select1(unitig_id) - coordinates[0].second[0]
-                    );
+            if (indicator[i]) {
+                const auto &coordinates = seed_tuples[j++];
+                if (coordinates.size()) {
+                    assert(coordinates.size() == 1);
+                    assert(!coordinates[0].first);
+                    if (coordinates[0].second.size()) {
+                        assert(coordinates[0].second.size() == 1);
+                        unitig_id = indicator_.rank1(coordinates[0].second[0]);
+                        results.emplace_back(
+                            unitig_id + unitig_id_offset,
+                            indicator_.select1(unitig_id) - coordinates[0].second[0]
+                        );
+                    }
                 }
             }
 
@@ -307,33 +324,17 @@ class Unitigs : public SequenceGraph::GraphExtension {
                                          ? nodes[i] - graph_->max_index()
                                          : nodes[i],
                                      0);
-
-#ifndef NDEBUG
-                if (graph_->has_single_outgoing(nodes[i])
-                        && graph_->has_single_incoming(nodes[i])) {
-                    graph_->adjacent_outgoing_nodes(nodes[i], [&](node_index next) {
-                        assert(next == nodes[i] || !(*valid_edges_)[next]
-                                || graph_->indegree(next) > 1);
-                    });
-                    graph_->adjacent_incoming_nodes(nodes[i], [&](node_index prev) {
-                        assert(prev == nodes[i] || !(*valid_edges_)[prev]
-                                || graph_->outdegree(prev) > 1);
-                    });
-                }
-#endif
-
             }
-            ++j;
         }
 
         return results;
     }
 
-    size_t cluster_and_filter_seeds(IDBGAligner::BatchSeeders &batch_seeders,
-                                    const DBGAlignerConfig &config) const {
+    size_t cluster_and_filter_seeds(const IDBGAligner &aligner,
+                                    IDBGAligner::BatchSeeders &batch_seeders) const {
+        const DBGAlignerConfig &config = aligner.get_config();
         std::vector<bool> indicator;
         std::vector<node_index> nodes;
-        size_t new_seed_count = 0;
         {
             ProgressBar progress_bar(batch_seeders.size(), "Extracting seed nodes",
                                      std::cerr, !common::get_verbose());
@@ -363,6 +364,7 @@ class Unitigs : public SequenceGraph::GraphExtension {
             }
         }
 
+        size_t new_seed_count = 0;
         common::logger->trace("Fetching unitig IDs");
         auto seed_tuples = unitigs_.get_row_tuples(nodes);
 
@@ -390,21 +392,6 @@ class Unitigs : public SequenceGraph::GraphExtension {
                                 unitig_to_bucket[unitig_id].emplace_back(k, coordinates[0].second[0]);
                             }
                         }
-#ifndef NDEBUG
-                        if (unitig_id == std::numeric_limits<size_t>::max()) {
-                            if (graph_->has_single_outgoing(nodes[i] + 1)
-                                    && graph_->has_single_incoming(nodes[i] + 1)) {
-                                graph_->adjacent_outgoing_nodes(nodes[i] + 1, [&](node_index next) {
-                                    assert(next == nodes[i] + 1 || !(*valid_edges_)[next]
-                                            || graph_->indegree(next) > 1);
-                                });
-                                graph_->adjacent_incoming_nodes(nodes[i] + 1, [&](node_index prev) {
-                                    assert(prev == nodes[i] + 1 || !(*valid_edges_)[prev]
-                                            || graph_->outdegree(prev) > 1);
-                                });
-                            }
-                        }
-#endif
                         ++i;
                     }
 
@@ -415,21 +402,101 @@ class Unitigs : public SequenceGraph::GraphExtension {
 
                     std::vector<Seed> filtered_seeds;
                     for (auto it = unitig_to_bucket.begin(); it != unitig_to_bucket.end(); ++it) {
-                        const auto &bucket = it->second;
-                        if (bucket.size() > 1 || seeds[bucket[0].first].get_query_view().size() > config.min_seed_length) {
-                            filtered_seeds.emplace_back(seeds[std::max_element(
-                                it.value().begin(), it.value().end(), [&seeds](const auto &a, const auto &b) {
-                                    return std::make_pair(seeds[a.first].get_query_view().size(),
-                                                          seeds[b.first].get_query_view().data())
-                                         < std::make_pair(seeds[b.first].get_query_view().size(),
-                                                          seeds[a.first].get_query_view().data());
+                        auto &bucket = it.value();
+                        if (bucket.size() == 1 && seeds[bucket[0].first].get_query_view().size() > config.min_seed_length) {
+                            filtered_seeds.emplace_back(seeds[bucket[0].first]);
+                        } else if (bucket.size() >= 2) {
+                            // look for co-linear seeds
+                            DEBUG_LOG("Chaining bucket of size {}", bucket.size());
+                            std::string_view forward;
+                            std::string_view reverse;
+                            if (seeds[bucket[0].first].get_orientation()) {
+                                reverse = std::string_view(seeds[bucket[0].first].get_query_view().data() - seeds[bucket[0].first].get_clipping(),
+                                                           seeds[bucket[0].first].get_query_view().size() + seeds[bucket[0].first].get_clipping() + seeds[bucket[0].first].get_end_clipping());
+                            } else {
+                                forward = std::string_view(seeds[bucket[0].first].get_query_view().data() - seeds[bucket[0].first].get_clipping(),
+                                                           seeds[bucket[0].first].get_query_view().size() + seeds[bucket[0].first].get_clipping() + seeds[bucket[0].first].get_end_clipping());
+                            }
+                            std::vector<Seed> seed_bucket_fwd;
+                            std::vector<Seed> seed_bucket_bwd;
+                            for (const auto &[k, coord] : bucket) {
+                                seed_bucket_fwd.emplace_back(seeds[k]);
+                                const auto &columns = seeds[k].get_columns();
+                                seed_bucket_fwd.back().label_coordinates.resize(
+                                    columns.size(),
+                                    Alignment::Tuple(1, coord - seeds[k].size() + 1 + seeds[k].get_offset())
+                                );
+                                DEBUG_LOG("\t{}", Alignment(seed_bucket_fwd.back(), config));
+                            }
+                            if (reverse.data())
+                                std::swap(seed_bucket_fwd, seed_bucket_bwd);
+
+                            tsl::hopscotch_set<Alignment::Column> used_labels;
+                            size_t old_filtered_size = filtered_seeds.size();
+                            call_seed_chains_both_strands(aligner,
+                                                          forward, reverse,
+                                                          config,
+                                                          std::move(seed_bucket_fwd),
+                                                          std::move(seed_bucket_bwd),
+                                                          [&](Chain&& chain, score_t) {
+                                if (chain.size() > 1 || chain[0].first.get_query_view().size() > config.min_seed_length) {
+                                    filtered_seeds.emplace_back(
+                                        chain[0].first.get_query_view(),
+                                        std::vector<node_index>(chain[0].first.get_nodes()),
+                                        chain[0].first.get_orientation(),
+                                        chain[0].first.get_offset(),
+                                        chain[0].first.get_clipping(),
+                                        chain[0].first.get_end_clipping()
+                                    );
+                                    filtered_seeds.back().label_columns = chain[0].first.label_columns;
+                                    filtered_seeds.back().label_encoder = chain[0].first.label_encoder;
+                                    const auto &columns = filtered_seeds.back().get_columns();
+                                    used_labels.insert(columns.begin(), columns.end());
                                 }
-                            )->first]);
+
+                            }, [&](Alignment::Column c) -> bool { return used_labels.count(c); });
+                            std::sort(filtered_seeds.begin() + old_filtered_size, filtered_seeds.end(),
+                                      [](const auto &a, const auto &b) {
+                                          return std::make_pair(a.get_query_view().data(), a.get_query_view().size())
+                                            < std::make_pair(b.get_query_view().data(), b.get_query_view().size());
+                                      });
+
+                            for (size_t i = old_filtered_size + 1; i < filtered_seeds.size(); ++i) {
+                                if (filtered_seeds[i] == filtered_seeds[i - 1]) {
+                                    if (filtered_seeds[i].label_encoder) {
+                                        const auto &a = filtered_seeds[i - 1].get_columns();
+                                        const auto &b = filtered_seeds[i].get_columns();
+                                        assert(filtered_seeds[i - 1].label_encoder->check_node_labels_is_superset(a, filtered_seeds[i - 1].get_nodes()));
+                                        assert(filtered_seeds[i].label_encoder->check_node_labels_is_superset(b, filtered_seeds[i].get_nodes()));
+                                        Vector<Alignment::Column> merged;
+                                        merged.reserve(a.size() + b.size());
+                                        std::set_union(a.begin(), a.end(), b.begin(), b.end(),
+                                                       std::back_inserter(merged));
+                                        assert(merged.empty()
+                                            || filtered_seeds[i].label_encoder->check_node_labels_is_superset(merged, filtered_seeds[i].get_nodes()));
+
+                                        filtered_seeds[i].label_columns
+                                            = filtered_seeds[i].label_encoder->cache_column_set(std::move(merged));
+                                    }
+                                    filtered_seeds[i - 1] = Seed();
+                                }
+                            }
+                            auto it = std::remove_if(filtered_seeds.begin() + old_filtered_size,
+                                                     filtered_seeds.end(),
+                                                     [](const auto &a) { return a.empty(); });
+                            filtered_seeds.erase(it, filtered_seeds.end());
+
                         } else {
                             // TODO: check if there are any neighboring buckets
                         }
                     }
 
+                    DEBUG_LOG("Added {} seeds", filtered_seeds.size());
+#ifndef NDEBUG
+                    for (const auto &seed : filtered_seeds) {
+                        DEBUG_LOG("\t{}", Alignment(seed, config));
+                    }
+#endif
                     size_t num_matches = get_num_char_matches_in_seeds(filtered_seeds.begin(), filtered_seeds.end());
                     new_seed_count += filtered_seeds.size();
                     cur_seeder = std::make_shared<ManualMatchingSeeder>(
@@ -468,6 +535,24 @@ class Unitigs : public SequenceGraph::GraphExtension {
         Timer timer;
         return std::dynamic_pointer_cast<const DBGSuccinct>(cli::load_critical_dbg(fname));
         common::logger->trace("Graph loaded in {} sec", timer.elapsed());
+    }
+
+    std::pair<sdsl::bit_vector, std::vector<uint64_t>>
+    nodes_to_rows(const std::vector<node_index> &nodes) const {
+        sdsl::bit_vector indicator(nodes.size(), false);
+        std::vector<uint64_t> rows;
+        for (size_t i = 0; i < nodes.size(); ++i) {
+            node_index node = nodes[i];
+            if (node > graph_->max_index())
+                node -= graph_->max_index();
+
+            if ((*valid_edges_)[graph_->kmer_to_boss_index(node)]) {
+                indicator[i] = true;
+                rows.emplace_back(node - 1);
+            }
+        }
+
+        return std::make_pair(std::move(indicator), std::move(rows));
     }
 };
 

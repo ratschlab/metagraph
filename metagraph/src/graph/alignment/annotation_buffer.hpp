@@ -77,6 +77,8 @@ class AnnotationBuffer {
         return column_sets_.data()[0];
     }
 
+    bool check_node_labels_is_superset(const Columns &c, const std::vector<node_index> &nodes) const;
+
   private:
     const DeBruijnGraph &graph_;
     const Annotator &annotator_;

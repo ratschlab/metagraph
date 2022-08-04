@@ -18,6 +18,30 @@ typedef annot::binmat::BinaryMatrix::Column Column;
 // dummy index for an unfetched annotations
 static constexpr size_t nannot = std::numeric_limits<size_t>::max();
 
+bool AnnotationBuffer
+::check_node_labels_is_superset(const Columns &c, const std::vector<node_index> &nodes) const {
+    if (c.empty())
+        return true;
+
+    for (node_index node : nodes) {
+        const auto *labels = get_labels(node);
+        if (!labels) {
+            logger->error("Node {} has no labels", node);
+            return false;
+        }
+
+        Columns diff;
+        std::set_difference(c.begin(), c.end(), labels->begin(), labels->end(),
+                            std::back_inserter(diff));
+        if (diff.size()) {
+            logger->error("Node {} does not have labels {}", fmt::join(diff, "\t"));
+            return false;
+        }
+    }
+
+    return true;
+}
+
 AnnotationBuffer::AnnotationBuffer(const DeBruijnGraph &graph, const Annotator &annotator)
       : graph_(graph),
         annotator_(annotator),

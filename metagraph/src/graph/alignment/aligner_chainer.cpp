@@ -106,13 +106,13 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
     ChainDPTable dp_tables[2];
     AlignedVector<int32_t> seed_backtraces[2];
 
-    logger->trace("Chaining forward seeds");
+    DEBUG_LOG("Chaining forward seeds");
     size_t num_seeds;
     size_t num_nodes;
     std::tie(dp_tables[0], seed_backtraces[0], num_seeds, num_nodes)
         = chain_seeds(aligner, config, forward, both_seeds[0]);
 
-    logger->trace("Chaining reverse complement seeds");
+    DEBUG_LOG("Chaining reverse complement seeds");
     size_t num_seeds_bwd;
     size_t num_nodes_bwd;
     std::tie(dp_tables[1], seed_backtraces[1], num_seeds_bwd, num_nodes_bwd)
@@ -137,7 +137,7 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
     }
 
     if (starts.empty()) {
-        logger->trace("No chains found");
+        DEBUG_LOG("No chains found");
         return std::make_pair(num_seeds, num_nodes);
     }
 
@@ -153,6 +153,13 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
         for (++it; it != chains.end(); ++it) {
             const Chain &chain = *it;
             if (chain != last_chain) {
+                assert(std::all_of(last_chain.begin(), last_chain.end(),
+                                   [&](const auto &chain) {
+                    const auto &columns = chain.first.get_columns();
+                    return chain.first.label_encoder->check_node_labels_is_superset(
+                        columns, chain.first.get_nodes()
+                    );
+                }));
                 callback(std::move(last_chain), last_chain_score);
                 last_chain = *it;
                 continue;
@@ -189,10 +196,19 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
                                    cur_columns.begin(), cur_columns.end(),
                                    std::back_inserter(columns));
                 }
+                assert(!last_chain[i].first.label_encoder
+                    || last_chain[i].first.label_encoder->check_node_labels_is_superset(columns, last_chain[i].first.get_nodes()));
                 last_chain[i].first.set_columns(std::move(columns));
             }
         }
 
+        assert(std::all_of(last_chain.begin(), last_chain.end(),
+                           [&](const auto &chain) {
+            const auto &columns = chain.first.get_columns();
+            return chain.first.label_encoder->check_node_labels_is_superset(
+                columns, chain.first.get_nodes()
+            );
+        }));
         callback(std::move(last_chain), last_chain_score);
 
         chains.clear();
@@ -316,8 +332,13 @@ chain_seeds(const IDBGAligner &aligner,
             std::string_view query,
             std::vector<Seed> &seeds) {
     const auto *labeled_aligner = dynamic_cast<const ILabeledAligner*>(&aligner);
-    if (seeds.empty() || !labeled_aligner || !aligner.has_coordinates())
+    if (seeds.empty())
         return {};
+
+    if (!labeled_aligner
+            || std::any_of(seeds.begin(), seeds.end(), [](const auto &a) { return a.label_coordinates.empty(); })) {
+        throw std::runtime_error("Chaining only supported for labeled aligners");
+    }
 
     size_t num_nodes = 0;
 
@@ -331,6 +352,7 @@ chain_seeds(const IDBGAligner &aligner,
 
     for (size_t i = 0; i < seeds.size(); ++i) {
         const Vector<Alignment::Column> &columns = seeds[i].get_columns();
+        assert(seeds[i].label_encoder->check_node_labels_is_superset(columns, seeds[i].get_nodes()));
         for (size_t j = 0; j < seeds[i].label_coordinates.size(); ++j) {
             Alignment::Column c = columns[j];
             auto rbegin = seeds[i].label_coordinates[j].rbegin();
@@ -354,10 +376,10 @@ chain_seeds(const IDBGAligner &aligner,
     if (dp_table.empty())
         return std::make_tuple(std::move(dp_table), std::move(backtrace), num_seeds, num_nodes);
 
-    logger->trace("Sorting {} anchors", dp_table.size());
+    DEBUG_LOG("Sorting {} anchors", dp_table.size());
     // sort seeds by label, then by decreasing reference coordinate
     std::sort(dp_table.begin(), dp_table.end(), std::greater<TableElem>());
-    logger->trace("Chaining anchors");
+    DEBUG_LOG("Chaining anchors");
 
     size_t bandwidth = 65;
 
