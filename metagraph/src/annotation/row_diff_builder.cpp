@@ -1015,8 +1015,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                 uint64_t r = 0;
                 set_rows[l_idx][j].for_each([&](const auto &v) {
                     call(utils::get_first(v));
-                    // TODO: this should be with_values, but that fails to compile due to a bug in g++-8.2
-                    if constexpr(utils::is_pair_v<T>) {
+                    if constexpr(with_values) {
                         assert(v.second && "zero diffs must have been skipped");
                         values[l_idx][j][r++] = matrix::encode_diff(v.second);
                     }
