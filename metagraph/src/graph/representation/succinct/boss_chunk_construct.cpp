@@ -440,13 +440,20 @@ generate_dummy_1_kmers(size_t k,
         real_chunks.emplace_back(real_names[i], ENCODER_BUFFER_SIZE);
         dummy_sink_chunks.emplace_back(dummy_sink_names[i], ENCODER_BUFFER_SIZE);
     }
-    std::vector<Encoder<KMER_INT>> dummy_l1_chunks;
     std::vector<std::string> dummy_l1_names;
     for (TAlphabet F = 0; F <= alphabet_size; ++F) {
         for (TAlphabet W = 0; W <= alphabet_size; ++W) {
             dummy_l1_names.push_back(dir/fmt::format("dummy_source_1_{}_{}", F, W));
-            dummy_l1_chunks.emplace_back(dummy_l1_names.back(), ENCODER_BUFFER_SIZE);
         }
+    }
+    // write empty chunks
+    for (TAlphabet W = 0; W <= alphabet_size; ++W) {
+        Encoder<KMER_INT> out(dummy_l1_names[W * (alphabet_size+1)], ENCODER_BUFFER_SIZE);
+        out.finish();
+    }
+    for (TAlphabet F = 0; F < alphabet_size; ++F) {
+        Encoder<KMER_INT> out(dummy_l1_names[F+1], ENCODER_BUFFER_SIZE);
+        out.finish();
     }
 
     logger->trace("Generating dummy-1 source k-mers and dummy sink k-mers...");
@@ -456,8 +463,21 @@ generate_dummy_1_kmers(size_t k,
     // reset kmer[1] (the first character in k-mer, $ in dummy source) to zero
     KMER_INT kmer_delta_dummy = kmer_delta & ~KMER_INT(((1ull << L) - 1) << L);
 
-    #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 1)
+    size_t n_threads = check_fd_and_adjust_threads(std::min(num_threads, (size_t)alphabet_size),
+            alphabet_size // `dummy_l1_chunks`
+                + (1 + utils::is_pair_v<T>) * alphabet_size // `it` (MergeDecoder)
+                + 1 // `sink_gen_it`
+    );
+
+    uint64_t num_source = 0;
+
+    #pragma omp parallel for num_threads(n_threads) schedule(dynamic, 1)
     for (TAlphabet F = 0; F < alphabet_size; ++F) {
+        std::vector<Encoder<KMER_INT>> dummy_l1_chunks;
+        for (TAlphabet next_F = 0; next_F < alphabet_size; ++next_F) {
+            dummy_l1_chunks.emplace_back(dummy_l1_names[(next_F+1) * (alphabet_size+1) + (F+1)],
+                                         ENCODER_BUFFER_SIZE);
+        }
         // stream k-mers of pattern ***F*
         std::vector<std::string> F_chunks(real_F_W.begin() + F * alphabet_size,
                                           real_F_W.begin() + (F + 1) * alphabet_size);
@@ -510,9 +530,15 @@ generate_dummy_1_kmers(size_t k,
             assert(F == dummy_source[0]);
             TAlphabet next_F = dummy_source[k];
             // lift all and reset the first character to the sentinel 0 (apply mask)
-            dummy_l1_chunks[(next_F+1) * (alphabet_size+1) + (F+1)].add(
-                kmer::transform<KMER>(dummy_source, k + 1) + kmer_delta_dummy);
+            dummy_l1_chunks[next_F].add(kmer::transform<KMER>(dummy_source, k + 1) + kmer_delta_dummy);
         }
+
+        for (auto &out : dummy_l1_chunks) {
+            out.finish();
+            #pragma omp atomic
+            num_source += out.size();
+        }
+
         // handle leftover sink_gen_it
         while (!sink_gen_it.empty()) {
             KMER_REAL v(sink_gen_it.pop());
@@ -525,15 +551,10 @@ generate_dummy_1_kmers(size_t k,
     elias_fano::remove_chunks(real_F_W);
 
     uint64_t num_sink = 0;
-    uint64_t num_source = 0;
     for (TAlphabet i = 0; i < alphabet_size; ++i) {
         real_chunks[i].finish();
         dummy_sink_chunks[i].finish();
         num_sink += dummy_sink_chunks[i].size();
-    }
-    for (auto &dummy_l1_chunk : dummy_l1_chunks) {
-        dummy_l1_chunk.finish();
-        num_source += dummy_l1_chunk.size();
     }
 
     logger->trace("Generated {} dummy sink and {} dummy source k-mers",
@@ -546,10 +567,10 @@ generate_dummy_1_kmers(size_t k,
  * Adds reverse complements
  */
 template <typename T_REAL>
-void add_reverse_complements(size_t k,
-                             size_t num_threads,
-                             size_t buffer_size,
-                             const std::vector<std::string> &real_F_W) {
+uint64_t add_reverse_complements(size_t k,
+                                 size_t num_threads,
+                                 size_t buffer_size,
+                                 const std::vector<std::string> &real_F_W) {
     using T_INT_REAL = get_int_t<T_REAL>; // either KMER_INT or <KMER_INT, count>
 
     const uint8_t alphabet_size = KmerExtractor2Bit().alphabet.size();
@@ -622,13 +643,13 @@ void add_reverse_complements(size_t k,
         rc_set[j].reset();
         std::filesystem::remove_all(real_F_W[j] + "_rc");
 
-        for (const auto &suffix : { "", ".up", ".count" }) {
+        for (const auto &suffix : { "", ".count" }) {
             if (std::filesystem::exists(real_F_W[j] + "_new" + suffix))
                 std::filesystem::rename(real_F_W[j] + "_new" + suffix,
                                         real_F_W[j] + suffix);
         }
     }
-    logger->trace("Total number of real k-mers: {}", total_num_kmers);
+    return total_num_kmers;
 }
 
 template <typename KMER>
@@ -669,25 +690,36 @@ BOSS::Chunk construct_boss_chunk_disk(KmerCollector &kmer_collector,
 
     size_t k = kmer_collector.get_k() - 1;
     const std::filesystem::path dir = kmer_collector.tmp_dir();
-    size_t num_threads = kmer_collector.num_threads();
+    size_t num_threads = std::max(kmer_collector.num_threads(), (size_t)1);
     const uint64_t buffer_size = kmer_collector.buffer_size();
 
     auto &container = kmer_collector.container();
     const std::vector<std::string> chunk_fnames = container.get_chunks();
 
+    const size_t A2 = std::pow(KmerExtractor2Bit().alphabet.size(), 2);
+    size_t n_threads = check_fd_and_adjust_threads(std::min(num_threads, chunk_fnames.size()),
+                                                   (A2 + 1) * (1 + utils::is_pair_v<T>));
     // split each chunk by F and W
     std::vector<std::vector<std::string>> chunks_split(chunk_fnames.size());
-    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+    #pragma omp parallel for num_threads(n_threads) schedule(dynamic)
     for (size_t i = 0; i < chunk_fnames.size(); ++i) {
         chunks_split[i] = split<T_REAL>(k, chunk_fnames[i]);
     }
 
     // for a DNA alphabet, this will contain 16 chunks, split by kmer[0] and kmer[1]
-    std::vector<std::string> real_F_W(std::pow(KmerExtractor2Bit().alphabet.size(), 2));
+    std::vector<std::string> real_F_W(A2);
+
+    n_threads = check_fd_and_adjust_threads(std::min(num_threads, real_F_W.size()),
+                                            4 * (1 + utils::is_pair_v<T>));
+    const size_t max_fd_open = get_max_files_open() - std::min((size_t)get_num_fds(),
+                                                               get_max_files_open());
+    const size_t max_chunks_open = max_fd_open / ((1 + utils::is_pair_v<T>) * n_threads) - 1;
+    assert(max_chunks_open >= 3);
+    logger->trace("Merging maximum {} chunks per thread at a time...", max_chunks_open);
 
     uint64_t total_num_kmers = 0;
     // merge each group of chunks into a single one for each F and W
-    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+    #pragma omp parallel for num_threads(n_threads) schedule(dynamic)
     for (size_t j = 0; j < real_F_W.size(); ++j) {
         std::vector<std::string> chunks_to_merge(chunks_split.size());
         for (size_t i = 0; i < chunks_split.size(); ++i) {
@@ -698,7 +730,7 @@ BOSS::Chunk construct_boss_chunk_disk(KmerCollector &kmer_collector,
         // merge chunks into a single one and remove them
         const std::function<void(const T_INT_REAL &)> write
                 = [&](const T_INT_REAL &v) { out.add(v); };
-        elias_fano::merge_files(chunks_to_merge, write);
+        elias_fano::merge_files(chunks_to_merge, write, true, max_chunks_open);
         out.finish();
         logger->trace("Merged {} chunks into {} with {} k-mers",
                       chunks_to_merge.size(), real_F_W[j], out.size());
@@ -706,12 +738,11 @@ BOSS::Chunk construct_boss_chunk_disk(KmerCollector &kmer_collector,
         total_num_kmers += out.size();
     }
 
-    if (kmer_collector.get_mode() == KmerCollector::Mode::CANONICAL_ONLY) {
-        // compute reverse complements k-mers and update the blocks #real_F_W
-        add_reverse_complements<T_REAL>(k, num_threads, buffer_size, real_F_W);
-    } else {
-        logger->trace("Total number of real k-mers: {}", total_num_kmers);
-    }
+    // compute reverse complements k-mers and update the blocks #real_F_W
+    if (kmer_collector.get_mode() == KmerCollector::Mode::CANONICAL_ONLY)
+        total_num_kmers = add_reverse_complements<T_REAL>(k, num_threads, buffer_size, real_F_W);
+
+    logger->trace("Total number of real k-mers: {}", total_num_kmers);
 
     // k-mer blocks split by F
     auto [real_names, dummy_l1_names, dummy_sink_names]
@@ -740,12 +771,19 @@ reconstruct_dummy_source(const std::vector<std::string> &dummy_l1_names,
 
     // generate dummy k-mers of prefix length 1..k
     logger->trace("Starting generating dummy-1..k source k-mers...");
+
+    size_t n_threads = check_fd_and_adjust_threads(std::min(num_threads, (size_t)alphabet_size),
+            1 // `dummy_chunk`
+                + alphabet_size // `dummy_next_chunks`
+                + alphabet_size // `merge_files(F_chunk_names)`
+    );
+
     for (size_t dummy_pref_len = 1; dummy_pref_len <= k; ++dummy_pref_len) {
         // this will store blocks of source dummy k-mers of the current level
         uint64_t num_kmers = 0;
         result.emplace_back(alphabet_size);
         std::vector<std::string> next_names(alphabet_size * alphabet_size);
-        #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+        #pragma omp parallel for num_threads(n_threads) schedule(dynamic)
         for (TAlphabet F = 0; F < alphabet_size; ++F) {
             // will store sorted dummy source k-mers of pattern ***F*
             result.back()[F] = dir/fmt::format("dummy_source_{}_{}", dummy_pref_len, F);
@@ -909,7 +947,11 @@ BOSS::Chunk build_boss(const std::vector<std::string> &real_names,
                                             k, bits_per_count, swap_dir);
     logger->trace("Chunk ..$. constructed");
     // construct all other chunks in parallel
-    #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic)
+    size_t n_threads = check_fd_and_adjust_threads(std::min(num_threads, real_names.size()),
+            (dummy_source_names.size() + 1) // dummy source + dummy sink
+                + (1 + utils::is_pair_v<T>) // real
+                + (2 + utils::is_pair_v<T>)); // L, W, counts
+    #pragma omp parallel for ordered num_threads(n_threads) schedule(dynamic)
     for (size_t F = 0; F < real_names.size(); ++F) {
         std::vector<std::string> dummy_names { dummy_sink_names[F] };
         for (size_t i = 0; i < dummy_source_names.size(); ++i) {
@@ -1137,6 +1179,8 @@ IBOSSChunkConstructor::initialize(size_t k,
                                   size_t disk_cap_bytes) {
 #define OTHER_ARGS k, both_strands, bits_per_count, filter_suffix, \
                    num_threads, memory_preallocated, swap_dir, disk_cap_bytes
+
+    assert(k);
 
     switch (container_type) {
         case kmer::ContainerType::VECTOR:

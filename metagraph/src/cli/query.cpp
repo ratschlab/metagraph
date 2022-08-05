@@ -181,6 +181,7 @@ Json::Value SeqSearchResult::to_json(bool verbose_output,
 
         // Alignment metrics
         root[SCORE_JSON_FIELD] = Json::Value(alignment_->score);
+        root[MAX_SCORE_JSON_FIELD] = Json::Value(alignment_->max_score);
         root[CIGAR_JSON_FIELD] = Json::Value(alignment_->cigar);
         root[ORIENTATION_JSON_FIELD] = Json::Value(alignment_->orientation);
     }
@@ -1217,7 +1218,11 @@ Alignment align_sequence(std::string *seq,
                          const AnnotatedDBG &anno_graph,
                          const align::DBGAlignerConfig &aligner_config) {
     const DeBruijnGraph &graph = anno_graph.get_graph();
-    auto alignments = align::DBGAligner(graph, aligner_config).align(*seq);
+    align::DBGAligner aligner(graph, aligner_config);
+    const align::DBGAlignerConfig &revised_config = aligner.get_config();
+    align::DBGAlignerConfig::score_t max_score = revised_config.match_score(*seq)
+        + revised_config.left_end_bonus + revised_config.right_end_bonus;
+    auto alignments = aligner.align(*seq);
 
     assert(alignments.size() <= 1 && "Only the best alignment is needed");
 
@@ -1231,9 +1236,9 @@ Alignment align_sequence(std::string *seq,
             *seq = match.get_sequence();
         }
 
-        return { match.get_score(), match.get_cigar().to_string(), match.get_orientation() };
+        return { match.get_score(), max_score, match.get_cigar().to_string(), match.get_orientation() };
     } else {
-        return { 0, fmt::format("{}S", seq->length()), false };
+        return { 0, max_score, fmt::format("{}S", seq->length()), false };
     }
 }
 

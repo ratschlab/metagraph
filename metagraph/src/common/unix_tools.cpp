@@ -27,6 +27,10 @@
 #error "Cannot define getPeakRSS( ) or getCurrentRSS( ) for an unknown OS."
 #endif
 
+#include "common/logger.hpp"
+
+using mtg::common::logger;
+
 
 /**
  * Returns the peak (maximum so far) resident set size (physical
@@ -110,6 +114,51 @@ size_t get_curr_RSS()
 #endif
 }
 
+
+size_t get_max_files_open() {
+    struct rlimit lim;
+    getrlimit(RLIMIT_NOFILE, &lim);
+    rlim_t max_files = lim.rlim_cur;
+    return max_files;
+}
+
+int get_num_fds() {
+    FILE *p = popen(fmt::format("lsof -p {} | tail -n +2 | wc -l", getpid()).c_str(), "r");
+    if (!p) {
+        logger->error("Can't open pipe to check the number of file descriptors with `lsof`");
+        exit(1);
+    }
+
+    char buffer[1024];
+    char *ret = fgets(buffer, sizeof(buffer), p);
+    pclose(p);
+    if (!ret) {
+        logger->error("Can't parse output of `lsof` from pipe");
+        exit(1);
+    }
+    return std::atoi(buffer);
+}
+
+int check_fd_and_adjust_threads(size_t num_threads, size_t fd_per_thread) {
+    const size_t max_fd = get_max_files_open() - std::min((size_t)get_num_fds(),
+                                                          get_max_files_open());
+
+    size_t n = max_fd / fd_per_thread;
+    if (!n) {
+        logger->error("The limit on the number of allowed file descriptors per process is too low"
+                      " (at least {}+{} are needed, the current limit is: {})."
+                      " Increase the limit with, e.g. `ulimit -S -n 4096`",
+                      get_max_files_open() - max_fd, fd_per_thread, get_max_files_open());
+        exit(1);
+    } else if (n < num_threads) {
+        logger->warn("Can open only {} more files. Only {} threads will be used"
+                     " in order not to exceed the allowed number of open files."
+                     " Consider increasing the limit with, e.g. `ulimit -S -n 4096`.",
+                     max_fd, n);
+        return n;
+    }
+    return num_threads;
+}
 
 bool stderr_to_terminal() {
     return isatty(STDERR_FILENO);

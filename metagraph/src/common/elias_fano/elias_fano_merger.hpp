@@ -193,7 +193,10 @@ void merge_files(std::vector<std::string> sources,
         return;
 
     // if there are too many chunks, merge them into larger ones
-    assert(max_sources_open >= 2);
+    if (max_sources_open < 3) {
+        common::logger->error("Can't merge with less than 3 open sources");
+        exit(1);
+    }
     while (sources.size() > max_sources_open) {
         // chunk 0 may be special (e.g. storing only fwd bits) and hence
         // never pre-merged
@@ -201,7 +204,8 @@ void merge_files(std::vector<std::string> sources,
         size_t i = 1;
         while (i < sources.size()) {
             std::vector<std::string> to_merge;
-            while (i < sources.size() && to_merge.size() < max_sources_open) {
+            // reserve +1 stream for output
+            while (i < sources.size() && to_merge.size() + 1 < max_sources_open) {
                 to_merge.push_back(sources[i++]);
             }
 
@@ -211,22 +215,12 @@ void merge_files(std::vector<std::string> sources,
                 continue;
             }
 
-            assert(to_merge.size() <= max_sources_open);
+            assert(to_merge.size() + 1 <= max_sources_open);
 
             new_chunks.push_back(to_merge.at(0) + "_premerged");
-            std::vector<T> buf;
-            buf.reserve(1024 * 1024);
-
-            merge_files<T>(to_merge, [&](T i) {
-                buf.push_back(i);
-                if (buf.size() == buf.capacity()) {
-                    EliasFanoEncoderBuffered<T>::append_block(buf, new_chunks.back());
-                    buf.resize(0);
-                }
-            });
-            if (buf.size()) {
-                EliasFanoEncoderBuffered<T>::append_block(buf, new_chunks.back());
-            }
+            EliasFanoEncoderBuffered<T> out(new_chunks.back(), 1024 * 1024);
+            merge_files<T>(to_merge, [&](T i) { out.add(i); }, remove_sources);
+            out.finish();
         }
         sources.swap(new_chunks);
     }

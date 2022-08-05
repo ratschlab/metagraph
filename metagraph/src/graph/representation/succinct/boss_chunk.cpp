@@ -153,7 +153,7 @@ BOSS::Chunk::~Chunk() {
         std::cerr << "ERROR: Failed to destruct BOSS::Chunk: "
                   << e.what() << std::endl;
     } catch (...) {
-        std::cerr << "ERROR: Failed to destruct BOSS::Chunk";
+        std::cerr << "ERROR: Failed to destruct BOSS::Chunk" << std::endl;
     }
 
     // remove the temp directory, but only if it was initialized

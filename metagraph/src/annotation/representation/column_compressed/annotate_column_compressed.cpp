@@ -10,6 +10,7 @@
 #include "common/serialization.hpp"
 #include "common/utils/string_utils.hpp"
 #include "common/logger.hpp"
+#include "common/unix_tools.hpp"
 #include "common/vectors/bitmap_builder.hpp"
 #include "common/vectors/bitmap_mergers.hpp"
 #include "common/vectors/bit_vector_adaptive.hpp"
@@ -19,6 +20,7 @@
 namespace mtg {
 namespace annot {
 
+namespace fs = std::filesystem;
 using utils::remove_suffix;
 using utils::make_suffix;
 using mtg::common::logger;
@@ -29,7 +31,8 @@ ColumnCompressed<Label>::ColumnCompressed(uint64_t num_rows,
                                           size_t num_columns_cached,
                                           const std::string &swap_dir,
                                           uint64_t buffer_size_bytes,
-                                          uint8_t count_width)
+                                          uint8_t count_width,
+                                          size_t max_chunks_open)
       : num_rows_(num_rows),
         swap_dir_(swap_dir),
         buffer_size_bytes_(buffer_size_bytes),
@@ -41,7 +44,8 @@ ColumnCompressed<Label>::ColumnCompressed(uint64_t num_rows,
                             delete column_builder;
                         }),
         count_width_(count_width),
-        max_count_(sdsl::bits::lo_set[count_width]) {}
+        max_count_(sdsl::bits::lo_set[count_width]),
+        max_chunks_open_(max_chunks_open) {}
 
 template <typename Label>
 ColumnCompressed<Label>::ColumnCompressed(sdsl::bit_vector&& column,
@@ -49,9 +53,10 @@ ColumnCompressed<Label>::ColumnCompressed(sdsl::bit_vector&& column,
                                           size_t num_columns_cached,
                                           const std::string &swap_dir,
                                           uint64_t buffer_size_bytes,
-                                          uint8_t count_width)
+                                          uint8_t count_width,
+                                          size_t max_chunks_open)
       : ColumnCompressed(column.size(),
-                         num_columns_cached, swap_dir, buffer_size_bytes, count_width) {
+                         num_columns_cached, swap_dir, buffer_size_bytes, count_width, max_chunks_open) {
     label_encoder_.insert_and_encode(column_label);
     bitmatrix_.resize(1);
     cached_columns_.Put(0, new bitmap_vector(std::move(column)));
@@ -64,9 +69,10 @@ ColumnCompressed<Label>::ColumnCompressed(std::vector<std::unique_ptr<bit_vector
                                           size_t num_columns_cached,
                                           const std::string &swap_dir,
                                           uint64_t buffer_size_bytes,
-                                          uint8_t count_width)
+                                          uint8_t count_width,
+                                          size_t max_chunks_open)
       : ColumnCompressed(columns.at(0)->size(),
-                         num_columns_cached, swap_dir, buffer_size_bytes, count_width) {
+                         num_columns_cached, swap_dir, buffer_size_bytes, count_width, max_chunks_open) {
     bitmatrix_ = std::move(columns);
     label_encoder_ = label_encoder;
     flushed_ = true;
@@ -153,11 +159,17 @@ void ColumnCompressed<Label>::add_label_counts(const std::vector<Index> &indices
 // for each label and index 'i' add numeric attribute 'coord'
 template <typename Label>
 void ColumnCompressed<Label>::add_label_coord(Index i, const VLabels &labels, uint64_t coord) {
-    coords_.resize(num_labels());
+    while (coords_.size() < num_labels()) {
+        coords_.emplace_back(get_num_threads(),
+                             buffer_size_bytes_ / sizeof(std::pair<Index, uint64_t>),
+                             swap_dir_);
+    }
+    max_coord_.resize(num_labels(), 0);
 
     for (const auto &label : labels) {
         const size_t j = label_encoder_.encode(label);
         coords_[j].emplace_back(i, coord);
+        max_coord_[j] = std::max(max_coord_[j], coord);
     }
 }
 
@@ -165,11 +177,20 @@ void ColumnCompressed<Label>::add_label_coord(Index i, const VLabels &labels, ui
 template <typename Label>
 void ColumnCompressed<Label>::add_label_coords(const std::vector<std::pair<Index, uint64_t>> &coords,
                                                const VLabels &labels) {
-    coords_.resize(num_labels());
+    while (coords_.size() < num_labels()) {
+        coords_.emplace_back(get_num_threads(),
+                             buffer_size_bytes_ / sizeof(std::pair<Index, uint64_t>),
+                             swap_dir_,
+                             max_chunks_open_);
+    }
+    max_coord_.resize(num_labels(), 0);
 
     for (const auto &label : labels) {
         const size_t j = label_encoder_.encode(label);
-        coords_[j].insert(coords_[j].end(), coords.begin(), coords.end());
+        for (const auto &v : coords) {
+            coords_[j].push_back(v);
+            max_coord_[j] = std::max(max_coord_[j], v.second);
+        }
     }
 }
 
@@ -228,9 +249,13 @@ void ColumnCompressed<Label>::serialize_counts(const std::string &filename) cons
         logger->error("Could not open file for writing: {}", counts_fname);
         throw std::ofstream::failure("Bad stream");
     }
+    logger->trace("Starting serializing counts to {}", counts_fname);
 
     uint64_t num_counts = 0;
     uint64_t sum_counts = 0;
+
+    Timer timer;
+    double reopen_file_time = 0;
 
     for (size_t j = 0; j < relation_counts_.size(); ++j) {
         if (!relation_counts_[j].size()) {
@@ -253,11 +278,20 @@ void ColumnCompressed<Label>::serialize_counts(const std::string &filename) cons
             if (packed_width == relation_counts_[j].width()) {
                 relation_counts_[j].serialize(out);
             } else {
-                // TODO: use int_vector_buffer<>
-                sdsl::int_vector<> packed_counts(relation_counts_[j].size(), 0, packed_width);
-                std::copy(relation_counts_[j].begin(), relation_counts_[j].end(),
-                          packed_counts.begin());
-                packed_counts.serialize(out);
+                timer.reset();
+                size_t offset = out.tellp();
+                out.close();
+                {
+                    sdsl::int_vector_buffer<> packed_counts(counts_fname, std::ios::out, 1024*1024,
+                                                            packed_width, false, offset);
+                    reopen_file_time += timer.elapsed();
+                    for (size_t c : relation_counts_[j]) {
+                        packed_counts.push_back(c);
+                    }
+                }
+                timer.reset();
+                out = std::ofstream(counts_fname, std::ios::binary | std::ios::app);
+                reopen_file_time += timer.elapsed();
             }
         }
     }
@@ -265,6 +299,8 @@ void ColumnCompressed<Label>::serialize_counts(const std::string &filename) cons
     for (size_t j = relation_counts_.size(); j < bitmatrix_.size(); ++j) {
         sdsl::int_vector<>(bitmatrix_[j]->num_set_bits(), 0, 1).serialize(out);
     }
+
+    logger->trace("Time overhead to close/re-open the file: {:.2} sec", reopen_file_time);
 
     logger->info("Num relation counts: {}", num_counts);
     logger->info("Relation counts sum: {}", sum_counts);
@@ -281,62 +317,157 @@ void ColumnCompressed<Label>::serialize_coordinates(const std::string &filename)
 
     uint64_t num_coordinates = 0;
 
+    fs::path tmp_path;
+
+    if (swap_dir_.size())
+        tmp_path = utils::create_temp_dir(swap_dir_, "buffers");
+
     for (size_t j = 0; j < coords_.size(); ++j) {
-        // sort pairs <rank, coord>
-        auto &c_v = const_cast<ColumnCompressed*>(this)->coords_[j];
-
-        ips4o::parallel::sort(c_v.begin(), c_v.end(), std::less<>(), get_num_threads());
-        if (std::unique(c_v.begin(), c_v.end()) != c_v.end()) {
-            logger->error("Found repeated coordinates. If flag --anno-header is passed,"
-                          " make sure sequence headers don't repeat.");
-            exit(1);
-        }
-
-        #pragma omp parallel for num_threads(get_num_threads())
-        for (size_t i = 0; i < c_v.size(); ++i) {
-            if (uint64_t rank = bitmatrix_[j]->conditional_rank1(c_v[i].first)) {
-                c_v[i].first = rank;
-            } else {
-                logger->warn("Trying to add attribute {} for not annotated object {}."
-                             " The attribute is ignored.", c_v[i].second, c_v[i].first);
+        if (!swap_dir_.size()) {
+            // sort pairs <rank, coord>
+            auto &c_v = const_cast<ColumnCompressed*>(this)->coords_[j].get_buffer();
+            ips4o::parallel::sort(c_v.begin(), c_v.end(), std::less<>(), get_num_threads());
+            if (std::unique(c_v.begin(), c_v.end()) != c_v.end()) {
+                logger->error("Found repeated coordinates. If flag --anno-header is passed,"
+                              " make sure sequence headers don't repeat.");
+                exit(1);
             }
-        }
 
-        // transform rank to index
-        size_t it = 0;
-        for (size_t i = 0; i < c_v.size(); ++i) {
-            if (c_v[i].first)
-                c_v[it++] = c_v[i];
-        }
-        c_v.resize(it);
-
-        // marks where the next block starts
-        //  *- * *
-        // 1001010
-        sdsl::bit_vector delim(c_v.size() + bitmatrix_[j]->num_set_bits() + 1, 0);
-        // pack coordinates
-        uint64_t max_coord = 0;
-        for (auto [r, coord] : c_v) {
-            max_coord = std::max(max_coord, coord);
-        }
-        sdsl::int_vector<> coords(c_v.size(), 0, sdsl::bits::hi(max_coord) + 1);
-        uint64_t cur = 0;
-        for (size_t i = 0; i < c_v.size(); ++i) {
-            auto [r, coord] = c_v[i];
-            while (cur < r) {
-                delim[i + cur++] = 1;
+            #pragma omp parallel for num_threads(get_num_threads())
+            for (size_t i = 0; i < c_v.size(); ++i) {
+                if (uint64_t rank = bitmatrix_[j]->conditional_rank1(c_v[i].first)) {
+                    c_v[i].first = rank;
+                } else {
+                    logger->warn("Trying to add attribute {} for not annotated object {}."
+                                 " The attribute is ignored.", c_v[i].second, c_v[i].first);
+                }
             }
-            coords[i] = coord;
-        }
-        for (uint64_t t = cur + c_v.size(); t < delim.size(); ++t) {
-            delim[t] = 1;
-        }
 
-        bit_vector_smart(std::move(delim)).serialize(out);
-        coords.serialize(out);
+            // transform rank to index
+            size_t it = 0;
+            for (size_t i = 0; i < c_v.size(); ++i) {
+                if (c_v[i].first)
+                    c_v[it++] = c_v[i];
+            }
+            c_v.resize(it);
 
-        num_coordinates += c_v.size();
+            // marks where the next block starts
+            //  *- * *
+            // 1001010
+            sdsl::bit_vector delim(c_v.size() + bitmatrix_[j]->num_set_bits() + 1, 0);
+            // pack coordinates
+            sdsl::int_vector<> coords(c_v.size(), 0, sdsl::bits::hi(max_coord_[j]) + 1);
+            uint64_t cur = 0;
+            for (size_t i = 0; i < c_v.size(); ++i) {
+                auto [r, coord] = c_v[i];
+                while (cur < r) {
+                    delim[i + cur++] = 1;
+                }
+                coords[i] = coord;
+            }
+
+            for (uint64_t t = cur + c_v.size(); t < delim.size(); ++t) {
+                delim[t] = 1;
+            }
+
+            bit_vector_smart(std::move(delim)).serialize(out);
+            coords.serialize(out);
+
+            num_coordinates += c_v.size();
+        } else {
+            auto &c_v = const_cast<ColumnCompressed*>(this)->coords_[j];
+            c_v.flush();
+            std::vector<std::pair<Index, uint64_t>> buffer;
+            buffer.swap(c_v.get_buffer());
+            buffer.resize(0);
+
+            std::pair<Index, uint64_t> last = { -1, -1 };
+
+            // marks where the next block starts
+            //  *- * *
+            // 1001010
+            sdsl::int_vector_buffer<1> delim(tmp_path/"delim", std::ios::out, 1024*1024);
+            // pack coordinates
+            sdsl::int_vector_buffer<> coords(tmp_path/"coords", std::ios::out, 1024*1024, sdsl::bits::hi(max_coord_[j]) + 1);
+            uint64_t cur = 0;
+
+            auto process_buffer = [&]() {
+                #pragma omp parallel for num_threads(get_num_threads())
+                for (size_t i = 0; i < buffer.size(); ++i) {
+                    if (uint64_t rank = bitmatrix_[j]->conditional_rank1(buffer[i].first)) {
+                        buffer[i].first = rank;
+                    } else {
+                        logger->warn("Trying to add attribute {} for not annotated object {}."
+                                     " The attribute is ignored.", buffer[i].second, buffer[i].first);
+                    }
+                }
+
+                // transform rank to index
+                for (const auto &pair : buffer) {
+                    if (pair == last) {
+                        logger->error("Found repeated coordinates. If flag --anno-header is passed,"
+                                      " make sure sequence headers don't repeat.");
+                        exit(1);
+                    }
+                    last = pair;
+
+                    auto [r, coord] = pair;
+                    if (!r)
+                        continue;
+
+                    while (cur < r) {
+                        delim.push_back(1);
+                        cur++;
+                    }
+                    delim.push_back(0);
+                    coords.push_back(coord);
+                }
+
+                buffer.resize(0);
+            };
+
+            c_v.for_each([&](const auto &v) {
+                buffer.push_back(v);
+                if (buffer.size() == buffer.capacity())
+                    process_buffer();
+            });
+            if (buffer.size())
+                process_buffer();
+
+            buffer = std::vector<std::pair<Index, uint64_t>>();
+
+            while (cur++ <= bitmatrix_[j]->num_set_bits()) {
+                delim.push_back(1);
+            }
+
+            assert(delim.size() == coords.size() + bitmatrix_[j]->num_set_bits() + 1);
+
+            num_coordinates += coords.size();
+
+            delim.close(false);
+            coords.close(false);
+
+            {
+                sdsl::bit_vector delim_bv;
+                std::ifstream in(tmp_path/"delim", std::ios::binary);
+                delim_bv.load(in);
+                bit_vector_smart(std::move(delim_bv)).serialize(out);
+            }
+
+            out.close();
+
+            std::string concat_command = fmt::format("cat {} >> {}", tmp_path/"coords", coords_fname);
+            if (std::system(concat_command.c_str())) {
+                logger->error("Error while cat-ing files: {}", concat_command);
+                std::exit(EXIT_FAILURE);
+            }
+
+            out = std::ofstream(coords_fname, std::ios::binary | std::ios::app);
+        }
     }
+
+    if (swap_dir_.size())
+        utils::remove_temp_dir(tmp_path);
 
     logger->info("Number of coordinates: {} in {}", num_coordinates, coords_fname);
 }
