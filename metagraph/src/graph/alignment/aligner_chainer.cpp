@@ -9,10 +9,6 @@
 
 #include "common/aligned_vector.hpp"
 #include "common/algorithms.hpp"
-#include "graph/representation/succinct/dbg_succinct.hpp"
-#include "graph/representation/canonical_dbg.hpp"
-#include "graph/representation/rc_dbg.hpp"
-#include "graph/graph_extensions/node_rc.hpp"
 #include "graph/graph_extensions/unitigs.hpp"
 
 namespace mtg {
