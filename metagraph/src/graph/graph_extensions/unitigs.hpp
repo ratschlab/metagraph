@@ -60,13 +60,14 @@ class Unitigs : public SequenceGraph::GraphExtension {
     std::vector<std::pair<size_t, Coord>>
     get_unitig_ids_and_coordinates(const std::vector<node_index> &nodes) const;
 
-    size_t cluster_and_filter_seeds(const IDBGAligner &aligner,
-                                    IDBGAligner::BatchSeeders &batch_seeders) const;
-
     void load_graph(const std::string &fname) {
         graph_ = load_graph_impl(fname);
         unitigs_.set_graph(graph_.get());
     }
+
+    const DBGSuccinct* get_graph() const { return graph_.get(); }
+
+    bool is_singleton(size_t unitig_id) const { return unitig_id < get_unitig_id_offset(); }
 
   private:
     std::shared_ptr<const DBGSuccinct> graph_;

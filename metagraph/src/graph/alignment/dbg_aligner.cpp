@@ -448,20 +448,17 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
 
     auto seeders = build_seeders(seq_batch, paths);
     if (!config_.chain_alignments) {
-        if (const auto *graph_unitigs = graph_.get_extension_threadsafe<Unitigs>()) {
-            size_t old_seed_count = 0;
-            for (const auto &[seeder, seeder_rc] : seeders) {
-                if (seeder)
-                    old_seed_count += seeder->get_seeds().size();
+        size_t old_seed_count = 0;
+        for (const auto &[seeder, seeder_rc] : seeders) {
+            if (seeder)
+                old_seed_count += seeder->get_seeds().size();
 
-                if (seeder_rc)
-                    old_seed_count += seeder_rc->get_seeds().size();
-            }
-
-            size_t new_seed_count = graph_unitigs->cluster_and_filter_seeds(*this, seeders);
-            logger->trace("Seed count:\tbefore clustering: {}\tafter clustering: {}",
-                          old_seed_count, new_seed_count);
+            if (seeder_rc)
+                old_seed_count += seeder_rc->get_seeds().size();
         }
+        size_t new_seed_count = cluster_and_filter_seeds(*this, seeders, old_seed_count);
+        logger->trace("Seed count:\tbefore clustering: {}\tafter clustering: {}",
+                      old_seed_count, new_seed_count);
     }
 
     assert(seeders.size() == seq_batch.size());

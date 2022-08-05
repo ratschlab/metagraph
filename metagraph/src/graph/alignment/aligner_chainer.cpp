@@ -1,5 +1,7 @@
 #include "aligner_chainer.hpp"
 
+#include <progress_bar.hpp>
+
 #include "dbg_aligner.hpp"
 #include "aligner_seeder_methods.hpp"
 #include "aligner_aggregator.hpp"
@@ -12,6 +14,7 @@
 #include "graph/representation/canonical_dbg.hpp"
 #include "graph/representation/rc_dbg.hpp"
 #include "graph/graph_extensions/node_rc.hpp"
+#include "graph/graph_extensions/unitigs.hpp"
 
 namespace mtg {
 namespace graph {
@@ -1177,12 +1180,193 @@ std::pair<size_t, size_t> call_alignment_chains(const IDBGAligner &aligner,
     return std::make_pair(num_extensions, num_explored_nodes);
 }
 
+template <class BatchSeeders>
+size_t cluster_and_filter_seeds(const IDBGAligner &aligner,
+                                BatchSeeders &batch_seeders,
+                                size_t old_seed_count) {
+    const DBGAlignerConfig &config = aligner.get_config();
+    const auto &align_graph = aligner.get_graph();
+    const auto *unitigs = align_graph.get_extension_threadsafe<Unitigs>();
+    if (!unitigs)
+        return old_seed_count;
+
+    std::vector<node_index> nodes;
+    for (const auto &[seeder, seeder_rc] : batch_seeders) {
+        auto parse_seeder = [&](const auto &cur_seeder) {
+            for (const auto &seed : cur_seeder.get_seeds()) {
+                nodes.emplace_back(seed.get_nodes().back());
+            }
+        };
+
+        if (seeder)
+            parse_seeder(*seeder);
+
+        if (seeder_rc)
+            parse_seeder(*seeder_rc);
+    }
+
+    common::logger->trace("Fetching unitig IDs");
+    size_t new_seed_count = 0;
+    auto coords = unitigs->get_unitig_ids_and_coordinates(nodes);
+
+    {
+        ProgressBar progress_bar(batch_seeders.size(), "Clustering and filtering seeds",
+                                 std::cerr, !common::get_verbose());
+        size_t i = 0;
+        for (auto &[seeder, seeder_rc] : batch_seeders) {
+            auto parse_seeder = [&](auto &cur_seeder) {
+                tsl::hopscotch_map<size_t, std::vector<std::pair<size_t, size_t>>> unitig_to_bucket;
+                const auto &seeds = cur_seeder->get_seeds();
+                for (size_t k = 0; k < seeds.size(); ++k) {
+                    auto [unitig_id, coord] = coords[i++];
+
+                    // ignore seeds from singleton unitigs
+                    if (!coord) {
+                        node_index node = seeds[k].get_nodes().back();
+                        if (node > unitigs->get_graph()->max_index())
+                            node -= unitigs->get_graph()->max_index();
+
+                        if (node == unitig_id)
+                            continue;
+                    }
+
+                    unitig_to_bucket[unitig_id].emplace_back(k, coord);
+                }
+
+                if (unitig_to_bucket.empty()) {
+                    cur_seeder = std::make_shared<ManualMatchingSeeder>(std::vector<Seed>{}, 0, config);
+                    return;
+                }
+
+                std::vector<Seed> filtered_seeds;
+                DEBUG_LOG("Found {} unitigs", unitig_to_bucket.size());
+                for (auto it = unitig_to_bucket.begin(); it != unitig_to_bucket.end(); ++it) {
+                    auto &bucket = it.value();
+                    if (bucket.size() == 1 && seeds[bucket[0].first].get_query_view().size() > config.min_seed_length) {
+                        filtered_seeds.emplace_back(seeds[bucket[0].first]);
+                    } else if (bucket.size() >= 2) {
+                        // look for co-linear seeds
+                        DEBUG_LOG("Chaining bucket of size {}", bucket.size());
+                        std::string_view forward;
+                        std::string_view reverse;
+                        if (seeds[bucket[0].first].get_orientation()) {
+                            reverse = std::string_view(seeds[bucket[0].first].get_query_view().data() - seeds[bucket[0].first].get_clipping(),
+                                                       seeds[bucket[0].first].get_query_view().size() + seeds[bucket[0].first].get_clipping() + seeds[bucket[0].first].get_end_clipping());
+                        } else {
+                            forward = std::string_view(seeds[bucket[0].first].get_query_view().data() - seeds[bucket[0].first].get_clipping(),
+                                                       seeds[bucket[0].first].get_query_view().size() + seeds[bucket[0].first].get_clipping() + seeds[bucket[0].first].get_end_clipping());
+                        }
+                        std::vector<Seed> seed_bucket_fwd;
+                        std::vector<Seed> seed_bucket_bwd;
+                        for (const auto &[k, coord] : bucket) {
+                            seed_bucket_fwd.emplace_back(seeds[k]);
+                            const auto &columns = seeds[k].get_columns();
+                            seed_bucket_fwd.back().label_coordinates.resize(
+                                columns.size(),
+                                Alignment::Tuple(1, coord - seeds[k].size() + 1 + seeds[k].get_offset())
+                            );
+                            DEBUG_LOG("\t{}", Alignment(seed_bucket_fwd.back(), config));
+                        }
+                        if (reverse.data())
+                            std::swap(seed_bucket_fwd, seed_bucket_bwd);
+
+                        tsl::hopscotch_set<Alignment::Column> used_labels;
+                        size_t old_filtered_size = filtered_seeds.size();
+                        call_seed_chains_both_strands(aligner,
+                                                      forward, reverse,
+                                                      config,
+                                                      std::move(seed_bucket_fwd),
+                                                      std::move(seed_bucket_bwd),
+                                                      [&](Chain&& chain, score_t) {
+                            if (chain.size() > 1 || chain[0].first.get_query_view().size() > config.min_seed_length) {
+                                filtered_seeds.emplace_back(
+                                    chain[0].first.get_query_view(),
+                                    std::vector<node_index>(chain[0].first.get_nodes()),
+                                    chain[0].first.get_orientation(),
+                                    chain[0].first.get_offset(),
+                                    chain[0].first.get_clipping(),
+                                    chain[0].first.get_end_clipping()
+                                );
+                                filtered_seeds.back().label_columns = chain[0].first.label_columns;
+                                filtered_seeds.back().label_encoder = chain[0].first.label_encoder;
+                                const auto &columns = filtered_seeds.back().get_columns();
+                                used_labels.insert(columns.begin(), columns.end());
+                            }
+
+                        }, [&](Alignment::Column c) -> bool { return used_labels.count(c); });
+                        std::sort(filtered_seeds.begin() + old_filtered_size, filtered_seeds.end(),
+                                  [](const auto &a, const auto &b) {
+                                      return std::make_pair(a.get_query_view().data(), a.get_query_view().size())
+                                        < std::make_pair(b.get_query_view().data(), b.get_query_view().size());
+                                  });
+
+                        for (size_t i = old_filtered_size + 1; i < filtered_seeds.size(); ++i) {
+                            if (filtered_seeds[i] == filtered_seeds[i - 1]) {
+                                if (filtered_seeds[i].label_encoder) {
+                                    const auto &a = filtered_seeds[i - 1].get_columns();
+                                    const auto &b = filtered_seeds[i].get_columns();
+                                    assert(filtered_seeds[i - 1].label_encoder->check_node_labels_is_superset(a, filtered_seeds[i - 1].get_nodes()));
+                                    assert(filtered_seeds[i].label_encoder->check_node_labels_is_superset(b, filtered_seeds[i].get_nodes()));
+                                    Vector<Alignment::Column> merged;
+                                    merged.reserve(a.size() + b.size());
+                                    std::set_union(a.begin(), a.end(), b.begin(), b.end(),
+                                                   std::back_inserter(merged));
+                                    assert(merged.empty()
+                                        || filtered_seeds[i].label_encoder->check_node_labels_is_superset(merged, filtered_seeds[i].get_nodes()));
+
+                                    filtered_seeds[i].label_columns
+                                        = filtered_seeds[i].label_encoder->cache_column_set(std::move(merged));
+                                }
+                                filtered_seeds[i - 1] = Seed();
+                            }
+                        }
+                        auto it = std::remove_if(filtered_seeds.begin() + old_filtered_size,
+                                                 filtered_seeds.end(),
+                                                 [](const auto &a) { return a.empty(); });
+                        filtered_seeds.erase(it, filtered_seeds.end());
+
+                    } else {
+                        // TODO: check if there are any neighboring buckets
+                    }
+                }
+
+                DEBUG_LOG("Added {} seeds", filtered_seeds.size());
+#ifndef NDEBUG
+                for (const auto &seed : filtered_seeds) {
+                    DEBUG_LOG("\t{}", Alignment(seed, config));
+                }
+#endif
+                size_t num_matches = get_num_char_matches_in_seeds(filtered_seeds.begin(), filtered_seeds.end());
+                new_seed_count += filtered_seeds.size();
+                cur_seeder = std::make_shared<ManualMatchingSeeder>(
+                    std::move(filtered_seeds), num_matches, config
+                );
+            };
+
+            if (seeder)
+                parse_seeder(seeder);
+
+            if (seeder_rc)
+                parse_seeder(seeder_rc);
+
+            ++progress_bar;
+        }
+    }
+
+    return new_seed_count;
+}
+
 template
 std::tuple<std::vector<Alignment>, size_t, size_t>
 chain_alignments<LocalAlignmentLess>(const IDBGAligner&,
                                      std::vector<Alignment>&&,
                                      std::string_view,
                                      std::string_view);
+
+template
+size_t cluster_and_filter_seeds<IDBGAligner::BatchSeeders>(const IDBGAligner&,
+                                                           IDBGAligner::BatchSeeders&,
+                                                           size_t);
 
 } // namespace align
 } // namespace graph
