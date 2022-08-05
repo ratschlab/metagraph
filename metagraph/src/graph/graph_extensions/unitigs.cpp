@@ -12,6 +12,7 @@
 #include "common/vectors/bit_vector_dyn.hpp"
 #include "annotation/annotation_converters.hpp"
 #include "graph/alignment/aligner_labeled.hpp"
+#include "graph/annotated_dbg.hpp"
 
 
 namespace mtg {
@@ -28,20 +29,24 @@ Unitigs::Unitigs(const cli::Config &config) : graph_(load_graph_impl(config.fnam
     std::vector<size_t> unitigs;
     std::vector<std::unique_ptr<bit_vector>> cols;
 
-    logger->trace("Marking dummy k-mers");
-    {
+    if (!graph_->get_mask()) {
+        logger->trace("Marking dummy k-mers");
         DBGSuccinct &ncgraph = const_cast<DBGSuccinct&>(*graph_);
         ncgraph.mask_dummy_kmers(get_num_threads(), false);
-        valid_edges_.reset(ncgraph.release_mask());
-        ProgressBar progress_bar(valid_edges_->num_set_bits(), "Transforming mask",
+        valid_nodes_.reset(ncgraph.release_mask());
+        ProgressBar progress_bar(valid_nodes_->num_set_bits(), "Transforming mask",
                                  std::cerr, !common::get_verbose());
         cols.emplace_back(std::make_unique<bit_vector_smart>([&](const auto &callback) {
-            valid_edges_->call_ones([&](node_index i) {
+            valid_nodes_->call_ones([&](node_index i) {
                 assert(i);
-                callback(i - 1);
+                callback(AnnotatedDBG::graph_to_anno_index(i));
                 ++progress_bar;
             });
-        }, ncgraph.num_nodes(), valid_edges_->num_set_bits()));
+        }, ncgraph.num_nodes(), valid_nodes_->num_set_bits()));
+    } else {
+        logger->error("Dummy mask already present in the graph. "
+                      "Support for this not implemented yet.");
+        exit(1);
     }
 
     annot::LabelEncoder<> encoder;
@@ -65,11 +70,11 @@ Unitigs::Unitigs(const cli::Config &config) : graph_(load_graph_impl(config.fnam
         if (graph_->has_single_outgoing(path.back())
                 && graph_->has_single_incoming(path.front())) {
             graph_->adjacent_outgoing_nodes(path.back(), [&](node_index next) {
-                assert(next == path.front() || !(*valid_edges_)[next]
+                assert(next == path.front() || !(*valid_nodes_)[next]
                         || graph_->indegree(next) > 1);
             });
             graph_->adjacent_incoming_nodes(path.front(), [&](node_index prev) {
-                assert(prev == path.back() || !(*valid_edges_)[prev]
+                assert(prev == path.back() || !(*valid_nodes_)[prev]
                         || graph_->outdegree(prev) > 1);
             });
         }
@@ -83,7 +88,7 @@ Unitigs::Unitigs(const cli::Config &config) : graph_(load_graph_impl(config.fnam
         counter += path.size();
         std::vector<std::pair<annot::ColumnCompressed<>::Index, uint64_t>> coords;
         for (size_t i = 0; i < path.size(); ++i) {
-            coords.emplace_back(path[i] - 1, i + unitigs.back());
+            coords.emplace_back(AnnotatedDBG::graph_to_anno_index(path[i]), i + unitigs.back());
         }
 
         colcomp->add_label_coords(coords, labels);
@@ -206,24 +211,24 @@ bool Unitigs::load(const std::string &filename_base) {
 
     switch (graph_->get_state()) {
         case boss::BOSS::State::STAT: {
-            valid_edges_.reset(new bit_vector_small());
+            valid_nodes_.reset(new bit_vector_small());
             break;
         }
         case boss::BOSS::State::FAST: {
-            valid_edges_.reset(new bit_vector_stat());
+            valid_nodes_.reset(new bit_vector_stat());
             break;
         }
         case boss::BOSS::State::DYN: {
-            valid_edges_.reset(new bit_vector_dyn());
+            valid_nodes_.reset(new bit_vector_dyn());
             break;
         }
         case boss::BOSS::State::SMALL: {
-            valid_edges_.reset(new bit_vector_small());
+            valid_nodes_.reset(new bit_vector_small());
             break;
         }
     }
 
-    if (!valid_edges_->load(fin))
+    if (!valid_nodes_->load(fin))
         return false;
 
     try {
@@ -240,7 +245,7 @@ void Unitigs::serialize(const std::string &filename_base) const {
     std::string fname = utils::make_suffix(filename_base, kUnitigsExtension);
     std::ofstream fout(fname, std::ios::binary);
     unitigs_.serialize(fout);
-    valid_edges_->serialize(fout);
+    valid_nodes_->serialize(fout);
     boundaries_.serialize(fout);
     indicator_.serialize(fout);
 }
@@ -295,11 +300,8 @@ std::vector<size_t> Unitigs::get_unitig_ids(const std::vector<node_index> &nodes
             }
         }
 
-        if (unitig_id == std::numeric_limits<size_t>::max()) {
-            results.emplace_back(nodes[i] > graph_->max_index()
-                                     ? nodes[i] - graph_->max_index()
-                                     : nodes[i]);
-        }
+        if (unitig_id == std::numeric_limits<size_t>::max())
+            results.emplace_back(get_base_node(nodes[i]));
     }
 
     return results;
@@ -325,20 +327,14 @@ auto Unitigs::get_unitig_ids_and_coordinates(const std::vector<node_index> &node
                 if (coordinates[0].second.size()) {
                     assert(coordinates[0].second.size() == 1);
                     unitig_id = indicator_.rank1(coordinates[0].second[0]);
-                    results.emplace_back(
-                        unitig_id + unitig_id_offset,
-                        indicator_.select1(unitig_id) - coordinates[0].second[0]
-                    );
+                    results.emplace_back(unitig_id + unitig_id_offset,
+                                         coordinates[0].second[0]);
                 }
             }
         }
 
-        if (unitig_id == std::numeric_limits<size_t>::max()) {
-            results.emplace_back(nodes[i] > graph_->max_index()
-                                     ? nodes[i] - graph_->max_index()
-                                     : nodes[i],
-                                 0);
-        }
+        if (unitig_id == std::numeric_limits<size_t>::max())
+            results.emplace_back(get_base_node(nodes[i]), 0);
     }
 
     return results;
@@ -356,17 +352,22 @@ Unitigs::nodes_to_rows(const std::vector<node_index> &nodes) const {
     sdsl::bit_vector indicator(nodes.size(), false);
     std::vector<uint64_t> rows;
     for (size_t i = 0; i < nodes.size(); ++i) {
-        node_index node = nodes[i];
-        if (node > graph_->max_index())
-            node -= graph_->max_index();
+        node_index node = get_base_node(nodes[i]);
 
-        if ((*valid_edges_)[graph_->kmer_to_boss_index(node)]) {
+        if ((*valid_nodes_)[graph_->kmer_to_boss_index(node)]) {
             indicator[i] = true;
-            rows.emplace_back(node - 1);
+            rows.emplace_back(AnnotatedDBG::graph_to_anno_index(node));
         }
     }
 
     return std::make_pair(std::move(indicator), std::move(rows));
+}
+
+auto Unitigs::get_base_node(node_index node) const -> node_index {
+    if (node > graph_->max_index())
+        return node - graph_->max_index();
+
+    return node;
 }
 
 } // namespace align

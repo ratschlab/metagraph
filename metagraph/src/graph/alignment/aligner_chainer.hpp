@@ -36,9 +36,9 @@ chain_alignments(const IDBGAligner &aligner,
                  std::string_view query_rc);
 
 template <class BatchSeeders>
-size_t cluster_and_filter_seeds(const IDBGAligner &aligner,
-                                BatchSeeders &batch_seeders,
-                                size_t old_seed_count);
+size_t cluster_seeds(const IDBGAligner &aligner,
+                     BatchSeeders &batch_seeders,
+                     size_t old_seed_count);
 
 } // namespace align
 } // namespace graph

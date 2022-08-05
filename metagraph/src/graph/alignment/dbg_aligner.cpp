@@ -456,7 +456,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
             if (seeder_rc)
                 old_seed_count += seeder_rc->get_seeds().size();
         }
-        size_t new_seed_count = cluster_and_filter_seeds(*this, seeders, old_seed_count);
+        size_t new_seed_count = cluster_seeds(*this, seeders, old_seed_count);
         logger->trace("Seed count:\tbefore clustering: {}\tafter clustering: {}",
                       old_seed_count, new_seed_count);
     }
