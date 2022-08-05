@@ -13,6 +13,7 @@
 #include "annotation/annotation_converters.hpp"
 #include "graph/alignment/aligner_labeled.hpp"
 #include "graph/annotated_dbg.hpp"
+#include "common/threads/threading.hpp"
 
 
 namespace mtg {
@@ -62,6 +63,8 @@ Unitigs::Unitigs(const cli::Config &config) : graph_(load_graph_impl(config.fnam
     std::mutex mu;
     size_t counter = 0;
     size_t max_unitig = 0;
+
+    ThreadPool pool(1);
     graph_->call_unitigs([&](const std::string&, const auto &path) {
         if (path.size() == 1)
             return;
@@ -80,19 +83,26 @@ Unitigs::Unitigs(const cli::Config &config) : graph_(load_graph_impl(config.fnam
         }
 #endif
 
-        std::lock_guard<std::mutex> lock(mu);
-        unitigs.emplace_back(path.front());
-        unitigs.emplace_back(path.back());
-        unitigs.emplace_back(counter);
-        max_unitig = std::max({ path.front(), path.back(), max_unitig });
-        counter += path.size();
+        {
+            std::lock_guard<std::mutex> lock(mu);
+            unitigs.emplace_back(path.front());
+            unitigs.emplace_back(path.back());
+            unitigs.emplace_back(counter);
+            max_unitig = std::max({ path.front(), path.back(), max_unitig });
+            counter += path.size();
+        }
+
         std::vector<std::pair<annot::ColumnCompressed<>::Index, uint64_t>> coords;
         for (size_t i = 0; i < path.size(); ++i) {
             coords.emplace_back(AnnotatedDBG::graph_to_anno_index(path[i]), i + unitigs.back());
         }
 
-        colcomp->add_label_coords(coords, labels);
-    });
+        pool.enqueue([&colcomp,&labels,c=std::move(coords)]() {
+            colcomp->add_label_coords(c, labels);
+        });
+    }, get_num_threads());
+
+    pool.join();
 
     logger->trace("Initializing unitig vector");
     size_t num_unitigs = unitigs.size() / 3;

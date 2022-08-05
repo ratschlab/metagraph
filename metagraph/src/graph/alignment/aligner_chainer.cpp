@@ -1101,8 +1101,8 @@ size_t cluster_seeds(const IDBGAligner &aligner,
             }
 
             std::vector<Seed> filtered_seeds;
-            if (unitig_to_bucket.size() == 1) {
-                auto &bucket = unitig_to_bucket.begin().value();
+            auto process_bucket = [&](auto bucket_it) {
+                auto &bucket = bucket_it.value();
                 const auto &first_seed = seeds[bucket[0].first];
                 if (bucket.size() == 1) {
                     if (first_seed.get_query_view().size() > config.min_seed_length)
@@ -1187,9 +1187,43 @@ size_t cluster_seeds(const IDBGAligner &aligner,
                     filtered_seeds.erase(it, filtered_seeds.end());
 
                 }
+            };
+
+            if (unitig_to_bucket.size() == 1) {
+                process_bucket(unitig_to_bucket.begin());
+
             } else {
                 // form a bucket forest, define coordinates accordingly
-                throw std::runtime_error("not implemented");
+                std::vector<std::pair<std::vector<size_t>, std::vector<size_t>>> neighbors(unitig_to_bucket.size());
+                size_t max_degree = 0;
+                auto it = neighbors.begin();
+                for (const auto &[unitig_id, bucket] : unitig_to_bucket) {
+                    auto &[pred, succ] = *it;
+                    // TODO: find path that leads to other unitigs
+                    unitigs->adjacent_outgoing_unitigs(unitig_id, [&](size_t next) {
+                        if (unitig_to_bucket.count(next))
+                            succ.emplace_back(next);
+                    });
+                    unitigs->adjacent_incoming_unitigs(unitig_id, [&](size_t prev) {
+                        if (unitig_to_bucket.count(prev))
+                            pred.emplace_back(prev);
+                    });
+                    max_degree = std::max({ max_degree, pred.size(), succ.size() });
+                    ++it;
+                }
+
+                if (!max_degree) {
+                    // unitigs are disconnected, process each one separately
+                    for (auto it = unitig_to_bucket.begin(); it != unitig_to_bucket.end(); ++it) {
+                        process_bucket(it);
+                    }
+                } else if (max_degree == 1) {
+                    // there are linear chains of unitigs
+                    throw std::runtime_error("not implemented (linear)");
+                } else {
+                    // there is a graph of unitigs, now it gets complicated
+                    throw std::runtime_error("not implemented (graph)");
+                }
             }
 
             DEBUG_LOG("Added back {} seeds", filtered_seeds.size());
