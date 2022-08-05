@@ -23,11 +23,14 @@ namespace graph {
 namespace align {
 
 class AnnotationBuffer;
+class Alignment;
 
 // Note: this object stores pointers to the query sequence, so it is the user's
 //       responsibility to ensure that the query sequence is not destroyed when
 //       calling this class' methods
 class Seed {
+    friend Alignment;
+
   public:
     typedef DeBruijnGraph::node_index node_index;
     typedef annot::binmat::BinaryMatrix::Column Column;
@@ -105,6 +108,8 @@ class Seed {
     size_t offset_;
     Cigar::LengthType clipping_;
     Cigar::LengthType end_clipping_;
+
+    static const Vector<Column> no_labels_;
 };
 
 template <class It>

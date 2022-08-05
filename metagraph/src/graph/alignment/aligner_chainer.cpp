@@ -1243,11 +1243,13 @@ size_t cluster_seeds(const IDBGAligner &aligner,
                     std::vector<Seed> seed_bucket_bwd;
                     for (const auto &[k, coord] : bucket) {
                         seed_bucket_fwd.emplace_back(seeds[k]);
-                        const auto &columns = seeds[k].get_columns();
-                        seed_bucket_fwd.back().label_coordinates.resize(
-                            columns.size(),
-                            Alignment::Tuple(1, coord - seeds[k].size() + 1 + seeds[k].get_offset())
-                        );
+                        if (seeds[k].label_columns) {
+                            const auto &columns = seeds[k].get_columns();
+                            seed_bucket_fwd.back().label_coordinates.resize(
+                                columns.size(),
+                                Alignment::Tuple(1, coord - seeds[k].size() + 1 + seeds[k].get_offset())
+                            );
+                        }
                         DEBUG_LOG("\t{}", Alignment(seed_bucket_fwd.back(), config));
                     }
 

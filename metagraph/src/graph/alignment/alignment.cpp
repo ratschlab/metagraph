@@ -16,6 +16,8 @@ namespace align {
 
 using mtg::common::logger;
 
+const Vector<Seed::Column> Seed::no_labels_ { 0 };
+
 std::string Alignment::format_coords() const {
     if (!label_coordinates.size())
         return "";
@@ -76,14 +78,18 @@ void Alignment::set_columns(Vector<Column>&& columns) {
 }
 
 auto Seed::get_columns() const -> const Vector<Column>& {
-    assert(label_encoder);
+    if (!label_encoder)
+        return no_labels_;
+
     return label_encoder->get_cached_column_set(label_columns);
 }
 
 auto Alignment::get_columns(size_t path_i) const -> const Vector<Column>& {
+    if (!label_encoder)
+        return Seed::no_labels_;
+
     assert(path_i < nodes_.size());
     assert(label_column_diffs.empty() || label_column_diffs.size() == nodes_.size() - 1);
-    assert(label_encoder);
     return label_encoder->get_cached_column_set(!path_i || label_column_diffs.empty()
         ? label_columns
         : label_column_diffs[path_i - 1]
@@ -91,8 +97,10 @@ auto Alignment::get_columns(size_t path_i) const -> const Vector<Column>& {
 }
 
 auto Alignment::get_column_union() const -> Vector<Column> {
+    if (!label_encoder)
+        return Seed::no_labels_;
+
     assert(label_column_diffs.empty() || label_column_diffs.size() == nodes_.size() - 1);
-    assert(label_encoder);
     Vector<Column> ret_val = label_encoder->get_cached_column_set(label_columns);
     for (size_t diff : label_column_diffs) {
         if (!diff)
