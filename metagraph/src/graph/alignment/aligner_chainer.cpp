@@ -7,7 +7,6 @@
 #include "aligner_labeled.hpp"
 
 #include "common/aligned_vector.hpp"
-#include "common/algorithms.hpp"
 
 namespace mtg {
 namespace graph {
