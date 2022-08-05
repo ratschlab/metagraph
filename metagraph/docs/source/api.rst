@@ -93,6 +93,8 @@ Additionally, the method accepts the following keyword arguments:
 Examples
 --------
 
+.. _install metasub example:
+
 Example of search in MetaSUB
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 ::
@@ -191,6 +193,24 @@ be instances of ``pandas.DataFrame``.
     # You can either handle the Future instances yourself
     # or block and wait for all of the results
     result = MultiGraphClient.wait_for_result(futures)
+
+
+Query a locally hosted index
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+When an index is hosted locally, say on address ``localhost`` and ``5555``, the API client can
+connect to it as follows::
+
+    from metagraph.client import GraphClient
+
+    graph_client = GraphClient('127.0.0.1', 5555, api_path='')
+
+Since in this case requests directly go to the MetaGraph engine without being forwarded via an intermediate HTTP server,
+the `api_path` flag should be omitted. (Compare this to the :ref:`example above <install metasub example>`).
+
+Before initializing a client and initiating a connection, a search engine (the main MetaGraph app)
+must be started to load up an index for query. This can be done, for instance, as follows::
+
+    metagraph server_query -v -i graph.dbg -a annotation.row_diff_brwt.annodbg --port 5555 -p 10
 
 
 Other examples

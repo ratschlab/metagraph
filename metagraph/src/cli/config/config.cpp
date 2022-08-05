@@ -251,7 +251,7 @@ Config::Config(int argc, char *argv[]) {
         } else if (!strcmp(argv[i], "--align-post-chain")) {
             alignment_post_chain = true;
         } else if (!strcmp(argv[i], "--align-no-seed-complexity-filter")) {
-            alignment_no_seed_complexity_filter = true;
+            alignment_seed_complexity_filter = false;
         } else if (!strcmp(argv[i], "--align-label-change-union")) {
             alignment_label_change_union = true;
         } else if (!strcmp(argv[i], "--max-hull-depth")) {
@@ -1040,11 +1040,11 @@ if (advanced) {
             fprintf(stderr, "\t         \t\t\t\t\t\tA '$' inserted into the reference sequence indicates a jump in the graph.\n");
             fprintf(stderr, "\t         \t\t\t\t\t\tA 'G' in the reported CIGAR string indicates inserted graph nodes.\n");
 if (advanced) {
-            fprintf(stderr, "\t   --align-min-path-score [INT]\t\t\tthe minimum score that a reported path can have [0]\n");
+            fprintf(stderr, "\t   --align-min-path-score [INT]\t\t\tmin score that a reported path can have [0]\n");
             fprintf(stderr, "\t   --align-max-nodes-per-seq-char [FLOAT]\tmaximum number of nodes to consider per sequence character [5.0]\n");
             fprintf(stderr, "\t   --align-max-ram [FLOAT]\t\t\tmaximum amount of RAM used per alignment in MB [200.0]\n");
 }
-            fprintf(stderr, "\t   --align-xdrop [INT]\t\t\t\tthe maximum difference between the current score and the best alignment score [27, 100 if chaining is enabled]\n");
+            fprintf(stderr, "\t   --align-xdrop [INT]\t\t\t\tmaximum difference between the current score and the best alignment score [27, 100 if chaining is enabled]\n");
             fprintf(stderr, "\t   \t\t\t\t\t\t\tNote that this parameter should be scaled accordingly when changing the default scoring parameters.\n");
             fprintf(stderr, "\t   --align-rel-score-cutoff [FLOAT]\t\tmin score relative to the current best alignment to use as a lower bound for subsequent extensions [0.8]\n");
             fprintf(stderr, "\n");
@@ -1059,11 +1059,11 @@ if (advanced) {
             fprintf(stderr, "\t   --align-label-change-score [INT] \t\tfallback score for changing labels during an alignment [-inf]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "Advanced options for seeding:\n");
-            fprintf(stderr, "\t   --align-min-seed-length [INT]\t\tthe minimum length of a seed [19]\n");
-            fprintf(stderr, "\t   --align-max-seed-length [INT]\t\tthe maximum length of a seed [graph k]\n");
+            fprintf(stderr, "\t   --align-min-seed-length [INT]\t\tmin length of a seed [19]\n");
+            fprintf(stderr, "\t   --align-max-seed-length [INT]\t\tmax length of a seed [graph k]\n");
 if (advanced) {
-            fprintf(stderr, "\t   --align-min-exact-match [FLOAT] \t\tfraction of matching nucleotides required to align sequence [0.76]\n");
-            fprintf(stderr, "\t   --align-max-num-seeds-per-locus [INT]\tthe maximum number of allowed inexact seeds per locus [100]\n");
+            fprintf(stderr, "\t   --align-min-exact-match [FLOAT] \t\tfraction of matching nucleotides required to align sequence [0.7]\n");
+            fprintf(stderr, "\t   --align-max-num-seeds-per-locus [INT]\tmaximum number of allowed inexact seeds per locus [1000]\n");
 }
         } break;
         case COMPARE: {
@@ -1282,20 +1282,34 @@ if (advanced) {
 }
             fprintf(stderr, "\t   --json \t\toutput query results in JSON format [off]\n");
             fprintf(stderr, "\n");
-            fprintf(stderr, "\t   --count-labels \t\tcount labels for k-mers from querying sequences [off]\n");
+            // TODO: remove flag `--count-labels` (do always)?
+            fprintf(stderr, "\t   --count-labels \t\tprint number of k-mer matches for every label with enough matches [off]\n");
+if (advanced) {
             fprintf(stderr, "\t   --count-kmers \t\tweight k-mers with their annotated counts (requires count annotation) [off]\n");
-            fprintf(stderr, "\t   --count-quantiles [FLOAT ...] \tk-mer count quantiles to compute for each label [off]\n"
+}
+            fprintf(stderr, "\t   --count-quantiles ['FLOAT ...'] \tprint k-mer count quantiles (requires count or coord annotation) [off]\n"
                             "\t                                 \t\tExample: --count-quantiles '0 0.33 0.5 0.66 1'\n"
-                            "\t                                 \t\t(0 corresponds to MIN, 1 corresponds to MAX)\n");
-            fprintf(stderr, "\t   --query-counts \t\tquery k-mer counts (requires count or coord annotation) [off]\n");
-            fprintf(stderr, "\t   --query-coords \t\tquery k-mer coordinates (requires coord annotation) [off]\n");
-            fprintf(stderr, "\t   --verbose-output \t\tdo not collapse continuous coord or count ranges (for query-coords and query-counts) [off]\n");
+                            "\t                                 \t\t(0 corresponds to MIN, 1 corresponds to MAX)\n"
+                            "\t                                 \t\tRequires count or coord annotation\n");
+            fprintf(stderr, "\t   --query-counts \t\tprint k-mer counts (requires count or coord annotation) [off]\n"
+                            "\t                  \t\t\tOutput format: '<pos in query>=<abundance>' (single k-mer match)\n"
+                            "\t                  \t\t\t    or '<first pos>-<last pos>=<abundance>' (segment match)\n"
+                            "\t                  \t\t\tAll positions start with 0\n");
+            fprintf(stderr, "\t   --query-coords \t\tprint k-mer coordinates (requires coord annotation) [off]\n"
+                            "\t                  \t\t\tOutput format: '<pos in query>-<pos in sample>' (single k-mer match)\n"
+                            "\t                  \t\t\t    or '<start pos in query>-<first pos in sample>-<last pos in sample>' (segment match)\n"
+                            "\t                  \t\t\tAll positions start with 0\n");
             fprintf(stderr, "\t   --print-signature \t\tprint vectors indicating present/absent k-mers [off]\n");
-            fprintf(stderr, "\t   --num-top-labels [INT] \tmaximum number of frequent labels to print [inf]\n");
-            fprintf(stderr, "\t   --discovery-fraction [FLOAT] fraction of labeled k-mers required for annotation [0.7]\n");
-            fprintf(stderr, "\t   --presence-fraction [FLOAT] \tfraction of k-mers required to be present in the graph [0.0]\n");
+if (advanced) {
+            fprintf(stderr, "\t   --verbose-output \t\tdo not collapse continuous coord or count ranges (for query-coords and query-counts) [off]\n");
+}
+            fprintf(stderr, "\t   --num-top-labels [INT] \tmaximum number of top labels to output [inf]\n");
+            fprintf(stderr, "\t   --discovery-fraction [FLOAT] min fraction of k-mers from the query required to be present in a label [0.7]\n");
+            fprintf(stderr, "\t   --presence-fraction [FLOAT] \tmin fraction of k-mers from the query required to be present in the graph [0.0]\n");
+if (advanced) {
             fprintf(stderr, "\t   --labels-delimiter [STR]\tdelimiter for annotation labels [\":\"]\n");
             fprintf(stderr, "\t   --suppress-unlabeled \tdo not show results for sequences missing in graph [off]\n");
+}
             // fprintf(stderr, "\t-d --distance [INT] \tmax allowed alignment distance [0]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
@@ -1304,32 +1318,42 @@ if (advanced) {
             fprintf(stderr, "\t   --batch-size \tquery batch size (number of base pairs) [100000000]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "Available options for --align:\n");
+if (advanced) {
             fprintf(stderr, "\t   --align-only-forwards \t\t\tdo not align backwards from a seed on basic-mode graphs [off]\n");
+}
             // fprintf(stderr, "\t   --align-alternative-alignments \tthe number of alternative paths to report per seed [1]\n");
-            fprintf(stderr, "\t   --align-min-path-score [INT]\t\t\tthe minimum score that a reported path can have [0]\n");
+            fprintf(stderr, "\t   --align-min-path-score [INT]\t\t\tmin score that a reported path can have [0]\n");
+if (advanced) {
             fprintf(stderr, "\t   --align-max-nodes-per-seq-char [FLOAT]\tmaximum number of nodes to consider per sequence character [5.0]\n");
             fprintf(stderr, "\t   --align-max-ram [FLOAT]\t\t\tmaximum amount of RAM used per alignment in MB [200.0]\n");
-            fprintf(stderr, "\t   --align-xdrop [INT]\t\t\t\tthe maximum difference between the current score and the best alignment score [27, 100 if chaining is enabled]\n");
+}
+            fprintf(stderr, "\t   --align-xdrop [INT]\t\t\t\tmaximum difference between the current score and the best alignment score [27, 100 if chaining is enabled]\n");
             fprintf(stderr, "\t   \t\t\t\t\t\t\tNote that this parameter should be scaled accordingly when changing the default scoring parameters.\n");
             fprintf(stderr, "\n");
+if (advanced) {
             fprintf(stderr, "\t   --batch-align \t\talign against query graph [off]\n");
             fprintf(stderr, "\t   --max-hull-forks [INT]\tmaximum number of forks to take when expanding query graph [4]\n");
             fprintf(stderr, "\t   --max-hull-depth [INT]\tmaximum number of steps to traverse when expanding query graph [max_nodes_per_seq_char * max_seq_len]\n");
             fprintf(stderr, "\n");
+}
             fprintf(stderr, "Advanced options for scoring:\n");
             fprintf(stderr, "\t   --align-match-score [INT]\t\t\tpositive match score [2]\n");
             fprintf(stderr, "\t   --align-mm-transition-penalty [INT]\t\tpositive transition penalty (DNA only) [3]\n");
             fprintf(stderr, "\t   --align-mm-transversion-penalty [INT]\tpositive transversion penalty (DNA only) [3]\n");
             fprintf(stderr, "\t   --align-gap-open-penalty [INT]\t\tpositive gap opening penalty [6]\n");
             fprintf(stderr, "\t   --align-gap-extension-penalty [INT]\t\tpositive gap extension penalty [2]\n");
+if (advanced) {
             fprintf(stderr, "\t   --align-end-bonus [INT]\t\tscore bonus for each endpoint of the query covered by an alignment [5]\n");
             fprintf(stderr, "\t   --align-edit-distance \t\t\tuse unit costs for scoring matrix [off]\n");
+}
             fprintf(stderr, "\n");
             fprintf(stderr, "Advanced options for seeding:\n");
-            fprintf(stderr, "\t   --align-min-seed-length [INT]\t\tthe minimum length of a seed [19]\n");
-            fprintf(stderr, "\t   --align-max-seed-length [INT]\t\tthe maximum length of a seed [graph k]\n");
-            fprintf(stderr, "\t   --align-min-exact-match [FLOAT]\t\tfraction of matching nucleotides required to align sequence [0.76]\n");
-            fprintf(stderr, "\t   --align-max-num-seeds-per-locus [INT]\tthe maximum number of allowed inexact seeds per locus [100]\n");
+            fprintf(stderr, "\t   --align-min-seed-length [INT]\t\tmin length of a seed [19]\n");
+            fprintf(stderr, "\t   --align-max-seed-length [INT]\t\tmax length of a seed [graph k]\n");
+            fprintf(stderr, "\t   --align-min-exact-match [FLOAT]\t\tfraction of matching nucleotides required to align sequence [0.7]\n");
+if (advanced) {
+            fprintf(stderr, "\t   --align-max-num-seeds-per-locus [INT]\tmaximum number of allowed inexact seeds per locus [1000]\n");
+}
         } break;
         case SERVER_QUERY: {
             fprintf(stderr, "Usage: %s server_query -i <GRAPH> -a <ANNOTATION> [options]\n\n", prog_name.c_str());

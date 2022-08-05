@@ -1351,7 +1351,7 @@ TYPED_TEST(DBGAlignerTest, align_low_similarity3) {
     for (bool seed_complexity_filter : { false, true }) {
         DBGAlignerConfig config;
         config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
-        config.no_seed_complexity_filter = !seed_complexity_filter;
+        config.seed_complexity_filter = seed_complexity_filter;
         DBGAligner<> aligner(*graph, config);
         auto paths = aligner.align(query);
 #if ! _PROTEIN_GRAPH

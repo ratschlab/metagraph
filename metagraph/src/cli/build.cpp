@@ -103,6 +103,10 @@ int build_graph(Config *config) {
         graph.reset(new DBGBitmap(config->k, config->graph_mode));
 
     } else if (config->graph_type == Config::GraphType::SUCCINCT && !config->dynamic) {
+        if (config->k < 2) {
+            logger->error("For succinct graphs, k must be at least 2");
+            exit(1);
+        }
         auto boss_graph = std::make_unique<boss::BOSS>(config->k - 1);
 
         logger->trace("Start reading data and extracting k-mers");
@@ -170,11 +174,11 @@ int build_graph(Config *config) {
         if (config->inplace) {
             if (config->mark_dummy_kmers) {
                 logger->warn("Graph is being constructed in-place, dummy k-mers will"
-                             " not be marked. Run \'transform --clear-dummy\' manually after construction.");
+                             " not be marked. Run `metagraph transform --clear-dummy` manually after construction.");
             }
             if (config->node_suffix_length) {
                 logger->warn("Graph is being constructed in-place, k-mer suffixes will"
-                             " not be indexed. Run \'transform --index-ranges ...\' manually after construction.");
+                             " not be indexed. Run `metagraph transform --index-ranges ...` manually after construction.");
             }
             DBGSuccinct::serialize(std::move(graph_data), config->outfbase,
                                    config->graph_mode, config->state);

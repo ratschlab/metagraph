@@ -53,6 +53,7 @@ struct DBGAlignerConfig {
     bool allow_left_trim = true;
     bool no_backtrack = false;
     bool no_seed_complexity_filter = false;
+    bool seed_complexity_filter = true;
     bool label_change_union = false;
 
     bool alignment_edit_distance;

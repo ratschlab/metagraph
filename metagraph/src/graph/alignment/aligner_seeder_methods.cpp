@@ -81,7 +81,7 @@ auto ExactSeeder::get_seeds() const -> std::vector<Seed> {
         if (query_nodes_[i] != DeBruijnGraph::npos) {
             assert(i + k <= query_.size());
             std::string_view query_window = query_.substr(i, k);
-            if (config_.no_seed_complexity_filter || !is_low_complexity(query_window)) {
+            if (!config_.seed_complexity_filter || !is_low_complexity(query_window)) {
                 seeds.emplace_back(query_window,
                                    std::vector<node_index>{ query_nodes_[i] },
                                    orientation_, 0, i, end_clipping);
@@ -153,7 +153,7 @@ void append_range_nodes(const DBGSuccinct &dbg_succ,
                         size_t min_seed_length,
                         size_t max_seed_length,
                         size_t max_num_seeds_per_locus,
-                        bool no_seed_complexity_filter,
+                        bool seed_complexity_filter,
                         std::string_view query,
                         const std::function<void(size_t, size_t, node_index)> &callback,
                         const CanonicalDBG *canonical,
@@ -205,7 +205,7 @@ void append_range_nodes(const DBGSuccinct &dbg_succ,
 
             if (range.second - range.first + 1 <= max_num_seeds_per_locus) {
                 std::string_view query_window(query.data() + j, length);
-                if (no_seed_complexity_filter || !is_low_complexity(query_window)) {
+                if (!seed_complexity_filter || !is_low_complexity(query_window)) {
                     if (!canonical) {
                         call_ones(boss.get_last(), range.first, range.second + 1,
                                   [&](edge_index edge) {
@@ -308,7 +308,7 @@ void SuffixSeeder<BaseSeeder>
     append_range_nodes(dbg_succ, this->config_.min_seed_length,
                        this->config_.max_seed_length,
                        this->config_.max_num_seeds_per_locus,
-                       this->config_.no_seed_complexity_filter, this->query_, add_seed,
+                       this->config_.seed_complexity_filter, this->query_, add_seed,
                        nullptr, sample_boss, matching_ranges);
 
     if (const auto *canonical = dynamic_cast<const CanonicalDBG*>(&this->graph_)) {
@@ -318,7 +318,7 @@ void SuffixSeeder<BaseSeeder>
         append_range_nodes(dbg_succ, this->config_.min_seed_length,
                            this->config_.max_seed_length,
                            this->config_.max_num_seeds_per_locus,
-                           this->config_.no_seed_complexity_filter, query_rc,
+                           this->config_.seed_complexity_filter, query_rc,
                            add_seed, canonical, sample_boss, matching_ranges);
     }
 

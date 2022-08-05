@@ -17,6 +17,7 @@
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/succinct/boss_construct.hpp"
 #include "graph/graph_extensions/unitigs.hpp"
+#include "graph/graph_extensions/node_rc.hpp"
 #include "seq_io/sequence_io.hpp"
 #include "config/config.hpp"
 #include "load/load_graph.hpp"
@@ -181,6 +182,7 @@ Json::Value SeqSearchResult::to_json(bool verbose_output,
 
         // Alignment metrics
         root[SCORE_JSON_FIELD] = Json::Value(alignment_->score);
+        root[MAX_SCORE_JSON_FIELD] = Json::Value(alignment_->max_score);
         root[CIGAR_JSON_FIELD] = Json::Value(alignment_->cigar);
         root[ORIENTATION_JSON_FIELD] = Json::Value(alignment_->orientation);
     }
@@ -1154,6 +1156,20 @@ int query_graph(Config *config) {
         }
     }
 
+    if (auto dbg_succ = std::dynamic_pointer_cast<DBGSuccinct>(graph)) {
+        if (config->align_sequences && dbg_succ->get_mode() == DeBruijnGraph::PRIMARY) {
+            auto node_rc = std::make_shared<NodeRC>(*dbg_succ);
+            if (node_rc->load(config->infbase)) {
+                logger->trace("Loaded the adj-rc index (adjacent to reverse-complement nodes)");
+                dbg_succ->add_extension(node_rc);
+            } else {
+                logger->warn("adj-rc index missing or failed to load. "
+                             "Alignment speed will be significantly slower. "
+                             "Run `metagraph transform --adj-rc ...` to generate the adj-rc index.");
+            }
+        }
+    }
+
     std::unique_ptr<AnnotatedDBG> anno_graph = initialize_annotated_dbg(graph, *config);
     if (graph_unitigs)
         const_cast<DeBruijnGraph&>(anno_graph->get_graph()).add_extension(graph_unitigs);
@@ -1168,7 +1184,7 @@ int query_graph(Config *config) {
                 && "only the best alignment is used in query");
 
         aligner_config.reset(new align::DBGAlignerConfig(
-            initialize_aligner_config(*config)
+            initialize_aligner_config(*config, *graph)
         ));
     }
 
@@ -1217,7 +1233,11 @@ Alignment align_sequence(std::string *seq,
                          const AnnotatedDBG &anno_graph,
                          const align::DBGAlignerConfig &aligner_config) {
     const DeBruijnGraph &graph = anno_graph.get_graph();
-    auto alignments = align::DBGAligner(graph, aligner_config).align(*seq);
+    align::DBGAligner aligner(graph, aligner_config);
+    const align::DBGAlignerConfig &revised_config = aligner.get_config();
+    align::DBGAlignerConfig::score_t max_score = revised_config.match_score(*seq)
+        + revised_config.left_end_bonus + revised_config.right_end_bonus;
+    auto alignments = aligner.align(*seq);
 
     assert(alignments.size() <= 1 && "Only the best alignment is needed");
 
@@ -1231,11 +1251,9 @@ Alignment align_sequence(std::string *seq,
             *seq = match.get_sequence();
         }
 
-        return { match.get_score(), match.get_cigar().to_string(), match.get_orientation() };
+        return { match.get_score(), max_score, match.get_cigar().to_string(), match.get_orientation() };
     } else {
-        size_t seq_length = seq->length();
-        *seq = "";
-        return { 0, fmt::format("{}S", seq_length), false };
+        return { 0, max_score, fmt::format("{}S", seq->length()), false };
     }
 }
 

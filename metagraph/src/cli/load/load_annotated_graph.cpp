@@ -21,7 +21,8 @@ using mtg::common::logger;
 
 
 std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnGraph> graph,
-                                                       const Config &config) {
+                                                       const Config &config,
+                                                       size_t max_chunks_open) {
     uint64_t max_index = graph->max_index();
     const auto *dbg_graph = dynamic_cast<const DBGSuccinct*>(graph.get());
 
@@ -31,8 +32,8 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
     }
 
     auto annotation_temp = config.infbase_annotators.size()
-            ? initialize_annotation(config.infbase_annotators.at(0), config, 0)
-            : initialize_annotation(config.anno_type, config, max_index);
+            ? initialize_annotation(config.infbase_annotators.at(0), config, 0, max_chunks_open)
+            : initialize_annotation(config.anno_type, config, max_index, max_chunks_open);
 
     if (config.infbase_annotators.size()) {
         bool loaded = false;

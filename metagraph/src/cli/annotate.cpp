@@ -83,9 +83,8 @@ void call_annotations(const std::string &file,
 
                 if (logger->level() <= spdlog::level::level_enum::trace
                                                 && total_seqs % 10000 == 0) {
-                    logger->trace(
-                        "processed {} sequences, trying to annotate as <{}>, {} sec",
-                        total_seqs, fmt::join(labels, "><"), timer.elapsed());
+                    logger->trace("processed {} sequences, annotated as <{}>, {} sec",
+                                  total_seqs, fmt::join(labels, "><"), timer.elapsed());
                 }
             },
             graph.get_mode() != graph::DeBruijnGraph::CANONICAL, // |call_both_from_canonical|
@@ -117,7 +116,7 @@ void call_annotations(const std::string &file,
 
                 if (logger->level() <= spdlog::level::level_enum::trace
                                                 && total_seqs % 10000 == 0) {
-                    logger->trace("processed {} sequences, last was {}, trying to annotate as <{}>, {} sec",
+                    logger->trace("processed {} sequences, last was {}, annotated as <{}>, {} sec",
                                   total_seqs, read_stream->name.s, fmt::join(labels, "><"), timer.elapsed());
                 }
 
@@ -191,7 +190,7 @@ void add_kmer_counts(const std::string &file,
 
             if (logger->level() <= spdlog::level::level_enum::trace
                                             && total_seqs % 10000 == 0) {
-                logger->trace("processed {} sequences, last was {}, trying to annotate as <{}>, {} sec",
+                logger->trace("processed {} sequences, last was {}, annotated as <{}>, {} sec",
                               total_seqs, read_stream->name.s, fmt::join(labels, "><"), timer.elapsed());
             }
 
@@ -204,8 +203,9 @@ void add_kmer_counts(const std::string &file,
 void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                    const Config &config,
                    const std::vector<std::string> &files,
-                   const std::string &annotator_filename) {
-    auto anno_graph = initialize_annotated_dbg(graph, config);
+                   const std::string &annotator_filename,
+                   size_t num_chunks_open = 2000) {
+    auto anno_graph = initialize_annotated_dbg(graph, config, num_chunks_open);
     const size_t k = anno_graph->get_graph().get_k();
 
     bool forward_and_reverse = config.forward_and_reverse;
@@ -450,7 +450,7 @@ void annotate_coordinates(const std::vector<std::string> &files,
 
                     if (logger->level() <= spdlog::level::level_enum::trace
                                                     && total_seqs % 10000 == 0) {
-                        logger->trace("processed {} sequences, last was {}, trying to annotate as <{}>, {} sec",
+                        logger->trace("processed {} sequences, last was {}, annotated as <{}>, {} sec",
                                       total_seqs, read_stream->name.s, fmt::join(labels, "><"), timer.elapsed());
                     }
 
@@ -508,7 +508,8 @@ int annotate_graph(Config *config) {
             annotate_data(graph, *config, { files[i] },
                 config->outfbase.size()
                     ? config->outfbase + "/" + utils::split_string(files[i], "/").back()
-                    : files[i]);
+                    : files[i],
+                2000 / std::max((size_t)1, num_threads));
         }
     }
 

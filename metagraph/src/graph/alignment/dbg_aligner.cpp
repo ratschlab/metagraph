@@ -5,6 +5,7 @@
 #include "common/logger.hpp"
 #include "common/algorithms.hpp"
 #include "graph/representation/rc_dbg.hpp"
+#include "graph/representation/canonical_dbg.hpp"
 #include "aligner_labeled.hpp"
 #include "graph/representation/succinct/boss_construct.hpp"
 #include "graph/representation/canonical_dbg.hpp"
@@ -503,8 +504,17 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
                 align_core(*seeder, extender, add_alignment, get_min_path_score, false);
         }
 #else
-        std::tie(num_seeds, num_extensions, num_explored_nodes) =
-            align_core(*seeder, extender, add_alignment, get_min_path_score, false);
+        if (config_.chain_alignments) {
+            std::string_view reverse = paths[i].get_query(true);
+            Extender extender_rc(*this, reverse);
+            std::tie(num_seeds, num_extensions, num_explored_nodes) =
+                align_both_directions(this_query, reverse, *seeder, *seeder_rc,
+                                      extender, extender_rc,
+                                      add_alignment, get_min_path_score);
+        } else {
+            std::tie(num_seeds, num_extensions, num_explored_nodes) =
+                align_core(*seeder, extender, add_alignment, get_min_path_score, false);
+        }
 #endif
 
         size_t aligned_labels = aggregator.num_aligned_labels();
@@ -680,22 +690,25 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
     assert(!best.empty());
 
     if (best.get_end_clipping()) {
-        logger->trace("Extending back");
+        DEBUG_LOG("Extending back");
         auto extensions = extender.get_extensions(best, config_.ninf, true);
         if (extensions.size()
                 && extensions[0].get_end_clipping() < best.get_end_clipping()
                 && extensions[0].get_score() > best.get_score()) {
             std::swap(best, extensions[0]);
         }
-        logger->trace("done");
+        DEBUG_LOG("done");
     }
 
     assert(!best.empty());
     best.trim_offset();
     assert(best.is_valid(graph_, &config_));
 
+    // for now, backwards alignment not supported for amino acids
+#if ! _PROTEIN_GRAPH
+
     if (best.get_clipping()) {
-        logger->trace("Extending front");
+        DEBUG_LOG("Extending front");
         RCDBG rc_dbg(std::shared_ptr<const DeBruijnGraph>(
                         std::shared_ptr<const DeBruijnGraph>(), &graph_));
         const DeBruijnGraph &rc_graph = graph_.get_mode() != DeBruijnGraph::CANONICAL
@@ -717,8 +730,16 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
                     std::swap(best, extensions[0]);
             }
         }
-        logger->trace("done");
+        DEBUG_LOG("done");
     }
+
+#else
+
+    std::ignore = query;
+    std::ignore = query_rc;
+    std::ignore = num_explored_nodes;
+
+#endif
 
     assert(!best.empty());
     callback(std::move(best));
@@ -729,8 +750,6 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
     }
 }
 
-// there are no reverse-complement for protein sequences
-#if ! _PROTEIN_GRAPH
 template <class Seeder, class Extender, class AlignmentCompare>
 std::tuple<size_t, size_t, size_t>
 DBGAligner<Seeder, Extender, AlignmentCompare>
@@ -747,15 +766,22 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
     Extender reverse_extender(*this, reverse);
 
     if (config_.chain_alignments) {
-        auto fwd_seeds = forward_seeder.get_seeds();
-        auto bwd_seeds = reverse_seeder.get_seeds();
-        if (fwd_seeds.empty() && bwd_seeds.empty())
-            return std::make_tuple(num_seeds, num_extensions, num_explored_nodes);
-
         if (!has_coordinates()) {
             logger->error("Chaining only supported for seeds with coordinates. Skipping seed chaining.");
             exit(1);
         }
+
+        auto fwd_seeds = forward_seeder.get_seeds();
+
+#if ! _PROTEIN_GRAPH
+        auto bwd_seeds = reverse_seeder.get_seeds();
+#else
+        std::vector<Seed> bwd_seeds;
+        std::ignore = reverse_seeder;
+#endif
+
+        if (fwd_seeds.empty() && bwd_seeds.empty())
+            return std::make_tuple(num_seeds, num_extensions, num_explored_nodes);
 
         AlignmentAggregator<AlignmentCompare> aggregator(config_);
         tsl::hopscotch_set<Alignment::Column> all_columns;
@@ -779,14 +805,21 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
                         throw std::bad_function_call();
                     }
 
-                    double num_exact_matches = get_num_char_matches_in_chain(chain.begin(), chain.end());
-                    if (num_exact_matches / forward.size() < config_.min_exact_match)
-                        throw std::bad_function_call();
+                    double exact_match_fraction
+                        = static_cast<double>(get_num_char_matches_in_seeds(chain.begin(), chain.end()))
+                            / forward.size();
 
-                    logger->trace("Chain: score: {}", score);
+                    logger->trace("Chain: score: {}; exact match fraction: {}",
+                                  score, exact_match_fraction);
+
+#ifndef NDEBUG
                     for (const auto &[chain, dist] : chain) {
-                        logger->trace("\t{}\tdist: {}", chain, dist);
+                        DEBUG_LOG("\t{}\tdist: {}", chain, dist);
                     }
+#endif
+
+                    if (exact_match_fraction < config_.min_exact_match)
+                        throw std::bad_function_call();
 
                     extend_chain(chain[0].first.get_orientation() ? reverse : forward,
                                  chain[0].first.get_orientation() ? forward : reverse,
@@ -797,8 +830,7 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
                                  [&](Alignment&& aln) {
                         const auto &cur_columns = aln.get_columns();
                         if (!aggregator.add_alignment(std::move(aln))) {
-                            finished_columns.insert(cur_columns.begin(),
-                                                    cur_columns.end());
+                            finished_columns.insert(cur_columns.begin(), cur_columns.end());
                         }
                     });
                 },
@@ -825,6 +857,8 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
                                num_extensions + reverse_extender.num_extensions(),
                                num_explored_nodes + reverse_extender.num_explored_nodes());
     }
+
+#if ! _PROTEIN_GRAPH
 
     auto fwd_seeds = forward_seeder.get_alignments();
     auto bwd_seeds = reverse_seeder.get_alignments();
@@ -945,8 +979,13 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
     return std::make_tuple(num_seeds,
                            num_extensions + reverse_extender.num_extensions(),
                            num_explored_nodes + reverse_extender.num_explored_nodes());
-}
+
+#else
+
+    throw std::runtime_error("Reverse complements not defined for amino acids");
+
 #endif
+}
 
 template class DBGAligner<>;
 template class DBGAligner<SuffixSeeder<ExactSeeder>, LabeledExtender>;
