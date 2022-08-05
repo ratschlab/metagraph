@@ -18,6 +18,8 @@ namespace mtg {
 namespace graph {
 namespace align {
 
+using common::logger;
+
 Unitigs::Unitigs(const cli::Config &config) : graph_(load_graph_impl(config.fnames[0])) {
     std::filesystem::path tmp_dir = utils::create_temp_dir(config.tmp_dir, "unitigs");
     std::string out_path = tmp_dir/"unitigs";
@@ -26,7 +28,7 @@ Unitigs::Unitigs(const cli::Config &config) : graph_(load_graph_impl(config.fnam
     std::vector<size_t> unitigs;
     std::vector<std::unique_ptr<bit_vector>> cols;
 
-    common::logger->trace("Marking dummy k-mers");
+    logger->trace("Marking dummy k-mers");
     {
         DBGSuccinct &ncgraph = const_cast<DBGSuccinct&>(*graph_);
         ncgraph.mask_dummy_kmers(get_num_threads(), false);
@@ -51,7 +53,7 @@ Unitigs::Unitigs(const cli::Config &config) : graph_(load_graph_impl(config.fnam
     std::vector<std::string> labels;
     labels.push_back("");
 
-    common::logger->trace("Annotating unitigs");
+    logger->trace("Annotating unitigs");
     std::mutex mu;
     size_t counter = 0;
     size_t max_unitig = 0;
@@ -87,7 +89,7 @@ Unitigs::Unitigs(const cli::Config &config) : graph_(load_graph_impl(config.fnam
         colcomp->add_label_coords(coords, labels);
     });
 
-    common::logger->trace("Initializing unitig vector");
+    logger->trace("Initializing unitig vector");
     size_t num_unitigs = unitigs.size() / 3;
     // TODO: replace with int_vector_buffer
     sdsl::int_vector<> boundaries(num_unitigs * 2, 0, sdsl::bits::hi(max_unitig + 1) + 1);
@@ -104,13 +106,13 @@ Unitigs::Unitigs(const cli::Config &config) : graph_(load_graph_impl(config.fnam
     boundaries_ = IDVector(std::move(boundaries));
     unitigs = std::vector<size_t>();
 
-    common::logger->trace("Serializing initial annotation");
+    logger->trace("Serializing initial annotation");
     files.push_back(out_path + colcomp->file_extension());
     colcomp->serialize(files[0]);
     colcomp.reset();
     graph_.reset();
-    common::logger->trace("Compressing unitig index");
-    common::logger->trace("Step 0");
+    logger->trace("Compressing unitig index");
+    logger->trace("Step 0");
     convert_to_row_diff(files,
                         config.fnames[0],
                         config.memory_available * 1e9,
@@ -119,7 +121,7 @@ Unitigs::Unitigs(const cli::Config &config) : graph_(load_graph_impl(config.fnam
                         tmp_dir,
                         static_cast<annot::RowDiffStage>(0),
                         out_path + ".row_count", false, true);
-    common::logger->trace("Step 1");
+    logger->trace("Step 1");
     convert_to_row_diff(files,
                         config.fnames[0],
                         config.memory_available * 1e9,
@@ -128,7 +130,7 @@ Unitigs::Unitigs(const cli::Config &config) : graph_(load_graph_impl(config.fnam
                         tmp_dir,
                         static_cast<annot::RowDiffStage>(1),
                         out_path + ".row_reduction", false, true);
-    common::logger->trace("Step 2");
+    logger->trace("Step 2");
     convert_to_row_diff(files,
                         config.fnames[0],
                         config.memory_available * 1e9,
@@ -137,54 +139,56 @@ Unitigs::Unitigs(const cli::Config &config) : graph_(load_graph_impl(config.fnam
                         tmp_dir,
                         static_cast<annot::RowDiffStage>(2),
                         out_path + ".row_reduction", false, true);
-    common::logger->trace("done");
+    logger->trace("done");
     const std::string anchors_file = config.fnames[0] + annot::binmat::kRowDiffAnchorExt;
     if (!std::filesystem::exists(anchors_file)) {
-        common::logger->error("Anchor bitmap {} does not exist.", anchors_file);
+        logger->error("Anchor bitmap {} does not exist.", anchors_file);
         std::exit(1);
     }
     const std::string fork_succ_file = config.fnames[0] + annot::binmat::kRowDiffForkSuccExt;
     if (!std::filesystem::exists(fork_succ_file)) {
-        common::logger->error("Fork successor bitmap {} does not exist", fork_succ_file);
+        logger->error("Fork successor bitmap {} does not exist", fork_succ_file);
         std::exit(1);
     }
 
     common::logger->trace("Loading column");
     auto annotator = std::make_unique<annot::ColumnCompressed<>>(0);
     if (!annotator->merge_load(files)) {
-        common::logger->error("Cannot load annotations");
+        logger->error("Cannot load annotations");
         exit(1);
     }
 
-    common::logger->trace("Wrapping as TupleRowDiff");
+    logger->trace("Wrapping as TupleRowDiff");
 
     std::vector<bit_vector_smart> delimiters(1);
     std::vector<sdsl::int_vector<>> column_values(1);
 
     auto coords_fname = utils::remove_suffix(files[0], annot::ColumnCompressed<>::kExtension)
                                                     + annot::ColumnCompressed<>::kCoordExtension;
+    typedef annot::ColumnCoordAnnotator::binary_matrix_type UnitigCoordDiff;
     std::ifstream in(coords_fname, std::ios::binary);
     try {
-        RawUnitigs::load_tuples(in, 1, [&](auto&& delims, auto&& values) {
+        UnitigCoordDiff::load_tuples(in, 1, [&](auto&& delims, auto&& values) {
             delimiters[0] = std::move(delims);
             column_values[0] = std::move(values);
         });
     } catch (const std::exception &e) {
-        common::logger->error("Couldn't load coordinates from {}\nException: {}", coords_fname, e.what());
+        logger->error("Couldn't load coordinates from {}\nException: {}", coords_fname, e.what());
         exit(1);
     } catch (...) {
-        common::logger->error("Couldn't load coordinates from {}", coords_fname);
+        logger->error("Couldn't load coordinates from {}", coords_fname);
         exit(1);
     }
 
-    unitigs_ = CompUnitigs(nullptr,
-                           RawUnitigs(std::move(*annotator->release_matrix()),
-                                      std::move(delimiters),
-                                      std::move(column_values)));
+
+    unitigs_ = UnitigCoords(nullptr,
+                            UnitigCoordDiff(std::move(*annotator->release_matrix()),
+                                            std::move(delimiters),
+                                            std::move(column_values)));
 
     unitigs_.load_anchor(anchors_file);
     unitigs_.load_fork_succ(fork_succ_file);
-    common::logger->trace("RowDiff support bitmaps loaded");
+    logger->trace("RowDiff support bitmaps loaded");
     load_graph(config.fnames[0]);
     unitigs_.set_graph(graph_.get());
 }
@@ -269,7 +273,7 @@ auto Unitigs::get_unitig_bounds(size_t unitig_id) const
 
 std::vector<size_t> Unitigs::get_unitig_ids(const std::vector<node_index> &nodes) const {
     auto [indicator, rows] = nodes_to_rows(nodes);
-    common::logger->trace("Fetching unitig IDs");
+    logger->trace("Fetching unitig IDs");
     auto seed_tuples = unitigs_.get_row_tuples(rows);
     std::vector<size_t> results;
     results.reserve(nodes.size());
@@ -304,7 +308,7 @@ std::vector<size_t> Unitigs::get_unitig_ids(const std::vector<node_index> &nodes
 auto Unitigs::get_unitig_ids_and_coordinates(const std::vector<node_index> &nodes) const
         -> std::vector<std::pair<size_t, Coord>> {
     auto [indicator, rows] = nodes_to_rows(nodes);
-    common::logger->trace("Fetching unitig IDs");
+    logger->trace("Fetching unitig IDs");
     auto seed_tuples = unitigs_.get_row_tuples(rows);
     std::vector<std::pair<size_t, Coord>> results;
     results.reserve(nodes.size());
@@ -343,40 +347,26 @@ auto Unitigs::get_unitig_ids_and_coordinates(const std::vector<node_index> &node
 size_t Unitigs::cluster_and_filter_seeds(const IDBGAligner &aligner,
                                          IDBGAligner::BatchSeeders &batch_seeders) const {
     const DBGAlignerConfig &config = aligner.get_config();
-    std::vector<bool> indicator;
     std::vector<node_index> nodes;
-    {
-        ProgressBar progress_bar(batch_seeders.size(), "Extracting seed nodes",
-                                 std::cerr, !common::get_verbose());
-        for (const auto &[seeder, seeder_rc] : batch_seeders) {
-            auto parse_seeder = [&](const auto &cur_seeder) {
-                for (const auto &seed : cur_seeder.get_seeds()) {
-                    node_index node = seed.get_nodes().back();
-                    if (node > graph_->max_index())
-                        node = node - graph_->max_index();
+    for (const auto &[seeder, seeder_rc] : batch_seeders) {
+        auto parse_seeder = [&](const auto &cur_seeder) {
+            for (const auto &seed : cur_seeder.get_seeds()) {
+                nodes.emplace_back(seed.get_nodes().back());
+            }
+        };
 
-                    if ((*valid_edges_)[graph_->kmer_to_boss_index(node)]) {
-                        indicator.emplace_back(true);
-                        nodes.emplace_back(node - 1);
-                    } else {
-                        indicator.emplace_back(false);
-                    }
-                }
-            };
+        if (seeder)
+            parse_seeder(*seeder);
 
-            if (seeder)
-                parse_seeder(*seeder);
-
-            if (seeder_rc)
-                parse_seeder(*seeder_rc);
-
-            ++progress_bar;
-        }
+        if (seeder_rc)
+            parse_seeder(*seeder_rc);
     }
+
+    auto [indicator, rows] = nodes_to_rows(nodes);
 
     size_t new_seed_count = 0;
     common::logger->trace("Fetching unitig IDs");
-    auto seed_tuples = unitigs_.get_row_tuples(nodes);
+    auto seed_tuples = unitigs_.get_row_tuples(rows);
 
     {
         ProgressBar progress_bar(batch_seeders.size(), "Clustering and filtering seeds",

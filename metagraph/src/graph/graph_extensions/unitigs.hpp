@@ -21,8 +21,7 @@ class Unitigs : public SequenceGraph::GraphExtension {
     typedef DeBruijnGraph::node_index node_index;
     typedef bit_vector_small Indicator;
     typedef annot::CountsVector IDVector;
-    typedef annot::ColumnCoordAnnotator::binary_matrix_type RawUnitigs;
-    typedef annot::matrix::TupleRowDiff<RawUnitigs> CompUnitigs;
+    typedef annot::matrix::TupleRowDiff<annot::ColumnCoordAnnotator::binary_matrix_type> UnitigCoords;
     typedef Alignment::Tuple::value_type Coord;
 
     Unitigs(const DBGSuccinct &graph) : graph_(std::shared_ptr<const DeBruijnGraph>{}, &graph) {}
@@ -71,7 +70,7 @@ class Unitigs : public SequenceGraph::GraphExtension {
 
   private:
     std::shared_ptr<const DBGSuccinct> graph_;
-    CompUnitigs unitigs_;
+    UnitigCoords unitigs_;
     IDVector boundaries_;
     Indicator indicator_;
     std::unique_ptr<bit_vector> valid_edges_;
