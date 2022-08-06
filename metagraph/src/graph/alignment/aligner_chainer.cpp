@@ -147,14 +147,6 @@ call_seed_chains_both_strands(std::string_view forward,
         for (++it; it != chains.end(); ++it) {
             const Chain &chain = *it;
             if (chain != last_chain) {
-                assert(std::all_of(last_chain.begin(), last_chain.end(),
-                                   [&](const auto &chain) {
-                    const auto &columns = chain.first.get_columns();
-                    return chain.first.label_encoder->check_node_labels_is_superset(
-                        columns, chain.first.get_nodes()
-                    );
-                }));
-
                 callback(std::move(last_chain), last_chain_score);
                 last_chain = *it;
                 continue;
@@ -191,19 +183,9 @@ call_seed_chains_both_strands(std::string_view forward,
                                    cur_columns.begin(), cur_columns.end(),
                                    std::back_inserter(columns));
                 }
-                assert(!last_chain[i].first.label_encoder
-                    || last_chain[i].first.label_encoder->check_node_labels_is_superset(columns, last_chain[i].first.get_nodes()));
                 last_chain[i].first.set_columns(std::move(columns));
             }
         }
-
-        assert(std::all_of(last_chain.begin(), last_chain.end(),
-                           [&](const auto &chain) {
-            const auto &columns = chain.first.get_columns();
-            return chain.first.label_encoder->check_node_labels_is_superset(
-                columns, chain.first.get_nodes()
-            );
-        }));
 
         callback(std::move(last_chain), last_chain_score);
 
@@ -376,7 +358,6 @@ chain_seeds(const DBGAlignerConfig &config,
     size_t i = 0;
     while (cur_label_end < dp_table.size()) {
         cur_label_end += label_sizes[dp_table[i].label];
-        // TODO: rewrite with AVX2
         for ( ; i < cur_label_end; ++i) {
             const auto &[prev_label, prev_coord, prev_clipping, prev_end,
                          prev_score, prev_seed_i] = dp_table[i];
@@ -1235,13 +1216,11 @@ size_t cluster_seeds(const IDBGAligner &aligner,
                     std::vector<Seed> seed_bucket_bwd;
                     for (const auto &[k, coord] : bucket) {
                         seed_bucket_fwd.emplace_back(seeds[k]);
-                        if (seeds[k].label_columns) {
-                            const auto &columns = seeds[k].get_columns();
-                            seed_bucket_fwd.back().label_coordinates.resize(
-                                columns.size(),
-                                Alignment::Tuple(1, coord - seeds[k].size() + 1 + seeds[k].get_offset())
-                            );
-                        }
+                        const auto &columns = seeds[k].get_columns();
+                        seed_bucket_fwd.back().label_coordinates.resize(
+                            columns.size(),
+                            Alignment::Tuple(1, coord - seeds[k].size() + 1 + seeds[k].get_offset())
+                        );
                         DEBUG_LOG("\t{}", Alignment(seed_bucket_fwd.back(), config));
                     }
 
@@ -1283,15 +1262,10 @@ size_t cluster_seeds(const IDBGAligner &aligner,
                             if (filtered_seeds[i].label_encoder) {
                                 const auto &a = filtered_seeds[i - 1].get_columns();
                                 const auto &b = filtered_seeds[i].get_columns();
-                                assert(filtered_seeds[i - 1].label_encoder->check_node_labels_is_superset(a, filtered_seeds[i - 1].get_nodes()));
-                                assert(filtered_seeds[i].label_encoder->check_node_labels_is_superset(b, filtered_seeds[i].get_nodes()));
                                 Vector<Alignment::Column> merged;
                                 merged.reserve(a.size() + b.size());
                                 std::set_union(a.begin(), a.end(), b.begin(), b.end(),
                                                std::back_inserter(merged));
-                                assert(merged.empty()
-                                    || filtered_seeds[i].label_encoder->check_node_labels_is_superset(merged, filtered_seeds[i].get_nodes()));
-
                                 filtered_seeds[i].label_columns
                                     = filtered_seeds[i].label_encoder->cache_column_set(std::move(merged));
                             }
