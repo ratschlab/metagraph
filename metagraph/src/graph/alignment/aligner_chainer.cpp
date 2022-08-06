@@ -228,8 +228,8 @@ call_seed_chains_both_strands(std::string_view forward,
 
             assert(cur_seed.size());
             assert(prev_seed.size());
-            assert(prev_seed.get_clipping() < cur_seed.get_clipping());
-            assert(prev_seed.get_end_clipping() > cur_seed.get_end_clipping());
+            assert(prev_seed.get_clipping() <= cur_seed.get_clipping());
+            assert(prev_seed.get_end_clipping() >= cur_seed.get_end_clipping());
 
             size_t prev_end = prev_seed.get_clipping()
                                 + prev_seed.get_query_view().size();
