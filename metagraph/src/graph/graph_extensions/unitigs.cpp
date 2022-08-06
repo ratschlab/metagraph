@@ -47,21 +47,7 @@ Unitigs::Unitigs(const cli::Config &config) : graph_(load_graph_impl(config.fnam
         valid_nodes_.reset(ncgraph.release_mask());
     }
 
-    ProgressBar progress_bar(valid_nodes_->num_set_bits(), "Transforming mask",
-                             std::cerr, !common::get_verbose());
-    cols.emplace_back(std::make_unique<bit_vector_smart>([&](const auto &callback) {
-        valid_nodes_->call_ones([&](node_index i) {
-            assert(i);
-            callback(AnnotatedDBG::graph_to_anno_index(i));
-            ++progress_bar;
-        });
-    }, graph_->num_nodes(), valid_nodes_->num_set_bits()));
-
-    annot::LabelEncoder<> encoder;
-    encoder.insert_and_encode("");
-    auto colcomp = std::make_unique<annot::ColumnCompressed<>>(
-        std::move(cols), std::move(encoder), 1, tmp_dir, 1e9, width
-    );
+    auto colcomp = std::make_unique<annot::ColumnCompressed<>>(graph_->num_nodes(), 1, tmp_dir, 1e9, width);
 
     std::vector<std::string> labels;
     labels.push_back("");
@@ -71,24 +57,28 @@ Unitigs::Unitigs(const cli::Config &config) : graph_(load_graph_impl(config.fnam
     size_t counter = 0;
     size_t max_unitig = 0;
 
+    // TODO: store cycle indicator
     ThreadPool pool(1);
     graph_->call_unitigs([&](const std::string&, const auto &path) {
         if (path.size() == 1)
             return;
 
-#ifndef NDEBUG
-        if (graph_->has_single_outgoing(path.back())
-                && graph_->has_single_incoming(path.front())) {
-            graph_->adjacent_outgoing_nodes(path.back(), [&](node_index next) {
-                assert(next == path.front() || !(*valid_nodes_)[next]
-                        || graph_->indegree(next) > 1);
-            });
-            graph_->adjacent_incoming_nodes(path.front(), [&](node_index prev) {
-                assert(prev == path.back() || !(*valid_nodes_)[prev]
-                        || graph_->outdegree(prev) > 1);
-            });
+        std::vector<annot::ColumnCompressed<>::Index> rows;
+        rows.reserve(path.size());
+        for (node_index node : path) {
+            rows.push_back(AnnotatedDBG::graph_to_anno_index(node));
         }
-#endif
+
+        pool.enqueue([&colcomp,&labels,r=std::move(rows)]() {
+            colcomp->add_labels(r, labels);
+        });
+
+    }, get_num_threads());
+    pool.join();
+
+    graph_->call_unitigs([&](const std::string&, const auto &path) {
+        if (path.size() == 1)
+            return;
 
         {
             std::lock_guard<std::mutex> lock(mu);
@@ -126,6 +116,7 @@ Unitigs::Unitigs(const cli::Config &config) : graph_(load_graph_impl(config.fnam
         }
     }, counter, num_unitigs);
     boundaries_ = IDVector(std::move(boundaries));
+    assert(indicator_.num_set_bits() * 2 == boundaries_.size());
     unitigs = std::vector<size_t>();
 
     logger->trace("Serializing initial annotation");
@@ -173,7 +164,7 @@ Unitigs::Unitigs(const cli::Config &config) : graph_(load_graph_impl(config.fnam
         std::exit(1);
     }
 
-    common::logger->trace("Loading column");
+    logger->trace("Loading column");
     auto annotator = std::make_unique<annot::ColumnCompressed<>>(0);
     if (!annotator->merge_load(files)) {
         logger->error("Cannot load annotations");
@@ -213,16 +204,51 @@ Unitigs::Unitigs(const cli::Config &config) : graph_(load_graph_impl(config.fnam
     logger->trace("RowDiff support bitmaps loaded");
     load_graph(config.fnames[0]);
     unitigs_.set_graph(graph_.get());
+
+#ifndef NDEBUG
+    // very slow sanity check
+    {
+        ProgressBar progress_bar(indicator_.num_set_bits(), "Sanity check",
+                                 std::cerr, !common::get_verbose());
+        size_t unitig_id = 0;
+        indicator_.call_ones([&](size_t coord) {
+            node_index first = boundaries_[unitig_id * 2];
+            node_index last = boundaries_[unitig_id * 2 + 1];
+            ++unitig_id;
+            assert(coord == indicator_.select1(unitig_id));
+            size_t last_coord = unitig_id + 1 <= indicator_.num_set_bits()
+                ? indicator_.select1(unitig_id + 1) - 1
+                : indicator_.size() - 1;
+
+            while (coord < last_coord) {
+                bool found = false;
+                graph_->adjacent_outgoing_nodes(first, [&](node_index next) {
+                    assert(!found);
+                    found = true;
+                    first = next;
+                    ++coord;
+                });
+            }
+
+            assert(first == last);
+            ++progress_bar;
+        });
+    }
+#endif
 }
 
 bool Unitigs::load(const std::string &filename_base) {
     std::string fname = utils::make_suffix(filename_base, kUnitigsExtension);
     std::ifstream fin(fname, std::ios::binary);
-    if (!fin.good())
+    if (!fin.good()) {
+        logger->error("Failed to read unitig index from {}", fname);
         return false;
+    }
 
-    if (!unitigs_.load(fin))
+    if (!unitigs_.load(fin)) {
+        logger->error("Failed to read unitig coordinates");
         return false;
+    }
 
     unitigs_.set_graph(graph_.get());
 
@@ -245,17 +271,39 @@ bool Unitigs::load(const std::string &filename_base) {
         }
     }
 
-    if (!valid_nodes_->load(fin))
-        return false;
-
-    try {
-        boundaries_.load(fin);
-        return true;
-    } catch (...) {
+    if (!valid_nodes_->load(fin)) {
+        logger->error("Failed to load valid node indicator");
         return false;
     }
 
-    return indicator_.load(fin);
+    try {
+        boundaries_.load(fin);
+    } catch (...) {
+        logger->error("Failed to load unitig boundary array");
+        return false;
+    }
+
+    if (boundaries_.size() % 2) {
+        logger->error("Unitig boundary array should be of even length: {}",
+                      boundaries_.size());
+        return false;
+    }
+
+    if (!indicator_.load(fin)) {
+        logger->error("Failed to load coordinate boundary indicator");
+        return false;
+    }
+
+    if (indicator_.num_set_bits() * 2 != boundaries_.size()) {
+        logger->error("Unitig storage is inconsistent: {} indicators vs. {} unitigs",
+                      indicator_.num_set_bits(), boundaries_.size() / 2);
+        return false;
+    }
+
+    DEBUG_LOG("Loaded unitig index with {} unitigs and {} coordinates",
+              boundaries_.size() / 2, valid_nodes_->num_set_bits());
+
+    return true;
 }
 
 void Unitigs::serialize(const std::string &filename_base) const {
@@ -295,7 +343,6 @@ auto Unitigs::get_unitig_bounds(size_t unitig_id) const
 
 std::vector<size_t> Unitigs::get_unitig_ids(const std::vector<node_index> &nodes) const {
     auto [indicator, rows] = nodes_to_rows(nodes);
-    logger->trace("Fetching unitig IDs");
     auto seed_tuples = unitigs_.get_row_tuples(rows);
     std::vector<size_t> results;
     results.reserve(nodes.size());
@@ -327,7 +374,7 @@ std::vector<size_t> Unitigs::get_unitig_ids(const std::vector<node_index> &nodes
 auto Unitigs::get_unitig_ids_and_coordinates(const std::vector<node_index> &nodes) const
         -> std::vector<std::pair<size_t, Coord>> {
     auto [indicator, rows] = nodes_to_rows(nodes);
-    logger->trace("Fetching unitig IDs");
+    logger->trace("Fetching unitig IDs and coordinates");
     auto seed_tuples = unitigs_.get_row_tuples(rows);
     std::vector<std::pair<size_t, Coord>> results;
     results.reserve(nodes.size());
@@ -337,7 +384,8 @@ auto Unitigs::get_unitig_ids_and_coordinates(const std::vector<node_index> &node
     for (size_t i = 0; i < nodes.size(); ++i) {
         size_t unitig_id = std::numeric_limits<size_t>::max();
         if (indicator[i]) {
-            const auto &coordinates = seed_tuples[j++];
+            assert(get_base_node(nodes[i]) == AnnotatedDBG::anno_to_graph_index(rows[j]));
+            const auto &coordinates = seed_tuples[j];
             if (coordinates.size()) {
                 assert(coordinates.size() == 1);
                 assert(!coordinates[0].first);
@@ -346,8 +394,27 @@ auto Unitigs::get_unitig_ids_and_coordinates(const std::vector<node_index> &node
                     unitig_id = indicator_.rank1(coordinates[0].second[0]);
                     results.emplace_back(unitig_id + unitig_id_offset,
                                          coordinates[0].second[0]);
+#ifndef NDEBUG
+                    assert(!is_singleton(unitig_id + unitig_id_offset));
+                    auto [first_coord, second_coord] = get_unitig_bounds(unitig_id + unitig_id_offset).second;
+                    assert(first_coord <= results.back().second);
+                    assert(second_coord > results.back().second);
+                    node_index first = boundaries_[(unitig_id - 1) * 2];
+                    while (first_coord < results.back().second) {
+                        bool found = false;
+                        graph_->adjacent_outgoing_nodes(first, [&](node_index next) {
+                            assert(!found && "unitig boundary hit, coordinate incorrect");
+                            first = next;
+                            found = true;
+                        });
+                        assert(found);
+                        ++first_coord;
+                    }
+                    assert(first == AnnotatedDBG::anno_to_graph_index(rows[j]));
+#endif
                 }
             }
+            ++j;
         }
 
         if (unitig_id == std::numeric_limits<size_t>::max())
@@ -364,10 +431,10 @@ void Unitigs::load_graph(const std::string &fname) {
 }
 
 std::shared_ptr<const DBGSuccinct> Unitigs::load_graph_impl(const std::string &fname) {
-    common::logger->trace("Graph loading...");
+    logger->trace("Graph loading...");
     Timer timer;
     return std::dynamic_pointer_cast<const DBGSuccinct>(cli::load_critical_dbg(fname));
-    common::logger->trace("Graph loaded in {} sec", timer.elapsed());
+    logger->trace("Graph loaded in {} sec", timer.elapsed());
 }
 
 std::pair<sdsl::bit_vector, std::vector<uint64_t>>

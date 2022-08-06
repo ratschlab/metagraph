@@ -220,8 +220,6 @@ extract_subgraph(const DeBruijnGraph &graph,
         query_total_length += query.size() + (query.size() * add_rev_comp);
     }
     auto boss = std::make_unique<boss::BOSS>(&constructor);
-    logger->trace("Found {} {}-mers in the batch", boss->num_edges(),
-                  config.min_seed_length);
 
     logger->trace("Getting matching ranges");
     typedef boss::BOSS::TAlphabet TAlphabet;
