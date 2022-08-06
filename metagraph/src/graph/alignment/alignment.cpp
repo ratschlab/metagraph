@@ -16,13 +16,12 @@ namespace align {
 
 using mtg::common::logger;
 
-const Vector<Seed::Column> Seed::no_labels_ { 0 };
+const Vector<Seed::Column> Seed::no_labels_ { std::numeric_limits<Seed::Column>::max() };
 
 std::string Alignment::format_coords() const {
     if (!label_coordinates.size())
         return "";
 
-    assert(has_annotation());
     assert(label_coordinates.size() == get_columns(0).size());
 
     std::vector<std::string> decoded_labels = get_decoded_labels(0);
@@ -38,6 +37,7 @@ std::string Alignment::format_coords() const {
 }
 
 std::string Alignment::format_annotations() const {
+    assert(has_annotation());
     std::string out = fmt::format("{}", fmt::join(get_decoded_labels(0), ";"));
     size_t count = 1;
     size_t last_cols = label_columns;
@@ -58,7 +58,7 @@ std::string Alignment::format_annotations() const {
 }
 
 void Seed::set_columns(Vector<Column>&& columns) {
-    if (columns.empty()) {
+    if (columns.empty() || columns == no_labels_) {
         label_columns = 0;
         return;
     }
@@ -68,7 +68,7 @@ void Seed::set_columns(Vector<Column>&& columns) {
 }
 
 void Alignment::set_columns(Vector<Column>&& columns) {
-    if (columns.empty()) {
+    if (columns.empty() || columns == Seed::no_labels_) {
         label_columns = 0;
         return;
     }
@@ -117,7 +117,9 @@ auto Alignment::get_column_union() const -> Vector<Column> {
 }
 
 std::vector<std::string> Alignment::get_decoded_labels(size_t path_i) const {
-    assert(label_encoder);
+    if (!label_encoder)
+        return { "" };
+
     const auto &columns = get_columns(path_i);
     const auto &encoder = label_encoder->get_annotator().get_label_encoder();
     std::vector<std::string> result;

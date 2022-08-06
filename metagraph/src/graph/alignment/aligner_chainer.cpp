@@ -71,10 +71,10 @@ call_seed_chains_both_strands(std::string_view forward,
                               const std::function<void(Chain&&, score_t)> &callback,
                               const std::function<bool(Alignment::Column)> &skip_column) {
     fwd_seeds.erase(std::remove_if(fwd_seeds.begin(), fwd_seeds.end(),
-                                   [](const auto &a) { return a.empty() || !a.label_columns; }),
+                                   [](const auto &a) { return a.empty() || a.label_coordinates.empty(); }),
                     fwd_seeds.end());
     bwd_seeds.erase(std::remove_if(bwd_seeds.begin(), bwd_seeds.end(),
-                                   [](const auto &a) { return a.empty() || !a.label_columns; }),
+                                   [](const auto &a) { return a.empty() || a.label_coordinates.empty(); }),
                     bwd_seeds.end());
 
     if (fwd_seeds.empty() && bwd_seeds.empty())
@@ -265,7 +265,7 @@ call_seed_chains_both_strands(std::string_view forward,
         }
 
         chain_seeds[0].second = 0;
-        if (!chain_seeds[0].first.label_columns)
+        if (chain_seeds[0].first.label_coordinates.empty())
             continue;
 
         Chain chain;
