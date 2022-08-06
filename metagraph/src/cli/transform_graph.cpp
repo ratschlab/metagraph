@@ -105,7 +105,7 @@ int transform_graph(Config *config) {
                       suffix_length,
                       std::pow(dbg_succ->get_boss().alph_size - 1, suffix_length)
                             * 2. * sizeof(uint64_t) * 1e-6);
-        logger->trace("Compressed node ranges to {:.2f} MB",
+        logger->trace("Compressed node ranges to approx. {:.2f} MB",
                       dbg_succ->get_boss().get_suffix_ranges_index_size() / 8e6);
         timer.reset();
 

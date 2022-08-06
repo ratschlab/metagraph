@@ -386,6 +386,9 @@ bool BOSS::load_suffix_ranges(std::ifstream &instream) {
             throw std::ifstream::failure("");
 
         indexed_suffix_ranges_.load(instream);
+        indexed_suffix_ranges_rk1_ = decltype(indexed_suffix_ranges_rk1_)(&indexed_suffix_ranges_);
+        indexed_suffix_ranges_slct1_ = decltype(indexed_suffix_ranges_slct1_)(&indexed_suffix_ranges_);
+        indexed_suffix_ranges_slct0_ = decltype(indexed_suffix_ranges_slct0_)(&indexed_suffix_ranges_);
 
         if (!instream.good())
             throw std::ifstream::failure("");
@@ -3186,7 +3189,14 @@ void BOSS::index_suffix_ranges(size_t suffix_length, size_t num_threads) {
 
     assert(std::is_sorted(suffix_ranges.begin(), suffix_ranges.end()));
 
-    indexed_suffix_ranges_ = decltype(indexed_suffix_ranges_)(suffix_ranges);
+    sdsl::sd_vector_builder builder(W_->size() + suffix_ranges.size(), suffix_ranges.size());
+    for (auto pos : suffix_ranges) {
+        builder.set(pos);
+    }
+    indexed_suffix_ranges_ = sdsl::sd_vector<>(builder);
+    indexed_suffix_ranges_rk1_ = decltype(indexed_suffix_ranges_rk1_)(&indexed_suffix_ranges_);
+    indexed_suffix_ranges_slct1_ = decltype(indexed_suffix_ranges_slct1_)(&indexed_suffix_ranges_);
+    indexed_suffix_ranges_slct0_ = decltype(indexed_suffix_ranges_slct0_)(&indexed_suffix_ranges_);
 }
 
 bool BOSS::is_valid() const {

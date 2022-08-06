@@ -3,9 +3,8 @@
 
 #include <type_traits>
 
-#include <sdsl/enc_vector.hpp>
-
 #include "common/vectors/bit_vector.hpp"
+#include "common/vectors/bit_vector_sd.hpp"
 #include "common/vectors/wavelet_tree.hpp"
 #include "kmer/kmer_extractor.hpp"
 #include "graph/representation/base/sequence_graph.hpp"
@@ -81,8 +80,13 @@ class BOSS {
      */
     bool load_suffix_ranges(std::ifstream &instream);
     void serialize_suffix_ranges(std::ofstream &outstream) const;
-    // return the size of the compressed index in bits
-    uint64_t get_suffix_ranges_index_size() const { return indexed_suffix_ranges_.compressed_size(); }
+    // Estimate the size of the compressed index in bits
+    uint64_t get_suffix_ranges_index_size() const {
+        return indexed_suffix_ranges_.size()
+            ? footprint_sd_vector(indexed_suffix_ranges_.size(),
+                                  indexed_suffix_ranges_rk1_(indexed_suffix_ranges_.size()))
+            : 0;
+    }
 
     // Traverse graph mapping k-mers from sequence to the graph edges
     // and run callback for each edge until the termination condition is satisfied
@@ -519,10 +523,15 @@ class BOSS {
     State state = State::DYN;
 
     size_t indexed_suffix_length_ = 0;
-    // element `i` stores value[i] + i to make it strictly increasing for sdsl::enc_vector
-    sdsl::enc_vector<> indexed_suffix_ranges_;
+    // Range (begin[i], end[i]) is represented as (select[2i+1]-2i, select[2i+2]-2i-1)
+    // Use sdsl::sd_vector<> instead of bit_vector_sd to ensure it's not inverted
+    // even if dense, so the select queries are fast.
+    sdsl::sd_vector<> indexed_suffix_ranges_;
+    sdsl::sd_vector<>::rank_1_type indexed_suffix_ranges_rk1_;
+    sdsl::sd_vector<>::select_1_type indexed_suffix_ranges_slct1_;
+    sdsl::sd_vector<>::select_0_type indexed_suffix_ranges_slct0_;
 
-    inline uint64_t get_suffix_range(uint64_t i) const { return indexed_suffix_ranges_[i] - i; }
+    inline uint64_t get_suffix_range(uint64_t i) const { return indexed_suffix_ranges_slct1_(i + 1) - i; }
 
     /**
      * This function gets a character c and updates the edge offsets F_

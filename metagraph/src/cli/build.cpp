@@ -368,7 +368,7 @@ int build_graph(Config *config) {
                                 * 2. * sizeof(uint64_t) * 1e-6);
             timer.reset();
             dbg_succ->get_boss().index_suffix_ranges(suffix_length, get_num_threads());
-            logger->trace("Compressed node ranges to {:.2f} MB",
+            logger->trace("Compressed node ranges to approx. {:.2f} MB",
                           dbg_succ->get_boss().get_suffix_ranges_index_size() / 8e6);
 
             logger->trace("Indexing of node ranges took {} sec", timer.elapsed());
@@ -454,7 +454,7 @@ int concatenate_graph_chunks(Config *config) {
                                     * 2. * sizeof(uint64_t) * 1e-6);
                 timer.reset();
                 dbg_succ->get_boss().index_suffix_ranges(suffix_length, get_num_threads());
-                logger->trace("Compressed node ranges to {:.2f} MB",
+                logger->trace("Compressed node ranges to approx. {:.2f} MB",
                               dbg_succ->get_boss().get_suffix_ranges_index_size() / 8e6);
 
                 logger->trace("Indexing of node ranges took {} sec", timer.elapsed());
