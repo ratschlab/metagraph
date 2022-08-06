@@ -63,8 +63,7 @@ struct ChainHash {
 };
 
 std::pair<size_t, size_t>
-call_seed_chains_both_strands(const IDBGAligner &aligner,
-                              std::string_view forward,
+call_seed_chains_both_strands(std::string_view forward,
                               std::string_view reverse,
                               const DBGAlignerConfig &config,
                               std::vector<Seed>&& fwd_seeds,
@@ -80,9 +79,6 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
 
     if (fwd_seeds.empty() && bwd_seeds.empty())
         return { 0, 0 };
-
-
-    bool has_labels = dynamic_cast<const ILabeledAligner*>(&aligner);
 
     // filter out empty seeds
     std::vector<Seed> both_seeds[2];
@@ -234,13 +230,9 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
 
             used[i] = true;
             chain_seeds.emplace_back(seeds[seed_i], coord);
-            if (has_labels) {
-                chain_seeds.back().first.set_columns(Vector<Alignment::Column>{ label });
-                chain_seeds.back().first.label_coordinates.resize(1);
-                chain_seeds.back().first.label_coordinates[0].assign(1, coord);
-            } else {
-                chain_seeds.back().first.label_encoder = nullptr;
-            }
+            chain_seeds.back().first.set_columns(Vector<Alignment::Column>{ label });
+            chain_seeds.back().first.label_coordinates.resize(1);
+            chain_seeds.back().first.label_coordinates[0].assign(1, coord);
             i = seed_backtrace[i];
         }
 
@@ -1260,7 +1252,7 @@ size_t cluster_seeds(const IDBGAligner &aligner,
 
                     tsl::hopscotch_set<Alignment::Column> used_labels;
                     size_t old_filtered_size = filtered_seeds.size();
-                    call_seed_chains_both_strands(aligner, forward, reverse, config,
+                    call_seed_chains_both_strands(forward, reverse, config,
                                                   std::move(seed_bucket_fwd),
                                                   std::move(seed_bucket_bwd),
                                                   [&](Chain&& chain, score_t) {

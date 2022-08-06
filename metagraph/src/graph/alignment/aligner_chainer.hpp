@@ -16,8 +16,7 @@ typedef Alignment::score_t score_t;
 
 // Given forward and reverse-complement seeds, construct and call chains of seeds
 std::pair<size_t, size_t>
-call_seed_chains_both_strands(const IDBGAligner &aligner,
-                              std::string_view forward,
+call_seed_chains_both_strands(std::string_view forward,
                               std::string_view reverse,
                               const DBGAlignerConfig &config,
                               std::vector<Seed>&& fwd_seeds,
