@@ -923,7 +923,7 @@ std::vector<TAlphabet> BOSS::get_node_seq(edge_index x) const {
 
         // find end of range with binary search
         uint64_t index = 0;
-        uint64_t end = indexed_suffix_ranges_.size() / 2;
+        uint64_t end = indexed_suffix_ranges_rk1_(indexed_suffix_ranges_.size()) / 2;
         while (index != end) {
             auto mid = index + (end - index) / 2;
             if (get_suffix_range(2 * mid + 1) > x) {
@@ -933,7 +933,7 @@ std::vector<TAlphabet> BOSS::get_node_seq(edge_index x) const {
             }
         }
 
-        if (index < indexed_suffix_ranges_.size() / 2 && get_suffix_range(2 * index) <= x) {
+        if (index < indexed_suffix_ranges_rk1_(indexed_suffix_ranges_.size()) / 2 && get_suffix_range(2 * index) <= x) {
             assert(x < get_suffix_range(2 * index + 1));
             for (i = 0; i < indexed_suffix_length_; ++i) {
                 uint64_t next_index = index / (alph_size - 1);
