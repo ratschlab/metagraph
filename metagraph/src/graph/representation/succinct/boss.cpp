@@ -909,6 +909,7 @@ std::vector<TAlphabet> BOSS::get_node_seq(edge_index x) const {
     std::vector<TAlphabet> ret(k_);
     size_t i = k_;
 
+    // TODO: benchmark: short indexed suffix might be slower to query with binary search...
     if (indexed_suffix_length_) {
         while (i > indexed_suffix_length_) {
             CHECK_INDEX(x);
