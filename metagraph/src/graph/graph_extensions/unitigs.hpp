@@ -24,17 +24,13 @@ class Unitigs : public SequenceGraph::GraphExtension {
     typedef annot::matrix::TupleRowDiff<annot::ColumnCoordAnnotator::binary_matrix_type> UnitigCoords;
     typedef Alignment::Tuple::value_type Coord;
 
-    Unitigs(const DBGSuccinct &graph) : graph_(std::shared_ptr<const DeBruijnGraph>{}, &graph) {}
+    Unitigs(const DBGSuccinct &graph);
     Unitigs(const cli::Config &config);
 
     bool load(const std::string &filename_base);
     void serialize(const std::string &filename_base) const;
     bool is_compatible(const SequenceGraph &, bool = true) const { return true; }
-
-    void load_graph(const std::string &fname) {
-        graph_ = load_graph_impl(fname);
-        unitigs_.set_graph(graph_.get());
-    }
+    void load_graph(const std::string &fname);
 
     const DBGSuccinct* get_graph() const { return graph_.get(); }
 

@@ -14,6 +14,7 @@
 #include "graph/alignment/aligner_labeled.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "common/threads/threading.hpp"
+#include "common/serialization.hpp"
 
 
 namespace mtg {
@@ -21,6 +22,12 @@ namespace graph {
 namespace align {
 
 using common::logger;
+
+Unitigs::Unitigs(const DBGSuccinct &graph)
+      : graph_(std::shared_ptr<const DeBruijnGraph>{}, &graph) {
+    if (graph_->get_mask())
+        throw std::runtime_error("Masked graphs not supported");
+}
 
 Unitigs::Unitigs(const cli::Config &config) : graph_(load_graph_impl(config.fnames[0])) {
     std::filesystem::path tmp_dir = utils::create_temp_dir(config.tmp_dir, "unitigs");
@@ -30,25 +37,25 @@ Unitigs::Unitigs(const cli::Config &config) : graph_(load_graph_impl(config.fnam
     std::vector<size_t> unitigs;
     std::vector<std::unique_ptr<bit_vector>> cols;
 
-    if (!graph_->get_mask()) {
-        logger->trace("Marking dummy k-mers");
+    {
         DBGSuccinct &ncgraph = const_cast<DBGSuccinct&>(*graph_);
-        ncgraph.mask_dummy_kmers(get_num_threads(), false);
+        if (!graph_->get_mask()) {
+            logger->trace("Marking dummy k-mers");
+            ncgraph.mask_dummy_kmers(get_num_threads(), false);
+        }
+
         valid_nodes_.reset(ncgraph.release_mask());
-        ProgressBar progress_bar(valid_nodes_->num_set_bits(), "Transforming mask",
-                                 std::cerr, !common::get_verbose());
-        cols.emplace_back(std::make_unique<bit_vector_smart>([&](const auto &callback) {
-            valid_nodes_->call_ones([&](node_index i) {
-                assert(i);
-                callback(AnnotatedDBG::graph_to_anno_index(i));
-                ++progress_bar;
-            });
-        }, ncgraph.num_nodes(), valid_nodes_->num_set_bits()));
-    } else {
-        logger->error("Dummy mask already present in the graph. "
-                      "Support for this not implemented yet.");
-        exit(1);
     }
+
+    ProgressBar progress_bar(valid_nodes_->num_set_bits(), "Transforming mask",
+                             std::cerr, !common::get_verbose());
+    cols.emplace_back(std::make_unique<bit_vector_smart>([&](const auto &callback) {
+        valid_nodes_->call_ones([&](node_index i) {
+            assert(i);
+            callback(AnnotatedDBG::graph_to_anno_index(i));
+            ++progress_bar;
+        });
+    }, graph_->num_nodes(), valid_nodes_->num_set_bits()));
 
     annot::LabelEncoder<> encoder;
     encoder.insert_and_encode("");
@@ -348,6 +355,12 @@ auto Unitigs::get_unitig_ids_and_coordinates(const std::vector<node_index> &node
     }
 
     return results;
+}
+
+void Unitigs::load_graph(const std::string &fname) {
+    graph_ = load_graph_impl(fname);
+    const_cast<DBGSuccinct&>(*graph_).reset_mask();
+    unitigs_.set_graph(graph_.get());
 }
 
 std::shared_ptr<const DBGSuccinct> Unitigs::load_graph_impl(const std::string &fname) {
