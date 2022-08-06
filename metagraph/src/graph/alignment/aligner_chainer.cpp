@@ -1296,8 +1296,8 @@ size_t cluster_seeds(const IDBGAligner &aligner,
                     size_t unitig_id;
                     Unitigs::Coord start_coord;
                     Unitigs::Coord unitig_size;
-                    tsl::hopscotch_set<Node*> prevs;
-                    tsl::hopscotch_set<Node*> nexts;
+                    tsl::hopscotch_set<size_t> prevs;
+                    tsl::hopscotch_set<size_t> nexts;
                 };
                 std::vector<Node> bucket_forest;
                 std::vector<size_t> max_length;
@@ -1322,19 +1322,22 @@ size_t cluster_seeds(const IDBGAligner &aligner,
                 size_t max_degree = 0;
 
                 for (size_t i = 0; i < max_length.size(); ++i) {
-                    std::vector<std::pair<Node*, Unitigs::Coord>> dfs;
-                    dfs.emplace_back(&bucket_forest[i], max_length[i] - bucket_forest[i].unitig_size);
+                    std::vector<std::pair<size_t, Unitigs::Coord>> dfs;
+                    dfs.emplace_back(i, max_length[i] - bucket_forest[i].unitig_size);
                     while (dfs.size()) {
-                        auto [cur_node, dist_left] = dfs.back();
+                        auto [cur_node_i, dist_left] = dfs.back();
                         dfs.pop_back();
                         if (dist_left <= 0)
                             continue;
 
+                        Node *cur_node = &bucket_forest[cur_node_i];
+
                         if (cur_node->nexts.empty()) {
                             unitigs->adjacent_outgoing_unitigs(cur_node->unitig_id, [&](size_t next) {
                                 auto [it, inserted] = unitig_to_bucket.try_emplace(next, std::vector<std::pair<size_t, Unitigs::Coord>>{});
-                                Node *next_node;
+                                size_t next_node;
                                 if (inserted) {
+                                    next_node = bucket_forest.size();
                                     auto coords = unitigs->get_unitig_bounds(next).second;
                                     bucket_forest.emplace_back(Node{
                                         .unitig_id = next,
@@ -1342,9 +1345,12 @@ size_t cluster_seeds(const IDBGAligner &aligner,
                                         .unitig_size = coords.second - coords.first,
                                         .prevs = {}, .nexts = {}
                                     });
-                                    next_node = &bucket_forest.back();
+
+                                    // reset pointer just in case the previous emplace_back
+                                    // resized the vector
+                                    cur_node = &bucket_forest[cur_node_i];
                                 } else {
-                                    next_node = &bucket_forest[it - unitig_to_bucket.begin()];
+                                    next_node = it - unitig_to_bucket.begin();
                                 }
 
                                 cur_node->nexts.emplace(next_node);
@@ -1352,11 +1358,14 @@ size_t cluster_seeds(const IDBGAligner &aligner,
                             });
                         }
 
-                        for (Node* next : cur_node->nexts) {
-                            next->prevs.emplace(cur_node);
-                            max_degree = std::max(max_degree, next->prevs.size());
-                            dfs.emplace_back(next, dist_left - next->unitig_size);
+                        for (size_t node_i : cur_node->nexts) {
+                            bucket_forest[node_i].prevs.emplace(cur_node);
+                            max_degree = std::max(max_degree, bucket_forest[node_i].prevs.size());
+                            dfs.emplace_back(node_i, dist_left - bucket_forest[node_i].unitig_size);
                         }
+
+                        if (max_degree > 1)
+                            break;
                     }
                 }
 
@@ -1380,7 +1389,7 @@ size_t cluster_seeds(const IDBGAligner &aligner,
                             assert(cur_node->prevs.size() <= 1);
                             if (cur_node->nexts.size()) {
                                 assert(cur_node->nexts.size() == 1);
-                                cur_node = *cur_node->nexts.begin();
+                                cur_node = &bucket_forest[*cur_node->nexts.begin()];
                             } else {
                                 cur_node = nullptr;
                             }
