@@ -6,7 +6,7 @@ function (findOpenMP)
 # unset OpenMP_CXX_FLAGS. If OpenMP loading fails once, it will be set to NOT_FOUND
 # and happily cached, thus messing up the compilation flags forever
 unset(OpenMP_CXX_FLAGS CACHE)
-find_package(OpenMP REQUIRED)
+find_package(OpenMP 5.0 REQUIRED)
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}" PARENT_SCOPE)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}" PARENT_SCOPE)
 set(OpenMP_CXX_LIBRARIES "${OpenMP_CXX_LIBRARIES}" PARENT_SCOPE)
