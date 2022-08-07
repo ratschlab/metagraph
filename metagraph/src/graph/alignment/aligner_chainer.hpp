@@ -36,6 +36,7 @@ chain_alignments(const IDBGAligner &aligner,
 
 template <class BatchSeeders>
 size_t cluster_seeds(const IDBGAligner &aligner,
+                     const std::vector<AlignmentResults> &paths,
                      BatchSeeders &batch_seeders,
                      size_t old_seed_count);
 

@@ -165,6 +165,7 @@ bool align_connect(const DeBruijnGraph &graph,
                    Extender &extender,
                    std::vector<Alignment> &partial_alignments) {
     auto [left, next] = split_seed(graph, config, first);
+    DEBUG_LOG("Split seed: {}\n\t{}\n\t{}", first, left, next);
     coord_dist += second.get_sequence().size() + next.get_sequence().size()
             - first.get_sequence().size();
     assert(coord_dist > 0);
@@ -189,7 +190,7 @@ bool align_connect(const DeBruijnGraph &graph,
             return true;
     }
 
-    logger->trace("Extension score too low, restarting from seed {}", second);
+    DEBUG_LOG("Extension score too low, restarting from seed {}", second);
     partial_alignments.emplace_back(first);
     std::swap(first, second);
     return false;
@@ -454,7 +455,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
             if (seeder_rc)
                 old_seed_count += seeder_rc->get_seeds().size();
         }
-        size_t new_seed_count = cluster_seeds(*this, seeders, old_seed_count);
+        size_t new_seed_count = cluster_seeds(*this, paths, seeders, old_seed_count);
         logger->trace("Seed count:\tbefore clustering: {}\tafter clustering: {}",
                       old_seed_count, new_seed_count);
     }
@@ -638,7 +639,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
     }
     num_extensions += chain.size() - 1;
 
-    if (partial_alignments.size()) {
+    if (extend_ends && partial_alignments.size()) {
         partial_alignments.emplace_back(cur);
         assert(partial_alignments.size() == coord_offsets.size());
         Alignment *first = &partial_alignments[0];
@@ -739,9 +740,11 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
     assert(!best.empty());
     callback(std::move(best));
 
-    for (auto&& aln : partial_alignments) {
-        if (!aln.empty())
-            callback(std::move(aln));
+    if (!extend_ends) {
+        for (auto&& aln : partial_alignments) {
+            if (!aln.empty())
+                callback(std::move(aln));
+        }
     }
 }
 
@@ -885,7 +888,7 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
                 continue;
 
             score_t min_path_score = config_.min_cell_score;
-            auto extensions = fwd_extender.get_extensions(seeds[i], min_path_score, false);
+            auto extensions = fwd_extender.get_extensions(seeds[i], min_path_score, true);
 
             std::vector<Alignment> rc_of_alignments;
             for (Alignment &path : extensions) {
