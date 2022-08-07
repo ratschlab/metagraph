@@ -1321,14 +1321,23 @@ size_t cluster_seeds(const IDBGAligner &aligner,
 
                 size_t max_degree = 0;
 
+                size_t old_max_length = max_length.size();
                 for (size_t i = 0; i < max_length.size(); ++i) {
                     std::vector<std::pair<size_t, Unitigs::Coord>> dfs;
-                    dfs.emplace_back(i, max_length[i] - bucket_forest[i].unitig_size);
+                    dfs.emplace_back(i, max_length[i]);
                     while (dfs.size()) {
                         auto [cur_node_i, dist_left] = dfs.back();
                         dfs.pop_back();
+                        DEBUG_LOG("\tqueue: {} dist: {}", dfs.size(), dist_left);
                         if (dist_left <= 0)
                             continue;
+
+                        if (static_cast<Unitigs::Coord>(max_length[cur_node_i])
+                                < dist_left) {
+                            max_length[cur_node_i] = dist_left;
+                        } else {
+                            continue;
+                        }
 
                         Node *cur_node = &bucket_forest[cur_node_i];
 
@@ -1345,6 +1354,7 @@ size_t cluster_seeds(const IDBGAligner &aligner,
                                         .unitig_size = coords.second - coords.first,
                                         .prevs = {}, .nexts = {}
                                     });
+                                    max_length.emplace_back(dist_left);
 
                                     // reset pointer just in case the previous emplace_back
                                     // resized the vector
@@ -1353,55 +1363,81 @@ size_t cluster_seeds(const IDBGAligner &aligner,
                                     next_node = it - unitig_to_bucket.begin();
                                 }
 
+                                assert(next_node < bucket_forest.size());
                                 cur_node->nexts.emplace(next_node);
                                 max_degree = std::max(max_degree, cur_node->nexts.size());
                             });
                         }
 
                         for (size_t node_i : cur_node->nexts) {
-                            bucket_forest[node_i].prevs.emplace(cur_node);
+                            bucket_forest[node_i].prevs.emplace(cur_node_i);
                             max_degree = std::max(max_degree, bucket_forest[node_i].prevs.size());
-                            dfs.emplace_back(node_i, dist_left - bucket_forest[node_i].unitig_size);
+                            dfs.emplace_back(node_i, dist_left - cur_node->unitig_size);
                         }
-
-                        if (max_degree > 1)
-                            break;
                     }
                 }
 
-                if (max_degree <= 1) {
-                    DEBUG_LOG("Defining coordinates");
-                    for (size_t i = 0; i < max_length.size(); ++i) {
-                        if (!bucket_forest[i].unitig_id || bucket_forest[i].prevs.size())
-                            continue;
-
-                        Node *cur_node = &bucket_forest[i];
-                        std::vector<std::pair<size_t, Unitigs::Coord>> bucket;
-                        size_t coord_offset = 0;
-                        while (cur_node) {
-                            assert(cur_node->unitig_id);
-                            assert(unitig_to_bucket.count(cur_node->unitig_id));
-                            for (const auto &[k, coord] : unitig_to_bucket[cur_node->unitig_id]) {
-                                bucket.emplace_back(k, coord - cur_node->start_coord + coord_offset);
-                            }
-                            coord_offset += cur_node->unitig_size;
-                            cur_node->unitig_id = 0;
-                            assert(cur_node->prevs.size() <= 1);
-                            if (cur_node->nexts.size()) {
-                                assert(cur_node->nexts.size() == 1);
-                                cur_node = &bucket_forest[*cur_node->nexts.begin()];
-                            } else {
-                                cur_node = nullptr;
-                            }
+                DEBUG_LOG("Pruning tree of size {}", bucket_forest.size());
+                for (auto it = bucket_forest.rbegin(); it != bucket_forest.rend(); ++it) {
+                    if (it->nexts.empty() && unitig_to_bucket[it->unitig_id].empty()) {
+                        size_t j = it.base() - bucket_forest.begin() - 1;
+                        DEBUG_LOG("\tpruning {}", j);
+                        assert(j < bucket_forest.size());
+                        for (size_t i : it->prevs) {
+                            assert(i != j);
+                            assert(i < bucket_forest.size());
+                            auto find = bucket_forest[i].nexts.find(j);
+                            if (find != bucket_forest[i].nexts.end())
+                                bucket_forest[i].nexts.erase(find);
                         }
 
-                        process_bucket(0, bucket);
+                        it->unitig_id = 0;
                     }
-                } else {
-                    // TODO: handle coordinates later
-                    auto it = unitig_to_bucket.begin();
-                    assert(unitig_to_bucket.size() >= max_length.size());
-                    for (size_t i = 0; i < max_length.size(); ++i, ++it) {
+                }
+
+                DEBUG_LOG("Defining coordinates for linear unitig chains in tree of size {}",
+                          std::count_if(bucket_forest.begin(), bucket_forest.end(),
+                                        [](const auto &a) -> bool { return a.unitig_id; }));
+
+                for (size_t i = 0; i < old_max_length; ++i) {
+                    if (!bucket_forest[i].unitig_id || bucket_forest[i].prevs.size()
+                            || bucket_forest[i].nexts.size() > 1) {
+                        continue;
+                    }
+
+                    Node *cur_node = &bucket_forest[i];
+                    std::vector<std::pair<size_t, Unitigs::Coord>> bucket;
+                    size_t coord_offset = 0;
+#ifndef NDEBUG
+                    size_t bucket_count = 0;
+#endif
+                    while (cur_node) {
+                        assert(cur_node->unitig_id);
+                        assert(unitig_to_bucket.count(cur_node->unitig_id));
+#ifndef NDEBUG
+                        bucket_count += !unitig_to_bucket[cur_node->unitig_id].empty();
+#endif
+                        for (const auto &[k, coord] : unitig_to_bucket[cur_node->unitig_id]) {
+                            bucket.emplace_back(k, coord - cur_node->start_coord + coord_offset);
+                        }
+                        coord_offset += cur_node->unitig_size;
+                        cur_node->unitig_id = 0;
+                        if (cur_node->nexts.size() == 1 && cur_node->prevs.size() == 1) {
+                            cur_node = &bucket_forest[*cur_node->nexts.begin()];
+                        } else {
+                            cur_node = nullptr;
+                        }
+                    }
+
+                    DEBUG_LOG("Merged {} buckets", bucket_count);
+                    process_bucket(0, bucket);
+                }
+
+                DEBUG_LOG("Handling remaining buckets");
+                auto it = unitig_to_bucket.begin();
+                for (size_t i = 0; i < old_max_length; ++i, ++it) {
+                    if (bucket_forest[i].unitig_id) {
+                        throw std::runtime_error("not implemented");
                         process_bucket(it->first, it.value());
                     }
                 }
