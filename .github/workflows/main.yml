@@ -24,14 +24,10 @@ jobs:
       matrix:
         alphabet: [DNA, Protein]
         build_type: [Debug, Release]
-        compiler: [g++-10, g++-11]
+        compiler: [g++-11]
         build_static: [OFF, ON]
         with_avx: [OFF, ON]
         include:
-          - compiler: g++-10
-            cxx: g++-10
-            cc: gcc-10
-
           - compiler: g++-11
             cxx: g++-11
             cc: gcc-11
