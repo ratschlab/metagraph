@@ -40,6 +40,16 @@ class IDBGAligner {
     virtual std::unique_ptr<SeedFilteringExtender> make_extender(std::string_view query) const = 0;
 
     virtual bool has_coordinates() const = 0;
+
+    // Construct a full alignment from a chain by aligning the query agaisnt
+    // the graph in the regions of the query in between the chain seeds.
+    virtual void extend_chain(std::string_view query,
+                              std::string_view query_rc,
+                              Chain&& chain,
+                              size_t &num_extensions,
+                              size_t &num_explored_nodes,
+                              const std::function<void(Alignment&&)> &callback,
+                              bool extend_ends = true) const = 0;
 };
 
 
@@ -65,6 +75,16 @@ class DBGAligner : public IDBGAligner {
         return std::make_unique<Extender>(*this, query);
     }
 
+    // Construct a full alignment from a chain by aligning the query against
+    // the graph in the regions of the query in between the chain seeds.
+    void extend_chain(std::string_view query,
+                      std::string_view query_rc,
+                      Chain&& chain,
+                      size_t &num_extensions,
+                      size_t &num_explored_nodes,
+                      const std::function<void(Alignment&&)> &callback,
+                      bool extend_ends = true) const override;
+
   protected:
     typedef typename Seeder::node_index node_index;
     typedef Alignment::score_t score_t;
@@ -89,19 +109,8 @@ class DBGAligner : public IDBGAligner {
                           std::string_view reverse,
                           const ISeeder &forward_seeder,
                           const ISeeder &reverse_seeder,
-                          Extender &forward_extender,
                           const std::function<void(Alignment&&)> &callback,
                           const std::function<score_t(const Alignment&)> &get_min_path_score) const;
-
-    // Construct a full alignment from a chain by aligning the query agaisnt
-    // the graph in the regions of the query in between the chain seeds.
-    void extend_chain(std::string_view query,
-                      std::string_view query_rc,
-                      Extender &forward_extender,
-                      Chain&& chain,
-                      size_t &num_extensions,
-                      size_t &num_explored_nodes,
-                      const std::function<void(Alignment&&)> &callback) const;
 };
 
 std::pair<Alignment, Alignment> split_seed(const DeBruijnGraph &graph,

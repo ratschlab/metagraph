@@ -485,30 +485,28 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
         std::string_view this_query = paths[i].get_query(false);
         assert(this_query == query);
 
-        Extender extender(*this, this_query);
-
 #if ! _PROTEIN_GRAPH
         if (seeder_rc) {
             std::string_view reverse = paths[i].get_query(true);
             std::tie(num_seeds, num_extensions, num_explored_nodes) =
                 align_both_directions(this_query, reverse, *seeder, *seeder_rc,
-                                      extender, add_alignment, get_min_path_score);
+                                      add_alignment, get_min_path_score);
 
         } else {
             std::tie(num_seeds, num_extensions, num_explored_nodes) =
-                align_core(*seeder, extender, add_alignment, get_min_path_score, false);
+                align_core(*seeder, Extender(*this, this_query), add_alignment,
+                           get_min_path_score, false);
         }
 #else
         if (config_.chain_alignments) {
             std::string_view reverse = paths[i].get_query(true);
-            Extender extender_rc(*this, reverse);
             std::tie(num_seeds, num_extensions, num_explored_nodes) =
                 align_both_directions(this_query, reverse, *seeder, *seeder_rc,
-                                      extender, extender_rc,
                                       add_alignment, get_min_path_score);
         } else {
             std::tie(num_seeds, num_extensions, num_explored_nodes) =
-                align_core(*seeder, extender, add_alignment, get_min_path_score, false);
+                align_core(*seeder, Extender(*this, this_query), add_alignment,
+                           get_min_path_score, false);
         }
 #endif
 
@@ -574,7 +572,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
 template <class Seeder, class Extender>
 std::tuple<size_t, size_t, size_t>
 align_core(const Seeder &seeder,
-           Extender &extender,
+           Extender&& extender,
            const std::function<void(Alignment&&)> &callback,
            const std::function<score_t(const Alignment&)> &get_min_path_score,
            bool force_fixed_seed) {
@@ -606,11 +604,12 @@ template <class Seeder, class Extender, class AlignmentCompare>
 void DBGAligner<Seeder, Extender, AlignmentCompare>
 ::extend_chain(std::string_view query,
                std::string_view query_rc,
-               Extender &extender,
                Chain&& chain,
                size_t &num_extensions,
                size_t &num_explored_nodes,
-               const std::function<void(Alignment&&)> &callback) const {
+               const std::function<void(Alignment&&)> &callback,
+               bool extend_ends) const {
+    Extender extender(*this, query);
     assert(chain.size());
 
     Alignment cur = std::move(chain[0].first);
@@ -684,7 +683,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
 
     assert(!best.empty());
 
-    if (best.get_end_clipping()) {
+    if (best.get_end_clipping() && extend_ends) {
         DEBUG_LOG("Extending back");
         auto extensions = extender.get_extensions(best, config_.ninf, true);
         if (extensions.size()
@@ -702,7 +701,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
     // for now, backwards alignment not supported for amino acids
 #if ! _PROTEIN_GRAPH
 
-    if (best.get_clipping()) {
+    if (best.get_clipping() && extend_ends) {
         DEBUG_LOG("Extending front");
         RCDBG rc_dbg(std::shared_ptr<const DeBruijnGraph>(
                         std::shared_ptr<const DeBruijnGraph>(), &graph_));
@@ -730,11 +729,12 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
 
 #else
 
-    std::ignore = query;
     std::ignore = query_rc;
-    std::ignore = num_explored_nodes;
 
 #endif
+
+    num_extensions += extender.num_extensions();
+    num_explored_nodes += extender.num_explored_nodes();
 
     assert(!best.empty());
     callback(std::move(best));
@@ -752,13 +752,11 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
                         std::string_view reverse,
                         const ISeeder &forward_seeder,
                         const ISeeder &reverse_seeder,
-                        Extender &forward_extender,
                         const std::function<void(Alignment&&)> &callback,
                         const std::function<score_t(const Alignment&)> &get_min_path_score) const {
     size_t num_seeds = 0;
     size_t num_extensions = 0;
     size_t num_explored_nodes = 0;
-    Extender reverse_extender(*this, reverse);
 
     if (config_.chain_alignments) {
         if (!has_coordinates()) {
@@ -818,9 +816,6 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
 
                     extend_chain(chain[0].first.get_orientation() ? reverse : forward,
                                  chain[0].first.get_orientation() ? forward : reverse,
-                                 chain[0].first.get_orientation()
-                                     ? reverse_extender
-                                     : forward_extender,
                                  std::move(chain), num_extensions, num_explored_nodes,
                                  [&](Alignment&& aln) {
                         const auto &cur_columns = aln.get_columns();
@@ -848,10 +843,11 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
             callback(std::move(alignment));
         }
 
-        return std::make_tuple(num_seeds,
-                               num_extensions + reverse_extender.num_extensions(),
-                               num_explored_nodes + reverse_extender.num_explored_nodes());
+        return std::make_tuple(num_seeds, num_extensions, num_explored_nodes);
     }
+
+    Extender forward_extender(*this, forward);
+    Extender reverse_extender(*this, reverse);
 
 #if ! _PROTEIN_GRAPH
 
@@ -971,9 +967,13 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
         }
     }
 
-    return std::make_tuple(num_seeds,
-                           num_extensions + reverse_extender.num_extensions(),
-                           num_explored_nodes + reverse_extender.num_explored_nodes());
+    return std::make_tuple(
+        num_seeds,
+        num_extensions + forward_extender.num_extensions()
+                        + reverse_extender.num_extensions(),
+        num_explored_nodes + forward_extender.num_explored_nodes()
+                            + reverse_extender.num_explored_nodes()
+    );
 
 #else
 
