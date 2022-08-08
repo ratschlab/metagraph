@@ -298,10 +298,10 @@ AnnotatedDBG::get_labels(const std::vector<std::pair<row_index, size_t>> &index_
 
 std::vector<Label>
 AnnotatedSequenceGraph::get_labels(node_index index) const {
-    assert(!annotator_.get() || check_compatibility());
+    assert(check_compatibility());
     assert(index != SequenceGraph::npos);
 
-    return annotation_->get(graph_to_anno_index(index));
+    return annotator_->get(graph_to_anno_index(index));
 }
 
 std::vector<StringCountPair>
@@ -838,6 +838,26 @@ bool AnnotatedSequenceGraph::has_label(node_index index, const Label &label) con
     assert(index != SequenceGraph::npos);
 
     return annotator_->has_label(graph_to_anno_index(index), label);
+}
+
+const bitmap& AnnotatedSequenceGraph::get_annotated_nodes(const Label &label) const {
+    assert(!annotator_ || check_compatibility());
+    const bitmap *ret_val = nullptr;
+    annotation_->call_label_objects(Annotator::VLabels{ label },
+        [&](size_t, const bitmap &column) { ret_val = &column; }
+    );
+
+    assert(ret_val);
+    return *ret_val;
+}
+
+void AnnotatedSequenceGraph
+::call_annotated_nodes(const Annotator::VLabels &labels,
+                       const std::function<void(size_t, const bitmap&)> &callback,
+                       size_t num_threads) const {
+    assert(!annotator_ || check_compatibility());
+
+    annotation_->call_label_objects(labels, callback, num_threads);
 }
 
 bool AnnotatedSequenceGraph::check_compatibility() const {

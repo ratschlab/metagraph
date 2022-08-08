@@ -19,8 +19,8 @@ class AnnotatedSequenceGraph {
   public:
     typedef std::string Label;
     typedef annot::MultiLabelEncoded<Label> Annotator;
-    typedef annot::AnnotationCategory<typename Annotator::Index,
-                                      typename Annotator::VLabels> Annotation;
+    typedef annot::Annotation<typename Annotator::Index,
+                              typename Annotator::VLabels> Annotation;
     using node_index = SequenceGraph::node_index;
     using row_index = Annotator::Index;
 
@@ -54,6 +54,11 @@ class AnnotatedSequenceGraph {
     }
 
     virtual const Annotation& get_annotation() const { return *annotation_; }
+
+    virtual const bitmap& get_annotated_nodes(const Label &label) const;
+    virtual void call_annotated_nodes(const Annotator::VLabels &labels,
+                                      const std::function<void(size_t, const bitmap&)> &callback,
+                                      size_t num_threads = 1) const;
 
     static row_index graph_to_anno_index(node_index kmer_index) {
         assert(kmer_index);
