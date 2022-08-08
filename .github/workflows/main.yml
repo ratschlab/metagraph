@@ -106,7 +106,7 @@ jobs:
       run: |
         echo "LDFLAGS=${LDFLAGS} -L/usr/local/lib" >> $GITHUB_ENV
         echo "CPPFLAGS=${CPPFLAGS} -I/usr/local/include" >> $GITHUB_ENV
-        echo "CXXFLAGS=${CXXFLAGS} -stdlib=libc++" >> $GITHUB_ENV
+        echo "CXXFLAGS=${CXXFLAGS} -I/usr/local/include -stdlib=libc++" >> $GITHUB_ENV
 
     - name: install dependencies for integration tests
       run: |
