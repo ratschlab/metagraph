@@ -161,7 +161,7 @@ jobs:
     - name: install clang
       uses: egor-tensin/setup-clang@v1
       with:
-        version: 12
+        version: 11
         platform: x64
 
     - name: install sdsl-lite
