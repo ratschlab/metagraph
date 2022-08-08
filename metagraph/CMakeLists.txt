@@ -113,6 +113,7 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   )
 
   if (NOT CMAKE_CXX_COMPILER_ID MATCHES "AppleClang")
+    string(APPEND CMAKE_CXX_FLAGS " -stdlib=libc++")
      add_compile_options(
       -Wno-suggest-destructor-override
       -Wno-deprecated-copy
