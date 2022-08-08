@@ -114,7 +114,7 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
 
   if (NOT CMAKE_CXX_COMPILER_ID MATCHES "AppleClang")
     add_compile_options(
-     -Wno-old-style-cast
+     -Wno-suggest-destructor-override
      -Wno-deprecated-copy
      -Wno-deprecated-declarations
     )
