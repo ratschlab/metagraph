@@ -104,12 +104,10 @@ jobs:
     - name: set env variables for clang
       if: matrix.compiler == 'clang'
       run: |
-        echo "LDFLAGS=${LDFLAGS} -L/usr/local/lib" >> $GITHUB_ENV
-        echo "CPPFLAGS=${CPPFLAGS} -I/usr/local/include" >> $GITHUB_ENV
-        echo "CXXFLAGS=${CXXFLAGS} -I/usr/local/include -stdlib=libc++" >> $GITHUB_ENV
-        echo LIB $(ls /usr/lib/llvm-13/lib/clang/13.0.1)
-        echo LIB-inc $(ls /usr/lib/llvm-13/include/clang/13.0.1)
-        echo INC $(ls /usr/include/llvm-13/include/clang/13.0.1)
+        echo "LDFLAGS=${LDFLAGS} -L/usr/lib/llvm-13/lib/clang/13.0.1/lib" >> $GITHUB_ENV
+        echo "CPPFLAGS=${CPPFLAGS} -I/usr/lib/llvm-13/lib/clang/13.0.1/include" >> $GITHUB_ENV
+        echo "CXXFLAGS=${CXXFLAGS} -I/usr/lib/llvm-13/lib/clang/13.0.1/include -stdlib=libc++" >> $GITHUB_ENV
+        echo LIB $(ls /usr/lib/llvm-13/lib/clang/13.0.1/*)
         echo $(clang++ -v --print-search-dirs)
 
     - name: install dependencies for integration tests
