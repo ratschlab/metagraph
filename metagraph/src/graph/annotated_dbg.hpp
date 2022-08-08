@@ -41,9 +41,6 @@ class AnnotatedSequenceGraph {
     virtual void annotate_sequences(
         const std::vector<std::pair<std::string, std::vector<Label>>> &data);
 
-    virtual void call_annotated_nodes(const Label &label,
-                                      std::function<void(node_index)> callback) const;
-
     virtual bool label_exists(const Label &label) const;
 
     virtual bool check_compatibility() const;
