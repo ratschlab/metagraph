@@ -95,7 +95,11 @@ jobs:
     - name: set env variables for clang
       if: matrix.compiler == 'clang'
       run: |
-        echo $(find /usr/include/ -name cstdint)
+        echo "LDFLAGS=${LDFLAGS} -L/usr/lib/c++/10" >> $GITHUB_ENV
+        echo "CPPFLAGS=${CPPFLAGS} -I/usr/include/c++/10" >> $GITHUB_ENV
+        echo "CXXFLAGS=${CXXFLAGS} -I/usr/include/c++/10 -stdlib=libc++" >> $GITHUB_ENV
+        echo $(ls -l /usr/include)
+        echo $(ls -l /usr/include/c++)
 
     - name: install dependencies for integration tests
       run: |
