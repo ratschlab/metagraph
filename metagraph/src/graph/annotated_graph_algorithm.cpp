@@ -317,7 +317,7 @@ construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
 
     auto make_index_callback = [&](uint8_t col_indicator) {
         assert(col_indicator);
-        return [&](auto r) {
+        return [&indicator,&counts,&vector_backup_mutex,parallel,col_indicator](auto r) {
             node_index i = AnnotatedDBG::anno_to_graph_index(r);
             set_bit(indicator.data(), i, parallel, MO_RELAXED);
             if (col_indicator & 1)
