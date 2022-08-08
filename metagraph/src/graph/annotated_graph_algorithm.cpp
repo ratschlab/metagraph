@@ -4,6 +4,7 @@
 #include "common/vectors/vector_algorithm.hpp"
 #include "common/vectors/bitmap.hpp"
 #include "graph/representation/masked_graph.hpp"
+#include "annotation/representation/column_compressed/column_compressed_lazy.hpp"
 
 
 namespace mtg {
@@ -67,7 +68,6 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
                     const DifferentialAssemblyConfig &config,
                     size_t num_threads) {
     bool parallel = num_threads > 1;
-    size_t num_labels = anno_graph.get_annotator().num_labels();
     size_t num_in_labels = labels_in.size() + labels_in_round2.size();
     size_t num_out_labels = labels_out.size() + labels_out_round2.size();
     auto graph_ptr = std::dynamic_pointer_cast<const DeBruijnGraph>(
@@ -125,6 +125,7 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
         };
 
         logger->trace("Checking shared and other labels");
+        size_t num_labels = anno_graph.get_annotator().num_labels();
         masked_graph->call_sequences([&](const std::string &contig, const std::vector<node_index> &path) {
             for (const auto &[label, sig] : anno_graph.get_top_label_signatures(contig, num_labels)) {
                 bool found_in = labels_in.count(label);
@@ -309,42 +310,59 @@ construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
     // the in and out counts are stored interleaved
     sdsl::int_vector<> counts = aligned_int_vector(indicator.size() * 2, 0, width, 16);
 
-    const auto &label_encoder = anno_graph.get_annotator().get_label_encoder();
-    const auto &binmat = anno_graph.get_annotator().get_matrix();
-
-    tsl::hopscotch_map<uint64_t, uint8_t> code_to_indicator;
-    for (const std::string &label_in : labels_in) {
-        code_to_indicator[label_encoder.encode(label_in)] = 1;
-    }
-    for (const std::string &label_out : labels_out) {
-        code_to_indicator[label_encoder.encode(label_out)] |= 2;
-    }
-
-    std::vector<uint64_t> label_codes;
-    label_codes.reserve(code_to_indicator.size());
-    for (const auto &[code, indicator] : code_to_indicator) {
-        label_codes.push_back(code);
-    }
-
+    const auto &annotator = anno_graph.get_annotator();
     std::mutex vector_backup_mutex;
     std::atomic_thread_fence(std::memory_order_release);
     bool parallel = num_threads > 1;
 
-    binmat.call_columns(label_codes,
-        [&](auto col_idx, const bitmap &rows) {
-            uint8_t col_indicator = code_to_indicator[label_codes[col_idx]];
-            rows.call_ones([&](auto r) {
-                node_index i = AnnotatedDBG::anno_to_graph_index(r);
-                set_bit(indicator.data(), i, parallel, MO_RELAXED);
-                if (col_indicator & 1)
-                    atomic_fetch_and_add(counts, i * 2, 1, vector_backup_mutex, MO_RELAXED);
+    auto make_index_callback = [&](uint8_t col_indicator) {
+        return [&](auto r) {
+            node_index i = AnnotatedDBG::anno_to_graph_index(r);
+            set_bit(indicator.data(), i, parallel, MO_RELAXED);
+            if (col_indicator & 1)
+                atomic_fetch_and_add(counts, i * 2, 1, vector_backup_mutex, MO_RELAXED);
 
-                if (col_indicator & 2)
-                    atomic_fetch_and_add(counts, i * 2 + 1, 1, vector_backup_mutex, MO_RELAXED);
-            });
-        },
-        num_threads
-    );
+            if (col_indicator & 2)
+                atomic_fetch_and_add(counts, i * 2 + 1, 1, vector_backup_mutex, MO_RELAXED);
+        };
+    };
+
+    if (const auto *ccl = dynamic_cast<const annot::ColumnCompressedLazy<>*>(&annotator)) {
+        ccl->call_columns([&](size_t, const std::string &label, auto&& column) {
+            uint8_t col_indicator = 0;
+            if (labels_in.count(label))
+                col_indicator = 1;
+
+            if (labels_out.count(label))
+                col_indicator |= 2;
+
+            column->call_ones(make_index_callback(col_indicator));
+        });
+    } else {
+        const auto &label_encoder = annotator.get_label_encoder();
+        const auto &binmat = annotator.get_matrix();
+
+        tsl::hopscotch_map<uint64_t, uint8_t> code_to_indicator;
+        for (const std::string &label_in : labels_in) {
+            code_to_indicator[label_encoder.encode(label_in)] = 1;
+        }
+        for (const std::string &label_out : labels_out) {
+            code_to_indicator[label_encoder.encode(label_out)] |= 2;
+        }
+
+        std::vector<uint64_t> label_codes;
+        label_codes.reserve(code_to_indicator.size());
+        for (const auto &[code, indicator] : code_to_indicator) {
+            label_codes.push_back(code);
+        }
+
+        binmat.call_columns(label_codes,
+            [&](auto col_idx, const bitmap &rows) {
+                rows.call_ones(make_index_callback(code_to_indicator[label_codes[col_idx]]));
+            },
+            num_threads
+        );
+    }
 
     std::atomic_thread_fence(std::memory_order_acquire);
 

@@ -14,6 +14,7 @@
 #include "load/load_annotated_graph.hpp"
 #include "graph/annotated_graph_algorithm.hpp"
 #include "graph/representation/masked_graph.hpp"
+#include "annotation/representation/column_compressed/column_compressed_lazy.hpp"
 
 
 namespace mtg {
@@ -28,6 +29,11 @@ using mtg::graph::DifferentialAssemblyConfig;
 
 void check_labels(const tsl::hopscotch_set<std::string> &label_set,
                   const AnnotatedDBG &anno_graph) {
+    if (dynamic_cast<const annot::ColumnCompressedLazy<>*>(&anno_graph.get_annotator())) {
+        logger->trace("Skipping label check for streaming annotator");
+        return;
+    }
+
     bool detected_missing_labels = false;
     for (const std::string &label : label_set) {
         if (!anno_graph.label_exists(label)) {
@@ -76,6 +82,7 @@ void call_masked_graphs(const AnnotatedDBG &anno_graph,
         throw std::iostream::failure("Failed to read assembly config JSON from " + config->assembly_config_file);
 
     size_t num_threads = std::max(1u, get_num_threads());
+    bool streaming = dynamic_cast<const annot::ColumnCompressedLazy<>*>(&anno_graph.get_annotator());
 
     Json::Value diff_json;
     fin >> diff_json;
@@ -110,6 +117,15 @@ void call_masked_graphs(const AnnotatedDBG &anno_graph,
                 experiment, anno_graph.get_graph()
             );
 
+            std::string exp_name = experiment["name"].asString()
+                                    + (config->enumerate_out_sequences ? "." : "");
+
+            if (streaming && diff_config.label_mask_other_unitig_fraction != 1.0) {
+                logger->error("'unitig_other_max_fraction' not supported with --separately, skipping assembly: {}",
+                              exp_name);
+                continue;
+            }
+
             foreground_labels.clear();
             background_labels.clear();
 
@@ -124,8 +140,12 @@ void call_masked_graphs(const AnnotatedDBG &anno_graph,
             check_labels(foreground_labels, anno_graph);
             check_labels(background_labels, anno_graph);
 
-            std::string exp_name = experiment["name"].asString()
-                                    + (config->enumerate_out_sequences ? "." : "");
+            if (streaming
+                    && (shared_foreground_labels.size() || shared_background_labels.size())) {
+                logger->error("'shared_labels' not supported with --separately, skipping assembly: {}",
+                              exp_name);
+                continue;
+            }
 
             logger->trace("Running assembly: {}", exp_name);
 

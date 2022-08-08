@@ -1126,6 +1126,7 @@ if (advanced) {
             fprintf(stderr, "\t-a --annotator [STR] \t\tannotator to load []\n");
             fprintf(stderr, "\t   --diff-assembly-rules [STR] \tJSON file describing labels to mask in and out and their relative fractions []\n");
             fprintf(stderr, "\t                       \t\tSee the manual for the specification.\n");
+            fprintf(stderr, "\t   --separately \t\tstream annotator (only compatible with column annotator) [off]\n");
         } break;
         case STATS: {
             fprintf(stderr, "Usage: %s stats [options] GRAPH1 [[GRAPH2] ...]\n\n", prog_name.c_str());

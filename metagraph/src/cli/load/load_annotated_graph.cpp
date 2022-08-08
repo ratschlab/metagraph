@@ -5,6 +5,7 @@
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "annotation/binary_matrix/row_sparse/row_sparse.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
+#include "annotation/representation/column_compressed/column_compressed_lazy.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "common/logger.hpp"
@@ -37,8 +38,17 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
 
     if (config.infbase_annotators.size()) {
         bool loaded = false;
+        bool streamed = false;
         if (auto *cc = dynamic_cast<annot::ColumnCompressed<>*>(annotation_temp.get())) {
-            loaded = cc->merge_load(config.infbase_annotators);
+            if (config.identity == Config::ASSEMBLE && config.separately) {
+                annotation_temp.reset(new annot::ColumnCompressedLazy<>(
+                    max_index, config.infbase_annotators
+                ));
+                loaded = true;
+                streamed = true;
+            } else {
+                loaded = cc->merge_load(config.infbase_annotators);
+            }
         } else {
             if (config.infbase_annotators.size() > 1) {
                 logger->warn("Cannot merge annotations of this type. Only the first"
@@ -53,20 +63,22 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
         }
 
         // row_diff annotation is special, as it must know the graph structure
-        using namespace annot::binmat;
-        BinaryMatrix &matrix = const_cast<BinaryMatrix &>(annotation_temp->get_matrix());
-        if (IRowDiff *row_diff = dynamic_cast<IRowDiff*>(&matrix)) {
-            if (!dbg_graph) {
-                logger->error("Only succinct de Bruijn graph representations"
-                              " are supported for row-diff annotations");
-                std::exit(1);
-            }
+        if (!streamed) {
+            using namespace annot::binmat;
+            BinaryMatrix &matrix = const_cast<BinaryMatrix &>(annotation_temp->get_matrix());
+            if (IRowDiff *row_diff = dynamic_cast<IRowDiff*>(&matrix)) {
+                if (!dbg_graph) {
+                    logger->error("Only succinct de Bruijn graph representations"
+                                  " are supported for row-diff annotations");
+                    std::exit(1);
+                }
 
-            row_diff->set_graph(dbg_graph);
+                row_diff->set_graph(dbg_graph);
 
-            if (auto *row_diff_column = dynamic_cast<RowDiff<ColumnMajor> *>(&matrix)) {
-                row_diff_column->load_anchor(config.infbase + kRowDiffAnchorExt);
-                row_diff_column->load_fork_succ(config.infbase + kRowDiffForkSuccExt);
+                if (auto *row_diff_column = dynamic_cast<RowDiff<ColumnMajor> *>(&matrix)) {
+                    row_diff_column->load_anchor(config.infbase + kRowDiffAnchorExt);
+                    row_diff_column->load_fork_succ(config.infbase + kRowDiffForkSuccExt);
+                }
             }
         }
     }
@@ -75,7 +87,8 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
     auto anno_graph
             = std::make_unique<AnnotatedDBG>(std::move(graph), std::move(annotation_temp));
 
-    if (!anno_graph->check_compatibility()) {
+    if (!dynamic_cast<const annot::ColumnCompressedLazy<>*>(&anno_graph->get_annotator())
+            && !anno_graph->check_compatibility()) {
         logger->error("Graph and annotation are not compatible");
         exit(1);
     }
