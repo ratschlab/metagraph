@@ -89,6 +89,13 @@ jobs:
           sudo make install
         fi
 
+    - name: Set up Clang
+      if: matrix.compiler == 'clang'
+      uses: egor-tensin/setup-clang@v1
+      with:
+        version: latest
+        platform: x64
+
     - name: install dependencies for integration tests
       run: |
         pip3 install parameterized
