@@ -45,8 +45,8 @@ jobs:
             cc: gcc-11
 
           - compiler: clang
-            cxx: clang++
-            cc: clang
+            cxx: clang++-11
+            cc: clang-11
 
         exclude:
           - alphabet: Protein
@@ -96,11 +96,14 @@ jobs:
       if: matrix.compiler == 'clang'
       run: |
         sudo apt-get install libc++-dev g++-multilib gcc-multilib
-        echo "LDFLAGS=${LDFLAGS} -L/usr/lib/c++/10" >> $GITHUB_ENV
-        echo "CPPFLAGS=${CPPFLAGS} -I/usr/include/c++/10" >> $GITHUB_ENV
-        echo "CXXFLAGS=${CXXFLAGS} -I/usr/include/c++/10 -stdlib=libc++" >> $GITHUB_ENV
-        echo $(ls -l /usr/include)
-        echo $(ls -l /usr/include/c++)
+        sudo apt-get install clang-11 llvm-11 llvm-11-dev llvm-11-tools
+        echo "CC=$(which ${{ matrix.cc }})" >> $GITHUB_ENV
+        echo "CXX=$(which ${{ matrix.cxx }})" >> $GITHUB_ENV
+        echo "LDFLAGS=${LDFLAGS} -L/usr/lib/c++/11" >> $GITHUB_ENV
+        echo "CPPFLAGS=${CPPFLAGS} -I/usr/include/c++/11" >> $GITHUB_ENV
+        echo "CXXFLAGS=${CXXFLAGS} -I/usr/include/c++/11 -stdlib=libc++" >> $GITHUB_ENV
+        echo $(ls /usr/include)
+        echo $(ls /usr/include/c++)
 
     - name: install dependencies for integration tests
       run: |
