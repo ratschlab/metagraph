@@ -23,6 +23,8 @@ class Annotation {
     typedef std::function<void(size_t, const bitmap&)> LabelIndexCallback;
     virtual ~Annotation() {}
 
+    virtual uint64_t num_objects() const = 0;
+
     virtual void call_label_objects(const LabelType &labels,
                                     const LabelIndexCallback &callback,
                                     size_t num_threads = 1) const = 0;
@@ -81,7 +83,6 @@ class MultiLabelAnnotation
 
     /************************* Properties *************************/
 
-    virtual uint64_t num_objects() const = 0;
     virtual size_t num_labels() const = 0;
     virtual uint64_t num_relations() const = 0;
     virtual const std::vector<Label>& get_all_labels() const = 0;

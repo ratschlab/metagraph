@@ -32,7 +32,7 @@ AnnotatedSequenceGraph
         annotator_(std::shared_ptr<Annotator>{}, dynamic_cast<Annotator*>(annotation_.get())),
         force_fast_(force_fast) {
     assert(graph_.get());
-    assert(!annotator_.get() || check_compatibility());
+    assert(check_compatibility());
 }
 
 AnnotatedDBG::AnnotatedDBG(std::shared_ptr<DeBruijnGraph> dbg,
@@ -841,7 +841,7 @@ bool AnnotatedSequenceGraph::has_label(node_index index, const Label &label) con
 }
 
 const bitmap& AnnotatedSequenceGraph::get_annotated_nodes(const Label &label) const {
-    assert(!annotator_ || check_compatibility());
+    assert(check_compatibility());
     const bitmap *ret_val = nullptr;
     annotation_->call_label_objects(Annotator::VLabels{ label },
         [&](size_t, const bitmap &column) { ret_val = &column; }
@@ -855,19 +855,17 @@ void AnnotatedSequenceGraph
 ::call_annotated_nodes(const Annotator::VLabels &labels,
                        const std::function<void(size_t, const bitmap&)> &callback,
                        size_t num_threads) const {
-    assert(!annotator_ || check_compatibility());
+    assert(check_compatibility());
 
     annotation_->call_label_objects(labels, callback, num_threads);
 }
 
 bool AnnotatedSequenceGraph::check_compatibility() const {
-    assert(annotator_.get());
-
     // TODO: what if CanonicalDBG is not the highest level? find a better way to do this
     if (const auto *canonical = dynamic_cast<const CanonicalDBG *>(graph_.get()))
-        return canonical->get_graph().max_index() == annotator_->num_objects();
+        return canonical->get_graph().max_index() == annotation_->num_objects();
 
-    return graph_->max_index() == annotator_->num_objects();
+    return graph_->max_index() == annotation_->num_objects();
 }
 
 

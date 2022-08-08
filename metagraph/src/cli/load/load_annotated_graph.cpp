@@ -88,8 +88,7 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
     auto anno_graph
             = std::make_unique<AnnotatedDBG>(std::move(graph), std::move(annotation_temp));
 
-    if (!dynamic_cast<const annot::ColumnCompressedLazy<>*>(&anno_graph->get_annotation())
-            && !anno_graph->check_compatibility()) {
+    if (!anno_graph->check_compatibility()) {
         logger->error("Graph and annotation are not compatible");
         exit(1);
     }
