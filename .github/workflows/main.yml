@@ -44,7 +44,7 @@ jobs:
             cxx: g++-11
             cc: gcc-11
 
-          - compiler: clang++
+          - compiler: clang
             cxx: clang++
             cc: clang
 
