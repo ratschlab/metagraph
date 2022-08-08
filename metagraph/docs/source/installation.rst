@@ -80,7 +80,7 @@ Before compiling MetaGraph, install the following dependencies:
 
         For **Ubuntu** (20.04 LTS or higher) or **Debian** (10 or higher)::
 
-            sudo apt-get install cmake libbz2-dev libhts-dev libjemalloc-dev libboost-all-dev libomp5
+            sudo apt-get install cmake libbz2-dev libhts-dev libjemalloc-dev libboost-all-dev
 
 
     .. group-tab:: CentOS
@@ -98,7 +98,7 @@ Before compiling MetaGraph, install the following dependencies:
             [[ "$OSTYPE" == "darwin"* ]] \
                 && brew remove -f boost double-conversion gflags glog lz4 snappy zstd folly \
                 && brew install --cc=gcc-7 boost folly \
-                && brew install gcc@9 libomp
+                && brew install gcc@9
             [[ "$OSTYPE" != "darwin"* ]] \
                 && brew install gcc@9 libomp \
                 && brew remove -f openssl@1.1 boost double-conversion gflags glog lz4 snappy zstd folly \
