@@ -89,14 +89,6 @@ jobs:
           sudo make install
         fi
 
-        export CC=$(which ${{ matrix.cc }})
-        export CXX=$(which ${{ matrix.cxx }})
-
-    - name: install OpenMP
-      if: matrix.compiler == 'clang'
-      run: |
-        sudo apt-get install libomp-dev
-
     - name: set up clang
       if: matrix.compiler == 'clang'
       uses: egor-tensin/setup-clang@v1
@@ -111,11 +103,15 @@ jobs:
 
     - name: install sdsl-lite
       run: |
+        export CC=$(which ${{ matrix.cc }})
+        export CXX=$(which ${{ matrix.cxx }})
         cd metagraph/external-libraries/sdsl-lite
         ./install.sh $(pwd)
 
     - name: configure
       run: |
+        export CC=$(which ${{ matrix.cc }})
+        export CXX=$(which ${{ matrix.cxx }})
         mkdir metagraph/build
         cd metagraph/build
         cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
