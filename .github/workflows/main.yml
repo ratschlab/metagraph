@@ -99,9 +99,9 @@ jobs:
         sudo apt-get install clang-11 llvm-11 llvm-11-dev llvm-11-tools
         echo "CC=$(which ${{ matrix.cc }})" >> $GITHUB_ENV
         echo "CXX=$(which ${{ matrix.cxx }})" >> $GITHUB_ENV
-        echo "LDFLAGS=${LDFLAGS} -L/usr/lib/c++/11" >> $GITHUB_ENV
-        echo "CPPFLAGS=${CPPFLAGS} -I/usr/include/c++/11" >> $GITHUB_ENV
-        echo "CXXFLAGS=${CXXFLAGS} -I/usr/include/c++/11 -stdlib=libc++" >> $GITHUB_ENV
+        echo "LDFLAGS=${LDFLAGS} -L/usr/lib/c++/9 -L/usr/lib/c++/10" >> $GITHUB_ENV
+        echo "CPPFLAGS=${CPPFLAGS} -I/usr/include/c++/9 -I/usr/include/c++/10" >> $GITHUB_ENV
+        echo "CXXFLAGS=${CXXFLAGS} -I/usr/include/c++/9 -I/usr/include/c++/10 -stdlib=libc++" >> $GITHUB_ENV
         echo $(ls /usr/include)
         echo $(ls /usr/include/c++)
 
