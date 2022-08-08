@@ -18,7 +18,7 @@ env:
 jobs:
 
   Linux:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-18.04
 
     strategy:
       matrix:
@@ -168,6 +168,7 @@ jobs:
       run: |
         echo "CC=$(which clang)" >> $GITHUB_ENV
         echo "CXX=$(which clang++)" >> $GITHUB_ENV
+
         cd metagraph/external-libraries/sdsl-lite
         ./install.sh $(pwd)
 
