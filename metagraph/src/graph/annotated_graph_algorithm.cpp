@@ -316,6 +316,7 @@ construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
     bool parallel = num_threads > 1;
 
     auto make_index_callback = [&](uint8_t col_indicator) {
+        assert(col_indicator);
         return [&](auto r) {
             node_index i = AnnotatedDBG::anno_to_graph_index(r);
             set_bit(indicator.data(), i, parallel, MO_RELAXED);
@@ -336,7 +337,8 @@ construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
             if (labels_out.count(label))
                 col_indicator |= 2;
 
-            column->call_ones(make_index_callback(col_indicator));
+            if (col_indicator)
+                column->call_ones(make_index_callback(col_indicator));
         });
     } else {
         const auto &label_encoder = annotator.get_label_encoder();
