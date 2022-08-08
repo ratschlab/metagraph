@@ -8,37 +8,41 @@ namespace mtg {
 namespace annot {
 
 template <typename Label = std::string>
-class ColumnCompressedLazy : public MultiLabelEncoded<Label> {
+class ColumnCompressedLazy
+      : public AnnotationCategory<typename MultiLabelEncoded<Label>::Index,
+                                  typename MultiLabelEncoded<Label>::VLabels> {
   public:
-    typedef ColumnCompressed<Label> BaseAnnotator;
-    typedef typename BaseAnnotator::ColumnCallback ColumnCallback;
     using Index = typename MultiLabelEncoded<Label>::Index;
     using VLabels = typename MultiLabelEncoded<Label>::VLabels;
+    using LabelIndexCallback = typename MultiLabelEncoded<Label>::LabelIndexCallback;
 
     ColumnCompressedLazy(size_t num_objects, const std::vector<std::string> &files)
           : num_objects_(num_objects), files_(files) {}
 
-    uint64_t num_objects() const override final { return num_objects_; }
-
-    void call_columns(const ColumnCallback &callback, size_t num_threads = 1) const {
-        BaseAnnotator::merge_load(files_, callback, num_threads);
+    void call_label_indices(const LabelIndexCallback &callback, size_t num_threads = 1) const override final {
+        ColumnCompressed<Label>::merge_load(files_, [&](size_t, const Label &label, auto&& bitmap) {
+            if (bitmap->size() != num_objects_) {
+                common::logger->error("Label {} has incorrect number of rows: {} != {}",
+                                      bitmap->size(), num_objects_);
+                exit(1);
+            }
+            callback(label, *bitmap);
+        }, num_threads);
     }
 
     const std::string& get_file(size_t i) const { return files_[i]; }
 
+    VLabels get(Index) const override final { throw std::runtime_error("get not implemented"); }
     void set(Index, const VLabels &) override final { throw std::runtime_error("set not implemented"); }
-    void serialize(const std::string &) const override final { throw std::runtime_error("serialize not implemented"); }
-    bool load(const std::string &) override final { throw std::runtime_error("load not implemented"); }
-    void add_labels(const std::vector<Index> &, const VLabels &) override final { throw std::runtime_error("add_labels not implemented"); }
-    bool has_label(Index, const Label &) const override final { throw std::runtime_error("has_label not implemented"); }
-    bool has_labels(Index, const VLabels &) const override final { throw std::runtime_error("has_labels not implemented"); }
-    void insert_rows(const std::vector<Index> &) override final { throw std::runtime_error("insert_rows not implemented"); }
-    void rename_labels(const tsl::hopscotch_map<Label, Label> &) override final { throw std::runtime_error("rename_labels not implemented"); }
-    size_t num_labels() const override final { throw std::runtime_error("num_labels not implemented"); }
-    uint64_t num_relations() const override final { throw std::runtime_error("num_relations not implemented"); }
-    void call_objects(const Label &, std::function<void(Index)>) const override final { throw std::runtime_error("call_objects not implemented"); }
-    std::string file_extension() const override final { throw std::runtime_error("file_extension not implemented"); }
-    const binmat::BinaryMatrix& get_matrix() const override final { throw std::runtime_error("get_matrix not implemented"); }
+
+    void serialize(const std::string &) const override final {
+        common::logger->warn("Nothing to serialize");
+    }
+
+    bool load(const std::string &) override final {
+        common::logger->warn("Nothing to load");
+        return true;
+    }
 
   private:
     size_t num_objects_;

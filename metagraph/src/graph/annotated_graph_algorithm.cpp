@@ -310,11 +310,11 @@ construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
     // the in and out counts are stored interleaved
     sdsl::int_vector<> counts = aligned_int_vector(indicator.size() * 2, 0, width, 16);
 
-    const auto &annotator = anno_graph.get_annotator();
     std::mutex vector_backup_mutex;
     std::atomic_thread_fence(std::memory_order_release);
     bool parallel = num_threads > 1;
 
+    const auto &annotation = anno_graph.get_annotation();
     auto make_index_callback = [&](uint8_t col_indicator) {
         assert(col_indicator);
         return [&indicator,&counts,&vector_backup_mutex,parallel,col_indicator](auto r) {
@@ -328,8 +328,8 @@ construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
         };
     };
 
-    if (const auto *ccl = dynamic_cast<const annot::ColumnCompressedLazy<>*>(&annotator)) {
-        ccl->call_columns([&](size_t, const std::string &label, auto&& column) {
+    if (const auto *ccl = dynamic_cast<const annot::ColumnCompressedLazy<>*>(&annotation)) {
+        ccl->call_label_indices([&](const std::string &label, const bitmap &column) {
             uint8_t col_indicator = 0;
             if (labels_in.count(label))
                 col_indicator = 1;
@@ -338,9 +338,10 @@ construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
                 col_indicator |= 2;
 
             if (col_indicator)
-                column->call_ones(make_index_callback(col_indicator));
+                column.call_ones(make_index_callback(col_indicator));
         });
     } else {
+        const auto &annotator = anno_graph.get_annotator();
         const auto &label_encoder = annotator.get_label_encoder();
         const auto &binmat = annotator.get_matrix();
 

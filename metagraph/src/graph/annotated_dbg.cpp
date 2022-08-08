@@ -26,16 +26,17 @@ typedef std::pair<Label, size_t> StringCountPair;
 
 AnnotatedSequenceGraph
 ::AnnotatedSequenceGraph(std::shared_ptr<SequenceGraph> graph,
-                         std::unique_ptr<Annotator>&& annotation,
+                         std::unique_ptr<Annotation>&& annotation,
                          bool force_fast)
-      : graph_(graph), annotator_(std::move(annotation)), force_fast_(force_fast) {
+      : graph_(graph), annotation_(std::move(annotation)),
+        annotator_(std::shared_ptr<Annotator>{}, dynamic_cast<Annotator*>(annotation_.get())),
+        force_fast_(force_fast) {
     assert(graph_.get());
-    assert(annotator_.get());
-    assert(check_compatibility());
+    assert(!annotator_.get() || check_compatibility());
 }
 
 AnnotatedDBG::AnnotatedDBG(std::shared_ptr<DeBruijnGraph> dbg,
-                           std::unique_ptr<Annotator>&& annotation,
+                           std::unique_ptr<Annotation>&& annotation,
                            bool force_fast)
       : AnnotatedSequenceGraph(dbg, std::move(annotation), force_fast), dbg_(*dbg) {}
 
@@ -147,6 +148,7 @@ void AnnotatedDBG::add_kmer_coord(std::string_view sequence,
         // only insert coordinates for matched k-mers and increment the coordinates
         if (i > 0)
             annotator_->add_label_coord(graph_to_anno_index(i), labels, coord);
+
         coord++;
     }
 }
@@ -172,6 +174,7 @@ void AnnotatedDBG::add_kmer_coords(
             // only insert coordinates for matched k-mers and increment the coordinates
             if (i > 0)
                 annotator_->add_label_coord(graph_to_anno_index(i), labels, coord);
+
             coord++;
         }
     }
@@ -295,10 +298,10 @@ AnnotatedDBG::get_labels(const std::vector<std::pair<row_index, size_t>> &index_
 
 std::vector<Label>
 AnnotatedSequenceGraph::get_labels(node_index index) const {
-    assert(check_compatibility());
+    assert(!annotator_.get() || check_compatibility());
     assert(index != SequenceGraph::npos);
 
-    return annotator_->get(graph_to_anno_index(index));
+    return annotation_->get(graph_to_anno_index(index));
 }
 
 std::vector<StringCountPair>
@@ -826,6 +829,7 @@ AnnotatedDBG::get_top_labels(const std::vector<std::pair<row_index, size_t>> &in
 }
 
 bool AnnotatedSequenceGraph::label_exists(const Label &label) const {
+    assert(annotator_.get());
     return annotator_->label_exists(label);
 }
 
@@ -848,6 +852,8 @@ void AnnotatedSequenceGraph
 }
 
 bool AnnotatedSequenceGraph::check_compatibility() const {
+    assert(annotator_.get());
+
     // TODO: what if CanonicalDBG is not the highest level? find a better way to do this
     if (const auto *canonical = dynamic_cast<const CanonicalDBG *>(graph_.get()))
         return canonical->get_graph().max_index() == annotator_->num_objects();

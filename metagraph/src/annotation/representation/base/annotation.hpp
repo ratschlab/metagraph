@@ -21,6 +21,7 @@ namespace annot {
 template <typename IndexType, typename LabelType>
 class AnnotationCategory {
   public:
+    typedef std::function<void(const typename LabelType::value_type&, const bitmap&)> LabelIndexCallback;
     virtual ~AnnotationCategory() {}
 
     virtual LabelType get(IndexType i) const = 0;
@@ -28,6 +29,8 @@ class AnnotationCategory {
 
     virtual void serialize(const std::string &filename) const = 0;
     virtual bool load(const std::string &filename) = 0;
+
+    virtual void call_label_indices(const LabelIndexCallback &callback, size_t num_threads = 1) const = 0;
 };
 
 
@@ -134,6 +137,7 @@ class MultiLabelEncoded : public MultiLabelAnnotation<uint64_t, LabelType> {
     using Index = typename MultiLabelAnnotation<uint64_t, LabelType>::Index;
     using Label = typename MultiLabelAnnotation<uint64_t, LabelType>::Label;
     using VLabels = typename MultiLabelAnnotation<uint64_t, LabelType>::VLabels;
+    using LabelIndexCallback = typename AnnotationCategory<uint64_t, VLabels>::LabelIndexCallback;
 
     virtual ~MultiLabelEncoded() {}
 
@@ -169,6 +173,14 @@ class MultiLabelEncoded : public MultiLabelAnnotation<uint64_t, LabelType> {
                               std::function<void(Index)> callback) const override;
 
     virtual const binmat::BinaryMatrix& get_matrix() const = 0;
+
+    virtual void call_label_indices(const LabelIndexCallback &callback, size_t num_threads = 1) const override final {
+        std::vector<binmat::BinaryMatrix::Column> columns(num_labels());
+        std::iota(columns.begin(), columns.end(), 0);
+        get_matrix().call_columns(columns, [&](size_t j, const bitmap &column) {
+            callback(label_encoder_.decode(j), column);
+        }, num_threads);
+    }
 
   protected:
     LabelEncoder<Label> label_encoder_;

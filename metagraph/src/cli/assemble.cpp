@@ -29,7 +29,7 @@ using mtg::graph::DifferentialAssemblyConfig;
 
 void check_labels(const tsl::hopscotch_set<std::string> &label_set,
                   const AnnotatedDBG &anno_graph) {
-    if (dynamic_cast<const annot::ColumnCompressedLazy<>*>(&anno_graph.get_annotator())) {
+    if (dynamic_cast<const annot::ColumnCompressedLazy<>*>(&anno_graph.get_annotation())) {
         logger->trace("Skipping label check for streaming annotator");
         return;
     }
@@ -82,7 +82,7 @@ void call_masked_graphs(const AnnotatedDBG &anno_graph,
         throw std::iostream::failure("Failed to read assembly config JSON from " + config->assembly_config_file);
 
     size_t num_threads = std::max(1u, get_num_threads());
-    bool streaming = dynamic_cast<const annot::ColumnCompressedLazy<>*>(&anno_graph.get_annotator());
+    bool streaming = dynamic_cast<const annot::ColumnCompressedLazy<>*>(&anno_graph.get_annotation());
 
     Json::Value diff_json;
     fin >> diff_json;
