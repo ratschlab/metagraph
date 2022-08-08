@@ -89,12 +89,17 @@ jobs:
           sudo make install
         fi
 
-    - name: Set up Clang
+    - name: set up clang
       if: matrix.compiler == 'clang'
       uses: egor-tensin/setup-clang@v1
       with:
         version: latest
         platform: x64
+
+    - name: install OpenMP
+      if: matrix.compiler == 'clang'
+      run: |
+        sudo apt-get install libomp-dev
 
     - name: install dependencies for integration tests
       run: |

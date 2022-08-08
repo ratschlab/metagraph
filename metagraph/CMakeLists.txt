@@ -133,11 +133,10 @@ if(APPLE)
 endif()
 
 findOpenMP()
-message(STATUS "OpenMP_CXX_VERSION ${OpenMP_CXX_VERSION}")
 if("${OpenMP_CXX_VERSION}" VERSION_GREATER_EQUAL 5.0)
   add_definitions(-D_OpenMP_5)
 else()
-  message(WARNING "Couldn't find OpenMP>=5.0, non-rectangular nested loops will not be parallelized")
+  message(WARNING "Could only find OpenMP ${OpenMP_CXX_VERSION} < 5.0, non-rectangular nested loops will not be parallelized")
 endif()
 
 # Check if 128 bit integers are supported
