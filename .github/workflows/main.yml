@@ -89,13 +89,6 @@ jobs:
           sudo make install
         fi
 
-    - name: set up clang
-      if: matrix.compiler == 'clang'
-      uses: egor-tensin/setup-clang@v1
-      with:
-        version: 13
-        platform: x64
-
     - name: set env variables
       run: |
         echo "CC=$(which ${{ matrix.cc }})" >> $GITHUB_ENV
@@ -106,7 +99,7 @@ jobs:
       run: |
         echo "LDFLAGS=${LDFLAGS} -L/usr/lib/llvm-13/lib/clang/13.0.1/lib" >> $GITHUB_ENV
         echo "CPPFLAGS=${CPPFLAGS} -I/usr/lib/llvm-13/lib/clang/13.0.1/include" >> $GITHUB_ENV
-        echo "CXXFLAGS=${CXXFLAGS} -I/usr/lib/llvm-13/lib/clang/13.0.1/include -stdlib=libstdc++" >> $GITHUB_ENV
+        echo "CXXFLAGS=${CXXFLAGS} -I/usr/lib/llvm-13/lib/clang/13.0.1/include -stdlib=libc++" >> $GITHUB_ENV
         echo LIB $(ls /usr/lib/llvm-13/lib/clang/13.0.1/*)
         echo $(clang++ -v --print-search-dirs)
 
