@@ -1015,7 +1015,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                 uint64_t r = 0;
                 set_rows[l_idx][j].for_each([&](const auto &v) {
                     call(utils::get_first(v));
-                    if constexpr(with_values) {
+                    if constexpr(utils::is_pair_v<T>) {
                         assert(v.second && "zero diffs must have been skipped");
                         values[l_idx][j][r++] = matrix::encode_diff(v.second);
                     }
