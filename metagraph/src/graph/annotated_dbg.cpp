@@ -11,6 +11,7 @@
 #include "common/vectors/vector_algorithm.hpp"
 #include "common/vector_map.hpp"
 #include "common/logger.hpp"
+#include "common/vectors/bitmap.hpp"
 
 
 namespace mtg {
@@ -846,7 +847,11 @@ void AnnotatedSequenceGraph
                        size_t num_threads) const {
     assert(check_compatibility());
 
-    annotation_->call_label_objects(labels, callback, num_threads);
+    annotation_->call_label_objects(labels, [&](size_t j, const bitmap &bitmap) {
+        callback(j, bitmap_generator([&](const auto &call_one) {
+            bitmap.call_ones([&](uint64_t i) { call_one(anno_to_graph_index(i)); });
+        }, bitmap.size() + 1, bitmap.num_set_bits()));
+    }, num_threads);
 }
 
 bool AnnotatedSequenceGraph::check_compatibility() const {

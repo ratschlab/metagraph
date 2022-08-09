@@ -70,7 +70,7 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
     bool parallel = num_threads > 1;
     size_t num_in_labels = labels_in.size() + labels_in_round2.size();
     size_t num_out_labels = labels_out.size() + labels_out_round2.size();
-    auto graph_ptr = std::dynamic_pointer_cast<const DeBruijnGraph>(
+    auto graph_ptr = std::static_pointer_cast<const DeBruijnGraph>(
         anno_graph.get_graph_ptr()
     );
 
@@ -95,7 +95,7 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
                                                   config.add_complement, num_threads);
 
     if (check_other || labels_in_round2.size() || labels_out_round2.size())
-        union_mask = dynamic_cast<const bitmap_vector&>(masked_graph->get_mask()).data();
+        union_mask = static_cast<const bitmap_vector&>(masked_graph->get_mask()).data();
 
     // check all other labels and post labels
     if (check_other || labels_in_round2.size() || labels_out_round2.size()) {
@@ -161,7 +161,7 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
             && config.label_mask_other_unitig_fraction == 1.0) {
         logger->trace("Filtering by node");
         size_t total_nodes = masked_graph->num_nodes();
-        const auto &in_mask = dynamic_cast<const bitmap_vector&>(masked_graph->get_mask()).data();
+        const auto &in_mask = static_cast<const bitmap_vector&>(masked_graph->get_mask()).data();
         sdsl::bit_vector mask = in_mask;
 
         // TODO: make this part multithreaded
@@ -332,8 +332,8 @@ construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
             col_indicator |= 2;
 
         if (col_indicator) {
-            column.call_ones([&indicator,&counts,&vector_backup_mutex,parallel,col_indicator](auto r) {
-                node_index i = AnnotatedDBG::anno_to_graph_index(r);
+            column.call_ones([&indicator,&counts,&vector_backup_mutex,parallel,col_indicator](node_index i) {
+                assert(i != DeBruijnGraph::npos);
                 set_bit(indicator.data(), i, parallel, MO_RELAXED);
                 if (col_indicator & 1)
                     atomic_fetch_and_add(counts, i * 2, 1, vector_backup_mutex, MO_RELAXED);
@@ -358,7 +358,7 @@ void update_masked_graph_by_unitig(MaskedDeBruijnGraph &masked_graph,
     std::atomic<uint64_t> num_kept_nodes(0);
     bool parallel = num_threads > 1;
 
-    sdsl::bit_vector mask = dynamic_cast<const bitmap_vector&>(masked_graph.get_mask()).data();
+    sdsl::bit_vector mask = static_cast<const bitmap_vector&>(masked_graph.get_mask()).data();
 
     std::atomic_thread_fence(std::memory_order_release);
 

@@ -176,6 +176,7 @@ class bitmap_lazy : public bitmap {
 
     uint64_t size() const { return size_; }
     uint64_t num_set_bits() const;
+    std::optional<uint64_t> try_get_num_set_bits() const;
 
     void add_to(sdsl::bit_vector *other) const;
     void call_ones_in_range(uint64_t begin, uint64_t end,
@@ -201,8 +202,8 @@ class bitmap_generator : public bitmap {
                      size_t size,
                      size_t num_set_bits = -1) noexcept;
 
-    bool operator[](uint64_t) const { throw std::runtime_error("Not implemented"); }
-    uint64_t get_int(uint64_t, uint32_t) const { throw std::runtime_error("Not implemented"); }
+    bool operator[](uint64_t) const { throw std::runtime_error("operator[] not implemented for bitmap_generator"); }
+    uint64_t get_int(uint64_t, uint32_t) const { throw std::runtime_error("get_int not implemented for bitmap_generator"); }
 
     uint64_t size() const { return size_; }
     uint64_t num_set_bits() const { return num_set_bits_; }

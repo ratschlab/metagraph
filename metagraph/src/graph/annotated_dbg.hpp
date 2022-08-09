@@ -55,7 +55,6 @@ class AnnotatedSequenceGraph {
 
     virtual const Annotation& get_annotation() const { return *annotation_; }
 
-    virtual const bitmap& get_annotated_nodes(const Label &label) const;
     virtual void call_annotated_nodes(const Annotator::VLabels &labels,
                                       const std::function<void(size_t, const bitmap&)> &callback,
                                       size_t num_threads = 1) const;

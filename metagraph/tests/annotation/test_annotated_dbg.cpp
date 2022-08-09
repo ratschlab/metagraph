@@ -64,7 +64,7 @@ void check_labels(const AnnotatedDBG &anno_graph,
         std::vector<SequenceGraph::node_index> diff;
         std::set_difference(indices.begin(), indices.end(),
                             cur_indices.begin(), cur_indices.end(),
-                            diff.begin());
+                            std::back_inserter(diff));
         EXPECT_EQ(0u, diff.size())
             << diff.front()
             << anno_graph.get_graph().get_node_sequence(diff.front());
