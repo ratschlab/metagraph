@@ -52,18 +52,19 @@ void check_labels(const AnnotatedDBG &anno_graph,
 
     for (const auto &label : labels_present) {
         std::set<SequenceGraph::node_index> cur_indices;
-        anno_graph.call_annotated_nodes(
-            label,
-            [&](const auto &index) {
-                ASSERT_NE(SequenceGraph::npos, index);
-                cur_indices.insert(index);
-                EXPECT_TRUE(anno_graph.has_label(index, label));
-            }
-        );
+        anno_graph.call_annotated_nodes({ label }, [&](size_t, const bitmap &column) {
+            column.call_ones(
+                [&](const auto &index) {
+                    ASSERT_NE(SequenceGraph::npos, index);
+                    cur_indices.insert(index);
+                    EXPECT_TRUE(anno_graph.has_label(index, label));
+                }
+            );
+        });
         std::vector<SequenceGraph::node_index> diff;
         std::set_difference(indices.begin(), indices.end(),
                             cur_indices.begin(), cur_indices.end(),
-                            diff.begin());
+                            std::back_inserter(diff));
         EXPECT_EQ(0u, diff.size())
             << diff.front()
             << anno_graph.get_graph().get_node_sequence(diff.front());

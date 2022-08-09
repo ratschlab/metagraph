@@ -32,29 +32,35 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
         logger->trace("Primary graph wrapped into canonical");
     }
 
-    auto annotation_temp = config.infbase_annotators.size()
+    auto annotator_init = config.infbase_annotators.size()
             ? initialize_annotation(config.infbase_annotators.at(0), config, 0, max_chunks_open)
             : initialize_annotation(config.anno_type, config, max_index, max_chunks_open);
+    auto *annotator_temp = annotator_init.get();
+    std::unique_ptr<AnnotatedDBG::Annotation> annotation_temp(annotator_init.release());
+
+    bool try_stream = config.identity == Config::ASSEMBLE && config.separately;
 
     if (config.infbase_annotators.size()) {
         bool loaded = false;
-        bool streamed = false;
         if (auto *cc = dynamic_cast<annot::ColumnCompressed<>*>(annotation_temp.get())) {
-            if (config.identity == Config::ASSEMBLE && config.separately) {
+            if (try_stream) {
                 annotation_temp.reset(new annot::ColumnCompressedLazy<>(
                     max_index, config.infbase_annotators
                 ));
                 loaded = true;
-                streamed = true;
+                annotator_temp = nullptr;
             } else {
                 loaded = cc->merge_load(config.infbase_annotators);
             }
         } else {
+            if (try_stream)
+                logger->warn("--separately only supported with column annotator");
+
             if (config.infbase_annotators.size() > 1) {
                 logger->warn("Cannot merge annotations of this type. Only the first"
                              " file {} will be loaded.", config.infbase_annotators.at(0));
             }
-            loaded = annotation_temp->load(config.infbase_annotators.at(0));
+            loaded = annotator_temp->load(config.infbase_annotators.at(0));
         }
         if (!loaded) {
             logger->error("Cannot load annotations for graph {}, file corrupted",
@@ -63,9 +69,9 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
         }
 
         // row_diff annotation is special, as it must know the graph structure
-        if (!streamed) {
+        if (annotator_temp) {
             using namespace annot::binmat;
-            BinaryMatrix &matrix = const_cast<BinaryMatrix &>(annotation_temp->get_matrix());
+            BinaryMatrix &matrix = const_cast<BinaryMatrix &>(annotator_temp->get_matrix());
             if (IRowDiff *row_diff = dynamic_cast<IRowDiff*>(&matrix)) {
                 if (!dbg_graph) {
                     logger->error("Only succinct de Bruijn graph representations"
@@ -87,8 +93,7 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
     auto anno_graph
             = std::make_unique<AnnotatedDBG>(std::move(graph), std::move(annotation_temp));
 
-    if (!dynamic_cast<const annot::ColumnCompressedLazy<>*>(&anno_graph->get_annotator())
-            && !anno_graph->check_compatibility()) {
+    if (!anno_graph->check_compatibility()) {
         logger->error("Graph and annotation are not compatible");
         exit(1);
     }

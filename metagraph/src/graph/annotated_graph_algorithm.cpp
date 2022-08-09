@@ -70,7 +70,7 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
     bool parallel = num_threads > 1;
     size_t num_in_labels = labels_in.size() + labels_in_round2.size();
     size_t num_out_labels = labels_out.size() + labels_out_round2.size();
-    auto graph_ptr = std::dynamic_pointer_cast<const DeBruijnGraph>(
+    auto graph_ptr = std::static_pointer_cast<const DeBruijnGraph>(
         anno_graph.get_graph_ptr()
     );
 
@@ -88,17 +88,15 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
     assert(counts.size() == init_mask.size() * 2);
 
     bool check_other = config.label_mask_other_unitig_fraction != 1.0;
-    sdsl::bit_vector union_mask;
 
     sdsl::bit_vector other_mask(init_mask.size() * check_other, false);
     auto masked_graph = make_initial_masked_graph(graph_ptr, counts, std::move(init_mask),
                                                   config.add_complement, num_threads);
 
-    if (check_other || labels_in_round2.size() || labels_out_round2.size())
-        union_mask = dynamic_cast<const bitmap_vector&>(masked_graph->get_mask()).data();
-
     // check all other labels and post labels
     if (check_other || labels_in_round2.size() || labels_out_round2.size()) {
+        sdsl::bit_vector union_mask
+            = static_cast<const bitmap_vector&>(masked_graph->get_mask()).data();
         std::mutex vector_backup_mutex;
         std::atomic_thread_fence(std::memory_order_release);
 
@@ -161,7 +159,7 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
             && config.label_mask_other_unitig_fraction == 1.0) {
         logger->trace("Filtering by node");
         size_t total_nodes = masked_graph->num_nodes();
-        const auto &in_mask = dynamic_cast<const bitmap_vector&>(masked_graph->get_mask()).data();
+        const auto &in_mask = static_cast<const bitmap_vector&>(masked_graph->get_mask()).data();
         sdsl::bit_vector mask = in_mask;
 
         // TODO: make this part multithreaded
@@ -310,61 +308,50 @@ construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
     // the in and out counts are stored interleaved
     sdsl::int_vector<> counts = aligned_int_vector(indicator.size() * 2, 0, width, 16);
 
-    const auto &annotator = anno_graph.get_annotator();
     std::mutex vector_backup_mutex;
     std::atomic_thread_fence(std::memory_order_release);
     bool parallel = num_threads > 1;
 
-    auto make_index_callback = [&](uint8_t col_indicator) {
-        assert(col_indicator);
-        return [&indicator,&counts,&vector_backup_mutex,parallel,col_indicator](auto r) {
-            node_index i = AnnotatedDBG::anno_to_graph_index(r);
-            set_bit(indicator.data(), i, parallel, MO_RELAXED);
-            if (col_indicator & 1)
-                atomic_fetch_and_add(counts, i * 2, 1, vector_backup_mutex, MO_RELAXED);
-
-            if (col_indicator & 2)
-                atomic_fetch_and_add(counts, i * 2 + 1, 1, vector_backup_mutex, MO_RELAXED);
-        };
-    };
-
-    if (const auto *ccl = dynamic_cast<const annot::ColumnCompressedLazy<>*>(&annotator)) {
-        ccl->call_columns([&](size_t, const std::string &label, auto&& column) {
-            uint8_t col_indicator = 0;
-            if (labels_in.count(label))
-                col_indicator = 1;
-
-            if (labels_out.count(label))
-                col_indicator |= 2;
-
-            if (col_indicator)
-                column->call_ones(make_index_callback(col_indicator));
-        });
-    } else {
-        const auto &label_encoder = annotator.get_label_encoder();
-        const auto &binmat = annotator.get_matrix();
-
-        tsl::hopscotch_map<uint64_t, uint8_t> code_to_indicator;
-        for (const std::string &label_in : labels_in) {
-            code_to_indicator[label_encoder.encode(label_in)] = 1;
-        }
-        for (const std::string &label_out : labels_out) {
-            code_to_indicator[label_encoder.encode(label_out)] |= 2;
-        }
-
-        std::vector<uint64_t> label_codes;
-        label_codes.reserve(code_to_indicator.size());
-        for (const auto &[code, indicator] : code_to_indicator) {
-            label_codes.push_back(code);
-        }
-
-        binmat.call_columns(label_codes,
-            [&](auto col_idx, const bitmap &rows) {
-                rows.call_ones(make_index_callback(code_to_indicator[label_codes[col_idx]]));
-            },
-            num_threads
-        );
+    AnnotatedDBG::Annotator::VLabels labels;
+    labels.reserve(labels_in.size() + labels_out.size());
+    for (const auto &label : labels_in) {
+        labels.emplace_back(label);
     }
+    for (const auto &label : labels_out) {
+        if (!labels_in.count(label))
+            labels.emplace_back(label);
+    }
+    anno_graph.call_annotated_nodes(labels, [&](size_t j, const bitmap &column) {
+        uint8_t col_indicator = static_cast<bool>(labels_in.count(labels[j]));
+        if (labels_out.count(labels[j]))
+            col_indicator |= 2;
+
+        auto add_in = [&indicator,&counts,&vector_backup_mutex,parallel](node_index i) {
+            assert(i != DeBruijnGraph::npos);
+            set_bit(indicator.data(), i, parallel, MO_RELAXED);
+            atomic_fetch_and_add(counts, i * 2, 1, vector_backup_mutex, MO_RELAXED);
+        };
+
+        auto add_out = [&indicator,&counts,&vector_backup_mutex,parallel](node_index i) {
+            assert(i != DeBruijnGraph::npos);
+            set_bit(indicator.data(), i, parallel, MO_RELAXED);
+            atomic_fetch_and_add(counts, i * 2 + 1, 1, vector_backup_mutex, MO_RELAXED);
+        };
+
+        auto add_both = [&indicator,&counts,&vector_backup_mutex,parallel](node_index i) {
+            assert(i != DeBruijnGraph::npos);
+            set_bit(indicator.data(), i, parallel, MO_RELAXED);
+            atomic_fetch_and_add(counts, i * 2, 1, vector_backup_mutex, MO_RELAXED);
+            atomic_fetch_and_add(counts, i * 2 + 1, 1, vector_backup_mutex, MO_RELAXED);
+        };
+
+        switch (col_indicator) {
+            case 1: { column.call_ones(add_in); } break;
+            case 2: { column.call_ones(add_out); } break;
+            case 3: { column.call_ones(add_both); } break;
+            default: {}
+        }
+    }, num_threads);
 
     std::atomic_thread_fence(std::memory_order_acquire);
 
@@ -380,7 +367,7 @@ void update_masked_graph_by_unitig(MaskedDeBruijnGraph &masked_graph,
     std::atomic<uint64_t> num_kept_nodes(0);
     bool parallel = num_threads > 1;
 
-    sdsl::bit_vector mask = dynamic_cast<const bitmap_vector&>(masked_graph.get_mask()).data();
+    sdsl::bit_vector mask = static_cast<const bitmap_vector&>(masked_graph.get_mask()).data();
 
     std::atomic_thread_fence(std::memory_order_release);
 

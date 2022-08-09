@@ -17,9 +17,21 @@
 namespace mtg {
 namespace annot {
 
+template <typename IndexType, typename LabelType>
+class Annotation {
+  public:
+    typedef std::function<void(size_t, const bitmap&)> LabelIndexCallback;
+    virtual ~Annotation() {}
+
+    virtual uint64_t num_objects() const = 0;
+
+    virtual void call_label_objects(const LabelType &labels,
+                                    const LabelIndexCallback &callback,
+                                    size_t num_threads = 1) const = 0;
+};
 
 template <typename IndexType, typename LabelType>
-class AnnotationCategory {
+class AnnotationCategory : public Annotation<IndexType, LabelType> {
   public:
     virtual ~AnnotationCategory() {}
 
@@ -71,7 +83,6 @@ class MultiLabelAnnotation
 
     /************************* Properties *************************/
 
-    virtual uint64_t num_objects() const = 0;
     virtual size_t num_labels() const = 0;
     virtual uint64_t num_relations() const = 0;
     virtual const std::vector<Label>& get_all_labels() const = 0;
@@ -134,6 +145,7 @@ class MultiLabelEncoded : public MultiLabelAnnotation<uint64_t, LabelType> {
     using Index = typename MultiLabelAnnotation<uint64_t, LabelType>::Index;
     using Label = typename MultiLabelAnnotation<uint64_t, LabelType>::Label;
     using VLabels = typename MultiLabelAnnotation<uint64_t, LabelType>::VLabels;
+    using LabelIndexCallback = typename Annotation<uint64_t, VLabels>::LabelIndexCallback;
 
     virtual ~MultiLabelEncoded() {}
 
@@ -169,6 +181,17 @@ class MultiLabelEncoded : public MultiLabelAnnotation<uint64_t, LabelType> {
                               std::function<void(Index)> callback) const override;
 
     virtual const binmat::BinaryMatrix& get_matrix() const = 0;
+
+    virtual void call_label_objects(const VLabels &labels,
+                                    const LabelIndexCallback &callback,
+                                    size_t num_threads = 1) const override final {
+        std::vector<binmat::BinaryMatrix::Column> columns;
+        columns.reserve(labels.size());
+        for (const Label &label : labels) {
+            columns.emplace_back(label_encoder_.encode(label));
+        }
+        get_matrix().call_columns(columns, callback, num_threads);
+    }
 
   protected:
     LabelEncoder<Label> label_encoder_;

@@ -19,11 +19,13 @@ class AnnotatedSequenceGraph {
   public:
     typedef std::string Label;
     typedef annot::MultiLabelEncoded<Label> Annotator;
+    typedef annot::Annotation<typename Annotator::Index,
+                              typename Annotator::VLabels> Annotation;
     using node_index = SequenceGraph::node_index;
     using row_index = Annotator::Index;
 
     AnnotatedSequenceGraph(std::shared_ptr<SequenceGraph> graph,
-                           std::unique_ptr<Annotator>&& annotation,
+                           std::unique_ptr<Annotation>&& annotation,
                            bool force_fast = false);
 
     virtual ~AnnotatedSequenceGraph() {}
@@ -39,9 +41,6 @@ class AnnotatedSequenceGraph {
     virtual void annotate_sequences(
         const std::vector<std::pair<std::string, std::vector<Label>>> &data);
 
-    virtual void call_annotated_nodes(const Label &label,
-                                      std::function<void(node_index)> callback) const;
-
     virtual bool label_exists(const Label &label) const;
 
     virtual bool check_compatibility() const;
@@ -49,7 +48,16 @@ class AnnotatedSequenceGraph {
     virtual const SequenceGraph& get_graph() const { return *graph_; }
     std::shared_ptr<const SequenceGraph> get_graph_ptr() const { return graph_; }
 
-    virtual const Annotator& get_annotator() const { return *annotator_; }
+    virtual const Annotator& get_annotator() const {
+        assert(annotator_.get());
+        return *annotator_;
+    }
+
+    virtual const Annotation& get_annotation() const { return *annotation_; }
+
+    virtual void call_annotated_nodes(const Annotator::VLabels &labels,
+                                      const std::function<void(size_t, const bitmap&)> &callback,
+                                      size_t num_threads = 1) const;
 
     static row_index graph_to_anno_index(node_index kmer_index) {
         assert(kmer_index);
@@ -61,7 +69,8 @@ class AnnotatedSequenceGraph {
 
   protected:
     std::shared_ptr<SequenceGraph> graph_;
-    std::unique_ptr<Annotator> annotator_;
+    std::unique_ptr<Annotation> annotation_;
+    const std::shared_ptr<Annotator> annotator_;
 
     std::mutex mutex_;
     bool force_fast_;
@@ -71,7 +80,7 @@ class AnnotatedSequenceGraph {
 class AnnotatedDBG : public AnnotatedSequenceGraph {
   public:
     AnnotatedDBG(std::shared_ptr<DeBruijnGraph> dbg,
-                 std::unique_ptr<Annotator>&& annotation,
+                 std::unique_ptr<Annotation>&& annotation,
                  bool force_fast = false);
 
     using AnnotatedSequenceGraph::get_labels;
