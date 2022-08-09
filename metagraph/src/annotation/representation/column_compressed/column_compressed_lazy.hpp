@@ -30,18 +30,20 @@ class ColumnCompressedLazy
             label_set[labels[i]] = i;
         }
 
-        ColumnCompressed<Label>::merge_load(files_, [&](size_t, const Label &label, auto&& bitmap) {
-            if (bitmap->size() != num_objects_) {
-                common::logger->error("Label {} has incorrect number of rows: {} != {}",
-                                      bitmap->size(), num_objects_);
-                exit(1);
-            }
+        ColumnCompressed<Label>::merge_load(files_,
+            [&](size_t, const Label &label, auto&& bitmap) {
+                if (bitmap->size() != num_objects_) {
+                    common::logger->error("Label {} has incorrect number of rows: {} != {}",
+                                          bitmap->size(), num_objects_);
+                    exit(1);
+                }
 
-            auto find = label_set.find(label);
-            if (find != label_set.end())
-                callback(find->second, *bitmap);
-
-        }, num_threads);
+                auto find = label_set.find(label);
+                if (find != label_set.end())
+                    callback(find->second, *bitmap);
+            },
+            num_threads
+        );
     }
 
     const std::string& get_file(size_t i) const { return files_[i]; }

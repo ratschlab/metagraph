@@ -35,8 +35,8 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
     auto annotator_init = config.infbase_annotators.size()
             ? initialize_annotation(config.infbase_annotators.at(0), config, 0, max_chunks_open)
             : initialize_annotation(config.anno_type, config, max_index, max_chunks_open);
+    auto *annotator_temp = annotator_init.get();
     std::unique_ptr<AnnotatedDBG::Annotation> annotation_temp(annotator_init.release());
-    auto *annotator_temp = dynamic_cast<AnnotatedDBG::Annotator*>(annotation_temp.get());
 
     if (config.infbase_annotators.size()) {
         bool loaded = false;
