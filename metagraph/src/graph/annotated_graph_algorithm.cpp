@@ -88,17 +88,15 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
     assert(counts.size() == init_mask.size() * 2);
 
     bool check_other = config.label_mask_other_unitig_fraction != 1.0;
-    sdsl::bit_vector union_mask;
 
     sdsl::bit_vector other_mask(init_mask.size() * check_other, false);
     auto masked_graph = make_initial_masked_graph(graph_ptr, counts, std::move(init_mask),
                                                   config.add_complement, num_threads);
 
-    if (check_other || labels_in_round2.size() || labels_out_round2.size())
-        union_mask = static_cast<const bitmap_vector&>(masked_graph->get_mask()).data();
-
     // check all other labels and post labels
     if (check_other || labels_in_round2.size() || labels_out_round2.size()) {
+        sdsl::bit_vector union_mask
+            = static_cast<const bitmap_vector&>(masked_graph->get_mask()).data();
         std::mutex vector_backup_mutex;
         std::atomic_thread_fence(std::memory_order_release);
 
@@ -323,24 +321,34 @@ construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
         labels.emplace_back(label);
     }
     anno_graph.call_annotated_nodes(labels, [&](size_t j, const bitmap &column) {
-        const auto &label = labels[j];
-        uint8_t col_indicator = 0;
-        if (labels_in.count(label))
-            col_indicator = 1;
-
-        if (labels_out.count(label))
+        uint8_t col_indicator = static_cast<bool>(labels_in.count(labels[j]));
+        if (labels_out.count(labels[j]))
             col_indicator |= 2;
 
-        if (col_indicator) {
-            column.call_ones([&indicator,&counts,&vector_backup_mutex,parallel,col_indicator](node_index i) {
-                assert(i != DeBruijnGraph::npos);
-                set_bit(indicator.data(), i, parallel, MO_RELAXED);
-                if (col_indicator & 1)
-                    atomic_fetch_and_add(counts, i * 2, 1, vector_backup_mutex, MO_RELAXED);
+        auto add_in = [&indicator,&counts,&vector_backup_mutex,parallel](node_index i) {
+            assert(i != DeBruijnGraph::npos);
+            set_bit(indicator.data(), i, parallel, MO_RELAXED);
+            atomic_fetch_and_add(counts, i * 2, 1, vector_backup_mutex, MO_RELAXED);
+        };
 
-                if (col_indicator & 2)
-                    atomic_fetch_and_add(counts, i * 2 + 1, 1, vector_backup_mutex, MO_RELAXED);
-            });
+        auto add_out = [&indicator,&counts,&vector_backup_mutex,parallel](node_index i) {
+            assert(i != DeBruijnGraph::npos);
+            set_bit(indicator.data(), i, parallel, MO_RELAXED);
+            atomic_fetch_and_add(counts, i * 2 + 1, 1, vector_backup_mutex, MO_RELAXED);
+        };
+
+        auto add_both = [&indicator,&counts,&vector_backup_mutex,parallel](node_index i) {
+            assert(i != DeBruijnGraph::npos);
+            set_bit(indicator.data(), i, parallel, MO_RELAXED);
+            atomic_fetch_and_add(counts, i * 2, 1, vector_backup_mutex, MO_RELAXED);
+            atomic_fetch_and_add(counts, i * 2 + 1, 1, vector_backup_mutex, MO_RELAXED);
+        };
+
+        switch (col_indicator) {
+            case 1: { column.call_ones(add_in); } break;
+            case 2: { column.call_ones(add_out); } break;
+            case 3: { column.call_ones(add_both); } break;
+            default: {}
         }
     }, num_threads);
 
