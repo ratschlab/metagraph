@@ -840,17 +840,6 @@ bool AnnotatedSequenceGraph::has_label(node_index index, const Label &label) con
     return annotator_->has_label(graph_to_anno_index(index), label);
 }
 
-const bitmap& AnnotatedSequenceGraph::get_annotated_nodes(const Label &label) const {
-    assert(check_compatibility());
-    const bitmap *ret_val = nullptr;
-    annotation_->call_label_objects(Annotator::VLabels{ label },
-        [&](size_t, const bitmap &column) { ret_val = &column; }
-    );
-
-    assert(ret_val);
-    return *ret_val;
-}
-
 void AnnotatedSequenceGraph
 ::call_annotated_nodes(const Annotator::VLabels &labels,
                        const std::function<void(size_t, const bitmap&)> &callback,

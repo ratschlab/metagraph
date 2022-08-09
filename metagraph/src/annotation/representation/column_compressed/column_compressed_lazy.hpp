@@ -20,7 +20,7 @@ class ColumnCompressedLazy
     ColumnCompressedLazy(size_t num_objects, const std::vector<std::string> &files)
           : num_objects_(num_objects), files_(files) {}
 
-    size_t num_objects() const override final { return num_objects_; }
+    uint64_t num_objects() const override final { return num_objects_; }
 
     void call_label_objects(const VLabels &labels,
                             const LabelIndexCallback &callback,
