@@ -30,7 +30,8 @@ initialize_annotation(Config::AnnotationType anno_type,
                       size_t max_chunks_open = 2000) {
     return initialize_annotation(anno_type, config.num_columns_cached, config.sparse,
                                  num_rows, config.tmp_dir, config.memory_available,
-                                 config.count_width, max_chunks_open, config.row_sparse_disk_buff_size);
+                                 config.count_width, max_chunks_open,
+                                 config.row_sparse_disk_buff_size);
 }
 
 template <typename... Args>

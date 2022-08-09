@@ -119,13 +119,15 @@ initialize_annotation(Config::AnnotationType anno_type,
         }
         case Config::RowSparseDisk: {
             auto x = new annot::RowSparseDiskAnnotator();
-            const_cast<mtg::annot::binmat::RowSparseDisk&>(x->get_matrix()).set_buff_size(row_sparse_disk_buff_size);
+            const_cast<mtg::annot::binmat::RowSparseDisk &>(x->get_matrix())
+                    .set_buff_size(row_sparse_disk_buff_size);
             annotation.reset(x);
             break;
         }
         case Config::RowDiffSparseDisk: {
             auto x = new annot::RowDiffSparseDiskAnnotator();
-            const_cast<mtg::annot::binmat::RowSparseDisk&>(x->get_matrix().diffs()).set_buff_size(row_sparse_disk_buff_size);
+            const_cast<mtg::annot::binmat::RowSparseDisk &>(x->get_matrix().diffs())
+                    .set_buff_size(row_sparse_disk_buff_size);
             annotation.reset(x);
             break;
         }

@@ -851,7 +851,8 @@ int transform_annotation(Config *config) {
 
             }
             case Config::RowDiffSparseDisk: {
-                logger->error("Convert to row_diff first, and then to row_diff_sparse_disk");
+                logger->error(
+                        "Convert to row_diff first, and then to row_diff_sparse_disk");
                 return 0;
 
             }
@@ -973,7 +974,8 @@ int transform_annotation(Config *config) {
                 && config->anno_type != Config::RowDiffRowSparse
                 && config->anno_type != Config::RowDiffSparseDisk) {
             logger->error(
-                    "Only conversion to 'column', 'row_diff_sparse', 'row_diff_sparse_disk', and 'row_diff_brwt' "
+                    "Only conversion to 'column', 'row_diff_sparse', "
+                    "'row_diff_sparse_disk', and 'row_diff_brwt' "
                     "supported for row_diff");
             exit(1);
         }

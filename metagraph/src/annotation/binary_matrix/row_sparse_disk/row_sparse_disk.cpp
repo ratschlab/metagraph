@@ -18,7 +18,8 @@ bool RowSparseDisk::Impl::get(Row row, Column column) const {
     return v != set_bits.end() && *v == column;
 }
 
-std::vector<BinaryMatrix::Row> RowSparseDisk::Impl::get_column(uint64_t num_rows, Column column) const {
+std::vector<BinaryMatrix::Row> RowSparseDisk::Impl::get_column(uint64_t num_rows,
+                                                               Column column) const {
     std::vector<Row> result;
     for (Row row = 0; row < num_rows; ++row) {
         if (get(row, column))
@@ -42,7 +43,8 @@ BinaryMatrix::SetBitPositions RowSparseDisk::Impl::get_row(Row row) const {
     return result;
 }
 
-std::vector<BinaryMatrix::SetBitPositions> RowSparseDisk::Impl::get_rows(const std::vector<Row> &row_ids) const {
+std::vector<BinaryMatrix::SetBitPositions>
+RowSparseDisk::Impl::get_rows(const std::vector<Row> &row_ids) const {
     std::vector<SetBitPositions> rows(row_ids.size());
 
     for (size_t i = 0; i < row_ids.size(); ++i) {
@@ -53,13 +55,13 @@ std::vector<BinaryMatrix::SetBitPositions> RowSparseDisk::Impl::get_rows(const s
 }
 
 bool RowSparseDisk::load(std::istream &f) {
-    auto _f = dynamic_cast<mtg::common::IfstreamWithNameAndOffset*>(&f);
+    auto _f = dynamic_cast<mtg::common::IfstreamWithNameAndOffset *>(&f);
     assert(_f);
     try {
         f.read(reinterpret_cast<char *>(&num_columns_), sizeof(uint64_t));
 
         std::streampos boundary_start;
-        f.read(reinterpret_cast<char*>(&boundary_start), sizeof(boundary_start));
+        f.read(reinterpret_cast<char *>(&boundary_start), sizeof(boundary_start));
 
         _f->SetOffset(static_cast<uint64_t>(f.tellg()));
 
@@ -80,15 +82,20 @@ bool RowSparseDisk::load(std::istream &f) {
     return true;
 }
 
-void RowSparseDisk::serialize(std::ostream& /*f*/) const  {
-    throw std::runtime_error("RowSparseDisk::serialize not supproted, use static variant instead");
+void RowSparseDisk::serialize(std::ostream & /*f*/) const {
+    throw std::runtime_error(
+            "RowSparseDisk::serialize not supproted, use static variant instead");
 }
 
 
 void RowSparseDisk::serialize(const std::function<void(binmat::BinaryMatrix::RowCallback)> &call_rows,
-                              const std::string& filename, uint64_t num_cols, uint64_t num_set_bits, uint64_t num_rows) {
-
-    std::ofstream outstream(filename, std::ios::binary | std::ios::ate | std::ios::in);    //std::ios_base::in needed ...
+                              const std::string &filename,
+                              uint64_t num_cols,
+                              uint64_t num_set_bits,
+                              uint64_t num_rows) {
+    std::ofstream outstream(filename,
+                            std::ios::binary | std::ios::ate
+                                    | std::ios::in); // std::ios_base::in needed ...
 
     if (!outstream.good())
         throw std::ofstream::failure("Cannot write to file " + filename);
@@ -97,18 +104,15 @@ void RowSparseDisk::serialize(const std::function<void(binmat::BinaryMatrix::Row
     auto boundary_start_pos = outstream.tellp();
     // write "empty" boundary start
     std::streampos boundary_start = 0;
-    outstream.write(reinterpret_cast<char*>(&boundary_start), sizeof(std::streampos));
+    outstream.write(reinterpret_cast<char *>(&boundary_start), sizeof(std::streampos));
 
     const uint64_t iv_offs = outstream.tellp();
     outstream.close();
 
-    auto outbuf = sdsl::int_vector_buffer<>(filename,
-                                            std::ios::out | std::ios::binary,
-                                            1024 * 1024,
-                                            sdsl::bits::hi(num_cols) + 1,
-                                            false,
-                                            iv_offs);
-    //call_bits should be called for each argument that should be set (row boundaries)
+    auto outbuf = sdsl::int_vector_buffer<>(filename, std::ios::out | std::ios::binary,
+                                            1024 * 1024, sdsl::bits::hi(num_cols) + 1,
+                                            false, iv_offs);
+    // call_bits should be called for each argument that should be set (row boundaries)
     auto call_bits = [&](const std::function<void(uint64_t)> &call_bit) {
         uint64_t t = 0;
         call_rows([&](const auto &row) {
@@ -124,11 +128,13 @@ void RowSparseDisk::serialize(const std::function<void(binmat::BinaryMatrix::Row
 
     bit_vector_small boundary(call_bits, num_rows + num_set_bits, num_rows);
 
-    outstream.open(filename, std::ios::in | std::ios::out | std::ios::binary | std::ios::ate | std::ios::in);
+    outstream.open(filename,
+                   std::ios::in | std::ios::out | std::ios::binary | std::ios::ate
+                           | std::ios::in);
     boundary_start = outstream.tellp();
     boundary.serialize(outstream);
     outstream.seekp(boundary_start_pos, ios_base::beg);
-    outstream.write(reinterpret_cast<char*>(&boundary_start), sizeof(std::streampos));
+    outstream.write(reinterpret_cast<char *>(&boundary_start), sizeof(std::streampos));
 }
 
 } // namespace binmat
