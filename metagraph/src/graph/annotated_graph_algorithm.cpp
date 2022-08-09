@@ -318,7 +318,8 @@ construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
         labels.emplace_back(label);
     }
     for (const auto &label : labels_out) {
-        labels.emplace_back(label);
+        if (!labels_in.count(label))
+            labels.emplace_back(label);
     }
     anno_graph.call_annotated_nodes(labels, [&](size_t j, const bitmap &column) {
         uint8_t col_indicator = static_cast<bool>(labels_in.count(labels[j]));

@@ -87,16 +87,11 @@ void call_masked_graphs(const AnnotatedDBG &anno_graph,
     Json::Value diff_json;
     fin >> diff_json;
 
-    tsl::hopscotch_set<std::string> foreground_labels;
-    tsl::hopscotch_set<std::string> background_labels;
-    tsl::hopscotch_set<std::string> shared_foreground_labels;
-    tsl::hopscotch_set<std::string> shared_background_labels;
-
     for (const Json::Value &group : diff_json["groups"]) {
-        if (group["shared_labels"]) {
-            shared_foreground_labels.clear();
-            shared_background_labels.clear();
+        tsl::hopscotch_set<std::string> shared_foreground_labels;
+        tsl::hopscotch_set<std::string> shared_background_labels;
 
+        if (group["shared_labels"]) {
             for (const Json::Value &in_label : group["shared_labels"]["in"]) {
                 shared_foreground_labels.emplace(in_label.asString());
             }
@@ -113,6 +108,9 @@ void call_masked_graphs(const AnnotatedDBG &anno_graph,
             throw std::runtime_error("Missing experiments in group");
 
         for (const Json::Value &experiment : group["experiments"]) {
+            tsl::hopscotch_set<std::string> foreground_labels;
+            tsl::hopscotch_set<std::string> background_labels;
+
             DifferentialAssemblyConfig diff_config = diff_assembly_config(
                 experiment, anno_graph.get_graph()
             );
@@ -125,9 +123,6 @@ void call_masked_graphs(const AnnotatedDBG &anno_graph,
                               exp_name);
                 continue;
             }
-
-            foreground_labels.clear();
-            background_labels.clear();
 
             for (const Json::Value &in_label : experiment["in"]) {
                 foreground_labels.emplace(in_label.asString());

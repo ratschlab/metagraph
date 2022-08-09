@@ -38,10 +38,12 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
     auto *annotator_temp = annotator_init.get();
     std::unique_ptr<AnnotatedDBG::Annotation> annotation_temp(annotator_init.release());
 
+    bool try_stream = config.identity == Config::ASSEMBLE && config.separately;
+
     if (config.infbase_annotators.size()) {
         bool loaded = false;
         if (auto *cc = dynamic_cast<annot::ColumnCompressed<>*>(annotation_temp.get())) {
-            if (config.identity == Config::ASSEMBLE && config.separately) {
+            if (try_stream) {
                 annotation_temp.reset(new annot::ColumnCompressedLazy<>(
                     max_index, config.infbase_annotators
                 ));
@@ -51,6 +53,9 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
                 loaded = cc->merge_load(config.infbase_annotators);
             }
         } else {
+            if (try_stream)
+                logger->warn("--separately only supported with column annotator");
+
             if (config.infbase_annotators.size() > 1) {
                 logger->warn("Cannot merge annotations of this type. Only the first"
                              " file {} will be loaded.", config.infbase_annotators.at(0));
