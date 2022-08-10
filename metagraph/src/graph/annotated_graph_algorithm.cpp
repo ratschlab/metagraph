@@ -304,14 +304,16 @@ construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
                                   const tsl::hopscotch_set<Label> &labels_out,
                                   size_t num_labels,
                                   size_t num_threads) {
+    logger->trace("Allocating mask vector");
     size_t width = sdsl::bits::hi(num_labels) + 1;
     sdsl::bit_vector indicator(anno_graph.get_graph().max_index() + 1, false);
 
+    logger->trace("Allocating count vector");
     // the in and out counts are stored interleaved
     sdsl::int_vector<> counts = aligned_int_vector(indicator.size() * 2, 0, width, 16);
+    logger->trace("done");
 
     std::mutex vector_backup_mutex;
-    std::atomic_thread_fence(std::memory_order_release);
     bool parallel = num_threads > 1;
 
     AnnotatedDBG::Annotator::VLabels labels;
@@ -323,6 +325,9 @@ construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
         if (!labels_in.count(label))
             labels.emplace_back(label);
     }
+
+    logger->trace("Populating count vector");
+    std::atomic_thread_fence(std::memory_order_release);
     anno_graph.call_annotated_nodes(labels, [&](size_t j, const bitmap &column) {
         uint8_t col_indicator = static_cast<bool>(labels_in.count(labels[j]));
         if (labels_out.count(labels[j]))
@@ -356,6 +361,7 @@ construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
     }, num_threads);
 
     std::atomic_thread_fence(std::memory_order_acquire);
+    logger->trace("done");
 
     return std::make_pair(std::move(counts), std::move(indicator));
 }
