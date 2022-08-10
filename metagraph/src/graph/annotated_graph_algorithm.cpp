@@ -35,7 +35,8 @@ construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
                                   const tsl::hopscotch_set<Label> &labels_in,
                                   const tsl::hopscotch_set<Label> &labels_out,
                                   size_t num_labels,
-                                  size_t num_threads);
+                                  size_t num_threads,
+                                  bool add_out_labels_to_mask);
 
 // Regions of a graph mask which should be kept (i.e., masked in)
 typedef std::vector<std::pair<size_t, size_t>> Intervals;
@@ -76,20 +77,23 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
         anno_graph.get_graph_ptr()
     );
 
+    bool check_other = config.label_mask_other_unitig_fraction != 1.0;
     logger->trace("Generating initial mask");
 
     // Construct initial masked graph from union of labels in labels_in
     auto count_vector = construct_diff_label_count_vector(
         anno_graph, labels_in, labels_out,
-        std::max(num_in_labels, num_out_labels),
-        num_parallel_files
+        std::max(num_in_labels, num_out_labels), num_parallel_files,
+        check_other || labels_in_round2.size() || labels_out_round2.size() || config.add_complement
+            || config.label_mask_in_unitig_fraction != 0.0
+            || config.label_mask_out_unitig_fraction != 1.0
+            || config.label_mask_other_unitig_fraction != 1.0
     );
     auto &[counts, init_mask] = count_vector;
 
     // in and out counts are stored interleaved in the counts vector
     assert(counts.size() == init_mask.size() * 2);
 
-    bool check_other = config.label_mask_other_unitig_fraction != 1.0;
 
     sdsl::bit_vector other_mask(init_mask.size() * check_other, false);
     auto masked_graph = make_initial_masked_graph(graph_ptr, counts, std::move(init_mask),
@@ -303,7 +307,8 @@ construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
                                   const tsl::hopscotch_set<Label> &labels_in,
                                   const tsl::hopscotch_set<Label> &labels_out,
                                   size_t num_labels,
-                                  size_t num_threads) {
+                                  size_t num_threads,
+                                  bool add_out_labels_to_mask) {
     logger->trace("Allocating mask vector");
     size_t width = sdsl::bits::hi(num_labels) + 1;
     sdsl::bit_vector indicator(anno_graph.get_graph().max_index() + 1, false);
@@ -339,9 +344,11 @@ construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
             atomic_fetch_and_add(counts, i * 2, 1, vector_backup_mutex, MO_RELAXED);
         };
 
-        auto add_out = [&indicator,&counts,&vector_backup_mutex,parallel](node_index i) {
+        auto add_out = [&indicator,&counts,&vector_backup_mutex,parallel,add_out_labels_to_mask](node_index i) {
             assert(i != DeBruijnGraph::npos);
-            set_bit(indicator.data(), i, parallel, MO_RELAXED);
+            if (add_out_labels_to_mask)
+                set_bit(indicator.data(), i, parallel, MO_RELAXED);
+
             atomic_fetch_and_add(counts, i * 2 + 1, 1, vector_backup_mutex, MO_RELAXED);
         };
 
