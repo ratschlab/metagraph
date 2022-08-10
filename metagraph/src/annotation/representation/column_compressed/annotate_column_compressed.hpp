@@ -85,7 +85,10 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
                                               std::unique_ptr<bit_vector>&&)>;
     static bool merge_load(const std::vector<std::string> &filenames,
                            const ColumnCallback &callback,
-                           size_t num_threads = 1);
+                           size_t num_threads = 1,
+                           bool prefetch_total_column_count = false,
+                           const std::function<void(size_t)> &post_num_columns
+                               = [](size_t) {});
     static size_t read_num_labels(const std::string &filename);
     static LabelEncoder<Label> load_label_encoder(const std::string &filename);
 

@@ -595,7 +595,9 @@ ColumnCompressed<Label>::load_label_encoder(const std::string &filename) {
 template <typename Label>
 bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenames,
                                          const ColumnCallback &callback,
-                                         size_t num_threads) {
+                                         size_t num_threads,
+                                         bool prefetch_total_column_count,
+                                         const std::function<void(size_t)> &post_num_columns) {
     std::atomic<bool> error_occurred = false;
 
     std::vector<uint64_t> offsets(filenames.size(), 0);
@@ -618,8 +620,24 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
     // compute global offsets (partial sums)
     std::partial_sum(offsets.begin(), offsets.end(), offsets.begin());
 
+    if (prefetch_total_column_count) {
+        size_t total_count = offsets.back();
+        auto fname = make_suffix(filenames.back(), kExtension);
+        try {
+            total_count += read_num_labels(fname);
+        } catch (...) {
+            logger->error("Can't load label encoder from {}", fname);
+            error_occurred = true;
+        }
+
+        if (error_occurred)
+            return false;
+
+        post_num_columns(total_count);
+    }
+
     // load annotations
-    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+    #pragma omp taskloop num_tasks(num_threads) shared(error_occurred, filenames, offsets, logger)
     for (size_t i = 0; i < filenames.size(); ++i) {
         const auto &filename = make_suffix(filenames[i], kExtension);
         logger->trace("Loading annotations from file {}", filename);
@@ -639,17 +657,23 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
 
             // update the existing and add some new columns
             for (size_t c = 0; c < label_encoder_load.size(); ++c) {
-                auto new_column = std::make_unique<bit_vector_smart>();
+                auto *new_column = new bit_vector_smart();
 
-                if (!new_column->load(in))
+                if (!new_column->load(in)) {
+                    delete new_column;
                     throw std::ifstream::failure("can't load next column");
+                }
 
-                if (new_column->size() != num_rows)
+                if (new_column->size() != num_rows) {
+                    delete new_column;
                     throw std::ifstream::failure("inconsistent column size");
+                }
 
-                callback(offsets[i] + c,
-                         label_encoder_load.decode(c),
-                         std::move(new_column));
+                uint64_t offset = offsets[i] + c;
+                Label label = label_encoder_load.decode(c);
+
+                #pragma omp task firstprivate(new_column, label, offset)
+                callback(offset, label, std::unique_ptr<bit_vector_smart>(new_column));
             }
         } catch (const std::exception &e) {
             logger->error("Caught exception when loading columns from {}: {}", filename, e.what());

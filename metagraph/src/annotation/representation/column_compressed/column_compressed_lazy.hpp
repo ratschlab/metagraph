@@ -2,6 +2,7 @@
 #define __COLUMN_COMPRESSED_LAZY_HPP__
 
 #include <tsl/hopscotch_map.h>
+#include <progress_bar.hpp>
 
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 
@@ -30,6 +31,7 @@ class ColumnCompressedLazy
             label_set[labels[i]] = i;
         }
 
+        std::unique_ptr<ProgressBar> progress_bar;
         ColumnCompressed<Label>::merge_load(files_,
             [&](size_t, const Label &label, auto&& bitmap) {
                 if (bitmap->size() != num_objects_) {
@@ -41,8 +43,17 @@ class ColumnCompressedLazy
                 auto find = label_set.find(label);
                 if (find != label_set.end())
                     callback(find->second, *bitmap);
+
+                ++(*progress_bar);
             },
-            num_threads
+            num_threads,
+            true,
+            [&](size_t total_column_count) {
+                progress_bar = std::make_unique<ProgressBar>(
+                    total_column_count, "Streaming columns",
+                    std::cerr, !common::get_verbose()
+                );
+            }
         );
     }
 
