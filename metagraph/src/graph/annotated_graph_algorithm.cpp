@@ -66,7 +66,9 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
                     const tsl::hopscotch_set<Label> &labels_in_round2,
                     const tsl::hopscotch_set<Label> &labels_out_round2,
                     const DifferentialAssemblyConfig &config,
-                    size_t num_threads) {
+                    size_t num_threads,
+                    size_t num_parallel_files) {
+    num_parallel_files = std::min(num_threads, num_parallel_files);
     bool parallel = num_threads > 1;
     size_t num_in_labels = labels_in.size() + labels_in_round2.size();
     size_t num_out_labels = labels_out.size() + labels_out_round2.size();
@@ -80,7 +82,7 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
     auto count_vector = construct_diff_label_count_vector(
         anno_graph, labels_in, labels_out,
         std::max(num_in_labels, num_out_labels),
-        num_threads
+        num_parallel_files
     );
     auto &[counts, init_mask] = count_vector;
 

@@ -149,7 +149,8 @@ void call_masked_graphs(const AnnotatedDBG &anno_graph,
                                           background_labels,
                                           shared_foreground_labels,
                                           shared_background_labels,
-                                          diff_config, num_threads), exp_name);
+                                          diff_config, num_threads,
+                                          config->parallel_nodes), exp_name);
         }
     }
 }
