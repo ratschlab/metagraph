@@ -598,6 +598,9 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
                                          size_t num_threads,
                                          bool prefetch_total_column_count,
                                          const std::function<void(size_t)> &post_num_columns) {
+    if (!num_threads)
+        num_threads = 1;
+
     std::atomic<bool> error_occurred = false;
 
     std::vector<uint64_t> offsets(filenames.size(), 0);
@@ -637,50 +640,53 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
     }
 
     // load annotations
-    #pragma omp taskloop num_tasks(num_threads) shared(error_occurred, filenames, offsets, logger)
-    for (size_t i = 0; i < filenames.size(); ++i) {
-        const auto &filename = make_suffix(filenames[i], kExtension);
-        logger->trace("Loading annotations from file {}", filename);
-        try {
-            std::ifstream in(filename, std::ios::binary);
-            if (!in.good())
-                throw std::ifstream::failure("can't open file");
+    #pragma omp parallel num_threads(num_threads) shared(error_occurred, filenames, offsets, logger)
+    #pragma omp single
+    {
+        for (size_t i = 0; i < filenames.size(); ++i) {
+            const auto &filename = make_suffix(filenames[i], kExtension);
+            logger->trace("Loading annotations from file {}", filename);
+            try {
+                std::ifstream in(filename, std::ios::binary);
+                if (!in.good())
+                    throw std::ifstream::failure("can't open file");
 
-            const auto num_rows = load_number(in);
+                const auto num_rows = load_number(in);
 
-            LabelEncoder<Label> label_encoder_load;
-            if (!label_encoder_load.load(in))
-                throw std::ifstream::failure("can't load label encoder");
+                LabelEncoder<Label> label_encoder_load;
+                if (!label_encoder_load.load(in))
+                    throw std::ifstream::failure("can't load label encoder");
 
-            if (!label_encoder_load.size())
-                logger->warn("No columns in {}", filename);
+                if (!label_encoder_load.size())
+                    logger->warn("No columns in {}", filename);
 
-            // update the existing and add some new columns
-            for (size_t c = 0; c < label_encoder_load.size(); ++c) {
-                auto *new_column = new bit_vector_smart();
+                // update the existing and add some new columns
+                for (size_t c = 0; c < label_encoder_load.size(); ++c) {
+                    auto *new_column = new bit_vector_smart();
 
-                if (!new_column->load(in)) {
-                    delete new_column;
-                    throw std::ifstream::failure("can't load next column");
+                    if (!new_column->load(in)) {
+                        delete new_column;
+                        throw std::ifstream::failure("can't load next column");
+                    }
+
+                    if (new_column->size() != num_rows) {
+                        delete new_column;
+                        throw std::ifstream::failure("inconsistent column size");
+                    }
+
+                    uint64_t offset = offsets[i] + c;
+                    Label label = label_encoder_load.decode(c);
+
+                    #pragma omp task firstprivate(new_column, label, offset)
+                    callback(offset, label, std::unique_ptr<bit_vector_smart>(new_column));
                 }
-
-                if (new_column->size() != num_rows) {
-                    delete new_column;
-                    throw std::ifstream::failure("inconsistent column size");
-                }
-
-                uint64_t offset = offsets[i] + c;
-                Label label = label_encoder_load.decode(c);
-
-                #pragma omp task firstprivate(new_column, label, offset)
-                callback(offset, label, std::unique_ptr<bit_vector_smart>(new_column));
+            } catch (const std::exception &e) {
+                logger->error("Caught exception when loading columns from {}: {}", filename, e.what());
+                error_occurred = true;
+            } catch (...) {
+                logger->error("Unknown exception when loading columns from {}", filename);
+                error_occurred = true;
             }
-        } catch (const std::exception &e) {
-            logger->error("Caught exception when loading columns from {}: {}", filename, e.what());
-            error_occurred = true;
-        } catch (...) {
-            logger->error("Unknown exception when loading columns from {}", filename);
-            error_occurred = true;
         }
     }
 
