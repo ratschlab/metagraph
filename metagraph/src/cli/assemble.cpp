@@ -158,6 +158,15 @@ void call_masked_graphs(const AnnotatedDBG &anno_graph,
 int assemble(Config *config) {
     assert(config);
 
+    if (config->infbase_annotators.size()) {
+        assert(config->assembly_config_file.size());
+        if (!std::filesystem::exists(config->assembly_config_file)) {
+            logger->error("Differential assembly config does not exist\n{}",
+                          config->assembly_config_file);
+            exit(1);
+        }
+    }
+
     const auto &files = config->fnames;
 
     assert(files.size() == 1);
@@ -173,7 +182,6 @@ int assemble(Config *config) {
     if (config->infbase_annotators.size()) {
         config->infbase = files.at(0);
 
-        assert(config->assembly_config_file.size());
         auto anno_graph = initialize_annotated_dbg(graph, *config);
 
         logger->trace("Generating masked graphs...");
