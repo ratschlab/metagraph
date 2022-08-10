@@ -46,10 +46,8 @@ void check_labels(const tsl::hopscotch_set<std::string> &label_set,
         exit(1);
 }
 
-DifferentialAssemblyConfig diff_assembly_config(const Json::Value &experiment,
-                                                const DeBruijnGraph &graph) {
+DifferentialAssemblyConfig diff_assembly_config(const Json::Value &experiment) {
     DifferentialAssemblyConfig diff_config;
-    diff_config.add_complement = graph.get_mode() == DeBruijnGraph::CANONICAL;
     diff_config.label_mask_in_kmer_fraction = experiment.get("in_min_fraction", 1.0).asDouble();
     diff_config.label_mask_in_unitig_fraction = experiment.get("unitig_in_min_fraction", 0.0).asDouble();
     diff_config.label_mask_out_kmer_fraction = experiment.get("out_max_fraction", 0.0).asDouble();
@@ -111,9 +109,7 @@ void call_masked_graphs(const AnnotatedDBG &anno_graph,
             tsl::hopscotch_set<std::string> foreground_labels;
             tsl::hopscotch_set<std::string> background_labels;
 
-            DifferentialAssemblyConfig diff_config = diff_assembly_config(
-                experiment, anno_graph.get_graph()
-            );
+            DifferentialAssemblyConfig diff_config = diff_assembly_config(experiment);
 
             std::string exp_name = experiment["name"].asString()
                                     + (config->enumerate_out_sequences ? "." : "");

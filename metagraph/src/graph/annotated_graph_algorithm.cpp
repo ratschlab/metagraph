@@ -78,16 +78,21 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
     );
 
     bool check_other = config.label_mask_other_unitig_fraction != 1.0;
+    bool unitig_mode = check_other || labels_in_round2.size() || labels_out_round2.size()
+            || config.label_mask_in_unitig_fraction != 0.0
+            || config.label_mask_out_unitig_fraction != 1.0
+            || config.label_mask_other_unitig_fraction != 1.0;
+
+    bool add_complement = graph_ptr->get_mode() == DeBruijnGraph::CANONICAL
+        && (config.add_complement || unitig_mode);
+
     logger->trace("Generating initial mask");
 
     // Construct initial masked graph from union of labels in labels_in
     auto count_vector = construct_diff_label_count_vector(
         anno_graph, labels_in, labels_out,
         std::max(num_in_labels, num_out_labels), num_parallel_files,
-        check_other || labels_in_round2.size() || labels_out_round2.size() || config.add_complement
-            || config.label_mask_in_unitig_fraction != 0.0
-            || config.label_mask_out_unitig_fraction != 1.0
-            || config.label_mask_other_unitig_fraction != 1.0
+        add_complement
     );
     auto &[counts, init_mask] = count_vector;
 
@@ -97,7 +102,7 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
 
     sdsl::bit_vector other_mask(init_mask.size() * check_other, false);
     auto masked_graph = make_initial_masked_graph(graph_ptr, counts, std::move(init_mask),
-                                                  config.add_complement, num_threads);
+                                                  add_complement, num_threads);
 
     // check all other labels and post labels
     if (check_other || labels_in_round2.size() || labels_out_round2.size()) {
@@ -259,7 +264,6 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     // counts interleaved
     assert(counts.size() == mask.size() * 2);
 
-    add_complement |= graph_ptr->get_mode() == DeBruijnGraph::CANONICAL;
     auto masked_graph = std::make_shared<MaskedDeBruijnGraph>(
         graph_ptr,
         add_complement
