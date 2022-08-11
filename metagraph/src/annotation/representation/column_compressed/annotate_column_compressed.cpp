@@ -593,10 +593,11 @@ ColumnCompressed<Label>::load_label_encoder(const std::string &filename) {
 }
 
 template <typename Label>
-bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenames,
-                                         const ColumnCallback &callback,
-                                         size_t num_threads,
-                                         const std::optional<std::function<void(size_t)>> &num_columns_callback) {
+bool ColumnCompressed<Label>
+::merge_load(const std::vector<std::string> &filenames,
+             const ColumnCallback &callback,
+             size_t num_threads,
+             const std::optional<std::function<void(size_t)>> &num_columns_callback) {
     if (!num_threads)
         num_threads = 1;
 
