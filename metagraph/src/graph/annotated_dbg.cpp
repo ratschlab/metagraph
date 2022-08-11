@@ -843,11 +843,11 @@ bool AnnotatedSequenceGraph::has_label(node_index index, const Label &label) con
 
 void AnnotatedSequenceGraph
 ::call_annotated_nodes(const Annotator::VLabels &labels,
-                       const std::function<void(size_t, const bitmap&)> &callback,
+                       const std::function<void(size_t, const bitmap_generator&)> &callback,
                        size_t num_threads) const {
     assert(check_compatibility());
 
-    annotation_->call_label_objects(labels, [&](size_t j, const bitmap &bitmap) {
+    annotation_->call_label_objects(labels, [&](size_t j, const bitmap_generator &bitmap) {
         callback(j, bitmap_generator([&](const auto &call_one) {
             bitmap.call_ones([&](uint64_t i) { call_one(anno_to_graph_index(i)); });
         }, bitmap.size() + 1, bitmap.num_set_bits()));

@@ -337,7 +337,7 @@ construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
 
     logger->trace("Populating count vector");
     std::atomic_thread_fence(std::memory_order_release);
-    anno_graph.call_annotated_nodes(labels, [&](size_t j, const bitmap &column) {
+    anno_graph.call_annotated_nodes(labels, [&](size_t j, const bitmap_generator &column) {
         uint8_t col_indicator = static_cast<bool>(labels_in.count(labels[j]));
         if (labels_out.count(labels[j]))
             col_indicator |= 2;

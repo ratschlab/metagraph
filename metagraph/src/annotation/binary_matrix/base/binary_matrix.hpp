@@ -9,7 +9,7 @@
 #include "common/vector.hpp"
 
 
-class bitmap;
+class bitmap_generator;
 
 namespace mtg {
 namespace annot {
@@ -41,7 +41,7 @@ class BinaryMatrix {
     // For each column id in columns, run callback on its respective index in columns
     // and a bitmap represnting the column
     virtual void call_columns(const std::vector<Column> &columns,
-                              const std::function<void(size_t, const bitmap&)> &callback,
+                              const std::function<void(size_t, const bitmap_generator&)> &callback,
                               size_t num_threads = 1) const;
 
     virtual bool load(std::istream &in) = 0;

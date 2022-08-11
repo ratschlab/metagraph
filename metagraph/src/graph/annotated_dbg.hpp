@@ -12,6 +12,8 @@
 #include "common/vector.hpp"
 
 
+class bitmap_generator;
+
 namespace mtg {
 namespace graph {
 
@@ -56,7 +58,7 @@ class AnnotatedSequenceGraph {
     virtual const Annotation& get_annotation() const { return *annotation_; }
 
     virtual void call_annotated_nodes(const Annotator::VLabels &labels,
-                                      const std::function<void(size_t, const bitmap&)> &callback,
+                                      const std::function<void(size_t, const bitmap_generator&)> &callback,
                                       size_t num_threads = 1) const;
 
     static row_index graph_to_anno_index(node_index kmer_index) {

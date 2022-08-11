@@ -20,7 +20,7 @@ namespace annot {
 template <typename IndexType, typename LabelType>
 class Annotation {
   public:
-    typedef std::function<void(size_t, const bitmap&)> LabelIndexCallback;
+    typedef std::function<void(size_t, const bitmap_generator&)> LabelIndexCallback;
     virtual ~Annotation() {}
 
     virtual uint64_t num_objects() const = 0;

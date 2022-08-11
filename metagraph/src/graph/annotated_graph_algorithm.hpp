@@ -1,8 +1,6 @@
 #ifndef __ANNOTATED_GRAPH_ALGORITHM_HPP__
 #define __ANNOTATED_GRAPH_ALGORITHM_HPP__
 
-#include <vector>
-
 #include <tsl/hopscotch_set.h>
 
 #include "graph/annotated_dbg.hpp"

@@ -198,6 +198,12 @@ class bitmap_generator : public bitmap {
                            std::for_each(s.begin(), s.end(), callback);
                        }) {}
 
+    bitmap_generator(const bitmap &bits) noexcept
+          : size_(bits.size()), num_set_bits_(bits.num_set_bits()),
+            generator_([&bits](const VoidCall<uint64_t> &callback) {
+                           bits.call_ones(callback);
+                       }) {}
+
     bitmap_generator(std::function<void(const VoidCall<uint64_t>&)>&& generator,
                      size_t size,
                      size_t num_set_bits = -1) noexcept;

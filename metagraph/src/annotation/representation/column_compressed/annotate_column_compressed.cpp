@@ -596,8 +596,7 @@ template <typename Label>
 bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenames,
                                          const ColumnCallback &callback,
                                          size_t num_threads,
-                                         bool prefetch_total_column_count,
-                                         const std::function<void(size_t)> &post_num_columns) {
+                                         const std::optional<std::function<void(size_t)>> &num_columns_callback) {
     if (!num_threads)
         num_threads = 1;
 
@@ -623,7 +622,7 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
     // compute global offsets (partial sums)
     std::partial_sum(offsets.begin(), offsets.end(), offsets.begin());
 
-    if (prefetch_total_column_count) {
+    if (num_columns_callback) {
         size_t total_count = offsets.back();
         auto fname = make_suffix(filenames.back(), kExtension);
         try {
@@ -636,7 +635,7 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
         if (error_occurred)
             return false;
 
-        post_num_columns(total_count);
+        (*num_columns_callback)(total_count);
     }
 
     // load annotations

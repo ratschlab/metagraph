@@ -39,7 +39,7 @@ BinaryMatrix::slice_rows(const std::vector<Row> &row_ids) const {
 }
 
 void BinaryMatrix::call_columns(const std::vector<Column> &column_ids,
-                                const std::function<void(size_t, const bitmap&)> &callback,
+                                const std::function<void(size_t, const bitmap_generator&)> &callback,
                                 size_t num_threads) const {
     ProgressBar progress_bar(column_ids.size(), "Parsing columns",
                              std::cerr, !common::get_verbose());

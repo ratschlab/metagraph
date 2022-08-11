@@ -47,8 +47,7 @@ class ColumnCompressedLazy
                 ++(*progress_bar);
             },
             num_threads,
-            true,
-            [&](size_t total_column_count) {
+            [&progress_bar](size_t total_column_count) {
                 progress_bar = std::make_unique<ProgressBar>(
                     total_column_count, "Streaming columns",
                     std::cerr, !common::get_verbose()
