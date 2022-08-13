@@ -41,17 +41,20 @@ class IDBGAligner {
 
     virtual bool has_coordinates() const = 0;
 
-    // Construct a full alignment from a chain by aligning the query agaisnt
+    // Construct a full alignment from a chain by aligning the query against
     // the graph in the regions of the query in between the chain seeds.
-    virtual void extend_chain(std::string_view query,
-                              std::string_view query_rc,
-                              Chain&& chain,
+    virtual void extend_chain(Chain&& chain,
                               size_t &num_extensions,
                               size_t &num_explored_nodes,
                               const std::function<void(Alignment&&)> &callback,
                               bool extend_ends = true) const = 0;
-};
 
+  protected:
+    std::pair<bool, size_t> align_connect(Alignment &first,
+                                          Alignment &second,
+                                          int64_t coord_dist,
+                                          std::vector<Alignment> &partial_alignments) const;
+};
 
 template <class Seeder = SuffixSeeder<UniMEMSeeder>,
           class Extender = DefaultColumnExtender,
@@ -77,9 +80,7 @@ class DBGAligner : public IDBGAligner {
 
     // Construct a full alignment from a chain by aligning the query against
     // the graph in the regions of the query in between the chain seeds.
-    void extend_chain(std::string_view query,
-                      std::string_view query_rc,
-                      Chain&& chain,
+    void extend_chain(Chain&& chain,
                       size_t &num_extensions,
                       size_t &num_explored_nodes,
                       const std::function<void(Alignment&&)> &callback,
@@ -112,10 +113,6 @@ class DBGAligner : public IDBGAligner {
                           const std::function<void(Alignment&&)> &callback,
                           const std::function<score_t(const Alignment&)> &get_min_path_score) const;
 };
-
-std::pair<Alignment, Alignment> split_seed(const DeBruijnGraph &graph,
-                                           const DBGAlignerConfig &config,
-                                           const Alignment &alignment);
 
 } // namespace align
 } // namespace graph

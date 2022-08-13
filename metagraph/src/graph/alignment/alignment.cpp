@@ -1180,10 +1180,7 @@ Json::Value Alignment::to_json(size_t node_size,
         throw std::runtime_error("JSON output for chains not supported");
     }
 
-    std::string_view full_query = {
-        query_view_.data() - get_clipping(),
-        query_view_.size() + get_clipping() + get_end_clipping()
-    };
+    std::string_view full_query = get_full_query_view();
 
     // encode alignment
     Json::Value alignment;
@@ -1554,6 +1551,44 @@ void Alignment::insert_gap_prefix(ssize_t gap_length,
     assert(nodes_.size() == sequence_.size());
 
     offset_ = node_overlap;
+}
+
+/**
+ * Partition the alignment at the last k-mer. Return a pair containing the
+ * alignment of all but the last k-mers, and the alignment of the last k-mer.
+ */
+std::pair<Alignment, Alignment> Alignment
+::split_seed(size_t node_overlap, const DBGAlignerConfig &config) const {
+    size_t k = node_overlap + 1;
+    if (sequence_.size() < k * 2)
+        return std::make_pair(Alignment(), *this);
+
+    auto ret_val = std::make_pair(*this, *this);
+    assert(std::find(nodes_.begin(), nodes_.end(), DeBruijnGraph::npos) == nodes_.end());
+    ret_val.first.trim_reference_suffix(k, config, false);
+
+    // ensure that there's no DELETION at the splice point
+    size_t trim_nodes = k;
+    if (ret_val.first.size()) {
+        auto it = ret_val.first.get_cigar().data().rbegin();
+        if (it->first == Cigar::CLIPPED)
+            ++it;
+
+        if (it->first == Cigar::DELETION) {
+            trim_nodes += it->second;
+            ret_val.first.trim_reference_suffix(it->second, config, false);
+        }
+
+        assert(ret_val.first.size());
+    }
+
+    if (ret_val.first.empty())
+        return std::make_pair(Alignment(), *this);
+
+    ret_val.second.trim_reference_prefix(sequence_.size() - trim_nodes,
+                                         node_overlap, config, true);
+
+    return ret_val;
 }
 
 // Return the string spelled by the path. This path may have disconnects (if it came)

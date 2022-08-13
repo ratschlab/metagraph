@@ -49,6 +49,10 @@ class Seed {
             offset_(offset), clipping_(clipping), end_clipping_(end_clipping) {}
 
     std::string_view get_query_view() const { return query_view_; }
+    std::string_view get_full_query_view() const {
+        return std::string_view(query_view_.data() - get_clipping(),
+                                get_clipping() + get_end_clipping() + query_view_.size());
+    }
 
     bool empty() const { return nodes_.empty(); }
 
@@ -180,6 +184,10 @@ class Alignment {
     }
 
     std::string_view get_query_view() const { return query_view_; }
+    std::string_view get_full_query_view() const {
+        return std::string_view(query_view_.data() - get_clipping(),
+                                get_clipping() + get_end_clipping() + query_view_.size());
+    }
 
     bool empty() const { return nodes_.empty(); }
 
@@ -318,6 +326,9 @@ class Alignment {
     void merge_annotations(const Alignment &other);
 
     std::vector<std::string> get_decoded_labels(size_t path_i) const;
+
+    std::pair<Alignment, Alignment> split_seed(size_t node_overlap,
+                                               const DBGAlignerConfig &config) const;
 
   private:
     std::string_view query_view_;

@@ -18,6 +18,85 @@ using score_t = Alignment::score_t;
 const score_t ninf = Alignment::ninf;
 using kmer::KmerExtractorBOSS;
 
+void SeedFilteringExtender
+::extend_seed_end(const Alignment &seed,
+                  const std::function<void(Alignment&&)> &callback,
+                  bool force_fixed_seed,
+                  score_t min_path_score) {
+    if (!force_fixed_seed) {
+        for (auto&& extension : get_extensions(seed, min_path_score, false)) {
+            assert(extension.get_score() >= min_path_score);
+            callback(std::move(extension));
+        }
+
+        return;
+    }
+
+    auto [left, next] = seed.split_seed(graph_->get_k() - 1, config_);
+    auto extensions = get_extensions(next, min_path_score, true, 0, DeBruijnGraph::npos, false);
+
+    bool called = false;
+    for (auto&& extension : extensions) {
+        if (extension.get_end_clipping() < seed.get_end_clipping()) {
+            assert(extension.get_nodes().front() == next.get_nodes().front());
+            auto aln = left;
+            aln.splice(std::move(extension));
+            if (aln.size() && aln.get_score() >= min_path_score) {
+                assert(aln.get_clipping() == seed.get_clipping());
+                if (aln.get_offset() > seed.get_offset())
+                    aln.trim_offset(aln.get_offset() - seed.get_offset());
+
+                assert(aln.get_offset() == seed.get_offset());
+                callback(std::move(aln));
+                called = true;
+            }
+        }
+    }
+
+    if (!called && seed.get_score() >= min_path_score)
+        callback(Alignment(seed));
+}
+
+void SeedFilteringExtender
+::rc_extend_rc(const Alignment &seed,
+               const std::function<void(Alignment&&)> &callback,
+               bool force_fixed_seed,
+               score_t min_path_score) {
+    bool called = false;
+
+#if _PROTEIN_GRAPH
+    std::ignore = force_fixed_seed;
+    logger->warn("Front extension not supported for amino acid graphs");
+#else
+    auto rc_graph = std::shared_ptr<const DeBruijnGraph>(
+        std::shared_ptr<const DeBruijnGraph>{}, graph_);
+    if (graph_->get_mode() != DeBruijnGraph::CANONICAL)
+        rc_graph = std::make_shared<RCDBG>(rc_graph);
+
+    const DeBruijnGraph *old_graph = graph_;
+    auto rev = seed;
+    rev.reverse_complement(*rc_graph, get_query());
+    if (rev.size() && rev.get_nodes().back()) {
+        set_graph(*rc_graph);
+        assert(rev.get_end_clipping());
+        extend_seed_end(rev, [&](Alignment&& aln) {
+            aln.reverse_complement(*rc_graph, seed.get_full_query_view());
+            assert(aln.get_offset() == seed.get_offset());
+            assert(aln.get_end_clipping() == seed.get_end_clipping());
+            if (aln.size()) {
+                assert(aln.get_score() >= min_path_score);
+                callback(std::move(aln));
+                called = true;
+            }
+        }, force_fixed_seed, min_path_score);
+        set_graph(*old_graph);
+    }
+#endif
+
+    if (!called && seed.get_score() >= min_path_score)
+        callback(Alignment(seed));
+}
+
 DefaultColumnExtender::DefaultColumnExtender(const DeBruijnGraph &graph,
                                              const DBGAlignerConfig &config,
                                              std::string_view query)

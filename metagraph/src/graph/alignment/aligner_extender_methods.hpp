@@ -50,6 +50,8 @@ class SeedFilteringExtender {
                       trim_offset_after_extend, trim_query_suffix, added_xdrop);
     }
 
+    virtual std::string_view get_query() const = 0;
+
     // report alignment extension statistics
     virtual size_t num_explored_nodes() const = 0;
 
@@ -62,6 +64,16 @@ class SeedFilteringExtender {
     virtual void clear_conv_checker() = 0;
 
     void set_graph(const DeBruijnGraph &graph) { graph_ = &graph; }
+
+    void extend_seed_end(const Alignment &seed,
+                         const std::function<void(Alignment&&)> &callback,
+                         bool force_fixed_seed,
+                         score_t min_path_score = DBGAlignerConfig::ninf);
+
+    void rc_extend_rc(const Alignment &seed,
+                      const std::function<void(Alignment&&)> &callback,
+                      bool force_fixed_seed,
+                      score_t min_path_score = DBGAlignerConfig::ninf);
 
   protected:
     const DeBruijnGraph *graph_;
@@ -112,6 +124,7 @@ class DefaultColumnExtender : public SeedFilteringExtender {
     virtual ~DefaultColumnExtender() {}
 
     size_t num_extensions() const { return num_extensions_; }
+    std::string_view get_query() const { return query_; }
 
     /**
      * During extension, a tree is constructed from the graph starting at the
