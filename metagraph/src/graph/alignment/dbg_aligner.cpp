@@ -637,7 +637,6 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
         if (AlignmentCompare()(best, cur))
             best = cur;
     }
-    num_extensions += chain.size() - 1;
 
     if (extend_ends && partial_alignments.size()) {
         partial_alignments.emplace_back(cur);
