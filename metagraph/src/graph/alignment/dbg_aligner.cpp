@@ -2,14 +2,13 @@
 
 #include <progress_bar.hpp>
 
+#include "aligner_aggregator.hpp"
+#include "aligner_labeled.hpp"
 #include "common/logger.hpp"
 #include "common/algorithms.hpp"
-#include "graph/representation/rc_dbg.hpp"
 #include "graph/representation/canonical_dbg.hpp"
-#include "aligner_labeled.hpp"
 #include "graph/representation/succinct/boss_construct.hpp"
 #include "graph/representation/canonical_dbg.hpp"
-#include "graph/graph_extensions/unitigs.hpp"
 
 namespace mtg {
 namespace graph {

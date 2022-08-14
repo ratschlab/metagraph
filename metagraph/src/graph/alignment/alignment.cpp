@@ -1,7 +1,6 @@
 #include "alignment.hpp"
 
 #include "annotation_buffer.hpp"
-#include "graph/representation/base/sequence_graph.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "common/algorithms.hpp"

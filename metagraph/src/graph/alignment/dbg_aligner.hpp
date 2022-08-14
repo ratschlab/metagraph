@@ -5,12 +5,9 @@
 #include <functional>
 
 #include "alignment.hpp"
-#include "aligner_aggregator.hpp"
 #include "aligner_seeder_methods.hpp"
 #include "aligner_extender_methods.hpp"
 #include "aligner_chainer.hpp"
-#include "graph/representation/base/sequence_graph.hpp"
-#include "graph/representation/succinct/dbg_succinct.hpp"
 
 
 namespace mtg {
