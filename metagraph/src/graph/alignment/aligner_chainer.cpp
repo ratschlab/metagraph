@@ -1131,7 +1131,8 @@ size_t cluster_seeds(const IDBGAligner &aligner,
             if (seeds.empty())
                 return;
 
-            assert(seeds[0].get_full_query_view().size() == forward.size());
+            size_t query_size = seeds[0].get_full_query_view().size();
+            assert(query_size == forward.size());
             for (size_t k = 0; k < seeds.size(); ++k) {
                 const auto &[unitig_id, coord] = coords[i++];
 
@@ -1161,6 +1162,7 @@ size_t cluster_seeds(const IDBGAligner &aligner,
                               bucket.size());
                     std::vector<Seed> seed_bucket_fwd;
                     std::vector<Seed> seed_bucket_bwd;
+
                     for (const auto &[k, coord] : bucket) {
                         seed_bucket_fwd.emplace_back(seeds[k]);
                         const auto &columns = seeds[k].get_columns();
@@ -1202,7 +1204,26 @@ size_t cluster_seeds(const IDBGAligner &aligner,
             };
 
             if (unitig_to_bucket.size() == 1) {
-                process_bucket(unitig_to_bucket.begin()->first, unitig_to_bucket.begin().value());
+                size_t unitig_id = unitig_to_bucket.begin()->first;
+                auto &bucket = unitig_to_bucket.begin().value();
+                auto [bounds, coord_bounds] = unitigs->get_unitig_bounds(unitig_id);
+                const auto &[front, back] = bounds;
+                bool is_cycle = false;
+                aligner.get_graph().adjacent_outgoing_nodes(back, [&](node_index next) {
+                    is_cycle |= (next == front);
+                });
+
+                if (is_cycle) {
+                    // unroll cycle
+                    size_t unitig_size = coord_bounds.second - coord_bounds.first;
+                    size_t old_bucket_size = bucket.size();
+                    for (size_t c = unitig_size; c < query_size; c += unitig_size) {
+                        for (size_t i = 0; i < old_bucket_size; ++i) {
+                            bucket.emplace_back(bucket[i].first, bucket[i].second + c);
+                        }
+                    }
+                }
+                process_bucket(unitig_id, bucket);
 
             } else {
                 // form a bucket forest, define coordinates accordingly
@@ -1292,66 +1313,52 @@ size_t cluster_seeds(const IDBGAligner &aligner,
                     }
                 }
 
-                DEBUG_LOG("Pruning tree of size {}", bucket_forest.size());
-                for (auto it = bucket_forest.rbegin(); it != bucket_forest.rend(); ++it) {
-                    if (it->nexts.empty() && unitig_to_bucket[it->unitig_id].empty()) {
-                        size_t j = it.base() - bucket_forest.begin() - 1;
-                        DEBUG_LOG("\tpruning {}", j);
-                        assert(j < bucket_forest.size());
-                        for (size_t i : it->prevs) {
-                            assert(i != j);
-                            assert(i < bucket_forest.size());
-                            auto find = bucket_forest[i].nexts.find(j);
-                            if (find != bucket_forest[i].nexts.end())
-                                bucket_forest[i].nexts.erase(find);
-                        }
-
-                        it->unitig_id = 0;
-                    }
-                }
-
                 DEBUG_LOG("Defining coordinates for linear unitig chains in tree of size {}",
                           std::count_if(bucket_forest.begin(), bucket_forest.end(),
                                         [](const auto &a) -> bool { return a.unitig_id; }));
 
+                sdsl::bit_vector visited(old_max_length, false);
                 for (size_t i = 0; i < old_max_length; ++i) {
-                    if (!bucket_forest[i].unitig_id || bucket_forest[i].prevs.size()
+                    if (visited[i] || bucket_forest[i].prevs.size()
                             || bucket_forest[i].nexts.size() > 1) {
                         continue;
                     }
+#ifndef NDEBUG
+                    size_t old_visited_count = sdsl::util::cnt_one_bits(visited);
+#endif
 
-                    Node *cur_node = &bucket_forest[i];
+                    std::vector<Node*> stack;
+                    stack.emplace_back(&bucket_forest[i]);
                     std::vector<std::pair<size_t, Unitigs::Coord>> bucket;
+                    visited[i] = true;
                     size_t coord_offset = 0;
-#ifndef NDEBUG
-                    size_t bucket_count = 0;
-#endif
-                    while (cur_node) {
-                        assert(cur_node->unitig_id);
+                    while (stack.size()) {
+                        Node *cur_node = stack.back();
+                        stack.pop_back();
                         assert(unitig_to_bucket.count(cur_node->unitig_id));
-#ifndef NDEBUG
-                        bucket_count += !unitig_to_bucket[cur_node->unitig_id].empty();
-#endif
                         for (const auto &[k, coord] : unitig_to_bucket[cur_node->unitig_id]) {
                             bucket.emplace_back(k, coord - cur_node->start_coord + coord_offset);
                         }
                         coord_offset += cur_node->unitig_size;
-                        cur_node->unitig_id = 0;
-                        if (cur_node->nexts.size() == 1 && cur_node->prevs.size() == 1) {
-                            cur_node = &bucket_forest[*cur_node->nexts.begin()];
-                        } else {
-                            cur_node = nullptr;
+                        if (coord_offset < query_size) {
+                            for (size_t j : cur_node->nexts) {
+                                if (j < old_max_length)
+                                    visited[j] = true;
+
+                                stack.emplace_back(&bucket_forest[j]);
+                            }
                         }
                     }
 
-                    DEBUG_LOG("Merged {} buckets", bucket_count);
+                    DEBUG_LOG("Merged {} buckets",
+                              sdsl::util::cnt_one_bits(visited) - old_visited_count);
                     process_bucket(0, bucket);
                 }
 
                 DEBUG_LOG("Handling remaining buckets");
                 auto it = unitig_to_bucket.begin();
                 for (size_t i = 0; i < old_max_length; ++i, ++it) {
-                    if (bucket_forest[i].unitig_id) {
+                    if (!visited[i]) {
                         throw std::runtime_error("not implemented");
                         process_bucket(it->first, it.value());
                     }

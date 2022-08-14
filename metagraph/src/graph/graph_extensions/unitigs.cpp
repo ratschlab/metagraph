@@ -63,7 +63,6 @@ Unitigs::Unitigs(const cli::Config &config) : graph_(load_graph_impl(config.fnam
     size_t counter = 0;
     size_t max_unitig = 0;
 
-    // TODO: store cycle indicator
     ThreadPool pool(1);
     graph_->call_unitigs([&](const std::string&, const auto &path) {
         if (path.size() == 1)
