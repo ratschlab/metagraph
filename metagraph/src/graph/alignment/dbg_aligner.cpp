@@ -116,6 +116,7 @@ std::pair<bool, size_t> IDBGAligner
         first.get_score() - next.get_score() // added_xdrop
     );
 
+    // TODO: what if there are multiple alignments?
     if (extensions.size() && extensions[0].get_end_clipping() < first.get_end_clipping()) {
         assert(extensions[0].get_nodes().front() == next.get_nodes().front());
         left.splice(std::move(extensions[0]));
@@ -622,7 +623,7 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
                     }
 
                     callback(std::move(aln));
-                }, !config_.chain_alignments, get_min_path_score(seed));
+                }, true, get_min_path_score(seed));
             }
 
             for (size_t j = i + 1; j < seeds.size(); ++j) {

@@ -62,10 +62,13 @@ void SeedFilteringExtender
                const std::function<void(Alignment&&)> &callback,
                bool force_fixed_seed,
                score_t min_path_score) {
+    // TODO: the workflow for force_fixed_seed is hard to do when coordinates are involved
+    // TODO: I believe this is still guaranteed to get the same result
+    force_fixed_seed &= seed.label_coordinates.empty();
+
     bool called = false;
 
 #if _PROTEIN_GRAPH
-    std::ignore = force_fixed_seed;
     logger->warn("Front extension not supported for amino acid graphs");
 #else
     auto rc_graph = std::shared_ptr<const DeBruijnGraph>(

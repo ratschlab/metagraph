@@ -998,6 +998,7 @@ std::pair<size_t, size_t> call_alignment_chains(const IDBGAligner &aligner,
             try {
                 extender->rc_extend_rc(alignments[i], [&](auto&& aln) {
                     if (aln.get_clipping() < alignments[i].get_clipping()) {
+                        // TODO: what if there are multiple extensions?
                         DEBUG_LOG("Extended successfully:\n\t{}", aln);
                         front_extensions[i] = std::move(aln);
                         throw std::bad_function_call();
@@ -1039,6 +1040,7 @@ std::pair<size_t, size_t> call_alignment_chains(const IDBGAligner &aligner,
                     // TODO: if the extension uses a different subset of labels
                     // this will fail
                     if (alignment.get_end_clipping() < cur.get_end_clipping()) {
+                        // TODO: what if there are multiple extensions?
                         std::swap(alignment, cur);
                         DEBUG_LOG("Extended successfully:\n\t{}", cur);
                         throw std::bad_function_call();
