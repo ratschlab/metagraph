@@ -1089,6 +1089,299 @@ std::pair<size_t, size_t> call_alignment_chains(const IDBGAligner &aligner,
     return std::make_pair(num_extensions, num_explored_nodes);
 }
 
+template <class CurSeeder, class Coords>
+void parse_seeder(const Unitigs &unitigs,
+                  const IDBGAligner &aligner,
+                  const DBGAlignerConfig &config,
+                  std::string_view forward,
+                  std::string_view reverse,
+                  size_t &new_seed_count,
+                  size_t &i,
+                  const Coords &coords,
+                  CurSeeder &cur_seeder) {
+    VectorMap<size_t, std::vector<std::pair<size_t, Unitigs::Coord>>> unitig_to_bucket;
+    const auto &seeds = cur_seeder->get_seeds();
+    if (seeds.empty())
+        return;
+
+    size_t query_size = seeds[0].get_full_query_view().size();
+    assert(query_size == forward.size());
+    for (size_t k = 0; k < seeds.size(); ++k) {
+        const auto &[unitig_id, coord] = coords[i++];
+
+        // ignore seeds from singleton unitigs
+        if (!unitigs.is_singleton(unitig_id))
+            unitig_to_bucket[unitig_id].emplace_back(k, coord);
+    }
+
+    DEBUG_LOG("Found {} unitigs", unitig_to_bucket.size());
+
+    if (unitig_to_bucket.empty()) {
+        cur_seeder = std::make_shared<ManualMatchingSeeder>(std::vector<Seed>{}, 0, config);
+        return;
+    }
+
+    std::vector<Alignment> filtered_seeds;
+    std::vector<std::pair<Chain, score_t>> scored_chains;
+    auto process_bucket = [&](size_t unitig_id, auto &bucket) {
+        const auto &first_seed = seeds[bucket[0].first];
+        if (bucket.size() == 1) {
+            if (first_seed.get_query_view().size() > config.min_seed_length) {
+                const auto &columns = first_seed.get_columns();
+                Alignment aln(first_seed, config);
+                size_t chain_score = aln.get_score();
+                aln.label_coordinates.resize(columns.size(), Alignment::Tuple(1, 0));
+                Chain chain;
+                chain.emplace_back(std::move(aln), 0);
+                scored_chains.emplace_back(std::move(chain), chain_score);
+            }
+        } else {
+            // look for co-linear seeds
+            std::ignore = unitig_id;
+            DEBUG_LOG("Chaining bucket with id {} (is singleton: {}) of size {}",
+                      unitig_id, unitigs.is_singleton(unitig_id),
+                      bucket.size());
+            std::vector<Seed> seed_bucket_fwd;
+            std::vector<Seed> seed_bucket_bwd;
+
+            for (const auto &[k, coord] : bucket) {
+                seed_bucket_fwd.emplace_back(seeds[k]);
+                const auto &columns = seeds[k].get_columns();
+                seed_bucket_fwd.back().label_coordinates.resize(
+                    columns.size(),
+                    Alignment::Tuple(1, coord - seeds[k].size() + 1 + seeds[k].get_offset())
+                );
+                DEBUG_LOG("\t{}", Alignment(seed_bucket_fwd.back(), config));
+            }
+
+            if (first_seed.get_orientation())
+                std::swap(seed_bucket_fwd, seed_bucket_bwd);
+
+            tsl::hopscotch_set<Alignment::Column> used_labels;
+            call_seed_chains_both_strands(forward, reverse, config,
+                                          std::move(seed_bucket_fwd),
+                                          std::move(seed_bucket_bwd),
+                                          [&](Chain&& chain, score_t score) {
+                if (chain.size() > 1
+                        || chain[0].first.get_query_view().size() > config.min_seed_length) {
+                    const auto &columns = chain[0].first.get_columns();
+                    used_labels.insert(columns.begin(), columns.end());
+                    scored_chains.emplace_back(std::move(chain), score);
+                }
+            }, [&](Alignment::Column c) -> bool { return used_labels.count(c); });
+        }
+    };
+
+    if (unitig_to_bucket.size() == 1) {
+        size_t unitig_id = unitig_to_bucket.begin()->first;
+        auto &bucket = unitig_to_bucket.begin().value();
+        auto [bounds, coord_bounds] = unitigs.get_unitig_bounds(unitig_id);
+        const auto &[front, back] = bounds;
+        bool is_cycle = false;
+        aligner.get_graph().adjacent_outgoing_nodes(back, [&](node_index next) {
+            is_cycle |= (next == front);
+        });
+
+        if (is_cycle) {
+            // unroll cycle
+            size_t unitig_size = coord_bounds.second - coord_bounds.first;
+            size_t old_bucket_size = bucket.size();
+            for (size_t c = unitig_size; c < query_size; c += unitig_size) {
+                for (size_t i = 0; i < old_bucket_size; ++i) {
+                    bucket.emplace_back(bucket[i].first, bucket[i].second + c);
+                }
+            }
+        }
+        process_bucket(unitig_id, bucket);
+
+    } else {
+        // form a bucket forest, define coordinates accordingly
+        DEBUG_LOG("Building subtree");
+        struct Node {
+            size_t unitig_id;
+            Unitigs::Coord start_coord;
+            Unitigs::Coord unitig_size;
+            tsl::hopscotch_set<size_t> prevs;
+            tsl::hopscotch_set<size_t> nexts;
+        };
+        std::vector<Node> bucket_forest;
+        std::vector<size_t> max_length;
+        max_length.reserve(unitig_to_bucket.size());
+        bucket_forest.reserve(unitig_to_bucket.size());
+        for (const auto &[unitig_id, bucket] : unitig_to_bucket) {
+            size_t min_clipping = seeds[std::min_element(bucket.begin(), bucket.end(),
+                [&](const auto &a, const auto &b) {
+                    return seeds[a.first].get_clipping() < seeds[b.first].get_clipping();
+                })->first].get_clipping();
+            assert(min_clipping <= forward.size());
+            max_length.emplace_back(forward.size() - min_clipping);
+            auto coords = unitigs.get_unitig_bounds(unitig_id).second;
+            bucket_forest.emplace_back(Node{
+                .unitig_id = unitig_id,
+                .start_coord = coords.first,
+                .unitig_size = coords.second - coords.first,
+                .prevs = {}, .nexts = {}
+            });
+        }
+
+        size_t max_degree = 0;
+
+        size_t old_max_length = max_length.size();
+        for (size_t i = 0; i < max_length.size(); ++i) {
+            std::vector<std::pair<size_t, Unitigs::Coord>> dfs;
+            dfs.emplace_back(i, max_length[i]);
+            while (dfs.size()) {
+                auto [cur_node_i, dist_left] = dfs.back();
+                dfs.pop_back();
+                DEBUG_LOG("\tqueue: {} dist: {}", dfs.size(), dist_left);
+                if (dist_left <= 0)
+                    continue;
+
+                if (static_cast<Unitigs::Coord>(max_length[cur_node_i])
+                        < dist_left) {
+                    max_length[cur_node_i] = dist_left;
+                } else {
+                    continue;
+                }
+
+                Node *cur_node = &bucket_forest[cur_node_i];
+
+                if (cur_node->nexts.empty()) {
+                    unitigs.adjacent_outgoing_unitigs(cur_node->unitig_id, [&](size_t next) {
+                        auto [it, inserted] = unitig_to_bucket.try_emplace(next, std::vector<std::pair<size_t, Unitigs::Coord>>{});
+                        size_t next_node;
+                        if (inserted) {
+                            next_node = bucket_forest.size();
+                            auto coords = unitigs.get_unitig_bounds(next).second;
+                            bucket_forest.emplace_back(Node{
+                                .unitig_id = next,
+                                .start_coord = coords.first,
+                                .unitig_size = coords.second - coords.first,
+                                .prevs = {}, .nexts = {}
+                            });
+                            max_length.emplace_back(dist_left);
+
+                            // reset pointer just in case the previous emplace_back
+                            // resized the vector
+                            cur_node = &bucket_forest[cur_node_i];
+                        } else {
+                            next_node = it - unitig_to_bucket.begin();
+                        }
+
+                        assert(next_node < bucket_forest.size());
+                        cur_node->nexts.emplace(next_node);
+                        max_degree = std::max(max_degree, cur_node->nexts.size());
+                    });
+                }
+
+                for (size_t node_i : cur_node->nexts) {
+                    bucket_forest[node_i].prevs.emplace(cur_node_i);
+                    max_degree = std::max(max_degree, bucket_forest[node_i].prevs.size());
+                    dfs.emplace_back(node_i, dist_left - cur_node->unitig_size);
+                }
+            }
+        }
+
+        DEBUG_LOG("Computing coordinates");
+        sdsl::bit_vector finished(old_max_length, false);
+        sdsl::bit_vector visited(old_max_length, false);
+        size_t global_coord_offset = 0;
+        for (size_t i = 0; i < old_max_length; ++i) {
+            if (bucket_forest[i].prevs.size() || finished[i])
+                continue;
+
+            std::vector<std::pair<size_t, size_t>> stack;
+            stack.emplace_back(i, 0);
+            std::vector<std::pair<size_t, Unitigs::Coord>> bucket;
+            finished[i] = true;
+            visited[i] = true;
+            size_t max_coord_offset = 0;
+            while (stack.size()) {
+                auto [cur_i, coord_offset] = stack.back();
+                stack.pop_back();
+
+                visited[cur_i] = true;
+                const Node &cur_node = bucket_forest[cur_i];
+                if (std::all_of(cur_node.prevs.begin(), cur_node.prevs.end(),
+                                [&](size_t j) { return visited[j]; })) {
+                    finished[i] = true;
+                }
+
+                assert(unitig_to_bucket.count(cur_node.unitig_id));
+                for (const auto &[k, coord] : unitig_to_bucket[cur_node.unitig_id]) {
+                    bucket.emplace_back(k, global_coord_offset + coord - cur_node.start_coord + coord_offset);
+                }
+                coord_offset += cur_node.unitig_size;
+                max_coord_offset = std::max(max_coord_offset, coord_offset);
+                if (coord_offset < query_size * 1.5) {
+                    for (size_t j : cur_node.nexts) {
+                        stack.emplace_back(j, coord_offset);
+                    }
+                }
+            }
+
+            global_coord_offset += max_coord_offset;
+
+            process_bucket(bucket_forest[i].unitig_id, bucket);
+        }
+
+        DEBUG_LOG("Handling remaining buckets");
+        auto it = unitig_to_bucket.begin();
+        for (size_t i = 0; i < old_max_length; ++i, ++it) {
+            if (!finished[i]) {
+                // TODO: handle cycles better
+                process_bucket(it->first, it.value());
+            }
+        }
+
+        DEBUG_LOG("Processing chains");
+        std::sort(scored_chains.begin(), scored_chains.end(), utils::GreaterSecond());
+        tsl::hopscotch_set<Alignment::Column> used_labels;
+        for (auto&& [chain, score] : scored_chains) {
+            const auto &columns = chain[0].first.get_columns();
+            if (std::all_of(columns.begin(), columns.end(),
+                            [&](Alignment::Column c) { return used_labels.count(c); })) {
+                continue;
+            }
+
+            if (chain.size() > 1) {
+                size_t num_extensions = 0;
+                size_t num_explored_nodes = 0;
+                aligner.extend_chain(std::move(chain), num_extensions, num_explored_nodes,
+                                     [&](Alignment&& aln) {
+                    if (aln.get_query_view().size() > config.min_seed_length) {
+                        filtered_seeds.emplace_back(std::move(aln));
+                        filtered_seeds.back().label_coordinates.clear();
+                        const auto &columns = filtered_seeds.back().get_columns();
+                        for (Alignment::Column c : columns) {
+                            used_labels.emplace(c);
+                        }
+                    }
+                }, false);
+            } else {
+                filtered_seeds.emplace_back(std::move(chain[0].first));
+                filtered_seeds.back().label_coordinates.clear();
+                const auto &columns = filtered_seeds.back().get_columns();
+                for (Alignment::Column c : columns) {
+                    used_labels.emplace(c);
+                }
+            }
+        }
+    }
+
+    DEBUG_LOG("Added back {} seeds", filtered_seeds.size());
+#ifndef NDEBUG
+    for (const auto &seed : filtered_seeds) {
+        DEBUG_LOG("\t{}", seed);
+    }
+#endif
+    size_t num_matches = get_num_char_matches_in_seeds(filtered_seeds.begin(), filtered_seeds.end());
+    new_seed_count += filtered_seeds.size();
+    cur_seeder = std::make_shared<ManualSeeder>(
+        std::move(filtered_seeds), num_matches
+    );
+}
+
 template <class BatchSeeders>
 size_t cluster_seeds(const IDBGAligner &aligner,
                      const std::vector<AlignmentResults> &paths,
@@ -1101,17 +1394,17 @@ size_t cluster_seeds(const IDBGAligner &aligner,
 
     std::vector<node_index> nodes;
     for (const auto &[seeder, seeder_rc] : batch_seeders) {
-        auto parse_seeder = [&](const auto &cur_seeder) {
+        auto get_seeder_nodes = [&](const auto &cur_seeder) {
             for (const auto &seed : cur_seeder.get_seeds()) {
                 nodes.emplace_back(seed.get_nodes().back());
             }
         };
 
         if (seeder)
-            parse_seeder(*seeder);
+            get_seeder_nodes(*seeder);
 
         if (seeder_rc)
-            parse_seeder(*seeder_rc);
+            get_seeder_nodes(*seeder_rc);
     }
 
     auto coords = unitigs->get_unitig_ids_and_coordinates(nodes);
@@ -1125,282 +1418,16 @@ size_t cluster_seeds(const IDBGAligner &aligner,
     for (auto &[seeder, seeder_rc] : batch_seeders) {
         std::string_view forward = s_it->get_query(false);
         std::string_view reverse = s_it->get_query(true);
-        auto parse_seeder = [&](auto &cur_seeder) {
-            VectorMap<size_t, std::vector<std::pair<size_t, Unitigs::Coord>>> unitig_to_bucket;
-            const auto &seeds = cur_seeder->get_seeds();
-            if (seeds.empty())
-                return;
 
-            size_t query_size = seeds[0].get_full_query_view().size();
-            assert(query_size == forward.size());
-            for (size_t k = 0; k < seeds.size(); ++k) {
-                const auto &[unitig_id, coord] = coords[i++];
+        if (seeder) {
+            parse_seeder(*unitigs, aligner, config, forward, reverse, new_seed_count,
+                         i, coords, seeder);
+        }
 
-                // ignore seeds from singleton unitigs
-                if (!unitigs->is_singleton(unitig_id))
-                    unitig_to_bucket[unitig_id].emplace_back(k, coord);
-            }
-
-            DEBUG_LOG("Found {} unitigs", unitig_to_bucket.size());
-
-            if (unitig_to_bucket.empty()) {
-                cur_seeder = std::make_shared<ManualMatchingSeeder>(std::vector<Seed>{}, 0, config);
-                return;
-            }
-
-            std::vector<Alignment> filtered_seeds;
-            std::vector<std::pair<Chain, score_t>> scored_chains;
-            auto process_bucket = [&](size_t unitig_id, auto &bucket) {
-                const auto &first_seed = seeds[bucket[0].first];
-                if (bucket.size() == 1) {
-                    if (first_seed.get_query_view().size() > config.min_seed_length)
-                        filtered_seeds.emplace_back(first_seed, config);
-                } else {
-                    // look for co-linear seeds
-                    std::ignore = unitig_id;
-                    DEBUG_LOG("Chaining bucket with id {} (is singleton: {}) of size {}",
-                              unitig_id, unitigs->is_singleton(unitig_id),
-                              bucket.size());
-                    std::vector<Seed> seed_bucket_fwd;
-                    std::vector<Seed> seed_bucket_bwd;
-
-                    for (const auto &[k, coord] : bucket) {
-                        seed_bucket_fwd.emplace_back(seeds[k]);
-                        const auto &columns = seeds[k].get_columns();
-                        seed_bucket_fwd.back().label_coordinates.resize(
-                            columns.size(),
-                            Alignment::Tuple(1, coord - seeds[k].size() + 1 + seeds[k].get_offset())
-                        );
-                        DEBUG_LOG("\t{}", Alignment(seed_bucket_fwd.back(), config));
-                    }
-
-                    if (first_seed.get_orientation())
-                        std::swap(seed_bucket_fwd, seed_bucket_bwd);
-
-                    tsl::hopscotch_set<Alignment::Column> used_labels;
-                    call_seed_chains_both_strands(forward, reverse, config,
-                                                  std::move(seed_bucket_fwd),
-                                                  std::move(seed_bucket_bwd),
-                                                  [&](Chain&& chain, score_t score) {
-                        if (chain.size() > 1
-                                || chain[0].first.get_query_view().size() > config.min_seed_length) {
-                            const auto &columns = chain[0].first.get_columns();
-                            used_labels.insert(columns.begin(), columns.end());
-                            scored_chains.emplace_back(std::move(chain), score);
-                        }
-                    }, [&](Alignment::Column c) -> bool { return used_labels.count(c); });
-                }
-            };
-
-            if (unitig_to_bucket.size() == 1) {
-                size_t unitig_id = unitig_to_bucket.begin()->first;
-                auto &bucket = unitig_to_bucket.begin().value();
-                auto [bounds, coord_bounds] = unitigs->get_unitig_bounds(unitig_id);
-                const auto &[front, back] = bounds;
-                bool is_cycle = false;
-                aligner.get_graph().adjacent_outgoing_nodes(back, [&](node_index next) {
-                    is_cycle |= (next == front);
-                });
-
-                if (is_cycle) {
-                    // unroll cycle
-                    size_t unitig_size = coord_bounds.second - coord_bounds.first;
-                    size_t old_bucket_size = bucket.size();
-                    for (size_t c = unitig_size; c < query_size; c += unitig_size) {
-                        for (size_t i = 0; i < old_bucket_size; ++i) {
-                            bucket.emplace_back(bucket[i].first, bucket[i].second + c);
-                        }
-                    }
-                }
-                process_bucket(unitig_id, bucket);
-
-            } else {
-                // form a bucket forest, define coordinates accordingly
-                DEBUG_LOG("Building subtree");
-                struct Node {
-                    size_t unitig_id;
-                    Unitigs::Coord start_coord;
-                    Unitigs::Coord unitig_size;
-                    tsl::hopscotch_set<size_t> prevs;
-                    tsl::hopscotch_set<size_t> nexts;
-                };
-                std::vector<Node> bucket_forest;
-                std::vector<size_t> max_length;
-                max_length.reserve(unitig_to_bucket.size());
-                bucket_forest.reserve(unitig_to_bucket.size());
-                for (const auto &[unitig_id, bucket] : unitig_to_bucket) {
-                    size_t min_clipping = seeds[std::min_element(bucket.begin(), bucket.end(),
-                        [&](const auto &a, const auto &b) {
-                            return seeds[a.first].get_clipping() < seeds[b.first].get_clipping();
-                        })->first].get_clipping();
-                    assert(min_clipping <= forward.size());
-                    max_length.emplace_back(forward.size() - min_clipping);
-                    auto coords = unitigs->get_unitig_bounds(unitig_id).second;
-                    bucket_forest.emplace_back(Node{
-                        .unitig_id = unitig_id,
-                        .start_coord = coords.first,
-                        .unitig_size = coords.second - coords.first,
-                        .prevs = {}, .nexts = {}
-                    });
-                }
-
-                size_t max_degree = 0;
-
-                size_t old_max_length = max_length.size();
-                for (size_t i = 0; i < max_length.size(); ++i) {
-                    std::vector<std::pair<size_t, Unitigs::Coord>> dfs;
-                    dfs.emplace_back(i, max_length[i]);
-                    while (dfs.size()) {
-                        auto [cur_node_i, dist_left] = dfs.back();
-                        dfs.pop_back();
-                        DEBUG_LOG("\tqueue: {} dist: {}", dfs.size(), dist_left);
-                        if (dist_left <= 0)
-                            continue;
-
-                        if (static_cast<Unitigs::Coord>(max_length[cur_node_i])
-                                < dist_left) {
-                            max_length[cur_node_i] = dist_left;
-                        } else {
-                            continue;
-                        }
-
-                        Node *cur_node = &bucket_forest[cur_node_i];
-
-                        if (cur_node->nexts.empty()) {
-                            unitigs->adjacent_outgoing_unitigs(cur_node->unitig_id, [&](size_t next) {
-                                auto [it, inserted] = unitig_to_bucket.try_emplace(next, std::vector<std::pair<size_t, Unitigs::Coord>>{});
-                                size_t next_node;
-                                if (inserted) {
-                                    next_node = bucket_forest.size();
-                                    auto coords = unitigs->get_unitig_bounds(next).second;
-                                    bucket_forest.emplace_back(Node{
-                                        .unitig_id = next,
-                                        .start_coord = coords.first,
-                                        .unitig_size = coords.second - coords.first,
-                                        .prevs = {}, .nexts = {}
-                                    });
-                                    max_length.emplace_back(dist_left);
-
-                                    // reset pointer just in case the previous emplace_back
-                                    // resized the vector
-                                    cur_node = &bucket_forest[cur_node_i];
-                                } else {
-                                    next_node = it - unitig_to_bucket.begin();
-                                }
-
-                                assert(next_node < bucket_forest.size());
-                                cur_node->nexts.emplace(next_node);
-                                max_degree = std::max(max_degree, cur_node->nexts.size());
-                            });
-                        }
-
-                        for (size_t node_i : cur_node->nexts) {
-                            bucket_forest[node_i].prevs.emplace(cur_node_i);
-                            max_degree = std::max(max_degree, bucket_forest[node_i].prevs.size());
-                            dfs.emplace_back(node_i, dist_left - cur_node->unitig_size);
-                        }
-                    }
-                }
-
-                DEBUG_LOG("Computing coordinates");
-                sdsl::bit_vector finished(old_max_length, false);
-                sdsl::bit_vector visited(old_max_length, false);
-                for (size_t i = 0; i < old_max_length; ++i) {
-                    if (bucket_forest[i].prevs.size() || finished[i])
-                        continue;
-
-                    std::vector<size_t> stack;
-                    stack.emplace_back(i);
-                    std::vector<std::pair<size_t, Unitigs::Coord>> bucket;
-                    finished[i] = true;
-                    visited[i] = true;
-                    size_t coord_offset = 0;
-                    while (stack.size()) {
-                        visited[stack.back()] = true;
-                        Node *cur_node = &bucket_forest[stack.back()];
-                        if (std::all_of(cur_node->prevs.begin(), cur_node->prevs.end(),
-                                        [&](size_t j) { return visited[j]; })) {
-                            finished[i] = true;
-                        }
-
-                        stack.pop_back();
-                        assert(unitig_to_bucket.count(cur_node->unitig_id));
-                        for (const auto &[k, coord] : unitig_to_bucket[cur_node->unitig_id]) {
-                            bucket.emplace_back(k, coord - cur_node->start_coord + coord_offset);
-                        }
-                        coord_offset += cur_node->unitig_size;
-                        if (coord_offset < query_size) {
-                            for (size_t j : cur_node->nexts) {
-                                stack.emplace_back(j);
-                            }
-                        }
-                    }
-
-                    process_bucket(0, bucket);
-                }
-
-                DEBUG_LOG("Handling remaining buckets");
-                auto it = unitig_to_bucket.begin();
-                for (size_t i = 0; i < old_max_length; ++i, ++it) {
-                    if (!finished[i]) {
-                        throw std::runtime_error("Cycle detected, case not implemented");
-                        process_bucket(it->first, it.value());
-                    }
-                }
-
-                DEBUG_LOG("Processing chains");
-                std::sort(scored_chains.begin(), scored_chains.end(), utils::GreaterSecond());
-                tsl::hopscotch_set<Alignment::Column> used_labels;
-                for (auto&& [chain, score] : scored_chains) {
-                    const auto &columns = chain[0].first.get_columns();
-                    if (std::all_of(columns.begin(), columns.end(),
-                                    [&](Alignment::Column c) { return used_labels.count(c); })) {
-                        continue;
-                    }
-
-                    if (chain.size() > 1) {
-                        size_t num_extensions = 0;
-                        size_t num_explored_nodes = 0;
-                        aligner.extend_chain(std::move(chain), num_extensions, num_explored_nodes,
-                                             [&](Alignment&& aln) {
-                            if (aln.get_query_view().size() > config.min_seed_length) {
-                                filtered_seeds.emplace_back(std::move(aln));
-                                filtered_seeds.back().label_coordinates.clear();
-                                const auto &columns = filtered_seeds.back().get_columns();
-                                for (Alignment::Column c : columns) {
-                                    used_labels.emplace(c);
-                                }
-                            }
-                        }, false);
-                    } else {
-                        filtered_seeds.emplace_back(std::move(chain[0].first));
-                        filtered_seeds.back().label_coordinates.clear();
-                        const auto &columns = filtered_seeds.back().get_columns();
-                        for (Alignment::Column c : columns) {
-                            used_labels.emplace(c);
-                        }
-                    }
-                }
-            }
-
-            DEBUG_LOG("Added back {} seeds", filtered_seeds.size());
-#ifndef NDEBUG
-            for (const auto &seed : filtered_seeds) {
-                DEBUG_LOG("\t{}", seed);
-            }
-#endif
-            size_t num_matches = get_num_char_matches_in_seeds(filtered_seeds.begin(), filtered_seeds.end());
-            new_seed_count += filtered_seeds.size();
-            cur_seeder = std::make_shared<ManualSeeder>(
-                std::move(filtered_seeds), num_matches
-            );
-        };
-
-        if (seeder)
-            parse_seeder(seeder);
-
-        if (seeder_rc)
-            parse_seeder(seeder_rc);
+        if (seeder_rc) {
+            parse_seeder(*unitigs, aligner, config, forward, reverse, new_seed_count,
+                         i, coords, seeder_rc);
+        }
 
         ++progress_bar;
         ++s_it;
