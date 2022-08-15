@@ -72,11 +72,11 @@ class RowSparseDisk : public BinaryMatrix {
     // of RowSparseDisk class which could result in multiple opens of int_vector_buffer
     class Impl {
       public:
-        Impl(const bit_vector_small &boundary_,
+        Impl(const bit_vector_small &boundary,
              const std::string &filename,
              uint64_t offset,
              uint64_t buff_size)
-            : boundary_(boundary_),
+            : boundary_(boundary),
               set_bits_(filename, std::ios::in, buff_size, 0, false, offset) {}
 
         uint64_t num_relations_impl() const { return set_bits_.size(); }
