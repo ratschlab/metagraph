@@ -1149,6 +1149,7 @@ size_t cluster_seeds(const IDBGAligner &aligner,
             }
 
             std::vector<Alignment> filtered_seeds;
+            std::vector<std::pair<Chain, score_t>> scored_chains;
             auto process_bucket = [&](size_t unitig_id, auto &bucket) {
                 const auto &first_seed = seeds[bucket[0].first];
                 if (bucket.size() == 1) {
@@ -1180,24 +1181,12 @@ size_t cluster_seeds(const IDBGAligner &aligner,
                     call_seed_chains_both_strands(forward, reverse, config,
                                                   std::move(seed_bucket_fwd),
                                                   std::move(seed_bucket_bwd),
-                                                  [&](Chain&& chain, score_t) {
-                        if (chain.size() > 1) {
-                            size_t num_extensions = 0;
-                            size_t num_explored_nodes = 0;
-                            aligner.extend_chain(std::move(chain), num_extensions, num_explored_nodes,
-                                                 [&](Alignment&& aln) {
-                                if (aln.get_query_view().size() > config.min_seed_length) {
-                                    filtered_seeds.emplace_back(std::move(aln));
-                                    filtered_seeds.back().label_coordinates.clear();
-                                    const auto &columns = filtered_seeds.back().get_columns();
-                                    used_labels.insert(columns.begin(), columns.end());
-                                }
-                            }, false);
-                        } else if (chain[0].first.get_query_view().size() > config.min_seed_length) {
-                            filtered_seeds.emplace_back(std::move(chain[0].first));
-                            filtered_seeds.back().label_coordinates.clear();
-                            const auto &columns = filtered_seeds.back().get_columns();
+                                                  [&](Chain&& chain, score_t score) {
+                        if (chain.size() > 1
+                                || chain[0].first.get_query_view().size() > config.min_seed_length) {
+                            const auto &columns = chain[0].first.get_columns();
                             used_labels.insert(columns.begin(), columns.end());
+                            scored_chains.emplace_back(std::move(chain), score);
                         }
                     }, [&](Alignment::Column c) -> bool { return used_labels.count(c); });
                 }
@@ -1313,27 +1302,27 @@ size_t cluster_seeds(const IDBGAligner &aligner,
                     }
                 }
 
-                DEBUG_LOG("Defining coordinates for linear unitig chains in tree of size {}",
-                          std::count_if(bucket_forest.begin(), bucket_forest.end(),
-                                        [](const auto &a) -> bool { return a.unitig_id; }));
-
+                DEBUG_LOG("Computing coordinates");
+                sdsl::bit_vector finished(old_max_length, false);
                 sdsl::bit_vector visited(old_max_length, false);
                 for (size_t i = 0; i < old_max_length; ++i) {
-                    if (visited[i] || bucket_forest[i].prevs.size()
-                            || bucket_forest[i].nexts.size() > 1) {
+                    if (bucket_forest[i].prevs.size() || finished[i])
                         continue;
-                    }
-#ifndef NDEBUG
-                    size_t old_visited_count = sdsl::util::cnt_one_bits(visited);
-#endif
 
-                    std::vector<Node*> stack;
-                    stack.emplace_back(&bucket_forest[i]);
+                    std::vector<size_t> stack;
+                    stack.emplace_back(i);
                     std::vector<std::pair<size_t, Unitigs::Coord>> bucket;
+                    finished[i] = true;
                     visited[i] = true;
                     size_t coord_offset = 0;
                     while (stack.size()) {
-                        Node *cur_node = stack.back();
+                        visited[stack.back()] = true;
+                        Node *cur_node = &bucket_forest[stack.back()];
+                        if (std::all_of(cur_node->prevs.begin(), cur_node->prevs.end(),
+                                        [&](size_t j) { return visited[j]; })) {
+                            finished[i] = true;
+                        }
+
                         stack.pop_back();
                         assert(unitig_to_bucket.count(cur_node->unitig_id));
                         for (const auto &[k, coord] : unitig_to_bucket[cur_node->unitig_id]) {
@@ -1342,25 +1331,54 @@ size_t cluster_seeds(const IDBGAligner &aligner,
                         coord_offset += cur_node->unitig_size;
                         if (coord_offset < query_size) {
                             for (size_t j : cur_node->nexts) {
-                                if (j < old_max_length)
-                                    visited[j] = true;
-
-                                stack.emplace_back(&bucket_forest[j]);
+                                stack.emplace_back(j);
                             }
                         }
                     }
 
-                    DEBUG_LOG("Merged {} buckets",
-                              sdsl::util::cnt_one_bits(visited) - old_visited_count);
                     process_bucket(0, bucket);
                 }
 
                 DEBUG_LOG("Handling remaining buckets");
                 auto it = unitig_to_bucket.begin();
                 for (size_t i = 0; i < old_max_length; ++i, ++it) {
-                    if (!visited[i]) {
-                        throw std::runtime_error("not implemented");
+                    if (!finished[i]) {
+                        throw std::runtime_error("Cycle detected, case not implemented");
                         process_bucket(it->first, it.value());
+                    }
+                }
+
+                DEBUG_LOG("Processing chains");
+                std::sort(scored_chains.begin(), scored_chains.end(), utils::GreaterSecond());
+                tsl::hopscotch_set<Alignment::Column> used_labels;
+                for (auto&& [chain, score] : scored_chains) {
+                    const auto &columns = chain[0].first.get_columns();
+                    if (std::all_of(columns.begin(), columns.end(),
+                                    [&](Alignment::Column c) { return used_labels.count(c); })) {
+                        continue;
+                    }
+
+                    if (chain.size() > 1) {
+                        size_t num_extensions = 0;
+                        size_t num_explored_nodes = 0;
+                        aligner.extend_chain(std::move(chain), num_extensions, num_explored_nodes,
+                                             [&](Alignment&& aln) {
+                            if (aln.get_query_view().size() > config.min_seed_length) {
+                                filtered_seeds.emplace_back(std::move(aln));
+                                filtered_seeds.back().label_coordinates.clear();
+                                const auto &columns = filtered_seeds.back().get_columns();
+                                for (Alignment::Column c : columns) {
+                                    used_labels.emplace(c);
+                                }
+                            }
+                        }, false);
+                    } else {
+                        filtered_seeds.emplace_back(std::move(chain[0].first));
+                        filtered_seeds.back().label_coordinates.clear();
+                        const auto &columns = filtered_seeds.back().get_columns();
+                        for (Alignment::Column c : columns) {
+                            used_labels.emplace(c);
+                        }
                     }
                 }
             }
