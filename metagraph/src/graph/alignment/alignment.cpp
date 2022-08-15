@@ -1385,6 +1385,7 @@ void Alignment::splice_with_unknown(Alignment&& other,
         other.cigar_.data().insert(other.cigar_.data().begin(),
                                    Cigar::value_type{ Cigar::NODE_INSERTION,
                                                       node_overlap + num_unknown - other.offset_ });
+        other.score_ += config.node_insertion_penalty;
         other.query_view_ = std::string_view(start, other.query_view_.size() + query_gap);
         assert(query_view_.data() + query_view_.size() == other.query_view_.data());
     } else {
@@ -1411,9 +1412,10 @@ void Alignment::splice_with_unknown(Alignment&& other,
 
         other.cigar_.data().insert(other.cigar_.data().begin(),
                                    Cigar::value_type{ Cigar::DELETION, num_unknown });
-        other.score_ += static_cast<score_t>(config.gap_opening_penalty)
-                            + static_cast<score_t>(num_unknown - 1)
-                                * static_cast<score_t>(config.gap_extension_penalty);
+        other.score_ += static_cast<score_t>(config.node_insertion_penalty)
+                            + static_cast<score_t>(config.gap_opening_penalty)
+                                + static_cast<score_t>(num_unknown - 1)
+                                    * static_cast<score_t>(config.gap_extension_penalty);
         other.cigar_.data().insert(other.cigar_.data().begin(),
                                    Cigar::value_type{ Cigar::NODE_INSERTION,
                                                       node_overlap + num_unknown });
@@ -1485,6 +1487,7 @@ void Alignment::insert_gap_prefix(ssize_t gap_length,
             //           ACGA
             cigar_.data().insert(cigar_.data().begin(),
                                  Cigar::value_type{ Cigar::NODE_INSERTION, extra_nodes });
+            score_ += config.node_insertion_penalty;
         }
     } else {
         // no overlap
@@ -1518,6 +1521,7 @@ void Alignment::insert_gap_prefix(ssize_t gap_length,
         assert(extra_nodes >= 2);
         cigar_.data().insert(cigar_.data().begin(),
                              Cigar::value_type{ Cigar::NODE_INSERTION, extra_nodes - 1 });
+        score_ += config.node_insertion_penalty;
         //     if (offset_) {
         //         assert(false);
         //     }

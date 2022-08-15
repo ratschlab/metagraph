@@ -44,6 +44,7 @@ struct DBGAlignerConfig {
     int8_t gap_extension_penalty = -2;
     int8_t left_end_bonus = 0;
     int8_t right_end_bonus = 0;
+    int8_t node_insertion_penalty = -6;
     score_t label_change_score = ninf;
 
     bool forward_and_reverse_complement = true;

@@ -837,7 +837,15 @@ std::pair<size_t, size_t> call_alignment_chains(const IDBGAligner &aligner,
                             } else if (cur_mismatch > -node_overlap && cur_b_size <= cur_b_offset + cur_mismatch) {
                                 continue;
                             }
+                        }
 
+                        if (best_mismatch > -node_overlap) {
+                            size_t extra_nodes = node_overlap + 1;
+                            if (best_mismatch < 0)
+                                extra_nodes += best_mismatch - 1;
+
+                            if (extra_nodes)
+                                cur_score += config.node_insertion_penalty;
                         }
 
                         if (cur_score > b_score) {

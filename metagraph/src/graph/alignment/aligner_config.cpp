@@ -112,7 +112,7 @@ DBGAlignerConfig::score_t DBGAlignerConfig
                     score -= gap_opening_penalty - gap_extension_penalty;
                 }
             } break;
-            case Cigar::NODE_INSERTION: {} break;
+            case Cigar::NODE_INSERTION: { score += node_insertion_penalty; } break;
         }
     }
 
