@@ -393,8 +393,8 @@ Config::Config(int argc, char *argv[]) {
             arity_brwt = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--relax-arity")) {
             relax_arity_brwt = atoi(get_value(i++));
-        } else if (!strcmp(argv[i], "--row-sparse-disk-buff-size")) {
-            row_sparse_disk_buff_size = atoll((get_value(i++)));
+        } else if (!strcmp(argv[i], "--disk-buff-size")) {
+            disk_buffer_size = atoll((get_value(i++)));
         // } else if (!strcmp(argv[i], "--cache-size")) {
         //     row_cache_size = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) {
@@ -1312,6 +1312,7 @@ if (advanced) {
             // fprintf(stderr, "\t   --cache-size [INT] \tnumber of uncompressed rows to store in the cache [0]\n");
             fprintf(stderr, "\t   --fast \t\tquery in batches [off]\n");
             fprintf(stderr, "\t   --batch-size \tquery batch size (number of base pairs) [100000000]\n");
+            fprintf(stderr, "\t   --disk-buff-size [INT] \tsize of internal buffer of row sparse disk annotation [10000]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "Available options for --align:\n");
 if (advanced) {

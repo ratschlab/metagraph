@@ -14,11 +14,9 @@ namespace binmat {
 
 class RowSparseDisk : public BinaryMatrix {
   public:
-    RowSparseDisk() {}
-    RowSparseDisk(const std::function<void(const RowCallback &)> &call_rows,
-                  uint64_t num_columns,
-                  uint64_t num_rows,
-                  uint64_t num_relations);
+    RowSparseDisk(size_t disk_buffer_size = 10'000) {
+        int_vector_buffer_params.buff_size = disk_buffer_size;
+    }
 
     uint64_t num_columns() const override { return num_columns_; }
     uint64_t num_rows() const override { return num_rows_; }
@@ -61,8 +59,8 @@ class RowSparseDisk : public BinaryMatrix {
                           uint64_t num_set_bits,
                           uint64_t num_rows);
 
-    void set_buff_size(uint64_t _buff_size) {
-        int_vector_buffer_params.buff_size = _buff_size;
+    void set_buff_size(uint64_t buff_size) {
+        int_vector_buffer_params.buff_size = buff_size;
     }
 
     const bit_vector_small get_boundary() const { return boundary_; }
@@ -73,9 +71,6 @@ class RowSparseDisk : public BinaryMatrix {
     // implementation is wrapped in the class below to assure it will not call any methods
     // of RowSparseDisk class which could result in multiple opens of int_vector_buffer
     class Impl {
-        const bit_vector_small &boundary_;
-        sdsl::int_vector_buffer<> set_bits_;
-
       public:
         Impl(const bit_vector_small &boundary_,
              const std::string &filename,
@@ -89,12 +84,16 @@ class RowSparseDisk : public BinaryMatrix {
         BinaryMatrix::SetBitPositions get_row(Row row) const;
         std::vector<SetBitPositions> get_rows(const std::vector<Row> &row_ids) const;
         std::vector<BinaryMatrix::Row> get_column(uint64_t num_rows, Column column) const;
+
+      private:
+        const bit_vector_small &boundary_;
+        sdsl::int_vector_buffer<> set_bits_;
     };
 
     struct {
         std::string filename;
         uint64_t offset;
-        uint64_t buff_size = 1000;
+        uint64_t buff_size = 10'000;
     } int_vector_buffer_params;
 
     bit_vector_small boundary_;

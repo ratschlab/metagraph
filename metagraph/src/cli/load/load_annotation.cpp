@@ -93,7 +93,7 @@ initialize_annotation(Config::AnnotationType anno_type,
                       double memory_available_gb,
                       uint8_t count_width,
                       size_t max_chunks_open,
-                      size_t row_sparse_disk_buff_size) {
+                      size_t disk_buffer_size) {
     std::unique_ptr<annot::MultiLabelEncoded<std::string>> annotation;
 
     switch (anno_type) {
@@ -118,17 +118,16 @@ initialize_annotation(Config::AnnotationType anno_type,
             break;
         }
         case Config::RowSparseDisk: {
-            auto x = new annot::RowSparseDiskAnnotator();
-            const_cast<mtg::annot::binmat::RowSparseDisk &>(x->get_matrix())
-                    .set_buff_size(row_sparse_disk_buff_size);
-            annotation.reset(x);
+            annotation.reset(new annot::RowSparseDiskAnnotator(
+                    std::make_unique<annot::binmat::RowSparseDisk>(disk_buffer_size),
+                    annot::LabelEncoder<std::string> {}));
             break;
         }
         case Config::RowDiffSparseDisk: {
-            auto x = new annot::RowDiffSparseDiskAnnotator();
-            const_cast<mtg::annot::binmat::RowSparseDisk &>(x->get_matrix().diffs())
-                    .set_buff_size(row_sparse_disk_buff_size);
-            annotation.reset(x);
+            annotation.reset(new annot::RowDiffSparseDiskAnnotator(
+                    std::make_unique<annot::binmat::RowDiff<annot::binmat::RowSparseDisk>>(
+                            nullptr, annot::binmat::RowSparseDisk(disk_buffer_size)),
+                    annot::LabelEncoder<std::string> {}));
             break;
         }
         case Config::BRWT: {

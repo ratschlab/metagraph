@@ -58,15 +58,14 @@ bool RowSparseDisk::load(std::istream &f) {
     auto _f = dynamic_cast<mtg::common::IfstreamWithNameAndOffset *>(&f);
     assert(_f);
     try {
-        f.read(reinterpret_cast<char *>(&num_columns_), sizeof(uint64_t));
+        num_columns_ = load_number(f);
 
-        std::streampos boundary_start;
-        f.read(reinterpret_cast<char *>(&boundary_start), sizeof(boundary_start));
+        auto boundary_start = load_number(f);
 
-        _f->SetOffset(static_cast<uint64_t>(f.tellg()));
+        _f->set_offset(static_cast<uint64_t>(f.tellg()));
 
-        int_vector_buffer_params.filename = _f->GetFName();
-        int_vector_buffer_params.offset = _f->GetOffset();
+        int_vector_buffer_params.filename = _f->get_name();
+        int_vector_buffer_params.offset = _f->get_offset();
 
         f.seekg(-sizeof(std::streampos), ios_base::end);
 
@@ -100,11 +99,11 @@ void RowSparseDisk::serialize(const std::function<void(binmat::BinaryMatrix::Row
     if (!outstream.good())
         throw std::ofstream::failure("Cannot write to file " + filename);
 
-    outstream.write(reinterpret_cast<char *>(&num_cols), sizeof(uint64_t));
+    serialize_number(outstream, num_cols);
     auto boundary_start_pos = outstream.tellp();
     // write "empty" boundary start
     std::streampos boundary_start = 0;
-    outstream.write(reinterpret_cast<char *>(&boundary_start), sizeof(std::streampos));
+    serialize_number(outstream, boundary_start);
 
     const uint64_t iv_offs = outstream.tellp();
     outstream.close();
@@ -128,9 +127,7 @@ void RowSparseDisk::serialize(const std::function<void(binmat::BinaryMatrix::Row
 
     bit_vector_small boundary(call_bits, num_rows + num_set_bits, num_rows);
 
-    outstream.open(filename,
-                   std::ios::in | std::ios::out | std::ios::binary | std::ios::ate
-                           | std::ios::in);
+    outstream.open(filename, std::ios::in | std::ios::out | std::ios::binary | std::ios::ate);
     boundary_start = outstream.tellp();
     boundary.serialize(outstream);
     outstream.seekp(boundary_start_pos, ios_base::beg);
