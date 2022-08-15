@@ -1312,7 +1312,7 @@ if (advanced) {
             // fprintf(stderr, "\t   --cache-size [INT] \tnumber of uncompressed rows to store in the cache [0]\n");
             fprintf(stderr, "\t   --fast \t\tquery in batches [off]\n");
             fprintf(stderr, "\t   --batch-size \tquery batch size (number of base pairs) [100000000]\n");
-            fprintf(stderr, "\t   --disk-buff-size [INT] \tsize of internal buffer of row sparse disk annotation [10000]\n");
+            fprintf(stderr, "\t   --disk-buff-size [INT] \tsize (in bytes) of internal buffer of row sparse disk annotation [10000]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "Available options for --align:\n");
 if (advanced) {
