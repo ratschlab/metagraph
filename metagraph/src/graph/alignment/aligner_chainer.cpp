@@ -1300,12 +1300,12 @@ void parse_seeder(const Unitigs &unitigs,
             if (bucket_forest[i].prevs.size() || finished[i])
                 continue;
 
-            std::vector<std::pair<size_t, size_t>> stack;
+            std::vector<std::pair<size_t, Unitigs::Coord>> stack;
             stack.emplace_back(i, 0);
-            std::vector<std::pair<size_t, Unitigs::Coord>> bucket;
+            VectorMap<size_t, Unitigs::Coord> bucket;
             finished[i] = true;
             visited[i] = true;
-            size_t max_coord_offset = 0;
+            Unitigs::Coord max_coord_offset = 0;
             while (stack.size()) {
                 auto [cur_i, coord_offset] = stack.back();
                 stack.pop_back();
@@ -1319,7 +1319,11 @@ void parse_seeder(const Unitigs &unitigs,
 
                 assert(unitig_to_bucket.count(cur_node.unitig_id));
                 for (const auto &[k, coord] : unitig_to_bucket[cur_node.unitig_id]) {
-                    bucket.emplace_back(k, global_coord_offset + coord - cur_node.start_coord + coord_offset);
+                    Unitigs::Coord cur_coord = global_coord_offset + coord - cur_node.start_coord + coord_offset;
+                    auto [it, inserted] = bucket.try_emplace(k, cur_coord);
+                    if (!inserted && it->second != cur_coord) {
+                        throw std::runtime_error("Alternate paths of different length found, not implemented");
+                    }
                 }
                 coord_offset += cur_node.unitig_size;
                 max_coord_offset = std::max(max_coord_offset, coord_offset);
@@ -1332,7 +1336,7 @@ void parse_seeder(const Unitigs &unitigs,
 
             global_coord_offset += max_coord_offset;
 
-            process_bucket(bucket_forest[i].unitig_id, bucket);
+            process_bucket(bucket_forest[i].unitig_id, bucket.values_container());
         }
 
         DEBUG_LOG("Handling remaining buckets");
