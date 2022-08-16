@@ -586,12 +586,8 @@ chain_alignments(const IDBGAligner &aligner,
                 || a.size() == 1 || a.label_column_diffs.size()) {
             aggregator.add_alignment(std::move(a));
         } else {
+            DEBUG_LOG("\t{}", a);
             aggregator.add_alignment(Alignment(a));
-            // if (evalues.size()) {
-                // logger->trace("\t{}\t{}", evalues[i], a);
-            // } else {
-                DEBUG_LOG("\t{}", a);
-            // }
             size_t orientation = a.get_orientation();
             split_alignments[orientation].emplace_back(std::move(a));
         }

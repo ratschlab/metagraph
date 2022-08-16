@@ -342,8 +342,7 @@ void LabeledExtender
             assert(annotation_buffer_.get_labels_id(next));
             auto label_change_scores = aligner_.get_label_change_scores(
                 node_labels_[table_i], annotation_buffer_.get_labels_id(next),
-                config_.post_chain_alignments ? nullptr
-                                              : annotation_buffer_.get_hll_wrapper()
+                config_.allow_label_change ? annotation_buffer_.get_hll_wrapper() : nullptr
             );
 
             for (auto&& [labels, lc_score, is_subset] : label_change_scores) {
@@ -434,10 +433,7 @@ bool LabeledExtender::skip_backtrack_start(size_t i) {
         return true;
     }
 
-    if (!config_.post_chain_alignments
-            && (annotation_buffer_.get_hll_wrapper()
-                || config_.label_change_score != DBGAlignerConfig::ninf)) {
-        DEBUG_LOG("\tOnly picking the top alignment");
+    if (config_.allow_label_change) {
         remaining_labels_i_ = 0;
         return false;
     }

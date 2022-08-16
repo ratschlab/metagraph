@@ -296,9 +296,12 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
         if (config_.post_chain_alignments) {
             bool &post_chain = const_cast<bool&>(config_.post_chain_alignments);
             bool &allow_left_trim = const_cast<bool&>(config_.allow_left_trim);
+            bool &allow_label_change = const_cast<bool&>(config_.allow_label_change);
             bool old_allow_left_trim = allow_left_trim;
+            bool old_allow_label_change = allow_label_change;
             allow_left_trim = false;
             post_chain = false;
+            allow_label_change = true;
             size_t n_ext;
             size_t n_exp;
             std::tie(alignments, n_ext, n_exp)
@@ -307,6 +310,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
                                                      paths[i].get_query(true));
             post_chain = true;
             allow_left_trim = old_allow_left_trim;
+            allow_label_change = old_allow_label_change;
             num_extensions += n_ext;
             num_explored_nodes += n_exp;
         }
