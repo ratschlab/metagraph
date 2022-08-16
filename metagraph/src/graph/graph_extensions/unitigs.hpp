@@ -6,13 +6,6 @@
 #include "graph/alignment/dbg_aligner.hpp"
 
 namespace mtg {
-
-namespace cli {
-
-class Config;
-
-}
-
 namespace graph {
 namespace align {
 
@@ -25,7 +18,10 @@ class Unitigs : public SequenceGraph::GraphExtension {
     typedef Alignment::Tuple::value_type Coord;
 
     Unitigs(const DBGSuccinct &graph);
-    Unitigs(const cli::Config &config);
+    Unitigs(const std::string &graph_fname,
+            size_t max_path_length = 100,
+            double memory_available = 1,
+            const std::string &tmp_dir_path = "");
 
     bool load(const std::string &filename_base);
     void serialize(const std::string &filename_base) const;

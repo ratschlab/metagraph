@@ -4,7 +4,6 @@
 
 #include <progress_bar.hpp>
 
-#include "cli/config/config.hpp"
 #include "cli/load/load_graph.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 #include "common/utils/file_utils.hpp"
@@ -32,11 +31,14 @@ Unitigs::Unitigs(const DBGSuccinct &graph)
         throw std::runtime_error("Masked graphs not supported");
 }
 
-Unitigs::Unitigs(const cli::Config &config) : graph_(load_graph_impl(config.fnames[0])) {
+Unitigs::Unitigs(const std::string &graph_fname,
+                 size_t max_path_length,
+                 double memory_available,
+                 const std::string &tmp_dir_path) : graph_(load_graph_impl(graph_fname)) {
     if (graph_->get_mode() == DeBruijnGraph::CANONICAL)
         throw std::runtime_error("CANONICAL mode graphs not supported");
 
-    std::filesystem::path tmp_dir = utils::create_temp_dir(config.tmp_dir, "unitigs");
+    std::filesystem::path tmp_dir = utils::create_temp_dir(tmp_dir_path, "unitigs");
     std::string out_path = tmp_dir/"unitigs";
     std::vector<std::string> files;
     size_t width = sdsl::bits::hi(graph_->num_nodes()) + 1;
@@ -134,38 +136,38 @@ Unitigs::Unitigs(const cli::Config &config) : graph_(load_graph_impl(config.fnam
     logger->trace("Compressing unitig index");
     logger->trace("Step 0");
     convert_to_row_diff(files,
-                        config.fnames[0],
-                        config.memory_available * 1e9,
-                        config.max_path_length,
+                        graph_fname,
+                        memory_available * 1e9,
+                        max_path_length,
                         tmp_dir,
                         tmp_dir,
                         static_cast<annot::RowDiffStage>(0),
                         out_path + ".row_count", false, true);
     logger->trace("Step 1");
     convert_to_row_diff(files,
-                        config.fnames[0],
-                        config.memory_available * 1e9,
-                        config.max_path_length,
+                        graph_fname,
+                        memory_available * 1e9,
+                        max_path_length,
                         tmp_dir,
                         tmp_dir,
                         static_cast<annot::RowDiffStage>(1),
                         out_path + ".row_reduction", false, true);
     logger->trace("Step 2");
     convert_to_row_diff(files,
-                        config.fnames[0],
-                        config.memory_available * 1e9,
-                        config.max_path_length,
+                        graph_fname,
+                        memory_available * 1e9,
+                        max_path_length,
                         tmp_dir,
                         tmp_dir,
                         static_cast<annot::RowDiffStage>(2),
                         out_path + ".row_reduction", false, true);
     logger->trace("done");
-    const std::string anchors_file = config.fnames[0] + annot::binmat::kRowDiffAnchorExt;
+    const std::string anchors_file = graph_fname + annot::binmat::kRowDiffAnchorExt;
     if (!std::filesystem::exists(anchors_file)) {
         logger->error("Anchor bitmap {} does not exist.", anchors_file);
         std::exit(1);
     }
-    const std::string fork_succ_file = config.fnames[0] + annot::binmat::kRowDiffForkSuccExt;
+    const std::string fork_succ_file = graph_fname + annot::binmat::kRowDiffForkSuccExt;
     if (!std::filesystem::exists(fork_succ_file)) {
         logger->error("Fork successor bitmap {} does not exist", fork_succ_file);
         std::exit(1);
@@ -208,7 +210,7 @@ Unitigs::Unitigs(const cli::Config &config) : graph_(load_graph_impl(config.fnam
     unitigs_.load_anchor(anchors_file);
     unitigs_.load_fork_succ(fork_succ_file);
     logger->trace("RowDiff support bitmaps loaded");
-    load_graph(config.fnames[0]);
+    load_graph(graph_fname);
     unitigs_.set_graph(graph_.get());
 }
 
@@ -226,27 +228,8 @@ bool Unitigs::load(const std::string &filename_base) {
     }
 
     unitigs_.set_graph(graph_.get());
-
-    switch (graph_->get_state()) {
-        case boss::BOSS::State::STAT: {
-            valid_nodes_.reset(new bit_vector_small());
-            break;
-        }
-        case boss::BOSS::State::FAST: {
-            valid_nodes_.reset(new bit_vector_stat());
-            break;
-        }
-        case boss::BOSS::State::DYN: {
-            valid_nodes_.reset(new bit_vector_dyn());
-            break;
-        }
-        case boss::BOSS::State::SMALL: {
-            valid_nodes_.reset(new bit_vector_small());
-            break;
-        }
-    }
-
-    if (!valid_nodes_->load(fin)) {
+    valid_nodes_ = graph_->load_mask(fin);
+    if (!valid_nodes_) {
         logger->error("Failed to load valid node indicator");
         return false;
     }

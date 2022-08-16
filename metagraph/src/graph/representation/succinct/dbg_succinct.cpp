@@ -662,45 +662,56 @@ bool DBGSuccinct::load_without_mask(const std::string &filename) {
     return true;
 }
 
-bool DBGSuccinct::load(const std::string &filename) {
-    if (!load_without_mask(filename))
-        return false;
+std::unique_ptr<bit_vector> DBGSuccinct::load_mask(std::ifstream &instream) const {
+    std::unique_ptr<bit_vector> valid_edges;
 
-    auto prefix = utils::remove_suffix(filename, kExtension);
-
-    std::ifstream instream(prefix + kDummyMaskExtension, std::ios::binary);
-    if (!instream.good())
-        return true;
+    if (!instream.good()) {
+        std::cerr << "Error: Can't open dummy edge mask." << std::endl;
+        return valid_edges;
+    }
 
     // initialize a new vector
     switch (get_state()) {
         case BOSS::State::STAT: {
-            valid_edges_.reset(new bit_vector_small());
+            valid_edges.reset(new bit_vector_small());
             break;
         }
         case BOSS::State::FAST: {
-            valid_edges_.reset(new bit_vector_stat());
+            valid_edges.reset(new bit_vector_stat());
             break;
         }
         case BOSS::State::DYN: {
-            valid_edges_.reset(new bit_vector_dyn());
+            valid_edges.reset(new bit_vector_dyn());
             break;
         }
         case BOSS::State::SMALL: {
-            valid_edges_.reset(new bit_vector_small());
+            valid_edges.reset(new bit_vector_small());
             break;
         }
     }
 
     // load the mask of valid edges (all non-dummy including npos 0)
-    if (!valid_edges_->load(instream)) {
+    if (!valid_edges->load(instream)) {
         std::cerr << "Error: Can't load dummy edge mask." << std::endl;
-        return false;
+        return valid_edges;
     }
 
-    if (valid_edges_->size() != boss_graph_->num_edges() + 1 || (*valid_edges_)[0]) {
+    if (valid_edges->size() != boss_graph_->num_edges() + 1 || (*valid_edges)[0])
         std::cerr << "Error: Edge mask is not compatible with graph." << std::endl;
+
+    return valid_edges;
+}
+
+bool DBGSuccinct::load(const std::string &filename) {
+    if (!load_without_mask(filename))
         return false;
+
+    auto prefix = utils::remove_suffix(filename, kExtension);
+    std::ifstream instream(prefix + kDummyMaskExtension, std::ios::binary);
+    if (instream.good()) {
+        valid_edges_ = load_mask(instream);
+        if (!valid_edges_)
+            return false;
     }
 
     if (std::filesystem::exists(prefix + kBloomFilterExtension)) {
