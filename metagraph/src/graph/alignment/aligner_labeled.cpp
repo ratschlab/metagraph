@@ -188,6 +188,44 @@ bool LabeledExtender::set_seed(const Alignment &seed) {
     return true;
 }
 
+score_t ILabeledAligner
+::get_label_change_score(Alignment::Column c,
+                         Alignment::Column d,
+                         const HLLWrapper<> *hll_wrapper) const {
+    if (c == d)
+        return 0;
+
+    if (!hll_wrapper)
+        return label_change_score_;
+
+    uint64_t a_size = hll_wrapper->data().num_relations_in_column(c);
+    uint64_t b_size = hll_wrapper->data().num_relations_in_column(d);
+
+    double dbsize = b_size;
+    double logdbsize = log2(dbsize);
+
+    auto first = std::min(c, d);
+    auto second = std::max(c, d);
+    auto &cache_first = cache_[first];
+    auto [cache_find, cache_inserted] = cache_first.try_emplace(second, 0.0);
+
+    double union_size;
+    if (cache_inserted) {
+        union_size = hll_wrapper->data().estimate_column_union_cardinality(c, d);
+        cache_find.value() = union_size;
+    } else {
+        union_size = cache_find->second;
+    }
+
+    uint64_t size_sum = a_size + b_size;
+    score_t label_change_score = union_size < size_sum
+        ? log2(std::min(dbsize, size_sum - union_size)) - logdbsize
+        : DBGAlignerConfig::ninf;
+
+    assert(label_change_score <= 0);
+    return label_change_score;
+}
+
 auto ILabeledAligner
 ::get_label_change_scores(Alignment::Columns a_col,
                           Alignment::Columns b_col,

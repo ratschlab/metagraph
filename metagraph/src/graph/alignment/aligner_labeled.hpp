@@ -24,6 +24,10 @@ class ILabeledAligner {
                                               Alignment::Columns b_col,
                                               const HLLWrapper<> *hll_wrapper = nullptr) const;
 
+    score_t get_label_change_score(Alignment::Column c,
+                                   Alignment::Column d,
+                                   const HLLWrapper<> *hll_wrapper = nullptr) const;
+
   protected:
     score_t label_change_score_;
 

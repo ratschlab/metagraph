@@ -727,6 +727,10 @@ std::pair<size_t, size_t> call_alignment_chains(const IDBGAligner &aligner,
                     continue;
 
                 size_t b_prefix_trim = 0;
+
+                if (a_begin - b_end > node_overlap)
+                    continue;
+
                 if (b_begin < a_begin) {
                     b_prefix_trim = a_begin - b_begin;
                     b_begin += b_prefix_trim;
@@ -1008,7 +1012,7 @@ std::pair<size_t, size_t> call_alignment_chains(const IDBGAligner &aligner,
 
     // reconstruct chains
     for (const auto &chain : chains) {
-        DEBUG_LOG("Starting chain");
+        DEBUG_LOG("Reconstructing chain");
         auto it = chain.begin();
         auto [i, prefix_trim, suffix_trim, gap, cols, extra_score] = *it;
         assert(!suffix_trim);
