@@ -24,8 +24,8 @@ using common::logger;
 
 Unitigs::Unitigs(const DBGSuccinct &graph)
       : graph_(std::shared_ptr<const DeBruijnGraph>{}, &graph) {
-    if (graph_->get_mode() == DeBruijnGraph::CANONICAL)
-        throw std::runtime_error("CANONICAL mode graphs not supported");
+    if (graph_->get_mode() == DeBruijnGraph::PRIMARY)
+        canonical_ = std::make_unique<CanonicalDBG>(graph_);
 
     if (graph_->get_mask())
         throw std::runtime_error("Masked graphs not supported");
@@ -279,8 +279,24 @@ auto Unitigs::get_unitig(size_t unitig_id) const -> std::pair<node_index, node_i
         return std::make_pair(unitig_id, unitig_id);
 
     unitig_id -= unitig_id_offset;
-    return std::make_pair(boundaries_[(unitig_id - 1) * 2],
-                          boundaries_[(unitig_id - 1) * 2 + 1]);
+    bool is_rc_unitig = false;
+    size_t rc_unitig_offset = get_rc_unitig_offset();
+    if (unitig_id > rc_unitig_offset) {
+        unitig_id -= rc_unitig_offset;
+        is_rc_unitig = true;
+    }
+
+    node_index first = boundaries_[(unitig_id - 1) * 2];
+    node_index second = boundaries_[(unitig_id - 1) * 2 + 1];
+
+    if (is_rc_unitig) {
+        assert(canonical_);
+        first = canonical_->reverse_complement(first);
+        second = canonical_->reverse_complement(second);
+        std::swap(first, second);
+    }
+
+    return std::make_pair(first, second);
 }
 
 auto Unitigs::get_unitig_bounds(size_t unitig_id) const
@@ -292,23 +308,66 @@ auto Unitigs::get_unitig_bounds(size_t unitig_id) const
     }
 
     unitig_id -= unitig_id_offset;
-    return std::make_pair(std::make_pair(boundaries_[(unitig_id - 1) * 2],
-                                         boundaries_[(unitig_id - 1) * 2 + 1]),
-                          std::make_pair(indicator_.select1(unitig_id),
-                                         unitig_id + 1 <= indicator_.num_set_bits()
+    bool is_rc_unitig = false;
+    size_t rc_unitig_offset = get_rc_unitig_offset();
+    if (unitig_id > rc_unitig_offset) {
+        unitig_id -= rc_unitig_offset;
+        is_rc_unitig = true;
+    }
+
+    node_index first = boundaries_[(unitig_id - 1) * 2];
+    node_index second = boundaries_[(unitig_id - 1) * 2 + 1];
+    Coord first_c = indicator_.select1(unitig_id);
+    Coord second_c = unitig_id + 1 <= indicator_.num_set_bits()
                                              ? indicator_.select1(unitig_id + 1)
-                                             : indicator_.size())
-    );
+                                             : indicator_.size();
+
+    if (is_rc_unitig) {
+        assert(canonical_);
+        first = canonical_->reverse_complement(first);
+        second = canonical_->reverse_complement(second);
+        std::swap(first, second);
+        first_c += indicator_.size();
+        second_c += indicator_.size();
+    }
+
+    return std::make_pair(std::make_pair(first, second),
+                          std::make_pair(first_c, second_c));
+}
+
+void Unitigs::adjacent_outgoing_unitigs(size_t unitig_id,
+                                        const std::function<void(size_t)> &callback) const {
+    const DeBruijnGraph *graph = graph_.get();
+    if (canonical_)
+        graph = canonical_.get();
+
+    graph->adjacent_outgoing_nodes(get_unitig(unitig_id).second, [&](node_index next) {
+        auto next_unitig_ids = get_unitig_ids({ next });
+        callback(next_unitig_ids.size() ? next_unitig_ids[0] : next);
+    });
+}
+
+void Unitigs::adjacent_incoming_unitigs(size_t unitig_id,
+                                        const std::function<void(size_t)> &callback) const {
+    const DeBruijnGraph *graph = graph_.get();
+    if (canonical_)
+        graph = canonical_.get();
+
+    graph->adjacent_incoming_nodes(get_unitig(unitig_id).second, [&](node_index prev) {
+        auto prev_unitig_ids = get_unitig_ids({ prev });
+        callback(prev_unitig_ids.size() ? prev_unitig_ids[0] : prev);
+    });
 }
 
 std::vector<size_t> Unitigs::get_unitig_ids(const std::vector<node_index> &nodes) const {
-    auto [indicator, rows] = nodes_to_rows(nodes);
+    auto [indicator, is_rc_node, rows] = nodes_to_rows(nodes);
     auto seed_tuples = unitigs_.get_row_tuples(rows);
     std::vector<size_t> results;
     results.reserve(nodes.size());
 
     size_t j = 0;
     size_t unitig_id_offset = get_unitig_id_offset();
+    size_t rc_unitig_offset = get_rc_unitig_offset();
     for (size_t i = 0; i < nodes.size(); ++i) {
         size_t unitig_id = std::numeric_limits<size_t>::max();
         if (indicator[i]) {
@@ -318,12 +377,13 @@ std::vector<size_t> Unitigs::get_unitig_ids(const std::vector<node_index> &nodes
                 assert(!coordinates[0].first);
                 assert(coordinates[0].second.size() == 1);
                 unitig_id = indicator_.rank1(coordinates[0].second[0]);
-                results.emplace_back(unitig_id + unitig_id_offset);
+                results.emplace_back(unitig_id + unitig_id_offset
+                                        + (rc_unitig_offset * is_rc_node[i]));
             }
         }
 
         if (unitig_id == std::numeric_limits<size_t>::max())
-            results.emplace_back(get_base_node(nodes[i]));
+            results.emplace_back(nodes[i]);
     }
 
     return results;
@@ -331,49 +391,32 @@ std::vector<size_t> Unitigs::get_unitig_ids(const std::vector<node_index> &nodes
 
 auto Unitigs::get_unitig_ids_and_coordinates(const std::vector<node_index> &nodes) const
         -> std::vector<std::pair<size_t, Coord>> {
-    auto [indicator, rows] = nodes_to_rows(nodes);
+    auto [indicator, is_rc_node, rows] = nodes_to_rows(nodes);
     auto seed_tuples = unitigs_.get_row_tuples(rows);
     std::vector<std::pair<size_t, Coord>> results;
     results.reserve(nodes.size());
 
     size_t j = 0;
     size_t unitig_id_offset = get_unitig_id_offset();
+    size_t rc_unitig_offset = get_rc_unitig_offset();
     for (size_t i = 0; i < nodes.size(); ++i) {
         size_t unitig_id = std::numeric_limits<size_t>::max();
         if (indicator[i]) {
-            assert(get_base_node(nodes[i]) == AnnotatedDBG::anno_to_graph_index(rows[j]));
             const auto &coordinates = seed_tuples[j];
             if (coordinates.size()) {
                 assert(coordinates.size() == 1);
                 assert(!coordinates[0].first);
                 assert(coordinates[0].second.size() == 1);
                 unitig_id = indicator_.rank1(coordinates[0].second[0]);
-                results.emplace_back(unitig_id + unitig_id_offset,
+                results.emplace_back(unitig_id + unitig_id_offset
+                                        + (rc_unitig_offset * is_rc_node[i]),
                                      coordinates[0].second[0]);
-#ifndef NDEBUG
-                assert(!is_singleton(unitig_id + unitig_id_offset));
-                auto [first_coord, second_coord] = get_unitig_bounds(unitig_id + unitig_id_offset).second;
-                assert(first_coord <= results.back().second);
-                assert(second_coord > results.back().second);
-                node_index first = boundaries_[(unitig_id - 1) * 2];
-                while (first_coord < results.back().second) {
-                    bool found = false;
-                    graph_->adjacent_outgoing_nodes(first, [&](node_index next) {
-                        assert(!found && "unitig boundary hit, coordinate incorrect");
-                        first = next;
-                        found = true;
-                    });
-                    assert(found);
-                    ++first_coord;
-                }
-                assert(first == AnnotatedDBG::anno_to_graph_index(rows[j]));
-#endif
             }
             ++j;
         }
 
         if (unitig_id == std::numeric_limits<size_t>::max())
-            results.emplace_back(get_base_node(nodes[i]), 0);
+            results.emplace_back(nodes[i], 0);
     }
 
     return results;
@@ -392,27 +435,32 @@ std::shared_ptr<const DBGSuccinct> Unitigs::load_graph_impl(const std::string &f
     logger->trace("Graph loaded in {} sec", timer.elapsed());
 }
 
-std::pair<sdsl::bit_vector, std::vector<uint64_t>>
+std::tuple<sdsl::bit_vector, sdsl::bit_vector, std::vector<uint64_t>>
 Unitigs::nodes_to_rows(const std::vector<node_index> &nodes) const {
     sdsl::bit_vector indicator(nodes.size(), false);
+    sdsl::bit_vector is_rc_node(nodes.size(), false);
     std::vector<uint64_t> rows;
     for (size_t i = 0; i < nodes.size(); ++i) {
-        node_index node = get_base_node(nodes[i]);
+        node_index base_node = get_base_node(nodes[i]);
+        is_rc_node[i] = (nodes[i] != base_node);
 
-        if ((*valid_nodes_)[graph_->kmer_to_boss_index(node)]) {
+        if ((*valid_nodes_)[graph_->kmer_to_boss_index(base_node)]) {
             indicator[i] = true;
-            rows.emplace_back(AnnotatedDBG::graph_to_anno_index(node));
+            rows.emplace_back(AnnotatedDBG::graph_to_anno_index(base_node));
         }
     }
 
-    return std::make_pair(std::move(indicator), std::move(rows));
+    return std::make_tuple(std::move(indicator), std::move(is_rc_node), std::move(rows));
 }
 
-auto Unitigs::get_base_node(node_index node) const -> node_index {
-    if (node > graph_->max_index())
-        return node - graph_->max_index();
+size_t Unitigs::get_unitig_id_offset() const {
+    return (canonical_ ? canonical_->max_index() : graph_->max_index()) + 1;
+}
 
-    return node;
+size_t Unitigs::get_rc_unitig_offset() const { return boundaries_.size() / 2; }
+
+auto Unitigs::get_base_node(node_index node) const -> node_index {
+    return canonical_ ? canonical_->get_base_node(node) : node;
 }
 
 } // namespace align

@@ -2,6 +2,7 @@
 #define __UNITIGS_HPP__
 
 #include "graph/representation/succinct/dbg_succinct.hpp"
+#include "graph/representation/canonical_dbg.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 #include "graph/alignment/dbg_aligner.hpp"
 
@@ -31,20 +32,10 @@ class Unitigs : public SequenceGraph::GraphExtension {
     const DBGSuccinct* get_graph() const { return graph_.get(); }
 
     void adjacent_outgoing_unitigs(size_t unitig_id,
-                                   const std::function<void(size_t)> &callback) const {
-        graph_->adjacent_outgoing_nodes(get_unitig(unitig_id).second, [&](node_index next) {
-            auto next_unitig_ids = get_unitig_ids({ next });
-            callback(next_unitig_ids.size() ? next_unitig_ids[0] : next);
-        });
-    }
+                                   const std::function<void(size_t)> &callback) const;
 
     void adjacent_incoming_unitigs(size_t unitig_id,
-                                   const std::function<void(size_t)> &callback) const {
-        graph_->adjacent_incoming_nodes(get_unitig(unitig_id).second, [&](node_index prev) {
-            auto prev_unitig_ids = get_unitig_ids({ prev });
-            callback(prev_unitig_ids.size() ? prev_unitig_ids[0] : prev);
-        });
-    }
+                                   const std::function<void(size_t)> &callback) const;
 
     std::pair<node_index, node_index> get_unitig(size_t unitig_id) const;
 
@@ -60,6 +51,7 @@ class Unitigs : public SequenceGraph::GraphExtension {
 
   private:
     std::shared_ptr<const DBGSuccinct> graph_;
+    std::unique_ptr<CanonicalDBG> canonical_;
 
     // for each node in a non-singleton unitig, store a global coordinate
     UnitigCoords unitigs_;
@@ -79,10 +71,11 @@ class Unitigs : public SequenceGraph::GraphExtension {
 
     static std::shared_ptr<const DBGSuccinct> load_graph_impl(const std::string &fname);
 
-    std::pair<sdsl::bit_vector, std::vector<uint64_t>>
+    std::tuple<sdsl::bit_vector, sdsl::bit_vector, std::vector<uint64_t>>
     nodes_to_rows(const std::vector<node_index> &nodes) const;
 
-    size_t get_unitig_id_offset() const { return graph_->max_index() + 1; }
+    size_t get_unitig_id_offset() const;
+    size_t get_rc_unitig_offset() const;
 
     node_index get_base_node(node_index node) const;
 };
