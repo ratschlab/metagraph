@@ -517,45 +517,32 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
             all_columns.insert(columns.begin(), columns.end());
         }
 
-        try {
-            tsl::hopscotch_set<Alignment::Column> finished_columns;
-            size_t this_num_explored;
-            std::tie(num_seeds, this_num_explored) = call_seed_chains_both_strands(
-                forward, reverse, config_, std::move(fwd_seeds), std::move(bwd_seeds),
-                [&](Chain&& chain, score_t score) {
-                    if (config_.num_alternative_paths <= 1
-                            && finished_columns.size() == all_columns.size()) {
-                        throw std::bad_function_call();
-                    }
-
-                    double exact_match_fraction
-                        = static_cast<double>(get_num_char_matches_in_seeds(chain.begin(), chain.end()))
-                            / forward.size();
-
-                    logger->trace("Chain: score: {}; exact match fraction: {}",
-                                  score, exact_match_fraction);
+        tsl::hopscotch_set<Alignment::Column> finished_columns;
+        size_t this_num_explored;
+        std::tie(num_seeds, this_num_explored) = call_seed_chains_both_strands(
+            forward, reverse, config_, std::move(fwd_seeds), std::move(bwd_seeds),
+            [&](Chain&& chain, score_t score) {
+                logger->trace("Chain: score: {}", score);
 
 #ifndef NDEBUG
-                    for (const auto &[chain, dist] : chain) {
-                        DEBUG_LOG("\t{}\tdist: {}", chain, dist);
-                    }
+                for (const auto &[chain, dist] : chain) {
+                    DEBUG_LOG("\t{}\tdist: {}", chain, dist);
+                }
 #endif
 
-                    if (exact_match_fraction < config_.min_exact_match)
-                        throw std::bad_function_call();
-
-                    extend_chain(std::move(chain), num_extensions, num_explored_nodes,
-                                 [&](Alignment&& aln) {
-                        const auto &cur_columns = aln.get_columns();
-                        if (!aggregator.add_alignment(std::move(aln))) {
-                            finished_columns.insert(cur_columns.begin(), cur_columns.end());
-                        }
-                    });
-                },
-                [&](Alignment::Column column) { return finished_columns.count(column); }
-            );
-            num_explored_nodes += this_num_explored;
-        } catch (const std::bad_function_call&) {}
+                extend_chain(std::move(chain), num_extensions, num_explored_nodes,
+                             [&](Alignment&& aln) {
+                    const auto &cur_columns = aln.get_columns();
+                    if (!aggregator.add_alignment(std::move(aln))) {
+                        finished_columns.insert(cur_columns.begin(), cur_columns.end());
+                    }
+                });
+            },
+            [&](Alignment::Column column) { return finished_columns.count(column); },
+            [&]() { return config_.num_alternative_paths <= 1
+                            && finished_columns.size() == all_columns.size(); }
+        );
+        num_explored_nodes += this_num_explored;
 
         for (Alignment &alignment : aggregator.get_alignments()) {
             if (alignment.get_score() < get_min_path_score(alignment))

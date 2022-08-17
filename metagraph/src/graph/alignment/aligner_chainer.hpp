@@ -23,7 +23,9 @@ call_seed_chains_both_strands(std::string_view forward,
                               std::vector<Seed>&& bwd_seeds,
                               const std::function<void(Chain&&, score_t)> &callback,
                               const std::function<bool(Alignment::Column)> &skip_column
-                                  = [](Alignment::Column) { return false; });
+                                  = [](Alignment::Column) { return false; },
+                              const std::function<bool()> &terminate
+                                  = []() { return false; });
 
 // Given a set of local alignments, use sparse dynamic programming to construct
 // longer alignments, potentially with gaps.

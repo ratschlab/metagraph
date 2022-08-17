@@ -68,7 +68,8 @@ call_seed_chains_both_strands(std::string_view forward,
                               std::vector<Seed>&& fwd_seeds,
                               std::vector<Seed>&& bwd_seeds,
                               const std::function<void(Chain&&, score_t)> &callback,
-                              const std::function<bool(Alignment::Column)> &skip_column) {
+                              const std::function<bool(Alignment::Column)> &skip_column,
+                              const std::function<bool()> &terminate) {
     fwd_seeds.erase(std::remove_if(fwd_seeds.begin(), fwd_seeds.end(),
                                    [](const auto &a) { return a.empty() || a.label_coordinates.empty(); }),
                     fwd_seeds.end());
@@ -76,7 +77,7 @@ call_seed_chains_both_strands(std::string_view forward,
                                    [](const auto &a) { return a.empty() || a.label_coordinates.empty(); }),
                     bwd_seeds.end());
 
-    if (fwd_seeds.empty() && bwd_seeds.empty())
+    if (terminate() || (fwd_seeds.empty() && bwd_seeds.empty()))
         return { 0, 0 };
 
     // filter out empty seeds
@@ -138,14 +139,28 @@ call_seed_chains_both_strands(std::string_view forward,
 
     score_t last_chain_score = std::numeric_limits<score_t>::min();
     std::unordered_multiset<Chain, ChainHash> chains;
+    bool coverage_too_low = false;
 
     auto flush_chains = [&]() {
+        if (coverage_too_low)
+            return;
+
         assert(chains.size());
         auto it = chains.begin();
         Chain last_chain = *it;
         for (++it; it != chains.end(); ++it) {
             const Chain &chain = *it;
             if (chain != last_chain) {
+                double exact_match_fraction
+                    = static_cast<double>(get_num_char_matches_in_seeds(last_chain.begin(),
+                                                                        last_chain.end()))
+                        / forward.size();
+
+                if (exact_match_fraction < config.min_exact_match) {
+                    coverage_too_low = true;
+                    return;
+                }
+
                 callback(std::move(last_chain), last_chain_score);
                 last_chain = *it;
                 continue;
@@ -186,12 +201,24 @@ call_seed_chains_both_strands(std::string_view forward,
             }
         }
 
+        double exact_match_fraction
+            = static_cast<double>(get_num_char_matches_in_seeds(last_chain.begin(), last_chain.end()))
+                / forward.size();
+
+        if (exact_match_fraction < config.min_exact_match) {
+            coverage_too_low = true;
+            return;
+        }
+
         callback(std::move(last_chain), last_chain_score);
 
         chains.clear();
     };
 
     for (const auto &[chain_score, j, neg_i] : starts) {
+        if (coverage_too_low || terminate())
+            break;
+
         auto &used = both_used[j];
         uint32_t i = -neg_i;
         if (used[i])
