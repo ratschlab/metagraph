@@ -195,6 +195,10 @@ class QueryExecutor {
     void query_fasta(const std::string &file_path,
                      const std::function<void(const SeqSearchResult &)> &callback);
 
+    // TODO: add docstring
+    void query_reads(const std::string &file_path,
+                     const std::function<void(const std::string &, const SeqSearchResult &)> &callback);
+
     static SeqSearchResult execute_query(QuerySequence&& sequence,
                                          bool count_labels,
                                          bool print_signature,

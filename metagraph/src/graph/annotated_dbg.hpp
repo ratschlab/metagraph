@@ -161,6 +161,14 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
                          double discovery_fraction,
                          double presence_fraction) const;
 
+    // TODO: add docstring
+    std::vector<std::vector<std::tuple<std::string, Label, uint64_t>>>
+    get_overlapping_reads(std::string_view sequence) const;
+
+    // TODO: add docstring
+    std::vector<std::vector<std::tuple<std::string, Label, uint64_t>>>
+    get_overlapping_reads(const std::vector<node_index> &nodes) const;
+
     std::vector<std::pair<Label, sdsl::bit_vector>>
     get_top_label_signatures(std::string_view sequence,
                              size_t num_top_labels,

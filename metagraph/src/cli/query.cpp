@@ -1164,23 +1164,33 @@ int query_graph(Config *config) {
     for (const auto &file : files) {
         Timer curr_timer;
 
-        // Callback, which captures the config pointer and a const reference to the anno_graph
-        // instance pointed to by our unique_ptr...
-        executor.query_fasta(file,
-                             [config, &anno_graph = std::as_const(*anno_graph)]
-                             (const SeqSearchResult &result) {
-            if (config->output_json) {
-                std::cout << result.to_json(config->verbose_output
-                                              || !(config->query_counts || config->query_coords),
-                                            anno_graph) << "\n";
-            } else {
-                std::cout << result.to_string(config->anno_labels_delimiter,
-                                              config->suppress_unlabeled,
-                                              config->verbose_output
-                                                || !(config->query_counts || config->query_coords),
-                                              anno_graph) << "\n";
-            }
-        });
+        if (config->query_reads) {
+            executor.query_reads(file,
+                                 [config, &anno_graph = std::as_const(*anno_graph)]
+                                 (const std::string &read, const SeqSearchResult &result) {
+                // TODO: implement this
+                std::ignore = read;
+                std::ignore = result;
+            });
+        } else {
+            // Callback, which captures the config pointer and a const reference to the anno_graph
+            // instance pointed to by our unique_ptr...
+            executor.query_fasta(file,
+                                 [config, &anno_graph = std::as_const(*anno_graph)]
+                                 (const SeqSearchResult &result) {
+                if (config->output_json) {
+                    std::cout << result.to_json(config->verbose_output
+                                                  || !(config->query_counts || config->query_coords),
+                                                anno_graph) << "\n";
+                } else {
+                    std::cout << result.to_string(config->anno_labels_delimiter,
+                                                  config->suppress_unlabeled,
+                                                  config->verbose_output
+                                                    || !(config->query_counts || config->query_coords),
+                                                  anno_graph) << "\n";
+                }
+            });
+        }
         logger->trace("File '{}' was processed in {} sec, total time: {}", file,
                       curr_timer.elapsed(), timer.elapsed());
     }
@@ -1287,6 +1297,7 @@ void QueryExecutor::query_fasta(const string &file,
             logger->error("Querying coordinates in batch mode is currently not supported");
             exit(1);
         }
+
         // Construct a query graph and query against it
         batched_query_fasta(fasta_parser, callback);
         return;
@@ -1300,6 +1311,48 @@ void QueryExecutor::query_fasta(const string &file,
             // Callback with the SeqSearchResult
             callback(query_sequence(std::move(sequence), anno_graph_,
                                     config_, aligner_config_.get()));
+        }, QuerySequence { seq_count++, std::string(kseq.name.s), std::string(kseq.seq.s) });
+    }
+
+    // wait while all threads finish processing the current file
+    thread_pool_.join();
+}
+
+void QueryExecutor::query_reads(const std::string &file,
+                                const std::function<void(const std::string &, const SeqSearchResult &)> &callback) {
+    logger->trace("Parsing sequences from file '{}'", file);
+
+    seq_io::FastaParser fasta_parser(file, config_.forward_and_reverse);
+
+    // Only query_reads if using coord/count aware index.
+    if (!(dynamic_cast<const annot::matrix::MultiIntMatrix *>(
+            &this->anno_graph_.get_annotator().get_matrix()))) {
+        logger->error("Annotation does not support read queries. "
+                      "First transform this annotation to include coordinate data "
+                      "(e.g., {}, {}, {}, {}).",
+                      Config::annotype_to_string(Config::ColumnCoord),
+                      Config::annotype_to_string(Config::BRWTCoord),
+                      Config::annotype_to_string(Config::RowDiffCoord),
+                      Config::annotype_to_string(Config::RowDiffBRWTCoord));
+        exit(1);
+    }
+
+    if (config_.fast) {
+        // TODO: Implement batch mode for query_reads queries
+        logger->error("Querying coordinates in batch mode is currently not supported");
+        exit(1);
+    }
+
+    // Query sequences independently
+    size_t seq_count = 0;
+
+    for (const seq_io::kseq_t &kseq : fasta_parser) {
+        thread_pool_.enqueue([&](QuerySequence &sequence) {
+            // Callback with the SeqSearchResult
+            // TODO: implement
+            std::ignore = sequence;
+            std::ignore = callback;
+            // use AnnotatedDBG::get_overlapping_reads
         }, QuerySequence { seq_count++, std::string(kseq.name.s), std::string(kseq.seq.s) });
     }
 

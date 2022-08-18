@@ -646,6 +646,20 @@ AnnotatedDBG::get_kmer_coordinates(const std::vector<node_index> &nodes,
     return result;
 }
 
+std::vector<std::vector<std::tuple<std::string, Label, uint64_t>>>
+AnnotatedDBG::get_overlapping_reads(std::string_view sequence) const {
+    // TODO: implement
+    std::ignore = sequence;
+    return {};
+}
+
+std::vector<std::vector<std::tuple<std::string, Label, uint64_t>>>
+AnnotatedDBG::get_overlapping_reads(const std::vector<node_index> &nodes) const {
+    // TODO: implement
+    std::ignore = nodes;
+    return {};
+}
+
 std::vector<std::pair<Label, sdsl::bit_vector>>
 AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
                                        size_t num_top_labels,

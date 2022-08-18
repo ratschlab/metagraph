@@ -43,6 +43,7 @@ class Config {
     bool query_presence = false;
     bool query_counts = false;
     bool query_coords = false;
+    bool query_reads = false;
     bool verbose_output = false;
     bool filter_present = false;
     bool dump_text_anno = false;

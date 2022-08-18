@@ -39,6 +39,9 @@ class TupleRowDiff : public binmat::IRowDiff, public MultiIntMatrix {
     RowTuples get_row_tuples(Row i) const override;
     std::vector<RowTuples> get_row_tuples(const std::vector<Row> &rows) const override;
 
+    // TODO: add docstring
+    std::vector<std::vector<Row>> get_traces_with_row(Row i) const;
+
     uint64_t num_columns() const override { return diffs_.num_columns(); }
     uint64_t num_relations() const override { return diffs_.num_relations(); }
     uint64_t num_attributes() const override { return diffs_.num_attributes(); }
@@ -194,6 +197,17 @@ void TupleRowDiff<BaseMatrix>::add_diff(const RowTuples &diff, RowTuples *row) {
             c -= SHIFT;
         }
     }
+}
+
+template <class BaseMatrix>
+std::vector<std::vector<MultiIntMatrix::Row>> TupleRowDiff<BaseMatrix>
+::get_traces_with_row(Row i) const {
+    // TODO: fill in
+
+    // this line suppresses the compile error due to i being unused. remove it
+    // once you write this method.
+    std::ignore = i;
+    return {};
 }
 
 } // namespace matrix
