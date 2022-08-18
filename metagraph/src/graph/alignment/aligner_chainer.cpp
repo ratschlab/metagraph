@@ -989,9 +989,6 @@ std::pair<size_t, size_t> call_alignment_chains(const IDBGAligner &aligner,
     std::vector<std::vector<std::tuple<size_t, size_t, size_t, ssize_t, Alignment::Columns, score_t>>> chains;
     for (auto it = indices.rbegin(); it != indices.rend(); ++it) {
         auto [start_score, cols, i] = *it;
-        // if (start_score < std::get<0>(indices.back()) * config.rel_score_cutoff)
-            // break;
-
         if (used[i])
             continue;
 

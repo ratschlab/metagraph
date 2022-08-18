@@ -375,7 +375,6 @@ void LabeledExtender
     if (!annotation_buffer_.get_labels_and_coords(node).second) {
         // label consistency (weaker than coordinate consistency):
         // checks if there is at least one label shared between adjacent nodes
-        // std::cerr << "a\n";
         for (const auto &[next, c, score] : outgoing) {
             assert(annotation_buffer_.get_labels_id(next));
             auto label_change_scores = aligner_.get_label_change_scores(
@@ -385,13 +384,10 @@ void LabeledExtender
 
             for (auto&& [labels, lc_score, is_subset] : label_change_scores) {
                 lc_score *= config_.score_matrix[c][c];
-                // if (labels != node_labels_[table_i])
-                    // std::cerr << "\tllc\t" << c << "\t" << node_labels_[table_i] << "," << labels << "\t" << lc_score << "\n";
                 node_labels_.emplace_back(labels);
                 node_labels_switched_.emplace_back(!is_subset);
                 callback(next, c, score + lc_score);
             }
-            // std::cerr << "\n";
         }
 
         return;
