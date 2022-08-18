@@ -54,6 +54,7 @@ class SeedFilteringExtender {
 
     // report alignment extension statistics
     virtual size_t num_explored_nodes() const = 0;
+    virtual size_t num_extensions() const = 0;
 
     // return true if the nodes in this seed have been traversed previously with
     // better or equal scores
@@ -64,6 +65,13 @@ class SeedFilteringExtender {
     virtual void clear_conv_checker() = 0;
 
     void set_graph(const DeBruijnGraph &graph) { graph_ = &graph; }
+
+    // Extend the alignment first until it reaches the end of the alignment second.
+    // Return all such alignments.
+    std::vector<Alignment> connect_seeds(const Alignment &first,
+                                         const Alignment &second,
+                                         int64_t traversal_distance,
+                                         score_t min_path_score = DBGAlignerConfig::ninf);
 
     void extend_seed_end(const Alignment &seed,
                          const std::function<void(Alignment&&)> &callback,

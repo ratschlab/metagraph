@@ -100,6 +100,41 @@ void SeedFilteringExtender
         callback(Alignment(seed));
 }
 
+std::vector<Alignment> SeedFilteringExtender::connect_seeds(const Alignment &first,
+                                                            const Alignment &second,
+                                                            int64_t coord_dist,
+                                                            score_t min_path_score) {
+    auto [left, next] = first.split_seed(graph_->get_k() - 1, config_);
+    DEBUG_LOG("Split seed: {}\n\t{}\n\t{}", first, left, next);
+    coord_dist += second.get_sequence().size() + next.get_sequence().size()
+            - first.get_sequence().size();
+    assert(coord_dist > 0);
+
+    auto extensions = get_extensions(next, min_path_score,
+        true,                                // force_fixed_seed
+        coord_dist,                          // target_length
+        second.get_nodes().back(),           // target_node
+        false,                               // trim_offset_after_extend
+        second.get_end_clipping(),           // trim_query_suffix
+        first.get_score() - next.get_score() // added_xdrop
+    );
+
+    std::vector<Alignment> alignments;
+
+    for (auto&& extension : extensions) {
+        if (extension.get_end_clipping() == second.get_end_clipping()
+                && extension.get_nodes().back() == second.get_nodes().back()) {
+            auto alignment = left;
+            assert(extension.get_nodes().front() == next.get_nodes().front());
+            alignment.splice(std::move(extension));
+            assert(alignment.is_valid(*graph_, &config_));
+            alignments.emplace_back(std::move(alignment));
+        }
+    }
+
+    return alignments;
+}
+
 DefaultColumnExtender::DefaultColumnExtender(const DeBruijnGraph &graph,
                                              const DBGAlignerConfig &config,
                                              std::string_view query)

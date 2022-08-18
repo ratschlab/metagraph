@@ -41,16 +41,9 @@ class IDBGAligner {
     // Construct a full alignment from a chain by aligning the query against
     // the graph in the regions of the query in between the chain seeds.
     virtual void extend_chain(Chain&& chain,
-                              size_t &num_extensions,
-                              size_t &num_explored_nodes,
+                              SeedFilteringExtender &extender,
                               const std::function<void(Alignment&&)> &callback,
                               bool extend_ends = true) const = 0;
-
-  protected:
-    std::pair<bool, size_t> align_connect(Alignment &first,
-                                          Alignment &second,
-                                          int64_t coord_dist,
-                                          std::vector<Alignment> &partial_alignments) const;
 };
 
 template <class Seeder = SuffixSeeder<UniMEMSeeder>,
@@ -75,11 +68,8 @@ class DBGAligner : public IDBGAligner {
         return std::make_unique<Extender>(*this, query);
     }
 
-    // Construct a full alignment from a chain by aligning the query against
-    // the graph in the regions of the query in between the chain seeds.
     void extend_chain(Chain&& chain,
-                      size_t &num_extensions,
-                      size_t &num_explored_nodes,
+                      SeedFilteringExtender &extender,
                       const std::function<void(Alignment&&)> &callback,
                       bool extend_ends = true) const override;
 

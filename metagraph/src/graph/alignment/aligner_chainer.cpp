@@ -982,8 +982,9 @@ std::pair<size_t, size_t> call_alignment_chains(const IDBGAligner &aligner,
     std::sort(indices.begin(), indices.end());
 
     // extract all chains
-    size_t num_extensions = 0;
-    size_t num_explored_nodes = 0;
+    auto extender = aligner.make_extender(query);
+    auto extender_rc = aligner.make_extender(query_rc);
+
     std::vector<std::optional<Alignment>> front_extensions(alignments.size(), std::nullopt);
     std::vector<std::vector<std::tuple<size_t, size_t, size_t, ssize_t, Alignment::Columns, score_t>>> chains;
     for (auto it = indices.rbegin(); it != indices.rend(); ++it) {
@@ -1021,9 +1022,8 @@ std::pair<size_t, size_t> call_alignment_chains(const IDBGAligner &aligner,
             }
 
             DEBUG_LOG("Extending chain front");
-            auto extender = aligner.make_extender(query_rc);
             try {
-                extender->rc_extend_rc(alignments[i], [&](auto&& aln) {
+                extender_rc->rc_extend_rc(alignments[i], [&](auto&& aln) {
                     if (aln.get_clipping() < alignments[i].get_clipping()) {
                         // TODO: what if there are multiple extensions?
                         DEBUG_LOG("Extended successfully:\n\t{}", aln);
@@ -1032,8 +1032,6 @@ std::pair<size_t, size_t> call_alignment_chains(const IDBGAligner &aligner,
                     }
                 }, true);
             } catch (const std::bad_function_call&) {}
-            ++num_extensions;
-            num_explored_nodes += extender->num_explored_nodes();
         }
     }
 
@@ -1061,7 +1059,6 @@ std::pair<size_t, size_t> call_alignment_chains(const IDBGAligner &aligner,
 
         if (cur.get_end_clipping()) {
             DEBUG_LOG("Extending chain end");
-            auto extender = aligner.make_extender(query);
             try {
                 extender->extend_seed_end(cur, [&](Alignment&& alignment) {
                     // TODO: if the extension uses a different subset of labels
@@ -1074,8 +1071,6 @@ std::pair<size_t, size_t> call_alignment_chains(const IDBGAligner &aligner,
                     }
                 }, true);
             } catch (const std::bad_function_call&) {}
-            ++num_extensions;
-            num_explored_nodes += extender->num_explored_nodes();
         }
 
         for (++it; it != chain.end(); ++it) {
@@ -1123,7 +1118,8 @@ std::pair<size_t, size_t> call_alignment_chains(const IDBGAligner &aligner,
         callback(std::move(cur));
     }
 
-    return std::make_pair(num_extensions, num_explored_nodes);
+    return std::make_pair(extender->num_extensions() + extender_rc->num_extensions(),
+                          extender->num_explored_nodes() + extender_rc->num_explored_nodes());
 }
 
 template <class CurSeeder, class Coords>
@@ -1378,6 +1374,8 @@ void parse_seeder(const Unitigs &unitigs,
         DEBUG_LOG("Processing chains");
         std::sort(scored_chains.begin(), scored_chains.end(), utils::GreaterSecond());
         tsl::hopscotch_set<Alignment::Column> used_labels;
+        auto forward_extender = aligner.make_extender(forward);
+        auto reverse_extender = aligner.make_extender(reverse);
         for (auto&& [chain, score] : scored_chains) {
             const auto &columns = chain[0].first.get_columns();
             if (std::all_of(columns.begin(), columns.end(),
@@ -1386,9 +1384,9 @@ void parse_seeder(const Unitigs &unitigs,
             }
 
             if (chain.size() > 1) {
-                size_t num_extensions = 0;
-                size_t num_explored_nodes = 0;
-                aligner.extend_chain(std::move(chain), num_extensions, num_explored_nodes,
+                aligner.extend_chain(std::move(chain),
+                                     chain[0].first.get_orientation()
+                                         ? *reverse_extender : *forward_extender,
                                      [&](Alignment&& aln) {
                     if (aln.get_query_view().size() > config.min_seed_length) {
                         filtered_seeds.emplace_back(std::move(aln));

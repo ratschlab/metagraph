@@ -91,48 +91,6 @@ void filter_seed(const Alignment &prev, Alignment &a) {
     }
 }
 
-// Extend the alignment first until it reaches the end of the alignment second.
-// Return whether the connection was successful. If not, then replace first with second
-// and push first to the back of partial_alignments.
-std::pair<bool, size_t> IDBGAligner
-::align_connect(Alignment &first,
-                Alignment &second,
-                int64_t coord_dist,
-                std::vector<Alignment> &partial_alignments) const {
-    auto extender = make_extender(first.get_full_query_view());
-    auto [left, next] = first.split_seed(get_graph().get_k() - 1, get_config());
-    DEBUG_LOG("Split seed: {}\n\t{}\n\t{}", first, left, next);
-    coord_dist += second.get_sequence().size() + next.get_sequence().size()
-            - first.get_sequence().size();
-    assert(coord_dist > 0);
-
-    auto extensions = extender->get_extensions(next,
-        get_config().ninf,                   // min_path_score
-        true,                                // force_fixed_seed
-        coord_dist,                          // target_length
-        second.get_nodes().back(),           // target_node
-        false,                               // trim_offset_after_extend
-        second.get_end_clipping(),           // trim_query_suffix
-        first.get_score() - next.get_score() // added_xdrop
-    );
-
-    // TODO: what if there are multiple alignments?
-    if (extensions.size() && extensions[0].get_end_clipping() < first.get_end_clipping()) {
-        assert(extensions[0].get_nodes().front() == next.get_nodes().front());
-        left.splice(std::move(extensions[0]));
-        std::swap(left, first);
-        assert(first.is_valid(get_graph(), &get_config()));
-
-        if (first.get_score() >= second.get_score())
-            return std::make_pair(true, extender->num_explored_nodes());
-    }
-
-    DEBUG_LOG("Extension score too low, restarting from seed {}", second);
-    partial_alignments.emplace_back(first);
-    std::swap(first, second);
-    return std::make_pair(false, extender->num_explored_nodes());
-}
-
 template <class Seeder, class Extender, class AlignmentCompare>
 auto DBGAligner<Seeder, Extender, AlignmentCompare>
 ::build_seeders(const std::vector<IDBGAligner::Query> &seq_batch,
@@ -381,8 +339,7 @@ align_core(const Seeder &seeder,
 template <class Seeder, class Extender, class AlignmentCompare>
 void DBGAligner<Seeder, Extender, AlignmentCompare>
 ::extend_chain(Chain&& chain,
-               size_t &num_extensions,
-               size_t &num_explored_nodes,
+               SeedFilteringExtender &extender,
                const std::function<void(Alignment&&)> &callback,
                bool try_connect) const {
     assert(chain.size());
@@ -399,21 +356,24 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
         assert(chain[i].first.is_valid(graph_, &config_));
         coord_offset += chain[i].second;
         assert(coord_offset > 0);
-        auto [connected, explored_nodes]
-            = align_connect(cur, chain[i].first, coord_offset, partial_alignments);
-        if (!connected) {
+
+        auto alignments = extender.connect_seeds(cur, chain[i].first, coord_offset);
+
+        if (alignments.size()) {
+            // TODO: what if there are multiple alignments?
+            std::swap(alignments[0], cur);
+            if (AlignmentCompare()(best, cur))
+                best = cur;
+        } else {
+            DEBUG_LOG("Extension not found, restarting from seed {}", chain[i].first);
+            partial_alignments.emplace_back(cur);
+            std::swap(cur, chain[i].first);
             if (AlignmentCompare()(best, partial_alignments.back()))
                 best = partial_alignments.back();
 
             coord_offsets.push_back(coord_offset);
             coord_offset = 0;
         }
-
-        ++num_extensions;
-        num_explored_nodes += explored_nodes;
-
-        if (AlignmentCompare()(best, cur))
-            best = cur;
     }
 
     if (try_connect && partial_alignments.size()) {
@@ -488,6 +448,9 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
     size_t fwd_num_matches = 0;
     size_t bwd_num_matches = 0;
 
+    Extender forward_extender(*this, forward);
+    Extender reverse_extender(*this, reverse);
+
     if (config_.chain_alignments) {
         if (!has_coordinates()) {
             logger->error("Chaining only supported for seeds with coordinates. Skipping seed chaining.");
@@ -518,8 +481,8 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
         }
 
         tsl::hopscotch_set<Alignment::Column> finished_columns;
-        size_t this_num_explored;
-        std::tie(num_seeds, this_num_explored) = call_seed_chains_both_strands(
+        size_t num_nodes;
+        std::tie(num_seeds, num_nodes) = call_seed_chains_both_strands(
             forward, reverse, config_, std::move(fwd_seeds), std::move(bwd_seeds),
             [&](Chain&& chain, score_t score) {
                 logger->trace("Chain: score: {}", score);
@@ -530,7 +493,9 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
                 }
 #endif
 
-                extend_chain(std::move(chain), num_extensions, num_explored_nodes,
+                extend_chain(std::move(chain),
+                             chain[0].first.get_orientation()
+                                 ? reverse_extender : forward_extender,
                              [&](Alignment&& aln) {
                     const auto &cur_columns = aln.get_columns();
                     if (!aggregator.add_alignment(std::move(aln))) {
@@ -542,7 +507,7 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
             [&]() { return config_.num_alternative_paths <= 1
                             && finished_columns.size() == all_columns.size(); }
         );
-        num_explored_nodes += this_num_explored;
+        num_explored_nodes += num_nodes;
 
         for (Alignment &alignment : aggregator.get_alignments()) {
             if (alignment.get_score() < get_min_path_score(alignment))
@@ -564,7 +529,11 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
         }
 
 #if _PROTEIN_GRAPH
-        return std::make_tuple(num_seeds, num_extensions, num_explored_nodes);
+        return std::make_tuple(num_seeds,
+                               num_extensions + forward_extender.num_extensions()
+                                               + reverse_extender.num_extensions(),
+                               num_explored_nodes + forward_extender.num_explored_nodes()
+                                                   + reverse_extender.num_explored_nodes());
 #endif
 
     } else {
@@ -573,9 +542,6 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
         fwd_num_matches = forward_seeder.get_num_matches();
         bwd_num_matches = reverse_seeder.get_num_matches();
     }
-
-    Extender forward_extender(*this, forward);
-    Extender reverse_extender(*this, reverse);
 
 #if ! _PROTEIN_GRAPH
 
