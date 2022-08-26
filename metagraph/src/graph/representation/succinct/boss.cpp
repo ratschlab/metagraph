@@ -926,6 +926,7 @@ std::vector<TAlphabet> BOSS::get_node_seq(edge_index x) const {
         //    [  ]    [ ]   []
         uint64_t index = indexed_suffix_ranges_slct0_(x + 1) - x;
 
+        // check if the index is in an indexed range (k-mer without dummy characters)
         if (index % 2) {
             index /= 2;
             assert(x < get_suffix_range(2 * index + 1));
