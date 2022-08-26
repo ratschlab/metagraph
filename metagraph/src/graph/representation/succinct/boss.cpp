@@ -1663,7 +1663,7 @@ BOSS::erase_redundant_dummy_edges(sdsl::bit_vector *source_dummy_edges,
                                   size_t num_threads,
                                   bool verbose) {
     // reset the index of suffix ranges
-    index_suffix_ranges(0, 0);
+    index_suffix_ranges(0);
 
     sdsl::bit_vector redundant_dummy_edges_mask(W_->size(), false);
 
