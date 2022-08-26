@@ -77,7 +77,7 @@ void AnnotatedSequenceGraph
     for (size_t t = 0; t < data.size(); ++t) {
         // if the labels are the same, write indexes to the same array
         auto &indices = data[t].second == data[last].second ? ids[last] : ids[t];
-        if (!indices.size())
+        if (!indices.capacity())
             indices.reserve(data[t].first.size());
 
         graph_->map_to_nodes(data[t].first, [&](node_index i) {
