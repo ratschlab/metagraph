@@ -629,7 +629,7 @@ TYPED_TEST(AnnotatorPreset2Test, SwapColumns) {
 }
 
 TYPED_TEST(AnnotatorStaticTest, RenameColumnsMerge) {
-    annot::ColumnCompressed<> column_annotator(5, 1, "", 1e7);
+    annot::ColumnCompressed<> column_annotator(5);
     column_annotator.set(0, { "Label0", "Label2", "Label8" });
     column_annotator.set(2, { "Label1", "Label2" });
     column_annotator.set(4, { "Label8" });
@@ -643,7 +643,7 @@ TYPED_TEST(AnnotatorStaticTest, RenameColumnsMerge) {
 }
 
 TYPED_TEST(AnnotatorStaticTest, RenameColumnsMergeAll) {
-    annot::ColumnCompressed<> column_annotator(5, 1, "", 1e7);
+    annot::ColumnCompressed<> column_annotator(5);
     column_annotator.set(0, { "Label0", "Label2", "Label8" });
     column_annotator.set(2, { "Label1", "Label2" });
     column_annotator.set(4, { "Label8" });
