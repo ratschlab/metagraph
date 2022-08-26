@@ -69,8 +69,8 @@ class Config {
     unsigned int k = 3;
 
     // Cache ranges of nodes in succinct graphs to search faster.
-    // For DNA4, index nodes for all possible suffixes of length 10.
-    // In general, the default value is: log_{|Sigma|}(2^20)
+    // For DNA4, index nodes for all possible suffixes of length 12.
+    // In general, the default value is: log_{|Sigma|}(2^24)
     static const size_t kDefaultIndexSuffixLen;
     unsigned int node_suffix_length = kDefaultIndexSuffixLen;
     unsigned int distance = 0;
