@@ -20,7 +20,7 @@ using mtg::graph::DeBruijnGraph;
 
 
 const size_t Config::kDefaultIndexSuffixLen
-    = 20 / std::log2(kmer::KmerExtractor2Bit().alphabet.size());
+    = 24 / std::log2(kmer::KmerExtractor2Bit().alphabet.size());
 
 void print_welcome_message() {
     fprintf(stderr, "#############################\n");
