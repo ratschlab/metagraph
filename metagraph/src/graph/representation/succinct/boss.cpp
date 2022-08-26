@@ -912,7 +912,7 @@ std::vector<TAlphabet> BOSS::get_node_seq(edge_index x) const {
     std::vector<TAlphabet> ret(k_);
     size_t i = k_;
 
-    // TODO: benchmark: short indexed suffix might be slower to query with binary search...
+    // TODO: benchmark for short suffixes where select0 might actually be slower
     if (indexed_suffix_length_) {
         while (i > indexed_suffix_length_) {
             CHECK_INDEX(x);
@@ -921,19 +921,13 @@ std::vector<TAlphabet> BOSS::get_node_seq(edge_index x) const {
             x = bwd(x);
         }
 
-        // find end of range with binary search
-        uint64_t index = 0;
-        uint64_t end = indexed_suffix_ranges_rk1_(indexed_suffix_ranges_.size()) / 2;
-        while (index != end) {
-            auto mid = index + (end - index) / 2;
-            if (get_suffix_range(2 * mid + 1) > x) {
-                end = mid;
-            } else {
-                index = mid + 1;
-            }
-        }
+        // find end of range
+        // 0001001000010100011...
+        //    [  ]    [ ]   []
+        uint64_t index = indexed_suffix_ranges_slct0_(x + 1) - x;
 
-        if (index < indexed_suffix_ranges_rk1_(indexed_suffix_ranges_.size()) / 2 && get_suffix_range(2 * index) <= x) {
+        if (index % 2) {
+            index /= 2;
             assert(x < get_suffix_range(2 * index + 1));
             for (i = 0; i < indexed_suffix_length_; ++i) {
                 uint64_t next_index = index / (alph_size - 1);
