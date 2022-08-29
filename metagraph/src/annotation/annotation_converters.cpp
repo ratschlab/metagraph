@@ -436,6 +436,12 @@ convert_to_BRWT(
 
     LEncoder label_encoder;
     for (const auto &[i, label] : column_names) {
+        if (label_encoder.label_exists(label)) {
+            logger->error("Label '{}' is found in multiple annotations\nMerging labels in not supported"
+                          " in the Multi-BRWT convertor. Consider merging columns before the conversion.",
+                          label);
+            exit(1);
+        }
         label_encoder.insert_and_encode(label);
     }
 
