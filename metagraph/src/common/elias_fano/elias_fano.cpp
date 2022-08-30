@@ -478,9 +478,40 @@ size_t EliasFanoDecoder<T>::decompress_next_block() {
                 const size_t leftover = sizeof(T) - 1;
                 memcpy(lower_, lower_ + sizeof(lower_) - leftover, leftover);
                 const uint32_t to_read = std::min(sizeof(lower_) - leftover, num_lower_bytes_);
-                if (!source_.read(lower_ + leftover, to_read)) {
-                    logger->error("Error while reading next {} lower bits from {}",
-                                  to_read * 8, source_name_);
+
+                // If reading fails, retry MAX_NUM_RETRIES times
+                size_t num_retries = 0;
+                const size_t MAX_NUM_RETRIES = 100;
+                const auto source_pos = source_.tellg();
+
+                while (num_retries <= MAX_NUM_RETRIES) {
+                    if (num_retries < 10)
+                        source_.close();
+                    if (source_.read(lower_ + leftover, to_read))
+                        break;
+
+                    // reading failed -> retry
+                    while (++num_retries <= MAX_NUM_RETRIES) {
+                        logger->warn("Failed reading lower bits from {}. Retry #{}...", source_name_, num_retries);
+                        using namespace std::chrono_literals;
+                        std::this_thread::sleep_for(1s);
+
+                        source_ = std::ifstream(source_name_, std::ios::binary);
+                        if (!source_) {
+                            logger->error("Unable to open {}", source_name_);
+                            continue;
+                        }
+                        source_.seekg(source_pos);
+                        if (!source_) {
+                            logger->error("Unable to seek in {}", source_name_);
+                            continue;
+                        }
+                        break;
+                    }
+                }
+                if (num_retries > MAX_NUM_RETRIES) {
+                    logger->error("Failed reading lower bits from {} after {} retries",
+                                  source_name_, MAX_NUM_RETRIES);
                     std::exit(EXIT_FAILURE);
                 }
                 num_lower_bytes_ -= to_read;
@@ -516,9 +547,13 @@ bool EliasFanoDecoder<T>::init() {
         logger->error("Error while reading from {}", source_name_);
         std::exit(EXIT_FAILURE);
     }
+
+    // If reading fails, retry MAX_NUM_RETRIES times until crashing
+    size_t num_retries = 0;
+    const size_t MAX_NUM_RETRIES = 100;
     const auto source_pos = source_.tellg();
 
-    while (num_retries_ <= max_num_retries_) {
+    while (num_retries <= MAX_NUM_RETRIES) {
         source_.read(reinterpret_cast<char *>(&offset_), sizeof(T));
         source_.read(reinterpret_cast<char *>(&num_lower_bits_), 1);
         assert(num_lower_bits_ < 8 * sizeof(T));
@@ -538,10 +573,10 @@ bool EliasFanoDecoder<T>::init() {
             return true;
 
         // reading failed -> retry
-        while (num_retries_++ < max_num_retries_) {
-            logger->warn("Failed reading from {}. Retry #{}...", source_name_, num_retries_);
+        while (++num_retries <= MAX_NUM_RETRIES) {
+            logger->warn("Failed reading from {}. Retry #{}...", source_name_, num_retries);
             using namespace std::chrono_literals;
-            std::this_thread::sleep_for(500ms);
+            std::this_thread::sleep_for(1s);
 
             source_ = std::ifstream(source_name_, std::ios::binary);
             if (!source_) {
@@ -557,7 +592,7 @@ bool EliasFanoDecoder<T>::init() {
         }
     }
 
-    logger->error("Failed reading from {} after {} retries", source_name_, max_num_retries_);
+    logger->error("Failed reading from {} after {} retries", source_name_, MAX_NUM_RETRIES);
     std::exit(EXIT_FAILURE);
 }
 
