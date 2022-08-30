@@ -15,6 +15,7 @@
 #include "graph/annotated_graph_algorithm.hpp"
 #include "graph/representation/masked_graph.hpp"
 #include "annotation/representation/column_compressed/column_compressed_lazy.hpp"
+#include "graph/representation/succinct/dbg_succinct.hpp"
 
 
 namespace mtg {
@@ -240,9 +241,11 @@ int assemble(Config *config) {
                 std::ostringstream ostr;
                 if (config->output_compacted) {
                     ostr << fmt::format("S\t{}\t{}\n", path.back(), unitig);
-                    graph->adjacent_incoming_nodes(path.front(), [&](uint64_t node) {
-                        ostr << fmt::format("L\t{}\t+\t{}\t+\t{}M\n",
-                                            node, path.back(), overlap);
+                    graph->call_incoming_kmers(path.front(), [&](uint64_t node, char c) {
+                        if (c != graph::boss::BOSS::kSentinel) {
+                            ostr << fmt::format("L\t{}\t+\t{}\t+\t{}M\n",
+                                                node, path.back(), overlap);
+                        }
                     });
                 } else {
                     for (size_t i = 0; i < path.size(); ++i) {
@@ -252,9 +255,11 @@ int assemble(Config *config) {
                             ostr << fmt::format("L\t{}\t+\t{}\t+\t{}M\n",
                                                 path[i - 1], path[i], overlap);
                     }
-                    graph->adjacent_incoming_nodes(path.front(), [&](uint64_t node) {
-                        ostr << fmt::format("L\t{}\t+\t{}\t+\t{}M\n",
-                                            node, path.front(), overlap);
+                    graph->call_incoming_kmers(path.front(), [&](uint64_t node, char c) {
+                        if (c != graph::boss::BOSS::kSentinel) {
+                            ostr << fmt::format("L\t{}\t+\t{}\t+\t{}M\n",
+                                                node, path.front(), overlap);
+                        }
                     });
                 }
                 std::lock_guard<std::mutex> lock(str_mutex);

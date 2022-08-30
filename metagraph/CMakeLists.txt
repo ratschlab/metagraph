@@ -113,11 +113,11 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   )
 
   if (NOT CMAKE_CXX_COMPILER_ID MATCHES "AppleClang")
-     add_compile_options(
-      -Wno-suggest-destructor-override
-      -Wno-deprecated-copy
-      -Wno-deprecated-declarations
-     )
+    add_compile_options(
+     -Wno-suggest-destructor-override
+     -Wno-deprecated-copy
+     -Wno-deprecated-declarations
+    )
   endif()
 endif()
 
@@ -133,6 +133,11 @@ if(APPLE)
 endif()
 
 findOpenMP()
+if("${OpenMP_CXX_VERSION}" VERSION_GREATER_EQUAL 5.0)
+  add_definitions(-D_OpenMP_5)
+else()
+  message(WARNING "Could only find OpenMP ${OpenMP_CXX_VERSION} < 5.0, non-rectangular nested loops will not be parallelized")
+endif()
 
 # Check if 128 bit integers are supported
 try_compile(MODE_TI

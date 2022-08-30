@@ -34,7 +34,7 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
     ColumnCompressed(uint64_t num_rows = 0,
                      size_t num_columns_cached = 1,
                      const std::string &swap_dir = "",
-                     uint64_t buffer_size_bytes = 1e9,
+                     uint64_t buffer_size_bytes = 1e7,
                      uint8_t count_width = 8,
                      size_t max_chunks_open = 2000);
 
@@ -42,7 +42,7 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
                      const std::string &column_label,
                      size_t num_columns_cached = 1,
                      const std::string &swap_dir = "",
-                     uint64_t buffer_size_bytes = 1e9,
+                     uint64_t buffer_size_bytes = 1e7,
                      uint8_t count_width = 8,
                      size_t max_chunks_open = 2000);
 
@@ -50,7 +50,7 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
                      const LabelEncoder<Label> &label_encoder,
                      size_t num_columns_cached = 1,
                      const std::string &swap_dir = "",
-                     uint64_t buffer_size_bytes = 1e9,
+                     uint64_t buffer_size_bytes = 1e7,
                      uint8_t count_width = 8,
                      size_t max_chunks_open = 2000);
 

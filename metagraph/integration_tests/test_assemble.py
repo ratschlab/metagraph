@@ -75,14 +75,15 @@ class TestAnnotate(unittest.TestCase):
                     break
         fasta_file.close()
 
-    @parameterized.expand(GFAs)
+    @parameterized.expand(itertools.product(GFAs, ['nomask','mask']))
     @unittest.skipIf(PROTEIN_MODE, "No canonical mode for Protein alphabets")
-    def test_assemble_gfa(self, gfa_test):
+    def test_assemble_gfa(self, gfa_test, mask):
         k = 20
-        construct_command = '{exe} build -p {num_threads} --mask-dummy \
+        construct_command = '{exe} build -p {num_threads} {mask_dummy} \
                 --mode canonical -k {k} -o {outfile} {input}'.format(
             exe=METAGRAPH,
             num_threads=NUM_THREADS,
+            mask_dummy='--mask-dummy' if mask == 'mask' else '',
             k=k,
             outfile=self.tempdir.name + '/graph',
             input=gfa_tests[gfa_test]['fasta_path']
