@@ -564,8 +564,6 @@ bool EliasFanoDecoder<T>::init() {
 
         num_lower_bytes_ = (num_lower_bits_ * size_ + 7) / 8;
         size_t low_bytes_read = std::min(sizeof(lower_), num_lower_bytes_);
-        if (num_retries < 10)
-            source_.close();
         source_.read(reinterpret_cast<char *>(lower_), low_bytes_read);
         num_lower_bytes_ -= low_bytes_read;
 
