@@ -485,8 +485,6 @@ size_t EliasFanoDecoder<T>::decompress_next_block() {
                 const auto source_pos = source_.tellg();
 
                 while (num_retries <= MAX_NUM_RETRIES) {
-                    if (num_retries < 10)
-                        source_.close();
                     if (source_.read(lower_ + leftover, to_read))
                         break;
 
@@ -566,6 +564,8 @@ bool EliasFanoDecoder<T>::init() {
 
         num_lower_bytes_ = (num_lower_bits_ * size_ + 7) / 8;
         size_t low_bytes_read = std::min(sizeof(lower_), num_lower_bytes_);
+        if (num_retries < 10)
+            source_.close();
         source_.read(reinterpret_cast<char *>(lower_), low_bytes_read);
         num_lower_bytes_ -= low_bytes_read;
 
