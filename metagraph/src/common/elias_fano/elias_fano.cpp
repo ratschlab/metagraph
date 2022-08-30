@@ -564,8 +564,6 @@ bool EliasFanoDecoder<T>::init() {
 
         num_lower_bytes_ = (num_lower_bits_ * size_ + 7) / 8;
         size_t low_bytes_read = std::min(sizeof(lower_), num_lower_bytes_);
-        if (num_retries < 10)
-            source_.close();
         source_.read(reinterpret_cast<char *>(lower_), low_bytes_read);
         num_lower_bytes_ -= low_bytes_read;
 
@@ -576,7 +574,7 @@ bool EliasFanoDecoder<T>::init() {
         while (++num_retries <= MAX_NUM_RETRIES) {
             logger->warn("Failed reading from {}. Retry #{}...", source_name_, num_retries);
             using namespace std::chrono_literals;
-            // std::this_thread::sleep_for(1s);
+            std::this_thread::sleep_for(1s);
 
             source_ = std::ifstream(source_name_, std::ios::binary);
             if (!source_) {
