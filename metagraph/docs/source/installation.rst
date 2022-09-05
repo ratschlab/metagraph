@@ -96,14 +96,13 @@ Before compiling MetaGraph, install the following dependencies:
 
             brew install gcc autoconf automake libtool cmake make htslib
             [[ "$OSTYPE" == "darwin"* ]] \
-                && brew remove -f boost double-conversion gflags glog lz4 snappy zstd folly \
-                && brew install --cc=gcc-7 boost folly \
+                && brew remove -f boost \
+                && brew install --cc=gcc-7 boost \
                 && brew install gcc@9
             [[ "$OSTYPE" != "darwin"* ]] \
                 && brew install gcc@9 libomp \
-                && brew remove -f openssl@1.1 boost double-conversion gflags glog lz4 snappy zstd folly \
-                && brew install --cc=gcc-5 glog zstd \
-                && brew install --cc=gcc-9 openssl@1.1 boost folly
+                && brew remove -f openssl@1.1 boost \
+                && brew install --cc=gcc-9 openssl@1.1 boost
 
         Then, the following environment variables have to be set::
 
@@ -117,7 +116,7 @@ Before compiling MetaGraph, install the following dependencies:
 
         For compiling with LLVM Clang installed with `brew <https://brew.sh/>`_, the prerequisites can be installed with::
 
-            brew install llvm libomp autoconf automake libtool cmake make htslib boost folly
+            brew install llvm libomp autoconf automake libtool cmake make htslib boost
 
         Then, the following environment variables have to be set::
 
