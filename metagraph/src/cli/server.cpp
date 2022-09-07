@@ -91,8 +91,11 @@ std::string process_search_request(const std::string &received_message,
     }
 
     std::unique_ptr<align::DBGAlignerConfig> aligner_config;
-    if (json.get("align", false).asBool())
-        aligner_config.reset(new align::DBGAlignerConfig(initialize_aligner_config(config)));
+    if (json.get("align", false).asBool()) {
+        aligner_config.reset(new align::DBGAlignerConfig(
+            initialize_aligner_config(config, anno_graph.get_graph())
+        ));
+    }
 
     // Need mutex while appending to vector
     std::vector<SeqSearchResult> search_results;
@@ -173,7 +176,7 @@ std::string process_align_request(const std::string &received_message,
         "max_num_nodes_per_seq_char",
         config.alignment_max_nodes_per_seq_char).asDouble();
 
-    align::DBGAligner aligner(graph, initialize_aligner_config(config));
+    align::DBGAligner aligner(graph, initialize_aligner_config(config, graph));
     const align::DBGAlignerConfig &aligner_config = aligner.get_config();
 
     // TODO: make parallel?
