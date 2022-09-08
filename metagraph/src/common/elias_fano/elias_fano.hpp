@@ -60,10 +60,6 @@ class EliasFanoDecoder {
     /** Decompressed the next block into buffer and returns the number of elements in it */
     size_t decompress_next_block();
 
-    /** If reading fails, retry |max_num_retries_| times until crashing */
-    size_t num_retries_ = 0;
-    static constexpr size_t max_num_retries_ = 100;
-
     /** Index of current element */
     size_t position_ = 0;
 

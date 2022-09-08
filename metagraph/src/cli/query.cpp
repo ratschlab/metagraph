@@ -1,6 +1,7 @@
 #include "query.hpp"
 
 #include <mutex>
+#include <sstream>
 
 #include <ips4o.hpp>
 #include <tsl/ordered_set.h>
@@ -1185,15 +1186,17 @@ int query_graph(Config *config) {
                              [config, &anno_graph = std::as_const(*anno_graph)]
                              (const SeqSearchResult &result) {
             if (config->output_json) {
-                std::cout << result.to_json(config->verbose_output
-                                              || !(config->query_counts || config->query_coords),
-                                            anno_graph) << "\n";
+                std::ostringstream ss;
+                ss << result.to_json(config->verbose_output
+                                         || !(config->query_counts || config->query_coords),
+                                     anno_graph) << "\n";
+                std::cout << ss.str();
             } else {
                 std::cout << result.to_string(config->anno_labels_delimiter,
                                               config->suppress_unlabeled,
                                               config->verbose_output
                                                 || !(config->query_counts || config->query_coords),
-                                              anno_graph) << "\n";
+                                              anno_graph) + "\n";
             }
         });
         logger->trace("File '{}' was processed in {} sec, total time: {}", file,

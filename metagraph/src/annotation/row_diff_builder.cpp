@@ -33,6 +33,11 @@ using rd_succ_bv_type = RowDiff<ColumnMajor>::fork_succ_bv_type;
 template <typename T>
 using Encoder = mtg::elias_fano::EliasFanoEncoderBuffered<T>;
 
+#if _OpenMP_5
+#define _OMP_NONRCTGLR_LOOP collapse(2)
+#else
+#define _OMP_NONRCTGLR_LOOP schedule(dynamic)
+#endif
 
 std::vector<annot::ColumnCompressed<>>
 load_columns(const std::vector<std::string> &source_files, uint64_t *num_rows) {
@@ -40,7 +45,7 @@ load_columns(const std::vector<std::string> &source_files, uint64_t *num_rows) {
 
     std::vector<annot::ColumnCompressed<>> sources(source_files.size());
 
-    #pragma omp parallel for num_threads(get_num_threads())
+    #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
     for (size_t i = 0; i < source_files.size(); ++i) {
         if (!sources[i].load(source_files[i])) {
             logger->error("Can't load source annotations from {}", source_files[i]);
@@ -155,7 +160,7 @@ void count_labels_per_row(const std::vector<std::string> &source_files,
         row_count_block.assign(block_size, 0);
 
         // process the current block
-        #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
+        #pragma omp parallel for num_threads(get_num_threads()) _OMP_NONRCTGLR_LOOP
         for (size_t l_idx = 0; l_idx < sources.size(); ++l_idx) {
             for (size_t j = 0; j < sources[l_idx].num_labels(); ++j) {
                 const bit_vector &source_col
@@ -648,7 +653,7 @@ void traverse_anno_chunked(
         assert(succ_chunk.size() == succ_chunk_idx.back());
         assert(pred_chunk.size() == pred_chunk_idx.back());
         // process the current block
-        #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+        #pragma omp parallel for num_threads(num_threads) _OMP_NONRCTGLR_LOOP
         for (size_t l_idx = 0; l_idx < col_annotations.size(); ++l_idx) {
             for (size_t j = 0; j < col_annotations[l_idx].num_labels(); ++j) {
                 const bit_vector &source_col
@@ -753,7 +758,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
     std::vector<std::vector<sdsl::int_vector<>>> values;
     if (with_values) {
         values.resize(source_files.size());
-        #pragma omp parallel for num_threads(get_num_threads())
+        #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
         for (size_t i = 0; i < source_files.size(); ++i) {
             if (!sources[i].num_labels())
                 continue;
@@ -972,7 +977,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                 });
             });
 
-    #pragma omp parallel for num_threads(num_threads)
+    #pragma omp parallel for num_threads(num_threads) _OMP_NONRCTGLR_LOOP
     for (size_t s = 0; s < sources.size(); ++s) {
         for (size_t j = 0; j < sources[s].num_labels(); ++j) {
             // flush and release the buffer
@@ -1015,7 +1020,9 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                 uint64_t r = 0;
                 set_rows[l_idx][j].for_each([&](const auto &v) {
                     call(utils::get_first(v));
-                    if constexpr(with_values) {
+                    // TODO: this should be constexpr(with_values), but due to a bug
+                    //       in g++-8.2, that doesn't compile
+                    if constexpr(utils::is_pair_v<T>) {
                         assert(v.second && "zero diffs must have been skipped");
                         values[l_idx][j][r++] = matrix::encode_diff(v.second);
                     }
@@ -1071,7 +1078,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
     for (uint64_t chunk = 0; chunk < row_reduction.size(); chunk += BLOCK_SIZE) {
         row_nbits_block.assign(std::min(BLOCK_SIZE, row_reduction.size() - chunk), 0);
 
-        #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+        #pragma omp parallel for num_threads(num_threads) _OMP_NONRCTGLR_LOOP
         for (size_t l_idx = 0; l_idx < diff_columns.size(); ++l_idx) {
             for (const auto &col_ptr : diff_columns[l_idx]) {
                 col_ptr->call_ones_in_range(chunk, chunk + row_nbits_block.size(),
@@ -1367,7 +1374,7 @@ void convert_batch_to_row_diff_coord(const std::string &pred_succ_fprefix,
             [&](uint64_t) {}
     );
 
-    #pragma omp parallel for num_threads(num_threads)
+    #pragma omp parallel for num_threads(num_threads) _OMP_NONRCTGLR_LOOP
     for (size_t s = 0; s < sources.size(); ++s) {
         for (size_t j = 0; j < sources[s].num_labels(); ++j) {
             // flush and release the buffer
