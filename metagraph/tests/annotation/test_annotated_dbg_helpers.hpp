@@ -22,7 +22,8 @@ std::unique_ptr<graph::AnnotatedDBG>
 build_anno_graph(uint64_t k,
                  const std::vector<std::string> &sequences = {},
                  const std::vector<std::string> &labels = {},
-                 graph::DeBruijnGraph::Mode mode = graph::DeBruijnGraph::BASIC);
+                 graph::DeBruijnGraph::Mode mode = graph::DeBruijnGraph::BASIC,
+                 bool coordinates = false);
 
 } // namespace test
 } // namespace mtg
