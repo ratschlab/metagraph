@@ -51,7 +51,8 @@ class LabeledAlignerTest : public ::testing::Test {};
 typedef ::testing::Types<std::pair<DBGHashFast, annot::ColumnCompressed<>>,
                          std::pair<DBGSuccinct, annot::ColumnCompressed<>>,
                          std::pair<DBGHashFast, annot::RowFlatAnnotator>,
-                         std::pair<DBGSuccinct, annot::RowFlatAnnotator>> FewGraphAnnotationPairTypes;
+                         std::pair<DBGSuccinct, annot::RowFlatAnnotator>,
+                         std::pair<DBGSuccinct, annot::RowDiffCoordAnnotator>> FewGraphAnnotationPairTypes;
 
 TYPED_TEST_SUITE(LabeledAlignerTest, FewGraphAnnotationPairTypes);
 
@@ -151,8 +152,10 @@ TYPED_TEST(LabeledAlignerTest, SimpleTangleGraph) {
 
 TYPED_TEST(LabeledAlignerTest, SimpleTangleGraphCoords) {
     // TODO: for now, not implemented for other annotators
-    if constexpr(!std::is_same_v<typename TypeParam::second_type, annot::ColumnCompressed<>>)
+    if constexpr(!std::is_same_v<typename TypeParam::second_type, annot::ColumnCompressed<>>
+                    || !std::is_same_v<typename TypeParam::second_type, annot::RowDiffCoordAnnotator>) {
         return;
+    }
 
     size_t k = 3;
     /*  B                  AB  AB
@@ -212,8 +215,10 @@ TYPED_TEST(LabeledAlignerTest, SimpleTangleGraphCoords) {
 
 TYPED_TEST(LabeledAlignerTest, SimpleTangleGraphCoordsMiddle) {
     // TODO: for now, not implemented for other annotators
-    if constexpr(!std::is_same_v<typename TypeParam::second_type, annot::ColumnCompressed<>>)
+    if constexpr(!std::is_same_v<typename TypeParam::second_type, annot::ColumnCompressed<>>
+                    || !std::is_same_v<typename TypeParam::second_type, annot::RowDiffCoordAnnotator>) {
         return;
+    }
 
     size_t k = 3;
     /*  B                  AB  AB
@@ -273,8 +278,10 @@ TYPED_TEST(LabeledAlignerTest, SimpleTangleGraphCoordsMiddle) {
 
 TYPED_TEST(LabeledAlignerTest, SimpleTangleGraphCoordsCycle) {
     // TODO: for now, not implemented for other annotators
-    if constexpr(!std::is_same_v<typename TypeParam::second_type, annot::ColumnCompressed<>>)
+    if constexpr(!std::is_same_v<typename TypeParam::second_type, annot::ColumnCompressed<>>
+                    || !std::is_same_v<typename TypeParam::second_type, annot::RowDiffCoordAnnotator>) {
         return;
+    }
 
     size_t k = 4;
     /*
