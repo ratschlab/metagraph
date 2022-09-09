@@ -58,11 +58,11 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
                 graph,
                 std::unique_ptr<AnnotatedDBG::Annotator>(new ColumnCoordAnnotator(
                     load_coords(std::move(dynamic_cast<ColumnCompressed<>&>(*anno_graph->annotator_)),
-                                std::vector<std::string>{
-                                    out_path + ColumnCompressed<>::kExtension
-                                })
+                                std::vector<std::string>{out_path + ColumnCompressed<>::kExtension})
                 ))
             );
+        } else if constexpr(!std::is_same_v<Annotation, RowDiffColumnAnnotator>) {
+            static_assert("Coordinates only supported for ColumnCompressed and RowDiff");
         }
     } else {
         for (size_t i = 0; i < sequences.size(); ++i) {
@@ -85,9 +85,10 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
         }
     }
 
-    if constexpr(std::is_same_v<Annotation, RowDiffCoordAnnotator>
-            || std::is_same_v<Annotation, RowDiffColumnAnnotator>) {
+    if constexpr(std::is_same_v<Annotation, RowDiffColumnAnnotator>) {
         static_assert(std::is_same_v<Graph, DBGSuccinct>);
+        assert(dynamic_cast<const DBGSuccinct*>(base_graph));
+
         size_t num_columns = anno_graph->get_annotator().get_label_encoder().size();
         std::filesystem::path tmp_dir = utils::create_temp_dir("", "test_col");
         std::string out_path = tmp_dir/"test_col";
@@ -95,15 +96,19 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
         std::vector<std::string> files { out_path + ColumnCompressed<>::kExtension };
         base_graph->serialize(tmp_dir/"test_col");
         std::string graph_fname = std::string(tmp_dir/"test_col") + base_graph->file_extension();
-        convert_to_row_diff(files, graph_fname, 10e9, 100, tmp_dir, tmp_dir,
-                            static_cast<annot::RowDiffStage>(0),
-                            "", false, coordinates);
-        convert_to_row_diff(files, graph_fname, 10e9, 100, tmp_dir, tmp_dir,
-                            static_cast<annot::RowDiffStage>(1),
-                            "", false, coordinates);
-        convert_to_row_diff(files, graph_fname, 10e9, 100, tmp_dir, tmp_dir,
-                            static_cast<annot::RowDiffStage>(2),
-                            "", false, coordinates);
+        auto annotator = std::make_unique<annot::ColumnCompressed<>>(0);
+        convert_to_row_diff(files, graph_fname, 100e9, 100, tmp_dir, tmp_dir,
+                            static_cast<annot::RowDiffStage>(0), "", false, coordinates);
+        convert_to_row_diff(files, graph_fname, 100e9, 100, tmp_dir, tmp_dir,
+                            static_cast<annot::RowDiffStage>(1), "", false, coordinates);
+        convert_to_row_diff(files, graph_fname, 100e9, 100, tmp_dir, tmp_dir,
+                            static_cast<annot::RowDiffStage>(2), "", false, coordinates);
+
+        if (!annotator->merge_load(files)) {
+            logger->error("Cannot load annotations");
+            exit(1);
+        }
+
         const std::string anchors_file = graph_fname + annot::binmat::kRowDiffAnchorExt;
         const std::string fork_succ_file = graph_fname + annot::binmat::kRowDiffForkSuccExt;
         if (!std::filesystem::exists(anchors_file)) {
@@ -115,11 +120,6 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
             std::exit(1);
         }
 
-        auto annotator = std::make_unique<annot::ColumnCompressed<>>(0);
-        if (!annotator->merge_load(files)) {
-            logger->error("Cannot load annotations");
-            exit(1);
-        }
         assert(annotator->num_labels() == num_columns);
 
         if (coordinates) {
