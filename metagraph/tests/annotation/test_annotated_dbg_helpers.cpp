@@ -1,5 +1,7 @@
 #include "test_annotated_dbg_helpers.hpp"
 
+#include "test_matrix_helpers.hpp"
+
 #include "../graph/all/test_dbg_helpers.hpp"
 
 #include "graph/representation/hash/dbg_hash_fast.hpp"
@@ -20,6 +22,7 @@ namespace test {
 
 using namespace mtg::graph;
 using namespace mtg::annot;
+using namespace mtg::annot::binmat;
 using namespace mtg::annot::matrix;
 using common::logger;
 
@@ -94,23 +97,23 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
         std::string out_path = tmp_dir/"test_col";
         anno_graph->get_annotator().serialize(out_path);
         std::vector<std::string> files { out_path + ColumnCompressed<>::kExtension };
-        base_graph->serialize(tmp_dir/"test_col");
-        std::string graph_fname = std::string(tmp_dir/"test_col") + base_graph->file_extension();
-        auto annotator = std::make_unique<annot::ColumnCompressed<>>(0);
-        convert_to_row_diff(files, graph_fname, 100e9, 100, tmp_dir, tmp_dir,
-                            static_cast<annot::RowDiffStage>(0), "", false, coordinates);
-        convert_to_row_diff(files, graph_fname, 100e9, 100, tmp_dir, tmp_dir,
-                            static_cast<annot::RowDiffStage>(1), "", false, coordinates);
-        convert_to_row_diff(files, graph_fname, 100e9, 100, tmp_dir, tmp_dir,
-                            static_cast<annot::RowDiffStage>(2), "", false, coordinates);
+        base_graph->serialize(out_path);
+        std::string graph_fname = out_path + base_graph->file_extension();
+        auto annotator = std::make_unique<ColumnCompressed<>>(0);
+        convert_to_row_diff(files, graph_fname, 100000000, 5, tmp_dir, tmp_dir,
+                            static_cast<RowDiffStage>(0), "", false, coordinates);
+        convert_to_row_diff(files, graph_fname, 100000000, 5, tmp_dir, tmp_dir,
+                            static_cast<RowDiffStage>(1), "", false, coordinates);
+        convert_to_row_diff(files, graph_fname, 100000000, 5, tmp_dir, tmp_dir,
+                            static_cast<RowDiffStage>(2), "", false, coordinates);
 
         if (!annotator->merge_load(files)) {
             logger->error("Cannot load annotations");
             exit(1);
         }
 
-        const std::string anchors_file = graph_fname + annot::binmat::kRowDiffAnchorExt;
-        const std::string fork_succ_file = graph_fname + annot::binmat::kRowDiffForkSuccExt;
+        const std::string anchors_file = graph_fname + kRowDiffAnchorExt;
+        const std::string fork_succ_file = graph_fname + kRowDiffForkSuccExt;
         if (!std::filesystem::exists(anchors_file)) {
             logger->error("Anchor bitmap {} does not exist.", anchors_file);
             std::exit(1);
@@ -150,6 +153,10 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
             );
             row_diff->load_anchor(anchors_file);
             row_diff->load_fork_succ(fork_succ_file);
+            assert(row_diff->num_relations()
+                    == anno_graph->get_annotator().get_matrix().num_relations());
+            test_matrix(*row_diff,
+                        static_cast<const ColumnMajor&>(anno_graph->get_annotator().get_matrix()).data());
             auto annotator = std::make_unique<RowDiffCoordAnnotator>(
                 std::move(row_diff),
                 anno_graph->get_annotator().get_label_encoder()
@@ -157,10 +164,15 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
             return std::make_unique<AnnotatedDBG>(graph, std::move(annotator));
         } else {
             auto row_diff = std::make_unique<RowDiffColumnAnnotator::binary_matrix_type>(
-                static_cast<const DBGSuccinct*>(base_graph), std::move(*annotator->release_matrix())
+                static_cast<const DBGSuccinct*>(base_graph),
+                std::move(*annotator->release_matrix())
             );
             row_diff->load_anchor(anchors_file);
             row_diff->load_fork_succ(fork_succ_file);
+            assert(row_diff->num_relations()
+                    == anno_graph->get_annotator().get_matrix().num_relations());
+            test_matrix(*row_diff,
+                        static_cast<const ColumnMajor&>(anno_graph->get_annotator().get_matrix()).data());
             auto annotator = std::make_unique<RowDiffColumnAnnotator>(
                 std::move(row_diff),
                 anno_graph->get_annotator().get_label_encoder()
