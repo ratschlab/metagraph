@@ -99,14 +99,26 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
         std::vector<std::string> files { out_path + ColumnCompressed<>::kExtension };
         base_graph->serialize(out_path);
         std::string graph_fname = out_path + base_graph->file_extension();
-        auto annotator = std::make_unique<ColumnCompressed<>>(0);
-        convert_to_row_diff(files, graph_fname, 100000000, 5, tmp_dir, tmp_dir,
-                            static_cast<RowDiffStage>(0), "", false, coordinates);
-        convert_to_row_diff(files, graph_fname, 100000000, 5, tmp_dir, tmp_dir,
-                            static_cast<RowDiffStage>(1), "", false, coordinates);
-        convert_to_row_diff(files, graph_fname, 100000000, 5, tmp_dir, tmp_dir,
-                            static_cast<RowDiffStage>(2), "", false, coordinates);
+        if (!std::filesystem::exists(files[0])) {
+            logger->error("Failed to serialize annotation to {}.", files[0]);
+            std::exit(1);
+        }
+        if (!std::filesystem::exists(graph_fname)) {
+            logger->error("Failed to serialize graph to {}.", graph_fname);
+            std::exit(1);
+        }
 
+        {
+            std::filesystem::path swap_dir = utils::create_temp_dir("", "swap_col");
+            convert_to_row_diff(files, graph_fname, 100000000, 5, tmp_dir, swap_dir,
+                                static_cast<RowDiffStage>(0), out_path + ".row_count", false, coordinates);
+            convert_to_row_diff(files, graph_fname, 100000000, 5, tmp_dir, swap_dir,
+                                static_cast<RowDiffStage>(1), out_path + ".row_reduction", false, coordinates);
+            convert_to_row_diff(files, graph_fname, 100000000, 5, tmp_dir, swap_dir,
+                                static_cast<RowDiffStage>(2), out_path, false, coordinates);
+        }
+
+        auto annotator = std::make_unique<ColumnCompressed<>>(0);
         if (!annotator->merge_load(files)) {
             logger->error("Cannot load annotations");
             exit(1);
