@@ -632,7 +632,11 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
         return std::make_tuple(num_seeds, num_extensions, num_explored_nodes);
     }
 
-#if ! _PROTEIN_GRAPH
+#if _PROTEIN_GRAPH
+
+    throw std::runtime_error("Reverse complements not defined for amino acids");
+
+#endif
 
     auto fwd_seeds = forward_seeder.get_alignments();
     auto bwd_seeds = reverse_seeder.get_alignments();
@@ -751,12 +755,6 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
     }
 
     return std::make_tuple(num_seeds, num_extensions, num_explored_nodes);
-
-#else
-
-    throw std::runtime_error("Reverse complements not defined for amino acids");
-
-#endif
 }
 
 template class DBGAligner<>;
