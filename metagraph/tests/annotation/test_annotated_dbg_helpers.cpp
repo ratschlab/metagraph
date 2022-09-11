@@ -41,18 +41,6 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
     auto canonical = dynamic_pointer_cast<const CanonicalDBG>(graph);
     auto base_graph = canonical ? canonical->get_graph_ptr() : graph;
 
-    // remove the mask
-    if (const auto *c_dbg_succ = dynamic_cast<const DBGSuccinct*>(base_graph.get())) {
-        if (!canonical) {
-            dynamic_pointer_cast<DBGSuccinct>(graph)->reset_mask();
-        } else {
-            auto *dbg_succ = const_cast<DBGSuccinct*>(c_dbg_succ);
-            dbg_succ->reset_mask();
-            graph = std::make_shared<CanonicalDBG>(base_graph);
-            canonical = dynamic_pointer_cast<const CanonicalDBG>(graph);
-        }
-    }
-
     uint64_t max_index = base_graph->max_index();
 
     auto anno_graph = std::make_unique<AnnotatedDBG>(
@@ -104,7 +92,6 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
     if constexpr(std::is_same_v<Annotation, RowDiffColumnAnnotator>) {
         static_assert(std::is_same_v<Graph, DBGSuccinct>);
         assert(dynamic_cast<const DBGSuccinct*>(base_graph.get()));
-        assert(!dynamic_cast<const DBGSuccinct*>(base_graph.get())->get_mask());
 
         size_t num_columns = anno_graph->get_annotator().get_label_encoder().size();
         std::filesystem::path tmp_dir = utils::create_temp_dir("", "test_col");
