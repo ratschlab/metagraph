@@ -1,6 +1,6 @@
 #include "aligner_seeder_methods.hpp"
 
-#include "sdust.h"
+#include <sdust.h>
 
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/canonical_dbg.hpp"
