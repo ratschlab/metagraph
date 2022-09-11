@@ -184,6 +184,7 @@ TYPED_TEST(LabeledAlignerTest, SimpleTangleGraphCoords) {
     std::unordered_map<std::string, std::unordered_map<std::string, std::pair<std::string, int32_t>>> exp_alignments {{
         { std::string("CGAATGCAT"), {{ { std::string("C"), std::make_pair(std::string("GAATGCAT"), 1) }, // 1S8=
                                        { std::string("B"), std::make_pair(std::string("CGAATGCCT"), 0) }, // 7=1X1=
+                                       { std::string("A"), std::make_pair(std::string("TGCCT"), 0) } // 4S3=1X1=
                                      }} }
     }};
 
@@ -244,7 +245,9 @@ TYPED_TEST(LabeledAlignerTest, SimpleTangleGraphCoordsMiddle) {
     LabeledAligner<> aligner(anno_graph->get_graph(), config, anno_graph->get_annotator());
 
     std::unordered_map<std::string, std::unordered_map<std::string, std::pair<std::string, int32_t>>> exp_alignments {{
-        { std::string("CGAAAGCCT"), {{ { std::string("B"), std::make_pair(std::string("CGAATGCCT"), 0) }, // 4=1X4=
+        { std::string("CGAAAGCCT"), {{ { std::string("C"), std::make_pair(std::string("GAATGCAT"), 1) }, // 1S3=1X2=1X1=
+                                       { std::string("B"), std::make_pair(std::string("CGAATGCCT"), 0) }, // 4=1X4=
+                                       { std::string("A"), std::make_pair(std::string("GCCT"), 1) } // 5S4=
                                      }} }
     }};
 
@@ -302,6 +305,7 @@ TYPED_TEST(LabeledAlignerTest, SimpleTangleGraphCoordsCycle) {
 
     std::unordered_map<std::string, std::unordered_map<std::string, std::pair<std::string, int32_t>>> exp_alignments {{
         { std::string("ATGCGCAATGCG"), {{ { std::string("B"), std::make_pair(std::string("ATGCGCA"), 1) },
+                                          { std::string("A"), std::make_pair(std::string("GCAAT"), 0) },
                                      }} }
     }};
 
