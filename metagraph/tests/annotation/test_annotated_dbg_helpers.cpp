@@ -108,7 +108,8 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
 
         size_t num_columns = anno_graph->get_annotator().get_label_encoder().size();
         std::filesystem::path tmp_dir = utils::create_temp_dir("", "test_col");
-        std::string out_path = tmp_dir/"test_col";
+        auto out_fs_path = tmp_dir/"test_col";
+        std::string out_path = out_fs_path;
         anno_graph->get_annotator().serialize(out_path);
         std::vector<std::string> files { out_path + ColumnCompressed<>::kExtension };
         base_graph->serialize(out_path);
@@ -124,18 +125,12 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
 
         {
             std::filesystem::path swap_dir = utils::create_temp_dir("", "swap_col");
-            convert_to_row_diff(files, graph_fname, 100000000, 5, tmp_dir, swap_dir,
+            convert_to_row_diff(files, graph_fname, 1e9, 100, tmp_dir, swap_dir,
                                 static_cast<RowDiffStage>(0), out_path + ".row_count", false, coordinates);
-            convert_to_row_diff(files, graph_fname, 100000000, 5, tmp_dir, swap_dir,
+            convert_to_row_diff(files, graph_fname, 1e9, 100, tmp_dir, swap_dir,
                                 static_cast<RowDiffStage>(1), out_path + ".row_reduction", false, coordinates);
-            convert_to_row_diff(files, graph_fname, 100000000, 5, tmp_dir, swap_dir,
+            convert_to_row_diff(files, graph_fname, 1e9, 100, tmp_dir, swap_dir,
                                 static_cast<RowDiffStage>(2), out_path, false, coordinates);
-        }
-
-        auto annotator = std::make_unique<ColumnCompressed<>>(0);
-        if (!annotator->merge_load(files)) {
-            logger->error("Cannot load annotations");
-            exit(1);
         }
 
         const std::string anchors_file = graph_fname + kRowDiffAnchorExt;
@@ -149,15 +144,20 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
             std::exit(1);
         }
 
-        assert(annotator->num_labels() == num_columns);
-
+        std::unique_ptr<AnnotatedDBG::Annotator> annotator;
         if (coordinates) {
+            auto diff_annotator = std::make_unique<ColumnCompressed<>>(0);
+            if (!diff_annotator->merge_load(files)) {
+                logger->error("Cannot load annotations from {}", files[0]);
+                exit(1);
+            }
+            assert(diff_annotator->num_labels() == num_columns);
             std::vector<bit_vector_smart> delimiters;
             std::vector<sdsl::int_vector<>> column_values;
 
             typedef ColumnCoordAnnotator::binary_matrix_type CoordDiff;
-            auto coords_fname = utils::remove_suffix(files[0], annot::ColumnCompressed<>::kExtension)
-                                                            + annot::ColumnCompressed<>::kCoordExtension;
+            auto coords_fname = utils::remove_suffix(files[0], ColumnCompressed<>::kExtension)
+                                                            + ColumnCompressed<>::kCoordExtension;
             std::ifstream in(coords_fname, std::ios::binary);
             try {
                 CoordDiff::load_tuples(in, num_columns, [&](auto&& delims, auto&& values) {
@@ -172,39 +172,32 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
                 exit(1);
             }
 
-            auto row_diff = std::make_unique<CoordRowDiff>(
+            auto matrix = std::make_unique<CoordRowDiff>(
                 static_cast<const DBGSuccinct*>(base_graph.get()),
-                CoordDiff(std::move(*annotator->release_matrix()),
+                CoordDiff(std::move(*diff_annotator->release_matrix()),
                           std::move(delimiters), std::move(column_values))
             );
-            row_diff->load_anchor(anchors_file);
-            row_diff->load_fork_succ(fork_succ_file);
-            assert(row_diff->num_relations()
-                    == anno_graph->get_annotator().get_matrix().num_relations());
-            test_matrix(*row_diff,
-                        static_cast<const ColumnMajor&>(anno_graph->get_annotator().get_matrix()).data());
-            auto annotator = std::make_unique<RowDiffCoordAnnotator>(
-                std::move(row_diff),
+            annotator = std::make_unique<RowDiffCoordAnnotator>(
+                std::move(matrix),
                 anno_graph->get_annotator().get_label_encoder()
             );
-            return std::make_unique<AnnotatedDBG>(graph, std::move(annotator));
+
         } else {
-            auto row_diff = std::make_unique<RowDiffColumnAnnotator::binary_matrix_type>(
-                static_cast<const DBGSuccinct*>(base_graph.get()),
-                std::move(*annotator->release_matrix())
-            );
-            row_diff->load_anchor(anchors_file);
-            row_diff->load_fork_succ(fork_succ_file);
-            assert(row_diff->num_relations()
-                    == anno_graph->get_annotator().get_matrix().num_relations());
-            test_matrix(*row_diff,
-                        static_cast<const ColumnMajor&>(anno_graph->get_annotator().get_matrix()).data());
-            auto annotator = std::make_unique<RowDiffColumnAnnotator>(
-                std::move(row_diff),
-                anno_graph->get_annotator().get_label_encoder()
-            );
-            return std::make_unique<AnnotatedDBG>(graph, std::move(annotator));
+            auto rd_path = out_fs_path.replace_extension(RowDiffColumnAnnotator::kExtension);
+            annotator = std::make_unique<RowDiffColumnAnnotator>();
+            if (!annotator->load(rd_path)) {
+                logger->error("Cannot load annotations from {}", rd_path);
+                exit(1);
+            }
         }
+
+        IRowDiff &row_diff = const_cast<IRowDiff&>(dynamic_cast<const IRowDiff&>(
+            annotator->get_matrix()
+        ));
+        row_diff.set_graph(static_cast<const DBGSuccinct*>(base_graph.get()));
+        row_diff.load_anchor(anchors_file);
+        row_diff.load_fork_succ(fork_succ_file);
+        return std::make_unique<AnnotatedDBG>(graph, std::move(annotator));
     } else {
         throw std::runtime_error("Unsupported combination");
     }
