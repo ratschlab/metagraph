@@ -72,9 +72,7 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
                                    [](const auto &a) { return a.empty() || a.label_columns.empty(); }),
                     fwd_seeds.end());
     bwd_seeds.erase(std::remove_if(bwd_seeds.begin(), bwd_seeds.end(),
-                                   [](const auto &a) {
-                                       return a.empty() || a.label_columns.empty();
-                                   }),
+                                   [](const auto &a) { return a.empty() || a.label_columns.empty(); }),
                     bwd_seeds.end());
 
     if (fwd_seeds.empty() && bwd_seeds.empty())
