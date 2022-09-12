@@ -5,6 +5,7 @@
 #include "common/logger.hpp"
 #include "common/algorithms.hpp"
 #include "graph/representation/rc_dbg.hpp"
+#include "graph/representation/canonical_dbg.hpp"
 #include "aligner_labeled.hpp"
 
 namespace mtg {
@@ -12,6 +13,11 @@ namespace graph {
 namespace align {
 
 using mtg::common::logger;
+
+const DBGSuccinct* get_dbg_succ(const DeBruijnGraph &graph) {
+    const auto *canonical = dynamic_cast<const CanonicalDBG*>(&graph);
+    return dynamic_cast<const DBGSuccinct*>(&(canonical ? canonical->get_graph() : graph));
+}
 
 AlignmentResults IDBGAligner::align(std::string_view query) const {
     AlignmentResults result;
@@ -30,6 +36,9 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
       : graph_(graph), config_(config) {
     if (!config_.min_seed_length)
         config_.min_seed_length = graph_.get_k();
+
+    if (config_.min_seed_length < graph.get_k() && !get_dbg_succ(graph))
+        config_.min_seed_length = graph.get_k();
 
     if (!config_.max_seed_length)
         config_.max_seed_length = graph_.get_k();
@@ -203,9 +212,13 @@ auto DBGAligner<Seeder, Extender, AlignmentCompare>
             nodes.resize(this_query.size() - graph_.get_k() + 1);
         }
 
-        auto seeder = std::make_shared<Seeder>(graph_, this_query, false,
-                                               std::vector<node_index>(nodes), config_);
-        std::shared_ptr<Seeder> seeder_rc;
+        std::shared_ptr<ISeeder> seeder
+            = std::make_shared<Seeder>(graph_, this_query, false,
+                                       std::vector<node_index>(nodes), config_);
+        if (this_query.size() * config_.min_exact_match > seeder->get_num_matches())
+            seeder = std::make_shared<ManualMatchingSeeder>(std::vector<Seed>{}, 0, config_);
+
+        std::shared_ptr<ISeeder> seeder_rc;
         std::vector<node_index> nodes_rc;
 
 #if ! _PROTEIN_GRAPH
@@ -224,6 +237,8 @@ auto DBGAligner<Seeder, Extender, AlignmentCompare>
 
             seeder_rc = std::make_shared<Seeder>(graph_, reverse, true,
                                                  std::move(nodes_rc), config_);
+            if (reverse.size() * config_.min_exact_match > seeder_rc->get_num_matches())
+                seeder_rc = std::make_shared<ManualMatchingSeeder>(std::vector<Seed>{}, 0, config_);
         }
 #endif
         result.emplace_back(std::move(seeder), std::move(seeder_rc));
@@ -289,7 +304,18 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
             align_core(*seeder, extender, add_alignment, get_min_path_score, false);
         }
 #else
-        align_core(*seeder, extender, add_alignment, get_min_path_score, false);
+        if (config_.chain_alignments) {
+            std::string_view reverse = paths[i].get_query(true);
+            Extender extender_rc(*this, reverse);
+            auto [seeds, extensions, explored_nodes] =
+                align_both_directions(this_query, reverse, *seeder, *seeder_rc,
+                                      extender, extender_rc,
+                                      add_alignment, get_min_path_score);
+
+            num_seeds += seeds;
+        } else {
+            align_core(*seeder, extender, add_alignment, get_min_path_score, false);
+        }
 #endif
 
         num_explored_nodes += extender.num_explored_nodes();
@@ -381,6 +407,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
     for (size_t i = 1; i < chain.size(); ++i) {
         assert(chain[i].first.is_valid(graph_, &config_));
         coord_offset += chain[i].second;
+        assert(coord_offset > 0);
         if (!align_connect(graph_, config_, cur, chain[i].first, coord_offset,
                            extender, partial_alignments)) {
             if (AlignmentCompare()(best, partial_alignments.back()))
@@ -441,19 +468,25 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
     assert(!best.empty());
 
     if (best.get_end_clipping()) {
+        DEBUG_LOG("Extending back");
         auto extensions = extender.get_extensions(best, config_.ninf, true);
         if (extensions.size()
                 && extensions[0].get_end_clipping() < best.get_end_clipping()
                 && extensions[0].get_score() > best.get_score()) {
             std::swap(best, extensions[0]);
         }
+        DEBUG_LOG("done");
     }
 
     assert(!best.empty());
     best.trim_offset();
     assert(best.is_valid(graph_, &config_));
 
+    // for now, backwards alignment not supported for amino acids
+#if ! _PROTEIN_GRAPH
+
     if (best.get_clipping()) {
+        DEBUG_LOG("Extending front");
         RCDBG rc_dbg(std::shared_ptr<const DeBruijnGraph>(
                         std::shared_ptr<const DeBruijnGraph>(), &graph_));
         const DeBruijnGraph &rc_graph = graph_.get_mode() != DeBruijnGraph::CANONICAL
@@ -475,7 +508,16 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
                     std::swap(best, extensions[0]);
             }
         }
+        DEBUG_LOG("done");
     }
+
+#else
+
+    std::ignore = query;
+    std::ignore = query_rc;
+    std::ignore = num_explored_nodes;
+
+#endif
 
     assert(!best.empty());
     callback(std::move(best));
@@ -486,8 +528,6 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
     }
 }
 
-// there are no reverse-complement for protein sequences
-#if ! _PROTEIN_GRAPH
 template <class Seeder, class Extender, class AlignmentCompare>
 std::tuple<size_t, size_t, size_t>
 DBGAligner<Seeder, Extender, AlignmentCompare>
@@ -504,44 +544,59 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
     size_t num_explored_nodes = 0;
 
     if (config_.chain_alignments) {
-        auto fwd_seeds = forward_seeder.get_seeds();
-        auto bwd_seeds = reverse_seeder.get_seeds();
-        if (fwd_seeds.empty() && bwd_seeds.empty())
-            return std::make_tuple(num_seeds, num_extensions, num_explored_nodes);
-
-        bool can_chain = false;
-        for (const Seed &seed : fwd_seeds) {
-            if (seed.label_coordinates.size()) {
-                can_chain = true;
-                break;
-            }
-        }
-
-        if (!can_chain) {
-            for (const Seed &seed : bwd_seeds) {
-                if (seed.label_coordinates.size()) {
-                    can_chain = true;
-                    break;
-                }
-            }
-        }
-
-        if (!can_chain) {
+        if (!has_coordinates()) {
             logger->error("Chaining only supported for seeds with coordinates. Skipping seed chaining.");
             exit(1);
         }
 
+        auto fwd_seeds = forward_seeder.get_seeds();
+
+#if ! _PROTEIN_GRAPH
+        auto bwd_seeds = reverse_seeder.get_seeds();
+#else
+        std::vector<Seed> bwd_seeds;
+        std::ignore = reverse_seeder;
+#endif
+
+        if (fwd_seeds.empty() && bwd_seeds.empty())
+            return std::make_tuple(num_seeds, num_extensions, num_explored_nodes);
+
         AlignmentAggregator<AlignmentCompare> aggregator(config_);
+        tsl::hopscotch_set<Alignment::Column> all_columns;
+        for (const auto &seed : fwd_seeds) {
+            all_columns.insert(seed.label_columns.begin(), seed.label_columns.end());
+        }
+        for (const auto &seed : bwd_seeds) {
+            all_columns.insert(seed.label_columns.begin(), seed.label_columns.end());
+        }
 
         try {
             tsl::hopscotch_set<Alignment::Column> finished_columns;
             size_t this_num_explored;
             std::tie(num_seeds, this_num_explored) = call_seed_chains_both_strands(
-                forward, reverse, graph_.get_k() - 1, config_,
-                std::move(fwd_seeds), std::move(bwd_seeds),
+                *this, forward, reverse, config_, std::move(fwd_seeds), std::move(bwd_seeds),
                 [&](Chain&& chain, score_t score) {
-                    std::ignore = score;
-                    bool any_added = false;
+                    if (config_.num_alternative_paths <= 1
+                            && finished_columns.size() == all_columns.size()) {
+                        throw std::bad_function_call();
+                    }
+
+                    double exact_match_fraction
+                        = static_cast<double>(get_num_char_matches_in_seeds(chain.begin(), chain.end()))
+                            / forward.size();
+
+                    logger->trace("Chain: score: {}; exact match fraction: {}",
+                                  score, exact_match_fraction);
+
+#ifndef NDEBUG
+                    for (const auto &[chain, dist] : chain) {
+                        DEBUG_LOG("\t{}\tdist: {}", chain, dist);
+                    }
+#endif
+
+                    if (exact_match_fraction < config_.min_exact_match)
+                        throw std::bad_function_call();
+
                     extend_chain(chain[0].first.get_orientation() ? reverse : forward,
                                  chain[0].first.get_orientation() ? forward : reverse,
                                  chain[0].first.get_orientation()
@@ -551,17 +606,9 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
                                  [&](Alignment&& aln) {
                         auto cur_columns = aln.label_columns;
                         if (!aggregator.add_alignment(std::move(aln))) {
-                            if (cur_columns.size()) {
-                                any_added = true;
-                                finished_columns.insert(cur_columns.begin(), cur_columns.end());
-                            }
-                        } else {
-                            any_added = true;
+                            finished_columns.insert(cur_columns.begin(), cur_columns.end());
                         }
                     });
-
-                    if (!any_added)
-                        throw std::bad_function_call();
                 },
                 [&](Alignment::Column column) { return finished_columns.count(column); }
             );
@@ -584,6 +631,12 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
 
         return std::make_tuple(num_seeds, num_extensions, num_explored_nodes);
     }
+
+#if _PROTEIN_GRAPH
+
+    throw std::runtime_error("Reverse complements not defined for amino acids");
+
+#endif
 
     auto fwd_seeds = forward_seeder.get_alignments();
     auto bwd_seeds = reverse_seeder.get_alignments();
@@ -703,10 +756,9 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
 
     return std::make_tuple(num_seeds, num_extensions, num_explored_nodes);
 }
-#endif
 
 template class DBGAligner<>;
-template class DBGAligner<SuffixSeeder<UniMEMSeeder>, LabeledExtender>;
+template class DBGAligner<SuffixSeeder<ExactSeeder>, LabeledExtender>;
 
 } // namespace align
 } // namespace graph

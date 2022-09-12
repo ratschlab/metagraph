@@ -51,7 +51,8 @@ class LabeledAlignerTest : public ::testing::Test {};
 typedef ::testing::Types<std::pair<DBGHashFast, annot::ColumnCompressed<>>,
                          std::pair<DBGSuccinct, annot::ColumnCompressed<>>,
                          std::pair<DBGHashFast, annot::RowFlatAnnotator>,
-                         std::pair<DBGSuccinct, annot::RowFlatAnnotator>> FewGraphAnnotationPairTypes;
+                         std::pair<DBGSuccinct, annot::RowFlatAnnotator>,
+                         std::pair<DBGSuccinct, annot::RowDiffColumnAnnotator>> FewGraphAnnotationPairTypes;
 
 TYPED_TEST_SUITE(LabeledAlignerTest, FewGraphAnnotationPairTypes);
 
@@ -143,6 +144,190 @@ TYPED_TEST(LabeledAlignerTest, SimpleTangleGraph) {
                     found = true;
                     break;
                 }
+            }
+            EXPECT_TRUE(found) << alignment;
+        }
+    }
+}
+
+TYPED_TEST(LabeledAlignerTest, SimpleTangleGraphCoords) {
+    // TODO: for now, not implemented for other annotators
+    if constexpr(!std::is_same_v<typename TypeParam::second_type, annot::ColumnCompressed<>>
+                    && !std::is_same_v<typename TypeParam::second_type, annot::RowDiffColumnAnnotator>) {
+        return;
+    }
+
+    size_t k = 3;
+    /*  B                  AB  AB
+       CGA                 GCC-CCT
+          \ BC  BC  BC ABC/
+           GAA-AAT-ATG-TGC
+         C/               \  C   C
+       GGA                 GCA-CAT
+    */
+    const std::vector<std::string> sequences {
+        "TGCCT",
+        "CGAATGCCT",
+        "GGAATGCAT"
+    };
+    const std::vector<std::string> labels { "A", "B", "C" };
+
+    auto anno_graph = build_anno_graph<typename TypeParam::first_type,
+                                       typename TypeParam::second_type>(
+        k, sequences, labels, DeBruijnGraph::BASIC, true
+    );
+
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -1);
+    LabeledAligner<> aligner(anno_graph->get_graph(), config, anno_graph->get_annotator());
+
+    std::unordered_map<std::string, std::unordered_map<std::string, std::pair<std::string, int32_t>>> exp_alignments {{
+        { std::string("CGAATGCAT"), {{ { std::string("C"), std::make_pair(std::string("GAATGCAT"), 1) }, // 1S8=
+                                       { std::string("B"), std::make_pair(std::string("CGAATGCCT"), 0) }, // 7=1X1=
+                                       { std::string("A"), std::make_pair(std::string("TGCCT"), 0) } // 4S3=1X1=
+                                     }} }
+    }};
+
+    for (const auto &[query, labels] : exp_alignments) {
+        auto alignments = aligner.align(query);
+        EXPECT_EQ(labels.size(), alignments.size()) << query;
+
+        for (const auto &alignment : alignments) {
+            bool found = false;
+            ASSERT_EQ(alignment.label_columns.size(), alignment.label_coordinates.size());
+            size_t label_index = 0;
+            for (const auto &label : get_alignment_labels(*anno_graph, alignment)) {
+                ASSERT_GT(alignment.label_coordinates[label_index].size(), 0);
+                auto find = labels.find(label);
+                ASSERT_TRUE(find != labels.end()) << label;
+                if (alignment.get_sequence() == find->second.first) {
+                    found = true;
+                    EXPECT_EQ(find->second.second,
+                              alignment.label_coordinates[label_index][0]);
+                    break;
+                }
+                ++label_index;
+            }
+            EXPECT_TRUE(found) << alignment;
+        }
+    }
+}
+
+TYPED_TEST(LabeledAlignerTest, SimpleTangleGraphCoordsMiddle) {
+    // TODO: for now, not implemented for other annotators
+    if constexpr(!std::is_same_v<typename TypeParam::second_type, annot::ColumnCompressed<>>
+                    && !std::is_same_v<typename TypeParam::second_type, annot::RowDiffColumnAnnotator>) {
+        return;
+    }
+
+    size_t k = 3;
+    /*  B                  AB  AB
+       CGA                 GCC-CCT
+          \ BC  BC  BC ABC/
+           GAA-AAT-ATG-TGC
+         C/               \  C   C
+       GGA                 GCA-CAT
+    */
+    const std::vector<std::string> sequences {
+        "TGCCT",
+        "CGAATGCCT",
+        "GGAATGCAT"
+    };
+    const std::vector<std::string> labels { "A", "B", "C" };
+
+    auto anno_graph = build_anno_graph<typename TypeParam::first_type,
+                                       typename TypeParam::second_type>(
+        k, sequences, labels, DeBruijnGraph::BASIC, true
+    );
+
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -1);
+    LabeledAligner<> aligner(anno_graph->get_graph(), config, anno_graph->get_annotator());
+
+    std::unordered_map<std::string, std::unordered_map<std::string, std::pair<std::string, int32_t>>> exp_alignments {{
+        { std::string("CGAAAGCCT"), {{ { std::string("C"), std::make_pair(std::string("GAATGCAT"), 1) }, // 1S3=1X2=1X1=
+                                       { std::string("B"), std::make_pair(std::string("CGAATGCCT"), 0) }, // 4=1X4=
+                                       { std::string("A"), std::make_pair(std::string("GCCT"), 1) } // 5S4=
+                                     }} }
+    }};
+
+    for (const auto &[query, labels] : exp_alignments) {
+        auto alignments = aligner.align(query);
+        EXPECT_EQ(labels.size(), alignments.size()) << query;
+
+        for (const auto &alignment : alignments) {
+            bool found = false;
+            ASSERT_EQ(alignment.label_columns.size(), alignment.label_coordinates.size());
+            size_t label_index = 0;
+            for (const auto &label : get_alignment_labels(*anno_graph, alignment)) {
+                ASSERT_GT(alignment.label_coordinates[label_index].size(), 0);
+                auto find = labels.find(label);
+                ASSERT_TRUE(find != labels.end()) << label;
+                if (alignment.get_sequence() == find->second.first) {
+                    found = true;
+                    EXPECT_EQ(find->second.second,
+                              alignment.label_coordinates[label_index][0]);
+                    break;
+                }
+                ++label_index;
+            }
+            EXPECT_TRUE(found) << alignment;
+        }
+    }
+}
+
+TYPED_TEST(LabeledAlignerTest, SimpleTangleGraphCoordsCycle) {
+    // TODO: for now, not implemented for other annotators
+    if constexpr(!std::is_same_v<typename TypeParam::second_type, annot::ColumnCompressed<>>
+                    && !std::is_same_v<typename TypeParam::second_type, annot::RowDiffColumnAnnotator>) {
+        return;
+    }
+
+    size_t k = 4;
+    /*
+        A    A    B    B    B    B    B
+        GCAA-CAAT-AATG-ATGC-TGCG-GCGC-CGCA
+    */
+    const std::vector<std::string> sequences {
+        "GCAAT",
+        "AATGCGCA"
+    };
+    const std::vector<std::string> labels { "A", "B" };
+
+    auto anno_graph = build_anno_graph<typename TypeParam::first_type,
+                                       typename TypeParam::second_type>(
+        k, sequences, labels, DeBruijnGraph::BASIC, true
+    );
+
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -1);
+    LabeledAligner<> aligner(anno_graph->get_graph(), config, anno_graph->get_annotator());
+
+    std::unordered_map<std::string, std::unordered_map<std::string, std::pair<std::string, int32_t>>> exp_alignments {{
+        { std::string("ATGCGCAATGCG"), {{ { std::string("B"), std::make_pair(std::string("ATGCGCA"), 1) },
+                                          { std::string("A"), std::make_pair(std::string("GCAAT"), 0) },
+                                     }} }
+    }};
+
+    for (const auto &[query, labels] : exp_alignments) {
+        auto alignments = aligner.align(query);
+        EXPECT_EQ(labels.size(), alignments.size()) << query;
+
+        for (const auto &alignment : alignments) {
+            bool found = false;
+            ASSERT_EQ(alignment.label_columns.size(), alignment.label_coordinates.size());
+            size_t label_index = 0;
+            for (const auto &label : get_alignment_labels(*anno_graph, alignment)) {
+                ASSERT_GT(alignment.label_coordinates[label_index].size(), 0);
+                auto find = labels.find(label);
+                ASSERT_TRUE(find != labels.end()) << label;
+                if (alignment.get_sequence() == find->second.first) {
+                    found = true;
+                    EXPECT_EQ(find->second.second,
+                              alignment.label_coordinates[label_index][0]);
+                    break;
+                }
+                ++label_index;
             }
             EXPECT_TRUE(found) << alignment;
         }
