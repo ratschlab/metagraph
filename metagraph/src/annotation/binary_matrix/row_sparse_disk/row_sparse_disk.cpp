@@ -92,9 +92,11 @@ void RowSparseDisk::serialize(const std::function<void(binmat::BinaryMatrix::Row
                               uint64_t num_cols,
                               uint64_t num_set_bits,
                               uint64_t num_rows) {
+    // std::ios::ate needed because labels are serialized before
+    // std::ios::in needed for tellp to return absolute file position
     std::ofstream outstream(filename,
                             std::ios::binary | std::ios::ate
-                                    | std::ios::in); // std::ios_base::in needed ...
+                                    | std::ios::in);
 
     if (!outstream.good())
         throw std::ofstream::failure("Cannot write to file " + filename);
