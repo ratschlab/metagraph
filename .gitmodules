@@ -62,6 +62,3 @@
 [submodule "metagraph/external-libraries/Priority-Deque"]
 	path = metagraph/external-libraries/Priority-Deque
 	url = https://github.com/nmcclatchey/Priority-Deque
-[submodule "metagraph/external-libraries/sdust"]
-	path = metagraph/external-libraries/sdust
-	url = https://github.com/lh3/sdust

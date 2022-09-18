@@ -114,16 +114,11 @@ class LabeledExtender : public DefaultColumnExtender {
     Columns label_diff_;
 };
 
-class ILabeledAligner {
-  public:
-    virtual AnnotationBuffer& get_annotation_buffer() const = 0;
-    virtual ~ILabeledAligner() {}
-};
 
-template <class Seeder = SuffixSeeder<ExactSeeder>,
+template <class Seeder = SuffixSeeder<UniMEMSeeder>,
           class Extender = LabeledExtender,
           class AlignmentCompare = LocalAlignmentLess>
-class LabeledAligner : public DBGAligner<Seeder, Extender, AlignmentCompare>, public ILabeledAligner {
+class LabeledAligner : public DBGAligner<Seeder, Extender, AlignmentCompare> {
     friend class LabeledExtender;
   public:
     typedef AnnotatedDBG::Annotator Annotator;
@@ -134,14 +129,6 @@ class LabeledAligner : public DBGAligner<Seeder, Extender, AlignmentCompare>, pu
 
     virtual ~LabeledAligner();
 
-    virtual AnnotationBuffer& get_annotation_buffer() const override final {
-        return annotation_buffer_;
-    }
-
-    virtual bool has_coordinates() const override final {
-        return annotation_buffer_.has_coordinates();
-    }
-
   private:
     mutable AnnotationBuffer annotation_buffer_;
     size_t max_seed_length_;
@@ -149,7 +136,7 @@ class LabeledAligner : public DBGAligner<Seeder, Extender, AlignmentCompare>, pu
     typedef typename DBGAligner<Seeder, Extender, AlignmentCompare>::BatchSeeders BatchSeeders;
     BatchSeeders
     virtual build_seeders(const std::vector<IDBGAligner::Query> &seq_batch,
-                          const std::vector<AlignmentResults> &wrapped_seqs) const override final;
+                          const std::vector<AlignmentResults> &wrapped_seqs) const override;
 
     // helper for the build_seeders method
     size_t filter_seeds(std::vector<Seed> &seeds) const;

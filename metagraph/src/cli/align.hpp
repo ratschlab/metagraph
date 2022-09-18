@@ -6,21 +6,16 @@
 namespace mtg {
 
 namespace graph {
-
-class DeBruijnGraph;
-
 namespace align {
 struct DBGAlignerConfig;
 } // namespace align
-
 } // namespace graph
 
 namespace cli {
 
 class Config;
 
-graph::align::DBGAlignerConfig initialize_aligner_config(const Config &config,
-                                                         const graph::DeBruijnGraph &graph);
+graph::align::DBGAlignerConfig initialize_aligner_config(const Config &config);
 
 int align_to_graph(Config *config);
 

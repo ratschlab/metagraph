@@ -1,7 +1,5 @@
 #include "aligner_seeder_methods.hpp"
 
-#include "sdust.h"
-
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "common/logger.hpp"
@@ -16,20 +14,6 @@ namespace align {
 using mtg::common::logger;
 
 typedef Alignment::score_t score_t;
-
-
-#if ! _PROTEIN_GRAPH
-inline bool is_low_complexity(std::string_view s, int T = 20, int W = 64) {
-    int n;
-    std::unique_ptr<uint64_t> r { sdust(0, (const uint8_t*)s.data(), s.size(), T, W, &n) };
-    return n > 0;
-}
-#else
-inline bool is_low_complexity(std::string_view, int = 20, int = 64) {
-    // TODO: implement a checker here
-    return false;
-}
-#endif
 
 ExactSeeder::ExactSeeder(const DeBruijnGraph &graph,
                          std::string_view query,
@@ -77,12 +61,9 @@ auto ExactSeeder::get_seeds() const -> std::vector<Seed> {
     for (size_t i = 0; i < query_nodes_.size(); ++i, --end_clipping) {
         if (query_nodes_[i] != DeBruijnGraph::npos) {
             assert(i + k <= query_.size());
-            std::string_view query_window = query_.substr(i, k);
-            if (!config_.seed_complexity_filter || !is_low_complexity(query_window)) {
-                seeds.emplace_back(query_window,
-                                   std::vector<node_index>{ query_nodes_[i] },
-                                   orientation_, 0, i, end_clipping);
-            }
+            seeds.emplace_back(query_.substr(i, k),
+                               std::vector<node_index>{ query_nodes_[i] },
+                               orientation_, 0, i, end_clipping);
         }
     }
 
@@ -220,11 +201,6 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
         size_t seed_length = 0;
         std::vector<node_index> alt_nodes;
 
-        if (this->config_.seed_complexity_filter &&
-                is_low_complexity(this->query_.substr(i, min_seed_length[i]))) {
-            continue;
-        }
-
         dbg_succ.call_nodes_with_suffix_matching_longest_prefix(
             this->query_.substr(i, max_seed_length),
             [&](node_index alt_node, size_t len) {
@@ -292,12 +268,8 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
             assert(seed_length < this->config_.min_seed_length
                 || j < min_seed_length.size());
 
-            if (seed_length < this->config_.min_seed_length
-                    || seed_length < min_seed_length[j]
-                    || (this->config_.seed_complexity_filter
-                            && is_low_complexity(this->query_.substr(j, seed_length)))) {
+            if (seed_length < this->config_.min_seed_length || seed_length < min_seed_length[j])
                 continue;
-            }
 
             // e.g., matched: ***ATG, want ATG***
             suffix_to_prefix(

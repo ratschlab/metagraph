@@ -1348,18 +1348,13 @@ TYPED_TEST(DBGAlignerTest, align_low_similarity3) {
     std::string query =     "AAAAAAAAAAAAAAAAAAAAAAAAAAACGCCAAAAAGGGGGAATAGGGGGGGGGGAACCCCAACACCGGTATGTTTTTTTGTGTGTGGGGGATTTTTTTC";
 
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-    for (bool seed_complexity_filter : { false, true }) {
-        DBGAlignerConfig config;
-        config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
-        config.seed_complexity_filter = seed_complexity_filter;
-        DBGAligner<> aligner(*graph, config);
-        auto paths = aligner.align(query);
-#if ! _PROTEIN_GRAPH
-        EXPECT_EQ(seed_complexity_filter, paths.empty());
-#else
-        EXPECT_FALSE(paths.empty());
-#endif
-    }
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
+    DBGAligner<> aligner(*graph, config);
+    auto paths = aligner.align(query);
+
+    ASSERT_EQ(1ull, paths.size());
+    auto path = paths[0];
 }
 
 TYPED_TEST(DBGAlignerTest, align_low_similarity4) {

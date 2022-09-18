@@ -22,7 +22,6 @@
 #include "binary_matrix/row_vector/vector_row_binmat.hpp"
 #include "binary_matrix/multi_brwt/brwt_builders.hpp"
 #include "binary_matrix/multi_brwt/clustering.hpp"
-#include "int_matrix/rank_extended/tuple_csc_matrix.hpp"
 #include "representation/annotation_matrix/static_annotators_def.hpp"
 #include "representation/column_compressed/annotate_column_compressed.hpp"
 #include "representation/row_compressed/annotate_row_compressed.hpp"
@@ -38,8 +37,6 @@ using mtg::common::logger;
 namespace fs = std::filesystem;
 
 typedef LabelEncoder<std::string> LEncoder;
-typedef matrix::TupleCSCMatrix<binmat::ColumnMajor> TupleCSC;
-typedef matrix::TupleCSCMatrix<binmat::BRWT> TupleBRWT;
 
 const size_t kNumRowsInBlock = 50'000;
 const uint64_t ROW_DIFF_BUFFER_BYTES = 8'000'000;
@@ -1306,67 +1303,6 @@ void wrap_in_row_diff(MultiLabelEncoded<std::string> &&anno,
     anno.get_matrix().serialize(f);
     f.close();
 }
-
-template <class Annotator>
-StaticBinRelAnnotator<matrix::TupleCSCMatrix<typename Annotator::binary_matrix_type>, std::string>
-load_coords(Annotator&& anno, const std::vector<std::string> &files) {
-    std::vector<bit_vector_smart> delimiters(anno.num_labels());
-    std::vector<sdsl::int_vector<>> column_values(anno.num_labels());
-
-    #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
-    for (size_t i = 0; i < files.size(); ++i) {
-        auto label_encoder = ColumnCompressed<>::load_label_encoder(files[i]);
-
-        auto coords_fname = utils::remove_suffix(files[i], ColumnCompressed<>::kExtension)
-                                                        + ColumnCompressed<>::kCoordExtension;
-        std::ifstream in(coords_fname, std::ios::binary);
-        size_t j = 0;
-        try {
-            TupleCSC::load_tuples(in, label_encoder.size(), [&](auto&& delims, auto&& values) {
-                size_t idx;
-                try {
-                    idx = anno.get_label_encoder().encode(label_encoder.decode(j));
-                } catch (...) {
-                    logger->error("Label '{}' from {} is missing in the target annotator",
-                                  label_encoder.decode(j), files[i]);
-                    exit(1);
-                }
-                if (delimiters[idx].size()) {
-                    logger->error("Merging coordinate annotations with overlapping"
-                                  " labels is not implemented");
-                    exit(1);
-                }
-                delimiters[idx] = std::move(delims);
-                column_values[idx] = std::move(values);
-                j++;
-            });
-        } catch (const std::exception &e) {
-            logger->error("Couldn't load coordinates from {}\nException: {}", coords_fname, e.what());
-            exit(1);
-        } catch (...) {
-            logger->error("Couldn't load coordinates from {}", coords_fname);
-            exit(1);
-        }
-        assert(j == label_encoder.size());
-    }
-
-    auto label_encoder = anno.get_label_encoder();
-
-    return StaticBinRelAnnotator<matrix::TupleCSCMatrix<typename Annotator::binary_matrix_type>, std::string>(
-            std::make_unique<matrix::TupleCSCMatrix<typename Annotator::binary_matrix_type>>(
-                    std::move(*anno.release_matrix()),
-                    std::move(delimiters),
-                    std::move(column_values)),
-            std::move(label_encoder));
-}
-
-template
-StaticBinRelAnnotator<TupleCSC, std::string>
-load_coords<ColumnCompressed<>>(ColumnCompressed<>&&, const std::vector<std::string> &);
-
-template
-StaticBinRelAnnotator<TupleBRWT, std::string>
-load_coords<MultiBRWTAnnotator>(MultiBRWTAnnotator&&, const std::vector<std::string> &);
 
 } // namespace annot
 } // namespace mtg
