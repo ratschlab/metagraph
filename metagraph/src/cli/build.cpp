@@ -361,13 +361,15 @@ int build_graph(Config *config) {
             logger->warn("Node ranges for k-mer suffixes longer than {} cannot be indexed",
                          static_cast<int>(63 / log2(dbg_succ->get_boss().alph_size - 1)));
 
-        } else if (suffix_length) {
+        } else {
             logger->trace("Index all node ranges for suffixes of length {} in {:.2f} MB",
                           suffix_length,
                           std::pow(dbg_succ->get_boss().alph_size - 1, suffix_length)
                                 * 2. * sizeof(uint64_t) * 1e-6);
             timer.reset();
-            dbg_succ->get_boss().index_suffix_ranges(suffix_length);
+            dbg_succ->get_boss().index_suffix_ranges(suffix_length, get_num_threads());
+            logger->trace("Compressed node ranges to approx. {:.2f} MB",
+                          dbg_succ->get_boss().get_suffix_ranges_index_size() / 8e6);
 
             logger->trace("Indexing of node ranges took {} sec", timer.elapsed());
         }
@@ -445,13 +447,15 @@ int concatenate_graph_chunks(Config *config) {
                 logger->warn("Node ranges for k-mer suffixes longer than {} cannot be indexed",
                              static_cast<int>(63 / log2(dbg_succ->get_boss().alph_size - 1)));
 
-            } else if (suffix_length) {
+            } else {
                 logger->trace("Index all node ranges for suffixes of length {} in {:.2f} MB",
                               suffix_length,
                               std::pow(dbg_succ->get_boss().alph_size - 1, suffix_length)
                                     * 2. * sizeof(uint64_t) * 1e-6);
                 timer.reset();
-                dbg_succ->get_boss().index_suffix_ranges(suffix_length);
+                dbg_succ->get_boss().index_suffix_ranges(suffix_length, get_num_threads());
+                logger->trace("Compressed node ranges to approx. {:.2f} MB",
+                              dbg_succ->get_boss().get_suffix_ranges_index_size() / 8e6);
 
                 logger->trace("Indexing of node ranges took {} sec", timer.elapsed());
             }

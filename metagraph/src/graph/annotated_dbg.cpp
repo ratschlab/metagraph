@@ -77,7 +77,7 @@ void AnnotatedSequenceGraph
     for (size_t t = 0; t < data.size(); ++t) {
         // if the labels are the same, write indexes to the same array
         auto &indices = data[t].second == data[last].second ? ids[last] : ids[t];
-        if (!indices.size())
+        if (!indices.capacity())
             indices.reserve(data[t].first.size());
 
         graph_->map_to_nodes(data[t].first, [&](node_index i) {
@@ -192,22 +192,18 @@ void AnnotatedDBG::annotate_kmer_coords(
             continue;
 
         // if the labels are the same, write indexes to the same array
-        bool is_same = labels == std::get<1>(data[last]);
-        auto &indices = is_same ? ids[last] : ids[t];
-        auto &coordinates = is_same ? coords[last] : coords[t];
+        if (labels != std::get<1>(data[last]))
+            last = t;
 
-        if (!is_same)
-            last = t + 1;
-
-        if (!indices.size()) {
-            indices.reserve(sequence.size() - dbg_.get_k() + 1);
-            coordinates.reserve(sequence.size() - dbg_.get_k() + 1);
+        if (!ids[last].size()) {
+            ids[last].reserve(sequence.size() - dbg_.get_k() + 1);
+            coords[last].reserve(sequence.size() - dbg_.get_k() + 1);
         }
 
         graph_->map_to_nodes(sequence, [&](node_index i) {
             if (i > 0) {
-                indices.push_back(graph_to_anno_index(i));
-                coordinates.emplace_back(graph_to_anno_index(i), coord);
+                ids[last].push_back(graph_to_anno_index(i));
+                coords[last].emplace_back(graph_to_anno_index(i), coord);
             }
             coord++;
         });
@@ -216,13 +212,11 @@ void AnnotatedDBG::annotate_kmer_coords(
     std::lock_guard<std::mutex> lock(mutex_);
 
     for (size_t t = 0; t < data.size(); ++t) {
-        if (!ids[t].size())
-            continue;
-
-        const auto &labels = std::get<1>(data[t]);
-
-        annotator_->add_labels(ids[t], labels);
-        annotator_->add_label_coords(coords[t], labels);
+        if (ids[t].size()) {
+            const auto &labels = std::get<1>(data[t]);
+            annotator_->add_labels(ids[t], labels);
+            annotator_->add_label_coords(coords[t], labels);
+        }
     }
 }
 

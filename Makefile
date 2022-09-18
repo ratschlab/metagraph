@@ -50,7 +50,7 @@ ifeq ($(env), docker)
  	$(shell mkdir -p $(BUILD_DIR_HOST_DOCKER) $(BUILD_DIR_STATIC_HOST_DOCKER) )
 	EXEC_CMD := $(DOCKER_BASE_CMD) bash -c
 else
-	EXEC_CMD := bash -l -c
+	EXEC_CMD := bash -c
 endif
 
 all: update build test

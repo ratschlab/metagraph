@@ -13,12 +13,16 @@
 #include "annotation/binary_matrix/row_vector/unique_row_binmat.hpp"
 #include "annotation/binary_matrix/row_sparse/row_sparse.hpp"
 #include "annotation/binary_matrix/rainbowfish/rainbow.hpp"
+#include "annotation/binary_matrix/row_diff/row_diff.hpp"
+#include "annotation/int_matrix/row_diff/tuple_row_diff.hpp"
+#include "annotation/int_matrix/rank_extended/tuple_csc_matrix.hpp"
 #include "common/vectors/bitmap_mergers.hpp"
 
 
 namespace mtg {
 
 using namespace mtg::annot::binmat;
+using namespace mtg::annot::matrix;
 
 namespace annot {
 using CallColumn = std::function<void(std::unique_ptr<bit_vector>&&)>;
@@ -356,6 +360,8 @@ template void test_matrix<RowSparse>(const RowSparse&, const BitVectorPtrArray &
 template void test_matrix<UniqueRowBinmat>(const UniqueRowBinmat&, const BitVectorPtrArray &);
 template void test_matrix<Rainbow<BRWT>>(const Rainbow<BRWT>&, const BitVectorPtrArray &);
 template void test_matrix<Rainbowfish>(const Rainbowfish&, const BitVectorPtrArray &);
+template void test_matrix<RowDiff<ColumnMajor>>(const RowDiff<ColumnMajor>&, const BitVectorPtrArray &);
+template void test_matrix<TupleRowDiff<TupleCSCMatrix<ColumnMajor>>>(const TupleRowDiff<TupleCSCMatrix<ColumnMajor>>&, const BitVectorPtrArray &);
 template void test_matrix<RainbowfishBuffer<1>>(const RainbowfishBuffer<1>&, const BitVectorPtrArray &);
 template void test_matrix<RainbowfishBuffer<2>>(const RainbowfishBuffer<2>&, const BitVectorPtrArray &);
 template void test_matrix<RainbowfishBuffer<3>>(const RainbowfishBuffer<3>&, const BitVectorPtrArray &);
