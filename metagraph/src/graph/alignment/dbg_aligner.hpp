@@ -34,6 +34,8 @@ class IDBGAligner {
 
     // Convenience method
     AlignmentResults align(std::string_view query) const;
+
+    virtual bool has_coordinates() const = 0;
 };
 
 
@@ -52,6 +54,8 @@ class DBGAligner : public IDBGAligner {
     const DeBruijnGraph& get_graph() const override { return graph_; }
     const DBGAlignerConfig& get_config() const override { return config_; }
 
+    virtual bool has_coordinates() const override { return false; }
+
   protected:
     typedef typename Seeder::node_index node_index;
     typedef Alignment::score_t score_t;
@@ -61,13 +65,10 @@ class DBGAligner : public IDBGAligner {
 
     typedef std::vector<std::pair<std::shared_ptr<ISeeder>, std::shared_ptr<ISeeder>>> BatchSeeders;
 
-    BatchSeeders
-    virtual build_seeders(const std::vector<Query> &seq_batch,
-                          const std::vector<AlignmentResults> &wrapped_seqs) const;
+    virtual BatchSeeders build_seeders(const std::vector<Query> &seq_batch,
+                                       const std::vector<AlignmentResults> &wrapped_seqs) const;
 
   private:
-// there are no reverse-complement for protein sequences
-#if ! _PROTEIN_GRAPH
     /**
      * Align the forward and reverse complement of the query sequence in both
      * directions and return the overall best alignment. e.g., for the forward query
@@ -85,7 +86,6 @@ class DBGAligner : public IDBGAligner {
                           Extender &reverse_extender,
                           const std::function<void(Alignment&&)> &callback,
                           const std::function<score_t(const Alignment&)> &get_min_path_score) const;
-#endif
 
     // Construct a full alignment from a chain by aligning the query agaisnt
     // the graph in the regions of the query in between the chain seeds.

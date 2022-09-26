@@ -113,11 +113,11 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   )
 
   if (NOT CMAKE_CXX_COMPILER_ID MATCHES "AppleClang")
-     add_compile_options(
-      -Wno-suggest-destructor-override
-      -Wno-deprecated-copy
-      -Wno-deprecated-declarations
-     )
+    add_compile_options(
+     -Wno-suggest-destructor-override
+     -Wno-deprecated-copy
+     -Wno-deprecated-declarations
+    )
   endif()
 endif()
 
@@ -133,6 +133,11 @@ if(APPLE)
 endif()
 
 findOpenMP()
+if("${OpenMP_CXX_VERSION}" VERSION_GREATER_EQUAL 5.0)
+  add_definitions(-D_OpenMP_5)
+else()
+  message(WARNING "Could only find OpenMP ${OpenMP_CXX_VERSION} < 5.0, non-rectangular nested loops will not be parallelized")
+endif()
 
 # Check if 128 bit integers are supported
 try_compile(MODE_TI
@@ -263,6 +268,7 @@ include_directories(
   external-libraries/spdlog/include
   external-libraries/zlib
   external-libraries/Simple-Web-Server
+  external-libraries/sdust
   ${PROJECT_SOURCE_DIR}/src
 )
 
@@ -307,6 +313,11 @@ add_library(progress_bar STATIC
 add_library(mersenne_twister STATIC
   external-libraries/rollinghashcpp/mersennetwister.cpp
 )
+
+add_library(sdust STATIC
+  external-libraries/sdust/sdust.c
+)
+target_compile_options(sdust PRIVATE -Wall -Wc++-compat -Wno-error)
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH}
   "${CMAKE_SOURCE_DIR}/external-libraries/binrel_wt/cmake/modules"
@@ -373,6 +384,7 @@ set(METALIBS ${METALIBS}
   jsoncpp_lib
   progress_bar
   mersenne_twister
+  sdust
   spdlog::spdlog
 )
 if(APPLE)

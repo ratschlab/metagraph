@@ -17,6 +17,7 @@
 #include "annotation/int_matrix/base/int_matrix.hpp"
 #include "annotation/representation/base/annotation.hpp"
 #include "common/vector.hpp"
+#include "common/utils/template_utils.hpp"
 
 
 namespace mtg {
@@ -94,6 +95,35 @@ class Seed {
     Cigar::LengthType clipping_;
     Cigar::LengthType end_clipping_;
 };
+
+template <class It>
+inline size_t get_num_char_matches_in_seeds(It begin, It end) {
+    size_t num_matching = 0;
+    size_t last_q_end = 0;
+    for (auto it = begin; it != end; ++it) {
+        const auto &aln = utils::get_first(*it);
+        if (aln.empty())
+            continue;
+
+        size_t q_begin = aln.get_clipping();
+        size_t q_end = q_begin + aln.get_query_view().size();
+        if (q_end > last_q_end) {
+            num_matching += q_end - q_begin;
+            if (q_begin < last_q_end)
+                num_matching -= last_q_end - q_begin;
+        }
+
+        if (size_t offset = aln.get_offset()) {
+            size_t clipping = aln.get_clipping();
+            for (++it; it != end && aln.get_offset() == offset
+                                    && aln.get_clipping() == clipping; ++it) {}
+            --it;
+        }
+
+        last_q_end = q_end;
+    }
+    return num_matching;
+}
 
 // Note: this object stores pointers to the query sequence, so it is the user's
 //       responsibility to ensure that the query sequence is not destroyed when

@@ -1020,14 +1020,7 @@ bitmap_builder& ColumnCompressed<Label>::decompress_builder(size_t j) {
         if (j == bitmatrix_.size()) {
             // the column is new, create an efficient builder for it
             bitmatrix_.emplace_back();
-            // Work with the full uncompressed bitmap if it takes less space
-            // than the buffer in its builder.
-            if (num_rows_ < buffer_size_bytes_ * 8) {
-                vector = new bitmap_vector(num_rows_, 0);
-
-            // For large bitmaps, use a more space efficient builder that
-            // requires only 64 bits per each 1-bit in the bitmap.
-            } else if (swap_dir_.size()) {
+            if (swap_dir_.size()) {
                 // use a fixed size buffer and disk swap
                 vector = new bitmap_builder_set_disk(num_rows_, get_num_threads(),
                                                      buffer_size_bytes_ / 8, swap_dir_);

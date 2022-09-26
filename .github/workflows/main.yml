@@ -85,6 +85,9 @@ jobs:
           sudo make install
         fi
 
+        echo "CC=$(which ${{ matrix.cc }})" >> $GITHUB_ENV
+        echo "CXX=$(which ${{ matrix.cxx }})" >> $GITHUB_ENV
+
     - name: install dependencies for integration tests
       run: |
         pip3 install parameterized
@@ -92,15 +95,11 @@ jobs:
 
     - name: install sdsl-lite
       run: |
-        export CC=$(which ${{ matrix.cc }})
-        export CXX=$(which ${{ matrix.cxx }})
         cd metagraph/external-libraries/sdsl-lite
         ./install.sh $(pwd)
 
     - name: configure
       run: |
-        export CC=$(which ${{ matrix.cc }})
-        export CXX=$(which ${{ matrix.cxx }})
         mkdir metagraph/build
         cd metagraph/build
         cmake -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \

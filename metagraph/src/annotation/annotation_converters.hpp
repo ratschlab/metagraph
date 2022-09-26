@@ -155,6 +155,10 @@ void wrap_in_row_diff(MultiLabelEncoded<std::string> &&anno,
                       const std::string &graph_file,
                       const std::string &out_file);
 
+template <class Annotator>
+StaticBinRelAnnotator<matrix::TupleCSCMatrix<typename Annotator::binary_matrix_type>, std::string>
+load_coords(Annotator&& anno, const std::vector<std::string> &files);
+
 } // namespace annot
 } // namespace mtg
 
