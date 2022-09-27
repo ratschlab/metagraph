@@ -926,8 +926,8 @@ void merge_row_sparse_disk_annotations(const std::vector<std::string> &files,
 
     RowSparseDisk::serialize(
             [&](BinaryMatrix::RowCallback write_row) {
-// maybe better if single thread reads single annotation?
-#pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic)
+                // maybe better if single thread reads single annotation?
+                #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic)
                 for (uint64_t i = 0; i < num_rows; i += kNumRowsInBlock) {
                     uint64_t begin = i;
                     uint64_t end = std::min(i + kNumRowsInBlock, num_rows);
@@ -1039,7 +1039,7 @@ void convert_to_row_sparse_disk(const std::vector<std::string> &files,
         }
 
         std::string fname
-                = utils::make_suffix(tmp_dir / (outfbase + "-" + std::to_string(parts.size())),
+                = utils::make_suffix(tmp_dir/fmt::format("{}-{}", outfbase, parts.size()),
                                      RowSparseDiskAnnotator::kExtension);
         std::function<void(std::ofstream &)> decorate = [](std::ofstream &) {};
         if (file_batch.size() == files.size()) {
@@ -1090,6 +1090,7 @@ uint64_t get_num_rows_from_row_diff_anno(const std::string &fname) {
     std::ifstream in(fname, std::ios::binary);
     if (!in.good())
         throw std::ifstream::failure("can't open file");
+
     LabelEncoder<std::string> label_encoder;
     binmat::RowDiff<binmat::ColumnMajor> matrix;
 
