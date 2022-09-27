@@ -11,7 +11,7 @@
 
 #include "annotation/row_diff_builder.hpp"
 #include "common/logger.hpp"
-#include "common/ifstream_with_name_and_offset.hpp"
+#include "common/ifstream_with_name.hpp"
 #include "common/algorithms.hpp"
 #include "common/hashers/hash.hpp"
 #include "common/sorted_sets/sorted_multiset.hpp"
@@ -870,7 +870,7 @@ void merge_row_sparse_disk_annotations(const std::vector<std::string> &files,
         label_encoders[batch_idx] = std::make_unique<LEncoder>();
         matrices[batch_idx] = std::make_unique<RowSparseDisk>();
 
-        mtg::common::IfstreamWithNameAndOffset in(fname, std::ios::in);
+        mtg::common::IfstreamWithName in(fname, std::ios::in);
         if (!label_encoders[batch_idx]->load(in)) {
             logger->error("Can't load label encoder from {}", fname);
             exit(1);

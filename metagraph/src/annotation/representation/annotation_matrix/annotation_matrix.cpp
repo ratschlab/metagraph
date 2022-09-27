@@ -4,7 +4,7 @@
 #include "common/utils/string_utils.hpp"
 #include "common/serialization.hpp"
 #include "static_annotators_def.hpp"
-#include "common/ifstream_with_name_and_offset.hpp"
+#include "common/ifstream_with_name.hpp"
 
 namespace mtg {
 namespace annot {
@@ -61,7 +61,7 @@ StaticBinRelAnnotator<BinaryMatrixType, Label>
 
 template <class BinaryMatrixType, typename Label>
 bool StaticBinRelAnnotator<BinaryMatrixType, Label>::load(const std::string &filename) {
-    mtg::common::IfstreamWithNameAndOffset instream(make_suffix(filename, kExtension),
+    mtg::common::IfstreamWithName instream(make_suffix(filename, kExtension),
                                                     std::ios::binary);
     if (!instream.good())
         return false;

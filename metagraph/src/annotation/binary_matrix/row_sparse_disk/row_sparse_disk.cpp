@@ -2,7 +2,7 @@
 
 #include "common/logger.hpp"
 #include "common/utils/file_utils.hpp"
-#include "common/ifstream_with_name_and_offset.hpp"
+#include "common/ifstream_with_name.hpp"
 #include "graph/representation/succinct/boss.hpp"
 
 
@@ -55,21 +55,21 @@ RowSparseDisk::Impl::get_rows(const std::vector<Row> &row_ids) const {
 }
 
 bool RowSparseDisk::load(std::istream &f) {
-    auto _f = dynamic_cast<mtg::common::IfstreamWithNameAndOffset *>(&f);
+    auto _f = dynamic_cast<mtg::common::IfstreamWithName *>(&f);
     assert(_f);
     try {
         num_columns_ = load_number(f);
 
         auto boundary_start = load_number(f);
 
-        _f->set_offset(static_cast<uint64_t>(f.tellg()));
+        buffer_params_.filename = _f->get_name();
+        buffer_params_.offset = f.tellg();
 
-        int_vector_buffer_params.filename = _f->get_name();
-        int_vector_buffer_params.offset = _f->get_offset();
-
-        f.seekg(-sizeof(std::streampos), ios_base::end);
+        assert(boundary_start >= buffer_params_.offset);
+        iv_size_on_disk_ = boundary_start - buffer_params_.offset;
 
         f.seekg(boundary_start, ios_base::beg);
+
         boundary_.load(f);
 
         num_rows_ = boundary_.num_set_bits();
@@ -81,9 +81,32 @@ bool RowSparseDisk::load(std::istream &f) {
     return true;
 }
 
-void RowSparseDisk::serialize(std::ostream & /*f*/) const {
-    throw std::runtime_error(
-            "RowSparseDisk::serialize not supproted, use static variant instead");
+void RowSparseDisk::serialize(std::ostream & f) const {
+    serialize_number(f, num_columns_);
+    auto boundary_start = iv_size_on_disk_ + f.tellp() + sizeof(size_t);
+    serialize_number(f, boundary_start);
+
+    size_t chunk_size = 1024 * 1024;
+
+    std::ifstream iv_in(buffer_params_.filename, std::ios::binary);
+    if (!iv_in.good())
+        throw std::ofstream::failure("Cannot read from file " + buffer_params_.filename);
+
+    iv_in.seekg(buffer_params_.offset);
+    std::vector<char> chunk(chunk_size);
+
+    // Perform binary rewrite of int_vector_buffer
+    auto left_to_read = iv_size_on_disk_;
+    while (left_to_read) {
+        auto to_read = left_to_read < chunk_size ? left_to_read : chunk_size;
+        iv_in.read(chunk.data(), to_read);
+        f.write(chunk.data(), to_read);
+        left_to_read -= to_read;
+    }
+    iv_in.close();
+
+    assert(f.tellp() == boundary_start);
+    boundary_.serialize(f);
 }
 
 
@@ -97,12 +120,19 @@ void RowSparseDisk::serialize(const std::function<void(binmat::BinaryMatrix::Row
     std::ofstream outstream(filename,
                             std::ios::binary | std::ios::ate
                                     | std::ios::in);
-
     if (!outstream.good())
         throw std::ofstream::failure("Cannot write to file " + filename);
 
     serialize_number(outstream, num_cols);
     auto boundary_start_pos = outstream.tellp();
+
+    // boundary is built in memory while writing rows data to disk via int_vector_buffer
+    // the boundary must be loaded in the RowSparseDisk::load so its position must be known
+    // binary format for this representation is
+    // [boundary pos] (8B)
+    // [serialized rows]
+    // [boundary] (that are stored in the file at boundary pos)
+
     // write "empty" boundary start
     std::streampos boundary_start = 0;
     serialize_number(outstream, boundary_start);
@@ -133,7 +163,7 @@ void RowSparseDisk::serialize(const std::function<void(binmat::BinaryMatrix::Row
     boundary_start = outstream.tellp();
     boundary.serialize(outstream);
     outstream.seekp(boundary_start_pos, ios_base::beg);
-    outstream.write(reinterpret_cast<char *>(&boundary_start), sizeof(std::streampos));
+    serialize_number(outstream, boundary_start);
 }
 
 } // namespace binmat

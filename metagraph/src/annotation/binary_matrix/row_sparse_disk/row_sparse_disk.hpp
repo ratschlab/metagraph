@@ -15,31 +15,31 @@ namespace binmat {
 class RowSparseDisk : public BinaryMatrix {
   public:
     RowSparseDisk(size_t disk_buffer_size = 10'000) {
-        int_vector_buffer_params.buff_size = disk_buffer_size;
+        buffer_params_.buff_size = disk_buffer_size;
     }
 
     uint64_t num_columns() const override { return num_columns_; }
     uint64_t num_rows() const override { return num_rows_; }
 
     bool get(Row row, Column column) const override {
-        return Impl(boundary_, int_vector_buffer_params.filename,
-                    int_vector_buffer_params.offset, int_vector_buffer_params.buff_size)
+        return Impl(boundary_, buffer_params_.filename,
+                    buffer_params_.offset, buffer_params_.buff_size)
                 .get(row, column);
     }
     SetBitPositions get_row(Row row) const override {
-        return Impl(boundary_, int_vector_buffer_params.filename,
-                    int_vector_buffer_params.offset, int_vector_buffer_params.buff_size)
+        return Impl(boundary_, buffer_params_.filename,
+                    buffer_params_.offset, buffer_params_.buff_size)
                 .get_row(row);
     }
     std::vector<Row> get_column(Column column) const override {
-        return Impl(boundary_, int_vector_buffer_params.filename,
-                    int_vector_buffer_params.offset, int_vector_buffer_params.buff_size)
+        return Impl(boundary_, buffer_params_.filename,
+                    buffer_params_.offset, buffer_params_.buff_size)
                 .get_column(num_rows(), column);
     }
 
     std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const override {
-        return Impl(boundary_, int_vector_buffer_params.filename,
-                    int_vector_buffer_params.offset, int_vector_buffer_params.buff_size)
+        return Impl(boundary_, buffer_params_.filename,
+                    buffer_params_.offset, buffer_params_.buff_size)
                 .get_rows(rows);
     }
 
@@ -48,8 +48,8 @@ class RowSparseDisk : public BinaryMatrix {
 
     // number of ones in the matrix
     uint64_t num_relations() const override {
-        return Impl(boundary_, int_vector_buffer_params.filename,
-                    int_vector_buffer_params.offset, int_vector_buffer_params.buff_size)
+        return Impl(boundary_, buffer_params_.filename,
+                    buffer_params_.offset, buffer_params_.buff_size)
                 .num_relations_impl();
     }
 
@@ -60,7 +60,7 @@ class RowSparseDisk : public BinaryMatrix {
                           uint64_t num_rows);
 
     void set_buff_size(uint64_t buff_size) {
-        int_vector_buffer_params.buff_size = buff_size;
+        buffer_params_.buff_size = buff_size;
     }
 
     const bit_vector_small get_boundary() const { return boundary_; }
@@ -90,15 +90,18 @@ class RowSparseDisk : public BinaryMatrix {
         sdsl::int_vector_buffer<> set_bits_;
     };
 
-    struct {
+    struct int_vector_buffer_params {
         std::string filename;
         uint64_t offset;
         uint64_t buff_size = 10'000;
-    } int_vector_buffer_params;
+    };
+    int_vector_buffer_params buffer_params_;
 
     bit_vector_small boundary_;
     uint64_t num_columns_ = 0;
     uint64_t num_rows_ = 0;
+
+    size_t iv_size_on_disk_ = 0; // for non-static serialization
 };
 
 
