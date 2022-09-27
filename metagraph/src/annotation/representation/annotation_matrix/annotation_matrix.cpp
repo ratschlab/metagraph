@@ -62,7 +62,7 @@ StaticBinRelAnnotator<BinaryMatrixType, Label>
 template <class BinaryMatrixType, typename Label>
 bool StaticBinRelAnnotator<BinaryMatrixType, Label>::load(const std::string &filename) {
     mtg::common::IfstreamWithName instream(make_suffix(filename, kExtension),
-                                                    std::ios::binary);
+                                           std::ios::binary);
     if (!instream.good())
         return false;
 

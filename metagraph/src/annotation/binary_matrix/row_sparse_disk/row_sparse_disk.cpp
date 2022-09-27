@@ -12,13 +12,13 @@ namespace binmat {
 
 using mtg::common::logger;
 
-bool RowSparseDisk::Impl::get(Row row, Column column) const {
+bool RowSparseDisk::View::get(Row row, Column column) const {
     SetBitPositions set_bits = get_row(row);
     SetBitPositions::iterator v = std::lower_bound(set_bits.begin(), set_bits.end(), column);
     return v != set_bits.end() && *v == column;
 }
 
-std::vector<BinaryMatrix::Row> RowSparseDisk::Impl::get_column(uint64_t num_rows,
+std::vector<BinaryMatrix::Row> RowSparseDisk::View::get_column(uint64_t num_rows,
                                                                Column column) const {
     std::vector<Row> result;
     for (Row row = 0; row < num_rows; ++row) {
@@ -28,7 +28,7 @@ std::vector<BinaryMatrix::Row> RowSparseDisk::Impl::get_column(uint64_t num_rows
     return result;
 }
 
-BinaryMatrix::SetBitPositions RowSparseDisk::Impl::get_row(Row row) const {
+BinaryMatrix::SetBitPositions RowSparseDisk::View::get_row(Row row) const {
     assert(boundary_[boundary_.size() - 1] == 1);
     uint64_t start_idx = row == 0 ? 0 : boundary_.select1(row) + 1;
     uint64_t end_idx = boundary_.next1(start_idx);
@@ -44,7 +44,7 @@ BinaryMatrix::SetBitPositions RowSparseDisk::Impl::get_row(Row row) const {
 }
 
 std::vector<BinaryMatrix::SetBitPositions>
-RowSparseDisk::Impl::get_rows(const std::vector<Row> &row_ids) const {
+RowSparseDisk::View::get_rows(const std::vector<Row> &row_ids) const {
     std::vector<SetBitPositions> rows(row_ids.size());
 
     for (size_t i = 0; i < row_ids.size(); ++i) {
@@ -105,7 +105,7 @@ void RowSparseDisk::serialize(std::ostream & f) const {
     }
     iv_in.close();
 
-    assert(f.tellp() == boundary_start);
+    assert((uint64_t)f.tellp() == boundary_start);
     boundary_.serialize(f);
 }
 

@@ -22,23 +22,26 @@ class RowSparseDisk : public BinaryMatrix {
     uint64_t num_rows() const override { return num_rows_; }
 
     bool get(Row row, Column column) const override {
-        return Impl(boundary_, buffer_params_.filename,
+        return View(boundary_, buffer_params_.filename,
                     buffer_params_.offset, buffer_params_.buff_size)
                 .get(row, column);
     }
     SetBitPositions get_row(Row row) const override {
-        return Impl(boundary_, buffer_params_.filename,
+        return View(boundary_, buffer_params_.filename,
                     buffer_params_.offset, buffer_params_.buff_size)
                 .get_row(row);
     }
     std::vector<Row> get_column(Column column) const override {
-        return Impl(boundary_, buffer_params_.filename,
-                    buffer_params_.offset, buffer_params_.buff_size)
+        mtg::common::logger->warn(
+                "get_column is extremely inefficient operation, consider using "
+                "column-major format");
+        return View(boundary_, buffer_params_.filename, buffer_params_.offset,
+                    buffer_params_.buff_size)
                 .get_column(num_rows(), column);
     }
 
     std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const override {
-        return Impl(boundary_, buffer_params_.filename,
+        return View(boundary_, buffer_params_.filename,
                     buffer_params_.offset, buffer_params_.buff_size)
                 .get_rows(rows);
     }
@@ -48,7 +51,7 @@ class RowSparseDisk : public BinaryMatrix {
 
     // number of ones in the matrix
     uint64_t num_relations() const override {
-        return Impl(boundary_, buffer_params_.filename,
+        return View(boundary_, buffer_params_.filename,
                     buffer_params_.offset, buffer_params_.buff_size)
                 .num_relations_impl();
     }
@@ -70,9 +73,9 @@ class RowSparseDisk : public BinaryMatrix {
     // each public method call that needs to work with int_vector_buffer<> The actual
     // implementation is wrapped in the class below to assure it will not call any methods
     // of RowSparseDisk class which could result in multiple opens of int_vector_buffer
-    class Impl {
+    class View {
       public:
-        Impl(const bit_vector_small &boundary,
+        View(const bit_vector_small &boundary,
              const std::string &filename,
              uint64_t offset,
              uint64_t buff_size)

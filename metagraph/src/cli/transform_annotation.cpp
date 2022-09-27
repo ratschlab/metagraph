@@ -797,8 +797,7 @@ int transform_annotation(Config *config) {
 
             }
             case Config::RowDiffSparseDisk: {
-                logger->error(
-                        "Convert to row_diff first, and then to row_diff_sparse_disk");
+                logger->error("Convert to row_diff first, and then to row_diff_sparse_disk");
                 return 0;
 
             }

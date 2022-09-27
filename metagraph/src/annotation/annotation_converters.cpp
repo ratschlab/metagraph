@@ -753,7 +753,7 @@ convert_to_RbBRWT<RbBRWTAnnotator>(const std::vector<std::string> &annotation_fi
 }
 
 void convert_batch_to_row_sparse_disk(
-        std::function<bool(const std::vector<std::string> &, const ColumnCallback &, size_t)> get_cols,
+        const std::function<bool(const std::vector<std::string> &, const ColumnCallback &, size_t)>& get_cols,
         const std::vector<std::string> &source_files,
         const std::string &outfname,
         const std::function<void(std::ofstream &)> &decorate,
@@ -974,24 +974,28 @@ void merge_row_sparse_disk_annotations(const std::vector<std::string> &files,
             outfname, label_encoder.size(), num_set_bits, num_rows);
 }
 
-
+// works for cols -> row_sparse and row_diff -> row_diff_sparse_disk
 void convert_to_row_sparse_disk(const std::vector<std::string> &files,
-                                const std::string &outfbase,
-                                size_t num_threads,
-                                size_t mem_bytes,
-                                fs::path tmp_dir) {
+                                     const std::string &outfbase,
+                                     size_t num_threads,
+                                     size_t mem_bytes,
+                                     fs::path tmp_dir,
+                                     const std::string& result_fname,
+                                     uint64_t num_rows,
+                                     const std::function<void(std::ofstream &)>& result_decorate,
+                                     const std::function<bool(const std::vector<std::string> &, const ColumnCallback &, size_t)>& get_cols) {
     if (!files.size())
         return;
 
-    uint64_t num_rows = get_num_rows_from_column_anno(files[0]);
     double density_prediction = 0.01; // TODO: predict it better?
 
     size_t conversion_overhead_per_column = num_threads * kNumRowsInBlock * 8 * 2
             * density_prediction; // 8 bytes per stored position, times 2 because of capacity
 
     std::vector<std::string> parts;
+
     // load as many columns as we can fit in memory, and convert them
-    for (uint32_t i = 0; i < files.size();) {
+    for (uint32_t i = 0; i < files.size(); ) {
         logger->trace("Loading columns for batch-conversion...");
         size_t mem_bytes_left = mem_bytes;
         std::vector<std::string> file_batch;
@@ -1037,38 +1041,49 @@ void convert_to_row_sparse_disk(const std::vector<std::string> &files,
         std::string fname
                 = utils::make_suffix(tmp_dir / (outfbase + "-" + std::to_string(parts.size())),
                                      RowSparseDiskAnnotator::kExtension);
-
+        std::function<void(std::ofstream &)> decorate = [](std::ofstream &) {};
         if (file_batch.size() == files.size()) {
-            fname = utils::make_suffix(outfbase, RowSparseDiskAnnotator::kExtension);
+            fname = result_fname;
+            decorate = result_decorate;
             logger->info("All annotations fit in single batch");
         }
         Timer timer;
         logger->trace("Annotations in batch: {}", file_batch.size());
 
-
-        convert_batch_to_row_sparse_disk(
-                [](const std::vector<std::string> &filenames,
-                   const ColumnCallback &callback, size_t num_threads) {
-                    return annot::ColumnCompressed<>::merge_load(filenames, callback,
-                                                                 num_threads);
-                },
-                file_batch, fname, [](std::ofstream &) {}, num_rows, num_threads);
+        convert_batch_to_row_sparse_disk(get_cols, file_batch, fname, decorate,
+                                         num_rows, num_threads);
 
         parts.push_back(fname);
-
         logger->trace("Batch processed in {} sec", timer.elapsed());
     }
 
     // need to merge multiple temp row sparse disk annotations
     if (parts.size() > 1) {
         merge_row_sparse_disk_annotations(
-                parts, utils::make_suffix(outfbase, RowSparseDiskAnnotator::kExtension),
-                [&](std::ofstream &) {}, num_rows, num_threads, mem_bytes);
+                parts, result_fname,
+                result_decorate, num_rows, num_threads, mem_bytes);
 
         for (const auto &fname : parts) {
             fs::remove(fname);
         }
     }
+}
+
+void convert_to_row_sparse_disk(const std::vector<std::string> &files,
+                                const std::string &outfbase,
+                                size_t num_threads,
+                                size_t mem_bytes,
+                                fs::path tmp_dir) {
+
+    convert_to_row_sparse_disk(
+            files, outfbase, num_threads, mem_bytes, tmp_dir,
+            utils::make_suffix(outfbase, RowSparseDiskAnnotator::kExtension),
+            get_num_rows_from_column_anno(files[0]), [](std::ofstream &) {},
+            [](const std::vector<std::string> &filenames, const ColumnCallback &callback,
+               size_t num_threads) {
+                return annot::ColumnCompressed<>::merge_load(filenames, callback,
+                                                             num_threads);
+            });
 }
 
 uint64_t get_num_rows_from_row_diff_anno(const std::string &fname) {
@@ -1094,100 +1109,20 @@ void convert_row_diff_to_row_diff_sparse_disk(const std::vector<std::string> &fi
                                               size_t num_threads,
                                               size_t mem_bytes,
                                               fs::path tmp_dir) {
-    if (!files.size())
-        return;
 
-    uint64_t num_rows = get_num_rows_from_row_diff_anno(files[0]);
-    logger->info("num_rows: {}", num_rows);
-
-
-    double density_prediction = 0.01; // TODO: predict it better?
-
-    size_t conversion_overhead_per_column = num_threads * kNumRowsInBlock * 8 * 2
-            * density_prediction; // 8 bytes per stored position, times 2 because of capacity
-
-    std::vector<std::string> parts;
-
-    std::function<void(std::ofstream &)> empty_decorate = [](std::ofstream &) {};
-    std::function<void(std::ofstream &)> decorate_row_diff = [&](std::ofstream &outstream) {
-        IRowDiff row_diff;
-        row_diff.load_anchor(anchors_file);
-        row_diff.load_fork_succ(fork_succ_file);
-        outstream.write("v2.0", 4);
-        row_diff.anchor().serialize(outstream);
-        row_diff.fork_succ().serialize(outstream);
-    };
-
-    // load as many columns as we can fit in memory, and convert them
-    for (uint32_t i = 0; i < files.size();) {
-        logger->trace("Loading columns for batch-conversion...");
-        size_t mem_bytes_left = mem_bytes;
-        std::vector<std::string> file_batch;
-
-        size_t current_boundary_cost = 0;
-        for (; i < files.size(); ++i) {
-            uint64_t file_size = fs::file_size(files[i]);
-
-            if (file_size > mem_bytes) {
-                logger->warn("Not enough memory to process {}, requires {} MB, skipped",
-                             files[i], file_size / 1e6);
-                continue;
-            }
-
-            size_t new_predicted_boundary_cost
-                    = bit_vector_small::predict_size(num_rows * (file_batch.size() + 1)
-                                                                     * density_prediction
-                                                             + num_rows,
-                                                     num_rows)
-                    / 8;
-
-            size_t conversion_overhead
-                    = conversion_overhead_per_column * (file_batch.size() + 1);
-
-            if (file_size + new_predicted_boundary_cost + conversion_overhead
-                > mem_bytes_left) {
-                if (file_batch.empty()) {
-                    logger->error("{} MB is not enough memory to perform conversion",
-                                  mem_bytes / 1e6);
-                    exit(1);
-                }
-                break;
-            }
-
-            mem_bytes_left += current_boundary_cost;
-            current_boundary_cost = new_predicted_boundary_cost;
-            mem_bytes_left -= file_size;
-            mem_bytes_left -= current_boundary_cost;
-
-            file_batch.push_back(files[i]);
-        }
-
-        std::string fname
-                = utils::make_suffix(tmp_dir / (outfbase + "-" + std::to_string(parts.size())),
-                                     RowSparseDiskAnnotator::kExtension);
-        std::function<void(std::ofstream &)> decorate = empty_decorate;
-        if (file_batch.size() == files.size()) {
-            fname = utils::make_suffix(outfbase, RowDiffSparseDiskAnnotator::kExtension);
-            decorate = decorate_row_diff;
-            logger->info("All annotations fit in single batch");
-        }
-        Timer timer;
-        logger->trace("Annotations in batch: {}", file_batch.size());
-        convert_batch_to_row_sparse_disk(merge_load_row_diff, file_batch, fname, decorate,
-                                         num_rows, num_threads);
-        parts.push_back(fname);
-        logger->trace("Batch processed in {} sec", timer.elapsed());
-    }
-    // need to merge multiple temp row sparse disk annotations
-    if (parts.size() > 1) {
-        merge_row_sparse_disk_annotations(
-                parts, utils::make_suffix(outfbase, RowDiffSparseDiskAnnotator::kExtension),
-                decorate_row_diff, num_rows, num_threads, mem_bytes);
-
-        for (const auto &fname : parts) {
-            fs::remove(fname);
-        }
-    }
+    convert_to_row_sparse_disk(
+            files, outfbase, num_threads, mem_bytes, tmp_dir,
+            utils::make_suffix(outfbase, RowDiffSparseDiskAnnotator::kExtension),
+            get_num_rows_from_row_diff_anno(files[0]),
+            [&](std::ofstream &outstream) {
+                IRowDiff row_diff;
+                row_diff.load_anchor(anchors_file);
+                row_diff.load_fork_succ(fork_succ_file);
+                outstream.write("v2.0", 4);
+                row_diff.anchor().serialize(outstream);
+                row_diff.fork_succ().serialize(outstream);
+            },
+            merge_load_row_diff);
 }
 
 
