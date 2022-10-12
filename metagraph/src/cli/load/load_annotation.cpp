@@ -57,14 +57,14 @@ Config::AnnotationType parse_annotation_type(const std::string &filename) {
     } else if (utils::ends_with(filename, annot::RowSparseAnnotator::kExtension)) {
         return Config::AnnotationType::RowSparse;
 
-    } else if (utils::ends_with(filename, annot::RowSparseDiskAnnotator::kExtension)) {
-        return Config::AnnotationType::RowSparseDisk;
+    } else if (utils::ends_with(filename, annot::RowDiskAnnotator::kExtension)) {
+        return Config::AnnotationType::RowDisk;
 
     } else if (utils::ends_with(filename, annot::RowDiffRowSparseAnnotator ::kExtension)) {
         return Config::AnnotationType::RowDiffRowSparse;
 
-    } else if (utils::ends_with(filename, annot::RowDiffSparseDiskAnnotator::kExtension)) {
-        return Config::AnnotationType::RowDiffSparseDisk;
+    } else if (utils::ends_with(filename, annot::RowDiffDiskAnnotator::kExtension)) {
+        return Config::AnnotationType::RowDiffDisk;
 
     } else if (utils::ends_with(filename, annot::RainbowfishAnnotator::kExtension)) {
         return Config::AnnotationType::RBFish;
@@ -117,16 +117,16 @@ initialize_annotation(Config::AnnotationType anno_type,
             annotation.reset(new annot::RowSparseAnnotator());
             break;
         }
-        case Config::RowSparseDisk: {
-            annotation.reset(new annot::RowSparseDiskAnnotator(
-                    std::make_unique<annot::binmat::RowSparseDisk>(RA_ivbuffer_size),
+        case Config::RowDisk: {
+            annotation.reset(new annot::RowDiskAnnotator(
+                    std::make_unique<annot::binmat::RowDisk>(RA_ivbuffer_size),
                     annot::LabelEncoder<std::string> {}));
             break;
         }
-        case Config::RowDiffSparseDisk: {
-            annotation.reset(new annot::RowDiffSparseDiskAnnotator(
-                    std::make_unique<annot::binmat::RowDiff<annot::binmat::RowSparseDisk>>(
-                            nullptr, annot::binmat::RowSparseDisk(RA_ivbuffer_size)),
+        case Config::RowDiffDisk: {
+            annotation.reset(new annot::RowDiffDiskAnnotator(
+                    std::make_unique<annot::binmat::RowDiff<annot::binmat::RowDisk>>(
+                            nullptr, annot::binmat::RowDisk(RA_ivbuffer_size)),
                     annot::LabelEncoder<std::string> {}));
             break;
         }

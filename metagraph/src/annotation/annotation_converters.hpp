@@ -71,19 +71,19 @@ std::unique_ptr<StaticAnnotation>
 convert_to_RbBRWT(const std::vector<std::string> &annotation_files,
                   size_t max_brwt_arity);
 
-void convert_to_row_sparse_disk(const std::vector<std::string> &files,
-                                const std::string &outfbase,
-                                size_t num_threads,
-                                size_t mem_bytes,
-                                std::filesystem::path tmp_dir);
+void convert_to_row_disk(const std::vector<std::string> &files,
+                         const std::string &outfbase,
+                         size_t num_threads,
+                         size_t mem_bytes,
+                         std::filesystem::path tmp_dir);
 
-void convert_row_diff_to_row_diff_sparse_disk(const std::vector<std::string> &files,
-                                              const std::string &outfbase,
-                                              const std::string &anchors_file,
-                                              const std::string &fork_succ_file,
-                                              size_t num_threads,
-                                              size_t mem_bytes,
-                                              std::filesystem::path tmp_dir);
+void convert_row_diff_to_row_diff_disk(const std::vector<std::string> &files,
+                                       const std::string &outfbase,
+                                       const std::string &anchors_file,
+                                       const std::string &fork_succ_file,
+                                       size_t num_threads,
+                                       size_t mem_bytes,
+                                       std::filesystem::path tmp_dir);
 
 
 template <class ToAnnotation, typename Label>

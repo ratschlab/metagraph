@@ -683,7 +683,7 @@ int transform_annotation(Config *config) {
         std::unique_ptr<ColumnCompressed<>> annotator;
 
         // The entire annotation is loaded in all cases except for transforms
-        // to BRWT or RbBRWT or RowSparseDisk, for which the construction is done with streaming
+        // to BRWT or RbBRWT or RowDisk, for which the construction is done with streaming
         // columns from disk.
         if (config->anno_type != Config::BRWT
                 && config->anno_type != Config::RbBRWT
@@ -691,7 +691,7 @@ int transform_annotation(Config *config) {
                 && config->anno_type != Config::BRWTCoord
                 && config->anno_type != Config::RowDiffBRWTCoord
                 && config->anno_type != Config::RowDiff
-                && config->anno_type != Config::RowSparseDisk) {
+                && config->anno_type != Config::RowDisk) {
             annotator = std::make_unique<ColumnCompressed<>>(0);
             logger->trace("Loading annotation from disk...");
             if (!annotator->merge_load(files)) {
@@ -796,8 +796,8 @@ int transform_annotation(Config *config) {
                 return 0;
 
             }
-            case Config::RowDiffSparseDisk: {
-                logger->error("Convert to row_diff first, and then to row_diff_sparse_disk");
+            case Config::RowDiffDisk: {
+                logger->error("Convert to row_diff first, and then to row_diff_disk");
                 return 0;
 
             }
@@ -864,9 +864,9 @@ int transform_annotation(Config *config) {
                 convert<RowSparseAnnotator>(std::move(annotator), *config, timer);
                 break;
             }
-            case Config::RowSparseDisk: {
-                convert_to_row_sparse_disk(files, config->outfbase, get_num_threads(),
-                                           config->memory_available * 1e9, config->tmp_dir);
+            case Config::RowDisk: {
+                convert_to_row_disk(files, config->outfbase, get_num_threads(),
+                                    config->memory_available * 1e9, config->tmp_dir);
                 break;
             }
 
@@ -917,10 +917,10 @@ int transform_annotation(Config *config) {
         if (config->anno_type != Config::RowDiffBRWT
                 && config->anno_type != Config::ColumnCompressed
                 && config->anno_type != Config::RowDiffRowSparse
-                && config->anno_type != Config::RowDiffSparseDisk) {
+                && config->anno_type != Config::RowDiffDisk) {
             logger->error(
                     "Only conversion to 'column', 'row_diff_sparse', "
-                    "'row_diff_sparse_disk', and 'row_diff_brwt' "
+                    "'row_diff_disk', and 'row_diff_brwt' "
                     "supported for row_diff");
             exit(1);
         }
@@ -967,13 +967,12 @@ int transform_annotation(Config *config) {
                         .load_fork_succ(fork_succ_file);
                 brwt_annotator->serialize(config->outfbase);
 
-            } else if (config->anno_type == Config::RowDiffSparseDisk) {
+            } else if (config->anno_type == Config::RowDiffDisk) {
                 logger->trace("Loading annotation from disk...");
-                convert_row_diff_to_row_diff_sparse_disk(files, config->outfbase,
-                                                         anchors_file, fork_succ_file,
-                                                         get_num_threads(),
-                                                         config->memory_available * 1e9,
-                                                         config->tmp_dir);
+                convert_row_diff_to_row_diff_disk(files, config->outfbase, anchors_file,
+                                                  fork_succ_file, get_num_threads(),
+                                                  config->memory_available * 1e9,
+                                                  config->tmp_dir);
 
                 logger->trace("Annotation converted in {} sec", timer.elapsed());
             } else { // RowDiff<RowSparse>

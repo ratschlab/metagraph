@@ -620,7 +620,7 @@ Config::Config(int argc, char *argv[]) {
                                     || anno_type == RowDiffBRWT
                                     || anno_type == IntRowDiffBRWT
                                     || anno_type == RowDiffRowSparse
-                                    || anno_type == RowDiffSparseDisk
+                                    || anno_type == RowDiffDisk
                                     || anno_type == RowDiffBRWTCoord
                                     || anno_type == RowDiffCoord;
         if (to_row_diff && !infbase.size()) {
@@ -738,12 +738,12 @@ std::string Config::annotype_to_string(AnnotationType state) {
             return "row_diff_brwt";
         case RowDiffRowSparse:
             return "row_diff_sparse";
-        case RowDiffSparseDisk:
-            return "row_diff_sparse_disk";
+        case RowDiffDisk:
+            return "row_diff_disk";
         case RowSparse:
             return "row_sparse";
-        case RowSparseDisk:
-            return "row_sparse_disk";
+        case RowDisk:
+            return "row_disk";
         case IntBRWT:
             return "int_brwt";
         case IntRowDiffBRWT:
@@ -783,12 +783,12 @@ Config::AnnotationType Config::string_to_annotype(const std::string &string) {
         return AnnotationType::RowDiffBRWT;
     } else if (string == "row_diff_sparse") {
         return AnnotationType::RowDiffRowSparse;
-    } else if (string == "row_diff_sparse_disk") {
-        return AnnotationType::RowDiffSparseDisk;
+    } else if (string == "row_diff_disk") {
+        return AnnotationType::RowDiffDisk;
     } else if (string == "row_sparse") {
         return AnnotationType::RowSparse;
-    } else if (string == "row_sparse_disk") {
-        return AnnotationType::RowSparseDisk;
+    } else if (string == "row_disk") {
+        return AnnotationType::RowDisk;
     } else if (string == "int_brwt") {
         return AnnotationType::IntBRWT;
     } else if (string == "row_diff_int_brwt") {
@@ -864,8 +864,8 @@ DeBruijnGraph::Mode Config::string_to_graphmode(const std::string &string) {
 void Config::print_usage(const std::string &prog_name, IdentityType identity) {
     const char annotation_list[] = "\t\t( column, brwt, rb_brwt, int_brwt,\n"
                                    "\t\t  column_coord, brwt_coord, row_diff_coord, row_diff_brwt_coord,\n"
-                                   "\t\t  row_diff, row_diff_brwt, row_diff_sparse, row_diff_sparse_disk, row_diff_int_brwt,\n"
-                                   "\t\t  row, flat, row_sparse, row_sparse_disk, rbfish, bin_rel_wt, bin_rel_wt_sdsl )";
+                                   "\t\t  row_diff, row_diff_brwt, row_diff_sparse, row_diff_disk, row_diff_int_brwt,\n"
+                                   "\t\t  row, flat, row_sparse, row_disk, rbfish, bin_rel_wt, bin_rel_wt_sdsl )";
 
     switch (identity) {
         case NO_IDENTITY: {

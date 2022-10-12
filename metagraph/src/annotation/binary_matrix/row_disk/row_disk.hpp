@@ -12,9 +12,9 @@ namespace annot {
 namespace binmat {
 
 
-class RowSparseDisk : public BinaryMatrix {
+class RowDisk : public BinaryMatrix {
   public:
-    RowSparseDisk(size_t RA_ivbuffer_size = 16'384) {
+    RowDisk(size_t RA_ivbuffer_size = 16'384) {
         buffer_params_.buff_size = RA_ivbuffer_size;
     }
 
@@ -72,7 +72,7 @@ class RowSparseDisk : public BinaryMatrix {
     // For the multithreading to work properly the idea is to open int_vector_buffer<> per
     // each public method call that needs to work with int_vector_buffer<> The actual
     // implementation is wrapped in the class below to assure it will not call any methods
-    // of RowSparseDisk class which could result in multiple opens of int_vector_buffer
+    // of RowDisk class which could result in multiple opens of int_vector_buffer
     class View {
       public:
         View(const bit_vector_small &boundary,

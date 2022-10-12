@@ -1,4 +1,4 @@
-#include "row_sparse_disk.hpp"
+#include "row_disk.hpp"
 
 #include "common/logger.hpp"
 #include "common/utils/file_utils.hpp"
@@ -12,14 +12,14 @@ namespace binmat {
 
 using mtg::common::logger;
 
-bool RowSparseDisk::View::get(Row row, Column column) const {
+bool RowDisk::View::get(Row row, Column column) const {
     SetBitPositions set_bits = get_row(row);
     SetBitPositions::iterator v = std::lower_bound(set_bits.begin(), set_bits.end(), column);
     return v != set_bits.end() && *v == column;
 }
 
-std::vector<BinaryMatrix::Row> RowSparseDisk::View::get_column(uint64_t num_rows,
-                                                               Column column) const {
+std::vector<BinaryMatrix::Row> RowDisk::View::get_column(uint64_t num_rows,
+                                                         Column column) const {
     std::vector<Row> result;
     for (Row row = 0; row < num_rows; ++row) {
         if (get(row, column))
@@ -28,7 +28,7 @@ std::vector<BinaryMatrix::Row> RowSparseDisk::View::get_column(uint64_t num_rows
     return result;
 }
 
-BinaryMatrix::SetBitPositions RowSparseDisk::View::get_row(Row row) const {
+BinaryMatrix::SetBitPositions RowDisk::View::get_row(Row row) const {
     assert(boundary_[boundary_.size() - 1] == 1);
     uint64_t start_idx = row == 0 ? 0 : boundary_.select1(row) + 1;
     uint64_t end_idx = boundary_.next1(start_idx);
@@ -44,7 +44,7 @@ BinaryMatrix::SetBitPositions RowSparseDisk::View::get_row(Row row) const {
 }
 
 std::vector<BinaryMatrix::SetBitPositions>
-RowSparseDisk::View::get_rows(const std::vector<Row> &row_ids) const {
+RowDisk::View::get_rows(const std::vector<Row> &row_ids) const {
     std::vector<SetBitPositions> rows(row_ids.size());
 
     for (size_t i = 0; i < row_ids.size(); ++i) {
@@ -54,7 +54,7 @@ RowSparseDisk::View::get_rows(const std::vector<Row> &row_ids) const {
     return rows;
 }
 
-bool RowSparseDisk::load(std::istream &f) {
+bool RowDisk::load(std::istream &f) {
     auto _f = dynamic_cast<mtg::common::IfstreamWithName *>(&f);
     assert(_f);
     try {
@@ -81,7 +81,7 @@ bool RowSparseDisk::load(std::istream &f) {
     return true;
 }
 
-void RowSparseDisk::serialize(std::ostream & f) const {
+void RowDisk::serialize(std::ostream & f) const {
     serialize_number(f, num_columns_);
     auto boundary_start = iv_size_on_disk_ + f.tellp() + sizeof(size_t);
     serialize_number(f, boundary_start);
@@ -110,11 +110,11 @@ void RowSparseDisk::serialize(std::ostream & f) const {
 }
 
 
-void RowSparseDisk::serialize(const std::function<void(binmat::BinaryMatrix::RowCallback)> &call_rows,
-                              const std::string &filename,
-                              uint64_t num_cols,
-                              uint64_t num_set_bits,
-                              uint64_t num_rows) {
+void RowDisk::serialize(const std::function<void(binmat::BinaryMatrix::RowCallback)> &call_rows,
+                        const std::string &filename,
+                        uint64_t num_cols,
+                        uint64_t num_set_bits,
+                        uint64_t num_rows) {
     // std::ios::ate needed because labels are serialized before
     // std::ios::in needed for tellp to return absolute file position
     std::ofstream outstream(filename,
@@ -127,7 +127,7 @@ void RowSparseDisk::serialize(const std::function<void(binmat::BinaryMatrix::Row
     auto boundary_start_pos = outstream.tellp();
 
     // boundary is built in memory while writing rows data to disk via int_vector_buffer
-    // the boundary must be loaded in the RowSparseDisk::load so its position must be known
+    // the boundary must be loaded in the RowDisk::load so its position must be known
     // binary format for this representation is
     // [boundary pos] (8B)
     // [serialized rows]

@@ -752,15 +752,15 @@ convert_to_RbBRWT<RbBRWTAnnotator>(const std::vector<std::string> &annotation_fi
     return std::make_unique<RbBRWTAnnotator>(std::move(matrix), label_encoder);
 }
 
-void convert_batch_to_row_sparse_disk(
-        const std::function<bool(const std::vector<std::string> &, const ColumnCallback &, size_t)>& get_cols,
+void convert_batch_to_row_disk(
+        const std::function<bool(const std::vector<std::string> &, const ColumnCallback &, size_t)>
+                &get_cols,
         const std::vector<std::string> &source_files,
         const std::string &outfname,
         const std::function<void(std::ofstream &)> &decorate,
         uint64_t num_rows,
         size_t num_threads) {
     std::vector<std::string> col_names;
-
     std::vector<std::unique_ptr<bit_vector>> columns;
     uint64_t num_set_bits {};
     std::mutex mtx;
@@ -807,7 +807,7 @@ void convert_batch_to_row_sparse_disk(
 
     ProgressBar progress_bar(num_rows, "Serialize rows", std::cerr, !common::get_verbose());
 
-    RowSparseDisk::serialize(
+    RowDisk::serialize(
             [&](BinaryMatrix::RowCallback write_row) {
 
                 #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic)
@@ -847,18 +847,18 @@ uint64_t get_num_rows_from_column_anno(const std::string &fname) {
 }
 
 
-void merge_row_sparse_disk_annotations(const std::vector<std::string> &files,
-                                       const std::string &outfname,
-                                       const std::function<void(std::ofstream &)> &decorate,
-                                       uint64_t num_rows,
-                                       size_t num_threads,
-                                       size_t mem_bytes) {
-    logger->info("Merge {} row_sparse_disk annotations", files.size());
+void merge_row_disk_annotations(const std::vector<std::string> &files,
+                                const std::string &outfname,
+                                const std::function<void(std::ofstream &)> &decorate,
+                                uint64_t num_rows,
+                                size_t num_threads,
+                                size_t mem_bytes) {
+    logger->info("Merge {} row_disk annotations", files.size());
     std::vector<std::unique_ptr<LEncoder>> label_encoders(files.size());
 
     LEncoder label_encoder;
 
-    std::vector<std::unique_ptr<RowSparseDisk>> matrices(files.size());
+    std::vector<std::unique_ptr<RowDisk>> matrices(files.size());
 
     std::vector<uint64_t> offsets(files.size() + 1, 0);
 
@@ -868,7 +868,7 @@ void merge_row_sparse_disk_annotations(const std::vector<std::string> &files,
     for (size_t batch_idx = 0; batch_idx < files.size(); ++batch_idx) {
         std::string fname = files[batch_idx];
         label_encoders[batch_idx] = std::make_unique<LEncoder>();
-        matrices[batch_idx] = std::make_unique<RowSparseDisk>();
+        matrices[batch_idx] = std::make_unique<RowDisk>();
 
         mtg::common::IfstreamWithName in(fname, std::ios::in);
         if (!label_encoders[batch_idx]->load(in)) {
@@ -924,7 +924,7 @@ void merge_row_sparse_disk_annotations(const std::vector<std::string> &files,
 
     ProgressBar progress_bar(num_rows, "Merge rows", std::cerr, !common::get_verbose());
 
-    RowSparseDisk::serialize(
+    RowDisk::serialize(
             [&](BinaryMatrix::RowCallback write_row) {
                 // maybe better if single thread reads single annotation?
                 #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic)
@@ -962,7 +962,7 @@ void merge_row_sparse_disk_annotations(const std::vector<std::string> &files,
                             row.insert(row.end(), row_to_append.begin(), row_to_append.end());
                         }
                     }
-#pragma omp ordered
+                    #pragma omp ordered
                     {
                         for (const auto &row : rows) {
                             write_row(row);
@@ -974,16 +974,18 @@ void merge_row_sparse_disk_annotations(const std::vector<std::string> &files,
             outfname, label_encoder.size(), num_set_bits, num_rows);
 }
 
-// works for cols -> row_sparse and row_diff -> row_diff_sparse_disk
-void convert_to_row_sparse_disk(const std::vector<std::string> &files,
-                                     const std::string &outfbase,
-                                     size_t num_threads,
-                                     size_t mem_bytes,
-                                     fs::path tmp_dir,
-                                     const std::string& result_fname,
-                                     uint64_t num_rows,
-                                     const std::function<void(std::ofstream &)>& result_decorate,
-                                     const std::function<bool(const std::vector<std::string> &, const ColumnCallback &, size_t)>& get_cols) {
+// works for cols -> row_disk and row_diff -> row_diff_disk
+void convert_to_row_disk(
+        const std::vector<std::string> &files,
+        const std::string &outfbase,
+        size_t num_threads,
+        size_t mem_bytes,
+        fs::path tmp_dir,
+        const std::string &result_fname,
+        uint64_t num_rows,
+        const std::function<void(std::ofstream &)> &result_decorate,
+        const std::function<bool(const std::vector<std::string> &, const ColumnCallback &, size_t)>
+                &get_cols) {
     if (!files.size())
         return;
 
@@ -1040,7 +1042,7 @@ void convert_to_row_sparse_disk(const std::vector<std::string> &files,
 
         std::string fname
                 = utils::make_suffix(tmp_dir/fmt::format("{}-{}", outfbase, parts.size()),
-                                     RowSparseDiskAnnotator::kExtension);
+                                     RowDiskAnnotator::kExtension);
         std::function<void(std::ofstream &)> decorate = [](std::ofstream &) {};
         if (file_batch.size() == files.size()) {
             fname = result_fname;
@@ -1050,8 +1052,8 @@ void convert_to_row_sparse_disk(const std::vector<std::string> &files,
         Timer timer;
         logger->trace("Annotations in batch: {}", file_batch.size());
 
-        convert_batch_to_row_sparse_disk(get_cols, file_batch, fname, decorate,
-                                         num_rows, num_threads);
+        convert_batch_to_row_disk(get_cols, file_batch, fname, decorate,
+                                  num_rows, num_threads);
 
         parts.push_back(fname);
         logger->trace("Batch processed in {} sec", timer.elapsed());
@@ -1059,9 +1061,8 @@ void convert_to_row_sparse_disk(const std::vector<std::string> &files,
 
     // need to merge multiple temp row sparse disk annotations
     if (parts.size() > 1) {
-        merge_row_sparse_disk_annotations(
-                parts, result_fname,
-                result_decorate, num_rows, num_threads, mem_bytes);
+        merge_row_disk_annotations(parts, result_fname, result_decorate, num_rows,
+                                   num_threads, mem_bytes);
 
         for (const auto &fname : parts) {
             fs::remove(fname);
@@ -1069,15 +1070,14 @@ void convert_to_row_sparse_disk(const std::vector<std::string> &files,
     }
 }
 
-void convert_to_row_sparse_disk(const std::vector<std::string> &files,
-                                const std::string &outfbase,
-                                size_t num_threads,
-                                size_t mem_bytes,
-                                fs::path tmp_dir) {
-
-    convert_to_row_sparse_disk(
+void convert_to_row_disk(const std::vector<std::string> &files,
+                         const std::string &outfbase,
+                         size_t num_threads,
+                         size_t mem_bytes,
+                         fs::path tmp_dir) {
+    convert_to_row_disk(
             files, outfbase, num_threads, mem_bytes, tmp_dir,
-            utils::make_suffix(outfbase, RowSparseDiskAnnotator::kExtension),
+            utils::make_suffix(outfbase, RowDiskAnnotator::kExtension),
             get_num_rows_from_column_anno(files[0]), [](std::ofstream &) {},
             [](const std::vector<std::string> &filenames, const ColumnCallback &callback,
                size_t num_threads) {
@@ -1103,17 +1103,16 @@ uint64_t get_num_rows_from_row_diff_anno(const std::string &fname) {
 }
 
 
-void convert_row_diff_to_row_diff_sparse_disk(const std::vector<std::string> &files,
-                                              const std::string &outfbase,
-                                              const std::string &anchors_file,
-                                              const std::string &fork_succ_file,
-                                              size_t num_threads,
-                                              size_t mem_bytes,
-                                              fs::path tmp_dir) {
-
-    convert_to_row_sparse_disk(
+void convert_row_diff_to_row_diff_disk(const std::vector<std::string> &files,
+                                       const std::string &outfbase,
+                                       const std::string &anchors_file,
+                                       const std::string &fork_succ_file,
+                                       size_t num_threads,
+                                       size_t mem_bytes,
+                                       fs::path tmp_dir) {
+    convert_to_row_disk(
             files, outfbase, num_threads, mem_bytes, tmp_dir,
-            utils::make_suffix(outfbase, RowDiffSparseDiskAnnotator::kExtension),
+            utils::make_suffix(outfbase, RowDiffDiskAnnotator::kExtension),
             get_num_rows_from_row_diff_anno(files[0]),
             [&](std::ofstream &outstream) {
                 IRowDiff row_diff;
