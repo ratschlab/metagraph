@@ -14,8 +14,8 @@ namespace binmat {
 
 class RowSparseDisk : public BinaryMatrix {
   public:
-    RowSparseDisk(size_t disk_buffer_size = 10'000) {
-        buffer_params_.buff_size = disk_buffer_size;
+    RowSparseDisk(size_t RA_ivbuffer_size = 16'384) {
+        buffer_params_.buff_size = RA_ivbuffer_size;
     }
 
     uint64_t num_columns() const override { return num_columns_; }

@@ -93,7 +93,7 @@ initialize_annotation(Config::AnnotationType anno_type,
                       double memory_available_gb,
                       uint8_t count_width,
                       size_t max_chunks_open,
-                      size_t disk_buffer_size) {
+                      size_t RA_ivbuffer_size) {
     std::unique_ptr<annot::MultiLabelEncoded<std::string>> annotation;
 
     switch (anno_type) {
@@ -119,14 +119,14 @@ initialize_annotation(Config::AnnotationType anno_type,
         }
         case Config::RowSparseDisk: {
             annotation.reset(new annot::RowSparseDiskAnnotator(
-                    std::make_unique<annot::binmat::RowSparseDisk>(disk_buffer_size),
+                    std::make_unique<annot::binmat::RowSparseDisk>(RA_ivbuffer_size),
                     annot::LabelEncoder<std::string> {}));
             break;
         }
         case Config::RowDiffSparseDisk: {
             annotation.reset(new annot::RowDiffSparseDiskAnnotator(
                     std::make_unique<annot::binmat::RowDiff<annot::binmat::RowSparseDisk>>(
-                            nullptr, annot::binmat::RowSparseDisk(disk_buffer_size)),
+                            nullptr, annot::binmat::RowSparseDisk(RA_ivbuffer_size)),
                     annot::LabelEncoder<std::string> {}));
             break;
         }

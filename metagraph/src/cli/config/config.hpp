@@ -91,7 +91,7 @@ class Config {
     unsigned int genome_binsize_anno = 1000;
     unsigned int arity_brwt = 2;
     unsigned int relax_arity_brwt = 10;
-    unsigned long long disk_buffer_size = 10'000; // in B
+    unsigned long long RA_ivbuffer_size = 16'384; // in B
     unsigned int min_tip_size = 1;
     unsigned int min_unitig_median_kmer_abundance = 1;
     int fallback_abundance_cutoff = 1;
