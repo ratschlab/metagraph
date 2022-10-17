@@ -11,7 +11,9 @@
 #include "common/vectors/vector_algorithm.hpp"
 #include "common/vector_map.hpp"
 #include "common/logger.hpp"
-
+#include "annotation/int_matrix/row_diff/tuple_row_diff.hpp"
+#include "annotation/int_matrix/rank_extended/tuple_csc_matrix.hpp"
+#include "graph/alignment/alignment.hpp"
 
 namespace mtg {
 namespace graph {
@@ -19,6 +21,10 @@ namespace graph {
 using mtg::common::logger;
 using mtg::annot::matrix::IntMatrix;
 using mtg::annot::matrix::MultiIntMatrix;
+
+using mtg::annot::matrix::TupleRowDiff;
+using mtg::annot::matrix::TupleCSCMatrix;
+using mtg::annot::binmat::ColumnMajor;
 
 typedef AnnotatedDBG::Label Label;
 typedef std::pair<Label, size_t> StringCountPair;
@@ -642,16 +648,59 @@ AnnotatedDBG::get_kmer_coordinates(const std::vector<node_index> &nodes,
 
 std::vector<std::vector<std::tuple<std::string, Label, uint64_t>>>
 AnnotatedDBG::get_overlapping_reads(std::string_view sequence) const {
-    // TODO: implement
-    std::ignore = sequence;
-    return {};
+    
+    if (sequence.size() < dbg_.get_k())
+        return {};
+
+    std::vector<node_index> nodes = map_to_nodes(dbg_, sequence);
+    return get_overlapping_reads(nodes);
 }
 
 std::vector<std::vector<std::tuple<std::string, Label, uint64_t>>>
 AnnotatedDBG::get_overlapping_reads(const std::vector<node_index> &nodes) const {
-    // TODO: implement
-    std::ignore = nodes;
-    return {};
+    
+    if (!nodes.size())
+        return {};    
+    
+    std::vector<row_index> rows;
+    rows.reserve(nodes.size());
+    for (node_index i : nodes) {
+        if (i > 0)
+            rows.push_back(graph_to_anno_index(i));
+    }
+
+    const auto *tuple_row_diff = dynamic_cast<const TupleRowDiff<TupleCSCMatrix<ColumnMajor>> *>(&annotator_->get_matrix());
+    if (!tuple_row_diff) {
+        logger->error("k-mer coordinates are not indexed in this annotator");
+        exit(1);
+    }
+
+    std::vector<std::vector<std::tuple<std::string, Label, uint64_t>>> result;
+    result.reserve(rows.size());
+
+    for (row_index & row: rows) {
+        std::vector<std::tuple<std::string, Label, uint64_t>> row_result;
+
+        auto traces = tuple_row_diff->get_traces_with_row(row);
+
+        for (auto & [row_trace, j]: traces) {
+            std::vector<node_index> trace_to_graph_index;
+            trace_to_graph_index.reserve(row_trace.size());
+            for (row_index & row_in_trace : row_trace) {
+                trace_to_graph_index.push_back(anno_to_graph_index(row_in_trace));
+            }
+
+            std::string path_spelling = mtg::graph::align::spell_path(dbg_, trace_to_graph_index);
+            Label label = annotator_->get_label_encoder().decode(j);
+
+            row_result.push_back(std::make_tuple(path_spelling, label, trace_to_graph_index.front()));
+        }
+
+        result.push_back(row_result);
+    }
+
+    return result;
+
 }
 
 std::vector<std::pair<Label, sdsl::bit_vector>>

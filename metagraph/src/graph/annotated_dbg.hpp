@@ -161,11 +161,19 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
                          double discovery_fraction,
                          double presence_fraction) const;
 
-    // TODO: add docstring
+    /** For each kmer from a given sequence returns all labeled sequences from the graph that contain it.
+     * @param sequence DNA sequence.
+     * @return For each kmer from the given sequence a vector of tuples 
+     * (path_spelling, label, coordinate_of_the_start_node) is returned.
+     */
     std::vector<std::vector<std::tuple<std::string, Label, uint64_t>>>
     get_overlapping_reads(std::string_view sequence) const;
 
-    // TODO: add docstring
+    /** For each node from a given vector returns all labeled sequences that pass through it in the graph. 
+     * @param nodes Vector of nodes.
+     * @return For each node from the given vector a vector of tuples 
+     * (path_spelling, label, coordinate_of_the_start_node) is returned.
+     */
     std::vector<std::vector<std::tuple<std::string, Label, uint64_t>>>
     get_overlapping_reads(const std::vector<node_index> &nodes) const;
 

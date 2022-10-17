@@ -56,6 +56,41 @@ typedef ::testing::Types<std::pair<DBGHashFast, annot::ColumnCompressed<>>,
 
 TYPED_TEST_SUITE(LabeledAlignerTest, FewGraphAnnotationPairTypes);
 
+TYPED_TEST(LabeledAlignerTest, GetTracesWithRow) {
+     size_t k = 4;
+    /*
+        A    A    AB    B    B    B
+        GCAA-CAAT-AATG-ATGC-TGCT-GCTT
+        2    1    5    4    3    6
+
+        "GCAATG",
+        "AATGCTT"         
+    */
+
+   const std::vector<std::string> sequences {
+        "GCAATG",
+        "AATGCTT"
+        
+    };
+    const std::vector<std::string> labels { "A", "B" };
+
+    auto anno_graph = build_anno_graph<typename TypeParam::first_type,
+                                       typename TypeParam::second_type>(k, sequences, labels, DeBruijnGraph::BASIC, true);
+
+
+    std::string_view start_seq = "CAATG";
+
+    auto obs = anno_graph->get_overlapping_reads(start_seq);
+ 
+    std::tuple ref_tuple1 = std::make_tuple<std::string, std::string, uint64_t>("GCAATG", "A", 2);
+    std::tuple ref_tuple2 = std::make_tuple<std::string, std::string, uint64_t>("AATGCTT", "B", 5);
+
+    std::vector<std::vector<std::tuple<std::string, std::string, uint64_t>>> ref = { {ref_tuple1}, {ref_tuple2, ref_tuple1} };
+
+    EXPECT_EQ(ref, obs);
+}
+
+
 TYPED_TEST(LabeledAlignerTest, SimpleLinearGraph) {
     size_t k = 4;
     /*
