@@ -1125,6 +1125,189 @@ void convert_row_diff_to_row_diff_disk(const std::vector<std::string> &files,
             merge_load_row_diff);
 }
 
+uint8_t get_max_count_width(const std::vector<std::string> &files) {
+    uint8_t res {};
+    for(const auto& fname : files) {
+        const auto &values_fname
+                = utils::remove_suffix(fname, ColumnCompressed<>::kExtension)
+                                                + ColumnCompressed<>::kCountExtension;
+        sdsl::int_vector<>::size_type size{};
+        uint8_t int_width{};
+        std::ifstream in(values_fname);
+        if (!in)
+                throw std::ifstream::failure("can't open file " + values_fname);
+
+        sdsl::int_vector<>::read_header(size, int_width, in);
+        if(int_width > res)
+            res = int_width;
+    }
+
+    return res;
+}
+
+void convert_to_int_row_disk(const std::vector<std::string> &files,
+                             const std::string &outfbase,
+                             size_t /*num_threads*/,
+                             size_t /*mem_bytes*/,
+                             std::filesystem::path /*tmp_dir*/) {
+
+    logger->info("Convert to int_row_disk"); //mkokot_TODO: remove or change this info
+
+    auto outfname = utils::make_suffix(outfbase, IntRowDiskAnnotator::kExtension);
+
+    size_t num_rows = get_num_rows_from_column_anno(files[0]);
+    size_t num_set_bits = 0;
+
+    std::vector<std::string> col_names;
+    std::vector<std::unique_ptr<bit_vector>> columns;
+    std::vector<sdsl::int_vector<>> col_values;
+
+
+
+    std::mutex mtx;
+
+    ColumnCompressed<>::load_columns_and_values(
+            files,
+            [&](size_t column_index, const std::string &label, std::unique_ptr<bit_vector> &&column,
+                sdsl::int_vector<> &&values) {
+                    std::lock_guard<std::mutex> lck(mtx);
+
+                    num_set_bits += column->num_set_bits();
+
+                    if (columns.size() <= column_index) {
+                        columns.resize(column_index + 1);
+                        col_names.resize(column_index + 1);
+                        col_values.resize(column_index + 1);
+                    }
+                    columns[column_index] = std::move(column);
+                    col_values[column_index] = std::move(values);
+                    col_names[column_index] = label;
+
+            },
+            get_num_threads());
+
+    LEncoder label_encoder;
+    for (const auto &label : col_names) {
+        label_encoder.insert_and_encode(label);
+    }
+
+    std::ofstream outstream(outfname, std::ios::binary);
+    if (!outstream.good()) {
+        throw std::ofstream::failure("Bad stream");
+    }
+    label_encoder.serialize(outstream);
+
+    outstream.close();
+
+    ProgressBar progress_bar(num_rows, "Serialize rows", std::cerr, !common::get_verbose());
+
+    uint8_t int_width_for_counts = get_max_count_width(files);
+
+    //mkokot_TODO: parallelize
+    matrix::IntRowDisk::serialize(
+        [&](std::function<void(const matrix::IntMatrix::RowValues &)> write_row_with_values) {
+            std::vector<matrix::IntMatrix::RowValues> rows_with_values(num_rows);
+
+            for(size_t col_idx = 0 ; col_idx < columns.size() ; ++col_idx) {
+                size_t val_idx = 0;
+                columns[col_idx]->call_ones([&](uint64_t row_idx) {
+                    rows_with_values[row_idx].emplace_back(col_idx, col_values[col_idx][val_idx++]);
+                });
+            }
+
+            for(const auto& row_with_values : rows_with_values) {
+                write_row_with_values(row_with_values);
+                ++progress_bar;
+            }
+
+    }, outfname, columns.size(), num_set_bits, num_rows, int_width_for_counts);
+}
+
+
+void convert_to_int_row_diff_disk(const std::vector<std::string> &files,
+                                  const std::string &outfbase,
+                                  const std::string &anchors_file,
+                                  const std::string &fork_succ_file,
+                                  size_t /*num_threads*/,
+                                  size_t /*mem_bytes*/,
+                                  std::filesystem::path /*tmp_dir*/) {
+    logger->info("Convert to row_diff_int_disk"); //mkokot_TODO: remove or change this info
+
+
+    auto outfname = utils::make_suffix(outfbase, IntRowDiffDiskAnnotator::kExtension);
+
+    size_t num_rows = get_num_rows_from_column_anno(files[0]);
+    size_t num_set_bits = 0;
+
+    std::vector<std::string> col_names;
+    std::vector<std::unique_ptr<bit_vector>> columns;
+    std::vector<sdsl::int_vector<>> col_values;
+
+    std::mutex mtx;
+
+    ColumnCompressed<>::load_columns_and_values(
+            files,
+            [&](size_t column_index, const std::string &label, std::unique_ptr<bit_vector> &&column,
+                sdsl::int_vector<> &&values) {
+                    std::lock_guard<std::mutex> lck(mtx);
+
+                    num_set_bits += column->num_set_bits();
+
+                    if (columns.size() <= column_index) {
+                        columns.resize(column_index + 1);
+                        col_names.resize(column_index + 1);
+                        col_values.resize(column_index + 1);
+                    }
+                    columns[column_index] = std::move(column);
+                    col_values[column_index] = std::move(values);
+                    col_names[column_index] = label;
+
+            },
+            get_num_threads());
+
+    LEncoder label_encoder;
+    for (const auto &label : col_names) {
+        label_encoder.insert_and_encode(label);
+    }
+
+    std::ofstream outstream(outfname, std::ios::binary);
+    if (!outstream.good()) {
+        throw std::ofstream::failure("Bad stream");
+    }
+    label_encoder.serialize(outstream);
+
+    IRowDiff row_diff;
+    row_diff.load_anchor(anchors_file);
+    row_diff.load_fork_succ(fork_succ_file);
+    outstream.write("v2.0", 4);
+    row_diff.anchor().serialize(outstream);
+    row_diff.fork_succ().serialize(outstream);
+
+
+    outstream.close();
+
+    ProgressBar progress_bar(num_rows, "Serialize rows", std::cerr, !common::get_verbose());
+
+    uint8_t int_width_for_counts = get_max_count_width(files);
+    //mkokot_TODO: parallelize
+    matrix::IntRowDisk::serialize(
+        [&](std::function<void(const matrix::IntMatrix::RowValues &)> write_row_with_values) {
+            std::vector<matrix::IntMatrix::RowValues> rows_with_values(num_rows);
+
+            for(size_t col_idx = 0 ; col_idx < columns.size() ; ++col_idx) {
+                size_t val_idx = 0;
+                columns[col_idx]->call_ones([&](uint64_t row_idx) {
+                    rows_with_values[row_idx].emplace_back(col_idx, col_values[col_idx][val_idx++]);
+                });
+            }
+
+            for(const auto& row_with_values : rows_with_values) {
+                write_row_with_values(row_with_values);
+                ++progress_bar;
+            }
+
+    }, outfname, columns.size(), num_set_bits, num_rows, int_width_for_counts);
+}
 
 template <>
 std::unique_ptr<RbBRWTAnnotator>

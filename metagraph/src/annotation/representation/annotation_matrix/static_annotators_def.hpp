@@ -18,6 +18,7 @@
 #include "annotation/int_matrix/row_diff/int_row_diff.hpp"
 #include "annotation/int_matrix/row_diff/tuple_row_diff.hpp"
 #include "annotation/int_matrix/csr_matrix/csr_matrix.hpp"
+#include "annotation/int_matrix/int_row_disk/int_row_disk.hpp"
 #include "annotation/int_matrix/rank_extended/tuple_csc_matrix.hpp"
 
 
@@ -57,6 +58,10 @@ typedef StaticBinRelAnnotator<matrix::CSCMatrix<binmat::BRWT, CountsVector>, std
 typedef StaticBinRelAnnotator<matrix::IntRowDiff<matrix::CSCMatrix<binmat::BRWT, CountsVector>>, std::string> IntRowDiffBRWTAnnotator;
 
 typedef StaticBinRelAnnotator<matrix::CSRMatrix, std::string> IntRowAnnotator;
+
+typedef StaticBinRelAnnotator<matrix::IntRowDisk, std::string> IntRowDiskAnnotator;
+
+typedef StaticBinRelAnnotator<matrix::IntRowDiff<matrix::IntRowDisk>, std::string> IntRowDiffDiskAnnotator;
 
 typedef StaticBinRelAnnotator<matrix::TupleCSCMatrix<binmat::ColumnMajor>, std::string> ColumnCoordAnnotator;
 
@@ -99,6 +104,10 @@ template <>
 inline const std::string IntRowDiffBRWTAnnotator::kExtension = ".row_diff_int_brwt.annodbg";
 template <>
 inline const std::string IntRowAnnotator::kExtension = ".int_csr.annodbg";
+template <>
+inline const std::string IntRowDiskAnnotator::kExtension = ".int_row_disk.annodbg";
+template <>
+inline const std::string IntRowDiffDiskAnnotator::kExtension = ".row_diff_int_disk.annodbg";
 template <>
 inline const std::string ColumnCoordAnnotator::kExtension = ".column_coord.annodbg";
 template <>

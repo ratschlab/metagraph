@@ -96,7 +96,7 @@ class RowDisk : public BinaryMatrix {
     struct int_vector_buffer_params {
         std::string filename;
         uint64_t offset;
-        uint64_t buff_size = 10'000;
+        uint64_t buff_size = 16'384;
     };
     int_vector_buffer_params buffer_params_;
 

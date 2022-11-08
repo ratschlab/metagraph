@@ -210,6 +210,8 @@ class Config {
         RowFlat,
         RowSparse,
         RowDisk,
+        IntRowDisk,
+        IntRowDiffDisk,
         RBFish,
         RbBRWT,
         IntBRWT,

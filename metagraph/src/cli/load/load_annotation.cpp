@@ -60,11 +60,17 @@ Config::AnnotationType parse_annotation_type(const std::string &filename) {
     } else if (utils::ends_with(filename, annot::RowDiskAnnotator::kExtension)) {
         return Config::AnnotationType::RowDisk;
 
+    } else if (utils::ends_with(filename, annot::IntRowDiskAnnotator::kExtension)) {
+        return Config::AnnotationType::IntRowDisk;
+
     } else if (utils::ends_with(filename, annot::RowDiffRowSparseAnnotator ::kExtension)) {
         return Config::AnnotationType::RowDiffRowSparse;
 
     } else if (utils::ends_with(filename, annot::RowDiffDiskAnnotator::kExtension)) {
         return Config::AnnotationType::RowDiffDisk;
+
+    } else if (utils::ends_with(filename, annot::IntRowDiffDiskAnnotator::kExtension)) {
+        return Config::AnnotationType::IntRowDiffDisk;
 
     } else if (utils::ends_with(filename, annot::RainbowfishAnnotator::kExtension)) {
         return Config::AnnotationType::RBFish;
@@ -123,10 +129,23 @@ initialize_annotation(Config::AnnotationType anno_type,
                     annot::LabelEncoder<std::string> {}));
             break;
         }
+        case Config::IntRowDisk: {
+            annotation.reset(new annot::IntRowDiskAnnotator(
+                    std::make_unique<annot::matrix::IntRowDisk>(RA_ivbuffer_size),
+                    annot::LabelEncoder<std::string> {}));
+            break;
+        }
         case Config::RowDiffDisk: {
             annotation.reset(new annot::RowDiffDiskAnnotator(
                     std::make_unique<annot::binmat::RowDiff<annot::binmat::RowDisk>>(
                             nullptr, annot::binmat::RowDisk(RA_ivbuffer_size)),
+                    annot::LabelEncoder<std::string> {}));
+            break;
+        }
+        case Config::IntRowDiffDisk: {
+            annotation.reset(new annot::IntRowDiffDiskAnnotator(
+                    std::make_unique<annot::matrix::IntRowDiff<annot::matrix::IntRowDisk>>(
+                            nullptr, annot::matrix::IntRowDisk(RA_ivbuffer_size)),
                     annot::LabelEncoder<std::string> {}));
             break;
         }
