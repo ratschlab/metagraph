@@ -5,7 +5,7 @@
 #include <cassert>
 
 #include <sdsl/wt_huff.hpp>
-#include <dynamic.hpp>
+#include <dynamic/dynamic.hpp>
 
 #include "bit_vector_sdsl.hpp"
 

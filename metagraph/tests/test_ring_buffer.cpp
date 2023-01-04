@@ -84,8 +84,10 @@ TEST(RingBuffer, empty) {
 
     buffer.reset();
 
+#ifndef NDEBUG
     ASSERT_DEATH(buffer.push_back(1), "");
     ASSERT_DEATH(buffer.push_front(1), "");
+#endif
 }
 
 TEST(RingBuffer, PushBack) {
