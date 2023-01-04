@@ -63,6 +63,9 @@ Config::AnnotationType parse_annotation_type(const std::string &filename) {
     } else if (utils::ends_with(filename, annot::IntRowDiskAnnotator::kExtension)) {
         return Config::AnnotationType::IntRowDisk;
 
+    } else if (utils::ends_with(filename, annot::CoordRowDiskAnnotator::kExtension)) {
+        return Config::AnnotationType::CoordRowDisk;
+
     } else if (utils::ends_with(filename, annot::RowDiffRowSparseAnnotator ::kExtension)) {
         return Config::AnnotationType::RowDiffRowSparse;
 
@@ -71,6 +74,9 @@ Config::AnnotationType parse_annotation_type(const std::string &filename) {
 
     } else if (utils::ends_with(filename, annot::IntRowDiffDiskAnnotator::kExtension)) {
         return Config::AnnotationType::IntRowDiffDisk;
+
+    } else if (utils::ends_with(filename, annot::CoordRowDiffDiskAnnotator::kExtension)) {
+        return Config::AnnotationType::CoordRowDiffDisk;
 
     } else if (utils::ends_with(filename, annot::RainbowfishAnnotator::kExtension)) {
         return Config::AnnotationType::RBFish;
@@ -135,6 +141,12 @@ initialize_annotation(Config::AnnotationType anno_type,
                     annot::LabelEncoder<std::string> {}));
             break;
         }
+        case Config::CoordRowDisk: {
+            annotation.reset(new annot::CoordRowDiskAnnotator(
+                std::make_unique<annot::matrix::CoordRowDisk>(RA_ivbuffer_size),
+                annot::LabelEncoder<std::string> {}));
+            break;
+        }
         case Config::RowDiffDisk: {
             annotation.reset(new annot::RowDiffDiskAnnotator(
                     std::make_unique<annot::binmat::RowDiff<annot::binmat::RowDisk>>(
@@ -146,6 +158,13 @@ initialize_annotation(Config::AnnotationType anno_type,
             annotation.reset(new annot::IntRowDiffDiskAnnotator(
                     std::make_unique<annot::matrix::IntRowDiff<annot::matrix::IntRowDisk>>(
                             nullptr, annot::matrix::IntRowDisk(RA_ivbuffer_size)),
+                    annot::LabelEncoder<std::string> {}));
+            break;
+        }
+        case Config::CoordRowDiffDisk: {
+            annotation.reset(new annot::CoordRowDiffDiskAnnotator(
+                    std::make_unique<annot::matrix::TupleRowDiff<annot::matrix::CoordRowDisk>>(
+                            nullptr, annot::matrix::CoordRowDisk(RA_ivbuffer_size)),
                     annot::LabelEncoder<std::string> {}));
             break;
         }

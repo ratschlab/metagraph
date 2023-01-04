@@ -8,7 +8,7 @@ namespace mtg {
 namespace annot {
 namespace matrix {
 
-class Uint64BuffWrite {    
+class Uint64BuffWrite {
 public:
     template<class Store>
     void add(uint64_t v, uint8_t n_bits, Store store) {        

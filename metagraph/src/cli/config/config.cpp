@@ -622,6 +622,7 @@ Config::Config(int argc, char *argv[]) {
                                     || anno_type == RowDiffRowSparse
                                     || anno_type == RowDiffDisk
                                     || anno_type == IntRowDiffDisk
+                                    || anno_type == CoordRowDiffDisk
                                     || anno_type == RowDiffBRWTCoord
                                     || anno_type == RowDiffCoord;
         if (to_row_diff && !infbase.size()) {
@@ -749,6 +750,10 @@ std::string Config::annotype_to_string(AnnotationType state) {
             return "int_row_disk";
         case IntRowDiffDisk:
             return "row_diff_int_disk";
+        case CoordRowDisk:
+            return "coord_row_disk";
+        case CoordRowDiffDisk:
+            return "row_diff_coord_disk";
         case IntBRWT:
             return "int_brwt";
         case IntRowDiffBRWT:
@@ -798,6 +803,10 @@ Config::AnnotationType Config::string_to_annotype(const std::string &string) {
         return AnnotationType::IntRowDisk;
     } else if (string == "row_diff_int_disk") {
         return AnnotationType::IntRowDiffDisk;
+    } else if (string == "coord_row_disk") {
+        return AnnotationType::CoordRowDisk;
+    } else if (string == "row_diff_coord_disk") {
+        return AnnotationType::CoordRowDiffDisk;
     } else if (string == "int_brwt") {
         return AnnotationType::IntBRWT;
     } else if (string == "row_diff_int_brwt") {

@@ -99,6 +99,20 @@ void convert_to_int_row_diff_disk(const std::vector<std::string> &files,
                                   size_t mem_bytes,
                                   std::filesystem::path tmp_dir);
 
+void convert_to_coord_row_disk(const std::vector<std::string> &files,
+                               const std::string &outfbase,
+                               size_t num_threads,
+                               size_t mem_bytes,
+                               std::filesystem::path tmp_dir);
+
+void convert_to_coord_row_diff_disk(const std::vector<std::string> &files,
+                                    const std::string &outfbase,
+                                    const std::string &anchors_file,
+                                    const std::string &fork_succ_file,
+                                    size_t num_threads,
+                                    size_t mem_bytes,
+                                    std::filesystem::path tmp_dir);
+
 
 template <class ToAnnotation, typename Label>
 void merge(std::vector<std::unique_ptr<MultiLabelEncoded<Label>>>&& annotators,

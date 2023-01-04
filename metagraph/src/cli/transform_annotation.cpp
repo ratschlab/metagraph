@@ -693,7 +693,10 @@ int transform_annotation(Config *config) {
                 && config->anno_type != Config::RowDiff
                 && config->anno_type != Config::RowDisk
                 && config->anno_type != Config::IntRowDisk
-                && config->anno_type != Config::IntRowDiffDisk) {
+                && config->anno_type != Config::IntRowDiffDisk
+                && config->anno_type != Config::CoordRowDisk
+                && config->anno_type != Config::CoordRowDiffDisk
+                ) {
             annotator = std::make_unique<ColumnCompressed<>>(0);
             logger->trace("Loading annotation from disk...");
             if (!annotator->merge_load(files)) {
@@ -876,6 +879,11 @@ int transform_annotation(Config *config) {
                                     config->memory_available * 1e9, config->tmp_dir);
                 break;
             }
+            case Config::CoordRowDisk : {
+                convert_to_coord_row_disk(files, config->outfbase, get_num_threads(),
+                                    config->memory_available * 1e9, config->tmp_dir);
+                break;
+            }
             case Config::IntRowDiffDisk: {
                 const std::string anchors_file = config->infbase + annot::binmat::kRowDiffAnchorExt;
                 if (!std::filesystem::exists(anchors_file)) {
@@ -890,6 +898,23 @@ int transform_annotation(Config *config) {
                 }
 
                 convert_to_int_row_diff_disk(files, config->outfbase, anchors_file, fork_succ_file, get_num_threads(),
+                                    config->memory_available * 1e9, config->tmp_dir);
+                break;
+            }
+             case Config::CoordRowDiffDisk: {
+                const std::string anchors_file = config->infbase + annot::binmat::kRowDiffAnchorExt;
+                if (!std::filesystem::exists(anchors_file)) {
+                    logger->error("Anchor bitmap {} does not exist. Run the row_diff"
+                                  " transform followed by anchor optimization.", anchors_file);
+                    std::exit(1);
+                }
+                const std::string fork_succ_file = config->infbase + annot::binmat::kRowDiffForkSuccExt;
+                if (!std::filesystem::exists(fork_succ_file)) {
+                    logger->error("Fork successor bitmap {} does not exist", fork_succ_file);
+                    std::exit(1);
+                }
+
+                convert_to_coord_row_diff_disk(files, config->outfbase, anchors_file, fork_succ_file, get_num_threads(),
                                     config->memory_available * 1e9, config->tmp_dir);
                 break;
             }

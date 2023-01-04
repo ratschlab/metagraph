@@ -211,11 +211,15 @@ template class StaticBinRelAnnotator<binmat::RowDisk, std::string>;
 
 template class StaticBinRelAnnotator<matrix::IntRowDisk, std::string>;
 
+template class StaticBinRelAnnotator<matrix::CoordRowDisk, std::string>;
+
 template class StaticBinRelAnnotator<binmat::RowDiff<binmat::RowSparse>, std::string>;
 
 template class StaticBinRelAnnotator<binmat::RowDiff<binmat::RowDisk>, std::string>;
 
 template class StaticBinRelAnnotator<matrix::IntRowDiff<matrix::IntRowDisk>, std::string>;
+
+template class StaticBinRelAnnotator<matrix::TupleRowDiff<matrix::CoordRowDisk>, std::string>;
 
 template class StaticBinRelAnnotator<matrix::CSCMatrix<binmat::BRWT, CountsVector>, std::string>;
 

@@ -1,5 +1,5 @@
-#ifndef __INT_ROW_DISK_HPP__
-#define __INT_ROW_DISK_HPP__
+#ifndef __INT_COORD_DISK_HPP__
+#define __INT_COORD_DISK_HPP__
 
 #include <vector>
 
@@ -16,10 +16,10 @@ namespace matrix {
 // the only difference will be that there is some additional data stored
 // for now for simplicity I just use different class
 // and also different base class
-class IntRowDisk : public IntMatrix {
+class CoordRowDisk : public MultiIntMatrix {
 
 public:
-    IntRowDisk(size_t RA_ivbuffer_size = 16'384) {
+    CoordRowDisk(size_t RA_ivbuffer_size = 16'384) {
         buffer_params_.buff_size = RA_ivbuffer_size/8;
         if (buffer_params_.buff_size < 8)
             buffer_params_.buff_size = 8;
@@ -30,13 +30,13 @@ public:
 
     bool get(Row row, Column column) const override {
         return View(boundary_, buffer_params_.filename,
-                    buffer_params_.offset, buffer_params_.buff_size, bits_for_col_id_, bits_for_value_)
+                    buffer_params_.offset, buffer_params_.buff_size, bits_for_col_id_, bits_for_number_of_vals_, bits_for_single_value_)
                 .get(row, column);
     }
 
     SetBitPositions get_row(Row row) const override {
         return View(boundary_, buffer_params_.filename,
-                    buffer_params_.offset, buffer_params_.buff_size, bits_for_col_id_, bits_for_value_)
+                    buffer_params_.offset, buffer_params_.buff_size, bits_for_col_id_, bits_for_number_of_vals_, bits_for_single_value_)
                 .get_row(row);
     }
 
@@ -45,27 +45,47 @@ public:
                 "get_column is extremely inefficient operation, consider using "
                 "column-major format");
         return View(boundary_, buffer_params_.filename, buffer_params_.offset,
-                    buffer_params_.buff_size, bits_for_col_id_, bits_for_value_)
+                    buffer_params_.buff_size, bits_for_col_id_, bits_for_number_of_vals_, bits_for_single_value_)
                 .get_column(num_rows(), column);
     }
 
     std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const override {
         return View(boundary_, buffer_params_.filename,
-                    buffer_params_.offset, buffer_params_.buff_size, bits_for_col_id_, bits_for_value_)
+                    buffer_params_.offset, buffer_params_.buff_size, bits_for_col_id_, bits_for_number_of_vals_, bits_for_single_value_)
                 .get_rows(rows);
     }
 
     RowValues get_row_values(Row row) const override {
         return View(boundary_, buffer_params_.filename,
-                    buffer_params_.offset, buffer_params_.buff_size, bits_for_col_id_, bits_for_value_)
+                    buffer_params_.offset, buffer_params_.buff_size, bits_for_col_id_, bits_for_number_of_vals_, bits_for_single_value_)
                 .get_row_values(row);
     }
 
     std::vector<RowValues>
     get_row_values(const std::vector<Row> &rows) const override {
         return View(boundary_, buffer_params_.filename,
-                    buffer_params_.offset, buffer_params_.buff_size, bits_for_col_id_, bits_for_value_)
+                    buffer_params_.offset, buffer_params_.buff_size, bits_for_col_id_, bits_for_number_of_vals_, bits_for_single_value_)
                 .get_row_values(rows);
+    }
+
+    // return total number of attributes in all tuples
+    uint64_t num_attributes() const override {
+        //mkokot_TODO: implement, just store this value in the annotation file, it does not make sense to compute it
+        throw std::runtime_error("Not implemented");
+    }
+
+    // return entries of the matrix -- where each entry is a set of integers
+    RowTuples get_row_tuples(Row row) const override {
+        return View(boundary_, buffer_params_.filename,
+                    buffer_params_.offset, buffer_params_.buff_size, bits_for_col_id_, bits_for_number_of_vals_, bits_for_single_value_)
+                .get_row_tuples(row);
+    }
+
+    std::vector<RowTuples>
+    get_row_tuples(const std::vector<Row> &rows) const override {
+         return View(boundary_, buffer_params_.filename,
+                    buffer_params_.offset, buffer_params_.buff_size, bits_for_col_id_, bits_for_number_of_vals_, bits_for_single_value_)
+                .get_row_tuples(rows);
     }
 
     bool load(std::istream &f) override;
@@ -82,12 +102,12 @@ public:
 
 
     static void
-    serialize(const std::function<void(std::function<void(const RowValues &)>)> &call_rows_with_values,
+    serialize(const std::function<void(std::function<void(const RowTuples &)>)> &write_row_with_tuples,
               const std::string &filename,
               uint64_t num_cols,
               uint64_t num_set_bits,
               uint64_t num_rows,
-              uint8_t int_width_for_counts);
+              uint64_t num_values);
 
   private:
 
@@ -104,17 +124,19 @@ public:
             return in;
         }
       public:
-        View(const bit_vector_small &boundary,
+        View(const bit_vector_small &boundary, //sd_vector or int_vector_buffer at the begining (instead of bit_vector_small)
              const std::string &filename,
              uint64_t offset,
              uint64_t buff_size,
              uint64_t bits_for_col_id,
-             uint64_t bits_for_value)
+             uint64_t bits_for_number_of_vals,
+             uint64_t bits_for_single_value)
             : boundary_(boundary),
               in_(open_and_set_pos(filename, offset)),
               set_bits_(in_, buff_size),
               bits_for_col_id_(bits_for_col_id),
-              bits_for_value_(bits_for_value) {}
+              bits_for_number_of_vals_(bits_for_number_of_vals),
+              bits_for_single_value_(bits_for_single_value) {}
 
         bool get(Row row, Column column) const;
         BinaryMatrix::SetBitPositions get_row(Row row) const;
@@ -124,13 +146,18 @@ public:
         RowValues get_row_values(Row row) const;
         std::vector<RowValues> get_row_values(const std::vector<Row> &row_ids) const;
 
+        RowTuples get_row_tuples(Row row) const;
+
+        std::vector<RowTuples> get_row_tuples(const std::vector<Row> &rows) const;
+
       private:
         const bit_vector_small &boundary_;
-        //sdsl::int_vector_buffer<> set_bits_;
+        
         std::ifstream in_;
         mutable DiskRandomReader set_bits_;
         uint64_t bits_for_col_id_;
-        uint64_t bits_for_value_;
+        uint64_t bits_for_number_of_vals_;
+        uint64_t bits_for_single_value_;
     };
 
     struct int_vector_buffer_params {
@@ -144,7 +171,8 @@ public:
     uint64_t num_columns_ = 0;
     uint64_t num_set_bits_ = 0;
     uint64_t bits_for_col_id_ = 0;
-    uint64_t bits_for_value_ = 0;
+    uint64_t bits_for_number_of_vals_ = 0;
+    uint64_t bits_for_single_value_ = 0;
     uint64_t num_rows_ = 0;
 
     size_t iv_size_on_disk_ = 0; // for non-static serialization
@@ -155,4 +183,4 @@ public:
 } // namespace mtg
 
 
-#endif // __INT_ROW_DISK_HPP__
+#endif // __INT_COORD_DISK_HPP__

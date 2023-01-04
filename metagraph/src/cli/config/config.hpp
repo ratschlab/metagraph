@@ -212,6 +212,8 @@ class Config {
         RowDisk,
         IntRowDisk,
         IntRowDiffDisk,
+        CoordRowDisk,
+        CoordRowDiffDisk,
         RBFish,
         RbBRWT,
         IntBRWT,

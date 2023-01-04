@@ -134,7 +134,6 @@ void IntRowDisk::serialize(
     // std::ios::in needed for tellp to return absolute file position
     std::ofstream outstream(filename, std::ios::binary | std::ios::ate | std::ios::in);
 
-
     if (!outstream.good())
         throw std::ofstream::failure("Cannot write to file " + filename);
 

@@ -809,7 +809,6 @@ void convert_batch_to_row_disk(
 
     RowDisk::serialize(
             [&](BinaryMatrix::RowCallback write_row) {
-
                 #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic)
                 for (uint64_t i = 0; i < num_rows; i += kNumRowsInBlock) {
                     uint64_t begin = i;
@@ -1147,12 +1146,9 @@ uint8_t get_max_count_width(const std::vector<std::string> &files) {
 
 void convert_to_int_row_disk(const std::vector<std::string> &files,
                              const std::string &outfbase,
-                             size_t /*num_threads*/,
+                             size_t num_threads,
                              size_t /*mem_bytes*/,
                              std::filesystem::path /*tmp_dir*/) {
-
-    logger->info("Convert to int_row_disk"); //mkokot_TODO: remove or change this info
-
     auto outfname = utils::make_suffix(outfbase, IntRowDiskAnnotator::kExtension);
 
     size_t num_rows = get_num_rows_from_column_anno(files[0]);
@@ -1161,8 +1157,6 @@ void convert_to_int_row_disk(const std::vector<std::string> &files,
     std::vector<std::string> col_names;
     std::vector<std::unique_ptr<bit_vector>> columns;
     std::vector<sdsl::int_vector<>> col_values;
-
-
 
     std::mutex mtx;
 
@@ -1184,7 +1178,7 @@ void convert_to_int_row_disk(const std::vector<std::string> &files,
                     col_names[column_index] = label;
 
             },
-            get_num_threads());
+            num_threads);
 
     LEncoder label_encoder;
     for (const auto &label : col_names) {
@@ -1203,23 +1197,35 @@ void convert_to_int_row_disk(const std::vector<std::string> &files,
 
     uint8_t int_width_for_counts = get_max_count_width(files);
 
-    //mkokot_TODO: parallelize
     matrix::IntRowDisk::serialize(
         [&](std::function<void(const matrix::IntMatrix::RowValues &)> write_row_with_values) {
-            std::vector<matrix::IntMatrix::RowValues> rows_with_values(num_rows);
+            #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic)
+            for (size_t i = 0 ; i < num_rows; i += kNumRowsInBlock) {
+                uint64_t start_row_id = i;
+                uint64_t end_row_id = std::min(start_row_id + kNumRowsInBlock, num_rows);
 
-            for(size_t col_idx = 0 ; col_idx < columns.size() ; ++col_idx) {
-                size_t val_idx = 0;
-                columns[col_idx]->call_ones([&](uint64_t row_idx) {
-                    rows_with_values[row_idx].emplace_back(col_idx, col_values[col_idx][val_idx++]);
-                });
+                std::vector<matrix::IntMatrix::RowValues> rows_with_values(end_row_id - start_row_id);
+
+                assert(start_row_id <= end_row_id);
+                assert(end_row_id <= num_rows);
+
+                for (size_t col_idx = 0 ; col_idx < columns.size() ; ++col_idx) {
+                    size_t val_idx = std::numeric_limits<size_t>::max(); //not known yet
+                    columns[col_idx]->call_ones_in_range(start_row_id, end_row_id, [&](uint64_t row_idx) {
+                        if (val_idx == std::numeric_limits<size_t>::max())
+                            val_idx = columns[col_idx]->rank1(row_idx) - 1;
+                        rows_with_values[row_idx - start_row_id].emplace_back(col_idx, col_values[col_idx][val_idx++]);
+                    });
+                }
+
+                #pragma omp ordered
+                {
+                    for (const auto& row_with_values : rows_with_values) {
+                        write_row_with_values(row_with_values);
+                        ++progress_bar;
+                    }
+                }
             }
-
-            for(const auto& row_with_values : rows_with_values) {
-                write_row_with_values(row_with_values);
-                ++progress_bar;
-            }
-
     }, outfname, columns.size(), num_set_bits, num_rows, int_width_for_counts);
 }
 
@@ -1228,12 +1234,9 @@ void convert_to_int_row_diff_disk(const std::vector<std::string> &files,
                                   const std::string &outfbase,
                                   const std::string &anchors_file,
                                   const std::string &fork_succ_file,
-                                  size_t /*num_threads*/,
+                                  size_t num_threads,
                                   size_t /*mem_bytes*/,
                                   std::filesystem::path /*tmp_dir*/) {
-    logger->info("Convert to row_diff_int_disk"); //mkokot_TODO: remove or change this info
-
-
     auto outfname = utils::make_suffix(outfbase, IntRowDiffDiskAnnotator::kExtension);
 
     size_t num_rows = get_num_rows_from_column_anno(files[0]);
@@ -1263,7 +1266,7 @@ void convert_to_int_row_diff_disk(const std::vector<std::string> &files,
                     col_names[column_index] = label;
 
             },
-            get_num_threads());
+            num_threads);
 
     LEncoder label_encoder;
     for (const auto &label : col_names) {
@@ -1283,30 +1286,243 @@ void convert_to_int_row_diff_disk(const std::vector<std::string> &files,
     row_diff.anchor().serialize(outstream);
     row_diff.fork_succ().serialize(outstream);
 
-
     outstream.close();
 
     ProgressBar progress_bar(num_rows, "Serialize rows", std::cerr, !common::get_verbose());
 
     uint8_t int_width_for_counts = get_max_count_width(files);
-    //mkokot_TODO: parallelize
+
     matrix::IntRowDisk::serialize(
         [&](std::function<void(const matrix::IntMatrix::RowValues &)> write_row_with_values) {
-            std::vector<matrix::IntMatrix::RowValues> rows_with_values(num_rows);
+            #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic)
+            for (size_t i = 0 ; i < num_rows; i += kNumRowsInBlock) {
+                uint64_t start_row_id = i;
+                uint64_t end_row_id = std::min(start_row_id + kNumRowsInBlock, num_rows);
 
-            for(size_t col_idx = 0 ; col_idx < columns.size() ; ++col_idx) {
-                size_t val_idx = 0;
-                columns[col_idx]->call_ones([&](uint64_t row_idx) {
-                    rows_with_values[row_idx].emplace_back(col_idx, col_values[col_idx][val_idx++]);
-                });
+                std::vector<matrix::IntMatrix::RowValues> rows_with_values(end_row_id - start_row_id);
+
+                assert(start_row_id <= end_row_id);
+                assert(end_row_id <= num_rows);
+
+                for (size_t col_idx = 0 ; col_idx < columns.size() ; ++col_idx) {
+                    size_t val_idx = std::numeric_limits<size_t>::max(); //not known yet
+                    columns[col_idx]->call_ones_in_range(start_row_id, end_row_id, [&](uint64_t row_idx) {
+                        if (val_idx == std::numeric_limits<size_t>::max())
+                            val_idx = columns[col_idx]->rank1(row_idx) - 1;
+                        rows_with_values[row_idx - start_row_id].emplace_back(col_idx, col_values[col_idx][val_idx++]);
+                    });
+                }
+
+                #pragma omp ordered
+                {
+                    for (const auto& row_with_values : rows_with_values) {
+                        write_row_with_values(row_with_values);
+                        ++progress_bar;
+                    }
+                }
             }
-
-            for(const auto& row_with_values : rows_with_values) {
-                write_row_with_values(row_with_values);
-                ++progress_bar;
-            }
-
     }, outfname, columns.size(), num_set_bits, num_rows, int_width_for_counts);
+}
+
+void convert_to_coord_row_disk(const std::vector<std::string> &files,
+                               const std::string &outfbase,
+                               size_t num_threads,
+                               size_t /*mem_bytes*/,
+                               std::filesystem::path /*tmp_dir*/) {
+    auto outfname = utils::make_suffix(outfbase, CoordRowDiskAnnotator::kExtension);
+
+    size_t num_rows = get_num_rows_from_column_anno(files[0]);
+    size_t num_set_bits = 0;
+
+    size_t num_values = 0;
+
+    std::vector<std::string> col_names;
+    std::vector<std::unique_ptr<bit_vector>> columns;
+    std::vector<sdsl::int_vector<>> col_values;
+    std::vector<bit_vector_small> col_delims;
+
+    std::mutex mtx;
+
+    ColumnCompressed<>::load_columns_delims_and_values(
+            files,
+            [&](size_t column_index, const std::string &label,
+            std::unique_ptr<bit_vector> &&column,
+                bit_vector_small&& delims,
+                sdsl::int_vector<> &&values) {
+                    std::lock_guard<std::mutex> lck(mtx);
+
+                    num_set_bits += column->num_set_bits();
+
+                    num_values += values.size();
+
+                    if (columns.size() <= column_index) {
+                        columns.resize(column_index + 1);
+                        col_names.resize(column_index + 1);
+                        col_values.resize(column_index + 1);
+                        col_delims.resize(column_index + 1);
+                    }
+                    columns[column_index] = std::move(column);
+                    col_values[column_index] = std::move(values);
+                    col_names[column_index] = label;
+                    col_delims[column_index] = std::move(delims);
+            },
+            num_threads);
+
+    LEncoder label_encoder;
+    for (const auto &label : col_names) {
+        label_encoder.insert_and_encode(label);
+    }
+
+    std::ofstream outstream(outfname, std::ios::binary);
+    if (!outstream.good()) {
+        throw std::ofstream::failure("Bad stream");
+    }
+    label_encoder.serialize(outstream);
+
+    outstream.close();
+
+    ProgressBar progress_bar(num_rows, "Serialize rows", std::cerr, !common::get_verbose());
+
+    matrix::CoordRowDisk::serialize(
+        [&](std::function<void(const matrix::MultiIntMatrix::RowTuples &)> write_row_with_tuples) {
+            #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic)
+            for (size_t i = 0 ; i < num_rows; i += kNumRowsInBlock) {
+                uint64_t start_row_id = i;
+                uint64_t end_row_id = std::min(start_row_id + kNumRowsInBlock, num_rows);
+
+                std::vector<matrix::MultiIntMatrix::RowTuples> rows_with_tuples(end_row_id - start_row_id);
+
+                assert(start_row_id <= end_row_id);
+                assert(end_row_id <= num_rows);
+
+                for (size_t col_idx = 0 ; col_idx < columns.size() ; ++col_idx) {
+                    columns[col_idx]->call_ones_in_range(start_row_id, end_row_id, [&](uint64_t row_idx) {
+                        auto r = columns[col_idx]->rank1(row_idx);
+                        size_t begin = col_delims[col_idx].select1(r) + 1 - r;
+                        size_t end = col_delims[col_idx].select1(r + 1) - r;
+                        matrix::MultiIntMatrix::Tuple tuple;
+                        tuple.reserve(end - begin);
+                        for (size_t t = begin; t < end; ++t) {
+                            tuple.push_back(col_values[col_idx][t]);
+                        }
+                        rows_with_tuples[row_idx - start_row_id].emplace_back(col_idx, std::move(tuple));
+                    });
+                }
+
+                #pragma omp ordered
+                {
+                    for (const auto& row_with_tuples : rows_with_tuples) {
+                        write_row_with_tuples(row_with_tuples);
+                        ++progress_bar;
+                    }
+                }
+            }
+    }, outfname, columns.size(), num_set_bits, num_rows, num_values);
+}
+
+void convert_to_coord_row_diff_disk(const std::vector<std::string> &files,
+                                    const std::string &outfbase,
+                                    const std::string &anchors_file,
+                                    const std::string &fork_succ_file,
+                                    size_t num_threads,
+                                    size_t /*mem_bytes*/,
+                                    std::filesystem::path /*tmp_dir*/) {
+    auto outfname = utils::make_suffix(outfbase, CoordRowDiffDiskAnnotator::kExtension);
+
+    size_t num_rows = get_num_rows_from_column_anno(files[0]);
+    size_t num_set_bits = 0;
+
+    size_t num_values = 0;
+
+    std::vector<std::string> col_names;
+    std::vector<std::unique_ptr<bit_vector>> columns;
+    std::vector<sdsl::int_vector<>> col_values;
+    std::vector<bit_vector_small> col_delims;
+
+    std::mutex mtx;
+
+    ColumnCompressed<>::load_columns_delims_and_values(
+            files,
+            [&](size_t column_index, const std::string &label,
+            std::unique_ptr<bit_vector> &&column,
+            bit_vector_small&& delims,
+                sdsl::int_vector<> &&values) {
+                    std::lock_guard<std::mutex> lck(mtx);
+
+                    num_set_bits += column->num_set_bits();
+
+                    num_values += values.size();
+
+                    if (columns.size() <= column_index) {
+                        columns.resize(column_index + 1);
+                        col_names.resize(column_index + 1);
+                        col_values.resize(column_index + 1);
+                        col_delims.resize(column_index + 1);
+                    }
+                    columns[column_index] = std::move(column);
+                    col_values[column_index] = std::move(values);
+                    col_names[column_index] = label;
+                    col_delims[column_index] = std::move(delims);
+            },
+            num_threads);
+
+    LEncoder label_encoder;
+    for (const auto &label : col_names) {
+        label_encoder.insert_and_encode(label);
+    }
+
+    std::ofstream outstream(outfname, std::ios::binary);
+    if (!outstream.good()) {
+        throw std::ofstream::failure("Bad stream");
+    }
+    label_encoder.serialize(outstream);
+
+    IRowDiff row_diff;
+    row_diff.load_anchor(anchors_file);
+    row_diff.load_fork_succ(fork_succ_file);
+    outstream.write("v2.0", 4);
+    row_diff.anchor().serialize(outstream);
+    row_diff.fork_succ().serialize(outstream);
+
+    outstream.close();
+
+    ProgressBar progress_bar(num_rows, "Serialize rows", std::cerr, !common::get_verbose());
+
+    matrix::CoordRowDisk::serialize(
+        [&](std::function<void(const matrix::MultiIntMatrix::RowTuples &)> write_row_with_tuples) {
+            #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic)
+            for (size_t i = 0 ; i < num_rows; i += kNumRowsInBlock) {
+                uint64_t start_row_id = i;
+                uint64_t end_row_id = std::min(start_row_id + kNumRowsInBlock, num_rows);
+
+                std::vector<matrix::MultiIntMatrix::RowTuples> rows_with_tuples(end_row_id - start_row_id);
+
+                assert(start_row_id <= end_row_id);
+                assert(end_row_id <= num_rows);
+
+                for (size_t col_idx = 0 ; col_idx < columns.size() ; ++col_idx) {
+                    columns[col_idx]->call_ones_in_range(start_row_id, end_row_id, [&](uint64_t row_idx) {
+                        auto r = columns[col_idx]->rank1(row_idx);
+                        size_t begin = col_delims[col_idx].select1(r) + 1 - r;
+                        size_t end = col_delims[col_idx].select1(r + 1) - r;
+                        matrix::MultiIntMatrix::Tuple tuple;
+                        tuple.reserve(end - begin);
+                        for (size_t t = begin; t < end; ++t) {
+                            tuple.push_back(col_values[col_idx][t]);
+                        }
+                        rows_with_tuples[row_idx - start_row_id].emplace_back(col_idx, std::move(tuple));
+                    });
+                }
+
+                #pragma omp ordered
+                {
+                    for (const auto& row_with_tuples : rows_with_tuples) {
+                        write_row_with_tuples(row_with_tuples);
+                        ++progress_bar;
+                    }
+                }
+            }
+    }, outfname, columns.size(), num_set_bits, num_rows, num_values);
 }
 
 template <>
@@ -1578,7 +1794,6 @@ void convert_to_row_annotator(const ColumnCompressed<Label> &annotator,
         outfbase,
         annotator.get_label_encoder(),
         [&](BinaryMatrix::RowCallback write_row) {
-
             #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic)
             for (uint64_t i = 0; i < num_rows; i += kNumRowsInBlock) {
 
