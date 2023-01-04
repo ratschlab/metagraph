@@ -1343,13 +1343,25 @@ void convert_to_coord_row_disk(const std::vector<std::string> &files,
 
     std::mutex mtx;
 
+    size_t max_tuple_size = 0;
+    size_t max_val = 0;
+
     ColumnCompressed<>::load_columns_delims_and_values(
             files,
             [&](size_t column_index, const std::string &label,
             std::unique_ptr<bit_vector> &&column,
                 bit_vector_small&& delims,
                 sdsl::int_vector<> &&values) {
+                    size_t local_max_val = *std::max_element(values.begin(), values.end());
+
                     std::lock_guard<std::mutex> lck(mtx);
+
+                    if (local_max_val > max_val)
+                        max_val = local_max_val;
+
+                    if (values.size() > max_tuple_size)
+                        max_tuple_size = values.size();
+
 
                     num_set_bits += column->num_set_bits();
 
@@ -1417,7 +1429,7 @@ void convert_to_coord_row_disk(const std::vector<std::string> &files,
                     }
                 }
             }
-    }, outfname, columns.size(), num_set_bits, num_rows, num_values);
+    }, outfname, columns.size(), num_set_bits, num_rows, num_values, max_val, max_tuple_size);
 }
 
 void convert_to_coord_row_diff_disk(const std::vector<std::string> &files,
@@ -1441,13 +1453,24 @@ void convert_to_coord_row_diff_disk(const std::vector<std::string> &files,
 
     std::mutex mtx;
 
+    size_t max_tuple_size = 0;
+    size_t max_val = 0;
+
     ColumnCompressed<>::load_columns_delims_and_values(
             files,
             [&](size_t column_index, const std::string &label,
             std::unique_ptr<bit_vector> &&column,
             bit_vector_small&& delims,
                 sdsl::int_vector<> &&values) {
+                    size_t local_max_val = *std::max_element(values.begin(), values.end());
+
                     std::lock_guard<std::mutex> lck(mtx);
+
+                    if (local_max_val > max_val)
+                        max_val = local_max_val;
+
+                    if (values.size() > max_tuple_size)
+                        max_tuple_size = values.size();
 
                     num_set_bits += column->num_set_bits();
 
@@ -1522,7 +1545,7 @@ void convert_to_coord_row_diff_disk(const std::vector<std::string> &files,
                     }
                 }
             }
-    }, outfname, columns.size(), num_set_bits, num_rows, num_values);
+    }, outfname, columns.size(), num_set_bits, num_rows, num_values, max_val, max_tuple_size);
 }
 
 template <>

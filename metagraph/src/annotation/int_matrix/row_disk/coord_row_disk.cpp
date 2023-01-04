@@ -190,7 +190,9 @@ void CoordRowDisk::serialize(
         uint64_t num_cols,
         uint64_t num_set_bits,
         uint64_t num_rows,
-        uint64_t num_values) {
+        uint64_t num_values,
+        uint64_t max_val,
+        uint64_t max_tuple_size) {
 
     // std::ios::ate needed because labels are serialized before
     // std::ios::in needed for tellp to return absolute file position
@@ -209,9 +211,10 @@ void CoordRowDisk::serialize(
     serialize_number(outstream, num_set_bits);
 
     uint8_t bits_for_col_id = sdsl::bits::hi(num_cols) + 1;
-    uint8_t bits_for_number_of_vals = 32; //mkokot_TODO: maybe would be possible to calculate better, or store for each row etc.
-    uint8_t bits_for_single_value = 32; //mkokot_TODO: maybe would be possible to calculate better, or store for each row etc.
     
+    uint8_t bits_for_number_of_vals = sdsl::bits::hi(max_tuple_size) + 1;
+    uint8_t bits_for_single_value = sdsl::bits::hi(max_val) + 1;
+
     serialize_number(outstream, bits_for_col_id);
     serialize_number(outstream, bits_for_number_of_vals);
     serialize_number(outstream, bits_for_single_value);

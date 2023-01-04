@@ -107,7 +107,9 @@ public:
               uint64_t num_cols,
               uint64_t num_set_bits,
               uint64_t num_rows,
-              uint64_t num_values);
+              uint64_t num_values,
+              uint64_t max_val,
+              uint64_t max_tuple_size);
 
   private:
 
