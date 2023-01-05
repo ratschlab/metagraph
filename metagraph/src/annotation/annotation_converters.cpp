@@ -1151,7 +1151,7 @@ void convert_to_int_row_disk(const std::vector<std::string> &files,
                              std::filesystem::path /*tmp_dir*/) {
     auto outfname = utils::make_suffix(outfbase, IntRowDiskAnnotator::kExtension);
 
-    size_t num_rows = get_num_rows_from_column_anno(files[0]);
+    uint64_t num_rows = get_num_rows_from_column_anno(files[0]);
     size_t num_set_bits = 0;
 
     std::vector<std::string> col_names;
@@ -1239,7 +1239,7 @@ void convert_to_int_row_diff_disk(const std::vector<std::string> &files,
                                   std::filesystem::path /*tmp_dir*/) {
     auto outfname = utils::make_suffix(outfbase, IntRowDiffDiskAnnotator::kExtension);
 
-    size_t num_rows = get_num_rows_from_column_anno(files[0]);
+    uint64_t num_rows = get_num_rows_from_column_anno(files[0]);
     size_t num_set_bits = 0;
 
     std::vector<std::string> col_names;
@@ -1331,7 +1331,7 @@ void convert_to_coord_row_disk(const std::vector<std::string> &files,
                                std::filesystem::path /*tmp_dir*/) {
     auto outfname = utils::make_suffix(outfbase, CoordRowDiskAnnotator::kExtension);
 
-    size_t num_rows = get_num_rows_from_column_anno(files[0]);
+    uint64_t num_rows = get_num_rows_from_column_anno(files[0]);
     size_t num_set_bits = 0;
 
     size_t num_values = 0;
@@ -1441,7 +1441,7 @@ void convert_to_coord_row_diff_disk(const std::vector<std::string> &files,
                                     std::filesystem::path /*tmp_dir*/) {
     auto outfname = utils::make_suffix(outfbase, CoordRowDiffDiskAnnotator::kExtension);
 
-    size_t num_rows = get_num_rows_from_column_anno(files[0]);
+    uint64_t num_rows = get_num_rows_from_column_anno(files[0]);
     size_t num_set_bits = 0;
 
     size_t num_values = 0;
