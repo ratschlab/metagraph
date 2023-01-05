@@ -253,11 +253,8 @@ link_directories(
 include_directories(
  PUBLIC
   external-libraries/KMC/kmc_api
-  external-libraries/DYNAMIC/include
   external-libraries/sdsl-lite/include
-  external-libraries/ips4o
   external-libraries/eigen
-  external-libraries/caches/include
   external-libraries/hopscotch-map/include
   external-libraries/ordered-map/include
   external-libraries/binrel_wt/include
@@ -267,10 +264,16 @@ include_directories(
   external-libraries/rollinghashcpp
   external-libraries/spdlog/include
   external-libraries/zlib
-  external-libraries/Simple-Web-Server
   external-libraries/sdust
   ${PROJECT_SOURCE_DIR}/src
 )
+
+add_library(ips4o INTERFACE)
+target_include_directories(ips4o INTERFACE external-libraries/ips4o)
+
+add_library(caches INTERFACE)
+target_include_directories(caches INTERFACE external-libraries/caches/include)
+
 
 findFolly()
 if(FOLLY_FOUND)
@@ -298,6 +301,7 @@ IF(APPLE)
     set(THREADS_PREFER_PTHREAD_FLAG ON)
 ENDIF()
 add_subdirectory(external-libraries/spdlog)
+add_subdirectory(external-libraries/DYNAMIC)
 add_subdirectory(external-libraries/zlib)
 target_compile_options(zlib
   PRIVATE
@@ -386,6 +390,9 @@ set(METALIBS ${METALIBS}
   mersenne_twister
   sdust
   spdlog::spdlog
+  XXSDS_DYNAMIC
+  ips4o
+  caches
 )
 if(APPLE)
   set(METALIBS ${METALIBS} ${OpenMP_CXX_LIBRARIES})
@@ -450,7 +457,8 @@ if(NOT CPPNOFS)
 endif()
 
 target_link_libraries(metagraph-core ${METALIBS})
-target_link_libraries(metagraph-cli PRIVATE metagraph-core)
+add_subdirectory(external-libraries/Simple-Web-Server)
+target_link_libraries(metagraph-cli PRIVATE metagraph-core simple-web-server)
 target_link_libraries(metagraph metagraph-core metagraph-cli)
 
 add_custom_target(link_target ALL
