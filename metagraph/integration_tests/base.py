@@ -132,7 +132,7 @@ class TestingBase(unittest.TestCase):
         if target_anno.endswith('_coord'):
             command += ' --coordinates'
 
-        with_counts = target_anno.endswith('int_brwt')
+        with_counts = '_int_' in target_anno
         if with_counts:
             command += ' --count-kmers'
 
@@ -174,12 +174,14 @@ class TestingBase(unittest.TestCase):
                     assert(res.returncode == 0)
                 res = subprocess.run([command + ' --row-diff-stage 1' + other_args], shell=True)
                 assert(res.returncode == 0)
+                subprocess.run([f'rm -f {output}.row_count'], shell=True)
             if separate:
                 print('-- Assigning anchors...')
                 res = subprocess.run(['echo \"\" | ' + without_input_anno + ' --row-diff-stage 2'], shell=True)
                 assert(res.returncode == 0)
             res = subprocess.run([command + ' --row-diff-stage 2' + other_args], shell=True)
             assert(res.returncode == 0)
+            subprocess.run([f'rm -f {output}.row_reduction'], shell=True)
 
             if final_anno != target_anno:
                 rd_type = 'column' if with_counts or final_anno.endswith('_coord') else 'row_diff'
@@ -187,9 +189,9 @@ class TestingBase(unittest.TestCase):
                                    f'-i {graph_path} -p {num_threads} {output}.{rd_type}.annodbg'
                 res = subprocess.run([command], shell=True)
                 assert (res.returncode == 0)
-                os.remove(output + anno_file_extension[rd_type])
+                subprocess.run([f'rm {output}{anno_file_extension[rd_type]}*'], shell=True)
             else:
-                os.remove(output + anno_file_extension[anno_repr])
+                subprocess.run([f'rm {output}{anno_file_extension[anno_repr]}*'], shell=True)
 
         if final_anno.endswith('brwt') or final_anno.endswith('brwt_coord'):
             command = f'{METAGRAPH} relax_brwt -o {output} -p {num_threads} {output}.{final_anno}.annodbg'
