@@ -990,7 +990,7 @@ void convert_to_row_disk(
     if (!files.size())
         return;
 
-    assert(utils::ends_width(result_fname, file_extension));
+    assert(utils::ends_with(result_fname, file_extension));
 
     double density_prediction = 0.01; // TODO: predict it better?
 
