@@ -14,8 +14,8 @@ bool CoordRowDisk::View::get(Row row, Column column) const {
     return v != set_bits.end() && *v == column;
 }
 
-std::vector<IntMatrix::Row> CoordRowDisk::View::get_column(uint64_t num_rows,
-                                                         Column column) const {
+std::vector<IntMatrix::Row>
+CoordRowDisk::View::get_column(uint64_t num_rows, Column column) const {
     std::vector<Row> result;
     for (Row row = 0; row < num_rows; ++row) {
         if (get(row, column))
@@ -38,7 +38,7 @@ IntMatrix::SetBitPositions CoordRowDisk::View::get_row(Row row) const {
         set_bits_.start_reading_at(pos - row);
         set_bits_.get(col_id, bits_for_col_id_);
         pos += bits_for_col_id_;
-        
+
         uint64_t num_values;
         set_bits_.get(num_values, bits_for_number_of_vals_);
 
@@ -68,17 +68,17 @@ IntMatrix::RowValues CoordRowDisk::View::get_row_values(Row row) const {
     uint64_t start_idx = row == 0 ? 0 : boundary_.select1(row) + 1;
     uint64_t end_idx = boundary_.next1(start_idx);
 
-    RowValues result;    
-    Column col_id;    
+    RowValues result;
+    Column col_id;
     size_t pos = start_idx;
     while (pos < end_idx) {
 
         set_bits_.start_reading_at(pos - row);
 
         set_bits_.get(col_id, bits_for_col_id_);
-        
+
         pos += bits_for_col_id_;
-        
+
         uint64_t num_values;
         set_bits_.get(num_values, bits_for_number_of_vals_);
 
@@ -119,7 +119,7 @@ MultiIntMatrix::RowTuples CoordRowDisk::View::get_row_tuples(Row row) const {
     while (pos < end_idx) {
         set_bits_.get(col_id, bits_for_col_id_);
         pos += bits_for_col_id_;
-        
+
         uint64_t num_values;
         set_bits_.get(num_values, bits_for_number_of_vals_);
 
@@ -140,14 +140,15 @@ MultiIntMatrix::RowTuples CoordRowDisk::View::get_row_tuples(Row row) const {
 
     return result;
 }
-        
-std::vector<MultiIntMatrix::RowTuples> CoordRowDisk::View::get_row_tuples(const std::vector<Row> &rows) const {
+
+std::vector<MultiIntMatrix::RowTuples>
+CoordRowDisk::View::get_row_tuples(const std::vector<Row> &rows) const {
     std::vector<RowTuples> rows_with_tuples(rows.size());
 
     for (size_t i = 0; i < rows.size(); ++i) {
         rows_with_tuples[i] = get_row_tuples(rows[i]);
     }
-    
+
     return rows_with_tuples;
 }
 
@@ -173,6 +174,7 @@ bool CoordRowDisk::load(std::istream &f) {
         f.seekg(boundary_start, std::ios_base::beg);
 
         boundary_.load(f);
+        num_attributes_ = load_number(f);
 
         num_rows_ = boundary_.num_set_bits();
 
@@ -210,7 +212,7 @@ void CoordRowDisk::serialize(
     serialize_number(outstream, num_set_bits);
 
     uint8_t bits_for_col_id = sdsl::bits::hi(num_cols) + 1;
-    
+
     uint8_t bits_for_number_of_vals = sdsl::bits::hi(max_tuple_size) + 1;
     uint8_t bits_for_single_value = sdsl::bits::hi(max_val) + 1;
 
@@ -220,12 +222,14 @@ void CoordRowDisk::serialize(
 
     DiskWriter writer(outstream, 1024 * 1024);
 
+    uint64_t num_attributes = 0;
+
     auto call_bits = [&](const std::function<void(uint64_t)> &call_bit) {
-        uint64_t t = 0;        
-        write_row_with_tuples([&](const RowTuples &row_tuples) {            
+        uint64_t t = 0;
+        write_row_with_tuples([&](const RowTuples &row_tuples) {
             size_t bits_used = 0;
-            
-            for (const auto &tuple : row_tuples) {                
+
+            for (const auto &tuple : row_tuples) {
                 auto col_id = tuple.first;
                 const auto& values = tuple.second;
 
@@ -238,10 +242,11 @@ void CoordRowDisk::serialize(
                 for (auto v : values) {
                     writer.add(v, bits_for_single_value);
                     bits_used += bits_for_single_value;
-                }                
+                }
+                num_attributes += values.size();
             }
-            auto boundary_val = (t += bits_used + 1) - 1;            
-            call_bit(boundary_val);            
+            auto boundary_val = (t += bits_used + 1) - 1;
+            call_bit(boundary_val);
         });
         writer.flush();
     };
@@ -252,8 +257,9 @@ void CoordRowDisk::serialize(
 
     boundary_start = outstream.tellp();
     boundary.serialize(outstream);
+    serialize_number(outstream, num_attributes);
     outstream.seekp(boundary_start_pos, std::ios_base::beg);
-    serialize_number(outstream, boundary_start);    
+    serialize_number(outstream, boundary_start);
 }
 
 } // namespace binmat

@@ -132,7 +132,7 @@ class TestingBase(unittest.TestCase):
         if target_anno.endswith('_coord'):
             command += ' --coordinates'
 
-        with_counts = '_int_' in target_anno
+        with_counts = 'int_' in target_anno
         if with_counts:
             command += ' --count-kmers'
 
