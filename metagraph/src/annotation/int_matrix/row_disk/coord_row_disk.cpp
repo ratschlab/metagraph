@@ -2,7 +2,6 @@
 
 #include "common/logger.hpp"
 #include "common/utils/file_utils.hpp"
-#include "common/ifstream_with_name.hpp"
 
 
 namespace mtg {
@@ -154,7 +153,7 @@ std::vector<MultiIntMatrix::RowTuples> CoordRowDisk::View::get_row_tuples(const 
 
 
 bool CoordRowDisk::load(std::istream &f) {
-    auto _f = dynamic_cast<mtg::common::IfstreamWithName *>(&f);
+    auto _f = dynamic_cast<utils::NamedIfstream *>(&f);
     assert(_f);
     try {
         num_columns_ = load_number(f);

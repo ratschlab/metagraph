@@ -618,11 +618,11 @@ Config::Config(int argc, char *argv[]) {
     if (identity == TRANSFORM_ANNOTATION) {
         const bool to_row_diff = anno_type == RowDiff
                                     || anno_type == RowDiffBRWT
-                                    || anno_type == IntRowDiffBRWT
-                                    || anno_type == RowDiffRowSparse
                                     || anno_type == RowDiffDisk
+                                    || anno_type == IntRowDiffBRWT
                                     || anno_type == IntRowDiffDisk
-                                    || anno_type == CoordRowDiffDisk
+                                    || anno_type == RowDiffRowSparse
+                                    || anno_type == RowDiffDiskCoord
                                     || anno_type == RowDiffBRWTCoord
                                     || anno_type == RowDiffCoord;
         if (to_row_diff && !infbase.size()) {
@@ -740,20 +740,14 @@ std::string Config::annotype_to_string(AnnotationType state) {
             return "row_diff_brwt";
         case RowDiffRowSparse:
             return "row_diff_sparse";
-        case RowDiffDisk:
-            return "row_diff_disk";
         case RowSparse:
             return "row_sparse";
-        case RowDisk:
-            return "row_disk";
-        case IntRowDisk:
-            return "int_row_disk";
+        case RowDiffDisk:
+            return "row_diff_disk";
         case IntRowDiffDisk:
             return "row_diff_int_disk";
-        case CoordRowDisk:
-            return "coord_row_disk";
-        case CoordRowDiffDisk:
-            return "row_diff_coord_disk";
+        case RowDiffDiskCoord:
+            return "row_diff_disk_coord";
         case IntBRWT:
             return "int_brwt";
         case IntRowDiffBRWT:
@@ -793,20 +787,14 @@ Config::AnnotationType Config::string_to_annotype(const std::string &string) {
         return AnnotationType::RowDiffBRWT;
     } else if (string == "row_diff_sparse") {
         return AnnotationType::RowDiffRowSparse;
-    } else if (string == "row_diff_disk") {
-        return AnnotationType::RowDiffDisk;
     } else if (string == "row_sparse") {
         return AnnotationType::RowSparse;
-    } else if (string == "row_disk") {
-        return AnnotationType::RowDisk;
-    } else if (string == "int_row_disk") {
-        return AnnotationType::IntRowDisk;
+    } else if (string == "row_diff_disk") {
+        return AnnotationType::RowDiffDisk;
     } else if (string == "row_diff_int_disk") {
         return AnnotationType::IntRowDiffDisk;
-    } else if (string == "coord_row_disk") {
-        return AnnotationType::CoordRowDisk;
-    } else if (string == "row_diff_coord_disk") {
-        return AnnotationType::CoordRowDiffDisk;
+    } else if (string == "row_diff_disk_coord") {
+        return AnnotationType::RowDiffDiskCoord;
     } else if (string == "int_brwt") {
         return AnnotationType::IntBRWT;
     } else if (string == "row_diff_int_brwt") {
@@ -882,8 +870,9 @@ DeBruijnGraph::Mode Config::string_to_graphmode(const std::string &string) {
 void Config::print_usage(const std::string &prog_name, IdentityType identity) {
     const char annotation_list[] = "\t\t( column, brwt, rb_brwt, int_brwt,\n"
                                    "\t\t  column_coord, brwt_coord, row_diff_coord, row_diff_brwt_coord,\n"
-                                   "\t\t  row_diff, row_diff_brwt, row_diff_sparse, row_diff_disk, row_diff_int_brwt,\n"
-                                   "\t\t  row, flat, row_sparse, row_disk, int_row_disk, rbfish, bin_rel_wt, bin_rel_wt_sdsl )";
+                                   "\t\t  row_diff, row_diff_brwt, row_diff_sparse, row_diff_int_brwt,\n"
+                                   "\t\t  row_diff_disk, row_diff_int_disk, row_diff_disk_coord,\n"
+                                   "\t\t  row, flat, row_sparse, rbfish, bin_rel_wt, bin_rel_wt_sdsl )";
 
     switch (identity) {
         case NO_IDENTITY: {
@@ -1334,7 +1323,7 @@ if (advanced) {
             fprintf(stderr, "\t   --fast \t\tquery in batches [off]\n");
             fprintf(stderr, "\t   --batch-size \tquery batch size (number of base pairs) [100000000]\n");
 if (advanced) {
-            fprintf(stderr, "\t   --RA_ivbuff_size [INT] \tsize (in bytes) of int_vector_buffer used in random access mode (e.g. in row sparse disk annotation) [16384]\n");
+            fprintf(stderr, "\t   --RA_ivbuff_size [INT] \tsize (in bytes) of int_vector_buffer used in random access mode (e.g. by row disk annotator) [16384]\n");
 }
             fprintf(stderr, "\n");
             fprintf(stderr, "Available options for --align:\n");

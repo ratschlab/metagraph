@@ -2,7 +2,6 @@
 
 #include "common/logger.hpp"
 #include "common/utils/file_utils.hpp"
-#include "common/ifstream_with_name.hpp"
 #include "graph/representation/succinct/boss.hpp"
 
 
@@ -55,7 +54,7 @@ RowDisk::View::get_rows(const std::vector<Row> &row_ids) const {
 }
 
 bool RowDisk::load(std::istream &f) {
-    auto _f = dynamic_cast<mtg::common::IfstreamWithName *>(&f);
+    auto _f = dynamic_cast<utils::NamedIfstream *>(&f);
     assert(_f);
     try {
         num_columns_ = load_number(f);

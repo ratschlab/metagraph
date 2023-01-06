@@ -30,8 +30,6 @@ typedef StaticBinRelAnnotator<binmat::RowConcatenated<>, std::string> RowFlatAnn
 
 typedef StaticBinRelAnnotator<binmat::RowSparse, std::string> RowSparseAnnotator;
 
-typedef StaticBinRelAnnotator<binmat::RowDisk, std::string> RowDiskAnnotator;
-
 typedef StaticBinRelAnnotator<binmat::Rainbowfish, std::string> RainbowfishAnnotator;
 
 typedef StaticBinRelAnnotator<binmat::BRWT, std::string> MultiBRWTAnnotator;
@@ -60,13 +58,9 @@ typedef StaticBinRelAnnotator<matrix::IntRowDiff<matrix::CSCMatrix<binmat::BRWT,
 
 typedef StaticBinRelAnnotator<matrix::CSRMatrix, std::string> IntRowAnnotator;
 
-typedef StaticBinRelAnnotator<matrix::IntRowDisk, std::string> IntRowDiskAnnotator;
-
 typedef StaticBinRelAnnotator<matrix::IntRowDiff<matrix::IntRowDisk>, std::string> IntRowDiffDiskAnnotator;
 
-typedef StaticBinRelAnnotator<matrix::CoordRowDisk, std::string> CoordRowDiskAnnotator;
-
-typedef StaticBinRelAnnotator<matrix::TupleRowDiff<matrix::CoordRowDisk>, std::string> CoordRowDiffDiskAnnotator;
+typedef StaticBinRelAnnotator<matrix::TupleRowDiff<matrix::CoordRowDisk>, std::string> RowDiffDiskCoordAnnotator;
 
 typedef StaticBinRelAnnotator<matrix::TupleCSCMatrix<binmat::ColumnMajor>, std::string> ColumnCoordAnnotator;
 
@@ -81,8 +75,6 @@ template <>
 inline const std::string RowFlatAnnotator::kExtension = ".flat.annodbg";
 template <>
 inline const std::string RowSparseAnnotator::kExtension = ".row_sparse.annodbg";
-template <>
-inline const std::string RowDiskAnnotator::kExtension = ".row_disk.annodbg";
 template <>
 inline const std::string RainbowfishAnnotator::kExtension = ".rbfish.annodbg";
 template <>
@@ -110,13 +102,9 @@ inline const std::string IntRowDiffBRWTAnnotator::kExtension = ".row_diff_int_br
 template <>
 inline const std::string IntRowAnnotator::kExtension = ".int_csr.annodbg";
 template <>
-inline const std::string IntRowDiskAnnotator::kExtension = ".int_row_disk.annodbg";
-template <>
 inline const std::string IntRowDiffDiskAnnotator::kExtension = ".row_diff_int_disk.annodbg";
 template <>
-inline const std::string CoordRowDiskAnnotator::kExtension = ".coord_row_disk.annodbg";
-template <>
-inline const std::string CoordRowDiffDiskAnnotator::kExtension = ".row_diff_coord_disk.annodbg";
+inline const std::string RowDiffDiskCoordAnnotator::kExtension = ".row_diff_disk_coord.annodbg";
 template <>
 inline const std::string ColumnCoordAnnotator::kExtension = ".column_coord.annodbg";
 template <>

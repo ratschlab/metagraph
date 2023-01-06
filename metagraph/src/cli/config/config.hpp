@@ -209,19 +209,16 @@ class Config {
         RowDiffDisk,
         RowFlat,
         RowSparse,
-        RowDisk,
-        IntRowDisk,
-        IntRowDiffDisk,
-        CoordRowDisk,
-        CoordRowDiffDisk,
         RBFish,
         RbBRWT,
         IntBRWT,
         IntRowDiffBRWT,
+        IntRowDiffDisk,
         ColumnCoord,
         BRWTCoord,
         RowDiffCoord,
         RowDiffBRWTCoord,
+        RowDiffDiskCoord,
     };
 
     enum GraphType {

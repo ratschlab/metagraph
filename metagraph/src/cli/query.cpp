@@ -1296,7 +1296,6 @@ void QueryExecutor::query_fasta(const string &file,
                       "(e.g., {} or {}).",
                       Config::annotype_to_string(Config::IntBRWT),
                       Config::annotype_to_string(Config::IntRowDiffBRWT),
-                      Config::annotype_to_string(Config::IntRowDisk),
                       Config::annotype_to_string(Config::IntRowDiffDisk)
                       );
         exit(1);

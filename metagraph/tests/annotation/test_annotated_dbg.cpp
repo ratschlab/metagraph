@@ -1002,7 +1002,7 @@ typedef ::testing::Types<std::pair<DBGBitmap, annot::ColumnCompressed<>>,
                          std::pair<DBGHashFast, annot::RowFlatAnnotator>,
                          std::pair<DBGSuccinct, annot::RowFlatAnnotator>,
                          std::pair<DBGSuccinct, annot::RowDiffColumnAnnotator>,
-                         std::pair<DBGSuccinct, annot::RowDiskAnnotator>
+                         std::pair<DBGSuccinct, annot::RowDiffDiskAnnotator>
                         > GraphAnnotationPairTypes;
 TYPED_TEST_SUITE(AnnotatedDBGTest, GraphAnnotationPairTypes);
 
@@ -1014,7 +1014,7 @@ typedef ::testing::Types<std::pair<DBGHashString, annot::ColumnCompressed<>>,
                          std::pair<DBGHashString, annot::RowFlatAnnotator>,
                          std::pair<DBGSuccinct, annot::RowFlatAnnotator>,
                          std::pair<DBGSuccinct, annot::RowDiffColumnAnnotator>,
-                         std::pair<DBGSuccinct, annot::RowDiskAnnotator>
+                         std::pair<DBGSuccinct, annot::RowDiffDiskAnnotator>
                         > GraphWithNAnnotationPairTypes;
 TYPED_TEST_SUITE(AnnotatedDBGWithNTest, GraphWithNAnnotationPairTypes);
 
@@ -1029,7 +1029,7 @@ typedef ::testing::Types<std::pair<DBGBitmap, annot::ColumnCompressed<>>,
                          std::pair<DBGHashOrdered, annot::RowFlatAnnotator>,
                          std::pair<DBGHashFast, annot::RowFlatAnnotator>,
                          std::pair<DBGSuccinct, annot::RowDiffColumnAnnotator>,
-                         std::pair<DBGSuccinct, annot::RowDiskAnnotator>
+                         std::pair<DBGSuccinct, annot::RowDiffDiskAnnotator>
                         > GraphNoNAnnotationPairTypes;
 TYPED_TEST_SUITE(AnnotatedDBGNoNTest, GraphNoNAnnotationPairTypes);
 #endif
