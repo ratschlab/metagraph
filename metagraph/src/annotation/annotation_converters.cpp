@@ -264,6 +264,25 @@ convert<UniqueRowAnnotator, std::string>(ColumnCompressed<std::string>&& annotat
                                                 annotator.get_label_encoder());
 }
 
+
+template <>
+std::unique_ptr<RowDiskAnnotator>
+convert<RowDiskAnnotator, std::string>(ColumnCompressed<std::string>&& annotator) {
+    std::filesystem::path tmp_dir = utils::create_temp_dir("", "test_col");
+    auto out_fs_path = tmp_dir/"test_col";
+    std::string out_path = out_fs_path;
+    annotator.serialize(out_path);
+    std::vector<std::string> files { out_path + ColumnCompressed<>::kExtension };
+
+    std::string outfbase = "anno";
+    convert_to_row_disk(files, outfbase, 1, 1'000'000, tmp_dir);
+
+    std::unique_ptr<RowDiskAnnotator> annotation = std::make_unique<RowDiskAnnotator>();
+    annotation->load(outfbase);
+
+    return annotation;
+}
+
 template <class StaticAnnotation, typename Label>
 typename std::unique_ptr<StaticAnnotation>
 convert_to_BRWT(ColumnCompressed<Label>&& annotator,

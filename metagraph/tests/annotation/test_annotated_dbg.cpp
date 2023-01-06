@@ -1001,7 +1001,8 @@ typedef ::testing::Types<std::pair<DBGBitmap, annot::ColumnCompressed<>>,
                          std::pair<DBGHashOrdered, annot::RowFlatAnnotator>,
                          std::pair<DBGHashFast, annot::RowFlatAnnotator>,
                          std::pair<DBGSuccinct, annot::RowFlatAnnotator>,
-                         std::pair<DBGSuccinct, annot::RowDiffColumnAnnotator>
+                         std::pair<DBGSuccinct, annot::RowDiffColumnAnnotator>,
+                         std::pair<DBGSuccinct, annot::RowDiskAnnotator>
                         > GraphAnnotationPairTypes;
 TYPED_TEST_SUITE(AnnotatedDBGTest, GraphAnnotationPairTypes);
 
@@ -1012,7 +1013,8 @@ typedef ::testing::Types<std::pair<DBGHashString, annot::ColumnCompressed<>>,
                          std::pair<DBGSuccinct, annot::ColumnCompressed<>>,
                          std::pair<DBGHashString, annot::RowFlatAnnotator>,
                          std::pair<DBGSuccinct, annot::RowFlatAnnotator>,
-                         std::pair<DBGSuccinct, annot::RowDiffColumnAnnotator>
+                         std::pair<DBGSuccinct, annot::RowDiffColumnAnnotator>,
+                         std::pair<DBGSuccinct, annot::RowDiskAnnotator>
                         > GraphWithNAnnotationPairTypes;
 TYPED_TEST_SUITE(AnnotatedDBGWithNTest, GraphWithNAnnotationPairTypes);
 
@@ -1026,7 +1028,8 @@ typedef ::testing::Types<std::pair<DBGBitmap, annot::ColumnCompressed<>>,
                          std::pair<DBGBitmap, annot::RowFlatAnnotator>,
                          std::pair<DBGHashOrdered, annot::RowFlatAnnotator>,
                          std::pair<DBGHashFast, annot::RowFlatAnnotator>,
-                         std::pair<DBGSuccinct, annot::RowDiffColumnAnnotator>
+                         std::pair<DBGSuccinct, annot::RowDiffColumnAnnotator>,
+                         std::pair<DBGSuccinct, annot::RowDiskAnnotator>
                         > GraphNoNAnnotationPairTypes;
 TYPED_TEST_SUITE(AnnotatedDBGNoNTest, GraphNoNAnnotationPairTypes);
 #endif

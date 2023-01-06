@@ -141,8 +141,8 @@ void IntRowDisk::serialize(
 
     auto boundary_start_pos = outstream.tellp();
 
-    // boundary is built in memory while writing rows data to disk via int_vector_buffer
-    // the boundary must be loaded in the RowDisk::load so its position must be known
+    // boundary is built in memory
+    // the boundary must be loaded in the IntRowDisk::load so its position must be known
     // binary format for this representation is
     // [boundary pos] (8B)
     // [serialized rows with values]
@@ -154,17 +154,9 @@ void IntRowDisk::serialize(
 
     serialize_number(outstream, num_set_bits);
 
-    //const uint64_t iv_offs = outstream.tellp();
-//    outstream.close();
-
     uint8_t bits_for_col_id = sdsl::bits::hi(num_cols) + 1;
     uint8_t bits_for_value = int_width_for_counts;
     //uint8_t int_width = std::max(bits_for_col_id, bits_for_value);
-
-    //mtg::common::logger->info("int_width: {}", int_width); //mkokot_TODO: remove
-
-    //auto outbuf = sdsl::int_vector_buffer<>(filename, std::ios::out | std::ios::binary,
-    //                                        1024 * 1024, int_width, false, iv_offs);
 
     serialize_number(outstream, bits_for_col_id);
     serialize_number(outstream, bits_for_value);
@@ -185,14 +177,11 @@ void IntRowDisk::serialize(
             }
             call_bit((t += row_with_values.size() + 1) - 1);
         });
-        //outbuf.close();
         writer.flush();
-        //outstream.close();
     };
     
     bit_vector_small boundary(call_bits, num_rows + num_set_bits, num_rows);
 
-    //outstream.open(filename, std::ios::in | std::ios::out | std::ios::binary | std::ios::ate);
     boundary_start = outstream.tellp();    
     boundary.serialize(outstream);
     outstream.seekp(boundary_start_pos, std::ios_base::beg);

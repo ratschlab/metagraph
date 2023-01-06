@@ -204,6 +204,8 @@ template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashString, RowFlatAn
 
 template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGSuccinct, RowDiffColumnAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool);
 
+template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGSuccinct, RowDiskAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool);
+
 
 } // namespace test
 } // namespace mtg
