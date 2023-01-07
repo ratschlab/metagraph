@@ -71,12 +71,6 @@ std::unique_ptr<StaticAnnotation>
 convert_to_RbBRWT(const std::vector<std::string> &annotation_files,
                   size_t max_brwt_arity);
 
-void convert_to_row_disk(const std::vector<std::string> &files,
-                         const std::string &outfbase,
-                         size_t num_threads,
-                         size_t mem_bytes,
-                         std::filesystem::path tmp_dir);
-
 // For RowDiffDiskAnnotator, RowDiffDiskCoordAnnotator, etc.
 template <class RowDiffAnnotator>
 void convert_to_row_diff(const std::vector<std::string> &files,

@@ -1981,4 +1981,3 @@ load_coords<MultiBRWTAnnotator>(MultiBRWTAnnotator&&, const std::vector<std::str
 
 } // namespace annot
 } // namespace mtg
-
