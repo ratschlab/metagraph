@@ -160,19 +160,16 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
                 exit(1);
             }
 
-            auto matrix = std::make_unique<CoordRowDiff>(
+            annotator.reset(new RowDiffCoordAnnotator(
+                anno_graph->get_annotator().get_label_encoder(),
                 static_cast<const DBGSuccinct*>(base_graph.get()),
-                CoordDiff(std::move(*diff_annotator->release_matrix()),
-                          std::move(delimiters), std::move(column_values))
-            );
-            annotator = std::make_unique<RowDiffCoordAnnotator>(
-                std::move(matrix),
-                anno_graph->get_annotator().get_label_encoder()
-            );
+                std::move(*diff_annotator->release_matrix()),
+                std::move(delimiters), std::move(column_values)
+            ));
 
         } else {
             auto rd_path = out_fs_path.replace_extension(RowDiffColumnAnnotator::kExtension);
-            annotator = std::make_unique<RowDiffColumnAnnotator>();
+            annotator.reset(new RowDiffColumnAnnotator({}, static_cast<const DBGSuccinct*>(base_graph.get())));
             if (!annotator->load(rd_path)) {
                 logger->error("Cannot load annotations from {}", rd_path);
                 exit(1);
@@ -182,7 +179,6 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
         IRowDiff &row_diff = const_cast<IRowDiff&>(dynamic_cast<const IRowDiff&>(
             annotator->get_matrix()
         ));
-        row_diff.set_graph(static_cast<const DBGSuccinct*>(base_graph.get()));
         row_diff.load_anchor(anchors_file);
         row_diff.load_fork_succ(fork_succ_file);
         return std::make_unique<AnnotatedDBG>(graph, std::move(annotator));
@@ -233,14 +229,12 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
                                           get_num_threads(), 1e9, tmp_dir);
 
         auto rd_path = out_path + RowDiffDiskAnnotator::kExtension;
-        auto annotator = std::make_unique<RowDiffDiskAnnotator>();
+        auto annotator = std::make_unique<RowDiffDiskAnnotator>(
+                annot::LabelEncoder(), static_cast<const DBGSuccinct*>(base_graph.get()));
         if (!annotator->load(rd_path)) {
             logger->error("Cannot load annotations from {}", rd_path);
             exit(1);
         }
-
-        const_cast<IRowDiff&>(dynamic_cast<const IRowDiff&>(annotator->get_matrix()))
-                        .set_graph(static_cast<const DBGSuccinct*>(base_graph.get()));
 
         return std::make_unique<AnnotatedDBG>(graph, std::move(annotator));
 
