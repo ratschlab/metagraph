@@ -1151,26 +1151,6 @@ void convert_to_row_diff<RowDiffDiskAnnotator>(
             merge_load_row_diff);
 }
 
-uint8_t get_max_count_width(const std::vector<std::string> &files) {
-    uint8_t res {};
-    for(const auto& fname : files) {
-        const auto &values_fname
-                = utils::remove_suffix(fname, ColumnCompressed<>::kExtension)
-                                                + ColumnCompressed<>::kCountExtension;
-        sdsl::int_vector<>::size_type size{};
-        uint8_t int_width{};
-        std::ifstream in(values_fname);
-        if (!in)
-                throw std::ifstream::failure("can't open file " + values_fname);
-
-        sdsl::int_vector<>::read_header(size, int_width, in);
-        if(int_width > res)
-            res = int_width;
-    }
-
-    return res;
-}
-
 template <>
 void convert_to_row_diff<IntRowDiffDiskAnnotator>(
             const std::vector<std::string> &files,
@@ -1195,11 +1175,18 @@ void convert_to_row_diff<IntRowDiffDiskAnnotator>(
 
     std::mutex mtx;
 
+    size_t max_val = 0;
+
     ColumnCompressed<>::load_columns_and_values(
             files,
             [&](size_t column_index, const std::string &label, std::unique_ptr<bit_vector> &&column,
                 sdsl::int_vector<> &&values) {
+                    size_t local_max_val = *std::max_element(values.begin(), values.end());
+
                     std::lock_guard<std::mutex> lck(mtx);
+
+                    if (local_max_val > max_val)
+                        max_val = local_max_val;
 
                     num_set_bits += column->num_set_bits();
 
@@ -1237,8 +1224,6 @@ void convert_to_row_diff<IntRowDiffDiskAnnotator>(
 
     ProgressBar progress_bar(num_rows, "Serialize rows", std::cerr, !common::get_verbose());
 
-    uint8_t int_width_for_counts = get_max_count_width(files);
-
     matrix::IntRowDisk::serialize(
         [&](std::function<void(const matrix::IntMatrix::RowValues &)> write_row_with_values) {
             #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic)
@@ -1268,7 +1253,7 @@ void convert_to_row_diff<IntRowDiffDiskAnnotator>(
                     }
                 }
             }
-    }, outfname, columns.size(), num_set_bits, num_rows, int_width_for_counts);
+    }, outfname, columns.size(), num_set_bits, num_rows, max_val);
 }
 
 template <>

@@ -128,7 +128,7 @@ void IntRowDisk::serialize(
         uint64_t num_cols,
         uint64_t num_set_bits,
         uint64_t num_rows,
-        uint8_t int_width_for_counts) {
+        uint8_t max_val) {
     // std::ios::ate needed because labels are serialized before
     // std::ios::in needed for tellp to return absolute file position
     std::ofstream outstream(filename, std::ios::binary | std::ios::ate | std::ios::in);
@@ -154,8 +154,7 @@ void IntRowDisk::serialize(
     serialize_number(outstream, num_set_bits);
 
     uint8_t bits_for_col_id = sdsl::bits::hi(num_cols) + 1;
-    uint8_t bits_for_value = int_width_for_counts;
-    //uint8_t int_width = std::max(bits_for_col_id, bits_for_value);
+    uint8_t bits_for_value = sdsl::bits::hi(max_val) + 1;
 
     serialize_number(outstream, bits_for_col_id);
     serialize_number(outstream, bits_for_value);
@@ -169,9 +168,7 @@ void IntRowDisk::serialize(
             uint64_t last = 0;
             for (auto [col_id, val] : row_with_values) {                
                 writer.add(col_id - last, bits_for_col_id);
-                //outbuf.push_back(col_id - last);
                 writer.add(val, bits_for_value);
-                //outbuf.push_back(val);
                 last = col_id;                
             }
             call_bit((t += row_with_values.size() + 1) - 1);

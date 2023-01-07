@@ -87,7 +87,7 @@ public:
               uint64_t num_cols,
               uint64_t num_set_bits,
               uint64_t num_rows,
-              uint8_t int_width_for_counts);
+              uint8_t max_val);
 
   private:
 
