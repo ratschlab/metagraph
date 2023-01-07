@@ -213,20 +213,9 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
                                 static_cast<RowDiffStage>(2), out_path, false, coordinates);
         }
 
-        const std::string anchors_file = graph_fname + kRowDiffAnchorExt;
-        const std::string fork_succ_file = graph_fname + kRowDiffForkSuccExt;
-        if (!std::filesystem::exists(anchors_file)) {
-            logger->error("Anchor bitmap {} does not exist.", anchors_file);
-            std::exit(1);
-        }
-        if (!std::filesystem::exists(fork_succ_file)) {
-            logger->error("Fork successor bitmap {} does not exist", fork_succ_file);
-            std::exit(1);
-        }
-
-        convert_row_diff_to_row_diff_disk({ out_path + RowDiffColumnAnnotator::kExtension },
-                                          out_fs_path, anchors_file, fork_succ_file,
-                                          get_num_threads(), 1e9, tmp_dir);
+        convert_to_row_diff<RowDiffDiskAnnotator>({ out_path + RowDiffColumnAnnotator::kExtension },
+                                                  graph_fname, out_fs_path,
+                                                  get_num_threads(), 1e9, tmp_dir);
 
         auto rd_path = out_path + RowDiffDiskAnnotator::kExtension;
         auto annotator = std::make_unique<RowDiffDiskAnnotator>(

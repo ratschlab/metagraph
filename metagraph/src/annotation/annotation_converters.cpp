@@ -365,15 +365,43 @@ std::unique_ptr<RowDiffBRWTAnnotator> convert_to_simple_BRWT(RowDiffColumnAnnota
             num_parallel_nodes, num_threads);
 }
 
-std::unique_ptr<RowDiffRowSparseAnnotator>
-convert_row_diff_to_RowDiffSparse(const std::vector<std::string> &filenames) {
+std::pair<std::string, std::string> get_anchors_and_fork_fnames(const std::string &fbase) {
+    std::string anchors_file = fbase + annot::binmat::kRowDiffAnchorExt;
+    if (!std::filesystem::exists(anchors_file)) {
+        logger->error("Anchor bitmap {} does not exist. Run the row_diff"
+                      " transform followed by anchor optimization.", anchors_file);
+        std::exit(1);
+    }
+    std::string fork_succ_file = fbase + annot::binmat::kRowDiffForkSuccExt;
+    if (!std::filesystem::exists(fork_succ_file)) {
+        logger->error("Fork successor bitmap {} does not exist", fork_succ_file);
+        std::exit(1);
+    }
+    return std::make_pair(anchors_file, fork_succ_file);
+}
+
+template <>
+void convert_to_row_diff<RowDiffRowSparseAnnotator>(
+            const std::vector<std::string> &files,
+            const std::string &anchors_file_fbase,
+            const std::string &outfbase,
+            size_t /*num_threads*/,
+            size_t /*mem_bytes*/,
+            std::filesystem::path /*tmp_dir*/) {
+
+    std::string anchors_file;
+    std::string fork_succ_file;
+    std::tie(anchors_file, fork_succ_file) = get_anchors_and_fork_fnames(anchors_file_fbase);
+
+    logger->trace("Loading annotation from disk...");
+
     std::vector<std::unique_ptr<bit_vector>> columns;
     LabelEncoder<std::string> label_encoder;
 
     std::mutex mu;
     uint64_t total_num_set_bits = 0;
     bool load_successful = merge_load_row_diff(
-        filenames,
+        files,
         [&](uint64_t, const std::string &label, std::unique_ptr<bit_vector> &&column) {
             uint64_t num_set_bits = column->num_set_bits();
             logger->trace("RowDiff column: {}, Density: {}, Set bits: {}", label,
@@ -406,15 +434,20 @@ convert_row_diff_to_RowDiffSparse(const std::vector<std::string> &filenames) {
     uint64_t num_rows = columns.at(0)->size();
     uint64_t num_columns = columns.size();
 
-    RowSparse rd_matrix(
+    RowDiffRowSparseAnnotator row_sparse(label_encoder, nullptr,
         [&](auto callback) {
             utils::RowsFromColumnsTransformer(columns).call_rows(callback);
         },
         num_columns, num_rows, total_num_set_bits
     );
-    return std::make_unique<RowDiffRowSparseAnnotator>(
-                std::make_unique<RowDiff<RowSparse>>(nullptr, std::move(rd_matrix)),
-                std::move(label_encoder));
+
+    const_cast<binmat::RowDiff<binmat::RowSparse> &>(row_sparse.get_matrix())
+            .load_anchor(anchors_file);
+    const_cast<binmat::RowDiff<binmat::RowSparse> &>(row_sparse.get_matrix())
+            .load_fork_succ(fork_succ_file);
+
+    logger->trace("Annotation converted");
+    row_sparse.serialize(outfbase);
 }
 
 
@@ -1089,14 +1122,19 @@ uint64_t get_num_rows_from_row_diff_anno(const std::string &fname) {
     return matrix.diffs().num_rows();
 }
 
+template <>
+void convert_to_row_diff<RowDiffDiskAnnotator>(
+            const std::vector<std::string> &files,
+            const std::string &anchors_file_fbase,
+            const std::string &outfbase,
+            size_t num_threads,
+            size_t mem_bytes,
+            std::filesystem::path tmp_dir) {
 
-void convert_row_diff_to_row_diff_disk(const std::vector<std::string> &files,
-                                       const std::string &outfbase,
-                                       const std::string &anchors_file,
-                                       const std::string &fork_succ_file,
-                                       size_t num_threads,
-                                       size_t mem_bytes,
-                                       fs::path tmp_dir) {
+    std::string anchors_file;
+    std::string fork_succ_file;
+    std::tie(anchors_file, fork_succ_file) = get_anchors_and_fork_fnames(anchors_file_fbase);
+
     convert_to_row_disk(
             files, outfbase, num_threads, mem_bytes, tmp_dir,
             utils::make_suffix(outfbase, RowDiffDiskAnnotator::kExtension),
@@ -1133,14 +1171,19 @@ uint8_t get_max_count_width(const std::vector<std::string> &files) {
     return res;
 }
 
+template <>
+void convert_to_row_diff<IntRowDiffDiskAnnotator>(
+            const std::vector<std::string> &files,
+            const std::string &anchors_file_fbase,
+            const std::string &outfbase,
+            size_t num_threads,
+            size_t /*mem_bytes*/,
+            std::filesystem::path /*tmp_dir*/) {
 
-void convert_to_int_row_diff_disk(const std::vector<std::string> &files,
-                                  const std::string &outfbase,
-                                  const std::string &anchors_file,
-                                  const std::string &fork_succ_file,
-                                  size_t num_threads,
-                                  size_t /*mem_bytes*/,
-                                  std::filesystem::path /*tmp_dir*/) {
+    std::string anchors_file;
+    std::string fork_succ_file;
+    std::tie(anchors_file, fork_succ_file) = get_anchors_and_fork_fnames(anchors_file_fbase);
+
     auto outfname = utils::make_suffix(outfbase, IntRowDiffDiskAnnotator::kExtension);
 
     uint64_t num_rows = get_num_rows_from_column_anno(files[0]);
@@ -1228,13 +1271,19 @@ void convert_to_int_row_diff_disk(const std::vector<std::string> &files,
     }, outfname, columns.size(), num_set_bits, num_rows, int_width_for_counts);
 }
 
-void convert_to_coord_row_diff_disk(const std::vector<std::string> &files,
-                                    const std::string &outfbase,
-                                    const std::string &anchors_file,
-                                    const std::string &fork_succ_file,
-                                    size_t num_threads,
-                                    size_t /*mem_bytes*/,
-                                    std::filesystem::path /*tmp_dir*/) {
+template <>
+void convert_to_row_diff<RowDiffDiskCoordAnnotator>(
+            const std::vector<std::string> &files,
+            const std::string &anchors_file_fbase,
+            const std::string &outfbase,
+            size_t num_threads,
+            size_t /*mem_bytes*/,
+            std::filesystem::path /*tmp_dir*/) {
+
+    std::string anchors_file;
+    std::string fork_succ_file;
+    std::tie(anchors_file, fork_succ_file) = get_anchors_and_fork_fnames(anchors_file_fbase);
+
     auto outfname = utils::make_suffix(outfbase, RowDiffDiskCoordAnnotator::kExtension);
 
     uint64_t num_rows = get_num_rows_from_column_anno(files[0]);

@@ -77,30 +77,14 @@ void convert_to_row_disk(const std::vector<std::string> &files,
                          size_t mem_bytes,
                          std::filesystem::path tmp_dir);
 
-void convert_row_diff_to_row_diff_disk(const std::vector<std::string> &files,
-                                       const std::string &outfbase,
-                                       const std::string &anchors_file,
-                                       const std::string &fork_succ_file,
-                                       size_t num_threads,
-                                       size_t mem_bytes,
-                                       std::filesystem::path tmp_dir);
-
-void convert_to_int_row_diff_disk(const std::vector<std::string> &files,
-                                  const std::string &outfbase,
-                                  const std::string &anchors_file,
-                                  const std::string &fork_succ_file,
-                                  size_t num_threads,
-                                  size_t mem_bytes,
-                                  std::filesystem::path tmp_dir);
-
-void convert_to_coord_row_diff_disk(const std::vector<std::string> &files,
-                                    const std::string &outfbase,
-                                    const std::string &anchors_file,
-                                    const std::string &fork_succ_file,
-                                    size_t num_threads,
-                                    size_t mem_bytes,
-                                    std::filesystem::path tmp_dir);
-
+// For RowDiffDiskAnnotator, RowDiffDiskCoordAnnotator, etc.
+template <class RowDiffAnnotator>
+void convert_to_row_diff(const std::vector<std::string> &files,
+                         const std::string &anchors_file_fbase,
+                         const std::string &outfbase,
+                         size_t num_threads,
+                         size_t mem_bytes,
+                         std::filesystem::path tmp_dir);
 
 template <class ToAnnotation, typename Label>
 void merge(std::vector<std::unique_ptr<MultiLabelEncoded<Label>>>&& annotators,
@@ -155,12 +139,9 @@ void convert_to_row_diff(const std::vector<std::string> &files,
 void convert_row_diff_to_col_compressed(const std::vector<std::string> &files,
                                         const std::string &outfbase);
 
-/**
- * Converts a RowDiff annotation into RowDiff<RowSparse>.
- */
-std::unique_ptr<RowDiffRowSparseAnnotator>
-convert_row_diff_to_RowDiffSparse(const std::vector<std::string> &filenames);
+std::pair<std::string, std::string> get_anchors_and_fork_fnames(const std::string &fbase);
 
+// TODO: remove
 /**
  * Wraps an existing annotation (e.g. BRWT) into a RowDiff annotation. Typically this
  * happens when transforming RowDiff columns back to column compress, manipulate the
