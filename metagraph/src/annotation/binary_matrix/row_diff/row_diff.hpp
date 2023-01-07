@@ -78,10 +78,9 @@ class IRowDiff {
 template <class BaseMatrix>
 class RowDiff : public IRowDiff, public BinaryMatrix {
   public:
-    RowDiff() {}
-
-    RowDiff(const graph::DBGSuccinct *graph, BaseMatrix &&diff)
-          : diffs_(std::move(diff)) { graph_ = graph; }
+    template <typename... Args>
+    RowDiff(const graph::DBGSuccinct *graph = nullptr, Args&&... args)
+        : diffs_(std::forward<Args>(args)...) { graph_ = graph; }
 
     /**
      * Returns the number of set bits in the row-diff transformed matrix.

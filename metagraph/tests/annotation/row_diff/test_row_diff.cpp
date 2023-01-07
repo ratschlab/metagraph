@@ -14,11 +14,13 @@ namespace {
 using namespace mtg;
 using namespace testing;
 using ::testing::_;
+using mtg::annot::binmat::RowDiff;
+using mtg::annot::binmat::ColumnMajor;
 
-typedef annot::binmat::RowDiff<annot::binmat::ColumnMajor>::anchor_bv_type anchor_bv_type;
+typedef RowDiff<ColumnMajor>::anchor_bv_type anchor_bv_type;
 
 TEST(RowDiff, Empty) {
-    annot::binmat::RowDiff<annot::binmat::ColumnMajor> rowdiff;
+    RowDiff<ColumnMajor> rowdiff;
     EXPECT_EQ(0, rowdiff.diffs().num_columns());
     EXPECT_EQ(0, rowdiff.diffs().num_relations());
     EXPECT_EQ(0, rowdiff.diffs().num_rows());
@@ -42,16 +44,16 @@ TEST(RowDiff, Serialize) {
     cols[1] = std::make_unique<bit_vector_sd>(std::initializer_list<bool>({1,0,1,0}));
 
     utils::TempFile fmat;
-    annot::binmat::ColumnMajor mat(std::move(cols));
+    ColumnMajor mat(std::move(cols));
 
-    annot::binmat::RowDiff<annot::binmat::ColumnMajor> annot(nullptr, std::move(mat));
+    RowDiff<ColumnMajor> annot(nullptr, std::move(mat));
 
     utils::TempFile tempfile;
     std::ofstream &out = tempfile.ofstream();
     annot.serialize(out);
     out.flush();
 
-    annot::binmat::RowDiff<annot::binmat::ColumnMajor> loaded;
+    RowDiff<ColumnMajor> loaded;
     ASSERT_TRUE(loaded.load(tempfile.ifstream()));
     loaded.load_anchor(fterm_temp.name());
 
@@ -87,9 +89,9 @@ TEST(RowDiff, GetRows) {
     cols[1] = std::make_unique<bit_vector_sd>(
             std::initializer_list<bool>({ 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1 }));
 
-    annot::binmat::ColumnMajor mat(std::move(cols));
+    ColumnMajor mat(std::move(cols));
 
-    annot::binmat::RowDiff annot(&graph, std::move(mat));
+    RowDiff<ColumnMajor> annot(&graph, std::move(mat));
     annot.load_anchor(fterm_temp.name());
 
     auto rows = annot.get_rows({ 3, 3, 3, 3, 5, 5, 6, 7, 8, 9, 10, 11 });
@@ -142,9 +144,9 @@ TEST(RowDiff, GetAnnotation) {
     cols[1] = std::make_unique<bit_vector_sd>(
             std::initializer_list<bool>({ 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1 }));
 
-    annot::binmat::ColumnMajor mat(std::move(cols));
+    ColumnMajor mat(std::move(cols));
 
-    annot::binmat::RowDiff annot(&graph, std::move(mat));
+    RowDiff<ColumnMajor> annot(&graph, std::move(mat));
     annot.load_anchor(fterm_temp.name());
 
     EXPECT_EQ("CTAG", graph.get_node_sequence(4));
@@ -198,9 +200,9 @@ TEST(RowDiff, GetAnnotationMasked) {
     cols[1] = std::make_unique<bit_vector_sd>(
             std::initializer_list<bool>({ 0, 0, 0, 0, 1, 0, 1, 1 }));
 
-    annot::binmat::ColumnMajor mat(std::move(cols));
+    ColumnMajor mat(std::move(cols));
 
-    annot::binmat::RowDiff annot(&graph, std::move(mat));
+    RowDiff<ColumnMajor> annot(&graph, std::move(mat));
     annot.load_anchor(fterm_temp.name());
 
     EXPECT_EQ("CTAG", graph.get_node_sequence(1));
@@ -253,9 +255,9 @@ TEST(RowDiff, GetAnnotationBifurcation) {
     cols[1] = std::make_unique<bit_vector_sd>(
             std::initializer_list<bool>({0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0 }));
 
-    annot::binmat::ColumnMajor mat(std::move(cols));
+    ColumnMajor mat(std::move(cols));
 
-    annot::binmat::RowDiff annot(&graph, std::move(mat));
+    RowDiff<ColumnMajor> annot(&graph, std::move(mat));
     annot.load_anchor(fterm_temp.name());
 
     EXPECT_EQ("CTAG", graph.get_node_sequence(4));
@@ -314,9 +316,9 @@ TEST(RowDiff, GetAnnotationBifurcationMasked) {
     cols[1] = std::make_unique<bit_vector_sd>(
             std::initializer_list<bool>({0, 1, 1, 0, 0, 0, 0, 0, 1, 0 }));
 
-    annot::binmat::ColumnMajor mat(std::move(cols));
+    ColumnMajor mat(std::move(cols));
 
-    annot::binmat::RowDiff annot(&graph, std::move(mat));
+    RowDiff<ColumnMajor> annot(&graph, std::move(mat));
     annot.load_anchor(fterm_temp.name());
 
     EXPECT_EQ("CTAG", graph.get_node_sequence(1));

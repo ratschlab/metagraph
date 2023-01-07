@@ -121,24 +121,15 @@ initialize_annotation(Config::AnnotationType anno_type,
             break;
         }
         case Config::RowDiffDisk: {
-            annotation.reset(new annot::RowDiffDiskAnnotator(
-                    std::make_unique<annot::binmat::RowDiff<annot::binmat::RowDisk>>(
-                            nullptr, annot::binmat::RowDisk(RA_ivbuffer_size)),
-                    annot::LabelEncoder<std::string> {}));
+            annotation.reset(new annot::RowDiffDiskAnnotator({}, nullptr, RA_ivbuffer_size));
             break;
         }
         case Config::IntRowDiffDisk: {
-            annotation.reset(new annot::IntRowDiffDiskAnnotator(
-                    std::make_unique<annot::matrix::IntRowDiff<annot::matrix::IntRowDisk>>(
-                            nullptr, annot::matrix::IntRowDisk(RA_ivbuffer_size)),
-                    annot::LabelEncoder<std::string> {}));
+            annotation.reset(new annot::IntRowDiffDiskAnnotator({}, nullptr, RA_ivbuffer_size));
             break;
         }
         case Config::RowDiffDiskCoord: {
-            annotation.reset(new annot::RowDiffDiskCoordAnnotator(
-                    std::make_unique<annot::matrix::TupleRowDiff<annot::matrix::CoordRowDisk>>(
-                            nullptr, annot::matrix::CoordRowDisk(RA_ivbuffer_size)),
-                    annot::LabelEncoder<std::string> {}));
+            annotation.reset(new annot::RowDiffDiskCoordAnnotator({}, nullptr, RA_ivbuffer_size));
             break;
         }
         case Config::BRWT: {
