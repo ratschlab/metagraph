@@ -1918,42 +1918,6 @@ void convert_row_diff_to_col_compressed(const std::vector<std::string> &files,
     }
 }
 
-void wrap_in_row_diff(MultiLabelEncoded<std::string> &&anno,
-                      const std::string &graph_file,
-                      const std::string &out_file) {
-
-    if (dynamic_cast<MultiBRWTAnnotator *>(&anno)) {
-        auto &brwt = const_cast<BRWT &>(dynamic_cast<const BRWT &>(anno.get_matrix()));
-        auto rd_brwt = std::make_unique<RowDiff<BRWT>>(nullptr, std::move(brwt));
-        StaticBinRelAnnotator<RowDiff<BRWT>> row_diff_anno(std::move(rd_brwt),
-                                                           anno.get_label_encoder());
-        if (graph_file.empty()) {
-            logger->error(
-                    "Please specify the anchor file location via `-i <anchor_location>'");
-            std::exit(1);
-        }
-        std::string anchors_file = utils::make_suffix(graph_file, kRowDiffAnchorExt);
-        if (!fs::exists(anchors_file)) {
-            logger->error("Couldn't find anchor file at {}", anchors_file);
-            std::exit(1);
-        }
-        std::string fork_succ_file = utils::make_suffix(graph_file, kRowDiffForkSuccExt);
-        if (!std::filesystem::exists(fork_succ_file)) {
-            logger->error("Couldn't find fork successor bitmap at {}", fork_succ_file);
-            std::exit(1);
-        }
-        const_cast<RowDiff<BRWT> &>(row_diff_anno.get_matrix()).load_anchor(anchors_file);
-        const_cast<RowDiff<BRWT> &>(row_diff_anno.get_matrix()).load_fork_succ(fork_succ_file);
-
-        row_diff_anno.serialize(out_file);
-        return;
-    }
-    std::ofstream f(out_file, std::ios::binary);
-    anno.get_label_encoder().serialize(f);
-    anno.get_matrix().serialize(f);
-    f.close();
-}
-
 template <class Annotator>
 StaticBinRelAnnotator<matrix::TupleCSCMatrix<typename Annotator::binary_matrix_type>, std::string>
 load_coords(Annotator&& anno, const std::vector<std::string> &files) {

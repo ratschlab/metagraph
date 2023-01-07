@@ -141,17 +141,6 @@ void convert_row_diff_to_col_compressed(const std::vector<std::string> &files,
 
 std::pair<std::string, std::string> get_anchors_and_fork_fnames(const std::string &fbase);
 
-// TODO: remove
-/**
- * Wraps an existing annotation (e.g. BRWT) into a RowDiff annotation. Typically this
- * happens when transforming RowDiff columns back to column compress, manipulate the
- * column compressed into some other format, and then wrapping the result back into a
- * RowDiff.
- */
-void wrap_in_row_diff(MultiLabelEncoded<std::string> &&anno,
-                      const std::string &graph_file,
-                      const std::string &out_file);
-
 template <class Annotator>
 StaticBinRelAnnotator<matrix::TupleCSCMatrix<typename Annotator::binary_matrix_type>, std::string>
 load_coords(Annotator&& anno, const std::vector<std::string> &files);
