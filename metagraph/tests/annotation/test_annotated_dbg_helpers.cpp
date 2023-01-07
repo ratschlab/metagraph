@@ -219,7 +219,7 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
 
         auto rd_path = out_path + RowDiffDiskAnnotator::kExtension;
         auto annotator = std::make_unique<RowDiffDiskAnnotator>(
-                annot::LabelEncoder(), static_cast<const DBGSuccinct*>(base_graph.get()));
+                annot::LabelEncoder<>(), static_cast<const DBGSuccinct*>(base_graph.get()));
         if (!annotator->load(rd_path)) {
             logger->error("Cannot load annotations from {}", rd_path);
             exit(1);
