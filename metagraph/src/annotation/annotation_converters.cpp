@@ -1181,7 +1181,9 @@ void convert_to_row_diff<IntRowDiffDiskAnnotator>(
             files,
             [&](size_t column_index, const std::string &label, std::unique_ptr<bit_vector> &&column,
                 sdsl::int_vector<> &&values) {
-                    size_t local_max_val = *std::max_element(values.begin(), values.end());
+                    size_t local_max_val = 0;
+                    if (!values.empty())
+                        local_max_val = *std::max_element(values.begin(), values.end());
 
                     std::lock_guard<std::mutex> lck(mtx);
 
@@ -1292,7 +1294,9 @@ void convert_to_row_diff<RowDiffDiskCoordAnnotator>(
             std::unique_ptr<bit_vector> &&column,
             bit_vector_small&& delims,
                 sdsl::int_vector<> &&values) {
-                    size_t local_max_val = *std::max_element(values.begin(), values.end());
+                    size_t local_max_val = 0;
+                    if (!values.empty())
+                        local_max_val = *std::max_element(values.begin(), values.end());
 
                     std::lock_guard<std::mutex> lck(mtx);
 
