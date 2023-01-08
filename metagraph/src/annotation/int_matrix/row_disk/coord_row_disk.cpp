@@ -42,8 +42,6 @@ IntMatrix::SetBitPositions CoordRowDisk::View::get_row(Row row) const {
         uint64_t num_values;
         set_bits_.get(num_values, bits_for_number_of_vals_);
 
-        assert(num_values);
-
         pos += bits_for_number_of_vals_;
         pos += bits_for_single_value_ * num_values;
         result.emplace_back(col_id);
@@ -81,8 +79,6 @@ IntMatrix::RowValues CoordRowDisk::View::get_row_values(Row row) const {
 
         uint64_t num_values;
         set_bits_.get(num_values, bits_for_number_of_vals_);
-
-        assert(num_values);
 
         pos += bits_for_number_of_vals_;
         pos += num_values * bits_for_single_value_;
@@ -122,8 +118,6 @@ MultiIntMatrix::RowTuples CoordRowDisk::View::get_row_tuples(Row row) const {
 
         uint64_t num_values;
         set_bits_.get(num_values, bits_for_number_of_vals_);
-
-        assert(num_values);
 
         pos += bits_for_number_of_vals_;
         Tuple tuple;
