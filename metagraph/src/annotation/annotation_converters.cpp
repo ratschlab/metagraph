@@ -386,8 +386,7 @@ void convert_to_row_diff<RowDiffRowSparseAnnotator>(
             const std::string &anchors_file_fbase,
             const std::string &outfbase,
             size_t /*num_threads*/,
-            size_t /*mem_bytes*/,
-            std::filesystem::path /*tmp_dir*/) {
+            size_t /*mem_bytes*/) {
 
     std::string anchors_file;
     std::string fork_succ_file;
@@ -991,7 +990,6 @@ void convert_to_row_disk(
         const std::string &outfbase,
         size_t num_threads,
         size_t mem_bytes,
-        fs::path tmp_dir,
         const std::string &result_fname,
         const std::string &file_extension,
         uint64_t num_rows,
@@ -1051,7 +1049,7 @@ void convert_to_row_disk(
             file_batch.push_back(files[i]);
         }
 
-        parts.push_back(utils::make_suffix(tmp_dir/fmt::format("{}-{}", outfbase, parts.size()),
+        parts.push_back(utils::make_suffix(fmt::format("{}-{}", outfbase, parts.size()),
                                            file_extension));
         Timer timer;
         logger->trace("Annotations in batch: {}", file_batch.size());
@@ -1092,8 +1090,7 @@ void convert_to_row_diff<RowDiffDiskAnnotator>(
             const std::string &anchors_file_fbase,
             const std::string &outfbase,
             size_t num_threads,
-            size_t mem_bytes,
-            std::filesystem::path tmp_dir) {
+            size_t mem_bytes) {
 
     std::string anchors_file;
     std::string fork_succ_file;
@@ -1108,7 +1105,7 @@ void convert_to_row_diff<RowDiffDiskAnnotator>(
     };
 
     convert_to_row_disk(
-            files, outfbase, num_threads, mem_bytes, tmp_dir,
+            files, outfbase, num_threads, mem_bytes,
             utils::make_suffix(outfbase, RowDiffDiskAnnotator::kExtension),
             RowDiffDiskAnnotator::kExtension,
             get_num_rows_from_row_diff_anno(files[0]),
@@ -1122,8 +1119,7 @@ void convert_to_row_diff<IntRowDiffDiskAnnotator>(
             const std::string &anchors_file_fbase,
             const std::string &outfbase,
             size_t num_threads,
-            size_t /*mem_bytes*/,
-            std::filesystem::path /*tmp_dir*/) {
+            size_t /*mem_bytes*/) {
 
     std::string anchors_file;
     std::string fork_succ_file;
@@ -1225,8 +1221,7 @@ void convert_to_row_diff<RowDiffDiskCoordAnnotator>(
             const std::string &anchors_file_fbase,
             const std::string &outfbase,
             size_t num_threads,
-            size_t /*mem_bytes*/,
-            std::filesystem::path /*tmp_dir*/) {
+            size_t /*mem_bytes*/) {
 
     std::string anchors_file;
     std::string fork_succ_file;

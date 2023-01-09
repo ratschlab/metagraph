@@ -77,8 +77,7 @@ void convert_to_row_diff(const std::vector<std::string> &files,
                          const std::string &anchors_file_fbase,
                          const std::string &outfbase,
                          size_t num_threads,
-                         size_t mem_bytes,
-                         std::filesystem::path tmp_dir);
+                         size_t mem_bytes);
 
 template <class ToAnnotation, typename Label>
 void merge(std::vector<std::unique_ptr<MultiLabelEncoded<Label>>>&& annotators,

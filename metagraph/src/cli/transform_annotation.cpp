@@ -769,7 +769,7 @@ int transform_annotation(Config *config) {
             case Config::RowDiffDiskCoord: {
                 convert_to_row_diff<RowDiffDiskCoordAnnotator>(
                         files, config->infbase, config->outfbase,
-                        get_num_threads(), config->memory_available * 1e9, config->tmp_dir);
+                        get_num_threads(), config->memory_available * 1e9);
                 logger->trace("Serialized to {}", config->outfbase);
                 break;
             }
@@ -884,7 +884,7 @@ int transform_annotation(Config *config) {
             case Config::IntRowDiffDisk: {
                 convert_to_row_diff<IntRowDiffDiskAnnotator>(
                         files, config->infbase, config->outfbase,
-                        get_num_threads(), config->memory_available * 1e9, config->tmp_dir);
+                        get_num_threads(), config->memory_available * 1e9);
                 logger->trace("Serialized to {}", config->outfbase);
                 break;
             }
@@ -936,13 +936,13 @@ int transform_annotation(Config *config) {
             } else if (config->anno_type == Config::RowDiffDisk) {
                 convert_to_row_diff<RowDiffDiskAnnotator>(
                         files, config->infbase, config->outfbase,
-                        get_num_threads(), config->memory_available * 1e9, config->tmp_dir);
+                        get_num_threads(), config->memory_available * 1e9);
                 logger->trace("Serialized to {}", config->outfbase);
 
             } else { // RowDiff<RowSparse>
                 convert_to_row_diff<RowDiffRowSparseAnnotator>(
                         files, config->infbase, config->outfbase,
-                        get_num_threads(), config->memory_available * 1e9, config->tmp_dir);
+                        get_num_threads(), config->memory_available * 1e9);
                 logger->trace("Serialized to {}", config->outfbase);
             }
         }

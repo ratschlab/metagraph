@@ -214,8 +214,7 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
         }
 
         convert_to_row_diff<RowDiffDiskAnnotator>({ out_path + RowDiffColumnAnnotator::kExtension },
-                                                  graph_fname, out_fs_path,
-                                                  get_num_threads(), 1e9, tmp_dir);
+                                                  graph_fname, out_fs_path, get_num_threads(), 1e9);
 
         auto rd_path = out_path + RowDiffDiskAnnotator::kExtension;
         auto annotator = std::make_unique<RowDiffDiskAnnotator>(
