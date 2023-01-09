@@ -794,29 +794,28 @@ void convert_batch_to_row_disk(
         const std::function<void(std::ofstream &)> &decorate,
         uint64_t num_rows,
         size_t num_threads) {
-    std::vector<std::string> col_names;
+    LEncoder label_encoder;
     std::vector<std::unique_ptr<bit_vector>> columns;
     uint64_t num_set_bits = 0;
-    std::mutex mtx;
+    std::mutex mu;
     bool success = get_cols(
             source_files,
             [&](uint64_t j,
                     const std::string &label,
                     std::unique_ptr<bit_vector>&& column) {
-                std::lock_guard<std::mutex> lck(mtx);
-
                 if (num_rows != column->size()) {
-                    logger->error("Annotations have different number of rows");
+                    logger->error("Annotations have different number of rows and can't be merged");
                     std::exit(1);
                 }
 
+                std::lock_guard<std::mutex> lock(mu);
+
                 num_set_bits += column->num_set_bits();
-                if (columns.size() <= j) {
-                    columns.resize(j + 1);
-                    col_names.resize(j + 1);
+                while (columns.size() <= j) {
+                    columns.emplace_back();
                 }
                 columns[j] = std::move(column);
-                col_names[j] = label;
+                label_encoder.insert_and_encode(label);
             },
             num_threads
     );
@@ -826,38 +825,32 @@ void convert_batch_to_row_disk(
         exit(1);
     }
 
-    LEncoder label_encoder;
-    for (const auto &label : col_names) {
-        label_encoder.insert_and_encode(label);
-    }
+    std::ofstream out(outfname, std::ios::binary);
+    if (!out.good())
+        throw std::ofstream::failure("Can't write to " + outfname);
 
-    std::ofstream outstream(outfname, std::ios::binary);
-    if (!outstream.good()) {
-        throw std::ofstream::failure("Bad stream");
-    }
-    label_encoder.serialize(outstream);
+    label_encoder.serialize(out);
 
-    decorate(outstream);
+    decorate(out);
 
-    outstream.close();
+    out.close();
 
     ProgressBar progress_bar(num_rows, "Serialize rows", std::cerr, !common::get_verbose());
 
     RowDisk::serialize(
             [&](BinaryMatrix::RowCallback write_row) {
                 #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic)
-                for (uint64_t i = 0; i < num_rows; i += kNumRowsInBlock) {
-                    uint64_t begin = i;
-                    uint64_t end = std::min(i + kNumRowsInBlock, num_rows);
+                for (uint64_t begin = 0; begin < num_rows; begin += kNumRowsInBlock) {
+                    uint64_t end = std::min(begin + kNumRowsInBlock, num_rows);
 
                     std::vector<BinaryMatrix::SetBitPositions> rows(end - begin);
 
                     assert(begin <= end);
                     assert(end <= num_rows);
 
-                    for (size_t col_idx = 0; col_idx < columns.size(); ++col_idx) {
-                        columns[col_idx]->call_ones_in_range(begin, end, [&](uint64_t row_idx) {
-                            rows[row_idx - begin].push_back(col_idx);
+                    for (size_t j = 0; j < columns.size(); ++j) {
+                        columns[j]->call_ones_in_range(begin, end, [&](uint64_t i) {
+                            rows[i - begin].push_back(j);
                         });
                     }
 
@@ -870,8 +863,7 @@ void convert_batch_to_row_disk(
                     }
                 }
             },
-            outfname, label_encoder.size(), num_set_bits, num_rows
-    );
+            outfname, label_encoder.size(), num_set_bits, num_rows);
 }
 
 uint64_t get_num_rows_from_column_anno(const std::string &fname) {
@@ -889,6 +881,11 @@ void merge_row_disk_annotations(const std::vector<std::string> &files,
                                 uint64_t num_rows,
                                 size_t num_threads,
                                 size_t mem_bytes) {
+    if (files.size() == 1) {
+        fs::rename(files[0], outfname);
+        return;
+    }
+
     logger->trace("Merge {} row_disk annotations", files.size());
 
     LEncoder label_encoder;
@@ -931,7 +928,7 @@ void merge_row_disk_annotations(const std::vector<std::string> &files,
     if (tot_predicted_mem > mem_bytes) {
         logger->error(
                 "{} MB is not enough to complete the conversion with {} threads."
-                " {} MB is requred", mem_bytes / 1e6, num_threads, tot_predicted_mem / 1e6);
+                " > {} MB is requred", mem_bytes / 1e6, num_threads, tot_predicted_mem / 1e6);
         exit(1);
     }
 
@@ -952,9 +949,8 @@ void merge_row_disk_annotations(const std::vector<std::string> &files,
             [&](BinaryMatrix::RowCallback write_row) {
                 // maybe better if single thread reads single annotation?
                 #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic)
-                for (uint64_t i = 0; i < num_rows; i += kNumRowsInBlock) {
-                    uint64_t begin = i;
-                    uint64_t end = std::min(i + kNumRowsInBlock, num_rows);
+                for (uint64_t begin = 0; begin < num_rows; begin += kNumRowsInBlock) {
+                    uint64_t end = std::min(begin + kNumRowsInBlock, num_rows);
 
                     assert(begin <= end);
                     assert(end <= num_rows);
@@ -982,8 +978,11 @@ void merge_row_disk_annotations(const std::vector<std::string> &files,
                     }
                 }
             },
-            outfname, label_encoder.size(), num_set_bits, num_rows
-    );
+            outfname, label_encoder.size(), num_set_bits, num_rows);
+
+    for (const auto &fname : files) {
+        fs::remove(fname);
+    }
 }
 
 // works for cols -> row_disk and row_diff -> row_diff_disk
@@ -996,7 +995,7 @@ void convert_to_row_disk(
         const std::string &result_fname,
         const std::string &file_extension,
         uint64_t num_rows,
-        const std::function<void(std::ofstream &)> &result_decorate,
+        const std::function<void(std::ofstream &)> &decorate,
         const std::function<bool(const std::vector<std::string> &, const ColumnCallback &, size_t)>
                 &get_cols) {
     if (!files.size())
@@ -1026,6 +1025,7 @@ void convert_to_row_disk(
                 exit(1);
             }
 
+            // TODO: construct with disk swap (sd_vector_swap), so this won't need to reserve anything
             size_t boundary_size
                     = bit_vector_small::predict_size(num_rows * (file_batch.size() + 1)
                                                                      * density_prediction
@@ -1038,8 +1038,9 @@ void convert_to_row_disk(
 
             if (columns_size + file_size + boundary_size + conversion_overhead > mem_bytes) {
                 if (file_batch.empty()) {
-                    logger->error("{} MB is not enough memory to perform conversion",
-                                  mem_bytes / 1e6);
+                    logger->error("{} MB is not enough to perform the conversion. > {} MB requred",
+                                  mem_bytes / 1e6,
+                                  (columns_size + file_size + boundary_size + conversion_overhead) / 1e6);
                     exit(1);
                 }
                 break;
@@ -1050,33 +1051,22 @@ void convert_to_row_disk(
             file_batch.push_back(files[i]);
         }
 
-        std::string fname = utils::make_suffix(tmp_dir/fmt::format("{}-{}", outfbase, parts.size()),
-                                               file_extension);
-        std::function<void(std::ofstream &)> decorate = [](std::ofstream &) {};
-        if (file_batch.size() == files.size()) {
-            fname = result_fname;
-            decorate = result_decorate;
-            logger->trace("All annotations fit in single batch");
-        }
+        parts.push_back(utils::make_suffix(tmp_dir/fmt::format("{}-{}", outfbase, parts.size()),
+                                           file_extension));
         Timer timer;
         logger->trace("Annotations in batch: {}", file_batch.size());
 
-        convert_batch_to_row_disk(get_cols, file_batch, fname, decorate,
+        convert_batch_to_row_disk(get_cols, file_batch, parts.back(),
+                                  file_batch.size() == files.size() ? decorate
+                                                                    : [](std::ofstream &) {},
                                   num_rows, num_threads);
 
-        parts.push_back(fname);
         logger->trace("Batch processed in {} sec", timer.elapsed());
     }
 
-    // need to merge multiple temp row sparse disk annotations
-    if (parts.size() > 1) {
-        merge_row_disk_annotations(parts, result_fname, result_decorate, num_rows,
-                                   num_threads, mem_bytes);
-
-        for (const auto &fname : parts) {
-            fs::remove(fname);
-        }
-    }
+    // merge the temp row sparse disk annotations
+    merge_row_disk_annotations(parts, result_fname, decorate, num_rows,
+                               num_threads, mem_bytes);
 }
 
 
@@ -1108,21 +1098,22 @@ void convert_to_row_diff<RowDiffDiskAnnotator>(
     std::string anchors_file;
     std::string fork_succ_file;
     std::tie(anchors_file, fork_succ_file) = get_anchors_and_fork_fnames(anchors_file_fbase);
+    auto write_anchors = [&](std::ofstream &out) {
+        IRowDiff row_diff;
+        row_diff.load_anchor(anchors_file);
+        row_diff.load_fork_succ(fork_succ_file);
+        out.write("v2.0", 4);
+        row_diff.anchor().serialize(out);
+        row_diff.fork_succ().serialize(out);
+    };
 
     convert_to_row_disk(
             files, outfbase, num_threads, mem_bytes, tmp_dir,
             utils::make_suffix(outfbase, RowDiffDiskAnnotator::kExtension),
             RowDiffDiskAnnotator::kExtension,
             get_num_rows_from_row_diff_anno(files[0]),
-            [&](std::ofstream &outstream) {
-                IRowDiff row_diff;
-                row_diff.load_anchor(anchors_file);
-                row_diff.load_fork_succ(fork_succ_file);
-                outstream.write("v2.0", 4);
-                row_diff.anchor().serialize(outstream);
-                row_diff.fork_succ().serialize(outstream);
-            },
-            merge_load_row_diff);
+            write_anchors, merge_load_row_diff
+    );
 }
 
 template <>
@@ -1143,93 +1134,89 @@ void convert_to_row_diff<IntRowDiffDiskAnnotator>(
     uint64_t num_rows = get_num_rows_from_column_anno(files[0]);
     size_t num_set_bits = 0;
 
-    std::vector<std::string> col_names;
+    LEncoder label_encoder;
     std::vector<std::unique_ptr<bit_vector>> columns;
     std::vector<sdsl::int_vector<>> col_values;
 
-    std::mutex mtx;
+    std::mutex mu;
 
     size_t max_val = 0;
 
+    // TODO: convert with streaming
     ColumnCompressed<>::load_columns_and_values(
             files,
-            [&](size_t j, const std::string &label, std::unique_ptr<bit_vector> &&column,
-                sdsl::int_vector<> &&values) {
-                    size_t local_max_val = 0;
-                    if (!values.empty())
-                        local_max_val = *std::max_element(values.begin(), values.end());
+            [&](size_t j,
+                    const std::string &label,
+                    std::unique_ptr<bit_vector> &&column,
+                    sdsl::int_vector<> &&values) {
+                size_t local_max_val = 0;
+                if (values.size())
+                    local_max_val = *std::max_element(values.begin(), values.end());
 
-                    std::lock_guard<std::mutex> lck(mtx);
+                std::lock_guard<std::mutex> lock(mu);
 
-                    if (local_max_val > max_val)
-                        max_val = local_max_val;
+                if (local_max_val > max_val)
+                    max_val = local_max_val;
 
-                    num_set_bits += column->num_set_bits();
+                num_set_bits += column->num_set_bits();
 
-                    if (columns.size() <= j) {
-                        columns.resize(j + 1);
-                        col_names.resize(j + 1);
-                        col_values.resize(j + 1);
-                    }
-                    columns[j] = std::move(column);
-                    col_values[j] = std::move(values);
-                    col_names[j] = label;
-
+                while (columns.size() <= j) {
+                    columns.emplace_back();
+                    col_values.emplace_back();
+                }
+                columns[j] = std::move(column);
+                col_values[j] = std::move(values);
+                label_encoder.insert_and_encode(label);
             },
             num_threads);
 
-    LEncoder label_encoder;
-    for (const auto &label : col_names) {
-        label_encoder.insert_and_encode(label);
-    }
+    std::ofstream out(outfname, std::ios::binary);
+    if (!out.good())
+        throw std::ofstream::failure("Can't write to " + outfname);
 
-    std::ofstream outstream(outfname, std::ios::binary);
-    if (!outstream.good()) {
-        throw std::ofstream::failure("Bad stream");
-    }
-    label_encoder.serialize(outstream);
+    label_encoder.serialize(out);
 
     IRowDiff row_diff;
     row_diff.load_anchor(anchors_file);
     row_diff.load_fork_succ(fork_succ_file);
-    outstream.write("v2.0", 4);
-    row_diff.anchor().serialize(outstream);
-    row_diff.fork_succ().serialize(outstream);
+    out.write("v2.0", 4);
+    row_diff.anchor().serialize(out);
+    row_diff.fork_succ().serialize(out);
 
-    outstream.close();
+    out.close();
 
     ProgressBar progress_bar(num_rows, "Serialize rows", std::cerr, !common::get_verbose());
 
     matrix::IntRowDisk::serialize(
-        [&](std::function<void(const matrix::IntMatrix::RowValues &)> write_row_with_values) {
-            #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic)
-            for (size_t i = 0 ; i < num_rows; i += kNumRowsInBlock) {
-                uint64_t start_row_id = i;
-                uint64_t end_row_id = std::min(start_row_id + kNumRowsInBlock, num_rows);
+            [&](std::function<void(const matrix::IntMatrix::RowValues &)> write_row_with_values) {
+                #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic)
+                for (uint64_t begin = 0 ; begin < num_rows; begin += kNumRowsInBlock) {
+                    uint64_t end = std::min(begin + kNumRowsInBlock, num_rows);
 
-                std::vector<matrix::IntMatrix::RowValues> rows_with_values(end_row_id - start_row_id);
+                    assert(begin <= end);
+                    assert(end <= num_rows);
 
-                assert(start_row_id <= end_row_id);
-                assert(end_row_id <= num_rows);
+                    std::vector<matrix::IntMatrix::RowValues> rows(end - begin);
 
-                for (size_t col_idx = 0 ; col_idx < columns.size() ; ++col_idx) {
-                    size_t val_idx = std::numeric_limits<size_t>::max(); //not known yet
-                    columns[col_idx]->call_ones_in_range(start_row_id, end_row_id, [&](uint64_t row_idx) {
-                        if (val_idx == std::numeric_limits<size_t>::max())
-                            val_idx = columns[col_idx]->rank1(row_idx) - 1;
-                        rows_with_values[row_idx - start_row_id].emplace_back(col_idx, col_values[col_idx][val_idx++]);
-                    });
-                }
+                    for (size_t j = 0 ; j < columns.size() ; ++j) {
+                        size_t val_idx = begin ? columns[j]->rank1(begin - 1) : 0;
+                        columns[j]->call_ones_in_range(begin, end,
+                            [&](uint64_t i) {
+                                rows[i - begin].emplace_back(j, col_values[j][val_idx++]);
+                            }
+                        );
+                    }
 
-                #pragma omp ordered
-                {
-                    for (const auto& row_with_values : rows_with_values) {
-                        write_row_with_values(row_with_values);
-                        ++progress_bar;
+                    #pragma omp ordered
+                    {
+                        for (const auto &row_with_values : rows) {
+                            write_row_with_values(row_with_values);
+                            ++progress_bar;
+                        }
                     }
                 }
-            }
-    }, outfname, columns.size(), num_set_bits, num_rows, max_val);
+            },
+            outfname, columns.size(), num_set_bits, num_rows, max_val);
 }
 
 template <>
@@ -1252,109 +1239,105 @@ void convert_to_row_diff<RowDiffDiskCoordAnnotator>(
 
     size_t num_values = 0;
 
-    std::vector<std::string> col_names;
+    LEncoder label_encoder;
     std::vector<std::unique_ptr<bit_vector>> columns;
     std::vector<sdsl::int_vector<>> col_values;
     std::vector<bit_vector_small> col_delims;
 
-    std::mutex mtx;
+    std::mutex mu;
 
     size_t max_tuple_size = 0;
     size_t max_val = 0;
 
+    // TODO: convert with streaming
     ColumnCompressed<>::load_columns_delims_and_values(
             files,
             [&](size_t j, const std::string &label,
-            std::unique_ptr<bit_vector> &&column,
-            bit_vector_small&& delims,
-                sdsl::int_vector<> &&values) {
-                    size_t local_max_val = 0;
-                    if (!values.empty())
-                        local_max_val = *std::max_element(values.begin(), values.end());
+                    std::unique_ptr<bit_vector> &&column,
+                    bit_vector_small&& delims,
+                    sdsl::int_vector<> &&values) {
+                size_t local_max_val = 0;
+                if (!values.empty())
+                    local_max_val = *std::max_element(values.begin(), values.end());
 
-                    std::lock_guard<std::mutex> lck(mtx);
+                std::lock_guard<std::mutex> lock(mu);
 
-                    if (local_max_val > max_val)
-                        max_val = local_max_val;
+                if (local_max_val > max_val)
+                    max_val = local_max_val;
 
-                    if (values.size() > max_tuple_size)
-                        max_tuple_size = values.size();
+                if (values.size() > max_tuple_size)
+                    max_tuple_size = values.size();
 
-                    num_set_bits += column->num_set_bits();
+                num_set_bits += column->num_set_bits();
 
-                    num_values += values.size();
+                num_values += values.size();
 
-                    if (columns.size() <= j) {
-                        columns.resize(j + 1);
-                        col_names.resize(j + 1);
-                        col_values.resize(j + 1);
-                        col_delims.resize(j + 1);
-                    }
-                    columns[j] = std::move(column);
-                    col_values[j] = std::move(values);
-                    col_names[j] = label;
-                    col_delims[j] = std::move(delims);
+                while (columns.size() <= j) {
+                    columns.emplace_back();
+                    col_values.emplace_back();
+                    col_delims.emplace_back();
+                }
+                columns[j] = std::move(column);
+                col_values[j] = std::move(values);
+                label_encoder.insert_and_encode(label);
+                col_delims[j] = std::move(delims);
             },
             num_threads);
 
-    LEncoder label_encoder;
-    for (const auto &label : col_names) {
-        label_encoder.insert_and_encode(label);
-    }
+    std::ofstream out(outfname, std::ios::binary);
+    if (!out.good())
+        throw std::ofstream::failure("Can't write to " + outfname);
 
-    std::ofstream outstream(outfname, std::ios::binary);
-    if (!outstream.good()) {
-        throw std::ofstream::failure("Bad stream");
-    }
-    label_encoder.serialize(outstream);
+    label_encoder.serialize(out);
 
     IRowDiff row_diff;
     row_diff.load_anchor(anchors_file);
     row_diff.load_fork_succ(fork_succ_file);
-    outstream.write("v2.0", 4);
-    row_diff.anchor().serialize(outstream);
-    row_diff.fork_succ().serialize(outstream);
+    out.write("v2.0", 4);
+    row_diff.anchor().serialize(out);
+    row_diff.fork_succ().serialize(out);
 
-    outstream.close();
+    out.close();
 
     ProgressBar progress_bar(num_rows, "Serialize rows", std::cerr, !common::get_verbose());
 
     matrix::CoordRowDisk::serialize(
-        [&](std::function<void(const matrix::MultiIntMatrix::RowTuples &)> write_row_with_tuples) {
-            #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic)
-            for (size_t i = 0 ; i < num_rows; i += kNumRowsInBlock) {
-                uint64_t start_row_id = i;
-                uint64_t end_row_id = std::min(start_row_id + kNumRowsInBlock, num_rows);
+            [&](std::function<void(const matrix::MultiIntMatrix::RowTuples &)> write_row_with_tuples) {
+                #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic)
+                for (uint64_t begin = 0 ; begin < num_rows; begin += kNumRowsInBlock) {
+                    uint64_t end = std::min(begin + kNumRowsInBlock, num_rows);
 
-                std::vector<matrix::MultiIntMatrix::RowTuples> rows_with_tuples(end_row_id - start_row_id);
+                    assert(begin <= end);
+                    assert(end <= num_rows);
 
-                assert(start_row_id <= end_row_id);
-                assert(end_row_id <= num_rows);
+                    std::vector<matrix::MultiIntMatrix::RowTuples> rows(end - begin);
 
-                for (size_t col_idx = 0 ; col_idx < columns.size() ; ++col_idx) {
-                    columns[col_idx]->call_ones_in_range(start_row_id, end_row_id, [&](uint64_t row_idx) {
-                        auto r = columns[col_idx]->rank1(row_idx);
-                        size_t begin = col_delims[col_idx].select1(r) + 1 - r;
-                        size_t end = col_delims[col_idx].select1(r + 1) - r;
-                        matrix::MultiIntMatrix::Tuple tuple;
-                        tuple.reserve(end - begin);
-                        for (size_t t = begin; t < end; ++t) {
-                            tuple.push_back(col_values[col_idx][t]);
+                    for (size_t j = 0 ; j < columns.size() ; ++j) {
+                        size_t r = begin ? columns[j]->rank1(begin - 1) + 1 : 1;
+                        if (r > columns[j]->num_set_bits())
+                            continue;
+                        size_t tb = col_delims[j].select1(r) + 1 - r;
+
+                        columns[j]->call_ones_in_range(begin, end, [&](uint64_t i) {
+                            size_t te = col_delims[j].select1(r + 1) - r;
+                            rows[i - begin].emplace_back(j,
+                                    matrix::MultiIntMatrix::Tuple(col_values[j].begin() + tb,
+                                                                  col_values[j].begin() + te));
+                            tb = te;
+                            ++r;
+                        });
+                    }
+
+                    #pragma omp ordered
+                    {
+                        for (const auto& row_with_tuples : rows) {
+                            write_row_with_tuples(row_with_tuples);
+                            ++progress_bar;
                         }
-                        rows_with_tuples[row_idx - start_row_id].emplace_back(col_idx, std::move(tuple));
-                    });
-                }
-
-                #pragma omp ordered
-                {
-                    for (const auto& row_with_tuples : rows_with_tuples) {
-                        write_row_with_tuples(row_with_tuples);
-                        ++progress_bar;
                     }
                 }
-            }
-        }, outfname, columns.size(), num_set_bits, num_rows, num_values, max_val, max_tuple_size
-    );
+            },
+            outfname, columns.size(), num_set_bits, num_rows, num_values, max_val, max_tuple_size);
 }
 
 template <>
@@ -1823,7 +1806,7 @@ void convert_to_row_diff(const std::vector<std::string> &files,
                 }
             }
             if (file_size > mem_bytes) {
-                logger->error("Not enough memory to process {}, requires {} MB",
+                logger->error("Not enough memory to load {}, requires {} MB",
                               files[i], file_size / 1e6);
                 exit(1);
             }
@@ -1872,13 +1855,13 @@ void convert_row_diff_to_col_compressed(const std::vector<std::string> &files,
         std::string out_path
                 = (fs::path(outfbase).remove_filename() / outname).string()
                 + "_row_diff" + ColumnCompressed<std::string>::kExtension;
-        std::ofstream outstream(out_path, std::ios::binary);
+        std::ofstream out(out_path, std::ios::binary);
         logger->trace("Transforming {} to {}", file, out_path);
 
-        serialize_number(outstream, input_anno.num_objects());
-        input_anno.get_label_encoder().serialize(outstream);
-        input_anno.get_matrix().diffs().serialize(outstream);
-        outstream.close();
+        serialize_number(out, input_anno.num_objects());
+        input_anno.get_label_encoder().serialize(out);
+        input_anno.get_matrix().diffs().serialize(out);
+        out.close();
     }
 }
 

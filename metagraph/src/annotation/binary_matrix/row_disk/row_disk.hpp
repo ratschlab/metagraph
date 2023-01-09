@@ -1,4 +1,5 @@
-#pragma once
+#ifndef __ROW_DISK_HPP__
+#define __ROW_DISK_HPP__
 
 #include <iostream>
 #include <string>
@@ -10,7 +11,6 @@
 namespace mtg {
 namespace annot {
 namespace binmat {
-
 
 class RowDisk : public BinaryMatrix {
   public:
@@ -107,7 +107,8 @@ class RowDisk : public BinaryMatrix {
     size_t iv_size_on_disk_ = 0; // for non-static serialization
 };
 
-
 } // namespace binmat
 } // namespace annot
 } // namespace mtg
+
+#endif // __ROW_DISK_HPP__

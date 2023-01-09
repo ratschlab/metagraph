@@ -154,5 +154,4 @@ public:
 } // namespace annot
 } // namespace mtg
 
-
 #endif // __INT_ROW_DISK_HPP__
