@@ -499,12 +499,12 @@ std::unique_ptr<MultiBRWTAnnotator> convert_to_BRWT<MultiBRWTAnnotator>(
     auto get_columns = [&](const BRWTBottomUpBuilder::CallColumn &call_column) {
         bool success = ColumnCompressed<>::merge_load(
             annotation_files,
-            [&](uint64_t column_index,
+            [&](uint64_t j,
                     const std::string &label,
                     std::unique_ptr<bit_vector>&& column) {
-                call_column(column_index, std::move(column));
+                call_column(j, std::move(column));
                 std::lock_guard<std::mutex> lock(mu);
-                column_names.emplace_back(column_index, label);
+                column_names.emplace_back(j, label);
             },
             num_threads
         );
@@ -530,12 +530,12 @@ convert_to_BRWT<RowDiffBRWTAnnotator>(const std::vector<std::string> &annotation
     auto get_columns = [&](const BRWTBottomUpBuilder::CallColumn &call_column) {
         bool success = merge_load_row_diff(
             annotation_files,
-            [&](uint64_t column_index,
+            [&](uint64_t j,
                     const std::string &label,
                     std::unique_ptr<bit_vector>&& column) {
-                call_column(column_index, std::move(column));
+                call_column(j, std::move(column));
                 std::lock_guard<std::mutex> lock(mu);
-                column_names.emplace_back(column_index, label);
+                column_names.emplace_back(j, label);
             },
             num_threads
         );
@@ -765,7 +765,7 @@ convert_to_RbBRWT<RbBRWTAnnotator>(const std::vector<std::string> &annotation_fi
 
         bool success = ColumnCompressed<>::merge_load(
             annotation_files,
-            [&](uint64_t /*column_index*/,
+            [&](uint64_t /*j*/,
                     const std::string &label,
                     std::unique_ptr<bit_vector>&& column) {
                 call_column(std::move(column));
@@ -796,12 +796,13 @@ void convert_batch_to_row_disk(
         size_t num_threads) {
     std::vector<std::string> col_names;
     std::vector<std::unique_ptr<bit_vector>> columns;
-    uint64_t num_set_bits {};
+    uint64_t num_set_bits = 0;
     std::mutex mtx;
     bool success = get_cols(
             source_files,
-            [&](uint64_t column_index, const std::string &label,
-                std::unique_ptr<bit_vector> &&column) {
+            [&](uint64_t j,
+                    const std::string &label,
+                    std::unique_ptr<bit_vector>&& column) {
                 std::lock_guard<std::mutex> lck(mtx);
 
                 if (num_rows != column->size()) {
@@ -810,14 +811,15 @@ void convert_batch_to_row_disk(
                 }
 
                 num_set_bits += column->num_set_bits();
-                if (columns.size() <= column_index) {
-                    columns.resize(column_index + 1);
-                    col_names.resize(column_index + 1);
+                if (columns.size() <= j) {
+                    columns.resize(j + 1);
+                    col_names.resize(j + 1);
                 }
-                columns[column_index] = std::move(column);
-                col_names[column_index] = label;
+                columns[j] = std::move(column);
+                col_names[j] = label;
             },
-            num_threads);
+            num_threads
+    );
 
     if (!success) {
         logger->error("Can't load annotation columns");
@@ -868,7 +870,8 @@ void convert_batch_to_row_disk(
                     }
                 }
             },
-            outfname, label_encoder.size(), num_set_bits, num_rows);
+            outfname, label_encoder.size(), num_set_bits, num_rows
+    );
 }
 
 uint64_t get_num_rows_from_column_anno(const std::string &fname) {
@@ -887,67 +890,55 @@ void merge_row_disk_annotations(const std::vector<std::string> &files,
                                 size_t num_threads,
                                 size_t mem_bytes) {
     logger->trace("Merge {} row_disk annotations", files.size());
-    std::vector<std::unique_ptr<LEncoder>> label_encoders(files.size());
 
     LEncoder label_encoder;
-
     std::vector<std::unique_ptr<RowDisk>> matrices(files.size());
-
     std::vector<uint64_t> offsets(files.size() + 1, 0);
 
-    uint64_t num_set_bits {};
-    size_t tot_boundary_bytes {};
-    size_t num_cols {};
-    for (size_t batch_idx = 0; batch_idx < files.size(); ++batch_idx) {
-        std::string fname = files[batch_idx];
-        label_encoders[batch_idx] = std::make_unique<LEncoder>();
-        matrices[batch_idx] = std::make_unique<RowDisk>();
+    uint64_t num_set_bits = 0;
+    size_t tot_boundary_bytes = 0;
+    for (size_t j = 0; j < files.size(); ++j) {
+        LEncoder le;
+        matrices[j] = std::make_unique<RowDisk>();
 
-        utils::NamedIfstream in(fname, std::ios::in);
-        if (!label_encoders[batch_idx]->load(in)) {
-            logger->error("Can't load label encoder from {}", fname);
+        utils::NamedIfstream in(files[j], std::ios::in);
+        if (!le.load(in)) {
+            logger->error("Can't load label encoder from {}", files[j]);
             exit(1);
         }
 
-        for (const auto &label : label_encoders[batch_idx]->get_labels())
+        for (const auto &label : le.get_labels()) {
             label_encoder.insert_and_encode(label);
+        }
 
-        offsets[batch_idx + 1] = label_encoders[batch_idx]->size();
-        if (!matrices[batch_idx]->load(in)) {
-            logger->error("Can't load matrix from {}", fname);
+        offsets[j + 1] = le.size();
+        if (!matrices[j]->load(in)) {
+            logger->error("Can't load matrix from {}", files[j]);
             exit(1);
         }
 
-        num_set_bits += matrices[batch_idx]->num_relations();
-        num_cols += matrices[batch_idx]->num_columns();
-        tot_boundary_bytes += matrices[batch_idx]->get_boundary().size() / 8;
-
-        if (tot_boundary_bytes > mem_bytes) {
-            logger->error("{} MB is not enough to complete conversion", mem_bytes / 1e6);
-            exit(1);
-        }
+        num_set_bits += matrices[j]->num_relations();
+        tot_boundary_bytes += matrices[j]->get_boundary().size() / 8;
     }
 
-    double density = (double)num_set_bits / (num_cols * num_rows);
     size_t predicted_serialize_memory
-            = bit_vector_small::predict_size(num_set_bits + num_rows, num_rows) / 8; // boundary
-    predicted_serialize_memory += num_threads
-            * (2 * kNumRowsInBlock * sizeof(uint64_t) * num_cols * density
-               + kNumRowsInBlock * sizeof(BinaryMatrix::Row));
+            = bit_vector_small::predict_size(num_set_bits + num_rows, num_rows) / 8 // boundary
+                + num_threads
+                    * (2 * kNumRowsInBlock * sizeof(uint64_t) * num_set_bits / num_rows
+                       + kNumRowsInBlock * sizeof(BinaryMatrix::Row));
 
     size_t tot_predicted_mem = predicted_serialize_memory + tot_boundary_bytes;
     if (tot_predicted_mem > mem_bytes) {
         logger->error(
-                "{} MB is not enough to complete conversion, {} MB is requred for {} "
-                "threads in current configuration.",
-                mem_bytes / 1e6, tot_predicted_mem / 1e6, num_threads);
+                "{} MB is not enough to complete the conversion with {} threads."
+                " {} MB is requred", mem_bytes / 1e6, num_threads, tot_predicted_mem / 1e6);
         exit(1);
     }
 
     std::ofstream out(outfname, std::ios::binary);
-    if (!out.good()) {
-        throw std::ofstream::failure("Bad stream");
-    }
+    if (!out.good())
+        throw std::ofstream::failure("Can't write to " + outfname);
+
     label_encoder.serialize(out);
     decorate(out);
     out.close();
@@ -968,33 +959,20 @@ void merge_row_disk_annotations(const std::vector<std::string> &files,
                     assert(begin <= end);
                     assert(end <= num_rows);
 
-                    std::vector<std::vector<BinaryMatrix::SetBitPositions>> input_rows_parts(
-                            files.size(),
-                            std::vector<BinaryMatrix::SetBitPositions>(end - begin));
-
                     std::vector<BinaryMatrix::SetBitPositions> rows(end - begin);
 
                     std::vector<BinaryMatrix::Row> query_row_id(end - begin);
                     std::iota(query_row_id.begin(), query_row_id.end(), begin);
 
-                    for (size_t batch_idx = 0; batch_idx < files.size(); ++batch_idx) {
-                        input_rows_parts[batch_idx]
-                                = matrices[batch_idx]->get_rows(query_row_id);
-
-                        if (batch_idx > 0) { // first batch has a 0 offset
-                            for (auto &rp : input_rows_parts[batch_idx])
-                                for (auto &set_bit_pos : rp)
-                                    set_bit_pos += offsets[batch_idx];
+                    for (size_t b = 0; b < files.size(); ++b) {
+                        auto input_rows = matrices[b]->get_rows(query_row_id);
+                        for (size_t r = 0; r < input_rows.size(); ++r) {
+                            for (auto j : input_rows[r]) {
+                                rows[r].push_back(j + offsets[b]);
+                            }
                         }
                     }
 
-                    for (size_t j = 0; j < rows.size(); ++j) {
-                        auto &row = rows[j];
-                        for (size_t batch_idx = 0; batch_idx < files.size(); ++batch_idx) {
-                            auto &row_to_append = input_rows_parts[batch_idx][j];
-                            row.insert(row.end(), row_to_append.begin(), row_to_append.end());
-                        }
-                    }
                     #pragma omp ordered
                     {
                         for (const auto &row : rows) {
@@ -1004,7 +982,8 @@ void merge_row_disk_annotations(const std::vector<std::string> &files,
                     }
                 }
             },
-            outfname, label_encoder.size(), num_set_bits, num_rows);
+            outfname, label_encoder.size(), num_set_bits, num_rows
+    );
 }
 
 // works for cols -> row_disk and row_diff -> row_diff_disk
@@ -1035,20 +1014,19 @@ void convert_to_row_disk(
     // load as many columns as we can fit in memory, and convert them
     for (uint32_t i = 0; i < files.size(); ) {
         logger->trace("Loading columns for batch-conversion...");
-        size_t mem_bytes_left = mem_bytes;
+        size_t columns_size = 0;
         std::vector<std::string> file_batch;
 
-        size_t current_boundary_cost = 0;
         for (; i < files.size(); ++i) {
             uint64_t file_size = fs::file_size(files[i]);
 
             if (file_size > mem_bytes) {
-                logger->warn("Not enough memory to process {}, requires {} MB, skipped",
-                             files[i], file_size / 1e6);
-                continue;
+                logger->error("Not enough memory to load {}, requires {} MB",
+                              files[i], file_size / 1e6);
+                exit(1);
             }
 
-            size_t new_predicted_boundary_cost
+            size_t boundary_size
                     = bit_vector_small::predict_size(num_rows * (file_batch.size() + 1)
                                                                      * density_prediction
                                                              + num_rows,
@@ -1058,8 +1036,7 @@ void convert_to_row_disk(
             size_t conversion_overhead
                     = conversion_overhead_per_column * (file_batch.size() + 1);
 
-            if (file_size + new_predicted_boundary_cost + conversion_overhead
-                > mem_bytes_left) {
+            if (columns_size + file_size + boundary_size + conversion_overhead > mem_bytes) {
                 if (file_batch.empty()) {
                     logger->error("{} MB is not enough memory to perform conversion",
                                   mem_bytes / 1e6);
@@ -1068,10 +1045,7 @@ void convert_to_row_disk(
                 break;
             }
 
-            mem_bytes_left += current_boundary_cost;
-            current_boundary_cost = new_predicted_boundary_cost;
-            mem_bytes_left -= file_size;
-            mem_bytes_left -= current_boundary_cost;
+            columns_size += file_size;
 
             file_batch.push_back(files[i]);
         }
@@ -1179,7 +1153,7 @@ void convert_to_row_diff<IntRowDiffDiskAnnotator>(
 
     ColumnCompressed<>::load_columns_and_values(
             files,
-            [&](size_t column_index, const std::string &label, std::unique_ptr<bit_vector> &&column,
+            [&](size_t j, const std::string &label, std::unique_ptr<bit_vector> &&column,
                 sdsl::int_vector<> &&values) {
                     size_t local_max_val = 0;
                     if (!values.empty())
@@ -1192,14 +1166,14 @@ void convert_to_row_diff<IntRowDiffDiskAnnotator>(
 
                     num_set_bits += column->num_set_bits();
 
-                    if (columns.size() <= column_index) {
-                        columns.resize(column_index + 1);
-                        col_names.resize(column_index + 1);
-                        col_values.resize(column_index + 1);
+                    if (columns.size() <= j) {
+                        columns.resize(j + 1);
+                        col_names.resize(j + 1);
+                        col_values.resize(j + 1);
                     }
-                    columns[column_index] = std::move(column);
-                    col_values[column_index] = std::move(values);
-                    col_names[column_index] = label;
+                    columns[j] = std::move(column);
+                    col_values[j] = std::move(values);
+                    col_names[j] = label;
 
             },
             num_threads);
@@ -1290,7 +1264,7 @@ void convert_to_row_diff<RowDiffDiskCoordAnnotator>(
 
     ColumnCompressed<>::load_columns_delims_and_values(
             files,
-            [&](size_t column_index, const std::string &label,
+            [&](size_t j, const std::string &label,
             std::unique_ptr<bit_vector> &&column,
             bit_vector_small&& delims,
                 sdsl::int_vector<> &&values) {
@@ -1310,16 +1284,16 @@ void convert_to_row_diff<RowDiffDiskCoordAnnotator>(
 
                     num_values += values.size();
 
-                    if (columns.size() <= column_index) {
-                        columns.resize(column_index + 1);
-                        col_names.resize(column_index + 1);
-                        col_values.resize(column_index + 1);
-                        col_delims.resize(column_index + 1);
+                    if (columns.size() <= j) {
+                        columns.resize(j + 1);
+                        col_names.resize(j + 1);
+                        col_values.resize(j + 1);
+                        col_delims.resize(j + 1);
                     }
-                    columns[column_index] = std::move(column);
-                    col_values[column_index] = std::move(values);
-                    col_names[column_index] = label;
-                    col_delims[column_index] = std::move(delims);
+                    columns[j] = std::move(column);
+                    col_values[j] = std::move(values);
+                    col_names[j] = label;
+                    col_delims[j] = std::move(delims);
             },
             num_threads);
 
@@ -1379,7 +1353,8 @@ void convert_to_row_diff<RowDiffDiskCoordAnnotator>(
                     }
                 }
             }
-    }, outfname, columns.size(), num_set_bits, num_rows, num_values, max_val, max_tuple_size);
+        }, outfname, columns.size(), num_set_bits, num_rows, num_values, max_val, max_tuple_size
+    );
 }
 
 template <>
@@ -1848,9 +1823,9 @@ void convert_to_row_diff(const std::vector<std::string> &files,
                 }
             }
             if (file_size > mem_bytes) {
-                logger->warn("Not enough memory to process {}, requires {} MB, skipped",
-                             files[i], file_size / 1e6);
-                continue;
+                logger->error("Not enough memory to process {}, requires {} MB",
+                              files[i], file_size / 1e6);
+                exit(1);
             }
             if (file_size > mem_bytes_left)
                 break;
