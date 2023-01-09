@@ -814,7 +814,11 @@ void convert_batch_to_row_disk(
                     columns.emplace_back();
                 }
                 columns[j] = std::move(column);
-                label_encoder.insert_and_encode(label);
+                size_t col = label_encoder.insert_and_encode(label);
+                if (col + 1 != label_encoder.size()) {
+                    logger->error("Duplicate columns {}", label);
+                    exit(1);
+                }
             },
             num_threads
     );
@@ -904,7 +908,11 @@ void merge_row_disk_annotations(const std::vector<std::string> &files,
         }
 
         for (const auto &label : le.get_labels()) {
-            label_encoder.insert_and_encode(label);
+            size_t col = label_encoder.insert_and_encode(label);
+            if (col + 1 != label_encoder.size()) {
+                logger->error("Duplicate columns {}", label);
+                exit(1);
+            }
         }
 
         offsets[j + 1] = le.size();
@@ -1162,7 +1170,11 @@ void convert_to_row_diff<IntRowDiffDiskAnnotator>(
                 }
                 columns[j] = std::move(column);
                 col_values[j] = std::move(values);
-                label_encoder.insert_and_encode(label);
+                size_t col = label_encoder.insert_and_encode(label);
+                if (col + 1 != label_encoder.size()) {
+                    logger->error("Duplicate columns {}", label);
+                    exit(1);
+                }
             },
             num_threads);
 
@@ -1274,7 +1286,11 @@ void convert_to_row_diff<RowDiffDiskCoordAnnotator>(
                 }
                 columns[j] = std::move(column);
                 col_values[j] = std::move(values);
-                label_encoder.insert_and_encode(label);
+                size_t col = label_encoder.insert_and_encode(label);
+                if (col + 1 != label_encoder.size()) {
+                    logger->error("Duplicate columns {}", label);
+                    exit(1);
+                }
                 col_delims[j] = std::move(delims);
             },
             num_threads);
