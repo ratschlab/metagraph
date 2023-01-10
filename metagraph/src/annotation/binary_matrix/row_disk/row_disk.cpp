@@ -13,13 +13,14 @@ using mtg::common::logger;
 
 bool RowDisk::View::get(Row row, Column column) const {
     SetBitPositions set_bits = get_row(row);
-    SetBitPositions::iterator v = std::lower_bound(set_bits.begin(), set_bits.end(), column);
-    return v != set_bits.end() && *v == column;
+    return std::binary_search(set_bits.begin(), set_bits.end(), column);
 }
 
-std::vector<BinaryMatrix::Row> RowDisk::View::get_column(uint64_t num_rows,
-                                                         Column column) const {
+std::vector<BinaryMatrix::Row> RowDisk::View::get_column(Column column) const {
+    logger->warn("get_column is extremely inefficient for RowDisk, consider"
+                 " using a column-major format");
     std::vector<Row> result;
+    const uint64_t num_rows = boundary_.num_set_bits();
     for (Row row = 0; row < num_rows; ++row) {
         if (get(row, column))
             result.push_back(row);
@@ -29,14 +30,14 @@ std::vector<BinaryMatrix::Row> RowDisk::View::get_column(uint64_t num_rows,
 
 BinaryMatrix::SetBitPositions RowDisk::View::get_row(Row row) const {
     assert(boundary_[boundary_.size() - 1] == 1);
-    uint64_t start_idx = row == 0 ? 0 : boundary_.select1(row) + 1;
-    uint64_t end_idx = boundary_.next1(start_idx);
+    uint64_t begin = row == 0 ? 0 : boundary_.select1(row) + 1;
+    uint64_t end = boundary_.select1(row + 1);
     SetBitPositions result;
-    result.reserve(end_idx - start_idx);
+    result.reserve(end - begin);
     // In each row, the first value in `set_bits_` stores the first set bit,
     // and all next ones store deltas pos[i] - pos[i-1].
     uint64_t last = 0;
-    for (uint64_t i = start_idx; i != end_idx; ++i) {
+    for (uint64_t i = begin; i != end; ++i) {
         result.push_back(last += set_bits_[i - row]);
     }
     return result;
@@ -72,6 +73,7 @@ bool RowDisk::load(std::istream &f) {
         boundary_.load(f);
 
         num_rows_ = boundary_.num_set_bits();
+        num_relations_ = boundary_.size() - num_rows_;
 
     } catch (...) {
         return false;
@@ -85,19 +87,17 @@ void RowDisk::serialize(std::ostream & f) const {
     auto boundary_start = iv_size_on_disk_ + f.tellp() + sizeof(size_t);
     serialize_number(f, boundary_start);
 
-    size_t chunk_size = 1024 * 1024;
-
     std::ifstream iv_in(buffer_params_.filename, std::ios::binary);
     if (!iv_in.good())
         throw std::ofstream::failure("Cannot read from file " + buffer_params_.filename);
 
     iv_in.seekg(buffer_params_.offset);
-    std::vector<char> chunk(chunk_size);
+    std::vector<char> chunk(1024 * 1024);
 
     // Perform binary rewrite of int_vector_buffer
-    auto left_to_read = iv_size_on_disk_;
+    size_t left_to_read = iv_size_on_disk_;
     while (left_to_read) {
-        auto to_read = left_to_read < chunk_size ? left_to_read : chunk_size;
+        size_t to_read = std::min(left_to_read, chunk.size());
         iv_in.read(chunk.data(), to_read);
         f.write(chunk.data(), to_read);
         left_to_read -= to_read;
@@ -109,16 +109,14 @@ void RowDisk::serialize(std::ostream & f) const {
 }
 
 
-void RowDisk::serialize(const std::function<void(binmat::BinaryMatrix::RowCallback)> &call_rows,
-                        const std::string &filename,
+void RowDisk::serialize(const std::string &filename,
+                        const std::function<void(binmat::BinaryMatrix::RowCallback)> &call_rows,
                         uint64_t num_cols,
                         uint64_t num_set_bits,
                         uint64_t num_rows) {
     // std::ios::ate needed because labels are serialized before
     // std::ios::in needed for tellp to return absolute file position
-    std::ofstream outstream(filename,
-                            std::ios::binary | std::ios::ate
-                                    | std::ios::in);
+    std::ofstream outstream(filename, std::ios::binary | std::ios::ate | std::ios::in);
     if (!outstream.good())
         throw std::ofstream::failure("Cannot write to file " + filename);
 
@@ -151,12 +149,12 @@ void RowDisk::serialize(const std::function<void(binmat::BinaryMatrix::RowCallba
                 outbuf.push_back(val - last);
                 last = val;
             }
-            call_bit((t += row.size() + 1) - 1);
+            call_bit((t += (row.size() + 1)) - 1);
         });
-        outbuf.close();
     };
 
     bit_vector_small boundary(call_bits, num_rows + num_set_bits, num_rows);
+    outbuf.close();
 
     outstream.open(filename, std::ios::in | std::ios::out | std::ios::binary | std::ios::ate);
     boundary_start = outstream.tellp();

@@ -45,7 +45,7 @@ private:
 class Uint64BuffRead {
 public:
     template<class Load>
-    void get(uint64_t& v, uint8_t n_bits, Load load) {
+    void get(uint64_t &v, uint8_t n_bits, Load load) {
         if (pos_ == 64) {
             load(buffer_);
             pos_ = 0;
@@ -141,13 +141,16 @@ public:
         read_pos_++;
     }
 
-    void get(uint64_t& v, uint8_t n_bits) {
+    uint64_t get(uint8_t n_bits) {
+        uint64_t v;
         buff_read_.get(v, n_bits, [&](uint64_t& x) {
             reaload_if_needed();
             x = buffer_[read_pos_ - (buffer_start_pos_in_file_ - offset_) / 8];
             read_pos_++;
         });
+        return v;
     }
+
 private:    
     std::vector<uint64_t> buffer_;
     size_t read_pos_{}; //global in uint64_t

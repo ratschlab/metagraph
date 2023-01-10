@@ -119,8 +119,7 @@ bool RowDiff<BaseMatrix>::get(Row row, Column column) const {
     assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());
 
     SetBitPositions set_bits = get_row(row);
-    SetBitPositions::iterator v = std::lower_bound(set_bits.begin(), set_bits.end(), column);
-    return v != set_bits.end() && *v == column;
+    return std::binary_search(set_bits.begin(), set_bits.end(), column);
 }
 
 

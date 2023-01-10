@@ -841,6 +841,7 @@ void convert_batch_to_row_disk(
     ProgressBar progress_bar(num_rows, "Serialize rows", std::cerr, !common::get_verbose());
 
     RowDisk::serialize(
+            outfname,
             [&](BinaryMatrix::RowCallback write_row) {
                 #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic)
                 for (uint64_t begin = 0; begin < num_rows; begin += kNumRowsInBlock) {
@@ -866,7 +867,7 @@ void convert_batch_to_row_disk(
                     }
                 }
             },
-            outfname, label_encoder.size(), num_set_bits, num_rows);
+            label_encoder.size(), num_set_bits, num_rows);
 }
 
 uint64_t get_num_rows_from_column_anno(const std::string &fname) {
@@ -953,6 +954,7 @@ void merge_row_disk_annotations(const std::vector<std::string> &files,
     ProgressBar progress_bar(num_rows, "Merge rows", std::cerr, !common::get_verbose());
 
     RowDisk::serialize(
+            outfname,
             [&](BinaryMatrix::RowCallback write_row) {
                 // maybe better if single thread reads single annotation?
                 #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic)
@@ -985,7 +987,7 @@ void merge_row_disk_annotations(const std::vector<std::string> &files,
                     }
                 }
             },
-            outfname, label_encoder.size(), num_set_bits, num_rows);
+            label_encoder.size(), num_set_bits, num_rows);
 
     for (const auto &fname : files) {
         fs::remove(fname);
@@ -1196,6 +1198,7 @@ void convert_to_row_diff<IntRowDiffDiskAnnotator>(
     ProgressBar progress_bar(num_rows, "Serialize rows", std::cerr, !common::get_verbose());
 
     matrix::IntRowDisk::serialize(
+            outfname,
             [&](std::function<void(const matrix::IntMatrix::RowValues &)> write_row_with_values) {
                 #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic)
                 for (uint64_t begin = 0 ; begin < num_rows; begin += kNumRowsInBlock) {
@@ -1224,7 +1227,7 @@ void convert_to_row_diff<IntRowDiffDiskAnnotator>(
                     }
                 }
             },
-            outfname, columns.size(), num_set_bits, num_rows, max_val);
+            columns.size(), num_set_bits, num_rows, max_val);
 }
 
 template <>
@@ -1313,6 +1316,7 @@ void convert_to_row_diff<RowDiffDiskCoordAnnotator>(
     ProgressBar progress_bar(num_rows, "Serialize rows", std::cerr, !common::get_verbose());
 
     matrix::CoordRowDisk::serialize(
+            outfname,
             [&](std::function<void(const matrix::MultiIntMatrix::RowTuples &)> write_row_with_tuples) {
                 #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic)
                 for (uint64_t begin = 0 ; begin < num_rows; begin += kNumRowsInBlock) {
@@ -1348,7 +1352,7 @@ void convert_to_row_diff<RowDiffDiskCoordAnnotator>(
                     }
                 }
             },
-            outfname, columns.size(), num_set_bits, num_rows, num_values, max_val, max_tuple_size);
+            columns.size(), num_set_bits, num_rows, num_values, max_val, max_tuple_size);
 }
 
 template <>

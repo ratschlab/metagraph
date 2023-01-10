@@ -22,105 +22,54 @@ class CoordRowDisk : public MultiIntMatrix {
         buffer_params_.buff_size = std::max((size_t)8, RA_ivbuffer_size / 8);
     }
 
-    uint64_t num_columns() const override { return num_columns_; }
-    uint64_t num_rows() const override { return num_rows_; }
+    uint64_t num_columns() const { return num_columns_; }
+    uint64_t num_rows() const { return num_rows_; }
 
-    bool get(Row row, Column column) const override {
-        return View(boundary_, buffer_params_.filename,
-                    buffer_params_.offset, buffer_params_.buff_size, bits_for_col_id_,
-                    bits_for_number_of_vals_, bits_for_single_value_)
-                .get(row, column);
+    bool get(Row i, Column j) const { return get_view().get(i, j); }
+    SetBitPositions get_row(Row i) const { return get_view().get_row(i); }
+    // FYI: `get_column` is very inefficient, consider using column-major formats
+    std::vector<Row> get_column(Column j) const { return get_view().get_column(j); }
+    std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const {
+        return get_view().get_rows(rows);
     }
 
-    SetBitPositions get_row(Row row) const override {
-        return View(boundary_, buffer_params_.filename,
-                    buffer_params_.offset, buffer_params_.buff_size, bits_for_col_id_,
-                    bits_for_number_of_vals_, bits_for_single_value_)
-                .get_row(row);
-    }
-
-    std::vector<Row> get_column(Column column) const override {
-        common::logger->warn(
-                "get_column is extremely inefficient operation, consider using "
-                "column-major format");
-        return View(boundary_, buffer_params_.filename, buffer_params_.offset,
-                    buffer_params_.buff_size, bits_for_col_id_, bits_for_number_of_vals_,
-                    bits_for_single_value_)
-                .get_column(num_rows(), column);
-    }
-
-    std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const override {
-        return View(boundary_, buffer_params_.filename,
-                    buffer_params_.offset, buffer_params_.buff_size, bits_for_col_id_,
-                    bits_for_number_of_vals_, bits_for_single_value_)
-                .get_rows(rows);
-    }
-
-    RowValues get_row_values(Row row) const override {
-        return View(boundary_, buffer_params_.filename,
-                    buffer_params_.offset, buffer_params_.buff_size, bits_for_col_id_,
-                    bits_for_number_of_vals_, bits_for_single_value_)
-                .get_row_values(row);
-    }
-
-    std::vector<RowValues>
-    get_row_values(const std::vector<Row> &rows) const override {
-        return View(boundary_, buffer_params_.filename,
-                    buffer_params_.offset, buffer_params_.buff_size, bits_for_col_id_,
-                    bits_for_number_of_vals_, bits_for_single_value_)
-                .get_row_values(rows);
+    RowValues get_row_values(Row i) const { return get_view().get_row_values(i); }
+    std::vector<RowValues> get_row_values(const std::vector<Row> &rows) const {
+        return get_view().get_row_values(rows);
     }
 
     // return total number of attributes in all tuples
-    uint64_t num_attributes() const override {
-        return num_attributes_;
-    }
+    uint64_t num_attributes() const { return num_attributes_; }
 
     // return entries of the matrix -- where each entry is a set of integers
-    RowTuples get_row_tuples(Row row) const override {
-        return View(boundary_, buffer_params_.filename,
-                    buffer_params_.offset, buffer_params_.buff_size, bits_for_col_id_,
-                    bits_for_number_of_vals_, bits_for_single_value_)
-                .get_row_tuples(row);
+    RowTuples get_row_tuples(Row i) const { return get_view().get_row_tuples(i); }
+    std::vector<RowTuples> get_row_tuples(const std::vector<Row> &rows) const {
+        return get_view().get_row_tuples(rows);
     }
 
-    std::vector<RowTuples>
-    get_row_tuples(const std::vector<Row> &rows) const override {
-        return View(boundary_, buffer_params_.filename,
-                    buffer_params_.offset, buffer_params_.buff_size, bits_for_col_id_,
-                    bits_for_number_of_vals_, bits_for_single_value_)
-                .get_row_tuples(rows);
-    }
+    bool load(std::istream &f);
 
-    bool load(std::istream &f) override;
-
-    void serialize(std::ostream &/*out*/) const override {
+    void serialize(std::ostream &/*out*/) const {
         throw std::runtime_error("Not implemented");
         //mkokot_TODO: implement
     }
 
     // number of ones in the matrix
-    uint64_t num_relations() const override {
-        return num_set_bits_;
-    }
+    uint64_t num_relations() const { return num_set_bits_; }
 
-
-    static void
-    serialize(const std::function<void(std::function<void(const RowTuples &)>)> &write_row_with_tuples,
-              const std::string &filename,
-              uint64_t num_cols,
-              uint64_t num_set_bits,
-              uint64_t num_rows,
-              uint64_t num_values,
-              uint64_t max_val,
-              uint64_t max_tuple_size);
+    static void serialize(
+            const std::string &filename,
+            const std::function<void(std::function<void(const RowTuples &)>)> &call_rows,
+            uint64_t num_cols,
+            uint64_t num_set_bits,
+            uint64_t num_rows,
+            uint64_t num_values,
+            uint64_t max_val,
+            uint64_t max_tuple_size);
 
   private:
-
-    // For the multithreading to work properly the idea is to open int_vector_buffer<> per
-    // each public method call that needs to work with int_vector_buffer<> The actual
-    // implementation is wrapped in the class below to assure it will not call any methods
-    // of RowDisk class which could result in multiple opens of int_vector_buffer
+    // For the multithreading to work properly, we open int_vector_buffer<> in
+    // a special View class that has an actual implementation of the method.
     class View {
       public:
         View(const bit_vector_small &boundary, //sd_vector or int_vector_buffer at the begining (instead of bit_vector_small)
@@ -137,15 +86,15 @@ class CoordRowDisk : public MultiIntMatrix {
               bits_for_number_of_vals_(bits_for_number_of_vals),
               bits_for_single_value_(bits_for_single_value) {}
 
-        bool get(Row row, Column column) const;
-        BinaryMatrix::SetBitPositions get_row(Row row) const;
+        bool get(Row i, Column j) const;
+        BinaryMatrix::SetBitPositions get_row(Row i) const;
         std::vector<SetBitPositions> get_rows(const std::vector<Row> &row_ids) const;
-        std::vector<BinaryMatrix::Row> get_column(uint64_t num_rows, Column column) const;
+        std::vector<BinaryMatrix::Row> get_column(Column j) const;
 
-        RowValues get_row_values(Row row) const;
+        RowValues get_row_values(Row i) const;
         std::vector<RowValues> get_row_values(const std::vector<Row> &row_ids) const;
 
-        RowTuples get_row_tuples(Row row) const;
+        RowTuples get_row_tuples(Row i) const;
 
         std::vector<RowTuples> get_row_tuples(const std::vector<Row> &rows) const;
 
@@ -159,20 +108,26 @@ class CoordRowDisk : public MultiIntMatrix {
         }
 
         const bit_vector_small &boundary_;
-        
         std::ifstream in_;
+        // layout: [col_id|value]
+        // `boundary_` puts 0 for each col-value pair and delimits rows with 1
         mutable DiskRandomReader set_bits_;
         uint64_t bits_for_col_id_;
         uint64_t bits_for_number_of_vals_;
         uint64_t bits_for_single_value_;
     };
 
-    struct int_vector_buffer_params {
+    View get_view() const {
+        return View(boundary_, buffer_params_.filename,
+                    buffer_params_.offset, buffer_params_.buff_size, bits_for_col_id_,
+                    bits_for_number_of_vals_, bits_for_single_value_);
+    }
+
+    struct {
         std::string filename;
         uint64_t offset;
-        uint64_t buff_size = 16'384/8; //in uint64_t
-    };
-    int_vector_buffer_params buffer_params_;
+        uint64_t buff_size = 16'384 / 8; // in uint64_t
+    } buffer_params_;
 
     bit_vector_small boundary_;
     uint64_t num_columns_ = 0;
@@ -182,8 +137,6 @@ class CoordRowDisk : public MultiIntMatrix {
     uint64_t bits_for_number_of_vals_ = 0;
     uint64_t bits_for_single_value_ = 0;
     uint64_t num_rows_ = 0;
-
-    size_t iv_size_on_disk_ = 0; // for non-static serialization
 };
 
 } // namespace matrix
