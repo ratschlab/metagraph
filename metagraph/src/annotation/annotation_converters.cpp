@@ -1267,7 +1267,7 @@ void convert_to_row_diff<RowDiffDiskCoordAnnotator>(
                     bit_vector_small&& delims,
                     sdsl::int_vector<> &&values) {
                 size_t local_max_val = 0;
-                if (!values.empty())
+                if (values.size())
                     local_max_val = *std::max_element(values.begin(), values.end());
 
                 std::lock_guard<std::mutex> lock(mu);
