@@ -95,22 +95,20 @@ class DiskRandomReader {
 
         in_.seekg(offset_, std::ios::beg);
 
-        buffer_start_pos_ = offset_;
+        buffer_start_ = 0;
         buffer_.resize(buff_size);
-        load(buffer_start_pos_);
+        load_buffer(offset_);
     }
 
     void start_reading_at(uint64_t bit_pos) {
-        i_ = bit_pos / 64 - (buffer_start_pos_ - offset_) / 8;
-        reaload_if_needed();
-        buff_read_.init(buffer_[i_++], bit_pos % 64);
+        i_ = bit_pos / 64;
+        buff_read_.init(get_next_word(), bit_pos % 64);
     }
 
     uint64_t get(uint8_t n_bits) {
         uint64_t v;
-        buff_read_.get(v, n_bits, [&](uint64_t& x) {
-            reaload_if_needed();
-            x = buffer_[i_++];
+        buff_read_.get(v, n_bits, [&]() {
+            return get_next_word();
         });
         return v;
     }
@@ -122,7 +120,7 @@ class DiskRandomReader {
         void get(uint64_t &v, uint8_t n_bits, Load load) {
             assert(n_bits && n_bits <= (uint8_t)64);
             if (pos_ == 64) {
-                load(buffer_);
+                buffer_ = load();
                 pos_ = 0;
             }
             auto have = 64 - pos_;
@@ -133,7 +131,7 @@ class DiskRandomReader {
                 pos_ += n_bits;
             } else {
                 v = buffer_ >> pos_;
-                load(buffer_);
+                buffer_ = load();
                 v |= buffer_ << have;
                 if (n_bits != 64)
                     v &= (1ull << n_bits) - 1;
@@ -152,26 +150,28 @@ class DiskRandomReader {
     };
 
     std::vector<uint64_t> buffer_;
-    size_t i_ = 0; // index in `buffer_`
-    size_t buffer_start_pos_ = 0; // in bytes
+    size_t i_ = 0; // index of the uint64_t word fed to `buff_read_`
+    size_t buffer_start_ = 0; // in uint64_t words
     std::ifstream &in_;
     size_t offset_;
     Uint64BuffRead buff_read_;
     size_t file_size_;
 
-    void load(size_t pos) {
+    void load_buffer(size_t pos) {
         size_t to_load = std::min(buffer_.size(), (file_size_ - pos) / 8); // how many uint64_t words to load
-        for (size_t i = 0; i < to_load; ++i)
+        for (size_t i = 0; i < to_load; ++i) {
             buffer_[i] = load_number(in_);
+        }
     }
 
-    void reaload_if_needed() {
-        auto pos = buffer_start_pos_ + i_ * 8; // convert to position in file
-        if (pos < buffer_start_pos_ || pos >= buffer_start_pos_ + 8 * buffer_.size()) {
+    uint64_t get_next_word() {
+        if (i_ < buffer_start_ || i_ >= buffer_start_ + buffer_.size()) {
+            auto pos = offset_ + i_ * 8; // convert to position in file
             in_.seekg(pos, std::ios::beg);
-            buffer_start_pos_ = pos;
-            load(buffer_start_pos_);
+            buffer_start_ = i_;
+            load_buffer(pos);
         }
+        return buffer_[i_++ - buffer_start_];
     }
 };
 
