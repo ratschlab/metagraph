@@ -29,10 +29,9 @@ class TupleRowDiff : public binmat::IRowDiff, public MultiIntMatrix {
     static_assert(std::is_convertible<BaseMatrix*, MultiIntMatrix*>::value);
     static const int SHIFT = 1; // coordinates increase by 1 at each edge
 
-    TupleRowDiff() {}
-
-    TupleRowDiff(const graph::DBGSuccinct *graph, BaseMatrix&& diff)
-        : diffs_(std::move(diff)) { graph_ = graph; }
+    template <typename... Args>
+    TupleRowDiff(const graph::DBGSuccinct *graph = nullptr, Args&&... args)
+        : diffs_(std::forward<Args>(args)...) { graph_ = graph; }
 
     bool get(Row i, Column j) const override;
     std::vector<Row> get_column(Column j) const override;

@@ -77,6 +77,7 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
             return anno_graph;
 
         if constexpr(!std::is_same_v<Annotation, RowDiffColumnAnnotator>
+                && !std::is_same_v<Annotation, RowDiffDiskAnnotator>
                 && !std::is_same_v<Annotation, RowDiffCoordAnnotator>) {
             return std::make_unique<AnnotatedDBG>(
                 graph,
@@ -93,7 +94,6 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
         static_assert(std::is_same_v<Graph, DBGSuccinct>);
         assert(dynamic_cast<const DBGSuccinct*>(base_graph.get()));
 
-        size_t num_columns = anno_graph->get_annotator().get_label_encoder().size();
         std::filesystem::path tmp_dir = utils::create_temp_dir("", "test_col");
         auto out_fs_path = tmp_dir/"test_col";
         std::string out_path = out_fs_path;
@@ -133,6 +133,7 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
 
         std::unique_ptr<AnnotatedDBG::Annotator> annotator;
         if (coordinates) {
+            size_t num_columns = anno_graph->get_annotator().get_label_encoder().size();
             auto diff_annotator = std::make_unique<ColumnCompressed<>>(0);
             if (!diff_annotator->merge_load(files)) {
                 logger->error("Cannot load annotations from {}", files[0]);
@@ -159,19 +160,16 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
                 exit(1);
             }
 
-            auto matrix = std::make_unique<CoordRowDiff>(
+            annotator.reset(new RowDiffCoordAnnotator(
+                anno_graph->get_annotator().get_label_encoder(),
                 static_cast<const DBGSuccinct*>(base_graph.get()),
-                CoordDiff(std::move(*diff_annotator->release_matrix()),
-                          std::move(delimiters), std::move(column_values))
-            );
-            annotator = std::make_unique<RowDiffCoordAnnotator>(
-                std::move(matrix),
-                anno_graph->get_annotator().get_label_encoder()
-            );
+                std::move(*diff_annotator->release_matrix()),
+                std::move(delimiters), std::move(column_values)
+            ));
 
         } else {
             auto rd_path = out_fs_path.replace_extension(RowDiffColumnAnnotator::kExtension);
-            annotator = std::make_unique<RowDiffColumnAnnotator>();
+            annotator.reset(new RowDiffColumnAnnotator({}, static_cast<const DBGSuccinct*>(base_graph.get())));
             if (!annotator->load(rd_path)) {
                 logger->error("Cannot load annotations from {}", rd_path);
                 exit(1);
@@ -181,10 +179,53 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
         IRowDiff &row_diff = const_cast<IRowDiff&>(dynamic_cast<const IRowDiff&>(
             annotator->get_matrix()
         ));
-        row_diff.set_graph(static_cast<const DBGSuccinct*>(base_graph.get()));
         row_diff.load_anchor(anchors_file);
         row_diff.load_fork_succ(fork_succ_file);
         return std::make_unique<AnnotatedDBG>(graph, std::move(annotator));
+
+    } else if constexpr(std::is_same_v<Annotation, RowDiffDiskAnnotator>) {
+        static_assert(std::is_same_v<Graph, DBGSuccinct>);
+        assert(dynamic_cast<const DBGSuccinct*>(base_graph.get()));
+
+        std::filesystem::path tmp_dir = utils::create_temp_dir("", "test_col");
+        auto out_fs_path = tmp_dir/"test_col";
+        std::string out_path = out_fs_path;
+        anno_graph->get_annotator().serialize(out_path);
+        std::vector<std::string> files { out_path + ColumnCompressed<>::kExtension };
+        base_graph->serialize(out_path);
+        std::string graph_fname = out_path + base_graph->file_extension();
+        if (!std::filesystem::exists(files[0])) {
+            logger->error("Failed to serialize annotation to {}.", files[0]);
+            std::exit(1);
+        }
+        if (!std::filesystem::exists(graph_fname)) {
+            logger->error("Failed to serialize graph to {}.", graph_fname);
+            std::exit(1);
+        }
+
+        {
+            std::filesystem::path swap_dir = utils::create_temp_dir("", "swap_col");
+            convert_to_row_diff(files, graph_fname, 1e9, 100, tmp_dir, swap_dir,
+                                static_cast<RowDiffStage>(0), out_path + ".row_count", false, coordinates);
+            convert_to_row_diff(files, graph_fname, 1e9, 100, tmp_dir, swap_dir,
+                                static_cast<RowDiffStage>(1), out_path + ".row_reduction", false, coordinates);
+            convert_to_row_diff(files, graph_fname, 1e9, 100, tmp_dir, swap_dir,
+                                static_cast<RowDiffStage>(2), out_path, false, coordinates);
+        }
+
+        convert_to_row_diff<RowDiffDiskAnnotator>({ out_path + RowDiffColumnAnnotator::kExtension },
+                                                  graph_fname, out_fs_path, get_num_threads(), 1e9);
+
+        auto rd_path = out_path + RowDiffDiskAnnotator::kExtension;
+        auto annotator = std::make_unique<RowDiffDiskAnnotator>(
+                annot::LabelEncoder<>(), static_cast<const DBGSuccinct*>(base_graph.get()));
+        if (!annotator->load(rd_path)) {
+            logger->error("Cannot load annotations from {}", rd_path);
+            exit(1);
+        }
+
+        return std::make_unique<AnnotatedDBG>(graph, std::move(annotator));
+
     } else {
         throw std::runtime_error("Unsupported combination");
     }
@@ -203,7 +244,7 @@ template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashFast, RowFlatAnno
 template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGHashString, RowFlatAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool);
 
 template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGSuccinct, RowDiffColumnAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool);
-
+template std::unique_ptr<AnnotatedDBG> build_anno_graph<DBGSuccinct, RowDiffDiskAnnotator>(uint64_t, const std::vector<std::string> &, const std::vector<std::string>&, DeBruijnGraph::Mode, bool);
 
 } // namespace test
 } // namespace mtg

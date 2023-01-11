@@ -60,6 +60,15 @@ Config::AnnotationType parse_annotation_type(const std::string &filename) {
     } else if (utils::ends_with(filename, annot::RowDiffRowSparseAnnotator ::kExtension)) {
         return Config::AnnotationType::RowDiffRowSparse;
 
+    } else if (utils::ends_with(filename, annot::RowDiffDiskAnnotator::kExtension)) {
+        return Config::AnnotationType::RowDiffDisk;
+
+    } else if (utils::ends_with(filename, annot::IntRowDiffDiskAnnotator::kExtension)) {
+        return Config::AnnotationType::IntRowDiffDisk;
+
+    } else if (utils::ends_with(filename, annot::RowDiffDiskCoordAnnotator::kExtension)) {
+        return Config::AnnotationType::RowDiffDiskCoord;
+
     } else if (utils::ends_with(filename, annot::RainbowfishAnnotator::kExtension)) {
         return Config::AnnotationType::RBFish;
 
@@ -86,7 +95,8 @@ initialize_annotation(Config::AnnotationType anno_type,
                       const std::string &swap_dir,
                       double memory_available_gb,
                       uint8_t count_width,
-                      size_t max_chunks_open) {
+                      size_t max_chunks_open,
+                      size_t RA_ivbuffer_size) {
     std::unique_ptr<annot::MultiLabelEncoded<std::string>> annotation;
 
     switch (anno_type) {
@@ -108,6 +118,18 @@ initialize_annotation(Config::AnnotationType anno_type,
         }
         case Config::RowSparse: {
             annotation.reset(new annot::RowSparseAnnotator());
+            break;
+        }
+        case Config::RowDiffDisk: {
+            annotation.reset(new annot::RowDiffDiskAnnotator({}, nullptr, RA_ivbuffer_size));
+            break;
+        }
+        case Config::IntRowDiffDisk: {
+            annotation.reset(new annot::IntRowDiffDiskAnnotator({}, nullptr, RA_ivbuffer_size));
+            break;
+        }
+        case Config::RowDiffDiskCoord: {
+            annotation.reset(new annot::RowDiffDiskCoordAnnotator({}, nullptr, RA_ivbuffer_size));
             break;
         }
         case Config::BRWT: {

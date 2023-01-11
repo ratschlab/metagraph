@@ -1281,10 +1281,11 @@ void QueryExecutor::query_fasta(const string &file,
             &this->anno_graph_.get_annotator().get_matrix()))) {
         logger->error("Annotation does not support k-mer coordinate queries. "
                       "First transform this annotation to include coordinate data "
-                      "(e.g., {}, {}, {}, {}).",
+                      "(e.g., {}, {}, {}, {}, {}).",
                       Config::annotype_to_string(Config::ColumnCoord),
                       Config::annotype_to_string(Config::BRWTCoord),
                       Config::annotype_to_string(Config::RowDiffCoord),
+                      Config::annotype_to_string(Config::RowDiffDiskCoord),
                       Config::annotype_to_string(Config::RowDiffBRWTCoord));
         exit(1);
     }
@@ -1293,8 +1294,9 @@ void QueryExecutor::query_fasta(const string &file,
             &this->anno_graph_.get_annotator().get_matrix()))) {
         logger->error("Annotation does not support k-mer count queries. "
                       "First transform this annotation to include count data "
-                      "(e.g., {} or {}).",
+                      "(e.g., {}, {}, {}).",
                       Config::annotype_to_string(Config::IntBRWT),
+                      Config::annotype_to_string(Config::IntRowDiffDisk),
                       Config::annotype_to_string(Config::IntRowDiffBRWT));
         exit(1);
     }

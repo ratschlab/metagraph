@@ -106,6 +106,18 @@ class BufferedAsyncWriter {
     std::ofstream *fos_;
 };
 
+
+class NamedIfstream : public std::ifstream {
+  public:
+    NamedIfstream(const std::string &fname, std::ios_base::openmode mode)
+        : std::ifstream(fname, mode), fname_(fname) {}
+
+    const std::string& get_name() const { return fname_; }
+
+    private:
+      std::string fname_;
+};
+
 } // namespace utils
 
 #endif // __FILE_UTILS_HPP__

@@ -13,7 +13,6 @@
 #include "common/unix_tools.hpp"
 #include "common/vectors/bitmap_builder.hpp"
 #include "common/vectors/bitmap_mergers.hpp"
-#include "common/vectors/bit_vector_adaptive.hpp"
 #include "common/threads/threading.hpp"
 
 
@@ -813,6 +812,106 @@ void ColumnCompressed<Label>
                 callback(offsets[i] + c,
                          label_encoder_load.decode(c),
                          std::move(column), std::move(column_values));
+            }
+
+        } catch (const std::exception &e) {
+            logger->error("Caught exception when loading values for {}: {}", filename, e.what());
+            error_occurred = true;
+        } catch (...) {
+            logger->error("Unknown exception when loading values for {}", filename);
+            error_occurred = true;
+        }
+    }
+
+    if (error_occurred)
+        exit(1);
+}
+
+template <typename Label>
+void ColumnCompressed<Label>::load_columns_delims_and_values(
+        const std::vector<std::string> &filenames,
+        const ColumnsDelimsValuesCallback &callback,
+        size_t num_threads) {
+
+    std::atomic<bool> error_occurred = false;
+
+    std::vector<uint64_t> offsets(filenames.size(), 0);
+
+    // load labels
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+    for (size_t i = 1; i < filenames.size(); ++i) {
+        auto fname = make_suffix(filenames[i - 1], kExtension);
+        try {
+            offsets[i] = read_num_labels(fname);
+        } catch (...) {
+            logger->error("Can't load label encoder from {}", fname);
+            error_occurred = true;
+        }
+    }
+
+    if (error_occurred)
+        exit(1);
+
+    // compute global offsets (partial sums)
+    std::partial_sum(offsets.begin(), offsets.end(), offsets.begin());
+
+    // load annotations
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+    for (size_t i = 0; i < filenames.size(); ++i) {
+        const auto &filename = make_suffix(filenames[i], kExtension);
+        logger->trace("Loading columns from {}", filename);
+        try {
+            std::ifstream in(filename, std::ios::binary);
+            if (!in)
+                throw std::ifstream::failure("can't open file");
+
+            std::ignore = load_number(in);
+
+            LabelEncoder<Label> label_encoder_load;
+            if (!label_encoder_load.load(in))
+                throw std::ifstream::failure("can't load label encoder");
+
+            if (!label_encoder_load.size()) {
+                logger->warn("No columns in {}", filename);
+                continue;
+            }
+
+            const auto &coords_fname
+                    = utils::remove_suffix(filename, ColumnCompressed<>::kExtension)
+                    + ColumnCompressed<>::kCoordExtension;
+
+            std::ifstream coord_in(coords_fname, std::ios::binary);
+            if (!coord_in)
+                throw std::ifstream::failure("can't open file " + coords_fname);
+
+            for (size_t c = 0; c < label_encoder_load.size(); ++c) {
+                auto column = std::make_unique<bit_vector_smart>();
+
+                if (!column->load(in))
+                    throw std::ifstream::failure("can't load next column");
+
+                bit_vector_smart delims;
+                sdsl::int_vector<> column_values;
+
+                try {
+                    if(!delims.load(coord_in))
+                        throw std::runtime_error("can't load delims");
+                } catch(...) {
+                    logger->error("Can't load delimeters from {} for column {}",
+                                  coords_fname, c);
+                    throw;
+                }
+                try {
+                    column_values.load(coord_in);
+                } catch(...) {
+                    logger->error("Can't load column values from {} for column {}",
+                                  coords_fname, c);
+                    throw;
+                }
+
+                callback(offsets[i] + c,
+                         label_encoder_load.decode(c),
+                         std::move(column), std::move(delims), std::move(column_values));
             }
 
         } catch (const std::exception &e) {

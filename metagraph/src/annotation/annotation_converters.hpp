@@ -71,6 +71,14 @@ std::unique_ptr<StaticAnnotation>
 convert_to_RbBRWT(const std::vector<std::string> &annotation_files,
                   size_t max_brwt_arity);
 
+// For RowDiffDiskAnnotator, RowDiffDiskCoordAnnotator, etc.
+template <class RowDiffAnnotator>
+void convert_to_row_diff(const std::vector<std::string> &files,
+                         const std::string &anchors_file_fbase,
+                         const std::string &outfbase,
+                         size_t num_threads,
+                         size_t mem_bytes);
+
 template <class ToAnnotation, typename Label>
 void merge(std::vector<std::unique_ptr<MultiLabelEncoded<Label>>>&& annotators,
            const std::vector<std::string> &filenames,
@@ -124,21 +132,7 @@ void convert_to_row_diff(const std::vector<std::string> &files,
 void convert_row_diff_to_col_compressed(const std::vector<std::string> &files,
                                         const std::string &outfbase);
 
-/**
- * Converts a RowDiff annotation into RowDiff<RowSparse>.
- */
-std::unique_ptr<RowDiffRowSparseAnnotator>
-convert_row_diff_to_RowDiffSparse(const std::vector<std::string> &filenames);
-
-/**
- * Wraps an existing annotation (e.g. BRWT) into a RowDiff annotation. Typically this
- * happens when transforming RowDiff columns back to column compress, manipulate the
- * column compressed into some other format, and then wrapping the result back into a
- * RowDiff.
- */
-void wrap_in_row_diff(MultiLabelEncoded<std::string> &&anno,
-                      const std::string &graph_file,
-                      const std::string &out_file);
+std::pair<std::string, std::string> get_anchors_and_fork_fnames(const std::string &fbase);
 
 template <class Annotator>
 StaticBinRelAnnotator<matrix::TupleCSCMatrix<typename Annotator::binary_matrix_type>, std::string>
