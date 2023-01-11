@@ -1,13 +1,12 @@
-#ifndef __DISK_UTILS__
-#define __DISK_UTILS__
+#ifndef __DISK_BUFFER__
+#define __DISK_BUFFER__
 
 #include <cinttypes>
 #include <vector>
 #include <fstream>
 
 namespace mtg {
-namespace annot {
-namespace matrix {
+namespace common {
 
 class DiskWriter {
   public:
@@ -175,8 +174,7 @@ class DiskRandomReader {
     }
 };
 
-} // namespace matrix
-} // namespace annot
+} // namespace common
 } // namespace mtg
 
-#endif // __DISK_UTILS__
+#endif // __DISK_BUFFER__

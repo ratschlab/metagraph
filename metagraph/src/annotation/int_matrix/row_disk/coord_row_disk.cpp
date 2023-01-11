@@ -1,6 +1,7 @@
 #include "coord_row_disk.hpp"
 
 #include "common/logger.hpp"
+#include "common/vectors/sd_vector_disk.hpp"
 #include "common/utils/file_utils.hpp"
 
 namespace mtg {
@@ -204,7 +205,7 @@ void CoordRowDisk::serialize(
     serialize_number(outstream, bits_for_number_of_vals);
     serialize_number(outstream, bits_for_single_value);
 
-    DiskWriter writer(outstream, 1024 * 1024);
+    common::DiskWriter writer(outstream, 1024 * 1024);
 
     uint64_t num_attributes = 0;
 
