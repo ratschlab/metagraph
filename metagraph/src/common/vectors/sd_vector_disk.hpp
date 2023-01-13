@@ -3,6 +3,7 @@
 
 #include <type_traits>
 
+#include <sdsl/sd_vector.hpp>
 #include <sdsl/int_vector.hpp>
 #include <sdsl/int_vector_buffer.hpp>
 #include <sdsl/select_support_mcl.hpp>
@@ -375,24 +376,6 @@ class sd_vector_disk
         }
 };
 
-template<uint8_t t_b>
-struct rank_support_sd_disk_trait {
-    typedef bit_vector::size_type size_type;
-    static size_type adjust_rank(size_type r,size_type)
-    {
-        return r;
-    }
-};
-
-template<>
-struct rank_support_sd_disk_trait<0> {
-    typedef bit_vector::size_type size_type;
-    static size_type adjust_rank(size_type r, size_type n)
-    {
-        return n - r;
-    }
-};
-
 //! Rank data structure for sd_vector_disk
 /*! \tparam t_b             Bit pattern.
  *  \tparam t_hi_bit_vector Type of the bitvector used for the unary decoded differences of
@@ -429,15 +412,15 @@ class rank_support_sd_disk
             size_type sel_high = m_v->high_0_select(high_val + 1);
             size_type rank_low = sel_high - high_val; //
             if (0 == rank_low)
-                return rank_support_sd_disk_trait<t_b>::adjust_rank(0, i);
+                return rank_support_sd_trait<t_b>::adjust_rank(0, i);
             size_type val_low = i & bits::lo_set[ m_v->wl ];
             // now since rank_low > 0 => sel_high > 0
             do {
                 if (!sel_high)
-                    return rank_support_sd_disk_trait<t_b>::adjust_rank(0, i);
+                    return rank_support_sd_trait<t_b>::adjust_rank(0, i);
                 --sel_high; --rank_low;
             } while (m_v->high[sel_high] and m_v->low[rank_low] >= val_low);
-            return rank_support_sd_disk_trait<t_b>::adjust_rank(rank_low+1, i);
+            return rank_support_sd_trait<t_b>::adjust_rank(rank_low+1, i);
         }
 
         size_type operator()(size_type i)const
@@ -476,45 +459,6 @@ class rank_support_sd_disk
         }
 };
 
-template<uint8_t t_b, class t_sd_vec>
-struct select_support_sd_disk_trait {
-    typedef bit_vector::size_type size_type;
-    static size_type select(size_type i, const t_sd_vec* v)
-    {
-        return v->low[i-1] +  // lower part of the number
-               ((v->high_1_select(i) + 1 - i)  << (v->wl));  // upper part
-        //^-number of 0 before the i-th 1-^    ^-shift by wl
-    }
-};
-
-template<class t_sd_vec>
-struct select_support_sd_disk_trait<0, t_sd_vec> {
-    typedef bit_vector::size_type size_type;
-    static size_type select(size_type i, const t_sd_vec* v)
-    {
-        auto ones  = v->low.size();
-        assert(0 < i and i <= v->size() - ones);
-        size_type lb = 1, rb = ones+1;
-        size_type r0 = 0;
-        size_type pos = (size_type)-1;
-        // rb exclusive
-        // invariant: rank0(select_1(rb)) >= i
-        while (lb < rb) {
-            auto mid = lb + (rb-lb)/2;
-            auto x = select_support_sd_disk_trait<1, t_sd_vec>::select(mid, v);
-            auto rank0 = x + 1 - mid;
-            if (rank0 >= i) {
-                rb = mid;
-            } else {
-                r0 = rank0;
-                pos = x;
-                lb = mid + 1;
-            }
-        }
-        return pos + i - r0;
-    }
-};
-
 //! Select data structure for sd_vector_disk
 /*! \tparam t_b             Bit pattern.
  *  \tparam t_hi_bit_vector Type of the bitvector used for the unary decoded differences of
@@ -542,7 +486,7 @@ class select_support_sd_disk
         //! Returns the position of the i-th occurrence in the bit vector.
         size_type select(size_type i)const
         {
-            return select_support_sd_disk_trait<t_b, bit_vector_type>::select(i, m_v);
+            return select_support_sd_trait<t_b, bit_vector_type>::select(i, m_v);
         }
 
         size_type operator()(size_type i)const

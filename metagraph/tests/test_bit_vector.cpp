@@ -590,7 +590,7 @@ void compare(const sdsl::sd_vector<> &first, const sdsl::sd_vector_disk<> &secon
     sdsl::sd_vector_disk<>::select_1_type second_slct(&second);
     sdsl::sd_vector_disk<>::rank_1_type second_rank(&second);
 
-    uint64_t m = first_rank(first.size() + 1);
+    uint64_t m = first_rank(first.size());
 
     ASSERT_EQ(first_rank(0), second_rank(0));
 
