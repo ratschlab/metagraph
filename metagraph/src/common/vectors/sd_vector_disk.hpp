@@ -11,6 +11,8 @@
 
 // Based on https://github.com/simongog/sdsl-lite/blob/master/include/sdsl/sd_vector.hpp
 
+// FYI: This implementation does NOT support multithreading
+
 namespace sdsl {
 
 // forward declaration needed for friend declaration
@@ -65,7 +67,7 @@ class sd_vector_disk_builder
             m_size(n), m_capacity(m),
             m_wl(0),
             m_tail(0), m_items(0),
-            m_last_high(0), m_highpos(0)
+            m_last_high(0), m_highpos(0), filename(fname), file_offset(offset)
         {
             if(m_capacity > m_size)
                 throw std::runtime_error("sd_vector_builder: requested capacity is larger than vector size.");
@@ -85,8 +87,6 @@ class sd_vector_disk_builder
             write_member(m_wl, out);
             out.close();
 
-            filename = fname;
-            file_offset = offset;
             m_low = int_vector_buffer<>(filename, std::ios::out, 1024 * 1024, m_wl, false,
                                         file_offset + sizeof(m_size) + sizeof(m_wl));
             m_high = bit_vector(m_capacity + (1ULL << logm), 0);
@@ -164,6 +164,7 @@ class sd_vector_disk
         // and m is the number of ones in the bit vector, wl is the abbreviation
         // for ,,width (of) low (part)''
 
+        static const uint64_t BUFFER_SIZE = 1024;
         int_vector_buffer<>   m_low;           // vector for the least significant bits of the positions of the m ones
         hi_bit_vector_type    m_high;          // bit vector that represents the most significant bit in permuted order
         select_1_support_type m_high_1_select; // select support for the ones in m_high
@@ -210,7 +211,7 @@ class sd_vector_disk
             m_high_0_select.serialize(out);
 
             // open m_low in read-only
-            m_low = int_vector_buffer<>(builder.filename, std::ios::in, 1024 * 1024, m_wl, false,
+            m_low = int_vector_buffer<>(builder.filename, std::ios::in, BUFFER_SIZE, m_wl, false,
                                         builder.file_offset + sizeof(m_size) + sizeof(m_wl));
 
             builder = sd_vector_disk_builder();
@@ -360,7 +361,7 @@ class sd_vector_disk
             m_high_1_select.load(in, &m_high);
             m_high_0_select.load(in, &m_high);
 
-            m_low = int_vector_buffer<>(filename, std::ios::in, 1024 * 1024, m_wl, false, m_low_offset);
+            m_low = int_vector_buffer<>(filename, std::ios::in, BUFFER_SIZE, m_wl, false, m_low_offset);
         }
 
         iterator begin() const

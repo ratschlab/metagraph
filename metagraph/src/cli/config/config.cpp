@@ -395,7 +395,7 @@ Config::Config(int argc, char *argv[]) {
             arity_brwt = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--relax-arity")) {
             relax_arity_brwt = atoi(get_value(i++));
-        } else if (!strcmp(argv[i], "--RA_ivbuff_size")) {
+        } else if (!strcmp(argv[i], "--RA-ivbuff-size")) {
             RA_ivbuffer_size = atoll(get_value(i++));
         // } else if (!strcmp(argv[i], "--cache-size")) {
         //     row_cache_size = atoi(get_value(i++));
@@ -1324,7 +1324,7 @@ if (advanced) {
             fprintf(stderr, "\t   --fast \t\tquery in batches [off]\n");
             fprintf(stderr, "\t   --batch-size \tquery batch size (number of base pairs) [100000000]\n");
 if (advanced) {
-            fprintf(stderr, "\t   --RA_ivbuff_size [INT] \tsize (in bytes) of int_vector_buffer used in random access mode (e.g. by row disk annotator) [16384]\n");
+            fprintf(stderr, "\t   --RA-ivbuff-size [INT] \tsize (in bytes) of int_vector_buffer used in random access mode (e.g. by row disk annotator) [16384]\n");
 }
             fprintf(stderr, "\n");
             fprintf(stderr, "Available options for --align:\n");
