@@ -598,8 +598,9 @@ void compare(const sdsl::sd_vector<> &first, const sdsl::sd_vector_disk<> &secon
     for (size_t i = 0; i < std::min(first.size(), (uint64_t)1000); ++i) {
         ASSERT_EQ(first[i], second[i]);
         ASSERT_EQ(first_rank(i), second_rank(i));
-        if (i + 1 <= m)
+        if (i < m) {
             ASSERT_EQ(first_slct(i + 1), second_slct(i + 1));
+        }
     }
 
     // jumping indexes
@@ -607,14 +608,16 @@ void compare(const sdsl::sd_vector<> &first, const sdsl::sd_vector_disk<> &secon
         uint64_t j = i;
         ASSERT_EQ(first[j], second[j]);
         ASSERT_EQ(first_rank(j), second_rank(j));
-        if (j + 1 <= m)
+        if (j < m) {
             ASSERT_EQ(first_slct(j + 1), second_slct(j + 1));
+        }
 
         j = (first.size() / 2 + i) % first.size();
         ASSERT_EQ(first[j], second[j]);
         ASSERT_EQ(first_rank(j), second_rank(j));
-        if (j + 1 <= m)
+        if (j < m) {
             ASSERT_EQ(first_slct(j + 1), second_slct(j + 1));
+        }
     }
 }
 
