@@ -590,12 +590,14 @@ void compare(const sdsl::sd_vector<> &first, const sdsl::sd_vector_disk<> &secon
     sdsl::sd_vector_disk<>::select_1_type second_slct(&second);
     sdsl::sd_vector_disk<>::rank_1_type second_rank(&second);
 
-    uint64_t m = first_rank(first.size());
+    uint64_t n = first.size();
+    uint64_t m = first_rank(n);
 
     ASSERT_EQ(first_rank(0), second_rank(0));
+    ASSERT_EQ(first_rank(n), second_rank(n));
 
     // sequential
-    for (size_t i = 0; i < std::min(first.size(), (uint64_t)1000); ++i) {
+    for (size_t i = 0; i < std::min(n, (uint64_t)1000); ++i) {
         ASSERT_EQ(first[i], second[i]);
         ASSERT_EQ(first_rank(i), second_rank(i));
         if (i < m) {
@@ -604,7 +606,7 @@ void compare(const sdsl::sd_vector<> &first, const sdsl::sd_vector_disk<> &secon
     }
 
     // jumping indexes
-    for (size_t i = 0; i < std::min((first.size() + 1) / 2, (uint64_t)1000); ++i) {
+    for (size_t i = 0; i < std::min((n + 1) / 2, (uint64_t)1000); ++i) {
         uint64_t j = i;
         ASSERT_EQ(first[j], second[j]);
         ASSERT_EQ(first_rank(j), second_rank(j));
@@ -612,7 +614,7 @@ void compare(const sdsl::sd_vector<> &first, const sdsl::sd_vector_disk<> &secon
             ASSERT_EQ(first_slct(j + 1), second_slct(j + 1));
         }
 
-        j = (first.size() / 2 + i) % first.size();
+        j = (n / 2 + i) % n;
         ASSERT_EQ(first[j], second[j]);
         ASSERT_EQ(first_rank(j), second_rank(j));
         if (j < m) {
