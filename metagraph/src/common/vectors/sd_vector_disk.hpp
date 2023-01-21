@@ -6,6 +6,7 @@
 #include <sdsl/sd_vector.hpp>
 #include <sdsl/int_vector.hpp>
 #include <sdsl/int_vector_buffer.hpp>
+#include <sdsl/int_vector_mapper.hpp>
 #include <sdsl/select_support_mcl.hpp>
 #include <sdsl/util.hpp>
 #include <sdsl/iterators.hpp>
@@ -149,6 +150,7 @@ class sd_vector_disk
         typedef random_access_const_iterator<sd_vector_disk> iterator;
         typedef iterator                                const_iterator;
         typedef bv_tag                                  index_category;
+        typedef int_vector_mapper<0,std::ios_base::in>  low_vector_type;
         typedef t_select_0                              select_0_support_type;
         typedef t_select_1                              select_1_support_type;
 
@@ -166,7 +168,7 @@ class sd_vector_disk
         // for ,,width (of) low (part)''
 
         static const uint64_t BUFFER_SIZE = 1024;
-        int_vector_buffer<>   m_low;           // vector for the least significant bits of the positions of the m ones
+        low_vector_type       m_low;           // vector for the least significant bits of the positions of the m ones
         hi_bit_vector_type    m_high;          // bit vector that represents the most significant bit in permuted order
         select_1_support_type m_high_1_select; // select support for the ones in m_high
         select_0_support_type m_high_0_select; // select support for the zeros in m_high
@@ -174,7 +176,7 @@ class sd_vector_disk
     public:
         const uint8_t&               wl            = m_wl;
         const hi_bit_vector_type&    high          = m_high;
-        const int_vector_buffer<>&   low           = m_low;
+        const low_vector_type&       low           = m_low;
         const select_1_support_type& high_1_select = m_high_1_select;
         const select_0_support_type& high_0_select = m_high_0_select;
 
@@ -212,8 +214,8 @@ class sd_vector_disk
             m_high_0_select.serialize(out);
 
             // open m_low in read-only
-            m_low = int_vector_buffer<>(builder.filename, std::ios::in, BUFFER_SIZE, m_wl, false,
-                                        builder.file_offset + sizeof(m_size) + sizeof(m_wl));
+            m_low = low_vector_type(builder.filename, false, false,
+                                    builder.file_offset + sizeof(m_size) + sizeof(m_wl));
 
             builder = sd_vector_disk_builder();
         }
@@ -301,7 +303,7 @@ class sd_vector_disk
             if (this != &v) {
                 std::swap(m_size, v.m_size);
                 std::swap(m_wl, v.m_wl);
-                m_low.swap(v.m_low);
+                std::swap(m_low, v.m_low);
                 m_high.swap(v.m_high);
                 util::swap_support(m_high_1_select, v.m_high_1_select, &m_high, &v.m_high);
                 util::swap_support(m_high_0_select, v.m_high_0_select, &m_high, &v.m_high);
@@ -362,7 +364,7 @@ class sd_vector_disk
             m_high_1_select.load(in, &m_high);
             m_high_0_select.load(in, &m_high);
 
-            m_low = int_vector_buffer<>(filename, std::ios::in, BUFFER_SIZE, m_wl, false, m_low_offset);
+            m_low = low_vector_type(filename, false, false, m_low_offset);
         }
 
         iterator begin() const
