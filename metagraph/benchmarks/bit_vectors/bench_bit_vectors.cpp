@@ -245,4 +245,57 @@ INST_BV_BENCHMARK(random_sd_vector_access);
 INST_BV_BENCHMARK(sequential_sd_vector_disk_rank);
 INST_BV_BENCHMARK(sequential_sd_vector_rank);
 
+
+template <uint64_t t>
+static void BM_bv_query_random_sd_vector_access_every_nth_bit_set(benchmark::State& state) {
+    const uint64_t size = 1e12;
+    sdsl::sd_vector_builder builder(size, (size + t - 1) / t);
+    for (size_t i = 0; i < size; i += t) {
+        builder.set(i);
+    }
+    sdsl::sd_vector<> bv(builder);
+
+    uint64_t i = 0;
+    for (auto _ : state) {
+        benchmark::DoNotOptimize(bv[(i++ * 87'178'291'199) % bv.size()]);
+    }
+
+    state.counters["RAM"] = get_curr_RSS();
+}
+
+BENCHMARK_TEMPLATE(BM_bv_query_random_sd_vector_access_every_nth_bit_set, 10000) -> Unit(benchmark::kMicrosecond);
+BENCHMARK_TEMPLATE(BM_bv_query_random_sd_vector_access_every_nth_bit_set, 3000) -> Unit(benchmark::kMicrosecond);
+BENCHMARK_TEMPLATE(BM_bv_query_random_sd_vector_access_every_nth_bit_set, 1000) -> Unit(benchmark::kMicrosecond);
+BENCHMARK_TEMPLATE(BM_bv_query_random_sd_vector_access_every_nth_bit_set, 500) -> Unit(benchmark::kMicrosecond);
+BENCHMARK_TEMPLATE(BM_bv_query_random_sd_vector_access_every_nth_bit_set, 200) -> Unit(benchmark::kMicrosecond);
+
+template <uint64_t t>
+static void BM_bv_query_random_sd_vector_disk_access_every_nth_bit_set(benchmark::State& state) {
+    const uint64_t size = 1e12;
+
+    sdsl::sd_vector_disk<> bv;
+    {
+        const std::string fname = "../tests/data/bit_vector_dump_test";
+        sdsl::sd_vector_disk_builder builder(size, (size + t - 1) / t, fname);
+        for (size_t i = 0; i < size; i += t) {
+            builder.set(i);
+        }
+        bv = sdsl::sd_vector_disk<>(builder);
+    }
+
+    uint64_t i = 0;
+    for (auto _ : state) {
+        benchmark::DoNotOptimize(bv[(i++ * 87'178'291'199) % bv.size()]);
+    }
+
+    state.counters["RAM"] = get_curr_RSS();
+}
+
+BENCHMARK_TEMPLATE(BM_bv_query_random_sd_vector_disk_access_every_nth_bit_set, 10000) -> Unit(benchmark::kMicrosecond);
+BENCHMARK_TEMPLATE(BM_bv_query_random_sd_vector_disk_access_every_nth_bit_set, 3000) -> Unit(benchmark::kMicrosecond);
+BENCHMARK_TEMPLATE(BM_bv_query_random_sd_vector_disk_access_every_nth_bit_set, 1000) -> Unit(benchmark::kMicrosecond);
+BENCHMARK_TEMPLATE(BM_bv_query_random_sd_vector_disk_access_every_nth_bit_set, 500) -> Unit(benchmark::kMicrosecond);
+BENCHMARK_TEMPLATE(BM_bv_query_random_sd_vector_disk_access_every_nth_bit_set, 200) -> Unit(benchmark::kMicrosecond);
+BENCHMARK_TEMPLATE(BM_bv_query_random_sd_vector_disk_access_every_nth_bit_set, 100) -> Unit(benchmark::kMicrosecond);
+
 } // namespace
