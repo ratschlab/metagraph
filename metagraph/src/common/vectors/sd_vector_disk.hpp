@@ -31,6 +31,13 @@ template<uint8_t t_b          = 1,
          class t_select_0     = typename t_hi_bit_vector::select_0_type>
 class select_support_sd_disk;  // in sd_vector
 
+// returns the number of bytes taken on disk by int_vector<0> of this size
+template <uint8_t t_width = 0>
+inline uint64_t int_vector_space(uint64_t size, uint8_t width) {
+    uint64_t wb = (size * width + 7) / 8;
+    return (t_width ? 8 : 9) + wb + (wb%8 ? 8-wb%8 : 0);
+}
+
 //! Class for in-place construction of sd_vector from a strictly increasing sequence
 /*! \par Building an sd_vector will clear the builder.
  */
@@ -51,7 +58,7 @@ class sd_vector_disk_builder
         std::string filename;
         size_t file_offset;
         int_vector_buffer<> m_low;
-        bit_vector   m_high;
+        int_vector_buffer<1> m_high;
 
     public:
         sd_vector_disk_builder() :
@@ -88,10 +95,20 @@ class sd_vector_disk_builder
             write_member(m_size, out);
             write_member(m_wl, out);
             out.close();
+            uint64_t m_low_offset = file_offset + sizeof(m_size) + sizeof(m_wl);
+            uint64_t m_high_offset = m_low_offset + int_vector_space<>(m_capacity, m_wl);
+            // fill the file with 0-bytes for `m_low` and `m_high`
+            std::filesystem::resize_file(filename, m_high_offset + int_vector_space<1>(m_capacity + (1ULL << logm), 1));
+            // write headers for `m_low` and `m_high`
+            out.open(filename, std::ios::in | std::ios::binary);
+            out.seekp(m_low_offset);
+            int_vector<0>::write_header(m_capacity, m_wl, out);
+            out.seekp(m_high_offset);
+            bit_vector::write_header(m_capacity + (1ULL << logm), 1, out);
+            out.close();
 
-            m_low = int_vector_buffer<>(filename, std::ios::out, 1024 * 1024, m_wl, false,
-                                        file_offset + sizeof(m_size) + sizeof(m_wl));
-            m_high = bit_vector(m_capacity + (1ULL << logm), 0);
+            m_low = int_vector_buffer<>(filename, std::ios::in|std::ios::out, 1024 * 1024, m_wl, false, m_low_offset);
+            m_high = int_vector_buffer<1>(filename, std::ios::in|std::ios::out, 1024 * 1024, 1, false, m_high_offset);
         }
 
         inline size_type size() const { return m_size; }
@@ -151,6 +168,7 @@ class sd_vector_disk
         typedef iterator                                const_iterator;
         typedef bv_tag                                  index_category;
         typedef int_vector_mapper<0,std::ios_base::in>  low_vector_type;
+        typedef int_vector_mapper<1,std::ios_base::in>  high_vector_type;
         typedef t_select_0                              select_0_support_type;
         typedef t_select_1                              select_1_support_type;
 
@@ -167,15 +185,14 @@ class sd_vector_disk
         // and m is the number of ones in the bit vector, wl is the abbreviation
         // for ,,width (of) low (part)''
 
-        static const uint64_t BUFFER_SIZE = 1024;
         low_vector_type       m_low;           // vector for the least significant bits of the positions of the m ones
-        hi_bit_vector_type    m_high;          // bit vector that represents the most significant bit in permuted order
+        high_vector_type      m_high;          // bit vector that represents the most significant bit in permuted order
         select_1_support_type m_high_1_select; // select support for the ones in m_high
         select_0_support_type m_high_0_select; // select support for the zeros in m_high
 
     public:
         const uint8_t&               wl            = m_wl;
-        const hi_bit_vector_type&    high          = m_high;
+        const hi_bit_vector_type&    high          = m_high.wrapper();
         const low_vector_type&       low           = m_low;
         const select_1_support_type& high_1_select = m_high_1_select;
         const select_0_support_type& high_0_select = m_high_0_select;
@@ -192,30 +209,26 @@ class sd_vector_disk
 
             m_size = builder.m_size;
             m_wl = builder.m_wl;
-            // flush m_low to file
+            // flush to file
             builder.m_low.close();
+            builder.m_high.close();
 
-            if constexpr(std::is_same<hi_bit_vector_type, bit_vector>::value) {
-                m_high.swap(builder.m_high);
-            } else {
-                util::assign(m_high, builder.m_high);
-            }
-            util::init_support(m_high_1_select, &m_high);
-            util::init_support(m_high_0_select, &m_high);
+            // open m_low and m_high in int_vector_mapper for read-only
+            uint64_t m_low_offset = builder.file_offset + sizeof(m_size) + sizeof(m_wl);
+            m_low = low_vector_type(builder.filename, false, false, m_low_offset);
+
+            uint64_t m_high_offset = m_low_offset + int_vector_space<>(builder.capacity(), m_wl);
+            m_high = high_vector_type(builder.filename, false, false, m_high_offset);
+
+            util::init_support(m_high_1_select, &high);
+            util::init_support(m_high_0_select, &high);
 
             std::ofstream out(builder.filename, std::ios::in | std::ios::ate | std::ios::binary);
-            int64_t wb = (builder.capacity()*m_wl+7)/8;
-            size_t m_low_endpos = builder.file_offset + sizeof(m_size) + sizeof(m_wl) + 9 + wb + (wb%8 ? 8-wb%8 : 0);
-            if ((size_t)out.tellp() != m_low_endpos)
+            if ((size_t)out.tellp() != m_high_offset + int_vector_space<1>(m_high.size(), 1))
                 throw std::runtime_error("sd_vector_disk: bad offset calculation");
 
-            m_high.serialize(out);
             m_high_1_select.serialize(out);
             m_high_0_select.serialize(out);
-
-            // open m_low in read-only
-            m_low = low_vector_type(builder.filename, false, false,
-                                    builder.file_offset + sizeof(m_size) + sizeof(m_wl));
 
             builder = sd_vector_disk_builder();
         }
@@ -304,9 +317,9 @@ class sd_vector_disk
                 std::swap(m_size, v.m_size);
                 std::swap(m_wl, v.m_wl);
                 std::swap(m_low, v.m_low);
-                m_high.swap(v.m_high);
-                util::swap_support(m_high_1_select, v.m_high_1_select, &m_high, &v.m_high);
-                util::swap_support(m_high_0_select, v.m_high_0_select, &m_high, &v.m_high);
+                std::swap(m_high, v.m_high);
+                util::swap_support(m_high_1_select, v.m_high_1_select, &high, &v.high);
+                util::swap_support(m_high_0_select, v.m_high_0_select, &high, &v.high);
             }
         }
 
@@ -332,9 +345,9 @@ class sd_vector_disk
                 m_low  = std::move(v.m_low);
                 m_high = std::move(v.m_high);
                 m_high_1_select = std::move(v.m_high_1_select);
-                m_high_1_select.set_vector(&m_high);
+                m_high_1_select.set_vector(&high);
                 m_high_0_select = std::move(v.m_high_0_select);
-                m_high_0_select.set_vector(&m_high);
+                m_high_0_select.set_vector(&high);
             }
             return *this;
         }
@@ -352,19 +365,16 @@ class sd_vector_disk
             in.seekg(file_offset);
             read_member(m_size, in);
             read_member(m_wl, in);
-            size_t m_low_offset = in.tellg();
-            // skip m_low in file
-            uint64_t m_low_size;
-            uint8_t m_low_width;
-            int_vector<>::read_header(m_low_size, m_low_width, in);
-            int64_t wb = (m_low_size*m_wl+7)/8;
-            assert(m_low_width == m_wl);
-            in.seekg(m_low_offset + 9 + wb + (wb%8 ? 8-wb%8 : 0));
-            m_high.load(in);
-            m_high_1_select.load(in, &m_high);
-            m_high_0_select.load(in, &m_high);
 
+            size_t m_low_offset = in.tellg();
             m_low = low_vector_type(filename, false, false, m_low_offset);
+
+            uint64_t m_high_offset = m_low_offset + int_vector_space<>(m_low.size(), m_low.width());
+            m_high = high_vector_type(filename, false, false, m_high_offset);
+
+            in.seekg(m_high_offset + int_vector_space<1>(m_high.size(), 1));
+            m_high_1_select.load(in, &high);
+            m_high_0_select.load(in, &high);
         }
 
         iterator begin() const
