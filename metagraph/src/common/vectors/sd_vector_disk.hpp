@@ -1,6 +1,7 @@
 #ifndef __SD_VECTOR_DISK__
 #define __SD_VECTOR_DISK__
 
+#include <filesystem>
 #include <type_traits>
 
 #include <sdsl/sd_vector.hpp>
