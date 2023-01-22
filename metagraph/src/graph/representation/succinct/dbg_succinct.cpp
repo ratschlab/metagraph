@@ -11,6 +11,7 @@
 #include "common/logger.hpp"
 #include "common/threads/threading.hpp"
 #include "common/utils/string_utils.hpp"
+#include "common/utils/file_utils.hpp"
 #include "common/vectors/bit_vector_sdsl.hpp"
 #include "common/vectors/bit_vector_dyn.hpp"
 #include "common/vectors/bit_vector_adaptive.hpp"
@@ -648,14 +649,15 @@ bool DBGSuccinct::load_without_mask(const std::string &filename) {
     valid_edges_.reset();
 
     {
-        std::ifstream instream(utils::make_suffix(filename, kExtension), std::ios::binary);
+        std::unique_ptr<std::ifstream> in
+            = utils::open_ifstream(utils::make_suffix(filename, kExtension), utils::with_mmap());
 
-        if (!boss_graph_->load(instream))
+        if (!boss_graph_->load(*in))
             return false;
 
-        mode_ = static_cast<Mode>(load_number(instream));
+        mode_ = static_cast<Mode>(load_number(*in));
 
-        if (!boss_graph_->load_suffix_ranges(instream))
+        if (!boss_graph_->load_suffix_ranges(*in))
             logger->warn("No index for node ranges could be loaded");
     }
 
@@ -668,8 +670,10 @@ bool DBGSuccinct::load(const std::string &filename) {
 
     auto prefix = utils::remove_suffix(filename, kExtension);
 
-    std::ifstream instream(prefix + kDummyMaskExtension, std::ios::binary);
-    if (!instream.good())
+    std::unique_ptr<std::ifstream> in
+        = utils::open_ifstream(prefix + kDummyMaskExtension, utils::with_mmap());
+
+    if (!in->good())
         return true;
 
     // initialize a new vector
@@ -693,7 +697,7 @@ bool DBGSuccinct::load(const std::string &filename) {
     }
 
     // load the mask of valid edges (all non-dummy including npos 0)
-    if (!valid_edges_->load(instream)) {
+    if (!valid_edges_->load(*in)) {
         std::cerr << "Error: Can't load dummy edge mask." << std::endl;
         return false;
     }
@@ -704,11 +708,13 @@ bool DBGSuccinct::load(const std::string &filename) {
     }
 
     if (std::filesystem::exists(prefix + kBloomFilterExtension)) {
-        std::ifstream bloom_instream(prefix + kBloomFilterExtension, std::ios::binary);
+        std::unique_ptr<std::ifstream> bloom_in
+            = utils::open_ifstream(prefix + kBloomFilterExtension, utils::with_mmap());
+
         if (!bloom_filter_)
             bloom_filter_ = std::make_unique<kmer::KmerBloomFilter<>>(get_k(), mode_ == CANONICAL);
 
-        if (!bloom_filter_->load(bloom_instream)) {
+        if (!bloom_filter_->load(*bloom_in)) {
             std::cerr << "Error: failed to load Bloom filter from " + prefix + kBloomFilterExtension << std::endl;
             return false;
         }

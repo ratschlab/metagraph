@@ -1,5 +1,9 @@
 #include "benchmark/benchmark.h"
 
+#include <sdsl/sd_vector.hpp>
+
+#include "common/unix_tools.hpp"
+#include "common/vectors/sd_vector_builder_disk.hpp"
 #include "common/vectors/bit_vector_sdsl.hpp"
 #include "common/data_generation.hpp"
 
@@ -99,5 +103,44 @@ INST_BV_QUERY_BENCHMARK(bit_vector_rrr<63>, select);
 INST_BV_QUERY_BENCHMARK(bit_vector_rrr<63>, next);
 INST_BV_QUERY_BENCHMARK(bit_vector_rrr<63>, prev);
 INST_BV_QUERY_BENCHMARK(bit_vector_rrr<63>, cond_rank);
+
+
+template <class t_ifstream, uint64_t t>
+static void BM_bv_query_random_sd_vector_access_every_nth_bit_set(benchmark::State& state) {
+    const uint64_t size = 1e12;
+
+    sdsl::sd_vector<> bv;
+    {
+        const std::string fname = "../tests/data/bit_vector_dump_test";
+        sdsl::sd_vector_builder_disk<> builder(size, (size + t - 1) / t, fname);
+        for (size_t i = 0; i < size; i += t) {
+            builder.set(i);
+        }
+        builder.finish();
+        t_ifstream in(fname);
+        bv.load(in);
+    }
+
+    uint64_t i = 0;
+    for (auto _ : state) {
+        benchmark::DoNotOptimize(bv[(i++ * 87'178'291'199) % bv.size()]);
+    }
+
+    state.counters["RAM"] = get_curr_RSS();
+}
+
+BENCHMARK_TEMPLATE(BM_bv_query_random_sd_vector_access_every_nth_bit_set, std::ifstream, 10000) -> Unit(benchmark::kMicrosecond);
+BENCHMARK_TEMPLATE(BM_bv_query_random_sd_vector_access_every_nth_bit_set, std::ifstream, 3000) -> Unit(benchmark::kMicrosecond);
+BENCHMARK_TEMPLATE(BM_bv_query_random_sd_vector_access_every_nth_bit_set, std::ifstream, 1000) -> Unit(benchmark::kMicrosecond);
+BENCHMARK_TEMPLATE(BM_bv_query_random_sd_vector_access_every_nth_bit_set, std::ifstream, 500) -> Unit(benchmark::kMicrosecond);
+BENCHMARK_TEMPLATE(BM_bv_query_random_sd_vector_access_every_nth_bit_set, std::ifstream, 200) -> Unit(benchmark::kMicrosecond);
+BENCHMARK_TEMPLATE(BM_bv_query_random_sd_vector_access_every_nth_bit_set, std::ifstream, 100) -> Unit(benchmark::kMicrosecond);
+
+BENCHMARK_TEMPLATE(BM_bv_query_random_sd_vector_access_every_nth_bit_set, sdsl::mmap_ifstream, 10000) -> Unit(benchmark::kMicrosecond);
+BENCHMARK_TEMPLATE(BM_bv_query_random_sd_vector_access_every_nth_bit_set, sdsl::mmap_ifstream, 3000) -> Unit(benchmark::kMicrosecond);
+BENCHMARK_TEMPLATE(BM_bv_query_random_sd_vector_access_every_nth_bit_set, sdsl::mmap_ifstream, 1000) -> Unit(benchmark::kMicrosecond);
+BENCHMARK_TEMPLATE(BM_bv_query_random_sd_vector_access_every_nth_bit_set, sdsl::mmap_ifstream, 500) -> Unit(benchmark::kMicrosecond);
+BENCHMARK_TEMPLATE(BM_bv_query_random_sd_vector_access_every_nth_bit_set, sdsl::mmap_ifstream, 200) -> Unit(benchmark::kMicrosecond);
+BENCHMARK_TEMPLATE(BM_bv_query_random_sd_vector_access_every_nth_bit_set, sdsl::mmap_ifstream, 100) -> Unit(benchmark::kMicrosecond);
 
 } // namespace

@@ -12,6 +12,8 @@
 #include <stdio.h>
 #endif
 
+#include <sdsl/memory_management.hpp>
+
 #include "common/logger.hpp"
 
 namespace utils {
@@ -21,6 +23,27 @@ using mtg::common::logger;
 std::filesystem::path SWAP_PATH;
 std::vector<std::string> TMP_DIRS;
 std::mutex TMP_DIRS_MUTEX;
+
+static bool WITH_MMAP = false;
+
+bool with_mmap(bool set_bit) {
+    if (set_bit) {
+        logger->trace("Enabled memory mapping");
+        WITH_MMAP = true;
+    }
+    return WITH_MMAP;
+}
+
+std::unique_ptr<std::ifstream>
+open_ifstream(const std::string &filename, bool mmap_stream) {
+    std::unique_ptr<std::ifstream> in;
+    if (mmap_stream) {
+        in.reset(new sdsl::mmap_ifstream(filename, std::ios_base::binary));
+    } else {
+        in.reset(new std::ifstream(filename, std::ios_base::binary));
+    }
+    return in;
+}
 
 void set_swap_path(std::filesystem::path dir_path) {
     SWAP_PATH = dir_path;
