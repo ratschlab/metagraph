@@ -5,7 +5,7 @@
 
 #include "test_helpers.hpp"
 
-#include "common/vectors/sd_vector_disk.hpp"
+#include "common/vectors/sd_vector_builder_disk.hpp"
 #include "common/vectors/bit_vector_sdsl.hpp"
 #include "common/vectors/bit_vector_dyn.hpp"
 #include "common/vectors/bit_vector_sd.hpp"
@@ -574,21 +574,19 @@ TEST(bit_vector_sd, CheckIfInverts) {
     }
 }
 
-sdsl::sd_vector_disk<>
-construct_sd_vector_disk(sdsl::bit_vector bv, const std::string &fname, size_t offset) {
-    sdsl::sd_vector_disk_builder builder(bv.size(), sdsl::util::cnt_one_bits(bv), fname, offset);
+void construct_sd_vector_disk(sdsl::bit_vector bv, const std::string &fname, size_t offset) {
+    sdsl::sd_vector_builder_disk builder(bv.size(), sdsl::util::cnt_one_bits(bv), fname, offset);
     call_ones(bv, [&](uint64_t i) { builder.set(i); });
-    return sdsl::sd_vector_disk<>(builder);
 }
 
-void compare(const sdsl::sd_vector<> &first, const sdsl::sd_vector_disk<> &second) {
+void compare(const sdsl::sd_vector<> &first, const sdsl::sd_vector<> &second) {
     ASSERT_EQ(first.size(), second.size());
 
     sdsl::sd_vector<>::select_1_type first_slct(&first);
     sdsl::sd_vector<>::rank_1_type first_rank(&first);
 
-    sdsl::sd_vector_disk<>::select_1_type second_slct(&second);
-    sdsl::sd_vector_disk<>::rank_1_type second_rank(&second);
+    sdsl::sd_vector<>::select_1_type second_slct(&second);
+    sdsl::sd_vector<>::rank_1_type second_rank(&second);
 
     uint64_t n = first.size();
     uint64_t m = first_rank(n);
@@ -640,44 +638,24 @@ TEST(sd_vector_disk, all_tests) {
     vectors.emplace_back(100'000'000, 1);
 
     for (const sdsl::bit_vector &numbers : vectors) {
-        sdsl::sd_vector<> sd_vec(numbers);
+        sdsl::sd_vector<> sd_reference(numbers);
 
         for (size_t offset : { 0, 777 }) {
-            {
-                auto fname = test_dump_basename + "_sd_disk";
-                std::ofstream out(fname, std::ios::binary);
-                std::vector<char> buffer(offset, 'X');
-                out.write(buffer.data(), offset);
-                out.close();
+            auto fname = test_dump_basename + "_sd_disk";
+            std::ofstream out(fname, std::ios::binary);
+            std::vector<char> buffer(offset, 'X');
+            out.write(buffer.data(), offset);
+            out.close();
 
-                sdsl::sd_vector_disk<> sd_vec_disk
-                        = construct_sd_vector_disk(numbers, fname, offset);
-                compare(sd_vec, sd_vec_disk);
+            construct_sd_vector_disk(numbers, fname, offset);
 
-                std::ifstream in(fname, std::ios::binary);
-                buffer.assign(offset, '-');
-                in.read(buffer.data(), offset);
-                ASSERT_EQ(std::vector<char>(offset, 'X'), buffer);
-            }
-
-            {
-                // test load
-                auto fname = test_dump_basename + "_sd";
-                std::ofstream out(fname, std::ios::binary);
-                std::vector<char> buffer(offset, 'X');
-                out.write(buffer.data(), offset);
-                sd_vec.serialize(out);
-                out.close();
-
-                sdsl::sd_vector_disk<> sd_vec_disk;
-                sd_vec_disk.load(fname, offset);
-                compare(sd_vec, sd_vec_disk);
-
-                std::ifstream in(fname, std::ios::binary);
-                buffer.assign(offset, '-');
-                in.read(buffer.data(), offset);
-                ASSERT_EQ(std::vector<char>(offset, 'X'), buffer);
-            }
+            std::ifstream in(fname, std::ios::binary);
+            buffer.assign(offset, '-');
+            in.read(buffer.data(), offset);
+            ASSERT_EQ(std::vector<char>(offset, 'X'), buffer);
+            sdsl::sd_vector<> sd;
+            sd.load(in);
+            compare(sd_reference, sd);
         }
     }
 }

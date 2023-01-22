@@ -1,7 +1,6 @@
 #include "coord_row_disk.hpp"
 
 #include "common/logger.hpp"
-#include "common/vectors/sd_vector_disk.hpp"
 #include "common/utils/file_utils.hpp"
 
 namespace mtg {
