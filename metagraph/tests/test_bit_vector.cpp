@@ -5,6 +5,7 @@
 
 #include "test_helpers.hpp"
 
+#include "common/vectors/sd_vector_builder_disk.hpp"
 #include "common/vectors/bit_vector_sdsl.hpp"
 #include "common/vectors/bit_vector_dyn.hpp"
 #include "common/vectors/bit_vector_sd.hpp"
@@ -572,6 +573,93 @@ TEST(bit_vector_sd, CheckIfInverts) {
         ASSERT_EQ(bvs.is_inverted(), bvs_bits.is_inverted());
     }
 }
+
+void construct_sd_vector_disk(sdsl::bit_vector bv, const std::string &fname, size_t offset) {
+    sdsl::sd_vector_builder_disk builder(bv.size(), sdsl::util::cnt_one_bits(bv), fname, offset);
+    call_ones(bv, [&](uint64_t i) { builder.set(i); });
+}
+
+void compare(const sdsl::sd_vector<> &first, const sdsl::sd_vector<> &second) {
+    ASSERT_EQ(first.size(), second.size());
+
+    sdsl::sd_vector<>::select_1_type first_slct(&first);
+    sdsl::sd_vector<>::rank_1_type first_rank(&first);
+
+    sdsl::sd_vector<>::select_1_type second_slct(&second);
+    sdsl::sd_vector<>::rank_1_type second_rank(&second);
+
+    uint64_t n = first.size();
+    uint64_t m = first_rank(n);
+
+    ASSERT_EQ(first_rank(0), second_rank(0));
+    ASSERT_EQ(first_rank(n), second_rank(n));
+
+    // sequential
+    for (size_t i = 0; i < std::min(n, (uint64_t)1000); ++i) {
+        ASSERT_EQ(first[i], second[i]);
+        ASSERT_EQ(first_rank(i), second_rank(i));
+        if (i < m) {
+            ASSERT_EQ(first_slct(i + 1), second_slct(i + 1));
+        }
+    }
+
+    // jumping indexes
+    for (size_t i = 0; i < std::min((n + 1) / 2, (uint64_t)1000); ++i) {
+        uint64_t j = i;
+        ASSERT_EQ(first[j], second[j]);
+        ASSERT_EQ(first_rank(j), second_rank(j));
+        if (j < m) {
+            ASSERT_EQ(first_slct(j + 1), second_slct(j + 1));
+        }
+
+        j = (n / 2 + i) % n;
+        ASSERT_EQ(first[j], second[j]);
+        ASSERT_EQ(first_rank(j), second_rank(j));
+        if (j < m) {
+            ASSERT_EQ(first_slct(j + 1), second_slct(j + 1));
+        }
+    }
+}
+
+TEST(sd_vector_disk, all_tests) {
+    std::vector<sdsl::bit_vector> vectors = {
+        sdsl::bit_vector({}),
+        sdsl::bit_vector({ 0, 1, 0, 1, 1, 1, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0 }),
+        sdsl::bit_vector({ 0, 1, 0, 1, 1, 1, 1, 0, 0, 1, 0, 0, 0, 0, 1, 1 }),
+        sdsl::bit_vector({ 0, 1, 0, 1, 1, 1, 1, 0, 0, 1, 0, 0, 0, 0, 1, 1 }),
+        sdsl::bit_vector({ 0, 1, 0, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 1, 1 }),
+        sdsl::bit_vector({ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 })
+    };
+    for (size_t len = 1; len < 100; ++len) {
+        vectors.emplace_back(len, 0);
+        vectors.emplace_back(len, 1);
+    }
+    vectors.emplace_back(100'000'000, 0);
+    vectors.emplace_back(100'000'000, 1);
+
+    for (const sdsl::bit_vector &numbers : vectors) {
+        sdsl::sd_vector<> sd_reference(numbers);
+
+        for (size_t offset : { 0, 777 }) {
+            auto fname = test_dump_basename + "_sd_disk";
+            std::ofstream out(fname, std::ios::binary);
+            std::vector<char> buffer(offset, 'X');
+            out.write(buffer.data(), offset);
+            out.close();
+
+            construct_sd_vector_disk(numbers, fname, offset);
+
+            std::ifstream in(fname, std::ios::binary);
+            buffer.assign(offset, '-');
+            in.read(buffer.data(), offset);
+            ASSERT_EQ(std::vector<char>(offset, 'X'), buffer);
+            sdsl::sd_vector<> sd;
+            sd.load(in);
+            compare(sd_reference, sd);
+        }
+    }
+}
+
 
 TYPED_TEST(BitVectorTest, add_to_all_zero) {
     for (uint64_t size : { 0, 10, 100, 1000000 }) {

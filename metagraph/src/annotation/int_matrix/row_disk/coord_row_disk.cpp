@@ -204,7 +204,7 @@ void CoordRowDisk::serialize(
     serialize_number(outstream, bits_for_number_of_vals);
     serialize_number(outstream, bits_for_single_value);
 
-    DiskWriter writer(outstream, 1024 * 1024);
+    common::DiskWriter writer(outstream, 1024 * 1024);
 
     uint64_t num_attributes = 0;
 

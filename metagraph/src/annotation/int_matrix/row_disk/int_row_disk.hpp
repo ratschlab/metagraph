@@ -5,7 +5,7 @@
 
 #include "annotation/int_matrix/base/int_matrix.hpp"
 #include "common/vectors/bit_vector_adaptive.hpp"
-#include "annotation/int_matrix/row_disk/disk_utils.h"
+#include "common/disk_buffer.hpp"
 
 namespace mtg {
 namespace annot {
@@ -94,7 +94,7 @@ class IntRowDisk : public IntMatrix {
         std::ifstream in_;
         // layout: [col_id|tuple_size|...]
         // `boundary_` points to beginning of row in `set_bits_`
-        mutable DiskRandomReader set_bits_;
+        mutable common::DiskRandomReader set_bits_;
         uint64_t bits_for_col_id_;
         uint64_t bits_for_value_;
     };

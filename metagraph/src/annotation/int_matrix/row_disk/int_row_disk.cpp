@@ -158,7 +158,7 @@ void IntRowDisk::serialize(
     serialize_number(outstream, bits_for_col_id);
     serialize_number(outstream, bits_for_value);
 
-    DiskWriter writer(outstream, 1024 * 1024);
+    common::DiskWriter writer(outstream, 1024 * 1024);
 
     //  call_bits should be called for each argument that should be set (row boundaries)
     auto call_bits = [&](const std::function<void(uint64_t)> &call_bit) {

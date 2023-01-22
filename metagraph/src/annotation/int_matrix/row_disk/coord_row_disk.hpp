@@ -5,7 +5,7 @@
 
 #include "annotation/int_matrix/base/int_matrix.hpp"
 #include "common/vectors/bit_vector_adaptive.hpp"
-#include "annotation/int_matrix/row_disk/disk_utils.h"
+#include "common/disk_buffer.hpp"
 
 namespace mtg {
 namespace annot {
@@ -111,7 +111,7 @@ class CoordRowDisk : public MultiIntMatrix {
         std::ifstream in_;
         // layout: [col_id|value]
         // `boundary_` puts 0 for each col-value pair and delimits rows with 1
-        mutable DiskRandomReader set_bits_;
+        mutable common::DiskRandomReader set_bits_;
         uint64_t bits_for_col_id_;
         uint64_t bits_for_number_of_vals_;
         uint64_t bits_for_single_value_;
