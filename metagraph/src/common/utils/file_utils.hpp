@@ -114,8 +114,8 @@ class NamedIfstream : public std::ifstream {
 
     const std::string& get_name() const { return fname_; }
 
-    private:
-      std::string fname_;
+  private:
+    std::string fname_;
 };
 
 } // namespace utils
