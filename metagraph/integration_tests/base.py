@@ -35,6 +35,9 @@ class TestingBase(unittest.TestCase):
 
     @staticmethod
     def _get_stats(graph_path):
+        stats_command = METAGRAPH + ' stats ' + graph_path + ' --mmap'
+        res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
+        assert(res.returncode == 0)
         stats_command = METAGRAPH + ' stats ' + graph_path + MMAP_FLAG
         res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
         return res
