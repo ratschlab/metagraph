@@ -62,16 +62,11 @@ StaticBinRelAnnotator<BinaryMatrixType, Label>
 template <class BinaryMatrixType, typename Label>
 bool StaticBinRelAnnotator<BinaryMatrixType, Label>::load(const std::string &filename) {
     const auto &fname = make_suffix(filename, kExtension);
-    std::unique_ptr<std::ifstream> in;
     using T = StaticBinRelAnnotator<BinaryMatrixType, Label>;
-    if (std::is_same_v<T, RowDiffDiskAnnotator>
-            || std::is_same_v<T, IntRowDiffDiskAnnotator>
-            || std::is_same_v<T, RowDiffDiskCoordAnnotator>) {
-        in.reset(new utils::NamedIfstream(fname, std::ios::binary));
-    } else {
-        in = utils::open_ifstream(fname, utils::with_mmap());
-    }
-
+    bool use_mmap = std::is_same_v<T, RowDiffDiskAnnotator>
+                        || std::is_same_v<T, IntRowDiffDiskAnnotator>
+                        || std::is_same_v<T, RowDiffDiskCoordAnnotator>;
+    std::unique_ptr<std::ifstream> in = utils::open_ifstream(fname, use_mmap || utils::with_mmap());
     if (!in->good())
         return false;
 

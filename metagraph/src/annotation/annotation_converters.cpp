@@ -902,7 +902,7 @@ void merge_row_disk_annotations(const std::vector<std::string> &files,
         LEncoder le;
         matrices[j] = std::make_unique<RowDisk>();
 
-        utils::NamedIfstream in(files[j], std::ios::in);
+        sdsl::mmap_ifstream in(files[j], std::ios::binary);
         if (!le.load(in)) {
             logger->error("Can't load label encoder from {}", files[j]);
             exit(1);
@@ -1079,14 +1079,14 @@ void convert_to_row_disk(
 
 
 uint64_t get_num_rows_from_row_diff_anno(const std::string &fname) {
-    std::ifstream in(fname, std::ios::binary);
-    if (!in.good())
+    std::unique_ptr<std::ifstream> in = utils::open_ifstream(fname, utils::with_mmap());
+    if (!in->good())
         throw std::ifstream::failure("can't open file");
 
     LabelEncoder<std::string> label_encoder;
     binmat::RowDiff<binmat::ColumnMajor> matrix;
 
-    if (!label_encoder.load(in) || !matrix.load(in)) {
+    if (!label_encoder.load(*in) || !matrix.load(*in)) {
         logger->error("Can't load {}", fname);
         exit(1);
     }

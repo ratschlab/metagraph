@@ -140,7 +140,7 @@ CoordRowDisk::View::get_row_tuples(const std::vector<Row> &rows) const {
 
 
 bool CoordRowDisk::load(std::istream &f) {
-    auto _f = dynamic_cast<utils::NamedIfstream *>(&f);
+    auto _f = dynamic_cast<sdsl::mmap_ifstream *>(&f);
     assert(_f);
     try {
         num_columns_ = load_number(f);
@@ -151,7 +151,7 @@ bool CoordRowDisk::load(std::istream &f) {
         bits_for_number_of_vals_ = load_number(f);
         bits_for_single_value_ = load_number(f);
 
-        buffer_params_.filename = _f->get_name();
+        buffer_params_.filename = _f->get_filename();
         buffer_params_.offset = f.tellg();
 
         assert(boundary_start >= buffer_params_.offset);
