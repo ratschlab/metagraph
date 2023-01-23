@@ -1892,10 +1892,10 @@ load_coords(Annotator&& anno, const std::vector<std::string> &files) {
 
         auto coords_fname = utils::remove_suffix(files[i], ColumnCompressed<>::kExtension)
                                                         + ColumnCompressed<>::kCoordExtension;
-        std::ifstream in(coords_fname, std::ios::binary);
+        std::unique_ptr<std::ifstream> in = utils::open_ifstream(coords_fname, utils::with_mmap());
         size_t j = 0;
         try {
-            TupleCSC::load_tuples(in, label_encoder.size(), [&](auto&& delims, auto&& values) {
+            TupleCSC::load_tuples(*in, label_encoder.size(), [&](auto&& delims, auto&& values) {
                 size_t idx;
                 try {
                     idx = anno.get_label_encoder().encode(label_encoder.decode(j));
