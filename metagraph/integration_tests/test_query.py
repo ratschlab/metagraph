@@ -43,6 +43,10 @@ ANNO_TYPES = [anno_type for anno_type, _ in anno_file_extension.items()]
 
 NUM_THREADS = 4
 
+MEMORY_MAPPING = True
+MMAP_FLAG = ' --mmap' if MEMORY_MAPPING else ''
+
+
 def product(graph_types, anno_types):
     result  = []
     for graph in graph_types:
@@ -92,7 +96,7 @@ class TestQuery(TestingBase):
         if cls.with_bloom:
             convert_command = f'{METAGRAPH} transform -o {cls.tempdir.name}/graph \
                                 --initialize-bloom --bloom-fpp 0.1 \
-                                {cls.tempdir.name}/graph{graph_file_extension[cls.graph_repr]}'
+                                {cls.tempdir.name}/graph{graph_file_extension[cls.graph_repr]}' + MMAP_FLAG
             res = subprocess.run([convert_command], shell=True)
             assert(res.returncode == 0)
 
@@ -135,7 +139,7 @@ class TestQuery(TestingBase):
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
-        )
+        ) + MMAP_FLAG
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 137140)
@@ -145,7 +149,7 @@ class TestQuery(TestingBase):
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
-        )
+        ) + MMAP_FLAG
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 136959)
@@ -158,7 +162,7 @@ class TestQuery(TestingBase):
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
-        )
+        ) + MMAP_FLAG
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 261390)
@@ -168,7 +172,7 @@ class TestQuery(TestingBase):
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
-        )
+        ) + MMAP_FLAG
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 260215)
@@ -181,7 +185,7 @@ class TestQuery(TestingBase):
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_1000.fa',
             num_theads=NUM_THREADS
-        )
+        ) + MMAP_FLAG
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 137140)
@@ -192,7 +196,7 @@ class TestQuery(TestingBase):
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_1000.fa',
             num_theads=NUM_THREADS
-        )
+        ) + MMAP_FLAG
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 136959)
@@ -206,7 +210,7 @@ class TestQuery(TestingBase):
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_1000.fa',
             num_theads=NUM_THREADS
-        )
+        ) + MMAP_FLAG
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 261390)
@@ -217,7 +221,7 @@ class TestQuery(TestingBase):
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_1000.fa',
             num_theads=NUM_THREADS
-        )
+        ) + MMAP_FLAG
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 260215)
@@ -228,7 +232,7 @@ class TestQuery(TestingBase):
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa'
-        )
+        ) + MMAP_FLAG
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         if DNA_MODE:
@@ -241,7 +245,7 @@ class TestQuery(TestingBase):
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa'
-        )
+        ) + MMAP_FLAG
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         if DNA_MODE:
@@ -256,7 +260,7 @@ class TestQuery(TestingBase):
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa',
             num_theads=NUM_THREADS
-        )
+        ) + MMAP_FLAG
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         if DNA_MODE:
@@ -270,7 +274,7 @@ class TestQuery(TestingBase):
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa',
             num_theads=NUM_THREADS
-        )
+        ) + MMAP_FLAG
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         if DNA_MODE:
@@ -287,7 +291,7 @@ class TestQuery(TestingBase):
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa',
             num_theads=NUM_THREADS
-        )
+        ) + MMAP_FLAG
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 24567)
@@ -298,7 +302,7 @@ class TestQuery(TestingBase):
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa',
             num_theads=NUM_THREADS
-        )
+        ) + MMAP_FLAG
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 24779)
@@ -309,7 +313,7 @@ class TestQuery(TestingBase):
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
-        )
+        ) + MMAP_FLAG
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 137140)
@@ -319,7 +323,7 @@ class TestQuery(TestingBase):
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
-        )
+        ) + MMAP_FLAG
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 136959)
@@ -332,7 +336,7 @@ class TestQuery(TestingBase):
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
-        )
+        ) + MMAP_FLAG
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 261390)
@@ -342,7 +346,7 @@ class TestQuery(TestingBase):
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
-        )
+        ) + MMAP_FLAG
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 260215)
@@ -355,7 +359,7 @@ class TestQuery(TestingBase):
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_1000.fa',
             num_threads=NUM_THREADS
-        )
+        ) + MMAP_FLAG
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 137140)
@@ -366,7 +370,7 @@ class TestQuery(TestingBase):
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_1000.fa',
             num_threads=NUM_THREADS
-        )
+        ) + MMAP_FLAG
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 136959)
@@ -380,7 +384,7 @@ class TestQuery(TestingBase):
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_1000.fa',
             num_theads=NUM_THREADS
-        )
+        ) + MMAP_FLAG
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 261390)
@@ -391,7 +395,7 @@ class TestQuery(TestingBase):
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_1000.fa',
             num_theads=NUM_THREADS
-        )
+        ) + MMAP_FLAG
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 260215)
@@ -402,7 +406,7 @@ class TestQuery(TestingBase):
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa'
-        )
+        ) + MMAP_FLAG
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         if DNA_MODE:
@@ -430,7 +434,7 @@ class TestQuery(TestingBase):
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa',
             num_threads=NUM_THREADS
-        )
+        ) + MMAP_FLAG
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         if DNA_MODE:
@@ -444,7 +448,7 @@ class TestQuery(TestingBase):
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa',
             num_threads=NUM_THREADS
-        )
+        ) + MMAP_FLAG
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         if DNA_MODE:
@@ -461,7 +465,7 @@ class TestQuery(TestingBase):
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa',
             num_theads=NUM_THREADS
-        )
+        ) + MMAP_FLAG
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 24567)
@@ -472,7 +476,7 @@ class TestQuery(TestingBase):
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa',
             num_theads=NUM_THREADS
-        )
+        ) + MMAP_FLAG
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 24779)
@@ -483,7 +487,7 @@ class TestQuery(TestingBase):
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
-        )
+        ) + MMAP_FLAG
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 137140)
@@ -493,7 +497,7 @@ class TestQuery(TestingBase):
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
-        )
+        ) + MMAP_FLAG
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 136959)
@@ -505,7 +509,7 @@ class TestQuery(TestingBase):
         query_command = f'{METAGRAPH} query --query-coords \
                             -i {self.tempdir.name}/graph{graph_file_extension[self.graph_repr]} \
                             -a {self.tempdir.name}/annotation{anno_file_extension[self.anno_repr]} \
-                            --discovery-fraction 0.05 {TEST_DATA_DIR}/transcripts_100.fa'
+                            --discovery-fraction 0.05 {TEST_DATA_DIR}/transcripts_100.fa' + MMAP_FLAG
 
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
@@ -514,7 +518,7 @@ class TestQuery(TestingBase):
         query_command = f'{METAGRAPH} query --query-coords \
                             -i {self.tempdir.name}/graph{graph_file_extension[self.graph_repr]} \
                             -a {self.tempdir.name}/annotation{anno_file_extension[self.anno_repr]} \
-                            --discovery-fraction 0.95 {TEST_DATA_DIR}/transcripts_100.fa'
+                            --discovery-fraction 0.95 {TEST_DATA_DIR}/transcripts_100.fa' + MMAP_FLAG
 
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
@@ -527,7 +531,7 @@ class TestQuery(TestingBase):
         query_command = f'{METAGRAPH} query --query-coords --verbose-output \
                             -i {self.tempdir.name}/graph{graph_file_extension[self.graph_repr]} \
                             -a {self.tempdir.name}/annotation{anno_file_extension[self.anno_repr]} \
-                            --discovery-fraction 0.05 {TEST_DATA_DIR}/transcripts_100.fa'
+                            --discovery-fraction 0.05 {TEST_DATA_DIR}/transcripts_100.fa' + MMAP_FLAG
 
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
@@ -536,7 +540,7 @@ class TestQuery(TestingBase):
         query_command = f'{METAGRAPH} query --query-coords --verbose-output \
                             -i {self.tempdir.name}/graph{graph_file_extension[self.graph_repr]} \
                             -a {self.tempdir.name}/annotation{anno_file_extension[self.anno_repr]} \
-                            --discovery-fraction 0.95 {TEST_DATA_DIR}/transcripts_100.fa'
+                            --discovery-fraction 0.95 {TEST_DATA_DIR}/transcripts_100.fa' + MMAP_FLAG
 
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
@@ -610,7 +614,7 @@ class TestQueryTinyLinear(TestingBase):
         query_command = f'{METAGRAPH} query --query-coords  --verbose-output \
                             -i {self.tempdir.name}/graph{graph_file_extension[self.graph_repr]} \
                             -a {self.tempdir.name}/annotation{anno_file_extension[self.anno_repr]} \
-                            --discovery-fraction 0.05 {self.fasta_graph}'
+                            --discovery-fraction 0.05 {self.fasta_graph}' + MMAP_FLAG
 
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
@@ -661,7 +665,7 @@ class TestQuery1Column(TestingBase):
         if cls.with_bloom:
             convert_command = f'{METAGRAPH} transform -o {cls.tempdir.name}/graph \
                                 --initialize-bloom --bloom-fpp 0.1 \
-                                {cls.tempdir.name}/graph{graph_file_extension[cls.graph_repr]}'
+                                {cls.tempdir.name}/graph{graph_file_extension[cls.graph_repr]}' + MMAP_FLAG
             res = subprocess.run([convert_command], shell=True)
             assert(res.returncode == 0)
 
@@ -704,7 +708,7 @@ class TestQuery1Column(TestingBase):
                             -i {self.tempdir.name}/graph{graph_file_extension[self.graph_repr]} \
                             -a {self.tempdir.name}/annotation{anno_file_extension[self.anno_repr]} \
                             --discovery-fraction 1.0 \
-                            {TEST_DATA_DIR}/transcripts_1000.fa'
+                            {TEST_DATA_DIR}/transcripts_1000.fa' + MMAP_FLAG
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         self.assertEqual(hashlib.sha224(res.stdout).hexdigest(), '254d173abb255a81a4ab8a685201a73de8dbad4546c378e0a645d454')
@@ -713,7 +717,7 @@ class TestQuery1Column(TestingBase):
                             -i {self.tempdir.name}/graph{graph_file_extension[self.graph_repr]} \
                             -a {self.tempdir.name}/annotation{anno_file_extension[self.anno_repr]} \
                             --discovery-fraction 1.0 \
-                            {TEST_DATA_DIR}/transcripts_1000.fa'
+                            {TEST_DATA_DIR}/transcripts_1000.fa' + MMAP_FLAG
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         self.assertEqual(hashlib.sha224(res.stdout).hexdigest(), '1bd6c24373812064c3e17e73533de7b1e30baa3cca3a64b460e83cb4')
@@ -794,7 +798,7 @@ class TestQueryCounts(TestingBase):
         if cls.with_bloom:
             convert_command = f'{METAGRAPH} transform -o {cls.tempdir.name}/graph \
                                 --initialize-bloom --bloom-fpp 0.1 \
-                                {cls.tempdir.name}/graph{graph_file_extension[cls.graph_repr]}'
+                                {cls.tempdir.name}/graph{graph_file_extension[cls.graph_repr]}' + MMAP_FLAG
             res = subprocess.run([convert_command], shell=True)
             assert(res.returncode == 0)
 
@@ -870,7 +874,7 @@ class TestQueryCounts(TestingBase):
             query_command = f'{METAGRAPH} query --fast --count-kmers \
                             -i {self.tempdir.name}/graph{graph_file_extension[self.graph_repr]} \
                             -a {self.tempdir.name}/annotation{anno_file_extension[self.anno_repr]} \
-                            --discovery-fraction {discovery_rate} {query_file}'
+                            --discovery-fraction {discovery_rate} {query_file}' + MMAP_FLAG
 
             res = subprocess.run(query_command.split(), stdout=PIPE)
             self.assertEqual(res.returncode, 0)
@@ -909,7 +913,7 @@ class TestQueryCounts(TestingBase):
             query_command = f'{METAGRAPH} query --fast --query-counts --verbose-output \
                             -i {self.tempdir.name}/graph{graph_file_extension[self.graph_repr]} \
                             -a {self.tempdir.name}/annotation{anno_file_extension[self.anno_repr]} \
-                            --discovery-fraction {discovery_rate} {query_file}'
+                            --discovery-fraction {discovery_rate} {query_file}' + MMAP_FLAG
 
             res = subprocess.run(query_command.split(), stdout=PIPE)
             self.assertEqual(res.returncode, 0)
@@ -918,7 +922,7 @@ class TestQueryCounts(TestingBase):
         query_command = f'{METAGRAPH} query --fast --query-counts \
                         -i {self.tempdir.name}/graph{graph_file_extension[self.graph_repr]} \
                         -a {self.tempdir.name}/annotation{anno_file_extension[self.anno_repr]} \
-                        --discovery-fraction {discovery_rate} {query_file}'
+                        --discovery-fraction {discovery_rate} {query_file}' + MMAP_FLAG
 
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
@@ -961,7 +965,7 @@ class TestQueryCounts(TestingBase):
         query_command = f'{METAGRAPH} query --fast --count-quantiles <SET_BELOW> \
                         -i {self.tempdir.name}/graph{graph_file_extension[self.graph_repr]} \
                         -a {self.tempdir.name}/annotation{anno_file_extension[self.anno_repr]} \
-                        --discovery-fraction 0.0 {query_file}'
+                        --discovery-fraction 0.0 {query_file}' + MMAP_FLAG
 
         query_command = query_command.split()
         query_command[4] = ' '.join([str(p) for p in quantiles])
@@ -972,7 +976,7 @@ class TestQueryCounts(TestingBase):
         query_command = f'{METAGRAPH} query --fast --count-quantiles <SET_BELOW> \
                         -i {self.tempdir.name}/graph{graph_file_extension[self.graph_repr]} \
                         -a {self.tempdir.name}/annotation{anno_file_extension[self.anno_repr]} \
-                        --discovery-fraction 1.0 {query_file}'
+                        --discovery-fraction 1.0 {query_file}' + MMAP_FLAG
 
         query_command = query_command.split()
         query_command[4] = ' '.join([str(p) for p in quantiles])
@@ -1017,7 +1021,7 @@ class TestQueryCanonical(TestingBase):
         if cls.with_bloom:
             convert_command = f'{METAGRAPH} transform -o {cls.tempdir.name}/graph \
                                 --initialize-bloom --bloom-fpp 0.1 \
-                                {cls.tempdir.name}/graph{graph_file_extension[cls.graph_repr]}'
+                                {cls.tempdir.name}/graph{graph_file_extension[cls.graph_repr]}' + MMAP_FLAG
             res = subprocess.run([convert_command], shell=True)
             assert(res.returncode == 0)
 
@@ -1047,7 +1051,7 @@ class TestQueryCanonical(TestingBase):
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
-        )
+        ) + MMAP_FLAG
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 137269)
@@ -1057,7 +1061,7 @@ class TestQueryCanonical(TestingBase):
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
-        )
+        ) + MMAP_FLAG
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 137093)
@@ -1068,7 +1072,7 @@ class TestQueryCanonical(TestingBase):
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa'
-        )
+        ) + MMAP_FLAG
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 12840)
@@ -1078,7 +1082,7 @@ class TestQueryCanonical(TestingBase):
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa'
-        )
+        ) + MMAP_FLAG
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 12970)
@@ -1089,7 +1093,7 @@ class TestQueryCanonical(TestingBase):
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
-        )
+        ) + MMAP_FLAG
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 137269)
@@ -1099,7 +1103,7 @@ class TestQueryCanonical(TestingBase):
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
-        )
+        ) + MMAP_FLAG
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 137093)
@@ -1110,7 +1114,7 @@ class TestQueryCanonical(TestingBase):
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa'
-        )
+        ) + MMAP_FLAG
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 12840)
@@ -1120,7 +1124,7 @@ class TestQueryCanonical(TestingBase):
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa'
-        )
+        ) + MMAP_FLAG
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 12970)
@@ -1131,7 +1135,7 @@ class TestQueryCanonical(TestingBase):
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
-        )
+        ) + MMAP_FLAG
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 137269)
@@ -1141,7 +1145,7 @@ class TestQueryCanonical(TestingBase):
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
-        )
+        ) + MMAP_FLAG
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 137093)
@@ -1184,7 +1188,7 @@ class TestQueryPrimary(TestingBase):
         if cls.with_bloom:
             convert_command = f'{METAGRAPH} transform -o {cls.tempdir.name}/graph \
                                 --initialize-bloom --bloom-fpp 0.1 \
-                                {cls.tempdir.name}/graph{graph_file_extension[cls.graph_repr]}'
+                                {cls.tempdir.name}/graph{graph_file_extension[cls.graph_repr]}' + MMAP_FLAG
             res = subprocess.run([convert_command], shell=True)
             assert(res.returncode == 0)
 
@@ -1214,7 +1218,7 @@ class TestQueryPrimary(TestingBase):
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
-        )
+        ) + MMAP_FLAG
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 137269)
@@ -1224,7 +1228,7 @@ class TestQueryPrimary(TestingBase):
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
-        )
+        ) + MMAP_FLAG
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 137093)
@@ -1235,7 +1239,7 @@ class TestQueryPrimary(TestingBase):
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa'
-        )
+        ) + MMAP_FLAG
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 12840)
@@ -1245,7 +1249,7 @@ class TestQueryPrimary(TestingBase):
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa'
-        )
+        ) + MMAP_FLAG
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 12970)
@@ -1256,7 +1260,7 @@ class TestQueryPrimary(TestingBase):
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
-        )
+        ) + MMAP_FLAG
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 137269)
@@ -1266,7 +1270,7 @@ class TestQueryPrimary(TestingBase):
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
-        )
+        ) + MMAP_FLAG
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 137093)
@@ -1277,7 +1281,7 @@ class TestQueryPrimary(TestingBase):
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa'
-        )
+        ) + MMAP_FLAG
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 12840)
@@ -1287,7 +1291,7 @@ class TestQueryPrimary(TestingBase):
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_100_tail10_snp.fa'
-        )
+        ) + MMAP_FLAG
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 12970)
@@ -1298,7 +1302,7 @@ class TestQueryPrimary(TestingBase):
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
-        )
+        ) + MMAP_FLAG
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 137269)
@@ -1308,7 +1312,7 @@ class TestQueryPrimary(TestingBase):
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
             input=TEST_DATA_DIR + '/transcripts_1000.fa'
-        )
+        ) + MMAP_FLAG
         res = subprocess.run(query_command.split(), stdout=PIPE)
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 137093)

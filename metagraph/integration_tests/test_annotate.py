@@ -6,14 +6,12 @@ from tempfile import TemporaryDirectory
 import filecmp
 import glob
 import os
-from base import TestingBase
+from base import TestingBase, METAGRAPH, TEST_DATA_DIR, NUM_THREADS
 
 
 """Test graph annotation"""
 
-METAGRAPH = './metagraph'
 PROTEIN_MODE = os.readlink(METAGRAPH).endswith("_Protein")
-TEST_DATA_DIR = os.path.dirname(os.path.realpath(__file__)) + '/../tests/data'
 
 graph_file_extension = {'succinct': '.dbg',
                         'bitmap': '.bitmapdbg',
@@ -25,8 +23,6 @@ anno_file_extension = {'column': '.column.annodbg',
                        'row': '.row.annodbg'}
 
 GRAPH_TYPES = [graph_type for graph_type, _ in graph_file_extension.items()]
-
-NUM_THREADS = 4
 
 
 class TestAnnotate(TestingBase):

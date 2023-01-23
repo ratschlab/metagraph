@@ -24,6 +24,9 @@ GRAPH_TYPES = [graph_type for graph_type, _ in graph_file_extension.items()]
 
 NUM_THREADS = 4
 
+MEMORY_MAPPING = True
+MMAP_FLAG = ' --mmap' if MEMORY_MAPPING else ''
+
 
 class TestingBase(unittest.TestCase):
     @classmethod
@@ -32,7 +35,7 @@ class TestingBase(unittest.TestCase):
 
     @staticmethod
     def _get_stats(graph_path):
-        stats_command = METAGRAPH + ' stats ' + graph_path
+        stats_command = METAGRAPH + ' stats ' + graph_path + MMAP_FLAG
         res = subprocess.run(stats_command.split(), stdout=PIPE, stderr=PIPE)
         return res
 
@@ -56,7 +59,7 @@ class TestingBase(unittest.TestCase):
             mode='basic' if mode == 'basic' else 'canonical',
             outfile=output,
             input=input
-        )
+        ) + MMAP_FLAG
 
         res = subprocess.run([construct_command], shell=True)
         assert res.returncode == 0
@@ -70,7 +73,7 @@ class TestingBase(unittest.TestCase):
                 repr=repr,
                 outfile='{}.fasta.gz'.format(output),
                 input=output
-            )
+            ) + MMAP_FLAG
 
             res = subprocess.run([transform_command], shell=True)
             assert res.returncode == 0
@@ -84,7 +87,7 @@ class TestingBase(unittest.TestCase):
                 repr=repr,
                 outfile=output,
                 input='{}.fasta.gz'.format(output)
-            )
+            ) + MMAP_FLAG
 
             res = subprocess.run([construct_command], shell=True)
             assert res.returncode == 0
@@ -98,7 +101,7 @@ class TestingBase(unittest.TestCase):
             outfile=output,
             extra_params=extra_params,
             input=graph
-        )
+        ) + MMAP_FLAG
         res = subprocess.run([clean_command], shell=True)
         assert res.returncode == 0
 
@@ -127,7 +130,7 @@ class TestingBase(unittest.TestCase):
 
         command = f'{METAGRAPH} annotate -p {num_threads} --anno-{anno_type}\
                     -i {graph_path} --anno-type {anno_repr} {extra_params} \
-                    -o {output} {input}'
+                    -o {output} {input}' + MMAP_FLAG
 
         if target_anno.endswith('_coord'):
             command += ' --coordinates'
@@ -146,7 +149,7 @@ class TestingBase(unittest.TestCase):
         if final_anno.startswith('row_diff'):
             target_anno = 'row_diff'
 
-        command = f'{METAGRAPH} transform_anno -p {num_threads} \
+        command = f'{METAGRAPH} transform_anno {MMAP_FLAG} -p {num_threads} \
                     --anno-type {target_anno} -o {output} \
                     {output + anno_file_extension[anno_repr]}'
 
@@ -186,7 +189,7 @@ class TestingBase(unittest.TestCase):
             if final_anno != target_anno:
                 rd_type = 'column' if with_counts or final_anno.endswith('_coord') else 'row_diff'
                 command = f'{METAGRAPH} transform_anno --anno-type {final_anno} --greedy -o {output} ' \
-                                   f'-i {graph_path} -p {num_threads} {output}.{rd_type}.annodbg'
+                                   f'-i {graph_path} -p {num_threads} {output}.{rd_type}.annodbg' + MMAP_FLAG
                 res = subprocess.run([command], shell=True)
                 assert (res.returncode == 0)
                 subprocess.run([f'rm {output}{anno_file_extension[rd_type]}*'], shell=True)
@@ -194,6 +197,6 @@ class TestingBase(unittest.TestCase):
                 subprocess.run([f'rm {output}{anno_file_extension[anno_repr]}*'], shell=True)
 
         if final_anno.endswith('brwt') or final_anno.endswith('brwt_coord'):
-            command = f'{METAGRAPH} relax_brwt -o {output} -p {num_threads} {output}.{final_anno}.annodbg'
+            command = f'{METAGRAPH} relax_brwt -o {output} -p {num_threads} {output}.{final_anno}.annodbg' + MMAP_FLAG
             res = subprocess.run([command], shell=True)
             assert (res.returncode == 0)
