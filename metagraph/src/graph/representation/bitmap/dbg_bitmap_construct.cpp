@@ -5,6 +5,7 @@
 #include "common/logger.hpp"
 #include "common/sorted_sets/sorted_set.hpp"
 #include "common/sorted_sets/sorted_multiset.hpp"
+#include "common/utils/file_utils.hpp"
 #include "common/utils/template_utils.hpp"
 #include "kmer/kmer_collector.hpp"
 #include "graph/graph_extensions/node_weights.hpp"
@@ -189,8 +190,9 @@ DBGBitmap* DBGBitmapConstructor
         const auto &chunk_filename = chunk_filenames.at(i);
         DBGBitmap::Chunk chunk;
 
-        std::ifstream chunk_in(chunk_filename, std::ios::binary);
-        chunk.load(chunk_in);
+        std::unique_ptr<std::ifstream> chunk_in
+                = utils::open_ifstream(chunk_filename, utils::with_mmap());
+        chunk.load(*chunk_in);
 
         if (!i) {
             size = chunk.size();
@@ -223,15 +225,16 @@ DBGBitmap* DBGBitmapConstructor
             auto chunk_filename = utils::make_suffix(chunk_filenames.at(chunk_idx),
                                                      DBGBitmap::kChunkFileExtension);
 
-            std::ifstream chunk_in(chunk_filename, std::ios::binary);
+            std::unique_ptr<std::ifstream> chunk_in
+                    = utils::open_ifstream(chunk_filename, utils::with_mmap());
 
-            if (!chunk_in.good()) {
+            if (!chunk_in->good()) {
                 logger->error("Input file {} corrupted", chunk_filename);
                 exit(1);
             }
 
             DBGBitmap::Chunk chunk;
-            chunk.load(chunk_in);
+            chunk.load(*chunk_in);
 
             chunk_idx++;
             ++progress_bar;

@@ -3,7 +3,7 @@
 #include <filesystem>
 
 #include "common/algorithms.hpp"
-
+#include "common/utils/file_utils.hpp"
 
 namespace mtg {
 namespace graph {
@@ -37,11 +37,12 @@ bool NodeWeights::NodeWeights::load(const std::string &filename_base) {
     const auto weights_filename
             = utils::make_suffix(filename_base, kWeightsExtension);
     try {
-        std::ifstream instream(weights_filename, std::ios::binary);
-        if (!instream.good())
+        std::unique_ptr<std::ifstream> in
+                = utils::open_ifstream(weights_filename, utils::with_mmap());
+        if (!in->good())
             return false;
 
-        weights_.load(instream);
+        weights_.load(*in);
         max_weight_ = sdsl::bits::lo_set[weights_.width()];
         return true;
 

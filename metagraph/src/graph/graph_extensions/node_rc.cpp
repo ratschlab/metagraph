@@ -7,6 +7,7 @@
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/utils/template_utils.hpp"
+#include "common/utils/file_utils.hpp"
 
 namespace mtg {
 namespace graph {
@@ -217,12 +218,13 @@ void NodeRC::call_incoming_from_rc(node_index node,
 bool NodeRC::load(const std::string &filename_base) {
     const auto rc_filename = utils::make_suffix(filename_base, kRCExtension);
     try {
-        std::ifstream instream(rc_filename, std::ios::binary);
-        if (!instream.good())
+        std::unique_ptr<std::ifstream> in
+                = utils::open_ifstream(rc_filename, utils::with_mmap());
+        if (!in->good())
             return false;
 
-        rc_.load(instream);
-        mapping_.load(instream);
+        rc_.load(*in);
+        mapping_.load(*in);
         return true;
 
     } catch (...) {
