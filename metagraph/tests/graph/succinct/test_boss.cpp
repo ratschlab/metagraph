@@ -233,10 +233,13 @@ TEST(BOSS, Serialization) {
 
     BOSS *graph = new BOSS(&constructor);
 
-    graph->serialize(test_dump_basename);
+    std::ofstream out(test_dump_basename + ".boss", std::ios::binary);
+    graph->serialize(out);
+    out.close();
 
     BOSS loaded_graph;
-    ASSERT_TRUE(loaded_graph.load(test_dump_basename)) << "Can't load the graph";
+    std::ifstream in(test_dump_basename + ".boss", std::ios::binary);
+    ASSERT_TRUE(loaded_graph.load(in)) << "Can't load the graph";
     EXPECT_EQ(*graph, loaded_graph) << "Loaded graph differs";
     EXPECT_FALSE(BOSS() == loaded_graph);
 

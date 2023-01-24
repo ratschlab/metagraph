@@ -230,16 +230,6 @@ bool BOSS::operator==(const BOSS &other) const {
     return i == W_->size() && j == other.W_->size();
 }
 
-void BOSS::serialize(const std::string &filename) const {
-    const auto out_filename = utils::make_suffix(filename, kExtension);
-
-    std::ofstream outstream(out_filename, std::ios::binary);
-    if (!outstream.good())
-        throw std::ofstream::failure("Error: Can't write to file " + out_filename);
-
-    serialize(outstream);
-}
-
 void BOSS::serialize(std::ofstream &outstream) const {
     if (!outstream.good())
         throw std::ofstream::failure("Error: Can't write to file");
@@ -303,14 +293,6 @@ void BOSS::serialize(Chunk&& chunk, std::ofstream &out, State state) {
     }
 
     out.flush();
-}
-
-bool BOSS::load(const std::string &filename) {
-    auto file = utils::make_suffix(filename, kExtension);
-
-    std::ifstream instream(file, std::ios::binary);
-
-    return load(instream);
 }
 
 bool BOSS::load(std::ifstream &instream) {
@@ -383,7 +365,7 @@ bool BOSS::load_suffix_ranges(std::ifstream &instream) {
         indexed_suffix_length_ = load_number(instream);
         if (indexed_suffix_length_ > k_
                 || indexed_suffix_length_ * log2(alph_size - 1) > 63)
-            throw std::ifstream::failure("");
+            throw std::ifstream::failure("bad index of suffix ranges");
 
         indexed_suffix_ranges_.load(instream);
         indexed_suffix_ranges_rk1_ = decltype(indexed_suffix_ranges_rk1_)(&indexed_suffix_ranges_);
@@ -391,7 +373,7 @@ bool BOSS::load_suffix_ranges(std::ifstream &instream) {
         indexed_suffix_ranges_slct0_ = decltype(indexed_suffix_ranges_slct0_)(&indexed_suffix_ranges_);
 
         if (!instream.good())
-            throw std::ifstream::failure("");
+            throw std::ifstream::failure("couldn't read index of suffix ranges");
 
         return true;
 

@@ -68,9 +68,6 @@ class BOSS {
     uint64_t num_nodes() const;
     uint64_t num_edges() const;
 
-    bool load(const std::string &filename_base);
-    void serialize(const std::string &filename_base) const;
-
     bool load(std::ifstream &instream);
     void serialize(std::ofstream &outstream) const;
 
@@ -502,9 +499,6 @@ class BOSS {
     static constexpr size_t kSentinel = '$';
 
   private:
-    // file dump extension
-    static constexpr auto kExtension = ".dbg";
-
     const mtg::kmer::KmerExtractorBOSS kmer_extractor_;
     const size_t bits_per_char_W_;
 
