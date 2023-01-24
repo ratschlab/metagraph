@@ -8,6 +8,7 @@
 #include <ips4o.hpp>
 
 #include "common/serialization.hpp"
+#include "common/utils/file_utils.hpp"
 #include "common/utils/string_utils.hpp"
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
@@ -448,8 +449,9 @@ void ColumnCompressed<Label>::serialize_coordinates(const std::string &filename)
 
             {
                 sdsl::bit_vector delim_bv;
-                std::ifstream in(tmp_path/"delim", std::ios::binary);
-                delim_bv.load(in);
+                std::unique_ptr<std::ifstream> in
+                        = utils::open_ifstream(tmp_path/"delim", utils::with_mmap());
+                delim_bv.load(*in);
                 bit_vector_smart(std::move(delim_bv)).serialize(out);
             }
 
@@ -483,7 +485,8 @@ bool ColumnCompressed<Label>::load(const std::string &filename) {
     logger->trace("Loading annotations from file {}", f);
 
     try {
-        std::ifstream in(f, std::ios::binary);
+        std::unique_ptr<std::ifstream> in_ptr = utils::open_ifstream(f, utils::with_mmap());
+        auto &in = *in_ptr;
         if (!in.good())
             throw std::ifstream::failure("can't open file");
 
@@ -623,7 +626,8 @@ bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenam
         const auto &filename = make_suffix(filenames[i], kExtension);
         logger->trace("Loading annotations from file {}", filename);
         try {
-            std::ifstream in(filename, std::ios::binary);
+            std::unique_ptr<std::ifstream> in_ptr = utils::open_ifstream(filename, utils::with_mmap());
+            auto &in = *in_ptr;
             if (!in.good())
                 throw std::ifstream::failure("can't open file");
 
@@ -705,7 +709,8 @@ void ColumnCompressed<Label>
             const auto &values_fname
                 = remove_suffix(filename, kExtension) + kCountExtension;
 
-            std::ifstream values_in(values_fname, std::ios::binary);
+            std::unique_ptr<std::ifstream> in_ptr = utils::open_ifstream(values_fname, utils::with_mmap());
+            auto &values_in = *in_ptr;
             if (!values_in)
                 throw std::ifstream::failure("can't open file " + values_fname);
 
@@ -769,7 +774,8 @@ void ColumnCompressed<Label>
         const auto &filename = make_suffix(filenames[i], kExtension);
         logger->trace("Loading columns from {}", filename);
         try {
-            std::ifstream in(filename, std::ios::binary);
+            std::unique_ptr<std::ifstream> in_ptr = utils::open_ifstream(filename, utils::with_mmap());
+            auto &in = *in_ptr;
             if (!in)
                 throw std::ifstream::failure("can't open file");
 
@@ -788,7 +794,9 @@ void ColumnCompressed<Label>
                 = utils::remove_suffix(filename, ColumnCompressed<>::kExtension)
                                                 + ColumnCompressed<>::kCountExtension;
 
-            std::ifstream values_in(values_fname, std::ios::binary);
+            std::unique_ptr<std::ifstream> values_in_ptr
+                    = utils::open_ifstream(values_fname, utils::with_mmap());
+            auto &values_in = *values_in_ptr;
             if (!values_in)
                 throw std::ifstream::failure("can't open file " + values_fname);
 
@@ -861,7 +869,8 @@ void ColumnCompressed<Label>::load_columns_delims_and_values(
         const auto &filename = make_suffix(filenames[i], kExtension);
         logger->trace("Loading columns from {}", filename);
         try {
-            std::ifstream in(filename, std::ios::binary);
+            std::unique_ptr<std::ifstream> in_ptr = utils::open_ifstream(filename, utils::with_mmap());
+            auto &in = *in_ptr;
             if (!in)
                 throw std::ifstream::failure("can't open file");
 
@@ -880,7 +889,9 @@ void ColumnCompressed<Label>::load_columns_delims_and_values(
                     = utils::remove_suffix(filename, ColumnCompressed<>::kExtension)
                     + ColumnCompressed<>::kCoordExtension;
 
-            std::ifstream coord_in(coords_fname, std::ios::binary);
+            std::unique_ptr<std::ifstream> coords_in_ptr
+                    = utils::open_ifstream(coords_fname, utils::with_mmap());
+            auto &coord_in = *coords_in_ptr;
             if (!coord_in)
                 throw std::ifstream::failure("can't open file " + coords_fname);
 

@@ -145,6 +145,7 @@ uint64_t get_num_columns(const std::vector<std::string> &files,
     #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
     for (size_t i = 0; i < files.size(); ++i) {
         std::string file = utils::make_suffix(files[i], extension);
+        // TODO: call load_label_encoder
         std::ifstream instream(file, std::ios::binary);
         if (!instream.good()) {
             logger->error("Can't read from {}", file);

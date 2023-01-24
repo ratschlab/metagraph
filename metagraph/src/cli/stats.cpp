@@ -355,7 +355,7 @@ int print_stats(Config *config) {
             try {
                 std::ifstream instream(file, std::ios::binary);
 
-                // TODO: make this more reliable
+                // TODO: make this more reliable: add load_label_encoder to all annotators
                 if (parse_annotation_type(file) == Config::ColumnCompressed) {
                     // Column compressed dumps the number of rows first
                     // skipping it...

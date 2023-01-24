@@ -244,8 +244,8 @@ BRWT BRWTBottomUpBuilder::build(
         get_node = [tmp_dir](uint64_t id) {
             BRWT node;
             auto filename = tmp_dir/std::to_string(id);
-            std::ifstream in(filename, std::ios::binary);
-            if (!node.load(in)) {
+            std::unique_ptr<std::ifstream> in = utils::open_ifstream(filename, utils::with_mmap());
+            if (!node.load(*in)) {
                 logger->error("Can't load temp BRWT node {}", filename);
                 exit(1);
             }

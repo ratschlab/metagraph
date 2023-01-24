@@ -126,6 +126,7 @@ StaticBinRelAnnotator<BinaryMatrixType, Label>
     label_encoder_ = label_encoder;
 }
 
+// TODO: make row-diff annotations .column.annodbg format and remove this function
 bool merge_load_row_diff(const std::vector<std::string> &filenames,
                          const ColumnCallback &callback,
                          size_t num_threads) {
@@ -145,6 +146,7 @@ bool merge_load_row_diff(const std::vector<std::string> &filenames,
             error_occurred = true;
         }
 
+        // TODO: use load_label_encoder
         LabelEncoder<std::string> label_encoder;
         if (!label_encoder.load(instream)) {
             common::logger->error("Can't load label encoder from {}", filenames[i]);

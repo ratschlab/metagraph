@@ -1025,7 +1025,7 @@ void convert_to_row_disk(
         std::vector<std::string> file_batch;
 
         for (; i < files.size(); ++i) {
-            uint64_t file_size = fs::file_size(files[i]);
+            uint64_t file_size = utils::with_mmap() ? 0 : fs::file_size(files[i]);
 
             if (file_size > mem_bytes) {
                 logger->error("Not enough memory to load {}, requires {} MB",
@@ -1776,14 +1776,16 @@ void convert_to_row_diff(const std::vector<std::string> &files,
             logger->error("Can't find anchors bitmap at {}", anchors_fname);
             exit(1);
         }
-        uint64_t anchor_size = fs::file_size(anchors_fname);
-        if (anchor_size > mem_bytes) {
-            logger->warn("Anchor bitmap ({} MiB) is larger than the memory"
-                         " allocated ({} MiB). Reserve more RAM.",
-                         anchor_size >> 20, mem_bytes >> 20);
-            return;
+        if (!utils::with_mmap()) { // only reserve space for anchors with no mmap
+            uint64_t anchor_size = fs::file_size(anchors_fname);
+            if (anchor_size > mem_bytes) {
+                logger->warn("Anchor bitmap ({} MB) is larger than the memory"
+                             " allocated ({} MB). Reserve more RAM.",
+                             anchor_size / 1e6, mem_bytes / 1e6);
+                return;
+            }
+            mem_bytes -= anchor_size;
         }
-        mem_bytes -= anchor_size;
     }
 
     if (!files.size())
@@ -1796,8 +1798,8 @@ void convert_to_row_diff(const std::vector<std::string> &files,
         std::vector<std::string> file_batch;
         for ( ; i < files.size(); ++i) {
             // also add some space for buffers for each column
-            uint64_t file_size = fs::file_size(files[i]) + ROW_DIFF_BUFFER_BYTES;
-            if (with_values) {
+            uint64_t file_size = (utils::with_mmap() ? 0 : fs::file_size(files[i])) + ROW_DIFF_BUFFER_BYTES;
+            if (with_values && !utils::with_mmap()) {
                 // also add k-mer counts
                 try {
                     const auto &values_fname
@@ -1809,7 +1811,7 @@ void convert_to_row_diff(const std::vector<std::string> &files,
                     // is missing for a non-empty annotation, the error will be thrown later
                     // in convert_batch_to_row_diff, so we skip it here in any case.
                 }
-            } else if (with_coordinates) {
+            } else if (with_coordinates && !utils::with_mmap()) {
                 // also add k-mer coordinates
                 try {
                     const auto &coord_fname
