@@ -139,28 +139,19 @@ binmat::LinkageMatrix cluster_columns(const std::vector<std::string> &files,
 uint64_t get_num_columns(const std::vector<std::string> &files,
                          Config::AnnotationType anno_type) {
     size_t num_columns = 0;
-    std::string extension = anno_type == Config::ColumnCompressed
-            ? ColumnCompressed<>::kExtension
-            : RowDiffColumnAnnotator::kExtension;
     #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
     for (size_t i = 0; i < files.size(); ++i) {
-        std::string file = utils::make_suffix(files[i], extension);
-        // TODO: call load_label_encoder
-        std::ifstream instream(file, std::ios::binary);
-        if (!instream.good()) {
-            logger->error("Can't read from {}", file);
-            exit(1);
-        }
-        if (anno_type == Config::ColumnCompressed)
-            std::ignore = load_number(instream);
-
-        annot::LabelEncoder<std::string> label_encoder;
-        if (!label_encoder.load(instream)) {
-            logger->error("Can't load label encoder from {}", file);
+        size_t m = 0;
+        try {
+            m = anno_type == Config::ColumnCompressed
+                    ? ColumnCompressed<>::read_label_encoder(files[i]).size()
+                    : RowDiffColumnAnnotator::read_label_encoder(files[i]).size();
+        } catch (const std::exception &e) {
+            logger->error("Error when scanning annotations: {}", e.what());
             exit(1);
         }
         #pragma omp atomic
-        num_columns += label_encoder.size();
+        num_columns += m;
     }
     return num_columns;
 }

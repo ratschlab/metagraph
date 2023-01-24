@@ -79,6 +79,17 @@ bool StaticBinRelAnnotator<BinaryMatrixType, Label>::load(const std::string &fil
 }
 
 template <class BinaryMatrixType, typename Label>
+LabelEncoder<Label>
+StaticBinRelAnnotator<BinaryMatrixType, Label>::read_label_encoder(const std::string &filename) {
+    const auto &fname = make_suffix(filename, kExtension);
+    std::ifstream in(fname, std::ios::binary);
+    LabelEncoder<Label> label_encoder;
+    if (!label_encoder.load(in))
+        throw std::ofstream::failure("Can't load label encoder from " + fname);
+    return label_encoder;
+}
+
+template <class BinaryMatrixType, typename Label>
 void StaticBinRelAnnotator<BinaryMatrixType, Label>::except_dyn() {
     throw std::runtime_error("Dynamic actions are not supported"
                              " in static representation");
@@ -132,34 +143,21 @@ bool merge_load_row_diff(const std::vector<std::string> &filenames,
                          size_t num_threads) {
     std::atomic<bool> error_occurred = false;
 
-    std::vector<uint64_t> offsets(filenames.size() + 1, 0);
+    std::vector<uint64_t> offsets(filenames.size(), 0);
 
     // load labels
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 1)
-    for (size_t i = 0; i < filenames.size(); ++i) {
-        if (error_occurred)
-            continue;
-
-        std::ifstream instream(filenames[i], std::ios::binary);
-        if (!instream.good()) {
-            common::logger->error("Can't read from {}", filenames[i]);
+    for (size_t i = 1; i < filenames.size(); ++i) {
+        try {
+            offsets[i] = RowDiffColumnAnnotator::read_label_encoder(filenames[i - 1]).size();
+        } catch (...) {
+            common::logger->error("Can't load label encoder from {}", filenames[i - 1]);
             error_occurred = true;
         }
-
-        // TODO: use load_label_encoder
-        LabelEncoder<std::string> label_encoder;
-        if (!label_encoder.load(instream)) {
-            common::logger->error("Can't load label encoder from {}", filenames[i]);
-            error_occurred = true;
-        }
-
-        offsets[i + 1] = label_encoder.size();
     }
 
     // compute global offsets (partial sums)
     std::partial_sum(offsets.begin(), offsets.end(), offsets.begin());
-
-    std::vector<std::string> labels(offsets.back());
 
     // load annotations
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 1)

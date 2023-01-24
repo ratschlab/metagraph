@@ -19,7 +19,7 @@ const std::string test_dump_basename_vec_bad = test_dump_basename + "_bad_filena
 const std::string test_dump_basename_vec_good = test_dump_basename + "_row_compressed";
 
 
-TEST(RowCompressed, load_label_encoder) {
+TEST(RowCompressed, read_label_encoder) {
     {
         RowCompressed<> annotation(5, false);
         annotation.set(0, { "Label0", "Label2", "Label8" });
@@ -29,13 +29,12 @@ TEST(RowCompressed, load_label_encoder) {
         annotation.serialize(test_dump_basename_vec_good);
     }
     {
-        auto label_encoder = RowCompressed<>::load_label_encoder(test_dump_basename_vec_good);
-        ASSERT_TRUE(label_encoder.get());
-        EXPECT_EQ(4u, label_encoder->size());
+        auto label_encoder = RowCompressed<>::read_label_encoder(test_dump_basename_vec_good);
+        EXPECT_EQ(4u, label_encoder.size());
     }
 }
 
-TEST(RowCompressed, load_shape) {
+TEST(RowCompressed, read_shape) {
     {
         RowCompressed<> annotation(5, false);
         annotation.set(0, { "Label0", "Label2", "Label8" });
@@ -46,14 +45,13 @@ TEST(RowCompressed, load_shape) {
     }
     {
         uint64_t num_rows, num_relations;
-        RowCompressed<>::load_shape(test_dump_basename_vec_good,
-                                              &num_rows, &num_relations);
+        RowCompressed<>::read_shape(test_dump_basename_vec_good, &num_rows, &num_relations);
         ASSERT_EQ(5u, num_rows);
         ASSERT_EQ(6u, num_relations);
     }
 }
 
-TEST(RowCompressed, load_label_encoder_and_load_shape) {
+TEST(RowCompressed, read_label_encoder_and_read_shape) {
     {
         RowCompressed<> annotation(5, false);
         annotation.set(0, { "Label0", "Label2", "Label8" });
@@ -64,19 +62,15 @@ TEST(RowCompressed, load_label_encoder_and_load_shape) {
     }
     {
         uint64_t num_rows, num_relations;
-        auto label_encoder = RowCompressed<>::load_label_encoder(
-            test_dump_basename_vec_good
-        );
-        RowCompressed<>::load_shape(test_dump_basename_vec_good,
-                                              &num_rows, &num_relations);
+        auto label_encoder = RowCompressed<>::read_label_encoder(test_dump_basename_vec_good);
+        RowCompressed<>::read_shape(test_dump_basename_vec_good, &num_rows, &num_relations);
         ASSERT_EQ(5u, num_rows);
         ASSERT_EQ(6u, num_relations);
-        ASSERT_TRUE(label_encoder.get());
-        EXPECT_EQ(4u, label_encoder->size());
+        EXPECT_EQ(4u, label_encoder.size());
     }
 }
 
-TEST(RowCompressed, load_shape_and_load_label_encoder) {
+TEST(RowCompressed, read_shape_and_read_label_encoder) {
     {
         RowCompressed<> annotation(5, false);
         annotation.set(0, { "Label0", "Label2", "Label8" });
@@ -87,15 +81,11 @@ TEST(RowCompressed, load_shape_and_load_label_encoder) {
     }
     {
         uint64_t num_rows, num_relations;
-        RowCompressed<>::load_shape(test_dump_basename_vec_good,
-                                              &num_rows, &num_relations);
-        auto label_encoder = RowCompressed<>::load_label_encoder(
-            test_dump_basename_vec_good
-        );
+        RowCompressed<>::read_shape(test_dump_basename_vec_good, &num_rows, &num_relations);
+        auto label_encoder = RowCompressed<>::read_label_encoder(test_dump_basename_vec_good);
         ASSERT_EQ(5u, num_rows);
         ASSERT_EQ(6u, num_relations);
-        ASSERT_TRUE(label_encoder.get());
-        EXPECT_EQ(4u, label_encoder->size());
+        EXPECT_EQ(4u, label_encoder.size());
     }
 }
 
@@ -106,15 +96,12 @@ TEST(RowCompressed, SerializationExtension) {
         annotation.set(2, { "Label1", "Label2" });
         annotation.set(4, { "Label8" });
 
-        annotation.serialize(test_dump_basename_vec_good
-                                        + annotation.file_extension());
+        annotation.serialize(test_dump_basename_vec_good + annotation.file_extension());
     }
     {
         RowCompressed<> annotation(5, false);
-        ASSERT_FALSE(annotation.load(test_dump_basename_vec_bad
-                                        + annotation.file_extension()));
-        ASSERT_TRUE(annotation.load(test_dump_basename_vec_good
-                                        + annotation.file_extension()));
+        ASSERT_FALSE(annotation.load(test_dump_basename_vec_bad + annotation.file_extension()));
+        ASSERT_TRUE(annotation.load(test_dump_basename_vec_good + annotation.file_extension()));
 
         EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }),
                   convert_to_set(annotation.get(0)));

@@ -149,13 +149,11 @@ std::unique_ptr<StaticAnnotation> convert(const std::string &filename) {
     using MatrixType = typename StaticAnnotation::binary_matrix_type;
     using Label = typename StaticAnnotation::Label;
 
-    auto label_encoder = RowCompressed<Label>::load_label_encoder(filename);
-    if (!label_encoder.get())
-        throw std::iostream::failure("Cannot load label encoder");
+    auto label_encoder = RowCompressed<Label>::read_label_encoder(filename);
 
     uint64_t num_rows;
     uint64_t num_relations;
-    RowCompressed<Label>::load_shape(filename, &num_rows, &num_relations);
+    RowCompressed<Label>::read_shape(filename, &num_rows, &num_relations);
 
     constexpr size_t num_passes = std::is_same_v<MatrixType, Rainbowfish> ? 2u : 1u;
     ProgressBar progress_bar(num_rows * num_passes, "Processing rows",
@@ -175,25 +173,25 @@ std::unique_ptr<StaticAnnotation> convert(const std::string &filename) {
     std::unique_ptr<MatrixType> matrix;
 
     if constexpr(std::is_same_v<MatrixType, RowConcatenated<>>) {
-        matrix = std::make_unique<MatrixType>(call_rows, label_encoder->size(), num_rows, num_relations);
+        matrix = std::make_unique<MatrixType>(call_rows, label_encoder.size(), num_rows, num_relations);
 
     } else if constexpr(std::is_same_v<MatrixType, Rainbowfish>) {
-        matrix = std::make_unique<MatrixType>(call_rows, label_encoder->size());
+        matrix = std::make_unique<MatrixType>(call_rows, label_encoder.size());
 
     } else if constexpr(std::is_same_v<MatrixType, BinRelWT>) {
-        matrix = std::make_unique<MatrixType>(call_rows, num_relations, label_encoder->size());
+        matrix = std::make_unique<MatrixType>(call_rows, num_relations, label_encoder.size());
 
     } else if constexpr(std::is_same_v<MatrixType, BinRelWT_sdsl>) {
-        matrix = std::make_unique<MatrixType>(call_rows, num_relations, label_encoder->size());
+        matrix = std::make_unique<MatrixType>(call_rows, num_relations, label_encoder.size());
 
     } else if constexpr(std::is_same_v<MatrixType, RowSparse>) {
-        matrix = std::make_unique<MatrixType>(call_rows, label_encoder->size(), num_rows, num_relations);
+        matrix = std::make_unique<MatrixType>(call_rows, label_encoder.size(), num_rows, num_relations);
 
     } else {
         static_assert(utils::dependent_false<StaticAnnotation>::value);
     }
 
-    return std::make_unique<StaticAnnotation>(std::move(matrix), *label_encoder);
+    return std::make_unique<StaticAnnotation>(std::move(matrix), label_encoder);
 }
 
 template std::unique_ptr<RowFlatAnnotator> convert(const std::string &filename);
@@ -1495,7 +1493,7 @@ void merge(std::vector<std::unique_ptr<MultiLabelEncoded<Label>>>&& annotators,
     if (annotators.size()) {
         num_rows = annotators.at(0)->num_objects();
     } else {
-        RowCompressed<Label>::load_shape(filenames.at(0), &num_rows, &num_relations);
+        RowCompressed<Label>::read_shape(filenames.at(0), &num_rows, &num_relations);
     }
     assert(num_rows);
 
@@ -1512,14 +1510,13 @@ void merge(std::vector<std::unique_ptr<MultiLabelEncoded<Label>>>&& annotators,
         );
     }
 
-    std::vector<std::unique_ptr<const LEncoder> > loaded_label_encoders;
+    std::vector<LEncoder> loaded_label_encoders;
     std::vector<std::unique_ptr<StreamRows<>>> streams;
     for (auto filename : filenames) {
         if (utils::ends_with(filename, RowCompressed<Label>::kExtension)) {
 
-            auto label_encoder = RowCompressed<Label>::load_label_encoder(filename);
-            label_encoders.push_back(label_encoder.get());
-            loaded_label_encoders.push_back(std::move(label_encoder));
+            loaded_label_encoders.emplace_back(RowCompressed<Label>::read_label_encoder(filename));
+            label_encoders.push_back(&loaded_label_encoders.back());
 
             streams.emplace_back(new StreamRows<>(RowCompressed<Label>::get_row_streamer(filename)));
 
@@ -1890,7 +1887,7 @@ load_coords(Annotator&& anno, const std::vector<std::string> &files) {
 
     #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
     for (size_t i = 0; i < files.size(); ++i) {
-        auto label_encoder = ColumnCompressed<>::load_label_encoder(files[i]);
+        auto label_encoder = ColumnCompressed<>::read_label_encoder(files[i]);
 
         auto coords_fname = utils::remove_suffix(files[i], ColumnCompressed<>::kExtension)
                                                         + ColumnCompressed<>::kCoordExtension;
