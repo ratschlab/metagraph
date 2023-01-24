@@ -200,6 +200,8 @@ class TestingBase(unittest.TestCase):
                 subprocess.run([f'rm {output}{anno_file_extension[anno_repr]}*'], shell=True)
 
         if final_anno.endswith('brwt') or final_anno.endswith('brwt_coord'):
-            command = f'{METAGRAPH} relax_brwt -o {output} -p {num_threads} {output}.{final_anno}.annodbg' + MMAP_FLAG
+            # write to a new file to avoid overwrites when memory mapping is enabled
+            command = f'{METAGRAPH} relax_brwt -o {output}_relaxed -p {num_threads} {output}.{final_anno}.annodbg' + MMAP_FLAG
             res = subprocess.run([command], shell=True)
             assert (res.returncode == 0)
+            subprocess.run([f'mv {output}_relaxed.{final_anno}.annodbg {output}.{final_anno}.annodbg'], shell=True)
