@@ -29,7 +29,8 @@ static bool WITH_MMAP = false;
 bool with_mmap(bool set_bit) {
     if (set_bit) {
         // TODO: is there a good way to check this, like when opening outstreams?
-        logger->info("Memory mapping enabled. Make sure all output files are"
+        // It could be logger->info() but that prints to stdout. Print info() to stderr?
+        logger->warn("Memory mapping enabled. Make sure all output files are"
                      " different from the input to avoid errors.");
         WITH_MMAP = true;
     }
