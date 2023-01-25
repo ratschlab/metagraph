@@ -132,14 +132,15 @@ void bit_vector::call_ones_adaptive(uint64_t begin, uint64_t end,
     assert(begin <= end);
     assert(end <= size());
 
-    if (num_set_bits() <= size() / WORD_ACCESS_VS_SELECT_FACTOR) {
+    // TODO: store num_set_bits() to avoid this call
+    const uint64_t m = num_set_bits();
+    if (m <= size() / WORD_ACCESS_VS_SELECT_FACTOR) {
         // sparse
         uint64_t num_ones = end ? rank1(end - 1) : 0;
         for (uint64_t r = begin ? rank1(begin - 1) + 1 : 1; r <= num_ones; ++r) {
             callback(select1(r));
         }
-    } else if ((size() - num_set_bits())
-                <= size() / WORD_ACCESS_VS_SELECT_FACTOR) {
+    } else if (size() - m <= size() / WORD_ACCESS_VS_SELECT_FACTOR) {
         // dense
         uint64_t one_pos = begin;
         uint64_t zero_pos = 0;
