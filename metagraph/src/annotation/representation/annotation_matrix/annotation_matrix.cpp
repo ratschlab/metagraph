@@ -1,10 +1,12 @@
 #include "annotation_matrix.hpp"
 
+#include <filesystem>
+
 #include "common/threads/threading.hpp"
 #include "common/utils/string_utils.hpp"
+#include "common/utils/file_utils.hpp"
 #include "common/serialization.hpp"
 #include "static_annotators_def.hpp"
-#include "common/utils/file_utils.hpp"
 
 namespace mtg {
 namespace annot {
@@ -51,26 +53,42 @@ template <class BinaryMatrixType, typename Label>
 void
 StaticBinRelAnnotator<BinaryMatrixType, Label>
 ::serialize(const std::string &filename) const {
-    std::ofstream outstream(make_suffix(filename, kExtension), std::ios::binary);
-    if (!outstream.good()) {
-        throw std::ofstream::failure("Bad stream");
-    }
-    label_encoder_.serialize(outstream);
-    matrix_->serialize(outstream);
+    const auto &fname = make_suffix(filename, kExtension);
+    std::ofstream out = utils::open_new_ofstream(fname);
+    if (!out.good())
+        throw std::ofstream::failure("Can't write to " + fname);
+    label_encoder_.serialize(out);
+    matrix_->serialize(out);
 }
 
 template <class BinaryMatrixType, typename Label>
 bool StaticBinRelAnnotator<BinaryMatrixType, Label>::load(const std::string &filename) {
-    utils::NamedIfstream instream(make_suffix(filename, kExtension), std::ios::binary);
-    if (!instream.good())
+    const auto &fname = make_suffix(filename, kExtension);
+    using T = StaticBinRelAnnotator<BinaryMatrixType, Label>;
+    bool use_mmap = std::is_same_v<T, RowDiffDiskAnnotator>
+                        || std::is_same_v<T, IntRowDiffDiskAnnotator>
+                        || std::is_same_v<T, RowDiffDiskCoordAnnotator>;
+    std::unique_ptr<std::ifstream> in = utils::open_ifstream(fname, use_mmap || utils::with_mmap());
+    if (!in->good())
         return false;
 
     try {
         assert(matrix_.get());
-        return label_encoder_.load(instream) && matrix_->load(instream);
+        return label_encoder_.load(*in) && matrix_->load(*in);
     } catch (...) {
         return false;
     }
+}
+
+template <class BinaryMatrixType, typename Label>
+LabelEncoder<Label>
+StaticBinRelAnnotator<BinaryMatrixType, Label>::read_label_encoder(const std::string &filename) {
+    const auto &fname = make_suffix(filename, kExtension);
+    std::ifstream in(fname, std::ios::binary);
+    LabelEncoder<Label> label_encoder;
+    if (!label_encoder.load(in))
+        throw std::ofstream::failure("Can't load label encoder from " + fname);
+    return label_encoder;
 }
 
 template <class BinaryMatrixType, typename Label>
@@ -87,12 +105,8 @@ bool StaticBinRelAnnotator<BinaryMatrixType, Label>
 
     #pragma omp parallel for num_threads(num_threads)
     for (uint64_t i = 0; i < m; ++i) {
-        std::ofstream outstream(
-            remove_suffix(prefix, kExtension)
-                + "." + std::to_string(i)
-                + ".text.annodbg"
-        );
-
+        std::ofstream outstream(remove_suffix(prefix, kExtension)
+                                    + fmt::format(".{}.text.annodbg", i));
         if (!outstream.good()) {
             std::cerr << "ERROR: dumping column " << i << " failed" << std::endl;
             success = false;
@@ -121,38 +135,27 @@ StaticBinRelAnnotator<BinaryMatrixType, Label>
     label_encoder_ = label_encoder;
 }
 
+// TODO: make row-diff annotations .column.annodbg format and remove this function
 bool merge_load_row_diff(const std::vector<std::string> &filenames,
                          const ColumnCallback &callback,
                          size_t num_threads) {
     std::atomic<bool> error_occurred = false;
 
-    std::vector<uint64_t> offsets(filenames.size() + 1, 0);
+    std::vector<uint64_t> offsets(filenames.size(), 0);
 
     // load labels
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 1)
-    for (size_t i = 0; i < filenames.size(); ++i) {
-        if (error_occurred)
-            continue;
-
-        std::ifstream instream(filenames[i], std::ios::binary);
-        if (!instream.good()) {
-            common::logger->error("Can't read from {}", filenames[i]);
+    for (size_t i = 1; i < filenames.size(); ++i) {
+        try {
+            offsets[i] = RowDiffColumnAnnotator::read_label_encoder(filenames[i - 1]).size();
+        } catch (...) {
+            common::logger->error("Can't load label encoder from {}", filenames[i - 1]);
             error_occurred = true;
         }
-
-        LabelEncoder<std::string> label_encoder;
-        if (!label_encoder.load(instream)) {
-            common::logger->error("Can't load label encoder from {}", filenames[i]);
-            error_occurred = true;
-        }
-
-        offsets[i + 1] = label_encoder.size();
     }
 
     // compute global offsets (partial sums)
     std::partial_sum(offsets.begin(), offsets.end(), offsets.begin());
-
-    std::vector<std::string> labels(offsets.back());
 
     // load annotations
     #pragma omp parallel for num_threads(num_threads) schedule(dynamic, 1)
@@ -163,9 +166,9 @@ bool merge_load_row_diff(const std::vector<std::string> &filenames,
         try {
             common::logger->trace("Loading annotations from file {}", filenames[i]);
             LabelEncoder<std::string> label_encoder;
-            std::ifstream instream(filenames[i], std::ios::binary);
+            std::unique_ptr<std::ifstream> in = utils::open_ifstream(filenames[i]);
             binmat::RowDiff<binmat::ColumnMajor> matrix;
-            if (!label_encoder.load(instream) || !matrix.load(instream)) {
+            if (!label_encoder.load(*in) || !matrix.load(*in)) {
                 common::logger->error("Can't load {}", filenames[i]);
                 std::exit(1);
             }

@@ -149,13 +149,11 @@ std::unique_ptr<StaticAnnotation> convert(const std::string &filename) {
     using MatrixType = typename StaticAnnotation::binary_matrix_type;
     using Label = typename StaticAnnotation::Label;
 
-    auto label_encoder = RowCompressed<Label>::load_label_encoder(filename);
-    if (!label_encoder.get())
-        throw std::iostream::failure("Cannot load label encoder");
+    auto label_encoder = RowCompressed<Label>::read_label_encoder(filename);
 
     uint64_t num_rows;
     uint64_t num_relations;
-    RowCompressed<Label>::load_shape(filename, &num_rows, &num_relations);
+    RowCompressed<Label>::read_shape(filename, &num_rows, &num_relations);
 
     constexpr size_t num_passes = std::is_same_v<MatrixType, Rainbowfish> ? 2u : 1u;
     ProgressBar progress_bar(num_rows * num_passes, "Processing rows",
@@ -175,25 +173,25 @@ std::unique_ptr<StaticAnnotation> convert(const std::string &filename) {
     std::unique_ptr<MatrixType> matrix;
 
     if constexpr(std::is_same_v<MatrixType, RowConcatenated<>>) {
-        matrix = std::make_unique<MatrixType>(call_rows, label_encoder->size(), num_rows, num_relations);
+        matrix = std::make_unique<MatrixType>(call_rows, label_encoder.size(), num_rows, num_relations);
 
     } else if constexpr(std::is_same_v<MatrixType, Rainbowfish>) {
-        matrix = std::make_unique<MatrixType>(call_rows, label_encoder->size());
+        matrix = std::make_unique<MatrixType>(call_rows, label_encoder.size());
 
     } else if constexpr(std::is_same_v<MatrixType, BinRelWT>) {
-        matrix = std::make_unique<MatrixType>(call_rows, num_relations, label_encoder->size());
+        matrix = std::make_unique<MatrixType>(call_rows, num_relations, label_encoder.size());
 
     } else if constexpr(std::is_same_v<MatrixType, BinRelWT_sdsl>) {
-        matrix = std::make_unique<MatrixType>(call_rows, num_relations, label_encoder->size());
+        matrix = std::make_unique<MatrixType>(call_rows, num_relations, label_encoder.size());
 
     } else if constexpr(std::is_same_v<MatrixType, RowSparse>) {
-        matrix = std::make_unique<MatrixType>(call_rows, label_encoder->size(), num_rows, num_relations);
+        matrix = std::make_unique<MatrixType>(call_rows, label_encoder.size(), num_rows, num_relations);
 
     } else {
         static_assert(utils::dependent_false<StaticAnnotation>::value);
     }
 
-    return std::make_unique<StaticAnnotation>(std::move(matrix), *label_encoder);
+    return std::make_unique<StaticAnnotation>(std::move(matrix), label_encoder);
 }
 
 template std::unique_ptr<RowFlatAnnotator> convert(const std::string &filename);
@@ -828,7 +826,7 @@ void convert_batch_to_row_disk(
         exit(1);
     }
 
-    std::ofstream out(outfname, std::ios::binary);
+    std::ofstream out = utils::open_new_ofstream(outfname);
     if (!out.good())
         throw std::ofstream::failure("Can't write to " + outfname);
 
@@ -902,7 +900,7 @@ void merge_row_disk_annotations(const std::vector<std::string> &files,
         LEncoder le;
         matrices[j] = std::make_unique<RowDisk>();
 
-        utils::NamedIfstream in(files[j], std::ios::in);
+        sdsl::mmap_ifstream in(files[j], std::ios::binary);
         if (!le.load(in)) {
             logger->error("Can't load label encoder from {}", files[j]);
             exit(1);
@@ -940,7 +938,7 @@ void merge_row_disk_annotations(const std::vector<std::string> &files,
         exit(1);
     }
 
-    std::ofstream out(outfname, std::ios::binary);
+    std::ofstream out = utils::open_new_ofstream(outfname);
     if (!out.good())
         throw std::ofstream::failure("Can't write to " + outfname);
 
@@ -1025,7 +1023,7 @@ void convert_to_row_disk(
         std::vector<std::string> file_batch;
 
         for (; i < files.size(); ++i) {
-            uint64_t file_size = fs::file_size(files[i]);
+            uint64_t file_size = utils::with_mmap() ? 0 : fs::file_size(files[i]);
 
             if (file_size > mem_bytes) {
                 logger->error("Not enough memory to load {}, requires {} MB",
@@ -1079,19 +1077,19 @@ void convert_to_row_disk(
 
 
 uint64_t get_num_rows_from_row_diff_anno(const std::string &fname) {
-    std::ifstream in(fname, std::ios::binary);
-    if (!in.good())
+    std::unique_ptr<std::ifstream> in = utils::open_ifstream(fname);
+    if (!in->good())
         throw std::ifstream::failure("can't open file");
 
     LabelEncoder<std::string> label_encoder;
     binmat::RowDiff<binmat::ColumnMajor> matrix;
 
-    if (!label_encoder.load(in) || !matrix.load(in)) {
+    if (!label_encoder.load(*in) || !matrix.load(*in)) {
         logger->error("Can't load {}", fname);
         exit(1);
     }
 
-    return matrix.diffs().num_rows();
+    return matrix.num_rows();
 }
 
 template <>
@@ -1180,7 +1178,7 @@ void convert_to_row_diff<IntRowDiffDiskAnnotator>(
             },
             num_threads);
 
-    std::ofstream out(outfname, std::ios::binary);
+    std::ofstream out = utils::open_new_ofstream(outfname);
     if (!out.good())
         throw std::ofstream::failure("Can't write to " + outfname);
 
@@ -1298,7 +1296,7 @@ void convert_to_row_diff<RowDiffDiskCoordAnnotator>(
             },
             num_threads);
 
-    std::ofstream out(outfname, std::ios::binary);
+    std::ofstream out = utils::open_new_ofstream(outfname);
     if (!out.good())
         throw std::ofstream::failure("Can't write to " + outfname);
 
@@ -1404,19 +1402,19 @@ convert<BinRelWTAnnotator, std::string>(ColumnCompressed<std::string>&& annotato
 }
 
 template <typename Label>
-void merge_rows(const std::vector<const LabelEncoder<Label> *> &label_encoders,
+void merge_rows(const std::vector<LabelEncoder<Label>> &label_encoders,
                 std::function<const BinaryMatrix::SetBitPositions(uint64_t)> get_next_row,
                 uint64_t num_rows,
                 const std::string &outfile) {
     LabelEncoder<Label> merged_label_enc;
     std::vector<std::vector<uint64_t> > label_mappings;
 
-    for (const auto *label_encoder : label_encoders) {
-        merged_label_enc.merge(*label_encoder);
+    for (const auto &label_encoder : label_encoders) {
+        merged_label_enc.merge(label_encoder);
 
         std::vector<uint64_t> v;
-        for (size_t j = 0; j < label_encoder->size(); ++j) {
-            v.push_back(merged_label_enc.encode(label_encoder->decode(j)));
+        for (size_t j = 0; j < label_encoder.size(); ++j) {
+            v.push_back(merged_label_enc.encode(label_encoder.decode(j)));
         }
         label_mappings.push_back(v);
     }
@@ -1495,31 +1493,28 @@ void merge(std::vector<std::unique_ptr<MultiLabelEncoded<Label>>>&& annotators,
     if (annotators.size()) {
         num_rows = annotators.at(0)->num_objects();
     } else {
-        RowCompressed<Label>::load_shape(filenames.at(0), &num_rows, &num_relations);
+        RowCompressed<Label>::read_shape(filenames.at(0), &num_rows, &num_relations);
     }
     assert(num_rows);
 
-    std::vector<const LEncoder*> label_encoders;
+    std::vector<LEncoder> label_encoders;
 
     std::vector<std::unique_ptr<Iterate<BinaryMatrix::SetBitPositions>>> annotator_row_iterators;
     for (const auto &annotator : annotators) {
         if (annotator->num_objects() != num_rows)
             throw std::runtime_error("Annotators have different number of rows");
 
-        label_encoders.push_back(&annotator->get_label_encoder());
+        label_encoders.push_back(annotator->get_label_encoder());
         annotator_row_iterators.push_back(
             std::make_unique<IterateRows<MultiLabelEncoded<Label>>>(*annotator)
         );
     }
 
-    std::vector<std::unique_ptr<const LEncoder> > loaded_label_encoders;
     std::vector<std::unique_ptr<StreamRows<>>> streams;
     for (auto filename : filenames) {
         if (utils::ends_with(filename, RowCompressed<Label>::kExtension)) {
 
-            auto label_encoder = RowCompressed<Label>::load_label_encoder(filename);
-            label_encoders.push_back(label_encoder.get());
-            loaded_label_encoders.push_back(std::move(label_encoder));
+            label_encoders.emplace_back(RowCompressed<Label>::read_label_encoder(filename));
 
             streams.emplace_back(new StreamRows<>(RowCompressed<Label>::get_row_streamer(filename)));
 
@@ -1776,14 +1771,16 @@ void convert_to_row_diff(const std::vector<std::string> &files,
             logger->error("Can't find anchors bitmap at {}", anchors_fname);
             exit(1);
         }
-        uint64_t anchor_size = fs::file_size(anchors_fname);
-        if (anchor_size > mem_bytes) {
-            logger->warn("Anchor bitmap ({} MiB) is larger than the memory"
-                         " allocated ({} MiB). Reserve more RAM.",
-                         anchor_size >> 20, mem_bytes >> 20);
-            return;
+        if (!utils::with_mmap()) { // only reserve space for anchors with no mmap
+            uint64_t anchor_size = fs::file_size(anchors_fname);
+            if (anchor_size > mem_bytes) {
+                logger->warn("Anchor bitmap ({} MB) is larger than the memory"
+                             " allocated ({} MB). Reserve more RAM.",
+                             anchor_size / 1e6, mem_bytes / 1e6);
+                return;
+            }
+            mem_bytes -= anchor_size;
         }
-        mem_bytes -= anchor_size;
     }
 
     if (!files.size())
@@ -1796,8 +1793,8 @@ void convert_to_row_diff(const std::vector<std::string> &files,
         std::vector<std::string> file_batch;
         for ( ; i < files.size(); ++i) {
             // also add some space for buffers for each column
-            uint64_t file_size = fs::file_size(files[i]) + ROW_DIFF_BUFFER_BYTES;
-            if (with_values) {
+            uint64_t file_size = (utils::with_mmap() ? 0 : fs::file_size(files[i])) + ROW_DIFF_BUFFER_BYTES;
+            if (with_values && !utils::with_mmap()) {
                 // also add k-mer counts
                 try {
                     const auto &values_fname
@@ -1809,7 +1806,7 @@ void convert_to_row_diff(const std::vector<std::string> &files,
                     // is missing for a non-empty annotation, the error will be thrown later
                     // in convert_batch_to_row_diff, so we skip it here in any case.
                 }
-            } else if (with_coordinates) {
+            } else if (with_coordinates && !utils::with_mmap()) {
                 // also add k-mer coordinates
                 try {
                     const auto &coord_fname
@@ -1888,14 +1885,14 @@ load_coords(Annotator&& anno, const std::vector<std::string> &files) {
 
     #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
     for (size_t i = 0; i < files.size(); ++i) {
-        auto label_encoder = ColumnCompressed<>::load_label_encoder(files[i]);
+        auto label_encoder = ColumnCompressed<>::read_label_encoder(files[i]);
 
         auto coords_fname = utils::remove_suffix(files[i], ColumnCompressed<>::kExtension)
                                                         + ColumnCompressed<>::kCoordExtension;
-        std::ifstream in(coords_fname, std::ios::binary);
+        std::unique_ptr<std::ifstream> in = utils::open_ifstream(coords_fname);
         size_t j = 0;
         try {
-            TupleCSC::load_tuples(in, label_encoder.size(), [&](auto&& delims, auto&& values) {
+            TupleCSC::load_tuples(*in, label_encoder.size(), [&](auto&& delims, auto&& values) {
                 size_t idx;
                 try {
                     idx = anno.get_label_encoder().encode(label_encoder.decode(j));

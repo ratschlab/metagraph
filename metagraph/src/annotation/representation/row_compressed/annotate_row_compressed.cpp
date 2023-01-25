@@ -223,8 +223,7 @@ uint64_t RowCompressed<Label>::num_relations() const {
 }
 
 template <typename Label>
-std::unique_ptr<LabelEncoder<Label>>
-RowCompressed<Label>::load_label_encoder(const std::string &filebase) {
+LabelEncoder<Label> RowCompressed<Label>::read_label_encoder(const std::string &filebase) {
     auto filename = make_suffix(filebase, kExtension);
 
     std::ifstream instream(filename, std::ios::binary);
@@ -232,27 +231,26 @@ RowCompressed<Label>::load_label_encoder(const std::string &filebase) {
         throw std::ifstream::failure("Cannot read from file " + filename);
 
     try {
-        return load_label_encoder(instream);
+        return read_label_encoder(instream);
     } catch (...) {
         throw std::ifstream::failure("Cannot load label encoder from file " + filename);
     }
 }
 
 template <typename Label>
-std::unique_ptr<LabelEncoder<Label>>
-RowCompressed<Label>::load_label_encoder(std::istream &instream) {
+LabelEncoder<Label> RowCompressed<Label>::read_label_encoder(std::istream &instream) {
     if (!instream.good())
         throw std::istream::failure("Bad stream");
 
-    auto label_encoder = std::make_unique<LabelEncoder<Label>>();
-    if (!label_encoder->load(instream))
+    LabelEncoder<Label> label_encoder;
+    if (!label_encoder.load(instream))
         throw std::istream::failure("Cannot load label encoder");
 
     return label_encoder;
 }
 
 template <typename Label>
-void RowCompressed<Label>::load_shape(const std::string &filename,
+void RowCompressed<Label>::read_shape(const std::string &filename,
                                       uint64_t *num_objects_,
                                       uint64_t *num_relations_) {
     assert(num_objects_);
@@ -276,7 +274,7 @@ RowCompressed<Label>::get_row_streamer(const std::string &filebase) {
     std::string filename = make_suffix(filebase, kExtension);
     std::ifstream instream(filename, std::ios::binary);
     // skip header
-    load_label_encoder(instream);
+    read_label_encoder(instream);
     // rows
     return binmat::StreamRows<binmat::BinaryMatrix::SetBitPositions>(filename, instream.tellg());
 }

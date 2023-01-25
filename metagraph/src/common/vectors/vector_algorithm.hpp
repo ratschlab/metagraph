@@ -833,6 +833,7 @@ aligned_int_vector(size_t size, uint64_t val, uint8_t width, size_t alignment) {
         typename sdsl::int_vector<t_width>::size_type m_size;
         uint64_t *m_data;
         typename sdsl::int_vector<t_width>::int_width_type m_width;
+        std::shared_ptr<sdsl::mmap_context> m_mmap_context;
     };
     static_assert(sizeof(sdsl::int_vector<t_width>) == sizeof(int_vector_access));
     assert(!t_width || t_width == width);

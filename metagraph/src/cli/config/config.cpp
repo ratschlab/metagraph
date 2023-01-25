@@ -115,6 +115,8 @@ Config::Config(int argc, char *argv[]) {
     for (int i = 2; i < argc; ++i) {
         if (!strcmp(argv[i], "-v") || !strcmp(argv[i], "--verbose")) {
             common::set_verbose(true);
+        } else if (!strcmp(argv[i], "--mmap")) {
+            utils::with_mmap(true);
         } else if (!strcmp(argv[i], "--print")) {
             print_graph = true;
         } else if (!strcmp(argv[i], "--advanced")) {
@@ -1380,6 +1382,7 @@ if (advanced) {
     }
 
     fprintf(stderr, "\nGeneral options:\n");
+    fprintf(stderr, "\t   --mmap \t\tuse memory mapping when loading to reduce RAM [off]\n");
     fprintf(stderr, "\t-v --verbose \t\tswitch on verbose output [off]\n");
     fprintf(stderr, "\t   --advanced \t\tshow other advanced and legacy options [off]\n");
     fprintf(stderr, "\t-h --help \t\tprint usage info\n");

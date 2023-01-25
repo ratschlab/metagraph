@@ -48,12 +48,11 @@ class RowCompressed : public MultiLabelEncoded<Label> {
                           const LabelEncoder<Label> &label_encoder,
                           const std::function<void(binmat::BinaryMatrix::RowCallback)> &call_rows);
 
-    static void load_shape(const std::string &filename,
+    static void read_shape(const std::string &filename,
                            uint64_t *num_objects,
                            uint64_t *num_relations);
 
-    static std::unique_ptr<LabelEncoder<Label>>
-    load_label_encoder(const std::string &filename);
+    static LabelEncoder<Label> read_label_encoder(const std::string &filename);
 
     static binmat::StreamRows<binmat::BinaryMatrix::SetBitPositions>
     get_row_streamer(const std::string &filename);
@@ -71,8 +70,7 @@ class RowCompressed : public MultiLabelEncoded<Label> {
 
     std::unique_ptr<binmat::BinaryMatrixRowDynamic> matrix_;
 
-    static std::unique_ptr<LabelEncoder<Label>>
-    load_label_encoder(std::istream &instream);
+    static LabelEncoder<Label> read_label_encoder(std::istream &instream);
 };
 
 } // namespace annot
