@@ -31,21 +31,6 @@ static const Eigen::IOFormat CSVFormat(Eigen::StreamPrecision,
                                        Eigen::DontAlignCols, " ", "\n");
 
 
-template <class AnnotatorTo, class AnnotatorFrom>
-void convert(std::unique_ptr<AnnotatorFrom> annotator,
-             const Config &config,
-             const Timer &timer) {
-    logger->trace("Converting annotation to {}...",
-                  Config::annotype_to_string(config.anno_type));
-
-    auto target_annotator = convert<AnnotatorTo>(std::move(*annotator));
-    annotator.reset();
-    logger->trace("Conversion done in {} sec", timer.elapsed());
-
-    logger->trace("Serializing annotation to '{}'...", config.outfbase);
-    target_annotator->serialize(config.outfbase);
-}
-
 template <class T>
 binmat::LinkageMatrix cluster_columns(const std::vector<std::string> &files,
                                       Config::AnnotationType anno_type,
@@ -827,23 +812,23 @@ int transform_annotation(Config *config) {
                 break;
             }
             case Config::BinRelWT_sdsl: {
-                convert<BinRelWT_sdslAnnotator>(std::move(annotator), *config, timer);
+                convert<BinRelWT_sdslAnnotator>(std::move(*annotator), config->outfbase);
                 break;
             }
             case Config::BinRelWT: {
-                convert<BinRelWTAnnotator>(std::move(annotator), *config, timer);
+                convert<BinRelWTAnnotator>(std::move(*annotator), config->outfbase);
                 break;
             }
             case Config::RowFlat: {
-                convert<RowFlatAnnotator>(std::move(annotator), *config, timer);
+                convert<RowFlatAnnotator>(std::move(*annotator), config->outfbase);
                 break;
             }
             case Config::RowSparse: {
-                convert<RowSparseAnnotator>(std::move(annotator), *config, timer);
+                convert<RowSparseAnnotator>(std::move(*annotator), config->outfbase);
                 break;
             }
             case Config::RBFish: {
-                convert<RainbowfishAnnotator>(std::move(annotator), *config, timer);
+                convert<RainbowfishAnnotator>(std::move(*annotator), config->outfbase);
                 break;
             }
             case Config::RbBRWT: {

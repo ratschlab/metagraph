@@ -82,7 +82,7 @@ bool RowDisk::load(std::istream &f) {
     return true;
 }
 
-void RowDisk::serialize(std::ostream & f) const {
+void RowDisk::serialize(std::ostream &f) const {
     serialize_number(f, num_columns_);
     auto boundary_start = iv_size_on_disk_ + f.tellp() + sizeof(size_t);
     serialize_number(f, boundary_start);
@@ -111,16 +111,16 @@ void RowDisk::serialize(std::ostream & f) const {
 
 void RowDisk::serialize(const std::string &filename,
                         const std::function<void(binmat::BinaryMatrix::RowCallback)> &call_rows,
-                        uint64_t num_cols,
-                        uint64_t num_set_bits,
-                        uint64_t num_rows) {
+                        uint64_t num_columns,
+                        uint64_t num_rows,
+                        uint64_t num_set_bits) {
     // std::ios::ate needed because labels are serialized before
     // std::ios::in needed for tellp to return absolute file position
     std::ofstream outstream(filename, std::ios::binary | std::ios::ate | std::ios::in);
     if (!outstream.good())
         throw std::ofstream::failure("Cannot write to file " + filename);
 
-    serialize_number(outstream, num_cols);
+    serialize_number(outstream, num_columns);
     auto boundary_start_pos = outstream.tellp();
 
     // boundary is built in memory while writing rows data to disk via int_vector_buffer
@@ -138,7 +138,7 @@ void RowDisk::serialize(const std::string &filename,
     outstream.close();
 
     auto outbuf = sdsl::int_vector_buffer<>(filename, std::ios::out | std::ios::binary,
-                                            1024 * 1024, sdsl::bits::hi(num_cols) + 1,
+                                            1024 * 1024, sdsl::bits::hi(num_columns) + 1,
                                             false, iv_offs);
     // call_bits should be called for each argument that should be set (row boundaries)
     auto call_bits = [&](const std::function<void(uint64_t)> &call_bit) {

@@ -189,7 +189,7 @@ bool merge_load_row_diff(const std::vector<std::string> &filenames,
     return !error_occurred;
 }
 
-template class StaticBinRelAnnotator<binmat::RowConcatenated<>, std::string>;
+template class StaticBinRelAnnotator<binmat::RowFlat<>, std::string>;
 
 template class StaticBinRelAnnotator<binmat::Rainbowfish, std::string>;
 

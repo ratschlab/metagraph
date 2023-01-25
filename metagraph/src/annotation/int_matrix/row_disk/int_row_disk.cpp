@@ -125,8 +125,8 @@ void IntRowDisk::serialize(
             const std::string &filename,
             const std::function<void(std::function<void(const RowValues &)>)> &call_rows,
             uint64_t num_cols,
-            uint64_t num_set_bits,
             uint64_t num_rows,
+            uint64_t num_set_bits,
             uint8_t max_val) {
     // std::ios::ate needed because labels are serialized before
     // std::ios::in needed for tellp to return absolute file position

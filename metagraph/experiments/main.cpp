@@ -726,7 +726,7 @@ int main(int argc, char *argv[]) {
             auto files = files_arg.getValue();
             for (const auto &file : files) {
                 if (compressor == MatrixType::ROW_FLAT) {
-                    annot::StaticBinRelAnnotator<annot::binmat::RowConcatenated<>> annotator;
+                    annot::StaticBinRelAnnotator<annot::binmat::RowFlat<>> annotator;
                     std::cout << "loading\n";
                     annotator.load(file);
                     std::cout << "done\n";
@@ -780,7 +780,7 @@ int main(int argc, char *argv[]) {
 
                         std::ofstream outrrr(file + ".distinct_rows.rrr", std::ios::binary);
                         for (const auto &a : distinct_rows) {
-                            dynamic_cast<const annot::binmat::RowConcatenated<> &>(*a).data()
+                            dynamic_cast<const annot::binmat::RowFlat<> &>(*a).data()
                                 .copy_to<bit_vector_rrr<>>().serialize(outrrr);
                         }
                     }

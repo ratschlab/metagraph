@@ -18,8 +18,7 @@ class MultiLabelEncoded;
 
 
 template <class StaticAnnotation, typename Label>
-typename std::unique_ptr<StaticAnnotation>
-convert(RowCompressed<Label>&& annotation);
+std::unique_ptr<StaticAnnotation> convert(RowCompressed<Label>&& annotation);
 
 
 template <typename Label>
@@ -27,6 +26,15 @@ class ColumnCompressed;
 
 template <class StaticAnnotation, typename Label>
 std::unique_ptr<StaticAnnotation> convert(ColumnCompressed<Label>&& annotation);
+
+template <class StaticAnnotation, typename Label>
+void convert(ColumnCompressed<Label>&& annotation, const std::string &outfbase) {
+    convert<StaticAnnotation, Label>(std::move(annotation))->serialize(outfbase);
+}
+
+template <>
+void convert<RowFlatAnnotator, std::string>(ColumnCompressed<std::string>&& annotator,
+                                            const std::string &outfbase);
 
 template <class StaticAnnotation>
 std::unique_ptr<StaticAnnotation> convert(const std::string &filename);

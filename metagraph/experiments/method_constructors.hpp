@@ -78,7 +78,7 @@ matrix_type_to_data(const std::string &file, MatrixType type) {
     } else if (type == MatrixType::BIN_REL_WT) {
         matrix_ptr.reset(new BinRelWT());
     } else if (type == MatrixType::ROW_FLAT) {
-        matrix_ptr.reset(new RowConcatenated<>());
+        matrix_ptr.reset(new RowFlat<>());
     } else if (type == MatrixType::RAINBOWFISH) {
         matrix_ptr.reset(new Rainbowfish());
     } else {
@@ -210,7 +210,7 @@ generate_from_rows(std::vector<std::unique_ptr<bit_vector>>&& columns,
                 num_set_bits += vector_ptr->num_set_bits();
             }
 
-            binary_matrix.reset(new RowConcatenated<>(
+            binary_matrix.reset(new RowFlat<>(
                 [&](const auto &callback) {
                     utils::RowsFromColumnsTransformer(columns).call_rows(callback);
                 },

@@ -76,7 +76,7 @@ convert<RowFlatAnnotator, std::string>(RowCompressed<std::string>&& annotator) {
     if (const auto *mat = dynamic_cast<const VectorRowBinMat<>*>(&annotator.get_matrix()))
         const_cast<VectorRowBinMat<>*>(mat)->standardize_rows();
 
-    auto matrix = std::make_unique<RowConcatenated<>>(
+    auto matrix = std::make_unique<RowFlat<>>(
         [&](auto callback) {
             call_rows(annotator.get_matrix(),
                 [&](const auto &row) {
@@ -172,7 +172,7 @@ std::unique_ptr<StaticAnnotation> convert(const std::string &filename) {
 
     std::unique_ptr<MatrixType> matrix;
 
-    if constexpr(std::is_same_v<MatrixType, RowConcatenated<>>) {
+    if constexpr(std::is_same_v<MatrixType, RowFlat<>>) {
         matrix = std::make_unique<MatrixType>(call_rows, label_encoder.size(), num_rows, num_relations);
 
     } else if constexpr(std::is_same_v<MatrixType, Rainbowfish>) {
@@ -210,12 +210,40 @@ convert<RowFlatAnnotator, std::string>(ColumnCompressed<std::string>&& annotator
     uint64_t num_rows = annotator.num_objects();
     uint64_t num_columns = annotator.num_labels();
 
-    auto matrix = std::make_unique<RowConcatenated<>>([&](auto callback) {
+    auto matrix = std::make_unique<RowFlat<>>([&](auto callback) {
         utils::RowsFromColumnsTransformer(annotator.get_matrix().data()).call_rows(callback);
     }, num_columns, num_rows, num_set_bits);
 
     return std::make_unique<RowFlatAnnotator>(std::move(matrix),
                                               annotator.get_label_encoder());
+}
+
+// TODO: add similar convertor to RowDiffRowFlat
+template <>
+void convert<RowFlatAnnotator, std::string>(ColumnCompressed<std::string>&& annotator,
+                                            const std::string &outfbase) {
+    uint64_t num_set_bits = annotator.num_relations();
+    uint64_t num_rows = annotator.num_objects();
+    uint64_t num_columns = annotator.num_labels();
+
+    ProgressBar progress_bar(num_rows, "Processed rows", std::cerr, !common::get_verbose());
+    auto call_rows = [&](RowFlat<>::RowCallback callback) {
+        utils::RowsFromColumnsTransformer(annotator.get_matrix().data())
+                .call_rows<RowFlat<>::SetBitPositions>([&](const RowFlat<>::SetBitPositions &row) {
+                    callback(row);
+                    ++progress_bar;
+                });
+    };
+
+    const auto &fname = utils::make_suffix(outfbase, RowFlatAnnotator::kExtension);
+    std::ofstream out = utils::open_new_ofstream(fname);
+    if (!out.good())
+        throw std::ofstream::failure("Can't write to " + fname);
+
+    annotator.get_label_encoder().serialize(out);
+    out.close();
+
+    RowFlat<>::serialize(call_rows, num_columns, num_rows, num_set_bits, fname, true);
 }
 
 template <>
@@ -865,7 +893,7 @@ void convert_batch_to_row_disk(
                     }
                 }
             },
-            label_encoder.size(), num_set_bits, num_rows);
+            label_encoder.size(), num_rows, num_set_bits);
 }
 
 uint64_t get_num_rows_from_column_anno(const std::string &fname) {
@@ -985,7 +1013,7 @@ void merge_row_disk_annotations(const std::vector<std::string> &files,
                     }
                 }
             },
-            label_encoder.size(), num_set_bits, num_rows);
+            label_encoder.size(), num_rows, num_set_bits);
 
     for (const auto &fname : files) {
         fs::remove(fname);
@@ -1225,7 +1253,7 @@ void convert_to_row_diff<IntRowDiffDiskAnnotator>(
                     }
                 }
             },
-            columns.size(), num_set_bits, num_rows, max_val);
+            columns.size(), num_rows, max_val, num_set_bits);
 }
 
 template <>
@@ -1350,7 +1378,7 @@ void convert_to_row_diff<RowDiffDiskCoordAnnotator>(
                     }
                 }
             },
-            columns.size(), num_set_bits, num_rows, num_values, max_val, max_tuple_size);
+            columns.size(), num_rows, num_set_bits, num_values, max_val, max_tuple_size);
 }
 
 template <>
