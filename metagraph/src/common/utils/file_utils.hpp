@@ -26,7 +26,7 @@ bool check_if_writable(const std::string &filename);
 bool with_mmap(bool set_bit = false);
 
 std::unique_ptr<std::ifstream>
-open_ifstream(const std::string &filename, bool mmap_stream = false);
+open_ifstream(const std::string &filename, bool mmap_stream = with_mmap());
 
 // Always create a new physical file to avoid overwriting the existing one if
 // such exists, so that all readers (including mmap) can keep reading from it.

@@ -218,8 +218,7 @@ void NodeRC::call_incoming_from_rc(node_index node,
 bool NodeRC::load(const std::string &filename_base) {
     const auto rc_filename = utils::make_suffix(filename_base, kRCExtension);
     try {
-        std::unique_ptr<std::ifstream> in
-                = utils::open_ifstream(rc_filename, utils::with_mmap());
+        std::unique_ptr<std::ifstream> in = utils::open_ifstream(rc_filename);
         if (!in->good())
             return false;
 

@@ -17,7 +17,7 @@ void IRowDiff::load_anchor(const std::string &filename) {
         common::logger->error("Can't read anchor file: {}", filename);
         std::exit(1);
     }
-    std::unique_ptr<std::ifstream> f = utils::open_ifstream(filename, utils::with_mmap());
+    std::unique_ptr<std::ifstream> f = utils::open_ifstream(filename);
     if (!f->good()) {
         common::logger->error("Could not open anchor file {}", filename);
         std::exit(1);
@@ -30,7 +30,7 @@ void IRowDiff::load_fork_succ(const std::string &filename) {
         common::logger->error("Can't read fork successor file: {}", filename);
         std::exit(1);
     }
-    std::unique_ptr<std::ifstream> f = utils::open_ifstream(filename, utils::with_mmap());
+    std::unique_ptr<std::ifstream> f = utils::open_ifstream(filename);
     if (!f->good()) {
         common::logger->error("Could not open fork successor file {}", filename);
         std::exit(1);

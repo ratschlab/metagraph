@@ -166,7 +166,7 @@ bool merge_load_row_diff(const std::vector<std::string> &filenames,
         try {
             common::logger->trace("Loading annotations from file {}", filenames[i]);
             LabelEncoder<std::string> label_encoder;
-            std::unique_ptr<std::ifstream> in = utils::open_ifstream(filenames[i], utils::with_mmap());
+            std::unique_ptr<std::ifstream> in = utils::open_ifstream(filenames[i]);
             binmat::RowDiff<binmat::ColumnMajor> matrix;
             if (!label_encoder.load(*in) || !matrix.load(*in)) {
                 common::logger->error("Can't load {}", filenames[i]);

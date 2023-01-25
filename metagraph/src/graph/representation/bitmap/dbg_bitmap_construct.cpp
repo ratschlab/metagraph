@@ -190,8 +190,7 @@ DBGBitmap* DBGBitmapConstructor
         const auto &chunk_filename = chunk_filenames.at(i);
         DBGBitmap::Chunk chunk;
 
-        std::unique_ptr<std::ifstream> chunk_in
-                = utils::open_ifstream(chunk_filename, utils::with_mmap());
+        std::unique_ptr<std::ifstream> chunk_in = utils::open_ifstream(chunk_filename);
         chunk.load(*chunk_in);
 
         if (!i) {
@@ -222,8 +221,7 @@ DBGBitmap* DBGBitmapConstructor
             auto chunk_filename = utils::make_suffix(chunk_filenames.at(chunk_idx),
                                                      DBGBitmap::kChunkFileExtension);
 
-            std::unique_ptr<std::ifstream> chunk_in
-                    = utils::open_ifstream(chunk_filename, utils::with_mmap());
+            std::unique_ptr<std::ifstream> chunk_in = utils::open_ifstream(chunk_filename);
 
             if (!chunk_in->good()) {
                 logger->error("Input file {} corrupted", chunk_filename);

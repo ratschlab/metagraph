@@ -34,8 +34,7 @@ bool with_mmap(bool set_bit) {
     return WITH_MMAP;
 }
 
-std::unique_ptr<std::ifstream>
-open_ifstream(const std::string &filename, bool mmap_stream) {
+std::unique_ptr<std::ifstream> open_ifstream(const std::string &filename, bool mmap_stream) {
     std::unique_ptr<std::ifstream> in;
     if (mmap_stream) {
         in.reset(new sdsl::mmap_ifstream(filename, std::ios_base::binary));

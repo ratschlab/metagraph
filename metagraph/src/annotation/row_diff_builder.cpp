@@ -83,7 +83,7 @@ void load_coordinates(const std::vector<std::string> &source_files,
         const auto &coords_fname = utils::remove_suffix(source_files[i],
                                                         ColumnCompressed<>::kExtension)
                                         + ColumnCompressed<>::kCoordExtension;
-        std::unique_ptr<std::ifstream> in = utils::open_ifstream(coords_fname, utils::with_mmap());
+        std::unique_ptr<std::ifstream> in = utils::open_ifstream(coords_fname);
         if (!*in) {
             logger->error("Could not open file with coordinates {}", coords_fname);
             exit(1);
@@ -484,7 +484,7 @@ void assign_anchors(const std::string &graph_fname,
     {
         rd_succ_bv_type rd_succ;
         const std::string &rd_succ_fname = outfbase + kRowDiffForkSuccExt;
-        std::unique_ptr<std::ifstream> in = utils::open_ifstream(rd_succ_fname, utils::with_mmap());
+        std::unique_ptr<std::ifstream> in = utils::open_ifstream(rd_succ_fname);
         if (!rd_succ.load(*in)) {
             logger->error("Couldn't load row-diff successor bitmap from {}", rd_succ_fname);
             exit(1);
@@ -766,7 +766,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
             const auto &values_fname = utils::remove_suffix(source_files[i],
                                                             ColumnCompressed<>::kExtension)
                                             + ColumnCompressed<>::kCountExtension;
-            std::unique_ptr<std::ifstream> in = utils::open_ifstream(values_fname, utils::with_mmap());
+            std::unique_ptr<std::ifstream> in = utils::open_ifstream(values_fname);
             if (!*in) {
                 logger->error("Could not open file with column values {}", values_fname);
                 exit(1);
@@ -788,7 +788,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
     anchor_bv_type anchor;
     if (!compute_row_reduction) {
         const std::string anchors_fname = pred_succ_fprefix + kRowDiffAnchorExt;
-        std::unique_ptr<std::ifstream> in = utils::open_ifstream(anchors_fname, utils::with_mmap());
+        std::unique_ptr<std::ifstream> in = utils::open_ifstream(anchors_fname);
         if (!anchor.load(*in)) {
             logger->error("Can't load anchors from {}", anchors_fname);
             exit(1);
@@ -1254,7 +1254,7 @@ void convert_batch_to_row_diff_coord(const std::string &pred_succ_fprefix,
 
     anchor_bv_type anchor;
     const std::string anchors_fname = pred_succ_fprefix + kRowDiffAnchorExt;
-    std::unique_ptr<std::ifstream> in = utils::open_ifstream(anchors_fname, utils::with_mmap());
+    std::unique_ptr<std::ifstream> in = utils::open_ifstream(anchors_fname);
     if (!anchor.load(*in)) {
         logger->error("Can't load anchors from {}", anchors_fname);
         exit(1);

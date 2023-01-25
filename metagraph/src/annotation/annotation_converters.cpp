@@ -1077,7 +1077,7 @@ void convert_to_row_disk(
 
 
 uint64_t get_num_rows_from_row_diff_anno(const std::string &fname) {
-    std::unique_ptr<std::ifstream> in = utils::open_ifstream(fname, utils::with_mmap());
+    std::unique_ptr<std::ifstream> in = utils::open_ifstream(fname);
     if (!in->good())
         throw std::ifstream::failure("can't open file");
 
@@ -1889,7 +1889,7 @@ load_coords(Annotator&& anno, const std::vector<std::string> &files) {
 
         auto coords_fname = utils::remove_suffix(files[i], ColumnCompressed<>::kExtension)
                                                         + ColumnCompressed<>::kCoordExtension;
-        std::unique_ptr<std::ifstream> in = utils::open_ifstream(coords_fname, utils::with_mmap());
+        std::unique_ptr<std::ifstream> in = utils::open_ifstream(coords_fname);
         size_t j = 0;
         try {
             TupleCSC::load_tuples(*in, label_encoder.size(), [&](auto&& delims, auto&& values) {

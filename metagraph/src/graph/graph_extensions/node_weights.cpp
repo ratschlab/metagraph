@@ -37,8 +37,7 @@ bool NodeWeights::NodeWeights::load(const std::string &filename_base) {
     const auto weights_filename
             = utils::make_suffix(filename_base, kWeightsExtension);
     try {
-        std::unique_ptr<std::ifstream> in
-                = utils::open_ifstream(weights_filename, utils::with_mmap());
+        std::unique_ptr<std::ifstream> in = utils::open_ifstream(weights_filename);
         if (!in->good())
             return false;
 

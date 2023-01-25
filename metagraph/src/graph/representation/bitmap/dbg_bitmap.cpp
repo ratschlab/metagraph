@@ -304,7 +304,7 @@ bool DBGBitmap::load(std::istream &in) {
 
 bool DBGBitmap::load(const std::string &filename) {
     std::unique_ptr<std::ifstream> in
-            = utils::open_ifstream(utils::make_suffix(filename, kExtension), utils::with_mmap());
+            = utils::open_ifstream(utils::make_suffix(filename, kExtension));
     return load(*in);
 }
 
