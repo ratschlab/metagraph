@@ -101,7 +101,7 @@ void RowFlat<BitVector>::serialize(const std::function<void(const RowCallback&)>
                                    uint64_t num_rows,
                                    uint64_t num_set_bits,
                                    const std::string &filename, bool append_file) {
-    std::ofstream out(filename, std::ios::binary | (append_file ? std::ios::app : 0));
+    std::ofstream out(filename, std::ios::binary | (append_file ? std::ios::app : std::ios::openmode(0)));
     serialize_number(out, num_columns);
     out.close();
     auto call_bits = [&](auto callback) {

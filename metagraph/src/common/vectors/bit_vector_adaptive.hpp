@@ -303,7 +303,7 @@ inline void bit_vector_adaptive_stat<optimal_representation>::serialize(
                 uint64_t size,
                 uint64_t num_set_bits,
                 const std::string &filename, bool append_file) {
-    std::ofstream out(filename, std::ios::binary | (append_file ? std::ios::app : 0));
+    std::ofstream out(filename, std::ios::binary | (append_file ? std::ios::app : std::ios::openmode(0)));
     if (optimal_representation(size, num_set_bits) == SD_VECTOR) {
         // construct directly to disk
         serialize_number(out, SD_VECTOR);
