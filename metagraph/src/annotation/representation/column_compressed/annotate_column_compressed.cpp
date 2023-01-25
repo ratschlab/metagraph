@@ -216,7 +216,7 @@ template <typename Label>
 void ColumnCompressed<Label>::serialize(const std::string &filename) const {
     flush();
 
-    std::ofstream out(make_suffix(filename, kExtension), std::ios::binary);
+    std::ofstream out = utils::open_new_ofstream(make_suffix(filename, kExtension));
     if (!out) {
         logger->error("Could not open file for writing: {}",
                       make_suffix(filename, kExtension));
@@ -244,7 +244,7 @@ void ColumnCompressed<Label>::serialize(const std::string &filename) const {
 template <typename Label>
 void ColumnCompressed<Label>::serialize_counts(const std::string &filename) const {
     auto counts_fname = remove_suffix(filename, kExtension) + kCountExtension;
-    std::ofstream out(counts_fname, std::ios::binary);
+    std::ofstream out = utils::open_new_ofstream(counts_fname);
     if (!out) {
         logger->error("Could not open file for writing: {}", counts_fname);
         throw std::ofstream::failure("Bad stream");
@@ -309,7 +309,7 @@ void ColumnCompressed<Label>::serialize_counts(const std::string &filename) cons
 template <typename Label>
 void ColumnCompressed<Label>::serialize_coordinates(const std::string &filename) const {
     auto coords_fname = remove_suffix(filename, kExtension) + kCoordExtension;
-    std::ofstream out(coords_fname, std::ios::binary);
+    std::ofstream out = utils::open_new_ofstream(coords_fname);
     if (!out) {
         logger->error("Could not open file for writing: {}", coords_fname);
         throw std::ofstream::failure("Bad stream");

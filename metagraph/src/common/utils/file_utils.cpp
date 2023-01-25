@@ -28,10 +28,7 @@ static bool WITH_MMAP = false;
 
 bool with_mmap(bool set_bit) {
     if (set_bit) {
-        // TODO: is there a good way to check this, like when opening outstreams?
-        // It could be logger->info() but that prints to stdout. Print info() to stderr?
-        logger->warn("Memory mapping enabled. Make sure all output files are"
-                     " different from the input to avoid errors.");
+        logger->trace("Memory mapping enabled");
         WITH_MMAP = true;
     }
     return WITH_MMAP;
@@ -46,6 +43,14 @@ open_ifstream(const std::string &filename, bool mmap_stream) {
         in.reset(new std::ifstream(filename, std::ios_base::binary));
     }
     return in;
+}
+
+std::ofstream open_new_ofstream(const std::string &filename) {
+    // If file already exists, remove it.
+    // This ensures that if that old file was open for reading (e.g., memory mapped),
+    // the readers can keep reading it and the new out stream points to a new inode.
+    std::filesystem::remove(filename);
+    return std::ofstream(filename, std::ios_base::binary);
 }
 
 void set_swap_path(std::filesystem::path dir_path) {

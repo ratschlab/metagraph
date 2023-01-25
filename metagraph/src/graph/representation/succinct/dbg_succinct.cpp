@@ -750,7 +750,7 @@ void DBGSuccinct::serialize(const std::string &filename) const {
 
     {
         const std::string out_filename = prefix + kExtension;
-        std::ofstream out(out_filename, std::ios::binary);
+        std::ofstream out = utils::open_new_ofstream(out_filename);
         boss_graph_->serialize(out);
         serialize_number(out, static_cast<int>(mode_));
 
@@ -773,14 +773,14 @@ void DBGSuccinct::serialize(const std::string &filename) const {
                 && dynamic_cast<const bit_vector_small*>(valid_edges_.get())));
 
     const auto out_filename = prefix + kDummyMaskExtension;
-    std::ofstream out(out_filename, std::ios::binary);
+    std::ofstream out = utils::open_new_ofstream(out_filename);
     if (!out.good())
         throw std::ios_base::failure("Can't write to file " + out_filename);
 
     valid_edges_->serialize(out);
 
     if (bloom_filter_) {
-        std::ofstream bloom_out(prefix + kBloomFilterExtension, std::ios::binary);
+        std::ofstream bloom_out = utils::open_new_ofstream(prefix + kBloomFilterExtension);
         if (!bloom_out.good())
             throw std::ios_base::failure("Can't write to file " + prefix + kBloomFilterExtension);
 
@@ -797,7 +797,7 @@ void DBGSuccinct::serialize(boss::BOSS::Chunk&& chunk,
     std::filesystem::remove(prefix + kDummyMaskExtension);
 
     const std::string &fname = prefix + kExtension;
-    std::ofstream out(fname, std::ios::binary);
+    std::ofstream out = utils::open_new_ofstream(fname);
     boss::BOSS::serialize(std::move(chunk), out, state);
     serialize_number(out, static_cast<int>(mode));
     serialize_number(out, 0); // suffix ranges are not indexed

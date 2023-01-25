@@ -1,10 +1,12 @@
 #include "annotation_matrix.hpp"
 
+#include <filesystem>
+
 #include "common/threads/threading.hpp"
 #include "common/utils/string_utils.hpp"
+#include "common/utils/file_utils.hpp"
 #include "common/serialization.hpp"
 #include "static_annotators_def.hpp"
-#include "common/utils/file_utils.hpp"
 
 namespace mtg {
 namespace annot {
@@ -51,12 +53,12 @@ template <class BinaryMatrixType, typename Label>
 void
 StaticBinRelAnnotator<BinaryMatrixType, Label>
 ::serialize(const std::string &filename) const {
-    std::ofstream outstream(make_suffix(filename, kExtension), std::ios::binary);
-    if (!outstream.good()) {
-        throw std::ofstream::failure("Bad stream");
-    }
-    label_encoder_.serialize(outstream);
-    matrix_->serialize(outstream);
+    const auto &fname = make_suffix(filename, kExtension);
+    std::ofstream out = utils::open_new_ofstream(fname);
+    if (!out.good())
+        throw std::ofstream::failure("Can't write to " + fname);
+    label_encoder_.serialize(out);
+    matrix_->serialize(out);
 }
 
 template <class BinaryMatrixType, typename Label>

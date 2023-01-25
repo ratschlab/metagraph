@@ -4,6 +4,7 @@
 
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
+#include "common/utils/file_utils.hpp"
 #include "common/threads/threading.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/graph_extensions/node_rc.hpp"
@@ -71,11 +72,11 @@ int transform_graph(Config *config) {
         assert(dbg_succ->get_bloom_filter());
 
         auto fname = utils::make_suffix(config->outfbase, dbg_succ->bloom_filter_file_extension());
-        std::ofstream bloom_outstream(fname, std::ios::binary);
-        if (!bloom_outstream)
+        std::ofstream bloom_out = utils::open_new_ofstream(fname);
+        if (!bloom_out)
             throw std::ios_base::failure("Can't write to file " + fname);
 
-        dbg_succ->get_bloom_filter()->serialize(bloom_outstream);
+        dbg_succ->get_bloom_filter()->serialize(bloom_out);
 
         return 0;
     }

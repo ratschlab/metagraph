@@ -533,8 +533,8 @@ int transform_annotation(Config *config) {
         sdsl::util::bit_compress(sum);
 
         auto outfname = utils::remove_suffix(config->outfbase, ColumnCompressed<>::kExtension);
-        std::ofstream out_counts(outfname + ColumnCompressed<>::kCountExtension,
-                                 std::ios::binary);
+        std::ofstream out_counts
+                = utils::open_new_ofstream(outfname + ColumnCompressed<>::kCountExtension);
         sum.serialize(out_counts);
         sum = sdsl::int_vector<>();
 

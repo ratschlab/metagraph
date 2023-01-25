@@ -210,10 +210,7 @@ DBGBitmap* DBGBitmapConstructor
 
     size_t chunk_idx = 0;
 
-    //TODO configure stream for verbose output globally and refactor
-    std::ofstream null_ofstream;
-    ProgressBar progress_bar(chunk_filenames.size(), "Processing chunks",
-                             verbose ? std::cout : null_ofstream);
+    ProgressBar progress_bar(chunk_filenames.size(), "Processing chunks", std::cout, !verbose);
 
     return build_graph_from_chunks(
         size,

@@ -826,7 +826,7 @@ void convert_batch_to_row_disk(
         exit(1);
     }
 
-    std::ofstream out(outfname, std::ios::binary);
+    std::ofstream out = utils::open_new_ofstream(outfname);
     if (!out.good())
         throw std::ofstream::failure("Can't write to " + outfname);
 
@@ -938,7 +938,7 @@ void merge_row_disk_annotations(const std::vector<std::string> &files,
         exit(1);
     }
 
-    std::ofstream out(outfname, std::ios::binary);
+    std::ofstream out = utils::open_new_ofstream(outfname);
     if (!out.good())
         throw std::ofstream::failure("Can't write to " + outfname);
 
@@ -1178,7 +1178,7 @@ void convert_to_row_diff<IntRowDiffDiskAnnotator>(
             },
             num_threads);
 
-    std::ofstream out(outfname, std::ios::binary);
+    std::ofstream out = utils::open_new_ofstream(outfname);
     if (!out.good())
         throw std::ofstream::failure("Can't write to " + outfname);
 
@@ -1296,7 +1296,7 @@ void convert_to_row_diff<RowDiffDiskCoordAnnotator>(
             },
             num_threads);
 
-    std::ofstream out(outfname, std::ios::binary);
+    std::ofstream out = utils::open_new_ofstream(outfname);
     if (!out.good())
         throw std::ofstream::failure("Can't write to " + outfname);
 

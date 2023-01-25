@@ -56,8 +56,8 @@ bool NodeWeights::NodeWeights::load(const std::string &filename_base) {
 void NodeWeights::serialize(const std::string &filename_base) const {
     const auto fname = utils::make_suffix(filename_base, kWeightsExtension);
 
-    std::ofstream outstream(fname, std::ios::binary);
-    weights_.serialize(outstream);
+    std::ofstream out = utils::open_new_ofstream(fname);
+    weights_.serialize(out);
 }
 
 void NodeWeights::serialize(sdsl::int_vector_buffer<>&& weights,

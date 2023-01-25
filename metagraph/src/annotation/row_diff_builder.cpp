@@ -1047,9 +1047,9 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                 logger->trace("Serialized {}", fpath);
 
                 fpath.replace_extension().replace_extension(ColumnCompressed<>::kCountExtension);
-                std::ofstream outstream(fpath, std::ios::binary);
+                std::ofstream out = utils::open_new_ofstream(fpath);
                 for (size_t j = 0; j < label_encoders[l_idx].size(); ++j) {
-                    values[l_idx][j].serialize(outstream);
+                    values[l_idx][j].serialize(out);
                 }
                 logger->trace("Serialized {}", fpath);
                 values[l_idx].clear();
@@ -1410,7 +1410,7 @@ void convert_batch_to_row_diff_coord(const std::string &pred_succ_fprefix,
 
         auto fpath_coord = col_out_dir/fs::path(source_files[l_idx]).filename();
         fpath_coord.replace_extension().replace_extension(ColumnCompressed<>::kCoordExtension);
-        std::ofstream out_coord(fpath_coord, std::ios::binary);
+        std::ofstream out_coord = utils::open_new_ofstream(fpath_coord);
 
         for (size_t j = 0; j < label_encoders[l_idx].size(); ++j) {
             // diff values may be negative, hence we need wider integers

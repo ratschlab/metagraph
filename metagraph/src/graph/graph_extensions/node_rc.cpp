@@ -238,9 +238,9 @@ void NodeRC::serialize(const std::string &filename_base) const {
 
     const auto fname = utils::make_suffix(filename_base, kRCExtension);
 
-    std::ofstream outstream(fname, std::ios::binary);
-    rc_.serialize(outstream);
-    mapping_.serialize(outstream);
+    std::ofstream out = utils::open_new_ofstream(fname);
+    rc_.serialize(out);
+    mapping_.serialize(out);
 }
 
 bool NodeRC::is_compatible(const SequenceGraph &graph, bool) const {
