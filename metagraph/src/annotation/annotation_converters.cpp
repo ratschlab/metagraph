@@ -1089,7 +1089,7 @@ uint64_t get_num_rows_from_row_diff_anno(const std::string &fname) {
         exit(1);
     }
 
-    return matrix.diffs().num_rows();
+    return matrix.num_rows();
 }
 
 template <>

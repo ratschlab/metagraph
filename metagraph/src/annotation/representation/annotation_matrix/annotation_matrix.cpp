@@ -103,12 +103,8 @@ bool StaticBinRelAnnotator<BinaryMatrixType, Label>
 
     #pragma omp parallel for num_threads(num_threads)
     for (uint64_t i = 0; i < m; ++i) {
-        std::ofstream outstream(
-            remove_suffix(prefix, kExtension)
-                + "." + std::to_string(i)
-                + ".text.annodbg"
-        );
-
+        std::ofstream outstream(remove_suffix(prefix, kExtension)
+                                    + fmt::format(".{}.text.annodbg", i));
         if (!outstream.good()) {
             std::cerr << "ERROR: dumping column " << i << " failed" << std::endl;
             success = false;
