@@ -91,6 +91,7 @@ class Config {
     unsigned int genome_binsize_anno = 1000;
     unsigned int arity_brwt = 2;
     unsigned int relax_arity_brwt = 10;
+    unsigned long long RA_ivbuffer_size = 16'384; // in B
     unsigned int min_tip_size = 1;
     unsigned int min_unitig_median_kmer_abundance = 1;
     int fallback_abundance_cutoff = 1;
@@ -114,6 +115,7 @@ class Config {
     bool alignment_edit_distance = false;
     bool alignment_chain = false;
     bool alignment_post_chain = false;
+    bool alignment_seed_complexity_filter = true;
 
     int8_t alignment_match_score = 2;
     int8_t alignment_mm_transition_score = 3;
@@ -126,9 +128,9 @@ class Config {
     int32_t alignment_xdrop = 27;
 
     size_t alignment_num_alternative_paths = 1;
-    size_t alignment_min_seed_length = 0;
+    size_t alignment_min_seed_length = 19;
     size_t alignment_max_seed_length = std::numeric_limits<size_t>::max();
-    size_t alignment_max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
+    size_t alignment_max_num_seeds_per_locus = 1000;
 
     double alignment_rel_score_cutoff = 0.95;
 
@@ -141,7 +143,7 @@ class Config {
     double alignment_max_nodes_per_seq_char = 5.0;
     double alignment_max_ram = 200;
     // TODO: rename to min_covered_by_seeds
-    double alignment_min_exact_match = 0.0;
+    double alignment_min_exact_match = 0.7;
     double min_fraction = 0.0;
     double max_fraction = 1.0;
     std::vector<double> count_slice_quantiles;
@@ -204,16 +206,19 @@ class Config {
         RowDiff,
         RowDiffBRWT,
         RowDiffRowSparse,
+        RowDiffDisk,
         RowFlat,
         RowSparse,
         RBFish,
         RbBRWT,
         IntBRWT,
         IntRowDiffBRWT,
+        IntRowDiffDisk,
         ColumnCoord,
         BRWTCoord,
         RowDiffCoord,
         RowDiffBRWTCoord,
+        RowDiffDiskCoord,
     };
 
     enum GraphType {

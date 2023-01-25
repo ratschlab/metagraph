@@ -42,6 +42,8 @@ class IRowDiff {
 
     const anchor_bv_type& anchor() const { return anchor_; }
 
+    const fork_succ_bv_type& fork_succ() const { return fork_succ_; }
+
   protected:
     // get row-diff paths starting at |row_ids|
     std::pair<std::vector<BinaryMatrix::Row>, std::vector<std::vector<size_t>>>
@@ -76,10 +78,9 @@ class IRowDiff {
 template <class BaseMatrix>
 class RowDiff : public IRowDiff, public BinaryMatrix {
   public:
-    RowDiff() {}
-
-    RowDiff(const graph::DBGSuccinct *graph, BaseMatrix &&diff)
-          : diffs_(std::move(diff)) { graph_ = graph; }
+    template <typename... Args>
+    RowDiff(const graph::DBGSuccinct *graph = nullptr, Args&&... args)
+        : diffs_(std::forward<Args>(args)...) { graph_ = graph; }
 
     /**
      * Returns the number of set bits in the row-diff transformed matrix.
@@ -118,8 +119,7 @@ bool RowDiff<BaseMatrix>::get(Row row, Column column) const {
     assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());
 
     SetBitPositions set_bits = get_row(row);
-    SetBitPositions::iterator v = std::lower_bound(set_bits.begin(), set_bits.end(), column);
-    return v != set_bits.end() && *v == column;
+    return std::binary_search(set_bits.begin(), set_bits.end(), column);
 }
 
 

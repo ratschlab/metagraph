@@ -3,7 +3,7 @@
 
 #include <cstdint>
 
-#include <dynamic.hpp>
+#include <dynamic/dynamic.hpp>
 
 #include "vector_algorithm.hpp"
 #include "bit_vector.hpp"

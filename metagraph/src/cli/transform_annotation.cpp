@@ -300,60 +300,6 @@ convert_to_IntMultiBRWT(const std::vector<std::string> &files,
                 brwt_annotator->get_label_encoder());
 }
 
-template <class Annotator>
-StaticBinRelAnnotator<matrix::TupleCSCMatrix<typename Annotator::binary_matrix_type>, std::string>
-load_coords(Annotator&& anno, const std::vector<std::string> &files) {
-    std::vector<bit_vector_smart> delimiters(anno.num_labels());
-    std::vector<sdsl::int_vector<>> column_values(anno.num_labels());
-
-    #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
-    for (size_t i = 0; i < files.size(); ++i) {
-        auto label_encoder = ColumnCompressed<>::load_label_encoder(files[i]);
-
-        auto coords_fname = utils::remove_suffix(files[i], ColumnCompressed<>::kExtension)
-                                                        + ColumnCompressed<>::kCoordExtension;
-        std::ifstream in(coords_fname, std::ios::binary);
-        size_t j = 0;
-        try {
-            TupleCSC::load_tuples(in, label_encoder.size(), [&](auto&& delims, auto&& values) {
-                size_t idx;
-                try {
-                    idx = anno.get_label_encoder().encode(label_encoder.decode(j));
-                } catch (...) {
-                    logger->error("Label '{}' from {} is missing in the target annotator",
-                                  label_encoder.decode(j), files[i]);
-                    exit(1);
-                }
-                if (delimiters[idx].size()) {
-                    logger->error("Merging coordinate annotations with overlapping"
-                                  " labels is not implemented");
-                    exit(1);
-                }
-                delimiters[idx] = std::move(delims);
-                column_values[idx] = std::move(values);
-                j++;
-            });
-        } catch (const std::exception &e) {
-            logger->error("Couldn't load coordinates from {}\nException: {}", coords_fname, e.what());
-            exit(1);
-        } catch (...) {
-            logger->error("Couldn't load coordinates from {}", coords_fname);
-            exit(1);
-        }
-        assert(j == label_encoder.size());
-    }
-
-    auto label_encoder = anno.get_label_encoder();
-
-    return StaticBinRelAnnotator<matrix::TupleCSCMatrix<typename Annotator::binary_matrix_type>, std::string>(
-            std::make_unique<matrix::TupleCSCMatrix<typename Annotator::binary_matrix_type>>(
-                    std::move(*anno.release_matrix()),
-                    std::move(delimiters),
-                    std::move(column_values)),
-            std::move(label_encoder));
-}
-
-
 int transform_annotation(Config *config) {
     assert(config);
 
@@ -737,13 +683,16 @@ int transform_annotation(Config *config) {
         std::unique_ptr<ColumnCompressed<>> annotator;
 
         // The entire annotation is loaded in all cases except for transforms
-        // to BRWT or RbBRWT, for which the construction is done with streaming
-        // columns from disk.
+        // to BRWT, RbBRWT, RowDiff, or RowDisk-type annotations,
+        // for which the construction is done with streaming columns from disk.
         if (config->anno_type != Config::BRWT
                 && config->anno_type != Config::RbBRWT
                 && config->anno_type != Config::IntBRWT
                 && config->anno_type != Config::BRWTCoord
                 && config->anno_type != Config::RowDiffBRWTCoord
+                && config->anno_type != Config::RowDiffDisk
+                && config->anno_type != Config::IntRowDiffDisk
+                && config->anno_type != Config::RowDiffDiskCoord
                 && config->anno_type != Config::RowDiff) {
             annotator = std::make_unique<ColumnCompressed<>>(0);
             logger->trace("Loading annotation from disk...");
@@ -774,18 +723,7 @@ int transform_annotation(Config *config) {
                 break;
             }
             case Config::RowDiffCoord: {
-                assert(config->infbase.size());
-                const std::string anchors_file = config->infbase + annot::binmat::kRowDiffAnchorExt;
-                if (!std::filesystem::exists(anchors_file)) {
-                    logger->error("Anchor bitmap {} does not exist. Run the row_diff"
-                                  " transform followed by anchor optimization.", anchors_file);
-                    std::exit(1);
-                }
-                const std::string fork_succ_file = config->infbase + annot::binmat::kRowDiffForkSuccExt;
-                if (!std::filesystem::exists(fork_succ_file)) {
-                    logger->error("Fork successor bitmap {} does not exist", fork_succ_file);
-                    std::exit(1);
-                }
+                auto [anchors_file, fork_succ_file] = get_anchors_and_fork_fnames(config->infbase);
 
                 ColumnCoordAnnotator column_coord = load_coords(std::move(*annotator), files);
 
@@ -807,18 +745,7 @@ int transform_annotation(Config *config) {
                 break;
             }
             case Config::RowDiffBRWTCoord: {
-                assert(config->infbase.size());
-                const std::string anchors_file = config->infbase + annot::binmat::kRowDiffAnchorExt;
-                if (!std::filesystem::exists(anchors_file)) {
-                    logger->error("Anchor bitmap {} does not exist. Run the row_diff"
-                                  " transform followed by anchor optimization.", anchors_file);
-                    std::exit(1);
-                }
-                const std::string fork_succ_file = config->infbase + annot::binmat::kRowDiffForkSuccExt;
-                if (!std::filesystem::exists(fork_succ_file)) {
-                    logger->error("Fork successor bitmap {} does not exist", fork_succ_file);
-                    std::exit(1);
-                }
+                auto [anchors_file, fork_succ_file] = get_anchors_and_fork_fnames(config->infbase);
 
                 auto brwt_coord = load_coords(std::move(*convert_to_MultiBRWT(files, *config)), files);
 
@@ -839,6 +766,13 @@ int transform_annotation(Config *config) {
                 logger->trace("Serialized to {}", config->outfbase);
                 break;
             }
+            case Config::RowDiffDiskCoord: {
+                convert_to_row_diff<RowDiffDiskCoordAnnotator>(
+                        files, config->infbase, config->outfbase,
+                        get_num_threads(), config->memory_available * 1e9);
+                logger->trace("Serialized to {}", config->outfbase);
+                break;
+            }
             case Config::RowDiffBRWT: {
                 logger->error("Convert to row_diff first, and then to row_diff_brwt");
                 return 0;
@@ -848,6 +782,10 @@ int transform_annotation(Config *config) {
                 logger->error("Convert to row_diff first, and then to row_diff_sparse");
                 return 0;
 
+            }
+            case Config::RowDiffDisk: {
+                logger->error("Convert to row_diff first, and then to row_diff_disk");
+                return 0;
             }
             case Config::RowDiff: {
                 auto out_dir = std::filesystem::path(config->outfbase).remove_filename();
@@ -925,18 +863,8 @@ int transform_annotation(Config *config) {
                 break;
             }
             case Config::IntRowDiffBRWT: {
-                assert(config->infbase.size());
-                const std::string anchors_file = config->infbase + annot::binmat::kRowDiffAnchorExt;
-                if (!std::filesystem::exists(anchors_file)) {
-                    logger->error("Anchor bitmap {} does not exist. Run the row_diff"
-                                  " transform followed by anchor optimization.", anchors_file);
-                    std::exit(1);
-                }
-                const std::string fork_succ_file = config->infbase + annot::binmat::kRowDiffForkSuccExt;
-                if (!std::filesystem::exists(fork_succ_file)) {
-                    logger->error("Fork successor bitmap {} does not exist", fork_succ_file);
-                    std::exit(1);
-                }
+                auto [anchors_file, fork_succ_file] = get_anchors_and_fork_fnames(config->infbase);
+
                 auto int_annotation = convert_to_IntMultiBRWT(files, *config, timer);
                 logger->trace("Annotation converted in {} sec", timer.elapsed());
 
@@ -953,33 +881,31 @@ int transform_annotation(Config *config) {
                 logger->trace("Serialized to {}", config->outfbase);
                 break;
             }
+            case Config::IntRowDiffDisk: {
+                convert_to_row_diff<IntRowDiffDiskAnnotator>(
+                        files, config->infbase, config->outfbase,
+                        get_num_threads(), config->memory_available * 1e9);
+                logger->trace("Serialized to {}", config->outfbase);
+                break;
+            }
         }
 
     } else if (input_anno_type == Config::RowDiff) {
         if (config->anno_type != Config::RowDiffBRWT
                 && config->anno_type != Config::ColumnCompressed
+                && config->anno_type != Config::RowDiffDisk
                 && config->anno_type != Config::RowDiffRowSparse) {
             logger->error(
-                    "Only conversion to 'column', 'row_diff_sparse', and 'row_diff_brwt' "
+                    "Only conversion to 'column', 'row_diff_sparse', 'row_diff_disk', and 'row_diff_brwt' "
                     "supported for row_diff");
             exit(1);
         }
         if (config->anno_type == Config::ColumnCompressed) {
             convert_row_diff_to_col_compressed(files, config->outfbase);
         } else {
-            assert(config->infbase.size());
-            const std::string anchors_file = config->infbase + annot::binmat::kRowDiffAnchorExt;
-            if (!std::filesystem::exists(anchors_file)) {
-                logger->error("Anchor bitmap {} does not exist. Run the row_diff"
-                              " transform followed by anchor optimization.", anchors_file);
-                std::exit(1);
-            }
-            const std::string fork_succ_file = config->infbase + annot::binmat::kRowDiffForkSuccExt;
-            if (!std::filesystem::exists(fork_succ_file)) {
-                logger->error("Fork successor bitmap {} does not exist", fork_succ_file);
-                std::exit(1);
-            }
             if (config->anno_type == Config::RowDiffBRWT) {
+                auto [anchors_file, fork_succ_file] = get_anchors_and_fork_fnames(config->infbase);
+
                 if (!config->linkage_file.size()) {
                     logger->trace("Generating new column linkage...");
                     binmat::LinkageMatrix linkage_matrix
@@ -1007,36 +933,18 @@ int transform_annotation(Config *config) {
                         .load_fork_succ(fork_succ_file);
                 brwt_annotator->serialize(config->outfbase);
 
+            } else if (config->anno_type == Config::RowDiffDisk) {
+                convert_to_row_diff<RowDiffDiskAnnotator>(
+                        files, config->infbase, config->outfbase,
+                        get_num_threads(), config->memory_available * 1e9);
+                logger->trace("Serialized to {}", config->outfbase);
+
             } else { // RowDiff<RowSparse>
-                logger->trace("Loading annotation from disk...");
-                std::unique_ptr<RowDiffRowSparseAnnotator> row_sparse
-                        = convert_row_diff_to_RowDiffSparse(files);
-                logger->trace("Annotation converted in {} sec", timer.elapsed());
-                const_cast<binmat::RowDiff<binmat::RowSparse> &>(row_sparse->get_matrix())
-                        .load_anchor(anchors_file);
-                const_cast<binmat::RowDiff<binmat::RowSparse> &>(row_sparse->get_matrix())
-                        .load_fork_succ(fork_succ_file);
-                logger->trace("Serializing to '{}'", config->outfbase);
-                row_sparse->serialize(config->outfbase);
+                convert_to_row_diff<RowDiffRowSparseAnnotator>(
+                        files, config->infbase, config->outfbase,
+                        get_num_threads(), config->memory_available * 1e9);
+                logger->trace("Serialized to {}", config->outfbase);
             }
-        }
-    } else if (config->anno_type == Config::RowDiff) {
-        for (const auto &file : files) {
-            std::unique_ptr<MultiLabelEncoded<std::string>> annotator
-                    = initialize_annotation(file, *config);
-            if (!annotator->load(file)) {
-                logger->error("Cannot load annotations from file '{}'", file);
-                exit(1);
-            }
-
-            using std::filesystem::path;
-            path out_dir = path(config->outfbase).remove_filename();
-            path file_name = path(file).filename().replace_extension("");
-            std::string old_extension = file_name.extension();
-            file_name = file_name.replace_extension("row_diff_" + old_extension.substr(1));
-            std::string out_file = out_dir/(file_name.string() + ".annodbg");
-
-            wrap_in_row_diff(std::move(*annotator), config->linkage_file, out_file);
         }
     } else {
         logger->error(

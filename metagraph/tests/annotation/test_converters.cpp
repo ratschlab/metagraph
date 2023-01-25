@@ -274,10 +274,8 @@ TEST(RowDiff, ConvertFromColumnCompressedSameLabels) {
             convert_to_row_diff({ annot_fname }, graph_fname, 1e9, max_depth, dst_dir, dst_dir, RowDiffStage::CONVERT);
 
             ASSERT_TRUE(std::filesystem::exists(dest_fname));
-            RowDiffColumnAnnotator annotator;
+            RowDiffColumnAnnotator annotator({}, graph.get());
             annotator.load(dest_fname);
-            const_cast<binmat::RowDiff<binmat::ColumnMajor> &>(annotator.get_matrix())
-                    .set_graph(graph.get());
             const_cast<binmat::RowDiff<binmat::ColumnMajor> &>(annotator.get_matrix())
                     .load_anchor(graph_fname + binmat::kRowDiffAnchorExt);
 
@@ -329,10 +327,8 @@ TEST(RowDiff, ConvertFromColumnCompressedSameLabelsMultipleColumns) {
             for (uint32_t i = 0; i < labels.size(); ++i) {
                 std::string rd_anno = dst_dir/(labels[i] + RowDiffColumnAnnotator::kExtension);
                 ASSERT_TRUE(std::filesystem::exists(rd_anno));
-                RowDiffColumnAnnotator annotator;
+                RowDiffColumnAnnotator annotator({}, graph.get());
                 annotator.load(rd_anno);
-                const_cast<binmat::RowDiff<binmat::ColumnMajor> &>(annotator.get_matrix())
-                        .set_graph(graph.get());
                 const_cast<binmat::RowDiff<binmat::ColumnMajor> &>(annotator.get_matrix())
                         .load_anchor(graph_fname + binmat::kRowDiffAnchorExt);
 
@@ -387,10 +383,8 @@ void test_row_diff(uint32_t k,
     convert_to_row_diff({ annot_fname }, graph_fname, 1e9, max_depth, dst_dir, dst_dir, RowDiffStage::CONVERT);
 
     ASSERT_TRUE(std::filesystem::exists(dest_fname));
-    RowDiffColumnAnnotator annotator;
+    RowDiffColumnAnnotator annotator({}, graph.get());
     annotator.load(dest_fname);
-    const_cast<binmat::RowDiff<binmat::ColumnMajor> &>(annotator.get_matrix())
-            .set_graph(graph.get());
     const_cast<binmat::RowDiff<binmat::ColumnMajor> &>(annotator.get_matrix())
             .load_anchor(graph_fname + binmat::kRowDiffAnchorExt);
 
@@ -448,10 +442,8 @@ void test_row_diff_separate_columns(uint32_t k,
         const std::string dest_fname
                 = dst_dir/("anno_" + label + RowDiffColumnAnnotator::kExtension);
         ASSERT_TRUE(std::filesystem::exists(dest_fname));
-        RowDiffColumnAnnotator annotator;
+        RowDiffColumnAnnotator annotator({}, graph.get());
         annotator.load(dest_fname);
-        const_cast<binmat::RowDiff<binmat::ColumnMajor> &>(annotator.get_matrix())
-                .set_graph(graph.get());
         const_cast<binmat::RowDiff<binmat::ColumnMajor> &>(annotator.get_matrix())
                 .load_anchor(graph_fname + binmat::kRowDiffAnchorExt);
 

@@ -248,6 +248,8 @@ Config::Config(int argc, char *argv[]) {
             alignment_chain = true;
         } else if (!strcmp(argv[i], "--align-post-chain")) {
             alignment_post_chain = true;
+        } else if (!strcmp(argv[i], "--align-no-seed-complexity-filter")) {
+            alignment_seed_complexity_filter = false;
         } else if (!strcmp(argv[i], "--max-hull-depth")) {
             max_hull_depth = atoll(get_value(i++));
         } else if (!strcmp(argv[i], "--batch-align")) {
@@ -393,6 +395,8 @@ Config::Config(int argc, char *argv[]) {
             arity_brwt = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--relax-arity")) {
             relax_arity_brwt = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--RA-ivbuff-size")) {
+            RA_ivbuffer_size = atoll(get_value(i++));
         // } else if (!strcmp(argv[i], "--cache-size")) {
         //     row_cache_size = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) {
@@ -614,8 +618,11 @@ Config::Config(int argc, char *argv[]) {
     if (identity == TRANSFORM_ANNOTATION) {
         const bool to_row_diff = anno_type == RowDiff
                                     || anno_type == RowDiffBRWT
+                                    || anno_type == RowDiffDisk
                                     || anno_type == IntRowDiffBRWT
+                                    || anno_type == IntRowDiffDisk
                                     || anno_type == RowDiffRowSparse
+                                    || anno_type == RowDiffDiskCoord
                                     || anno_type == RowDiffBRWTCoord
                                     || anno_type == RowDiffCoord;
         if (to_row_diff && !infbase.size()) {
@@ -735,6 +742,12 @@ std::string Config::annotype_to_string(AnnotationType state) {
             return "row_diff_sparse";
         case RowSparse:
             return "row_sparse";
+        case RowDiffDisk:
+            return "row_diff_disk";
+        case IntRowDiffDisk:
+            return "row_diff_int_disk";
+        case RowDiffDiskCoord:
+            return "row_diff_disk_coord";
         case IntBRWT:
             return "int_brwt";
         case IntRowDiffBRWT:
@@ -776,6 +789,12 @@ Config::AnnotationType Config::string_to_annotype(const std::string &string) {
         return AnnotationType::RowDiffRowSparse;
     } else if (string == "row_sparse") {
         return AnnotationType::RowSparse;
+    } else if (string == "row_diff_disk") {
+        return AnnotationType::RowDiffDisk;
+    } else if (string == "row_diff_int_disk") {
+        return AnnotationType::IntRowDiffDisk;
+    } else if (string == "row_diff_disk_coord") {
+        return AnnotationType::RowDiffDiskCoord;
     } else if (string == "int_brwt") {
         return AnnotationType::IntBRWT;
     } else if (string == "row_diff_int_brwt") {
@@ -852,6 +871,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
     const char annotation_list[] = "\t\t( column, brwt, rb_brwt, int_brwt,\n"
                                    "\t\t  column_coord, brwt_coord, row_diff_coord, row_diff_brwt_coord,\n"
                                    "\t\t  row_diff, row_diff_brwt, row_diff_sparse, row_diff_int_brwt,\n"
+                                   "\t\t  row_diff_disk, row_diff_int_disk, row_diff_disk_coord,\n"
                                    "\t\t  row, flat, row_sparse, rbfish, bin_rel_wt, bin_rel_wt_sdsl )";
 
     switch (identity) {
@@ -1019,6 +1039,7 @@ if (advanced) {
             fprintf(stderr, "\t   --json \t\t\t\t\toutput alignment in JSON format [off]\n");
 if (advanced) {
             fprintf(stderr, "\t   --align-only-forwards \t\t\tdo not align backwards from a seed on basic-mode graphs [off]\n");
+            fprintf(stderr, "\t   --align-no-seed-complexity-filter \t\t\t\tdisable the filter for low-complexity seeds. [off]\n");
 }
             fprintf(stderr, "\t   --align-alternative-alignments \t\tthe number of alternative paths to report per seed [1]\n");
             fprintf(stderr, "\t   --align-chain \t\t\t\tconstruct seed chains before alignment. Useful for long error-prone reads. [off]\n");
@@ -1044,11 +1065,11 @@ if (advanced) {
             fprintf(stderr, "\t   --align-edit-distance \t\t\tuse unit costs for scoring matrix [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "Advanced options for seeding:\n");
-            fprintf(stderr, "\t   --align-min-seed-length [INT]\t\tmin length of a seed [graph k]\n");
+            fprintf(stderr, "\t   --align-min-seed-length [INT]\t\tmin length of a seed [19]\n");
             fprintf(stderr, "\t   --align-max-seed-length [INT]\t\tmax length of a seed [graph k]\n");
 if (advanced) {
-            fprintf(stderr, "\t   --align-min-exact-match [FLOAT] \t\tfraction of matching nucleotides required to align sequence [0.0]\n");
-            fprintf(stderr, "\t   --align-max-num-seeds-per-locus [INT]\tmaximum number of allowed inexact seeds per locus [inf]\n");
+            fprintf(stderr, "\t   --align-min-exact-match [FLOAT] \t\tfraction of matching nucleotides required to align sequence [0.7]\n");
+            fprintf(stderr, "\t   --align-max-num-seeds-per-locus [INT]\tmaximum number of allowed inexact seeds per locus [1000]\n");
 }
         } break;
         case COMPARE: {
@@ -1237,6 +1258,7 @@ if (advanced) {
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --row-diff-stage [0|1|2] \tstage of the row_diff construction [0]\n");
             fprintf(stderr, "\t   --max-path-length [INT] \tmaximum path length in row_diff annotation [100]\n");
+            fprintf(stderr, "\t   --mem-cap-gb [FLOAT]\tmemory in GB available for the transform [1]\n");
             fprintf(stderr, "\t-i --infile-base [STR] \t\tgraph for generating succ/pred/anchors (for row_diff types) []\n");
             fprintf(stderr, "\t   --count-kmers \t\tadd k-mer counts to the row_diff annotation [off]\n");
             fprintf(stderr, "\t   --coordinates \t\tadd k-mer coordinates to the row_diff annotation [off]\n");
@@ -1302,6 +1324,9 @@ if (advanced) {
             // fprintf(stderr, "\t   --cache-size [INT] \tnumber of uncompressed rows to store in the cache [0]\n");
             fprintf(stderr, "\t   --fast \t\tquery in batches [off]\n");
             fprintf(stderr, "\t   --batch-size \tquery batch size (number of base pairs) [100000000]\n");
+if (advanced) {
+            fprintf(stderr, "\t   --RA-ivbuff-size [INT] \tsize (in bytes) of int_vector_buffer used in random access mode (e.g. by row disk annotator) [16384]\n");
+}
             fprintf(stderr, "\n");
             fprintf(stderr, "Available options for --align:\n");
 if (advanced) {
@@ -1334,11 +1359,11 @@ if (advanced) {
 }
             fprintf(stderr, "\n");
             fprintf(stderr, "Advanced options for seeding:\n");
-            fprintf(stderr, "\t   --align-min-seed-length [INT]\t\tmin length of a seed [graph k]\n");
+            fprintf(stderr, "\t   --align-min-seed-length [INT]\t\tmin length of a seed [19]\n");
             fprintf(stderr, "\t   --align-max-seed-length [INT]\t\tmax length of a seed [graph k]\n");
-            fprintf(stderr, "\t   --align-min-exact-match [FLOAT]\t\tfraction of matching nucleotides required to align sequence [0.0]\n");
+            fprintf(stderr, "\t   --align-min-exact-match [FLOAT]\t\tfraction of matching nucleotides required to align sequence [0.7]\n");
 if (advanced) {
-            fprintf(stderr, "\t   --align-max-num-seeds-per-locus [INT]\tmaximum number of allowed inexact seeds per locus [inf]\n");
+            fprintf(stderr, "\t   --align-max-num-seeds-per-locus [INT]\tmaximum number of allowed inexact seeds per locus [1000]\n");
 }
         } break;
         case SERVER_QUERY: {

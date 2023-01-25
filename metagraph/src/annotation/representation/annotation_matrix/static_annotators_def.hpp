@@ -12,11 +12,14 @@
 #include "annotation/binary_matrix/rainbowfish/rainbow.hpp"
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "annotation/binary_matrix/row_sparse/row_sparse.hpp"
+#include "annotation/binary_matrix/row_disk/row_disk.hpp"
 #include "annotation/binary_matrix/row_vector/unique_row_binmat.hpp"
 #include "annotation/int_matrix/rank_extended/csc_matrix.hpp"
 #include "annotation/int_matrix/row_diff/int_row_diff.hpp"
 #include "annotation/int_matrix/row_diff/tuple_row_diff.hpp"
 #include "annotation/int_matrix/csr_matrix/csr_matrix.hpp"
+#include "annotation/int_matrix/row_disk/int_row_disk.hpp"
+#include "annotation/int_matrix/row_disk/coord_row_disk.hpp"
 #include "annotation/int_matrix/rank_extended/tuple_csc_matrix.hpp"
 
 
@@ -45,6 +48,8 @@ typedef StaticBinRelAnnotator<binmat::RowDiff<binmat::BRWT>, std::string> RowDif
 
 typedef StaticBinRelAnnotator<binmat::RowDiff<binmat::RowSparse>, std::string> RowDiffRowSparseAnnotator;
 
+typedef StaticBinRelAnnotator<binmat::RowDiff<binmat::RowDisk>, std::string> RowDiffDiskAnnotator;
+
 typedef sdsl::dac_vector_dp<> CountsVector;
 
 typedef StaticBinRelAnnotator<matrix::CSCMatrix<binmat::BRWT, CountsVector>, std::string> IntMultiBRWTAnnotator;
@@ -52,6 +57,10 @@ typedef StaticBinRelAnnotator<matrix::CSCMatrix<binmat::BRWT, CountsVector>, std
 typedef StaticBinRelAnnotator<matrix::IntRowDiff<matrix::CSCMatrix<binmat::BRWT, CountsVector>>, std::string> IntRowDiffBRWTAnnotator;
 
 typedef StaticBinRelAnnotator<matrix::CSRMatrix, std::string> IntRowAnnotator;
+
+typedef StaticBinRelAnnotator<matrix::IntRowDiff<matrix::IntRowDisk>, std::string> IntRowDiffDiskAnnotator;
+
+typedef StaticBinRelAnnotator<matrix::TupleRowDiff<matrix::CoordRowDisk>, std::string> RowDiffDiskCoordAnnotator;
 
 typedef StaticBinRelAnnotator<matrix::TupleCSCMatrix<binmat::ColumnMajor>, std::string> ColumnCoordAnnotator;
 
@@ -85,11 +94,17 @@ inline const std::string RowDiffBRWTAnnotator::kExtension = ".row_diff_brwt.anno
 template <>
 inline const std::string RowDiffRowSparseAnnotator::kExtension = ".row_diff_sparse.annodbg";
 template <>
+inline const std::string RowDiffDiskAnnotator::kExtension = ".row_diff_disk.annodbg";
+template <>
 inline const std::string IntMultiBRWTAnnotator::kExtension = ".int_brwt.annodbg";
 template <>
 inline const std::string IntRowDiffBRWTAnnotator::kExtension = ".row_diff_int_brwt.annodbg";
 template <>
 inline const std::string IntRowAnnotator::kExtension = ".int_csr.annodbg";
+template <>
+inline const std::string IntRowDiffDiskAnnotator::kExtension = ".row_diff_int_disk.annodbg";
+template <>
+inline const std::string RowDiffDiskCoordAnnotator::kExtension = ".row_diff_disk_coord.annodbg";
 template <>
 inline const std::string ColumnCoordAnnotator::kExtension = ".column_coord.annodbg";
 template <>

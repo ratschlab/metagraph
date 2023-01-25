@@ -46,10 +46,9 @@ class IntRowDiff : public binmat::IRowDiff, public IntMatrix {
   public:
     static_assert(std::is_convertible<BaseMatrix*, IntMatrix*>::value);
 
-    IntRowDiff() {}
-
-    IntRowDiff(const graph::DBGSuccinct *graph, BaseMatrix&& diff)
-        : diffs_(std::move(diff)) { graph_ = graph; }
+    template <typename... Args>
+    IntRowDiff(const graph::DBGSuccinct *graph = nullptr, Args&&... args)
+        : diffs_(std::forward<Args>(args)...) { graph_ = graph; }
 
     bool get(Row i, Column j) const override;
     std::vector<Row> get_column(Column j) const override;

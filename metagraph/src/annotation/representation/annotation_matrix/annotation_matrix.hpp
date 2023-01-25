@@ -18,12 +18,16 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<Label> {
     using Index = typename MultiLabelEncoded<Label>::Index;
     using VLabels = typename MultiLabelEncoded<Label>::VLabels;
 
-    explicit StaticBinRelAnnotator() : matrix_(new BinaryMatrixType()) {}
     StaticBinRelAnnotator(const StaticBinRelAnnotator&) = delete;
     StaticBinRelAnnotator(StaticBinRelAnnotator&&) = default;
 
     StaticBinRelAnnotator(std::unique_ptr<BinaryMatrixType>&& matrix,
                           const LabelEncoder<Label> &label_encoder);
+
+    template <typename... Args>
+    StaticBinRelAnnotator(const LabelEncoder<Label> &label_encoder = {}, Args&&... args)
+        : StaticBinRelAnnotator(std::make_unique<BinaryMatrixType>(std::forward<Args>(args)...),
+                                label_encoder) {}
 
     bool has_label(Index i, const Label &label) const override;
     bool has_labels(Index i, const VLabels &labels) const override;

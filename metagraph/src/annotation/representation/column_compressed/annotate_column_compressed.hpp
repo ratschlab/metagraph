@@ -7,6 +7,7 @@
 #include <lru_cache_policy.hpp>
 
 #include "common/vectors/bit_vector.hpp"
+#include "common/vectors/bit_vector_adaptive.hpp"
 #include "common/vector.hpp"
 #include "common/sorted_vector.hpp"
 #include "annotation/representation/base/annotation.hpp"
@@ -105,6 +106,15 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
     static void load_columns_and_values(const std::vector<std::string> &filenames,
                                         const ColumnsValuesCallback &callback,
                                         size_t num_threads = 1);
+
+    using ColumnsDelimsValuesCallback = std::function<void(uint64_t offset,
+                                                      const Label &,
+                                                      std::unique_ptr<bit_vector>&&,
+                                                      bit_vector_smart&&,
+                                                      sdsl::int_vector<>&&)>;
+    static void load_columns_delims_and_values(const std::vector<std::string> &filenames,
+                                               const ColumnsDelimsValuesCallback &callback,
+                                               size_t num_threads = 1);
 
     // Dump columns to separate files in human-readable format
     bool dump_columns(const std::string &prefix, size_t num_threads = 1) const;

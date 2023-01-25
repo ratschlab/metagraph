@@ -22,16 +22,19 @@ anno_file_extension = {'column': '.column.annodbg',
                        'brwt_coord': '.brwt_coord.annodbg',
                        'row_diff_coord': '.row_diff_coord.annodbg',
                        'row_diff_brwt_coord': '.row_diff_brwt_coord.annodbg',
+                       'row_diff_disk_coord': '.row_diff_disk_coord.annodbg',
                        'row': '.row.annodbg',
                        'row_diff': '.row_diff.annodbg',
                        'row_sparse': '.row_sparse.annodbg',
                        'row_diff_brwt': '.row_diff_brwt.annodbg',
+                       'row_diff_disk': '.row_diff_disk.annodbg',
                        'row_diff_sparse': '.row_diff_sparse.annodbg',
                        'row_diff_sparse_noswap': '.row_diff_sparse.annodbg',
                        'rb_brwt': '.rb_brwt.annodbg',
                        'brwt': '.brwt.annodbg',
                        'int_brwt': '.int_brwt.annodbg',
                        'row_diff_int_brwt': '.row_diff_int_brwt.annodbg',
+                       'row_diff_int_disk': '.row_diff_int_disk.annodbg',
                        'rbfish': '.rbfish.annodbg',
                        'flat': '.flat.annodbg'}
 
@@ -719,7 +722,7 @@ class TestQuery1Column(TestingBase):
 @parameterized_class(('graph_repr', 'anno_repr'),
     input_values=product(
         [repr for repr in GRAPH_TYPES if not (repr == 'bitmap' and PROTEIN_MODE)],
-        [anno_type for anno_type in ANNO_TYPES if anno_type.endswith('int_brwt') or anno_type.endswith('_coord')]
+        [anno_type for anno_type in ANNO_TYPES if '_int_' in anno_type or anno_type.endswith('_coord')]
     ),
     class_name_func=get_test_class_name
 )
