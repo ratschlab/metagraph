@@ -28,7 +28,6 @@ static bool WITH_MMAP = false;
 
 bool with_mmap(bool set_bit) {
     if (set_bit) {
-        logger->trace("Memory mapping enabled");
         WITH_MMAP = true;
     }
     return WITH_MMAP;

@@ -671,7 +671,6 @@ bool DBGSuccinct::load(const std::string &filename) {
     auto prefix = utils::remove_suffix(filename, kExtension);
 
     std::unique_ptr<std::ifstream> in = utils::open_ifstream(prefix + kDummyMaskExtension);
-
     if (!in->good())
         return true;
 
@@ -708,7 +707,6 @@ bool DBGSuccinct::load(const std::string &filename) {
 
     if (std::filesystem::exists(prefix + kBloomFilterExtension)) {
         std::unique_ptr<std::ifstream> bloom_in = utils::open_ifstream(prefix + kBloomFilterExtension);
-
         if (!bloom_filter_)
             bloom_filter_ = std::make_unique<kmer::KmerBloomFilter<>>(get_k(), mode_ == CANONICAL);
 
