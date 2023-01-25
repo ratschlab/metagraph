@@ -1402,19 +1402,19 @@ convert<BinRelWTAnnotator, std::string>(ColumnCompressed<std::string>&& annotato
 }
 
 template <typename Label>
-void merge_rows(const std::vector<const LabelEncoder<Label> *> &label_encoders,
+void merge_rows(const std::vector<LabelEncoder<Label>> &label_encoders,
                 std::function<const BinaryMatrix::SetBitPositions(uint64_t)> get_next_row,
                 uint64_t num_rows,
                 const std::string &outfile) {
     LabelEncoder<Label> merged_label_enc;
     std::vector<std::vector<uint64_t> > label_mappings;
 
-    for (const auto *label_encoder : label_encoders) {
-        merged_label_enc.merge(*label_encoder);
+    for (const auto &label_encoder : label_encoders) {
+        merged_label_enc.merge(label_encoder);
 
         std::vector<uint64_t> v;
-        for (size_t j = 0; j < label_encoder->size(); ++j) {
-            v.push_back(merged_label_enc.encode(label_encoder->decode(j)));
+        for (size_t j = 0; j < label_encoder.size(); ++j) {
+            v.push_back(merged_label_enc.encode(label_encoder.decode(j)));
         }
         label_mappings.push_back(v);
     }
@@ -1497,26 +1497,24 @@ void merge(std::vector<std::unique_ptr<MultiLabelEncoded<Label>>>&& annotators,
     }
     assert(num_rows);
 
-    std::vector<const LEncoder*> label_encoders;
+    std::vector<LEncoder> label_encoders;
 
     std::vector<std::unique_ptr<Iterate<BinaryMatrix::SetBitPositions>>> annotator_row_iterators;
     for (const auto &annotator : annotators) {
         if (annotator->num_objects() != num_rows)
             throw std::runtime_error("Annotators have different number of rows");
 
-        label_encoders.push_back(&annotator->get_label_encoder());
+        label_encoders.push_back(annotator->get_label_encoder());
         annotator_row_iterators.push_back(
             std::make_unique<IterateRows<MultiLabelEncoded<Label>>>(*annotator)
         );
     }
 
-    std::vector<LEncoder> loaded_label_encoders;
     std::vector<std::unique_ptr<StreamRows<>>> streams;
     for (auto filename : filenames) {
         if (utils::ends_with(filename, RowCompressed<Label>::kExtension)) {
 
-            loaded_label_encoders.emplace_back(RowCompressed<Label>::read_label_encoder(filename));
-            label_encoders.push_back(&loaded_label_encoders.back());
+            label_encoders.emplace_back(RowCompressed<Label>::read_label_encoder(filename));
 
             streams.emplace_back(new StreamRows<>(RowCompressed<Label>::get_row_streamer(filename)));
 
