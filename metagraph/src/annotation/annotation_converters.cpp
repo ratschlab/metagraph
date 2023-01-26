@@ -1253,7 +1253,7 @@ void convert_to_row_diff<IntRowDiffDiskAnnotator>(
                     }
                 }
             },
-            columns.size(), num_rows, max_val, num_set_bits);
+            columns.size(), num_rows, num_set_bits, max_val);
 }
 
 template <>
