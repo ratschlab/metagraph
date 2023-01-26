@@ -46,8 +46,9 @@ RowFlat<BitVector>::get_row(Row row) const {
     assert(compressed_rows_.get());
     assert(row * num_columns_ < compressed_rows_->size());
     SetBitPositions columns;
-    compressed_rows_->call_ones_in_range(row * num_columns_, (row + 1) * num_columns_,
-                                         [&](uint64_t j) { columns.emplace_back(j); });
+    const uint64_t offset = row * num_columns_;
+    compressed_rows_->call_ones_in_range(offset, offset + num_columns_,
+                                         [&](uint64_t j) { columns.emplace_back(j - offset); });
     return columns;
 }
 
