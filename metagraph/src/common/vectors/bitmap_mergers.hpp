@@ -43,8 +43,10 @@ class RowsFromColumnsTransformer {
     // get the number of set bits in the vectors left
     uint64_t values_left() const { return num_set_bits_left_; }
 
+    // Transpose all columns and call all rows.
+    // If there are no columns, call `num_rows` empty rows.
     template <typename Vector = std::vector<uint64_t>>
-    void call_rows(const std::function<void(const Vector &)> &callback);
+    void call_rows(const std::function<void(const Vector &)> &callback, uint64_t num_rows = 0);
 
   private:
     class VectorBitStream {

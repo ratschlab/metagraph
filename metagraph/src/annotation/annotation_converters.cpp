@@ -211,7 +211,8 @@ convert<RowFlatAnnotator, std::string>(ColumnCompressed<std::string>&& annotator
     uint64_t num_columns = annotator.num_labels();
 
     auto matrix = std::make_unique<RowFlat<>>([&](auto callback) {
-        utils::RowsFromColumnsTransformer(annotator.get_matrix().data()).call_rows(callback);
+        utils::RowsFromColumnsTransformer(annotator.get_matrix().data())
+                .call_rows(callback, annotator.num_objects());
     }, num_columns, num_rows, num_set_bits);
 
     return std::make_unique<RowFlatAnnotator>(std::move(matrix),
@@ -231,7 +232,7 @@ void convert<RowFlatAnnotator, std::string>(ColumnCompressed<std::string>&& anno
                 .call_rows<RowFlat<>::SetBitPositions>([&](const RowFlat<>::SetBitPositions &row) {
                     callback(row);
                     ++progress_bar;
-                });
+                }, annotator.num_objects());
     };
 
     const auto &fname = utils::make_suffix(outfbase, RowFlatAnnotator::kExtension);
@@ -255,7 +256,7 @@ convert<RowSparseAnnotator, std::string>(ColumnCompressed<std::string> &&annotat
     auto matrix = std::make_unique<RowSparse>(
         [&](auto callback) {
             utils::RowsFromColumnsTransformer(annotator.get_matrix().data())
-                    .call_rows(callback);
+                    .call_rows(callback, annotator.num_objects());
         },
         num_columns, num_rows, num_set_bits
     );
@@ -269,7 +270,8 @@ convert<RainbowfishAnnotator, std::string>(ColumnCompressed<std::string>&& annot
     uint64_t num_columns = annotator.num_labels();
 
     auto matrix = std::make_unique<Rainbowfish>([&](auto callback) {
-        utils::RowsFromColumnsTransformer(annotator.get_matrix().data()).call_rows(callback);
+        utils::RowsFromColumnsTransformer(annotator.get_matrix().data())
+                .call_rows(callback, annotator.num_objects());
     }, num_columns);
 
     return std::make_unique<RainbowfishAnnotator>(std::move(matrix),
@@ -282,7 +284,8 @@ convert<UniqueRowAnnotator, std::string>(ColumnCompressed<std::string>&& annotat
     uint64_t num_columns = annotator.num_labels();
 
     auto matrix = std::make_unique<UniqueRowBinmat>([&](auto callback) {
-        utils::RowsFromColumnsTransformer(annotator.get_matrix().data()).call_rows(callback);
+        utils::RowsFromColumnsTransformer(annotator.get_matrix().data())
+                .call_rows(callback, annotator.num_objects());
     }, num_columns);
 
     return std::make_unique<UniqueRowAnnotator>(std::move(matrix),
@@ -1443,7 +1446,8 @@ convert<BinRelWT_sdslAnnotator, std::string>(ColumnCompressed<std::string>&& ann
 
     auto matrix = std::make_unique<BinRelWT_sdsl>(
         [&](auto callback) {
-            utils::RowsFromColumnsTransformer(annotator.get_matrix().data()).call_rows(callback);
+            utils::RowsFromColumnsTransformer(annotator.get_matrix().data())
+                    .call_rows(callback, annotator.num_objects());
         },
         num_set_bits,
         num_columns
@@ -1658,7 +1662,8 @@ void convert_to_row_annotator(const ColumnCompressed<Label> &annotator,
                 write_row(row);
                 ++progress_bar;
             };
-            utils::RowsFromColumnsTransformer(annotator.get_matrix().data()).call_rows(call_row);
+            utils::RowsFromColumnsTransformer(annotator.get_matrix().data())
+                    .call_rows(call_row, annotator.num_objects());
         }
     );
 }

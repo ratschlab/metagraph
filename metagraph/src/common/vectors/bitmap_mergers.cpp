@@ -169,9 +169,11 @@ template Vector<uint64_t> RowsFromColumnsIterator::next_row<Vector<uint64_t>>();
 
 template <typename Vector>
 void RowsFromColumnsTransformer
-::call_rows(const std::function<void(const Vector &)> &callback) {
+::call_rows(const std::function<void(const Vector &)> &callback, uint64_t num_rows) {
     uint64_t cur_row = 0;
     Vector indices;
+
+    num_rows = std::max(num_rows, rows());
 
     while (values_left()) {
         call_next([&](uint64_t row, uint64_t column) {
@@ -184,7 +186,7 @@ void RowsFromColumnsTransformer
         });
     }
 
-    while (cur_row++ < rows()) {
+    while (cur_row++ < num_rows) {
         callback(indices);
         indices.clear();
     }
@@ -193,10 +195,10 @@ void RowsFromColumnsTransformer
 }
 
 template void RowsFromColumnsTransformer::call_rows<Vector<uint64_t>>(
-        const std::function<void(const Vector<uint64_t> &)> &callback);
+        const std::function<void(const Vector<uint64_t> &)> &, uint64_t);
 
 template void RowsFromColumnsTransformer::call_rows<SmallVector<uint32_t>>(
-        const std::function<void(const SmallVector<uint32_t> &)> &callback);
+        const std::function<void(const SmallVector<uint32_t> &)> &, uint64_t);
 
 
 template <class BitVectorType>
