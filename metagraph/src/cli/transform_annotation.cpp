@@ -774,27 +774,9 @@ int transform_annotation(Config *config) {
                 break;
             }
             case Config::RowCompressed: {
-                if (config->fast) {
-                    RowCompressed<> row_annotator(annotator->num_objects());
-                    convert_to_row_annotator(*annotator,
-                                             &row_annotator,
-                                             get_num_threads());
-                    annotator.reset();
-
-                    logger->trace("Annotation converted in {} sec", timer.elapsed());
-                    logger->trace("Serializing to '{}'...", config->outfbase);
-
-                    row_annotator.serialize(config->outfbase);
-
-                    logger->trace("Serialization done in {} sec", timer.elapsed());
-
-                } else {
-                    convert_to_row_annotator(*annotator,
-                                             config->outfbase,
-                                             get_num_threads());
-                    logger->trace("Annotation converted and serialized in {} sec",
-                                  timer.elapsed());
-                }
+                convert_to_row_annotator(*annotator, config->outfbase);
+                logger->trace("Annotation converted and serialized in {} sec",
+                              timer.elapsed());
                 break;
             }
             case Config::BRWT: {

@@ -92,15 +92,10 @@ void merge(std::vector<std::unique_ptr<MultiLabelEncoded<Label>>>&& annotators,
            const std::vector<std::string> &filenames,
            const std::string &outfile);
 
+// transform to RowCompressed<Label>
 template <typename Label>
 void convert_to_row_annotator(const ColumnCompressed<Label> &annotator,
-                              const std::string &outfbase,
-                              size_t num_threads = 1);
-
-template <typename Label>
-void convert_to_row_annotator(const ColumnCompressed<Label> &annotator,
-                              RowCompressed<Label> *target,
-                              size_t num_threads = 1);
+                              const std::string &outfbase);
 
 /**
  * Sparsifies annotations in #ColumnCompressed format by storing diffs between sucessive

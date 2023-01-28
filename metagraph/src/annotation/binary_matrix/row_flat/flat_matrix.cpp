@@ -13,11 +13,10 @@ namespace annot {
 namespace binmat {
 
 template <typename BitVector>
-RowFlat<BitVector>::
-RowFlat(const std::function<void(const RowCallback&)> &call_rows,
-        uint64_t num_columns,
-        uint64_t num_rows,
-        uint64_t num_set_bits)
+RowFlat<BitVector>::RowFlat(const std::function<void(const RowCallback&)> &call_rows,
+                            uint64_t num_columns,
+                            uint64_t num_rows,
+                            uint64_t num_set_bits)
           : num_columns_(num_columns),
             num_rows_(num_columns ? num_rows : 0) {
     compressed_rows_.reset(new BitVector(

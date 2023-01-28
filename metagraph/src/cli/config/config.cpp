@@ -1253,7 +1253,7 @@ if (advanced) {
             fprintf(stderr, "\t                       \texample: '0 1 <dist> 4\n");
             fprintf(stderr, "\t                       \t          2 3 <dist> 5\n");
             fprintf(stderr, "\t                       \t          4 5 <dist> 6'\n");
-            fprintf(stderr, "\t   --fast \t\ttransform annotation in memory without streaming / sparse subsampling [off]\n");
+            fprintf(stderr, "\t   --fast \t\tuse sparse subsampling of columns for clustering [off]\n");
             fprintf(stderr, "\t   --subsample [INT] \tnumber of rows subsampled for distance estimation in column clustering [1000000]\n");
             fprintf(stderr, "\t   --dump-text-anno \tdump the columns of the annotator as separate text files [off]\n");
             fprintf(stderr, "\n");
