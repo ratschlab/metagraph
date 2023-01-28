@@ -218,7 +218,6 @@ convert<RowFlatAnnotator, std::string>(ColumnCompressed<std::string>&& annotator
                                               annotator.get_label_encoder());
 }
 
-// TODO: add similar convertor to RowDiffRowFlat
 template <>
 void convert<RowFlatAnnotator, std::string>(ColumnCompressed<std::string>&& annotator,
                                             const std::string &outfbase) {
@@ -226,7 +225,7 @@ void convert<RowFlatAnnotator, std::string>(ColumnCompressed<std::string>&& anno
     uint64_t num_rows = annotator.num_objects();
     uint64_t num_columns = annotator.num_labels();
 
-    ProgressBar progress_bar(num_rows, "Processed rows", std::cerr, !common::get_verbose());
+    ProgressBar progress_bar(num_rows, "Constructed rows", std::cerr, !common::get_verbose());
     auto call_rows = [&](RowFlat<>::RowCallback callback) {
         utils::RowsFromColumnsTransformer(annotator.get_matrix().data())
                 .call_rows<RowFlat<>::SetBitPositions>([&](const RowFlat<>::SetBitPositions &row) {
@@ -406,20 +405,8 @@ std::pair<std::string, std::string> get_anchors_and_fork_fnames(const std::strin
     return std::make_pair(anchors_file, fork_succ_file);
 }
 
-template <>
-void convert_to_row_diff<RowDiffRowSparseAnnotator>(
-            const std::vector<std::string> &files,
-            const std::string &anchors_file_fbase,
-            const std::string &outfbase,
-            size_t /*num_threads*/,
-            size_t /*mem_bytes*/) {
-
-    std::string anchors_file;
-    std::string fork_succ_file;
-    std::tie(anchors_file, fork_succ_file) = get_anchors_and_fork_fnames(anchors_file_fbase);
-
-    logger->trace("Loading annotation from disk...");
-
+std::tuple<std::vector<std::unique_ptr<bit_vector>>, LabelEncoder<std::string>, uint64_t>
+load_row_diff_columns(const std::vector<std::string> &files) {
     std::vector<std::unique_ptr<bit_vector>> columns;
     LabelEncoder<std::string> label_encoder;
 
@@ -456,14 +443,82 @@ void convert_to_row_diff<RowDiffRowSparseAnnotator>(
         exit(1);
     }
 
+    return std::make_tuple(std::move(columns), std::move(label_encoder), total_num_set_bits);
+}
+
+template <>
+void convert_to_row_diff<RowDiffRowFlatAnnotator>(
+            const std::vector<std::string> &files,
+            const std::string &anchors_file_fbase,
+            const std::string &outfbase,
+            size_t /*num_threads*/,
+            size_t /*mem_bytes*/) {
+
+    std::string anchors_file;
+    std::string fork_succ_file;
+    std::tie(anchors_file, fork_succ_file) = get_anchors_and_fork_fnames(anchors_file_fbase);
+
+    logger->trace("Loading annotation from disk...");
+
+    std::vector<std::unique_ptr<bit_vector>> columns;
+    LabelEncoder<std::string> label_encoder;
+    uint64_t num_set_bits;
+    std::tie(columns, label_encoder, num_set_bits) = load_row_diff_columns(files);
+
+    const auto &fname = utils::make_suffix(outfbase, RowDiffRowFlatAnnotator::kExtension);
+    std::ofstream out = utils::open_new_ofstream(fname);
+    if (!out.good())
+        throw std::ofstream::failure("Can't write to " + fname);
+
+    label_encoder.serialize(out);
+
+    // serialize RowDiff<RowFlat<>>
+    out.write("v2.0", 4);
+    out.close();
+    utils::append_file(anchors_file, fname);
+    utils::append_file(fork_succ_file, fname);
+
+    uint64_t num_rows = columns.at(0)->size();
+    uint64_t num_columns = columns.size();
+
+    ProgressBar progress_bar(num_rows, "Constructed rows", std::cerr, !common::get_verbose());
+    auto call_rows = [&](RowFlat<>::RowCallback callback) {
+        utils::RowsFromColumnsTransformer(columns)
+                .call_rows<RowFlat<>::SetBitPositions>([&](const RowFlat<>::SetBitPositions &row) {
+                    callback(row);
+                    ++progress_bar;
+                });
+    };
+
+    RowFlat<>::serialize(call_rows, num_columns, num_rows, num_set_bits, fname, true);
+    logger->trace("Annotation converted");
+}
+
+template <>
+void convert_to_row_diff<RowDiffRowSparseAnnotator>(
+            const std::vector<std::string> &files,
+            const std::string &anchors_file_fbase,
+            const std::string &outfbase,
+            size_t /*num_threads*/,
+            size_t /*mem_bytes*/) {
+
+    std::string anchors_file;
+    std::string fork_succ_file;
+    std::tie(anchors_file, fork_succ_file) = get_anchors_and_fork_fnames(anchors_file_fbase);
+
+    logger->trace("Loading annotation from disk...");
+
+    std::vector<std::unique_ptr<bit_vector>> columns;
+    LabelEncoder<std::string> label_encoder;
+    uint64_t num_set_bits;
+    std::tie(columns, label_encoder, num_set_bits) = load_row_diff_columns(files);
+
     uint64_t num_rows = columns.at(0)->size();
     uint64_t num_columns = columns.size();
 
     RowDiffRowSparseAnnotator row_sparse(label_encoder, nullptr,
-        [&](auto callback) {
-            utils::RowsFromColumnsTransformer(columns).call_rows(callback);
-        },
-        num_columns, num_rows, total_num_set_bits
+        [&](auto callback) { utils::RowsFromColumnsTransformer(columns).call_rows(callback); },
+        num_columns, num_rows, num_set_bits
     );
 
     const_cast<binmat::RowDiff<binmat::RowSparse> &>(row_sparse.get_matrix())

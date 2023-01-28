@@ -209,6 +209,8 @@ template class StaticBinRelAnnotator<binmat::RowDiff<binmat::ColumnMajor>, std::
 
 template class StaticBinRelAnnotator<binmat::RowDiff<binmat::BRWT>, std::string>;
 
+template class StaticBinRelAnnotator<binmat::RowDiff<binmat::RowFlat<>>, std::string>;
+
 template class StaticBinRelAnnotator<binmat::RowDiff<binmat::RowSparse>, std::string>;
 
 template class StaticBinRelAnnotator<binmat::RowDiff<binmat::RowDisk>, std::string>;

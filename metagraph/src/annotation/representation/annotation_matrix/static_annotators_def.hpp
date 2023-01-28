@@ -46,6 +46,8 @@ typedef StaticBinRelAnnotator<binmat::RowDiff<binmat::ColumnMajor>, std::string>
 
 typedef StaticBinRelAnnotator<binmat::RowDiff<binmat::BRWT>, std::string> RowDiffBRWTAnnotator;
 
+typedef StaticBinRelAnnotator<binmat::RowDiff<binmat::RowFlat<>>, std::string> RowDiffRowFlatAnnotator;
+
 typedef StaticBinRelAnnotator<binmat::RowDiff<binmat::RowSparse>, std::string> RowDiffRowSparseAnnotator;
 
 typedef StaticBinRelAnnotator<binmat::RowDiff<binmat::RowDisk>, std::string> RowDiffDiskAnnotator;
@@ -91,6 +93,8 @@ template <>
 inline const std::string RowDiffColumnAnnotator::kExtension = ".row_diff.annodbg";
 template <>
 inline const std::string RowDiffBRWTAnnotator::kExtension = ".row_diff_brwt.annodbg";
+template <>
+inline const std::string RowDiffRowFlatAnnotator::kExtension = ".row_diff_flat.annodbg";
 template <>
 inline const std::string RowDiffRowSparseAnnotator::kExtension = ".row_diff_sparse.annodbg";
 template <>

@@ -753,12 +753,14 @@ int transform_annotation(Config *config) {
             case Config::RowDiffBRWT: {
                 logger->error("Convert to row_diff first, and then to row_diff_brwt");
                 return 0;
-
+            }
+            case Config::RowDiffRowFlat: {
+                logger->error("Convert to row_diff first, and then to row_diff_flat");
+                return 0;
             }
             case Config::RowDiffRowSparse: {
                 logger->error("Convert to row_diff first, and then to row_diff_sparse");
                 return 0;
-
             }
             case Config::RowDiffDisk: {
                 logger->error("Convert to row_diff first, and then to row_diff_disk");
@@ -853,9 +855,10 @@ int transform_annotation(Config *config) {
         if (config->anno_type != Config::RowDiffBRWT
                 && config->anno_type != Config::ColumnCompressed
                 && config->anno_type != Config::RowDiffDisk
+                && config->anno_type != Config::RowDiffRowFlat
                 && config->anno_type != Config::RowDiffRowSparse) {
             logger->error(
-                    "Only conversion to 'column', 'row_diff_sparse', 'row_diff_disk', and 'row_diff_brwt' "
+                    "Only conversion to 'column', 'row_diff_flat', 'row_diff_sparse', 'row_diff_disk', and 'row_diff_brwt' "
                     "supported for row_diff");
             exit(1);
         }
@@ -894,6 +897,12 @@ int transform_annotation(Config *config) {
 
             } else if (config->anno_type == Config::RowDiffDisk) {
                 convert_to_row_diff<RowDiffDiskAnnotator>(
+                        files, config->infbase, config->outfbase,
+                        get_num_threads(), config->memory_available * 1e9);
+                logger->trace("Serialized to {}", config->outfbase);
+
+            } else if (config->anno_type == Config::RowDiffRowFlat) {
+                convert_to_row_diff<RowDiffRowFlatAnnotator>(
                         files, config->infbase, config->outfbase,
                         get_num_threads(), config->memory_available * 1e9);
                 logger->trace("Serialized to {}", config->outfbase);

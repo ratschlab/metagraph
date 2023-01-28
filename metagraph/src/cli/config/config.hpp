@@ -205,6 +205,7 @@ class Config {
         BinRelWT,
         RowDiff,
         RowDiffBRWT,
+        RowDiffRowFlat,
         RowDiffRowSparse,
         RowDiffDisk,
         RowFlat,

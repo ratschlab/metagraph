@@ -623,6 +623,7 @@ Config::Config(int argc, char *argv[]) {
                                     || anno_type == RowDiffDisk
                                     || anno_type == IntRowDiffBRWT
                                     || anno_type == IntRowDiffDisk
+                                    || anno_type == RowDiffRowFlat
                                     || anno_type == RowDiffRowSparse
                                     || anno_type == RowDiffDiskCoord
                                     || anno_type == RowDiffBRWTCoord
@@ -740,6 +741,8 @@ std::string Config::annotype_to_string(AnnotationType state) {
             return "row_diff";
         case RowDiffBRWT:
             return "row_diff_brwt";
+        case RowDiffRowFlat:
+            return "row_diff_flat";
         case RowDiffRowSparse:
             return "row_diff_sparse";
         case RowSparse:
@@ -787,6 +790,8 @@ Config::AnnotationType Config::string_to_annotype(const std::string &string) {
         return AnnotationType::RowDiff;
     } else if (string == "row_diff_brwt") {
         return AnnotationType::RowDiffBRWT;
+    } else if (string == "row_diff_flat") {
+        return AnnotationType::RowDiffRowFlat;
     } else if (string == "row_diff_sparse") {
         return AnnotationType::RowDiffRowSparse;
     } else if (string == "row_sparse") {
@@ -872,7 +877,7 @@ DeBruijnGraph::Mode Config::string_to_graphmode(const std::string &string) {
 void Config::print_usage(const std::string &prog_name, IdentityType identity) {
     const char annotation_list[] = "\t\t( column, brwt, rb_brwt, int_brwt,\n"
                                    "\t\t  column_coord, brwt_coord, row_diff_coord, row_diff_brwt_coord,\n"
-                                   "\t\t  row_diff, row_diff_brwt, row_diff_sparse, row_diff_int_brwt,\n"
+                                   "\t\t  row_diff, row_diff_brwt, row_diff_flat, row_diff_sparse, row_diff_int_brwt,\n"
                                    "\t\t  row_diff_disk, row_diff_int_disk, row_diff_disk_coord,\n"
                                    "\t\t  row, flat, row_sparse, rbfish, bin_rel_wt, bin_rel_wt_sdsl )";
 
