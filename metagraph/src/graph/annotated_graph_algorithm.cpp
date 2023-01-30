@@ -4,7 +4,6 @@
 #include "common/vectors/vector_algorithm.hpp"
 #include "common/vectors/bitmap.hpp"
 #include "graph/representation/masked_graph.hpp"
-#include "annotation/representation/column_compressed/column_compressed_lazy.hpp"
 
 
 namespace mtg {
