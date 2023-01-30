@@ -324,51 +324,59 @@ construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
     std::mutex vector_backup_mutex;
     bool parallel = num_threads > 1;
 
+    std::vector<annot::binmat::BinaryMatrix::Column> columns;
+    const auto &encoder = anno_graph.get_annotator().get_label_encoder();
     AnnotatedDBG::Annotator::VLabels labels;
     labels.reserve(labels_in.size() + labels_out.size());
+    columns.reserve(labels_in.size() + labels_out.size());
     for (const auto &label : labels_in) {
         labels.emplace_back(label);
+        columns.emplace_back(encoder.encode(label));
     }
     for (const auto &label : labels_out) {
-        if (!labels_in.count(label))
+        if (!labels_in.count(label)) {
             labels.emplace_back(label);
+            columns.emplace_back(encoder.encode(label));
+        }
     }
 
     logger->trace("Populating count vector");
     std::atomic_thread_fence(std::memory_order_release);
-    anno_graph.call_annotated_nodes(labels, [&](size_t j, const bitmap_generator &column) {
-        uint8_t col_indicator = static_cast<bool>(labels_in.count(labels[j]));
-        if (labels_out.count(labels[j]))
-            col_indicator |= 2;
+    anno_graph.get_annotator().get_matrix().call_columns(columns,
+        [&](size_t j, const bitmap_generator &column) {
+            uint8_t col_indicator = static_cast<bool>(labels_in.count(labels[j]));
+            if (labels_out.count(labels[j]))
+                col_indicator |= 2;
 
-        auto add_in = [&indicator,&counts,&vector_backup_mutex,parallel](node_index i) {
-            assert(i != DeBruijnGraph::npos);
-            set_bit(indicator.data(), i, parallel, MO_RELAXED);
-            atomic_fetch_and_add(counts, i * 2, 1, vector_backup_mutex, MO_RELAXED);
-        };
-
-        auto add_out = [&indicator,&counts,&vector_backup_mutex,parallel,add_out_labels_to_mask](node_index i) {
-            assert(i != DeBruijnGraph::npos);
-            if (add_out_labels_to_mask)
+            auto add_in = [&indicator,&counts,&vector_backup_mutex,parallel](node_index i) {
+                assert(i != DeBruijnGraph::npos);
                 set_bit(indicator.data(), i, parallel, MO_RELAXED);
+                atomic_fetch_and_add(counts, i * 2, 1, vector_backup_mutex, MO_RELAXED);
+            };
 
-            atomic_fetch_and_add(counts, i * 2 + 1, 1, vector_backup_mutex, MO_RELAXED);
-        };
+            auto add_out = [&indicator,&counts,&vector_backup_mutex,parallel,add_out_labels_to_mask](node_index i) {
+                assert(i != DeBruijnGraph::npos);
+                if (add_out_labels_to_mask)
+                    set_bit(indicator.data(), i, parallel, MO_RELAXED);
 
-        auto add_both = [&indicator,&counts,&vector_backup_mutex,parallel](node_index i) {
-            assert(i != DeBruijnGraph::npos);
-            set_bit(indicator.data(), i, parallel, MO_RELAXED);
-            atomic_fetch_and_add(counts, i * 2, 1, vector_backup_mutex, MO_RELAXED);
-            atomic_fetch_and_add(counts, i * 2 + 1, 1, vector_backup_mutex, MO_RELAXED);
-        };
+                atomic_fetch_and_add(counts, i * 2 + 1, 1, vector_backup_mutex, MO_RELAXED);
+            };
 
-        switch (col_indicator) {
-            case 1: { column.call_ones(add_in); } break;
-            case 2: { column.call_ones(add_out); } break;
-            case 3: { column.call_ones(add_both); } break;
-            default: {}
-        }
-    }, num_threads);
+            auto add_both = [&indicator,&counts,&vector_backup_mutex,parallel](node_index i) {
+                assert(i != DeBruijnGraph::npos);
+                set_bit(indicator.data(), i, parallel, MO_RELAXED);
+                atomic_fetch_and_add(counts, i * 2, 1, vector_backup_mutex, MO_RELAXED);
+                atomic_fetch_and_add(counts, i * 2 + 1, 1, vector_backup_mutex, MO_RELAXED);
+            };
+
+            switch (col_indicator) {
+                case 1: { column.call_ones(add_in); } break;
+                case 2: { column.call_ones(add_out); } break;
+                case 3: { column.call_ones(add_both); } break;
+                default: {}
+            }
+        }, num_threads
+    );
 
     std::atomic_thread_fence(std::memory_order_acquire);
     logger->trace("done");
