@@ -10,7 +10,7 @@
 #include "common/utils/string_utils.hpp"
 #include "common/utils/file_utils.hpp"
 #include "common/algorithms.hpp"
-#include "common/vectors/bitmap_mergers.hpp"
+#include "common/vectors/transpose.hpp"
 #include "common/threads/threading.hpp"
 #include "common/vectors/bit_vector_adaptive.hpp"
 #include "seq_io/formats.hpp"
@@ -58,65 +58,25 @@ std::vector<bit_vector_small> generate_rows() {
     return rows;
 }
 
-void check_rows(utils::RowsFromColumnsTransformer&& rct) {
-    ASSERT_EQ(2u, rct.columns());
-    ASSERT_EQ(7u, rct.rows());
-    ASSERT_EQ(8u, rct.values_left());
-    // ASSERT_EQ(std::vector<uint64_t>({ 3, 5 }), rct.num_set_bits());
+TEST(Utils, call_rows) {
+    auto rows = generate_rows();
+
+    std::vector<const bit_vector_small*> rows_ptr;
+    for (const auto &row : rows) {
+        rows_ptr.push_back(&row);
+    }
 
     uint64_t i = 0;
-    rct.call_rows<Vector<uint64_t>>([&](const auto &row_indices) {
-        sdsl::bit_vector bv(rct.columns());
+    std::function<void(const Vector<uint64_t> &)> call_row = [&](const Vector<uint64_t> &row_indices) {
+        sdsl::bit_vector bv(rows_ptr.size());
         for (auto j : row_indices) {
             bv[j] = 1;
         }
         EXPECT_EQ(matrix[i++], bv) << i;
-    });
+    };
+    utils::call_rows(rows_ptr, call_row);
 
     ASSERT_EQ(7u, i);
-}
-
-void check_indices(utils::RowsFromColumnsTransformer&& rct) {
-    ASSERT_EQ(2u, rct.columns());
-    ASSERT_EQ(7u, rct.rows());
-    ASSERT_EQ(8u, rct.values_left());
-    // ASSERT_EQ(std::vector<uint64_t>({ 3, 5 }), rct.num_set_bits());
-
-    uint64_t counter = 0;
-    for (uint64_t i = 0; i < 8; ++i) {
-        rct.call_next([&](auto row, auto column) {
-            counter++;
-            EXPECT_EQ(std::vector<uint64_t>({ row, column }),
-                      indices[i]) << i;
-        });
-    }
-
-    EXPECT_EQ(8u, counter);
-    EXPECT_EQ(0u, rct.values_left());
-}
-
-TEST(Utils, RowsFromColumnsTransformerCallRowsColumns) {
-    auto rows = generate_rows();
-    utils::RowsFromColumnsTransformer rct(rows);
-    check_rows(std::move(rct));
-}
-
-TEST(Utils, RowsFromColumnsTransformerCallIndicesColumns) {
-    auto rows = generate_rows();
-    utils::RowsFromColumnsTransformer rct(rows);
-    check_indices(std::move(rct));
-}
-
-TEST(Utils, RowsFromColumnsTransformerCallRowsConcat) {
-    bit_vector_small vectors_small{ 0, 1, 1, 0, 0, 1, 0, 0, 1, 1, 1, 1, 1, 0 };
-    auto rct = utils::RowsFromColumnsTransformer(vectors_small, 7);
-    check_rows(std::move(rct));
-}
-
-TEST(Utils, RowsFromColumnsTransformerCallIndicesConcat) {
-    bit_vector_small vectors_small{ 0, 1, 1, 0, 0, 1, 0, 0, 1, 1, 1, 1, 1, 0 };
-    auto rct = utils::RowsFromColumnsTransformer(vectors_small, 7);
-    check_indices(std::move(rct));
 }
 
 TEST(Utils, TempFileInitialize) {

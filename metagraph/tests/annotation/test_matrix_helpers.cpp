@@ -16,7 +16,7 @@
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "annotation/int_matrix/row_diff/tuple_row_diff.hpp"
 #include "annotation/int_matrix/rank_extended/tuple_csc_matrix.hpp"
-#include "common/vectors/bitmap_mergers.hpp"
+#include "common/vectors/transpose.hpp"
 
 
 namespace mtg {
@@ -92,9 +92,7 @@ BinMat build_matrix_from_columns(const BitVectorPtrArray &columns, uint64_t num_
     }
 
     return build_matrix_from_rows<BinMat>(
-        [&](auto row_callback) {
-            utils::RowsFromColumnsTransformer(columns).call_rows(row_callback);
-        },
+        [&](auto row_callback) { utils::call_rows(columns, row_callback); },
         num_columns, num_rows, num_set_bits
     );
 }

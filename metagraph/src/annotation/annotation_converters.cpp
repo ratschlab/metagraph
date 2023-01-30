@@ -18,7 +18,7 @@
 #include "common/utils/file_utils.hpp"
 #include "common/utils/string_utils.hpp"
 #include "common/utils/template_utils.hpp"
-#include "common/vectors/bitmap_mergers.hpp"
+#include "common/vectors/transpose.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 #include "binary_matrix/row_vector/vector_row_binmat.hpp"
 #include "binary_matrix/multi_brwt/brwt_builders.hpp"
@@ -211,8 +211,7 @@ convert<RowFlatAnnotator, std::string>(ColumnCompressed<std::string>&& annotator
     uint64_t num_columns = annotator.num_labels();
 
     auto matrix = std::make_unique<RowFlat<>>([&](auto callback) {
-        utils::RowsFromColumnsTransformer(annotator.get_matrix().data())
-                .call_rows(callback, annotator.num_objects());
+        utils::call_rows(annotator.get_matrix().data(), callback, annotator.num_objects());
     }, num_columns, num_rows, num_set_bits);
 
     return std::make_unique<RowFlatAnnotator>(std::move(matrix),
@@ -226,13 +225,8 @@ void convert<RowFlatAnnotator, std::string>(ColumnCompressed<std::string>&& anno
     uint64_t num_rows = annotator.num_objects();
     uint64_t num_columns = annotator.num_labels();
 
-    ProgressBar progress_bar(num_rows, "Constructed rows", std::cerr, !common::get_verbose());
     auto call_rows = [&](RowFlat<>::RowCallback callback) {
-        utils::RowsFromColumnsTransformer(annotator.get_matrix().data())
-                .call_rows<RowFlat<>::SetBitPositions>([&](const RowFlat<>::SetBitPositions &row) {
-                    callback(row);
-                    ++progress_bar;
-                }, annotator.num_objects());
+        utils::call_rows(annotator.get_matrix().data(), callback, annotator.num_objects());
     };
 
     const auto &fname = utils::make_suffix(outfbase, RowFlatAnnotator::kExtension);
@@ -255,8 +249,7 @@ convert<RowSparseAnnotator, std::string>(ColumnCompressed<std::string> &&annotat
 
     auto matrix = std::make_unique<RowSparse>(
         [&](auto callback) {
-            utils::RowsFromColumnsTransformer(annotator.get_matrix().data())
-                    .call_rows(callback, annotator.num_objects());
+            utils::call_rows(annotator.get_matrix().data(), callback, annotator.num_objects());
         },
         num_columns, num_rows, num_set_bits
     );
@@ -270,7 +263,7 @@ convert<RainbowfishAnnotator, std::string>(ColumnCompressed<std::string>&& annot
     uint64_t num_columns = annotator.num_labels();
 
     auto matrix = std::make_unique<Rainbowfish>([&](auto callback) {
-        utils::RowsFromColumnsTransformer(annotator.get_matrix().data()).call_rows(callback);
+        utils::call_rows(annotator.get_matrix().data(), callback);
     }, num_columns);
 
     return std::make_unique<RainbowfishAnnotator>(std::move(matrix),
@@ -283,7 +276,7 @@ convert<UniqueRowAnnotator, std::string>(ColumnCompressed<std::string>&& annotat
     uint64_t num_columns = annotator.num_labels();
 
     auto matrix = std::make_unique<UniqueRowBinmat>([&](auto callback) {
-        utils::RowsFromColumnsTransformer(annotator.get_matrix().data()).call_rows(callback);
+        utils::call_rows(annotator.get_matrix().data(), callback);
     }, num_columns);
 
     return std::make_unique<UniqueRowAnnotator>(std::move(matrix),
@@ -482,16 +475,8 @@ void convert_to_row_diff<RowDiffRowFlatAnnotator>(
     uint64_t num_rows = columns.at(0)->size();
     uint64_t num_columns = columns.size();
 
-    ProgressBar progress_bar(num_rows, "Constructed rows", std::cerr, !common::get_verbose());
-    auto call_rows = [&](RowFlat<>::RowCallback callback) {
-        utils::RowsFromColumnsTransformer(columns)
-                .call_rows<RowFlat<>::SetBitPositions>([&](const RowFlat<>::SetBitPositions &row) {
-                    callback(row);
-                    ++progress_bar;
-                });
-    };
-
-    RowFlat<>::serialize(call_rows, num_columns, num_rows, num_set_bits, fname, true);
+    RowFlat<>::serialize([&](auto callback) { utils::call_rows(columns, callback); },
+                         num_columns, num_rows, num_set_bits, fname, true);
     logger->trace("Annotation converted");
 }
 
@@ -518,7 +503,7 @@ void convert_to_row_diff<RowDiffRowSparseAnnotator>(
     uint64_t num_columns = columns.size();
 
     RowDiffRowSparseAnnotator row_sparse(label_encoder, nullptr,
-        [&](auto callback) { utils::RowsFromColumnsTransformer(columns).call_rows(callback); },
+        [&](auto callback) { utils::call_rows(columns, callback); },
         num_columns, num_rows, num_set_bits
     );
 
@@ -920,15 +905,9 @@ void convert_batch_to_row_disk(
 
     out.close();
 
-    ProgressBar progress_bar(num_rows, "Serialize rows", std::cerr, !common::get_verbose());
-
     RowDisk::serialize(outfname,
         [&](BinaryMatrix::RowCallback write_row) {
-            BinaryMatrix::RowCallback call_row = [&](const BinaryMatrix::SetBitPositions &row) {
-                write_row(row);
-                ++progress_bar;
-            };
-            utils::RowsFromColumnsTransformer(columns).call_rows(call_row);
+            utils::call_rows(columns, write_row);
         },
         label_encoder.size(), num_rows, num_set_bits
     );
@@ -1444,7 +1423,7 @@ convert<BinRelWT_sdslAnnotator, std::string>(ColumnCompressed<std::string>&& ann
 
     auto matrix = std::make_unique<BinRelWT_sdsl>(
         [&](auto callback) {
-            utils::RowsFromColumnsTransformer(annotator.get_matrix().data()).call_rows(callback);
+            utils::call_rows(annotator.get_matrix().data(), callback);
         },
         num_set_bits,
         num_columns
@@ -1649,18 +1628,9 @@ void merge<MultiBRWTAnnotator, std::string>(
 template <typename Label>
 void convert_to_row_annotator(const ColumnCompressed<Label> &annotator,
                               const std::string &outfbase) {
-    uint64_t num_rows = annotator.num_objects();
-
-    ProgressBar progress_bar(num_rows, "Serialize rows", std::cerr, !common::get_verbose());
-
     RowCompressed<Label>::serialize(outfbase, annotator.get_label_encoder(),
         [&](BinaryMatrix::RowCallback write_row) {
-            BinaryMatrix::RowCallback call_row = [&](const BinaryMatrix::SetBitPositions &row) {
-                write_row(row);
-                ++progress_bar;
-            };
-            utils::RowsFromColumnsTransformer(annotator.get_matrix().data())
-                    .call_rows(call_row, annotator.num_objects());
+            utils::call_rows(annotator.get_matrix().data(), write_row, annotator.num_objects());
         }
     );
 }
