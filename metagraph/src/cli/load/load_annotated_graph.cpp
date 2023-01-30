@@ -5,7 +5,6 @@
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "annotation/binary_matrix/row_sparse/row_sparse.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
-#include "annotation/representation/column_compressed/column_compressed_lazy.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "common/logger.hpp"
@@ -32,35 +31,20 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
         logger->trace("Primary graph wrapped into canonical");
     }
 
-    auto annotator_init = config.infbase_annotators.size()
+    auto annotation_temp = config.infbase_annotators.size()
             ? initialize_annotation(config.infbase_annotators.at(0), config, 0, max_chunks_open)
             : initialize_annotation(config.anno_type, config, max_index, max_chunks_open);
-    auto *annotator_temp = annotator_init.get();
-    std::unique_ptr<AnnotatedDBG::Annotation> annotation_temp(annotator_init.release());
-
-    bool try_stream = config.identity == Config::ASSEMBLE && config.separately;
 
     if (config.infbase_annotators.size()) {
         bool loaded = false;
         if (auto *cc = dynamic_cast<annot::ColumnCompressed<>*>(annotation_temp.get())) {
-            if (try_stream) {
-                annotation_temp.reset(new annot::ColumnCompressedLazy<>(
-                    max_index, config.infbase_annotators
-                ));
-                loaded = true;
-                annotator_temp = nullptr;
-            } else {
-                loaded = cc->merge_load(config.infbase_annotators);
-            }
+            loaded = cc->merge_load(config.infbase_annotators);
         } else {
-            if (try_stream)
-                logger->warn("--separately only supported with column annotator");
-
             if (config.infbase_annotators.size() > 1) {
                 logger->warn("Cannot merge annotations of this type. Only the first"
                              " file {} will be loaded.", config.infbase_annotators.at(0));
             }
-            loaded = annotator_temp->load(config.infbase_annotators.at(0));
+            loaded = annotation_temp->load(config.infbase_annotators.at(0));
         }
         if (!loaded) {
             logger->error("Cannot load annotations for graph {}, file corrupted",
@@ -69,22 +53,20 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
         }
 
         // row_diff annotation is special, as it must know the graph structure
-        if (annotator_temp) {
-            using namespace annot::binmat;
-            BinaryMatrix &matrix = const_cast<BinaryMatrix &>(annotator_temp->get_matrix());
-            if (IRowDiff *row_diff = dynamic_cast<IRowDiff*>(&matrix)) {
-                if (!dbg_graph) {
-                    logger->error("Only succinct de Bruijn graph representations"
-                                  " are supported for row-diff annotations");
-                    std::exit(1);
-                }
+        using namespace annot::binmat;
+        BinaryMatrix &matrix = const_cast<BinaryMatrix &>(annotation_temp->get_matrix());
+        if (IRowDiff *row_diff = dynamic_cast<IRowDiff*>(&matrix)) {
+            if (!dbg_graph) {
+                logger->error("Only succinct de Bruijn graph representations"
+                              " are supported for row-diff annotations");
+                std::exit(1);
+            }
 
-                row_diff->set_graph(dbg_graph);
+            row_diff->set_graph(dbg_graph);
 
-                if (auto *row_diff_column = dynamic_cast<RowDiff<ColumnMajor> *>(&matrix)) {
-                    row_diff_column->load_anchor(config.infbase + kRowDiffAnchorExt);
-                    row_diff_column->load_fork_succ(config.infbase + kRowDiffForkSuccExt);
-                }
+            if (auto *row_diff_column = dynamic_cast<RowDiff<ColumnMajor> *>(&matrix)) {
+                row_diff_column->load_anchor(config.infbase + kRowDiffAnchorExt);
+                row_diff_column->load_fork_succ(config.infbase + kRowDiffForkSuccExt);
             }
         }
     }
