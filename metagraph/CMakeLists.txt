@@ -291,6 +291,8 @@ endif()
 
 # makes ASIO not depend on boost
 add_definitions(-DASIO_STANDALONE -DUSE_STANDALONE_ASIO)
+set(USE_STANDALONE_ASIO ON)
+set(ASIO_PATH external-libraries/asio/asio)
 
 # assume built-in pthreads on MacOS
 IF(APPLE)
@@ -539,7 +541,7 @@ target_include_directories(unit_tests PRIVATE "${PROJECT_SOURCE_DIR}")
 target_compile_definitions(unit_tests PRIVATE TEST_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/data")
 target_link_libraries(unit_tests gtest_main gtest gmock metagraph-core metagraph-cli)
 
-target_compile_options(unit_tests PRIVATE -Wno-undefined-var-template ${DEATH_TEST_FLAG})
+target_compile_options(unit_tests PRIVATE -Wno-uninitialized ${DEATH_TEST_FLAG})
 
 #-------------------
 # Benchmarks
@@ -556,7 +558,7 @@ add_executable(benchmarks ${benchmark_files})
 target_compile_definitions(benchmarks PRIVATE TEST_DATA_DIR="${PROJECT_SOURCE_DIR}/tests/data")
 target_link_libraries(benchmarks benchmark_main benchmark metagraph-core metagraph-cli -lsdsl)
 
-target_compile_options(benchmarks PRIVATE -Wno-undefined-var-template)
+target_compile_options(benchmarks PRIVATE)
 
 #-------------------
 # Tests

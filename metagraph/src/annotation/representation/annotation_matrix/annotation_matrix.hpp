@@ -34,6 +34,7 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<Label> {
 
     void serialize(const std::string &filename) const override;
     bool load(const std::string &filename) override;
+    static LabelEncoder<Label> read_label_encoder(const std::string &filename);
     // Dump columns to separate files in human-readable format
     bool dump_columns(const std::string &prefix, uint64_t num_threads = 1) const;
 

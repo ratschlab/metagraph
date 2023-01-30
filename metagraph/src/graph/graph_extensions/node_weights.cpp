@@ -3,7 +3,7 @@
 #include <filesystem>
 
 #include "common/algorithms.hpp"
-
+#include "common/utils/file_utils.hpp"
 
 namespace mtg {
 namespace graph {
@@ -37,11 +37,11 @@ bool NodeWeights::NodeWeights::load(const std::string &filename_base) {
     const auto weights_filename
             = utils::make_suffix(filename_base, kWeightsExtension);
     try {
-        std::ifstream instream(weights_filename, std::ios::binary);
-        if (!instream.good())
+        std::unique_ptr<std::ifstream> in = utils::open_ifstream(weights_filename);
+        if (!in->good())
             return false;
 
-        weights_.load(instream);
+        weights_.load(*in);
         max_weight_ = sdsl::bits::lo_set[weights_.width()];
         return true;
 
@@ -55,8 +55,8 @@ bool NodeWeights::NodeWeights::load(const std::string &filename_base) {
 void NodeWeights::serialize(const std::string &filename_base) const {
     const auto fname = utils::make_suffix(filename_base, kWeightsExtension);
 
-    std::ofstream outstream(fname, std::ios::binary);
-    weights_.serialize(outstream);
+    std::ofstream out = utils::open_new_ofstream(fname);
+    weights_.serialize(out);
 }
 
 void NodeWeights::serialize(sdsl::int_vector_buffer<>&& weights,

@@ -83,8 +83,8 @@ void load_coordinates(const std::vector<std::string> &source_files,
         const auto &coords_fname = utils::remove_suffix(source_files[i],
                                                         ColumnCompressed<>::kExtension)
                                         + ColumnCompressed<>::kCoordExtension;
-        std::ifstream in(coords_fname, std::ios::binary);
-        if (!in) {
+        std::unique_ptr<std::ifstream> in = utils::open_ifstream(coords_fname);
+        if (!*in) {
             logger->error("Could not open file with coordinates {}", coords_fname);
             exit(1);
         }
@@ -93,8 +93,8 @@ void load_coordinates(const std::vector<std::string> &source_files,
         bit_vector_smart delims;
         for (size_t j = 0; j < sources[i].num_labels(); ++j) {
             try {
-                delims.load(in);
-                coords.load(in);
+                delims.load(*in);
+                coords.load(*in);
             } catch (...) {
                 logger->error("Couldn't read coordinates from {}", coords_fname);
                 exit(1);
@@ -484,8 +484,8 @@ void assign_anchors(const std::string &graph_fname,
     {
         rd_succ_bv_type rd_succ;
         const std::string &rd_succ_fname = outfbase + kRowDiffForkSuccExt;
-        std::ifstream f(rd_succ_fname, ios::binary);
-        if (!rd_succ.load(f)) {
+        std::unique_ptr<std::ifstream> in = utils::open_ifstream(rd_succ_fname);
+        if (!rd_succ.load(*in)) {
             logger->error("Couldn't load row-diff successor bitmap from {}", rd_succ_fname);
             exit(1);
         }
@@ -766,8 +766,8 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
             const auto &values_fname = utils::remove_suffix(source_files[i],
                                                             ColumnCompressed<>::kExtension)
                                             + ColumnCompressed<>::kCountExtension;
-            std::ifstream instream(values_fname, std::ios::binary);
-            if (!instream) {
+            std::unique_ptr<std::ifstream> in = utils::open_ifstream(values_fname);
+            if (!*in) {
                 logger->error("Could not open file with column values {}", values_fname);
                 exit(1);
             }
@@ -775,7 +775,7 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
             values[i].resize(sources[i].num_labels());
             for (size_t j = 0; j < values[i].size(); ++j) {
                 try {
-                    values[i][j].load(instream);
+                    values[i][j].load(*in);
                 } catch (...) {
                     logger->error("Couldn't read column values from {}", values_fname);
                     exit(1);
@@ -788,8 +788,8 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
     anchor_bv_type anchor;
     if (!compute_row_reduction) {
         const std::string anchors_fname = pred_succ_fprefix + kRowDiffAnchorExt;
-        std::ifstream f(anchors_fname, std::ios::binary);
-        if (!anchor.load(f)) {
+        std::unique_ptr<std::ifstream> in = utils::open_ifstream(anchors_fname);
+        if (!anchor.load(*in)) {
             logger->error("Can't load anchors from {}", anchors_fname);
             exit(1);
         }
@@ -1047,9 +1047,9 @@ void convert_batch_to_row_diff(const std::string &pred_succ_fprefix,
                 logger->trace("Serialized {}", fpath);
 
                 fpath.replace_extension().replace_extension(ColumnCompressed<>::kCountExtension);
-                std::ofstream outstream(fpath, std::ios::binary);
+                std::ofstream out = utils::open_new_ofstream(fpath);
                 for (size_t j = 0; j < label_encoders[l_idx].size(); ++j) {
-                    values[l_idx][j].serialize(outstream);
+                    values[l_idx][j].serialize(out);
                 }
                 logger->trace("Serialized {}", fpath);
                 values[l_idx].clear();
@@ -1254,8 +1254,8 @@ void convert_batch_to_row_diff_coord(const std::string &pred_succ_fprefix,
 
     anchor_bv_type anchor;
     const std::string anchors_fname = pred_succ_fprefix + kRowDiffAnchorExt;
-    std::ifstream f(anchors_fname, std::ios::binary);
-    if (!anchor.load(f)) {
+    std::unique_ptr<std::ifstream> in = utils::open_ifstream(anchors_fname);
+    if (!anchor.load(*in)) {
         logger->error("Can't load anchors from {}", anchors_fname);
         exit(1);
     }
@@ -1410,7 +1410,7 @@ void convert_batch_to_row_diff_coord(const std::string &pred_succ_fprefix,
 
         auto fpath_coord = col_out_dir/fs::path(source_files[l_idx]).filename();
         fpath_coord.replace_extension().replace_extension(ColumnCompressed<>::kCoordExtension);
-        std::ofstream out_coord(fpath_coord, std::ios::binary);
+        std::ofstream out_coord = utils::open_new_ofstream(fpath_coord);
 
         for (size_t j = 0; j < label_encoders[l_idx].size(); ++j) {
             // diff values may be negative, hence we need wider integers

@@ -6,15 +6,13 @@ import os
 import gzip
 import itertools
 from helpers import get_test_class_name
-from base import TestingBase, graph_file_extension
+from base import TestingBase, graph_file_extension, METAGRAPH, TEST_DATA_DIR, NUM_THREADS
 from test_query import anno_file_extension, GRAPH_TYPES, ANNO_TYPES, product
 
 
 """Test graph assemble"""
 
-METAGRAPH = './metagraph'
 PROTEIN_MODE = os.readlink(METAGRAPH).endswith("_Protein")
-TEST_DATA_DIR = os.path.dirname(os.path.realpath(__file__)) + '/../tests/data'
 
 gfa_tests = {
     'compacted': {
@@ -43,8 +41,6 @@ gfa_tests = {
 
 GFAs = [name for name, _ in gfa_tests.items()]
 LOAD_TYPES = ['load', 'stream']
-
-NUM_THREADS = 4
 
 
 class TestAnnotate(unittest.TestCase):

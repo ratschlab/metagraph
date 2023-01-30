@@ -4,6 +4,7 @@
 #include <fstream>
 
 #include "common/serialization.hpp"
+#include "common/utils/file_utils.hpp"
 #include "dbg_bitmap_construct.hpp"
 
 
@@ -264,7 +265,7 @@ void DBGBitmap::serialize(std::ostream &out) const {
 }
 
 void DBGBitmap::serialize(const std::string &filename) const {
-    std::ofstream out(utils::make_suffix(filename, kExtension), std::ios::binary);
+    std::ofstream out = utils::open_new_ofstream(utils::make_suffix(filename, kExtension));
     serialize(out);
 }
 
@@ -302,8 +303,9 @@ bool DBGBitmap::load(std::istream &in) {
 }
 
 bool DBGBitmap::load(const std::string &filename) {
-    std::ifstream in(utils::make_suffix(filename, kExtension), std::ios::binary);
-    return load(in);
+    std::unique_ptr<std::ifstream> in
+            = utils::open_ifstream(utils::make_suffix(filename, kExtension));
+    return load(*in);
 }
 
 Vector<std::pair<DBGBitmap::Kmer, bool>>

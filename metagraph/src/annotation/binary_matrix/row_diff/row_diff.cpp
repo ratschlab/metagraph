@@ -6,6 +6,7 @@
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
 #include "annotation/binary_matrix/multi_brwt/brwt.hpp"
 #include "annotation/binary_matrix/row_sparse/row_sparse.hpp"
+#include "common/utils/file_utils.hpp"
 
 namespace mtg {
 namespace annot {
@@ -16,12 +17,12 @@ void IRowDiff::load_anchor(const std::string &filename) {
         common::logger->error("Can't read anchor file: {}", filename);
         std::exit(1);
     }
-    std::ifstream f(filename, ios::binary);
-    if (!f.good()) {
+    std::unique_ptr<std::ifstream> f = utils::open_ifstream(filename);
+    if (!f->good()) {
         common::logger->error("Could not open anchor file {}", filename);
         std::exit(1);
     }
-    anchor_.load(f);
+    anchor_.load(*f);
 }
 
 void IRowDiff::load_fork_succ(const std::string &filename) {
@@ -29,12 +30,12 @@ void IRowDiff::load_fork_succ(const std::string &filename) {
         common::logger->error("Can't read fork successor file: {}", filename);
         std::exit(1);
     }
-    std::ifstream f(filename, ios::binary);
-    if (!f.good()) {
+    std::unique_ptr<std::ifstream> f = utils::open_ifstream(filename);
+    if (!f->good()) {
         common::logger->error("Could not open fork successor file {}", filename);
         std::exit(1);
     }
-    fork_succ_.load(f);
+    fork_succ_.load(*f);
 }
 
 std::pair<std::vector<BinaryMatrix::Row>, std::vector<std::vector<size_t>>>
