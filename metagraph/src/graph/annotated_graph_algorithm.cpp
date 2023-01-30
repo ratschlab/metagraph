@@ -324,7 +324,9 @@ construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
     std::mutex vector_backup_mutex;
     bool parallel = num_threads > 1;
 
-    std::vector<annot::binmat::BinaryMatrix::Column> columns;
+    using Column = annot::binmat::BinaryMatrix::Column;
+
+    std::vector<Column> columns;
     const auto &encoder = anno_graph.get_annotator().get_label_encoder();
     AnnotatedDBG::Annotator::VLabels labels;
     labels.reserve(labels_in.size() + labels_out.size());
@@ -348,13 +350,15 @@ construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
             if (labels_out.count(labels[j]))
                 col_indicator |= 2;
 
-            auto add_in = [&indicator,&counts,&vector_backup_mutex,parallel](node_index i) {
+            auto add_in = [&indicator,&counts,&vector_backup_mutex,parallel](Column i) {
+                i = AnnotatedDBG::anno_to_graph_index(i);
                 assert(i != DeBruijnGraph::npos);
                 set_bit(indicator.data(), i, parallel, MO_RELAXED);
                 atomic_fetch_and_add(counts, i * 2, 1, vector_backup_mutex, MO_RELAXED);
             };
 
-            auto add_out = [&indicator,&counts,&vector_backup_mutex,parallel,add_out_labels_to_mask](node_index i) {
+            auto add_out = [&indicator,&counts,&vector_backup_mutex,parallel,add_out_labels_to_mask](Column i) {
+                i = AnnotatedDBG::anno_to_graph_index(i);
                 assert(i != DeBruijnGraph::npos);
                 if (add_out_labels_to_mask)
                     set_bit(indicator.data(), i, parallel, MO_RELAXED);
@@ -362,7 +366,8 @@ construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
                 atomic_fetch_and_add(counts, i * 2 + 1, 1, vector_backup_mutex, MO_RELAXED);
             };
 
-            auto add_both = [&indicator,&counts,&vector_backup_mutex,parallel](node_index i) {
+            auto add_both = [&indicator,&counts,&vector_backup_mutex,parallel](Column i) {
+                i = AnnotatedDBG::anno_to_graph_index(i);
                 assert(i != DeBruijnGraph::npos);
                 set_bit(indicator.data(), i, parallel, MO_RELAXED);
                 atomic_fetch_and_add(counts, i * 2, 1, vector_backup_mutex, MO_RELAXED);
