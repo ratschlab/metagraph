@@ -13,7 +13,6 @@
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
 #include "common/vectors/bitmap_builder.hpp"
-#include "common/vectors/transpose.hpp"
 #include "common/threads/threading.hpp"
 
 
