@@ -132,14 +132,15 @@ void bit_vector::call_ones_adaptive(uint64_t begin, uint64_t end,
     assert(begin <= end);
     assert(end <= size());
 
-    if (num_set_bits() <= size() / WORD_ACCESS_VS_SELECT_FACTOR) {
+    // TODO: store num_set_bits() to avoid this call
+    const uint64_t m = num_set_bits();
+    if (m <= size() / WORD_ACCESS_VS_SELECT_FACTOR) {
         // sparse
         uint64_t num_ones = end ? rank1(end - 1) : 0;
         for (uint64_t r = begin ? rank1(begin - 1) + 1 : 1; r <= num_ones; ++r) {
             callback(select1(r));
         }
-    } else if ((size() - num_set_bits())
-                <= size() / WORD_ACCESS_VS_SELECT_FACTOR) {
+    } else if (size() - m <= size() / WORD_ACCESS_VS_SELECT_FACTOR) {
         // dense
         uint64_t one_pos = begin;
         uint64_t zero_pos = 0;
@@ -164,21 +165,21 @@ sdsl::bit_vector
 bit_vector::to_vector_adaptive(double WORD_ACCESS_VS_SELECT_FACTOR) const {
     sdsl::bit_vector result;
 
-    if (num_set_bits() <= size() / WORD_ACCESS_VS_SELECT_FACTOR) {
+    const uint64_t m = num_set_bits();
+    if (m <= size() / WORD_ACCESS_VS_SELECT_FACTOR) {
         // sparse
         result = sdsl::bit_vector(size(), false);
 
-        uint64_t num_ones = num_set_bits();
-        for (uint64_t r = 1; r <= num_ones; ++r) {
+        for (uint64_t r = 1; r <= m; ++r) {
             result[select1(r)] = true;
         }
 
-    } else if ((size() - num_set_bits())
+    } else if ((size() - m)
                 <= size() / WORD_ACCESS_VS_SELECT_FACTOR) {
         // dense
         result = sdsl::bit_vector(size(), true);
 
-        uint64_t num_zeros = size() - num_set_bits();
+        uint64_t num_zeros = size() - m;
         for (uint64_t r = 1; r <= num_zeros; ++r) {
             result[select0(r)] = false;
         }
@@ -206,7 +207,8 @@ void bit_vector::add_to_adaptive(sdsl::bit_vector *other,
     assert(other);
     assert(other->size() == size());
 
-    if (std::min(num_set_bits(), size() - num_set_bits())
+    const uint64_t m = num_set_bits();
+    if (std::min(m, size() - m)
             <= size() / WORD_ACCESS_VS_SELECT_FACTOR) {
         // for very sparse or very dense vectors
         call_ones_adaptive(0, size(),

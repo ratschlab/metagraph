@@ -36,9 +36,9 @@ class RowDisk : public BinaryMatrix {
 
     static void serialize(const std::string &filename,
                           const std::function<void(binmat::BinaryMatrix::RowCallback)> &call_rows,
-                          uint64_t num_cols,
-                          uint64_t num_set_bits,
-                          uint64_t num_rows);
+                          uint64_t num_columns,
+                          uint64_t num_rows,
+                          uint64_t num_set_bits);
 
     const bit_vector_small& get_boundary() const { return boundary_; }
 

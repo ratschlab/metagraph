@@ -221,6 +221,7 @@ void print_annotation_stats(const std::string &fname, const Config &config) {
     }
 
     CHECK_IF_DIFFED_AND_PRINT_STATS(RowDiff<ColumnMajor>, "ColumnMajor");
+    CHECK_IF_DIFFED_AND_PRINT_STATS(RowDiff<RowFlat<>>, "RowFlat");
     CHECK_IF_DIFFED_AND_PRINT_STATS(RowDiff<RowSparse>, "RowSparse");
     CHECK_IF_DIFFED_AND_PRINT_STATS(RowDiff<BRWT>, "Multi-BRWT");
 

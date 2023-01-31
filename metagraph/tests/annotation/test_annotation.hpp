@@ -15,14 +15,6 @@ namespace mtg {
 namespace test {
 
 template <typename... Args>
-class RowCompressedParallel : public annot::RowCompressed<Args...> {
-  public:
-    template <typename... CArgs>
-    RowCompressedParallel(CArgs&&... args)
-          : annot::RowCompressed<Args...>(std::forward<CArgs>(args)...) {}
-};
-
-template <typename... Args>
 class RowCompressedDynamic : public annot::RowCompressed<Args...> {
   public:
     template <typename... CArgs>
@@ -41,18 +33,17 @@ template <typename Annotator>
 class AnnotatorTest : public ::testing::Test {
   public:
     std::unique_ptr<Annotator> annotation;
+    const std::string test_data_dir = "../tests/data";
+    const std::string test_dump_basename = test_data_dir + "/bit_vector_dump_test";
 
     virtual void set(annot::ColumnCompressed<>&& column_annotator) {
         if constexpr(std::is_same_v<Annotator, annot::MultiBRWTAnnotator>) {
             annotation = annot::convert_to_simple_BRWT(std::move(column_annotator));
 
         } else if constexpr(std::is_same_v<Annotator, annot::RowCompressed<>>) {
-            annotation.reset(new annot::RowCompressed<>(column_annotator.num_objects()));
-            convert_to_row_annotator(column_annotator, annotation.get());
-
-        } else if constexpr(std::is_same_v<Annotator, RowCompressedParallel<>>) {
-            annotation.reset(new RowCompressedParallel<>(column_annotator.num_objects()));
-            convert_to_row_annotator(column_annotator, annotation.get(), 10);
+            convert_to_row_annotator(column_annotator, test_dump_basename);
+            annotation.reset(new annot::RowCompressed<>(0));
+            annotation->load(test_dump_basename);
 
         } else if constexpr(std::is_same_v<Annotator, RowCompressedDynamic<>>) {
             annotation.reset(new RowCompressedDynamic<>(column_annotator.num_objects()));
@@ -139,7 +130,6 @@ typedef ::testing::Types<annot::BinRelWTAnnotator,
                          annot::UniqueRowAnnotator,
                          annot::ColumnCompressed<>,
                          annot::RowCompressed<>,
-                         RowCompressedParallel<>,
                          RowCompressedDynamic<>,
                          RowCompressedSparse<>> AnnotatorTypes;
 
@@ -154,13 +144,11 @@ typedef ::testing::Types<annot::BinRelWTAnnotator,
 
 typedef ::testing::Types<annot::ColumnCompressed<>,
                          annot::RowCompressed<>,
-                         RowCompressedParallel<>,
                          RowCompressedDynamic<>,
                          RowCompressedSparse<>> AnnotatorDynamicTypes;
 
 typedef ::testing::Types<annot::ColumnCompressed<>,
                          annot::RowCompressed<>,
-                         RowCompressedParallel<>,
                          RowCompressedDynamic<>> AnnotatorDynamicNoSparseTypes;
 
 

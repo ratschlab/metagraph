@@ -149,6 +149,12 @@ class bit_vector_adaptive_stat : public bit_vector_adaptive {
                                     uint64_t size,
                                     uint64_t num_set_bits);
 
+    using bit_vector_adaptive::serialize;
+    static void serialize(const VoidCall<const VoidCall<uint64_t>&> &call_ones,
+                          uint64_t size,
+                          uint64_t num_set_bits,
+                          const std::string &filename, bool append_file);
+
     bit_vector_adaptive_stat(std::initializer_list<bool> init)
       : bit_vector_adaptive_stat(sdsl::bit_vector(init)) {}
 
@@ -288,6 +294,25 @@ bit_vector_adaptive_stat<optimal_representation>
             vector_.reset(new bit_vector_il<4096>(std::move(vector)));
             break;
         }
+    }
+}
+
+template <bit_vector_adaptive::DefineRepresentation optimal_representation>
+inline void bit_vector_adaptive_stat<optimal_representation>::serialize(
+                const std::function<void(const VoidCall<uint64_t>&)> &call_ones,
+                uint64_t size,
+                uint64_t num_set_bits,
+                const std::string &filename, bool append_file) {
+    std::ofstream out(filename, std::ios::binary | (append_file ? std::ios::app : std::ios::openmode(0)));
+    if (optimal_representation(size, num_set_bits) == SD_VECTOR) {
+        // construct directly to disk
+        serialize_number(out, SD_VECTOR);
+        out.close();
+        bit_vector_sd::serialize(call_ones, size, num_set_bits, filename, append_file);
+    } else {
+        // in memory
+        bit_vector_adaptive_stat vec(call_ones, size, num_set_bits);
+        vec.serialize(out);
     }
 }
 

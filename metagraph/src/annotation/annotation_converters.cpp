@@ -18,7 +18,7 @@
 #include "common/utils/file_utils.hpp"
 #include "common/utils/string_utils.hpp"
 #include "common/utils/template_utils.hpp"
-#include "common/vectors/bitmap_mergers.hpp"
+#include "common/vectors/transpose.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 #include "binary_matrix/row_vector/vector_row_binmat.hpp"
 #include "binary_matrix/multi_brwt/brwt_builders.hpp"
@@ -76,7 +76,7 @@ convert<RowFlatAnnotator, std::string>(RowCompressed<std::string>&& annotator) {
     if (const auto *mat = dynamic_cast<const VectorRowBinMat<>*>(&annotator.get_matrix()))
         const_cast<VectorRowBinMat<>*>(mat)->standardize_rows();
 
-    auto matrix = std::make_unique<RowConcatenated<>>(
+    auto matrix = std::make_unique<RowFlat<>>(
         [&](auto callback) {
             call_rows(annotator.get_matrix(),
                 [&](const auto &row) {
@@ -172,7 +172,7 @@ std::unique_ptr<StaticAnnotation> convert(const std::string &filename) {
 
     std::unique_ptr<MatrixType> matrix;
 
-    if constexpr(std::is_same_v<MatrixType, RowConcatenated<>>) {
+    if constexpr(std::is_same_v<MatrixType, RowFlat<>>) {
         matrix = std::make_unique<MatrixType>(call_rows, label_encoder.size(), num_rows, num_relations);
 
     } else if constexpr(std::is_same_v<MatrixType, Rainbowfish>) {
@@ -210,12 +210,34 @@ convert<RowFlatAnnotator, std::string>(ColumnCompressed<std::string>&& annotator
     uint64_t num_rows = annotator.num_objects();
     uint64_t num_columns = annotator.num_labels();
 
-    auto matrix = std::make_unique<RowConcatenated<>>([&](auto callback) {
-        utils::RowsFromColumnsTransformer(annotator.get_matrix().data()).call_rows(callback);
+    auto matrix = std::make_unique<RowFlat<>>([&](auto callback) {
+        utils::call_rows(annotator.get_matrix().data(), callback, annotator.num_objects());
     }, num_columns, num_rows, num_set_bits);
 
     return std::make_unique<RowFlatAnnotator>(std::move(matrix),
                                               annotator.get_label_encoder());
+}
+
+template <>
+void convert<RowFlatAnnotator, std::string>(ColumnCompressed<std::string>&& annotator,
+                                            const std::string &outfbase) {
+    uint64_t num_set_bits = annotator.num_relations();
+    uint64_t num_rows = annotator.num_objects();
+    uint64_t num_columns = annotator.num_labels();
+
+    auto call_rows = [&](RowFlat<>::RowCallback callback) {
+        utils::call_rows(annotator.get_matrix().data(), callback, annotator.num_objects());
+    };
+
+    const auto &fname = utils::make_suffix(outfbase, RowFlatAnnotator::kExtension);
+    std::ofstream out = utils::open_new_ofstream(fname);
+    if (!out.good())
+        throw std::ofstream::failure("Can't write to " + fname);
+
+    annotator.get_label_encoder().serialize(out);
+    out.close();
+
+    RowFlat<>::serialize(call_rows, num_columns, num_rows, num_set_bits, fname, true);
 }
 
 template <>
@@ -227,8 +249,7 @@ convert<RowSparseAnnotator, std::string>(ColumnCompressed<std::string> &&annotat
 
     auto matrix = std::make_unique<RowSparse>(
         [&](auto callback) {
-            utils::RowsFromColumnsTransformer(annotator.get_matrix().data())
-                    .call_rows(callback);
+            utils::call_rows(annotator.get_matrix().data(), callback, annotator.num_objects());
         },
         num_columns, num_rows, num_set_bits
     );
@@ -242,7 +263,7 @@ convert<RainbowfishAnnotator, std::string>(ColumnCompressed<std::string>&& annot
     uint64_t num_columns = annotator.num_labels();
 
     auto matrix = std::make_unique<Rainbowfish>([&](auto callback) {
-        utils::RowsFromColumnsTransformer(annotator.get_matrix().data()).call_rows(callback);
+        utils::call_rows(annotator.get_matrix().data(), callback);
     }, num_columns);
 
     return std::make_unique<RainbowfishAnnotator>(std::move(matrix),
@@ -255,7 +276,7 @@ convert<UniqueRowAnnotator, std::string>(ColumnCompressed<std::string>&& annotat
     uint64_t num_columns = annotator.num_labels();
 
     auto matrix = std::make_unique<UniqueRowBinmat>([&](auto callback) {
-        utils::RowsFromColumnsTransformer(annotator.get_matrix().data()).call_rows(callback);
+        utils::call_rows(annotator.get_matrix().data(), callback);
     }, num_columns);
 
     return std::make_unique<UniqueRowAnnotator>(std::move(matrix),
@@ -378,20 +399,8 @@ std::pair<std::string, std::string> get_anchors_and_fork_fnames(const std::strin
     return std::make_pair(anchors_file, fork_succ_file);
 }
 
-template <>
-void convert_to_row_diff<RowDiffRowSparseAnnotator>(
-            const std::vector<std::string> &files,
-            const std::string &anchors_file_fbase,
-            const std::string &outfbase,
-            size_t /*num_threads*/,
-            size_t /*mem_bytes*/) {
-
-    std::string anchors_file;
-    std::string fork_succ_file;
-    std::tie(anchors_file, fork_succ_file) = get_anchors_and_fork_fnames(anchors_file_fbase);
-
-    logger->trace("Loading annotation from disk...");
-
+std::tuple<std::vector<std::unique_ptr<bit_vector>>, LabelEncoder<std::string>, uint64_t>
+load_row_diff_columns(const std::vector<std::string> &files) {
     std::vector<std::unique_ptr<bit_vector>> columns;
     LabelEncoder<std::string> label_encoder;
 
@@ -428,14 +437,74 @@ void convert_to_row_diff<RowDiffRowSparseAnnotator>(
         exit(1);
     }
 
+    return std::make_tuple(std::move(columns), std::move(label_encoder), total_num_set_bits);
+}
+
+template <>
+void convert_to_row_diff<RowDiffRowFlatAnnotator>(
+            const std::vector<std::string> &files,
+            const std::string &anchors_file_fbase,
+            const std::string &outfbase,
+            size_t /*num_threads*/,
+            size_t /*mem_bytes*/) {
+
+    std::string anchors_file;
+    std::string fork_succ_file;
+    std::tie(anchors_file, fork_succ_file) = get_anchors_and_fork_fnames(anchors_file_fbase);
+
+    logger->trace("Loading annotation from disk...");
+
+    std::vector<std::unique_ptr<bit_vector>> columns;
+    LabelEncoder<std::string> label_encoder;
+    uint64_t num_set_bits;
+    std::tie(columns, label_encoder, num_set_bits) = load_row_diff_columns(files);
+
+    const auto &fname = utils::make_suffix(outfbase, RowDiffRowFlatAnnotator::kExtension);
+    std::ofstream out = utils::open_new_ofstream(fname);
+    if (!out.good())
+        throw std::ofstream::failure("Can't write to " + fname);
+
+    label_encoder.serialize(out);
+
+    // serialize RowDiff<RowFlat<>>
+    out.write("v2.0", 4);
+    out.close();
+    utils::append_file(anchors_file, fname);
+    utils::append_file(fork_succ_file, fname);
+
+    uint64_t num_rows = columns.at(0)->size();
+    uint64_t num_columns = columns.size();
+
+    RowFlat<>::serialize([&](auto callback) { utils::call_rows(columns, callback); },
+                         num_columns, num_rows, num_set_bits, fname, true);
+    logger->trace("Annotation converted");
+}
+
+template <>
+void convert_to_row_diff<RowDiffRowSparseAnnotator>(
+            const std::vector<std::string> &files,
+            const std::string &anchors_file_fbase,
+            const std::string &outfbase,
+            size_t /*num_threads*/,
+            size_t /*mem_bytes*/) {
+
+    std::string anchors_file;
+    std::string fork_succ_file;
+    std::tie(anchors_file, fork_succ_file) = get_anchors_and_fork_fnames(anchors_file_fbase);
+
+    logger->trace("Loading annotation from disk...");
+
+    std::vector<std::unique_ptr<bit_vector>> columns;
+    LabelEncoder<std::string> label_encoder;
+    uint64_t num_set_bits;
+    std::tie(columns, label_encoder, num_set_bits) = load_row_diff_columns(files);
+
     uint64_t num_rows = columns.at(0)->size();
     uint64_t num_columns = columns.size();
 
     RowDiffRowSparseAnnotator row_sparse(label_encoder, nullptr,
-        [&](auto callback) {
-            utils::RowsFromColumnsTransformer(columns).call_rows(callback);
-        },
-        num_columns, num_rows, total_num_set_bits
+        [&](auto callback) { utils::call_rows(columns, callback); },
+        num_columns, num_rows, num_set_bits
     );
 
     const_cast<binmat::RowDiff<binmat::RowSparse> &>(row_sparse.get_matrix())
@@ -836,36 +905,12 @@ void convert_batch_to_row_disk(
 
     out.close();
 
-    ProgressBar progress_bar(num_rows, "Serialize rows", std::cerr, !common::get_verbose());
-
-    RowDisk::serialize(
-            outfname,
-            [&](BinaryMatrix::RowCallback write_row) {
-                #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic)
-                for (uint64_t begin = 0; begin < num_rows; begin += kNumRowsInBlock) {
-                    uint64_t end = std::min(begin + kNumRowsInBlock, num_rows);
-
-                    std::vector<BinaryMatrix::SetBitPositions> rows(end - begin);
-
-                    assert(begin <= end);
-                    assert(end <= num_rows);
-
-                    for (size_t j = 0; j < columns.size(); ++j) {
-                        columns[j]->call_ones_in_range(begin, end, [&](uint64_t i) {
-                            rows[i - begin].push_back(j);
-                        });
-                    }
-
-                    #pragma omp ordered
-                    {
-                        for (const auto &row : rows) {
-                            write_row(row);
-                            ++progress_bar;
-                        }
-                    }
-                }
-            },
-            label_encoder.size(), num_set_bits, num_rows);
+    RowDisk::serialize(outfname,
+        [&](BinaryMatrix::RowCallback write_row) {
+            utils::call_rows(columns, write_row);
+        },
+        label_encoder.size(), num_rows, num_set_bits
+    );
 }
 
 uint64_t get_num_rows_from_column_anno(const std::string &fname) {
@@ -985,7 +1030,7 @@ void merge_row_disk_annotations(const std::vector<std::string> &files,
                     }
                 }
             },
-            label_encoder.size(), num_set_bits, num_rows);
+            label_encoder.size(), num_rows, num_set_bits);
 
     for (const auto &fname : files) {
         fs::remove(fname);
@@ -1225,7 +1270,7 @@ void convert_to_row_diff<IntRowDiffDiskAnnotator>(
                     }
                 }
             },
-            columns.size(), num_set_bits, num_rows, max_val);
+            columns.size(), num_rows, num_set_bits, max_val);
 }
 
 template <>
@@ -1350,7 +1395,7 @@ void convert_to_row_diff<RowDiffDiskCoordAnnotator>(
                     }
                 }
             },
-            columns.size(), num_set_bits, num_rows, num_values, max_val, max_tuple_size);
+            columns.size(), num_rows, num_set_bits, num_values, max_val, max_tuple_size);
 }
 
 template <>
@@ -1378,7 +1423,7 @@ convert<BinRelWT_sdslAnnotator, std::string>(ColumnCompressed<std::string>&& ann
 
     auto matrix = std::make_unique<BinRelWT_sdsl>(
         [&](auto callback) {
-            utils::RowsFromColumnsTransformer(annotator.get_matrix().data()).call_rows(callback);
+            utils::call_rows(annotator.get_matrix().data(), callback);
         },
         num_set_bits,
         num_columns
@@ -1441,42 +1486,18 @@ void merge_rows(const std::vector<LabelEncoder<Label>> &label_encoders,
 }
 
 // TODO: move row iterators to BinaryMatrix
-template <class T>
-class Iterate {
-  public:
-    virtual ~Iterate() {}
-    virtual T next() = 0;
-};
-
 template <class Annotator>
-class IterateRows : public Iterate<BinaryMatrix::SetBitPositions> {
+class IterateRows {
   public:
     IterateRows(const Annotator &annotator) : matrix_(annotator.get_matrix()) {};
 
-    BinaryMatrix::SetBitPositions next() override {
+    BinaryMatrix::SetBitPositions next() {
         return matrix_.get_row(i_++);
     };
 
   private:
     typename BinaryMatrix::Row i_ = 0;
     const BinaryMatrix &matrix_;
-};
-
-// TODO: remove this if not crucial.
-// Support only merge with streaming and only converted to row-major.
-template <>
-class IterateRows<ColumnCompressed<std::string>>
-            : public Iterate<BinaryMatrix::SetBitPositions> {
-  public:
-    IterateRows(const ColumnCompressed<std::string> &annotator)
-          : row_iterator_(std::make_unique<utils::RowsFromColumnsTransformer>(annotator.get_matrix().data())) {}
-
-    BinaryMatrix::SetBitPositions next() override {
-        return row_iterator_.next_row<BinaryMatrix::SetBitPositions>();
-    }
-
-  private:
-    utils::RowsFromColumnsIterator row_iterator_;
 };
 
 template <class ToAnnotation, typename Label>
@@ -1499,15 +1520,13 @@ void merge(std::vector<std::unique_ptr<MultiLabelEncoded<Label>>>&& annotators,
 
     std::vector<LEncoder> label_encoders;
 
-    std::vector<std::unique_ptr<Iterate<BinaryMatrix::SetBitPositions>>> annotator_row_iterators;
+    std::vector<IterateRows<MultiLabelEncoded<Label>>> row_iterators;
     for (const auto &annotator : annotators) {
         if (annotator->num_objects() != num_rows)
             throw std::runtime_error("Annotators have different number of rows");
 
         label_encoders.push_back(annotator->get_label_encoder());
-        annotator_row_iterators.push_back(
-            std::make_unique<IterateRows<MultiLabelEncoded<Label>>>(*annotator)
-        );
+        row_iterators.emplace_back(*annotator);
     }
 
     std::vector<std::unique_ptr<StreamRows<>>> streams;
@@ -1527,7 +1546,7 @@ void merge(std::vector<std::unique_ptr<MultiLabelEncoded<Label>>>&& annotators,
         label_encoders,
         [&](uint64_t annotator_idx) -> const BinaryMatrix::SetBitPositions {
             if (annotator_idx < annotators.size()) {
-                return annotator_row_iterators.at(annotator_idx)->next();
+                return row_iterators.at(annotator_idx).next();
             } else {
                 return *streams[annotator_idx-annotators.size()]->next_row();
             }
@@ -1608,107 +1627,17 @@ void merge<MultiBRWTAnnotator, std::string>(
 
 template <typename Label>
 void convert_to_row_annotator(const ColumnCompressed<Label> &annotator,
-                              const std::string &outfbase,
-                              size_t num_threads) {
-    uint64_t num_rows = annotator.num_objects();
-
-    ProgressBar progress_bar(num_rows, "Serialize rows",
-                             std::cerr, !common::get_verbose());
-
-    RowCompressed<Label>::serialize(
-        outfbase,
-        annotator.get_label_encoder(),
+                              const std::string &outfbase) {
+    RowCompressed<Label>::serialize(outfbase, annotator.get_label_encoder(),
         [&](BinaryMatrix::RowCallback write_row) {
-            #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic)
-            for (uint64_t i = 0; i < num_rows; i += kNumRowsInBlock) {
-
-                uint64_t begin = i;
-                uint64_t end = std::min(i + kNumRowsInBlock, num_rows);
-
-                std::vector<BinaryMatrix::SetBitPositions> rows(end - begin);
-
-                assert(begin <= end);
-                assert(end <= num_rows);
-
-                // TODO: use RowsFromColumnsTransformer
-                for (const auto &label : annotator.get_all_labels()) {
-                    size_t j = annotator.get_label_encoder().encode(label);
-                    annotator.get_column(label).call_ones_in_range(begin, end,
-                        [&](uint64_t idx) { rows[idx - begin].push_back(j); }
-                    );
-                }
-
-                #pragma omp ordered
-                {
-                    for (const auto &row : rows) {
-                        write_row(row);
-                        ++progress_bar;
-                    }
-                }
-            }
+            utils::call_rows(annotator.get_matrix().data(), write_row, annotator.num_objects());
         }
     );
 }
 
 template
 void convert_to_row_annotator(const ColumnCompressed<std::string> &annotator,
-                              const std::string &outfbase,
-                              size_t num_threads);
-
-template <typename Label>
-void convert_to_row_annotator(const ColumnCompressed<Label> &source,
-                              RowCompressed<Label> *annotator,
-                              size_t num_threads) {
-    assert(annotator);
-    assert(source.num_objects() == annotator->get_matrix().num_rows());
-
-    uint64_t num_rows = source.num_objects();
-
-    ProgressBar progress_bar(num_rows, "Rows processed",
-                             std::cerr, !common::get_verbose());
-
-    const_cast<LabelEncoder<Label>&>(annotator->get_label_encoder())
-            = source.get_label_encoder();
-
-    if (num_threads <= 1) {
-        add_labels(source, 0, num_rows,
-                   const_cast<BinaryMatrixRowDynamic*>(&annotator->get_matrix()),
-                   &progress_bar);
-        return;
-    }
-
-    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
-    for (uint64_t i = 0; i < num_rows; i += kNumRowsInBlock) {
-        add_labels(source, i, std::min(i + kNumRowsInBlock, num_rows),
-                   const_cast<BinaryMatrixRowDynamic*>(&annotator->get_matrix()),
-                   &progress_bar);
-    }
-}
-
-template <typename Label>
-void add_labels(const ColumnCompressed<Label> &source,
-                uint64_t begin, uint64_t end,
-                BinaryMatrixRowDynamic *matrix,
-                ProgressBar *progress_bar) {
-    assert(matrix);
-    assert(begin <= end);
-    assert(end <= matrix->num_rows());
-
-    // TODO: use RowsFromColumnsTransformer
-    for (const auto &label : source.get_all_labels()) {
-        size_t j = source.get_label_encoder().encode(label);
-        source.get_column(label).call_ones_in_range(begin, end,
-            [&](uint64_t idx) { matrix->set(idx, j); }
-        );
-    }
-    if (progress_bar)
-        *progress_bar += end - begin;
-}
-
-template
-void convert_to_row_annotator(const ColumnCompressed<std::string> &source,
-                              RowCompressed<std::string> *annotator,
-                              size_t num_threads);
+                              const std::string &outfbase);
 
 fs::path get_count_filename(fs::path vector_fname,
                             const std::string &extension,

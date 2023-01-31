@@ -13,7 +13,6 @@
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
 #include "common/vectors/bitmap_builder.hpp"
-#include "common/vectors/bitmap_mergers.hpp"
 #include "common/threads/threading.hpp"
 
 
@@ -456,11 +455,8 @@ void ColumnCompressed<Label>::serialize_coordinates(const std::string &filename)
 
             out.close();
 
-            std::string concat_command = fmt::format("cat {} >> {}", tmp_path/"coords", coords_fname);
-            if (std::system(concat_command.c_str())) {
-                logger->error("Error while cat-ing files: {}", concat_command);
-                std::exit(EXIT_FAILURE);
-            }
+            utils::append_file(tmp_path/"coords", coords_fname);
+            fs::remove(tmp_path/"coords");
 
             out = std::ofstream(coords_fname, std::ios::binary | std::ios::app);
         }

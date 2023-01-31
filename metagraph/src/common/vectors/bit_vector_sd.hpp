@@ -5,6 +5,7 @@
 
 #include <sdsl/sd_vector.hpp>
 
+#include "sd_vector_builder_disk.hpp"
 #include "vector_algorithm.hpp"
 #include "bit_vector.hpp"
 
@@ -42,6 +43,10 @@ class bit_vector_sd : public bit_vector {
 
     inline bool load(std::istream &in) override;
     inline void serialize(std::ostream &out) const override;
+    static void serialize(const std::function<void(const VoidCall<uint64_t>&)> &call_ones,
+                          uint64_t size,
+                          uint64_t num_set_bits,
+                          const std::string &filename, bool append_file);
 
     inline uint64_t size() const override { return vector_.size(); }
 
@@ -267,6 +272,35 @@ bool bit_vector_sd::load(std::istream &in) {
 void bit_vector_sd::serialize(std::ostream &out) const {
     vector_.serialize(out);
     if (!out.put(inverted_).good())
+        throw std::ofstream::failure("Error when dumping bit_vector_sd");
+}
+
+inline void bit_vector_sd::serialize(
+                const std::function<void(const VoidCall<uint64_t>&)> &call_ones,
+                uint64_t size,
+                uint64_t num_set_bits,
+                const std::string &filename, bool append_file) {
+    bool inverted = num_set_bits > size / 2;
+    sdsl::sd_vector_builder_disk builder(size, !inverted ? num_set_bits : size - num_set_bits,
+                                         filename, append_file ? std::filesystem::file_size(filename) : 0);
+    if (inverted) {
+        uint64_t last_pos = 0;
+        call_ones([&](uint64_t pos) {
+            while (last_pos < pos) {
+                builder.set(last_pos++);
+            }
+            ++last_pos;
+        });
+        while (last_pos < size) {
+            builder.set(last_pos++);
+        }
+    } else {
+        call_ones([&](uint64_t pos) { builder.set(pos); });
+    }
+    builder.finish();
+
+    std::ofstream out(filename, std::ios::binary | std::ios::app);
+    if (!out.put(inverted).good())
         throw std::ofstream::failure("Error when dumping bit_vector_sd");
 }
 

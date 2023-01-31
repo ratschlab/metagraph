@@ -16,7 +16,7 @@
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "annotation/int_matrix/row_diff/tuple_row_diff.hpp"
 #include "annotation/int_matrix/rank_extended/tuple_csc_matrix.hpp"
-#include "common/vectors/bitmap_mergers.hpp"
+#include "common/vectors/transpose.hpp"
 
 
 namespace mtg {
@@ -47,12 +47,12 @@ build_matrix_from_rows(const std::function<void(const RowCallback &)> &generate_
 }
 
 template <>
-RowConcatenated<>
+RowFlat<>
 build_matrix_from_rows(const std::function<void(const RowCallback &)> &generate_rows,
                        uint64_t num_columns,
                        uint64_t num_rows,
                        uint64_t num_relations) {
-    return RowConcatenated<>(generate_rows, num_columns, num_rows, num_relations);
+    return RowFlat<>(generate_rows, num_columns, num_rows, num_relations);
 }
 
 template <>
@@ -92,15 +92,13 @@ BinMat build_matrix_from_columns(const BitVectorPtrArray &columns, uint64_t num_
     }
 
     return build_matrix_from_rows<BinMat>(
-        [&](auto row_callback) {
-            utils::RowsFromColumnsTransformer(columns).call_rows(row_callback);
-        },
+        [&](auto row_callback) { utils::call_rows(columns, row_callback); },
         num_columns, num_rows, num_set_bits
     );
 }
 template BinRelWT build_matrix_from_columns<BinRelWT>(const BitVectorPtrArray&, uint64_t);
 template BinRelWT_sdsl build_matrix_from_columns<BinRelWT_sdsl>(const BitVectorPtrArray&, uint64_t);
-template RowConcatenated<> build_matrix_from_columns<RowConcatenated<>>(const BitVectorPtrArray&, uint64_t);
+template RowFlat<> build_matrix_from_columns<RowFlat<>>(const BitVectorPtrArray&, uint64_t);
 template RowSparse build_matrix_from_columns<RowSparse>(const BitVectorPtrArray&, uint64_t);
 template UniqueRowBinmat build_matrix_from_columns<UniqueRowBinmat>(const BitVectorPtrArray&, uint64_t);
 template Rainbowfish build_matrix_from_columns<Rainbowfish>(const BitVectorPtrArray&, uint64_t);
@@ -355,7 +353,7 @@ template void test_matrix<BRWTOptimized>(const BRWTOptimized&, const BitVectorPt
 template void test_matrix<ColumnMajor>(const ColumnMajor&, const BitVectorPtrArray &);
 template void test_matrix<BinRelWT>(const BinRelWT&, const BitVectorPtrArray &);
 template void test_matrix<BinRelWT_sdsl>(const BinRelWT_sdsl&, const BitVectorPtrArray &);
-template void test_matrix<RowConcatenated<>>(const RowConcatenated<>&, const BitVectorPtrArray &);
+template void test_matrix<RowFlat<>>(const RowFlat<>&, const BitVectorPtrArray &);
 template void test_matrix<RowSparse>(const RowSparse&, const BitVectorPtrArray &);
 template void test_matrix<UniqueRowBinmat>(const UniqueRowBinmat&, const BitVectorPtrArray &);
 template void test_matrix<Rainbow<BRWT>>(const Rainbow<BRWT>&, const BitVectorPtrArray &);

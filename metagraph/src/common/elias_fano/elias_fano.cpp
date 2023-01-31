@@ -10,6 +10,7 @@
 #include <sdsl/uint128_t.hpp>
 
 #include "common/logger.hpp"
+#include "common/utils/file_utils.hpp"
 #include "common/utils/template_utils.hpp"
 
 
@@ -27,24 +28,11 @@ void concat(const std::vector<std::string> &files, const std::string &result) {
         suffixes.push_back(".count");
 
     for (const std::string &suffix : suffixes) {
-        if (files.size() > 1) {
-            std::string concat_command = "cat ";
-            for (uint32_t i = 1; i < files.size(); ++i) {
-                concat_command += files[i] + suffix + " ";
-            }
-            concat_command += ">> " + files[0] + suffix;
-
-            if (std::system(concat_command.c_str())) {
-                logger->error("Error while cat-ing files: {}", concat_command);
-                std::exit(EXIT_FAILURE);
-            }
-        }
-
-        std::filesystem::rename(files[0] + suffix, result + suffix);
-        for (size_t i = 1; i < files.size(); ++i) {
-            assert(std::filesystem::exists(files[i] + suffix));
+        for (uint32_t i = 1; i < files.size(); ++i) {
+            utils::append_file(files[i] + suffix, files[0] + suffix);
             std::filesystem::remove(files[i] + suffix);
         }
+        std::filesystem::rename(files[0] + suffix, result + suffix);
     }
 }
 

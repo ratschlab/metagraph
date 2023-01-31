@@ -6,7 +6,7 @@
 #include "annotation/binary_matrix/multi_brwt/clustering.hpp"
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
 #include "annotation/binary_matrix/row_vector/vector_row_binmat.hpp"
-#include "common/vectors/bitmap_mergers.hpp"
+#include "common/vectors/transpose.hpp"
 #include "common/data_generation.hpp"
 
 
@@ -78,7 +78,7 @@ matrix_type_to_data(const std::string &file, MatrixType type) {
     } else if (type == MatrixType::BIN_REL_WT) {
         matrix_ptr.reset(new BinRelWT());
     } else if (type == MatrixType::ROW_FLAT) {
-        matrix_ptr.reset(new RowConcatenated<>());
+        matrix_ptr.reset(new RowFlat<>());
     } else if (type == MatrixType::RAINBOWFISH) {
         matrix_ptr.reset(new Rainbowfish());
     } else {
@@ -189,9 +189,7 @@ generate_from_rows(std::vector<std::unique_ptr<bit_vector>>&& columns,
             }
 
             binary_matrix.reset(new BinRelWT_sdsl(
-                [&](const auto &callback) {
-                    utils::RowsFromColumnsTransformer(columns).call_rows(callback);
-                },
+                [&](const auto &callback) { utils::call_rows(columns, callback); },
                 num_set_bits, num_columns
             ));
 
@@ -210,14 +208,9 @@ generate_from_rows(std::vector<std::unique_ptr<bit_vector>>&& columns,
                 num_set_bits += vector_ptr->num_set_bits();
             }
 
-            binary_matrix.reset(new RowConcatenated<>(
-                [&](const auto &callback) {
-                    utils::RowsFromColumnsTransformer(columns).call_rows(callback);
-                },
-                num_columns,
-                num_rows,
-                num_set_bits,
-                std::forward<Args>(args)...
+            binary_matrix.reset(new RowFlat<>(
+                [&](const auto &callback) { utils::call_rows(columns, callback); },
+                num_columns, num_rows, num_set_bits, std::forward<Args>(args)...
             ));
 
             break;
@@ -226,11 +219,8 @@ generate_from_rows(std::vector<std::unique_ptr<bit_vector>>&& columns,
             const auto num_columns = columns.size();
 
             binary_matrix.reset(new Rainbowfish(
-                [&](const auto &callback) {
-                    utils::RowsFromColumnsTransformer(columns).call_rows(callback);
-                },
-                num_columns,
-                std::forward<Args>(args)...
+                [&](const auto &callback) { utils::call_rows(columns, callback); },
+                num_columns, std::forward<Args>(args)...
             ));
             break;
         }

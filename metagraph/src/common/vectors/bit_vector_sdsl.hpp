@@ -372,8 +372,7 @@ template <uint16_t t_bs, class t_rac, uint16_t t_k>
 struct bit_vector_sdsl<bv_type, rank_1_type, select_1_type, select_0_type>
 ::bv_traits<sdsl::rrr_vector<t_bs, t_rac, t_k>> {
     static constexpr size_t MAX_ITER_BIT_VECTOR = 1;
-    // sequential word access for bit_vector_rrr per bit is 21 times faster than select
-    static constexpr size_t SEQ_BITWISE_WORD_ACCESS_VS_SELECT_FACTOR = 21;
+    static constexpr size_t SEQ_BITWISE_WORD_ACCESS_VS_SELECT_FACTOR = 2;
 
     static inline double logbinomial(double n, double m) {
         return (lgamma(n + 1)
