@@ -399,6 +399,8 @@ Config::Config(int argc, char *argv[]) {
             relax_arity_brwt = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--RA-ivbuff-size")) {
             RA_ivbuffer_size = atoll(get_value(i++));
+        } else if (!strcmp(argv[i], "--dense-rows-percentage")) {
+            dense_rows_percentage = atoll(get_value(i++));
         // } else if (!strcmp(argv[i], "--cache-size")) {
         //     row_cache_size = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) {
@@ -620,6 +622,7 @@ Config::Config(int argc, char *argv[]) {
     if (identity == TRANSFORM_ANNOTATION) {
         const bool to_row_diff = anno_type == RowDiff
                                     || anno_type == RowDiffBRWT
+                                    || anno_type == RowDiffHybridDiskBRWT
                                     || anno_type == RowDiffDisk
                                     || anno_type == IntRowDiffBRWT
                                     || anno_type == IntRowDiffDisk
@@ -744,6 +747,8 @@ std::string Config::annotype_to_string(AnnotationType state) {
             return "row_diff_sparse";
         case RowSparse:
             return "row_sparse";
+        case RowDiffHybridDiskBRWT:
+            return "rd_hybrid_disk_brwt";
         case RowDiffDisk:
             return "row_diff_disk";
         case IntRowDiffDisk:
@@ -791,6 +796,8 @@ Config::AnnotationType Config::string_to_annotype(const std::string &string) {
         return AnnotationType::RowDiffRowSparse;
     } else if (string == "row_sparse") {
         return AnnotationType::RowSparse;
+    } else if (string == "rd_hybrid_disk_brwt") {
+        return AnnotationType::RowDiffHybridDiskBRWT;
     } else if (string == "row_diff_disk") {
         return AnnotationType::RowDiffDisk;
     } else if (string == "row_diff_int_disk") {
@@ -1327,6 +1334,7 @@ if (advanced) {
             fprintf(stderr, "\t   --batch-size \tquery batch size (number of base pairs) [100000000]\n");
 if (advanced) {
             fprintf(stderr, "\t   --RA-ivbuff-size [INT] \tsize (in bytes) of int_vector_buffer used in random access mode (e.g. by row disk annotator) [16384]\n");
+            fprintf(stderr, "\t   --dense-rows-percentage [FLOAT] \tpercentage of rows considered as dense when splitting matrix to hybrid representation [2.0]\n");
 }
             fprintf(stderr, "\n");
             fprintf(stderr, "Available options for --align:\n");

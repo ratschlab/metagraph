@@ -1092,6 +1092,299 @@ uint64_t get_num_rows_from_row_diff_anno(const std::string &fname) {
     return matrix.num_rows();
 }
 
+void convert_to_rd_hybrid_disk_brwt(
+            const std::vector<std::string> &files,
+            const std::string &anchors_file_fbase,
+            const std::string &outfbase,
+            double dense_rows_percentage,
+            size_t num_threads,
+            const std::filesystem::path &tmp_path,
+            const std::function<std::unique_ptr<RowDiffBRWTAnnotator>(const std::vector<std::string> &)>& create_row_diff_multi_brwt) {
+
+    assert(dense_rows_percentage > 0);
+
+    size_t num_cols{};
+    for (size_t i = 0; i < files.size(); ++i) {
+        try {
+            num_cols += RowDiffColumnAnnotator::read_label_encoder(files[i]).size();
+        } catch (...) {
+            common::logger->error("Can't load label encoder from {}", files[i]);
+        }
+    }
+
+    //first need to determine which rows are dense
+    std::unique_ptr<ProgressBar> progress_bar = std::make_unique<ProgressBar>(num_cols, "Determine dense rows", std::cerr, !common::get_verbose());
+
+    std::mutex mu;
+    uint64_t total_num_set_bits = 0;
+
+    using CounterType = uint32_t;
+    struct cnt_row {
+        CounterType cnt;
+        size_t row_id;
+    };
+    std::vector<cnt_row> histogram;
+
+    size_t num_rows = 0;
+
+    bool load_successful = merge_load_row_diff(
+        files,
+        [&](uint64_t, const std::string &label, std::unique_ptr<bit_vector> &&column) {
+            uint64_t num_set_bits = column->num_set_bits();
+            logger->trace("RowDiff column: {}, Density: {}, Set bits: {}", label,
+                          static_cast<double>(num_set_bits) / column->size(),
+                          num_set_bits);
+
+            std::lock_guard<std::mutex> lock(mu);
+
+            if (!num_rows) {
+                num_rows = column->size();
+                histogram.resize(num_rows);
+                for (size_t row_id = 0 ; row_id < num_rows ; ++row_id)
+                    histogram[row_id].row_id = row_id;
+
+            }
+            if (column->size() != num_rows) {
+                logger->error("Column {} has {} rows, previous column has {} rows",
+                              label, column->size(), num_rows);
+                exit(1);
+            }
+            column->call_ones([&](uint64_t row_id) {
+                ++histogram[row_id].cnt;
+            });
+
+            total_num_set_bits += num_set_bits;
+
+            ++(*progress_bar);
+        },
+        num_threads
+    );
+
+    if (!load_successful) {
+        logger->error("Error while loading row-diff columns");
+        exit(1);
+    }
+    size_t num_dense_rows = num_rows * dense_rows_percentage / 100;
+    std::partial_sort(
+        histogram.begin(),
+        histogram.begin() + num_dense_rows,
+        histogram.end(),
+        [](const cnt_row& lhs, const cnt_row& rhs) {
+            if (lhs.cnt == rhs.cnt)
+                return lhs.row_id < rhs.row_id;
+
+            return lhs.cnt > rhs.cnt;
+        });
+
+    sdsl::bit_vector dense_rows(num_rows, false);
+
+    size_t num_sparse_rows =  num_rows - num_dense_rows;
+    logger->trace("# sparse rows: {}", num_sparse_rows);
+    logger->trace("# dense rows: {}", num_dense_rows);
+
+    logger->trace("density of sparsest row in dense rows: {}", (double)histogram.back().cnt / num_cols);
+    logger->trace("density of densest row in dense rows: {}", (double)histogram.front().cnt / num_cols);
+
+    size_t num_set_bits_in_dense{};
+    for (size_t i = 0 ; i < num_dense_rows ; ++i) {
+        dense_rows[histogram[i].row_id] = true;
+        num_set_bits_in_dense += histogram[i].cnt;
+    }
+
+    histogram.clear();
+    histogram.shrink_to_fit();
+
+    size_t num_set_bits_in_sparse = total_num_set_bits - num_set_bits_in_dense;
+
+    logger->trace("# set bits in sparse rows: {}", num_set_bits_in_sparse);
+    logger->trace("# set bits in dense rows: {}", num_set_bits_in_dense);
+
+    logger->trace("density of sparse rows: {}", (double)num_set_bits_in_sparse / (num_sparse_rows * num_cols));
+    logger->trace("density of dense rows: {}", (double)num_set_bits_in_dense / (num_dense_rows * num_cols));
+
+    logger->trace("global density: {}", (double)total_num_set_bits/(num_rows * num_cols));
+
+    std::vector<std::unique_ptr<bit_vector>> columns;
+    LabelEncoder<std::string> label_encoder;
+
+    //iterate cols again
+    //mkokot_TODO: rewrite this to work in streaming mode
+    progress_bar = std::make_unique<ProgressBar>(num_cols, "Load all columns", std::cerr, !common::get_verbose());
+    load_successful = merge_load_row_diff(
+        files,
+        [&](uint64_t, const std::string &label, std::unique_ptr<bit_vector> &&column) {
+            uint64_t num_set_bits = column->num_set_bits();
+            logger->trace("RowDiff column: {}, Density: {}, Set bits: {}", label,
+                          static_cast<double>(num_set_bits) / column->size(),
+                          num_set_bits);
+
+            std::lock_guard<std::mutex> lock(mu);
+
+            if (columns.size() && column->size() != columns.back()->size()) {
+                logger->error("Column {} has {} rows, previous column has {} rows",
+                              label, column->size(), columns.back()->size());
+                exit(1);
+            }
+            size_t col = label_encoder.insert_and_encode(label);
+            if (col != columns.size()) {
+                logger->error("Duplicate columns {}", label);
+                exit(1);
+            }
+            columns.push_back(std::move(column));
+
+            ++(*progress_bar);
+        },
+        get_num_threads()
+    );
+
+    if (!load_successful) {
+        logger->error("Error while loading row-diff columns");
+        exit(1);
+    }
+
+    auto fname = utils::make_suffix(outfbase, RowDiffHybridDiskBRWTAnnotator::kExtension);
+    std::ofstream outstream(fname, std::ios::binary);
+    if (!outstream.good()) {
+        throw std::ofstream::failure("Bad stream");
+    }
+    label_encoder.serialize(outstream);
+
+    std::string anchors_file;
+    std::string fork_succ_file;
+    std::tie(anchors_file, fork_succ_file) = get_anchors_and_fork_fnames(anchors_file_fbase);
+    IRowDiff row_diff;
+    row_diff.load_anchor(anchors_file);
+    row_diff.load_fork_succ(fork_succ_file);
+    outstream.write("v2.0", 4);
+    row_diff.anchor().serialize(outstream);
+    row_diff.fork_succ().serialize(outstream);
+
+    auto dense_rows_bv = HybridMatrix<RowDisk, BRWT>::stored_in_matrix1_bv_type(dense_rows);
+
+    auto fpos = outstream.tellp();
+    dense_rows_bv.serialize(outstream);
+    logger->trace("stored_as_matrix1 bv size: {}", outstream.tellp() - fpos);
+    fpos = outstream.tellp();
+    outstream.close();
+
+    progress_bar = std::make_unique<ProgressBar>(num_dense_rows, "Serialize dense rows",
+                             std::cerr, !common::get_verbose());
+    RowDisk::serialize(
+        fname,
+        [&](BinaryMatrix::RowCallback write_row) {
+            #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic)
+            for (uint64_t i = 0; i < num_rows; i += kNumRowsInBlock) {
+
+                uint64_t begin = i;
+                uint64_t end = std::min(i + kNumRowsInBlock, num_rows);
+
+                std::vector<BinaryMatrix::SetBitPositions> rows(end - begin);
+
+                assert(begin <= end);
+                assert(end <= num_rows);
+
+                for (size_t j = 0 ; j < columns.size() ; ++j) {
+                    columns[j]->call_ones_in_range(begin, end,
+                        [&](uint64_t idx) {
+                            if (dense_rows[idx])
+                                rows[idx - begin].push_back(j);
+                        }
+                    );
+                }
+
+                #pragma omp ordered
+                {
+                    for(size_t id = 0 ; id < rows.size() ; ++id) {
+                        size_t row_id = begin + id;
+                        if (dense_rows[row_id]) {
+                            write_row(rows[id]);
+                            ++(*progress_bar);
+                        }
+                    }
+                }
+            }
+        },num_cols, num_set_bits_in_dense, num_dense_rows
+    );
+
+    // mkokot_TODO: OK for now I will do this in a very simple way,
+    // I will load all columns and remove rows that are to be represented as
+    // row_sparse_disk and store to the files
+    // I will call call_ones per each column and create a new column
+
+    const auto tmp_dir_path = tmp_path / ".row_diff_row_sparse_brwt_disk-tmp";
+    std::filesystem::create_directory(tmp_dir_path);
+
+    progress_bar = std::make_unique<ProgressBar>(num_cols, "Compute brwt cols",
+                             std::cerr, !common::get_verbose());
+
+    std::vector<std::string> brwt_fnames(num_cols);
+    for (uint64_t i = 0 ; i < label_encoder.get_labels().size() ; ++i) {
+        const auto& label = label_encoder.get_labels()[i];
+        auto lab_id = label_encoder.encode(label);
+        std::string fname = std::filesystem::path(tmp_dir_path) / (std::to_string(lab_id) + RowDiffColumnAnnotator::kExtension);
+
+        brwt_fnames[lab_id] = fname;
+    }
+
+    #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic)
+    for (uint64_t i = 0 ; i < label_encoder.get_labels().size() ; ++i) {
+        const auto& label = label_encoder.get_labels()[i];
+
+        auto lab_id = label_encoder.encode(label);
+
+        const std::string& fname = brwt_fnames[lab_id];
+
+        std::ofstream out(fname, std::ios::binary);
+        if (!out) {
+            logger->error("Could not open file for writing: {}",
+                        fname);
+            throw std::ofstream::failure("Bad stream");
+        }
+
+        LabelEncoder<> label_encoder;
+
+        label_encoder.insert_and_encode(label);
+
+
+        sdsl::bit_vector new_column(num_sparse_rows, false);
+        // mkokot, TODO: remove this comment latter
+        // as I use columns[i] I think it is not needed to collect brwt_fnames in a loop before
+        // and some simplifications can be made
+        columns[i]->call_ones([&](uint64_t row_id) {
+            // if stored as brwt
+            if (dense_rows[row_id] == false) {
+                auto id_in_brwt_col = dense_rows_bv.rank0(row_id) - 1;
+                new_column[id_in_brwt_col] = true;
+            }
+        });
+
+        bit_vector_small new_column_bv = bit_vector_small(std::move(new_column));
+
+        //prevent threads from fighting of disk access
+        #pragma omp critical
+        {
+            label_encoder.serialize(out);
+            new_column_bv.serialize(out);
+        }
+
+        ++(*progress_bar);
+    }
+
+    columns.clear();
+    columns.shrink_to_fit();
+
+    auto row_diff_brwt_anno = create_row_diff_multi_brwt(brwt_fnames);
+
+    std::filesystem::remove_all(tmp_dir_path);
+
+    outstream.open(fname, std::ios::binary | std::ios::ate | std::ios::in);
+    logger->trace("stored as row sparse size: {}", outstream.tellp() - fpos);
+    fpos = outstream.tellp();
+    row_diff_brwt_anno->get_matrix().diffs().serialize(outstream);
+
+    logger->trace("stored as brwt size: {}", outstream.tellp() - fpos);
+}
+
 template <>
 void convert_to_row_diff<RowDiffDiskAnnotator>(
             const std::vector<std::string> &files,

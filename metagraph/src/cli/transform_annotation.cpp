@@ -775,6 +775,10 @@ int transform_annotation(Config *config) {
                 return 0;
 
             }
+            case Config::RowDiffHybridDiskBRWT: {
+                logger->error("Convert to row_diff first, and then to rd_hybrid_disk_brwt");
+                return 0;
+            }
             case Config::RowDiffDisk: {
                 logger->error("Convert to row_diff first, and then to row_diff_disk");
                 return 0;
@@ -885,11 +889,12 @@ int transform_annotation(Config *config) {
     } else if (input_anno_type == Config::RowDiff) {
         if (config->anno_type != Config::RowDiffBRWT
                 && config->anno_type != Config::ColumnCompressed
+                && config->anno_type != Config::RowDiffHybridDiskBRWT
                 && config->anno_type != Config::RowDiffDisk
                 && config->anno_type != Config::RowDiffRowSparse) {
             logger->error(
-                    "Only conversion to 'column', 'row_diff_sparse', 'row_diff_disk', and 'row_diff_brwt' "
-                    "supported for row_diff");
+                    "Only conversion to 'column', 'row_diff_sparse', 'row_diff_disk', "
+                    "'rd_hybrid_disk_brwt', and 'row_diff_brwt' supported for row_diff");
             exit(1);
         }
         if (config->anno_type == Config::ColumnCompressed) {
@@ -929,6 +934,41 @@ int transform_annotation(Config *config) {
                 convert_to_row_diff<RowDiffDiskAnnotator>(
                         files, config->infbase, config->outfbase,
                         get_num_threads(), config->memory_available * 1e9);
+                logger->trace("Serialized to {}", config->outfbase);
+
+            } else if (config->anno_type == Config::RowDiffHybridDiskBRWT) {
+
+                // mkokot_TODO: this is a code duplication, check out
+                //if (config->anno_type == Config::RowDiffBRWT) 
+                std::function<std::unique_ptr<RowDiffBRWTAnnotator>(const std::vector<std::string> &)>
+                create_row_diff_multi_brwt = [&](const std::vector<std::string> & fnames){
+                    if (!config->linkage_file.size()) {
+                        logger->trace("Generating new column linkage...");
+                        binmat::LinkageMatrix linkage_matrix
+                                = compute_linkage(fnames, input_anno_type, *config);
+                        config->linkage_file = config->outfbase + ".linkage";
+                        std::ofstream out(config->linkage_file);
+                        out << linkage_matrix.format(CSVFormat) << std::endl;
+                        logger->trace("Generated new linkage and saved to {}",
+                                    config->linkage_file);
+                    }
+                    std::vector<std::vector<uint64_t>> linkage
+                            = parse_linkage_matrix(config->linkage_file);
+                    logger->trace("Linkage loaded from {}", config->linkage_file);
+
+                    auto brwt_annotator = convert_to_BRWT<RowDiffBRWTAnnotator>(
+                            fnames, linkage, config->parallel_nodes,
+                            get_num_threads(), config->tmp_dir);
+
+                    return brwt_annotator;
+                };
+
+                convert_to_rd_hybrid_disk_brwt(
+                        files, config->infbase, config->outfbase,
+                        config->dense_rows_percentage, get_num_threads(),
+                        config->tmp_dir,
+                        create_row_diff_multi_brwt
+                );
                 logger->trace("Serialized to {}", config->outfbase);
 
             } else { // RowDiff<RowSparse>

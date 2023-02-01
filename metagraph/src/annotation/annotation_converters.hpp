@@ -71,6 +71,15 @@ std::unique_ptr<StaticAnnotation>
 convert_to_RbBRWT(const std::vector<std::string> &annotation_files,
                   size_t max_brwt_arity);
 
+void convert_to_rd_hybrid_disk_brwt(const std::vector<std::string> &files,
+                                    const std::string &anchors_file_fbase,
+                                    const std::string &outfbase,
+                                    double dense_rows_percentage,
+                                    size_t num_threads,
+                                    const std::filesystem::path &tmp_path,
+                                    const std::function<std::unique_ptr<RowDiffBRWTAnnotator>(const std::vector<std::string> &)>& create_row_diff_multi_brwt);
+
+
 // For RowDiffDiskAnnotator, RowDiffDiskCoordAnnotator, etc.
 template <class RowDiffAnnotator>
 void convert_to_row_diff(const std::vector<std::string> &files,

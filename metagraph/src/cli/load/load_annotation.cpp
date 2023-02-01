@@ -60,6 +60,9 @@ Config::AnnotationType parse_annotation_type(const std::string &filename) {
     } else if (utils::ends_with(filename, annot::RowDiffRowSparseAnnotator ::kExtension)) {
         return Config::AnnotationType::RowDiffRowSparse;
 
+    } else if (utils::ends_with(filename, annot::RowDiffHybridDiskBRWTAnnotator::kExtension)) {
+        return Config::AnnotationType::RowDiffHybridDiskBRWT;
+
     } else if (utils::ends_with(filename, annot::RowDiffDiskAnnotator::kExtension)) {
         return Config::AnnotationType::RowDiffDisk;
 
@@ -118,6 +121,10 @@ initialize_annotation(Config::AnnotationType anno_type,
         }
         case Config::RowSparse: {
             annotation.reset(new annot::RowSparseAnnotator());
+            break;
+        }
+        case Config::RowDiffHybridDiskBRWT: {
+            annotation.reset(new annot::RowDiffHybridDiskBRWTAnnotator());
             break;
         }
         case Config::RowDiffDisk: {

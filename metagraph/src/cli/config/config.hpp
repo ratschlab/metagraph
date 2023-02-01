@@ -92,6 +92,7 @@ class Config {
     unsigned int arity_brwt = 2;
     unsigned int relax_arity_brwt = 10;
     unsigned long long RA_ivbuffer_size = 16'384; // in B
+    double dense_rows_percentage = 2;
     unsigned int min_tip_size = 1;
     unsigned int min_unitig_median_kmer_abundance = 1;
     int fallback_abundance_cutoff = 1;
@@ -206,6 +207,7 @@ class Config {
         RowDiff,
         RowDiffBRWT,
         RowDiffRowSparse,
+        RowDiffHybridDiskBRWT,
         RowDiffDisk,
         RowFlat,
         RowSparse,
