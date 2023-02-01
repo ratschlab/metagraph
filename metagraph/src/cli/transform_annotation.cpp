@@ -966,6 +966,7 @@ int transform_annotation(Config *config) {
                 convert_to_rd_hybrid_disk_brwt(
                         files, config->infbase, config->outfbase,
                         config->dense_rows_percentage, get_num_threads(),
+                        config->memory_available * 1e9,
                         config->tmp_dir,
                         create_row_diff_multi_brwt
                 );

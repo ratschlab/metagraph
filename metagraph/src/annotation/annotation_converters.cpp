@@ -1092,107 +1092,282 @@ uint64_t get_num_rows_from_row_diff_anno(const std::string &fname) {
     return matrix.num_rows();
 }
 
-void convert_to_rd_hybrid_disk_brwt(
-            const std::vector<std::string> &files,
-            const std::string &anchors_file_fbase,
-            const std::string &outfbase,
-            double dense_rows_percentage,
-            size_t num_threads,
-            const std::filesystem::path &tmp_path,
-            const std::function<std::unique_ptr<RowDiffBRWTAnnotator>(const std::vector<std::string> &)>& create_row_diff_multi_brwt) {
+template<typename T, typename PRED = std::greater<T>>
+class KeepNLargests {
+	std::vector<T> heap;
+	size_t n;
+	PRED pred;
+public:
+	KeepNLargests(size_t n, PRED pred = std::greater<T>{}) : n(n), pred(pred) {
 
-    assert(dense_rows_percentage > 0);
+	}
+	void Add(T&& elem) {
+		if (heap.size() == n) {
+            if (pred(heap[0], elem))
+				return;
+			heap.push_back(std::move(elem));
+			std::push_heap(heap.begin(), heap.end(), pred);
+			std::pop_heap(heap.begin(), heap.end(), pred);
+			heap.pop_back();
+		}
+		else {
+			heap.push_back(std::move(elem));
+			if (heap.size() == n) {
+				std::make_heap(heap.begin(), heap.end(), pred);
+			}
+		}
+	}
+	const std::vector<T>& Get() const {
+		return heap;
+	}
+};
 
-    size_t num_cols{};
-    for (size_t i = 0; i < files.size(); ++i) {
-        try {
-            num_cols += RowDiffColumnAnnotator::read_label_encoder(files[i]).size();
-        } catch (...) {
-            common::logger->error("Can't load label encoder from {}", files[i]);
+class RowsHistogram {
+public:
+    RowsHistogram(const std::vector<std::string> &files,
+                  const std::filesystem::path &tmp_path,
+                  size_t num_threads,
+                  size_t mem_bytes) :
+                  tmp_path_(tmp_path / ".row-histos") {
+
+        std::filesystem::create_directory(tmp_path_);
+        //read number of rows from first row_diff anno
+        bool load_successful = merge_load_row_diff(
+            { files[0] },
+            [&](uint64_t, const std::string &, std::unique_ptr<bit_vector> &&column) {
+                num_rows_ = column->size();
+            }, 1);
+
+        if (!load_successful) {
+            logger->error("Error while loading row-diff columns");
+            exit(1);
+        }
+        logger->info("num_rows: {}", num_rows_); //mkokot_TODO: remove
+
+        for (uint32_t i = 0; i < files.size(); ) {
+            logger->trace("Loading columns for batched histogram...");
+            size_t columns_size = 0;
+            std::vector<std::string> file_batch;
+
+            for (; i < files.size(); ++i) {
+                uint64_t file_size = utils::with_mmap() ? 0 : fs::file_size(files[i]);
+
+                if (file_size > mem_bytes) {
+                    logger->error("Not enough memory to load {}, requires {} MB",
+                                files[i], file_size / 1e6);
+                    exit(1);
+                }
+
+                if (columns_size + file_size > mem_bytes)
+                    break;
+
+                columns_size += file_size;
+
+                file_batch.push_back(files[i]);
+            }
+
+            Timer timer;
+            logger->trace("Annotations in batch: {}", file_batch.size());
+
+            update_histo(file_batch, num_threads);
+
+            logger->trace("Batch processed in {} sec", timer.elapsed());
         }
     }
 
-    //first need to determine which rows are dense
-    std::unique_ptr<ProgressBar> progress_bar = std::make_unique<ProgressBar>(num_cols, "Determine dense rows", std::cerr, !common::get_verbose());
+    std::pair<std::vector<uint64_t>, size_t> get_dense_rows_ids(double dense_rows_percentage) {
+        size_t num_dense_rows = num_rows_ * dense_rows_percentage / 100;
+        size_t num_set_bits_in_dense = 0;
 
-    std::mutex mu;
-    uint64_t total_num_set_bits = 0;
+        struct cnt_row {
+            uint64_t cnt;
+            size_t row_id;
+            bool operator>(const cnt_row& rhs) const {
+                if (cnt == rhs.cnt)
+                    return row_id < rhs.row_id;
 
-    using CounterType = uint32_t;
-    struct cnt_row {
-        CounterType cnt;
-        size_t row_id;
-    };
-    std::vector<cnt_row> histogram;
+                return cnt > rhs.cnt;
+            }
+        };
 
-    size_t num_rows = 0;
+        KeepNLargests<cnt_row> keep_n_largest(num_dense_rows);
 
-    bool load_successful = merge_load_row_diff(
-        files,
+        ProgressBar progress_bar(num_rows_, "Keep dense rows",
+                             std::cerr, !common::get_verbose());
+
+        for (uint64_t begin = 0; begin < num_rows_; begin += rows_per_block) {
+            uint64_t end = std::min(begin + rows_per_block, num_rows_);
+
+            auto histo = load_vec(begin, end);
+
+            for (size_t row_id = begin ; row_id < end ; ++row_id) {
+                auto cnt = histo[row_id - begin];
+                keep_n_largest.Add({cnt, row_id});
+            }
+
+            remove_tmp_histo(begin, end);
+
+            progress_bar += end - begin;
+        }
+
+        std::filesystem::remove_all(tmp_path_);
+
+        const auto& dens = keep_n_largest.Get();
+        std::vector<uint64_t> res;
+        res.reserve(dens.size());
+
+        assert(res.size() == num_dense_rows);
+
+        for(auto& [cnt, row_id] : dens) {
+            res.push_back(row_id);
+            num_set_bits_in_dense += cnt;
+        }
+
+        return { res, num_set_bits_in_dense };
+    }
+
+    size_t get_num_cols() const {
+        return num_cols_;
+    }
+    size_t get_num_rows() const {
+        return num_rows_;
+    }
+    size_t get_total_set_bits() const {
+        return total_set_bits_;
+    }
+private:
+    void update_histo(const std::vector<std::string> &batch,
+                      size_t num_threads) {
+        std::vector<std::unique_ptr<bit_vector>> columns;
+        std::mutex mu;
+
+        bool load_successful = merge_load_row_diff(
+        batch,
         [&](uint64_t, const std::string &label, std::unique_ptr<bit_vector> &&column) {
             uint64_t num_set_bits = column->num_set_bits();
             logger->trace("RowDiff column: {}, Density: {}, Set bits: {}", label,
                           static_cast<double>(num_set_bits) / column->size(),
                           num_set_bits);
 
-            std::lock_guard<std::mutex> lock(mu);
-
-            if (!num_rows) {
-                num_rows = column->size();
-                histogram.resize(num_rows);
-                for (size_t row_id = 0 ; row_id < num_rows ; ++row_id)
-                    histogram[row_id].row_id = row_id;
-
-            }
-            if (column->size() != num_rows) {
-                logger->error("Column {} has {} rows, previous column has {} rows",
-                              label, column->size(), num_rows);
+            if (column->size() != num_rows_) {
+                logger->error("Column {} has {} rows, first column has {} rows",
+                              label, column->size(), num_rows_);
                 exit(1);
             }
-            column->call_ones([&](uint64_t row_id) {
-                ++histogram[row_id].cnt;
-            });
 
-            total_num_set_bits += num_set_bits;
+            std::lock_guard<std::mutex> lock(mu);
+            columns.push_back(std::move(column));
+            ++num_cols_;
+            total_set_bits_ += num_set_bits;
+        }, num_threads);
 
-            ++(*progress_bar);
-        },
-        num_threads
-    );
+        if (!load_successful) {
+            logger->error("Error while loading row-diff columns");
+            exit(1);
+        }
+        ProgressBar progress_bar(num_rows_, "Build/update histogram",
+                             std::cerr, !common::get_verbose());
+        #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic)
+        for (uint64_t begin = 0; begin < num_rows_; begin += rows_per_block) {
+            uint64_t end = std::min(begin + rows_per_block, num_rows_);
 
-    if (!load_successful) {
-        logger->error("Error while loading row-diff columns");
-        exit(1);
+            auto histo = load_vec(begin, end);
+
+            assert(begin <= end);
+            assert(end <= num_rows_);
+
+            for (size_t j = 0; j < columns.size(); ++j) {
+                columns[j]->call_ones_in_range(begin, end, [&](uint64_t i) {
+                    //++histogram_[i].cnt;
+                    ++histo[i - begin];
+                });
+            }
+
+            store_vec(std::move(histo), begin, end);
+
+            progress_bar += end - begin;
+        }
     }
-    size_t num_dense_rows = num_rows * dense_rows_percentage / 100;
-    std::partial_sort(
-        histogram.begin(),
-        histogram.begin() + num_dense_rows,
-        histogram.end(),
-        [](const cnt_row& lhs, const cnt_row& rhs) {
-            if (lhs.cnt == rhs.cnt)
-                return lhs.row_id < rhs.row_id;
 
-            return lhs.cnt > rhs.cnt;
-        });
+    std::string get_histo_path(size_t begin, size_t end) {
+        return tmp_path_ / fmt::format(".histo-{}-{}", begin, end);
+    }
 
-    sdsl::bit_vector dense_rows(num_rows, false);
+    void remove_tmp_histo(size_t begin, size_t end) {
+        fs::remove(get_histo_path(begin, end));
+    }
+
+    std::vector<uint64_t> load_vec(size_t begin, size_t end) {
+        const auto histo_path = get_histo_path(begin, end);
+        std::vector<uint64_t> res(end - begin);
+        std::ifstream in(histo_path, std::ios::binary);
+        if (!in) //not created yet
+            return res;
+        assert(fs::file_size(files[i]) == sizeof(uint64_t) * res.size());
+        for(auto& x : res)
+            x = load_number(in);
+        return res;
+    }
+    void store_vec(std::vector<uint64_t>&& vec, size_t begin, size_t end) {
+        const auto histo_path = get_histo_path(begin, end);
+        std::ofstream out(histo_path, std::ios::binary);
+        if(!out) {
+            logger->error("Cannot open file {} for writing", histo_path);
+            exit(1);
+        }
+        for (const auto& x : vec)
+            serialize_number(out, x);
+    }
+    size_t rows_per_block = 1'000'000;
+    std::filesystem::path tmp_path_;
+    size_t num_cols_{};
+    size_t num_rows_{};
+    size_t total_set_bits_{};
+};
+
+
+//mkokot_TODO: optimizations to be made:
+// * load cols in batches and split to row_disk part
+void convert_to_rd_hybrid_disk_brwt(
+            const std::vector<std::string> &files,
+            const std::string &anchors_file_fbase,
+            const std::string &outfbase,
+            double dense_rows_percentage,
+            size_t num_threads,
+            size_t mem_bytes,
+            const std::filesystem::path &tmp_path,
+            const std::function<std::unique_ptr<RowDiffBRWTAnnotator>(const std::vector<std::string> &)>& create_row_diff_multi_brwt) {
+    assert(dense_rows_percentage > 0);
+    assert(dense_rows_percentage < 100);
+
+    logger->info("tmp_path: {}", tmp_path); //mkokot_TODO: remove
+
+    logger->trace("Determine dense rows");
+    //first need to determine which rows are dense
+
+    RowsHistogram hist(files, tmp_path, num_threads, mem_bytes);
+
+    size_t num_cols = hist.get_num_cols();
+    size_t num_rows = hist.get_num_rows();
+    size_t total_num_set_bits = hist.get_total_set_bits();
+
+    //mkokot_TODO: remove?
+    logger->trace("# cols: {}", num_cols);
+    logger->trace("# rows: {}", num_rows);
+    logger->trace("# set bits: {}", total_num_set_bits);
+
+    auto [dense_row_ids, num_set_bits_in_dense] = hist.get_dense_rows_ids(dense_rows_percentage);
+
+    size_t num_dense_rows = dense_row_ids.size();
 
     size_t num_sparse_rows =  num_rows - num_dense_rows;
-    logger->trace("# sparse rows: {}", num_sparse_rows);
-    logger->trace("# dense rows: {}", num_dense_rows);
 
-    logger->trace("density of sparsest row in dense rows: {}", (double)histogram.back().cnt / num_cols);
-    logger->trace("density of densest row in dense rows: {}", (double)histogram.front().cnt / num_cols);
+    logger->trace("# sparse rows: {}", num_sparse_rows); //mkokot_TODO: remove?
+    logger->trace("# dense rows: {}", num_dense_rows); //mkokot_TODO: remove?
 
-    size_t num_set_bits_in_dense{};
-    for (size_t i = 0 ; i < num_dense_rows ; ++i) {
-        dense_rows[histogram[i].row_id] = true;
-        num_set_bits_in_dense += histogram[i].cnt;
-    }
-
-    histogram.clear();
-    histogram.shrink_to_fit();
+    sdsl::bit_vector dense_rows(num_rows, false);
+    for (size_t dense_row_id : dense_row_ids)
+        dense_rows[dense_row_id] = true;
 
     size_t num_set_bits_in_sparse = total_num_set_bits - num_set_bits_in_dense;
 
@@ -1207,10 +1382,11 @@ void convert_to_rd_hybrid_disk_brwt(
     std::vector<std::unique_ptr<bit_vector>> columns;
     LabelEncoder<std::string> label_encoder;
 
+    std::mutex mu;
     //iterate cols again
     //mkokot_TODO: rewrite this to work in streaming mode
-    progress_bar = std::make_unique<ProgressBar>(num_cols, "Load all columns", std::cerr, !common::get_verbose());
-    load_successful = merge_load_row_diff(
+    std::unique_ptr<ProgressBar> progress_bar = std::make_unique<ProgressBar>(num_cols, "Load all columns", std::cerr, !common::get_verbose());
+    bool load_successful = merge_load_row_diff(
         files,
         [&](uint64_t, const std::string &label, std::unique_ptr<bit_vector> &&column) {
             uint64_t num_set_bits = column->num_set_bits();

@@ -76,6 +76,7 @@ void convert_to_rd_hybrid_disk_brwt(const std::vector<std::string> &files,
                                     const std::string &outfbase,
                                     double dense_rows_percentage,
                                     size_t num_threads,
+                                    size_t mem_bytes,
                                     const std::filesystem::path &tmp_path,
                                     const std::function<std::unique_ptr<RowDiffBRWTAnnotator>(const std::vector<std::string> &)>& create_row_diff_multi_brwt);
 
