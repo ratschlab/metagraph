@@ -138,6 +138,15 @@ bool check_if_writable(const std::string &filename) {
 }
 
 
+void append_file(const std::string &source_fname, const std::string &target_fname) {
+    std::string concat_command = "cat " + source_fname + " >> " + target_fname;
+    if (std::system(concat_command.c_str())) {
+        logger->error("Error while cat-ing files: {}", concat_command);
+        exit(1);
+    }
+}
+
+
 TempFile::TempFile(const std::string &tmp_dir)
       : tmp_file_name_((tmp_dir.size()
                           ? std::filesystem::path(tmp_dir)

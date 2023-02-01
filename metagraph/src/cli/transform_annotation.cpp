@@ -31,21 +31,6 @@ static const Eigen::IOFormat CSVFormat(Eigen::StreamPrecision,
                                        Eigen::DontAlignCols, " ", "\n");
 
 
-template <class AnnotatorTo, class AnnotatorFrom>
-void convert(std::unique_ptr<AnnotatorFrom> annotator,
-             const Config &config,
-             const Timer &timer) {
-    logger->trace("Converting annotation to {}...",
-                  Config::annotype_to_string(config.anno_type));
-
-    auto target_annotator = convert<AnnotatorTo>(std::move(*annotator));
-    annotator.reset();
-    logger->trace("Conversion done in {} sec", timer.elapsed());
-
-    logger->trace("Serializing annotation to '{}'...", config.outfbase);
-    target_annotator->serialize(config.outfbase);
-}
-
 template <class T>
 binmat::LinkageMatrix cluster_columns(const std::vector<std::string> &files,
                                       Config::AnnotationType anno_type,
@@ -768,12 +753,14 @@ int transform_annotation(Config *config) {
             case Config::RowDiffBRWT: {
                 logger->error("Convert to row_diff first, and then to row_diff_brwt");
                 return 0;
-
+            }
+            case Config::RowDiffRowFlat: {
+                logger->error("Convert to row_diff first, and then to row_diff_flat");
+                return 0;
             }
             case Config::RowDiffRowSparse: {
                 logger->error("Convert to row_diff first, and then to row_diff_sparse");
                 return 0;
-
             }
             case Config::RowDiffDisk: {
                 logger->error("Convert to row_diff first, and then to row_diff_disk");
@@ -789,27 +776,9 @@ int transform_annotation(Config *config) {
                 break;
             }
             case Config::RowCompressed: {
-                if (config->fast) {
-                    RowCompressed<> row_annotator(annotator->num_objects());
-                    convert_to_row_annotator(*annotator,
-                                             &row_annotator,
-                                             get_num_threads());
-                    annotator.reset();
-
-                    logger->trace("Annotation converted in {} sec", timer.elapsed());
-                    logger->trace("Serializing to '{}'...", config->outfbase);
-
-                    row_annotator.serialize(config->outfbase);
-
-                    logger->trace("Serialization done in {} sec", timer.elapsed());
-
-                } else {
-                    convert_to_row_annotator(*annotator,
-                                             config->outfbase,
-                                             get_num_threads());
-                    logger->trace("Annotation converted and serialized in {} sec",
-                                  timer.elapsed());
-                }
+                convert_to_row_annotator(*annotator, config->outfbase);
+                logger->trace("Annotation converted and serialized in {} sec",
+                              timer.elapsed());
                 break;
             }
             case Config::BRWT: {
@@ -827,23 +796,23 @@ int transform_annotation(Config *config) {
                 break;
             }
             case Config::BinRelWT_sdsl: {
-                convert<BinRelWT_sdslAnnotator>(std::move(annotator), *config, timer);
+                convert<BinRelWT_sdslAnnotator>(std::move(*annotator), config->outfbase);
                 break;
             }
             case Config::BinRelWT: {
-                convert<BinRelWTAnnotator>(std::move(annotator), *config, timer);
+                convert<BinRelWTAnnotator>(std::move(*annotator), config->outfbase);
                 break;
             }
             case Config::RowFlat: {
-                convert<RowFlatAnnotator>(std::move(annotator), *config, timer);
+                convert<RowFlatAnnotator>(std::move(*annotator), config->outfbase);
                 break;
             }
             case Config::RowSparse: {
-                convert<RowSparseAnnotator>(std::move(annotator), *config, timer);
+                convert<RowSparseAnnotator>(std::move(*annotator), config->outfbase);
                 break;
             }
             case Config::RBFish: {
-                convert<RainbowfishAnnotator>(std::move(annotator), *config, timer);
+                convert<RainbowfishAnnotator>(std::move(*annotator), config->outfbase);
                 break;
             }
             case Config::RbBRWT: {
@@ -886,9 +855,10 @@ int transform_annotation(Config *config) {
         if (config->anno_type != Config::RowDiffBRWT
                 && config->anno_type != Config::ColumnCompressed
                 && config->anno_type != Config::RowDiffDisk
+                && config->anno_type != Config::RowDiffRowFlat
                 && config->anno_type != Config::RowDiffRowSparse) {
             logger->error(
-                    "Only conversion to 'column', 'row_diff_sparse', 'row_diff_disk', and 'row_diff_brwt' "
+                    "Only conversion to 'column', 'row_diff_flat', 'row_diff_sparse', 'row_diff_disk', and 'row_diff_brwt' "
                     "supported for row_diff");
             exit(1);
         }
@@ -927,6 +897,12 @@ int transform_annotation(Config *config) {
 
             } else if (config->anno_type == Config::RowDiffDisk) {
                 convert_to_row_diff<RowDiffDiskAnnotator>(
+                        files, config->infbase, config->outfbase,
+                        get_num_threads(), config->memory_available * 1e9);
+                logger->trace("Serialized to {}", config->outfbase);
+
+            } else if (config->anno_type == Config::RowDiffRowFlat) {
+                convert_to_row_diff<RowDiffRowFlatAnnotator>(
                         files, config->infbase, config->outfbase,
                         get_num_threads(), config->memory_available * 1e9);
                 logger->trace("Serialized to {}", config->outfbase);

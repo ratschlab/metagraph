@@ -3,7 +3,7 @@
 
 #include "common/data_generation.hpp"
 #include "common/vectors/bit_vector_sdsl.hpp"
-#include "common/vectors/bitmap_mergers.hpp"
+#include "common/vectors/transpose.hpp"
 
 std::vector<uint64_t>
 DataGenerator::generate_random_ints(uint64_t n, uint64_t begin, uint64_t end) {

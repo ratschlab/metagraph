@@ -46,7 +46,7 @@ class Rainbowfish : public RainbowMatrix {
     }
 
   private:
-    using ReducedMatrixType = RowConcatenated<bit_vector_small>;
+    using ReducedMatrixType = RowFlat<bit_vector_small>;
 
     uint64_t num_columns_ = 0;
     uint64_t num_relations_ = 0;

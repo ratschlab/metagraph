@@ -18,8 +18,7 @@ class MultiLabelEncoded;
 
 
 template <class StaticAnnotation, typename Label>
-typename std::unique_ptr<StaticAnnotation>
-convert(RowCompressed<Label>&& annotation);
+std::unique_ptr<StaticAnnotation> convert(RowCompressed<Label>&& annotation);
 
 
 template <typename Label>
@@ -27,6 +26,15 @@ class ColumnCompressed;
 
 template <class StaticAnnotation, typename Label>
 std::unique_ptr<StaticAnnotation> convert(ColumnCompressed<Label>&& annotation);
+
+template <class StaticAnnotation, typename Label>
+void convert(ColumnCompressed<Label>&& annotation, const std::string &outfbase) {
+    convert<StaticAnnotation, Label>(std::move(annotation))->serialize(outfbase);
+}
+
+template <>
+void convert<RowFlatAnnotator, std::string>(ColumnCompressed<std::string>&& annotator,
+                                            const std::string &outfbase);
 
 template <class StaticAnnotation>
 std::unique_ptr<StaticAnnotation> convert(const std::string &filename);
@@ -71,7 +79,7 @@ std::unique_ptr<StaticAnnotation>
 convert_to_RbBRWT(const std::vector<std::string> &annotation_files,
                   size_t max_brwt_arity);
 
-// For RowDiffDiskAnnotator, RowDiffDiskCoordAnnotator, etc.
+// For RowDiffDisk/RowDiffDiskCoord/RowDiffRowFlat/RowDiffRowSparse -Annotator
 template <class RowDiffAnnotator>
 void convert_to_row_diff(const std::vector<std::string> &files,
                          const std::string &anchors_file_fbase,
@@ -84,15 +92,10 @@ void merge(std::vector<std::unique_ptr<MultiLabelEncoded<Label>>>&& annotators,
            const std::vector<std::string> &filenames,
            const std::string &outfile);
 
+// transform to RowCompressed<Label>
 template <typename Label>
 void convert_to_row_annotator(const ColumnCompressed<Label> &annotator,
-                              const std::string &outfbase,
-                              size_t num_threads = 1);
-
-template <typename Label>
-void convert_to_row_annotator(const ColumnCompressed<Label> &annotator,
-                              RowCompressed<Label> *target,
-                              size_t num_threads = 1);
+                              const std::string &outfbase);
 
 /**
  * Sparsifies annotations in #ColumnCompressed format by storing diffs between sucessive

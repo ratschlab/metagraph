@@ -32,6 +32,8 @@ open_ifstream(const std::string &filename, bool mmap_stream = with_mmap());
 // such exists, so that all readers (including mmap) can keep reading from it.
 std::ofstream open_new_ofstream(const std::string &filename);
 
+void append_file(const std::string &source_fname, const std::string &target_fname);
+
 class TempFile {
   public:
     // The state flow:
