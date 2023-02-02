@@ -2,6 +2,7 @@
 #define __SIMD_UTILS_HPP__
 
 #include <x86/avx512.h>
+#include <x86/svml.h>
 
 #include <cassert>
 #include <cstdint>
