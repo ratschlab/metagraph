@@ -87,9 +87,6 @@ inline uint64_t restrict_to(uint64_t h, size_t size) {
 #endif
 }
 
-
-#ifdef __AVX2__
-
 inline simde__m256i restrict_to_mask_epi64(const uint64_t *hashes, size_t size, simde__m256i mask) {
     // TODO: is there a vectorized way of doing this?
     return simde_mm256_and_si256(
@@ -150,7 +147,7 @@ inline simde__m256i popcnt_avx2_hs(const uint64_t *data, uint64_t size) {
     simde__m256i sixteens = simde_mm256_setzero_si256();
     simde__m256i twosA, twosB, foursA, foursB, eightsA, eightsB;
 
-    #define LOAD(a) _mm256_loadu_si256((__m256i*)&data[i + (a * 4)])
+    #define LOAD(a) simde_mm256_loadu_si256((simde__m256i*)&data[i + (a * 4)])
     for (uint64_t i = 0; i + 64 <= size; i += 64) {
         CSA256(&twosA, &ones, ones, LOAD(0), LOAD(1));
         CSA256(&twosB, &ones, ones, LOAD(2), LOAD(3));
@@ -222,18 +219,5 @@ inline simde__m256i inner_prod_avx2_hs(const uint64_t *data1,
 
     return total;
 }
-
-inline uint64_t haddall_epi64(__m256i v) {
-    // [ a, b, c, d ] -> [ a+c, b+d, c+a, d+b ]
-    simde__m256i s1 = simde_mm256_add_epi64(v, simde_mm256_permute4x64_epi64(v, 0b01001110));
-
-    // [ a+c, b+d, c+a, d+b ] -> a+c+b+d
-    return simde_mm256_extract_epi64(
-        simde_mm256_add_epi64(s1, simde_mm256_permute4x64_epi64(s1, 0b10001101)),
-        0
-    );
-}
-
-#endif // __AVX2__
 
 #endif // __SIMD_UTILS_HPP__

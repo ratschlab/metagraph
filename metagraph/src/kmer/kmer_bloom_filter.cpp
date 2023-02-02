@@ -6,7 +6,6 @@
 
 #include "common/serialization.hpp"
 #include "common/algorithms.hpp"
-#include "common/utils/simd_utils.hpp"
 #include "common/aligned_vector.hpp"
 #include "kmer/kmer_extractor.hpp"
 

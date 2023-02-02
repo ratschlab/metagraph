@@ -6,7 +6,6 @@
 #include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
 #include "annotation/int_matrix/base/int_matrix.hpp"
 #include "graph/representation/canonical_dbg.hpp"
-#include "common/utils/simd_utils.hpp"
 #include "common/aligned_vector.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 #include "common/vector_map.hpp"
@@ -938,36 +937,6 @@ tabulate_score(const sdsl::bit_vector &presence, size_t correction = 0) {
     return table;
 }
 
-#ifdef __AVX2__
-__m256d get_penalty_bigsi_avx2(__m256d counts,
-                               __m256d match_score,
-                               __m256d mismatch_score,
-                               __m256d SNP_t) {
-    __m256d neg_ones = _mm256_set1_pd(-1.0);
-
-    __m256d min_N_snps = _mm256_div_pd(counts, SNP_t);
-
-    // subtract -1 instead of add 1 to reuse a register
-    __m256d max_N_snps = _mm256_max_pd(
-        _mm256_sub_pd(_mm256_sub_pd(counts, SNP_t), neg_ones),
-        min_N_snps
-    );
-
-    // separate mul and add is faster than using FMA instructions
-    __m256d mean_N_snps = fmafast_pd(max_N_snps, _mm256_set1_pd(0.05), min_N_snps);
-
-    assert(!_mm256_movemask_pd(_mm256_cmp_pd(mean_N_snps, counts, 14)));
-
-    __m256d mean_penalty = _mm256_mul_pd(mean_N_snps, mismatch_score);
-
-    return _mm256_mul_pd(fmafast_pd(_mm256_sub_pd(mean_penalty, counts),
-                                    match_score,
-                                    mean_penalty),
-                         neg_ones);
-}
-#endif // __AVX2__
-
-
 /**
  * A penalty function used in BIGSI
  */
@@ -1010,35 +979,6 @@ int32_t AnnotatedDBG
 
     const auto *it = score_counter[0].data();
     const auto *end = it + score_counter[0].size();
-
-#ifdef __AVX2__
-    __m256d match_score_packed = _mm256_set1_pd(match_score);
-    __m256d mismatch_score_packed = _mm256_set1_pd(mismatch_score);
-    __m256d SNP_t_packed = _mm256_set1_pd(SNP_t);
-    __m256d penalties = _mm256_setzero_pd();
-
-    for ( ; it + 4 <= end; it += 4) {
-        __m256d penalty_add = get_penalty_bigsi_avx2(
-            uint64_to_double(_mm256_load_si256(reinterpret_cast<const __m256i*>(it))),
-            match_score_packed,
-            mismatch_score_packed,
-            SNP_t_packed
-        );
-
-        // TODO: the least-significant bits are usually off by one, is there
-        //       a way to fix this?
-        assert(float(penalty_bigsi(*it, match_score, mismatch_score, SNP_t)
-                    + penalty_bigsi(*(it + 1), match_score, mismatch_score, SNP_t)
-                    + penalty_bigsi(*(it + 2), match_score, mismatch_score, SNP_t)
-                    + penalty_bigsi(*(it + 3), match_score, mismatch_score, SNP_t))
-            == float(haddall_pd(penalty_add)));
-
-        penalties = _mm256_add_pd(penalties, penalty_add);
-    }
-
-    // reduce
-    score += haddall_pd(penalties);
-#endif // __AVX2__
 
     for ( ; it != end; ++it) {
         score += penalty_bigsi(*it, match_score, mismatch_score, SNP_t);

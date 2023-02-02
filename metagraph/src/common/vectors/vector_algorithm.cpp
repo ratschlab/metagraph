@@ -28,31 +28,27 @@ sdsl::bit_vector to_sdsl(const std::vector<uint8_t> &vector) {
     sdsl::bit_vector result(vector.size(), 0);
 
     uint64_t i = 0;
-#ifdef __AVX2__
     for ( ; i + 32 <= vector.size(); i += 32) {
         result.set_int(
             i,
-            ~_mm256_movemask_epi8(_mm256_cmpeq_epi8(
-                _mm256_loadu_si256(reinterpret_cast<const __m256i*>(&vector[i])),
-                _mm256_setzero_si256()
+            ~simde_mm256_movemask_epi8(simde_mm256_cmpeq_epi8(
+                simde_mm256_loadu_si256(reinterpret_cast<const simde__m256i*>(&vector[i])),
+                simde_mm256_setzero_si256()
             )),
             32
         );
     }
-#endif
 
-#ifdef __SSE2__
     for ( ; i + 16 <= vector.size(); i += 16) {
         result.set_int(
             i,
-            ~_mm_movemask_epi8(_mm_cmpeq_epi8(
-                _mm_loadu_si128(reinterpret_cast<const __m128i*>(&vector[i])),
-                _mm_setzero_si128()
+            ~simde_mm_movemask_epi8(simde_mm_cmpeq_epi8(
+                simde_mm_loadu_si128(reinterpret_cast<const simde__m128i*>(&vector[i])),
+                simde_mm_setzero_si128()
             )),
             16
         );
     }
-#endif
 
     for ( ; i < vector.size(); i += 64) {
         uint64_t word = 0;
@@ -79,6 +75,17 @@ sdsl::int_vector<> pack_vector(sdsl::int_vector<>&& vector, uint8_t width) {
     }
 }
 
+inline uint64_t haddall_epi64(simde__m256i v) {
+    // [ a, b, c, d ] -> [ a+c, b+d, c+a, d+b ]
+    simde__m256i s1 = simde_mm256_add_epi64(v, simde_mm256_permute4x64_epi64(v, 0b01001110));
+
+    // [ a+c, b+d, c+a, d+b ] -> a+c+b+d
+    return simde_mm256_extract_epi64(
+        simde_mm256_add_epi64(s1, simde_mm256_permute4x64_epi64(s1, 0b10001101)),
+        0
+    );
+}
+
 uint64_t count_ones(const sdsl::bit_vector &vector,
                     uint64_t begin, uint64_t end) {
     assert(begin <= end);
@@ -99,20 +106,18 @@ uint64_t count_ones(const sdsl::bit_vector &vector,
         count += sdsl::bits::cnt((*data++) & (~sdsl::bits::lo_set[begin & 0x3F]));
     }
 
-#ifdef __AVX2__
     size_t diff = ((data_end - data) >> 6) << 6;
-    __m256i counts = popcnt_avx2_hs(data, diff);
+    simde__m256i counts = popcnt_avx2_hs(data, diff);
     data += diff;
 
     for ( ; data + 4 <= data_end; data += 4) {
-        counts = _mm256_add_epi64(
+        counts = simde_mm256_add_epi64(
             counts,
-            popcnt256(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(data)))
+            popcnt256(simde_mm256_loadu_si256(reinterpret_cast<const simde__m256i*>(data)))
         );
     }
 
     count += haddall_epi64(counts);
-#endif
 
     while (data < data_end) {
         count += sdsl::bits::cnt(*data++);
@@ -137,24 +142,22 @@ uint64_t inner_prod(const sdsl::bit_vector &first,
 
     uint64_t count = 0;
 
-#ifdef __AVX2__
     size_t diff = ((first_end - first_data) >> 6) << 6;
-    __m256i counts = inner_prod_avx2_hs(first_data, second_data, diff);
+    simde__m256i counts = inner_prod_avx2_hs(first_data, second_data, diff);
     first_data += diff;
     second_data += diff;
 
     for ( ; first_data + 4 <= first_end; first_data += 4, second_data += 4) {
-        counts = _mm256_add_epi64(
+        counts = simde_mm256_add_epi64(
             counts,
-            popcnt256(_mm256_and_si256(
-                _mm256_loadu_si256(reinterpret_cast<const __m256i*>(first_data)),
-                _mm256_loadu_si256(reinterpret_cast<const __m256i*>(second_data))
+            popcnt256(simde_mm256_and_si256(
+                simde_mm256_loadu_si256(reinterpret_cast<const simde__m256i*>(first_data)),
+                simde_mm256_loadu_si256(reinterpret_cast<const simde__m256i*>(second_data))
             ))
         );
     }
 
     count += haddall_epi64(counts);
-#endif
 
     while (first_data < first_end) {
         count += sdsl::bits::cnt(*(first_data++) & *(second_data++));
