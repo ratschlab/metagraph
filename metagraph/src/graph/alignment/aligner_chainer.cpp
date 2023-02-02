@@ -457,7 +457,7 @@ chain_seeds(const DBGAlignerConfig &config,
                     cur_score_v = simde_mm256_blendv_epi8(old_scores_v, cur_score_v, mask);
                     simde_mm256_maskstore_epi32(&backtrace[j], mask, i_v);
 
-                    // note: _mm256_i32scatter_epi32 not supported in AVX2
+                    // TODO: simde_mm256_i32scatter_epi32 not implemented yet
                     score_t cur_scores[8] __attribute__((aligned(32)));
                     simde_mm256_store_si256((simde__m256i*)cur_scores, cur_score_v);
                     auto *dp_table_o = &dp_table[j];
