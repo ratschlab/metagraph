@@ -13,7 +13,7 @@
 namespace {
 
 #define DEFINE_BV_QUERY_BENCHMARK(NAME, OPERATION, MIN_INDEX, RANGE) \
-template <class bit_vector_type, uint64_t size, uint density_promille> \
+template <class bit_vector_type, uint64_t size, unsigned int density_promille> \
 static void BM_bv_query_##NAME(benchmark::State& state) { \
     DataGenerator gen; \
     gen.set_seed(42); \
@@ -32,7 +32,7 @@ static void BM_bv_query_##NAME(benchmark::State& state) { \
     state.counters["Density"] = static_cast<double>(bv.num_set_bits()) / bv.size(); \
 } \
  \
-template <class bit_vector_type, uint64_t size, uint density_promille> \
+template <class bit_vector_type, uint64_t size, unsigned int density_promille> \
 static void BM_bv_query_sequential_##NAME(benchmark::State& state) { \
     DataGenerator gen; \
     gen.set_seed(42); \
@@ -59,7 +59,7 @@ DEFINE_BV_QUERY_BENCHMARK(next,           next1,          0, size);
 DEFINE_BV_QUERY_BENCHMARK(prev,           prev1,          0, size);
 DEFINE_BV_QUERY_BENCHMARK(cond_rank,   conditional_rank1, 0, size);
 
-template <class bit_vector_type, uint64_t size, uint density_promille>
+template <class bit_vector_type, uint64_t size, unsigned int density_promille>
 static void BM_bv_query_get_int(benchmark::State& state) {
     DataGenerator gen;
     gen.set_seed(42);
@@ -76,7 +76,7 @@ static void BM_bv_query_get_int(benchmark::State& state) {
     state.counters["Density"] = static_cast<double>(bv.num_set_bits()) / bv.size();
 }
 
-template <class bit_vector_type, uint64_t size, uint density_promille>
+template <class bit_vector_type, uint64_t size, unsigned int density_promille>
 static void BM_bv_query_sequential_get_int(benchmark::State& state) {
     DataGenerator gen;
     gen.set_seed(42);
@@ -93,7 +93,7 @@ static void BM_bv_query_sequential_get_int(benchmark::State& state) {
     state.counters["Density"] = static_cast<double>(bv.num_set_bits()) / bv.size();
 }
 
-template <class bit_vector_type, uint64_t size, uint density_promille>
+template <class bit_vector_type, uint64_t size, unsigned int density_promille>
 static void BM_bv_query_call_ones(benchmark::State& state) {
     DataGenerator gen;
     gen.set_seed(42);
@@ -112,7 +112,7 @@ static void BM_bv_query_call_ones(benchmark::State& state) {
     state.counters["Density"] = static_cast<double>(bv.num_set_bits()) / bv.size();
 }
 
-template <class bit_vector_type, uint64_t size, uint density_promille>
+template <class bit_vector_type, uint64_t size, unsigned int density_promille>
 static void BM_bv_query_sequential_call_ones(benchmark::State& state) {
     DataGenerator gen;
     gen.set_seed(42);

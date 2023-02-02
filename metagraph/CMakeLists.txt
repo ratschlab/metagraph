@@ -146,7 +146,9 @@ try_compile(MODE_TI
 )
 if(MODE_TI)
   add_definitions(-DMODE_TI)
-  add_compile_options(-mcx16)
+  if(NOT ${CMAKE_SYSTEM_PROCESSOR} MATCHES "arm")
+      add_compile_options(-mcx16)
+  endif()
 endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
@@ -253,19 +255,24 @@ link_directories(
 include_directories(
  PUBLIC
   external-libraries/KMC/kmc_api
-  external-libraries/sdsl-lite/include
   external-libraries/eigen
   external-libraries/hopscotch-map/include
   external-libraries/ordered-map/include
   external-libraries/binrel_wt/include
-  external-libraries/asio/asio/include
   external-libraries/cpp_progress_bar
   external-libraries/Priority-Deque
   external-libraries/rollinghashcpp
   external-libraries/spdlog/include
   external-libraries/zlib
   external-libraries/sdust
+  external-libraries/simde-no-tests
   ${PROJECT_SOURCE_DIR}/src
+)
+
+include_directories(
+ PUBLIC SYSTEM
+  external-libraries/sdsl-lite/include
+  external-libraries/asio/asio/include
 )
 
 add_library(ips4o INTERFACE)

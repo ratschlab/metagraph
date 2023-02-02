@@ -150,14 +150,16 @@ class FastaParser {
     bool with_reverse_complement_;
 };
 
-class FastaParser::iterator : public std::iterator<std::input_iterator_tag,
-                                                   kseq_t,
-                                                   size_t,
-                                                   kseq_t*,
-                                                   kseq_t&> {
+class FastaParser::iterator {
     friend FastaParser;
 
   public:
+    using iterator_category = std::input_iterator_tag;
+    using value_type = kseq_t;
+    using difference_type = size_t;
+    using pointer = kseq_t*;
+    using reference = kseq_t&;
+
     iterator() {}
 
     iterator(const iterator &other) { *this = other; }

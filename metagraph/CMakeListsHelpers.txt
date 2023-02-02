@@ -7,7 +7,7 @@ function (findOpenMP)
 # and happily cached, thus messing up the compilation flags forever
 unset(OpenMP_C_FLAGS CACHE)
 unset(OpenMP_CXX_FLAGS CACHE)
-if(APPLE)
+if(APPLE AND NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   execute_process(
       COMMAND brew --prefix libomp
       OUTPUT_VARIABLE BREW_OMP_PREFIX

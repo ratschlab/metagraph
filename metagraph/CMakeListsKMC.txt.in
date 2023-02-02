@@ -38,6 +38,7 @@ ${KMC_MAIN_DIR}/raduls_avx2.cpp
 ${KMC_MAIN_DIR}/raduls_avx.cpp
 )
 
+if(NOT ${CMAKE_SYSTEM_PROCESSOR} MATCHES "arm")
 set_source_files_properties(${KMC_MAIN_DIR}/raduls_sse2.cpp
     PROPERTIES COMPILE_FLAGS "-msse2")
 set_source_files_properties(${KMC_MAIN_DIR}/raduls_sse41.cpp
@@ -46,6 +47,7 @@ set_source_files_properties(${KMC_MAIN_DIR}/raduls_avx.cpp
     PROPERTIES COMPILE_FLAGS "-mavx")
 set_source_files_properties(${KMC_MAIN_DIR}/raduls_avx2.cpp
     PROPERTIES COMPILE_FLAGS "-mavx2 -mfma")
+endif()
 
 add_library(KMCcore
     ${KMC_files}
