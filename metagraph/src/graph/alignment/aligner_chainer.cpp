@@ -367,7 +367,6 @@ chain_seeds(const DBGAlignerConfig &config,
     size_t i = 0;
     while (cur_label_end < dp_table.size()) {
         cur_label_end += label_sizes[dp_table[i].label];
-        // TODO: rewrite with AVX2
         for ( ; i < cur_label_end; ++i) {
             const auto &[prev_label, prev_coord, prev_clipping, prev_end,
                          prev_score, prev_seed_i] = dp_table[i];
