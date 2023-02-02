@@ -216,70 +216,52 @@ void update_column(size_t prev_end,
                    const DBGAlignerConfig &config_,
                    score_t init_score,
                    size_t offset) {
-#ifndef __SSE4_1__
-    for (size_t j = 0; j < prev_end; ++j) {
-        score_t match = j ? (S_prev_v[j - 1] + profile_scores[j] + init_score) : ninf;
-        if (offset > 1) {
-            F_v[j] = std::max(S_prev_v[j] + init_score + config_.gap_opening_penalty,
-                              F_prev_v[j] + init_score + config_.gap_extension_penalty);
-        }
-
-        if (j + 1 < prev_end) {
-            E_v[j + 1] = std::max(match + config_.gap_opening_penalty,
-                                  E_v[j] + config_.gap_extension_penalty);
-        }
-
-        match = std::max({ F_v[j], E_v[j], match });
-        if (match >= xdrop_cutoff)
-            S_v[j] = match;
-    }
-#else
     static_assert(DefaultColumnExtender::kPadding == 5);
     constexpr size_t width = DefaultColumnExtender::kPadding - 1;
-    const __m128i gap_open = _mm_set1_epi32(config_.gap_opening_penalty);
-    const __m128i gap_extend = _mm_set1_epi32(config_.gap_extension_penalty);
-    const __m128i xdrop_v = _mm_set1_epi32(xdrop_cutoff - 1);
-    const __m128i ninf_v = _mm_set1_epi32(ninf);
-    const __m128i score_v = _mm_set1_epi32(init_score);
+    const simde__m128i gap_open = simde_mm_set1_epi32(config_.gap_opening_penalty);
+    const simde__m128i gap_extend = simde_mm_set1_epi32(config_.gap_extension_penalty);
+    const simde__m128i xdrop_v = simde_mm_set1_epi32(xdrop_cutoff - 1);
+    const simde__m128i ninf_v = simde_mm_set1_epi32(ninf);
+    const simde__m128i score_v = simde_mm_set1_epi32(init_score);
     for (size_t j = 0; j < prev_end; j += width) {
         // ensure that nothing will access out of bounds
         assert(j + DefaultColumnExtender::kPadding <= S_v.capacity());
 
         // match = j ? S_prev_v[j - 1] + profile_scores[j] : ninf;
-        __m128i match;
+        simde__m128i match;
         if (j) {
-            match = _mm_add_epi32(_mm_loadu_si128((__m128i*)&S_prev_v[j - 1]),
-                                  _mm_loadu_si128((__m128i*)&profile_scores[j]));
-            match = _mm_add_epi32(match, score_v);
+            match = simde_mm_add_epi32(simde_mm_loadu_si128((simde__m128i*)&S_prev_v[j - 1]),
+                                       simde_mm_loadu_si128((simde__m128i*)&profile_scores[j]));
+            match = simde_mm_add_epi32(match, score_v);
         } else {
             // rotate elements to the right, then insert ninf in first cell
-            match = _mm_shuffle_epi32(_mm_loadu_si128((__m128i*)&S_prev_v[j]), 0b10010000);
-            match = _mm_add_epi32(match, _mm_loadu_si128((__m128i*)&profile_scores[j]));
-            match = _mm_add_epi32(match, score_v);
-            match = _mm_insert_epi32(match, ninf, 0);
+            match = simde_mm_shuffle_epi32(simde_mm_loadu_si128((simde__m128i*)&S_prev_v[j]), 0b10010000);
+            match = simde_mm_add_epi32(match, simde_mm_loadu_si128((simde__m128i*)&profile_scores[j]));
+            match = simde_mm_add_epi32(match, score_v);
+            match = simde_mm_insert_epi32(match, ninf, 0);
         }
 
         // del_score = std::max(del_open, del_extend);
-        __m128i del_score;
+        simde__m128i del_score;
         if (offset > 1) {
-            del_score = _mm_max_epi32(
-                _mm_add_epi32(_mm_loadu_si128((__m128i*)&S_prev_v[j]), gap_open),
-                _mm_add_epi32(_mm_loadu_si128((__m128i*)&F_prev_v[j]), gap_extend)
+            del_score = simde_mm_max_epi32(
+                simde_mm_add_epi32(simde_mm_loadu_si128((simde__m128i*)&S_prev_v[j]), gap_open),
+                simde_mm_add_epi32(simde_mm_loadu_si128((simde__m128i*)&F_prev_v[j]), gap_extend)
             );
-            del_score = _mm_add_epi32(del_score, score_v);
+            del_score = simde_mm_add_epi32(del_score, score_v);
         } else {
             del_score = ninf_v;
         }
 
         // F_v[j] = del_score
-        _mm_store_si128((__m128i*)&F_v[j], del_score);
+        simde_mm_store_si128((simde__m128i*)&F_v[j], del_score);
 
         // match = max(match, del_score)
-        match = _mm_max_epi32(match, del_score);
+        match = simde_mm_max_epi32(match, del_score);
 
         // E_v[j + 1] = S[j] + gap_open
-        __m128i ins_open_next = _mm_add_epi32(match, gap_open);
-        _mm_storeu_si128((__m128i*)&E_v[j + 1], ins_open_next);
+        simde__m128i ins_open_next = simde_mm_add_epi32(match, gap_open);
+        simde_mm_storeu_si128((simde__m128i*)&E_v[j + 1], ins_open_next);
 
         // This rolling update is hard to vectorize
         // E_v[j + 1] = max(E_v[j + 1], E_v[j] + gap_extend)
@@ -289,16 +271,14 @@ void update_column(size_t prev_end,
         E_v[j + 4] = std::max(E_v[j + 3] + config_.gap_extension_penalty, E_v[j + 4]);
 
         // S_v[j] = max(match, E_v[j])
-        match = _mm_max_epi32(match, _mm_load_si128((__m128i*)&E_v[j]));
+        match = simde_mm_max_epi32(match, simde_mm_load_si128((simde__m128i*)&E_v[j]));
 
         // match >= xdrop_cutoff
-        __m128i mask = _mm_cmpgt_epi32(match, xdrop_v);
-        match = _mm_blendv_epi8(ninf_v, match, mask);
+        simde__m128i mask = simde_mm_cmpgt_epi32(match, xdrop_v);
+        match = simde_mm_blendv_epi8(ninf_v, match, mask);
 
-        _mm_store_si128((__m128i*)&S_v[j], match);
+        simde_mm_store_si128((simde__m128i*)&S_v[j], match);
     }
-
-#endif
 
     if (S_v.size() > std::max(size_t{1}, prev_end)) {
         size_t j = S_v.size() - 1;

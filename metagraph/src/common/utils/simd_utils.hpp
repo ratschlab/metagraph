@@ -1,8 +1,6 @@
 #ifndef __SIMD_UTILS_HPP__
 #define __SIMD_UTILS_HPP__
 
-#include <x86/avx.h>
-#include <x86/avx2.h>
 #include <x86/avx512.h>
 
 #include <cassert>
