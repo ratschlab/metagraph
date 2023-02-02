@@ -860,7 +860,7 @@ void convert_batch_to_row_disk(
         const std::function<void(std::ofstream &)> &decorate,
         uint64_t num_rows,
         size_t num_threads) {
-    LEncoder label_encoder;
+    std::vector<std::string> col_names;
     std::vector<std::unique_ptr<bit_vector>> columns;
     uint64_t num_set_bits = 0;
     std::mutex mu;
@@ -879,13 +879,10 @@ void convert_batch_to_row_disk(
                 num_set_bits += column->num_set_bits();
                 while (columns.size() <= j) {
                     columns.emplace_back();
+                    col_names.emplace_back();
                 }
                 columns[j] = std::move(column);
-                size_t col = label_encoder.insert_and_encode(label);
-                if (col + 1 != label_encoder.size()) {
-                    logger->error("Duplicate columns {}", label);
-                    exit(1);
-                }
+                col_names[j] = label;
             },
             num_threads
     );
@@ -893,6 +890,18 @@ void convert_batch_to_row_disk(
     if (!success) {
         logger->error("Can't load annotation columns");
         exit(1);
+    }
+
+    // this must be done after loading all columns
+    // to keep their order correct
+    // (label_encoder.insert_and_encode cannot be inside get_cols callback)
+    LEncoder label_encoder;
+    for (const auto &label : col_names) {
+        size_t col = label_encoder.insert_and_encode(label);
+        if (col + 1 != label_encoder.size()) {
+            logger->error("Duplicate columns {}", label);
+            exit(1);
+        }
     }
 
     std::ofstream out = utils::open_new_ofstream(outfname);
