@@ -181,7 +181,7 @@ batch_insert_avx2(BloomFilter &bloom,
 
 // Helper for Bloom filter
 // Bit reduce packed 64-bit numbers to 32 bits
-inline simde__m128i cvtepi64_epi32(simde__m256i v) {
+SIMDE_FUNCTION_ATTRIBUTES simde__m128i cvtepi64_epi32(simde__m256i v) {
     return simde_mm256_castsi256_si128(simde_mm256_permutevar8x32_epi32(
         v,
         simde_mm256_setr_epi32(0, 2, 4, 6, 1, 3, 5, 7)

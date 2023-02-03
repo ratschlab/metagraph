@@ -85,7 +85,7 @@ inline uint64_t restrict_to(uint64_t h, size_t size) {
 #endif
 }
 
-inline simde__m256i restrict_to_mask_epi64(const uint64_t *hashes, size_t size, simde__m256i mask) {
+SIMDE_FUNCTION_ATTRIBUTES simde__m256i restrict_to_mask_epi64(const uint64_t *hashes, size_t size, simde__m256i mask) {
     // TODO: is there a vectorized way of doing this?
     return simde_mm256_and_si256(
         simde_mm256_setr_epi64x(restrict_to(hashes[0], size),
@@ -111,7 +111,7 @@ inline void CSA256(simde__m256i *hi, simde__m256i *lo, simde__m256i a, simde__m2
 }
 
 // Lookup popcount
-inline simde__m256i popcnt256(simde__m256i v) {
+SIMDE_FUNCTION_ATTRIBUTES simde__m256i popcnt256(simde__m256i v) {
     simde__m256i lookup1 = simde_mm256_setr_epi8(
         4, 5, 5, 6, 5, 6, 6, 7,
         5, 6, 6, 7, 6, 7, 7, 8,
@@ -136,7 +136,7 @@ inline simde__m256i popcnt256(simde__m256i v) {
 }
 
 // Harley-Seal algorithm for popcount
-inline simde__m256i popcnt_avx2_hs(const uint64_t *data, uint64_t size) {
+SIMDE_FUNCTION_ATTRIBUTES simde__m256i popcnt_avx2_hs(const uint64_t *data, uint64_t size) {
     simde__m256i total = simde_mm256_setzero_si256();
     simde__m256i ones = simde_mm256_setzero_si256();
     simde__m256i twos = simde_mm256_setzero_si256();
@@ -176,9 +176,9 @@ inline simde__m256i popcnt_avx2_hs(const uint64_t *data, uint64_t size) {
 }
 
 // Harley-Seal algorithm for inner product of bit vectors
-inline simde__m256i inner_prod_avx2_hs(const uint64_t *data1,
-                                       const uint64_t *data2,
-                                       uint64_t size) {
+SIMDE_FUNCTION_ATTRIBUTES simde__m256i inner_prod_avx2_hs(const uint64_t *data1,
+                                                          const uint64_t *data2,
+                                                          uint64_t size) {
     simde__m256i total = simde_mm256_setzero_si256();
     simde__m256i ones = simde_mm256_setzero_si256();
     simde__m256i twos = simde_mm256_setzero_si256();
