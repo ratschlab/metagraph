@@ -33,7 +33,7 @@ struct TableElem {
               int32_t seed_end, score_t chain_score, uint32_t current_seed_index)
           : label(c), coordinate(coordinate), seed_clipping(seed_clipping),
             seed_end(seed_end), chain_score(chain_score), current_seed_index(current_seed_index) {}
-};
+} SIMDE_ALIGN_TO_32;
 static_assert(sizeof(TableElem) == 32);
 
 inline constexpr bool operator>(const TableElem &a, const TableElem &b) {
