@@ -296,7 +296,7 @@ endif()
 
 add_definitions(-DASIO_STANDALONE -DUSE_STANDALONE_ASIO)
 set(USE_STANDALONE_ASIO ON)
-set(ASIO_PATH ${Boost_INCLUDE_DIRS})
+set(ASIO_PATH external-libraries/asio/asio)
 
 # assume built-in pthreads on MacOS
 IF(APPLE)
