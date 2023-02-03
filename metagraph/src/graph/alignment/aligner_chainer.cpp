@@ -2,6 +2,8 @@
 
 #include <unordered_set>
 
+#include <x86/svml.h>
+
 #include "aligner_seeder_methods.hpp"
 #include "aligner_aggregator.hpp"
 #include "aligner_labeled.hpp"
@@ -31,7 +33,7 @@ struct TableElem {
               int32_t seed_end, score_t chain_score, uint32_t current_seed_index)
           : label(c), coordinate(coordinate), seed_clipping(seed_clipping),
             seed_end(seed_end), chain_score(chain_score), current_seed_index(current_seed_index) {}
-} SIMDE_ALIGN_TO_32;
+};
 static_assert(sizeof(TableElem) == 32);
 
 inline constexpr bool operator>(const TableElem &a, const TableElem &b) {
@@ -39,7 +41,7 @@ inline constexpr bool operator>(const TableElem &a, const TableElem &b) {
         > std::tie(b.label, b.coordinate, b.seed_clipping, b.seed_end);
 }
 
-typedef AlignedVector<TableElem> ChainDPTable;
+typedef std::vector<TableElem> ChainDPTable;
 
 std::tuple<ChainDPTable, AlignedVector<int32_t>, size_t, size_t>
 chain_seeds(const DBGAlignerConfig &config,
