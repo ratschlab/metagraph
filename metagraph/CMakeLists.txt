@@ -285,7 +285,7 @@ target_include_directories(caches INTERFACE external-libraries/caches/include)
 unset(Boost_INCLUDE_DIR CACHE)
 find_package(Boost)
 if(NOT Boost_FOUND)
-    message(FATAL_ERROR "std::filesystem not found")
+    message(FATAL_ERROR "Boost is required for ASIO and folly. Install boost.")
 endif()
 
 findFolly()
@@ -298,7 +298,7 @@ if(FOLLY_FOUND)
   set(METALIBS ${METALIBS} fbvector)
 else()
   message(WARNING "Prerequisites for Folly (Facebook Open Source Library) not found."
-  " Install Boost and jemalloc to compile with folly and enable various"
+  " Install jemalloc to compile with folly and enable various"
   " optimizations as well as reduce memory taken up by the Row-Compressed annotator.")
 endif()
 
