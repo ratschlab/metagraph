@@ -31,7 +31,7 @@ struct TableElem {
               int32_t seed_end, score_t chain_score, uint32_t current_seed_index)
           : label(c), coordinate(coordinate), seed_clipping(seed_clipping),
             seed_end(seed_end), chain_score(chain_score), current_seed_index(current_seed_index) {}
-} __attribute__((aligned(32)));
+} SIMDE_ALIGN_TO_32;
 static_assert(sizeof(TableElem) == 32);
 
 inline constexpr bool operator>(const TableElem &a, const TableElem &b) {
@@ -458,7 +458,7 @@ chain_seeds(const DBGAlignerConfig &config,
                     simde_mm256_maskstore_epi32(&backtrace[j], mask, i_v);
 
                     // TODO: simde_mm256_i32scatter_epi32 not implemented yet
-                    score_t cur_scores[8] __attribute__((aligned(32)));
+                    score_t cur_scores[8] SIMDE_ALIGN_TO_32;
                     simde_mm256_store_si256((simde__m256i*)cur_scores, cur_score_v);
                     auto *dp_table_o = &dp_table[j];
                     dp_table_o[0].chain_score = cur_scores[0];
