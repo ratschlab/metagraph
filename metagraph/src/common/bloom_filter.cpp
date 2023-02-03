@@ -89,9 +89,8 @@ batch_insert_avx2(BloomFilter &bloom,
 
     auto &filter_ = bloom.data();
 
-    static_assert(sizeof(long long int) == sizeof(uint64_t));
-    long long int *filter_cast = reinterpret_cast<long long int*>(filter_.data());
-    long long int *offset;
+    int64_t *filter_cast = reinterpret_cast<int64_t*>(filter_.data());
+    int64_t *offset;
 
     const size_t size = filter_.size();
 
@@ -199,9 +198,8 @@ batch_check_avx2(const BloomFilter &bloom,
                  const std::function<void(size_t)> &present_index_callback) {
     assert(num_hash_functions_);
 
-    static_assert(sizeof(long long int) == sizeof(uint64_t));
-    const auto *filter_cast = reinterpret_cast<const long long int*>(bloom.data().data());
-    const long long int *offset;
+    const int64_t *filter_cast = reinterpret_cast<const int64_t*>(bloom.data().data());
+    const int64_t *offset;
 
     const size_t size = bloom.size();
 
