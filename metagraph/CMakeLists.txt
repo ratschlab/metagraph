@@ -278,11 +278,7 @@ add_library(caches INTERFACE)
 target_include_directories(caches INTERFACE external-libraries/caches/include)
 
 
-unset(Boost_INCLUDE_DIR CACHE)
-find_package(Boost)
-if(NOT Boost_FOUND)
-    message(FATAL_ERROR "Boost is required for ASIO and folly. Install boost.")
-endif()
+find_package(Boost REQUIRED)
 
 findFolly()
 if(FOLLY_FOUND)
@@ -297,6 +293,10 @@ else()
   " Install jemalloc to compile with folly and enable various"
   " optimizations as well as reduce memory taken up by the Row-Compressed annotator.")
 endif()
+
+add_definitions(-DASIO_STANDALONE -DUSE_STANDALONE_ASIO)
+set(USE_STANDALONE_ASIO ON)
+set(ASIO_PATH ${Boost_INCLUDE_DIRS})
 
 # assume built-in pthreads on MacOS
 IF(APPLE)
