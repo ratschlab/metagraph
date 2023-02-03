@@ -332,9 +332,6 @@ inline uint64_t atomic_fetch(const sdsl::int_vector<> &vector,
                              std::mutex &backup_mutex,
                              int mo) {
     const uint8_t width = vector.width();
-    if (width > 64)
-        __builtin_unreachable();
-
     const size_t bit_pos = i * width;
     const uint64_t mask = (1llu << width) - 1;
     if (width + 7 > 64) {
@@ -380,9 +377,6 @@ inline uint64_t atomic_fetch_and_add(sdsl::int_vector<> &vector,
                                      std::mutex &backup_mutex,
                                      int mo) {
     const uint8_t width = vector.width();
-    if (width > 64)
-        __builtin_unreachable();
-
     const size_t bit_pos = i * width;
     const uint64_t mask = (1llu << width) - 1;
     if (width + 7 > 64) {
@@ -433,9 +427,6 @@ inline uint64_t atomic_exchange(sdsl::int_vector<> &vector,
                                 std::mutex &backup_mutex,
                                 int mo) {
     const uint8_t width = vector.width();
-    if (width > 64)
-        __builtin_unreachable();
-
     const size_t bit_pos = i * width;
     const uint64_t mask = (1llu << width) - 1;
     if (width + 7 > 64) {
