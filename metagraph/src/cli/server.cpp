@@ -1,5 +1,6 @@
 #include <json/json.h>
 #include <server_http.hpp>
+#include <asio/error.hpp>
 
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
