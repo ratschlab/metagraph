@@ -255,6 +255,7 @@ link_directories(
 include_directories(
  PUBLIC
   external-libraries/KMC/kmc_api
+  external-libraries/sdsl-lite/include
   external-libraries/eigen
   external-libraries/hopscotch-map/include
   external-libraries/ordered-map/include
@@ -268,11 +269,6 @@ include_directories(
   external-libraries/sdust
   external-libraries/simde-no-tests
   ${PROJECT_SOURCE_DIR}/src
-)
-
-include_directories(
- PUBLIC SYSTEM
-  external-libraries/sdsl-lite/include
 )
 
 add_library(ips4o INTERFACE)
