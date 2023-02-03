@@ -937,23 +937,6 @@ tabulate_score(const sdsl::bit_vector &presence, size_t correction = 0) {
     return table;
 }
 
-/**
- * A penalty function used in BIGSI
- */
-double penalty_bigsi(double count,
-                     double match_score,
-                     double mismatch_score,
-                     double SNP_t) {
-    double min_N_snps = count / SNP_t;
-    double max_N_snps = std::max(count - SNP_t + 1, min_N_snps);
-    double mean_N_snps = max_N_snps * 0.05 + min_N_snps;
-
-    assert(count >= mean_N_snps);
-
-    double mean_penalty = mean_N_snps * mismatch_score;
-    return (count - mean_penalty) * match_score - mean_penalty;
-}
-
 int32_t AnnotatedDBG
 ::score_kmer_presence_mask(const sdsl::bit_vector &kmer_presence_mask,
                            int32_t match_score,
@@ -977,11 +960,16 @@ int32_t AnnotatedDBG
     if (score_counter[0].empty())
         return score * sequence_length / kmer_presence_mask.size();
 
-    const auto *it = score_counter[0].data();
-    const auto *end = it + score_counter[0].size();
+    for (double count : score_counter[0]) {
+        // A penalty function used in BIGSI
+        double min_N_snps = count / SNP_t;
+        double max_N_snps = std::max(count - SNP_t + 1, min_N_snps);
+        double mean_N_snps = max_N_snps * 0.05 + min_N_snps;
 
-    for ( ; it != end; ++it) {
-        score += penalty_bigsi(*it, match_score, mismatch_score, SNP_t);
+        assert(count >= mean_N_snps);
+
+        double mean_penalty = mean_N_snps * mismatch_score;
+        score += (count - mean_penalty) * match_score - mean_penalty;
     }
 
     return std::max(score * sequence_length / kmer_presence_mask.size(), 0.);
