@@ -383,7 +383,10 @@ inline uint64_t atomic_fetch_and_add(sdsl::int_vector<> &vector,
         // there is no way to reliably modify without a mutex
         std::lock_guard<std::mutex> lock(backup_mutex);
         const uint64_t old_val = vector[i];
-        vector[i] += val;
+
+        // TODO: using += here triggers an array-bounds warning in sdsl::util::write_int
+        vector[i] = old_val + val;
+
         return old_val;
     } else if ((bit_pos & 0x3F) + width <= 64) {
         // element fits in an aligned word

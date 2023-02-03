@@ -259,20 +259,20 @@ include_directories(
   external-libraries/hopscotch-map/include
   external-libraries/ordered-map/include
   external-libraries/binrel_wt/include
+  external-libraries/asio/asio/include
   external-libraries/cpp_progress_bar
   external-libraries/Priority-Deque
   external-libraries/rollinghashcpp
   external-libraries/spdlog/include
   external-libraries/zlib
   external-libraries/sdust
+  external-libraries/simde-no-tests
   ${PROJECT_SOURCE_DIR}/src
 )
 
 include_directories(
  PUBLIC SYSTEM
   external-libraries/sdsl-lite/include
-  external-libraries/asio/asio/include
-  external-libraries/simde-no-tests
 )
 
 add_library(ips4o INTERFACE)
@@ -281,6 +281,12 @@ target_include_directories(ips4o INTERFACE external-libraries/ips4o)
 add_library(caches INTERFACE)
 target_include_directories(caches INTERFACE external-libraries/caches/include)
 
+
+unset(Boost_INCLUDE_DIR CACHE)
+find_package(Boost)
+if(NOT Boost_FOUND)
+    message(FATAL_ERROR "std::filesystem not found")
+endif()
 
 findFolly()
 if(FOLLY_FOUND)
@@ -295,11 +301,6 @@ else()
   " Install Boost and jemalloc to compile with folly and enable various"
   " optimizations as well as reduce memory taken up by the Row-Compressed annotator.")
 endif()
-
-# makes ASIO not depend on boost
-add_definitions(-DASIO_STANDALONE -DUSE_STANDALONE_ASIO)
-set(USE_STANDALONE_ASIO ON)
-set(ASIO_PATH external-libraries/asio/asio)
 
 # assume built-in pthreads on MacOS
 IF(APPLE)

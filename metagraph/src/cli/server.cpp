@@ -347,8 +347,8 @@ int run_server(Config *config) {
     server.on_error = [](shared_ptr<HttpServer::Request> /*request*/,
                          const SimpleWeb::error_code &ec) {
         // Handle errors here, ignoring a few trivial ones.
-        if (ec.value() != asio::stream_errc::eof
-                && ec.value() != asio::error::operation_aborted) {
+        if (ec.value() != boost::asio::stream_errc::eof
+                && ec.value() != boost::asio::error::operation_aborted) {
             logger->info("[Server] Got error {} {} {}",
                          ec.message(), ec.category().name(), ec.value());
         }
