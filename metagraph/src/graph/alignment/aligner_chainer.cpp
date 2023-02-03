@@ -21,14 +21,14 @@ constexpr uint32_t nid = std::numeric_limits<uint32_t>::max();
 
 struct TableElem {
     Alignment::Column label;
-    long long coordinate;
-    int seed_clipping;
-    int seed_end;
+    int64_t coordinate;
+    int32_t seed_clipping;
+    int32_t seed_end;
     score_t chain_score;
     uint32_t current_seed_index;
 
-    TableElem(Alignment::Column c, long long coordinate, int seed_clipping,
-              int seed_end, score_t chain_score, uint32 current_seed_index)
+    TableElem(Alignment::Column c, int64_t coordinate, int32_t seed_clipping,
+              int32_t seed_end, score_t chain_score, uint32_t current_seed_index)
           : label(c), coordinate(coordinate), seed_clipping(seed_clipping),
             seed_end(seed_end), chain_score(chain_score), current_seed_index(current_seed_index) {}
 } __attribute__((aligned(32)));
