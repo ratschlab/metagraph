@@ -293,7 +293,7 @@ if(FOLLY_FOUND)
   set(METALIBS ${METALIBS} fbvector)
 else()
   message(WARNING "Prerequisites for Folly (Facebook Open Source Library) not found."
-  " Install Boost jemalloc to compile with folly and enable various"
+  " Install Boost and jemalloc to compile with folly and enable various"
   " optimizations as well as reduce memory taken up by the Row-Compressed annotator.")
 endif()
 
