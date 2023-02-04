@@ -260,7 +260,6 @@ include_directories(
   external-libraries/hopscotch-map/include
   external-libraries/ordered-map/include
   external-libraries/binrel_wt/include
-  external-libraries/asio/asio/include
   external-libraries/cpp_progress_bar
   external-libraries/Priority-Deque
   external-libraries/rollinghashcpp
@@ -271,14 +270,18 @@ include_directories(
   ${PROJECT_SOURCE_DIR}/src
 )
 
+# TODO: move ASIO out of here once it replaces sprintf with snprintf
+include_directories(
+  PUBLIC SYSTEM
+  external-libraries/asio/asio/include
+)
+
 add_library(ips4o INTERFACE)
 target_include_directories(ips4o INTERFACE external-libraries/ips4o)
 
 add_library(caches INTERFACE)
 target_include_directories(caches INTERFACE external-libraries/caches/include)
 
-
-find_package(Boost REQUIRED)
 
 findFolly()
 if(FOLLY_FOUND)
@@ -290,10 +293,11 @@ if(FOLLY_FOUND)
   set(METALIBS ${METALIBS} fbvector)
 else()
   message(WARNING "Prerequisites for Folly (Facebook Open Source Library) not found."
-  " Install jemalloc to compile with folly and enable various"
+  " Install Boost jemalloc to compile with folly and enable various"
   " optimizations as well as reduce memory taken up by the Row-Compressed annotator.")
 endif()
 
+# makes ASIO not depend on boost
 add_definitions(-DASIO_STANDALONE -DUSE_STANDALONE_ASIO)
 set(USE_STANDALONE_ASIO ON)
 set(ASIO_PATH external-libraries/asio/asio)
