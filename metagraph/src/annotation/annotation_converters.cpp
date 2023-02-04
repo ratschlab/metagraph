@@ -860,7 +860,7 @@ void convert_batch_to_row_disk(
         const std::function<void(std::ofstream &)> &decorate,
         uint64_t num_rows,
         size_t num_threads) {
-    LEncoder label_encoder;
+    std::vector<std::string> col_names;
     std::vector<std::unique_ptr<bit_vector>> columns;
     uint64_t num_set_bits = 0;
     std::mutex mu;
@@ -879,13 +879,10 @@ void convert_batch_to_row_disk(
                 num_set_bits += column->num_set_bits();
                 while (columns.size() <= j) {
                     columns.emplace_back();
+                    col_names.emplace_back();
                 }
                 columns[j] = std::move(column);
-                size_t col = label_encoder.insert_and_encode(label);
-                if (col + 1 != label_encoder.size()) {
-                    logger->error("Duplicate columns {}", label);
-                    exit(1);
-                }
+                col_names[j] = label;
             },
             num_threads
     );
@@ -893,6 +890,18 @@ void convert_batch_to_row_disk(
     if (!success) {
         logger->error("Can't load annotation columns");
         exit(1);
+    }
+
+    // this must be done after loading all columns
+    // to keep their order correct
+    // (label_encoder.insert_and_encode cannot be inside get_cols callback)
+    LEncoder label_encoder;
+    for (const auto &label : col_names) {
+        size_t col = label_encoder.insert_and_encode(label);
+        if (col + 1 != label_encoder.size()) {
+            logger->error("Duplicate columns {}", label);
+            exit(1);
+        }
     }
 
     std::ofstream out = utils::open_new_ofstream(outfname);
@@ -1183,7 +1192,7 @@ void convert_to_row_diff<IntRowDiffDiskAnnotator>(
     uint64_t num_rows = get_num_rows_from_column_anno(files[0]);
     size_t num_set_bits = 0;
 
-    LEncoder label_encoder;
+    std::vector<std::string> col_names;
     std::vector<std::unique_ptr<bit_vector>> columns;
     std::vector<sdsl::int_vector<>> col_values;
 
@@ -1212,16 +1221,25 @@ void convert_to_row_diff<IntRowDiffDiskAnnotator>(
                 while (columns.size() <= j) {
                     columns.emplace_back();
                     col_values.emplace_back();
+                    col_names.emplace_back();
                 }
                 columns[j] = std::move(column);
                 col_values[j] = std::move(values);
-                size_t col = label_encoder.insert_and_encode(label);
-                if (col + 1 != label_encoder.size()) {
-                    logger->error("Duplicate columns {}", label);
-                    exit(1);
-                }
+                col_names[j] = label;
             },
             num_threads);
+
+    // this must be done after loading all columns
+    // to keep their order correct
+    // (label_encoder.insert_and_encode cannot be inside get_cols callback)
+    LEncoder label_encoder;
+    for (const auto &label : col_names) {
+        size_t col = label_encoder.insert_and_encode(label);
+        if (col + 1 != label_encoder.size()) {
+            logger->error("Duplicate columns {}", label);
+            exit(1);
+        }
+    }
 
     std::ofstream out = utils::open_new_ofstream(outfname);
     if (!out.good())
@@ -1292,7 +1310,7 @@ void convert_to_row_diff<RowDiffDiskCoordAnnotator>(
 
     size_t num_values = 0;
 
-    LEncoder label_encoder;
+    std::vector<std::string> col_names;
     std::vector<std::unique_ptr<bit_vector>> columns;
     std::vector<sdsl::int_vector<>> col_values;
     std::vector<bit_vector_small> col_delims;
@@ -1329,17 +1347,26 @@ void convert_to_row_diff<RowDiffDiskCoordAnnotator>(
                     columns.emplace_back();
                     col_values.emplace_back();
                     col_delims.emplace_back();
+                    col_names.emplace_back();
                 }
                 columns[j] = std::move(column);
                 col_values[j] = std::move(values);
-                size_t col = label_encoder.insert_and_encode(label);
-                if (col + 1 != label_encoder.size()) {
-                    logger->error("Duplicate columns {}", label);
-                    exit(1);
-                }
                 col_delims[j] = std::move(delims);
+                col_names[j] = label;
             },
             num_threads);
+
+    // this must be done after loading all columns
+    // to keep their order correct
+    // (label_encoder.insert_and_encode cannot be inside get_cols callback)
+    LEncoder label_encoder;
+    for (const auto &label : col_names) {
+        size_t col = label_encoder.insert_and_encode(label);
+        if (col + 1 != label_encoder.size()) {
+            logger->error("Duplicate columns {}", label);
+            exit(1);
+        }
+    }
 
     std::ofstream out = utils::open_new_ofstream(outfname);
     if (!out.good())
