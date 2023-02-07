@@ -122,37 +122,23 @@ jobs:
       if: matrix.build_static == 'OFF'
       run: |
         export LD_LIBRARY_PATH="/usr/local/lib/:$LD_LIBRARY_PATH"
-        ulimit -c unlimited
         cd metagraph/build && ./unit_tests
 
     - name: run integration tests
       run: |
         export LD_LIBRARY_PATH="/usr/local/lib/:$LD_LIBRARY_PATH"
-        ulimit -c unlimited
         cd metagraph/build && make check
-
-    - name: store core dumps
-      run: |
-        sudo mkdir /cores
-        sudo chmod 777 /cores
-        sudo bash -c 'echo "/cores/%e.%p.%t" > /proc/sys/kernel/core_pattern'
 
     # for potential release
     - name: rename binary
       if: matrix.with_avx == 'OFF'
       run: mv metagraph/build/metagraph_${{ matrix.alphabet }} metagraph/build/metagraph_${{ matrix.alphabet }}_noAVX
     - name: upload static binary
-      if: ${{ matrix.build_static == 'ON' (matrix.compiler == 'g++-11' || failure() ) }}
+      if: ${{ matrix.build_static == 'ON' && matrix.compiler == 'g++-11' }}
       uses: actions/upload-artifact@v3
       with:
-        name: metagraph_${{ matrix.alphabet }}_${{ matrix.compiler }}_linux_x86
+        name: metagraph_${{ matrix.alphabet }}_linux_x86
         path: metagraph/build/metagraph_${{ matrix.alphabet }}${{ matrix.with_avx == 'OFF' && '_noAVX' || '' }}
-
-    - uses: actions/upload-artifact@v3
-      if: ${{ matrix.build_static == 'ON' && failure() }}
-      with:
-        name: cores
-        path: /cores
 
 
   MacOS:
