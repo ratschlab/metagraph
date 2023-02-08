@@ -5,7 +5,7 @@ project(KMC)
 add_compile_options(-Wall -O3 -m64 -pthread -std=c++11)
 
 if(@BUILD_STATIC@)
-string(APPEND CMAKE_CXX_FLAGS " -static ")
+string(APPEND CMAKE_CXX_FLAGS " -static")
 endif()
 
 set(KMC_MAIN_DIR @KMC_MAIN_DIR@)
