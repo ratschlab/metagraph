@@ -7,7 +7,7 @@ function (findOpenMP)
 # and happily cached, thus messing up the compilation flags forever
 unset(OpenMP_C_FLAGS CACHE)
 unset(OpenMP_CXX_FLAGS CACHE)
-if(APPLE)
+if(APPLE AND NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   execute_process(
       COMMAND brew --prefix libomp
       OUTPUT_VARIABLE BREW_OMP_PREFIX
@@ -80,10 +80,9 @@ endfunction()
 
 function (findFolly)
 unset(FOLLY_FOUND PARENT_SCOPE)
-unset(Boost_INCLUDE_DIR CACHE)
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_SOURCE_DIR})
-find_package(Boost)
 find_package(Jemalloc)
+find_package(Boost)
 
 if(Jemalloc_FOUND)
   if(${JEMALLOC_VERSION} VERSION_LESS 4.0)

@@ -2,6 +2,8 @@
 
 #include <unordered_set>
 
+#include <x86/svml.h>
+
 #include "aligner_seeder_methods.hpp"
 #include "aligner_aggregator.hpp"
 #include "aligner_labeled.hpp"
@@ -21,17 +23,17 @@ constexpr uint32_t nid = std::numeric_limits<uint32_t>::max();
 
 struct TableElem {
     Alignment::Column label;
-    long long coordinate;
-    int seed_clipping;
-    int seed_end;
+    int64_t coordinate;
+    int32_t seed_clipping;
+    int32_t seed_end;
     score_t chain_score;
     uint32_t current_seed_index;
 
-    TableElem(Alignment::Column c, long long coordinate, int seed_clipping,
-              int seed_end, score_t chain_score, uint32 current_seed_index)
+    TableElem(Alignment::Column c, int64_t coordinate, int32_t seed_clipping,
+              int32_t seed_end, score_t chain_score, uint32_t current_seed_index)
           : label(c), coordinate(coordinate), seed_clipping(seed_clipping),
             seed_end(seed_end), chain_score(chain_score), current_seed_index(current_seed_index) {}
-} __attribute__((aligned(32)));
+} SIMDE_ALIGN_TO_32;
 static_assert(sizeof(TableElem) == 32);
 
 inline constexpr bool operator>(const TableElem &a, const TableElem &b) {
@@ -39,7 +41,7 @@ inline constexpr bool operator>(const TableElem &a, const TableElem &b) {
         > std::tie(b.label, b.coordinate, b.seed_clipping, b.seed_end);
 }
 
-typedef AlignedVector<TableElem> ChainDPTable;
+typedef std::vector<TableElem> ChainDPTable;
 
 std::tuple<ChainDPTable, AlignedVector<int32_t>, size_t, size_t>
 chain_seeds(const DBGAlignerConfig &config,
@@ -367,7 +369,6 @@ chain_seeds(const DBGAlignerConfig &config,
     size_t i = 0;
     while (cur_label_end < dp_table.size()) {
         cur_label_end += label_sizes[dp_table[i].label];
-        // TODO: rewrite with AVX2
         for ( ; i < cur_label_end; ++i) {
             const auto &[prev_label, prev_coord, prev_clipping, prev_end,
                          prev_score, prev_seed_i] = dp_table[i];
@@ -377,122 +378,90 @@ chain_seeds(const DBGAlignerConfig &config,
 
             size_t it_end = std::min(bandwidth, cur_label_end - i) + i;
             ssize_t coord_cutoff = prev_coord - query_size;
-#if __AVX2__
-            const __m256i coord_cutoff_v = _mm256_set1_epi64x(coord_cutoff);
-            const __m256i prev_coord_v = _mm256_set1_epi64x(prev_coord);
-            const __m256i prev_clipping_v = _mm256_set1_epi32(prev_clipping);
-            const __m256i query_size_v = _mm256_set1_epi32(query_size);
-            const __m256i prev_score_v = _mm256_set1_epi32(prev_score);
-            const __m256i it_end_v = _mm256_set1_epi32(it_end - 1);
-            const __m256i i_v = _mm256_set1_epi32(i);
-            auto epi64_to_epi32 = [](__m256i v) {
-                return _mm256_castsi256_si128(_mm256_permute4x64_epi64(_mm256_shuffle_epi32(v, 8), 8));
+
+            const simde__m256i coord_cutoff_v = simde_mm256_set1_epi64x(coord_cutoff);
+            const simde__m256i prev_coord_v = simde_mm256_set1_epi64x(prev_coord);
+            const simde__m256i prev_clipping_v = simde_mm256_set1_epi32(prev_clipping);
+            const simde__m256i query_size_v = simde_mm256_set1_epi32(query_size);
+            const simde__m256i prev_score_v = simde_mm256_set1_epi32(prev_score);
+            const simde__m256i it_end_v = simde_mm256_set1_epi32(it_end - 1);
+            const simde__m256i i_v = simde_mm256_set1_epi32(i);
+            auto epi64_to_epi32 = [](simde__m256i v) {
+                return simde_mm256_castsi256_si128(simde_mm256_permute4x64_epi64(simde_mm256_shuffle_epi32(v, 8), 8));
             };
 
-            __m256i j_v = _mm256_add_epi32(_mm256_set1_epi32(i + 1), _mm256_set_epi32(7, 6, 5, 4, 3, 2, 1, 0));
+            simde__m256i j_v = simde_mm256_add_epi32(simde_mm256_set1_epi32(i + 1), simde_mm256_set_epi32(7, 6, 5, 4, 3, 2, 1, 0));
             for (size_t j = i + 1; true; j += 8) {
                 // if (coord_cutoff > coord || j > it_end - 1)
                 //     break;
-                __m256i coord_1_v = _mm256_i32gather_epi64(&dp_table[j].coordinate, _mm_set_epi32(12, 8, 4, 0), 8);
-                __m256i coord_2_v = _mm256_i32gather_epi64(&dp_table[j + 4].coordinate, _mm_set_epi32(12, 8, 4, 0), 8);
-                __m256i coord_1_mask = _mm256_cmpgt_epi64(coord_cutoff_v, coord_1_v);
-                __m256i coord_2_mask = _mm256_cmpgt_epi64(coord_cutoff_v, coord_2_v);
-                __m256i coord_neg_mask = _mm256_blend_epi32(coord_1_mask, coord_2_mask, 0b10101010);
-                __m256i j_neg_mask = _mm256_cmpgt_epi32(j_v, it_end_v);
-                coord_neg_mask = _mm256_or_si256(j_neg_mask, coord_neg_mask);
+                simde__m256i coord_1_v = simde_mm256_i32gather_epi64(&dp_table[j].coordinate, simde_mm_set_epi32(12, 8, 4, 0), 8);
+                simde__m256i coord_2_v = simde_mm256_i32gather_epi64(&dp_table[j + 4].coordinate, simde_mm_set_epi32(12, 8, 4, 0), 8);
+                simde__m256i coord_1_mask = simde_mm256_cmpgt_epi64(coord_cutoff_v, coord_1_v);
+                simde__m256i coord_2_mask = simde_mm256_cmpgt_epi64(coord_cutoff_v, coord_2_v);
+                simde__m256i coord_neg_mask = simde_mm256_blend_epi32(coord_1_mask, coord_2_mask, 0b10101010);
+                simde__m256i j_neg_mask = simde_mm256_cmpgt_epi32(j_v, it_end_v);
+                coord_neg_mask = simde_mm256_or_si256(j_neg_mask, coord_neg_mask);
 
                 // int32_t dist = prev_clipping - clipping;
-                __m256i clipping_v = _mm256_i32gather_epi32(&dp_table[j].seed_clipping, _mm256_set_epi32(56, 48, 40, 32, 24, 16, 8, 0), 4);
-                __m256i dist_v = _mm256_sub_epi32(prev_clipping_v, clipping_v);
+                simde__m256i clipping_v = simde_mm256_i32gather_epi32(&dp_table[j].seed_clipping, simde_mm256_set_epi32(56, 48, 40, 32, 24, 16, 8, 0), 4);
+                simde__m256i dist_v = simde_mm256_sub_epi32(prev_clipping_v, clipping_v);
 
                 // int32_t coord_dist = prev_coord - coord;
                 // a[0:32],b[0:32],a[64:96],b[64:96],a[128:160],b[128:160],a[192:224],b[192:224]
-                __m128i coord_dist_1_v = epi64_to_epi32(_mm256_sub_epi64(prev_coord_v, coord_1_v));
-                __m128i coord_dist_2_v = epi64_to_epi32(_mm256_sub_epi64(prev_coord_v, coord_2_v));
-                __m256i coord_dist_v = _mm256_set_m128i(coord_dist_2_v, coord_dist_1_v);
+                simde__m128i coord_dist_1_v = epi64_to_epi32(simde_mm256_sub_epi64(prev_coord_v, coord_1_v));
+                simde__m128i coord_dist_2_v = epi64_to_epi32(simde_mm256_sub_epi64(prev_coord_v, coord_2_v));
+                simde__m256i coord_dist_v = simde_mm256_set_m128i(coord_dist_2_v, coord_dist_1_v);
 
-                __m256i dist_mask = _mm256_cmpgt_epi32(dist_v, _mm256_setzero_si256());
-                __m256i dmax = _mm256_max_epi32(dist_v, coord_dist_v);
-                __m256i dmax_mask = _mm256_cmpgt_epi32(query_size_v, dmax);
-                dist_mask = _mm256_and_si256(dist_mask, dmax_mask);
-                dist_mask = _mm256_andnot_si256(coord_neg_mask, dist_mask);
+                simde__m256i dist_mask = simde_mm256_cmpgt_epi32(dist_v, simde_mm256_setzero_si256());
+                simde__m256i dmax = simde_mm256_max_epi32(dist_v, coord_dist_v);
+                simde__m256i dmax_mask = simde_mm256_cmpgt_epi32(query_size_v, dmax);
+                dist_mask = simde_mm256_and_si256(dist_mask, dmax_mask);
+                dist_mask = simde_mm256_andnot_si256(coord_neg_mask, dist_mask);
 
                 // if (dist > 0 && std::max(dist, coord_dist) < query_size) {
-                if (_mm256_movemask_epi8(dist_mask)) {
+                if (simde_mm256_movemask_epi8(dist_mask)) {
                     // score_t match = std::min({ dist, coord_dist, end - clipping });
-                    __m256i match_v = _mm256_min_epi32(dist_v, coord_dist_v);
-                    __m256i end_v = _mm256_i32gather_epi32(&dp_table[j].seed_end, _mm256_set_epi32(56, 48, 40, 32, 24, 16, 8, 0), 4);
-                    __m256i length_v = _mm256_sub_epi32(end_v, clipping_v);
-                    match_v = _mm256_min_epi32(match_v, length_v);
+                    simde__m256i match_v = simde_mm256_min_epi32(dist_v, coord_dist_v);
+                    simde__m256i end_v = simde_mm256_i32gather_epi32(&dp_table[j].seed_end, simde_mm256_set_epi32(56, 48, 40, 32, 24, 16, 8, 0), 4);
+                    simde__m256i length_v = simde_mm256_sub_epi32(end_v, clipping_v);
+                    match_v = simde_mm256_min_epi32(match_v, length_v);
 
                     // score_t cur_score = prev_score + match;
-                    __m256i cur_score_v = _mm256_add_epi32(prev_score_v, match_v);
+                    simde__m256i cur_score_v = simde_mm256_add_epi32(prev_score_v, match_v);
 
                     // float coord_diff = std::abs(coord_dist - dist);
-                    __m256i coord_diff = _mm256_sub_epi32(coord_dist_v, dist_v);
-                    coord_diff = _mm256_abs_epi32(coord_diff);
-                    __m256 coord_diff_f = _mm256_cvtepi32_ps(coord_diff);
+                    simde__m256i coord_diff = simde_mm256_sub_epi32(coord_dist_v, dist_v);
+                    coord_diff = simde_mm256_abs_epi32(coord_diff);
+                    simde__m256 coord_diff_f = simde_mm256_cvtepi32_ps(coord_diff);
 
                     // float linear_penalty = coord_diff * sl;
-                    __m256 linear_penalty_v = _mm256_mul_ps(coord_diff_f, _mm256_set1_ps(sl));
-
-                    // from:
-                    // https://github.com/IntelLabs/Trans-Omics-Acceleration-Library/blob/master/src/dynamic-programming/parallel_chaining_v2_22.h
-                    auto mg_log2_avx2 = [](__m256i dd_v) -> __m256 // NB: this doesn't work when x<2
-                    {
-                        // -------- constant vectors --------------------
-                        __m256i v255 = _mm256_set1_epi32(255);
-                        __m256i v128 = _mm256_set1_epi32(128);
-                        __m256i shift1 =  _mm256_set1_epi32(~(255 << 23));
-                        __m256i shift2 =  _mm256_set1_epi32(127 << 23);
-                            __m256 fc1 = _mm256_set1_ps(-0.34484843f);
-                            __m256 fc2 = _mm256_set1_ps(2.02466578f);
-                            __m256 fc3 = _mm256_set1_ps(0.67487759f);
-                        // ---------------------------------------------
-
-                        __m256 dd_v_f = _mm256_cvtepi32_ps(dd_v);
-                            __m256i dd_v_i = _mm256_castps_si256(dd_v_f);
-
-                        __m256i log2_v_i = _mm256_sub_epi32 (_mm256_and_si256( _mm256_srli_epi32(dd_v_i, 23), v255) , v128);
-
-                        dd_v_i = _mm256_and_si256(dd_v_i, shift1);
-                        dd_v_i = _mm256_add_epi32(dd_v_i, shift2);
-
-                        dd_v_f = _mm256_castsi256_ps(dd_v_i);
-
-                        __m256 t1 =_mm256_add_ps (_mm256_mul_ps(fc1, dd_v_f), fc2);
-                        __m256 t2 = _mm256_sub_ps(_mm256_mul_ps(t1, dd_v_f), fc3);
-
-                        __m256 log2_v_f = _mm256_add_ps(_mm256_cvtepi32_ps(log2_v_i), t2);
-
-                        return log2_v_f;
-                    };
+                    simde__m256 linear_penalty_v = simde_mm256_mul_ps(coord_diff_f, simde_mm256_set1_ps(sl));
 
                     // float log_penalty = log2(coord_diff + 1) * 0.5;
-                    __m256 log_penalty_v = mg_log2_avx2(_mm256_add_epi32(coord_diff, _mm256_set1_epi32(1)));
-                    log_penalty_v = _mm256_mul_ps(log_penalty_v, _mm256_set1_ps(0.5));
+                    simde__m256 log_penalty_v = simde_mm256_log2_ps(simde_mm256_cvtepi32_ps(simde_mm256_add_epi32(coord_diff, simde_mm256_set1_epi32(1))));
+                    log_penalty_v = simde_mm256_mul_ps(log_penalty_v, simde_mm256_set1_ps(0.5));
 
                     // cur_score -= linear_penalty + log_penalty;
-                    __m256 gap_penalty_f = _mm256_add_ps(linear_penalty_v, log_penalty_v);
-                    __m256i gap_penalty_v = _mm256_cvtps_epi32(gap_penalty_f);
-                    __m256i dist_cutoff_mask = _mm256_cmpgt_epi32(coord_diff, _mm256_setzero_si256());
-                    gap_penalty_v = _mm256_blendv_epi8(_mm256_setzero_si256(), gap_penalty_v, dist_cutoff_mask);
-                    cur_score_v = _mm256_sub_epi32(cur_score_v, gap_penalty_v);
+                    simde__m256 gap_penalty_f = simde_mm256_add_ps(linear_penalty_v, log_penalty_v);
+                    simde__m256i gap_penalty_v = simde_mm256_cvtps_epi32(gap_penalty_f);
+                    simde__m256i dist_cutoff_mask = simde_mm256_cmpgt_epi32(coord_diff, simde_mm256_setzero_si256());
+                    gap_penalty_v = simde_mm256_blendv_epi8(simde_mm256_setzero_si256(), gap_penalty_v, dist_cutoff_mask);
+                    cur_score_v = simde_mm256_sub_epi32(cur_score_v, gap_penalty_v);
 
                     // if (cur_score >= score) {
                     //     score = cur_score;
                     //     backtrace[j] = i;
                     // }
-                    __m256i old_scores_v = _mm256_i32gather_epi32(&dp_table[j].chain_score, _mm256_set_epi32(56, 48, 40, 32, 24, 16, 8, 0), 4);
-                    __m256i score_neg_mask = _mm256_cmpgt_epi32(old_scores_v, cur_score_v);
-                    __m256i mask = _mm256_andnot_si256(score_neg_mask, dist_mask);
+                    simde__m256i old_scores_v = simde_mm256_i32gather_epi32(&dp_table[j].chain_score, simde_mm256_set_epi32(56, 48, 40, 32, 24, 16, 8, 0), 4);
+                    simde__m256i score_neg_mask = simde_mm256_cmpgt_epi32(old_scores_v, cur_score_v);
+                    simde__m256i mask = simde_mm256_andnot_si256(score_neg_mask, dist_mask);
 
-                    cur_score_v = _mm256_blendv_epi8(old_scores_v, cur_score_v, mask);
-                    _mm256_maskstore_epi32(&backtrace[j], mask, i_v);
+                    cur_score_v = simde_mm256_blendv_epi8(old_scores_v, cur_score_v, mask);
+                    simde_mm256_maskstore_epi32(&backtrace[j], mask, i_v);
 
-                    // note: _mm256_i32scatter_epi32 not supported in AVX2
-                    score_t cur_scores[8] __attribute__((aligned(32)));
-                    _mm256_store_si256((__m256i*)cur_scores, cur_score_v);
+                    // TODO: simde_mm256_i32scatter_epi32 not implemented yet
+                    score_t cur_scores[8] SIMDE_ALIGN_TO_32;
+                    simde_mm256_store_si256((simde__m256i*)cur_scores, cur_score_v);
                     auto *dp_table_o = &dp_table[j];
                     dp_table_o[0].chain_score = cur_scores[0];
                     dp_table_o[1].chain_score = cur_scores[1];
@@ -504,12 +473,13 @@ chain_seeds(const DBGAlignerConfig &config,
                     dp_table_o[7].chain_score = cur_scores[7];
                 }
 
-                if (_mm256_movemask_epi8(coord_neg_mask))
+                if (simde_mm256_movemask_epi8(coord_neg_mask))
                     break;
 
-                j_v = _mm256_add_epi32(j_v, _mm256_set1_epi32(8));
+                j_v = simde_mm256_add_epi32(j_v, simde_mm256_set1_epi32(8));
             }
-#else
+#if 0
+            // reference implementation
             for (size_t j = i + 1; j < it_end; ++j) {
                 auto &[label, coord, clipping, end, score, seed_i] = dp_table[j];
                 assert(label == prev_label);

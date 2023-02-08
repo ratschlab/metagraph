@@ -103,8 +103,7 @@ bool VectorRowBinMat<RowType>::load(std::istream &instream) {
     try {
         size_t num_rows = load_number(instream);
         num_columns_ = load_number(instream);
-        vector_.clear();
-        vector_.shrink_to_fit();
+        vector_ = decltype(vector_)();
         vector_.resize(num_rows);
 
         sdsl::int_vector<> full_vector;

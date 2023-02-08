@@ -148,6 +148,7 @@ jobs:
       matrix:
         alphabet: [DNA]
         build_type: [Debug, Release]
+        platform: [x64, arm64]
 
     steps:
     - uses: actions/checkout@v1

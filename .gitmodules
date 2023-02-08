@@ -65,3 +65,6 @@
 [submodule "metagraph/external-libraries/sdust"]
 	path = metagraph/external-libraries/sdust
 	url = https://github.com/lh3/sdust
+[submodule "metagraph/external-libraries/simde-no-tests"]
+	path = metagraph/external-libraries/simde-no-tests
+	url = https://github.com/simd-everywhere/simde-no-tests
