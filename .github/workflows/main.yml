@@ -45,6 +45,8 @@ jobs:
             compiler: g++-9
           - compiler: g++-9
             build_static: ON
+          - compiler: g++-10
+            build_static: ON
           - build_type: Debug
             build_static: ON
           - with_avx: OFF
