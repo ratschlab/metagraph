@@ -68,3 +68,6 @@
 [submodule "metagraph/external-libraries/htslib"]
 	path = metagraph/external-libraries/htslib
 	url = https://github.com/samtools/htslib
+[submodule "metagraph/external-libraries/libcount"]
+	path = metagraph/external-libraries/libcount
+	url = https://github.com/hmusta/libcount

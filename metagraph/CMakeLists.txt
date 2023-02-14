@@ -270,6 +270,7 @@ include_directories(
   external-libraries/zlib
   external-libraries/sdust
   external-libraries/simde-no-tests
+  external-libraries/libcount/include
   ${PROJECT_SOURCE_DIR}/src
 )
 
@@ -349,8 +350,18 @@ ExternalProject_Add(HTSLIB
   SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib
   CONFIGURE_COMMAND autoreconf -i ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib && ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib/configure --prefix=${CMAKE_BINARY_DIR}/external-libraries/htslib --disable-libcurl --disable-bz2 --disable-lzma
 )
+
 link_directories(${CMAKE_BINARY_DIR}/external-libraries/htslib/lib)
 include_directories(${CMAKE_BINARY_DIR}/external-libraries/htslib/include)
+
+add_library(hll STATIC
+  "external-libraries/libcount/count/c.cc"
+  "external-libraries/libcount/count/empirical_data.cc"
+  "external-libraries/libcount/count/hll.cc"
+  "external-libraries/libcount/count/hll_data.cc"
+  "external-libraries/libcount/count/utility.cc"
+)
+target_include_directories(hll PUBLIC external-libraries/libcount)
 
 set(OTHER_COMPILER_FLAGS "")
 get_directory_property(DIRECTORY_DEFINITIONS COMPILE_DEFINITIONS)
@@ -408,6 +419,7 @@ set(METALIBS ${METALIBS}
   progress_bar
   mersenne_twister
   sdust
+  hll
   spdlog::spdlog
   XXSDS_DYNAMIC
   ips4o
