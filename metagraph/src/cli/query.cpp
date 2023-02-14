@@ -1158,6 +1158,20 @@ int query_graph(Config *config) {
         }
     }
 
+    if (auto dbg_succ = std::dynamic_pointer_cast<DBGSuccinct>(graph)) {
+        if (config->align_sequences && dbg_succ->get_mode() == DeBruijnGraph::PRIMARY) {
+            auto node_rc = std::make_shared<NodeRC>(*dbg_succ);
+            if (node_rc->load(config->infbase)) {
+                logger->trace("Loaded the adj-rc index (adjacent to reverse-complement nodes)");
+                dbg_succ->add_extension(node_rc);
+            } else {
+                logger->warn("adj-rc index missing or failed to load. "
+                             "Alignment speed will be significantly slower. "
+                             "Run `metagraph transform --adj-rc ...` to generate the adj-rc index.");
+            }
+        }
+    }
+
     std::unique_ptr<AnnotatedDBG> anno_graph = initialize_annotated_dbg(graph, *config);
 
     ThreadPool thread_pool(std::max(1u, get_num_threads()) - 1, 1000);
