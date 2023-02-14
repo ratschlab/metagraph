@@ -14,8 +14,6 @@
 #include "aligner_config.hpp"
 #include "graph/representation/base/sequence_graph.hpp"
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
-#include "annotation/int_matrix/base/int_matrix.hpp"
-#include "annotation/representation/base/annotation.hpp"
 #include "common/vector.hpp"
 #include "common/utils/template_utils.hpp"
 
@@ -24,16 +22,20 @@ namespace mtg {
 namespace graph {
 namespace align {
 
+class AnnotationBuffer;
+class Alignment;
 
 // Note: this object stores pointers to the query sequence, so it is the user's
 //       responsibility to ensure that the query sequence is not destroyed when
 //       calling this class' methods
 class Seed {
+    friend Alignment;
+
   public:
     typedef DeBruijnGraph::node_index node_index;
     typedef annot::binmat::BinaryMatrix::Column Column;
     typedef SmallVector<int64_t> Tuple;
-    typedef Vector<Column> Columns;
+    typedef size_t Columns;
     typedef Vector<Tuple> CoordinateSet;
 
     Seed() : orientation_(false), offset_(0), clipping_(0), end_clipping_(0) {}
@@ -47,6 +49,10 @@ class Seed {
             offset_(offset), clipping_(clipping), end_clipping_(end_clipping) {}
 
     std::string_view get_query_view() const { return query_view_; }
+    std::string_view get_full_query_view() const {
+        return std::string_view(query_view_.data() - get_clipping(),
+                                get_clipping() + get_end_clipping() + query_view_.size());
+    }
 
     bool empty() const { return nodes_.empty(); }
 
@@ -78,9 +84,21 @@ class Seed {
         nodes_.insert(nodes_.end(), next.begin(), next.end());
     }
 
-    const annot::LabelEncoder<> *label_encoder = nullptr;
+    bool operator==(const Seed &b) const {
+        return std::make_tuple(query_view_.data(), query_view_.size(), orientation_,
+                               offset_, clipping_, end_clipping_)
+            == std::make_tuple(b.query_view_.data(), b.query_view_.size(), b.orientation_,
+                               b.offset_, b.clipping_, b.end_clipping_)
+                && nodes_ == b.nodes_;
+    }
 
-    Columns label_columns;
+    AnnotationBuffer *label_encoder = nullptr;
+    bool has_annotation() const { return label_encoder; }
+
+    Columns label_columns = 0;
+
+    const Vector<Column>& get_columns() const;
+    void set_columns(Vector<Column>&& columns);
 
     // for each column in |label_columns|, store a vector of coordinates for the
     // alignment's first nucleotide
@@ -94,6 +112,8 @@ class Seed {
     size_t offset_;
     Cigar::LengthType clipping_;
     Cigar::LengthType end_clipping_;
+
+    static const Vector<Column> no_labels_;
 };
 
 template <class It>
@@ -133,7 +153,7 @@ class Alignment {
     typedef DeBruijnGraph::node_index node_index;
     typedef annot::binmat::BinaryMatrix::Column Column;
     typedef SmallVector<int64_t> Tuple;
-    typedef Vector<Column> Columns;
+    typedef size_t Columns;
     typedef Vector<Tuple> CoordinateSet;
     typedef DBGAlignerConfig::score_t score_t;
     static const score_t ninf = DBGAlignerConfig::ninf;
@@ -164,6 +184,10 @@ class Alignment {
     }
 
     std::string_view get_query_view() const { return query_view_; }
+    std::string_view get_full_query_view() const {
+        return std::string_view(query_view_.data() - get_clipping(),
+                                get_clipping() + get_end_clipping() + query_view_.size());
+    }
 
     bool empty() const { return nodes_.empty(); }
 
@@ -190,18 +214,9 @@ class Alignment {
     // one of the coordinates in this. If this operation is unsuccessful, then
     // *this == {} afterwards.
     // Returns true if the label or coordinate set of this changed.
-    bool append(Alignment&& next);
+    bool append(Alignment&& next, score_t label_change_score = DBGAlignerConfig::ninf);
 
-    bool splice(Alignment&& other) {
-        if (empty()) {
-            std::swap(*this, other);
-            return label_columns.size();
-        }
-
-        trim_end_clipping();
-        other.trim_clipping();
-        return append(std::move(other));
-    }
+    bool splice(Alignment&& other, score_t label_change_score = DBGAlignerConfig::ninf);
 
     score_t get_score() const { return score_; }
 
@@ -223,7 +238,10 @@ class Alignment {
     inline size_t trim_clipping() { return cigar_.trim_clipping(); }
     inline size_t trim_end_clipping() { return cigar_.trim_end_clipping(); }
 
-    size_t trim_offset();
+    size_t trim_offset(size_t num_nodes = std::numeric_limits<size_t>::max());
+    void extend_offset(std::vector<node_index>&& path,
+                       std::vector<size_t>&& columns = {},
+                       std::vector<score_t>&& scores = {});
 
     size_t trim_query_prefix(size_t n,
                              size_t node_overlap,
@@ -281,9 +299,10 @@ class Alignment {
 
     bool is_valid(const DeBruijnGraph &graph, const DBGAlignerConfig *config = nullptr) const;
 
-    const annot::LabelEncoder<> *label_encoder = nullptr;
+    AnnotationBuffer *label_encoder = nullptr;
+    bool has_annotation() const { return label_encoder; }
 
-    Columns label_columns;
+    Columns label_columns = 0;
 
     // for each column in |label_columns|, store a vector of coordinates for the
     // alignment's first nucleotide
@@ -292,9 +311,22 @@ class Alignment {
 
     static bool coordinates_less(const Alignment &a, const Alignment &b);
 
+    std::vector<Columns> label_column_diffs;
+    std::vector<score_t> extra_scores;
     score_t extra_score = 0;
 
     std::string format_coords() const;
+    std::string format_annotations() const;
+
+    void set_columns(Vector<Column>&& columns);
+    const Vector<Column>& get_columns(size_t path_i = 0) const;
+    Vector<Column> get_column_union() const;
+    void merge_annotations(const Alignment &other);
+
+    std::vector<std::string> get_decoded_labels(size_t path_i) const;
+
+    std::pair<Alignment, Alignment> split_seed(size_t node_overlap,
+                                               const DBGAlignerConfig &config) const;
 
   private:
     std::string_view query_view_;
@@ -405,23 +437,10 @@ template <> struct formatter<mtg::graph::align::Alignment> {
                   a.get_cigar().to_string(),
                   a.get_offset());
 
-        const auto &label_columns = a.label_columns;
-        const auto &label_coordinates = a.label_coordinates;
-
-        if (label_coordinates.size()) {
+        if (a.label_coordinates.size()) {
             format_to(ctx.out(), "\t{}", a.format_coords());
-        } else if (label_columns.size()) {
-            if (a.label_encoder) {
-                std::vector<std::string> decoded_labels;
-                decoded_labels.reserve(label_columns.size());
-                for (size_t i = 0; i < label_columns.size(); ++i) {
-                    decoded_labels.emplace_back(a.label_encoder->decode(label_columns[i]));
-                }
-
-                format_to(ctx.out(), "\t{}", fmt::join(decoded_labels, ";"));
-            } else {
-                format_to(ctx.out(), "\t{}", fmt::join(label_columns, ";"));
-            }
+        } else if (a.has_annotation()) {
+            format_to(ctx.out(), "\t{}", a.format_annotations());
         }
 
         return ctx.out();

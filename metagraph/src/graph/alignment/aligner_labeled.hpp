@@ -4,24 +4,37 @@
 #include "dbg_aligner.hpp"
 #include "annotation_buffer.hpp"
 #include "graph/annotated_dbg.hpp"
+#include "graph/graph_extensions/hll_wrapper.hpp"
 
 
 namespace mtg {
 namespace graph {
 namespace align {
 
+class ILabeledAligner {
+  public:
+    typedef std::vector<std::tuple<Alignment::Columns, score_t, bool>> LabelChangeScores;
+    typedef std::pair<Alignment::Columns, Alignment::Columns> LabelPair;
+
+    virtual AnnotationBuffer& get_annotation_buffer() const = 0;
+    virtual ~ILabeledAligner() {}
+
+    LabelChangeScores get_label_change_scores(Alignment::Columns a_col,
+                                              Alignment::Columns b_col) const;
+
+    score_t get_label_change_score(Alignment::Column c, Alignment::Column d) const;
+
+  protected:
+    score_t label_change_score_;
+
+  private:
+    mutable tsl::hopscotch_map<Alignment::Column, tsl::hopscotch_map<Alignment::Column, double>> cache_;
+};
 
 class LabeledExtender : public DefaultColumnExtender {
   public:
     typedef AnnotationBuffer::Columns Columns;
     typedef AnnotationBuffer::CoordinateSet CoordinateSet;
-
-    LabeledExtender(const DeBruijnGraph &graph,
-                    const DBGAlignerConfig &config,
-                    AnnotationBuffer &annotation_buffer,
-                    std::string_view query)
-          : DefaultColumnExtender(graph, config, query),
-            annotation_buffer_(annotation_buffer) {}
 
     // |aligner| must be an instance of LabeledAligner<>
     LabeledExtender(const IDBGAligner &aligner, std::string_view query);
@@ -43,7 +56,7 @@ class LabeledExtender : public DefaultColumnExtender {
         );
 
         for (Alignment &alignment : alignments) {
-            alignment.label_encoder = &annotation_buffer_.get_annotator().get_label_encoder();
+            alignment.label_encoder = &annotation_buffer_;
         }
 
         return alignments;
@@ -71,6 +84,7 @@ class LabeledExtender : public DefaultColumnExtender {
     virtual void call_alignments(score_t end_score,
                                  const std::vector<node_index> &path,
                                  const std::vector<size_t> &trace,
+                                 const std::vector<score_t> &score_trace,
                                  const Cigar &ops,
                                  size_t clipping,
                                  size_t offset,
@@ -82,15 +96,19 @@ class LabeledExtender : public DefaultColumnExtender {
     // ensure that when terminating a path early, the per-node label storage is also
     // correctly handled
     virtual void pop(size_t i) override final {
+        assert(node_labels_.size() == node_labels_switched_.size());
         assert(i < node_labels_.size());
         DefaultColumnExtender::pop(i);
         last_flushed_table_i_ = std::min(i, last_flushed_table_i_);
         node_labels_.erase(node_labels_.begin() + i);
+        node_labels_switched_.erase(node_labels_switched_.begin() + i);
     }
 
     // this override flushes the AnnotationBuffer, and checks elements in the
     // dynamic programming table for label- (and coordinate-)consistency
     void flush();
+
+    const ILabeledAligner &aligner_;
 
     // stores annotations for nodes
     AnnotationBuffer &annotation_buffer_;
@@ -100,6 +118,7 @@ class LabeledExtender : public DefaultColumnExtender {
 
     // map each table element to a corresponding label set index
     std::vector<size_t> node_labels_;
+    std::vector<bool> node_labels_switched_;
 
     // if the seed has coordinates, then the coordinates of the initial node in the
     // extension is stored here
@@ -112,12 +131,6 @@ class LabeledExtender : public DefaultColumnExtender {
     // operation and the ones still left to be observed
     Columns label_intersection_;
     Columns label_diff_;
-};
-
-class ILabeledAligner {
-  public:
-    virtual AnnotationBuffer& get_annotation_buffer() const = 0;
-    virtual ~ILabeledAligner() {}
 };
 
 template <class Seeder = SuffixSeeder<ExactSeeder>,

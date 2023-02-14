@@ -35,7 +35,7 @@ class AlignmentAggregator {
   public:
     typedef Alignment::score_t score_t;
     typedef Alignment::Column Column;
-    typedef Alignment::Columns Columns;
+    typedef Vector<Alignment::Column> Columns;
     typedef PriorityDeque<std::shared_ptr<Alignment>,
                           std::vector<std::shared_ptr<Alignment>>, ValCmp> PathQueue;
 
@@ -69,19 +69,6 @@ inline bool AlignmentAggregator<AlignmentCompare>::add_alignment(Alignment&& ali
     // first, wrap the alignment so that duplicates are not stored in each per-label queue
     auto a = std::make_shared<Alignment>(std::move(alignment));
 
-    // if nothing has been added to the queue so far, add the alignment
-    if (unlabeled_.empty()) {
-        unlabeled_.emplace(a);
-        for (Column c : a->label_columns) {
-            path_queue_[c].emplace(a);
-        }
-        return true;
-    }
-
-    // if the score is less than the cutoff, don't add it
-    if (a->get_score() < get_global_cutoff())
-        return false;
-
     // helper for adding alignments to the queue
     auto push_to_queue = [&](auto &queue) {
         // check for duplicates
@@ -103,9 +90,28 @@ inline bool AlignmentAggregator<AlignmentCompare>::add_alignment(Alignment&& ali
         return true;
     };
 
+    auto call_columns = [&](const std::function<void(Column)> &callback) {
+        if (a->has_annotation()) {
+            for (Column c : a->get_column_union()) {
+                callback(c);
+            }
+        }
+    };
+
+    // if nothing has been added to the queue so far, add the alignment
+    if (unlabeled_.empty()) {
+        unlabeled_.emplace(a);
+        call_columns([&](Column c) { path_queue_[c].emplace(a); });
+        return true;
+    }
+
+    // if the score is less than the cutoff, don't add it
+    if (a->get_score() < get_global_cutoff())
+        return false;
+
     // if we are in the unlabeled case, only consider the global queue
-    if (a->label_columns.empty())
-        return push_to_queue(unlabeled_);
+    if (!a->has_annotation())
+        return path_queue_.empty() ? push_to_queue(unlabeled_) : false;
 
     // if an incoming alignment has labels, and we haven't encountered a labeled
     // alignment yet, we only need the ncol queue for fetching the global minimum,
@@ -122,9 +128,7 @@ inline bool AlignmentAggregator<AlignmentCompare>::add_alignment(Alignment&& ali
 
     // add the alignment to its labeled queues
     bool added = false;
-    for (Column c : a->label_columns) {
-        added |= push_to_queue(path_queue_[c]);
-    }
+    call_columns([&](Column c) { added |= push_to_queue(path_queue_[c]); });
 
     if (!added)
         return false;
@@ -138,9 +142,8 @@ inline bool AlignmentAggregator<AlignmentCompare>::add_alignment(Alignment&& ali
 }
 
 template <class AlignmentCompare>
-inline auto AlignmentAggregator<AlignmentCompare>
-::get_global_cutoff() const -> score_t {
-    if (unlabeled_.empty())
+inline auto AlignmentAggregator<AlignmentCompare>::get_global_cutoff() const -> score_t {
+    if (unlabeled_.empty() || config_.post_chain_alignments)
         return config_.ninf;
 
     score_t cur_max = unlabeled_.maximum()->get_score();
@@ -187,6 +190,24 @@ inline std::vector<Alignment> AlignmentAggregator<AlignmentCompare>::get_alignme
     clear();
     // sort by value (not by pointer value)
     std::sort(ptrs.begin(), ptrs.end(), cmp_);
+
+    for (size_t i = 0; i < ptrs.size(); ++i) {
+        auto &a = *ptrs[i];
+        if (a.empty())
+            continue;
+
+        for (size_t j = i + 1; j < ptrs.size(); ++j) {
+            auto &b = *ptrs[j];
+            if (b.empty() || ptrs[i] == ptrs[j])
+                continue;
+
+            if (a != b)
+                break;
+
+            a.merge_annotations(b);
+            b = Alignment();
+        }
+    }
     // transform pointers to objects
     std::vector<Alignment> alignments;
     alignments.reserve(ptrs.size());

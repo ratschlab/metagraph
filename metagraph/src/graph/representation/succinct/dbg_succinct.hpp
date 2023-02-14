@@ -119,6 +119,7 @@ class DBGSuccinct : public DeBruijnGraph {
 
     virtual bool load_without_mask(const std::string &filename_base) final;
     virtual bool load(const std::string &filename_base) override;
+    virtual std::unique_ptr<bit_vector> load_mask(std::ifstream &fin) const;
     virtual void serialize(const std::string &filename_base) const override;
     // Initialize DBGSuccinct and dump to disk without loading to RAM.
     // FYI: Note that suffix ranges will not be indexed.

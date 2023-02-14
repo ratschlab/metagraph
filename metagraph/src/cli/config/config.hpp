@@ -8,6 +8,7 @@
 #include "kmer/kmer_collector_config.hpp"
 #include "graph/representation/succinct/boss.hpp"
 #include "graph/representation/base/sequence_graph.hpp"
+#include "graph/alignment/aligner_config.hpp"
 
 
 namespace mtg {
@@ -116,6 +117,7 @@ class Config {
     bool alignment_chain = false;
     bool alignment_post_chain = false;
     bool alignment_seed_complexity_filter = true;
+    bool alignment_label_change_union = false;
 
     int8_t alignment_match_score = 2;
     int8_t alignment_mm_transition_score = 3;
@@ -126,13 +128,14 @@ class Config {
 
     int32_t alignment_min_path_score = 0;
     int32_t alignment_xdrop = 27;
+    int32_t alignment_label_change_score = graph::align::DBGAlignerConfig::ninf;
 
     size_t alignment_num_alternative_paths = 1;
     size_t alignment_min_seed_length = 19;
     size_t alignment_max_seed_length = std::numeric_limits<size_t>::max();
     size_t alignment_max_num_seeds_per_locus = 1000;
 
-    double alignment_rel_score_cutoff = 0.95;
+    double alignment_rel_score_cutoff = 0.8;
 
     double discovery_fraction = 0.7;
     double presence_fraction = 0.0;
@@ -146,6 +149,7 @@ class Config {
     double alignment_min_exact_match = 0.7;
     double min_fraction = 0.0;
     double max_fraction = 1.0;
+    double sketch_precision = 0.0;
     std::vector<double> count_slice_quantiles;
     std::vector<double> count_quantiles;
 

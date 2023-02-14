@@ -18,6 +18,30 @@ typedef annot::binmat::BinaryMatrix::Column Column;
 // dummy index for an unfetched annotations
 static constexpr size_t nannot = std::numeric_limits<size_t>::max();
 
+bool AnnotationBuffer
+::check_node_labels_is_superset(const Columns &c, const std::vector<node_index> &nodes) const {
+    if (c.empty())
+        return true;
+
+    for (node_index node : nodes) {
+        const auto *labels = get_labels(node);
+        if (!labels) {
+            logger->error("Node {} has no labels", node);
+            return false;
+        }
+
+        Columns diff;
+        std::set_difference(c.begin(), c.end(), labels->begin(), labels->end(),
+                            std::back_inserter(diff));
+        if (diff.size()) {
+            logger->error("Node {} does not have labels {}", fmt::join(diff, "\t"));
+            return false;
+        }
+    }
+
+    return true;
+}
+
 AnnotationBuffer::AnnotationBuffer(const DeBruijnGraph &graph, const Annotator &annotator)
       : graph_(graph),
         annotator_(annotator),
@@ -192,18 +216,26 @@ void AnnotationBuffer::fetch_queued_annotations() {
 #endif
 }
 
+auto AnnotationBuffer::get_labels_it(node_index node) const
+        -> VectorMap<node_index, size_t>::const_iterator {
+    if (canonical_)
+        node = canonical_->get_base_node(node);
+
+    // if the node hasn't been seen before, or if its annotations haven't
+    // been fetched, return nothing
+    auto it = node_to_cols_.find(node);
+    if (it != node_to_cols_.end() && it->second == nannot)
+        it = node_to_cols_.end();
+
+    return it;
+}
+
 auto AnnotationBuffer::get_labels_and_coords(node_index node) const
         -> std::pair<const Columns*, const CoordinateSet*> {
     std::pair<const Columns*, const CoordinateSet*> ret_val { nullptr, nullptr };
 
-    if (canonical_)
-        node = canonical_->get_base_node(node);
-
-    auto it = node_to_cols_.find(node);
-
-    // if the node hasn't been seen before, or if its annotations haven't
-    // been fetched, return nothing
-    if (it == node_to_cols_.end() || it->second == nannot)
+    auto it = get_labels_it(node);
+    if (it == node_to_cols_.cend())
         return ret_val;
 
     ret_val.first = &column_sets_.data()[it->second];

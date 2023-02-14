@@ -50,10 +50,11 @@ class SeedFilteringExtender {
                       trim_offset_after_extend, trim_query_suffix, added_xdrop);
     }
 
+    virtual std::string_view get_query() const = 0;
+
     // report alignment extension statistics
-    size_t num_explored_nodes() const {
-        return explored_nodes_previous_ + conv_checker_.size();
-    }
+    virtual size_t num_explored_nodes() const = 0;
+    virtual size_t num_extensions() const = 0;
 
     // return true if the nodes in this seed have been traversed previously with
     // better or equal scores
@@ -61,10 +62,26 @@ class SeedFilteringExtender {
 
     virtual bool filter_nodes(node_index node, size_t query_start, size_t query_end);
 
-    void clear_conv_checker() {
-        explored_nodes_previous_ += conv_checker_.size();
-        conv_checker_.clear();
-    }
+    virtual void clear_conv_checker() = 0;
+
+    void set_graph(const DeBruijnGraph &graph) { graph_ = &graph; }
+
+    // Extend the alignment first until it reaches the end of the alignment second.
+    // Return all such alignments.
+    std::vector<Alignment> connect_seeds(const Alignment &first,
+                                         const Alignment &second,
+                                         int64_t traversal_distance,
+                                         score_t min_path_score = DBGAlignerConfig::ninf);
+
+    void extend_seed_end(const Alignment &seed,
+                         const std::function<void(Alignment&&)> &callback,
+                         bool force_fixed_seed,
+                         score_t min_path_score = DBGAlignerConfig::ninf);
+
+    void rc_extend_rc(const Alignment &seed,
+                      const std::function<void(Alignment&&)> &callback,
+                      bool force_fixed_seed,
+                      score_t min_path_score = DBGAlignerConfig::ninf);
 
   protected:
     const DeBruijnGraph *graph_;
@@ -114,9 +131,8 @@ class DefaultColumnExtender : public SeedFilteringExtender {
 
     virtual ~DefaultColumnExtender() {}
 
-    void set_graph(const DeBruijnGraph &graph) { graph_ = &graph; }
-
     size_t num_extensions() const { return num_extensions_; }
+    std::string_view get_query() const { return query_; }
 
     /**
      * During extension, a tree is constructed from the graph starting at the
@@ -145,6 +161,16 @@ class DefaultColumnExtender : public SeedFilteringExtender {
         template <typename... RestArgs>
         static DPTColumn create(size_t size, RestArgs&&... args);
     };
+
+    void clear_conv_checker() {
+        explored_nodes_previous_ += table.size();
+        table.clear();
+        conv_checker_.clear();
+    }
+
+    size_t num_explored_nodes() const {
+        return explored_nodes_previous_ + table.size();
+    }
 
   protected:
     std::string_view query_;
@@ -205,6 +231,7 @@ class DefaultColumnExtender : public SeedFilteringExtender {
     virtual void call_alignments(score_t end_score,
                                  const std::vector<node_index> &path,
                                  const std::vector<size_t> & /* trace */,
+                                 const std::vector<score_t> &score_trace,
                                  const Cigar &ops,
                                  size_t clipping,
                                  size_t offset,
@@ -213,7 +240,7 @@ class DefaultColumnExtender : public SeedFilteringExtender {
                                  score_t extra_score,
                                  const std::function<void(Alignment&&)> &callback) {
         callback(construct_alignment(ops, clipping, window, path, match, end_score,
-                                     offset, extra_score));
+                                     offset, score_trace, extra_score));
     }
 
     Alignment construct_alignment(Cigar cigar,
@@ -223,6 +250,7 @@ class DefaultColumnExtender : public SeedFilteringExtender {
                                   std::string match,
                                   score_t score,
                                   size_t offset,
+                                  const std::vector<score_t> &score_trace,
                                   score_t extra_score) const;
 
   private:

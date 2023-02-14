@@ -210,6 +210,8 @@ Config::Config(int argc, char *argv[]) {
             min_fraction = std::stod(get_value(i++));
         } else if (!strcmp(argv[i], "--max-fraction")) {
             max_fraction = std::stod(get_value(i++));
+        } else if (!strcmp(argv[i], "--sketch-precision")) {
+            sketch_precision = std::stod(get_value(i++));
         } else if (!strcmp(argv[i], "--min-value")) {
             min_value = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--max-value")) {
@@ -252,6 +254,8 @@ Config::Config(int argc, char *argv[]) {
             alignment_post_chain = true;
         } else if (!strcmp(argv[i], "--align-no-seed-complexity-filter")) {
             alignment_seed_complexity_filter = false;
+        } else if (!strcmp(argv[i], "--align-label-change-union")) {
+            alignment_label_change_union = true;
         } else if (!strcmp(argv[i], "--max-hull-depth")) {
             max_hull_depth = atoll(get_value(i++));
         } else if (!strcmp(argv[i], "--batch-align")) {
@@ -277,6 +281,8 @@ Config::Config(int argc, char *argv[]) {
         } else if (!strcmp(argv[i], "--align-xdrop")) {
             alignment_xdrop = atol(get_value(i++));
             xdrop_override = true;
+        } else if (!strcmp(argv[i], "--align-label-change-score")) {
+            alignment_label_change_score = atol(get_value(i++));
         } else if (!strcmp(argv[i], "--align-min-seed-length")) {
             alignment_min_seed_length = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--align-max-seed-length")) {
@@ -1050,7 +1056,7 @@ if (advanced) {
 }
             fprintf(stderr, "\t   --align-alternative-alignments \t\tthe number of alternative paths to report per seed [1]\n");
             fprintf(stderr, "\t   --align-chain \t\t\t\tconstruct seed chains before alignment. Useful for long error-prone reads. [off]\n");
-            fprintf(stderr, "\t   --align-post-chain \t\t\tperform multiple local alignments and chain them together into a single alignment. Useful for long error-prone reads. [off]\n");
+            fprintf(stderr, "\t   --align-post-chain \t\t\t\tperform multiple local alignments and chain them together into a single alignment. Useful for long error-prone reads. [off]\n");
             fprintf(stderr, "\t         \t\t\t\t\t\tA '$' inserted into the reference sequence indicates a jump in the graph.\n");
             fprintf(stderr, "\t         \t\t\t\t\t\tA 'G' in the reported CIGAR string indicates inserted graph nodes.\n");
 if (advanced) {
@@ -1060,7 +1066,7 @@ if (advanced) {
 }
             fprintf(stderr, "\t   --align-xdrop [INT]\t\t\t\tmaximum difference between the current score and the best alignment score [27, 100 if chaining is enabled]\n");
             fprintf(stderr, "\t   \t\t\t\t\t\t\tNote that this parameter should be scaled accordingly when changing the default scoring parameters.\n");
-            fprintf(stderr, "\t   --align-rel-score-cutoff [FLOAT]\t\tmin score relative to the current best alignment to use as a lower bound for subsequent extensions [0.95]\n");
+            fprintf(stderr, "\t   --align-rel-score-cutoff [FLOAT]\t\tmin score relative to the current best alignment to use as a lower bound for subsequent extensions [0.8]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "Advanced options for scoring:\n");
             fprintf(stderr, "\t   --align-match-score [INT]\t\t\tpositive match score [2]\n");
@@ -1068,8 +1074,9 @@ if (advanced) {
             fprintf(stderr, "\t   --align-mm-transversion-penalty [INT]\tpositive transversion penalty (DNA only) [3]\n");
             fprintf(stderr, "\t   --align-gap-open-penalty [INT]\t\tpositive gap opening penalty [6]\n");
             fprintf(stderr, "\t   --align-gap-extension-penalty [INT]\t\tpositive gap extension penalty [2]\n");
-            fprintf(stderr, "\t   --align-end-bonus [INT]\t\tscore bonus for each endpoint of the query covered by an alignment [5]\n");
+            fprintf(stderr, "\t   --align-end-bonus [INT]\t\t\tscore bonus for each endpoint of the query covered by an alignment [5]\n");
             fprintf(stderr, "\t   --align-edit-distance \t\t\tuse unit costs for scoring matrix [off]\n");
+            fprintf(stderr, "\t   --align-label-change-score [INT] \t\tfallback score for changing labels during an alignment [-inf]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "Advanced options for seeding:\n");
             fprintf(stderr, "\t   --align-min-seed-length [INT]\t\tmin length of a seed [19]\n");

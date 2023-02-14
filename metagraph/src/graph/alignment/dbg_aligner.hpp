@@ -5,12 +5,9 @@
 #include <functional>
 
 #include "alignment.hpp"
-#include "aligner_aggregator.hpp"
 #include "aligner_seeder_methods.hpp"
 #include "aligner_extender_methods.hpp"
 #include "aligner_chainer.hpp"
-#include "graph/representation/base/sequence_graph.hpp"
-#include "graph/representation/succinct/dbg_succinct.hpp"
 
 
 namespace mtg {
@@ -22,6 +19,7 @@ class IDBGAligner {
     typedef std::pair<std::string /* header */, std::string /* seq */> Query;
     typedef std::function<void(const std::string& /* header */,
                                AlignmentResults&& /* alignments */)> AlignmentCallback;
+    typedef std::vector<std::pair<std::shared_ptr<ISeeder>, std::shared_ptr<ISeeder>>> BatchSeeders;
 
     virtual ~IDBGAligner() {}
 
@@ -30,14 +28,23 @@ class IDBGAligner {
 
     // Main aligner
     virtual void align_batch(const std::vector<Query> &seq_batch,
-                             const AlignmentCallback &callback) const = 0;
+                             const AlignmentCallback &callback,
+                             size_t first_seq_offset = 0) const = 0;
 
     // Convenience method
     AlignmentResults align(std::string_view query) const;
 
-    virtual bool has_coordinates() const = 0;
-};
+    virtual std::unique_ptr<SeedFilteringExtender> make_extender(std::string_view query) const = 0;
 
+    virtual bool has_coordinates() const = 0;
+
+    // Construct a full alignment from a chain by aligning the query against
+    // the graph in the regions of the query in between the chain seeds.
+    virtual void extend_chain(Chain&& chain,
+                              SeedFilteringExtender &extender,
+                              const std::function<void(Alignment&&)> &callback,
+                              bool extend_ends = true) const = 0;
+};
 
 template <class Seeder = SuffixSeeder<UniMEMSeeder>,
           class Extender = DefaultColumnExtender,
@@ -49,12 +56,22 @@ class DBGAligner : public IDBGAligner {
     virtual ~DBGAligner() {}
 
     virtual void align_batch(const std::vector<IDBGAligner::Query> &seq_batch,
-                             const AlignmentCallback &callback) const override;
+                             const AlignmentCallback &callback,
+                             size_t first_seq_offset = 0) const override;
 
     const DeBruijnGraph& get_graph() const override { return graph_; }
     const DBGAlignerConfig& get_config() const override { return config_; }
 
     virtual bool has_coordinates() const override { return false; }
+
+    std::unique_ptr<SeedFilteringExtender> make_extender(std::string_view query) const {
+        return std::make_unique<Extender>(*this, query);
+    }
+
+    void extend_chain(Chain&& chain,
+                      SeedFilteringExtender &extender,
+                      const std::function<void(Alignment&&)> &callback,
+                      bool extend_ends = true) const override;
 
   protected:
     typedef typename Seeder::node_index node_index;
@@ -62,8 +79,6 @@ class DBGAligner : public IDBGAligner {
 
     const DeBruijnGraph &graph_;
     DBGAlignerConfig config_;
-
-    typedef std::vector<std::pair<std::shared_ptr<ISeeder>, std::shared_ptr<ISeeder>>> BatchSeeders;
 
     virtual BatchSeeders build_seeders(const std::vector<Query> &seq_batch,
                                        const std::vector<AlignmentResults> &wrapped_seqs) const;
@@ -82,20 +97,8 @@ class DBGAligner : public IDBGAligner {
                           std::string_view reverse,
                           const ISeeder &forward_seeder,
                           const ISeeder &reverse_seeder,
-                          Extender &forward_extender,
-                          Extender &reverse_extender,
                           const std::function<void(Alignment&&)> &callback,
                           const std::function<score_t(const Alignment&)> &get_min_path_score) const;
-
-    // Construct a full alignment from a chain by aligning the query agaisnt
-    // the graph in the regions of the query in between the chain seeds.
-    void extend_chain(std::string_view query,
-                      std::string_view query_rc,
-                      Extender &forward_extender,
-                      Chain&& chain,
-                      size_t &num_extensions,
-                      size_t &num_explored_nodes,
-                      const std::function<void(Alignment&&)> &callback) const;
 };
 
 } // namespace align

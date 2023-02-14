@@ -24,16 +24,18 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
                               std::vector<Seed>&& bwd_seeds,
                               const std::function<void(Chain&&, score_t)> &callback,
                               const std::function<bool(Alignment::Column)> &skip_column
-                                  = [](Alignment::Column) { return false; });
+                                  = [](Alignment::Column) { return false; },
+                              const std::function<bool()> &terminate
+                                  = []() { return false; });
 
 // Given a set of local alignments, use sparse dynamic programming to construct
 // longer alignments, potentially with gaps.
 template <class AlignmentCompare>
-std::vector<Alignment> chain_alignments(std::vector<Alignment>&& alignments,
-                                        std::string_view query,
-                                        std::string_view rc_query,
-                                        const DBGAlignerConfig &config,
-                                        size_t node_overlap);
+std::tuple<std::vector<Alignment>, size_t, size_t>
+chain_alignments(const IDBGAligner &aligner,
+                 std::vector<Alignment>&& alignments,
+                 std::string_view query,
+                 std::string_view query_rc);
 
 } // namespace align
 } // namespace graph

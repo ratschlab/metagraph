@@ -485,6 +485,9 @@ class BOSS {
 
     inline bool tighten_range(edge_index *rl, edge_index *ru, TAlphabet s) const;
 
+    void call_tightened_ranges(edge_index rl, edge_index ru,
+                               const std::function<void(edge_index, edge_index, TAlphabet)> &callback) const;
+
     /**
      * The size of the alphabet for kmers that this graph encodes.
      * For DNA, this value is 5 ($,A,C,G,T).

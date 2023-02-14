@@ -18,6 +18,123 @@ using score_t = Alignment::score_t;
 const score_t ninf = Alignment::ninf;
 using kmer::KmerExtractorBOSS;
 
+void SeedFilteringExtender
+::extend_seed_end(const Alignment &seed,
+                  const std::function<void(Alignment&&)> &callback,
+                  bool force_fixed_seed,
+                  score_t min_path_score) {
+    if (!force_fixed_seed) {
+        for (auto&& extension : get_extensions(seed, min_path_score, false)) {
+            assert(extension.get_score() >= min_path_score);
+            callback(std::move(extension));
+        }
+
+        return;
+    }
+
+    auto [left, next] = seed.split_seed(graph_->get_k() - 1, config_);
+    auto extensions = get_extensions(next, min_path_score, true, 0, DeBruijnGraph::npos, false);
+
+    bool called = false;
+    for (auto&& extension : extensions) {
+        if (extension.get_end_clipping() < seed.get_end_clipping()) {
+            assert(extension.get_nodes().front() == next.get_nodes().front());
+            auto aln = left;
+            aln.splice(std::move(extension));
+            if (aln.size() && aln.get_score() >= min_path_score) {
+                assert(aln.get_clipping() == seed.get_clipping());
+                if (aln.get_offset() > seed.get_offset())
+                    aln.trim_offset(aln.get_offset() - seed.get_offset());
+
+                assert(aln.get_offset() == seed.get_offset());
+                callback(std::move(aln));
+                called = true;
+            }
+        }
+    }
+
+    if (!called && seed.get_score() >= min_path_score)
+        callback(Alignment(seed));
+}
+
+void SeedFilteringExtender
+::rc_extend_rc(const Alignment &seed,
+               const std::function<void(Alignment&&)> &callback,
+               bool force_fixed_seed,
+               score_t min_path_score) {
+    // TODO: the workflow for force_fixed_seed is hard to do when coordinates are involved
+    // TODO: I believe this is still guaranteed to get the same result
+    force_fixed_seed &= seed.label_coordinates.empty();
+
+    bool called = false;
+
+#if _PROTEIN_GRAPH
+    logger->warn("Front extension not supported for amino acid graphs");
+#else
+    auto rc_graph = std::shared_ptr<const DeBruijnGraph>(
+        std::shared_ptr<const DeBruijnGraph>{}, graph_);
+    if (graph_->get_mode() != DeBruijnGraph::CANONICAL)
+        rc_graph = std::make_shared<RCDBG>(rc_graph);
+
+    const DeBruijnGraph *old_graph = graph_;
+    auto rev = seed;
+    rev.reverse_complement(*rc_graph, get_query());
+    if (rev.size() && rev.get_nodes().back()) {
+        set_graph(*rc_graph);
+        assert(rev.get_end_clipping());
+        extend_seed_end(rev, [&](Alignment&& aln) {
+            aln.reverse_complement(*rc_graph, seed.get_full_query_view());
+            assert(aln.get_offset() == seed.get_offset());
+            assert(aln.get_end_clipping() == seed.get_end_clipping());
+            if (aln.size()) {
+                assert(aln.get_score() >= min_path_score);
+                callback(std::move(aln));
+                called = true;
+            }
+        }, force_fixed_seed, min_path_score);
+        set_graph(*old_graph);
+    }
+#endif
+
+    if (!called && seed.get_score() >= min_path_score)
+        callback(Alignment(seed));
+}
+
+std::vector<Alignment> SeedFilteringExtender::connect_seeds(const Alignment &first,
+                                                            const Alignment &second,
+                                                            int64_t coord_dist,
+                                                            score_t min_path_score) {
+    auto [left, next] = first.split_seed(graph_->get_k() - 1, config_);
+    DEBUG_LOG("Split seed: {}\n\t{}\n\t{}", first, left, next);
+    coord_dist += second.get_sequence().size() + next.get_sequence().size()
+            - first.get_sequence().size();
+    assert(coord_dist > 0);
+
+    auto extensions = get_extensions(next, min_path_score,
+        true,                                // force_fixed_seed
+        coord_dist,                          // target_length
+        second.get_nodes().back(),           // target_node
+        false,                               // trim_offset_after_extend
+        second.get_end_clipping(),           // trim_query_suffix
+        first.get_score() - next.get_score() // added_xdrop
+    );
+
+    std::vector<Alignment> alignments;
+
+    for (auto&& extension : extensions) {
+        if (extension.get_end_clipping() == second.get_end_clipping()
+                && extension.get_nodes().back() == second.get_nodes().back()) {
+            auto alignment = left;
+            assert(extension.get_nodes().front() == next.get_nodes().front());
+            alignment.splice(std::move(extension));
+            assert(alignment.is_valid(*graph_, &config_));
+            alignments.emplace_back(std::move(alignment));
+        }
+    }
+
+    return alignments;
+}
+
 DefaultColumnExtender::DefaultColumnExtender(const DeBruijnGraph &graph,
                                              const DBGAlignerConfig &config,
                                              std::string_view query)
@@ -347,13 +464,17 @@ void DefaultColumnExtender
                  0);
     } else if (in_seed && force_fixed_seed) {
         size_t node_i = next_offset - graph_->get_k() + 1;
+        assert(node_i);
+        assert(node_i < this->seed_->get_nodes().size());
         assert(node == this->seed_->get_nodes()[node_i - 1]);
         node_index next_node = this->seed_->get_nodes()[node_i];
         char next_c = this->seed_->get_sequence()[seed_pos];
-        callback(next_node, next_c, next_node
-            ? 0
-            : (!node ? config_.gap_extension_penalty : config_.gap_opening_penalty));
-        assert(!node || next_c == boss::BOSS::kSentinel ||
+        callback(next_node, next_c,
+            // (next_node ? 0 : (!node ? config_.gap_extension_penalty : config_.gap_opening_penalty)) +
+                (node_i - 1 < this->seed_->extra_scores.size() ? this->seed_->extra_scores[node_i - 1] : 0)
+
+        );
+        assert(!node || next_c == boss::BOSS::kSentinel || !next_node ||
                 graph_->traverse(node, next_c) == next_node);
     } else {
         assert(node);
@@ -400,6 +521,7 @@ std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score,
 
     min_path_score = std::max(0, min_path_score);
 
+    explored_nodes_previous_ += table.size();
     table.clear();
     prev_starts.clear();
 
@@ -467,20 +589,12 @@ std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score,
     std::vector<size_t> tips;
 
     while (queue.size()) {
-        std::vector<TableIt> next_nodes{ queue.top() };
+        size_t i = std::get<2>(queue.top());
         queue.pop();
+        bool has_single_outgoing = true;
 
-        // try all paths which have the same best partial alignment score
-        // (this performs a BFS-like search)
-        while (queue.size() && std::get<0>(queue.top()) == std::get<0>(next_nodes.back())) {
-            next_nodes.push_back(queue.top());
-            queue.pop();
-        }
-
-        while (next_nodes.size()) {
-            size_t i = std::get<2>(next_nodes.back());
-            next_nodes.pop_back();
-
+        while (has_single_outgoing) {
+            has_single_outgoing = false;
             std::vector<std::tuple<node_index, char, score_t>> outgoing;
             size_t next_offset = table[i].offset + 1;
 
@@ -506,10 +620,8 @@ std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score,
                     if (node_counter / window.size() >= config_.max_nodes_per_seq_char) {
                         DEBUG_LOG("Position {}: Alignment node limit reached, stopping this branch",
                                   next_offset - seed_->get_offset());
-                        if (config_.global_xdrop) {
+                        if (config_.global_xdrop)
                             queue = std::priority_queue<TableIt>();
-                            next_nodes.clear();
-                        }
 
                         continue;
                     }
@@ -519,7 +631,6 @@ std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score,
                         DEBUG_LOG("Position {}: Alignment RAM limit reached, stopping extension",
                                   next_offset - seed_->get_offset());
                         queue = std::priority_queue<TableIt>();
-                        next_nodes.clear();
                         continue;
                     }
                 }
@@ -711,16 +822,14 @@ std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score,
                     next, vec_offset, s_begin, s_end
                 );
                 if (converged_score != ninf) {
-                    // if this next node is the only next option, or if it's
-                    // better than all other options, take it without pushing
+                    // if this next node is the only next option, take it without pushing
                     // to the queue
-                    TableIt next_score { converged_score, -std::abs(max_pos - diag_i),
-                                         table.size() - 1, max_val };
-                    if (next_nodes.size()
-                            && converged_score == std::get<0>(next_nodes[0])) {
-                        next_nodes.emplace_back(std::move(next_score));
+                    if (outgoing.size() == 1) {
+                        has_single_outgoing = true;
+                        i = table.size() - 1;
                     } else {
-                        queue.emplace(std::move(next_score));
+                        queue.emplace(converged_score, -std::abs(max_pos - diag_i),
+                                      table.size() - 1, max_val);
                     }
                 } else {
                     DEBUG_LOG("Position {}: Dropped due to convergence",
@@ -756,6 +865,7 @@ Alignment DefaultColumnExtender::construct_alignment(Cigar cigar,
                                                      std::string match,
                                                      score_t score,
                                                      size_t offset,
+                                                     const std::vector<score_t> &score_trace,
                                                      score_t extra_score) const {
     assert(final_path.size());
     assert(cigar.size());
@@ -770,6 +880,11 @@ Alignment DefaultColumnExtender::construct_alignment(Cigar cigar,
     extension.extend_query_begin(query_.data());
     extension.extend_query_end(query_.data() + query_.size());
     extension.extra_score = extra_score;
+    if (extra_score) {
+        auto score_it = score_trace.rend() - extension.get_nodes().size() + 1;
+        assert(!*(score_it - 1));
+        extension.extra_scores = std::vector<score_t>(score_it, score_trace.rend());
+    }
     assert(extension.is_valid(*this->graph_, &config_));
 
     return extension;
@@ -855,17 +970,21 @@ std::vector<Alignment> DefaultColumnExtender::backtrack(score_t min_path_score,
     for (auto it = indices.rbegin(); it != indices.rend(); ++it) {
         std::pop_heap(indices.begin(), it.base());
         const auto &[start_score, neg_off_diag, neg_j_start, start_pos] = *it;
+        DEBUG_LOG("Trying backtracking from score {}", start_score);
 
         if (terminate_backtrack_start(extensions))
             break;
 
         size_t j = -neg_j_start;
 
-        if (skip_backtrack_start(j))
+        if (skip_backtrack_start(j)) {
+            DEBUG_LOG("\tskipped");
             continue;
+        }
 
         std::vector<DeBruijnGraph::node_index> path;
         std::vector<size_t> trace;
+        std::vector<score_t> score_trace;
         Cigar ops;
         std::string seq;
         score_t score = start_score;
@@ -891,7 +1010,7 @@ std::vector<Alignment> DefaultColumnExtender::backtrack(score_t min_path_score,
                     ++dummy_counter;
                 } else if (dummy_counter) {
                     ops.append(Cigar::NODE_INSERTION, dummy_counter);
-                    extra_score -= config_.gap_opening_penalty + (dummy_counter - 1) * config_.gap_extension_penalty;
+                    // extra_score -= config_.gap_opening_penalty + (dummy_counter - 1) * config_.gap_extension_penalty;
                     dummy_counter = 0;
                 }
             }
@@ -940,6 +1059,7 @@ std::vector<Alignment> DefaultColumnExtender::backtrack(score_t min_path_score,
                         + profile_score_[s][seed_clipping + pos]) {
                 // match/mismatch
                 trace.emplace_back(j);
+                score_trace.emplace_back(score_cur);
 
                 extra_score += score_cur;
                 append_node(node, c, offset, profile_op_[s][seed_clipping + pos]);
@@ -969,6 +1089,7 @@ std::vector<Alignment> DefaultColumnExtender::backtrack(score_t min_path_score,
                         : Cigar::MATCH;
 
                     trace.emplace_back(j);
+                    score_trace.emplace_back(score_cur);
                     extra_score += score_cur;
                     append_node(node, c, offset, Cigar::DELETION);
 
@@ -976,7 +1097,7 @@ std::vector<Alignment> DefaultColumnExtender::backtrack(score_t min_path_score,
                     j = j_prev;
                 }
             } else {
-                DEBUG_LOG("Backtracking failed, trying next start point");
+                DEBUG_LOG("\tBacktracking failed, trying next start point");
                 break;
             }
         }
@@ -988,11 +1109,14 @@ std::vector<Alignment> DefaultColumnExtender::backtrack(score_t min_path_score,
             if (score - min_cell_score_ < best_score)
                 break;
 
+            assert(extra_score == std::accumulate(score_trace.begin(), score_trace.end(),
+                                                    score_t(0)));
+
             if (score >= min_start_score
                     && (!pos || cur_cell_score == 0)
                     && (pos || cur_cell_score == table[0].S[0])
                     && (config_.allow_left_trim || !j)) {
-                call_alignments(score, path, trace, ops, pos, align_offset,
+                call_alignments(score, path, trace, score_trace, ops, pos, align_offset,
                                 window.substr(pos, end_pos - pos), seq, extra_score,
                                 [&](Alignment&& alignment) {
                     DEBUG_LOG("Extension: {}", alignment);

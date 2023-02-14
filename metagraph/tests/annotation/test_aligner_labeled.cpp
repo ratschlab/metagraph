@@ -28,7 +28,7 @@ inline std::vector<std::string> get_alignment_labels(const AnnotatedDBG &anno_gr
     auto labels = anno_graph.get_labels(alignment.get_sequence(),
                                         check_full_coverage ? 1.0 : 0.0);
     if (check_full_coverage) {
-        EXPECT_GE(labels.size(), alignment.label_columns.size());
+        EXPECT_GE(labels.size(), alignment.get_columns().size());
     }
 
     std::unordered_set<uint64_t> enc_labels;
@@ -37,7 +37,7 @@ inline std::vector<std::string> get_alignment_labels(const AnnotatedDBG &anno_gr
     }
 
     std::vector<std::string> dec_labels;
-    for (uint64_t label : alignment.label_columns) {
+    for (uint64_t label : alignment.get_columns()) {
         EXPECT_TRUE(enc_labels.count(label)) << alignment;
         dec_labels.emplace_back(label_encoder.decode(label));
     }
@@ -194,7 +194,7 @@ TYPED_TEST(LabeledAlignerTest, SimpleTangleGraphCoords) {
 
         for (const auto &alignment : alignments) {
             bool found = false;
-            ASSERT_EQ(alignment.label_columns.size(), alignment.label_coordinates.size());
+            ASSERT_EQ(alignment.get_columns().size(), alignment.label_coordinates.size());
             size_t label_index = 0;
             for (const auto &label : get_alignment_labels(*anno_graph, alignment)) {
                 ASSERT_GT(alignment.label_coordinates[label_index].size(), 0);
@@ -257,7 +257,7 @@ TYPED_TEST(LabeledAlignerTest, SimpleTangleGraphCoordsMiddle) {
 
         for (const auto &alignment : alignments) {
             bool found = false;
-            ASSERT_EQ(alignment.label_columns.size(), alignment.label_coordinates.size());
+            ASSERT_EQ(alignment.get_columns().size(), alignment.label_coordinates.size());
             size_t label_index = 0;
             for (const auto &label : get_alignment_labels(*anno_graph, alignment)) {
                 ASSERT_GT(alignment.label_coordinates[label_index].size(), 0);
@@ -315,7 +315,7 @@ TYPED_TEST(LabeledAlignerTest, SimpleTangleGraphCoordsCycle) {
 
         for (const auto &alignment : alignments) {
             bool found = false;
-            ASSERT_EQ(alignment.label_columns.size(), alignment.label_coordinates.size());
+            ASSERT_EQ(alignment.get_columns().size(), alignment.label_coordinates.size());
             size_t label_index = 0;
             for (const auto &label : get_alignment_labels(*anno_graph, alignment)) {
                 ASSERT_GT(alignment.label_coordinates[label_index].size(), 0);

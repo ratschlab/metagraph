@@ -1,6 +1,7 @@
 #include "aligner_cigar.hpp"
 
 #include "kmer/alphabets.hpp"
+#include "graph/representation/succinct/boss.hpp"
 
 namespace mtg {
 namespace graph {
@@ -83,6 +84,30 @@ Cigar::Cigar(std::string_view cigar_str) {
     }
 }
 
+size_t Cigar::get_coverage() const {
+    size_t coverage = 0;
+    for (size_t i = 0; i < cigar_.size(); ++i) {
+        const auto &[op, len] = cigar_[i];
+        switch (op) {
+            case MATCH:
+            case MISMATCH:
+            case INSERTION: {
+                coverage += len;
+            } break;
+            case NODE_INSERTION:
+            case CLIPPED: {
+                // do nothing
+            } break;
+            case DELETION: {
+                if (len == 1 && i >= 2 && cigar_[i - 1].first == NODE_INSERTION && cigar_[i - 2].first == INSERTION)
+                    coverage -= cigar_[i - 2].second;
+            }
+        }
+    }
+
+    return coverage;
+}
+
 std::string Cigar::to_string() const {
     std::string cigar_string;
 
@@ -91,6 +116,46 @@ std::string Cigar::to_string() const {
     }
 
     return cigar_string;
+}
+
+std::string Cigar::to_md_string(std::string_view reference) const {
+    std::string md_string;
+    const char *ref_it = reference.data();
+
+    size_t match_count = 0;
+    for (const auto &[op, num] : cigar_) {
+        switch (op) {
+            case CLIPPED:
+            case INSERTION:
+            case NODE_INSERTION: {} break;
+            case MATCH: {
+                match_count += num;
+                ref_it += num;
+            } break;
+            case MISMATCH: {
+                for (size_t i = 0; i < num; ++i, ++ref_it) {
+                    md_string += std::to_string(match_count);
+                    match_count = 0;
+                    md_string += *ref_it;
+                }
+            } break;
+            case DELETION: {
+                if (match_count) {
+                    md_string += std::to_string(match_count);
+                    match_count = 0;
+                }
+                md_string.push_back('^');
+                md_string += std::string_view(ref_it, num);
+                ref_it += num;
+            }
+        }
+    }
+
+    if (match_count)
+        md_string += std::to_string(match_count);
+
+    assert(ref_it == reference.data() + reference.size());
+    return md_string;
 }
 
 void Cigar::append(Operator op, LengthType num) {
@@ -195,7 +260,7 @@ bool Cigar::is_valid(std::string_view reference, std::string_view query) const {
                 alt_it += op.second;
             } break;
             case DELETION: {
-                if (i && cigar_[i - 1].first == INSERTION) {
+                if (i && cigar_[i - 1].first == INSERTION && *ref_it != boss::BOSS::kSentinel) {
                     std::cerr << "DELETION after INSERTION" << std::endl
                               << to_string() << std::endl
                               << reference << std::endl

@@ -41,7 +41,7 @@ inline constexpr bool operator>(const TableElem &a, const TableElem &b) {
         > std::tie(b.label, b.coordinate, b.seed_clipping, b.seed_end);
 }
 
-typedef std::vector<TableElem> ChainDPTable;
+typedef AlignedVector<TableElem> ChainDPTable;
 
 std::tuple<ChainDPTable, AlignedVector<int32_t>, size_t, size_t>
 chain_seeds(const DBGAlignerConfig &config,
@@ -69,15 +69,16 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
                               std::vector<Seed>&& fwd_seeds,
                               std::vector<Seed>&& bwd_seeds,
                               const std::function<void(Chain&&, score_t)> &callback,
-                              const std::function<bool(Alignment::Column)> &skip_column) {
+                              const std::function<bool(Alignment::Column)> &skip_column,
+                              const std::function<bool()> &terminate) {
     fwd_seeds.erase(std::remove_if(fwd_seeds.begin(), fwd_seeds.end(),
-                                   [](const auto &a) { return a.empty() || a.label_columns.empty(); }),
+                                   [](const auto &a) { return a.empty() || !a.label_columns; }),
                     fwd_seeds.end());
     bwd_seeds.erase(std::remove_if(bwd_seeds.begin(), bwd_seeds.end(),
-                                   [](const auto &a) { return a.empty() || a.label_columns.empty(); }),
+                                   [](const auto &a) { return a.empty() || !a.label_columns; }),
                     bwd_seeds.end());
 
-    if (fwd_seeds.empty() && bwd_seeds.empty())
+    if (terminate() || (fwd_seeds.empty() && bwd_seeds.empty()))
         return { 0, 0 };
 
 
@@ -143,13 +144,28 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
     score_t last_chain_score = std::numeric_limits<score_t>::min();
     std::unordered_multiset<Chain, ChainHash> chains;
 
+    bool coverage_too_low = false;
+
     auto flush_chains = [&]() {
+        if (coverage_too_low)
+            return;
+
         assert(chains.size());
         auto it = chains.begin();
         Chain last_chain = *it;
         for (++it; it != chains.end(); ++it) {
             const Chain &chain = *it;
             if (chain != last_chain) {
+                double exact_match_fraction
+                    = static_cast<double>(get_num_char_matches_in_seeds(last_chain.begin(),
+                                                                        last_chain.end()))
+                        / forward.size();
+
+                if (exact_match_fraction < config.min_exact_match) {
+                    coverage_too_low = true;
+                    return;
+                }
+
                 callback(std::move(last_chain), last_chain_score);
                 last_chain = *it;
                 continue;
@@ -157,23 +173,24 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
 
             // if this chain has the same seeds as the last one, merge their coordinate sets
             for (size_t i = 0; i < chain.size(); ++i) {
-                Alignment::Columns columns;
+                Vector<Alignment::Column> columns;
+                const auto &last_columns = last_chain[i].first.get_columns();
+                const auto &cur_columns = chain[i].first.get_columns();
                 if (chain[i].first.label_coordinates.size()) {
-                    assert(last_chain[i].first.label_columns.size()
+                    assert(last_chain[i].first.label_columns
                             == last_chain[i].first.label_coordinates.size());
-                    assert(chain[i].first.label_columns.size()
+                    assert(chain[i].first.label_columns
                             == chain[i].first.label_coordinates.size());
                     Alignment::CoordinateSet coord_union;
                     auto add_col_coords = [&](auto col, auto &coords) {
                         columns.push_back(col);
                         coord_union.emplace_back(std::move(coords));
                     };
+
                     utils::match_indexed_values(
-                        last_chain[i].first.label_columns.begin(),
-                        last_chain[i].first.label_columns.end(),
+                        last_columns.begin(), last_columns.end(),
                         last_chain[i].first.label_coordinates.begin(),
-                        chain[i].first.label_columns.begin(),
-                        chain[i].first.label_columns.end(),
+                        cur_columns.begin(), cur_columns.end(),
                         chain[i].first.label_coordinates.begin(),
                         [&](auto col, const auto &coords, const auto &other_coords) {
                             columns.push_back(col);
@@ -186,15 +203,23 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
                     );
                     std::swap(last_chain[i].first.label_coordinates, coord_union);
                 } else {
-                    assert(chain[i].first.label_columns.size());
-                    std::set_union(last_chain[i].first.label_columns.begin(),
-                                   last_chain[i].first.label_columns.end(),
-                                   chain[i].first.label_columns.begin(),
-                                   chain[i].first.label_columns.end(),
+                    assert(chain[i].first.label_columns);
+                    std::set_union(last_columns.begin(), last_columns.end(),
+                                   cur_columns.begin(), cur_columns.end(),
                                    std::back_inserter(columns));
                 }
-                std::swap(last_chain[i].first.label_columns, columns);
+                last_chain[i].first.set_columns(std::move(columns));
             }
+        }
+
+        double exact_match_fraction
+            = static_cast<double>(get_num_char_matches_in_seeds(last_chain.begin(),
+                                                                last_chain.end()))
+                / forward.size();
+
+        if (exact_match_fraction < config.min_exact_match) {
+            coverage_too_low = true;
+            return;
         }
 
         callback(std::move(last_chain), last_chain_score);
@@ -203,6 +228,9 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
     };
 
     for (const auto &[chain_score, j, neg_i] : starts) {
+        if (coverage_too_low || terminate())
+            break;
+
         auto &used = both_used[j];
         uint32_t i = -neg_i;
         if (used[i])
@@ -222,8 +250,9 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
 
             used[i] = true;
             chain_seeds.emplace_back(seeds[seed_i], coord);
+            chain_seeds.back().first.label_encoder = seeds[seed_i].label_encoder;
             if (has_labels) {
-                chain_seeds.back().first.label_columns.assign(1, label);
+                chain_seeds.back().first.set_columns(Vector<Alignment::Column>{ label });
                 chain_seeds.back().first.label_coordinates.resize(1);
                 chain_seeds.back().first.label_coordinates[0].assign(1, coord);
             }
@@ -277,7 +306,7 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
         }
 
         chain_seeds[0].second = 0;
-        if (chain_seeds[0].first.label_columns.empty())
+        if (!chain_seeds[0].first.label_columns)
             continue;
 
         Chain chain;
@@ -331,8 +360,9 @@ chain_seeds(const DBGAlignerConfig &config,
     tsl::hopscotch_map<Alignment::Column, size_t> label_sizes;
 
     for (size_t i = 0; i < seeds.size(); ++i) {
+        const auto &columns = seeds[i].get_columns();
         for (size_t j = 0; j < seeds[i].label_coordinates.size(); ++j) {
-            Alignment::Column c = seeds[i].label_columns[j];
+            Alignment::Column c = columns[j];
             auto rbegin = seeds[i].label_coordinates[j].rbegin();
             auto rend = rbegin + std::min(seeds[i].label_coordinates[j].size(),
                                           config.max_num_seeds_per_locus);
@@ -343,7 +373,7 @@ chain_seeds(const DBGAlignerConfig &config,
                                       seeds[i].get_query_view().size(), i);
             });
         }
-        seeds[i].label_columns = Alignment::Columns{};
+        seeds[i].label_columns = 0;
         seeds[i].label_coordinates = Alignment::CoordinateSet{};
     }
 
@@ -511,24 +541,40 @@ chain_seeds(const DBGAlignerConfig &config,
     return std::make_tuple(std::move(dp_table), std::move(backtrace), num_seeds, num_nodes);
 }
 
-template <class AlignmentCompare>
-void construct_alignment_chain(size_t node_overlap,
-                               const DBGAlignerConfig &config,
-                               std::string_view query,
-                               Alignment&& chain,
-                               typename std::vector<Alignment>::iterator begin,
-                               typename std::vector<Alignment>::iterator end,
-                               std::vector<score_t> *best_score,
-                               const std::function<void(Alignment&&)> &callback);
+bool last_is_indel(const Cigar &a) {
+    auto it = a.data().rbegin();
+    if (it->first == Cigar::CLIPPED)
+        ++it;
+
+    return it != a.data().rend() && (it->first == Cigar::INSERTION || it->first == Cigar::DELETION);
+}
+
+bool first_is_indel(const Cigar &a) {
+    auto it = a.data().begin();
+    if (it->first == Cigar::CLIPPED)
+        ++it;
+
+    return it != a.data().end() && (it->first == Cigar::INSERTION || it->first == Cigar::DELETION);
+}
+
+std::pair<size_t, size_t> call_alignment_chains(const IDBGAligner &aligner,
+                                                const std::vector<Alignment> &alignments,
+                                                const std::function<void(Alignment&&)> &callback,
+                                                std::string_view query,
+                                                std::string_view query_rc);
 
 template <class AlignmentCompare>
-std::vector<Alignment> chain_alignments(std::vector<Alignment>&& alignments,
-                                        std::string_view query,
-                                        std::string_view rc_query,
-                                        const DBGAlignerConfig &config,
-                                        size_t node_overlap) {
-    if (alignments.size() < 2 || !config.post_chain_alignments)
-        return std::move(alignments);
+std::tuple<std::vector<Alignment>, size_t, size_t>
+chain_alignments(const IDBGAligner &aligner,
+                 std::vector<Alignment>&& alignments,
+                 std::string_view query,
+                 std::string_view query_rc) {
+    const DBGAlignerConfig &config = aligner.get_config();
+
+    if (alignments.size() < 2) {
+        DEBUG_LOG("Too few alignments found, nothing to chain.");
+        return std::make_tuple(std::move(alignments), 0, 0);
+    }
 
     for (const auto &a : alignments) {
         if (a.label_coordinates.size())
@@ -539,164 +585,529 @@ std::vector<Alignment> chain_alignments(std::vector<Alignment>&& alignments,
     no_chain_config.post_chain_alignments = false;
     AlignmentAggregator<AlignmentCompare> aggregator(no_chain_config);
 
-    alignments.erase(std::remove_if(alignments.begin(), alignments.end(), [&](Alignment &a) {
-        if (!a.get_clipping() && !a.get_end_clipping()) {
+    std::vector<Alignment> split_alignments[2];
+
+    DEBUG_LOG("Chaining alignments:");
+    for (size_t i = 0; i < alignments.size(); ++i) {
+        auto &a = alignments[i];
+        assert(a.size());
+
+        // TODO: handle offset and mixed label cases later
+        if ((!a.get_clipping() && !a.get_end_clipping())
+                || a.size() == 1 || a.label_column_diffs.size()) {
             aggregator.add_alignment(std::move(a));
-            return true;
+        } else {
+            DEBUG_LOG("\t{}", a);
+            aggregator.add_alignment(Alignment(a));
+            size_t orientation = a.get_orientation();
+            split_alignments[orientation].emplace_back(std::move(a));
         }
+    }
 
-        return false;
-    }), alignments.end());
+    if (split_alignments[0].empty() && split_alignments[1].empty())
+        return std::make_tuple(aggregator.get_alignments(), 0, 0);
 
-    std::sort(alignments.begin(), alignments.end(), [](const auto &a, const auto &b) {
-        return std::make_tuple(a.get_orientation(),
-                               a.get_clipping() + a.get_query_view().size(),
+    auto acomp = [](const auto &a, const auto &b) {
+        return std::make_tuple(a.get_clipping() + a.get_query_view().size(),
                                a.get_clipping(),
                                b.get_score(),
                                a.get_sequence().size())
-            < std::make_tuple(b.get_orientation(),
-                              b.get_clipping() + b.get_query_view().size(),
+            < std::make_tuple(b.get_clipping() + b.get_query_view().size(),
                               b.get_clipping(),
                               a.get_score(),
                               b.get_sequence().size());
-    });
-
-    DEBUG_LOG("Chaining alignments:\n{}", fmt::join(alignments, "\t\n"));
-
-
-    auto run = [&](std::string_view this_query, auto begin, auto end) {
-        std::vector<score_t> best_score(this_query.size() + 1, 0);
-        for (auto it = begin; it != end; ++it) {
-            size_t end_pos = it->get_query_view().data() + it->get_query_view().size()
-                                - this_query.data();
-            if (it->get_score() > best_score[end_pos]) {
-                best_score[end_pos] = it->get_score();
-                construct_alignment_chain<AlignmentCompare>(
-                    node_overlap, config, this_query, Alignment(*it), it + 1, end, &best_score,
-                    [&](Alignment&& chain) { aggregator.add_alignment(std::move(chain)); }
-                );
-            }
-        }
     };
 
-    // recursively construct chains
-    auto split_it = std::find_if(alignments.begin(), alignments.end(),
-                                 [](const auto &a) { return a.get_orientation(); });
-    run(query, alignments.begin(), split_it);
-    run(rc_query, split_it, alignments.end());
+    std::sort(split_alignments[0].begin(), split_alignments[0].end(), acomp);
+    std::sort(split_alignments[1].begin(), split_alignments[1].end(), acomp);
 
-    return aggregator.get_alignments();
+    auto callback = [&](Alignment&& a) {
+        aggregator.add_alignment(std::move(a));
+    };
+
+    auto [num_extensions, num_explored_nodes]
+        = call_alignment_chains(aligner, split_alignments[0], callback, query, query_rc);
+    auto [n_ext, n_exp] = call_alignment_chains(aligner, split_alignments[1], callback, query_rc, query);
+    num_extensions += n_ext;
+    num_explored_nodes += n_exp;
+    return std::make_tuple(aggregator.get_alignments(), num_extensions, num_explored_nodes);
 }
 
-// TODO: rewrite this to not use recursion
-template <class AlignmentCompare>
-void construct_alignment_chain(size_t node_overlap,
-                               const DBGAlignerConfig &config,
-                               std::string_view query,
-                               Alignment&& chain,
-                               typename std::vector<Alignment>::iterator begin,
-                               typename std::vector<Alignment>::iterator end,
-                               std::vector<score_t> *best_score,
-                               const std::function<void(Alignment&&)> &callback) {
-    assert(begin <= end);
-    assert(chain.size());
+std::pair<size_t, size_t> call_alignment_chains(const IDBGAligner &aligner,
+                                                const std::vector<Alignment> &alignments,
+                                                const std::function<void(Alignment&&)> &callback,
+                                                std::string_view query,
+                                                std::string_view query_rc) {
+    if (alignments.empty())
+        return {};
 
-    const char *chain_begin = chain.get_query_view().data();
-    const char *chain_end = chain.get_query_view().data() + chain.get_query_view().size();
-    if (begin == end || chain_end == query.data() + query.size()) {
-        callback(std::move(chain));
-        return;
+    assert(std::all_of(alignments.begin(), alignments.end(), [](const auto &a) { return a.size(); }));
+    assert(std::all_of(alignments.begin(), alignments.end(), [](const auto &a) { return !a.get_offset(); }));
+
+    const auto *labeled_aligner = dynamic_cast<const ILabeledAligner*>(&aligner);
+    const DBGAlignerConfig &config = aligner.get_config();
+    const DeBruijnGraph &graph = aligner.get_graph();
+    ssize_t node_overlap = graph.get_k() - 1;
+
+    DEBUG_LOG("Preprocessing alignments");
+    std::vector<const char *> min_next_char;
+    min_next_char.reserve(alignments.size());
+    for (auto jt = alignments.begin() + 1; jt != alignments.end(); ++jt) {
+        min_next_char.push_back(jt->get_query_view().data());
+    }
+    min_next_char.push_back(std::numeric_limits<const char *>::max());
+    for (auto it = min_next_char.rbegin() + 1; it != min_next_char.rend(); ++it) {
+        *it = std::min(*it, *(it - 1));
     }
 
-    score_t score = chain.get_score();
+    std::vector<const char *> max_prev_char;
+    max_prev_char.reserve(alignments.size());
+    max_prev_char.push_back(std::numeric_limits<const char *>::min());
+    for (auto jt = alignments.begin(); jt != alignments.end() - 1; ++jt) {
+        max_prev_char.push_back(jt->get_query_view().data() + jt->get_query_view().size());
+    }
+    for (auto it = max_prev_char.begin() + 1; it != max_prev_char.end(); ++it) {
+        *it = std::max(*it, *(it - 1));
+    }
 
-    bool called = false;
-    for (auto it = begin; it != end; ++it) {
-        // TODO: handle this case later
-        if (it->get_offset())
-            continue;
-
-        const char *next_begin = it->get_query_view().data();
-        const char *next_end = it->get_query_view().data() + it->get_query_view().size();
-
-        assert(chain_begin - chain.get_clipping() == next_begin - it->get_clipping());
-        assert(it->get_orientation() == chain.get_orientation());
-
-        if (next_begin <= chain_begin || next_end == chain_end)
-            continue;
-
-        if (chain.label_columns.size()
-                && !utils::share_element(it->label_columns.begin(),
-                                         it->label_columns.end(),
-                                         chain.label_columns.begin(),
-                                         chain.label_columns.end())) {
-            continue;
+    std::vector<std::vector<std::pair<score_t, size_t>>> prefix_score_size_diffs(alignments.size());
+    std::vector<std::vector<std::pair<score_t, size_t>>> suffix_score_size_diffs(alignments.size());
+    for (size_t i = 0; i < alignments.size(); ++i) {
+        if (i) {
+            for (Alignment a = alignments[i]; a.size(); a.trim_query_prefix(1, node_overlap, config)) {
+                assert(alignments[i].get_sequence().size() >= a.get_sequence().size());
+                score_t score = first_is_indel(a.get_cigar()) ? DBGAlignerConfig::ninf : alignments[i].get_score() - a.get_score();
+                prefix_score_size_diffs[i].emplace_back(score, alignments[i].get_sequence().size() - a.get_sequence().size());
+                if (a.get_query_view().data() > max_prev_char[i] && !first_is_indel(a.get_cigar()))
+                    break;
+            }
+        } else {
+            prefix_score_size_diffs[i].emplace_back(0, 0);
         }
 
-        Alignment aln = *it;
-
-        if (next_begin >= chain_end) {
-            // no overlap
-            aln.insert_gap_prefix(next_begin - chain_end, node_overlap, config);
-
+        if (i + 1 < alignments.size()) {
+            for (Alignment a = alignments[i]; a.size(); a.trim_query_suffix(1, config)) {
+                assert(alignments[i].get_sequence().size() >= a.get_sequence().size());
+                score_t score = last_is_indel(a.get_cigar()) ? DBGAlignerConfig::ninf : alignments[i].get_score() - a.get_score();
+                suffix_score_size_diffs[i].emplace_back(score, alignments[i].get_sequence().size() - a.get_sequence().size());
+                if (a.get_query_view().data() + a.get_query_view().size() < min_next_char[i] && last_is_indel(a.get_cigar()))
+                    break;
+            }
         } else {
-            // trim, then fill in dummy nodes
-            assert(chain.get_end_clipping());
+            suffix_score_size_diffs[i].emplace_back(0, 0);
+        }
+    }
 
-            // first trim front of the incoming alignment
-            size_t overlap = std::min(
-                static_cast<size_t>((chain.get_cigar().data().end() - 2)->second),
-                aln.trim_query_prefix(chain_end - it->get_query_view().data(),
-                                      node_overlap, config)
-            );
+    DEBUG_LOG("Done preprocessing alignments, starting chaining");
 
-            if (aln.empty() || aln.get_sequence().size() <= node_overlap
-                    || (aln.get_cigar().data().begin()
-                            + static_cast<bool>(aln.get_clipping()))->first != Cigar::MATCH) {
+    typedef std::tuple<score_t /* best score */,
+                       score_t /* extra score */,
+                       ssize_t /* gap */,
+                       size_t /* prefix trim */,
+                       size_t /* last table i */,
+                       Alignment::Columns /* last labels */,
+                       size_t /* last suffix trim */> TableVal;
+    typedef tsl::hopscotch_map<Alignment::Columns, TableVal> Table;
+    std::vector<Table> chain_table(alignments.size());
+
+    for (size_t i = 0; i < alignments.size() - 1; ++i) {
+        auto find = chain_table[i].find(alignments[i].label_columns);
+        if (find == chain_table[i].end()) {
+            chain_table[i][alignments[i].label_columns] = TableVal{
+                alignments[i].get_score(), 0, 0, 0,
+                std::numeric_limits<size_t>::max(),
+                0, 0
+            };
+        } else if (alignments[i].get_score() > std::get<0>(find->second)) {
+            find.value() = TableVal{
+                alignments[i].get_score(), 0, 0, 0,
+                std::numeric_limits<size_t>::max(),
+                0, 0
+            };
+        }
+        for (const auto &[cur_columns, val] : chain_table[i]) {
+            score_t a_score = std::get<0>(val);
+            size_t a_prefix_trim = std::get<3>(val);
+            for (size_t j = i + 1; j < alignments.size(); ++j) {
+                const char *a_begin = alignments[i].get_query_view().data() + a_prefix_trim;
+                const char *a_end = alignments[i].get_query_view().data() + alignments[i].get_query_view().size();
+                const char *b_begin = alignments[j].get_query_view().data();
+                const char *b_end = b_begin + alignments[j].get_query_view().size();
+
+                if (b_end <= a_end)
+                    continue;
+
+                size_t b_prefix_trim = 0;
+
+                if (a_begin - b_end > node_overlap)
+                    continue;
+
+                if (b_begin < a_begin) {
+                    b_prefix_trim = a_begin - b_begin;
+                    b_begin += b_prefix_trim;
+                }
+
+                if (b_prefix_trim >= prefix_score_size_diffs[j].size())
+                    continue;
+
+                auto [prefix_score_diff, prefix_size_diff] = prefix_score_size_diffs[j][b_prefix_trim];
+                while (b_prefix_trim < prefix_score_size_diffs[j].size() && prefix_score_diff == DBGAlignerConfig::ninf) {
+                    std::tie(prefix_score_diff, prefix_size_diff) = prefix_score_size_diffs[j][++b_prefix_trim];
+                    ++b_begin;
+                }
+
+                if (b_prefix_trim == prefix_score_size_diffs[j].size() || b_begin == b_end)
+                    continue;
+
+                size_t b_offset = std::min(prefix_size_diff, graph.get_k() - 1);
+                size_t b_size = alignments[j].get_sequence().size() - prefix_size_diff - graph.get_k() + 1 + b_offset;
+
+                ssize_t gap = b_begin - a_end;
+
+                score_t b_score = DBGAlignerConfig::ninf;
+                char c = alignments[j].get_sequence()[prefix_size_diff];
+                size_t a_suffix_trim = 0;
+                if (gap >= 0) {
+                    // no overlap
+                    if (b_offset >= b_size)
+                        continue;
+
+                    score_t gap_score = config.gap_opening_penalty;
+                    if (gap > 0)
+                        gap_score += config.gap_opening_penalty + (gap - 1) * config.gap_extension_penalty;
+
+                    b_score = a_score + alignments[j].get_score() - prefix_score_diff + gap_score;
+                } else {
+                    // overlap
+                    b_score = DBGAlignerConfig::ninf;
+                    ssize_t best_mismatch = 0;
+                    ssize_t best_gap = gap;
+                    for (ssize_t cur_gap = 0; cur_gap >= gap; --cur_gap) {
+                        size_t a_suffix_trim = cur_gap - gap;
+
+                        if (a_suffix_trim >= suffix_score_size_diffs[i].size())
+                            continue;
+
+                        if (b_prefix_trim - cur_gap >= prefix_score_size_diffs[j].size())
+                            continue;
+
+                        if (a_suffix_trim + a_prefix_trim >= alignments[i].get_query_view().size())
+                            continue;
+
+                        assert(alignments[i].get_query_view().data() + alignments[i].get_query_view().size() - a_suffix_trim
+                            == alignments[j].get_query_view().data() + (b_prefix_trim - cur_gap));
+                        auto [b_prefix_score_diff, b_seq_prefix_trim] = prefix_score_size_diffs[j][b_prefix_trim - cur_gap];
+                        auto [a_suffix_score_diff, a_seq_suffix_trim] = suffix_score_size_diffs[i][a_suffix_trim];
+                        if (std::min(a_suffix_score_diff, b_prefix_score_diff) == DBGAlignerConfig::ninf)
+                            continue;
+
+                        assert(a_prefix_trim < prefix_score_size_diffs[i].size());
+                        size_t a_seq_prefix_trim = prefix_score_size_diffs[i][a_prefix_trim].second;
+
+                        if (alignments[i].get_sequence().size() - a_seq_suffix_trim - a_seq_prefix_trim < graph.get_k()
+                                || alignments[j].get_sequence().size() - b_seq_prefix_trim < graph.get_k()) {
+                            continue;
+                        }
+
+                        score_t cur_score = a_score - a_suffix_score_diff + alignments[j].get_score() - b_prefix_score_diff;
+
+                        size_t a_seq_extra_trim = std::min(b_seq_prefix_trim,
+                                                           alignments[i].get_sequence().size() - a_seq_suffix_trim);
+
+                        size_t cur_b_offset = std::min(b_seq_prefix_trim, graph.get_k() - 1);
+                        size_t cur_b_size = alignments[j].get_sequence().size() - b_seq_prefix_trim - graph.get_k() + 1 + cur_b_offset;
+                        ssize_t cur_mismatch = 0;
+                        if (!b_seq_prefix_trim || !a_seq_extra_trim) {
+                            if (cur_b_offset >= cur_b_size)
+                                continue;
+
+                            cur_score += config.gap_opening_penalty;
+                        } else {
+                            std::string_view b_prefix(alignments[j].get_sequence().begin(),
+                                                      b_seq_prefix_trim);
+
+                            std::string_view a_suffix(alignments[i].get_sequence().end() - a_seq_suffix_trim - a_seq_extra_trim,
+                                                      a_seq_extra_trim);
+
+                            if (b_prefix.size() >= graph.get_k()) {
+                                b_prefix.remove_prefix(b_prefix.size() - node_overlap);
+                                a_suffix.remove_prefix(a_suffix.size() - node_overlap);
+                            }
+
+                            // TODO: optimize this later if needed
+                            auto [a_mm, b_mm] = std::mismatch(a_suffix.rbegin(), a_suffix.rend(),
+                                                              b_prefix.rbegin(), b_prefix.rend());
+
+                            cur_mismatch = -(b_mm - b_prefix.rbegin());
+
+                            if (cur_mismatch == 0) {
+                                if (cur_b_offset >= cur_b_size)
+                                    continue;
+
+                                cur_score += config.gap_opening_penalty;
+                            } else if (cur_mismatch > -node_overlap && cur_b_size <= cur_b_offset + cur_mismatch) {
+                                continue;
+                            }
+                        }
+
+                        if (best_mismatch > -node_overlap) {
+                            size_t extra_nodes = node_overlap + 1;
+                            if (best_mismatch < 0)
+                                extra_nodes += best_mismatch - 1;
+
+                            if (extra_nodes)
+                                cur_score += config.node_insertion_penalty;
+                        }
+
+                        if (cur_score > b_score) {
+                            b_score = cur_score;
+                            best_gap = cur_gap;
+                            best_mismatch = cur_mismatch;
+                        }
+                    }
+
+                    if (b_score == DBGAlignerConfig::ninf)
+                        continue;
+
+                    b_prefix_trim -= best_gap;
+                    b_begin -= best_gap;
+
+                    auto [b_prefix_score_diff, b_seq_prefix_trim] = prefix_score_size_diffs[j][b_prefix_trim];
+                    b_offset = std::min(b_seq_prefix_trim, graph.get_k() - 1);
+                    b_size = alignments[j].get_sequence().size() - b_seq_prefix_trim - graph.get_k() + 1 + b_offset;
+
+                    c = alignments[j].get_sequence()[b_seq_prefix_trim];
+
+                    a_suffix_trim = best_gap - gap;
+                    gap = best_mismatch;
+                    assert(gap <= 0);
+                    assert(gap == 0 || gap <= -node_overlap || b_size > b_offset + gap);
+                }
+
+#ifndef NDEBUG
+                Alignment a = alignments[i];
+                if (a_suffix_trim) {
+                    a.trim_query_suffix(a_suffix_trim, config);
+                    assert(a.size());
+                    assert(a.is_valid(graph, &config));
+                }
+
+                if (a_prefix_trim) {
+                    a.trim_query_prefix(a_prefix_trim, node_overlap, config);
+                    assert(a.size());
+                    assert(a.is_valid(graph, &config));
+                }
+
+                Alignment b = alignments[j];
+                if (b_prefix_trim) {
+                    b.trim_query_prefix(b_prefix_trim, node_overlap, config);
+                    assert(b.size());
+                    assert(b.is_valid(graph, &config));
+                }
+
+                assert(b.get_offset() == b_offset);
+                assert(b.size() == b_size);
+
+                if (gap > -node_overlap) {
+                    b.insert_gap_prefix(gap, node_overlap, config);
+                    assert(b.size());
+                } else {
+                    b.trim_clipping();
+                    assert(b.size());
+                }
+
+                assert(a.size());
+                a.trim_end_clipping();
+                a.append(std::move(b), a.label_columns != alignments[j].label_columns);
+                assert(a.size());
+                assert(a.is_valid(graph, &config));
+#endif
+
+                ILabeledAligner::LabelChangeScores label_change_scores;
+                if (!labeled_aligner) {
+                    label_change_scores.emplace_back(0, 0, true);
+                } else {
+                    label_change_scores = labeled_aligner->get_label_change_scores(
+                        cur_columns, alignments[j].label_columns
+                    );
+                }
+
+                auto &b_tab = chain_table[j];
+                score_t lambda = config.score_matrix[c][c];
+                for (auto &[cols, lc_score, is_subset] : label_change_scores) {
+                    lc_score *= lambda;
+                    assert(lc_score <= 0);
+                    score_t next_score = b_score + lc_score;
+                    auto find = b_tab.find(cols);
+                    if (find == b_tab.end()) {
+                        b_tab.try_emplace(cols, TableVal{
+                            next_score, lc_score, gap, b_prefix_trim, i, cur_columns, a_suffix_trim
+                        });
+                    } else if (next_score > std::get<0>(find->second)) {
+                        find.value() = std::tie(
+                            next_score, lc_score, gap, b_prefix_trim, i, cur_columns, a_suffix_trim
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    DEBUG_LOG("Done chaining, backtracking");
+
+    std::vector<std::tuple<score_t, size_t, Alignment::Columns>> indices;
+    sdsl::bit_vector used(chain_table.size(), false);
+    for (size_t i = 0; i < chain_table.size(); ++i) {
+        for (const auto &[cols, vals] : chain_table[i]) {
+            indices.emplace_back(std::get<0>(vals), cols, i);
+        }
+    }
+    std::sort(indices.begin(), indices.end());
+
+    // extract all chains
+    auto extender = aligner.make_extender(query);
+    auto extender_rc = aligner.make_extender(query_rc);
+
+    std::vector<std::optional<Alignment>> front_extensions(alignments.size(), std::nullopt);
+    std::vector<std::vector<std::tuple<size_t, size_t, size_t, ssize_t, Alignment::Columns, score_t>>> chains;
+    for (auto it = indices.rbegin(); it != indices.rend(); ++it) {
+        auto [start_score, cols, i] = *it;
+        if (used[i])
+            continue;
+
+        used[i] = true;
+        auto [score, extra_score, gap, prefix_trim,
+              last_i, last_cols, last_suffix_trim] = chain_table[i][cols];
+
+        auto &cur_chain = chains.emplace_back();
+        cur_chain.emplace_back(i, prefix_trim, 0, gap, cols, 0);
+        assert(last_i != std::numeric_limits<size_t>::max() || gap == 0);
+        while (last_i != std::numeric_limits<size_t>::max()) {
+            used[last_i] = true;
+            cur_chain.emplace_back(last_i, 0, last_suffix_trim, 0, last_cols, 0);
+            i = last_i;
+            cols = last_cols;
+            std::tie(score, extra_score, gap, prefix_trim,
+                     last_i, last_cols, last_suffix_trim) = chain_table[i][cols];
+            std::get<1>(cur_chain.back()) = prefix_trim;
+            std::get<3>(cur_chain.back()) = gap;
+            std::get<5>(cur_chain.back()) = extra_score;
+        }
+
+        assert(cols == alignments[i].label_columns);
+        if (!front_extensions[i]) {
+            if (!alignments[i].get_clipping()) {
+                front_extensions[i] = Alignment();
                 continue;
             }
 
-            assert(aln.get_query_view().data()
-                    == chain.get_query_view().data() + chain.get_query_view().size());
-
-            if (overlap < node_overlap) {
-                aln.insert_gap_prefix(-overlap, node_overlap, config);
-            } else {
-                aln.trim_clipping();
-            }
-        }
-
-        assert(!aln.empty());
-
-        score_t next_score = score + aln.get_score();
-        if (next_score <= (*best_score)[next_end - query.data()])
-            continue;
-
-        (*best_score)[next_end - query.data()] = next_score;
-        // use append instead of splice because any clipping in aln represents
-        // internally clipped characters
-        Alignment next_chain = chain;
-        next_chain.trim_end_clipping();
-        bool changed = next_chain.append(std::move(aln));
-        if (next_chain.size()) {
-            assert(next_chain.get_score() == next_score);
-            construct_alignment_chain<AlignmentCompare>(
-                    node_overlap, config, query, std::move(next_chain),
-                    it + 1, end, best_score, callback);
-            called |= changed;
+            DEBUG_LOG("Extending chain front");
+            try {
+                extender_rc->rc_extend_rc(alignments[i], [&](auto&& aln) {
+                    if (aln.get_clipping() < alignments[i].get_clipping()) {
+                        // TODO: what if there are multiple extensions?
+                        DEBUG_LOG("Extended successfully:\n\t{}", aln);
+                        front_extensions[i] = std::move(aln);
+                        throw std::bad_function_call();
+                    }
+                }, true);
+            } catch (const std::bad_function_call&) {}
         }
     }
 
-    if (!called)
-        callback(std::move(chain));
+    // reconstruct chains
+    for (const auto &chain : chains) {
+        DEBUG_LOG("Reconstructing chain");
+        auto it = chain.begin();
+        auto [i, prefix_trim, suffix_trim, gap, cols, extra_score] = *it;
+        assert(!suffix_trim);
+        assert(extra_score == 0);
+        bool swap_front = (it + 1 == chain.end() && front_extensions[i] && front_extensions[i]->size());
+        assert(!swap_front || !prefix_trim);
+#ifndef NDEBUG
+            if (swap_front) {
+                DEBUG_LOG("Front swapped:\n\t{}\n\t{}", alignments[i], *front_extensions[i]);
+            }
+#endif
+        Alignment cur = swap_front ? *front_extensions[i] : alignments[i];
+        cur.label_columns = cols;
+        if (prefix_trim) {
+            cur.trim_query_prefix(prefix_trim, node_overlap, config);
+            assert(cur.size());
+            assert(cur.is_valid(graph, &config));
+        }
+
+        if (cur.get_end_clipping()) {
+            DEBUG_LOG("Extending chain end");
+            try {
+                extender->extend_seed_end(cur, [&](Alignment&& alignment) {
+                    // TODO: if the extension uses a different subset of labels
+                    // this will fail
+                    if (alignment.get_end_clipping() < cur.get_end_clipping()) {
+                        // TODO: what if there are multiple extensions?
+                        std::swap(alignment, cur);
+                        DEBUG_LOG("Extended successfully:\n\t{}", cur);
+                        throw std::bad_function_call();
+                    }
+                }, true);
+            } catch (const std::bad_function_call&) {}
+        }
+
+        for (++it; it != chain.end(); ++it) {
+            if (gap > -node_overlap) {
+                cur.insert_gap_prefix(gap, node_overlap, config);
+            } else {
+                cur.trim_clipping();
+            }
+            std::tie(i, prefix_trim, suffix_trim, gap, cols, extra_score) = *it;
+            bool swap_front = (it + 1 == chain.end() && front_extensions[i] && front_extensions[i]->size());
+            assert(!swap_front || !prefix_trim);
+
+#ifndef NDEBUG
+            if (swap_front) {
+                DEBUG_LOG("Front swapped:\n\t{}\n\t{}", alignments[i], *front_extensions[i]);
+            }
+#endif
+
+            Alignment prev = swap_front ? *front_extensions[i] : alignments[i];
+            prev.label_columns = cols;
+
+            if (prefix_trim) {
+                prev.trim_query_prefix(prefix_trim, node_overlap, config);
+                assert(prev.size());
+                assert(prev.is_valid(graph, &config));
+            }
+
+            if (suffix_trim) {
+                prev.trim_query_suffix(suffix_trim, config);
+                assert(prev.size());
+                assert(prev.is_valid(graph, &config));
+            }
+
+            prev.trim_end_clipping();
+            prev.append(std::move(cur), extra_score);
+            assert(prev.size());
+            std::swap(cur, prev);
+            assert(cur.is_valid(graph, &config));
+            DEBUG_LOG("Partial alignment: {}\n\t{}", extra_score, cur);
+        }
+
+        assert(cur.get_full_query_view().size() == query.size());
+        assert(cur.is_valid(graph, &config));
+        DEBUG_LOG("Full alignment:\n\t{}", cur);
+        callback(std::move(cur));
+    }
+
+    return std::make_pair(extender->num_extensions() + extender_rc->num_extensions(),
+                          extender->num_explored_nodes() + extender_rc->num_explored_nodes());
 }
 
 template
-std::vector<Alignment> chain_alignments<LocalAlignmentLess>(std::vector<Alignment>&&,
-                                                            std::string_view,
-                                                            std::string_view,
-                                                            const DBGAlignerConfig&,
-                                                            size_t);
+std::tuple<std::vector<Alignment>, size_t, size_t>
+chain_alignments<LocalAlignmentLess>(const IDBGAligner&,
+                                     std::vector<Alignment>&&,
+                                     std::string_view,
+                                     std::string_view);
 
 } // namespace align
 } // namespace graph

@@ -5,6 +5,7 @@
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
 #include "common/threads/threading.hpp"
+#include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "graph/alignment/dbg_aligner.hpp"
@@ -12,6 +13,7 @@
 #include "graph/annotated_dbg.hpp"
 #include "graph/graph_extensions/node_rc.hpp"
 #include "graph/graph_extensions/node_first_cache.hpp"
+#include "graph/graph_extensions/hll_wrapper.hpp"
 #include "seq_io/sequence_io.hpp"
 #include "config/config.hpp"
 #include "load/load_graph.hpp"
@@ -47,10 +49,12 @@ DBGAlignerConfig initialize_aligner_config(const Config &config,
         .gap_extension_penalty = static_cast<int8_t>(-config.alignment_gap_extension_penalty),
         .left_end_bonus = config.alignment_end_bonus,
         .right_end_bonus = config.alignment_end_bonus,
+        .label_change_score = config.alignment_label_change_score,
         .forward_and_reverse_complement = !config.align_only_forwards,
         .chain_alignments = config.alignment_chain,
         .post_chain_alignments = config.alignment_post_chain,
         .seed_complexity_filter = config.alignment_seed_complexity_filter,
+        .label_change_union = config.alignment_label_change_union,
         .alignment_edit_distance = config.alignment_edit_distance,
         .alignment_match_score = config.alignment_match_score,
         .alignment_mm_transition_score = config.alignment_mm_transition_score,
@@ -253,18 +257,7 @@ std::string format_alignment(const std::string &header,
                              const DeBruijnGraph &graph,
                              const Config &config) {
     std::string sout;
-    if (!config.output_json) {
-        sout += fmt::format("{}\t{}", header, paths.get_query());
-        if (paths.empty()) {
-            sout += fmt::format("\t*\t*\t{}\t*\t*\t*\n", config.alignment_min_path_score);
-        } else {
-            for (const auto &path : paths) {
-                sout += fmt::format("\t{}", path);
-            }
-            sout += "\n";
-        }
-
-    } else {
+    if (config.output_json) {
         Json::StreamWriterBuilder builder;
         builder["indentation"] = "";
 
@@ -280,6 +273,16 @@ std::string format_alignment(const std::string &header,
         if (paths.empty()) {
             Json::Value json_line = Alignment().to_json(graph.get_k(), secondary, header);
             sout += fmt::format("{}\n", Json::writeString(builder, json_line));
+        }
+    } else {
+        sout += fmt::format("{}\t{}", header, paths.get_query());
+        if (paths.empty()) {
+            sout += fmt::format("\t*\t*\t{}\t*\t*\t*\n", config.alignment_min_path_score);
+        } else {
+            for (const auto &path : paths) {
+                sout += fmt::format("\t{}", path);
+            }
+            sout += "\n";
         }
     }
 
@@ -299,6 +302,18 @@ int align_to_graph(Config *config) {
     if (utils::ends_with(config->outfbase, ".gfa")) {
         gfa_map_files(config, files, *graph);
         return 0;
+    }
+
+    auto hll = std::make_shared<HLLWrapper<>>();
+    if (config->alignment_post_chain) {
+        if (hll->load(utils::remove_suffix(config->infbase, graph->file_extension()))) {
+            logger->trace("Loaded HLL sketch with {} columns", hll->data().num_columns());
+        } else {
+            logger->warn("HLL sketch not present or failed to load");
+            hll.reset();
+        }
+    } else {
+        hll.reset();
     }
 
     // For graphs which still feature a mask, this speeds up mapping and allows
@@ -380,6 +395,7 @@ int align_to_graph(Config *config) {
         auto end = fasta_parser.end();
 
         size_t num_batches = 0;
+        size_t seq_id = 0;
 
         while (it != end) {
             uint64_t num_bytes_read = 0;
@@ -397,10 +413,11 @@ int align_to_graph(Config *config) {
                             : std::string(it->name.s);
                 seq_batch.emplace_back(std::move(header), it->seq.s);
                 num_bytes_read += it->seq.l;
+                ++seq_id;
             }
 
             ++num_batches;
-            thread_pool.enqueue([&,graph,batch=std::move(seq_batch)]() {
+            thread_pool.enqueue([&,graph,seq_id,batch=std::move(seq_batch)]() {
                 // Make a dummy shared_ptr
                 auto aln_graph
                     = std::shared_ptr<DeBruijnGraph>(std::shared_ptr<DeBruijnGraph>{}, graph.get());
@@ -416,6 +433,9 @@ int align_to_graph(Config *config) {
                         aln_graph->add_extension(std::make_shared<NodeFirstCache>(*dbg_succ));
                 }
 
+                if (hll)
+                    aln_graph->add_extension(hll);
+
                 std::unique_ptr<IDBGAligner> aligner;
 
                 if (anno_dbg) {
@@ -430,7 +450,7 @@ int align_to_graph(Config *config) {
                         const auto &res = format_alignment(header, paths, *graph, *config);
                         std::lock_guard<std::mutex> lock(print_mutex);
                         *out << res;
-                    }
+                    }, seq_id - batch.size()
                 );
             });
         };

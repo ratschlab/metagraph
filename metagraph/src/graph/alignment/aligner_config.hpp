@@ -44,14 +44,18 @@ struct DBGAlignerConfig {
     int8_t gap_extension_penalty = -2;
     int8_t left_end_bonus = 0;
     int8_t right_end_bonus = 0;
+    int8_t node_insertion_penalty = -6;
+    score_t label_change_score = ninf;
 
     bool forward_and_reverse_complement = true;
     bool chain_alignments = false;
     bool post_chain_alignments = false;
+    bool allow_label_change = false;
     bool global_xdrop = true;
     bool allow_left_trim = true;
     bool no_backtrack = false;
     bool seed_complexity_filter = true;
+    bool label_change_union = false;
 
     bool alignment_edit_distance;
     int8_t alignment_match_score;
