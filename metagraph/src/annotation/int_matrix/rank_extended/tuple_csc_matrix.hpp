@@ -5,6 +5,7 @@
 
 #include "annotation/int_matrix/base/int_matrix.hpp"
 #include "common/logger.hpp"
+#include "common/vectors/bit_vector_adaptive.hpp"
 
 
 namespace mtg {
