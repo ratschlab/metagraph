@@ -267,6 +267,7 @@ include_directories(
   external-libraries/zlib
   external-libraries/sdust
   external-libraries/simde-no-tests
+  external-libraries/libcount/include
   ${PROJECT_SOURCE_DIR}/src
 )
 
@@ -332,6 +333,15 @@ add_library(sdust STATIC
   external-libraries/sdust/sdust.c
 )
 target_compile_options(sdust PRIVATE -Wall -Wc++-compat -Wno-error)
+
+add_library(hll STATIC
+  "external-libraries/libcount/count/c.cc"
+  "external-libraries/libcount/count/empirical_data.cc"
+  "external-libraries/libcount/count/hll.cc"
+  "external-libraries/libcount/count/hll_data.cc"
+  "external-libraries/libcount/count/utility.cc"
+)
+target_include_directories(hll PUBLIC external-libraries/libcount)
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH}
   "${CMAKE_SOURCE_DIR}/external-libraries/binrel_wt/cmake/modules"
@@ -399,6 +409,7 @@ set(METALIBS ${METALIBS}
   progress_bar
   mersenne_twister
   sdust
+  hll
   spdlog::spdlog
   XXSDS_DYNAMIC
   ips4o

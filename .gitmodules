@@ -68,3 +68,6 @@
 [submodule "metagraph/external-libraries/simde-no-tests"]
 	path = metagraph/external-libraries/simde-no-tests
 	url = https://github.com/simd-everywhere/simde-no-tests
+[submodule "metagraph/external-libraries/libcount"]
+	path = metagraph/external-libraries/libcount
+	url = https://github.com/hmusta/libcount
