@@ -111,12 +111,12 @@ std::vector<Alignment> SeedFilteringExtender::connect_seeds(const Alignment &fir
     assert(coord_dist > 0);
 
     auto extensions = get_extensions(next, min_path_score,
-        true,                                // force_fixed_seed
-        coord_dist,                          // target_length
-        second.get_nodes().back(),           // target_node
-        false,                               // trim_offset_after_extend
-        second.get_end_clipping(),           // trim_query_suffix
-        first.get_score() - next.get_score() // added_xdrop
+        true,                                               // force_fixed_seed
+        coord_dist,                                         // target_length
+        second.get_nodes().back(),                          // target_node
+        false,                                              // trim_offset_after_extend
+        second.get_end_clipping(),                          // trim_query_suffix
+        std::max(100, first.get_score() - next.get_score()) // added_xdrop
     );
 
     std::vector<Alignment> alignments;

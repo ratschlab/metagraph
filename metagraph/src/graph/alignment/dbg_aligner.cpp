@@ -10,6 +10,7 @@
 #include "graph/representation/succinct/boss_construct.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
+#include "graph/graph_extensions/path_index.hpp"
 
 namespace mtg {
 namespace graph {
@@ -194,6 +195,18 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
 
         std::string_view this_query = paths[i].get_query(false);
         assert(this_query == query);
+
+        if (graph_.get_extension_threadsafe<IPathIndex>()) {
+            if (graph_.get_mode() != DeBruijnGraph::BASIC)
+                seeder_rc = std::make_shared<ManualSeeder>();
+
+            Extender extender(*this, paths[i].get_query(false));
+            chain_seeds(*this, paths[i].get_query(false), seeder, extender);
+            if (seeder_rc && seeder_rc->get_alignments().size()) {
+                Extender extender_rc(*this, paths[i].get_query(true));
+                chain_seeds(*this, paths[i].get_query(true), seeder_rc, extender_rc);
+            }
+        }
 
 #if ! _PROTEIN_GRAPH
         if (seeder_rc) {

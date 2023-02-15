@@ -9,6 +9,8 @@ namespace graph {
 namespace align {
 
 class IDBGAligner;
+class SeedFilteringExtender;
+class ISeeder;
 
 typedef std::vector<std::pair<Alignment, int64_t>> Chain;
 typedef Alignment::score_t score_t;
@@ -36,6 +38,12 @@ chain_alignments(const IDBGAligner &aligner,
                  std::vector<Alignment>&& alignments,
                  std::string_view query,
                  std::string_view query_rc);
+
+std::tuple<size_t, size_t, size_t>
+chain_seeds(const IDBGAligner &aligner,
+            std::string_view query,
+            std::shared_ptr<ISeeder> &seeder,
+            SeedFilteringExtender &extender);
 
 } // namespace align
 } // namespace graph

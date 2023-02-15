@@ -14,6 +14,7 @@
 #include "graph/graph_extensions/node_rc.hpp"
 #include "graph/graph_extensions/node_first_cache.hpp"
 #include "graph/graph_extensions/hll_wrapper.hpp"
+#include "graph/graph_extensions/path_index.hpp"
 #include "seq_io/sequence_io.hpp"
 #include "config/config.hpp"
 #include "load/load_graph.hpp"
@@ -319,6 +320,8 @@ int align_to_graph(Config *config) {
     // For graphs which still feature a mask, this speeds up mapping and allows
     // for dummy nodes to be matched by suffix seeding
     auto dbg_succ = std::dynamic_pointer_cast<DBGSuccinct>(graph);
+
+    std::shared_ptr<PathIndex<>> path_index;
     if (dbg_succ) {
         dbg_succ->reset_mask();
         if (dbg_succ->get_mode() == DeBruijnGraph::PRIMARY) {
@@ -331,6 +334,15 @@ int align_to_graph(Config *config) {
                              "Alignment speed will be significantly slower. "
                              "Use metagraph transform to generate an adj-rc index.");
             }
+        }
+
+        path_index = std::make_shared<PathIndex<>>();
+        if (path_index->load(config->infbase)) {
+            logger->trace("Loaded path index");
+            path_index->set_graph(dbg_succ);
+            graph->add_extension(path_index);
+        } else {
+            path_index.reset();
         }
     }
 
@@ -435,6 +447,9 @@ int align_to_graph(Config *config) {
 
                 if (hll)
                     aln_graph->add_extension(hll);
+
+                if (path_index)
+                    aln_graph->add_extension(path_index);
 
                 std::unique_ptr<IDBGAligner> aligner;
 

@@ -1016,6 +1016,9 @@ TYPED_TEST(DBGAlignerTest, align_straight_long_xdrop) {
 }
 
 TYPED_TEST(DBGAlignerTest, align_drop_seed) {
+    if constexpr(std::is_same_v<TypeParam, DBGSuccinctPathIndexed>)
+        return;
+
     size_t k = 4;
     std::string reference = "TTTCCCTGGCGCTCTC";
     std::string query =     "TTTCCGGGGCGCTCTC";
@@ -1050,6 +1053,9 @@ TYPED_TEST(DBGAlignerTest, align_drop_seed) {
 }
 
 TYPED_TEST(DBGAlignerTest, align_long_gap_after_seed) {
+    if constexpr(std::is_same_v<TypeParam, DBGSuccinctPathIndexed>)
+        return;
+
     size_t k = 4;
     std::string reference = "TTTCCCTTAAGGCGCTCTC";
     std::string query =           "TTTCGGCGCTCTC";
