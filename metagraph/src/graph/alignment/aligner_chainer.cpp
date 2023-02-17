@@ -1187,6 +1187,8 @@ chain_seeds(const IDBGAligner &aligner,
         }
     }
 
+    const auto *labeled_aligner = dynamic_cast<const ILabeledAligner*>(&aligner);
+
     std::sort(seeds.begin(), seeds.end());
     assert(std::adjacent_find(seeds.begin(), seeds.end()) == seeds.end());
 
@@ -1195,11 +1197,18 @@ chain_seeds(const IDBGAligner &aligner,
         const auto &coords_j = node_coords[coord_idx_j];
         for (size_t k = j + 1; k < seeds.size(); ++k) {
             auto &[col, coord_idx, is_rev, end, begin, node, score, last, last_dist] = seeds[k];
-            if (col != col_j || is_rev != is_rev_j)
+            if (is_rev != is_rev_j)
                 break;
 
+            if (!labeled_aligner && col != col_j)
+                break;
+
+            score_t label_change_score = labeled_aligner
+                ? labeled_aligner->get_label_change_score(col_j, col)
+                : 0;
+
             int64_t dist = end - end_j;
-            score_t base_added_score = end - begin - std::max(std::ptrdiff_t{0}, end_j - begin);
+            score_t base_added_score = end - begin - std::max(std::ptrdiff_t{0}, end_j - begin) + label_change_score;
 
             const auto &coords = node_coords[coord_idx];
             auto it = coords_j.begin();
