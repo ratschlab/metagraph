@@ -1191,10 +1191,12 @@ chain_seeds(const IDBGAligner &aligner,
 
     std::sort(seeds.begin(), seeds.end());
     assert(std::adjacent_find(seeds.begin(), seeds.end()) == seeds.end());
+    size_t bandwidth = 60;
 
     for (size_t j = 0; j + 1 < seeds.size(); ++j) {
         const auto &[col_j, coord_idx_j, is_rev_j, end_j, begin_j, node_j, score_j, last_j, last_dist_j] = seeds[j];
         const auto &coords_j = node_coords[coord_idx_j];
+        size_t num_considered = 0;
         for (size_t k = j + 1; k < seeds.size(); ++k) {
             auto &[col, coord_idx, is_rev, end, begin, node, score, last, last_dist] = seeds[k];
             if (is_rev != is_rev_j)
@@ -1203,12 +1205,20 @@ chain_seeds(const IDBGAligner &aligner,
             if (!labeled_aligner && col != col_j)
                 break;
 
+            if (++num_considered > bandwidth)
+                break;
+
+            int64_t dist = end - end_j;
+            if (dist < 0)
+                continue;
+
             score_t label_change_score = labeled_aligner
                 ? labeled_aligner->get_label_change_score(col_j, col)
                 : 0;
 
-            int64_t dist = end - end_j;
-            score_t base_added_score = end - begin - std::max(std::ptrdiff_t{0}, end_j - begin) + label_change_score;
+            score_t base_added_score = score_j + end - std::max(begin, end_j) + label_change_score;
+            if (base_added_score <= score)
+                continue;
 
             const auto &coords = node_coords[coord_idx];
             auto it = coords_j.begin();
@@ -1230,8 +1240,7 @@ chain_seeds(const IDBGAligner &aligner,
                                 ? config_.gap_opening_penalty
                                     + (gap - 1) * config_.gap_extension_penalty
                                 : 0;
-                            score_t added_score = base_added_score + gap_cost;
-                            score_t updated_score = score_j + added_score;
+                            score_t updated_score = base_added_score + gap_cost;
 
                             if (std::tie(updated_score, last_dist) > std::tie(score, coord_dist)) {
                                 score = updated_score;

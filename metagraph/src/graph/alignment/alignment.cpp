@@ -1492,17 +1492,10 @@ void Alignment::insert_gap_prefix(ssize_t gap_length,
         cigar_.data().insert(cigar_.data().begin(), Cigar::value_type{ Cigar::DELETION, 1 });
         score_ += config.gap_opening_penalty;
 
-        // if (static_cast<size_t>(gap_length) <= node_overlap) {
-        //     // overlap is small, so add only the required dummy nodes
-        //     trim_offset();
         assert(extra_nodes >= 2);
         cigar_.data().insert(cigar_.data().begin(),
                              Cigar::value_type{ Cigar::NODE_INSERTION, extra_nodes - 1 });
         score_ += config.node_insertion_penalty;
-        //     if (offset_) {
-        //         assert(false);
-        //     }
-        // }
 
         if (gap_length) {
             cigar_.data().insert(cigar_.data().begin(), Cigar::value_type{ Cigar::INSERTION, gap_length });

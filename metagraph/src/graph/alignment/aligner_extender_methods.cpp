@@ -470,7 +470,6 @@ void DefaultColumnExtender
         node_index next_node = this->seed_->get_nodes()[node_i];
         char next_c = this->seed_->get_sequence()[seed_pos];
         callback(next_node, next_c,
-            // (next_node ? 0 : (!node ? config_.gap_extension_penalty : config_.gap_opening_penalty)) +
                 (node_i - 1 < this->seed_->extra_scores.size() ? this->seed_->extra_scores[node_i - 1] : 0)
 
         );
