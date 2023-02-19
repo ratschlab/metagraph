@@ -853,10 +853,10 @@ std::pair<size_t, size_t> call_alignment_chains(const IDBGAligner &aligner,
                             }
                         }
 
-                        if (best_mismatch > -node_overlap) {
+                        if (cur_mismatch > -node_overlap) {
                             size_t extra_nodes = node_overlap + 1;
-                            if (best_mismatch < 0)
-                                extra_nodes += best_mismatch - 1;
+                            if (cur_mismatch < 0)
+                                extra_nodes += cur_mismatch - 1;
 
                             if (extra_nodes)
                                 cur_score += config.node_insertion_penalty;
