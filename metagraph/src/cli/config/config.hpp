@@ -65,6 +65,7 @@ class Config {
     bool output_json = false;
     bool aggregate_columns = false;
     bool coordinates = false;
+    bool filter_reads = false;
     bool advanced = false;
 
     unsigned int k = 3;

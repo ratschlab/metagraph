@@ -350,6 +350,36 @@ int align_to_graph(Config *config) {
     ThreadPool thread_pool(get_num_threads());
     std::mutex print_mutex;
 
+    if (config->filter_reads) {
+        logger->trace("Filtering reads");
+        size_t total_read_count = 0;
+        size_t output_read_count = 0;
+        seq_io::FastaWriter writer(config->outfbase, "",
+                                   config->enumerate_out_sequences,
+                                   true, /* async write */
+                                   "w" /* append mode */);
+        seq_io::read_fasta_file_critical(files.at(0), [&](kseq_t *read_stream) {
+            ++total_read_count;
+            thread_pool.enqueue([g=graph.get(),
+                                 s=std::string(read_stream->seq.s, read_stream->seq.l),
+                                 &print_mutex,
+                                 &output_read_count,
+                                 &writer]() {
+                for (auto node : map_to_nodes_sequentially(*g, s)) {
+                    if (node && (g->has_multiple_outgoing(node) || g->indegree(node) > 1)) {
+                        std::lock_guard<std::mutex> lock(print_mutex);
+                        ++output_read_count;
+                        writer.write(s);
+                        break;
+                    }
+                }
+            });
+        }, config->forward_and_reverse);
+        thread_pool.join();
+        logger->trace("Kept {} / {} sequences", output_read_count, total_read_count);
+        return 0;
+    }
+
     if (config->map_sequences) {
         if (graph->get_mode() == DeBruijnGraph::PRIMARY) {
             graph = std::make_shared<CanonicalDBG>(graph);
