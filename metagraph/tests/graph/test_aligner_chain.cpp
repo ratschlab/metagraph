@@ -38,11 +38,10 @@ TYPED_TEST(DBGAlignerPostChainTest, align_chain_swap) {
     std::string reference = "ATGATATGATGACCCCGG";
     std::string query     = "TGACCCCGGATGATATGA";
 
-    auto graph = std::make_shared<DBGSuccinct>(k);
+    auto graph = build_graph_batch<TypeParam>(k, { reference });
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     config.post_chain_alignments = true;
-    graph->add_sequence(reference);
 
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
@@ -55,15 +54,15 @@ TYPED_TEST(DBGAlignerPostChainTest, align_chain_swap) {
 TYPED_TEST(DBGAlignerPostChainTest, align_chain_overlap_2) {
     size_t k = 5;
     std::string reference1 = "TGAGGATCAG";
-    std::string reference2 =        "CAGCTAGCTAGCTAGC";
+    std::string reference2 =      "AACAGCTAGCTAGCTAGC";
     std::string query      = "TGAGGATCAGCTAGCTAGCTAGC";
 
-    auto graph = std::make_shared<DBGSuccinct>(k);
+    auto graph = build_graph_batch<TypeParam>(k, { reference1, reference2 });
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
-    config.post_chain_alignments = true;
-    graph->add_sequence(reference1);
-    graph->add_sequence(reference2);
+    // config.post_chain_alignments = true;
+    config.min_seed_length = 3;
+    config.max_seed_length = 3;
 
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
