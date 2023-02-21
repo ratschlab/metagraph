@@ -352,6 +352,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
         return a.get_query_view().end() == b_first_end;
     };
 
+
     int64_t coord_offset = 0;
     for (size_t i = 1; i < chain.size(); ++i) {
         assert(chain[i].first.is_valid(graph_, &config_));

@@ -44,7 +44,7 @@ struct DBGAlignerConfig {
     int8_t gap_extension_penalty = -2;
     int8_t left_end_bonus = 0;
     int8_t right_end_bonus = 0;
-    int8_t node_insertion_penalty = -6;
+    int8_t node_insertion_penalty = std::numeric_limits<int8_t>::min();
     score_t label_change_score = ninf;
 
     bool forward_and_reverse_complement = true;
@@ -84,6 +84,12 @@ struct DBGAlignerConfig {
     bool check_config_scores() const;
 
     void set_scoring_matrix();
+
+    void set_node_insertion_penalty(size_t graph_k) {
+        node_insertion_penalty = graph_k <= min_seed_length
+            ? std::numeric_limits<int8_t>::min()
+            : gap_opening_penalty + (graph_k - min_seed_length - 1) * gap_extension_penalty;
+    }
 
     // Protein matrices
     static const ScoreMatrix score_matrix_blosum62;

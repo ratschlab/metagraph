@@ -1253,7 +1253,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                         for (int64_t c_j : it->second) {
                             for (int64_t c : jt->second) {
                                 int64_t coord_dist = c - c_j;
-                                if (coord_dist < 0)
+                                if (coord_dist <= 0)
                                     continue;
 
                                 score_t gap = std::abs(coord_dist - dist);
@@ -1275,10 +1275,29 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                     }
                     ++it;
                     ++jt;
-                } else if (it->first < jt->first) {
-                    ++it;
                 } else {
-                    ++jt;
+                    // if (begin >= end_j) {
+                    //     // perhaps a disjoint alignment?
+                    //     score_t gap = dist - 1;
+                    //     assert(gap > 0);
+                    //     score_t gap_cost = config_.gap_opening_penalty
+                    //                         + (gap - 1) * config_.gap_extension_penalty;
+                    //     score_t updated_score = base_added_score + gap_cost;
+
+                    //     if (updated_score > score) {
+                    //         score = updated_score;
+                    //         last_dist = 0;
+                    //         last = j;
+                    //         last_q_dist = 0;
+                    //         updated = true;
+                    //     }
+                    // }
+
+                    if (it->first < jt->first) {
+                        ++it;
+                    } else {
+                        ++jt;
+                    }
                 }
             }
 
