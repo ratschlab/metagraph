@@ -105,9 +105,9 @@ std::vector<Alignment> SeedFilteringExtender::connect_seeds(const Alignment &fir
                                                             int64_t coord_dist,
                                                             score_t min_path_score) {
     auto [left, next] = first.split_seed(graph_->get_k() - 1, config_);
-    DEBUG_LOG("Split seed: {}\n\t{}\n\t{}", first, left, next);
-    coord_dist += second.get_sequence().size() + next.get_sequence().size()
-            - first.get_sequence().size();
+    // coord_dist += second.get_sequence().size() + next.get_sequence().size()
+    //         - first.get_sequence().size();
+    coord_dist += next.get_sequence().size();
     assert(coord_dist > 0);
 
     auto extensions = get_extensions(next, min_path_score,
@@ -1009,7 +1009,7 @@ std::vector<Alignment> DefaultColumnExtender::backtrack(score_t min_path_score,
                     ++dummy_counter;
                 } else if (dummy_counter) {
                     ops.append(Cigar::NODE_INSERTION, dummy_counter);
-                    // extra_score -= config_.gap_opening_penalty + (dummy_counter - 1) * config_.gap_extension_penalty;
+                    score += config_.node_insertion_penalty;
                     dummy_counter = 0;
                 }
             }

@@ -87,14 +87,14 @@ PathIndex<PathStorage, PathBoundaries>
                            AnnotatedDBG::graph_to_anno_index);
 
             std::lock_guard<std::mutex> lock(mu);
-            uint64_t coord = boundaries.back();
+            uint64_t coord = boundaries.back() + dbg_succ.get_k() - 1;
             annotator.add_labels(edges, DUMMY);
 
             for (auto edge : edges) {
                 annotator.add_label_coord(edge, DUMMY, coord++);
             }
 
-            assert(coord == boundaries.back() + edges.size());
+            // assert(coord == boundaries.back() + edges.size());
             boundaries.emplace_back(coord);
         },
         get_num_threads(), false, false, NULL, true // TODO: for now, ignore dummy k-mers
@@ -119,7 +119,7 @@ PathIndex<PathStorage, PathBoundaries>
     });
 
     if (total_seq_count)
-        logger->trace("Indexed {} / {} sequences", seq_count, total_seq_count);
+        logger->info("Indexed {} / {} sequences", seq_count, total_seq_count);
 
     assert(annotator.num_labels() == 1);
     assert(std::adjacent_find(boundaries.begin(), boundaries.end()) == boundaries.end());
@@ -223,6 +223,8 @@ PathIndex<PathStorage, PathBoundaries>
     } else {
         throw std::runtime_error("Only ColumnCoord and RowDiffCoord annotators supported");
     }
+
+    set_graph(graph);
 }
 
 auto IPathIndex
@@ -252,50 +254,38 @@ auto IPathIndex
     return ret_val;
 }
 
-template <class PathStorage, class PathBoundaries>
-auto PathIndex<PathStorage, PathBoundaries>
-::get_coords(const std::vector<node_index> &nodes) const -> std::vector<RowTuples> {
-    std::vector<Row> rows;
-    rows.reserve(nodes.size());
-    std::transform(nodes.begin(), nodes.end(), std::back_inserter(rows),
-                   AnnotatedDBG::graph_to_anno_index);
+// template <>
+// auto PathIndex<>
+// ::get_coords(const std::vector<node_index> &nodes) const -> std::vector<RowTuples> {
+//     assert(dbg_succ_);
+//     assert(std::all_of(nodes.begin(), nodes.end(),
+//         [this](const auto &a) {
+//             return dbg_succ_->get_node_sequence(a).find(boss::BOSS::kSentinel)
+//                 == std::string::npos;
+//         }
+//     ));
 
-    auto row_tuples = get_row_tuples(rows);
-    std::vector<RowTuples> ret_val;
-    ret_val.reserve(row_tuples.size());
-    for (auto &tuples : row_tuples) {
-        VectorMap<size_t, Tuple> out_tuples;
-        assert(tuples.size() == 1);
-        for (const auto &[c, tuple] : tuples) {
-            assert(!c);
-            assert(std::adjacent_find(tuple.begin(), tuple.end()) == tuple.end());
-            for (auto coord : tuple) {
-                out_tuples[coord_to_path_id(coord)].emplace_back(coord);
-            }
-        }
-        ret_val.emplace_back(out_tuples.values_container().begin(),
-                             out_tuples.values_container().end());
-    }
+//     return IPathIndex::get_coords(nodes);
 
-    size_t max_path_id = path_boundaries_.num_set_bits() + 1;
-    tsl::hopscotch_map<Row, std::vector<size_t>> row_inv_map;
-    for (size_t i = 0; i < rows.size(); ++i) {
-        row_inv_map[rows[i]].emplace_back(i);
-    }
+//     // size_t max_path_id = path_boundaries_.num_set_bits() + 1;
+//     // tsl::hopscotch_map<Row, std::vector<size_t>> row_inv_map;
+//     // for (size_t i = 0; i < rows.size(); ++i) {
+//     //     row_inv_map[rows[i]].emplace_back(i);
+//     // }
 
-    auto [rd_ids, rd_paths_trunc] = paths_indices_.get_rd_ids(rows);
-    for (size_t i = 0; i < rd_paths_trunc.size(); ++i) {
-        if (rd_paths_trunc[i].size() > 1) {
-            for (size_t j = 0; j < rd_paths_trunc[i].size(); ++j) {
-                for (size_t idx : row_inv_map[rd_ids[rd_paths_trunc[i][j]]]) {
-                    ret_val[idx].emplace_back(max_path_id + i, Tuple{ j });
-                }
-            }
-        }
-    }
+//     // auto [rd_ids, rd_paths_trunc] = paths_indices_.get_rd_ids(rows);
+//     // for (size_t i = 0; i < rd_paths_trunc.size(); ++i) {
+//     //     if (rd_paths_trunc[i].size() > 1) {
+//     //         for (size_t j = 0; j < rd_paths_trunc[i].size(); ++j) {
+//     //             for (size_t idx : row_inv_map[rd_ids[rd_paths_trunc[i][j]]]) {
+//     //                 ret_val[idx].emplace_back(max_path_id + i, Tuple{ j });
+//     //             }
+//     //         }
+//     //     }
+//     // }
 
-    return ret_val;
-}
+//     // return ret_val;
+// }
 
 template class PathIndex<>;
 

@@ -48,7 +48,7 @@ class PathIndex : public IPathIndex {
         return dynamic_cast<const DBGSuccinct*>(&graph) == dbg_succ_.get();
     }
 
-    virtual std::vector<RowTuples> get_coords(const std::vector<node_index> &nodes) const override final;
+    // virtual std::vector<RowTuples> get_coords(const std::vector<node_index> &nodes) const override final;
 
   private:
     std::shared_ptr<const DBGSuccinct> dbg_succ_;

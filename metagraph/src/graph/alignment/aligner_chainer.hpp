@@ -40,10 +40,9 @@ chain_alignments(const IDBGAligner &aligner,
                  std::string_view query_rc);
 
 std::tuple<size_t, size_t, size_t>
-chain_seeds(const IDBGAligner &aligner,
-            std::string_view query,
-            std::shared_ptr<ISeeder> &seeder,
-            SeedFilteringExtender &extender);
+chain_and_filter_seeds(const IDBGAligner &aligner,
+                       std::shared_ptr<ISeeder> &seeder,
+                       SeedFilteringExtender&& extender);
 
 } // namespace align
 } // namespace graph

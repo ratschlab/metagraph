@@ -194,23 +194,20 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
         };
 
         std::string_view this_query = paths[i].get_query(false);
+        std::string_view reverse = paths[i].get_query(true);
         assert(this_query == query);
 
         if (graph_.get_extension_threadsafe<IPathIndex>()) {
             if (graph_.get_mode() != DeBruijnGraph::BASIC)
                 seeder_rc = std::make_shared<ManualSeeder>();
 
-            Extender extender(*this, paths[i].get_query(false));
-            chain_seeds(*this, paths[i].get_query(false), seeder, extender);
-            if (seeder_rc && seeder_rc->get_alignments().size()) {
-                Extender extender_rc(*this, paths[i].get_query(true));
-                chain_seeds(*this, paths[i].get_query(true), seeder_rc, extender_rc);
-            }
+            chain_and_filter_seeds(*this, seeder, Extender(*this, this_query));
+            if (seeder_rc && seeder_rc->get_alignments().size())
+                chain_and_filter_seeds(*this, seeder_rc, Extender(*this, reverse));
         }
 
 #if ! _PROTEIN_GRAPH
         if (seeder_rc) {
-            std::string_view reverse = paths[i].get_query(true);
             auto [num_seeds_c, num_extensions_c, num_explored_nodes_c] =
                 align_both_directions(this_query, reverse, *seeder, *seeder_rc,
                                       add_alignment, get_min_path_score);
@@ -250,27 +247,27 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
         size_t query_coverage = 0;
 
         auto alignments = aggregator.get_alignments();
-        if (config_.post_chain_alignments) {
-            bool &post_chain = const_cast<bool&>(config_.post_chain_alignments);
-            bool &allow_left_trim = const_cast<bool&>(config_.allow_left_trim);
-            bool &allow_label_change = const_cast<bool&>(config_.allow_label_change);
-            bool old_allow_left_trim = allow_left_trim;
-            bool old_allow_label_change = allow_label_change;
-            allow_left_trim = false;
-            post_chain = false;
-            allow_label_change = true;
-            size_t n_ext;
-            size_t n_exp;
-            std::tie(alignments, n_ext, n_exp)
-                = chain_alignments<AlignmentCompare>(*this, std::move(alignments),
-                                                     paths[i].get_query(false),
-                                                     paths[i].get_query(true));
-            post_chain = true;
-            allow_left_trim = old_allow_left_trim;
-            allow_label_change = old_allow_label_change;
-            num_extensions += n_ext;
-            num_explored_nodes += n_exp;
-        }
+        // if (config_.post_chain_alignments) {
+        //     bool &post_chain = const_cast<bool&>(config_.post_chain_alignments);
+        //     bool &allow_left_trim = const_cast<bool&>(config_.allow_left_trim);
+        //     bool &allow_label_change = const_cast<bool&>(config_.allow_label_change);
+        //     bool old_allow_left_trim = allow_left_trim;
+        //     bool old_allow_label_change = allow_label_change;
+        //     allow_left_trim = false;
+        //     post_chain = false;
+        //     allow_label_change = true;
+        //     size_t n_ext;
+        //     size_t n_exp;
+        //     std::tie(alignments, n_ext, n_exp)
+        //         = chain_alignments<AlignmentCompare>(*this, std::move(alignments),
+        //                                              paths[i].get_query(false),
+        //                                              paths[i].get_query(true));
+        //     post_chain = true;
+        //     allow_left_trim = old_allow_left_trim;
+        //     allow_label_change = old_allow_label_change;
+        //     num_extensions += n_ext;
+        //     num_explored_nodes += n_exp;
+        // }
 
         for (auto&& alignment : alignments) {
             assert(alignment.is_valid(graph_, &config_));
@@ -350,13 +347,21 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
     std::vector<Alignment> partial_alignments;
     std::vector<int64_t> coord_offsets { 0 };
 
+    auto is_coord_jump = [&](const Alignment &a, const Alignment &b) {
+        auto b_first_end = b.get_query_view().begin() + graph_.get_k() - b.get_offset();
+        return a.get_query_view().end() == b_first_end;
+    };
+
     int64_t coord_offset = 0;
     for (size_t i = 1; i < chain.size(); ++i) {
         assert(chain[i].first.is_valid(graph_, &config_));
         coord_offset += chain[i].second;
-        assert(coord_offset > 0);
 
-        auto alignments = extender.connect_seeds(cur, chain[i].first, coord_offset);
+        std::vector<Alignment> alignments;
+        if (!is_coord_jump(cur, chain[i].first)) {
+            assert(coord_offset > 0);
+            alignments = extender.connect_seeds(cur, chain[i].first, coord_offset);
+        }
 
         if (alignments.size()) {
             // TODO: what if there are multiple alignments?
@@ -388,7 +393,14 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
             }
 
             int64_t num_unknown = coord_offsets[i] - first->get_sequence().size();
-            if (num_unknown > 0 && next.get_clipping() > num_unknown) {
+            if (is_coord_jump(*first, next)) {
+                ssize_t overlap = first->get_query_view().end() - next.get_query_view().begin();
+                next.trim_query_prefix(overlap, graph_.get_k() - 1, config_);
+                next.insert_gap_prefix(-overlap, graph_.get_k() - 1, config_);
+                first->splice(std::move(next));
+                std::swap(*first, next);
+                first = &next;
+            } else if (num_unknown > 0 && next.get_clipping() > num_unknown) {
                 auto merged = *first;
                 auto next_fixed = next;
                 next_fixed.trim_offset();
