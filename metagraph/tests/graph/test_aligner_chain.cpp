@@ -140,67 +140,71 @@ TYPED_TEST(DBGAlignerPostChainTest, align_chain_delete_no_chain_if_full_coverage
     check_extend(graph, aligner.get_config(), paths, query);
 }
 
+TYPED_TEST(DBGAlignerPostChainTest, align_chain_delete1) {
+    size_t k = 10;
+    std::string reference1 = "TTTTGAGGATCAGTTCTAGCTTG";
+    std::string reference2 =                "CTAGCTTGCTAGCGCTAGCTAGATC";
+    std::string query      = "TTTTGAGGATCAG""CTAGCTTGCTAGCGCTAGCTAGATC";
 
-// // TODO: these three tests only makes sense if NODE_INSERTION is scored affinely
-// TYPED_TEST(DBGAlignerPostChainTest, align_chain_delete1) {
-//     size_t k = 10;
-//     std::string reference1 = "TGAGGATCAGTTCTAGCTTG";
-//     std::string reference2 =             "CTAGCTTGCTAGCGCTAGCTAGATC";
-//     std::string query      = "TGAGGATCAG""CTAGCTTGCTAGCGCTAGCTAGATC";
+    auto graph = build_graph_batch<TypeParam>(k, { reference1, reference2 });
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+    config.min_seed_length = 8;
+    config.max_seed_length = 8;
+    config.set_node_insertion_penalty(k);
+    // config.post_chain_alignments = true;
 
-//     auto graph = build_graph_batch<TypeParam>(k, { reference1, reference2 });
-//     DBGAlignerConfig config;
-//     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
-//     // config.post_chain_alignments = true;
+    DBGAligner<> aligner(*graph, config);
+    auto paths = aligner.align(query);
+    check_chain(paths, *graph, config);
+    ASSERT_EQ(1u, paths.size());
+    EXPECT_EQ(std::string("TTTTGAGGATCAGTTCTAGCTTGCTAGCGCTAGCTAGATC"), paths[0].get_sequence());
+}
 
-//     DBGAligner<> aligner(*graph, config);
-//     auto paths = aligner.align(query);
-//     check_chain(paths, *graph, config);
-//     ASSERT_EQ(1u, paths.size());
-//     EXPECT_EQ(std::string("TGAGGATCAGTTCTAGCTTGCTAGCGCTAGCTAGATC"), paths[0].get_sequence());
-//     check_extend(graph, aligner.get_config(), paths, query);
-// }
+TYPED_TEST(DBGAlignerPostChainTest, align_chain_delete_mismatch) {
+    size_t k = 10;
+    std::string reference1 = "AAAAAGGGTTTTTGAGGATCAGTTCTAGCTTG";
+    std::string reference2 =                         "CTAGCTTGCTAGCGCTAGCTAGATC";
+    std::string query      = "AAAAAGGGTTTTTGAGGATCAG""CTTGCTTGCTAGCGCTAGCTAGATC";
+    //                                                  X
 
-// TYPED_TEST(DBGAlignerPostChainTest, align_chain_delete_mismatch) {
-//     size_t k = 10;
-//     std::string reference1 = "TGAGGATCAGTTCTAGCTTG";
-//     std::string reference2 =             "CTAGCTTGCTAGCGCTAGCTAGATC";
-//     std::string query      = "TGAGGATCAG""CTTGCTTGCTAGCGCTAGCTAGATC";
-//     //                                      X
+    auto graph = build_graph_batch<TypeParam>(k, { reference1, reference2 });
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+    config.min_seed_length = 5;
+    config.max_seed_length = 5;
+    config.set_node_insertion_penalty(k);
+    // config.post_chain_alignments = true;
 
-//     auto graph = build_graph_batch<TypeParam>(k, { reference1, reference2 });
-//     DBGAlignerConfig config;
-//     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
-//     // config.post_chain_alignments = true;
+    DBGAligner<> aligner(*graph, config);
+    auto paths = aligner.align(query);
+    check_chain(paths, *graph, config);
+    ASSERT_EQ(1u, paths.size());
+    EXPECT_EQ(std::string("AAAAAGGGTTTTTGAGGATCAGTTCTAGCTTGCTAGCGCTAGCTAGATC"), paths[0].get_sequence());
+}
 
-//     DBGAligner<> aligner(*graph, config);
-//     auto paths = aligner.align(query);
-//     check_chain(paths, *graph, config);
-//     ASSERT_EQ(1u, paths.size());
-//     EXPECT_EQ(std::string("TGAGGATCAGTTCTAGCTTGCTAGCGCTAGCTAGATC"), paths[0].get_sequence());
-//     check_extend(graph, aligner.get_config(), paths, query);
-// }
+TYPED_TEST(DBGAlignerPostChainTest, align_chain_overlap_with_insert) {
+    size_t k = 10;
+    std::string reference1 = "TGAGGATCAGTTCTAGCTTG";
+    std::string reference2 =              "CTAGCTTGCTAGCGCTAGCTAGATC";
+    std::string query      = "TGAGGATCAGTTCTAAGCTTGCTAGCGCTAGCTAGATC";
 
-// TYPED_TEST(DBGAlignerPostChainTest, align_chain_overlap_with_insert) {
-//     size_t k = 10;
-//     std::string reference1 = "TGAGGATCAGTTCTAGCTTG";
-//     std::string reference2 =              "CTAGCTTGCTAGCGCTAGCTAGATC";
-//     std::string query      = "TGAGGATCAGTTCTAAGCTTGCTAGCGCTAGCTAGATC";
+    auto graph = build_graph_batch<TypeParam>(k, { reference1, reference2 });
+    DBGAlignerConfig config;
+    config.gap_opening_penalty = -1;
+    config.gap_extension_penalty = -1;
+    config.min_seed_length = 6;
+    config.max_seed_length = 6;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(1, -1, -1);
+    config.set_node_insertion_penalty(k);
+    // config.post_chain_alignments = true;
 
-//     auto graph = build_graph_batch<TypeParam>(k, { reference1, reference2 });
-//     DBGAlignerConfig config;
-//     config.gap_opening_penalty = -1;
-//     config.gap_extension_penalty = -1;
-//     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(1, -1, -1);
-//     // config.post_chain_alignments = true;
-
-//     DBGAligner<> aligner(*graph, config);
-//     auto paths = aligner.align(query);
-//     check_chain(paths, *graph, config);
-//     ASSERT_EQ(1u, paths.size());
-//     EXPECT_EQ(std::string("TGAGGATCAGTTCTAGCTTGCTAGCGCTAGCTAGATC"), paths[0].get_sequence());
-//     check_extend(graph, aligner.get_config(), paths, query);
-// }
+    DBGAligner<> aligner(*graph, config);
+    auto paths = aligner.align(query);
+    check_chain(paths, *graph, config);
+    ASSERT_EQ(1u, paths.size());
+    EXPECT_EQ(std::string("TGAGGATCAGTTCTAGCTTGCTAGCGCTAGCTAGATC"), paths[0].get_sequence());
+}
 
 
 TYPED_TEST(DBGAlignerPostChainTest, align_chain_deletion_in_overlapping_node) {
