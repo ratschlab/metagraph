@@ -1197,6 +1197,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
     assert(std::adjacent_find(seeds.begin(), seeds.end()) == seeds.end());
     size_t bandwidth = 65;
     ssize_t min_overlap = config_.min_seed_length;
+    float sl = static_cast<float>(config_.min_seed_length) * 0.01;
 
     for (size_t j = 0; j < seeds.size() - 1; ++j) {
         const auto &[end_j, col_j, last_q_dist_j, begin_j, node_j, score_j, last_j, last_dist_j, coord_idx_j] = seeds[j];
@@ -1275,11 +1276,8 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                                 if (coord_dist <= 0)
                                     continue;
 
-                                score_t gap = std::abs(coord_dist - dist);
-                                score_t gap_cost = gap != 0
-                                    ? config_.gap_opening_penalty
-                                        + (gap - 1) * config_.gap_extension_penalty
-                                    : 0;
+                                float gap = std::abs(coord_dist - dist);
+                                score_t gap_cost = -sl * gap - float(log2(gap + 1)) * 0.5;
                                 score_t updated_score = base_added_score + gap_cost;
 
                                 if (std::tie(updated_score, last_dist) > std::tie(score, coord_dist)) {
