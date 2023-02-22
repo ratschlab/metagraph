@@ -11,6 +11,7 @@
 #include "graph/graph_extensions/path_index.hpp"
 #include "config/config.hpp"
 #include "load/load_graph.hpp"
+#include "seq_io/sequence_io.hpp"
 
 
 namespace mtg {
@@ -43,7 +44,14 @@ int transform_graph(Config *config) {
         throw std::runtime_error("Only implemented for DBGSuccinct");
 
     if (config->coordinates) {
-        graph::PathIndex<>(*dbg_succ, files.at(0)).serialize(config->outfbase + dbg_succ->file_extension());
+        graph::PathIndex<>(*dbg_succ, files.at(0),
+            [&](const auto &callback) {
+                if (config->infbase.size()) {
+                    seq_io::read_fasta_file_critical(config->infbase, [&](auto *read_stream) {
+                        callback(std::string_view(read_stream->seq.s, read_stream->seq.l));
+                    }, config->forward_and_reverse);
+                }
+            }).serialize(config->outfbase + dbg_succ->file_extension());
         return 0;
     }
 

@@ -201,9 +201,18 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
             if (graph_.get_mode() != DeBruijnGraph::BASIC)
                 seeder_rc = std::make_shared<ManualSeeder>();
 
-            chain_and_filter_seeds(*this, seeder, Extender(*this, this_query));
-            if (seeder_rc && seeder_rc->get_alignments().size())
-                chain_and_filter_seeds(*this, seeder_rc, Extender(*this, reverse));
+            auto [num_seeds_c, num_extensions_c, num_explored_nodes_c] =
+                chain_and_filter_seeds(*this, seeder, Extender(*this, this_query));
+            num_seeds += num_seeds_c;
+            num_extensions += num_extensions_c;
+            num_explored_nodes += num_explored_nodes_c;
+            if (seeder_rc && seeder_rc->get_alignments().size()) {
+                auto [num_seeds_c, num_extensions_c, num_explored_nodes_c] =
+                    chain_and_filter_seeds(*this, seeder_rc, Extender(*this, reverse));
+                num_seeds += num_seeds_c;
+                num_extensions += num_extensions_c;
+                num_explored_nodes += num_explored_nodes_c;
+            }
         }
 
 #if ! _PROTEIN_GRAPH
