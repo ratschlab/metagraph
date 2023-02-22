@@ -417,11 +417,15 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
                 next.trim_query_prefix(overlap, graph_.get_k() - 1, config_);
                 next.insert_gap_prefix(-overlap, graph_.get_k() - 1, config_);
                 first->splice(std::move(next));
+                assert(first->is_valid(graph_, &config_));
                 std::swap(*first, next);
                 first = &next;
             } else if (is_disconnected[i]) {
-                next.insert_gap_prefix(num_unknown, graph_.get_k() - 1, config_);
+                assert(first->get_query_view().end() <= next.get_query_view().begin());
+                next.insert_gap_prefix(next.get_query_view().begin() - first->get_query_view().end(),
+                                       graph_.get_k() - 1, config_);
                 first->splice(std::move(next));
+                assert(first->is_valid(graph_, &config_));
                 std::swap(*first, next);
                 first = &next;
             } else if (num_unknown > 0 && next.get_clipping() > num_unknown) {
