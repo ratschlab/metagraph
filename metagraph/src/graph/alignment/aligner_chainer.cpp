@@ -1196,6 +1196,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
     std::sort(seeds.begin(), seeds.end());
     assert(std::adjacent_find(seeds.begin(), seeds.end()) == seeds.end());
     size_t bandwidth = 65;
+    ssize_t min_overlap = config_.min_seed_length;
 
     for (size_t j = 0; j < seeds.size() - 1; ++j) {
         const auto &[end_j, col_j, last_q_dist_j, begin_j, node_j, score_j, last_j, last_dist_j, coord_idx_j] = seeds[j];
@@ -1235,7 +1236,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
             auto jt = coords.begin();
             bool updated = false;
 
-            if (last_q_dist_j && end == end_j && static_cast<size_t>(end_j - begin) >= config_.min_seed_length) {
+            if (last_q_dist_j && end == end_j && end_j - begin >= min_overlap) {
                 // same suffix seeds matching to different nodes
                 score_t updated_score = base_added_score + config_.node_insertion_penalty;
                 if (updated_score > score) {
@@ -1249,11 +1250,11 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
 
             if (begin >= end_j) {
                 // perhaps a disjoint alignment?
-                score_t gap = std::min(static_cast<int64_t>(graph_.get_k()), dist);
+                score_t gap = begin - end_j;
                 score_t gap_cost = config_.node_insertion_penalty
                                 + config_.gap_opening_penalty
                                 + config_.gap_opening_penalty
-                                    + (gap - 1) * config_.gap_extension_penalty;
+                                    + std::max(gap - 1, 0) * config_.gap_extension_penalty;
                 score_t updated_score = base_added_score + gap_cost;
 
                 if (updated_score > score) {

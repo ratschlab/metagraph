@@ -78,7 +78,7 @@ class DBGAligner : public IDBGAligner {
     typedef Alignment::score_t score_t;
 
     const DeBruijnGraph &graph_;
-    DBGAlignerConfig config_;
+    mutable DBGAlignerConfig config_;
 
     virtual BatchSeeders build_seeders(const std::vector<Query> &seq_batch,
                                        const std::vector<AlignmentResults> &wrapped_seqs) const;

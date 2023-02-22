@@ -353,7 +353,6 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
         return a.get_query_view().end() == b_first_end;
     };
 
-
     int64_t coord_offset = 0;
     for (size_t i = 1; i < chain.size(); ++i) {
         assert(chain[i].first.is_valid(graph_, &config_));
@@ -367,6 +366,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
 
             if (!is_coord_jump(cur, chain[i].first)) {
                 assert(coord_offset > 0);
+                config_.allow_label_change = (chain[i].first.label_columns != chain[i - 1].first.label_columns);
                 alignments = extender.connect_seeds(cur, chain[i].first, coord_offset);
             }
         }
