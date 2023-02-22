@@ -1235,21 +1235,39 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
             auto jt = coords.begin();
             bool updated = false;
 
-            while (it != coords_j.end() && jt != coords.end()) {
-                if (last_q_dist_j && end == end_j && static_cast<size_t>(end_j - begin) >= config_.min_seed_length) {
-                    // same suffix seeds matching to different nodes
-                    score_t updated_score = base_added_score + config_.node_insertion_penalty;
-                    if (updated_score > score) {
-                        score = updated_score;
-                        last_dist = 0;
-                        last = j;
-                        last_q_dist = 0;
-                        updated = true;
-                    }
+            if (last_q_dist_j && end == end_j && static_cast<size_t>(end_j - begin) >= config_.min_seed_length) {
+                // same suffix seeds matching to different nodes
+                score_t updated_score = base_added_score + config_.node_insertion_penalty;
+                if (updated_score > score) {
+                    score = updated_score;
+                    last_dist = 0;
+                    last = j;
+                    last_q_dist = 0;
+                    updated = true;
                 }
+            }
 
-                if (it->first == jt->first) {
-                    if (end > end_j) {
+            if (begin >= end_j) {
+                // perhaps a disjoint alignment?
+                score_t gap = std::min(static_cast<int64_t>(graph_.get_k()), dist);
+                score_t gap_cost = config_.node_insertion_penalty
+                                + config_.gap_opening_penalty
+                                + config_.gap_opening_penalty
+                                    + (gap - 1) * config_.gap_extension_penalty;
+                score_t updated_score = base_added_score + gap_cost;
+
+                if (updated_score > score) {
+                    score = updated_score;
+                    last_dist = std::numeric_limits<uint32_t>::max() + dist;
+                    last = j;
+                    last_q_dist = 0;
+                    updated = true;
+                }
+            }
+
+            if (end > end_j) {
+                while (it != coords_j.end() && jt != coords.end()) {
+                    if (it->first == jt->first) {
                         for (int64_t c_j : it->second) {
                             for (int64_t c : jt->second) {
                                 int64_t coord_dist = c - c_j;
@@ -1272,28 +1290,9 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                                 }
                             }
                         }
-                    }
-                    ++it;
-                    ++jt;
-                } else {
-                    // if (begin >= end_j) {
-                    //     // perhaps a disjoint alignment?
-                    //     score_t gap = dist - 1;
-                    //     assert(gap > 0);
-                    //     score_t gap_cost = config_.gap_opening_penalty
-                    //                         + (gap - 1) * config_.gap_extension_penalty;
-                    //     score_t updated_score = base_added_score + gap_cost;
-
-                    //     if (updated_score > score) {
-                    //         score = updated_score;
-                    //         last_dist = 0;
-                    //         last = j;
-                    //         last_q_dist = 0;
-                    //         updated = true;
-                    //     }
-                    // }
-
-                    if (it->first < jt->first) {
+                        ++it;
+                        ++jt;
+                    } else if (it->first < jt->first) {
                         ++it;
                     } else {
                         ++jt;
@@ -1313,17 +1312,17 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
 
     tsl::hopscotch_map<Alignment::Column, size_t> used_cols;
     sdsl::bit_vector used(seeds.size(), false);
-    std::vector<std::pair<score_t, size_t>> best_chain;
+    std::vector<std::tuple<score_t, size_t, size_t>> best_chain;
     best_chain.reserve(seeds.size());
     for (size_t j = 0; j < seeds.size(); ++j) {
         const auto &[end, col, last_q_dist, begin, node, score, last, last_dist, coord_idx] = seeds[j];
-        best_chain.emplace_back(-score, j);
+        best_chain.emplace_back(-score, last_dist, j);
     }
 
     std::sort(best_chain.begin(), best_chain.end());
 
     for (size_t j = 0; j < best_chain.size(); ++j) {
-        auto [nscore, k] = best_chain[j];
+        auto [nscore, last_dist, k] = best_chain[j];
         if (used[k])
             continue;
 

@@ -86,9 +86,8 @@ struct DBGAlignerConfig {
     void set_scoring_matrix();
 
     void set_node_insertion_penalty(size_t graph_k) {
-        node_insertion_penalty = graph_k <= min_seed_length
-            ? std::numeric_limits<int8_t>::min()
-            : gap_opening_penalty + (graph_k - min_seed_length - 1) * gap_extension_penalty;
+        node_insertion_penalty
+            = (graph_k - std::min(graph_k - 1, min_seed_length)) * gap_extension_penalty;
     }
 
     // Protein matrices

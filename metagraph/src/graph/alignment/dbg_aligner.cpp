@@ -345,6 +345,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
     Alignment best = cur;
 
     std::vector<Alignment> partial_alignments;
+    std::vector<bool> is_disconnected { false };
     std::vector<int64_t> coord_offsets { 0 };
 
     auto is_coord_jump = [&](const Alignment &a, const Alignment &b) {
@@ -356,12 +357,18 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
     int64_t coord_offset = 0;
     for (size_t i = 1; i < chain.size(); ++i) {
         assert(chain[i].first.is_valid(graph_, &config_));
-        coord_offset += chain[i].second;
-
         std::vector<Alignment> alignments;
-        if (!is_coord_jump(cur, chain[i].first)) {
-            assert(coord_offset > 0);
-            alignments = extender.connect_seeds(cur, chain[i].first, coord_offset);
+
+        if (chain[i].second >= std::numeric_limits<uint32_t>::max()) {
+            // connected disjoint regions
+            coord_offset += chain[i].second - std::numeric_limits<uint32_t>::max();
+        } else {
+            coord_offset += chain[i].second;
+
+            if (!is_coord_jump(cur, chain[i].first)) {
+                assert(coord_offset > 0);
+                alignments = extender.connect_seeds(cur, chain[i].first, coord_offset);
+            }
         }
 
         if (alignments.size()) {
@@ -372,6 +379,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
         } else {
             DEBUG_LOG("Extension not found, restarting from seed {}", chain[i].first);
             partial_alignments.emplace_back(cur);
+            is_disconnected.emplace_back(chain[i].second >= std::numeric_limits<uint32_t>::max());
             std::swap(cur, chain[i].first);
             if (AlignmentCompare()(best, partial_alignments.back()))
                 best = partial_alignments.back();
@@ -383,6 +391,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
 
     if (try_connect && partial_alignments.size()) {
         partial_alignments.emplace_back(cur);
+        is_disconnected.emplace_back(chain.back().second >= std::numeric_limits<uint32_t>::max());
         assert(partial_alignments.size() == coord_offsets.size());
         Alignment *first = &partial_alignments[0];
         DEBUG_LOG("Partial alignments:\n\t{}", fmt::join(partial_alignments, "\n\t"));
@@ -398,6 +407,11 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
                 ssize_t overlap = first->get_query_view().end() - next.get_query_view().begin();
                 next.trim_query_prefix(overlap, graph_.get_k() - 1, config_);
                 next.insert_gap_prefix(-overlap, graph_.get_k() - 1, config_);
+                first->splice(std::move(next));
+                std::swap(*first, next);
+                first = &next;
+            } else if (is_disconnected[i]) {
+                next.insert_gap_prefix(num_unknown, graph_.get_k() - 1, config_);
                 first->splice(std::move(next));
                 std::swap(*first, next);
                 first = &next;
