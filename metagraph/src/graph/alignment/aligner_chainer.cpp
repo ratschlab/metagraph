@@ -1381,7 +1381,11 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                                    ? it->second + it->first.get_query_view().size()
                                         - (it - 1)->second - (it - 1)->first.get_query_view().size()
                                    : 0);
-            logger->trace("\t{}\t(dist: {})", chain.back().first, chain.back().second);
+            logger->trace("\t{}\t(dist: {}{})", chain.back().first,
+                          it != jt && (it - 1)->first.get_query_view().end()
+                                         == it->first.get_query_view().begin() + graph_.get_k() - it->first.get_offset()
+                              ? "0 + " : "",
+                          chain.back().second);
         }
 
         std::vector<Alignment> alignments;

@@ -34,7 +34,7 @@ inline void check_chain(const AlignmentResults &paths,
 }
 
 TYPED_TEST(DBGAlignerPostChainTest, align_chain_swap) {
-    size_t k = 5;
+    size_t k = 11;
     std::string reference = "ATGATATGAGGGGGGGGGGGGTTTTTTTTGACCCCGGTTTAA";
     std::string query     = "TTTTTTTTGACCCCGGTTTAAATGATATGAGGGGGGGGGGGG";
 
@@ -98,18 +98,19 @@ TYPED_TEST(DBGAlignerPostChainTest, align_chain_overlap_mismatch) {
 }
 
 TYPED_TEST(DBGAlignerPostChainTest, align_chain_overlap_3_prefer_mismatch_over_gap) {
-    size_t k = 5;
+    size_t k = 11;
     std::string reference1 = "AAATTTTGAGGATCAG";
-    std::string reference2 =              "CAGGTTTATTTAATTAGCT";
-    std::string reference3 =                              "GCTTGCTAGCAAAAA";
+    std::string reference2 =          "GGATCAGGTTTATTTAATTAGCT";
+    std::string reference3 =                          "ATTAGCTTGCTAGCAAAAA";
     std::string query      = "AAATTTTGAGGATCAGCTTTATTTAATTAGCTTGCTAGCAAAAA";
     //                                        X
 
     auto graph = build_graph_batch<TypeParam>(k, { reference1, reference2, reference3 });
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
-    config.min_seed_length = 3;
-    config.max_seed_length = 3;
+    config.min_seed_length = 7;
+    config.max_seed_length = 7;
+    config.seed_complexity_filter = false;
     config.set_node_insertion_penalty(k);
     // config.post_chain_alignments = true;
 
