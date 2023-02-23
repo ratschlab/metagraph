@@ -1197,7 +1197,12 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
     assert(std::adjacent_find(seeds.begin(), seeds.end()) == seeds.end());
     size_t bandwidth = 65;
     ssize_t min_overlap = config_.min_seed_length;
-    float sl = static_cast<float>(config_.min_seed_length) * 0.01;
+    float sl = -static_cast<float>(config_.min_seed_length) * 0.01;
+    score_t match_score = config_.match_score("A");
+    score_t gap_open = config_.gap_opening_penalty / match_score;
+    score_t gap_ext = config_.gap_extension_penalty / match_score;
+    score_t node_insert = config_.node_insertion_penalty / match_score;
+
 
     for (size_t j = 0; j < seeds.size() - 1; ++j) {
         const auto &[end_j, col_j, last_q_dist_j, begin_j, node_j, score_j, last_j, last_dist_j, coord_idx_j] = seeds[j];
@@ -1239,7 +1244,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
 
             if (last_q_dist_j && end == end_j && end_j - begin >= min_overlap) {
                 // same suffix seeds matching to different nodes
-                score_t updated_score = base_added_score + config_.node_insertion_penalty;
+                score_t updated_score = base_added_score + node_insert;
                 if (updated_score > score) {
                     score = updated_score;
                     last_dist = 0;
@@ -1252,10 +1257,8 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
             if (begin >= end_j) {
                 // perhaps a disjoint alignment?
                 score_t gap = begin - end_j;
-                score_t gap_cost = config_.node_insertion_penalty
-                                + config_.gap_opening_penalty
-                                + config_.gap_opening_penalty
-                                    + std::max(gap - 1, 0) * config_.gap_extension_penalty;
+                score_t gap_cost = node_insert + gap_open + gap_open
+                                    + std::max(gap - 1, 0) * gap_ext;
                 score_t updated_score = base_added_score + gap_cost;
 
                 if (updated_score > score) {
@@ -1277,7 +1280,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                                     continue;
 
                                 float gap = std::abs(coord_dist - dist);
-                                score_t gap_cost = -sl * gap - float(log2(gap + 1)) * 0.5;
+                                score_t gap_cost = sl * gap - float(log2(gap + 1)) * 0.5;
                                 score_t updated_score = base_added_score + gap_cost;
 
                                 if (std::tie(updated_score, last_dist) > std::tie(score, coord_dist)) {

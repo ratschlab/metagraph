@@ -194,8 +194,8 @@ TYPED_TEST(DBGAlignerPostChainTest, align_chain_overlap_with_insert) {
     DBGAlignerConfig config;
     config.gap_opening_penalty = -1;
     config.gap_extension_penalty = -1;
-    config.min_seed_length = 6;
-    config.max_seed_length = 6;
+    config.min_seed_length = 5;
+    config.max_seed_length = 5;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(1, -1, -1);
     config.set_node_insertion_penalty(k);
     // config.post_chain_alignments = true;
