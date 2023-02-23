@@ -428,7 +428,8 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
                 assert(first->is_valid(graph_, &config_));
                 std::swap(*first, next);
                 first = &next;
-            } else if (num_unknown > 0 && next.get_clipping() > num_unknown) {
+            } else if (num_unknown > 0 && next.get_clipping() > num_unknown
+                    && first->get_query_view().end() <= next.get_query_view().begin()) {
                 auto merged = *first;
                 auto next_fixed = next;
                 next_fixed.trim_offset();
