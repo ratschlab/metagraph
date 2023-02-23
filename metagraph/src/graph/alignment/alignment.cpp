@@ -1534,8 +1534,10 @@ std::pair<Alignment, Alignment> Alignment
 ::split_seed(size_t node_overlap, const DBGAlignerConfig &config) const {
     size_t k = node_overlap + 1;
     if (sequence_.size() < k * 2
-            || std::find(nodes_.begin(), nodes_.end(), DeBruijnGraph::npos) != nodes_.end())
+            || std::find(std::max(nodes_.begin(), nodes_.end() - k - 1), nodes_.end(),
+                         DeBruijnGraph::npos) != nodes_.end()) {
         return std::make_pair(Alignment(), *this);
+    }
 
     auto ret_val = std::make_pair(*this, *this);
     ret_val.first.trim_reference_suffix(k, config, false);
@@ -1555,11 +1557,17 @@ std::pair<Alignment, Alignment> Alignment
         assert(ret_val.first.size());
     }
 
-    if (ret_val.first.empty())
+    if (ret_val.first.empty() || ret_val.first.get_nodes().back() == DeBruijnGraph::npos)
         return std::make_pair(Alignment(), *this);
 
-    ret_val.second.trim_reference_prefix(sequence_.size() - trim_nodes,
-                                         node_overlap, config, true);
+    size_t trim_prefix = sequence_.size() - trim_nodes;
+    auto second_end_it = std::min(ret_val.second.get_nodes().begin() + trim_prefix,
+                                  ret_val.second.get_nodes().end() - 1);
+    if (std::find(ret_val.second.get_nodes().begin(), second_end_it,
+                  DeBruijnGraph::npos) != second_end_it)
+        return std::make_pair(Alignment(), *this);
+
+    ret_val.second.trim_reference_prefix(trim_prefix, node_overlap, config, true);
 
     return ret_val;
 }
