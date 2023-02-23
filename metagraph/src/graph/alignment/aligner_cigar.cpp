@@ -304,6 +304,28 @@ bool Cigar::is_valid(std::string_view reference, std::string_view query) const {
     return true;
 }
 
+void Cigar::mark_exact_matches(sdsl::bit_vector &mask) const {
+    auto it = mask.begin();
+    for (const auto &[op, num] : cigar_) {
+        switch (op) {
+            case CLIPPED:
+            case INSERTION:
+            case MISMATCH: {
+                assert(it + num <= mask.end());
+                it += num;
+            } break;
+            case DELETION:
+            case NODE_INSERTION: {} break;
+            case MATCH: {
+                assert(it + num <= mask.end());
+                std::fill(it, it + num, true);
+                it += num;
+            } break;
+        }
+    }
+    assert(it == mask.end());
+}
+
 } // namespace align
 } // namespace graph
 } // namespace mtg

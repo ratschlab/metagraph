@@ -9,6 +9,8 @@
 #include <string>
 #include <vector>
 
+#include <sdsl/int_vector.hpp>
+
 namespace mtg {
 namespace graph {
 namespace align {
@@ -103,6 +105,8 @@ class Cigar {
     bool is_exact_match(size_t query_size) const {
         return cigar_.size() == 1 && cigar_.front() == value_type{ MATCH, query_size };
     }
+
+    void mark_exact_matches(sdsl::bit_vector &mask) const;
 
     static constexpr char opt_to_char(Cigar::Operator op) { return op_str_[op]; }
 

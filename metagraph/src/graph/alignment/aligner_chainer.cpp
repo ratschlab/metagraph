@@ -1388,15 +1388,18 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                           chain.back().second);
         }
 
+        sdsl::bit_vector matching_pos(query.size(), false);
         std::vector<Alignment> alignments;
         aligner.extend_chain(std::move(chain), extender, [&](Alignment&& aln) {
+            logger->trace("\t\t{}", aln);
+            aln.get_cigar().mark_exact_matches(matching_pos);
             alignments.emplace_back(std::move(aln));
         }, true);
 
         num_extensions += extender.num_extensions();
         num_explored_nodes += extender.num_explored_nodes();
-        size_t num_matches = alignments[0].get_cigar().get_num_matches();
-        seeder = std::make_unique<ManualSeeder>(std::move(alignments), num_matches);
+        seeder = std::make_unique<ManualSeeder>(std::move(alignments),
+                                                sdsl::util::cnt_one_bits(matching_pos));
     }
 
     return std::make_tuple(num_seeds, num_extensions, num_explored_nodes);
