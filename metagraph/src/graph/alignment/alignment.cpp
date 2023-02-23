@@ -1533,11 +1533,11 @@ void Alignment::insert_gap_prefix(ssize_t gap_length,
 std::pair<Alignment, Alignment> Alignment
 ::split_seed(size_t node_overlap, const DBGAlignerConfig &config) const {
     size_t k = node_overlap + 1;
-    if (sequence_.size() < k * 2)
+    if (sequence_.size() < k * 2
+            || std::find(nodes_.begin(), nodes_.end(), DeBruijnGraph::npos) != nodes_.end())
         return std::make_pair(Alignment(), *this);
 
     auto ret_val = std::make_pair(*this, *this);
-    assert(std::find(nodes_.begin(), nodes_.end(), DeBruijnGraph::npos) == nodes_.end());
     ret_val.first.trim_reference_suffix(k, config, false);
 
     // ensure that there's no DELETION at the splice point

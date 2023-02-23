@@ -55,30 +55,31 @@ TYPED_TEST(DBGAlignerPostChainTest, align_chain_swap) {
 }
 
 TYPED_TEST(DBGAlignerPostChainTest, align_chain_overlap_2) {
-    size_t k = 5;
-    std::string reference1 = "TTTGAGGATCAG";
-    std::string reference2 =          "CAGCTAGCTAGCTAGC";
-    std::string query      = "TTTGAGGATCAGCTAGCTAGCTAGC";
+    size_t k = 9;
+    std::string reference1 = "CCCCCCTTTGAGGATCAG";
+    std::string reference2 =          "CCGGATCAGCTAGCTAGCTAGC";
+    std::string query      = "CCCCCCTTTGAGGATCAGCTAGCTAGCTAGC";
 
     auto graph = build_graph_batch<TypeParam>(k, { reference1, reference2 });
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     // config.post_chain_alignments = true;
-    config.min_seed_length = 3;
-    config.max_seed_length = 3;
+    config.min_seed_length = 7;
+    config.max_seed_length = 7;
+    config.seed_complexity_filter = false;
     config.set_node_insertion_penalty(k);
 
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
     check_chain(paths, *graph, config);
     ASSERT_EQ(1u, paths.size());
-    EXPECT_EQ(std::string("TTTGAGGATCAGCTAGCTAGCTAGC"), paths[0].get_sequence());
+    EXPECT_EQ(std::string("CCCCCCTTTGAGGATCAGCTAGCTAGCTAGC"), paths[0].get_sequence());
 }
 
 TYPED_TEST(DBGAlignerPostChainTest, align_chain_overlap_mismatch) {
     size_t k = 8;
     std::string reference1 = "TTTTTCCTGAGGATCCG";
-    std::string reference2 =          "GGATCAGCTAGCTAGCTAGC";
+    std::string reference2 =        "CCCGGATCAGCTAGCTAGCTAGC";
     std::string query      = "TTTTTCCTGAGGATCTGCTAGCTAGCTAGC";
 
     auto graph = build_graph_batch<TypeParam>(k, { reference1, reference2 });
@@ -100,8 +101,8 @@ TYPED_TEST(DBGAlignerPostChainTest, align_chain_overlap_mismatch) {
 TYPED_TEST(DBGAlignerPostChainTest, align_chain_overlap_3_prefer_mismatch_over_gap) {
     size_t k = 11;
     std::string reference1 = "AAATTTTGAGGATCAG";
-    std::string reference2 =          "GGATCAGGTTTATTTAATTAGCT";
-    std::string reference3 =                          "ATTAGCTTGCTAGCAAAAA";
+    std::string reference2 =      "CCCCGGATCAGGTTTATTTAATTAGCT";
+    std::string reference3 =                      "CCCCATTAGCTTGCTAGCAAAAA";
     std::string query      = "AAATTTTGAGGATCAGCTTTATTTAATTAGCTTGCTAGCAAAAA";
     //                                        X
 
@@ -144,7 +145,7 @@ TYPED_TEST(DBGAlignerPostChainTest, align_chain_delete_no_chain_if_full_coverage
 TYPED_TEST(DBGAlignerPostChainTest, align_chain_delete1) {
     size_t k = 10;
     std::string reference1 = "TTTTGAGGATCAGTTCTAGCTTG";
-    std::string reference2 =                "CTAGCTTGCTAGCGCTAGCTAGATC";
+    std::string reference2 =              "CCCTAGCTTGCTAGCGCTAGCTAGATC";
     std::string query      = "TTTTGAGGATCAG""CTAGCTTGCTAGCGCTAGCTAGATC";
 
     auto graph = build_graph_batch<TypeParam>(k, { reference1, reference2 });
@@ -165,7 +166,7 @@ TYPED_TEST(DBGAlignerPostChainTest, align_chain_delete1) {
 TYPED_TEST(DBGAlignerPostChainTest, align_chain_delete_mismatch) {
     size_t k = 10;
     std::string reference1 = "AAAAAGGGTTTTTGAGGATCAGTTCTAGCTTG";
-    std::string reference2 =                         "CTAGCTTGCTAGCGCTAGCTAGATC";
+    std::string reference2 =                       "CCCTAGCTTGCTAGCGCTAGCTAGATC";
     std::string query      = "AAAAAGGGTTTTTGAGGATCAG""CTTGCTTGCTAGCGCTAGCTAGATC";
     //                                                  X
 
@@ -187,7 +188,7 @@ TYPED_TEST(DBGAlignerPostChainTest, align_chain_delete_mismatch) {
 TYPED_TEST(DBGAlignerPostChainTest, align_chain_overlap_with_insert) {
     size_t k = 10;
     std::string reference1 = "TGAGGATCAGTTCTAGCTTG";
-    std::string reference2 =              "CTAGCTTGCTAGCGCTAGCTAGATC";
+    std::string reference2 =            "CCCTAGCTTGCTAGCGCTAGCTAGATC";
     std::string query      = "TGAGGATCAGTTCTAAGCTTGCTAGCGCTAGCTAGATC";
 
     auto graph = build_graph_batch<TypeParam>(k, { reference1, reference2 });
@@ -211,7 +212,7 @@ TYPED_TEST(DBGAlignerPostChainTest, align_chain_overlap_with_insert) {
 TYPED_TEST(DBGAlignerPostChainTest, align_chain_deletion_in_overlapping_node) {
     size_t k = 10;
     std::string reference1 = "AAATTTTTTTGAGGATCAGTTCTAAGCTTG";
-    std::string reference2 =                         "AGCTTGCTAGCGCTAGCTAGATC";
+    std::string reference2 =                     "CCCCAGCTTGCTAGCGCTAGCTAGATC";
     std::string query      = "AAATTTTTTTGAGGATCAG""CTAAGCTTGCTAGCGCTAGCTAGATC";
 
     auto graph = build_graph_batch<TypeParam>(k, { reference1, reference2 });
@@ -253,7 +254,7 @@ TYPED_TEST(DBGAlignerPostChainTest, align_chain_large_overlap) {
 TYPED_TEST(DBGAlignerPostChainTest, align_chain_delete_in_overlap) {
     size_t k = 10;
     std::string reference1 = "AAATTTTTTTGAGGATCAGTTCTAGCTTGC";
-    std::string reference2 =                       "TAGCTTGCTAGCGCTAGCTAGATCCCCCCC";
+    std::string reference2 =                     "CCTAGCTTGCTAGCGCTAGCTAGATCCCCCCC";
     std::string query      = "AAATTTTTTTGAGGATCAGTTCTGCTTGCTAGCGCTAGCTAGATCCCCCCC";
 
     auto graph = build_graph_batch<TypeParam>(k, { reference1, reference2 });

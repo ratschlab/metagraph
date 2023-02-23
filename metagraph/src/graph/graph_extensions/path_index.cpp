@@ -59,9 +59,6 @@ PathIndex<PathStorage, PathBoundaries>
 ::PathIndex(std::shared_ptr<const DBGSuccinct> graph,
             const std::string &graph_name,
             const std::function<void(const std::function<void(std::string_view)>)> &generate_sequences) {
-    if (graph->num_nodes() <= 1)
-        return;
-
     const DBGSuccinct &dbg_succ = *graph;
 
     LabelEncoder<Label> label_encoder;
@@ -95,6 +92,7 @@ PathIndex<PathStorage, PathBoundaries>
             for (auto it = rows.rbegin(); it != rows.rend(); ++it) {
                 annotator.add_label_coord(*it, DUMMY, coord++);
             }
+            boundaries.emplace_back(coord);
         } else if (dbg_succ.get_mode() == DeBruijnGraph::CANONICAL) {
             auto rc_rows = path;
             std::string rc_seq = seq;
@@ -167,7 +165,7 @@ PathIndex<PathStorage, PathBoundaries>
     if (total_seq_count)
         logger->info("Indexed {} / {} sequences", seq_count, total_seq_count);
 
-    assert(annotator.num_labels() == 1);
+    assert(annotator.num_labels() <= 1);
     assert(std::adjacent_find(boundaries.begin(), boundaries.end()) == boundaries.end());
 
     path_boundaries_ = bit_vector_smart([&](const auto &callback) {
@@ -299,39 +297,6 @@ auto IPathIndex
 
     return ret_val;
 }
-
-// template <>
-// auto PathIndex<>
-// ::get_coords(const std::vector<node_index> &nodes) const -> std::vector<RowTuples> {
-//     assert(dbg_succ_);
-//     assert(std::all_of(nodes.begin(), nodes.end(),
-//         [this](const auto &a) {
-//             return dbg_succ_->get_node_sequence(a).find(boss::BOSS::kSentinel)
-//                 == std::string::npos;
-//         }
-//     ));
-
-//     return IPathIndex::get_coords(nodes);
-
-//     // size_t max_path_id = path_boundaries_.num_set_bits() + 1;
-//     // tsl::hopscotch_map<Row, std::vector<size_t>> row_inv_map;
-//     // for (size_t i = 0; i < rows.size(); ++i) {
-//     //     row_inv_map[rows[i]].emplace_back(i);
-//     // }
-
-//     // auto [rd_ids, rd_paths_trunc] = paths_indices_.get_rd_ids(rows);
-//     // for (size_t i = 0; i < rd_paths_trunc.size(); ++i) {
-//     //     if (rd_paths_trunc[i].size() > 1) {
-//     //         for (size_t j = 0; j < rd_paths_trunc[i].size(); ++j) {
-//     //             for (size_t idx : row_inv_map[rd_ids[rd_paths_trunc[i][j]]]) {
-//     //                 ret_val[idx].emplace_back(max_path_id + i, Tuple{ j });
-//     //             }
-//     //         }
-//     //     }
-//     // }
-
-//     // return ret_val;
-// }
 
 template class PathIndex<>;
 
