@@ -1320,6 +1320,8 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
 
     std::sort(best_chain.begin(), best_chain.end());
 
+    sdsl::bit_vector matching_pos(query.size(), false);
+    std::vector<Alignment> alignments;
     for (size_t j = 0; j < best_chain.size(); ++j) {
         auto [nscore, last_dist, k] = best_chain[j];
         if (used[k])
@@ -1327,9 +1329,6 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
 
         Alignment::Column col = std::get<1>(seeds[k]);
         if (++used_cols[col] > config_.num_alternative_paths)
-            continue;
-
-        if (std::get<6>(seeds[k]) == std::numeric_limits<uint32_t>::max())
             continue;
 
         logger->trace("Chain\t{}", -nscore);
@@ -1388,19 +1387,17 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                           chain.back().second);
         }
 
-        sdsl::bit_vector matching_pos(query.size(), false);
-        std::vector<Alignment> alignments;
         aligner.extend_chain(std::move(chain), extender, [&](Alignment&& aln) {
             logger->trace("\t\t{}", aln);
             aln.get_cigar().mark_exact_matches(matching_pos);
             alignments.emplace_back(std::move(aln));
         }, true);
-
-        num_extensions += extender.num_extensions();
-        num_explored_nodes += extender.num_explored_nodes();
-        seeder = std::make_unique<ManualSeeder>(std::move(alignments),
-                                                sdsl::util::cnt_one_bits(matching_pos));
     }
+
+    num_extensions += extender.num_extensions();
+    num_explored_nodes += extender.num_explored_nodes();
+    seeder = std::make_unique<ManualSeeder>(std::move(alignments),
+                                            sdsl::util::cnt_one_bits(matching_pos));
 
     return std::make_tuple(num_seeds, num_extensions, num_explored_nodes);
 }
