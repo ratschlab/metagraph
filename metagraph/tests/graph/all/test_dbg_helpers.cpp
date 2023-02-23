@@ -288,7 +288,6 @@ build_graph<DBGSuccinctPathIndexed>(uint64_t k,
                                     DeBruijnGraph::Mode mode) {
     auto graph = build_graph<DBGSuccinct>(k, sequences, mode);
     DBGSuccinct &dbg_succ = get_dbg_succ(*graph);
-    dbg_succ.reset_mask();
     graph->add_extension(std::make_shared<graph::PathIndex<>>(dbg_succ, "",
         [&](const auto &callback) {
             std::for_each(sequences.begin(), sequences.end(), callback);
@@ -477,7 +476,6 @@ build_graph_batch<DBGSuccinctPathIndexed>(uint64_t k,
                                           DeBruijnGraph::Mode mode) {
     auto graph = build_graph_batch<DBGSuccinct>(k, sequences, mode);
     DBGSuccinct &dbg_succ = get_dbg_succ(*graph);
-    dbg_succ.reset_mask();
     graph->add_extension(std::make_shared<graph::PathIndex<>>(dbg_succ, "",
         [&](const auto &callback) {
             std::for_each(sequences.begin(), sequences.end(), callback);

@@ -7,6 +7,8 @@
 #include "common/utils/file_utils.hpp"
 #include "annotation/annotation_converters.hpp"
 #include "graph/alignment/alignment.hpp"
+#include "common/seq_tools/reverse_complement.hpp"
+#include "graph/representation/canonical_dbg.hpp"
 
 namespace mtg::graph {
 using namespace annot;
@@ -61,10 +63,6 @@ PathIndex<PathStorage, PathBoundaries>
         return;
 
     const DBGSuccinct &dbg_succ = *graph;
-    if (dbg_succ.get_mask()) {
-        logger->error("Only unmasked DBGSuccinct supported");
-        exit(1);
-    }
 
     LabelEncoder<Label> label_encoder;
     label_encoder.insert_and_encode(DUMMY[0]);
@@ -79,42 +77,90 @@ PathIndex<PathStorage, PathBoundaries>
     std::vector<uint64_t> boundaries { 0 };
 
     std::mutex mu;
-    const auto &boss = dbg_succ.get_boss();
-    boss.call_paths(
-        [&](auto&& edges, auto&&) {
-            assert(edges.size());
-            std::transform(edges.begin(), edges.end(), edges.begin(),
-                           AnnotatedDBG::graph_to_anno_index);
+    dbg_succ.call_sequences([&](const auto &seq, const auto &path) {
+        auto rows = path;
+        std::transform(rows.begin(), rows.end(), rows.begin(), AnnotatedDBG::graph_to_anno_index);
 
-            std::lock_guard<std::mutex> lock(mu);
+        std::lock_guard<std::mutex> lock(mu);
+        uint64_t coord = boundaries.back() + dbg_succ.get_k() - 1;
+        annotator.add_labels(rows, DUMMY);
+        for (auto row : rows) {
+            annotator.add_label_coord(row, DUMMY, coord++);
+        }
+
+        boundaries.emplace_back(coord);
+
+        if (dbg_succ.get_mode() == DeBruijnGraph::PRIMARY) {
             uint64_t coord = boundaries.back() + dbg_succ.get_k() - 1;
-            annotator.add_labels(edges, DUMMY);
-
-            for (auto edge : edges) {
-                annotator.add_label_coord(edge, DUMMY, coord++);
+            for (auto it = rows.rbegin(); it != rows.rend(); ++it) {
+                annotator.add_label_coord(*it, DUMMY, coord++);
             }
-
-            // assert(coord == boundaries.back() + edges.size());
+        } else if (dbg_succ.get_mode() == DeBruijnGraph::CANONICAL) {
+            auto rc_rows = path;
+            std::string rc_seq = seq;
+            reverse_complement_seq_path(dbg_succ, rc_seq, rc_rows);
+            std::transform(rc_rows.begin(), rc_rows.end(), rc_rows.begin(), AnnotatedDBG::graph_to_anno_index);
+            uint64_t coord = boundaries.back() + dbg_succ.get_k() - 1;
+            annotator.add_labels(rc_rows, DUMMY);
+            for (auto row : rc_rows) {
+                annotator.add_label_coord(row, DUMMY, coord++);
+            }
             boundaries.emplace_back(coord);
-        },
-        get_num_threads(), false, false, NULL, true // TODO: for now, ignore dummy k-mers
-    );
+        }
+    }, get_num_threads());
 
-    std::vector<std::tuple<std::string, std::vector<Label>, uint64_t>> data;
-    data.emplace_back("", DUMMY, 0);
     size_t seq_count = 0;
     size_t total_seq_count = 0;
+    std::shared_ptr<const DeBruijnGraph> check_graph = graph;
+    std::shared_ptr<const CanonicalDBG> canonical;
+    if (dbg_succ.get_mode() == DeBruijnGraph::PRIMARY) {
+        canonical = std::make_shared<CanonicalDBG>(graph);
+        check_graph = canonical;
+    }
+
     generate_sequences([&](std::string_view seq) {
-        ++total_seq_count;
-        auto nodes = map_to_nodes(dbg_succ, seq);
+        total_seq_count += 1 + (dbg_succ.get_mode() != DeBruijnGraph::BASIC);
+        auto nodes = map_to_nodes_sequentially(*check_graph, seq);
+
         if (std::any_of(nodes.begin(), nodes.end(), [&](node_index node) {
-            return !node || dbg_succ.has_multiple_outgoing(node) || dbg_succ.indegree(node) > 1;
+            return !node || check_graph->has_multiple_outgoing(node) || check_graph->indegree(node) > 1;
         })) {
             ++seq_count;
-            std::get<0>(data[0]) = seq;
-            std::get<2>(data[0]) = boundaries.back();
+            uint64_t coord = boundaries.back() + dbg_succ.get_k() - 1;
+            for (node_index &node : nodes) {
+                if (node) {
+                    if (canonical)
+                        node = canonical->get_base_node(node);
+
+                    annotator.add_label_coord(AnnotatedDBG::graph_to_anno_index(node), DUMMY, coord);
+                }
+                ++coord;
+            }
             boundaries.emplace_back(boundaries.back() + seq.size());
-            anno_graph.add_kmer_coords(data);
+
+            if (canonical) {
+                ++seq_count;
+                uint64_t coord = boundaries.back() + dbg_succ.get_k() - 1;
+                boundaries.emplace_back(boundaries.back() + seq.size());
+                for (auto it = nodes.rbegin(); it != nodes.rend(); ++it) {
+                    if (*it)
+                        annotator.add_label_coord(AnnotatedDBG::graph_to_anno_index(*it), DUMMY, coord);
+
+                    ++coord;
+                }
+            } else if (dbg_succ.get_mode() == DeBruijnGraph::CANONICAL) {
+                ++seq_count;
+                uint64_t coord = boundaries.back() + dbg_succ.get_k() - 1;
+                boundaries.emplace_back(boundaries.back() + seq.size());
+                std::string seq_rc(seq);
+                reverse_complement_seq_path(dbg_succ, seq_rc, nodes);
+                for (node_index node : nodes) {
+                    if (node)
+                        annotator.add_label_coord(AnnotatedDBG::graph_to_anno_index(node), DUMMY, coord);
+
+                    ++coord;
+                }
+            }
         }
     });
 
@@ -239,7 +285,7 @@ auto IPathIndex
     ret_val.reserve(row_tuples.size());
     for (auto &tuples : row_tuples) {
         VectorMap<size_t, Tuple> out_tuples;
-        assert(tuples.size() == 1);
+        assert(tuples.size() <= 1);
         for (const auto &[c, tuple] : tuples) {
             assert(!c);
             assert(std::adjacent_find(tuple.begin(), tuple.end()) == tuple.end());
