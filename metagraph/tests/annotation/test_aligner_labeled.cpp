@@ -49,10 +49,11 @@ template <typename GraphAnnotationPair>
 class LabeledAlignerTest : public ::testing::Test {};
 
 typedef ::testing::Types<std::pair<DBGHashFast, annot::ColumnCompressed<>>,
-                         std::pair<DBGSuccinct, annot::ColumnCompressed<>>,
+                         std::pair<DBGSuccinctPathIndexed, annot::ColumnCompressed<>>,
                          std::pair<DBGHashFast, annot::RowFlatAnnotator>,
-                         std::pair<DBGSuccinct, annot::RowFlatAnnotator>,
-                         std::pair<DBGSuccinct, annot::RowDiffColumnAnnotator>> FewGraphAnnotationPairTypes;
+                         std::pair<DBGSuccinctPathIndexed, annot::RowFlatAnnotator>,
+                         std::pair<DBGSuccinct, annot::RowDiffColumnAnnotator>,
+                         std::pair<DBGSuccinct, annot::RowDiffDiskAnnotator>> FewGraphAnnotationPairTypes;
 
 TYPED_TEST_SUITE(LabeledAlignerTest, FewGraphAnnotationPairTypes);
 
