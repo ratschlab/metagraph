@@ -544,7 +544,7 @@ KmerExtractorTDecl(template <typename KMER> Vector<std::pair<KMER, bool>>)
             if (!invalid[i++])
                 return false;
 
-            kmers.emplace_back(KMER(), false);
+            kmers.emplace_back(KMER(0), false);
             return true;
         }
     );

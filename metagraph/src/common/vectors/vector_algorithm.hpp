@@ -331,7 +331,7 @@ inline uint64_t atomic_fetch(const sdsl::int_vector<> &vector,
                              uint64_t i,
                              std::mutex &backup_mutex,
                              int mo) {
-    const size_t width = vector.width();
+    const uint8_t width = vector.width();
     const size_t bit_pos = i * width;
     const uint64_t mask = (1llu << width) - 1;
     if (width + 7 > 64) {
@@ -376,14 +376,14 @@ inline uint64_t atomic_fetch_and_add(sdsl::int_vector<> &vector,
                                      uint64_t val,
                                      std::mutex &backup_mutex,
                                      int mo) {
-    const size_t width = vector.width();
+    const uint8_t width = vector.width();
     const size_t bit_pos = i * width;
     const uint64_t mask = (1llu << width) - 1;
     if (width + 7 > 64) {
         // there is no way to reliably modify without a mutex
         std::lock_guard<std::mutex> lock(backup_mutex);
         const uint64_t old_val = vector[i];
-        vector[i] += val;
+        vector[i] = old_val + val;
         return old_val;
     } else if ((bit_pos & 0x3F) + width <= 64) {
         // element fits in an aligned word
@@ -426,7 +426,7 @@ inline uint64_t atomic_exchange(sdsl::int_vector<> &vector,
                                 uint64_t val,
                                 std::mutex &backup_mutex,
                                 int mo) {
-    const size_t width = vector.width();
+    const uint8_t width = vector.width();
     const size_t bit_pos = i * width;
     const uint64_t mask = (1llu << width) - 1;
     if (width + 7 > 64) {
