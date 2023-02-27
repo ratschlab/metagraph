@@ -4,6 +4,7 @@
 #include "common/vectors/vector_algorithm.hpp"
 #include "common/vectors/bitmap.hpp"
 #include "graph/representation/masked_graph.hpp"
+#include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 
 
 namespace mtg {
@@ -12,7 +13,9 @@ namespace graph {
 using mtg::common::logger;
 
 typedef AnnotatedDBG::node_index node_index;
+typedef AnnotatedDBG::Annotator Annotator;
 typedef AnnotatedDBG::Annotator::Label Label;
+using Column = annot::binmat::BinaryMatrix::Column;
 
 typedef std::function<size_t()> LabelCountCallback;
 
@@ -30,9 +33,19 @@ constexpr std::memory_order MO_RELAXED = std::memory_order_relaxed;
  * with at least one in-label or out-label.
  */
 std::pair<sdsl::int_vector<>, sdsl::bit_vector>
-construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
+construct_diff_label_count_vector(const Annotator &annotator,
                                   const tsl::hopscotch_set<Label> &labels_in,
                                   const tsl::hopscotch_set<Label> &labels_out,
+                                  size_t max_index,
+                                  size_t num_labels,
+                                  size_t num_threads,
+                                  bool add_out_labels_to_mask);
+
+std::pair<sdsl::int_vector<>, sdsl::bit_vector>
+construct_diff_label_count_vector(const std::vector<std::string> &files,
+                                  const tsl::hopscotch_set<Label> &labels_in,
+                                  const tsl::hopscotch_set<Label> &labels_out,
+                                  size_t max_index,
                                   size_t num_labels,
                                   size_t num_threads,
                                   bool add_out_labels_to_mask);
@@ -60,6 +73,19 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
 
 std::shared_ptr<MaskedDeBruijnGraph>
+mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
+                    const AnnotatedDBG *anno_graph,
+                    sdsl::int_vector<>&& counts,
+                    sdsl::bit_vector&& mask,
+                    size_t num_labels,
+                    const tsl::hopscotch_set<Label> &labels_in,
+                    const tsl::hopscotch_set<Label> &labels_out,
+                    const tsl::hopscotch_set<Label> &labels_in_round2,
+                    const tsl::hopscotch_set<Label> &labels_out_round2,
+                    const DifferentialAssemblyConfig &config,
+                    size_t num_threads);
+
+std::shared_ptr<MaskedDeBruijnGraph>
 mask_nodes_by_label(const AnnotatedDBG &anno_graph,
                     const tsl::hopscotch_set<Label> &labels_in,
                     const tsl::hopscotch_set<Label> &labels_out,
@@ -69,7 +95,6 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
                     size_t num_threads,
                     size_t num_parallel_files) {
     num_parallel_files = std::min(num_threads, num_parallel_files);
-    bool parallel = num_threads > 1;
     size_t num_in_labels = labels_in.size() + labels_in_round2.size();
     size_t num_out_labels = labels_out.size() + labels_out_round2.size();
     auto graph_ptr = std::static_pointer_cast<const DeBruijnGraph>(
@@ -89,15 +114,82 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
 
     // Construct initial masked graph from union of labels in labels_in
     auto count_vector = construct_diff_label_count_vector(
-        anno_graph, labels_in, labels_out,
+        anno_graph.get_annotator(), labels_in, labels_out, graph_ptr->max_index(),
         std::max(num_in_labels, num_out_labels), num_parallel_files,
         add_complement
     );
     auto &[counts, init_mask] = count_vector;
+    return mask_nodes_by_label(graph_ptr, &anno_graph,
+                               std::move(counts), std::move(init_mask),
+                               anno_graph.get_annotator().num_labels(),
+                               labels_in, labels_out,
+                               labels_in_round2, labels_out_round2,
+                               config, num_threads);
+}
+
+std::shared_ptr<MaskedDeBruijnGraph>
+mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
+                    const std::vector<std::string> &files,
+                    size_t num_labels,
+                    const tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> &labels_in,
+                    const tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> &labels_out,
+                    const DifferentialAssemblyConfig &config,
+                    size_t num_threads,
+                    size_t num_parallel_files) {
+    bool check_other = config.label_mask_other_unitig_fraction != 1.0;
+    bool unitig_mode = check_other
+            || config.label_mask_in_unitig_fraction != 0.0
+            || config.label_mask_out_unitig_fraction != 1.0
+            || config.label_mask_other_unitig_fraction != 1.0;
+
+    bool add_complement = graph_ptr->get_mode() == DeBruijnGraph::CANONICAL
+        && (config.add_complement || unitig_mode);
+
+    assert(!check_other);
+
+    logger->trace("Generating initial mask");
+
+    // Construct initial masked graph from union of labels in labels_in
+    auto count_vector = construct_diff_label_count_vector(
+        files, labels_in, labels_out, graph_ptr->max_index(),
+        std::max(labels_in.size(), labels_out.size()), num_parallel_files,
+        add_complement
+    );
+    auto &[counts, init_mask] = count_vector;
+    return mask_nodes_by_label(graph_ptr, nullptr,
+                               std::move(counts), std::move(init_mask),
+                               num_labels,
+                               labels_in, labels_out, {}, {},
+                               config, num_threads);
+}
+
+std::shared_ptr<MaskedDeBruijnGraph>
+mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
+                    const AnnotatedDBG *anno_graph,
+                    sdsl::int_vector<>&& counts,
+                    sdsl::bit_vector&& init_mask,
+                    size_t num_labels,
+                    const tsl::hopscotch_set<Label> &labels_in,
+                    const tsl::hopscotch_set<Label> &labels_out,
+                    const tsl::hopscotch_set<Label> &labels_in_round2,
+                    const tsl::hopscotch_set<Label> &labels_out_round2,
+                    const DifferentialAssemblyConfig &config,
+                    size_t num_threads) {
+    bool parallel = num_threads > 1;
+    bool check_other = config.label_mask_other_unitig_fraction != 1.0;
+    bool unitig_mode = check_other || labels_in_round2.size() || labels_out_round2.size()
+            || config.label_mask_in_unitig_fraction != 0.0
+            || config.label_mask_out_unitig_fraction != 1.0
+            || config.label_mask_other_unitig_fraction != 1.0;
+
+    size_t num_in_labels = labels_in.size() + labels_in_round2.size();
+    size_t num_out_labels = labels_out.size() + labels_out_round2.size();
+
+    bool add_complement = graph_ptr->get_mode() == DeBruijnGraph::CANONICAL
+        && (config.add_complement || unitig_mode);
 
     // in and out counts are stored interleaved in the counts vector
     assert(counts.size() == init_mask.size() * 2);
-
 
     sdsl::bit_vector other_mask(init_mask.size() * check_other, false);
     auto masked_graph = make_initial_masked_graph(graph_ptr, counts, std::move(init_mask),
@@ -105,6 +197,7 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
 
     // check all other labels and post labels
     if (check_other || labels_in_round2.size() || labels_out_round2.size()) {
+        assert(anno_graph);
         sdsl::bit_vector union_mask
             = static_cast<const bitmap_vector&>(masked_graph->get_mask()).data();
         std::mutex vector_backup_mutex;
@@ -126,16 +219,15 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
             call_ones(b, [&](size_t i) {
                 if (id_map[i]) {
                     set_bit(a.data(), id_map[i], parallel, MO_RELAXED);
-                    atomic_fetch_and_add(count_vector.first, id_map[i] * 2 + offset, 1,
+                    atomic_fetch_and_add(counts, id_map[i] * 2 + offset, 1,
                                          vector_backup_mutex, MO_RELAXED);
                 }
             });
         };
 
         logger->trace("Checking shared and other labels");
-        size_t num_labels = anno_graph.get_annotator().num_labels();
         masked_graph->call_sequences([&](const std::string &contig, const std::vector<node_index> &path) {
-            for (const auto &[label, sig] : anno_graph.get_top_label_signatures(contig, num_labels)) {
+            for (const auto &[label, sig] : anno_graph->get_top_label_signatures(contig, num_labels)) {
                 bool found_in = labels_in.count(label);
                 bool found_out = labels_out.count(label);
                 bool found_in_round2 = labels_in_round2.count(label);
@@ -175,8 +267,8 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
         // TODO: make this part multithreaded
         size_t kept_nodes = 0;
         call_ones(in_mask, [&](node_index node) {
-            uint64_t in_count = count_vector.first[node * 2];
-            uint64_t out_count = count_vector.first[node * 2 + 1];
+            uint64_t in_count = counts[node * 2];
+            uint64_t out_count = counts[node * 2 + 1];
 
             if (in_count >= min_label_in_count && out_count <= max_label_out_count) {
                 ++kept_nodes;
@@ -197,8 +289,6 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
     update_masked_graph_by_unitig(*masked_graph,
         [&](const std::string &, const std::vector<node_index> &path) -> Intervals {
             // return a set of intervals to keep in the graph
-            const auto &counts = count_vector.first;
-
             size_t in_kmer_count = 0;
 
             size_t begin = path.size();
@@ -306,15 +396,16 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 }
 
 std::pair<sdsl::int_vector<>, sdsl::bit_vector>
-construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
+construct_diff_label_count_vector(const std::function<void(const std::function<void(const Label &, const bitmap&)>)> &generate_columns,
                                   const tsl::hopscotch_set<Label> &labels_in,
                                   const tsl::hopscotch_set<Label> &labels_out,
+                                  size_t max_index,
                                   size_t num_labels,
                                   size_t num_threads,
                                   bool add_out_labels_to_mask) {
     logger->trace("Allocating mask vector");
-    size_t width = sdsl::bits::hi(num_labels) + 1;
-    sdsl::bit_vector indicator(anno_graph.get_graph().max_index() + 1, false);
+    size_t width = (sdsl::bits::hi(num_labels) + 1) * (1 + add_out_labels_to_mask);
+    sdsl::bit_vector indicator(max_index + 1, false);
 
     logger->trace("Allocating count vector");
     // the in and out counts are stored interleaved
@@ -324,10 +415,62 @@ construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
     std::mutex vector_backup_mutex;
     bool parallel = num_threads > 1;
 
-    using Column = annot::binmat::BinaryMatrix::Column;
+    logger->trace("Populating count vector");
+    std::atomic_thread_fence(std::memory_order_release);
+    generate_columns([&](const Label &label, const bitmap &column) {
+        uint8_t col_indicator = static_cast<bool>(labels_in.count(label));
+        if (labels_out.count(label))
+            col_indicator |= 2;
 
+        auto add_in = [&indicator,&counts,&vector_backup_mutex,parallel](Column i) {
+            i = AnnotatedDBG::anno_to_graph_index(i);
+            assert(i != DeBruijnGraph::npos);
+            set_bit(indicator.data(), i, parallel, MO_RELAXED);
+            atomic_fetch_and_add(counts, i * 2, 1, vector_backup_mutex, MO_RELAXED);
+        };
+
+        auto add_out = [&indicator,&counts,&vector_backup_mutex,parallel,add_out_labels_to_mask](Column i) {
+            i = AnnotatedDBG::anno_to_graph_index(i);
+            assert(i != DeBruijnGraph::npos);
+            if (add_out_labels_to_mask)
+                set_bit(indicator.data(), i, parallel, MO_RELAXED);
+
+            atomic_fetch_and_add(counts, i * 2 + 1, 1, vector_backup_mutex, MO_RELAXED);
+        };
+
+        auto add_both = [&indicator,&counts,&vector_backup_mutex,parallel](Column i) {
+            i = AnnotatedDBG::anno_to_graph_index(i);
+            assert(i != DeBruijnGraph::npos);
+            set_bit(indicator.data(), i, parallel, MO_RELAXED);
+            atomic_fetch_and_add(counts, i * 2, 1, vector_backup_mutex, MO_RELAXED);
+            atomic_fetch_and_add(counts, i * 2 + 1, 1, vector_backup_mutex, MO_RELAXED);
+        };
+
+        switch (col_indicator) {
+            case 1: { column.call_ones(add_in); } break;
+            case 2: { column.call_ones(add_out); } break;
+            case 3: { column.call_ones(add_both); } break;
+            default: {}
+        }
+    });
+
+    std::atomic_thread_fence(std::memory_order_acquire);
+    logger->trace("done");
+
+    return std::make_pair(std::move(counts), std::move(indicator));
+}
+
+
+std::pair<sdsl::int_vector<>, sdsl::bit_vector>
+construct_diff_label_count_vector(const Annotator &annotator,
+                                  const tsl::hopscotch_set<Label> &labels_in,
+                                  const tsl::hopscotch_set<Label> &labels_out,
+                                  size_t max_index,
+                                  size_t num_labels,
+                                  size_t num_threads,
+                                  bool add_out_labels_to_mask) {
     std::vector<Column> columns;
-    const auto &encoder = anno_graph.get_annotator().get_label_encoder();
+    const auto &encoder = annotator.get_label_encoder();
     AnnotatedDBG::Annotator::VLabels labels;
     labels.reserve(labels_in.size() + labels_out.size());
     columns.reserve(labels_in.size() + labels_out.size());
@@ -342,51 +485,28 @@ construct_diff_label_count_vector(const AnnotatedDBG &anno_graph,
         }
     }
 
-    logger->trace("Populating count vector");
-    std::atomic_thread_fence(std::memory_order_release);
-    anno_graph.get_annotator().get_matrix().call_columns(columns,
-        [&](size_t j, const bitmap_generator &column) {
-            uint8_t col_indicator = static_cast<bool>(labels_in.count(labels[j]));
-            if (labels_out.count(labels[j]))
-                col_indicator |= 2;
+    return construct_diff_label_count_vector([&](const auto &callback) {
+        annotator.get_matrix().call_columns(columns,
+            [&](size_t j, const bitmap_generator &column) {
+                callback(labels[j], column);
+            }, num_threads
+        );
+    }, labels_in, labels_out, max_index, num_labels, num_threads, add_out_labels_to_mask);
+}
 
-            auto add_in = [&indicator,&counts,&vector_backup_mutex,parallel](Column i) {
-                i = AnnotatedDBG::anno_to_graph_index(i);
-                assert(i != DeBruijnGraph::npos);
-                set_bit(indicator.data(), i, parallel, MO_RELAXED);
-                atomic_fetch_and_add(counts, i * 2, 1, vector_backup_mutex, MO_RELAXED);
-            };
-
-            auto add_out = [&indicator,&counts,&vector_backup_mutex,parallel,add_out_labels_to_mask](Column i) {
-                i = AnnotatedDBG::anno_to_graph_index(i);
-                assert(i != DeBruijnGraph::npos);
-                if (add_out_labels_to_mask)
-                    set_bit(indicator.data(), i, parallel, MO_RELAXED);
-
-                atomic_fetch_and_add(counts, i * 2 + 1, 1, vector_backup_mutex, MO_RELAXED);
-            };
-
-            auto add_both = [&indicator,&counts,&vector_backup_mutex,parallel](Column i) {
-                i = AnnotatedDBG::anno_to_graph_index(i);
-                assert(i != DeBruijnGraph::npos);
-                set_bit(indicator.data(), i, parallel, MO_RELAXED);
-                atomic_fetch_and_add(counts, i * 2, 1, vector_backup_mutex, MO_RELAXED);
-                atomic_fetch_and_add(counts, i * 2 + 1, 1, vector_backup_mutex, MO_RELAXED);
-            };
-
-            switch (col_indicator) {
-                case 1: { column.call_ones(add_in); } break;
-                case 2: { column.call_ones(add_out); } break;
-                case 3: { column.call_ones(add_both); } break;
-                default: {}
-            }
-        }, num_threads
-    );
-
-    std::atomic_thread_fence(std::memory_order_acquire);
-    logger->trace("done");
-
-    return std::make_pair(std::move(counts), std::move(indicator));
+std::pair<sdsl::int_vector<>, sdsl::bit_vector>
+construct_diff_label_count_vector(const std::vector<std::string> &files,
+                                  const tsl::hopscotch_set<Label> &labels_in,
+                                  const tsl::hopscotch_set<Label> &labels_out,
+                                  size_t max_index,
+                                  size_t num_labels,
+                                  size_t num_threads,
+                                  bool add_out_labels_to_mask) {
+    return construct_diff_label_count_vector([&](const auto &callback) {
+        annot::ColumnCompressed<>::merge_load(files, [&](uint64_t, const auto &label, auto&& column) {
+            callback(label, *column);
+        }, num_threads);
+    }, labels_in, labels_out, max_index, num_labels, num_threads, add_out_labels_to_mask);
 }
 
 
