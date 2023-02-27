@@ -144,8 +144,6 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     bool add_complement = graph_ptr->get_mode() == DeBruijnGraph::CANONICAL
         && (config.add_complement || unitig_mode);
 
-    assert(!check_other);
-
     logger->trace("Generating initial mask");
 
     // Construct initial masked graph from union of labels in labels_in
@@ -174,6 +172,9 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     const tsl::hopscotch_set<Label> &labels_out_round2,
                     const DifferentialAssemblyConfig &config,
                     size_t num_threads) {
+    // in and out counts are stored interleaved in the counts vector
+    assert(counts.size() == init_mask.size() * 2);
+
     bool parallel = num_threads > 1;
     bool check_other = config.label_mask_other_unitig_fraction != 1.0;
     bool unitig_mode = check_other || labels_in_round2.size() || labels_out_round2.size()
@@ -187,29 +188,25 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     bool add_complement = graph_ptr->get_mode() == DeBruijnGraph::CANONICAL
         && (config.add_complement || unitig_mode);
 
-    // in and out counts are stored interleaved in the counts vector
-    assert(counts.size() == init_mask.size() * 2);
-
     sdsl::bit_vector other_mask(init_mask.size() * check_other, false);
     auto masked_graph = make_initial_masked_graph(graph_ptr, counts, std::move(init_mask),
                                                   add_complement, num_threads);
 
-    // check all other labels and post labels
-    if (check_other || labels_in_round2.size() || labels_out_round2.size()) {
-        assert(anno_graph);
+    auto mask_or = [&](sdsl::bit_vector &a,
+                       const sdsl::bit_vector &b,
+                       const std::vector<node_index> &id_map) {
+        call_ones(b, [&](size_t i) {
+            if (id_map[i])
+                set_bit(a.data(), id_map[i], parallel, MO_RELAXED);
+        });
+    };
+
+    // check all other labels and round 2 labels
+    if (anno_graph && (check_other || labels_in_round2.size() || labels_out_round2.size())) {
         sdsl::bit_vector union_mask
             = static_cast<const bitmap_vector&>(masked_graph->get_mask()).data();
         std::mutex vector_backup_mutex;
         std::atomic_thread_fence(std::memory_order_release);
-
-        auto mask_or = [&](sdsl::bit_vector &a,
-                           const sdsl::bit_vector &b,
-                           const std::vector<node_index> &id_map) {
-            call_ones(b, [&](size_t i) {
-                if (id_map[i])
-                    set_bit(a.data(), id_map[i], parallel, MO_RELAXED);
-            });
-        };
 
         auto count_merge = [&](sdsl::bit_vector &a,
                                const sdsl::bit_vector &b,
@@ -225,7 +222,8 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         };
 
         logger->trace("Checking shared and other labels");
-        masked_graph->call_sequences([&](const std::string &contig, const std::vector<node_index> &path) {
+        masked_graph->call_sequences([&](const std::string &contig,
+                                         const std::vector<node_index> &path) {
             for (const auto &[label, sig] : anno_graph->get_top_label_signatures(contig, num_labels)) {
                 bool found_in = labels_in.count(label);
                 bool found_out = labels_out.count(label);
@@ -247,6 +245,21 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         std::atomic_thread_fence(std::memory_order_acquire);
 
         masked_graph->set_mask(new bitmap_vector(std::move(union_mask)));
+    } else if (check_other && num_labels > num_in_labels + num_out_labels) {
+        assert(!anno_graph);
+        std::mutex vector_backup_mutex;
+        std::atomic_thread_fence(std::memory_order_release);
+
+        logger->trace("Checking other labels");
+        masked_graph->call_sequences([&](const std::string &contig,
+                                         const std::vector<node_index> &path) {
+            for (const auto &[label, sig] : anno_graph->get_top_label_signatures(contig, num_labels)) {
+                if (!labels_in.count(label) && !labels_out.count(label))
+                    mask_or(other_mask, sig, path);
+            }
+        }, num_threads);
+
+        std::atomic_thread_fence(std::memory_order_acquire);
     }
 
     // Filter unitigs from masked graph based on filtration criteria
