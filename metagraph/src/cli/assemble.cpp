@@ -143,8 +143,9 @@ void call_masked_graphs(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         throw std::iostream::failure("Failed to read assembly config JSON from " + config->assembly_config_file);
 
     for (const auto &name : config->fnames) {
-        if (parse_annotation_type(name) != Config::ColumnCompressed)
+        if (parse_annotation_type(name) != Config::ColumnCompressed) {
             throw std::runtime_error("Multiple annotation files must be ColumnCompressed");
+        }
     }
 
     size_t num_threads = std::max(1u, get_num_threads());
