@@ -141,7 +141,6 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     const DifferentialAssemblyConfig &config,
                     size_t num_threads,
                     size_t num_parallel_files) {
-    bool parallel = num_threads > 1;
     bool check_other = config.label_mask_other_unitig_fraction != 1.0;
     bool unitig_mode = check_other
             || config.label_mask_in_unitig_fraction != 0.0
@@ -162,6 +161,7 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     auto &[counts, init_mask, other_labels, num_labels_per_file] = count_vector;
     sdsl::bit_vector other_mask(init_mask.size() * check_other, false);
     if (check_other && sdsl::util::cnt_one_bits(other_labels)) {
+        bool parallel = num_parallel_files > 1;
         size_t j = 0;
         std::atomic_thread_fence(std::memory_order_release);
         for (size_t i = 0; i < files.size(); ++i) {
@@ -177,7 +177,7 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                             });
                         }
                     },
-                    num_threads
+                    num_parallel_files
                 );
             }
 
@@ -431,7 +431,7 @@ construct_diff_label_count_vector(const std::function<void(const std::function<v
                                   const tsl::hopscotch_set<Label> &labels_out,
                                   size_t max_index,
                                   size_t num_labels,
-                                  size_t num_threads,
+                                  bool parallel,
                                   bool add_out_labels_to_mask) {
     logger->trace("Allocating mask vector");
     size_t width = (sdsl::bits::hi(num_labels) + 1) * (1 + add_out_labels_to_mask);
@@ -443,7 +443,6 @@ construct_diff_label_count_vector(const std::function<void(const std::function<v
     logger->trace("done");
 
     std::mutex vector_backup_mutex;
-    bool parallel = num_threads > 1;
 
     logger->trace("Populating count vector");
     std::atomic_thread_fence(std::memory_order_release);
@@ -526,7 +525,7 @@ construct_diff_label_count_vector(const Annotator &annotator,
                 callback(labels[j], column);
             }, num_threads
         );
-    }, labels_in, labels_out, max_index, num_labels, num_threads, add_out_labels_to_mask);
+    }, labels_in, labels_out, max_index, num_labels, num_threads > 1, add_out_labels_to_mask);
 
     return std::make_tuple(std::move(counts), std::move(init_mask), std::move(other_labels));
 }
@@ -568,7 +567,7 @@ construct_diff_label_count_vector(const std::vector<std::string> &files,
 
             j += num_labels_per_file[i];
         }
-    }, labels_in, labels_out, max_index, num_labels, num_threads, add_out_labels_to_mask);
+    }, labels_in, labels_out, max_index, num_labels, num_threads > 1, add_out_labels_to_mask);
 
     return std::make_tuple(std::move(counts), std::move(init_mask),
                            to_sdsl(std::move(other_labels)),
