@@ -182,7 +182,6 @@ void call_masked_graphs(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
             callback(*mask_nodes_by_label(graph_ptr,
                                           config->fnames,
-                                          config->fnames.size(),
                                           foreground_labels,
                                           background_labels,
                                           diff_config, num_threads,

@@ -71,7 +71,7 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                           bool add_complement,
                           size_t num_threads);
 
-
+// Helper function for calls in interface
 std::shared_ptr<MaskedDeBruijnGraph>
 mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     const AnnotatedDBG *anno_graph,
@@ -130,7 +130,6 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
 std::shared_ptr<MaskedDeBruijnGraph>
 mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     const std::vector<std::string> &files,
-                    size_t num_labels,
                     const tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> &labels_in,
                     const tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> &labels_out,
                     const DifferentialAssemblyConfig &config,
@@ -158,7 +157,7 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     auto &[counts, init_mask] = count_vector;
     return mask_nodes_by_label(graph_ptr, nullptr,
                                std::move(counts), std::move(init_mask),
-                               num_labels,
+                               files.size(),
                                labels_in, labels_out, {}, {},
                                config, num_threads);
 }

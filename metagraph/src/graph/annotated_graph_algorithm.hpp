@@ -61,7 +61,6 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
 std::shared_ptr<MaskedDeBruijnGraph>
 mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     const std::vector<std::string> &files,
-                    size_t num_labels,
                     const tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> &labels_in,
                     const tsl::hopscotch_set<typename AnnotatedDBG::Annotator::Label> &labels_out,
                     const DifferentialAssemblyConfig &config,
