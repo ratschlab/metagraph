@@ -23,16 +23,20 @@ constexpr std::memory_order MO_RELAXED = std::memory_order_relaxed;
 
 
 /**
- * Return an int_vector<>, bit_vector pair, of lengths anno_graph.get_graph().max_index() * 2
- * and anno_graph.get_graph().max_index(), respectively.
+ * Return an int_vector<>, bit_vector of lengths anno_graph.get_graph().max_index() * 2
+ * and anno_graph.get_graph().max_index(), respectively, and a bit_vector of length
+ * equal to the total number of labels.
  * For an index i, the int_vector at indices 2*i and 2*i + 1 represent the
  * number of labels in labels_in and labels_out which the k-mer of index i is
  * annotated with, respectively. The width of the int_vector<> is computed to be
  * wide enough to contain counts up to num_labels.
  * The returned bit_vector is a k-mer mask indicating those k-mers annotated
- * with at least one in-label or out-label.
+ * with at least one in-label. If add_out_labels_to_mask is true, then it also indicates
+ * which those k-mers with at least one out-label.
+ * The second bit vector indicates which of the labels correspond to an "other"
+ * label (i.e., not in- or out-).
  */
-std::pair<sdsl::int_vector<>, sdsl::bit_vector>
+std::tuple<sdsl::int_vector<>, sdsl::bit_vector, sdsl::bit_vector>
 construct_diff_label_count_vector(const Annotator &annotator,
                                   const tsl::hopscotch_set<Label> &labels_in,
                                   const tsl::hopscotch_set<Label> &labels_out,
@@ -41,7 +45,7 @@ construct_diff_label_count_vector(const Annotator &annotator,
                                   size_t num_threads,
                                   bool add_out_labels_to_mask);
 
-std::pair<sdsl::int_vector<>, sdsl::bit_vector>
+std::tuple<sdsl::int_vector<>, sdsl::bit_vector, sdsl::bit_vector>
 construct_diff_label_count_vector(const std::vector<std::string> &files,
                                   const tsl::hopscotch_set<Label> &labels_in,
                                   const tsl::hopscotch_set<Label> &labels_out,
@@ -118,7 +122,7 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
         std::max(num_in_labels, num_out_labels), num_parallel_files,
         add_complement
     );
-    auto &[counts, init_mask] = count_vector;
+    auto &[counts, init_mask, other_labels] = count_vector;
     return mask_nodes_by_label(graph_ptr, &anno_graph,
                                std::move(counts), std::move(init_mask),
                                anno_graph.get_annotator().num_labels(),
@@ -152,7 +156,7 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         std::max(labels_in.size(), labels_out.size()), num_parallel_files,
         add_complement
     );
-    auto &[counts, init_mask] = count_vector;
+    auto &[counts, init_mask, other_labels] = count_vector;
     return mask_nodes_by_label(graph_ptr, nullptr,
                                std::move(counts), std::move(init_mask),
                                files.size(),
@@ -473,7 +477,7 @@ construct_diff_label_count_vector(const std::function<void(const std::function<v
 }
 
 
-std::pair<sdsl::int_vector<>, sdsl::bit_vector>
+std::tuple<sdsl::int_vector<>, sdsl::bit_vector, sdsl::bit_vector>
 construct_diff_label_count_vector(const Annotator &annotator,
                                   const tsl::hopscotch_set<Label> &labels_in,
                                   const tsl::hopscotch_set<Label> &labels_out,
@@ -497,16 +501,23 @@ construct_diff_label_count_vector(const Annotator &annotator,
         }
     }
 
-    return construct_diff_label_count_vector([&](const auto &callback) {
+    sdsl::bit_vector other_labels(encoder.size(), true);
+    for (Column column : columns) {
+        other_labels[column] = false;
+    }
+
+    auto [counts, init_mask] = construct_diff_label_count_vector([&](const auto &callback) {
         annotator.get_matrix().call_columns(columns,
             [&](size_t j, const bitmap_generator &column) {
                 callback(labels[j], column);
             }, num_threads
         );
     }, labels_in, labels_out, max_index, num_labels, num_threads, add_out_labels_to_mask);
+
+    return std::make_tuple(std::move(counts), std::move(init_mask), std::move(other_labels));
 }
 
-std::pair<sdsl::int_vector<>, sdsl::bit_vector>
+std::tuple<sdsl::int_vector<>, sdsl::bit_vector, sdsl::bit_vector>
 construct_diff_label_count_vector(const std::vector<std::string> &files,
                                   const tsl::hopscotch_set<Label> &labels_in,
                                   const tsl::hopscotch_set<Label> &labels_out,
@@ -514,11 +525,39 @@ construct_diff_label_count_vector(const std::vector<std::string> &files,
                                   size_t num_labels,
                                   size_t num_threads,
                                   bool add_out_labels_to_mask) {
-    return construct_diff_label_count_vector([&](const auto &callback) {
-        annot::ColumnCompressed<>::merge_load(files, [&](uint64_t, const auto &label, auto&& column) {
-            callback(label, *column);
-        }, num_threads);
+    std::vector<bool> other_labels;
+    other_labels.reserve(files.size());
+    std::vector<size_t> num_labels_per_file;
+    num_labels_per_file.reserve(files.size());
+    for (size_t i = 0; i < files.size(); ++i) {
+        auto label_encoder = annot::ColumnCompressed<>::read_label_encoder(files[i]);
+        num_labels_per_file.emplace_back(label_encoder.size());
+        for (const auto &label : label_encoder.get_labels()) {
+            other_labels.emplace_back(!labels_in.count(label) && !labels_out.count(label));
+        }
+    }
+
+    auto [counts, init_mask] = construct_diff_label_count_vector([&](const auto &callback) {
+        size_t j = 0;
+        for (size_t i = 0; i < files.size(); ++i) {
+            if (std::accumulate(other_labels.begin() + j,
+                                other_labels.begin() + j + num_labels_per_file[i],
+                                0ull)) {
+                annot::ColumnCompressed<>::merge_load({ files[i] },
+                    [&](size_t offset, const auto &label, auto&& column) {
+                        if (!other_labels[j + offset])
+                            callback(label, *column);
+                    },
+                    num_threads
+                );
+            }
+
+            j += num_labels_per_file[i];
+        }
     }, labels_in, labels_out, max_index, num_labels, num_threads, add_out_labels_to_mask);
+
+    return std::make_tuple(std::move(counts), std::move(init_mask),
+                           to_sdsl(std::move(other_labels)));
 }
 
 
