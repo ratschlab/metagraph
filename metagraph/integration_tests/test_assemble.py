@@ -40,7 +40,7 @@ gfa_tests = {
 }
 
 GFAs = [name for name, _ in gfa_tests.items()]
-LOAD_TYPES = ['load', 'stream']
+MASKED = ['','--mask-dummy']
 
 
 class TestAnnotate(unittest.TestCase):
@@ -264,13 +264,11 @@ class TestDiffAssembly(TestingBase):
             no_anchor_opt
         )
 
-    @parameterized.expand(LOAD_TYPES)
-    def test_diff_assembly(self, load_type):
+    def test_diff_assembly(self):
         assemble_command = f'{METAGRAPH} assemble -p {NUM_THREADS} \
                 -a {self.tempdir.name}/annotation{anno_file_extension[self.anno_repr]} \
                 -o {self.tempdir.name}/diff_contigs \
                 --diff-assembly-rules {TEST_DATA_DIR}/example.diff.json \
-                {"--separately" if load_type == "stream" else ""} \
                 {self.tempdir.name}/graph{graph_file_extension[self.graph_repr]}'
         res = subprocess.run([assemble_command], shell=True)
         self.assertEqual(res.returncode, 0)
@@ -296,13 +294,11 @@ class TestDiffAssembly(TestingBase):
         self.assertEqual(results['>metasub_by_kmer'][0], 'CTTGGATCACACTCTTCTCAGAGCCCAGGCCAGGGGCCCCCAAGAAAGGCTCTGGTGGAGAACCTGTGCATGAAGGCTGTCAACCAGTCCATAGGCAGGGCCATCAGGCACCAAAGGGATTCTGCCAGCATAGTGCTCCTGGACCAGTGATACACCCGGCACCCTGTCCTGGACATGCTGTTGGCCTGGATCTGAGCCCTCGTGGAGGTCAAAGCCACCTTTGGTTCTGCCATTGCTGCTGTGTGGAAGTTCACTCAAGTAGGCCTCTTCCTG')
         self.assertEqual(results['>metasub_sym_diff'][0], 'TGGAAGTTCACTCAAGTAGGCCTCTTCCTGACAGGCAGCTGCACCACTGCCTGGCGCTGTGCCCTTCCTTTGCTCTGCCCGCTGGAGACGGTGTTTGTCATGGGCCTGGTCTGCAGG')
 
-    @parameterized.expand(LOAD_TYPES)
-    def test_diff_assembly_simple(self, load_type):
+    def test_diff_assembly_simple(self):
         assemble_command = f'{METAGRAPH} assemble -p {NUM_THREADS} \
                 -a {self.tempdir.name}/annotation{anno_file_extension[self.anno_repr]} \
                 -o {self.tempdir.name}/diff_contigs \
                 --diff-assembly-rules {TEST_DATA_DIR}/example_simple.diff.json \
-                {"--separately" if load_type == "stream" else ""} \
                 {self.tempdir.name}/graph{graph_file_extension[self.graph_repr]}'
         res = subprocess.run([assemble_command], shell=True)
         self.assertEqual(res.returncode, 0)
