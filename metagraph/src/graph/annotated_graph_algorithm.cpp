@@ -170,6 +170,8 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                                 0ull)) {
                 annot::ColumnCompressed<>::merge_load({ files[i] },
                     [&](size_t offset, const auto &, auto&& column) {
+                        auto &[counts, init_mask, other_labels, num_labels_per_file]
+                            = count_vector;
                         if (other_labels[j + offset]) {
                             call_ones(init_mask, [&](size_t i) {
                                 if ((*column)[AnnotatedDBG::graph_to_anno_index(i)])
