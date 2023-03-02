@@ -1242,31 +1242,33 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
             auto jt = coords.begin();
             bool updated = false;
 
-            if (last_q_dist_j && end == end_j && end_j - begin >= min_overlap) {
-                // same suffix seeds matching to different nodes
-                score_t updated_score = base_added_score + node_insert;
-                if (updated_score > score) {
-                    score = updated_score;
-                    last_dist = 0;
-                    last = j;
-                    last_q_dist = 0;
-                    updated = true;
+            if (config_.allow_jump) {
+                if (last_q_dist_j && end == end_j && end_j - begin >= min_overlap) {
+                    // same suffix seeds matching to different nodes
+                    score_t updated_score = base_added_score + node_insert;
+                    if (updated_score > score) {
+                        score = updated_score;
+                        last_dist = 0;
+                        last = j;
+                        last_q_dist = 0;
+                        updated = true;
+                    }
                 }
-            }
 
-            if (begin >= end_j) {
-                // perhaps a disjoint alignment?
-                score_t gap = begin - end_j;
-                score_t gap_cost = node_insert + gap_open + gap_open
-                                    + std::max(gap - 1, 0) * gap_ext;
-                score_t updated_score = base_added_score + gap_cost;
+                if (begin >= end_j) {
+                    // perhaps a disjoint alignment?
+                    score_t gap = begin - end_j;
+                    score_t gap_cost = node_insert + gap_open + gap_open
+                                        + std::max(gap - 1, 0) * gap_ext;
+                    score_t updated_score = base_added_score + gap_cost;
 
-                if (updated_score > score) {
-                    score = updated_score;
-                    last_dist = std::numeric_limits<uint32_t>::max() + dist;
-                    last = j;
-                    last_q_dist = 0;
-                    updated = true;
+                    if (updated_score > score) {
+                        score = updated_score;
+                        last_dist = std::numeric_limits<uint32_t>::max() + dist;
+                        last = j;
+                        last_q_dist = 0;
+                        updated = true;
+                    }
                 }
             }
 

@@ -7,7 +7,6 @@
 #include "common/logger.hpp"
 #include "common/algorithms.hpp"
 #include "graph/representation/canonical_dbg.hpp"
-#include "graph/representation/succinct/boss_construct.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/graph_extensions/path_index.hpp"
@@ -17,15 +16,6 @@ namespace graph {
 namespace align {
 
 using mtg::common::logger;
-
-typedef boss::BOSS::edge_index edge_index;
-typedef std::pair<edge_index, edge_index> BOSSRange;
-
-std::pair<std::unique_ptr<boss::BOSS>, std::vector<BOSSRange>>
-extract_subgraph(const DeBruijnGraph &graph,
-                 const std::vector<IDBGAligner::Query> &seq_batch,
-                 const DBGAlignerConfig &config,
-                 size_t batch_size);
 
 const DBGSuccinct* get_dbg_succ(const DeBruijnGraph &graph) {
     const auto *canonical = dynamic_cast<const CanonicalDBG*>(&graph);
@@ -105,9 +95,6 @@ auto DBGAligner<Seeder, Extender, AlignmentCompare>
     for (const auto &[header, query] : seq_batch) {
         batch_size += query.size();
     }
-
-    auto [sample_boss, matching_ranges]
-        = extract_subgraph(graph_, seq_batch, config_, batch_size * 16);
 
     ProgressBar progress_bar(seq_batch.size(), "Seeding sequences",
                              std::cerr, !common::get_verbose());
@@ -257,27 +244,6 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
         size_t query_coverage = 0;
 
         auto alignments = aggregator.get_alignments();
-        // if (config_.post_chain_alignments) {
-        //     bool &post_chain = const_cast<bool&>(config_.post_chain_alignments);
-        //     bool &allow_left_trim = const_cast<bool&>(config_.allow_left_trim);
-        //     bool &allow_label_change = const_cast<bool&>(config_.allow_label_change);
-        //     bool old_allow_left_trim = allow_left_trim;
-        //     bool old_allow_label_change = allow_label_change;
-        //     allow_left_trim = false;
-        //     post_chain = false;
-        //     allow_label_change = true;
-        //     size_t n_ext;
-        //     size_t n_exp;
-        //     std::tie(alignments, n_ext, n_exp)
-        //         = chain_alignments<AlignmentCompare>(*this, std::move(alignments),
-        //                                              paths[i].get_query(false),
-        //                                              paths[i].get_query(true));
-        //     post_chain = true;
-        //     allow_left_trim = old_allow_left_trim;
-        //     allow_label_change = old_allow_label_change;
-        //     num_extensions += n_ext;
-        //     num_explored_nodes += n_exp;
-        // }
 
         for (auto&& alignment : alignments) {
             assert(alignment.is_valid(graph_, &config_));
@@ -653,163 +619,6 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
     throw std::runtime_error("Reverse complements not defined for amino acids");
 
 #endif
-}
-
-std::pair<std::unique_ptr<boss::BOSS>, std::vector<BOSSRange>>
-extract_subgraph(const DeBruijnGraph &graph,
-                 const std::vector<IDBGAligner::Query> &seq_batch,
-                 const DBGAlignerConfig &config,
-                 size_t batch_size) {
-    if (config.min_seed_length >= graph.get_k())
-        return {};
-
-    const auto *base_dbg_succ = get_dbg_succ(graph);
-    if (!base_dbg_succ)
-        return {};
-
-    size_t query_total_length = 0;
-    bool add_rev_comp = graph.get_mode() == DeBruijnGraph::CANONICAL
-                                    || config.forward_and_reverse_complement;
-    boss::BOSSConstructor constructor(config.min_seed_length - 1, add_rev_comp, 0,
-                                      "", 1, batch_size, kmer::ContainerType::VECTOR, "");
-    for (const auto &[header, query] : seq_batch) {
-        constructor.add_sequence(query);
-        query_total_length += query.size() + (query.size() * add_rev_comp);
-    }
-    auto boss = std::make_unique<boss::BOSS>(&constructor);
-
-    logger->trace("Getting matching ranges");
-    typedef boss::BOSS::TAlphabet TAlphabet;
-    const auto &base_boss = base_dbg_succ->get_boss();
-    std::vector<std::tuple<edge_index, edge_index, SmallVector<TAlphabet>>> initial_edge_stack;
-    for (TAlphabet s = 1; s < boss->alph_size; ++s) {
-        edge_index rl = boss->get_F(s) + 1 < boss->get_W().size()
-             ? boss->get_F(s) + 1
-             : boss->get_W().size(); // lower bound
-        edge_index ru = s + 1 < boss->alph_size
-             ? boss->get_F(s + 1)
-             : boss->get_W().size() - 1; // upper bound
-
-        if (rl <= ru)
-            initial_edge_stack.emplace_back(rl, ru, SmallVector<TAlphabet>{ s });
-    }
-
-    std::vector<std::tuple<edge_index, edge_index, size_t>> edge_stack;
-    std::vector<std::pair<BOSSRange, size_t>> traversal_stack;
-    while (initial_edge_stack.size()) {
-        auto [first, last, spelling] = initial_edge_stack.back();
-        initial_edge_stack.pop_back();
-        if (spelling.size() >= base_boss.get_indexed_suffix_length()) {
-            auto [base_first, base_last, match_end]
-                = base_boss.index_range(spelling.begin(), spelling.end());
-            if (match_end == spelling.end()) {
-                edge_stack.emplace_back(first, last, spelling.size());
-                traversal_stack.emplace_back(std::make_pair(base_first, base_last), spelling.size());
-            }
-            continue;
-        }
-
-        spelling.push_back(0);
-        for (TAlphabet s = 1; s < boss->alph_size; ++s) {
-            edge_index next_first = first;
-            if (spelling.size() <= boss->get_k()) {
-                edge_index next_last = last;
-                if (boss->tighten_range(&next_first, &next_last, s)) {
-                    spelling.back() = s;
-                    initial_edge_stack.emplace_back(next_first, next_last, spelling);
-                }
-            } else if (edge_index next_last = boss->pick_edge(last, s)) {
-                spelling.back() = s;
-                initial_edge_stack.emplace_back(next_last, next_last, spelling);
-            }
-        }
-    }
-
-    std::vector<BOSSRange> matching_ranges(boss->num_edges() + 1);
-    size_t total_matches = 0;
-    size_t total_ranges = 0;
-    while (traversal_stack.size()) {
-        auto [base_range, l] = traversal_stack.back();
-        traversal_stack.pop_back();
-
-        assert(edge_stack.size());
-        auto [first, last, length] = edge_stack.back();
-        assert(l == length);
-        edge_stack.pop_back();
-
-        if (l == config.min_seed_length) {
-            matching_ranges[last] = base_range;
-            total_matches += last - first + 1;
-            ++total_ranges;
-            continue;
-        }
-
-        if (++length == config.min_seed_length) {
-            if (base_range.first != base_range.second) {
-                boss->call_outgoing(last, [&](edge_index next_last) {
-                    if (TAlphabet s = boss->get_W(next_last)) {
-                        auto [next_base_first, next_base_last] = base_range;
-                        if (base_boss.tighten_range(&next_base_first, &next_base_last, s % boss->alph_size)) {
-                            edge_stack.emplace_back(next_last, next_last, length);
-                            traversal_stack.emplace_back(
-                                std::make_pair(next_base_first, next_base_last), length);
-                        }
-                    }
-                });
-            } else if (TAlphabet s = base_boss.get_W(base_range.second)) {
-                s %= base_boss.alph_size;
-                if (auto next_last = boss->pick_edge(last, s)) {
-                    auto next_base_last = base_boss.fwd(base_range.second, s);
-                    auto next_base_first = base_boss.pred_last(next_base_last - 1) + 1;
-                    edge_stack.emplace_back(next_last, next_last, length);
-                    traversal_stack.emplace_back(
-                        std::make_pair(next_base_first, next_base_last), length);
-                }
-            }
-            continue;
-        }
-
-        if (base_range.first == base_range.second) {
-            if (TAlphabet s = base_boss.get_W(base_range.second)) {
-                s %= base_boss.alph_size;
-                if (boss->tighten_range(&first, &last, s)) {
-                    auto next_base_last = base_boss.fwd(base_range.second, s);
-                    auto next_base_first = base_boss.pred_last(next_base_last - 1) + 1;
-                    edge_stack.emplace_back(first, last, length);
-                    traversal_stack.emplace_back(
-                        std::make_pair(next_base_first, next_base_last), length);
-                }
-            }
-        } else if (first == last) {
-            if (TAlphabet s = boss->get_W(last)) {
-                s %= boss->alph_size;
-                if (base_boss.tighten_range(&base_range.first, &base_range.second, s)) {
-                    auto next_last = boss->fwd(last, s);
-                    auto next_first = boss->pred_last(next_last - 1) + 1;
-                    edge_stack.emplace_back(next_first, next_last, length);
-                    traversal_stack.emplace_back(base_range, length);
-                }
-            }
-        } else {
-            for (TAlphabet s = 1; s < boss->alph_size; ++s) {
-                edge_index next_first = first;
-                edge_index next_last = last;
-
-                if (boss->tighten_range(&next_first, &next_last, s)) {
-                    auto [next_base_first, next_base_last] = base_range;
-                    if (base_boss.tighten_range(&next_base_first, &next_base_last, s)) {
-                        edge_stack.emplace_back(next_first, next_last, length);
-                        traversal_stack.emplace_back(
-                            std::make_pair(next_base_first, next_base_last), length);
-                    }
-                }
-            }
-        }
-    }
-
-    logger->trace("Found {} overlapping ranges, totalling {} k-mers",
-                  total_ranges, total_matches);
-    return std::make_pair(std::move(boss), std::move(matching_ranges));
 }
 
 template class DBGAligner<>;

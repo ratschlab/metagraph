@@ -43,7 +43,7 @@ TYPED_TEST(DBGAlignerPostChainTest, align_chain_swap) {
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     config.min_seed_length = k;
     config.seed_complexity_filter = false;
-    // config.post_chain_alignments = true;
+    config.allow_jump = true;
     config.set_node_insertion_penalty(k);
 
     DBGAligner<> aligner(*graph, config);
@@ -63,7 +63,7 @@ TYPED_TEST(DBGAlignerPostChainTest, align_chain_overlap_2) {
     auto graph = build_graph_batch<TypeParam>(k, { reference1, reference2 });
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
-    // config.post_chain_alignments = true;
+    config.allow_jump = true;
     config.min_seed_length = 7;
     config.max_seed_length = 7;
     config.seed_complexity_filter = false;
@@ -85,7 +85,7 @@ TYPED_TEST(DBGAlignerPostChainTest, align_chain_overlap_mismatch) {
     auto graph = build_graph_batch<TypeParam>(k, { reference1, reference2 });
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
-    // config.post_chain_alignments = true;
+    config.allow_jump = true;
     config.forward_and_reverse_complement = true;
     config.min_seed_length = 5;
     config.max_seed_length = 5;
@@ -113,7 +113,7 @@ TYPED_TEST(DBGAlignerPostChainTest, align_chain_overlap_3_prefer_mismatch_over_g
     config.max_seed_length = 7;
     config.seed_complexity_filter = false;
     config.set_node_insertion_penalty(k);
-    // config.post_chain_alignments = true;
+    config.allow_jump = true;
 
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
@@ -132,7 +132,7 @@ TYPED_TEST(DBGAlignerPostChainTest, align_chain_delete_no_chain_if_full_coverage
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     config.min_seed_length = k;
     config.set_node_insertion_penalty(k);
-    // config.post_chain_alignments = true;
+    config.allow_jump = true;
 
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
@@ -154,7 +154,7 @@ TYPED_TEST(DBGAlignerPostChainTest, align_chain_delete1) {
     config.min_seed_length = 8;
     config.max_seed_length = 8;
     config.set_node_insertion_penalty(k);
-    // config.post_chain_alignments = true;
+    config.allow_jump = true;
 
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
@@ -176,7 +176,7 @@ TYPED_TEST(DBGAlignerPostChainTest, align_chain_delete_mismatch) {
     config.min_seed_length = 5;
     config.max_seed_length = 5;
     config.set_node_insertion_penalty(k);
-    // config.post_chain_alignments = true;
+    config.allow_jump = true;
 
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
@@ -199,7 +199,7 @@ TYPED_TEST(DBGAlignerPostChainTest, align_chain_overlap_with_insert) {
     config.max_seed_length = 5;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(1, -1, -1);
     config.set_node_insertion_penalty(k);
-    // config.post_chain_alignments = true;
+    config.allow_jump = true;
 
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
@@ -218,7 +218,7 @@ TYPED_TEST(DBGAlignerPostChainTest, align_chain_deletion_in_overlapping_node) {
     auto graph = build_graph_batch<TypeParam>(k, { reference1, reference2 });
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
-    // config.post_chain_alignments = true;
+    config.allow_jump = true;
     config.min_seed_length = 5;
     config.max_seed_length = 5;
     config.set_node_insertion_penalty(k);
@@ -241,7 +241,7 @@ TYPED_TEST(DBGAlignerPostChainTest, align_chain_large_overlap) {
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     config.min_seed_length = k;
     config.set_node_insertion_penalty(k);
-    // config.post_chain_alignments = true;
+    config.allow_jump = true;
 
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
@@ -263,7 +263,7 @@ TYPED_TEST(DBGAlignerPostChainTest, align_chain_delete_in_overlap) {
     config.min_seed_length = 6;
     config.max_seed_length = 6;
     config.set_node_insertion_penalty(k);
-    // config.post_chain_alignments = true;
+    config.allow_jump = true;
 
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
@@ -284,14 +284,14 @@ TYPED_TEST(DBGAlignerPostChainTest, align_chain_disjoint) {
     config.min_seed_length = k;
     config.seed_complexity_filter = false;
     config.set_node_insertion_penalty(k);
-    // config.post_chain_alignments = true;
+    config.allow_jump = true;
 
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
     check_chain(paths, *graph, config);
     ASSERT_EQ(1u, paths.size());
     EXPECT_EQ(std::string("GGGGGGGGGGAAACCCCCCCCTGAGGATCAG$TTCACTAGCTAGCCCCCCCCCGGGGGGGGGG"), paths[0].get_sequence());
-    // check_extend(graph, aligner.get_config(), paths, query);
+    check_extend(graph, aligner.get_config(), paths, query);
 }
 
 TYPED_TEST(DBGAlignerPostChainTest, align_chain_gap) {
@@ -307,7 +307,7 @@ TYPED_TEST(DBGAlignerPostChainTest, align_chain_gap) {
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(1, -1, -1);
     config.min_seed_length = k;
     config.set_node_insertion_penalty(k);
-    // config.post_chain_alignments = true;
+    config.allow_jump = true;
 
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
