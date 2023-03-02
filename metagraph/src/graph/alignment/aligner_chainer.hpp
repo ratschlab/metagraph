@@ -30,15 +30,6 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
                               const std::function<bool()> &terminate
                                   = []() { return false; });
 
-// Given a set of local alignments, use sparse dynamic programming to construct
-// longer alignments, potentially with gaps.
-template <class AlignmentCompare>
-std::tuple<std::vector<Alignment>, size_t, size_t>
-chain_alignments(const IDBGAligner &aligner,
-                 std::vector<Alignment>&& alignments,
-                 std::string_view query,
-                 std::string_view query_rc);
-
 std::tuple<size_t, size_t, size_t>
 chain_and_filter_seeds(const IDBGAligner &aligner,
                        std::shared_ptr<ISeeder> &seeder,

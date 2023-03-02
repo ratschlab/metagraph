@@ -49,7 +49,6 @@ struct DBGAlignerConfig {
 
     bool forward_and_reverse_complement = true;
     bool chain_alignments = false;
-    bool post_chain_alignments = false;
     bool allow_label_change = false;
     bool allow_jump = false;
     bool global_xdrop = true;

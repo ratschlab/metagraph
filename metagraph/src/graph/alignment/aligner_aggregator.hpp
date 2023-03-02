@@ -74,10 +74,10 @@ inline bool AlignmentAggregator<AlignmentCompare>::add_alignment(Alignment&& ali
         // check for duplicates
         for (const auto &aln : queue) {
             if (*a == *aln)
-                return config_.post_chain_alignments;
+                return false;
         }
         // If post-alignment chaining is requested, never skip any alignments
-        if (config_.post_chain_alignments || queue.size() < config_.num_alternative_paths) {
+        if (queue.size() < config_.num_alternative_paths) {
             queue.emplace(a);
             return true;
         }
@@ -143,7 +143,7 @@ inline bool AlignmentAggregator<AlignmentCompare>::add_alignment(Alignment&& ali
 
 template <class AlignmentCompare>
 inline auto AlignmentAggregator<AlignmentCompare>::get_global_cutoff() const -> score_t {
-    if (unlabeled_.empty() || config_.post_chain_alignments)
+    if (unlabeled_.empty())
         return config_.ninf;
 
     score_t cur_max = unlabeled_.maximum()->get_score();
@@ -174,7 +174,6 @@ inline auto AlignmentAggregator<AlignmentCompare>
     auto find = path_queue_.find(label);
     return find == path_queue_.end()
             || find->second.size() < config_.num_alternative_paths
-            || config_.post_chain_alignments
         ? config_.ninf
         : find->second.minimum()->get_score();
 }
