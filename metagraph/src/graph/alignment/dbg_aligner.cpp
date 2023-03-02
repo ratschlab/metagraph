@@ -370,7 +370,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
         is_disconnected.emplace_back(chain.back().second >= std::numeric_limits<uint32_t>::max());
         assert(partial_alignments.size() == coord_offsets.size());
         Alignment *first = &partial_alignments[0];
-        DEBUG_LOG("Partial alignments:\n\t{}", fmt::join(partial_alignments, "\n\t"));
+        logger->trace("Partial alignments:\n\t{}", fmt::join(partial_alignments, "\n\t"));
         for (size_t i = 1; i < partial_alignments.size(); ++i) {
             Alignment &next = partial_alignments[i];
             if (next.get_sequence().size() < graph_.get_k()) {

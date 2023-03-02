@@ -679,7 +679,8 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
             bool updated = false;
 
             if (config_.allow_jump) {
-                if (last_q_dist_j && end == end_j && end_j - begin >= min_overlap) {
+                if (last_dist < std::numeric_limits<uint32_t>::max()
+                        && last_q_dist_j && end == end_j && end_j - begin >= min_overlap) {
                     // same suffix seeds matching to different nodes
                     score_t updated_score = base_added_score + node_insert;
                     if (updated_score > score) {
@@ -691,7 +692,9 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                     }
                 }
 
-                if (begin >= end_j) {
+                if (last_dist < std::numeric_limits<uint32_t>::max()
+                        && last_q_dist_j
+                        && begin >= end_j) {
                     // perhaps a disjoint alignment?
                     score_t gap = begin - end_j;
                     score_t gap_cost = node_insert + gap_open + gap_open
