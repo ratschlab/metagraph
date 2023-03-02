@@ -23,8 +23,10 @@ void DBGAlignerConfig::print_summary() const {
     logger->trace("\t Gap extension penalty: {}", (int64_t)gap_extension_penalty);
     logger->trace("\t Min alignment score: {}", min_path_score);
     logger->trace("\t X drop-off: {}", xdrop);
+    logger->trace("\t Allow node insertion: {}", allow_jump);
+    logger->trace("\t Path insertion penalty: {}", node_insertion_penalty);
     logger->trace("\t Exact nucleotide match threshold: {}", min_exact_match);
-    logger->trace("\t Chain alignments: {}", chain_alignments);
+    logger->trace("\t Chain alignments: {}", chain_alignments || allow_jump || allow_label_change);
 
     logger->trace("\t Scoring matrix: {}", alignment_edit_distance ? "unit costs" : "matrix");
     if (!alignment_edit_distance) {
