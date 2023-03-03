@@ -273,14 +273,29 @@ PathIndex<PathStorage, PathBoundaries>
 
 auto IPathIndex
 ::get_coords(const std::vector<node_index> &nodes) const -> std::vector<RowTuples> {
+    sdsl::bit_vector picked(nodes.size(), true);
+
     std::vector<Row> rows;
     rows.reserve(nodes.size());
-    std::transform(nodes.begin(), nodes.end(), std::back_inserter(rows),
-                   AnnotatedDBG::graph_to_anno_index);
 
+    for (size_t i = 0; i < nodes.size(); ++i) {
+        if (!has_coord(nodes[i])) {
+            picked[i] = false;
+            continue;
+        }
+
+        rows.emplace_back(AnnotatedDBG::graph_to_anno_index(nodes[i]));
+    }
+
+    auto it = picked.begin();
     auto row_tuples = get_row_tuples(rows);
     std::vector<RowTuples> ret_val;
-    ret_val.reserve(row_tuples.size());
+    ret_val.reserve(nodes.size());
+    while (it != picked.end() && !*it) {
+        ret_val.emplace_back();
+        ++it;
+    }
+
     for (auto &tuples : row_tuples) {
         VectorMap<size_t, Tuple> out_tuples;
         assert(tuples.size() <= 1);
@@ -293,9 +308,21 @@ auto IPathIndex
         }
         ret_val.emplace_back(out_tuples.values_container().begin(),
                              out_tuples.values_container().end());
+        ++it;
+        while (it != picked.end() && !*it) {
+            ret_val.emplace_back();
+            ++it;
+        }
     }
 
     return ret_val;
+}
+
+template <class PathStorage, class PathBoundaries>
+bool PathIndex<PathStorage, PathBoundaries>::has_coord(node_index node) const {
+    assert(dbg_succ_);
+    return node != DeBruijnGraph::npos
+        && dbg_succ_->get_node_sequence(node).find(boss::BOSS::kSentinel) == std::string::npos;
 }
 
 template class PathIndex<>;

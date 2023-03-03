@@ -582,7 +582,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                               Alignment::Column, // annotation
                               int64_t, // last_q_dist
                               std::string_view::const_iterator, // begin
-                              node_index, // node
+                              uint64_t, // mem_length
                               score_t, // score
                               uint32_t, // last
                               int64_t, // last_dist
@@ -599,11 +599,12 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
         auto end = anchor.get_query_view().begin() + graph_.get_k() - offset;
         for (size_t k = 0; k < anchor.get_nodes().size(); ++k) {
             auto add_seed = [&](Alignment::Column col) {
+                assert(anchor.get_nodes()[k] == nodes[j]);
                 seeds.emplace_back(end,
                                    col,
                                    0,
                                    begin,
-                                   anchor.get_nodes()[k],
+                                   end - begin,
                                    end - begin,
                                    std::numeric_limits<uint32_t>::max(),
                                    anchor.get_clipping(),
@@ -639,9 +640,8 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
     score_t gap_ext = config_.gap_extension_penalty / match_score;
     score_t node_insert = config_.node_insertion_penalty / match_score;
 
-
     for (size_t j = 0; j < seeds.size() - 1; ++j) {
-        const auto &[end_j, col_j, last_q_dist_j, begin_j, node_j, score_j, last_j, last_dist_j, coord_idx_j] = seeds[j];
+        const auto &[end_j, col_j, last_q_dist_j, begin_j, mem_length_j, score_j, last_j, last_dist_j, coord_idx_j] = seeds[j];
         const auto &coords_j = node_coords[coord_idx_j];
         size_t num_considered = 0;
         bool updated_with_less = false;
@@ -652,7 +652,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
         }
 
         for (++k; k < seeds.size(); ++k) {
-            auto &[end, col, last_q_dist, begin, node, score, last, last_dist, coord_idx] = seeds[k];
+            auto &[end, col, last_q_dist, begin, mem_length, score, last, last_dist, coord_idx] = seeds[k];
             assert(end >= end_j);
             if (k == j)
                 continue;
@@ -678,9 +678,11 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
             auto jt = coords.begin();
             bool updated = false;
 
-            if (config_.allow_jump) {
-                if (last_dist < std::numeric_limits<uint32_t>::max()
-                        && last_q_dist_j && end == end_j && end_j - begin >= min_overlap) {
+            if (config_.allow_jump
+                    && last_dist < std::numeric_limits<uint32_t>::max()
+                    && last_q_dist_j
+                    && mem_length_j >= graph_.get_k()) {
+                if (end == end_j && end_j - begin >= min_overlap) {
                     // same suffix seeds matching to different nodes
                     score_t updated_score = base_added_score + node_insert;
                     if (updated_score > score) {
@@ -689,12 +691,11 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                         last = j;
                         last_q_dist = 0;
                         updated = true;
+                        mem_length = end - begin;
                     }
                 }
 
-                if (last_dist < std::numeric_limits<uint32_t>::max()
-                        && last_q_dist_j
-                        && begin >= end_j) {
+                if (begin >= end_j) {
                     // perhaps a disjoint alignment?
                     score_t gap = begin - end_j;
                     score_t gap_cost = node_insert + gap_open + gap_open
@@ -707,11 +708,13 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                         last = j;
                         last_q_dist = 0;
                         updated = true;
+                        mem_length = end - begin;
                     }
                 }
             }
 
             if (end > end_j) {
+                size_t num_added = end - std::max(begin, end_j);
                 while (it != coords_j.end() && jt != coords.end()) {
                     if (it->first == jt->first) {
                         for (int64_t c_j : it->second) {
@@ -730,6 +733,8 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                                     last = j;
                                     last_q_dist = dist;
                                     updated = true;
+                                    mem_length = (coord_dist == dist) ? mem_length_j + num_added : num_added;
+
                                 }
                             }
                         }
@@ -758,7 +763,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
     std::vector<std::tuple<score_t, size_t, size_t>> best_chain;
     best_chain.reserve(seeds.size());
     for (size_t j = 0; j < seeds.size(); ++j) {
-        const auto &[end, col, last_q_dist, begin, node, score, last, last_dist, coord_idx] = seeds[j];
+        const auto &[end, col, last_q_dist, begin, mem_length, score, last, last_dist, coord_idx] = seeds[j];
         best_chain.emplace_back(-score, last_dist, j);
     }
 
@@ -779,11 +784,11 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
 
         std::vector<std::pair<Seed, size_t>> seed_chain;
         while (k != std::numeric_limits<uint32_t>::max()) {
-            const auto &[end, col, last_q_dist, begin, node, score, last, last_dist, coord_idx] = seeds[k];
+            const auto &[end, col, last_q_dist, begin, mem_length, score, last, last_dist, coord_idx] = seeds[k];
             const auto &anchor = anchors[anchor_ids[coord_idx]];
             used[k] = true;
             auto &seed = seed_chain.emplace_back(Seed(std::string_view(begin, end - begin),
-                                                      std::vector<node_index>{ node },
+                                                      std::vector<node_index>{ nodes[coord_idx] },
                                                       orientation,
                                                       graph_.get_k() - (end - begin),
                                                       begin - query.begin(),
@@ -832,7 +837,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
         }
 
         aligner.extend_chain(std::move(chain), extender, [&](Alignment&& aln) {
-            logger->trace("\t\t{}", aln);
+            logger->trace("\tChaining produced alignment\t{}", aln);
             aln.get_cigar().mark_exact_matches(matching_pos);
             alignments.emplace_back(std::move(aln));
         }, true);

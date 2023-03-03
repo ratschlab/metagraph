@@ -20,6 +20,8 @@ class IPathIndex : public SequenceGraph::GraphExtension {
   protected:
     virtual size_t coord_to_path_id(uint64_t coord) const = 0;
     virtual std::vector<RowTuples> get_row_tuples(const std::vector<Row> &rows) const = 0;
+
+    virtual bool has_coord(node_index) const { return true; }
 };
 
 template <class PathStorage = annot::RowDiffCoordAnnotator::binary_matrix_type,
@@ -48,8 +50,6 @@ class PathIndex : public IPathIndex {
         return dynamic_cast<const DBGSuccinct*>(&graph) == dbg_succ_.get();
     }
 
-    // virtual std::vector<RowTuples> get_coords(const std::vector<node_index> &nodes) const override final;
-
   private:
     std::shared_ptr<const DBGSuccinct> dbg_succ_;
     PathStorage paths_indices_;
@@ -62,6 +62,8 @@ class PathIndex : public IPathIndex {
     virtual std::vector<RowTuples> get_row_tuples(const std::vector<Row> &rows) const override final {
         return paths_indices_.get_row_tuples(rows);
     }
+
+    virtual bool has_coord(node_index node) const override final;
 
     static constexpr auto kPathIndexExtension = ".paths";
 };
