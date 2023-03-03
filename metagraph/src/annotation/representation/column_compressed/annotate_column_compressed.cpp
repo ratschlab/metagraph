@@ -524,7 +524,7 @@ bool ColumnCompressed<Label>::load(const std::string &filename) {
 }
 
 template <typename Label>
-bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenames) {
+bool ColumnCompressed<Label>::merge_load(const std::vector<std::string> &filenames) {  // TODO Myrthe: QUESTION how does this partial streaming exactly work?
     // release the columns stored
     cached_columns_.Clear();
     bitmatrix_.clear();

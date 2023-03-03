@@ -164,14 +164,14 @@ sdsl::bit_vector autocorrelate(const sdsl::bit_vector &vector, uint8_t offset);
 
 
 // Call (uint64_t index, uint64_t value) for each non-zero value in [begin, end)
-template <class Callback>
-inline void call_nonzeros(const sdsl::int_vector<> &vector,
+template <class Callback, class vector_type>
+inline void call_nonzeros(const vector_type &vector,
                           uint64_t begin, uint64_t end,
                           Callback callback);
 
 // Call (uint64_t index, uint64_t value) for each non-zero value in |vector|.
-template <class Callback>
-void call_nonzeros(const sdsl::int_vector<> &vector, Callback callback) {
+template <class Callback, class vector_type>
+void call_nonzeros(const vector_type &vector, Callback callback) {
     return call_nonzeros(vector, 0, vector.size(), callback);
 }
 
@@ -664,8 +664,8 @@ void call_zeros(const sdsl::bit_vector &vector,
     }
 }
 
-template <class Callback>
-void call_nonzeros(const sdsl::int_vector<> &vector,
+template <class Callback, class vector_type> //Myrthe: type for the vector bitmap or sdsl::int_vector<>, and later a sdsl::int_vector_buffer<>
+void call_nonzeros(const vector_type &vector,
                    uint64_t begin, uint64_t end,
                    Callback callback) {
     if (begin >= end)
@@ -720,6 +720,16 @@ void call_nonzeros(const sdsl::int_vector<> &vector,
             }
     }
 }
+
+template void call_nonzeros<sdsl::int_vector<>>(const sdsl::int_vector<> &vector,
+              uint64_t begin, uint64_t end,
+              Callback callback);
+template void call_nonzeros<bitmap>(const bitmap &vector, // for bitmaps this should write a 1 to the column.
+              uint64_t begin, uint64_t end,
+              Callback callback){
+    vector.call_ones([&](uint64_t i){callback(i, 1);}     // creates a lambda function that write a custom argument for the callback
+}
+
 
 template <typename BitVector>
 inline uint64_t next1(const BitVector &v, uint64_t pos, size_t num_steps) {

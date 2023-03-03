@@ -49,6 +49,10 @@ DifferentialAssemblyConfig diff_assembly_config(const Json::Value &experiment) {
     diff_config.label_mask_out_kmer_fraction = experiment.get("out_max_fraction", 0.0).asDouble();
     diff_config.label_mask_out_unitig_fraction = experiment.get("unitig_out_max_fraction", 1.0).asDouble();
     diff_config.label_mask_other_unitig_fraction = experiment.get("unitig_other_max_fraction", 1.0).asDouble();
+    // diff_config.count_kmers = experiment.get("count-kmers", 1.0).asBool(); why is this not present for add_complement?
+    diff_config.family_wise_error_rate = experiment.get("family_wise_error_rate", 0.05).asDouble();
+
+
 
     logger->trace("Per-kmer mask in fraction:\t\t{}", diff_config.label_mask_in_kmer_fraction);
     logger->trace("Per-unitig mask in fraction:\t\t{}", diff_config.label_mask_in_unitig_fraction);
@@ -56,6 +60,8 @@ DifferentialAssemblyConfig diff_assembly_config(const Json::Value &experiment) {
     logger->trace("Per-unitig mask out fraction:\t\t{}", diff_config.label_mask_out_unitig_fraction);
     logger->trace("Per-unitig other label fraction:\t{}", diff_config.label_mask_other_unitig_fraction);
     logger->trace("Include reverse complements:\t\t{}", diff_config.add_complement);
+    logger->trace("Include k-mer counts if present in the graph:\t\t{}", diff_config.count_kmers); // if node weights (k-mer count) are present in the graph and should be included in the differential assembly.
+    logger->trace("Family wise error rate for the Bonferroni test:\t{}", diff_config.family_wise_error_rate);
 
     return diff_config;
 }

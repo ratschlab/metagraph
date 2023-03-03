@@ -829,7 +829,7 @@ bool AnnotatedSequenceGraph::has_label(node_index index, const Label &label) con
     return annotator_->has_label(graph_to_anno_index(index), label);
 }
 
-void AnnotatedSequenceGraph
+void AnnotatedSequenceGraph //TODO Myrthe: Create such a function that supports count annotation?
 ::call_annotated_nodes(const Label &label,
                        std::function<void(node_index)> callback) const {
     assert(check_compatibility());

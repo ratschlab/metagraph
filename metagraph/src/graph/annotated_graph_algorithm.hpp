@@ -33,6 +33,8 @@ struct DifferentialAssemblyConfig {
     double label_mask_out_kmer_fraction = 0.0;
     double label_mask_other_unitig_fraction = 1.0;
     bool add_complement = false;
+    bool count_kmers = false; // Myrthe
+    double family_wise_error_rate = 0.05; //Myrthe: differential assembly statistical tests, or the family wise rate for bonferonni or a p-value
 };
 
 /**
@@ -44,7 +46,8 @@ struct DifferentialAssemblyConfig {
  * respectively.
  * In round 2, if any of the sequences of the initial masked graph have the
  * labels in labels_in_round2 or labels_out_round2, or if they have other labels,
- * the count vector is updated accordingly.
+ * the count
+ * vector is updated accordingly.
  * In round 3, the config rules are used to discard (i.e., mask out) nodes from
  * the masked graph. The resulting graph is returned.
  */
