@@ -590,7 +590,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
 
     using Anchor = std::tuple<std::string_view::const_iterator, // end
                               Alignment::Column, // annotation
-                              int64_t, // last_q_dist
+                              int64_t, // dummy
                               std::string_view::const_iterator, // begin
                               uint64_t, // mem_length
                               score_t, // score
@@ -652,7 +652,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
     score_t node_insert = config_.node_insertion_penalty / match_score;
 
     for (size_t j = 0; j < seeds.size() - 1; ++j) {
-        const auto &[end_j, col_j, last_q_dist_j, begin_j, mem_length_j, score_j, last_j, last_dist_j, coord_idx_j] = seeds[j];
+        const auto &[end_j, col_j, dummy_j, begin_j, aln_length_j, score_j, last_j, last_dist_j, coord_idx_j] = seeds[j];
         const auto &coords_j = node_coords[coord_idx_j];
         size_t num_considered = 0;
         bool updated_with_less = false;
@@ -665,7 +665,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
         }
 
         for (++k; k < seeds.size(); ++k) {
-            auto &[end, col, last_q_dist, begin, mem_length, score, last, last_dist, coord_idx] = seeds[k];
+            auto &[end, col, dummy, begin, aln_length, score, last, last_dist, coord_idx] = seeds[k];
             assert(end >= end_j);
             if (k == j)
                 continue;
@@ -687,15 +687,14 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
             if (base_added_score < score)
                 continue;
 
+            size_t length = end - begin;
+
             const auto &coords = node_coords[coord_idx];
             auto it = coords_j.begin();
             auto jt = coords.begin();
             bool updated = false;
 
-            if (config_.allow_jump
-                    && last_dist < std::numeric_limits<uint32_t>::max()
-                    && last_q_dist_j
-                    && mem_length_j >= graph_.get_k()) {
+            if (config_.allow_jump && aln_length_j >= graph_.get_k()) {
                 if (end == end_j && end_j - begin >= min_overlap) {
                     // same suffix seeds matching to different nodes
                     score_t updated_score = base_added_score + node_insert;
@@ -703,9 +702,8 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                         score = updated_score;
                         last_dist = 0;
                         last = j;
-                        last_q_dist = 0;
                         updated = true;
-                        mem_length = end - begin;
+                        aln_length = length;
                     }
                 }
 
@@ -720,9 +718,8 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                         score = updated_score;
                         last_dist = std::numeric_limits<uint32_t>::max() + dist;
                         last = j;
-                        last_q_dist = 0;
                         updated = true;
-                        mem_length = end - begin;
+                        aln_length = length;
                     }
                 }
             }
@@ -742,16 +739,15 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                             score = updated_score;
                             last_dist = coord_dist;
                             last = j;
-                            last_q_dist = dist;
                             updated = true;
-                            mem_length = (dist == coord_dist) ? mem_length_j + num_added : num_added;
+                            aln_length = aln_length_j + coord_dist;
                         }
                         break;
                     }
                 }
-                if (found && gap == 0) {
+
+                if (found && gap == 0)
                     continue;
-                }
 
                 while (it != coords_j.end() && jt != coords.end()) {
                     if (it->first == jt->first) {
@@ -770,9 +766,8 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                                     score = updated_score;
                                     last_dist = coord_dist;
                                     last = j;
-                                    last_q_dist = dist;
                                     updated = true;
-                                    mem_length = (coord_dist == dist) ? mem_length_j + num_added : num_added;
+                                    aln_length = aln_length_j + coord_dist;
                                 }
                             }
                         }
