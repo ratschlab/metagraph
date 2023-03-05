@@ -74,7 +74,7 @@ PathIndex<PathStorage, PathBoundaries>
     std::vector<uint64_t> boundaries { 0 };
 
     std::mutex mu;
-    dbg_succ.call_unitigs([&](const auto &seq, const auto &path) {
+    dbg_succ.call_unitigs([&](const auto &, const auto &path) {
         auto rows = path;
         std::transform(rows.begin(), rows.end(), rows.begin(), AnnotatedDBG::graph_to_anno_index);
 
@@ -91,17 +91,6 @@ PathIndex<PathStorage, PathBoundaries>
             uint64_t coord = boundaries.back() + dbg_succ.get_k() - 1;
             for (auto it = rows.rbegin(); it != rows.rend(); ++it) {
                 annotator.add_label_coord(*it, DUMMY, coord++);
-            }
-            boundaries.emplace_back(coord);
-        } else if (dbg_succ.get_mode() == DeBruijnGraph::CANONICAL) {
-            auto rc_rows = path;
-            std::string rc_seq = seq;
-            reverse_complement_seq_path(dbg_succ, rc_seq, rc_rows);
-            std::transform(rc_rows.begin(), rc_rows.end(), rc_rows.begin(), AnnotatedDBG::graph_to_anno_index);
-            uint64_t coord = boundaries.back() + dbg_succ.get_k() - 1;
-            annotator.add_labels(rc_rows, DUMMY);
-            for (auto row : rc_rows) {
-                annotator.add_label_coord(row, DUMMY, coord++);
             }
             boundaries.emplace_back(coord);
         }
