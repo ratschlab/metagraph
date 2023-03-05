@@ -74,7 +74,7 @@ PathIndex<PathStorage, PathBoundaries>
     std::vector<uint64_t> boundaries { 0 };
 
     std::mutex mu;
-    dbg_succ.call_sequences([&](const auto &seq, const auto &path) {
+    dbg_succ.call_unitigs([&](const auto &seq, const auto &path) {
         auto rows = path;
         std::transform(rows.begin(), rows.end(), rows.begin(), AnnotatedDBG::graph_to_anno_index);
 
