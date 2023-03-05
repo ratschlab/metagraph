@@ -131,95 +131,7 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator>
         }
     }, get_num_threads());
 
-    // enumerate superbubbles
-    sdsl::bit_vector is_superbubble_start(boundaries.size() - 1, false);
-    sdsl::int_vector<> superbubble_ends((boundaries.size() - 1) * 2, 0,
-                                        sdsl::bits::hi(check_graph->max_index()) + 1);
-
-    std::atomic_thread_fence(std::memory_order_release);
-
-    ProgressBar progress_bar(boundaries.size() - 1, "Indexing superbubbles",
-                             std::cerr, !common::get_verbose());
-    #pragma omp parallel for num_threads(get_num_threads())
-    for (size_t i = 1; i < boundaries.size(); ++i) {
-        ++progress_bar;
-        tsl::hopscotch_set<size_t> visited;
-        tsl::hopscotch_set<size_t> seen;
-        std::vector<std::tuple<size_t, size_t>> traversal_stack;
-        traversal_stack.emplace_back(i - 1, 0);
-        seen.insert(i - 1);
-        while (traversal_stack.size()) {
-            auto [unitig_id, dist] = traversal_stack.back();
-            traversal_stack.pop_back();
-            if (visited.count(unitig_id))
-                continue;
-
-            visited.insert(unitig_id);
-            bool has_children = false;
-            bool has_cycle = false;
-            size_t length = boundaries[unitig_id + 1] - boundaries[unitig_id];
-            check_graph->adjacent_outgoing_nodes(unitig_backs[unitig_id], [&](node_index next) {
-                has_children = true;
-                if (has_cycle)
-                    return;
-
-                if (next == unitig_fronts[i - 1]) {
-                    has_cycle = true;
-                    return;
-                }
-
-                size_t next_id = front_to_unitig_id[next];
-                seen.insert(next_id);
-                bool all_visited = true;
-                check_graph->adjacent_incoming_nodes(next, [&](node_index sibling) {
-                    if (all_visited && !visited.count(sibling))
-                        all_visited = false;
-                });
-
-                if (all_visited)
-                    traversal_stack.emplace_back(next_id, dist + length);
-            });
-
-            if (!has_children || has_cycle)
-                break;
-
-            if (traversal_stack.size() == 1 && visited.size() == seen.size()) {
-                auto [t_id, dist] = traversal_stack.back();
-                traversal_stack.pop_back();
-                bool is_cycle = false;
-                check_graph->adjacent_outgoing_nodes(unitig_backs[t_id], [&](node_index next) {
-                    if (next == unitig_fronts[i - 1])
-                        is_cycle = true;
-                });
-                if (!is_cycle) {
-                    set_bit(is_superbubble_start.data(), i - 1, true, MO_RELAXED);
-                    atomic_exchange(superbubble_ends, (i - 1) * 2, t_id, mu, MO_RELAXED);
-                    atomic_exchange(superbubble_ends, (i - 1) * 2 + 1, dist, mu, MO_RELAXED);
-                }
-            }
-        }
-    }
-
-    std::atomic_thread_fence(std::memory_order_acquire);
-
-    is_superbubble_start_ = SuperbubbleIndicator(std::move(is_superbubble_start));
-
-    size_t num_termini = is_superbubble_start_.num_set_bits();
-    size_t max_dist = 0;
-    is_superbubble_start_.call_ones([&](size_t i) {
-        max_dist = std::max(max_dist, static_cast<size_t>(superbubble_ends[i * 2 + 1]));
-    });
-
-    superbubble_termini_
-        = sdsl::int_vector<>(num_termini * 2, 0,
-                             sdsl::bits::hi(std::max(num_termini, max_dist)) + 1);
-    auto it = superbubble_termini_.begin();
-    is_superbubble_start_.call_ones([&](size_t i) {
-        *it = superbubble_termini_[i * 2];
-        ++it;
-        *it = superbubble_termini_[i * 2 + 1];
-        ++it;
-    });
+    size_t num_unitigs = boundaries.size() - 1;
 
     size_t seq_count = 0;
     size_t total_seq_count = 0;
@@ -279,7 +191,6 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator>
     path_boundaries_ = bit_vector_smart([&](const auto &callback) {
         std::for_each(boundaries.begin(), boundaries.end() - 1, callback);
     }, boundaries.back(), boundaries.size() - 1);
-    boundaries = decltype(boundaries)();
 
     std::filesystem::path tmp_dir = utils::create_temp_dir("", "test_col");
     std::string out_path = tmp_dir/"test_col";
@@ -377,6 +288,96 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator>
     }
 
     set_graph(graph);
+
+    // enumerate superbubbles
+    sdsl::bit_vector is_superbubble_start(num_unitigs, false);
+    sdsl::int_vector<> superbubble_ends(num_unitigs * 2, 0,
+                                        sdsl::bits::hi(check_graph->max_index()) + 1);
+
+    std::atomic_thread_fence(std::memory_order_release);
+
+    ProgressBar progress_bar(num_unitigs, "Indexing superbubbles",
+                             std::cerr, !common::get_verbose());
+    #pragma omp parallel for num_threads(get_num_threads())
+    for (size_t i = 0; i < num_unitigs; ++i) {
+        ++progress_bar;
+        tsl::hopscotch_set<size_t> visited;
+        tsl::hopscotch_set<size_t> seen;
+        std::vector<std::tuple<size_t, size_t>> traversal_stack;
+        traversal_stack.emplace_back(i, 0);
+        seen.insert(i);
+        while (traversal_stack.size()) {
+            auto [unitig_id, dist] = traversal_stack.back();
+            traversal_stack.pop_back();
+            if (visited.count(unitig_id))
+                continue;
+
+            visited.insert(unitig_id);
+            bool has_children = false;
+            bool has_cycle = false;
+            size_t length = boundaries[unitig_id + 1] - boundaries[unitig_id];
+            check_graph->adjacent_outgoing_nodes(unitig_backs[unitig_id], [&](node_index next) {
+                has_children = true;
+                if (has_cycle)
+                    return;
+
+                if (next == unitig_fronts[i]) {
+                    has_cycle = true;
+                    return;
+                }
+
+                size_t next_id = front_to_unitig_id[next];
+                seen.insert(next_id);
+                bool all_visited = true;
+                check_graph->adjacent_incoming_nodes(next, [&](node_index sibling) {
+                    if (all_visited && !visited.count(sibling))
+                        all_visited = false;
+                });
+
+                if (all_visited)
+                    traversal_stack.emplace_back(next_id, dist + length);
+            });
+
+            if (!has_children || has_cycle)
+                break;
+
+            if (traversal_stack.size() == 1 && visited.size() == seen.size()) {
+                auto [t_id, dist] = traversal_stack.back();
+                traversal_stack.pop_back();
+                bool is_cycle = false;
+                check_graph->adjacent_outgoing_nodes(unitig_backs[t_id], [&](node_index next) {
+                    if (next == unitig_fronts[i])
+                        is_cycle = true;
+                });
+                if (!is_cycle) {
+                    set_bit(is_superbubble_start.data(), i, true, MO_RELAXED);
+                    atomic_exchange(superbubble_ends, i * 2, t_id, mu, MO_RELAXED);
+                    atomic_exchange(superbubble_ends, i * 2 + 1, dist, mu, MO_RELAXED);
+                }
+            }
+        }
+    }
+
+    std::atomic_thread_fence(std::memory_order_acquire);
+
+    is_superbubble_start_ = SuperbubbleIndicator(std::move(is_superbubble_start));
+
+    size_t num_termini = is_superbubble_start_.num_set_bits();
+    size_t max_dist = 0;
+    is_superbubble_start_.call_ones([&](size_t i) {
+        max_dist = std::max(max_dist, static_cast<size_t>(superbubble_ends[i * 2 + 1]));
+    });
+
+    superbubble_termini_
+        = sdsl::int_vector<>(num_termini * 2, 0,
+                             sdsl::bits::hi(std::max(num_termini, max_dist)) + 1);
+    auto it = superbubble_termini_.begin();
+    is_superbubble_start_.call_ones([&](size_t i) {
+        *it = superbubble_termini_[i * 2];
+        ++it;
+        *it = superbubble_termini_[i * 2 + 1];
+        ++it;
+    });
 }
 
 auto IPathIndex
