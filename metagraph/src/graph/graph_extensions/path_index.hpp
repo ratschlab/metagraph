@@ -19,13 +19,20 @@ class IPathIndex : public SequenceGraph::GraphExtension {
 
   protected:
     virtual size_t coord_to_path_id(uint64_t coord) const = 0;
+    virtual uint64_t path_id_to_coord(size_t path_id) const = 0;
+
     virtual std::vector<RowTuples> get_row_tuples(const std::vector<Row> &rows) const = 0;
 
     virtual bool has_coord(node_index) const { return true; }
+
+    virtual std::pair<size_t, size_t> get_superbubble_terminus(size_t path_id) const = 0;
+
+    virtual const DeBruijnGraph& get_graph() const = 0;
 };
 
 template <class PathStorage = annot::RowDiffCoordAnnotator::binary_matrix_type,
-          class PathBoundaries = bit_vector_smart>
+          class PathBoundaries = bit_vector_smart,
+          class SuperbubbleIndicator = bit_vector_smart>
 class PathIndex : public IPathIndex {
   public:
     PathIndex() {}
@@ -54,9 +61,15 @@ class PathIndex : public IPathIndex {
     std::shared_ptr<const DBGSuccinct> dbg_succ_;
     PathStorage paths_indices_;
     PathBoundaries path_boundaries_;
+    SuperbubbleIndicator is_superbubble_start_;
+    sdsl::int_vector<> superbubble_termini_;
 
     virtual size_t coord_to_path_id(uint64_t coord) const override final {
         return path_boundaries_.rank1(coord);
+    }
+
+    virtual uint64_t path_id_to_coord(size_t path_id) const override final {
+        return path_boundaries_.select1(path_id);
     }
 
     virtual std::vector<RowTuples> get_row_tuples(const std::vector<Row> &rows) const override final {
@@ -64,6 +77,10 @@ class PathIndex : public IPathIndex {
     }
 
     virtual bool has_coord(node_index node) const override final;
+
+    virtual std::pair<size_t, size_t> get_superbubble_terminus(size_t path_id) const override final;
+
+    virtual const DeBruijnGraph& get_graph() const override final { return *dbg_succ_; }
 
     static constexpr auto kPathIndexExtension = ".paths";
 };
