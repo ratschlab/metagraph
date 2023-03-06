@@ -717,8 +717,6 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
             size_t length = end - begin;
 
             const auto &coords = node_coords[coord_idx];
-            auto it = coords_j.begin();
-            auto jt = coords.begin();
             bool updated = false;
 
             if (config_.allow_jump && aln_length_j >= graph_.get_k()) {
@@ -805,43 +803,34 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                     }
                 };
 
-                while (it != coords_j.end() && jt != coords.end()) {
-                    if (it->first == jt->first) {
-                        process_coord_list((is_rev ? jt : it)->second,
-                                           (is_rev ? it : jt)->second);
-
-                        ++it;
-                        ++jt;
-                    } else {
-                        if (path_index) {
-                            size_t target_unitig_id = is_rev ? it->first : jt->first;
-                            auto [superbubble_j, u_dist_j, offset_j] = superbubbles[is_rev ? coord_idx : coord_idx_j];
-                            auto [superbubble, u_dist, offset] = superbubbles[is_rev ? coord_idx_j : coord_idx];
+                auto [superbubble_j, u_dist_j, offset_j] = superbubbles[is_rev ? coord_idx : coord_idx_j];
+                auto [superbubble, u_dist, offset] = superbubbles[is_rev ? coord_idx_j : coord_idx];
+                int64_t coord_offset_base = static_cast<int64_t>(offset_j + u_dist) - offset - u_dist_j;
+                for (auto &[c_j, tuple_j] : coords_j) {
+                    for (auto &[c, tuple] : coords) {
+                        if (c == c_j) {
+                            process_coord_list(is_rev ? tuple : tuple_j,
+                                               is_rev ? tuple_j : tuple);
+                        } else if (path_index) {
+                            size_t target_unitig_id = is_rev ? c_j : c;
                             if (superbubble_j && superbubble) {
-                                int64_t coord_offset_base = static_cast<int64_t>(offset_j + u_dist) - offset - u_dist_j;
                                 auto [t, d] = superbubble_termini[superbubble_j];
                                 if (superbubble_j == superbubble) {
                                     // both in the same superbubble
                                     assert(t != target_unitig_id || d == u_dist);
                                     if (t == target_unitig_id || u_dist_j == 0) {
                                         // the source is at the front or the target is at the end
-                                        process_coord_list((is_rev ? jt : it)->second,
-                                                           (is_rev ? it : jt)->second,
+                                        process_coord_list(is_rev ? tuple : tuple_j,
+                                                           is_rev ? tuple_j : tuple,
                                                            coord_offset_base);
                                     }
                                 } else if (t == superbubble) {
                                     // superbubble_j and superbubble form a chain
-                                    process_coord_list((is_rev ? jt : it)->second,
-                                                       (is_rev ? it : jt)->second,
+                                    process_coord_list(is_rev ? tuple : tuple_j,
+                                                       is_rev ? tuple_j : tuple,
                                                        coord_offset_base + d);
                                 }
                             }
-                        }
-
-                        if (it->first < jt->first) {
-                            ++it;
-                        } else {
-                            ++jt;
                         }
                     }
                 }
