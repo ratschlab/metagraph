@@ -1752,6 +1752,29 @@ TEST(DBGAlignerTest, align_dummy) {
     check_extend(graph, aligner.get_config(), paths, query);
 }
 
+TYPED_TEST(DBGAlignerTest, align_branch_single_superbubble) {
+    size_t k = 22;
+    std::string reference_1 = "CGTGGCCCAGGCCCAGGCCCAGGCGCATCATCTAGCTACGATCTA";
+    std::string reference_2 = "CGTGGCCCAGGCCCAGGCCCAGCCGCATCATCTAGCTACGATCTA";
+    std::string query =       "CGTGGCCCAGGCCCAGGCCCAGTCGCATCATCTAGCTACGATCTA";
+
+    auto graph = build_graph_batch<TypeParam>(k, { reference_1, reference_2 });
+    DBGAlignerConfig config;
+    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
+
+    DBGAligner<> aligner(*graph, config);
+    auto paths = aligner.align(query);
+    ASSERT_EQ(1ull, paths.size());
+    auto path = paths[0];
+
+    EXPECT_TRUE(path.is_valid(*graph, &config));
+    EXPECT_EQ(85u, path.get_score())
+        << path.get_score() << " " << path.get_cigar().to_string();
+    check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
+
+    check_extend(graph, aligner.get_config(), paths, query);
+}
+
 TEST(DBGAlignerTest, align_extended_insert_after_match) {
     size_t k = 27;
     std::string reference_1 = "CGTGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAAGCC";

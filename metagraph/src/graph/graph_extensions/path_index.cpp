@@ -42,8 +42,12 @@ bool PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleSto
     if (!path_boundaries_.load(*in))
         return false;
 
+    logger->trace("Loaded {} paths", path_boundaries_.num_set_bits());
+
     if (!is_superbubble_start_.load(*in))
         return false;
+
+    logger->trace("Loaded {} superbubbles", is_superbubble_start_.num_set_bits());
 
     try {
         superbubble_termini_.load(*in);
@@ -101,6 +105,7 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
     std::vector<node_index> unitig_fronts;
     std::vector<node_index> unitig_backs;
     tsl::hopscotch_map<node_index, size_t> front_to_unitig_id;
+    tsl::hopscotch_map<node_index, size_t> back_to_unitig_id;
 
     std::mutex mu;
     dbg_succ.call_unitigs([&](const auto &, const auto &path) {
@@ -109,6 +114,7 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
 
         std::lock_guard<std::mutex> lock(mu);
         front_to_unitig_id[path.front()] = unitig_fronts.size();
+        back_to_unitig_id[path.back()] = unitig_fronts.size();
         unitig_fronts.emplace_back(path.front());
         unitig_backs.emplace_back(path.back());
         uint64_t coord = boundaries.back() + dbg_succ.get_k() - 1;
@@ -118,17 +124,6 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
         }
 
         boundaries.emplace_back(coord);
-
-        if (dbg_succ.get_mode() == DeBruijnGraph::PRIMARY) {
-            uint64_t coord = boundaries.back() + dbg_succ.get_k() - 1;
-            front_to_unitig_id[canonical->reverse_complement(path.back())] = unitig_fronts.size();
-            unitig_fronts.emplace_back(canonical->reverse_complement(path.back()));
-            unitig_backs.emplace_back(canonical->reverse_complement(path.front()));
-            for (auto it = rows.rbegin(); it != rows.rend(); ++it) {
-                annotator.add_label_coord(*it, DUMMY, coord++);
-            }
-            boundaries.emplace_back(coord);
-        }
     }, get_num_threads());
 
     size_t num_unitigs = boundaries.size() - 1;
@@ -191,6 +186,8 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
     path_boundaries_ = bit_vector_smart([&](const auto &callback) {
         std::for_each(boundaries.begin(), boundaries.end() - 1, callback);
     }, boundaries.back(), boundaries.size() - 1);
+
+    logger->info("Indexed a total of {} paths", path_boundaries_.num_set_bits());
 
     std::filesystem::path tmp_dir = utils::create_temp_dir("", "test_col");
     std::string out_path = tmp_dir/"test_col";
@@ -316,7 +313,7 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
             bool has_children = false;
             bool has_cycle = false;
             size_t length = boundaries[unitig_id + 1] - boundaries[unitig_id];
-            check_graph->adjacent_outgoing_nodes(unitig_backs[unitig_id], [&](node_index next) {
+            dbg_succ.adjacent_outgoing_nodes(unitig_backs[unitig_id], [&](node_index next) {
                 has_children = true;
                 if (has_cycle)
                     return;
@@ -329,8 +326,9 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
                 size_t next_id = front_to_unitig_id[next];
                 seen.insert(next_id);
                 bool all_visited = true;
-                check_graph->adjacent_incoming_nodes(next, [&](node_index sibling) {
-                    if (all_visited && !visited.count(sibling))
+                dbg_succ.adjacent_incoming_nodes(next, [&](node_index sibling) {
+                    size_t sibling_id = back_to_unitig_id[sibling];
+                    if (all_visited && !visited.count(sibling_id))
                         all_visited = false;
                 });
 
@@ -338,20 +336,18 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
                     traversal_stack.emplace_back(next_id, dist + length);
             });
 
-            if (!has_children || has_cycle)
+            if ((!has_children && traversal_stack.size()) || has_cycle)
                 break;
 
-            if (traversal_stack.size() == 1 && visited.size() == seen.size()) {
-                auto [t_id, dist] = traversal_stack.back();
-                traversal_stack.pop_back();
+            if (traversal_stack.empty() && visited.size() == seen.size() && dist) {
                 bool is_cycle = false;
-                check_graph->adjacent_outgoing_nodes(unitig_backs[t_id], [&](node_index next) {
+                dbg_succ.adjacent_outgoing_nodes(unitig_backs[unitig_id], [&](node_index next) {
                     if (next == unitig_fronts[i])
                         is_cycle = true;
                 });
                 if (!is_cycle) {
                     set_bit(is_superbubble_start.data(), i, true, MO_RELAXED);
-                    atomic_exchange(superbubble_ends, i * 2, t_id, mu, MO_RELAXED);
+                    atomic_exchange(superbubble_ends, i * 2, unitig_id, mu, MO_RELAXED);
                     atomic_exchange(superbubble_ends, i * 2 + 1, dist, mu, MO_RELAXED);
                 }
             }
@@ -367,6 +363,8 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
     is_superbubble_start_.call_ones([&](size_t i) {
         max_dist = std::max(max_dist, static_cast<size_t>(superbubble_ends[i * 2 + 1]));
     });
+
+    logger->info("Indexed {} superbubbles", is_superbubble_start_.num_set_bits());
 
     sdsl::int_vector<> superbubble_termini(num_termini * 2, 0,
                              sdsl::bits::hi(std::max(num_termini, max_dist)) + 1);
@@ -431,29 +429,25 @@ auto IPathIndex
         if (!picked[i])
             continue;
 
-        size_t max_k = std::min(ret_val[i].size(),
-                                size_t(1) + (get_graph().get_mode() == DeBruijnGraph::PRIMARY));
-        for (size_t k = 0; k < max_k; ++k) {
-            auto [t, d] = get_superbubble_terminus(ret_val[i][k].first);
-            if (!t)
-                continue;
+        auto [t, d] = get_superbubble_terminus(ret_val[i][0].first);
+        if (!t)
+            continue;
 
-            auto find = path_id_to_nodes.find(t);
-            if (find == path_id_to_nodes.end())
-                continue;
+        auto find = path_id_to_nodes.find(t);
+        if (find == path_id_to_nodes.end())
+            continue;
 
-            int64_t start_coord = path_id_to_coord(t);
-            int64_t coord_offset = start_coord - d;
+        int64_t start_coord = path_id_to_coord(t);
+        int64_t coord_offset = start_coord - d;
 
-            for (size_t j : find->second) {
-                auto &ncoords = ret_val[j].emplace_back(ret_val[i][k].first, Tuple{}).second;
-                for (auto &[t_c, coords] : ret_val[j]) {
-                    if (t_c != t)
-                        continue;
+        for (size_t j : find->second) {
+            auto &ncoords = ret_val[j].emplace_back(ret_val[i][0].first, Tuple{}).second;
+            for (auto &[t_c, coords] : ret_val[j]) {
+                if (t_c != t)
+                    continue;
 
-                    for (uint64_t coord : coords) {
-                        ncoords.emplace_back(coord - coord_offset);
-                    }
+                for (uint64_t coord : coords) {
+                    ncoords.emplace_back(coord - coord_offset);
                 }
             }
         }

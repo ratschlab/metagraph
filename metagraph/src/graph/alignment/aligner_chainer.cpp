@@ -654,6 +654,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
     for (size_t j = 0; j < seeds.size() - 1; ++j) {
         const auto &[end_j, col_j, dummy_j, begin_j, aln_length_j, score_j, last_j, last_dist_j, coord_idx_j] = seeds[j];
         const auto &coords_j = node_coords[coord_idx_j];
+        bool is_rev_j = (nodes[coord_idx_j] != anchors[anchor_ids[coord_idx_j].first].get_nodes()[anchor_ids[coord_idx_j].second]);
         size_t num_considered = 0;
         bool updated_with_less = false;
         size_t j_update = std::numeric_limits<size_t>::max();
@@ -749,11 +750,18 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                 if (found && gap == 0)
                     continue;
 
+                bool is_rev = (nodes[coord_idx] != node);
+                if (is_rev != is_rev_j)
+                    continue;
+
                 while (it != coords_j.end() && jt != coords.end()) {
                     if (it->first == jt->first) {
                         for (int64_t c_j : it->second) {
                             for (int64_t c : jt->second) {
                                 int64_t coord_dist = c - c_j;
+                                if (is_rev)
+                                    coord_dist = -coord_dist;
+
                                 if (coord_dist <= 0)
                                     continue;
 
