@@ -29,8 +29,8 @@ constexpr std::memory_order MO_RELAXED = std::memory_order_relaxed;
 static const std::vector<Label> DUMMY { Label(1, 1) };
 static const size_t MAX_SIZE = 1000;
 
-template <class PathStorage, class PathBoundaries, class SuperbubbleIndicator>
-bool PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator>
+template <class PathStorage, class PathBoundaries, class SuperbubbleIndicator, class SuperbubbleStorage>
+bool PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
 ::load(const std::string &filename_base) {
     auto in = utils::open_ifstream(filename_base + kPathIndexExtension);
     if (!in->good())
@@ -54,8 +54,8 @@ bool PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator>
     return true;
 }
 
-template <class PathStorage, class PathBoundaries, class SuperbubbleIndicator>
-void PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator>
+template <class PathStorage, class PathBoundaries, class SuperbubbleIndicator, class SuperbubbleStorage>
+void PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
 ::serialize(const std::string &filename_base) const {
     std::ofstream fout(filename_base + kPathIndexExtension);
     paths_indices_.serialize(fout);
@@ -64,8 +64,8 @@ void PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator>
     superbubble_termini_.serialize(fout);
 }
 
-template <class PathStorage, class PathBoundaries, class SuperbubbleIndicator>
-void PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator>
+template <class PathStorage, class PathBoundaries, class SuperbubbleIndicator, class SuperbubbleStorage>
+void PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
 ::set_graph(std::shared_ptr<const DBGSuccinct> graph) {
     dbg_succ_ = graph;
     if constexpr(std::is_base_of_v<IRowDiff, PathStorage>) {
@@ -73,8 +73,8 @@ void PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator>
     }
 }
 
-template <class PathStorage, class PathBoundaries, class SuperbubbleIndicator>
-PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator>
+template <class PathStorage, class PathBoundaries, class SuperbubbleIndicator, class SuperbubbleStorage>
+PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
 ::PathIndex(std::shared_ptr<const DBGSuccinct> graph,
             const std::string &graph_name,
             const std::function<void(const std::function<void(std::string_view)>)> &generate_sequences) {
@@ -368,16 +368,16 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator>
         max_dist = std::max(max_dist, static_cast<size_t>(superbubble_ends[i * 2 + 1]));
     });
 
-    superbubble_termini_
-        = sdsl::int_vector<>(num_termini * 2, 0,
+    sdsl::int_vector<> superbubble_termini(num_termini * 2, 0,
                              sdsl::bits::hi(std::max(num_termini, max_dist)) + 1);
-    auto it = superbubble_termini_.begin();
+    auto it = superbubble_termini.begin();
     is_superbubble_start_.call_ones([&](size_t i) {
-        *it = superbubble_termini_[i * 2];
+        *it = superbubble_ends[i * 2];
         ++it;
-        *it = superbubble_termini_[i * 2 + 1];
+        *it = superbubble_ends[i * 2 + 1];
         ++it;
     });
+    superbubble_termini_ = SuperbubbleStorage(std::move(superbubble_termini));
 }
 
 auto IPathIndex
@@ -462,8 +462,8 @@ auto IPathIndex
     return ret_val;
 }
 
-template <class PathStorage, class PathBoundaries, class SuperbubbleIndicator>
-std::pair<size_t, size_t> PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator>
+template <class PathStorage, class PathBoundaries, class SuperbubbleIndicator, class SuperbubbleStorage>
+std::pair<size_t, size_t> PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
 ::get_superbubble_terminus(size_t path_id) const {
     if (path_id <= is_superbubble_start_.size()) {
         if (auto rank = is_superbubble_start_.conditional_rank1(path_id - 1)) {
@@ -476,8 +476,8 @@ std::pair<size_t, size_t> PathIndex<PathStorage, PathBoundaries, SuperbubbleIndi
     return {};
 }
 
-template <class PathStorage, class PathBoundaries, class SuperbubbleIndicator>
-bool PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator>
+template <class PathStorage, class PathBoundaries, class SuperbubbleIndicator, class SuperbubbleStorage>
+bool PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
 ::has_coord(node_index node) const {
     assert(dbg_succ_);
     return node != DeBruijnGraph::npos

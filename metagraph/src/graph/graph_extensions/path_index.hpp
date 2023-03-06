@@ -1,6 +1,8 @@
 #ifndef __PATH_INDEX__HPP
 #define __PATH_INDEX__HPP
 
+#include <sdsl/dac_vector.hpp>
+
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 
@@ -32,7 +34,8 @@ class IPathIndex : public SequenceGraph::GraphExtension {
 
 template <class PathStorage = annot::RowDiffCoordAnnotator::binary_matrix_type,
           class PathBoundaries = bit_vector_smart,
-          class SuperbubbleIndicator = bit_vector_smart>
+          class SuperbubbleIndicator = bit_vector_smart,
+          class SuperbubbleStorage = sdsl::dac_vector_dp<>>
 class PathIndex : public IPathIndex {
   public:
     PathIndex() {}
@@ -62,7 +65,7 @@ class PathIndex : public IPathIndex {
     PathStorage paths_indices_;
     PathBoundaries path_boundaries_;
     SuperbubbleIndicator is_superbubble_start_;
-    sdsl::int_vector<> superbubble_termini_;
+    SuperbubbleStorage superbubble_termini_;
 
     virtual size_t coord_to_path_id(uint64_t coord) const override final {
         return path_boundaries_.rank1(coord);
