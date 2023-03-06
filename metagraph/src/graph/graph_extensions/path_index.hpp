@@ -19,15 +19,20 @@ class IPathIndex : public SequenceGraph::GraphExtension {
 
     virtual std::vector<RowTuples> get_coords(const std::vector<node_index> &nodes) const;
 
-  protected:
+    virtual std::pair<size_t, size_t> get_superbubble_terminus(size_t path_id) const = 0;
+    virtual std::pair<size_t, size_t> get_superbubble_and_dist(size_t path_id) const = 0;
+
     virtual size_t coord_to_path_id(uint64_t coord) const = 0;
     virtual uint64_t path_id_to_coord(size_t path_id) const = 0;
 
+    size_t path_length(size_t path_id) const {
+        return path_id_to_coord(path_id + 1) - path_id_to_coord(path_id);
+    }
+
+  protected:
     virtual std::vector<RowTuples> get_row_tuples(const std::vector<Row> &rows) const = 0;
 
     virtual bool has_coord(node_index) const { return true; }
-
-    virtual std::pair<size_t, size_t> get_superbubble_terminus(size_t path_id) const = 0;
 
     virtual const DeBruijnGraph& get_graph() const = 0;
 };
@@ -60,12 +65,8 @@ class PathIndex : public IPathIndex {
         return dynamic_cast<const DBGSuccinct*>(&graph) == dbg_succ_.get();
     }
 
-  private:
-    std::shared_ptr<const DBGSuccinct> dbg_succ_;
-    PathStorage paths_indices_;
-    PathBoundaries path_boundaries_;
-    SuperbubbleIndicator is_superbubble_start_;
-    SuperbubbleStorage superbubble_termini_;
+    virtual std::pair<size_t, size_t> get_superbubble_terminus(size_t path_id) const override final;
+    virtual std::pair<size_t, size_t> get_superbubble_and_dist(size_t path_id) const override final;
 
     virtual size_t coord_to_path_id(uint64_t coord) const override final {
         return path_boundaries_.rank1(coord);
@@ -75,13 +76,18 @@ class PathIndex : public IPathIndex {
         return path_boundaries_.select1(path_id);
     }
 
+  private:
+    std::shared_ptr<const DBGSuccinct> dbg_succ_;
+    PathStorage paths_indices_;
+    PathBoundaries path_boundaries_;
+    SuperbubbleIndicator is_superbubble_start_;
+    SuperbubbleStorage superbubble_termini_;
+
     virtual std::vector<RowTuples> get_row_tuples(const std::vector<Row> &rows) const override final {
         return paths_indices_.get_row_tuples(rows);
     }
 
     virtual bool has_coord(node_index node) const override final;
-
-    virtual std::pair<size_t, size_t> get_superbubble_terminus(size_t path_id) const override final;
 
     virtual const DeBruijnGraph& get_graph() const override final { return *dbg_succ_; }
 

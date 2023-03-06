@@ -603,6 +603,14 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
     auto node_coords = path_index->get_coords(nodes);
     size_t j = 0;
     std::vector<Anchor> seeds;
+    seeds.reserve(nodes.size());
+
+    std::vector<std::tuple<size_t, size_t, size_t>> superbubbles;
+    if (path_index)
+        superbubbles.reserve(anchors.size());
+
+    tsl::hopscotch_map<size_t, std::pair<size_t, size_t>> superbubble_termini;
+
     for (const auto &anchor : anchors) {
         size_t offset = anchor.get_offset();
         auto begin = anchor.get_query_view().begin();
@@ -629,6 +637,24 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
             } else {
                 add_seed(std::numeric_limits<Alignment::Column>::max());
             }
+
+            if (path_index) {
+                assert(superbubbles.size() == j);
+
+                for (const auto &[path_id, coords] : node_coords[j]) {
+                    auto [u_id, dist] = path_index->get_superbubble_and_dist(path_id);
+                    if (u_id) {
+                        superbubbles.emplace_back(u_id, dist, path_index->path_id_to_coord(path_id));
+                        if (!superbubble_termini.count(u_id))
+                            superbubble_termini[u_id] = path_index->get_superbubble_terminus(u_id);
+                    }
+                }
+
+                assert(superbubbles.size() <= j + 1);
+                if (superbubbles.size() != j + 1)
+                    superbubbles.emplace_back(0, 0, 0);
+            }
+
             ++j;
             ++end;
             if (offset) {
@@ -754,37 +780,71 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                 if (is_rev != is_rev_j)
                     continue;
 
+                auto process_coord_list = [&](const auto &list_a, const auto &list_b, int64_t offset = 0) {
+                    for (int64_t c_j : list_a) {
+                        for (int64_t c : list_b) {
+                            int64_t coord_dist = c - c_j + offset;
+                            if (coord_dist <= 0)
+                                continue;
+
+                            float gap = std::abs(coord_dist - dist);
+                            score_t gap_cost = ceil(sl * gap - log2(gap + 1) * 0.5);
+                            assert(gap > 0 || gap_cost == 0);
+                            score_t updated_score = base_added_score + gap_cost;
+
+                            if (std::tie(updated_score, last_dist) > std::tie(score, coord_dist)) {
+                                score = updated_score;
+                                last_dist = coord_dist;
+                                last = j;
+                                updated = true;
+                                aln_length = aln_length_j + coord_dist;
+                            }
+                        }
+                    }
+                };
+
                 while (it != coords_j.end() && jt != coords.end()) {
                     if (it->first == jt->first) {
-                        for (int64_t c_j : it->second) {
-                            for (int64_t c : jt->second) {
-                                int64_t coord_dist = c - c_j;
-                                if (is_rev)
-                                    coord_dist = -coord_dist;
+                        process_coord_list((is_rev ? jt : it)->second,
+                                           (is_rev ? it : jt)->second);
 
-                                if (coord_dist <= 0)
-                                    continue;
-
-                                float gap = std::abs(coord_dist - dist);
-                                score_t gap_cost = ceil(sl * gap - log2(gap + 1) * 0.5);
-                                assert(gap > 0 || gap_cost == 0);
-                                score_t updated_score = base_added_score + gap_cost;
-
-                                if (std::tie(updated_score, last_dist) > std::tie(score, coord_dist)) {
-                                    score = updated_score;
-                                    last_dist = coord_dist;
-                                    last = j;
-                                    updated = true;
-                                    aln_length = aln_length_j + coord_dist;
+                        ++it;
+                        ++jt;
+                    } else {
+                        if (path_index) {
+                            size_t target_unitig_id = is_rev ? it->first : jt->first;
+                            auto [superbubble_j, u_dist_j, offset_j] = superbubbles[is_rev ? coord_idx : coord_idx_j];
+                            auto [superbubble, u_dist, offset] = superbubbles[is_rev ? coord_idx_j : coord_idx];
+                            if (superbubble_j && superbubble) {
+                                int64_t coord_offset_base = static_cast<int64_t>(offset_j) - offset;
+                                auto [t, d] = superbubble_termini[superbubble_j];
+                                if (superbubble_j == superbubble) {
+                                    // both in the same superbubble
+                                    if (t == target_unitig_id) {
+                                        // the target is at the end
+                                        process_coord_list((is_rev ? jt : it)->second,
+                                                           (is_rev ? it : jt)->second,
+                                                           coord_offset_base + d - u_dist_j);
+                                    } else if (u_dist_j == 0) {
+                                        // the source is at the front
+                                        process_coord_list((is_rev ? jt : it)->second,
+                                                           (is_rev ? it : jt)->second,
+                                                           coord_offset_base + u_dist);
+                                    }
+                                } else if (t == superbubble) {
+                                    // superbubble_j and superbubble form a chain
+                                    process_coord_list((is_rev ? jt : it)->second,
+                                                       (is_rev ? it : jt)->second,
+                                                       coord_offset_base + d - u_dist_j + u_dist);
                                 }
                             }
                         }
-                        ++it;
-                        ++jt;
-                    } else if (it->first < jt->first) {
-                        ++it;
-                    } else {
-                        ++jt;
+
+                        if (it->first < jt->first) {
+                            ++it;
+                        } else {
+                            ++jt;
+                        }
                     }
                 }
             }
@@ -821,7 +881,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
         if (++used_cols[col] > config_.num_alternative_paths)
             continue;
 
-        logger->trace("Chain\t{}", -nscore);
+        logger->info("Chain\t{}", -nscore);
 
         std::vector<std::pair<Seed, size_t>> seed_chain;
         while (k != std::numeric_limits<uint32_t>::max()) {
@@ -873,7 +933,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                                    ? it->second + it->first.get_query_view().size()
                                         - (it - 1)->second - (it - 1)->first.get_query_view().size()
                                    : 0);
-            logger->trace("\t{}\t(dist: {}{})", chain.back().first,
+            logger->info("\t{}\t(dist: {}{})", chain.back().first,
                           it != jt && (it - 1)->first.get_query_view().end()
                                          == it->first.get_query_view().begin() + graph_.get_k() - it->first.get_offset()
                               ? "0 + " : "",
