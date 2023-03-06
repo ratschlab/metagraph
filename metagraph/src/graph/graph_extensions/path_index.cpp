@@ -300,7 +300,7 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
         ++progress_bar;
         tsl::hopscotch_set<size_t> visited;
         tsl::hopscotch_set<size_t> seen;
-        std::vector<std::tuple<size_t, size_t>> traversal_stack;
+        std::vector<std::pair<size_t, size_t>> traversal_stack;
         traversal_stack.emplace_back(i, 0);
         seen.insert(i);
         while (traversal_stack.size()) {
@@ -336,10 +336,12 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
                     traversal_stack.emplace_back(next_id, dist + length);
             });
 
-            if ((!has_children && traversal_stack.size()) || has_cycle)
+            if (!has_children || has_cycle)
                 break;
 
-            if (traversal_stack.empty() && visited.size() == seen.size() && dist) {
+            if (traversal_stack.size() == 1 && visited.size() + 1 == seen.size()) {
+                auto [unitig_id, dist] = traversal_stack.back();
+                traversal_stack.pop_back();
                 bool is_cycle = false;
                 dbg_succ.adjacent_outgoing_nodes(unitig_backs[unitig_id], [&](node_index next) {
                     if (next == unitig_fronts[i])
