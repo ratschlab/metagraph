@@ -780,7 +780,9 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                 if (is_rev != is_rev_j)
                     continue;
 
-                auto process_coord_list = [&](const auto &list_a, const auto &list_b, int64_t offset = 0) {
+                auto process_coord_list = [&](const auto &list_a,
+                                              const auto &list_b,
+                                              int64_t offset = 0) {
                     for (int64_t c_j : list_a) {
                         for (int64_t c : list_b) {
                             int64_t coord_dist = c - c_j + offset;
@@ -816,26 +818,22 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                             auto [superbubble_j, u_dist_j, offset_j] = superbubbles[is_rev ? coord_idx : coord_idx_j];
                             auto [superbubble, u_dist, offset] = superbubbles[is_rev ? coord_idx_j : coord_idx];
                             if (superbubble_j && superbubble) {
-                                int64_t coord_offset_base = static_cast<int64_t>(offset_j) - offset;
+                                int64_t coord_offset_base = static_cast<int64_t>(offset_j + u_dist) - offset - u_dist_j;
                                 auto [t, d] = superbubble_termini[superbubble_j];
                                 if (superbubble_j == superbubble) {
                                     // both in the same superbubble
-                                    if (t == target_unitig_id) {
-                                        // the target is at the end
+                                    assert(t != target_unitig_id || d == u_dist);
+                                    if (t == target_unitig_id || u_dist_j == 0) {
+                                        // the source is at the front or the target is at the end
                                         process_coord_list((is_rev ? jt : it)->second,
                                                            (is_rev ? it : jt)->second,
-                                                           coord_offset_base + d - u_dist_j);
-                                    } else if (u_dist_j == 0) {
-                                        // the source is at the front
-                                        process_coord_list((is_rev ? jt : it)->second,
-                                                           (is_rev ? it : jt)->second,
-                                                           coord_offset_base + u_dist);
+                                                           coord_offset_base);
                                     }
                                 } else if (t == superbubble) {
                                     // superbubble_j and superbubble form a chain
                                     process_coord_list((is_rev ? jt : it)->second,
                                                        (is_rev ? it : jt)->second,
-                                                       coord_offset_base + d - u_dist_j + u_dist);
+                                                       coord_offset_base + d);
                                 }
                             }
                         }
