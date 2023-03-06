@@ -1016,7 +1016,8 @@ TYPED_TEST(DBGAlignerTest, align_straight_long_xdrop) {
 }
 
 TYPED_TEST(DBGAlignerTest, align_drop_seed) {
-    if constexpr(std::is_same_v<TypeParam, DBGSuccinctPathIndexed>)
+    if constexpr(std::is_same_v<TypeParam, DBGSuccinctPathIndexed>
+            || std::is_same_v<TypeParam, DBGSuccinctUnitigIndexed>)
         return;
 
     size_t k = 4;
@@ -1053,7 +1054,8 @@ TYPED_TEST(DBGAlignerTest, align_drop_seed) {
 }
 
 TYPED_TEST(DBGAlignerTest, align_long_gap_after_seed) {
-    if constexpr(std::is_same_v<TypeParam, DBGSuccinctPathIndexed>)
+    if constexpr(std::is_same_v<TypeParam, DBGSuccinctPathIndexed>
+            || std::is_same_v<TypeParam, DBGSuccinctUnitigIndexed>)
         return;
 
     size_t k = 4;

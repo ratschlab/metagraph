@@ -29,6 +29,7 @@ template size_t max_test_k<DBGSuccinctBloom<4, 1>>();
 template size_t max_test_k<DBGSuccinctBloom<4, 50>>();
 template size_t max_test_k<DBGSuccinctRCIndexed>();
 template size_t max_test_k<DBGSuccinctCached>();
+template size_t max_test_k<DBGSuccinctUnitigIndexed>();
 template size_t max_test_k<DBGSuccinctPathIndexed>();
 
 
@@ -283,6 +284,18 @@ build_graph<DBGSuccinctCached>(uint64_t k,
 
 template <>
 std::shared_ptr<DeBruijnGraph>
+build_graph<DBGSuccinctUnitigIndexed>(uint64_t k,
+                                      std::vector<std::string> sequences,
+                                      DeBruijnGraph::Mode mode) {
+    auto graph = build_graph<DBGSuccinct>(k, sequences, mode);
+    DBGSuccinct &dbg_succ = get_dbg_succ(*graph);
+    graph->add_extension(std::make_shared<graph::PathIndex<>>(dbg_succ));
+
+    return graph;
+}
+
+template <>
+std::shared_ptr<DeBruijnGraph>
 build_graph<DBGSuccinctPathIndexed>(uint64_t k,
                                     std::vector<std::string> sequences,
                                     DeBruijnGraph::Mode mode) {
@@ -471,6 +484,18 @@ build_graph_batch<DBGSuccinctCached>(uint64_t k,
 
 template <>
 std::shared_ptr<DeBruijnGraph>
+build_graph_batch<DBGSuccinctUnitigIndexed>(uint64_t k,
+                                            std::vector<std::string> sequences,
+                                            DeBruijnGraph::Mode mode) {
+    auto graph = build_graph_batch<DBGSuccinct>(k, sequences, mode);
+    DBGSuccinct &dbg_succ = get_dbg_succ(*graph);
+    graph->add_extension(std::make_shared<graph::PathIndex<>>(dbg_succ));
+
+    return graph;
+}
+
+template <>
+std::shared_ptr<DeBruijnGraph>
 build_graph_batch<DBGSuccinctPathIndexed>(uint64_t k,
                                           std::vector<std::string> sequences,
                                           DeBruijnGraph::Mode mode) {
@@ -550,6 +575,7 @@ template bool check_graph<DBGSuccinctBloom<4, 1>>(const std::string &, DeBruijnG
 template bool check_graph<DBGSuccinctBloom<4, 50>>(const std::string &, DeBruijnGraph::Mode, bool);
 template bool check_graph<DBGSuccinctRCIndexed>(const std::string &, DeBruijnGraph::Mode, bool);
 template bool check_graph<DBGSuccinctCached>(const std::string &, DeBruijnGraph::Mode, bool);
+template bool check_graph<DBGSuccinctUnitigIndexed>(const std::string &, DeBruijnGraph::Mode, bool);
 template bool check_graph<DBGSuccinctPathIndexed>(const std::string &, DeBruijnGraph::Mode, bool);
 template bool check_graph<DBGBitmap>(const std::string &, DeBruijnGraph::Mode, bool);
 template bool check_graph<DBGHashOrdered>(const std::string &, DeBruijnGraph::Mode, bool);

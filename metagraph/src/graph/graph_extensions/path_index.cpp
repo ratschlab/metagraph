@@ -119,7 +119,6 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
         unitig_fronts.emplace_back(path.front());
         unitig_backs.emplace_back(path.back());
         uint64_t coord = boundaries.back();
-        // logger->info("Unitig: {}\t{}\t{}", unitig_fronts.size(), coord, seq);
         annotator.add_labels(rows, DUMMY);
         for (auto row : rows) {
             annotator.add_label_coord(row, DUMMY, coord++);

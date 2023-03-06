@@ -59,6 +59,12 @@ class DBGSuccinctRCIndexed : public DBGSuccinct {
           : DBGSuccinct(std::forward<Args>(args)...) {}
 };
 
+class DBGSuccinctUnitigIndexed : public DBGSuccinct {
+  public:
+    template <typename... Args>
+    DBGSuccinctUnitigIndexed(Args&&... args)
+          : DBGSuccinct(std::forward<Args>(args)...) {}
+};
 
 class DBGSuccinctPathIndexed : public DBGSuccinct {
   public:
@@ -118,6 +124,7 @@ typedef ::testing::Types<DBGBitmap,
                          DBGSuccinctBloom<4, 50>,
                          DBGSuccinctRCIndexed,
                          DBGSuccinctCached,
+                         DBGSuccinctUnitigIndexed,
                          DBGSuccinctPathIndexed> GraphTypes;
 
 // in stable graphs the order of input sequences
@@ -137,9 +144,10 @@ typedef ::testing::Types<DBGBitmap,
                          DBGSuccinctBloom<4, 50>,
                          DBGSuccinctRCIndexed,
                          DBGSuccinctCached,
+                         DBGSuccinctUnitigIndexed,
                          DBGSuccinctPathIndexed> StableGraphTypes;
 
-typedef ::testing::Types<DBGHashFast, DBGSuccinct, DBGSuccinctPathIndexed> FewGraphTypes;
+typedef ::testing::Types<DBGHashFast, DBGSuccinct, DBGSuccinctUnitigIndexed, DBGSuccinctPathIndexed> FewGraphTypes;
 
 } // namespace test
 } // namespace mtg

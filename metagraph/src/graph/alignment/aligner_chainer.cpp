@@ -881,7 +881,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
         if (++used_cols[col] > config_.num_alternative_paths)
             continue;
 
-        logger->info("Chain\t{}", -nscore);
+        logger->trace("Chain\t{}", -nscore);
 
         std::vector<std::pair<Seed, size_t>> seed_chain;
         while (k != std::numeric_limits<uint32_t>::max()) {
@@ -933,7 +933,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                                    ? it->second + it->first.get_query_view().size()
                                         - (it - 1)->second - (it - 1)->first.get_query_view().size()
                                    : 0);
-            logger->info("\t{}\t(dist: {}{})", chain.back().first,
+            logger->trace("\t{}\t(dist: {}{})", chain.back().first,
                           it != jt && (it - 1)->first.get_query_view().end()
                                          == it->first.get_query_view().begin() + graph_.get_k() - it->first.get_offset()
                               ? "0 + " : "",

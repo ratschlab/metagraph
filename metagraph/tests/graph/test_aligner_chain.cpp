@@ -17,7 +17,8 @@ using namespace mtg::kmer;
 template <typename Graph>
 class DBGAlignerPostChainTest : public DeBruijnGraphTest<Graph> {};
 
-TYPED_TEST_SUITE(DBGAlignerPostChainTest, ::testing::Types<DBGSuccinctPathIndexed>);
+typedef ::testing::Types<DBGSuccinctUnitigIndexed, DBGSuccinctPathIndexed> ChainGraphTypes;
+TYPED_TEST_SUITE(DBGAlignerPostChainTest, ChainGraphTypes);
 
 inline void check_chain(const AlignmentResults &paths,
                         const DeBruijnGraph &graph,
