@@ -881,7 +881,6 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
         }
 
         aligner.extend_chain(std::move(chain), extender, [&](Alignment&& aln) {
-            logger->trace("\tChaining produced alignment\t{}", aln);
             aln.get_cigar().mark_exact_matches(matching_pos);
             alignments.emplace_back(std::move(aln));
         }, true);

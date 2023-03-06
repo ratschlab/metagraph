@@ -288,8 +288,13 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
 
     // enumerate superbubbles
     sdsl::bit_vector is_superbubble_start(num_unitigs, false);
-    sdsl::int_vector<> superbubble_ends(num_unitigs * 2, 0,
-                                        sdsl::bits::hi(check_graph->max_index()) + 1);
+
+    // TODO: why does this get a bus error?
+    auto superbubble_ends = aligned_int_vector(
+        // num_unitigs * 2, 0, std::min(uint32_t(64), sdsl::bits::hi(check_graph->max_index()) + 1), 16
+        num_unitigs * 2, 0, 64, 16
+    );
+
 
     std::atomic_thread_fence(std::memory_order_release);
 
@@ -306,14 +311,16 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
         while (traversal_stack.size()) {
             auto [unitig_id, dist] = traversal_stack.back();
             traversal_stack.pop_back();
-            if (visited.count(unitig_id))
-                continue;
+            assert(!visited.count(unitig_id));
 
             visited.insert(unitig_id);
             bool has_children = false;
             bool has_cycle = false;
             size_t length = boundaries[unitig_id + 1] - boundaries[unitig_id];
-            dbg_succ.adjacent_outgoing_nodes(unitig_backs[unitig_id], [&](node_index next) {
+            dbg_succ.call_outgoing_kmers(unitig_backs[unitig_id], [&](node_index next, char c) {
+                if (c == boss::BOSS::kSentinel)
+                    return;
+
                 has_children = true;
                 if (has_cycle)
                     return;
@@ -323,13 +330,17 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
                     return;
                 }
 
+                assert(front_to_unitig_id.count(next));
                 size_t next_id = front_to_unitig_id[next];
                 seen.insert(next_id);
                 bool all_visited = true;
-                dbg_succ.adjacent_incoming_nodes(next, [&](node_index sibling) {
-                    size_t sibling_id = back_to_unitig_id[sibling];
-                    if (all_visited && !visited.count(sibling_id))
-                        all_visited = false;
+                dbg_succ.call_incoming_kmers(next, [&](node_index sibling, char c) {
+                    if (c != boss::BOSS::kSentinel) {
+                        assert(back_to_unitig_id.count(sibling));
+                        size_t sibling_id = back_to_unitig_id[sibling];
+                        if (all_visited && !visited.count(sibling_id))
+                            all_visited = false;
+                    }
                 });
 
                 if (all_visited)
@@ -349,8 +360,8 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
                 });
                 if (!is_cycle) {
                     set_bit(is_superbubble_start.data(), i, true, MO_RELAXED);
-                    atomic_exchange(superbubble_ends, i * 2, unitig_id, mu, MO_RELAXED);
-                    atomic_exchange(superbubble_ends, i * 2 + 1, dist, mu, MO_RELAXED);
+                    atomic_fetch_and_add(superbubble_ends, i * 2, unitig_id, mu, MO_RELAXED);
+                    atomic_fetch_and_add(superbubble_ends, i * 2 + 1, dist, mu, MO_RELAXED);
                 }
             }
         }
