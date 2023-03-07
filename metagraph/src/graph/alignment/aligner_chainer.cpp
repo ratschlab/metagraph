@@ -610,6 +610,8 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
         superbubbles.reserve(anchors.size());
 
     tsl::hopscotch_map<size_t, std::pair<size_t, size_t>> superbubble_termini;
+    size_t num_superbubbles_found = 0;
+    size_t num_superbubbles_found_with_termini = 0;
 
     for (const auto &anchor : anchors) {
         size_t offset = anchor.get_offset();
@@ -644,9 +646,13 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                 for (const auto &[path_id, coords] : node_coords[j]) {
                     auto [u_id, dist] = path_index->get_superbubble_and_dist(path_id);
                     if (u_id) {
+                        ++num_superbubbles_found;
                         superbubbles.emplace_back(u_id, dist, path_index->path_id_to_coord(path_id));
-                        if (!superbubble_termini.count(u_id))
-                            superbubble_termini[u_id] = path_index->get_superbubble_terminus(u_id);
+                        if (!superbubble_termini.count(u_id)) {
+                            num_superbubbles_found_with_termini += (superbubble_termini.try_emplace(
+                                u_id, path_index->get_superbubble_terminus(u_id)
+                            ).first->second.first != 0);
+                        }
                     }
                 }
 
@@ -664,6 +670,10 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
             }
         }
     }
+
+    logger->trace("Found superbubbles for {} / {} seeds, of which {} have termini",
+                  num_superbubbles_found, nodes.size(),
+                  num_superbubbles_found_with_termini);
 
     const auto *labeled_aligner = dynamic_cast<const ILabeledAligner*>(&aligner);
 
@@ -812,23 +822,44 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                             process_coord_list(is_rev ? tuple : tuple_j,
                                                is_rev ? tuple_j : tuple);
                         } else if (path_index) {
+                            size_t source_unitig_id = is_rev ? c : c_j;
+                            bool source_can_reach_terminus = path_index->can_reach_superbubble_terminus(source_unitig_id);
                             size_t target_unitig_id = is_rev ? c_j : c;
                             if (superbubble_j && superbubble) {
                                 auto [t, d] = superbubble_termini[superbubble_j];
+                                size_t num_steps = 0;
+
                                 if (superbubble_j == superbubble) {
                                     // both in the same superbubble
-                                    assert(t != target_unitig_id || d == u_dist);
-                                    if (t == target_unitig_id || u_dist_j == 0) {
+                                    if ((source_can_reach_terminus && t == target_unitig_id) || u_dist_j == 0) {
                                         // the source is at the front or the target is at the end
                                         process_coord_list(is_rev ? tuple : tuple_j,
                                                            is_rev ? tuple_j : tuple,
                                                            coord_offset_base);
                                     }
-                                } else if (t == superbubble) {
-                                    // superbubble_j and superbubble form a chain
-                                    process_coord_list(is_rev ? tuple : tuple_j,
-                                                       is_rev ? tuple_j : tuple,
-                                                       coord_offset_base + d);
+                                    continue;
+                                }
+
+                                if (!source_can_reach_terminus)
+                                    continue;
+
+                                while (t) {
+                                    ++num_steps;
+                                    if (t == superbubble) {
+                                        // superbubble_j and superbubble form a chain
+                                        process_coord_list(is_rev ? tuple : tuple_j,
+                                                           is_rev ? tuple_j : tuple,
+                                                           coord_offset_base + d);
+                                        break;
+                                    }
+
+                                    if (static_cast<size_t>(dist) > d) {
+                                        auto [next_t, next_d] = path_index->get_superbubble_terminus(t);
+                                        t = next_t;
+                                        d += next_d;
+                                    } else {
+                                        t = 0;
+                                    }
                                 }
                             }
                         }

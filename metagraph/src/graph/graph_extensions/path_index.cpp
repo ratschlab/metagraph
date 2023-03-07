@@ -55,6 +55,9 @@ bool PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleSto
         return false;
     }
 
+    if (!can_reach_terminus_.load(*in))
+        return false;
+
     return true;
 }
 
@@ -66,6 +69,7 @@ void PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleSto
     path_boundaries_.serialize(fout);
     is_superbubble_start_.serialize(fout);
     superbubble_termini_.serialize(fout);
+    can_reach_terminus_.serialize(fout);
 }
 
 template <class PathStorage, class PathBoundaries, class SuperbubbleIndicator, class SuperbubbleStorage>
@@ -289,6 +293,7 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
 
     // enumerate superbubbles
     sdsl::bit_vector is_superbubble_start(num_unitigs, false);
+    sdsl::bit_vector can_reach_terminus(num_unitigs, false);
 
     // TODO: why does this get a bus error?
     auto superbubble_ends = aligned_int_vector(
@@ -296,7 +301,8 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
         num_unitigs * 2, 0, 64, 16
     );
 
-
+    std::atomic<size_t> num_terminal_superbubbles { 0 };
+    std::atomic<size_t> num_skipped_superbubbles { 0 };
     std::atomic_thread_fence(std::memory_order_release);
 
     ProgressBar progress_bar(num_unitigs, "Indexing superbubbles",
@@ -305,24 +311,28 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
     for (size_t i = 0; i < num_unitigs; ++i) {
         ++progress_bar;
         tsl::hopscotch_set<size_t> visited;
-        tsl::hopscotch_map<size_t, tsl::hopscotch_set<size_t>> seen;
+        VectorMap<size_t, tsl::hopscotch_set<size_t>> seen;
+        tsl::hopscotch_map<size_t, std::vector<size_t>> parents;
         std::vector<std::pair<size_t, size_t>> traversal_stack;
         traversal_stack.emplace_back(i, 0);
         seen[i].emplace(0);
+        bool is_terminal_superbubble = false;
+        size_t terminus = 0;
         while (traversal_stack.size()) {
             auto [unitig_id, dist] = traversal_stack.back();
             traversal_stack.pop_back();
             assert(!visited.count(unitig_id));
 
             visited.insert(unitig_id);
-            bool has_children = false;
             bool has_cycle = false;
+            bool has_children = false;
             size_t length = boundaries[unitig_id + 1] - boundaries[unitig_id];
             dbg_succ.call_outgoing_kmers(unitig_backs[unitig_id], [&](node_index next, char c) {
                 if (c == boss::BOSS::kSentinel)
                     return;
 
                 has_children = true;
+
                 if (has_cycle)
                     return;
 
@@ -334,12 +344,16 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
                 assert(front_to_unitig_id.count(next));
                 size_t next_id = front_to_unitig_id[next];
 
+                bool add_parents = !seen.count(next_id);
+
                 seen[next_id].emplace(dist + length);
                 bool all_visited = true;
                 dbg_succ.call_incoming_kmers(next, [&](node_index sibling, char c) {
                     if (c != boss::BOSS::kSentinel) {
                         assert(back_to_unitig_id.count(sibling));
                         size_t sibling_id = back_to_unitig_id[sibling];
+                        if (add_parents)
+                            parents[next_id].emplace_back(sibling_id);
                         if (all_visited && !visited.count(sibling_id))
                             all_visited = false;
                     }
@@ -349,8 +363,13 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
                     traversal_stack.emplace_back(next_id, dist + length);
             });
 
-            if (!has_children || has_cycle)
+            if (has_cycle) {
+                is_terminal_superbubble = false;
                 break;
+            }
+
+            if (!has_children)
+                is_terminal_superbubble = true;
 
             if (traversal_stack.size() == 1 && visited.size() + 1 == seen.size()) {
                 auto [unitig_id, dist] = traversal_stack.back();
@@ -362,25 +381,74 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
                         is_cycle = true;
                 });
 
-                if (is_cycle)
+                if (is_cycle) {
+                    is_terminal_superbubble = false;
                     continue;
+                }
 
                 if (std::any_of(seen.begin(), seen.end(),
                                 [&](const auto &a) { return a.second.size() != 1; })) {
                     // superbubble with paths of different lengths (i.e., complex)
                     // TODO: handle later
+                    num_skipped_superbubbles.fetch_add(1, MO_RELAXED);
                     continue;
                 }
+
+                terminus = unitig_id;
 
                 set_bit(is_superbubble_start.data(), i, true, MO_RELAXED);
                 for (const auto &[u_id, d] : seen) {
                     atomic_fetch_and_add(superbubble_ends, u_id * 2, i + 1, mu, MO_RELAXED);
                     atomic_fetch_and_add(superbubble_ends, u_id * 2 + 1, *d.begin(), mu, MO_RELAXED);
+                    if (!is_terminal_superbubble)
+                        can_reach_terminus[u_id] = true;
                 }
 
                 atomic_exchange(superbubble_ends, i * 2, unitig_id + 1, mu, MO_RELAXED);
                 atomic_exchange(superbubble_ends, i * 2 + 1, dist, mu, MO_RELAXED);
             }
+        }
+
+        if (is_terminal_superbubble) {
+            if (std::any_of(seen.begin(), seen.end(),
+                            [&](const auto &a) { return a.second.size() != 1; })) {
+                // superbubble with paths of different lengths (i.e., complex)
+                // TODO: handle later
+                num_skipped_superbubbles.fetch_add(1, MO_RELAXED);
+                continue;
+            }
+            set_bit(is_superbubble_start.data(), i, true, MO_RELAXED);
+            for (const auto &[u_id, d] : seen) {
+                atomic_fetch_and_add(superbubble_ends, u_id * 2, i + 1, mu, MO_RELAXED);
+                atomic_fetch_and_add(superbubble_ends, u_id * 2 + 1, *d.begin(), mu, MO_RELAXED);
+            }
+
+            if (terminus) {
+                // mark unitigs can can't reach the terminus
+                sdsl::bit_vector found_map(seen.size(), false);
+                std::vector<size_t> back_traversal_stack;
+                back_traversal_stack.reserve(seen.size());
+                back_traversal_stack.emplace_back(terminus);
+                while (back_traversal_stack.size()) {
+                    size_t cur_id = back_traversal_stack.back();
+                    back_traversal_stack.pop_back();
+
+                    found_map[seen.find(cur_id) - seen.begin()] = true;
+                    for (size_t parent : parents[cur_id]) {
+                        back_traversal_stack.emplace_back(parent);
+                    }
+                }
+
+                auto it = found_map.begin();
+                for (const auto &[cur_id, stuff] : seen) {
+                    can_reach_terminus[cur_id] = *it;
+                    ++it;
+                }
+            } else {
+                atomic_exchange(superbubble_ends, i * 2, 0, mu, MO_RELAXED);
+            }
+
+            num_terminal_superbubbles.fetch_add(1, MO_RELAXED);
         }
     }
 
@@ -388,9 +456,13 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
 
     is_superbubble_start_ = SuperbubbleIndicator(std::move(is_superbubble_start));
 
-    logger->info("Indexed {} simple superbubbles", is_superbubble_start_.num_set_bits());
+    logger->info("Indexed {} simple superbubbles, of which {} have dead ends. Skipped {}",
+                 is_superbubble_start_.num_set_bits(),
+                 num_terminal_superbubbles,
+                 num_skipped_superbubbles);
 
     superbubble_termini_ = SuperbubbleStorage(std::move(superbubble_ends));
+    can_reach_terminus_ = SuperbubbleIndicator(std::move(can_reach_terminus));
 }
 
 auto IPathIndex
