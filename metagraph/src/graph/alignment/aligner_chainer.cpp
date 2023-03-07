@@ -605,14 +605,6 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
     std::vector<Anchor> seeds;
     seeds.reserve(nodes.size());
 
-    std::vector<std::tuple<size_t, size_t, size_t>> superbubbles;
-    if (path_index)
-        superbubbles.reserve(anchors.size());
-
-    tsl::hopscotch_map<size_t, std::pair<size_t, size_t>> superbubble_termini;
-    size_t num_superbubbles_found = 0;
-    size_t num_superbubbles_found_with_termini = 0;
-
     for (const auto &anchor : anchors) {
         size_t offset = anchor.get_offset();
         auto begin = anchor.get_query_view().begin();
@@ -640,27 +632,6 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                 add_seed(std::numeric_limits<Alignment::Column>::max());
             }
 
-            if (path_index) {
-                assert(superbubbles.size() == j);
-
-                for (const auto &[path_id, coords] : node_coords[j]) {
-                    auto [u_id, dist] = path_index->get_superbubble_and_dist(path_id);
-                    if (u_id) {
-                        ++num_superbubbles_found;
-                        superbubbles.emplace_back(u_id, dist, path_index->path_id_to_coord(path_id));
-                        if (!superbubble_termini.count(u_id)) {
-                            num_superbubbles_found_with_termini += (superbubble_termini.try_emplace(
-                                u_id, path_index->get_superbubble_terminus(u_id)
-                            ).first->second.first != 0);
-                        }
-                    }
-                }
-
-                assert(superbubbles.size() <= j + 1);
-                if (superbubbles.size() != j + 1)
-                    superbubbles.emplace_back(0, 0, 0);
-            }
-
             ++j;
             ++end;
             if (offset) {
@@ -670,10 +641,6 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
             }
         }
     }
-
-    logger->trace("Found superbubbles for {} / {} seeds, of which {} have termini",
-                  num_superbubbles_found, nodes.size(),
-                  num_superbubbles_found_with_termini);
 
     const auto *labeled_aligner = dynamic_cast<const ILabeledAligner*>(&aligner);
 
@@ -813,9 +780,6 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                     }
                 };
 
-                auto [superbubble_j, u_dist_j, offset_j] = superbubbles[is_rev ? coord_idx : coord_idx_j];
-                auto [superbubble, u_dist, offset] = superbubbles[is_rev ? coord_idx_j : coord_idx];
-                int64_t coord_offset_base = static_cast<int64_t>(offset_j + u_dist) - offset - u_dist_j;
                 for (auto &[c_j, tuple_j] : coords_j) {
                     for (auto &[c, tuple] : coords) {
                         if (c == c_j) {
@@ -823,44 +787,12 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                                                is_rev ? tuple_j : tuple);
                         } else if (path_index) {
                             size_t source_unitig_id = is_rev ? c : c_j;
-                            bool source_can_reach_terminus = path_index->can_reach_superbubble_terminus(source_unitig_id);
                             size_t target_unitig_id = is_rev ? c_j : c;
-                            if (superbubble_j && superbubble) {
-                                auto [t, d] = superbubble_termini[superbubble_j];
-                                size_t num_steps = 0;
-
-                                if (superbubble_j == superbubble) {
-                                    // both in the same superbubble
-                                    if ((source_can_reach_terminus && t == target_unitig_id) || u_dist_j == 0) {
-                                        // the source is at the front or the target is at the end
-                                        process_coord_list(is_rev ? tuple : tuple_j,
-                                                           is_rev ? tuple_j : tuple,
-                                                           coord_offset_base);
-                                    }
-                                    continue;
-                                }
-
-                                if (!source_can_reach_terminus)
-                                    continue;
-
-                                while (t) {
-                                    ++num_steps;
-                                    if (t == superbubble) {
-                                        // superbubble_j and superbubble form a chain
-                                        process_coord_list(is_rev ? tuple : tuple_j,
-                                                           is_rev ? tuple_j : tuple,
-                                                           coord_offset_base + d);
-                                        break;
-                                    }
-
-                                    if (static_cast<size_t>(dist) > d) {
-                                        auto [next_t, next_d] = path_index->get_superbubble_terminus(t);
-                                        t = next_t;
-                                        d += next_d;
-                                    } else {
-                                        t = 0;
-                                    }
-                                }
+                            size_t coord_dist = path_index->get_dist(source_unitig_id, target_unitig_id, dist);
+                            if (coord_dist < std::numeric_limits<size_t>::max()) {
+                                process_coord_list(is_rev ? tuple : tuple_j,
+                                                   is_rev ? tuple_j : tuple,
+                                                   coord_dist);
                             }
                         }
                     }

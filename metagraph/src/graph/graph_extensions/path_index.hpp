@@ -21,6 +21,7 @@ class IPathIndex : public SequenceGraph::GraphExtension {
 
     virtual std::pair<size_t, size_t> get_superbubble_terminus(size_t path_id) const = 0;
     virtual std::pair<size_t, size_t> get_superbubble_and_dist(size_t path_id) const = 0;
+    virtual bool is_superbubble_source(size_t path_id) const = 0;
 
     virtual size_t coord_to_path_id(uint64_t coord) const = 0;
     virtual uint64_t path_id_to_coord(size_t path_id) const = 0;
@@ -29,6 +30,10 @@ class IPathIndex : public SequenceGraph::GraphExtension {
     size_t path_length(size_t path_id) const {
         return path_id_to_coord(path_id + 1) - path_id_to_coord(path_id);
     }
+
+    size_t get_dist(size_t path_id_1,
+                    size_t path_id_2,
+                    size_t max_dist = std::numeric_limits<size_t>::max()) const;
 
   protected:
     virtual std::vector<RowTuples> get_row_tuples(const std::vector<Row> &rows) const = 0;
@@ -67,7 +72,13 @@ class PathIndex : public IPathIndex {
     }
 
     virtual std::pair<size_t, size_t> get_superbubble_terminus(size_t path_id) const override final;
+
     virtual std::pair<size_t, size_t> get_superbubble_and_dist(size_t path_id) const override final;
+
+    virtual bool is_superbubble_source(size_t path_id) const override final {
+      return --path_id <= is_superbubble_start_.size() && is_superbubble_start_[path_id];
+    }
+
     virtual bool can_reach_superbubble_terminus(size_t path_id) const override final {
         return --path_id <= can_reach_terminus_.size() && can_reach_terminus_[path_id];
     }
@@ -85,6 +96,7 @@ class PathIndex : public IPathIndex {
     PathStorage paths_indices_;
     PathBoundaries path_boundaries_;
     SuperbubbleIndicator is_superbubble_start_;
+    SuperbubbleStorage superbubble_sources_;
     SuperbubbleStorage superbubble_termini_;
     SuperbubbleIndicator can_reach_terminus_;
 
