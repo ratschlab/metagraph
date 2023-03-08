@@ -4,14 +4,16 @@
 #include <functional>
 #include <cassert>
 #include <cstdlib>
-
 #include <sdsl/int_vector.hpp>
 #include <sdsl/select_support_scan.hpp>
+
+#include "common/vectors/bitmap.hpp"
 
 class ThreadPool;
 class bit_vector;
 class bit_vector_adaptive;
 
+typedef std::function<void(uint64_t, uint64_t)> callback_template;
 
 sdsl::bit_vector to_sdsl(const std::vector<bool> &vector);
 sdsl::bit_vector to_sdsl(const std::vector<uint8_t> &vector);
@@ -163,15 +165,26 @@ sdsl::bit_vector generate_subindex(const bit_vector &column,
 sdsl::bit_vector autocorrelate(const sdsl::bit_vector &vector, uint8_t offset);
 
 
-// Call (uint64_t index, uint64_t value) for each non-zero value in [begin, end)
-template <class Callback, class vector_type>
-inline void call_nonzeros(const vector_type &vector,
-                          uint64_t begin, uint64_t end,
-                          Callback callback);
+
+
+void call_nonzeros(const sdsl::int_vector<> &vector,
+                   uint64_t begin, uint64_t end,
+                   callback_template callback);
+
+void call_nonzeros(const sdsl::bit_vector &vector,
+                   uint64_t begin, uint64_t end,
+                   callback_template callback);
+
+void call_nonzeros(const bitmap &vector,
+                   uint64_t begin, uint64_t end,
+                   callback_template callback);
 
 // Call (uint64_t index, uint64_t value) for each non-zero value in |vector|.
-template <class Callback, class vector_type>
-void call_nonzeros(const vector_type &vector, Callback callback) {
+template <class vector_type>
+void call_nonzeros(const vector_type &vector, callback_template callback);
+
+template <class vector_type>
+void call_nonzeros(const vector_type &vector, callback_template callback) {
     return call_nonzeros(vector, 0, vector.size(), callback);
 }
 
@@ -664,10 +677,9 @@ void call_zeros(const sdsl::bit_vector &vector,
     }
 }
 
-template <class Callback, class vector_type> //Myrthe: type for the vector bitmap or sdsl::int_vector<>, and later a sdsl::int_vector_buffer<>
-void call_nonzeros(const vector_type &vector,
+void call_nonzeros(const sdsl::int_vector<> & vector,
                    uint64_t begin, uint64_t end,
-                   Callback callback) {
+                   callback_template callback) {
     if (begin >= end)
         return;
 
@@ -676,25 +688,25 @@ void call_nonzeros(const vector_type &vector,
         case 64:
             std::for_each(reinterpret_cast<const uint64_t*>(vector.data()) + begin,
                           reinterpret_cast<const uint64_t*>(vector.data()) + end,
-                          [&](auto value) { if (value) callback(i, value); ++i; });
+                          [&](uint64_t value) { if (value) callback(i, value); ++i; });
             break;
 
         case 32:
             std::for_each(reinterpret_cast<const uint32_t*>(vector.data()) + begin,
                           reinterpret_cast<const uint32_t*>(vector.data()) + end,
-                          [&](auto value) { if (value) callback(i, value); ++i; });
+                          [&](uint64_t value) { if (value) callback(i, value); ++i; });
             break;
 
         case 16:
             std::for_each(reinterpret_cast<const uint16_t*>(vector.data()) + begin,
                           reinterpret_cast<const uint16_t*>(vector.data()) + end,
-                          [&](auto value) { if (value) callback(i, value); ++i; });
+                          [&](uint64_t value) { if (value) callback(i, value); ++i; });
             break;
 
         case 8:
             std::for_each(reinterpret_cast<const uint8_t*>(vector.data()) + begin,
                           reinterpret_cast<const uint8_t*>(vector.data()) + end,
-                          [&](auto value) { if (value) callback(i, value); ++i; });
+                          [&](uint64_t value) { if (value) callback(i, value); ++i; });
             break;
 
         default:
@@ -721,15 +733,17 @@ void call_nonzeros(const vector_type &vector,
     }
 }
 
-template void call_nonzeros<sdsl::int_vector<>>(const sdsl::int_vector<> &vector,
-              uint64_t begin, uint64_t end,
-              Callback callback);
-template void call_nonzeros<bitmap>(const bitmap &vector, // for bitmaps this should write a 1 to the column.
-              uint64_t begin, uint64_t end,
-              Callback callback){
-    vector.call_ones([&](uint64_t i){callback(i, 1);}     // creates a lambda function that write a custom argument for the callback
+void call_nonzeros(const sdsl::bit_vector &vector,
+                   uint64_t begin, uint64_t end,
+                   callback_template callback){
+    call_ones(vector, begin, end, [&](uint64_t i){callback(i, 1);});     // creates a lambda function that write a custom argument for the callback
 }
 
+void call_nonzeros(const bitmap &vector,
+                   uint64_t begin, uint64_t end,
+                   callback_template callback){
+    vector.call_ones_in_range(begin, end, [&](uint64_t i){callback(i, 1);});     // alternatively, use .call_ones() without begin or end.
+}
 
 template <typename BitVector>
 inline uint64_t next1(const BitVector &v, uint64_t pos, size_t num_steps) {
