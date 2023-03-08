@@ -6,13 +6,20 @@ namespace mtg::test {
 
 using namespace mtg::graph;
 using node_index = DeBruijnGraph::node_index;
-using TypeParam = DBGSuccinctUnitigIndexed;
 
-TEST(PathIndex, single_unitig) {
+template <typename Graph>
+class PathIndexTest : public DeBruijnGraphTest<Graph> {};
+
+typedef ::testing::Types<DBGSuccinctUnitigIndexed,
+                         DBGSuccinctPathIndexed> ChainGraphTypes;
+
+TYPED_TEST_SUITE(PathIndexTest, ChainGraphTypes);
+
+TYPED_TEST(PathIndexTest, single_unitig) {
     size_t k = 11;
     std::string reference = "ACGATGCGATG";
     auto graph = build_graph_batch<TypeParam>(k, { reference });
-    auto path_index = graph->get_extension_threadsafe<IPathIndex>();
+    auto path_index = graph->template get_extension_threadsafe<IPathIndex>();
     ASSERT_NE(nullptr, path_index);
 
     auto nodes = map_to_nodes(*graph, reference);
@@ -27,7 +34,7 @@ TEST(PathIndex, single_unitig) {
     EXPECT_EQ(0u, path_index->get_dist(coords[0][0].first, coords[0][0].first));
 }
 
-TEST(PathIndex, simple_superbubble_ends) {
+TYPED_TEST(PathIndexTest, simple_superbubble_ends) {
     size_t k = 22;
     /*
      *    o
@@ -40,7 +47,7 @@ TEST(PathIndex, simple_superbubble_ends) {
     std::string reference_2 = "CGTGGCCCAGGCCCAGGCCCAGCCGCATCATCTAGCTACGATCTA";
 
     auto graph = build_graph_batch<TypeParam>(k, { reference_1, reference_2 });
-    auto path_index = graph->get_extension_threadsafe<IPathIndex>();
+    auto path_index = graph->template get_extension_threadsafe<IPathIndex>();
     ASSERT_NE(nullptr, path_index);
 
     auto nodes_1 = map_to_nodes(*graph, reference_1.substr(0, k));
@@ -53,8 +60,13 @@ TEST(PathIndex, simple_superbubble_ends) {
 
     auto coords = path_index->get_coords({ nodes_1[0], nodes_2[0] });
     ASSERT_EQ(2u, coords.size());
-    ASSERT_EQ(1u, coords[0].size());
-    ASSERT_EQ(1u, coords[1].size());
+    if constexpr(std::is_same_v<TypeParam, DBGSuccinctUnitigIndexed>) {
+        ASSERT_EQ(1u, coords[0].size());
+        ASSERT_EQ(1u, coords[1].size());
+    } else {
+        ASSERT_LE(1u, coords[0].size());
+        ASSERT_LE(1u, coords[1].size());
+    }
 
     size_t source = coords[0][0].first;
     size_t terminus = coords[1][0].first;
@@ -64,6 +76,7 @@ TEST(PathIndex, simple_superbubble_ends) {
     EXPECT_EQ(k + 1, path_index->get_dist(source, terminus));
 }
 
+template <class TypeParam>
 void test_traversal_distances(const DeBruijnGraph &graph,
                               const std::vector<std::tuple<size_t, size_t, size_t>> &tests,
                               const std::string &reference_1,
@@ -80,8 +93,14 @@ void test_traversal_distances(const DeBruijnGraph &graph,
 
         auto coords = path_index->get_coords({ nodes_1[0], nodes_2[0] });
         ASSERT_EQ(2u, coords.size());
-        ASSERT_EQ(1u, coords[0].size());
-        ASSERT_EQ(1u, coords[1].size());
+
+        if constexpr(std::is_same_v<TypeParam, DBGSuccinctUnitigIndexed>) {
+            ASSERT_EQ(1u, coords[0].size());
+            ASSERT_EQ(1u, coords[1].size());
+        } else {
+            ASSERT_LE(1u, coords[0].size());
+            ASSERT_LE(1u, coords[1].size());
+        }
 
         size_t internal1 = coords[0][0].first;
         size_t internal2 = coords[1][0].first;
@@ -92,7 +111,7 @@ void test_traversal_distances(const DeBruijnGraph &graph,
     }
 }
 
-TEST(PathIndex, simple_superbubble) {
+TYPED_TEST(PathIndexTest, simple_superbubble) {
     size_t k = 22;
     /*
      *    o
@@ -118,10 +137,10 @@ TEST(PathIndex, simple_superbubble) {
         tests.emplace_back(reference_1.size() - k, i, std::numeric_limits<size_t>::max());
     }
 
-    test_traversal_distances(*graph, tests, reference_1, reference_2);
+    test_traversal_distances<TypeParam>(*graph, tests, reference_1, reference_2);
 }
 
-TEST(PathIndex, double_superbubble) {
+TYPED_TEST(PathIndexTest, double_superbubble_chain) {
     size_t k = 22;
     /*
      *    o   o
@@ -140,10 +159,10 @@ TEST(PathIndex, double_superbubble) {
         tests.emplace_back(i, reference_2.size() - k, (k + 1) * 2 - 1);
     }
 
-    test_traversal_distances(*graph, tests, reference_1, reference_2);
+    test_traversal_distances<TypeParam>(*graph, tests, reference_1, reference_2);
 }
 
-TEST(PathIndex, nested_superbubbles) {
+TYPED_TEST(PathIndexTest, nested_superbubbles) {
     size_t k = 22;
     /*
      *    o   o
@@ -165,11 +184,12 @@ TEST(PathIndex, nested_superbubbles) {
         tests.emplace_back(i, reference_2.size() - k - 1, std::numeric_limits<size_t>::max());
     }
 
-    test_traversal_distances(*graph, tests, reference_3, reference_2);
+    test_traversal_distances<TypeParam>(*graph, tests, reference_3, reference_2);
 
-    test_traversal_distances(*graph,
+    // the lower long unitig forces this entire graph to be a superbubble
+    test_traversal_distances<TypeParam>(*graph,
         std::vector<std::tuple<size_t, size_t, size_t>>{
-            { 1, reference_2.size() - k - 1, k + 1 }
+            { 1, reference_2.size() - k - 1, std::numeric_limits<size_t>::max() }
         },
         reference_1, reference_2
     );
