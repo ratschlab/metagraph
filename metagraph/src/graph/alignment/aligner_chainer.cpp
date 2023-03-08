@@ -788,11 +788,15 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                         } else if (path_index) {
                             size_t source_unitig_id = is_rev ? c : c_j;
                             size_t target_unitig_id = is_rev ? c_j : c;
+                            int64_t source_coord = path_index->path_id_to_coord(source_unitig_id);
+                            int64_t target_coord = path_index->path_id_to_coord(target_unitig_id);
                             size_t coord_dist = path_index->get_dist(source_unitig_id, target_unitig_id, dist);
                             if (coord_dist < std::numeric_limits<size_t>::max()) {
-                                process_coord_list(is_rev ? tuple : tuple_j,
-                                                   is_rev ? tuple_j : tuple,
-                                                   coord_dist);
+                                process_coord_list(
+                                    is_rev ? tuple : tuple_j,
+                                    is_rev ? tuple_j : tuple,
+                                    static_cast<int64_t>(coord_dist + source_coord) - target_coord
+                                );
                             }
                         }
                     }

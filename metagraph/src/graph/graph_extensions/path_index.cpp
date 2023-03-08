@@ -581,7 +581,6 @@ size_t IPathIndex::get_dist(size_t path_id_1, size_t path_id_2, size_t max_dist)
     auto [sb1, d1] = get_superbubble_and_dist(path_id_1);
     auto [sb2, d2] = get_superbubble_and_dist(path_id_2);
     bool is_source1 = is_superbubble_source(path_id_1);
-    // logger->info("{},{},{},{}\t{},{},{},{}",path_id_1,is_source1,sb1,d1, path_id_2,is_superbubble_source(path_id_2),sb2,d2);
 
     // path_id_2 is in the superbubble sourced at path_id_1
     if (is_source1 && sb2 == path_id_1)
@@ -598,14 +597,11 @@ size_t IPathIndex::get_dist(size_t path_id_1, size_t path_id_2, size_t max_dist)
         return std::numeric_limits<size_t>::max();
     }
 
-    // logger->info("\tcheck: {}", can_reach_superbubble_terminus(path_id_1));
-
     if (!can_reach_superbubble_terminus(path_id_1))
         return std::numeric_limits<size_t>::max();
 
     auto [t, d] = get_superbubble_terminus(is_source1 ? path_id_1 : sb1);
     d -= is_source1 ? 0 : d1;
-    // logger->info("\t{},{}\t{}",t,d,sb2);
 
     while (sb2 && sb2 != t && d < max_dist) {
         auto [next_sb, next_d] = get_superbubble_and_dist(sb2);
