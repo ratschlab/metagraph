@@ -598,7 +598,7 @@ Config::Config(int argc, char *argv[]) {
             || identity == CLEAN
             || identity == ASSEMBLE
             || identity == RELAX_BRWT)
-                    && fnames.size() != 1) {
+                    && (fnames.size() != 1 && assembly_config_file.empty())) {
         std::cerr << "Error: exactly one graph must be provided for this mode" << std::endl;
         print_usage_and_exit = true;
     }

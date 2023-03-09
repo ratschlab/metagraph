@@ -4,16 +4,14 @@
 #include <functional>
 #include <cassert>
 #include <cstdlib>
+
 #include <sdsl/int_vector.hpp>
 #include <sdsl/select_support_scan.hpp>
-
-#include "common/vectors/bitmap.hpp"
 
 class ThreadPool;
 class bit_vector;
 class bit_vector_adaptive;
 
-typedef std::function<void(uint64_t, uint64_t)> callback_template;
 
 sdsl::bit_vector to_sdsl(const std::vector<bool> &vector);
 sdsl::bit_vector to_sdsl(const std::vector<uint8_t> &vector);
@@ -165,26 +163,15 @@ sdsl::bit_vector generate_subindex(const bit_vector &column,
 sdsl::bit_vector autocorrelate(const sdsl::bit_vector &vector, uint8_t offset);
 
 
-
-
-void call_nonzeros(const sdsl::int_vector<> &vector,
-                   uint64_t begin, uint64_t end,
-                   callback_template callback);
-
-void call_nonzeros(const sdsl::bit_vector &vector,
-                   uint64_t begin, uint64_t end,
-                   callback_template callback);
-
-void call_nonzeros(const bitmap &vector,
-                   uint64_t begin, uint64_t end,
-                   callback_template callback);
+// Call (uint64_t index, uint64_t value) for each non-zero value in [begin, end)
+template <class Callback>
+inline void call_nonzeros(const sdsl::int_vector<> &vector,
+                          uint64_t begin, uint64_t end,
+                          Callback callback);
 
 // Call (uint64_t index, uint64_t value) for each non-zero value in |vector|.
-template <class vector_type>
-void call_nonzeros(const vector_type &vector, callback_template callback);
-
-template <class vector_type>
-void call_nonzeros(const vector_type &vector, callback_template callback) {
+template <class Callback>
+void call_nonzeros(const sdsl::int_vector<> &vector, Callback callback) {
     return call_nonzeros(vector, 0, vector.size(), callback);
 }
 
@@ -246,10 +233,10 @@ class select_support_scan_offset : public select_support_scan<t_b, t_pat_len> {
     using typename select_support_scan<t_b, t_pat_len>::size_type;
 
     explicit select_support_scan_offset(const bit_vector *v = nullptr)
-          : select_support_scan<t_b, t_pat_len>::select_support_scan(v) {}
+        : select_support_scan<t_b, t_pat_len>::select_support_scan(v) {}
 
     select_support_scan_offset(const select_support_scan<t_b,t_pat_len> &ss)
-          : select_support_scan<t_b, t_pat_len>::select_support_scan(ss.m_v) {}
+        : select_support_scan<t_b, t_pat_len>::select_support_scan(ss.m_v) {}
 
     inline size_type select_offset(size_type i, size_type offset = 0) const {
         using trait = select_support_trait<t_b, t_pat_len>;
@@ -260,7 +247,7 @@ class select_support_scan_offset : public select_support_scan<t_b, t_pat_len> {
         size_type args = trait::args_in_the_first_word(*data, word_off, carry);
         if (args >= i) {
             return (word_pos << 6)
-                + trait::ith_arg_pos_in_the_first_word(*data, i, word_off, carry);
+                    + trait::ith_arg_pos_in_the_first_word(*data, i, word_off, carry);
         }
         word_pos++;
         size_type sum_args = args;
@@ -275,7 +262,7 @@ class select_support_scan_offset : public select_support_scan<t_b, t_pat_len> {
             word_pos++;
         }
         return (word_pos << 6)
-            + trait::ith_arg_pos_in_the_word(*data, i - sum_args, old_carry);
+                + trait::ith_arg_pos_in_the_word(*data, i - sum_args, old_carry);
     }
 };
 
@@ -320,8 +307,8 @@ inline bool fetch_and_unset_bit(uint64_t *v, uint64_t i, bool atomic, int mo) {
 
 inline bool fetch_bit(const uint64_t *v, uint64_t i, bool atomic, int mo) {
     return atomic
-        ? ((__atomic_load_n(&v[i >> 6], mo) >> (i & 0x3F)) & 1)
-        : ((v[i >> 6] >> (i & 0x3F)) & 1);
+            ? ((__atomic_load_n(&v[i >> 6], mo) >> (i & 0x3F)) & 1)
+            : ((v[i >> 6] >> (i & 0x3F)) & 1);
 }
 
 inline void set_bit(uint64_t *v, uint64_t i, bool atomic, int mo) {
@@ -677,9 +664,10 @@ void call_zeros(const sdsl::bit_vector &vector,
     }
 }
 
-void call_nonzeros(const sdsl::int_vector<> & vector,
+template <class Callback>
+void call_nonzeros(const sdsl::int_vector<> &vector,
                    uint64_t begin, uint64_t end,
-                   callback_template callback) {
+                   Callback callback) {
     if (begin >= end)
         return;
 
@@ -688,25 +676,25 @@ void call_nonzeros(const sdsl::int_vector<> & vector,
         case 64:
             std::for_each(reinterpret_cast<const uint64_t*>(vector.data()) + begin,
                           reinterpret_cast<const uint64_t*>(vector.data()) + end,
-                          [&](uint64_t value) { if (value) callback(i, value); ++i; });
+                          [&](auto value) { if (value) callback(i, value); ++i; });
             break;
 
         case 32:
             std::for_each(reinterpret_cast<const uint32_t*>(vector.data()) + begin,
                           reinterpret_cast<const uint32_t*>(vector.data()) + end,
-                          [&](uint64_t value) { if (value) callback(i, value); ++i; });
+                          [&](auto value) { if (value) callback(i, value); ++i; });
             break;
 
         case 16:
             std::for_each(reinterpret_cast<const uint16_t*>(vector.data()) + begin,
                           reinterpret_cast<const uint16_t*>(vector.data()) + end,
-                          [&](uint64_t value) { if (value) callback(i, value); ++i; });
+                          [&](auto value) { if (value) callback(i, value); ++i; });
             break;
 
         case 8:
             std::for_each(reinterpret_cast<const uint8_t*>(vector.data()) + begin,
                           reinterpret_cast<const uint8_t*>(vector.data()) + end,
-                          [&](uint64_t value) { if (value) callback(i, value); ++i; });
+                          [&](auto value) { if (value) callback(i, value); ++i; });
             break;
 
         default:
@@ -723,7 +711,7 @@ void call_nonzeros(const sdsl::int_vector<> & vector,
                 it = std::max(it, w * 64 / vector.width());
 
                 auto it_end = std::min(end,
-                    ((w + 1) * 64 + vector.width() - 1) / vector.width());
+                                       ((w + 1) * 64 + vector.width() - 1) / vector.width());
 
                 for (; it < it_end; ++it) {
                     if (vector[it])
@@ -731,18 +719,6 @@ void call_nonzeros(const sdsl::int_vector<> & vector,
                 }
             }
     }
-}
-
-void call_nonzeros(const sdsl::bit_vector &vector,
-                   uint64_t begin, uint64_t end,
-                   callback_template callback){
-    call_ones(vector, begin, end, [&](uint64_t i){callback(i, 1);});     // creates a lambda function that write a custom argument for the callback
-}
-
-void call_nonzeros(const bitmap &vector,
-                   uint64_t begin, uint64_t end,
-                   callback_template callback){
-    vector.call_ones_in_range(begin, end, [&](uint64_t i){callback(i, 1);});     // alternatively, use .call_ones() without begin or end.
 }
 
 template <typename BitVector>

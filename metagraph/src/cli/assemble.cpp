@@ -49,10 +49,9 @@ DifferentialAssemblyConfig diff_assembly_config(const Json::Value &experiment) {
     diff_config.label_mask_out_kmer_fraction = experiment.get("out_max_fraction", 0.0).asDouble();
     diff_config.label_mask_out_unitig_fraction = experiment.get("unitig_out_max_fraction", 1.0).asDouble();
     diff_config.label_mask_other_unitig_fraction = experiment.get("unitig_other_max_fraction", 1.0).asDouble();
-    // diff_config.count_kmers = experiment.get("count-kmers", 1.0).asBool(); why is this not present for add_complement?
+    diff_config.add_complement = experiment.get("forward_and_reverse", false).asBool();
+    diff_config.count_kmers = experiment.get("count_kmers", false).asBool();
     diff_config.family_wise_error_rate = experiment.get("family_wise_error_rate", 0.05).asDouble();
-
-
 
     logger->trace("Per-kmer mask in fraction:\t\t{}", diff_config.label_mask_in_kmer_fraction);
     logger->trace("Per-unitig mask in fraction:\t\t{}", diff_config.label_mask_in_unitig_fraction);
@@ -62,7 +61,7 @@ DifferentialAssemblyConfig diff_assembly_config(const Json::Value &experiment) {
     logger->trace("Include reverse complements:\t\t{}", diff_config.add_complement);
     logger->trace("Include k-mer counts if present in the graph:\t\t{}", diff_config.count_kmers); // if node weights (k-mer count) are present in the graph and should be included in the differential assembly.
     logger->trace("Family wise error rate for the Bonferroni test:\t{}", diff_config.family_wise_error_rate);
-
+    // TODO get the folder with the annotation columns from the .json or command, because it is redundant to have to give all of them as an input. How to? For all the in_labels and out_labels, collect the folder/<filename>.column.annodbg file and push them in the list of config->infbase_annotators.
     return diff_config;
 }
 
@@ -186,8 +185,10 @@ void call_masked_graphs(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
             logger->trace("Running assembly: {}", exp_name);
 
+            auto filenames = (config->infbase_annotators.size() > 1) ? config->infbase_annotators : config->fnames;
+
             callback(*mask_nodes_by_label(graph_ptr,
-                                          config->fnames,
+                                          filenames,
                                           foreground_labels,
                                           background_labels,
                                           diff_config, num_threads,
@@ -219,7 +220,7 @@ int assemble(Config *config) {
 
     logger->trace("Graph loaded in {} sec", timer.elapsed());
 
-    if (config->infbase_annotators.size()) {
+    if (config->infbase_annotators.size() || files.size() > 1) {
         logger->trace("Generating masked graphs...");
         std::mutex write_mutex;
         size_t num_threads = std::max(1u, get_num_threads());
@@ -250,13 +251,13 @@ int assemble(Config *config) {
             }
         };
 
-        if (files.size() > 1) {
+        if (files.size() > 1 or config->infbase_annotators.size() > 1) { // Checks the infbase_annotators in the case that annotation columns are provided in the commandline using '-a' or '--annotator'
             config->fnames.erase(config->fnames.begin(), config->fnames.begin() + 1);
-            call_masked_graphs(graph, config, graph_callback);
+            call_masked_graphs(graph, config, graph_callback); // Does NOT support kmer-counts assembly?
         } else {
             config->infbase = files.at(0);
             auto anno_graph = initialize_annotated_dbg(graph, *config);
-            call_masked_graphs(*anno_graph, config, graph_callback);
+            call_masked_graphs(*anno_graph, config, graph_callback); // Does support kmer-counts assembly?
         }
         return 0;
     }

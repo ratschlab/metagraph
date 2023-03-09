@@ -1,9 +1,12 @@
-#include <cassert>
 #include <math.h>
+
 #include "differential_tests.hpp"
+#include "lookup_table_chisqrd_cdf.cpp"
+
 
 // https://github.com/tlemane/kmdiff/blob/6a56ce6f20abbf63928a19ebbfecb1968efd4cd3/include/kmdiff/log_factorial_table.hpp
 // cpp https://github.com/tlemane/kmdiff/blob/6a56ce6f20abbf63928a19ebbfecb1968efd4cd3/src/log_factorial_table.cpp
+namespace mtg{
 LogFactorialTable::LogFactorialTable(size_t size)
         : m_size(size)
 {
@@ -34,7 +37,7 @@ DifferentialTest::DifferentialTest(double family_wise_error_rate, size_t total_h
 {}
 
 
-//double DifferentialTest::chi_sqrd_1_cdf(double x)// DOF = 1
+//double DifferentialTest::chi_sqrd_1_cdf(double x)// DOF = 1 // https://www.codeproject.com/Articles/432194/How-to-Calculate-the-Chi-Squared-P-Value
 //{
 //    assert(x > 0); // assert that it is positive.
 //    double igf = lower_incomplete_gamma_function(x/0.5);
@@ -88,6 +91,7 @@ std::tuple<double, bool> DifferentialTest::likelihood_ratio_test(double in_sum, 
     double likelihood_ratio = alt_hypothesis - null_hypothesis;
 
     if (likelihood_ratio < 0) likelihood_ratio = 0;
+    Chi2PLookup Chi2PLookupTable; // generated with https://github.com/MoseleyBioinformaticsLab/chi2plookup
     double p_value = Chi2PLookupTable.getPValue(2 * likelihood_ratio, 1);
 
     auto out_sum_normalized = out_sum * in_total_kmers / out_total_kmers;
@@ -98,3 +102,4 @@ std::tuple<double, bool> DifferentialTest::likelihood_ratio_test(double in_sum, 
     return std::make_tuple(p_value, sign);
 }
 
+} // namespace mtg
