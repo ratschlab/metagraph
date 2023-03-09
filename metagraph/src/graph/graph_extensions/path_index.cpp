@@ -40,9 +40,9 @@ void IPathIndex::call_dists(size_t path_id_1,
     auto [sb1, d1] = get_superbubble_and_dist(path_id_1);
     auto [sb2, d2] = get_superbubble_and_dist(path_id_2);
     bool is_source1 = get_superbubble_terminus(path_id_1).first;
-    // logger->info("{},{},{},{}\t{},{},{},{}",
-    //              path_id_1,is_source1,sb1,d1,
-    //              path_id_2,get_superbubble_terminus(path_id_2).first,sb2,d2);
+    // logger->info("{},{},{}\t{},{},{}",
+    //              path_id_1,is_source1,sb1,
+    //              path_id_2,static_cast<bool>(get_superbubble_terminus(path_id_2).first),sb2);
 
     // path_id_2 is in the superbubble sourced at path_id_1
     if (is_source1 && sb2 == path_id_1) {
@@ -52,13 +52,23 @@ void IPathIndex::call_dists(size_t path_id_1,
 
     // both are in the same superbubble
     if (sb1 == sb2) {
+        assert(!is_source1);
+
+        if (!can_reach_superbubble_terminus(path_id_1))
+            return;
+
         auto [t, d] = get_superbubble_terminus(sb1);
-        if (t == path_id_2 && can_reach_superbubble_terminus(path_id_1)) {
-            for (size_t dd1 : d1) {
-                for (size_t dd2 : d2) {
-                    if (dd2 >= dd1)
-                        callback(dd2 - dd1);
-                }
+
+        // we can only guarantee that the path exists if path_id_2 is the superbubble terminus
+        if (t != path_id_2 || d.size() != 1)
+            return;
+
+        assert(std::equal(d2.begin(), d2.end(), d.begin(), d.end()));
+
+        for (size_t dd1 : d1) {
+            for (size_t dd2 : d2) {
+                assert(dd2 >= dd1);
+                callback(dd2 - dd1);
             }
         }
 
@@ -68,56 +78,99 @@ void IPathIndex::call_dists(size_t path_id_1,
     if (!can_reach_superbubble_terminus(path_id_1))
         return;
 
+    // logger->info("check");
+
     auto [t, d] = get_superbubble_terminus(is_source1 ? path_id_1 : sb1);
 
-    std::vector<std::pair<size_t, std::vector<size_t>>> path;
-    while (sb2 && sb2 != t) {
-        const auto &[next_sb, next_d] = path.emplace_back(get_superbubble_and_dist(sb2));
-        sb2 = next_sb;
-    }
-
-    if (sb2 != t)
+    if (!is_source1 && d.size() != 1 && d1.size() != 1)
         return;
 
-    for (size_t dd : d) {
-        for (size_t dd1 : d1) {
-            if (!is_source1 && dd1 > dd)
-                continue;
-
-            dd -= is_source1 ? 0 : dd1;
-
-            if (t == path_id_2) {
-                callback(dd);
-                if (is_source1)
-                    break;
-
-                continue;
+    if (t == path_id_2) {
+        if (is_source1) {
+            std::for_each(d.begin(), d.end(), callback);
+        } else {
+            for (size_t dd : d) {
+                for (size_t dd1 : d1) {
+                    assert(dd >= dd1);
+                    callback(dd - dd1);
+                }
             }
+        }
 
-            std::vector<std::pair<size_t, size_t>> dists;
-            dists.emplace_back(0, dd);
-            while (dists.size()) {
-                auto [i, dd] = dists.back();
-                dists.pop_back();
-                if (dd > max_dist)
-                    continue;
+        return;
+    }
 
-                const auto &[next_sb, next_d] = path[i];
-                for (size_t next_dd : next_d) {
-                    dd += next_dd;
-
-                    if (next_sb == t) {
-                        for (size_t dd2 : d2) {
-                            callback(dd + dd2);
-                        }
-                    } else {
-                        dists.emplace_back(i + 1, dd);
+    if (t == sb2) {
+        if (is_source1) {
+            for (size_t dd : d) {
+                for (size_t dd2 : d2) {
+                    callback(dd + dd2);
+                }
+            }
+        } else {
+            for (size_t dd1 : d1) {
+                for (size_t dd : d) {
+                    assert(dd >= dd1);
+                    for (size_t dd2 : d2) {
+                        callback(dd + dd2 - dd1);
                     }
                 }
             }
+        }
 
-            if (is_source1)
-                break;
+        return;
+    }
+
+    // logger->info("check2\t{},{}",sb2,t);
+
+    size_t min_dist = d[0];
+    std::vector<std::pair<size_t, std::vector<size_t>>> path;
+    while (sb2 && sb2 != t && min_dist < max_dist) {
+        const auto &[next_sb, next_d] = path.emplace_back(get_superbubble_and_dist(sb2));
+        // logger->info("\t{}->{}", sb2, next_sb);
+        if (next_d.size())
+            min_dist += next_d[0];
+
+        sb2 = next_sb;
+    }
+
+    if (sb2 != t || path.empty())
+        return;
+
+    // logger->info("check3");
+
+    std::reverse(path.begin(), path.end());
+
+    std::vector<std::pair<size_t, size_t>> dists;
+    if (is_source1) {
+        for (size_t dd : d) {
+            dists.emplace_back(0, dd);
+        }
+    } else {
+        for (size_t dd1 : d1) {
+            for (size_t dd : d) {
+                assert(dd >= dd1);
+                dists.emplace_back(0, dd - dd1);
+            }
+        }
+    }
+
+    while (dists.size()) {
+        auto [i, cur_d] = dists.back();
+        dists.pop_back();
+        if (cur_d > max_dist)
+            continue;
+
+        const auto &[next_sb, next_d] = path[i];
+        for (size_t next_dd : next_d) {
+            next_dd += cur_d;
+            if (next_sb == t) {
+                for (size_t dd2 : d2) {
+                    callback(next_dd + dd2);
+                }
+            } else if (i + 1 < path.size()) {
+                dists.emplace_back(i + 1, next_dd);
+            }
         }
     }
 }
@@ -127,7 +180,9 @@ std::pair<size_t, std::vector<size_t>> get_range(const Indicator &indicator,
                                                  const Storage &storage,
                                                  size_t i) {
     size_t begin = indicator.select1(i);
-    size_t end = indicator.next1(begin + 1);
+    size_t end = i != indicator.num_set_bits()
+        ? indicator.next1(begin + 1)
+        : storage.size();
     std::vector<size_t> values;
     values.reserve(end - begin - 1);
     std::copy(storage.begin() + begin + 1, storage.begin() + end,

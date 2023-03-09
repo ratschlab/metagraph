@@ -107,7 +107,9 @@ void test_traversal_distances(const DeBruijnGraph &graph,
                 << (canonical ? "PRIMARY\t" : "BASIC\t")
                 << std::string_view(&*i1, k) << "\t" << std::string_view(&*i2, k);
         });
-        ASSERT_EQ(found, exp_dist != std::numeric_limits<size_t>::max());
+        ASSERT_EQ(found, exp_dist != std::numeric_limits<size_t>::max())
+                << (canonical ? "PRIMARY\t" : "BASIC\t")
+                << std::string_view(&*i1, k) << "\t" << std::string_view(&*i2, k);
     }
 }
 
