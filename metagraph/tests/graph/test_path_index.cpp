@@ -50,7 +50,12 @@ TYPED_TEST(PathIndexTest, single_unitig) {
         ASSERT_EQ(1u, coords.size());
         ASSERT_EQ(1u, coords[0].size());
 
-        EXPECT_EQ(0u, path_index->get_dist(coords[0][0].first, coords[0][0].first));
+        bool found = false;
+        path_index->call_dists(coords[0][0].first, coords[0][0].first, [&](size_t dist) {
+            found = true;
+            EXPECT_EQ(0u, dist);
+        });
+        EXPECT_TRUE(found);
     }
 }
 
@@ -95,9 +100,14 @@ void test_traversal_distances(const DeBruijnGraph &graph,
         ASSERT_EQ(nodes_1[0] == nodes_2[0],
                   coords[0][0].second == coords[1][0].second);
 
-        ASSERT_EQ(exp_dist, path_index->get_dist(internal1, internal2))
-            << (canonical ? "PRIMARY\t" : "BASIC\t")
-            << std::string_view(&*i1, k) << "\t" << std::string_view(&*i2, k);
+        bool found = false;
+        path_index->call_dists(internal1, internal2, [&](size_t dist) {
+            found = true;
+            ASSERT_EQ(exp_dist, dist)
+                << (canonical ? "PRIMARY\t" : "BASIC\t")
+                << std::string_view(&*i1, k) << "\t" << std::string_view(&*i2, k);
+        });
+        ASSERT_EQ(found, exp_dist != std::numeric_limits<size_t>::max());
     }
 }
 

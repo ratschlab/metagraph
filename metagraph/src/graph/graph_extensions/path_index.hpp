@@ -19,8 +19,11 @@ class IPathIndex : public SequenceGraph::GraphExtension {
 
     virtual std::vector<RowTuples> get_coords(const std::vector<node_index> &nodes) const;
 
-    virtual std::pair<size_t, size_t> get_superbubble_terminus(size_t path_id) const = 0;
-    virtual std::pair<size_t, size_t> get_superbubble_and_dist(size_t path_id) const = 0;
+    virtual std::pair<size_t, std::vector<size_t>>
+    get_superbubble_terminus(size_t path_id) const = 0;
+
+    virtual std::pair<size_t, std::vector<size_t>>
+    get_superbubble_and_dist(size_t path_id) const = 0;
 
     virtual size_t coord_to_path_id(uint64_t coord) const = 0;
     virtual uint64_t path_id_to_coord(size_t path_id) const = 0;
@@ -30,8 +33,9 @@ class IPathIndex : public SequenceGraph::GraphExtension {
         return path_id_to_coord(path_id + 1) - path_id_to_coord(path_id);
     }
 
-    size_t get_dist(size_t path_id_1,
+    void call_dists(size_t path_id_1,
                     size_t path_id_2,
+                    const std::function<void(size_t)> &callback,
                     size_t max_dist = std::numeric_limits<size_t>::max()) const;
 
   protected:
@@ -70,8 +74,11 @@ class PathIndex : public IPathIndex {
         return dynamic_cast<const DBGSuccinct*>(&graph) == dbg_succ_.get();
     }
 
-    virtual std::pair<size_t, size_t> get_superbubble_terminus(size_t path_id) const override final;
-    virtual std::pair<size_t, size_t> get_superbubble_and_dist(size_t path_id) const override final;
+    virtual std::pair<size_t, std::vector<size_t>>
+    get_superbubble_terminus(size_t path_id) const override final;
+
+    virtual std::pair<size_t, std::vector<size_t>>
+    get_superbubble_and_dist(size_t path_id) const override final;
 
     virtual bool can_reach_superbubble_terminus(size_t path_id) const override final;
 

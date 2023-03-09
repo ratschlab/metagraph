@@ -28,9 +28,14 @@ constexpr std::memory_order MO_RELAXED = std::memory_order_relaxed;
 
 static const std::vector<Label> DUMMY { Label(1, 1) };
 
-size_t IPathIndex::get_dist(size_t path_id_1, size_t path_id_2, size_t max_dist) const {
-    if (path_id_1 == path_id_2)
-        return 0;
+void IPathIndex::call_dists(size_t path_id_1,
+                            size_t path_id_2,
+                            const std::function<void(size_t)> &callback,
+                            size_t max_dist) const {
+    if (path_id_1 == path_id_2) {
+        callback(0);
+        return;
+    }
 
     auto [sb1, d1] = get_superbubble_and_dist(path_id_1);
     auto [sb2, d2] = get_superbubble_and_dist(path_id_2);
@@ -40,56 +45,120 @@ size_t IPathIndex::get_dist(size_t path_id_1, size_t path_id_2, size_t max_dist)
     //              path_id_2,get_superbubble_terminus(path_id_2).first,sb2,d2);
 
     // path_id_2 is in the superbubble sourced at path_id_1
-    if (is_source1 && sb2 == path_id_1)
-        return d2;
+    if (is_source1 && sb2 == path_id_1) {
+        std::for_each(d2.begin(), d2.end(), callback);
+        return;
+    }
 
     // both are in the same superbubble
     if (sb1 == sb2) {
         auto [t, d] = get_superbubble_terminus(sb1);
         if (t == path_id_2 && can_reach_superbubble_terminus(path_id_1)) {
-            assert(d == d2);
-            return d2 - d1;
+            for (size_t dd1 : d1) {
+                for (size_t dd2 : d2) {
+                    if (dd2 >= dd1)
+                        callback(dd2 - dd1);
+                }
+            }
         }
 
-        return std::numeric_limits<size_t>::max();
+        return;
     }
 
     if (!can_reach_superbubble_terminus(path_id_1))
-        return std::numeric_limits<size_t>::max();
+        return;
 
     auto [t, d] = get_superbubble_terminus(is_source1 ? path_id_1 : sb1);
-    d -= is_source1 ? 0 : d1;
 
-    if (t == path_id_2)
-        return d;
-
-    while (sb2 && sb2 != t && d < max_dist) {
-        auto [next_sb, next_d] = get_superbubble_and_dist(sb2);
-        if (next_sb)
-            d += next_d;
-
+    std::vector<std::pair<size_t, std::vector<size_t>>> path;
+    while (sb2 && sb2 != t) {
+        const auto &[next_sb, next_d] = path.emplace_back(get_superbubble_and_dist(sb2));
         sb2 = next_sb;
     }
 
-    return sb2 == t ? d + d2 : std::numeric_limits<size_t>::max();
+    if (sb2 != t)
+        return;
+
+    for (size_t dd : d) {
+        for (size_t dd1 : d1) {
+            if (!is_source1 && dd1 > dd)
+                continue;
+
+            dd -= is_source1 ? 0 : dd1;
+
+            if (t == path_id_2) {
+                callback(dd);
+                if (is_source1)
+                    break;
+
+                continue;
+            }
+
+            std::vector<std::pair<size_t, size_t>> dists;
+            dists.emplace_back(0, dd);
+            while (dists.size()) {
+                auto [i, dd] = dists.back();
+                dists.pop_back();
+                if (dd > max_dist)
+                    continue;
+
+                const auto &[next_sb, next_d] = path[i];
+                for (size_t next_dd : next_d) {
+                    dd += next_dd;
+
+                    if (next_sb == t) {
+                        for (size_t dd2 : d2) {
+                            callback(dd + dd2);
+                        }
+                    } else {
+                        dists.emplace_back(i + 1, dd);
+                    }
+                }
+            }
+
+            if (is_source1)
+                break;
+        }
+    }
+}
+
+template <class Indicator, class Storage>
+std::pair<size_t, std::vector<size_t>> get_range(const Indicator &indicator,
+                                                 const Storage &storage,
+                                                 size_t i) {
+    size_t begin = indicator.select1(i);
+    size_t end = indicator.next1(begin + 1);
+    std::vector<size_t> values;
+    values.reserve(end - begin - 1);
+    std::copy(storage.begin() + begin + 1, storage.begin() + end,
+              std::back_inserter(values));
+    return std::make_pair(storage[begin], std::move(values));
 }
 
 template <class PathStorage,
           class PathBoundaries,
           class SuperbubbleIndicator,
           class SuperbubbleStorage>
-std::pair<size_t, size_t>
+std::pair<size_t, std::vector<size_t>>
 PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
 ::get_superbubble_terminus(size_t path_id) const {
     if (path_id > num_unitigs_)
         return {};
 
-    size_t i = superbubble_termini_b_.select1(path_id);
-    if (!superbubble_termini_[i])
+    return get_range(superbubble_termini_b_, superbubble_termini_, path_id);
+}
+
+template <class PathStorage,
+          class PathBoundaries,
+          class SuperbubbleIndicator,
+          class SuperbubbleStorage>
+std::pair<size_t, std::vector<size_t>>
+PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
+::get_superbubble_and_dist(size_t path_id) const {
+    if (path_id > num_unitigs_)
         return {};
 
-    assert(i + 1 < superbubble_termini_.size());
-    return std::make_pair(superbubble_termini_[i], superbubble_termini_[i + 1]);
+    return get_range(superbubble_sources_b_, superbubble_sources_, path_id);
 }
 
 template <class PathStorage,
@@ -99,24 +168,6 @@ template <class PathStorage,
 bool PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
 ::can_reach_superbubble_terminus(size_t path_id) const {
     return --path_id < num_unitigs_ && can_reach_terminus_[path_id];
-}
-
-template <class PathStorage,
-          class PathBoundaries,
-          class SuperbubbleIndicator,
-          class SuperbubbleStorage>
-std::pair<size_t, size_t>
-PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
-::get_superbubble_and_dist(size_t path_id) const {
-    if (path_id > num_unitigs_)
-        return {};
-
-    size_t i = superbubble_sources_b_.select1(path_id);
-    if (!superbubble_sources_[i])
-        return {};
-
-    assert(i + 1 < superbubble_sources_.size());
-    return std::make_pair(superbubble_sources_[i], superbubble_sources_[i + 1]);
 }
 
 

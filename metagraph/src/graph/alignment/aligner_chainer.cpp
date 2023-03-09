@@ -788,19 +788,18 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                         } else if (path_index) {
                             size_t source_unitig_id = is_rev ? c : c_j;
                             size_t target_unitig_id = is_rev ? c_j : c;
-                            size_t coord_dist = path_index->get_dist(source_unitig_id, target_unitig_id, dist);
-                            // logger->info("dist:{}\tcoord_dist: {}->{}:\t{}", dist, source_unitig_id, target_unitig_id, coord_dist);
-                            if (coord_dist < std::numeric_limits<size_t>::max()) {
-                                // the distance is -(c_j - source_coord) + coord_dist + (c - target_coord)
-                                //                 = c - c_j + coord_dist + source_coord - target_coord
-                                int64_t source_coord = path_index->path_id_to_coord(source_unitig_id);
-                                int64_t target_coord = path_index->path_id_to_coord(target_unitig_id);
-                                process_coord_list(
-                                    is_rev ? tuple : tuple_j,
-                                    is_rev ? tuple_j : tuple,
-                                    static_cast<int64_t>(coord_dist + source_coord) - target_coord
-                                );
-                            }
+                            path_index->call_dists(source_unitig_id, target_unitig_id,
+                                [&](size_t coord_dist) {
+                                    // the distance is -(c_j - source_coord) + coord_dist + (c - target_coord)
+                                    //                 = c - c_j + coord_dist + source_coord - target_coord
+                                    int64_t source_coord = path_index->path_id_to_coord(source_unitig_id);
+                                    int64_t target_coord = path_index->path_id_to_coord(target_unitig_id);
+                                    process_coord_list(
+                                        is_rev ? tuple : tuple_j,
+                                        is_rev ? tuple_j : tuple,
+                                        static_cast<int64_t>(coord_dist + source_coord) - target_coord
+                                    );
+                                }, dist);
                         }
                     }
                 }
