@@ -659,9 +659,9 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
         const auto &coords_j = node_coords[coord_idx_j];
         bool is_rev_j = (nodes[coord_idx_j] != anchors[anchor_ids[coord_idx_j].first].get_nodes()[anchor_ids[coord_idx_j].second]);
         size_t num_considered = 0;
+        size_t k = j;
         bool updated_with_less = false;
         size_t j_update = std::numeric_limits<size_t>::max();
-        size_t k = j;
         if (config_.allow_jump) {
             while (k && std::get<0>(seeds[k]) >= end_j) {
                 --k;
@@ -788,10 +788,13 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                         } else if (path_index) {
                             size_t source_unitig_id = is_rev ? c : c_j;
                             size_t target_unitig_id = is_rev ? c_j : c;
-                            int64_t source_coord = path_index->path_id_to_coord(source_unitig_id);
-                            int64_t target_coord = path_index->path_id_to_coord(target_unitig_id);
                             size_t coord_dist = path_index->get_dist(source_unitig_id, target_unitig_id, dist);
+                            // logger->info("dist:{}\tcoord_dist: {}->{}:\t{}", dist, source_unitig_id, target_unitig_id, coord_dist);
                             if (coord_dist < std::numeric_limits<size_t>::max()) {
+                                // the distance is -(c_j - source_coord) + coord_dist + (c - target_coord)
+                                //                 = c - c_j + coord_dist + source_coord - target_coord
+                                int64_t source_coord = path_index->path_id_to_coord(source_unitig_id);
+                                int64_t target_coord = path_index->path_id_to_coord(target_unitig_id);
                                 process_coord_list(
                                     is_rev ? tuple : tuple_j,
                                     is_rev ? tuple_j : tuple,
@@ -832,10 +835,9 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
             continue;
 
         Alignment::Column col = std::get<1>(seeds[k]);
+
         if (++used_cols[col] > config_.num_alternative_paths)
             continue;
-
-        logger->trace("Chain\t{}", -nscore);
 
         std::vector<std::pair<Seed, size_t>> seed_chain;
         while (k != std::numeric_limits<uint32_t>::max()) {
@@ -880,6 +882,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                            [](const auto &a) { return a.first.empty(); })
         );
 
+        logger->trace("Chain\t{}", -nscore);
         Chain chain;
         for (auto it = jt; it != seed_chain.rend(); ++it) {
             chain.emplace_back(Alignment(it->first, config_),
