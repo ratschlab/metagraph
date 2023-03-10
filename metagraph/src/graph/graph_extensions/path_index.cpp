@@ -82,7 +82,7 @@ void IPathIndex::call_dists(size_t path_id_1,
 
     auto [t, d] = get_superbubble_terminus(is_source1 ? path_id_1 : sb1);
 
-    if (!is_source1 && d.size() != 1 && d1.size() != 1)
+    if (!is_source1 && d.size() != 1)
         return;
 
     if (t == path_id_2) {
@@ -517,6 +517,7 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
     std::atomic<size_t> superbubble_termini_size { num_unitigs_ };
 
     std::atomic<size_t> num_terminal_superbubbles { 0 };
+    std::atomic<size_t> num_multiple_sizes { 0 };
     std::atomic_thread_fence(std::memory_order_release);
 
     ProgressBar progress_bar(num_unitigs_, "Indexing superbubbles",
@@ -574,11 +575,15 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
                 seen[next_id].emplace(dist + length);
                 bool all_visited = true;
                 dbg_succ.call_incoming_kmers(next, [&](node_index sibling, char c) {
-                    if (c != boss::BOSS::kSentinel && sibling != next) {
+                    if (c != boss::BOSS::kSentinel) {
                         assert(back_to_unitig_id.count(sibling));
                         size_t sibling_id = back_to_unitig_id[sibling];
+                        if (sibling_id == next_id)
+                            return;
+
                         if (add_parents)
                             parents[next_id].emplace_back(sibling_id);
+
                         if (all_visited && !visited.count(sibling_id))
                             all_visited = false;
                     }
@@ -609,19 +614,19 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
                 auto [unitig_id, dist] = traversal_stack.back();
                 traversal_stack.pop_back();
 
-                bool is_cycle = false;
-                dbg_succ.adjacent_outgoing_nodes(unitig_backs[unitig_id], [&](node_index next) {
-                    if (next == unitig_fronts[unitig_id])
-                        return;
+                // bool is_cycle = false;
+                // dbg_succ.adjacent_outgoing_nodes(unitig_backs[unitig_id], [&](node_index next) {
+                //     if (next == unitig_fronts[unitig_id])
+                //         return;
 
-                    if (next == unitig_fronts[i])
-                        is_cycle = true;
-                });
+                //     if (next == unitig_fronts[i])
+                //         is_cycle = true;
+                // });
 
-                if (is_cycle) {
-                    is_terminal_superbubble = false;
-                    continue;
-                }
+                // if (is_cycle) {
+                //     is_terminal_superbubble = false;
+                //     continue;
+                // }
 
                 terminus = unitig_id;
                 term_dist = dist;
@@ -641,6 +646,9 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
 
                 set_bit(can_reach_terminus.data(), i, true, MO_RELAXED);
                 const auto &d = seen[terminus];
+                if (d.size() > 1)
+                    num_multiple_sizes.fetch_add(1, MO_RELAXED);
+
                 {
                     std::lock_guard<std::mutex> lock(mu);
                     superbubble_termini_size -= superbubble_termini[i].second.size();
@@ -755,9 +763,10 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
 
     can_reach_terminus_ = SuperbubbleIndicator(std::move(can_reach_terminus));
 
-    logger->info("Indexed {} superbubbles, of which {} have dead ends.",
+    logger->info("Indexed {} superbubbles, of which {} have dead ends and {} have multiple paths to the terminus.",
                  superbubble_termini_b_.num_set_bits(),
-                 num_terminal_superbubbles);
+                 num_terminal_superbubbles,
+                 num_multiple_sizes);
 
 }
 
