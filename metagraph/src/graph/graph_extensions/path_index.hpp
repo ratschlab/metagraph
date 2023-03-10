@@ -93,6 +93,7 @@ class PathIndex : public IPathIndex {
   private:
     std::shared_ptr<const DBGSuccinct> dbg_succ_;
     size_t num_unitigs_;
+    size_t num_superbubbles_;
     PathStorage paths_indices_;
     PathBoundaries path_boundaries_;
 

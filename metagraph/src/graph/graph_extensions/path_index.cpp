@@ -237,6 +237,7 @@ bool PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleSto
         return false;
 
     num_unitigs_ = load_number(*in);
+    num_superbubbles_ = load_number(*in);
 
     if (!paths_indices_.load(*in))
         return false;
@@ -259,10 +260,10 @@ bool PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleSto
     if (!superbubble_termini_b_.load(*in))
         return false;
 
-    logger->trace("Loaded {} superbubbles", superbubble_termini_b_.num_set_bits());
-
     if (!can_reach_terminus_.load(*in))
         return false;
+
+    logger->trace("Loaded {} superbubbles", num_superbubbles_);
 
     return true;
 }
@@ -275,6 +276,7 @@ void PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleSto
 ::serialize(const std::string &filename_base) const {
     std::ofstream fout(filename_base + kPathIndexExtension);
     serialize_number(fout, num_unitigs_);
+    serialize_number(fout, num_superbubbles_);
     paths_indices_.serialize(fout);
     path_boundaries_.serialize(fout);
     superbubble_sources_.serialize(fout);
@@ -517,7 +519,6 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
     std::atomic<size_t> superbubble_termini_size { num_unitigs_ };
 
     std::atomic<size_t> num_terminal_superbubbles { 0 };
-    std::atomic<size_t> num_multiple_sizes { 0 };
     std::atomic_thread_fence(std::memory_order_release);
 
     ProgressBar progress_bar(num_unitigs_, "Indexing superbubbles",
@@ -646,8 +647,6 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
 
                 set_bit(can_reach_terminus.data(), i, true, MO_RELAXED);
                 const auto &d = seen[terminus];
-                if (d.size() > 1)
-                    num_multiple_sizes.fetch_add(1, MO_RELAXED);
 
                 {
                     std::lock_guard<std::mutex> lock(mu);
@@ -726,23 +725,34 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
 
     std::atomic_thread_fence(std::memory_order_acquire);
 
+    size_t num_in_superbubble = num_unitigs_;
     {
         sdsl::int_vector<> sources(superbubble_start_size);
         sdsl::bit_vector source_indicator(superbubble_start_size);
         auto it = sources.begin();
         auto jt = source_indicator.begin();
+        size_t j = 0;
         for (const auto &[start, d] : superbubble_starts) {
             *jt = true;
             *it = start;
             ++it;
             ++jt;
+
+            // TODO: this is not correct
+            if (!start && !superbubble_termini[j].first)
+                --num_in_superbubble;
+
             std::copy(d.begin(), d.end(), it);
             it += d.size();
             jt += d.size();
+            ++j;
         }
         superbubble_sources_ = SuperbubbleStorage(std::move(sources));
         superbubble_sources_b_ = SuperbubbleIndicator(std::move(source_indicator));
     }
+
+    num_superbubbles_ = 0;
+    size_t num_multiple_sizes = 0;
     {
         sdsl::int_vector<> termini(superbubble_termini_size);
         sdsl::bit_vector termini_indicator(superbubble_termini_size);
@@ -753,6 +763,8 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
             *it = start;
             ++it;
             ++jt;
+            num_superbubbles_ += !d.empty();
+            num_multiple_sizes += (d.size() > 1);
             std::copy(d.begin(), d.end(), it);
             it += d.size();
             jt += d.size();
@@ -763,8 +775,9 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
 
     can_reach_terminus_ = SuperbubbleIndicator(std::move(can_reach_terminus));
 
-    logger->info("Indexed {} superbubbles, of which {} have dead ends and {} have multiple paths to the terminus.",
-                 superbubble_termini_b_.num_set_bits(),
+    logger->info("{} / {} unitigs are in a superbubble. Indexed {} superbubbles, of which {} have dead ends and {} have multiple paths to the terminus.",
+                 num_in_superbubble, num_unitigs_,
+                 num_superbubbles_,
                  num_terminal_superbubbles,
                  num_multiple_sizes);
 
