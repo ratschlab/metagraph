@@ -811,6 +811,9 @@ void ColumnCompressed<Label>
                 if (column_values.size() != column->num_set_bits())
                     throw std::ifstream::failure("inconsistent size of the value vector");
 
+//                 for (auto &item: column_values) { std::string out_string = std::to_string(item); out = out + x + ", "; }
+//                    std::cout << out_string << ' ' << std::endl; }// Myrthe: temporary for debugging
+
                 callback(offsets[i] + c,
                          label_encoder_load.decode(c),
                          std::move(column), std::move(column_values));

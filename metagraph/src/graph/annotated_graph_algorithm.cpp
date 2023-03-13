@@ -374,7 +374,7 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         auto &[in_total_kmers, out_total_kmers] = total_kmers;
         auto total_hypotheses = counts.size()/2; // the total number of hypotheses tested.
         auto test_model = DifferentialTest(config.family_wise_error_rate, total_hypotheses,
-                                           counts.width(), in_total_kmers, out_total_kmers); // similar to the width of the counts vector, the size size of the log-factorial table should be the maximum joint coverage over the in_labels resp. out_labels
+                                           std::pow(2, counts.width()), in_total_kmers, out_total_kmers); // similar to the width of the counts vector, the size of the log-factorial table should be the maximum joint coverage over the in_labels resp. out_labels. Convert the width from bits to the number of stored values.
         size_t kept_nodes = 0;
         call_ones(in_mask, [&](node_index node) {
             uint64_t in_sum = counts[node * 2];
@@ -387,7 +387,14 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             }
         });
 
+        masked_graph->set_mask(new bitmap_vector(std::move(mask)));
+
+        size_t total_nodes = masked_graph->num_nodes();
+        logger->trace("Kept {} out of {} nodes", kept_nodes, total_nodes); // TODO this tracer is never printed and the breakpoints are never hit.
+
+        return masked_graph;
     }
+
 
 
     size_t min_label_in_count = std::ceil(config.label_mask_in_kmer_fraction
@@ -557,9 +564,11 @@ construct_diff_label_count_vector(const ColumnGenerator &generate_columns,
         for (size_t i = 0; i < files.size(); ++i) {
             const auto &values_fname = utils::remove_suffix(files[i],
                  annot::ColumnCompressed<>::kExtension) + annot::ColumnCompressed<>::kCountExtension;
-            sdsl::int_vector_size_type size; uint8_t col_width;
+            sdsl::int_vector_size_type col_size; uint8_t col_width;
             std::ifstream in_stream;
-            sdsl::int_vector<>::read_header(size, col_width, in_stream);
+            sdsl::int_vector<>::read_header(col_size, col_width, in_stream);
+            logger->trace("colwidth");
+            std::cout << std::to_string(col_width) << std::endl;
             auto label_encoder = annot::ColumnCompressed<>::read_label_encoder(files[i]);
             for (size_t c = 0; c < label_encoder.size(); ++c) {
                 auto label = label_encoder.decode(c);
@@ -567,7 +576,9 @@ construct_diff_label_count_vector(const ColumnGenerator &generate_columns,
                 if (labels_out.count(label)) sum_widths_out += std::pow(2, col_width);
             }
         }
-        width = std::min((size_t) 32, (size_t) std::log(std::max(sum_widths_in, sum_widths_out)));
+        std::cout << std::to_string(sum_widths_in) << std::endl;
+        std::cout << std::to_string(sum_widths_out) << std::endl;
+        width = std::min((size_t) 32, (size_t) std::ceil(std::log(std::max(sum_widths_in, sum_widths_out)))); // TODO, check if this is really correct. this should be 8.5 -> 9 rather then 7.
     } else{
         width = (sdsl::bits::hi(num_labels) + 1) * (1 + add_out_labels_to_mask);
     }
@@ -662,12 +673,12 @@ void kmer_distribution_table(const ColumnGenerator &generate_columns,
         };
 
         ValueCallback add_out = [&](Column i, uint64_t value) {
-            count_matrix[i * 2 +1 ].push_back(value);
+            count_matrix[i * 2 + 1].push_back(value);
         };
 
         ValueCallback add_both = [&](Column i, uint64_t value) { // theoretically a label should not be contained in both the in- and out-labels, but this is just in case.
             count_matrix[i * 2].push_back(value);
-            count_matrix[i * 2 +1 ].push_back(value);
+            count_matrix[i * 2 + 1].push_back(value);
 
         };
 
@@ -679,17 +690,33 @@ void kmer_distribution_table(const ColumnGenerator &generate_columns,
         }
     });
 
-    logger->trace("done");
+    int matrix_sum = 0;
+    for (size_t i = 0; i < count_matrix.size(); i+=2){
+        matrix_sum += std::accumulate(count_matrix[i].begin(), count_matrix[i].end(), 0);
+    }
+    std::cout << "matrix sum ";
+    std::cout << matrix_sum;
+    logger->trace("Writing k-mer count matrix to table");
 
     std::ofstream out_stream("kmer_dist_table.py");
     out_stream << "count_matrix_in = [" ;
-    for (size_t i = 0; i < count_matrix.size(); i+=2){
-        out_stream << "[" + outstring(count_matrix[i]) << "]" <<std::endl;
+    for (size_t i = 0; i < std::min(count_matrix.size(), (size_t) 50000000); i+=2){
+        if (count_matrix[i+1].size() > 3 or count_matrix[i].size() > 3){ // labels_out.size()/3
+                std::vector<int> zeros_vector(labels_in.size()-count_matrix[i].size(), 0);
+                count_matrix[i].insert(count_matrix[i].end(), zeros_vector.begin(), zeros_vector.end());
+                out_stream << "[" + outstring(count_matrix[i]) << "]," <<std::endl;
+            }
     }
     out_stream << "]" << std::endl;
     out_stream << "count_matrix_out = [" ;
-    for (size_t i = 1; i < count_matrix.size(); i+=2){
-        out_stream << "[" + outstring(count_matrix[i]) << "]" <<std::endl;
+    for (size_t i = 1; i < std::min(count_matrix.size(), (size_t) 50000000); i+=2){
+        if (count_matrix[i].size() > 3 or count_matrix[i-1].size() > 3){ // labels_out.size()/3
+            std::cout << std::to_string(count_matrix[i].size()) <<std::endl;
+            std::cout << std::to_string(labels_out.size()) <<std::endl;
+            std::cout << "[" + outstring(count_matrix[i]) << "]" <<std::endl;
+            std::vector<int> zeros_vector(labels_out.size()-count_matrix[i].size(), 0);
+            count_matrix[i].insert(count_matrix[i].end(), zeros_vector.begin(), zeros_vector.end());
+            out_stream << "[" + outstring(count_matrix[i]) << "]," <<std::endl;        }
     }
     out_stream << "]"<< std::endl;
     out_stream.close();
@@ -697,7 +724,7 @@ void kmer_distribution_table(const ColumnGenerator &generate_columns,
 
 void update_masked_graph_by_unitig(MaskedDeBruijnGraph &masked_graph,
                                    const GetKeptIntervals &get_kept_intervals,
-                                   size_t num_threads) {
+                                   size_t num_threads) { // traverses unitigs and takes a callback that does the filtering.
     std::atomic<uint64_t> kept_unitigs(0);
     std::atomic<uint64_t> total_unitigs(0);
     std::atomic<uint64_t> num_kept_nodes(0);
@@ -738,6 +765,29 @@ void update_masked_graph_by_unitig(MaskedDeBruijnGraph &masked_graph,
 }
 
 
+// TODO Myrthe:  filtering by unitig Myrthe todo
+//update_masked_graph_by_unitig(*masked_graph,
+//        [&](const std::string &, const std::vector<node_index> &path) -> Intervals { // Takes a path. Count vector per path.
+//            // return a set of intervals to keep in the graph
+//            size_t in_kmer_count = 0;
+//
+//            size_t begin = path.size();
+//            size_t end = 0;
+//            for (size_t i = 0; i < path.size(); ++i) { // first strategy is summing counts per unitig. QUESTION: where is the count vector created, such that iunitig k-mers can be accessed sequentially?
+//                in_kmer_count_unitig += counts[path[i] * 2];  // QUESTION Do more efficient std::accumulate for sdsl?
+//                out_kmer_count_unitig += counts[path[i] * 2 + 1];
+//            }
+//
+//            if model.likelihood_ratio_test(in_kmer_count_unitig, out_kmer_count_unitig) // todo can the model be accessed from the outside? Initiate total_hypotheses as number of unitigs.
+//                return { std::make_pair(begin, end) };
+//            else
+//                return {};
+//        },
+//        num_threads
+//);
+//
 
 } // namespace graph
 } // namespace mtg
+
+

@@ -70,8 +70,26 @@ double DifferentialTest::poisson_prob(int k, double lambda) // https://en.wikipe
 // family-wise error rate (FWER)
 bool DifferentialTest::bonferroni_correction(double& pvalue) //  &family_wise_error_rate, std::size_t & total_hypotheses, --> can also be class parameters.
 {
-    return pvalue < (family_wise_error_rate / total_hypotheses);
+    return pvalue < (family_wise_error_rate / total_hypotheses); // TODO store "family_wise_error_rate / total_hypotheses" as a class variable, corrected_pvalue_threshold (2.4e-8)
 }
+
+
+//size_t lrt_threshold(double corrected_pvalue){
+//    auto & array = ;
+//    int low = 0;
+//    int high = array.size()-1;
+//    while (low <= high) {
+//        int mid = (low + high) >> 1;
+//        if (std::get<0>(array[mid]) < kmer_count)
+//        {low = mid + 1;}
+//        else if (std::get<0>(array[mid]) > kmer_count)
+//        {high = mid - 1;}
+//        else if (std::get<0>(array[mid]) == kmer_count)
+//        {return std::get<1>(array[mid]);} // exact kmer_count found
+//    }
+//    return std::get<1>(array[low]);
+//}
+
 
 // adapted code from kmdiff.
 // previous is equivalent to mean_control,  mean_case, latter is equivalent to m_sum_controls, m_sum_cases
