@@ -217,6 +217,7 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr, // Myrthe: t
                 annot::ColumnCompressed<>::load_columns_and_values(files,
                     [&](uint64_t offset, const Label &label, std::unique_ptr<bit_vector> && column, auto&& column_values) {
                         column_callback(offset, label, [&](const ValueCallback &value_callback) {
+                            assert(std::accumulate(column_values.begin(), column_values.end(), 0) > 0);
                             call_ones(*column, [&](uint64_t i) {
                                 value_callback(i, column_values[column->rank1(i)-1]);
                             });
@@ -374,7 +375,10 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         auto &[in_total_kmers, out_total_kmers] = total_kmers;
         auto total_hypotheses = counts.size()/2; // the total number of hypotheses tested.
         auto test_model = DifferentialTest(config.family_wise_error_rate, total_hypotheses,
-                                           std::pow(2, counts.width()), in_total_kmers, out_total_kmers); // similar to the width of the counts vector, the size of the log-factorial table should be the maximum joint coverage over the in_labels resp. out_labels. Convert the width from bits to the number of stored values.
+                                           std::min((int) std::distance(counts.begin(),
+                                                                       std::max_element(counts.begin(), counts.end())), (int) 1000), in_total_kmers, out_total_kmers); // similar to the width of the counts vector, the size of the log-factorial table should be the maximum joint coverage over the in_labels resp. out_labels. Convert the width from bits to the number of stored values.
+        // std::min(std::pow(2, counts.width()), 10000) TODO Myrthe: limit the power of the width by some reasonable number, that is lower than 4,294,967,296, the current maximum, i.e. (2^32) or calculate it by the maximum of the counts vector.
+
         size_t kept_nodes = 0;
         call_ones(in_mask, [&](node_index node) {
             uint64_t in_sum = counts[node * 2];
@@ -560,6 +564,7 @@ construct_diff_label_count_vector(const ColumnGenerator &generate_columns,
     size_t width = (sdsl::bits::hi(num_labels) + 1) * (1 + add_out_labels_to_mask);
 
     if (config.count_kmers){ // calculate the sum of column widths to derive an upper bound for the required counts vector width.
+        assert(labels_in.size() > 0);
         size_t sum_widths_in = 0; size_t sum_widths_out = 0;
         for (size_t i = 0; i < files.size(); ++i) {
             const auto &values_fname = utils::remove_suffix(files[i],
@@ -643,6 +648,8 @@ construct_diff_label_count_vector(const ColumnGenerator &generate_columns,
         }
     });
 
+    assert( std::accumulate(counts.begin(), counts.end(), 0) > 0); // assert that the sum of the count vector is greater than 0
+
     std::atomic_thread_fence(std::memory_order_acquire);
     logger->trace("done");
 
@@ -694,6 +701,8 @@ void kmer_distribution_table(const ColumnGenerator &generate_columns,
     for (size_t i = 0; i < count_matrix.size(); i+=2){
         matrix_sum += std::accumulate(count_matrix[i].begin(), count_matrix[i].end(), 0);
     }
+    assert(matrix_sum > 0);
+
     std::cout << "matrix sum ";
     std::cout << matrix_sum;
     logger->trace("Writing k-mer count matrix to table");
