@@ -217,8 +217,12 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr, // Myrthe: t
                 annot::ColumnCompressed<>::load_columns_and_values(files,
                     [&](uint64_t offset, const Label &label, std::unique_ptr<bit_vector> && column, auto&& column_values) {
                         column_callback(offset, label, [&](const ValueCallback &value_callback) {
+                            std::cout << "test column values ";
                             assert(std::accumulate(column_values.begin(), column_values.end(), 0) > 0);
+                            assert(column->num_set_bits() > 0);
+                            assert(column->num_set_bits() == column_values.size());
                             call_ones(*column, [&](uint64_t i) {
+                                std::cout << "add to count vector ";
                                 value_callback(i, column_values[column->rank1(i)-1]);
                             });
                         });
@@ -228,7 +232,10 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr, // Myrthe: t
                 annot::ColumnCompressed<>::merge_load(files,
                     [&](uint64_t offset, const Label &label, std::unique_ptr<bit_vector> && column) {
                         column_callback(offset, label, [&](const ValueCallback &value_callback) {
+                            assert(column->num_set_bits() > 0);
+                            std::cout << "test columns ";
                             call_ones(*column, [&](uint64_t i) {
+                                std::cout << "add to count vector ";
                                 value_callback(i, 1);
                             });
                         });
@@ -307,13 +314,12 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     size_t num_out_labels = labels_out.size() + labels_out_round2.size();
 
     bool add_complement = graph_ptr->get_mode() == DeBruijnGraph::CANONICAL
-        && (config.add_complement || unitig_mode);
+            && (config.add_complement || unitig_mode);
 
     auto masked_graph = make_initial_masked_graph(graph_ptr, counts, std::move(init_mask),
                                                   add_complement, num_threads);
 
-    auto mask_or = [&](sdsl::bit_vector &a,
-                       const sdsl::bit_vector &b,
+    auto mask_or = [&](sdsl::bit_vector &a, const sdsl::bit_vector &b,
                        const std::vector<node_index> &id_map) {
         call_ones(b, [&](size_t i) {
             if (id_map[i])
@@ -324,43 +330,46 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     // check all other labels and round 2 labels
     if (anno_graph && (check_other || labels_in_round2.size() || labels_out_round2.size())) {
         sdsl::bit_vector union_mask
-            = static_cast<const bitmap_vector&>(masked_graph->get_mask()).data();
+                = static_cast<const bitmap_vector &>(masked_graph->get_mask()).data();
         std::mutex vector_backup_mutex;
         std::atomic_thread_fence(std::memory_order_release);
 
-        auto count_merge = [&](sdsl::bit_vector &a,  // Myrthe ANSWER: what does count_merge do? Is a hack, I do not have to touch this now. Count_add would be better name. If you have a dense column, and include it in foreground or background. Wate time, Instead first create mask.  You only access dense columns, for instance a reference.
-                               const sdsl::bit_vector &b,
-                               const std::vector<node_index> &id_map,
-                               size_t offset = 0) {
-            call_ones(b, [&](size_t i) {
-                if (id_map[i]) {
-                    set_bit(a.data(), id_map[i], parallel, MO_RELAXED);
-                    atomic_fetch_and_add(counts, id_map[i] * 2 + offset, 1,
-                                         vector_backup_mutex, MO_RELAXED);
-                }
-            });
-        };
+        auto count_merge
+                = [&](sdsl::bit_vector
+                              &a, // Myrthe ANSWER: what does count_merge do? Is a hack, I do not have to touch this now. Count_add would be better name. If you have a dense column, and include it in foreground or background. Wate time, Instead first create mask.  You only access dense columns, for instance a reference.
+                      const sdsl::bit_vector &b, const std::vector<node_index> &id_map,
+                      size_t offset = 0) {
+                      call_ones(b, [&](size_t i) {
+                          if (id_map[i]) {
+                              set_bit(a.data(), id_map[i], parallel, MO_RELAXED);
+                              atomic_fetch_and_add(counts, id_map[i] * 2 + offset, 1,
+                                                   vector_backup_mutex, MO_RELAXED);
+                          }
+                      });
+                  };
 
         logger->trace("Checking shared and other labels");
-        masked_graph->call_sequences([&](const std::string &contig,
-                                         const std::vector<node_index> &path) {
-            for (const auto &[label, sig] : anno_graph->get_top_label_signatures(contig, num_labels)) {
-                bool found_in = labels_in.count(label);
-                bool found_out = labels_out.count(label);
-                bool found_in_round2 = labels_in_round2.count(label);
-                bool found_out_round2 = labels_out_round2.count(label);
-                if (!found_in && !found_out
-                        && !found_in_round2 && !found_out_round2 && check_other) {
-                    mask_or(other_mask, sig, path);
-                }
+        masked_graph->call_sequences(
+                [&](const std::string &contig, const std::vector<node_index> &path) {
+                    for (const auto &[label, sig] :
+                         anno_graph->get_top_label_signatures(contig, num_labels)) {
+                        bool found_in = labels_in.count(label);
+                        bool found_out = labels_out.count(label);
+                        bool found_in_round2 = labels_in_round2.count(label);
+                        bool found_out_round2 = labels_out_round2.count(label);
+                        if (!found_in && !found_out && !found_in_round2
+                            && !found_out_round2 && check_other) {
+                            mask_or(other_mask, sig, path);
+                        }
 
-                if (found_in_round2)
-                    count_merge(union_mask, sig, path);
+                        if (found_in_round2)
+                            count_merge(union_mask, sig, path);
 
-                if (found_out_round2)
-                    count_merge(union_mask, sig, path, 1);
-            }
-        }, num_threads);
+                        if (found_out_round2)
+                            count_merge(union_mask, sig, path, 1);
+                    }
+                },
+                num_threads);
 
         std::atomic_thread_fence(std::memory_order_acquire);
 
@@ -369,36 +378,64 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
     // Filter unitigs from masked graph based on filtration criteria
     logger->trace("Filtering out background");
-    if (config.count_kmers){ // Statistical testing part when k-mer counts are included.
-        const auto &in_mask = static_cast<const bitmap_vector &>(masked_graph->get_mask()).data();
-        sdsl::bit_vector mask = in_mask;
+    if (config.count_kmers) {
         auto &[in_total_kmers, out_total_kmers] = total_kmers;
         auto total_hypotheses = counts.size()/2; // the total number of hypotheses tested.
-        auto test_model = DifferentialTest(config.family_wise_error_rate, total_hypotheses,
+        auto statistical_model = DifferentialTest(config.family_wise_error_rate, total_hypotheses,
                                            std::min((int) std::distance(counts.begin(),
                                                                        std::max_element(counts.begin(), counts.end())), (int) 1000), in_total_kmers, out_total_kmers); // similar to the width of the counts vector, the size of the log-factorial table should be the maximum joint coverage over the in_labels resp. out_labels. Convert the width from bits to the number of stored values.
         // std::min(std::pow(2, counts.width()), 10000) TODO Myrthe: limit the power of the width by some reasonable number, that is lower than 4,294,967,296, the current maximum, i.e. (2^32) or calculate it by the maximum of the counts vector.
 
-        size_t kept_nodes = 0;
-        call_ones(in_mask, [&](node_index node) {
-            uint64_t in_sum = counts[node * 2];
-            uint64_t out_sum = counts[node * 2 + 1];
-            auto [pvalue, sign] = test_model.likelihood_ratio_test(in_sum, out_sum);
-            if (test_model.bonferroni_correction(pvalue) and sign) {
-                ++kept_nodes;
-            } else {
-                mask[node] = false;
-            }
-        });
+        if (unitig_mode == false) { // Statistical testing part when k-mer counts are included.
+            const auto &in_mask
+                    = static_cast<const bitmap_vector &>(masked_graph->get_mask()).data();
+            sdsl::bit_vector mask = in_mask;
 
-        masked_graph->set_mask(new bitmap_vector(std::move(mask)));
 
-        size_t total_nodes = masked_graph->num_nodes();
-        logger->trace("Kept {} out of {} nodes", kept_nodes, total_nodes); // TODO this tracer is never printed and the breakpoints are never hit.
+            size_t kept_nodes = 0;
+            call_ones(in_mask, [&](node_index node) {
+                uint64_t in_sum = counts[node * 2];
+                uint64_t out_sum = counts[node * 2 + 1];
+                auto [pvalue, sign] = statistical_model.likelihood_ratio_test(in_sum, out_sum);
+                if (statistical_model.bonferroni_correction(pvalue) and sign) {
+                    ++kept_nodes;
+                } else {
+                    mask[node] = false;
+                }
+            });
 
-        return masked_graph;
+            masked_graph->set_mask(new bitmap_vector(std::move(mask)));
+
+            size_t total_nodes = masked_graph->num_nodes();
+            logger->trace("Kept {} out of {} nodes", kept_nodes,
+                          total_nodes); // TODO this tracer is never printed and the breakpoints are never hit.
+
+            return masked_graph;
+        } else if (config.count_kmers and unitig_mode == true) {
+        // TODO Myrthe:  filtering by unitig Myrthe todo
+
+        update_masked_graph_by_unitig(*masked_graph, // intitial mask
+                [&](const std::string &, const std::vector<node_index> &path)
+                        -> Intervals {
+                    // return a set of intervals to keep in the graph
+
+                    size_t begin = path.size();
+                    size_t end = 0;
+                    int in_kmer_count_unitig = 0;
+                    int out_kmer_count_unitig = 0;
+                    for (size_t i = 0; i < path.size(); ++i) { // first strategy is summing counts per unitig. // The update_mask.. function takes a path. Count vector per path. QUESTION: where is the count vector created, such that iunitig k-mers can be accessed sequentially?
+                        in_kmer_count_unitig += counts[path[i] * 2]; // QUESTION Do more efficient std::accumulate for sdsl?
+                        out_kmer_count_unitig += counts[path[i] * 2 + 1];
+                    }
+                    auto [pvalue, sign] = statistical_model.likelihood_ratio_test(in_kmer_count_unitig, out_kmer_count_unitig);
+                    if (statistical_model.bonferroni_correction(pvalue) and sign)
+                                return { std::make_pair(begin, end) };
+                    else
+                        return {};
+                },
+                num_threads);
+        }
     }
-
 
 
     size_t min_label_in_count = std::ceil(config.label_mask_in_kmer_fraction
@@ -617,7 +654,7 @@ construct_diff_label_count_vector(const ColumnGenerator &generate_columns,
             i = AnnotatedDBG::anno_to_graph_index(i); // indices in the annotation matrix have an offset of 1 compared to those in the graph. Since the mask should be compatible with the graph, we have to convert the index.
             assert(i != DeBruijnGraph::npos);
             set_bit(indicator.data(), i, parallel, MO_RELAXED); // set the corresponding bit to true in the mask, with the 'indicator' representing the mask.
-            atomic_fetch_and_add(counts, i * 2, value, vector_backup_mutex, MO_RELAXED);
+            atomic_fetch_and_add(counts, i * 2, value, vector_backup_mutex, MO_RELAXED); // TODO Myrthe later: make sure that values do not overflow in neighbouring cells.
             in_total_kmers += value;
         };
 
@@ -774,27 +811,7 @@ void update_masked_graph_by_unitig(MaskedDeBruijnGraph &masked_graph,
 }
 
 
-// TODO Myrthe:  filtering by unitig Myrthe todo
-//update_masked_graph_by_unitig(*masked_graph,
-//        [&](const std::string &, const std::vector<node_index> &path) -> Intervals { // Takes a path. Count vector per path.
-//            // return a set of intervals to keep in the graph
-//            size_t in_kmer_count = 0;
-//
-//            size_t begin = path.size();
-//            size_t end = 0;
-//            for (size_t i = 0; i < path.size(); ++i) { // first strategy is summing counts per unitig. QUESTION: where is the count vector created, such that iunitig k-mers can be accessed sequentially?
-//                in_kmer_count_unitig += counts[path[i] * 2];  // QUESTION Do more efficient std::accumulate for sdsl?
-//                out_kmer_count_unitig += counts[path[i] * 2 + 1];
-//            }
-//
-//            if model.likelihood_ratio_test(in_kmer_count_unitig, out_kmer_count_unitig) // todo can the model be accessed from the outside? Initiate total_hypotheses as number of unitigs.
-//                return { std::make_pair(begin, end) };
-//            else
-//                return {};
-//        },
-//        num_threads
-//);
-//
+
 
 } // namespace graph
 } // namespace mtg
