@@ -572,6 +572,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
 
     for (size_t i = 0; i < anchors.size(); ++i) {
         const auto &anchor = anchors[i];
+        // logger->info("Anchor:\t{}", anchor);
         for (size_t j = 0; j < anchor.get_nodes().size(); ++j) {
             node_index node = anchor.get_nodes()[j];
             auto &out = out_nodes.emplace_back();
@@ -681,6 +682,13 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                 break;
 
             int64_t dist = end - end_j;
+            if (dist > 300)
+                break;
+
+            // logger->info("check\t{}\t{}\tscores: {} vs. {}",
+            //     anchors[anchor_ids[coord_idx_j].first],
+            //     anchors[anchor_ids[coord_idx].first],
+            //     score_j, score);
 
             score_t label_change_score = labeled_aligner
                 ? labeled_aligner->get_label_change_score(col_j, col)
@@ -688,8 +696,10 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
 
             size_t num_added = end - std::max(begin, end_j);
             score_t base_added_score = score_j + num_added + label_change_score;
-            if (base_added_score < score)
+            if (base_added_score < score) {
+                // logger->info("\tskipped base low");
                 continue;
+            }
 
             size_t length = end - begin;
 
@@ -748,8 +758,10 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                     }
                 }
 
-                if (found && gap == 0)
+                if (found && gap == 0) {
+                    // logger->info("\tfound out edge\tscore: {}", score);
                     continue;
+                }
 
                 bool is_rev = (nodes[coord_idx] != node);
                 if (is_rev != is_rev_j)
@@ -790,6 +802,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                             size_t target_unitig_id = is_rev ? c_j : c;
                             path_index->call_dists(source_unitig_id, target_unitig_id,
                                 [&](size_t coord_dist) {
+                                    // logger->info("\t\t\tfinal dist: {}", coord_dist);
                                     // the distance is -(c_j - source_coord) + coord_dist + (c - target_coord)
                                     //                 = c - c_j + coord_dist + source_coord - target_coord
                                     int64_t source_coord = path_index->path_id_to_coord(source_unitig_id);
@@ -799,10 +812,14 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                                         is_rev ? tuple_j : tuple,
                                         static_cast<int64_t>(coord_dist + source_coord) - target_coord
                                     );
-                                }, dist);
+                                },
+                                dist + path_index->path_length(source_unitig_id)
+                            );
                         }
                     }
                 }
+
+                // logger->info("\tdone\tscore: {}", score);
             }
 
             if (updated && k < last) {
