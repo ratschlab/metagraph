@@ -349,18 +349,24 @@ inline uint64_t atomic_fetch(const sdsl::int_vector<> &vector,
         return (__atomic_load_n(word, mo) >> (bit_pos & 0x7F)) & mask;
 #endif
     } else {
-        const uint8_t shift = bit_pos & 0x7;
-        const uint8_t *word = &reinterpret_cast<const uint8_t*>(vector.data())[bit_pos >> 3];
+        uint8_t shift = bit_pos & 0x7;
         if (shift + width <= 8) {
+            const uint8_t *word = &reinterpret_cast<const uint8_t*>(vector.data())[bit_pos >> 3];
             // read from a byte
             return (__atomic_load_n(word, mo) >> shift) & mask;
         } else if (shift + width <= 16) {
+            const uint16_t *word = &reinterpret_cast<const uint16_t*>(vector.data())[bit_pos >> 4];
+            shift = bit_pos & 0xF;
             // unaligned read from two bytes
             return (__atomic_load_n((const uint16_t*)word, mo) >> shift) & mask;
         } else if (shift + width <= 32) {
+            const uint32_t *word = &reinterpret_cast<const uint32_t*>(vector.data())[bit_pos >> 5];
+            shift = bit_pos & 0x1F;
             // unaligned read from four bytes
             return (__atomic_load_n((const uint32_t*)word, mo) >> shift) & mask;
         } else if (shift + width <= 64) {
+            const uint64_t *word = &vector.data()[bit_pos >> 6];
+            shift = bit_pos & 0x3F;
             // unaligned read from eight bytes
             return (__atomic_load_n((const uint64_t*)word, mo) >> shift) & mask;
         } else {
@@ -399,20 +405,26 @@ inline uint64_t atomic_fetch_and_add(sdsl::int_vector<> &vector,
         return (__sync_fetch_and_add(word, __uint128_t(val) << shift) >> shift) & mask;
 #endif
     } else {
-        const uint8_t shift = bit_pos & 0x7;
-        uint8_t *word = &reinterpret_cast<uint8_t*>(vector.data())[bit_pos >> 3];
+        uint8_t shift = bit_pos & 0x7;
         if (shift + width <= 8) {
             // read from a byte
+            uint8_t *word = &reinterpret_cast<uint8_t*>(vector.data())[bit_pos >> 3];
             return (__atomic_fetch_add(word, val << shift, mo) >> shift) & mask;
         } else if (shift + width <= 16) {
             // unaligned read from two bytes
-            return (__atomic_fetch_add((uint16_t*)word, val << shift, mo) >> shift) & mask;
+            uint16_t *word = &reinterpret_cast<uint16_t*>(vector.data())[bit_pos >> 4];
+            shift = bit_pos & 0xF;
+            return (__atomic_fetch_add(word, val << shift, mo) >> shift) & mask;
         } else if (shift + width <= 32) {
             // unaligned read from four bytes
-            return (__atomic_fetch_add((uint32_t*)word, val << shift, mo) >> shift) & mask;
+            uint32_t *word = &reinterpret_cast<uint32_t*>(vector.data())[bit_pos >> 5];
+            shift = bit_pos & 0x1F;
+            return (__atomic_fetch_add(word, val << shift, mo) >> shift) & mask;
         } else if (shift + width <= 64) {
             // unaligned read from eight bytes
-            return (__atomic_fetch_add((uint64_t*)word, val << shift, mo) >> shift) & mask;
+            uint64_t *word = &vector.data()[bit_pos >> 6];
+            shift = bit_pos & 0x3F;
+            return (__atomic_fetch_add(word, val << shift, mo) >> shift) & mask;
         } else {
             assert(false);
         }
@@ -464,9 +476,9 @@ inline uint64_t atomic_exchange(sdsl::int_vector<> &vector,
         return (exp >> shift) & mask;
 #endif
     } else {
-        const uint8_t shift = bit_pos & 0x7;
-        uint8_t *word = &reinterpret_cast<uint8_t*>(vector.data())[bit_pos >> 3];
+        uint8_t shift = bit_pos & 0x7;
         if (shift + width <= 8) {
+            uint8_t *word = &reinterpret_cast<uint8_t*>(vector.data())[bit_pos >> 3];
             // read from a byte
             uint8_t desired;
             uint8_t exp = *word;
@@ -477,37 +489,40 @@ inline uint64_t atomic_exchange(sdsl::int_vector<> &vector,
             } while (!__atomic_compare_exchange(word, &exp, &desired, true, mo, __ATOMIC_RELAXED));
             return (exp >> shift) & mask;
         } else if (shift + width <= 16) {
+            uint16_t *word = &reinterpret_cast<uint16_t*>(vector.data())[bit_pos >> 4];
+            shift = bit_pos & 0xF;
             // unaligned read from two bytes
-            uint16_t *this_word = (uint16_t*)word;
             uint16_t desired;
-            uint16_t exp = *this_word;
+            uint16_t exp = *word;
             const uint16_t inv_mask = ~(mask << shift);
             val <<= shift;
             do {
                 desired = val | (inv_mask & exp);
-            } while (!__atomic_compare_exchange(this_word, &exp, &desired, true, mo, __ATOMIC_RELAXED));
+            } while (!__atomic_compare_exchange(word, &exp, &desired, true, mo, __ATOMIC_RELAXED));
             return (exp >> shift) & mask;
         } else if (shift + width <= 32) {
             // unaligned read from four bytes
-            uint32_t *this_word = (uint32_t*)word;
+            uint32_t *word = &reinterpret_cast<uint32_t*>(vector.data())[bit_pos >> 5];
+            shift = bit_pos & 0x1F;
             uint32_t desired;
-            uint32_t exp = *this_word;
+            uint32_t exp = *word;
             const uint32_t inv_mask = ~(mask << shift);
             val <<= shift;
             do {
                 desired = val | (inv_mask & exp);
-            } while (!__atomic_compare_exchange(this_word, &exp, &desired, true, mo, __ATOMIC_RELAXED));
+            } while (!__atomic_compare_exchange(word, &exp, &desired, true, mo, __ATOMIC_RELAXED));
             return (exp >> shift) & mask;
         } else if (shift + width <= 64) {
             // unaligned read from eight bytes
-            uint64_t *this_word = (uint64_t*)word;
+            uint64_t *word = &vector.data()[bit_pos >> 6];
+            shift = bit_pos & 0x3F;
             uint64_t desired;
-            uint64_t exp = *this_word;
+            uint64_t exp = *word;
             const uint64_t inv_mask = ~(mask << shift);
             val <<= shift;
             do {
                 desired = val | (inv_mask & exp);
-            } while (!__atomic_compare_exchange(this_word, &exp, &desired, true, mo, __ATOMIC_RELAXED));
+            } while (!__atomic_compare_exchange(word, &exp, &desired, true, mo, __ATOMIC_RELAXED));
             return (exp >> shift) & mask;
         } else {
             assert(false);
