@@ -170,15 +170,19 @@ TEST(IntVector, atomic_exchange) {
         std::atomic_thread_fence(std::memory_order_release);
         #pragma omp parallel for num_threads(3) schedule(static, 1)
         for (size_t i = 0; i < vector_atomic.size(); ++i) {
-            EXPECT_EQ(0u, atomic_exchange(vector_atomic, i, val, mu, memorder));
+            EXPECT_EQ(0u, atomic_exchange(vector_atomic, i, val, mu, memorder))
+                << w << " " << i;
         }
 
         std::atomic_thread_fence(std::memory_order_acquire);
-        EXPECT_EQ(sdsl::int_vector<>(128 * w, val, w), vector_atomic);
+        ASSERT_TRUE(std::all_of(vector_atomic.begin(), vector_atomic.end(),
+                    [&](uint64_t a) { return a == val; }))
+            << w << " " << val << "\n" << vector_atomic;
+        ASSERT_EQ(sdsl::int_vector<>(128 * w, val, w), vector_atomic) << w;
     }
 }
 
-TEST(IntVector, atomic_exchange_then_fetch_after_join) {
+TEST(IntVector, atomic_exchange_then_access_after_join) {
     for (size_t w = 1; w <= 64; ++w) {
         constexpr int memorder = __ATOMIC_RELAXED;
         sdsl::int_vector<> vector_atomic = aligned_int_vector(128 * w, 0, w, 16);
@@ -188,12 +192,36 @@ TEST(IntVector, atomic_exchange_then_fetch_after_join) {
         std::atomic_thread_fence(std::memory_order_release);
         #pragma omp parallel for num_threads(3) schedule(static, 1)
         for (size_t i = 0; i < vector_atomic.size(); ++i) {
-            EXPECT_EQ(0u, atomic_exchange(vector_atomic, i, val, mu, memorder));
+            EXPECT_EQ(0u, atomic_exchange(vector_atomic, i, val, mu, memorder))
+                << w << " " << i;
+        }
+        std::atomic_thread_fence(std::memory_order_acquire);
+
+        #pragma omp parallel for num_threads(3) schedule(dynamic)
+        for (size_t i = 0; i < vector_atomic.size(); ++i) {
+            EXPECT_EQ(val, vector_atomic[i]) << w << " " << i;
+        }
+    }
+}
+
+TEST(IntVector, atomic_exchange_then_acquire_fetch_after_join) {
+    for (size_t w = 1; w <= 64; ++w) {
+        constexpr int memorder = __ATOMIC_RELAXED;
+        sdsl::int_vector<> vector_atomic = aligned_int_vector(128 * w, 0, w, 16);
+        uint64_t val = sdsl::bits::lo_set[w];
+
+        std::mutex mu;
+        std::atomic_thread_fence(std::memory_order_release);
+        #pragma omp parallel for num_threads(3) schedule(static, 1)
+        for (size_t i = 0; i < vector_atomic.size(); ++i) {
+            EXPECT_EQ(0u, atomic_exchange(vector_atomic, i, val, mu, memorder))
+                << w << " " << i;
         }
 
         #pragma omp parallel for num_threads(3) schedule(dynamic)
         for (size_t i = 0; i < vector_atomic.size(); ++i) {
-            EXPECT_EQ(val, atomic_fetch(vector_atomic, i, mu, __ATOMIC_ACQUIRE));
+            EXPECT_EQ(val, atomic_fetch(vector_atomic, i, mu, __ATOMIC_ACQUIRE))
+                << w << " " << i;
         }
     }
 }
@@ -211,11 +239,13 @@ TEST(IntVector, atomic_exchange_then_fetch_release_and_acquire) {
         {
             #pragma omp taskloop
             for (size_t i = 0; i < vector_atomic.size(); ++i) {
-                EXPECT_EQ(0u, atomic_exchange(vector_atomic, i, val, mu, __ATOMIC_RELEASE));
+                EXPECT_EQ(0u, atomic_exchange(vector_atomic, i, val, mu, __ATOMIC_RELEASE))
+                    << w << " " << i;
 
                 #pragma omp task
                 {
-                    EXPECT_EQ(val, atomic_fetch(vector_atomic, i, mu, __ATOMIC_ACQUIRE));
+                    EXPECT_EQ(val, atomic_fetch(vector_atomic, i, mu, __ATOMIC_ACQUIRE))
+                        << w << " " << i;
                 }
             }
         }
@@ -249,7 +279,10 @@ TEST(IntVector, atomic_fetch_and_add_val) {
 
         std::atomic_thread_fence(std::memory_order_acquire);
 
-        EXPECT_EQ(sdsl::int_vector<>(128 * w, val, w), vector_atomic);
+        ASSERT_TRUE(std::all_of(vector_atomic.begin(), vector_atomic.end(),
+                    [&](uint64_t a) { return a == val; }))
+            << w << " " << val << "\n" << vector_atomic;
+        ASSERT_EQ(sdsl::int_vector<>(128 * w, val, w), vector_atomic) << w;
     }
 }
 
@@ -266,7 +299,8 @@ TEST(IntVector, atomic_fetch_and_add_all_bits) {
             uint64_t set_val = 1llu << j;
             for (size_t i = 0; i < vector_atomic.size(); ++i) {
                 EXPECT_EQ(0u, atomic_fetch_and_add(vector_atomic, i, set_val,
-                                                   mu, memorder) & set_val);
+                                                   mu, memorder) & set_val)
+                    << w << " " << i;
 
                 // some added contention
                 atomic_fetch_and_add(vector_atomic, 0, 0, mu, memorder);
@@ -281,7 +315,10 @@ TEST(IntVector, atomic_fetch_and_add_all_bits) {
         }
 
         std::atomic_thread_fence(std::memory_order_acquire);
-        EXPECT_EQ(sdsl::int_vector<>(128 * w, val, w), vector_atomic);
+        ASSERT_TRUE(std::all_of(vector_atomic.begin(), vector_atomic.end(),
+                    [&](uint64_t a) { return a == val; }))
+            << w << " " << val << "\n" << vector_atomic;
+        ASSERT_EQ(sdsl::int_vector<>(128 * w, val, w), vector_atomic) << w;
     }
 }
 
@@ -301,7 +338,8 @@ TEST(IntVector, atomic_fetch_and_add_all_bits_except_one) {
                     uint64_t set_val = 1llu << j;
                     for (size_t i = 0; i < vector_atomic.size(); ++i) {
                         EXPECT_EQ(0u, atomic_fetch_and_add(vector_atomic, i, set_val,
-                                                           mu, memorder) & set_val);
+                                                           mu, memorder) & set_val)
+                            << w << " " << i;
 
                         // some added contention
                         atomic_fetch_and_add(vector_atomic, 0, 0, mu, memorder);
@@ -317,7 +355,10 @@ TEST(IntVector, atomic_fetch_and_add_all_bits_except_one) {
             }
 
             std::atomic_thread_fence(std::memory_order_acquire);
-            EXPECT_EQ(sdsl::int_vector<>(128 * w, val, w), vector_atomic);
+            ASSERT_TRUE(std::all_of(vector_atomic.begin(), vector_atomic.end(),
+                    [&](uint64_t a) { return a == val; }))
+                << w << " " << val << "\n" << vector_atomic;
+            ASSERT_EQ(sdsl::int_vector<>(128 * w, val, w), vector_atomic) << w;
         }
     }
 }
