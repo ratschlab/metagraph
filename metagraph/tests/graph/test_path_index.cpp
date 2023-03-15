@@ -230,4 +230,15 @@ TYPED_TEST(PathIndexTest, disconnect) {
     }
 }
 
+TYPED_TEST(PathIndexTest, simple_cycle) {
+    size_t k = 11;
+    std::string reference = "GACTGTAGCTAGACTGTAGCTA";
+    for (DeBruijnGraph::Mode mode : MODES_TO_TEST) {
+        auto graph = build_graph_batch<TypeParam>(k, { reference }, mode);
+        std::vector<std::tuple<std::string::const_iterator,
+                               std::string::const_iterator,
+                               size_t>> tests;
+    }
+}
+
 } // namespace mtg::test

@@ -194,7 +194,6 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
             num_seeds += num_seeds_c;
             num_extensions += num_extensions_c;
             num_explored_nodes += num_explored_nodes_c;
-            seeder_rc.reset();
             if (seeder_rc) {
                 auto [num_seeds_c, num_extensions_c, num_explored_nodes_c] =
                     chain_and_filter_seeds(*this, seeder_rc, Extender(*this, reverse));
