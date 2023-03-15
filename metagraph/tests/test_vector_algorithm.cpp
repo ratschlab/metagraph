@@ -163,7 +163,7 @@ TEST(IntVector, call_nonzeros_sparse_every_4) {
 TEST(IntVector, atomic_exchange) {
     for (size_t w = 1; w <= 64; ++w) {
         constexpr int memorder = __ATOMIC_RELAXED;
-        sdsl::int_vector<> vector_atomic = aligned_int_vector(600, 0, w, 16);
+        sdsl::int_vector<> vector_atomic = aligned_int_vector(128 * w, 0, w, 16);
         uint64_t val = sdsl::bits::lo_set[w];
 
         std::mutex mu;
@@ -174,14 +174,14 @@ TEST(IntVector, atomic_exchange) {
         }
 
         std::atomic_thread_fence(std::memory_order_acquire);
-        EXPECT_EQ(sdsl::int_vector<>(600, val, w), vector_atomic);
+        EXPECT_EQ(sdsl::int_vector<>(128 * w, val, w), vector_atomic);
     }
 }
 
 TEST(IntVector, atomic_exchange_then_fetch_after_join) {
     for (size_t w = 1; w <= 64; ++w) {
         constexpr int memorder = __ATOMIC_RELAXED;
-        sdsl::int_vector<> vector_atomic = aligned_int_vector(600, 0, w, 16);
+        sdsl::int_vector<> vector_atomic = aligned_int_vector(128 * w, 0, w, 16);
         uint64_t val = sdsl::bits::lo_set[w];
 
         std::mutex mu;
@@ -200,7 +200,7 @@ TEST(IntVector, atomic_exchange_then_fetch_after_join) {
 
 TEST(IntVector, atomic_exchange_then_fetch_release_and_acquire) {
     for (size_t w = 1; w <= 64; ++w) {
-        sdsl::int_vector<> vector_atomic = aligned_int_vector(600, 0, w, 16);
+        sdsl::int_vector<> vector_atomic = aligned_int_vector(128 * w, 0, w, 16);
         uint64_t val = sdsl::bits::lo_set[w];
 
         std::mutex mu;
@@ -225,7 +225,7 @@ TEST(IntVector, atomic_exchange_then_fetch_release_and_acquire) {
 TEST(IntVector, atomic_fetch_and_add_val) {
     for (size_t w = 1; w <= 64; ++w) {
         constexpr int memorder = __ATOMIC_RELAXED;
-        sdsl::int_vector<> vector_atomic = aligned_int_vector(600, 0, w, 16);
+        sdsl::int_vector<> vector_atomic = aligned_int_vector(128 * w, 0, w, 16);
         uint64_t val = std::min(uint64_t(129), sdsl::bits::lo_set[w]);
 
         std::mutex mu;
@@ -249,14 +249,14 @@ TEST(IntVector, atomic_fetch_and_add_val) {
 
         std::atomic_thread_fence(std::memory_order_acquire);
 
-        EXPECT_EQ(sdsl::int_vector<>(600, val, w), vector_atomic);
+        EXPECT_EQ(sdsl::int_vector<>(128 * w, val, w), vector_atomic);
     }
 }
 
 TEST(IntVector, atomic_fetch_and_add_all_bits) {
     for (size_t w = 1; w <= 64; ++w) {
         constexpr int memorder = __ATOMIC_RELAXED;
-        sdsl::int_vector<> vector_atomic = aligned_int_vector(600, 0, w, 16);
+        sdsl::int_vector<> vector_atomic = aligned_int_vector(128 * w, 0, w, 16);
         uint64_t val = sdsl::bits::lo_set[w];
 
         std::mutex mu;
@@ -281,7 +281,7 @@ TEST(IntVector, atomic_fetch_and_add_all_bits) {
         }
 
         std::atomic_thread_fence(std::memory_order_acquire);
-        EXPECT_EQ(sdsl::int_vector<>(600, val, w), vector_atomic);
+        EXPECT_EQ(sdsl::int_vector<>(128 * w, val, w), vector_atomic);
     }
 }
 
@@ -290,7 +290,7 @@ TEST(IntVector, atomic_fetch_and_add_all_bits_except_one) {
         constexpr int memorder = __ATOMIC_RELAXED;
         size_t step = w < 17 ? 1 : 17;
         for (size_t s = 0; s < w; s += step) {
-            sdsl::int_vector<> vector_atomic = aligned_int_vector(600, 0, w, 16);
+            sdsl::int_vector<> vector_atomic = aligned_int_vector(128 * w, 0, w, 16);
             uint64_t val = sdsl::bits::lo_set[w] ^ (1llu << s);
 
             std::mutex mu;
@@ -317,7 +317,7 @@ TEST(IntVector, atomic_fetch_and_add_all_bits_except_one) {
             }
 
             std::atomic_thread_fence(std::memory_order_acquire);
-            EXPECT_EQ(sdsl::int_vector<>(600, val, w), vector_atomic);
+            EXPECT_EQ(sdsl::int_vector<>(128 * w, val, w), vector_atomic);
         }
     }
 }
