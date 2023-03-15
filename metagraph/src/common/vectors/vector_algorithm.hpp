@@ -68,20 +68,6 @@ inline void unset_bit(uint64_t *v,
                       bool atomic = false,
                       int mo = __ATOMIC_SEQ_CST);
 
-uint64_t atomic_fetch(const sdsl::int_vector<> &vector, uint64_t i,
-                      std::mutex &backup_mutex,
-                      int mo = __ATOMIC_SEQ_CST);
-
-uint64_t atomic_fetch_and_add(sdsl::int_vector<> &vector, uint64_t i,
-                              uint64_t count,
-                              std::mutex &backup_mutex,
-                              int mo = __ATOMIC_SEQ_CST);
-
-uint64_t atomic_exchange(sdsl::int_vector<> &vector, uint64_t i, uint64_t val,
-                         std::mutex &backup_mutex,
-                         int mo = __ATOMIC_SEQ_CST);
-
-
 template <class Bitmap, class Callback>
 inline void call_ones(const Bitmap &vector,
                       uint64_t begin, uint64_t end,
