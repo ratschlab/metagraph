@@ -628,16 +628,8 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
         bool is_terminal_superbubble = false;
         size_t terminus = 0;
         size_t term_dist = 0;
-        // size_t num_disconnects = 0;
-        // logger->info("Starting search at {}:{}:{}", i + 1,
-        //     boundaries[i + 1] - boundaries[i],
-        //     dbg_succ.get_node_sequence(unitig_fronts[i]));
         while (traversal_stack.size()) {
             auto [unitig_id, dist] = traversal_stack.back();
-            // logger->info("\t{}:{}:{} d:{}", unitig_id + 1,
-            //             boundaries[unitig_id + 1] - boundaries[unitig_id],
-            //             dbg_succ.get_node_sequence(unitig_fronts[unitig_id]),
-            //             dist);
             traversal_stack.pop_back();
             assert(!visited.count(unitig_id));
 
@@ -650,8 +642,6 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
                     return;
 
                 ++num_children;
-
-                // logger->info("\t\t{}", dbg_succ.get_node_sequence(next));
 
                 if (has_cycle)
                     return;
@@ -683,24 +673,17 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
                     }
                 });
 
-                // logger->info("\t\t\tall_visited: {}", all_visited);
-
                 if (all_visited)
                     traversal_stack.emplace_back(next_id, dist + length);
             });
 
             bool reached_end = (traversal_stack.size() == 1 && visited.size() + 1 == seen.size());
-            // logger->info("\t\t\treached end: {}", reached_end);
             if (has_cycle) {
-                // logger->info("\tHas cycle, ending");
                 is_terminal_superbubble = false;
                 break;
             }
 
             if (!num_children) {
-                // logger->info("\t\tdead end at unitig {}:{}:{}", unitig_id + 1, length,
-                //     dbg_succ.get_node_sequence(unitig_fronts[unitig_id]));
-                // ++num_disconnects;
                 is_terminal_superbubble = true;
             }
 
@@ -708,27 +691,9 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
                 auto [unitig_id, dist] = traversal_stack.back();
                 traversal_stack.pop_back();
 
-                // bool is_cycle = false;
-                // dbg_succ.adjacent_outgoing_nodes(unitig_backs[unitig_id], [&](node_index next) {
-                //     if (next == unitig_fronts[unitig_id])
-                //         return;
-
-                //     if (next == unitig_fronts[i])
-                //         is_cycle = true;
-                // });
-
-                // if (is_cycle) {
-                //     is_terminal_superbubble = false;
-                //     continue;
-                // }
-
                 terminus = unitig_id;
                 term_dist = dist;
                 for (const auto &[u_id, d] : seen) {
-                    // logger->info("\t\t{}:{}:{}", u_id + 1,
-                    //     boundaries[u_id + 1] - boundaries[u_id],
-                    //     dbg_succ.get_node_sequence(unitig_fronts[u_id]));
-
                     for (size_t dist : d) {
                         if (dist > term_dist) {
                             terminus = u_id;
@@ -758,31 +723,14 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
                     std::vector<size_t> cur_d(d.begin(), d.end());
                     std::sort(cur_d.begin(), cur_d.end());
 
-                    std::lock_guard<std::mutex> lock(mu);
-                    // logger->info("\t\t\tchecking {}\t{}\t{}\t{},{}",
-                    //         u_id + 1,
-                    //         superbubble_starts[u_id].first,
-                    //         is_nested,
-                    //         term_dist,
-                    //         superbubble_starts[i].first
-                    //             ? superbubble_starts[i].second.back()
-                    //             : -1);
                     if (!superbubble_starts[u_id].first
                             || cur_d.back() < superbubble_starts[u_id].second.back()) {
-                        // logger->info("\t\t\tupdated distance for {}, changed source from {} to {}",
-                        //     u_id + 1,
-                        //     superbubble_starts[u_id].first, i + 1);
                         superbubble_start_size -= superbubble_starts[u_id].second.size();
                         superbubble_start_size += cur_d.size();
                         superbubble_starts[u_id] = std::make_pair(i + 1, std::move(cur_d));
                         can_reach_terminus[u_id] = !is_terminal_superbubble;
                     }
                 }
-                // logger->info("\tFound superbubble from {} to {}:{}:{}", i + 1, terminus + 1,
-                //     boundaries[terminus + 1] - boundaries[terminus],
-                //     dbg_succ.get_node_sequence(unitig_fronts[terminus]));
-
-
             }
         }
 
