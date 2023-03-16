@@ -27,8 +27,6 @@ class IPathIndex : public SequenceGraph::GraphExtension {
     using Row = annot::binmat::BinaryMatrix::Row;
     using RowTuples = annot::matrix::MultiIntMatrix::RowTuples;
 
-    IPathIndex() : dist_cache_(100) {}
-
     virtual ~IPathIndex() {}
 
     virtual std::vector<RowTuples> get_coords(const std::vector<node_index> &nodes) const;
@@ -63,10 +61,6 @@ class IPathIndex : public SequenceGraph::GraphExtension {
     virtual bool has_coord(node_index) const { return true; }
 
     virtual const DeBruijnGraph& get_graph() const = 0;
-
-  private:
-    mutable caches::fixed_sized_cache<std::pair<size_t, size_t>, tsl::hopscotch_set<size_t>,
-                                      caches::LRUCachePolicy<std::pair<size_t, size_t>>> dist_cache_;
 };
 
 template <class PathStorage = annot::RowDiffCoordAnnotator::binary_matrix_type,

@@ -29,32 +29,15 @@ static const std::vector<Label> DUMMY { Label(1, 1) };
 
 void IPathIndex::call_dists(size_t path_id_1,
                             size_t path_id_2,
-                            const std::function<void(size_t)> &old_callback,
+                            const std::function<void(size_t)> &callback,
                             size_t max_dist) const {
     if (path_id_1 == path_id_2) {
-        old_callback(0);
+        callback(0);
         return;
     }
 
-    if (!max_dist || !is_unitig(path_id_1) || !is_unitig(path_id_2))
+    if (!max_dist || !is_unitig(path_id_1) || !is_unitig(path_id_2) || path_length(path_id_1) > max_dist)
         return;
-
-    auto p_pair = std::make_pair(path_id_1, path_id_2);
-
-    if (auto fetch = dist_cache_.TryGet(p_pair)) {
-        std::for_each(fetch->begin(), fetch->end(), old_callback);
-        return;
-    }
-
-    auto callback = [&](size_t d) {
-        tsl::hopscotch_set<size_t> dists;
-        if (auto fetch = dist_cache_.TryGet(p_pair))
-            dists = std::move(*fetch);
-
-        dists.emplace(d);
-        dist_cache_.Put(p_pair, std::move(dists));
-        old_callback(d);
-    };
 
     size_t sb1 = path_id_1;
     size_t sb2 = path_id_2;
@@ -70,8 +53,8 @@ void IPathIndex::call_dists(size_t path_id_1,
     if (!is_source2)
         std::tie(sb2, d2) = get_superbubble_and_dist(path_id_2);
 
-    // logger->info("checking dists for {}:{}:{} -> {}:{}:{}\t{}",
-    //     sb1, path_id_1, is_source1,
+    // logger->info("checking dists for {}:{}:{}:{} -> {}:{}:{}\t{}",
+    //     sb1, path_id_1, is_source1,path_length(path_id_1),
     //     sb2, path_id_2, is_source2,
     //     max_dist);
 
@@ -397,8 +380,7 @@ template <class PathStorage,
 PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
 ::PathIndex(std::shared_ptr<const DBGSuccinct> graph,
             const std::string &graph_name,
-            const std::function<void(const std::function<void(std::string_view)>)> &generate_sequences)
-      : IPathIndex() {
+            const std::function<void(const std::function<void(std::string_view)>)> &generate_sequences) {
     const DBGSuccinct &dbg_succ = *graph;
 
     LabelEncoder<Label> label_encoder;
@@ -679,6 +661,7 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
 
             bool reached_end = (traversal_stack.size() == 1 && visited.size() + 1 == seen.size());
             if (has_cycle) {
+                // logger->info("found cycle: num_children: {}\tv: {}\ts: {}", num_children, visited.size(), seen.size());
                 is_terminal_superbubble = false;
                 break;
             }
