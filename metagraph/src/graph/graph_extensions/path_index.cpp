@@ -53,83 +53,8 @@ void IPathIndex::call_dists(size_t path_id_1,
     if (!is_source2)
         std::tie(sb2, d2) = get_superbubble_and_dist(path_id_2);
 
-    // logger->info("checking dists for {}:{}:{}:{} -> {}:{}:{}\t{}",
-    //     sb1, path_id_1, is_source1,path_length(path_id_1),
-    //     sb2, path_id_2, is_source2,
-    //     max_dist);
-
-    if (!sb1) {
-        // logger->info("\tfull traversal\tmax_dist: {}", max_dist);
-        std::vector<std::pair<size_t, size_t>> path;
-        path.emplace_back(path_id_1, 0);
-        while (path.size()) {
-            auto [uid, d] = path.back();
-            path.pop_back();
-            if (d > max_dist)
-                continue;
-
-            d += path_length(uid);
-            adjacent_outgoing_unitigs(uid, [&](size_t next) {
-                assert(d);
-                if (max_dist > d && get_superbubble_terminus(next).first) {
-                    call_dists(next, path_id_2, [&](size_t l) {
-                        callback(l + d);
-                    }, max_dist - d);
-                } else {
-                    path.emplace_back(next, d);
-                }
-            });
-        }
-
+    if (!sb1 || !sb2)
         return;
-    }
-
-    if (!sb2) {
-        if (!can_reach_superbubble_terminus(path_id_1))
-            return;
-
-        auto [t, d] = get_superbubble_terminus(sb1);
-        if (!is_source1 && d.size() != 1) {
-            //TODO
-            return;
-        }
-
-        // logger->info("\tskip superbubble, then full traversal");
-
-        if (is_source1) {
-            if (d.size() == 1 && !d[0])
-                return;
-
-            size_t msize = d[1];
-            call_dists(t, path_id_2, [&](size_t l) {
-                for (size_t dd : d) {
-                    callback(l + dd);
-                }
-            }, max_dist - msize);
-            return;
-        }
-
-        size_t msize = std::numeric_limits<size_t>::max();
-        for (size_t dd1 : d1) {
-            for (size_t dd : d) {
-                if (dd > dd1)
-                    msize = std::min(msize, dd - dd1);
-            }
-        }
-        assert(msize);
-        if (max_dist > msize) {
-            // logger->info("\t\tgo");
-            call_dists(t, path_id_2, [&](size_t l) {
-                for (size_t dd1 : d1) {
-                    for (size_t dd : d) {
-                        callback(l + dd - dd1);
-                    }
-                }
-            }, max_dist - msize);
-        }
-
-        return;
-    }
 
     if (sb1 == sb2) {
         if (is_source1) {
@@ -185,6 +110,11 @@ void IPathIndex::call_dists(size_t path_id_1,
     }
 
     if (!can_reach_superbubble_terminus(path_id_1))
+        return;
+
+    size_t chain_1 = get_superbubble_chain(sb1);
+    size_t chain_2 = get_superbubble_chain(sb2);
+    if (!chain_1 || !chain_2 || chain_1 != chain_2)
         return;
 
     auto [t, d] = get_superbubble_terminus(sb1);
@@ -316,6 +246,12 @@ bool PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleSto
     if (!path_boundaries_.load(*in))
         return false;
 
+    if (!read_indices_.load(*in))
+        return false;
+
+    if (!read_boundaries_.load(*in))
+        return false;
+
     logger->trace("Loaded {} paths", path_boundaries_.num_set_bits());
 
     try {
@@ -336,6 +272,12 @@ bool PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleSto
     if (!can_reach_terminus_.load(*in))
         return false;
 
+    try {
+        unitig_chain_.load(*in);
+    } catch (...) {
+        return false;
+    }
+
     logger->trace("Loaded {} superbubbles", num_superbubbles_);
 
     return true;
@@ -352,6 +294,8 @@ void PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleSto
     serialize_number(fout, num_superbubbles_);
     paths_indices_.serialize(fout);
     path_boundaries_.serialize(fout);
+    read_indices_.serialize(fout);
+    read_boundaries_.serialize(fout);
     unitig_backs_.serialize(fout);
     unitig_fronts_.serialize(fout);
     superbubble_sources_.serialize(fout);
@@ -359,6 +303,7 @@ void PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleSto
     superbubble_sources_b_.serialize(fout);
     superbubble_termini_b_.serialize(fout);
     can_reach_terminus_.serialize(fout);
+    unitig_chain_.serialize(fout);
 }
 
 template <class PathStorage,
@@ -370,7 +315,103 @@ void PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleSto
     dbg_succ_ = graph;
     if constexpr(std::is_base_of_v<IRowDiff, PathStorage>) {
         static_cast<IRowDiff&>(paths_indices_).set_graph(dbg_succ_.get());
+        static_cast<IRowDiff&>(read_indices_).set_graph(dbg_succ_.get());
     }
+}
+
+template <class PathStorage>
+PathStorage compress_path_storage(const DBGSuccinct *graph,
+                                  ColumnCompressed<>&& annotator,
+                                  const LabelEncoder<Label> &label_encoder,
+                                  size_t num_columns,
+                                  const std::string &graph_fname,
+                                  const std::filesystem::path &tmp_dir,
+                                  const std::string &out_path) {
+    annotator.serialize(out_path);
+
+    std::vector<std::string> files { out_path + ColumnCompressed<>::kExtension };
+    if (!std::filesystem::exists(files[0])) {
+        logger->error("Failed to serialize annotation to {}.", files[0]);
+        std::exit(1);
+    }
+
+    if constexpr(std::is_same_v<PathStorage, ColumnCoordAnnotator::binary_matrix_type>) {
+        return const_cast<PathStorage&&>(load_coords(
+            std::move(annotator),
+            files
+        ).get_matrix());
+    }
+
+    if constexpr(std::is_same_v<PathStorage, RowDiffCoordAnnotator::binary_matrix_type>) {
+        if (!std::filesystem::exists(graph_fname)) {
+            logger->error("Graph path incorrect: {}.", graph_fname);
+            std::exit(1);
+        }
+
+        {
+            std::filesystem::path swap_dir = utils::create_temp_dir("", "swap_col");
+            convert_to_row_diff(files, graph_fname, 100e9, 100, tmp_dir, swap_dir,
+                                static_cast<RowDiffStage>(0), out_path + ".row_count", false, true);
+            convert_to_row_diff(files, graph_fname, 100e9, 100, tmp_dir, swap_dir,
+                                static_cast<RowDiffStage>(1), out_path + ".row_reduction", false, true);
+            convert_to_row_diff(files, graph_fname, 100e9, 100, tmp_dir, swap_dir,
+                                static_cast<RowDiffStage>(2), out_path, false, true);
+        }
+
+        const std::string anchors_file = graph_fname + kRowDiffAnchorExt;
+        const std::string fork_succ_file = graph_fname + kRowDiffForkSuccExt;
+        if (!std::filesystem::exists(anchors_file)) {
+            logger->error("Anchor bitmap {} does not exist.", anchors_file);
+            std::exit(1);
+        }
+        if (!std::filesystem::exists(fork_succ_file)) {
+            logger->error("Fork successor bitmap {} does not exist", fork_succ_file);
+            std::exit(1);
+        }
+
+        std::unique_ptr<AnnotatedDBG::Annotator> annotator;
+        auto diff_annotator = std::make_unique<ColumnCompressed<>>(0);
+        if (!diff_annotator->merge_load(files)) {
+            logger->error("Cannot load annotations from {}", files[0]);
+            exit(1);
+        }
+        assert(diff_annotator->num_labels() == num_columns);
+        std::vector<bit_vector_smart> delimiters;
+        std::vector<sdsl::int_vector<>> column_values;
+
+        typedef ColumnCoordAnnotator::binary_matrix_type CoordDiff;
+        auto coords_fname = utils::remove_suffix(files[0], ColumnCompressed<>::kExtension)
+                                                        + ColumnCompressed<>::kCoordExtension;
+        std::ifstream in(coords_fname, std::ios::binary);
+        try {
+            CoordDiff::load_tuples(in, num_columns, [&](auto&& delims, auto&& values) {
+                delimiters.emplace_back(std::move(delims));
+                column_values.emplace_back(std::move(values));
+            });
+        } catch (const std::exception &e) {
+            logger->error("Couldn't load coordinates from {}\nException: {}", coords_fname, e.what());
+            exit(1);
+        } catch (...) {
+            logger->error("Couldn't load coordinates from {}", coords_fname);
+            exit(1);
+        }
+
+        annotator.reset(new RowDiffCoordAnnotator(
+            label_encoder,
+            graph,
+            std::move(*diff_annotator->release_matrix()),
+            std::move(delimiters), std::move(column_values)
+        ));
+
+        auto &row_diff = const_cast<PathStorage&>(dynamic_cast<const PathStorage&>(
+            annotator->get_matrix()
+        ));
+        row_diff.load_anchor(anchors_file);
+        row_diff.load_fork_succ(fork_succ_file);
+        return const_cast<PathStorage&&>(row_diff);
+    }
+
+    throw std::runtime_error("Only ColumnCoord and RowDiffCoord annotators supported");
 }
 
 template <class PathStorage,
@@ -659,57 +700,35 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
         unitig_fronts_ = SuperbubbleStorage(std::move(unitig_fronts_sdsl));
     }
 
-    size_t seq_count = 0;
-    size_t total_seq_count = 0;
+    // chain superbubbles
+    {
+        sdsl::int_vector<> chain_parent(num_unitigs_);
+        for (size_t i = 0; i < num_unitigs_; ++i) {
+            auto t = get_superbubble_terminus(i + 1).first;
+            if (!t)
+                continue;
 
-    generate_sequences([&](std::string_view seq) {
-        total_seq_count += 1 + (dbg_succ.get_mode() != DeBruijnGraph::BASIC);
-        auto nodes = map_to_nodes_sequentially(*check_graph, seq);
+            auto t2 = get_superbubble_terminus(t).first;
+            if (t2 && t - 1 != i)
+                chain_parent[t - 1] = i;
+        }
 
-        if (std::any_of(nodes.begin(), nodes.end(), [&](node_index node) {
-            return !node || check_graph->has_multiple_outgoing(node) || check_graph->indegree(node) > 1;
-        })) {
-            ++seq_count;
-            uint64_t coord = boundaries.back();
-            for (node_index &node : nodes) {
-                if (node) {
-                    if (canonical)
-                        node = canonical->get_base_node(node);
-
-                    annotator.add_label_coord(AnnotatedDBG::graph_to_anno_index(node), DUMMY, coord);
+        sdsl::int_vector<> superbubble_chain(num_unitigs_);
+        size_t chain_i = 1;
+        for (size_t i = 0; i < num_unitigs_; ++i) {
+            if (!superbubble_chain[i] && chain_parent[i] && !get_superbubble_terminus(i + 1).first) {
+                // end of a superbubble chain
+                size_t j = i;
+                while (chain_parent[j]) {
+                    superbubble_chain[j] = chain_i;
+                    j = chain_parent[j];
                 }
-                ++coord;
-            }
-            boundaries.emplace_back(coord);
-
-            if (canonical) {
-                ++seq_count;
-                uint64_t coord = boundaries.back();
-                for (auto it = nodes.rbegin(); it != nodes.rend(); ++it) {
-                    if (*it)
-                        annotator.add_label_coord(AnnotatedDBG::graph_to_anno_index(*it), DUMMY, coord);
-
-                    ++coord;
-                }
-                boundaries.emplace_back(coord);
-            } else if (dbg_succ.get_mode() == DeBruijnGraph::CANONICAL) {
-                ++seq_count;
-                uint64_t coord = boundaries.back();
-                std::string seq_rc(seq);
-                reverse_complement_seq_path(dbg_succ, seq_rc, nodes);
-                for (node_index node : nodes) {
-                    if (node)
-                        annotator.add_label_coord(AnnotatedDBG::graph_to_anno_index(node), DUMMY, coord);
-
-                    ++coord;
-                }
-                boundaries.emplace_back(coord);
+                ++chain_i;
             }
         }
-    });
 
-    if (total_seq_count)
-        logger->info("Indexed {} / {} sequences", seq_count, total_seq_count);
+        unitig_chain_ = SuperbubbleStorage(std::move(superbubble_chain));
+    }
 
     assert(annotator.num_labels() <= 1);
     assert(std::adjacent_find(boundaries.begin(), boundaries.end()) == boundaries.end());
@@ -720,102 +739,146 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
 
     logger->info("Indexed a total of {} paths", path_boundaries_.num_set_bits() - 1);
 
+    std::string graph_fname = graph_name;
     std::filesystem::path tmp_dir = utils::create_temp_dir("", "test_col");
     std::string out_path = tmp_dir/"test_col";
-    annotator.serialize(out_path);
 
-    std::vector<std::string> files { out_path + ColumnCompressed<>::kExtension };
-    if (!std::filesystem::exists(files[0])) {
-        logger->error("Failed to serialize annotation to {}.", files[0]);
-        std::exit(1);
-    }
-
-    if constexpr(std::is_same_v<PathStorage, ColumnCoordAnnotator::binary_matrix_type>) {
-        paths_indices_ = const_cast<PathStorage&&>(load_coords(
-            std::move(annotator),
-            files
-        ).get_matrix());
-
-    } else if constexpr(std::is_same_v<PathStorage, RowDiffCoordAnnotator::binary_matrix_type>) {
-        std::string graph_fname = graph_name;
+    if constexpr(std::is_same_v<PathStorage, RowDiffCoordAnnotator::binary_matrix_type>) {
         if (graph_fname.empty()) {
             graph->serialize(out_path);
             graph_fname = out_path + graph->file_extension();
         }
-
-        if (!std::filesystem::exists(graph_fname)) {
-            logger->error("Graph path incorrect: {}.", graph_fname);
-            std::exit(1);
-        }
-
-        {
-            std::filesystem::path swap_dir = utils::create_temp_dir("", "swap_col");
-            convert_to_row_diff(files, graph_fname, 100e9, 100, tmp_dir, swap_dir,
-                                static_cast<RowDiffStage>(0), out_path + ".row_count", false, true);
-            convert_to_row_diff(files, graph_fname, 100e9, 100, tmp_dir, swap_dir,
-                                static_cast<RowDiffStage>(1), out_path + ".row_reduction", false, true);
-            convert_to_row_diff(files, graph_fname, 100e9, 100, tmp_dir, swap_dir,
-                                static_cast<RowDiffStage>(2), out_path, false, true);
-        }
-
-        const std::string anchors_file = graph_fname + kRowDiffAnchorExt;
-        const std::string fork_succ_file = graph_fname + kRowDiffForkSuccExt;
-        if (!std::filesystem::exists(anchors_file)) {
-            logger->error("Anchor bitmap {} does not exist.", anchors_file);
-            std::exit(1);
-        }
-        if (!std::filesystem::exists(fork_succ_file)) {
-            logger->error("Fork successor bitmap {} does not exist", fork_succ_file);
-            std::exit(1);
-        }
-
-        std::unique_ptr<AnnotatedDBG::Annotator> annotator;
-        size_t num_columns = anno_graph.get_annotator().get_label_encoder().size();
-        auto diff_annotator = std::make_unique<ColumnCompressed<>>(0);
-        if (!diff_annotator->merge_load(files)) {
-            logger->error("Cannot load annotations from {}", files[0]);
-            exit(1);
-        }
-        assert(diff_annotator->num_labels() == num_columns);
-        std::vector<bit_vector_smart> delimiters;
-        std::vector<sdsl::int_vector<>> column_values;
-
-        typedef ColumnCoordAnnotator::binary_matrix_type CoordDiff;
-        auto coords_fname = utils::remove_suffix(files[0], ColumnCompressed<>::kExtension)
-                                                        + ColumnCompressed<>::kCoordExtension;
-        std::ifstream in(coords_fname, std::ios::binary);
-        try {
-            CoordDiff::load_tuples(in, num_columns, [&](auto&& delims, auto&& values) {
-                delimiters.emplace_back(std::move(delims));
-                column_values.emplace_back(std::move(values));
-            });
-        } catch (const std::exception &e) {
-            logger->error("Couldn't load coordinates from {}\nException: {}", coords_fname, e.what());
-            exit(1);
-        } catch (...) {
-            logger->error("Couldn't load coordinates from {}", coords_fname);
-            exit(1);
-        }
-
-        annotator.reset(new RowDiffCoordAnnotator(
-            label_encoder,
-            graph.get(),
-            std::move(*diff_annotator->release_matrix()),
-            std::move(delimiters), std::move(column_values)
-        ));
-
-        auto &row_diff = const_cast<PathStorage&>(dynamic_cast<const PathStorage&>(
-            annotator->get_matrix()
-        ));
-        row_diff.load_anchor(anchors_file);
-        row_diff.load_fork_succ(fork_succ_file);
-        paths_indices_ = const_cast<PathStorage&&>(row_diff);
-
-    } else {
-        throw std::runtime_error("Only ColumnCoord and RowDiffCoord annotators supported");
     }
 
+    size_t num_columns = anno_graph.get_annotator().get_label_encoder().size();
+    paths_indices_ = compress_path_storage<PathStorage>(
+        graph.get(),
+        std::move(annotator),
+        label_encoder,
+        num_columns,
+        graph_fname,
+        tmp_dir,
+        out_path
+    );
+
     set_graph(graph);
+
+    {
+        AnnotatedDBG anno_graph(std::const_pointer_cast<DBGSuccinct>(graph),
+                                std::make_unique<ColumnCompressed<>>(dbg_succ.max_index()));
+
+        auto &annotator = const_cast<ColumnCompressed<>&>(
+            static_cast<const ColumnCompressed<>&>(anno_graph.get_annotator())
+        );
+        size_t seq_count = 0;
+        size_t total_seq_count = 0;
+        std::vector<uint64_t> boundaries { 0 };
+
+        logger->info("Indexing sequences");
+
+        generate_sequences([&](std::string_view seq) {
+            total_seq_count += 1 + (dbg_succ.get_mode() != DeBruijnGraph::BASIC);
+            auto nodes = map_to_nodes(*check_graph, seq);
+            std::vector<Row> rows;
+            sdsl::bit_vector picked(nodes.size(), false);
+            for (size_t i = 0; i < nodes.size(); ++i) {
+                node_index node = nodes[i];
+                if (has_coord(node)) {
+                    picked[i] = true;
+                    rows.emplace_back(AnnotatedDBG::graph_to_anno_index(node));
+                }
+            }
+
+            bool index_read = false;
+
+            for (const auto &tuples : get_path_row_tuples(rows)) {
+                for (const auto &[c, tuple] : tuples) {
+                    if (!get_superbubble_terminus(c).first && !get_superbubble_and_dist(c).first) {
+                        index_read = true;
+                        break;
+                    }
+                }
+
+                if (index_read)
+                    break;
+            }
+
+            if (!index_read)
+                return;
+
+            ++seq_count;
+            uint64_t coord = boundaries.back();
+            annotator.add_labels(rows, DUMMY);
+            auto it = rows.begin();
+            for (size_t i = 0; i < nodes.size(); ++i) {
+                if (picked[i]) {
+                    annotator.add_label_coord(*it, DUMMY, coord);
+                }
+                ++coord;
+                ++it;
+            }
+            // auto it = picked.begin();
+            // for (node_index &node : nodes) {
+            //     if (*it) {
+            //         annotator.add_label_coord(AnnotatedDBG::graph_to_anno_index(node), DUMMY, coord);
+            //     }
+            //     // if (node) {
+            //     //     if (canonical)
+            //     //         node = canonical->get_base_node(node);
+
+            //     //     annotator.add_label_coord(AnnotatedDBG::graph_to_anno_index(node), DUMMY, coord);
+            //     // }
+            //     ++coord;
+            //     ++it;
+            // }
+            boundaries.emplace_back(coord);
+
+            // if (canonical) {
+            //     ++seq_count;
+            //     uint64_t coord = boundaries.back();
+            //     for (auto it = nodes.rbegin(); it != nodes.rend(); ++it) {
+            //         if (*it)
+            //             annotator.add_label_coord(AnnotatedDBG::graph_to_anno_index(*it), DUMMY, coord);
+
+            //         ++coord;
+            //     }
+            //     boundaries.emplace_back(coord);
+            // } else if (dbg_succ.get_mode() == DeBruijnGraph::CANONICAL) {
+            //     ++seq_count;
+            //     uint64_t coord = boundaries.back();
+            //     std::string seq_rc(seq);
+            //     reverse_complement_seq_path(dbg_succ, seq_rc, nodes);
+            //     for (node_index node : nodes) {
+            //         if (node)
+            //             annotator.add_label_coord(AnnotatedDBG::graph_to_anno_index(node), DUMMY, coord);
+
+            //         ++coord;
+            //     }
+            //     boundaries.emplace_back(coord);
+            // }
+        });
+
+        if (total_seq_count) {
+            logger->info("Indexed {} / {} sequences", seq_count, total_seq_count);
+            if (seq_count) {
+                read_boundaries_ = bit_vector_smart([&](const auto &callback) {
+                    std::for_each(boundaries.begin(), boundaries.end(), callback);
+                }, boundaries.back() + 1, boundaries.size());
+
+                size_t num_columns = anno_graph.get_annotator().get_label_encoder().size();
+                read_indices_ = compress_path_storage<PathStorage>(
+                    graph.get(),
+                    std::move(annotator),
+                    label_encoder,
+                    num_columns,
+                    graph_fname,
+                    tmp_dir,
+                    out_path
+                );
+                set_graph(graph);
+            }
+        }
+    }
 }
 
 auto IPathIndex
@@ -836,7 +899,8 @@ auto IPathIndex
     }
 
     auto it = picked.begin();
-    auto row_tuples = get_row_tuples(rows);
+    auto row_tuples = get_path_row_tuples(rows);
+    auto read_tuples = get_read_row_tuples(rows);
     std::vector<RowTuples> ret_val;
     ret_val.reserve(nodes.size());
     while (it != picked.end() && !*it) {
@@ -844,6 +908,7 @@ auto IPathIndex
         ++it;
     }
 
+    auto jt = read_tuples.begin();
     for (auto &tuples : row_tuples) {
         VectorMap<size_t, Tuple> out_tuples;
         assert(tuples.size() <= 1);
@@ -856,6 +921,15 @@ auto IPathIndex
                 path_id_to_nodes[path_id].emplace_back(it - picked.begin());
             }
         }
+        for (const auto &[c, tuple] : *jt) {
+            assert(!c);
+            assert(std::adjacent_find(tuple.begin(), tuple.end()) == tuple.end());
+            for (auto coord : tuple) {
+                size_t read_id = coord_to_read_id(coord);
+                out_tuples[read_id].emplace_back(coord);
+                path_id_to_nodes[read_id].emplace_back(it - picked.begin());
+            }
+        }
         ret_val.emplace_back(out_tuples.values_container().begin(),
                              out_tuples.values_container().end());
         ++it;
@@ -863,6 +937,7 @@ auto IPathIndex
             ret_val.emplace_back();
             ++it;
         }
+        ++jt;
     }
 
     return ret_val;
