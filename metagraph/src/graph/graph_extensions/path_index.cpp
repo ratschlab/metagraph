@@ -791,19 +791,18 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
 
             bool index_read = false;
 
+            tsl::hopscotch_set<size_t> unitig_ids;
             for (const auto &tuples : get_path_row_tuples(rows)) {
                 for (const auto &[c, tuple] : tuples) {
-                    if (!get_superbubble_terminus(c).first && !get_superbubble_and_dist(c).first) {
+                    if (!get_superbubble_terminus(c).first && !get_superbubble_and_dist(c).first)
                         index_read = true;
-                        break;
-                    }
-                }
 
-                if (index_read)
-                    break;
+                    if (c)
+                        unitig_ids.insert(c);
+                }
             }
 
-            if (!index_read)
+            if (!index_read || unitig_ids.size() == 1)
                 return;
 
             ++seq_count;
