@@ -1,4 +1,7 @@
 #include <math.h>
+#include <string>
+#include <numbers>
+#include <iostream>
 
 #include "differential_tests.hpp"
 #include "lookup_table_chisqrd_cdf.cpp"
@@ -15,7 +18,7 @@ LogFactorialTable::LogFactorialTable(size_t size)
         m_table.push_back(log_factorial(i));
 }
 
-double LogFactorialTable::log_factorial(size_t k)
+double LogFactorialTable::log_factorial(size_t k) // TODO this can be calculated more efficiently.
 {
     double res = 0;
     while (k > 1)
@@ -26,6 +29,9 @@ double LogFactorialTable::log_factorial(size_t k)
     return res;
 }
 
+double LogFactorialTable::approximate_log_factorial(size_t k) {
+    return k * log(k) - k * log2e_v;
+}
 
 DifferentialTest::DifferentialTest(double family_wise_error_rate, size_t total_hypotheses, size_t preload_table_size,
                                    size_t in_total_kmers, size_t out_total_kmers) :
@@ -74,26 +80,27 @@ bool DifferentialTest::bonferroni_correction(double& pvalue) //  &family_wise_er
 }
 
 
-//size_t lrt_threshold(double corrected_pvalue){
-//    auto & array = ;
-//    int low = 0;
-//    int high = array.size()-1;
-//    while (low <= high) {
-//        int mid = (low + high) >> 1;
-//        if (std::get<0>(array[mid]) < kmer_count)
-//        {low = mid + 1;}
-//        else if (std::get<0>(array[mid]) > kmer_count)
-//        {high = mid - 1;}
-//        else if (std::get<0>(array[mid]) == kmer_count)
-//        {return std::get<1>(array[mid]);} // exact kmer_count found
-//    }
-//    return std::get<1>(array[low]);
-//}
+size_t DifferentialTest::lrt_threshold(){ // Binary search to find the threshold on the liklihood ratio test
+    double corrected_pvalue = family_wise_error_rate/total_hypotheses; // Take into account the Bonferonni multiple testing correction
+    Chi2PLookup Chi2PLookupTable;
+    int low = 0;
+    int high = sizeof(pValues_1); //int high = Chi2PLookupTable.divisor*Chi2PLookupTable.cutoff - 1; //.size()-1;
+    while (low <= high) {
+        int mid = (low + high) >> 1;
+        if (Chi2PLookupTable.getPValue(mid, 1) < corrected_pvalue)
+        {low = mid + 1;}
+        else if (Chi2PLookupTable.getPValue(mid, 1) >= corrected_pvalue)
+        {high = mid - 1;}
+//        else if (Chi2PLookupTable.getPValue(mid, 1) == corrected_pvalue)
+//        {return mid/2;}
+    }
+    return low / 2; // Note that 2*LRT is Chi-squared distributed.
+}
 
 
 // adapted code from kmdiff.
 // previous is equivalent to mean_control,  mean_case, latter is equivalent to m_sum_controls, m_sum_cases
-std::tuple<double, bool> DifferentialTest::likelihood_ratio_test(double in_sum, double out_sum)
+bool DifferentialTest::likelihood_ratio_test(double in_sum, double out_sum)
 {
     double mean = (out_sum + in_sum) / static_cast<double>(out_total_kmers + in_total_kmers);
 
@@ -108,16 +115,32 @@ std::tuple<double, bool> DifferentialTest::likelihood_ratio_test(double in_sum, 
 
     double likelihood_ratio = alt_hypothesis - null_hypothesis;
 
+    // if (likelihood_ratio > likelihood_ratio_threshold) return true;  // TODO test this instead of the code below.
+
+
     if (likelihood_ratio < 0) likelihood_ratio = 0;
     Chi2PLookup Chi2PLookupTable; // generated with https://github.com/MoseleyBioinformaticsLab/chi2plookup
-    double p_value = Chi2PLookupTable.getPValue(2 * likelihood_ratio, 1);
+    double pvalue = Chi2PLookupTable.getPValue(2 * likelihood_ratio, 1);
+
 
     auto out_sum_normalized = out_sum * in_total_kmers / out_total_kmers;
 
     bool sign = false;
-    if (out_sum_normalized < in_sum) sign = true;
+    if (out_sum_normalized < in_sum) sign = true; // TODO shouldn't this always be the case if the p value is significant?
 
-    return std::make_tuple(p_value, sign);
+    bool efficient_test = (likelihood_ratio > likelihood_ratio_threshold);
+    bool normal_test = (sign and bonferroni_correction(pvalue));
+    std::ignore = efficient_test;
+    std::ignore = normal_test;
+
+    //std::cout  << "efficient test: " + std::to_string(likelihood_ratio > likelihood_ratio_threshold) << std::endl;  // TODO test this instead of the code below.
+    //std::cout << "normal test: " + std::to_string(sign and bonferroni_correction(pvalue)) << std::endl;
+
+    if (sign)
+        if (bonferroni_correction(pvalue))
+            return true;
+
+    return false;
 }
 
 } // namespace mtg

@@ -56,7 +56,10 @@ std::string outstring(std::vector<T> out_array){
 void kmer_distribution_table(const ColumnGenerator &generate_columns,
                              const tsl::hopscotch_set<Label> &labels_in,
                              const tsl::hopscotch_set<Label> &labels_out,
-                             size_t max_index);  // For kmer distribution.
+                             size_t max_index,
+                             MaskedDeBruijnGraph &masked_graph, // std::shared_ptr<const DeBruijnGraph> graph_ptr,
+                             const DifferentialAssemblyConfig &config,
+                             size_t num_threads);  // For kmer distribution.
 
 std::tuple<sdsl::int_vector<>, sdsl::bit_vector, sdsl::bit_vector, std::tuple<size_t, size_t>>
 construct_diff_label_count_vector(const ColumnGenerator &generate_columns,
@@ -193,36 +196,20 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr, // Myrthe: t
 
     logger->trace("Generating initial mask");
 
-    if (config.family_wise_error_rate==0){
-        kmer_distribution_table(
-                [&](const ColumnCallback &column_callback) {
-                        annot::ColumnCompressed<>::load_columns_and_values(files,
-                           [&](uint64_t offset, const Label &label, std::unique_ptr<bit_vector> && column, auto&& column_values) {
-                               column_callback(offset, label, [&](const ValueCallback &value_callback) {
-                                   call_ones(*column, [&](uint64_t i) {
-                                       value_callback(i, column_values[column->rank1(i)-1]);
-                                   });
-                               });
-                           }
-                        );
-                },
-                labels_in, labels_out, graph_ptr->max_index()
-        );
-    std::exit(EXIT_SUCCESS);
-    }
+
 
     auto count_vector = construct_diff_label_count_vector(
             [&](const ColumnCallback &column_callback) {
             if (config.count_kmers) {
+                assert(files.size() > 0);
                 annot::ColumnCompressed<>::load_columns_and_values(files,
                     [&](uint64_t offset, const Label &label, std::unique_ptr<bit_vector> && column, auto&& column_values) {
+                        // TODO Myrthe: equalize coverage; std::ceil(column_values / (column_values sum
                         column_callback(offset, label, [&](const ValueCallback &value_callback) {
-                            std::cout << "test column values ";
                             assert(std::accumulate(column_values.begin(), column_values.end(), 0) > 0);
                             assert(column->num_set_bits() > 0);
                             assert(column->num_set_bits() == column_values.size());
                             call_ones(*column, [&](uint64_t i) {
-                                std::cout << "add to count vector ";
                                 value_callback(i, column_values[column->rank1(i)-1]);
                             });
                         });
@@ -233,9 +220,7 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr, // Myrthe: t
                     [&](uint64_t offset, const Label &label, std::unique_ptr<bit_vector> && column) {
                         column_callback(offset, label, [&](const ValueCallback &value_callback) {
                             assert(column->num_set_bits() > 0);
-                            std::cout << "test columns ";
                             call_ones(*column, [&](uint64_t i) {
-                                std::cout << "add to count vector ";
                                 value_callback(i, 1);
                             });
                         });
@@ -275,6 +260,38 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr, // Myrthe: t
             j += num_labels_per_file;
         }
         std::atomic_thread_fence(std::memory_order_acquire);
+    }
+
+    if (config.family_wise_error_rate == 0){  // make k-mer distribution
+        logger->trace("K-mer distribution");
+
+        auto masked_graph = make_initial_masked_graph(graph_ptr, counts, std::move(init_mask),
+                                                      add_complement, num_threads);
+        kmer_distribution_table(
+                [&](const ColumnCallback &column_callback) {
+                    annot::ColumnCompressed<>::load_columns_and_values(files,
+                       [&](uint64_t offset, const Label &label, std::unique_ptr<bit_vector> && column, auto&& column_values) {
+                           column_callback(offset, label, [&](const ValueCallback &value_callback) {
+
+                               if (config.test_by_unitig == false) {
+                                   call_ones(*column, [&](uint64_t i) {
+                                       value_callback(i, column_values[column->rank1(i)- 1]);
+                                   });
+                               }
+                               else {
+                                   for(size_t i = 0; i < column->size(); i++){  // Myrthe actually here, we should for unitigs, call all values.
+                                       double value = (*column)[i];
+                                       if (value) value = column_values[column->rank1(i)- 1];
+                                       value_callback(i, value);
+                                   }
+                               }
+                           });
+                       }
+                    );
+                },
+                labels_in, labels_out, graph_ptr->max_index(), *masked_graph, config, num_threads
+        );
+        std::exit(EXIT_SUCCESS);
     }
 
     return mask_nodes_by_label(graph_ptr, nullptr,
@@ -380,61 +397,58 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     logger->trace("Filtering out background");
     if (config.count_kmers) {
         auto &[in_total_kmers, out_total_kmers] = total_kmers;
-        auto total_hypotheses = counts.size()/2; // the total number of hypotheses tested.
-        auto statistical_model = DifferentialTest(config.family_wise_error_rate, total_hypotheses,
-                                           std::min((int) std::distance(counts.begin(),
-                                                                       std::max_element(counts.begin(), counts.end())), (int) 1000), in_total_kmers, out_total_kmers); // similar to the width of the counts vector, the size of the log-factorial table should be the maximum joint coverage over the in_labels resp. out_labels. Convert the width from bits to the number of stored values.
-        // std::min(std::pow(2, counts.width()), 10000) TODO Myrthe: limit the power of the width by some reasonable number, that is lower than 4,294,967,296, the current maximum, i.e. (2^32) or calculate it by the maximum of the counts vector.
 
-        if (unitig_mode == false) { // Statistical testing part when k-mer counts are included.
-            const auto &in_mask
-                    = static_cast<const bitmap_vector &>(masked_graph->get_mask()).data();
+        if (config.test_by_unitig == false) { // Statistical testing part when k-mer counts are included. // TODO change to test_by_unitig
+            auto total_hypotheses = counts.size()/2; // the total number of hypotheses tested.
+            auto statistical_model = DifferentialTest(config.family_wise_error_rate, total_hypotheses,
+                                                      std::min((int) std::distance(counts.begin(), std::max_element(counts.begin(), counts.end())), (int) 100000),
+                                                      in_total_kmers, out_total_kmers); // similar to the width of the counts vector, the size of the log-factorial table should be the maximum joint coverage over the in_labels resp. out_labels. Convert the width from bits to the number of stored values.
+            // std::min(std::pow(2, counts.width()), 10000) TODO Myrthe: limit the power of the width by some reasonable number, that is lower than 4,294,967,296, the current maximum, i.e. (2^32) or calculate it by the maximum of the counts vector.
+            const auto &in_mask = static_cast<const bitmap_vector &>(masked_graph->get_mask()).data();
             sdsl::bit_vector mask = in_mask;
-
-
+            size_t total_nodes = masked_graph->num_nodes();
             size_t kept_nodes = 0;
             call_ones(in_mask, [&](node_index node) {
                 uint64_t in_sum = counts[node * 2];
                 uint64_t out_sum = counts[node * 2 + 1];
-                auto [pvalue, sign] = statistical_model.likelihood_ratio_test(in_sum, out_sum);
-                if (statistical_model.bonferroni_correction(pvalue) and sign) {
+                if (statistical_model.likelihood_ratio_test(in_sum, out_sum))
                     ++kept_nodes;
-                } else {
+                else
                     mask[node] = false;
-                }
             });
 
             masked_graph->set_mask(new bitmap_vector(std::move(mask)));
 
-            size_t total_nodes = masked_graph->num_nodes();
-            logger->trace("Kept {} out of {} nodes", kept_nodes,
-                          total_nodes); // TODO this tracer is never printed and the breakpoints are never hit.
+            logger->trace("Kept {} out of {} nodes", kept_nodes, total_nodes);
 
-            return masked_graph;
-        } else if (config.count_kmers and unitig_mode == true) {
-        // TODO Myrthe:  filtering by unitig Myrthe todo
-
-        update_masked_graph_by_unitig(*masked_graph, // intitial mask
-                [&](const std::string &, const std::vector<node_index> &path)
-                        -> Intervals {
-                    // return a set of intervals to keep in the graph
-
+        } else { // Myrthe: maybe it is more efficient to do this at an earlier stage, while calculating the counts vector.
+            std::atomic<uint64_t> total_unitigs(0);
+            masked_graph->call_unitigs([&](const std::string &, const std::vector<node_index> &) {
+                total_unitigs.fetch_add(1, MO_RELAXED);
+            });
+            auto statistical_model = DifferentialTest(config.family_wise_error_rate, total_unitigs, // total number of hypotheses equals the number of unitigs
+                                               std::min((int) std::distance(counts.begin(),
+                                               std::max_element(counts.begin(), counts.end())), (int) 100000), // Myrthe: the factorial should increase for the unitig mode.
+                                               in_total_kmers, out_total_kmers);
+            update_masked_graph_by_unitig(*masked_graph, // intitial mask
+                [&](const std::string &, const std::vector<node_index> &path) -> Intervals { // return a set of intervals to keep in the graph
+                //TODO Myrthe: set the number of test hypotheses to the number of unitigs
                     size_t begin = path.size();
                     size_t end = 0;
                     int in_kmer_count_unitig = 0;
                     int out_kmer_count_unitig = 0;
-                    for (size_t i = 0; i < path.size(); ++i) { // first strategy is summing counts per unitig. // The update_mask.. function takes a path. Count vector per path. QUESTION: where is the count vector created, such that iunitig k-mers can be accessed sequentially?
-                        in_kmer_count_unitig += counts[path[i] * 2]; // QUESTION Do more efficient std::accumulate for sdsl?
+                    for (size_t i = 0; i < path.size(); ++i) {
+                        in_kmer_count_unitig += counts[path[i] * 2];
                         out_kmer_count_unitig += counts[path[i] * 2 + 1];
                     }
-                    auto [pvalue, sign] = statistical_model.likelihood_ratio_test(in_kmer_count_unitig, out_kmer_count_unitig);
-                    if (statistical_model.bonferroni_correction(pvalue) and sign)
+                    if (statistical_model.likelihood_ratio_test(in_kmer_count_unitig, out_kmer_count_unitig))
                                 return { std::make_pair(begin, end) };
                     else
                         return {};
                 },
                 num_threads);
-        }
+            }
+            return masked_graph;
     }
 
 
@@ -598,7 +612,7 @@ construct_diff_label_count_vector(const ColumnGenerator &generate_columns,
     bool parallel = (num_threads > 1);
     logger->trace("Allocating mask vector");
 
-    size_t width = (sdsl::bits::hi(num_labels) + 1) * (1 + add_out_labels_to_mask);
+    size_t width;
 
     if (config.count_kmers){ // calculate the sum of column widths to derive an upper bound for the required counts vector width.
         assert(labels_in.size() > 0);
@@ -607,10 +621,8 @@ construct_diff_label_count_vector(const ColumnGenerator &generate_columns,
             const auto &values_fname = utils::remove_suffix(files[i],
                  annot::ColumnCompressed<>::kExtension) + annot::ColumnCompressed<>::kCountExtension;
             sdsl::int_vector_size_type col_size; uint8_t col_width;
-            std::ifstream in_stream;
+            std::ifstream in_stream(values_fname);
             sdsl::int_vector<>::read_header(col_size, col_width, in_stream);
-            logger->trace("colwidth");
-            std::cout << std::to_string(col_width) << std::endl;
             auto label_encoder = annot::ColumnCompressed<>::read_label_encoder(files[i]);
             for (size_t c = 0; c < label_encoder.size(); ++c) {
                 auto label = label_encoder.decode(c);
@@ -618,13 +630,11 @@ construct_diff_label_count_vector(const ColumnGenerator &generate_columns,
                 if (labels_out.count(label)) sum_widths_out += std::pow(2, col_width);
             }
         }
-        std::cout << std::to_string(sum_widths_in) << std::endl;
-        std::cout << std::to_string(sum_widths_out) << std::endl;
         width = std::min((size_t) 32, (size_t) std::ceil(std::log(std::max(sum_widths_in, sum_widths_out)))); // TODO, check if this is really correct. this should be 8.5 -> 9 rather then 7.
     } else{
         width = (sdsl::bits::hi(num_labels) + 1) * (1 + add_out_labels_to_mask);
     }
-
+    assert(width);
 
     sdsl::bit_vector indicator(max_index + 1, false);
 
@@ -642,6 +652,7 @@ construct_diff_label_count_vector(const ColumnGenerator &generate_columns,
             // Myrthe later: The second problem with buffered_int_vector might be that it is expensive, because we do random access on it. Instead a solution might be to use a piority queue of L columns, storing the smallest element as a triple (column , index, value), such that always k-mers in row x are processed before row x + 1.
 
     size_t in_total_kmers = 0; size_t out_total_kmers = 0;
+
     generate_columns([&](uint64_t offset, const Label &label, const ValueGenerator &value_generator) {
         uint8_t col_indicator = static_cast<bool>(labels_in.count(label));
         if (labels_out.count(label))
@@ -654,7 +665,8 @@ construct_diff_label_count_vector(const ColumnGenerator &generate_columns,
             i = AnnotatedDBG::anno_to_graph_index(i); // indices in the annotation matrix have an offset of 1 compared to those in the graph. Since the mask should be compatible with the graph, we have to convert the index.
             assert(i != DeBruijnGraph::npos);
             set_bit(indicator.data(), i, parallel, MO_RELAXED); // set the corresponding bit to true in the mask, with the 'indicator' representing the mask.
-            atomic_fetch_and_add(counts, i * 2, value, vector_backup_mutex, MO_RELAXED); // TODO Myrthe later: make sure that values do not overflow in neighbouring cells.
+            //atomic_fetch_and_add(counts, i * 2, value, vector_backup_mutex, MO_RELAXED); // TODO Myrthe later: make sure that values do not overflow in neighbouring cells.
+            counts[i*2] += value;
             in_total_kmers += value;
         };
 
@@ -663,7 +675,8 @@ construct_diff_label_count_vector(const ColumnGenerator &generate_columns,
             assert(i != DeBruijnGraph::npos);
             if (add_out_labels_to_mask)
                 set_bit(indicator.data(), i, parallel, MO_RELAXED);
-            atomic_fetch_and_add(counts, i * 2 + 1, value, vector_backup_mutex, MO_RELAXED);
+            //atomic_fetch_and_add(counts, i * 2 + 1, value, vector_backup_mutex, MO_RELAXED);
+            counts[i*2 + 1] += value;
             out_total_kmers += value;
         };
 
@@ -685,10 +698,9 @@ construct_diff_label_count_vector(const ColumnGenerator &generate_columns,
         }
     });
 
-    assert( std::accumulate(counts.begin(), counts.end(), 0) > 0); // assert that the sum of the count vector is greater than 0
-
     std::atomic_thread_fence(std::memory_order_acquire);
     logger->trace("done");
+    assert( std::accumulate(counts.begin(), counts.end(), 0) > 0); // assert that the sum of the count vector is greater than 0
 
     return std::make_tuple(std::move(counts), std::move(indicator), std::move(other_labels),
                            std::make_tuple(std::move(in_total_kmers), std::move(out_total_kmers)));
@@ -699,13 +711,15 @@ construct_diff_label_count_vector(const ColumnGenerator &generate_columns,
 void kmer_distribution_table(const ColumnGenerator &generate_columns,
                                   const tsl::hopscotch_set<Label> &labels_in,
                                   const tsl::hopscotch_set<Label> &labels_out,
-                                  size_t max_index) {
+                                  size_t max_index,
+                                  MaskedDeBruijnGraph &masked_graph, // std::shared_ptr<const DeBruijnGraph> graph_ptr,
+                             const DifferentialAssemblyConfig &config,
+                             size_t num_threads) {
 
     logger->trace("Allocating count vector");
     std::vector<std::vector<int>> count_matrix(max_index*2 + 2); // outer array 'max_index + 1'*2, with arrays of initially zero lenght or of max size in labels/out_labels.
 
     logger->trace("Populating count matrix");
-    //    out_stream << "offset_sum" + std::to_string(x) << std::endl; uint64_t x = 0;
     generate_columns([&](uint64_t offset, const Label &label, const ValueGenerator &value_generator) {
         std::ignore = offset;// to overcome the error that 'offset' is set but not used.
         uint8_t col_indicator = static_cast<bool>(labels_in.count(label));
@@ -734,14 +748,44 @@ void kmer_distribution_table(const ColumnGenerator &generate_columns,
         }
     });
 
+    if (config.test_by_unitig){         // unitig mode.
+        std::vector<std::vector<int>> unitig_count_matrix;
+        update_masked_graph_by_unitig(masked_graph, // intitial mask
+            [&](const std::string &, const std::vector<node_index> &path)
+                    -> Intervals {
+                // return a set of intervals to keep in the graph
+                std::vector<int> in_kmer_unitig(labels_in.size(), 0);
+                std::vector<int> out_kmer_unitig(labels_out.size(), 0);
+                for (size_t i = 0; i < path.size(); ++i) { // first strategy is summing counts per unitig. // The update_mask.. function takes a path. Count vector per path. QUESTION: where is the count vector created, such that unitig k-mers can be accessed sequentially?
+                    assert(count_matrix.size() >= path[i] * 2);
+                    if (count_matrix[path[i] * 2].size() != in_kmer_unitig.size() or count_matrix[path[i] * 2 + 1].size() != out_kmer_unitig.size()){
+                        std::cout << "sizes" << std::endl;
+                        std::cout << std::to_string(count_matrix[path[i] * 2].size()) << std::endl << std::flush;
+                        std::cout << std::to_string(in_kmer_unitig.size()) << std::endl << std::flush;
+                        std::cout << std::to_string(count_matrix[path[i] * 2 + 1].size()) << std::endl << std::flush;
+                        std::cout << std::to_string(out_kmer_unitig.size()) << std::endl << std::flush;
+                        std::cout << std::to_string(path[i] * 2) << std::endl << std::flush; // TODO: do I have to convert the index? It was not done in the original code
+                    }else{
+                        assert(count_matrix[path[i] * 2].size() == in_kmer_unitig.size());
+                        assert(count_matrix[path[i] * 2 + 1].size() == out_kmer_unitig.size());
+                        std::transform(in_kmer_unitig.begin(), in_kmer_unitig.end(), count_matrix[path[i] * 2].begin(), in_kmer_unitig.begin(), std::plus<int>()); // sum the values of count_matrix[x] to in_kmer_count.
+                        std::transform(out_kmer_unitig.begin(), out_kmer_unitig.end(), count_matrix[path[i] * 2 + 1].begin(), out_kmer_unitig.begin(), std::plus<int>());
+                    }
+                }
+                unitig_count_matrix.push_back(in_kmer_unitig);
+                unitig_count_matrix.push_back(out_kmer_unitig); // add to matrix
+                return { };
+                },
+            num_threads);
+        count_matrix = unitig_count_matrix;
+    }
+
     int matrix_sum = 0;
     for (size_t i = 0; i < count_matrix.size(); i+=2){
         matrix_sum += std::accumulate(count_matrix[i].begin(), count_matrix[i].end(), 0);
     }
     assert(matrix_sum > 0);
 
-    std::cout << "matrix sum ";
-    std::cout << matrix_sum;
     logger->trace("Writing k-mer count matrix to table");
 
     std::ofstream out_stream("kmer_dist_table.py");
@@ -757,9 +801,6 @@ void kmer_distribution_table(const ColumnGenerator &generate_columns,
     out_stream << "count_matrix_out = [" ;
     for (size_t i = 1; i < std::min(count_matrix.size(), (size_t) 50000000); i+=2){
         if (count_matrix[i].size() > 3 or count_matrix[i-1].size() > 3){ // labels_out.size()/3
-            std::cout << std::to_string(count_matrix[i].size()) <<std::endl;
-            std::cout << std::to_string(labels_out.size()) <<std::endl;
-            std::cout << "[" + outstring(count_matrix[i]) << "]" <<std::endl;
             std::vector<int> zeros_vector(labels_out.size()-count_matrix[i].size(), 0);
             count_matrix[i].insert(count_matrix[i].end(), zeros_vector.begin(), zeros_vector.end());
             out_stream << "[" + outstring(count_matrix[i]) << "]," <<std::endl;        }

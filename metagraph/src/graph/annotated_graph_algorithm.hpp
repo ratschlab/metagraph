@@ -35,6 +35,7 @@ struct DifferentialAssemblyConfig {
     bool add_complement = false;
     bool count_kmers = false; // Myrthe
     double family_wise_error_rate = 0.05; //Myrthe: differential assembly statistical tests, or the family wise rate for bonferonni or a p-value
+    bool test_by_unitig = false; // Myrthe
 };
 
 /**
