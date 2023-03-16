@@ -779,6 +779,10 @@ int transform_annotation(Config *config) {
                 logger->error("Convert to row_diff first, and then to rd_hybrid_disk_brwt");
                 return 0;
             }
+            case Config::RowDiffHybMSTDiskBRWT: {
+                logger->error("Convert to row_diff first, then to rd_hybrid_disk_brwt, and then to rd_hyb_mst_disk_brwt");
+                return 0;
+            }
             case Config::RowDiffDisk: {
                 logger->error("Convert to row_diff first, and then to row_diff_disk");
                 return 0;
@@ -978,6 +982,15 @@ int transform_annotation(Config *config) {
                         get_num_threads(), config->memory_available * 1e9);
                 logger->trace("Serialized to {}", config->outfbase);
             }
+        }
+    } else if (input_anno_type == Config::RowDiffHybridDiskBRWT) {
+        if (config->anno_type != Config::RowDiffHybMSTDiskBRWT) {
+            logger->error(
+                    "Only conversion to 'rd_hyb_mst_disk_brwt' supported for rd_hybrid_disk_brwt");
+            exit(1);
+        }
+        if (config->anno_type == Config::RowDiffHybMSTDiskBRWT) {
+            convert_to_rd_hyb_mst_disk_brwt(files[0], config->outfbase, config->mst_stage);
         }
     } else {
         logger->error(

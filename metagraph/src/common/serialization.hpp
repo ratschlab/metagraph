@@ -9,6 +9,8 @@
 
 void serialize_number(std::ostream &out, uint64_t number);
 
+void serialize_number32(std::ostream &out, uint32_t number);
+
 uint64_t load_number(std::istream &in);
 
 uint32_t load_number32(std::istream &in);

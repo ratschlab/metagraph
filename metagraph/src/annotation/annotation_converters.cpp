@@ -9,6 +9,7 @@
 #include <progress_bar.hpp>
 #include <tsl/hopscotch_map.h>
 
+#include "binary_matrix/mst/mst_builder.hpp"
 #include "row_diff_builder.hpp"
 #include "common/logger.hpp"
 #include "common/algorithms.hpp"
@@ -27,6 +28,7 @@
 #include "representation/annotation_matrix/static_annotators_def.hpp"
 #include "representation/column_compressed/annotate_column_compressed.hpp"
 #include "representation/row_compressed/annotate_row_compressed.hpp"
+
 
 
 namespace mtg {
@@ -791,7 +793,7 @@ void convert_batch_to_row_disk(
         const std::function<void(std::ofstream &)> &decorate,
         uint64_t num_rows,
         size_t num_threads) {
-    LEncoder label_encoder;
+    std::vector<std::string> col_names;
     std::vector<std::unique_ptr<bit_vector>> columns;
     uint64_t num_set_bits = 0;
     std::mutex mu;
@@ -810,13 +812,10 @@ void convert_batch_to_row_disk(
                 num_set_bits += column->num_set_bits();
                 while (columns.size() <= j) {
                     columns.emplace_back();
+                    col_names.emplace_back();
                 }
                 columns[j] = std::move(column);
-                size_t col = label_encoder.insert_and_encode(label);
-                if (col + 1 != label_encoder.size()) {
-                    logger->error("Duplicate columns {}", label);
-                    exit(1);
-                }
+                col_names[j] = label;
             },
             num_threads
     );
@@ -824,6 +823,18 @@ void convert_batch_to_row_disk(
     if (!success) {
         logger->error("Can't load annotation columns");
         exit(1);
+    }
+
+    // this must be done after loading all columns
+    // to keep their order correct
+    // (label_encoder.insert_and_encode cannot be inside get_cols callback)
+    LEncoder label_encoder;
+    for (const auto &label : col_names) {
+        size_t col = label_encoder.insert_and_encode(label);
+        if (col + 1 != label_encoder.size()) {
+            logger->error("Duplicate columns {}", label);
+            exit(1);
+        }
     }
 
     std::ofstream out = utils::open_new_ofstream(outfname);
@@ -1303,8 +1314,7 @@ private:
         std::ifstream in(histo_path, std::ios::binary);
         if (!in) //not created yet
             return res;
-        assert(fs::file_size(files[i]) == sizeof(uint64_t) * res.size());
-        for(auto& x : res)
+        for (auto& x : res)
             x = load_number(in);
         return res;
     }
@@ -1324,6 +1334,516 @@ private:
     size_t num_rows_{};
     size_t total_set_bits_{};
 };
+
+
+void convert_to_rd_hyb_mst_disk_brwt(const std::string &anno_file,
+                                     const std::string &outfbase,
+                                     size_t stage) {
+    //mkokot_TODO: I'm not sure about running all the pre mst code at each stage...
+    //consider refactoring
+
+    LabelEncoder<std::string> label_encoder;
+    sdsl::mmap_ifstream in(anno_file, ios::in | ios::binary);
+
+    if(!in) {
+        logger->error("Cannot open file {}", anno_file);
+        exit(1);
+    }
+
+    if(!label_encoder.load(in)) {
+        logger->error("Cannot load labels from file {}", anno_file);
+        exit(1);
+    }
+
+    auto fname = utils::make_suffix(outfbase, RowDiffHybMSTDiskBRWTAnnotator::kExtension);
+
+    std::ofstream outstream(fname, ios::binary);
+    if (!outstream.good()) {
+        throw std::ofstream::failure("Bad stream");
+    }
+    label_encoder.serialize(outstream);
+
+    //mkokot_TODO: convert to function "rewrite_anchors_fork_succ"
+    {
+        char version[5]{};
+        if(!in.read(version, 4)){
+            logger->error("Cannot read version from {}", anno_file);
+            exit(1);
+        }
+        if (std::string("v2.0") != version) {
+            logger->error("Only v2.0 is supported, here the version is {}", version);
+            exit(1);
+        }
+        outstream.write(version, 4);
+        IRowDiff::anchor_bv_type anchor;
+        if(!anchor.load(in)) {
+            logger->error("Cannot load anchor vector from {}", anno_file);
+            exit(1);
+        }
+        anchor.serialize(outstream);
+
+        IRowDiff::fork_succ_bv_type fork_succ_;
+        if(!fork_succ_.load(in)) {
+            logger->error("Cannot load fork_succ vector from {}", anno_file);
+            exit(1);
+        }
+        fork_succ_.serialize(outstream);
+
+    }
+
+    //mkokot_TODO: create separate function "rewrite_dense_rows_bw"
+    {
+        HybridMatrix<RowDisk, BRWT>::stored_in_matrix1_bv_type dense_rows_bv;
+        if (!dense_rows_bv.load(in)) {
+            logger->error("Cannot load dense_rows_bv vector from {}", anno_file);
+            exit(1);
+        }
+        dense_rows_bv.serialize(outstream);
+    }
+
+    RowDisk row_disk;
+
+    if (!row_disk.load(in)) {
+        logger->error("Cannot load row_disk from {}", anno_file);
+        exit(1);
+    }
+
+    uint64_t num_cols = row_disk.num_columns();
+    uint64_t num_set_bits = row_disk.num_relations();
+    uint64_t num_rows = row_disk.num_rows();
+
+    serialize_number(outstream, num_set_bits);
+
+    outstream.close();
+
+    logger->trace("Start MST building");
+    mst::MSTStage mst_stage = (mst::MSTStage)stage;
+
+    std::vector<BinaryMatrix::SetBitPositions> rows;
+    std::vector<size_t> set_bits_per_row;
+    rows.resize(num_rows);
+    set_bits_per_row.resize(num_rows);
+
+    auto progress_bar = std::make_unique<ProgressBar>(num_rows, "Load rows",
+                                                      std::cerr, !common::get_verbose());
+
+    if (mst_stage == mst::MSTStage::BUILD_SIGNATURES) {
+        //mkokot_TODO: fix the message
+        logger->trace("MST builder: build signatures");
+
+        size_t rows_per_pack = 50'000; //mkokot_TODO: move to config somewhere
+        size_t num_min_hashes = 40; //mkokot_TODO: move to config somewhere
+
+        mst::MinHash min_hash(num_cols, num_rows, num_min_hashes);
+
+        omp_set_nested(1);
+        #pragma omp parallel for ordered num_threads(get_num_threads())
+        for (size_t row_id = 0; row_id < num_rows; row_id += rows_per_pack) {
+            uint64_t begin = row_id;
+            uint64_t end = std::min(row_id + rows_per_pack, num_rows);
+            std::vector<size_t> ids(end - begin);
+            std::iota(ids.begin(), ids.end(), begin);
+
+            auto rows = row_disk.get_rows(ids);
+            #pragma omp ordered
+            min_hash.AddRows(rows);
+
+            // n_set_bits_org += set_bits_per_row[row_id];
+            *progress_bar += end - begin;
+        }
+
+        //mkokot_TODO: store file extension somewhere else and use this define
+        std::string set_bits_per_row_fname = outfbase + ".set_bits_per_row";
+        min_hash.SerializeSetBitsPerRow(set_bits_per_row_fname);
+
+        //mkokot_TODO: store file extension somewhere else and use this define
+        std::string sig_fname = outfbase + ".row_signatures";
+        min_hash.SerializeSignatures(sig_fname);
+
+    } else if (mst_stage == mst::MSTStage::COMPUTE_BINS) {
+        logger->trace("Run MSTStage::COMPUTE_BINS"); //mkokot_TODO: change message
+
+        //mkokot_TODO: store file extension somewhere else and use this define
+        std::string set_bits_per_row_fname = outfbase + ".set_bits_per_row";
+        //mkokot_TODO: store file extension somewhere else and use this define
+        std::string sig_fname = outfbase + ".row_signatures";
+
+        mst::MinHash min_hash(sig_fname, set_bits_per_row_fname);
+
+        const auto &rows_signatures
+                = min_hash.GetRowSignatures(); // mkokot_TODO: maybe worth to make a copy and
+                                               //cut it to artificially limit no. of num_bashes
+        //mkokot_TODO: make this parameter!
+        size_t num_bands = 4;
+
+        mst::LSH lsh(rows_signatures, num_bands);
+        auto bins = lsh.AssignToBins();
+
+        //mkokot_TODO: store file extension somewhere else and use this define
+        std::string bins_fname = outfbase + ".bins";
+        bins_fname = mst::fix_fname(bins_fname);
+
+        std::ofstream out(bins_fname, std::ios::binary);
+
+        size_t tot_write{};
+        serialize_number(out, bins.size());
+        tot_write += 8;
+
+        for (size_t bin_id = 0; bin_id < bins.size(); ++bin_id) {
+            serialize_number(out, bins[bin_id].size());
+            tot_write += 8;
+            for (size_t elem : bins[bin_id]) {
+                serialize_number(out, elem);
+                tot_write += 8;
+            }
+        }
+        //mkokot_TODO: remove?
+        logger->info("tot_write bins: {}", tot_write);
+        out.close();
+    } else if (mst_stage == mst::MSTStage::BUILD_KRUSKAL_INPUT) {
+
+        logger->info("Run MSTStage::BUILD_KRUSKAL_INPUT"); //mkokot_TODO: change message
+
+        //mkokot_TODO: store file extension somewhere else and use this define
+        std::string set_bits_per_row_fname = outfbase + ".set_bits_per_row";
+
+        mst::SetBitsPerRow set_bits_per_row(set_bits_per_row_fname);
+
+        //mkokot_TODO: store file extension somewhere else and use this define
+        std::string bins_fname = outfbase + ".bins";
+        std::ifstream in(bins_fname, std::ios::binary);
+        if (!in) {
+            logger->error("Cannot open file {}", bins_fname);
+            throw std::ostream::failure("Bad stream");
+        }
+
+        size_t num_bins = load_number(in);
+        logger->info("num_bins: {}", num_bins); //mkokot_TODO: remove?
+        std::vector<std::vector<size_t>> bins(num_bins);
+        for (size_t bin_id = 0; bin_id < bins.size(); ++bin_id) {
+            size_t num_elems = load_number(in);
+            bins[bin_id].resize(num_elems);
+            for (size_t elem_id = 0; elem_id < num_elems; ++elem_id) {
+                bins[bin_id][elem_id] = load_number(in);
+            }
+        }
+
+        logger->info("Sort bins ascending");
+
+        ips4o::sort(bins.begin(), bins.end(), [](const auto &lsh, const auto &rsh) {
+            return lsh.size() < rsh.size();
+        });
+        logger->info("Done");
+        logger->info("bins[0].size(): {}", bins[0].size()); //mkokot_TODO: remove?
+
+        auto ub = std::upper_bound(bins.begin(), bins.end(), 1ull,
+                                   [](size_t v, const auto &vec) { return v < vec.size(); });
+        size_t index = std::distance(bins.begin(), ub);
+        logger->info("#bins with >= 2 elems: {}", bins.size() - index); //mkokot_TODO: remove?
+        logger->info("largest bin size: {}", bins.back().size()); //mkokot_TODO: remove?
+
+        size_t tot_nodes_in_bins{};
+        #pragma omp parallel for num_threads(get_num_threads()) reduction(+ : tot_nodes_in_bins)
+        for (size_t i = index; i < bins.size(); ++i) {
+            tot_nodes_in_bins += bins[i].size();
+        }
+
+        logger->info("#tot_nodes_in_bins with >= 2 elems: {}", tot_nodes_in_bins); //mkokot_TODO: remove?
+
+        //mkokot_TODO: make this parameters?
+        size_t max_bin_size = 20;
+        size_t max_neighbours = 20;
+
+        ub = std::upper_bound(bins.begin(), bins.end(), max_bin_size, [](size_t v, const auto& vec){return v < vec.size();});
+        size_t index_end = std::distance(bins.begin(), ub);
+
+        mst::CandidateCollector edges(set_bits_per_row.Get(), max_neighbours);
+
+        progress_bar = std::make_unique<ProgressBar>(index_end - index,
+                                                     "Select edges from small bins",
+                                                     std::cerr, !common::get_verbose());
+        Timer timer;
+        #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
+        for (size_t i = index; i < index_end; ++i) {
+            auto &bin = bins[i];
+            std::vector<BinaryMatrix::SetBitPositions> loaded_rows
+                    = row_disk.get_rows(bin);
+
+            for (size_t j = 0; j < bin.size(); ++j) {
+                size_t u = bin[j];
+                auto &u_row = loaded_rows[j];
+                for (size_t k = j + 1; k < bin.size(); ++k) {
+                    size_t v = bin[k];
+                    auto &v_row = loaded_rows[k];
+                    //#pragma omp critical
+                    edges.AddCandidate(u, v, u_row, v_row);
+                }
+            }
+            ++(*progress_bar);
+        }
+        logger->info("Done");
+
+        size_t tot_elems_big_bins {};
+        #pragma omp parallel for num_threads(get_num_threads()) reduction(+ : tot_elems_big_bins)
+        for (size_t i = index_end; i < bins.size(); ++i) {
+            tot_elems_big_bins += bins[i].size();
+        }
+        logger->info("tot_elems_big_bins: {}", tot_elems_big_bins);
+        progress_bar = std::make_unique<ProgressBar>(tot_elems_big_bins,
+                                                     "Select edges from big bins",
+                                                     std::cerr, !common::get_verbose());
+
+        //mkokot_TODO: make parameter?
+        size_t consider_n = 20;
+        //mkokot_TODO: make parameter?
+        size_t max_loaded_rows = 1'000;
+
+        //mkokot_TODO: remove time measure?
+        double load_time{};
+        double rest_time{};
+
+        #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic) reduction(+:load_time) reduction(+:rest_time)
+        for (size_t i = index_end; i < bins.size(); ++i) {
+            auto bin = bins[i];
+            std::sort(bin.begin(), bin.end(), [&](const auto &lhs, const auto &rhs) {
+                return set_bits_per_row[lhs] < set_bits_per_row[rhs];
+            });
+
+            std::vector<BinaryMatrix::SetBitPositions> loaded_rows;
+            size_t offset = 0;
+            size_t j_to_reload = 0;
+
+            //mkokot_TODO: make function/method
+            auto reaload_rows = [&]() {
+                auto startTime = std::chrono::high_resolution_clock::now();
+
+                auto start = bin.begin() + j_to_reload;
+                auto end = bin.end();
+                if (start + max_loaded_rows + consider_n < end)
+                    end = start + max_loaded_rows + consider_n;
+                std::vector<size_t> rows_ids(start, end);
+                loaded_rows = row_disk.get_rows(rows_ids);
+                offset = j_to_reload;
+                j_to_reload += max_loaded_rows;
+
+                load_time += std::chrono::duration<double>(
+                                     std::chrono::high_resolution_clock::now() - startTime)
+                                     .count();
+            };
+
+            auto start = std::chrono::high_resolution_clock::now();
+            for (size_t j = 0; j < bin.size(); ++j) {
+                if (j == j_to_reload) {
+                    reaload_rows();
+                }
+                size_t u = bin[j];
+                auto &u_row = loaded_rows[j - offset];
+                for (size_t k = j + 1, l = 0; k < bin.size() && l < consider_n; ++k, ++l) {
+                    size_t v = bin[k];
+                    auto &v_row = loaded_rows[k - offset];
+
+                    edges.AddCandidate(u, v, u_row, v_row);
+                }
+            }
+            rest_time += std::chrono::duration<double>(
+                                 std::chrono::high_resolution_clock::now() - start)
+                                 .count();
+            *progress_bar += bin.size();
+        }
+
+        logger->info("load time: {}", load_time);
+        logger->info("rest time: {}", rest_time);
+
+        auto _edges = edges.GetEdges();
+        logger->info("Serializing {} edges", _edges.size());
+
+        //mkokot_TODO: store file extension somewhere else and use this define
+        std::string edges_fname = outfbase + ".edges";
+        edges_fname = mst::fix_fname(edges_fname);
+
+        std::ofstream out(edges_fname, std::ios::binary);
+        serialize_number(out, _edges.size());
+        logger->info("_edges.size(): {}", _edges.size());
+
+        for (auto &e : _edges) {
+            serialize_number(out, e.idx1);
+            serialize_number(out, e.idx2);
+            serialize_number(out, e.dist);
+        }
+
+        logger->info("Done");
+        out.close();
+    } else if (mst_stage == mst::MSTStage::RUN_KRUSKAL) {
+        //mkokot_TODO: change message
+        logger->info("Run MSTStage::RUN_KRUSKAL");
+
+        //mkokot_TODO: store file extension somewhere else and use this define
+        std::string set_bits_per_row_fname = outfbase + ".set_bits_per_row";
+        //mkokot_TODO: store file extension somewhere else and use this define
+        std::string edges_fname = outfbase + ".edges";
+
+        mst::SetBitsPerRow set_bits_per_row(set_bits_per_row_fname);
+
+        std::ifstream in(edges_fname, std::ios::binary);
+
+        size_t num_edges = load_number(in);
+        logger->info("num_edges: {}", num_edges);
+        std::vector<mst::edge> _edges;
+
+        _edges.reserve(num_edges);
+
+        for (size_t i = 0; i < num_edges; ++i) {
+            auto idx1 = load_number(in);
+            auto idx2 = load_number(in);
+            auto dist = load_number(in);
+            _edges.emplace_back(idx1, idx2, dist);
+        }
+
+        auto set_bits_per_row_vec = set_bits_per_row.Get();
+
+        mst::BatchedKruskal batched_kruskal(std::move(set_bits_per_row_vec));
+
+        batched_kruskal.AddEdges(_edges);
+
+        auto MST = batched_kruskal.GetResult();
+        std::set<size_t> nodes_in;
+        for (auto &edge : MST) {
+            nodes_in.insert(edge.idx1);
+            nodes_in.insert(edge.idx2);
+        }
+        size_t tot_input_cost {};
+        for (auto node : nodes_in) {
+            tot_input_cost += batched_kruskal.GetSetBitsPerRow()[node];
+        }
+        logger->info("tot_input_cost: {}", tot_input_cost);
+        logger->info("nodes_in.size(): {}", nodes_in.size());
+        size_t num_sparsified_set_bits {};
+        auto trees = mst::ComputeTrees(MST, batched_kruskal.GetConnectedComponents(),
+                                              batched_kruskal.GetSetBitsPerRow(),
+                                              num_sparsified_set_bits);
+        size_t tot_output_cost {};
+        for (auto &node : nodes_in) {
+            tot_output_cost += trees[node].dist;
+        }
+        logger->info("tot_output_cost: {}", tot_output_cost);
+
+        //mkokot_TODO: store file extension somewhere else and use this define
+        std::string parents_fname = outfbase + "-parents.txt";
+        parents_fname = mst::fix_fname(parents_fname);
+        std::ofstream parents_file(parents_fname);
+        parents_file << "n_rows: " << trees.size() << "\n";
+        parents_file << "num_sparsified_set_bits: " << num_sparsified_set_bits << "\n";
+        for (size_t i = 0; i < trees.size(); ++i) {
+            parents_file << i << "\t" << trees[i].idx << "\t" << trees[i].dist << "\n";
+        }
+        parents_file.close();
+    }  else if (mst_stage == mst::MSTStage::COMPUTE_SPARSIFIED_ROWS) {
+        //mkokot_TODO: change message
+        logger->info("Run MSTStage::COMPUTE_SPARSIFIED_ROWS");
+
+        std::vector<mst::parent> parents;
+        //mkokot_TODO: store file extension somewhere else and use this define
+        std::string parents_fname = outfbase + "-parents.txt";
+
+
+        std::ifstream parents_file(parents_fname);
+        if (!parents_file) {
+            logger->error("Cannot open file {}", parents_fname);
+            throw std::ostream::failure("Bad stream");
+        }
+
+        size_t num_rows;
+        size_t num_sparsified_set_bits;
+        std::string tmp;
+        if (!(parents_file >> tmp >> num_rows) || tmp != "n_rows:") {
+            logger->error("Cannot read num_rows from {}", parents_fname);
+            exit(1);
+        }
+        if (!(parents_file >> tmp >> num_sparsified_set_bits)
+            || tmp != "num_sparsified_set_bits:") {
+            logger->error("Cannot read num_sparsified_set_bits from {}", parents_fname);
+            exit(1);
+        }
+        parents.reserve(num_rows);
+        size_t idx, parent;
+        mst::hamming_dist_t dist;
+        while (parents_file >> idx >> parent >> dist) {
+            parents.emplace_back(parent, dist);
+        }
+
+        if (parents.size() != num_rows) {
+            logger->error("parents.size() != num_rows"); // mkokot_TODO: change message
+            exit(1);
+        }
+
+        logger->info("num_rows: {}", num_rows);
+        logger->info("num_sparsified_set_bits: {}", num_sparsified_set_bits);
+
+        mst::SparsifyRows sparsified_rows(num_rows);
+        //mkkokot_TODO: in case of parallelization of the code below remember that there is
+        //an offset computed inside
+
+        progress_bar = std::make_unique<ProgressBar>(num_rows, "Serialize sparsified rows",
+                                                     std::cerr, !common::get_verbose());
+
+
+        size_t rows_in_batch = 1'000;
+        size_t tot_new_set_bits {};
+
+        RowDisk::serialize(
+                fname,
+                [&](BinaryMatrix::RowCallback write_row) {
+                    #pragma omp parallel for ordered num_threads(get_num_threads()) reduction(+:tot_new_set_bits)
+                    for (size_t start = 0; start < num_rows; start += rows_in_batch) {
+                        size_t end = start + rows_in_batch;
+                        if (end > num_rows)
+                            end = num_rows;
+                        std::vector<mst::parent> parents_batch(parents.begin() + start,
+                                                                      parents.begin() + end);
+
+                        auto tmp = sparsified_rows.GetSparsifiedRows(parents_batch,
+                                                                     row_disk, start);
+
+                        #pragma omp ordered
+                        for (auto &x : tmp) {
+                            tot_new_set_bits += x.set_bits.size();
+                            write_row(x.set_bits);
+                        }
+
+                        *progress_bar += end - start;
+                    }
+                },
+                num_cols, num_sparsified_set_bits, num_rows);
+
+        logger->info("tot_new_set_bits: {}", tot_new_set_bits);
+        logger->info("sparsified_rows.GetTotSetBits(): {}", sparsified_rows.GetTotSetBits());
+
+        // mkokot_TODO: brwt part is just binary rewritem
+        outstream.open(fname, ios::out | ios::in | ios::binary | ios::ate);
+        sparsified_rows.GetParents().serialize(outstream);
+
+
+        logger->info(
+                "out pos after "
+                "sparsified_rows.GetParents().serialize(outstream): {}",
+                outstream.tellp());
+
+        size_t buff_size = 1ull << 26;
+        std::vector<char> buff(buff_size);
+        size_t tot_gcount {};
+        while (true) {
+            in.read(buff.data(), buff_size);
+            auto gcount = in.gcount();
+            if (!gcount)
+                break;
+            outstream.write(buff.data(), gcount);
+            tot_gcount += gcount;
+        }
+
+        logger->info("out pos after rewrite brwt: {}", outstream.tellp());
+        logger->info("tot_gcount: {}", tot_gcount);
+    }
+}
 
 
 //mkokot_TODO: optimizations to be made:
@@ -1449,7 +1969,7 @@ void convert_to_rd_hybrid_disk_brwt(
         fname,
         [&](BinaryMatrix::RowCallback write_row) {
             #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic)
-            for (uint64_t i = 0; i < num_rows; i += kNumRowsInBlock) {
+            for (uint64_t i = 0; i < num_rows; i += kNumRowsInBlock) { //mkokot_TODO: why am I iterating all rows, and not just the dense
 
                 uint64_t begin = i;
                 uint64_t end = std::min(i + kNumRowsInBlock, num_rows);
@@ -1607,7 +2127,7 @@ void convert_to_row_diff<IntRowDiffDiskAnnotator>(
     uint64_t num_rows = get_num_rows_from_column_anno(files[0]);
     size_t num_set_bits = 0;
 
-    LEncoder label_encoder;
+    std::vector<std::string> col_names;
     std::vector<std::unique_ptr<bit_vector>> columns;
     std::vector<sdsl::int_vector<>> col_values;
 
@@ -1636,16 +2156,24 @@ void convert_to_row_diff<IntRowDiffDiskAnnotator>(
                 while (columns.size() <= j) {
                     columns.emplace_back();
                     col_values.emplace_back();
+                    col_names.emplace_back();
                 }
                 columns[j] = std::move(column);
                 col_values[j] = std::move(values);
-                size_t col = label_encoder.insert_and_encode(label);
-                if (col + 1 != label_encoder.size()) {
-                    logger->error("Duplicate columns {}", label);
-                    exit(1);
-                }
+                col_names[j] = label;
             },
             num_threads);
+    // this must be done after loading all columns
+    // to keep their order correct
+    // (label_encoder.insert_and_encode cannot be inside get_cols callback)
+    LEncoder label_encoder;
+    for (const auto &label : col_names) {
+        size_t col = label_encoder.insert_and_encode(label);
+        if (col + 1 != label_encoder.size()) {
+            logger->error("Duplicate columns {}", label);
+            exit(1);
+        }
+    }
 
     std::ofstream out = utils::open_new_ofstream(outfname);
     if (!out.good())
@@ -1716,7 +2244,7 @@ void convert_to_row_diff<RowDiffDiskCoordAnnotator>(
 
     size_t num_values = 0;
 
-    LEncoder label_encoder;
+    std::vector<std::string> col_names;
     std::vector<std::unique_ptr<bit_vector>> columns;
     std::vector<sdsl::int_vector<>> col_values;
     std::vector<bit_vector_small> col_delims;
@@ -1753,17 +2281,26 @@ void convert_to_row_diff<RowDiffDiskCoordAnnotator>(
                     columns.emplace_back();
                     col_values.emplace_back();
                     col_delims.emplace_back();
+                    col_names.emplace_back();
                 }
                 columns[j] = std::move(column);
                 col_values[j] = std::move(values);
-                size_t col = label_encoder.insert_and_encode(label);
-                if (col + 1 != label_encoder.size()) {
-                    logger->error("Duplicate columns {}", label);
-                    exit(1);
-                }
                 col_delims[j] = std::move(delims);
+                col_names[j] = label;
             },
             num_threads);
+
+    // this must be done after loading all columns
+    // to keep their order correct
+    // (label_encoder.insert_and_encode cannot be inside get_cols callback)
+    LEncoder label_encoder;
+    for (const auto &label : col_names) {
+        size_t col = label_encoder.insert_and_encode(label);
+        if (col + 1 != label_encoder.size()) {
+            logger->error("Duplicate columns {}", label);
+            exit(1);
+        }
+    }
 
     std::ofstream out = utils::open_new_ofstream(outfname);
     if (!out.good())

@@ -71,6 +71,11 @@ std::unique_ptr<StaticAnnotation>
 convert_to_RbBRWT(const std::vector<std::string> &annotation_files,
                   size_t max_brwt_arity);
 
+//mkokot_TODO: add parameters and implement
+void convert_to_rd_hyb_mst_disk_brwt(const std::string &anno_file,
+                                     const std::string &outfbase,
+                                     size_t stage);
+
 void convert_to_rd_hybrid_disk_brwt(const std::vector<std::string> &files,
                                     const std::string &anchors_file_fbase,
                                     const std::string &outfbase,

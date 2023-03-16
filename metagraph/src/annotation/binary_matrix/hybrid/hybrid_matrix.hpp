@@ -8,6 +8,8 @@ namespace binmat {
 #include "common/vectors/bit_vector_adaptive.hpp"
 #include "common/logger.hpp"
 
+using mtg::common::logger;
+
 template<class BaseMatrix1, class BaseMatrix2>
 class HybridMatrix : public BinaryMatrix {
 public:
@@ -152,9 +154,36 @@ get_column(Column column) const {
 
 template<class BaseMatrix1, class BaseMatrix2>
 bool HybridMatrix<BaseMatrix1, BaseMatrix2>::load(std::istream &in) {
-    return in_matrix1_.load(in) &&
-           matrix1_.load(in) &&
-           matrix2_.load(in);
+
+    //mkokot_TODO: remove
+    {
+        auto pos = in.tellg();
+        bool b1 = in_matrix1_.load(in);
+        logger->trace("hybrid matrix, size of in_matrix1_: {}", in.tellg() - pos);
+
+        pos = in.tellg();
+        bool b2 = matrix1_.load(in);
+        logger->trace("hybrid matrix, size of matrix1_: {}", in.tellg() - pos);
+
+        pos = in.tellg();
+        bool b3 = matrix2_.load(in);
+        logger->trace("hybrid matrix, size of matrix2_: {}", in.tellg() - pos);
+
+        logger->trace("matrix1_ rows: {}", matrix1_.num_rows());
+        logger->trace("matrix2_ rows: {}", matrix2_.num_rows());
+
+        logger->trace("matrix1_ set bits: {}", matrix1_.num_relations());
+        logger->trace("matrix2_ set bits: {}", matrix2_.num_relations());
+
+
+        return b1 && b2 && b3;
+
+    }
+
+    //mkokot_TODO: restore
+    //return in_matrix1_.load(in) &&
+    //       matrix1_.load(in) &&
+    //       matrix2_.load(in);
 }
 
 template<class BaseMatrix1, class BaseMatrix2>

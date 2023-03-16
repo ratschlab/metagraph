@@ -387,6 +387,8 @@ Config::Config(int argc, char *argv[]) {
             greedy_brwt = true;
         } else if (!strcmp(argv[i], "--row-diff-stage")) {
             row_diff_stage = atoi(get_value(i++));
+        } else if (!strcmp(argv[i], "--mst-stage")) {
+            mst_stage = atoi(get_value(i++));
         } else if (!strcmp(argv[i], "--linkage")) {
             cluster_linkage = true;
         } else if (!strcmp(argv[i], "--subsample")) {
@@ -749,6 +751,8 @@ std::string Config::annotype_to_string(AnnotationType state) {
             return "row_sparse";
         case RowDiffHybridDiskBRWT:
             return "rd_hybrid_disk_brwt";
+        case RowDiffHybMSTDiskBRWT:
+            return "rd_hyb_mst_disk_brwt";
         case RowDiffDisk:
             return "row_diff_disk";
         case IntRowDiffDisk:
@@ -798,6 +802,8 @@ Config::AnnotationType Config::string_to_annotype(const std::string &string) {
         return AnnotationType::RowSparse;
     } else if (string == "rd_hybrid_disk_brwt") {
         return AnnotationType::RowDiffHybridDiskBRWT;
+    } else if (string == "rd_hyb_mst_disk_brwt") {
+        return AnnotationType::RowDiffHybMSTDiskBRWT;
     } else if (string == "row_diff_disk") {
         return AnnotationType::RowDiffDisk;
     } else if (string == "row_diff_int_disk") {

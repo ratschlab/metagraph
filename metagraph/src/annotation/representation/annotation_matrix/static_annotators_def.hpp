@@ -13,6 +13,7 @@
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
 #include "annotation/binary_matrix/row_sparse/row_sparse.hpp"
 #include "annotation/binary_matrix/hybrid/hybrid_matrix.hpp"
+#include "annotation/binary_matrix/mst/mst_matrix.hpp"
 #include "annotation/binary_matrix/row_disk/row_disk.hpp"
 #include "annotation/binary_matrix/row_vector/unique_row_binmat.hpp"
 #include "annotation/int_matrix/rank_extended/csc_matrix.hpp"
@@ -50,6 +51,8 @@ typedef StaticBinRelAnnotator<binmat::RowDiff<binmat::BRWT>, std::string> RowDif
 typedef StaticBinRelAnnotator<binmat::RowDiff<binmat::RowSparse>, std::string> RowDiffRowSparseAnnotator;
 
 typedef StaticBinRelAnnotator<binmat::RowDiff<binmat::HybridMatrix<binmat::RowDisk, binmat::BRWT>>, std::string> RowDiffHybridDiskBRWTAnnotator;
+
+typedef StaticBinRelAnnotator<binmat::RowDiff<binmat::HybridMatrix<binmat::MSTMatrix<binmat::RowDisk>, binmat::BRWT>>, std::string> RowDiffHybMSTDiskBRWTAnnotator;
 
 typedef StaticBinRelAnnotator<binmat::RowDiff<binmat::RowDisk>, std::string> RowDiffDiskAnnotator;
 
@@ -98,6 +101,8 @@ template <>
 inline const std::string RowDiffRowSparseAnnotator::kExtension = ".row_diff_sparse.annodbg";
 template <>
 inline const std::string RowDiffHybridDiskBRWTAnnotator::kExtension = ".rd_hybrid_disk_brwt.annodbg";
+template <>
+inline const std::string RowDiffHybMSTDiskBRWTAnnotator::kExtension = ".rd_hyb_mst_disk_brwt.annodbg";
 template <>
 inline const std::string RowDiffDiskAnnotator::kExtension = ".row_diff_disk.annodbg";
 template <>

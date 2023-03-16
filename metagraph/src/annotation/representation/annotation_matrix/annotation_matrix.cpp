@@ -68,7 +68,8 @@ bool StaticBinRelAnnotator<BinaryMatrixType, Label>::load(const std::string &fil
     bool use_mmap = std::is_same_v<T, RowDiffDiskAnnotator>
                         || std::is_same_v<T, IntRowDiffDiskAnnotator>
                         || std::is_same_v<T, RowDiffDiskCoordAnnotator>
-                        || std::is_same_v<T, RowDiffHybridDiskBRWTAnnotator>;
+                        || std::is_same_v<T, RowDiffHybridDiskBRWTAnnotator>
+                        || std::is_same_v<T, RowDiffHybMSTDiskBRWTAnnotator>;
     std::unique_ptr<std::ifstream> in = utils::open_ifstream(fname, use_mmap || utils::with_mmap());
     if (!in->good())
         return false;
@@ -213,6 +214,8 @@ template class StaticBinRelAnnotator<binmat::RowDiff<binmat::BRWT>, std::string>
 template class StaticBinRelAnnotator<binmat::RowDiff<binmat::RowSparse>, std::string>;
 
 template class StaticBinRelAnnotator<binmat::RowDiff<binmat::HybridMatrix<binmat::RowDisk, binmat::BRWT>>, std::string>;
+
+template class StaticBinRelAnnotator<binmat::RowDiff<binmat::HybridMatrix<binmat::MSTMatrix<binmat::RowDisk>, binmat::BRWT>>, std::string>;
 
 template class StaticBinRelAnnotator<binmat::RowDiff<binmat::RowDisk>, std::string>;
 

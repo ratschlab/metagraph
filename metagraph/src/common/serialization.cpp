@@ -48,6 +48,19 @@ void serialize_number(std::ostream &out, uint64_t number) {
         throw std::ostream::failure("Bad stream");
 }
 
+void serialize_number32(std::ostream &out, uint32_t number) {
+    if (!out.good())
+        throw std::ostream::failure("Bad stream");
+
+    // store as big endian regardless of system endianness
+    number = htobe32(number);
+
+    out.write((const char*)&number, 4);
+
+    if (!out.good())
+        throw std::ostream::failure("Bad stream");
+}
+
 uint64_t load_number(std::istream &in) {
     if (!in.good())
         throw std::istream::failure("Bad stream");

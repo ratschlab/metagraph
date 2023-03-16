@@ -101,6 +101,7 @@ class Config {
     unsigned int num_columns_cached = 10;
     unsigned int max_hull_forks = 4;
     unsigned int row_diff_stage = 0;
+    unsigned int mst_stage = 0;
     unsigned int max_path_length = 100;
     unsigned int smoothing_window = 1;  // no smoothing by default
     unsigned int num_kmers_in_seq = 0;  // assume all input reads have this length
@@ -208,6 +209,7 @@ class Config {
         RowDiffBRWT,
         RowDiffRowSparse,
         RowDiffHybridDiskBRWT,
+        RowDiffHybMSTDiskBRWT,
         RowDiffDisk,
         RowFlat,
         RowSparse,
