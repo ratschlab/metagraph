@@ -422,6 +422,10 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
 ::PathIndex(std::shared_ptr<const DBGSuccinct> graph,
             const std::string &graph_name,
             const std::function<void(const std::function<void(std::string_view)>)> &generate_sequences) {
+    if (graph->get_mode() == DeBruijnGraph::CANONICAL) {
+        throw std::runtime_error("Only BASIC and PRIMARY graphs supported");
+    }
+
     const DBGSuccinct &dbg_succ = *graph;
 
     LabelEncoder<Label> label_encoder;
@@ -468,6 +472,7 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
     }, get_num_threads());
 
     num_unitigs_ = boundaries.size() - 1;
+    logger->info("Indexed {} unitigs", num_unitigs_);
 
     // enumerate superbubbles
     {
@@ -545,7 +550,6 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
 
                 bool reached_end = (traversal_stack.size() == 1 && visited.size() + 1 == seen.size());
                 if (has_cycle) {
-                    // logger->info("found cycle: num_children: {}\tv: {}\ts: {}", num_children, visited.size(), seen.size());
                     is_terminal_superbubble = false;
                     break;
                 }
@@ -568,7 +572,6 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
                             }
                         }
                     }
-
 
                     set_bit(can_reach_terminus.data(), i, true, MO_RELAXED);
                     const auto &d = seen[terminus];
@@ -633,7 +636,6 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
 
         std::atomic_thread_fence(std::memory_order_acquire);
 
-        size_t num_in_superbubble = num_unitigs_;
         {
             sdsl::int_vector<> sources(superbubble_start_size);
             sdsl::bit_vector source_indicator(superbubble_start_size);
@@ -645,11 +647,6 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
                 *it = start;
                 ++it;
                 ++jt;
-
-                // TODO: this is not correct
-                if (!start && !superbubble_termini[j].first)
-                    --num_in_superbubble;
-
                 std::copy(d.begin(), d.end(), it);
                 it += d.size();
                 jt += d.size();
@@ -661,11 +658,13 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
 
         num_superbubbles_ = 0;
         size_t num_multiple_sizes = 0;
+        size_t num_in_superbubble = num_unitigs_;
         {
             sdsl::int_vector<> termini(superbubble_termini_size);
             sdsl::bit_vector termini_indicator(superbubble_termini_size);
             auto it = termini.begin();
             auto jt = termini_indicator.begin();
+            size_t i = 1;
             for (const auto &[start, d] : superbubble_termini) {
                 *jt = true;
                 *it = start;
@@ -673,9 +672,13 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
                 ++jt;
                 num_superbubbles_ += !d.empty();
                 num_multiple_sizes += (d.size() > 1);
+                if (!start && !get_superbubble_and_dist(i).first)
+                    --num_in_superbubble;
+
                 std::copy(d.begin(), d.end(), it);
                 it += d.size();
                 jt += d.size();
+                ++i;
             }
             superbubble_termini_ = SuperbubbleStorage(std::move(termini));
             superbubble_termini_b_ = SuperbubbleIndicator(std::move(termini_indicator));
@@ -737,8 +740,6 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
         std::for_each(boundaries.begin(), boundaries.end(), callback);
     }, boundaries.back() + 1, boundaries.size());
 
-    logger->info("Indexed a total of {} paths", path_boundaries_.num_set_bits() - 1);
-
     std::string graph_fname = graph_name;
     std::filesystem::path tmp_dir = utils::create_temp_dir("", "test_col");
     std::string out_path = tmp_dir/"test_col";
@@ -774,8 +775,6 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
         size_t total_seq_count = 0;
         std::vector<uint64_t> boundaries { 0 };
 
-        logger->info("Indexing sequences");
-
         generate_sequences([&](std::string_view seq) {
             total_seq_count += 1 + (dbg_succ.get_mode() != DeBruijnGraph::BASIC);
             auto nodes = map_to_nodes(*check_graph, seq);
@@ -810,73 +809,38 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
             annotator.add_labels(rows, DUMMY);
             auto it = rows.begin();
             for (size_t i = 0; i < nodes.size(); ++i) {
-                if (picked[i]) {
+                if (picked[i])
                     annotator.add_label_coord(*it, DUMMY, coord);
-                }
+
                 ++coord;
                 ++it;
             }
-            // auto it = picked.begin();
-            // for (node_index &node : nodes) {
-            //     if (*it) {
-            //         annotator.add_label_coord(AnnotatedDBG::graph_to_anno_index(node), DUMMY, coord);
-            //     }
-            //     // if (node) {
-            //     //     if (canonical)
-            //     //         node = canonical->get_base_node(node);
-
-            //     //     annotator.add_label_coord(AnnotatedDBG::graph_to_anno_index(node), DUMMY, coord);
-            //     // }
-            //     ++coord;
-            //     ++it;
-            // }
             boundaries.emplace_back(coord);
-
-            // if (canonical) {
-            //     ++seq_count;
-            //     uint64_t coord = boundaries.back();
-            //     for (auto it = nodes.rbegin(); it != nodes.rend(); ++it) {
-            //         if (*it)
-            //             annotator.add_label_coord(AnnotatedDBG::graph_to_anno_index(*it), DUMMY, coord);
-
-            //         ++coord;
-            //     }
-            //     boundaries.emplace_back(coord);
-            // } else if (dbg_succ.get_mode() == DeBruijnGraph::CANONICAL) {
-            //     ++seq_count;
-            //     uint64_t coord = boundaries.back();
-            //     std::string seq_rc(seq);
-            //     reverse_complement_seq_path(dbg_succ, seq_rc, nodes);
-            //     for (node_index node : nodes) {
-            //         if (node)
-            //             annotator.add_label_coord(AnnotatedDBG::graph_to_anno_index(node), DUMMY, coord);
-
-            //         ++coord;
-            //     }
-            //     boundaries.emplace_back(coord);
-            // }
         });
 
-        if (total_seq_count) {
-            logger->info("Indexed {} / {} sequences", seq_count, total_seq_count);
-            if (seq_count) {
-                read_boundaries_ = bit_vector_smart([&](const auto &callback) {
-                    std::for_each(boundaries.begin(), boundaries.end(), callback);
-                }, boundaries.back() + 1, boundaries.size());
+        if (!total_seq_count)
+            return;
 
-                size_t num_columns = anno_graph.get_annotator().get_label_encoder().size();
-                read_indices_ = compress_path_storage<PathStorage>(
-                    graph.get(),
-                    std::move(annotator),
-                    label_encoder,
-                    num_columns,
-                    graph_fname,
-                    tmp_dir,
-                    out_path
-                );
-                set_graph(graph);
-            }
-        }
+        logger->info("Indexed {} / {} sequences", seq_count, total_seq_count);
+
+        if (!seq_count)
+            return;
+
+        read_boundaries_ = bit_vector_smart([&](const auto &callback) {
+            std::for_each(boundaries.begin(), boundaries.end(), callback);
+        }, boundaries.back() + 1, boundaries.size());
+
+        size_t num_columns = anno_graph.get_annotator().get_label_encoder().size();
+        read_indices_ = compress_path_storage<PathStorage>(
+            graph.get(),
+            std::move(annotator),
+            label_encoder,
+            num_columns,
+            graph_fname,
+            tmp_dir,
+            out_path
+        );
+        set_graph(graph);
     }
 }
 
