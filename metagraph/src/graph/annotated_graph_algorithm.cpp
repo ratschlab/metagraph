@@ -497,7 +497,7 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             size_t begin = path.size();
             size_t end = 0;
             for (size_t i = 0; i < path.size(); ++i) {
-                if (counts[path[i] * 2] >= min_label_in_count) {
+                if (counts[path[i] * 2] >= min_label_in_count) {f
                     if (begin == path.size())
                         begin = i;
 
