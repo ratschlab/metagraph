@@ -786,7 +786,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                         if (c == c_j) {
                             process_coord_list(is_rev ? tuple : tuple_j,
                                                is_rev ? tuple_j : tuple);
-                        } else if (path_index && (coords.size() == 1 || coords_j.size() == 1)) {
+                        } else if (path_index) {
                             size_t source_unitig_id = is_rev ? c : c_j;
                             size_t target_unitig_id = is_rev ? c_j : c;
                             path_index->call_dists(source_unitig_id, target_unitig_id,

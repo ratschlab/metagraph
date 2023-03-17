@@ -763,7 +763,7 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
 
     set_graph(graph);
 
-    {
+    if (num_unitigs_ > 1) {
         AnnotatedDBG anno_graph(std::const_pointer_cast<DBGSuccinct>(graph),
                                 std::make_unique<ColumnCompressed<>>(dbg_succ.max_index()));
 
