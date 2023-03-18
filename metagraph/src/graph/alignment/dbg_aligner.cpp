@@ -244,6 +244,16 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
         size_t query_coverage = 0;
 
         auto alignments = aggregator.get_alignments();
+        if (config_.allow_jump || config_.allow_label_change) {
+            chain_alignments(*this, alignments, [&](auto&& alignment) {
+                assert(alignment.is_valid(graph_, &config_));
+                if (alignment.get_score() > best_score) {
+                    best_score = alignment.get_score();
+                    query_coverage = alignment.get_cigar().get_coverage();
+                }
+                paths[i].emplace_back(std::move(alignment));
+            });
+        }
 
         for (auto&& alignment : alignments) {
             assert(alignment.is_valid(graph_, &config_));

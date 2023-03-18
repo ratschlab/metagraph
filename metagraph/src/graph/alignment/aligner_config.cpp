@@ -124,6 +124,83 @@ DBGAlignerConfig::score_t DBGAlignerConfig
     return score;
 }
 
+std::vector<DBGAlignerConfig::score_t> DBGAlignerConfig
+::get_per_char_scores(std::string_view reference,
+                      std::string_view query,
+                      const Cigar &cigar) const {
+    assert(cigar.is_valid(reference, query));
+
+    if (cigar.empty())
+        return {};
+
+    std::vector<score_t> scores;
+    scores.reserve(query.size() - cigar.get_clipping() - cigar.get_end_clipping());
+
+    score_t score = !cigar.get_clipping() ? left_end_bonus : 0;
+    score_t last_score = 0;
+
+    auto ref_it = reference.begin();
+    auto alt_it = query.begin();
+    auto it = cigar.data().begin();
+    if (it->first == Cigar::CLIPPED)
+        ++it;
+
+    for ( ; it != cigar.data().end(); ++it) {
+        const auto &op = *it;
+        switch (op.first) {
+            case Cigar::CLIPPED: {
+                if (it + 1 != cigar.data().end())
+                    alt_it += op.second;
+            } break;
+            case Cigar::MATCH: {
+                for (size_t i = 0; i < op.second; ++i) {
+                    score += match_score(std::string_view(ref_it, 1));
+                    scores.emplace_back(score - last_score);
+                    last_score = score;
+                    ++ref_it;
+                    ++alt_it;
+                }
+            } break;
+            case Cigar::MISMATCH: {
+                for (size_t i = 0; i < op.second; ++i) {
+                    score += score_sequences(std::string_view(ref_it, 1),
+                                             std::string_view(alt_it, 1));
+                    scores.emplace_back(score - last_score);
+                    last_score = score;
+                    ++ref_it;
+                    ++alt_it;
+                }
+            } break;
+            case Cigar::INSERTION: {
+                scores.emplace_back(gap_opening_penalty);
+                for (size_t i = 1; i < op.second; ++i) {
+                    scores.emplace_back(gap_extension_penalty);
+                }
+                score += gap_opening_penalty + (op.second - 1) * gap_extension_penalty;
+                last_score = score;
+                alt_it += op.second;
+            } break;
+            case Cigar::DELETION: {
+                score += gap_opening_penalty + (op.second - 1) * gap_extension_penalty;
+                ref_it += op.second;
+                if (it >= cigar.data().begin() + 2 && (it - 2)->first == Cigar::DELETION
+                        && (it - 1)->first == Cigar::NODE_INSERTION) {
+                    score -= gap_opening_penalty - gap_extension_penalty;
+                }
+            } break;
+            case Cigar::NODE_INSERTION: { score += node_insertion_penalty; } break;
+        }
+    }
+
+    scores.back() += !cigar.get_end_clipping() ? right_end_bonus : 0;
+
+    assert(ref_it == reference.end());
+    assert(alt_it == query.end());
+    assert(scores.size() == query.size() - cigar.get_clipping() - cigar.get_end_clipping());
+
+    return scores;
+}
+
 void DBGAlignerConfig::set_scoring_matrix() {
     if (alignment_edit_distance) {
         // TODO: REPLACE THIS

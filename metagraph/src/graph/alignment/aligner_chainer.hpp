@@ -35,6 +35,10 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                        std::shared_ptr<ISeeder> &seeder,
                        SeedFilteringExtender&& extender);
 
+void chain_alignments(const IDBGAligner &aligner,
+                      const std::vector<Alignment> &alignments,
+                      const std::function<void(Alignment&&)> &callback);
+
 } // namespace align
 } // namespace graph
 } // namespace mtg

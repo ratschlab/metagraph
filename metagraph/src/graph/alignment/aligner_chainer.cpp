@@ -621,7 +621,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                                    end - begin,
                                    end - begin,
                                    std::numeric_limits<uint32_t>::max(),
-                                   anchor.get_clipping(),
+                                   anchor.get_clipping() + (begin - anchor.get_query_view().begin()),
                                    j);
             };
 
@@ -786,7 +786,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                         if (c == c_j) {
                             process_coord_list(is_rev ? tuple : tuple_j,
                                                is_rev ? tuple_j : tuple);
-                        } else if (path_index) {
+                        } else if (path_index && path_index->is_unitig(c) && path_index->is_unitig(c_j)) {
                             size_t source_unitig_id = is_rev ? c : c_j;
                             size_t target_unitig_id = is_rev ? c_j : c;
                             path_index->call_dists(source_unitig_id, target_unitig_id,
@@ -909,6 +909,253 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                                             sdsl::util::cnt_one_bits(matching_pos));
 
     return std::make_tuple(num_seeds, num_extensions, num_explored_nodes);
+}
+
+void chain_alignments(const IDBGAligner &aligner,
+                      const std::vector<Alignment> &alignments,
+                      const std::function<void(Alignment&&)> &callback) {
+    const auto &config = aligner.get_config();
+    if (alignments.size() <= 1 || (!config.allow_jump && !config.allow_label_change))
+        return;
+
+    const DeBruijnGraph &graph = aligner.get_graph();
+    std::string_view query_view = alignments[0].get_full_query_view();
+
+    using Anchor = std::tuple<std::string_view::const_iterator, // end
+                              Alignment::Column, // annotation
+                              int64_t, // aln_index
+                              std::string_view::const_iterator, // begin
+                              uint64_t, // mem_length
+                              score_t, // score
+                              uint32_t, // last
+                              int64_t, // last_dist
+                              uint64_t // aln_node_index
+    >;
+    static_assert(sizeof(Anchor) == 64);
+
+    std::vector<Anchor> anchors;
+    std::vector<std::vector<score_t>> per_char_scores;
+    for (size_t i = 0; i < alignments.size(); ++i) {
+        const auto &alignment = alignments[i];
+        if (!alignment.get_clipping() && !alignment.get_end_clipping())
+            continue;
+
+        std::string_view query_view = alignment.get_query_view();
+        sdsl::bit_vector is_match(query_view.size(), false);
+        alignment.get_cigar().mark_exact_matches(is_match);
+
+        auto &scores = per_char_scores.emplace_back(config.get_per_char_scores(
+            alignment.get_sequence(),
+            query_view,
+            alignment.get_cigar()
+        ));
+
+        if (alignment.extra_scores.size()) {
+            for (size_t j = 1; j < alignment.get_nodes().size(); ++j) {
+                scores[j] += alignment.extra_scores[j - 1];
+            }
+        }
+        scores.insert(scores.begin(), 0);
+        std::partial_sum(scores.begin(), scores.end(), scores.begin());
+        assert(scores.back() == alignment.get_score());
+
+        auto begin = query_view.begin();
+        auto end = query_view.begin() + graph.get_k() - alignment.get_offset();
+
+        ssize_t num_exact_matches = std::accumulate(
+            is_match.begin(),
+            is_match.begin() + (end - begin),
+            ssize_t(0)
+        );
+
+        auto add_seed = [&](Alignment::Column col) {
+            anchors.emplace_back(
+                end,
+                col,
+                i,
+                begin,
+                end - begin,
+                scores[end - query_view.begin()] - scores[begin - query_view.begin()],
+                std::numeric_limits<uint32_t>::max(),
+                alignment.get_clipping() + (begin - query_view.begin()),
+                end - query_view.begin()
+            );
+        };
+
+        while (static_cast<size_t>(end - begin) > config.min_seed_length) {
+            if (num_exact_matches == end - begin) {
+                const auto &columns = alignment.get_columns(0);
+                std::for_each(columns.begin(), columns.end(), add_seed);
+                if (columns.empty())
+                    add_seed(std::numeric_limits<Alignment::Column>::max());
+            }
+
+            num_exact_matches -= is_match[begin - query_view.begin()];
+            ++begin;
+        }
+
+        num_exact_matches -= is_match[begin - query_view.begin()];
+        ++begin;
+        num_exact_matches += is_match[end - query_view.begin()];
+        ++end;
+
+        for (size_t j = 1; j < alignment.get_nodes().size(); ++j) {
+            if (num_exact_matches == end - begin) {
+                const auto &columns = alignment.get_columns(j);
+                std::for_each(columns.begin(), columns.end(), add_seed);
+                if (columns.empty())
+                    add_seed(std::numeric_limits<Alignment::Column>::max());
+            }
+
+            num_exact_matches -= is_match[begin - query_view.begin()];
+            ++begin;
+            num_exact_matches += is_match[end - query_view.begin()];
+            ++end;
+        }
+    }
+
+    if (anchors.size() <= 1)
+        return;
+
+    const auto *labeled_aligner = dynamic_cast<const ILabeledAligner*>(&aligner);
+    score_t match_score = config.match_score("A");
+    score_t node_insert = config.node_insertion_penalty / match_score;
+
+    std::sort(anchors.begin(), anchors.end());
+    std::vector<size_t> start_points;
+    start_points.reserve(anchors.size());
+    auto last_i = 0;
+    for (size_t i = 0; i < anchors.size(); ++i) {
+        if (std::get<0>(anchors[i]) != std::get<0>(anchors[last_i]))
+            last_i = i;
+
+        start_points.emplace_back(last_i);
+    }
+
+    // forward pass
+    for (size_t i = 0; i < anchors.size() - 1; ++i) {
+        const auto &[end_i, col_i, aln_i, begin_i, mem_length_i, score_i, last_i, last_dist_i, node_i] = anchors[i];
+        for (size_t j = start_points[i]; j < anchors.size(); ++j) {
+            if (i == j)
+                continue;
+
+            auto &[end, col, aln, begin, mem_length, score, last, last_dist, node] = anchors[j];
+
+            if (aln == aln_i) {
+                // connect within an alignment
+                if (end == end_i)
+                    continue;
+
+                score_t updated_score = score_i
+                    + per_char_scores[aln][end - query_view.begin()]
+                    - per_char_scores[aln][end_i - query_view.begin()];
+
+                if (updated_score > score) {
+                    score = updated_score;
+                    last = i;
+                    last_dist = end - end_i;
+                    mem_length = mem_length_i + (end - end_i);
+                }
+
+                continue;
+            }
+
+            if (end != end_i || begin_i > begin)
+                continue;
+
+            if (!config.allow_label_change && col_i != col)
+                continue;
+
+            score_t label_change_score = labeled_aligner
+                ? labeled_aligner->get_label_change_score(col_i, col)
+                : 0;
+
+            score_t updated_score = score_i + label_change_score;
+
+            if (alignments[aln_i].get_nodes()[node_i] == alignments[aln].get_nodes()[node]) {
+                // perfect overlap, easy to connect
+                if (updated_score > score) {
+                    score = updated_score;
+                    last = i;
+                    last_dist = 0;
+                    mem_length = std::max(mem_length, mem_length_i);
+                }
+
+                continue;
+            }
+
+            if (config.allow_jump && mem_length_i >= graph.get_k()) {
+                updated_score += node_insert;
+                if (updated_score > score) {
+                    score = updated_score;
+                    last_dist = 0;
+                    last = j;
+                    mem_length = end - begin;
+                }
+            }
+        }
+    }
+
+    std::vector<std::pair<score_t, size_t>> best_chains;
+    best_chains.reserve(anchors.size());
+
+    for (size_t i = 0; i < anchors.size(); ++i) {
+        const auto &[end, col, aln, begin, mem_length, score, last, last_dist, node] = anchors[i];
+        best_chains.emplace_back(-score, i);
+    }
+
+    std::sort(best_chains.begin(), best_chains.end());
+    sdsl::bit_vector used(best_chains.size(), false);
+    tsl::hopscotch_map<Alignment::Column, size_t> used_cols;
+    for (size_t j = 0; j < best_chains.size(); ++j) {
+        auto [nscore, k] = best_chains[j];
+        if (used[k])
+            continue;
+
+        if (++used_cols[std::get<1>(anchors[k])] > config.num_alternative_paths)
+            continue;
+
+        std::vector<std::pair<size_t, size_t>> chain;
+        tsl::hopscotch_set<size_t> used_alns;
+        while (k != std::numeric_limits<uint32_t>::max()) {
+            const auto &[end, col, aln, begin, mem_length, score, last, last_dist, node] = anchors[k];
+            chain.emplace_back(k, aln);
+            used_alns.insert(aln);
+            k = last;
+        }
+
+        if (chain.size() == 1 || used_alns.size() == 1)
+            continue;
+
+        std::reverse(chain.begin(), chain.end());
+        Alignment alignment = alignments[chain[0].second];
+        alignment.trim_query_prefix(std::get<3>(anchors[chain[0].first]) - alignment.get_query_view().begin(), graph.get_k() - 1, config);
+        size_t last_chain_i = 1;
+
+        for (size_t i = 1; i < chain.size(); ++i) {
+            if (chain[i].second != last_chain_i) {
+                // create an alignment
+                const auto &[end_i, col_i, aln_i, begin_i, mem_length_i, score_i, last_i, last_dist_i, node_i] = anchors[chain[last_chain_i].first];
+                alignment.trim_query_suffix(alignment.get_query_view().end() - end_i, config);
+
+                Alignment cur = alignments[chain[i - 1].second];
+                const auto &[end, col, aln, begin, mem_length, score, last, last_dist, node] = anchors[chain[i - 1].first];
+                ssize_t overlap = alignment.get_query_view().end() - begin;
+                cur.trim_query_prefix(begin - cur.get_query_view().begin() + overlap, graph.get_k() - 1, config);
+                cur.insert_gap_prefix(-overlap, graph.get_k() - 1, config);
+                alignment.splice(std::move(cur));
+
+                last_chain_i = i;
+            }
+        }
+
+        if (last_chain_i == 1)
+            continue;
+
+        const auto &[end, col, aln, begin, mem_length, score, last, last_dist, node] = anchors[chain.back().first];
+        alignment.trim_query_suffix(alignment.get_query_view().end() - end, config);
+        callback(std::move(alignment));
+    }
 }
 
 } // namespace align

@@ -42,6 +42,7 @@ class IPathIndex : public SequenceGraph::GraphExtension {
     virtual size_t coord_to_path_id(uint64_t coord) const = 0;
     virtual size_t coord_to_read_id(uint64_t coord) const = 0;
     virtual uint64_t path_id_to_coord(size_t path_id) const = 0;
+    virtual uint64_t read_id_to_coord(size_t read_id) const = 0;
     virtual bool can_reach_superbubble_terminus(size_t path_id) const = 0;
 
     virtual void adjacent_outgoing_unitigs(size_t path_id,
@@ -50,7 +51,13 @@ class IPathIndex : public SequenceGraph::GraphExtension {
     virtual bool is_unitig(size_t path_id) const = 0;
 
     size_t path_length(size_t path_id) const {
+        assert(is_unitig(path_id));
         return path_id_to_coord(path_id + 1) - path_id_to_coord(path_id);
+    }
+
+    size_t read_length(size_t read_id) const {
+        assert(!is_unitig(read_id));
+        return read_id_to_coord(read_id + 1) - read_id_to_coord(read_id);
     }
 
     void call_dists(size_t path_id_1,
@@ -117,6 +124,10 @@ class PathIndex : public IPathIndex {
 
     virtual uint64_t path_id_to_coord(size_t path_id) const override final {
         return path_boundaries_.select1(path_id);
+    }
+
+    virtual uint64_t read_id_to_coord(size_t read_id) const override final {
+        return read_boundaries_.select1(read_id);
     }
 
     virtual void adjacent_outgoing_unitigs(size_t path_id,

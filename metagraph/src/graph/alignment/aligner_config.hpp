@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <limits>
 #include <numeric>
+#include <vector>
 #include <string_view>
 
 
@@ -80,6 +81,10 @@ struct DBGAlignerConfig {
     score_t score_cigar(std::string_view reference,
                         std::string_view query,
                         const Cigar &cigar) const;
+
+    std::vector<score_t> get_per_char_scores(std::string_view reference,
+                                             std::string_view query,
+                                             const Cigar &cigar) const;
 
     bool check_config_scores() const;
 
