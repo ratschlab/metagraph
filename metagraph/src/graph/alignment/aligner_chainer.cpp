@@ -687,12 +687,13 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                 ? labeled_aligner->get_label_change_score(col_j, col)
                 : 0;
 
-            size_t num_added = end - std::max(begin, end_j);
+            ssize_t num_added = end - std::max(begin, end_j);
             score_t base_added_score = score_j + num_added + label_change_score;
             if (base_added_score < score)
                 continue;
 
             size_t length = end - begin;
+            bool overlap = (end_j > begin);
 
             const auto &coords = node_coords[coord_idx];
             bool updated = false;
@@ -729,28 +730,30 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
 
             if (dist > 0) {
                 node_index node = anchors[anchor_ids[coord_idx].first].get_nodes()[anchor_ids[coord_idx].second];
-                int64_t coord_dist = 1;
-                float gap = dist - coord_dist;
-                bool found = false;
-                score_t gap_cost = ceil(sl * gap - log2(gap + 1) * 0.5);
-                assert(gap > 0 || gap_cost == 0);
-                score_t updated_score = base_added_score + gap_cost;
-                for (node_index next : out_nodes[coord_idx_j]) {
-                    if (next == node) {
-                        if (std::tie(updated_score, last_dist) > std::tie(score, coord_dist)) {
-                            found = true;
-                            score = updated_score;
-                            last_dist = coord_dist;
-                            last = j;
-                            updated = true;
-                            aln_length = aln_length_j + coord_dist;
+                if (num_added == 1) {
+                    int64_t coord_dist = 1;
+                    float gap = dist - coord_dist;
+                    bool found = false;
+                    score_t gap_cost = ceil(sl * gap - log2(gap + 1) * 0.5);
+                    assert(gap > 0 || gap_cost == 0);
+                    score_t updated_score = base_added_score + gap_cost;
+                    for (node_index next : out_nodes[coord_idx_j]) {
+                        if (next == node) {
+                            if (std::tie(updated_score, last_dist) > std::tie(score, coord_dist)) {
+                                found = true;
+                                score = updated_score;
+                                last_dist = coord_dist;
+                                last = j;
+                                updated = true;
+                                aln_length = aln_length_j + coord_dist;
+                            }
+                            break;
                         }
-                        break;
                     }
-                }
 
-                if (found && gap == 0)
-                    continue;
+                    if (found && gap == 0)
+                        continue;
+                }
 
                 bool is_rev = (nodes[coord_idx] != node);
                 if (is_rev != is_rev_j)
@@ -762,10 +765,13 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                     for (int64_t c_j : list_a) {
                         for (int64_t c : list_b) {
                             int64_t coord_dist = c - c_j + offset;
-                            if (coord_dist <= 0)
+                            if (coord_dist <= 0 || num_added > coord_dist)
                                 continue;
 
                             float gap = std::abs(coord_dist - dist);
+                            if (gap != 0 && overlap)
+                                continue;
+
                             score_t gap_cost = ceil(sl * gap - log2(gap + 1) * 0.5);
                             assert(gap > 0 || gap_cost == 0);
                             score_t updated_score = base_added_score + gap_cost;
@@ -816,7 +822,6 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
             j = j_update;
     }
 
-    tsl::hopscotch_map<Alignment::Column, size_t> used_cols;
     sdsl::bit_vector used(seeds.size(), false);
     std::vector<std::tuple<score_t, size_t, size_t>> best_chain;
     best_chain.reserve(seeds.size());
@@ -828,6 +833,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
     std::sort(best_chain.begin(), best_chain.end());
 
     sdsl::bit_vector matching_pos(query.size(), false);
+    tsl::hopscotch_map<Alignment::Column, size_t> used_cols;
     std::vector<Alignment> alignments;
     for (size_t j = 0; j < best_chain.size(); ++j) {
         auto [nscore, last_dist, k] = best_chain[j];
@@ -860,11 +866,11 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
             k = last;
         }
 
+        // merge seeds
         for (auto it = seed_chain.rbegin() + 1; it != seed_chain.rend(); ++it) {
             it->second += (it - 1)->second;
         }
 
-        // merge seeds
         for (auto jt = seed_chain.begin(); jt + 1 != seed_chain.end(); ++jt) {
             if (jt->first.get_clipping() - (jt + 1)->first.get_clipping() == 1
                     && jt->second - (jt + 1)->second == 1
@@ -885,11 +891,12 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
         logger->trace("Chain\t{}", -nscore);
         Chain chain;
         for (auto it = jt; it != seed_chain.rend(); ++it) {
-            chain.emplace_back(Alignment(it->first, config_),
-                               it != jt
-                                   ? it->second + it->first.get_query_view().size()
-                                        - (it - 1)->second - (it - 1)->first.get_query_view().size()
-                                   : 0);
+            ssize_t dist = it != jt
+               ? it->second + it->first.get_query_view().size()
+                    - (it - 1)->second - (it - 1)->first.get_query_view().size()
+               : 0;
+
+            chain.emplace_back(Alignment(it->first, config_), dist);
             logger->trace("\t{}\t(dist: {}{})", chain.back().first,
                           it != jt && (it - 1)->first.get_query_view().end()
                                          == it->first.get_query_view().begin() + graph_.get_k() - it->first.get_offset()
