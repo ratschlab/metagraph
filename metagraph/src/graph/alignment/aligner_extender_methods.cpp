@@ -33,7 +33,16 @@ void SeedFilteringExtender
     }
 
     auto [left, next] = seed.split_seed(graph_->get_k() - 1, config_);
-    auto extensions = get_extensions(next, min_path_score, true, 0, DeBruijnGraph::npos, false);
+    auto extensions = get_extensions(
+        next,                               // seed
+        min_path_score,                     // min_path_score
+        true,                               // force_fixed_seed
+        0,                                  // target_length
+        DeBruijnGraph::npos,                // target_node
+        false,                              // trim_offset_after_extend
+        0,                                  // trim_query_suffix
+        seed.get_score() - next.get_score() // added_xdrop
+    );
 
     bool called = false;
     for (auto&& extension : extensions) {

@@ -1532,43 +1532,22 @@ void Alignment::insert_gap_prefix(ssize_t gap_length,
  */
 std::pair<Alignment, Alignment> Alignment
 ::split_seed(size_t node_overlap, const DBGAlignerConfig &config) const {
-    size_t k = node_overlap + 1;
-    if (sequence_.size() < k * 2
-            || std::find(std::max(nodes_.begin(), nodes_.end() - k - 1), nodes_.end(),
-                         DeBruijnGraph::npos) != nodes_.end()) {
+    if (nodes_.size() <= 1
+            || std::find(nodes_.begin(), nodes_.end(), DeBruijnGraph::npos) != nodes_.end()) {
         return std::make_pair(Alignment(), *this);
     }
 
+    auto it = cigar_.data().rbegin() + static_cast<bool>(cigar_.data().back().first == Cigar::CLIPPED);
+    if (it->first != Cigar::MATCH || it->second < 2)
+        return std::make_pair(Alignment(), *this);
+
+    size_t to_trim = std::min(static_cast<size_t>(it->second) - 1, nodes_.size() - 1);
     auto ret_val = std::make_pair(*this, *this);
-    ret_val.first.trim_reference_suffix(k, config, false);
+    ret_val.second.trim_reference_prefix(sequence_.size() - to_trim, node_overlap, config);
+    assert(ret_val.second.size());
 
-    // ensure that there's no DELETION at the splice point
-    size_t trim_nodes = k;
-    if (ret_val.first.size()) {
-        auto it = ret_val.first.get_cigar().data().rbegin();
-        if (it->first == Cigar::CLIPPED)
-            ++it;
-
-        if (it->first == Cigar::DELETION) {
-            trim_nodes += it->second;
-            ret_val.first.trim_reference_suffix(it->second, config, false);
-        }
-
-        assert(ret_val.first.size());
-    }
-
-    if (ret_val.first.empty() || ret_val.first.get_nodes().back() == DeBruijnGraph::npos)
-        return std::make_pair(Alignment(), *this);
-
-    size_t trim_prefix = sequence_.size() - trim_nodes;
-    auto second_end_it = std::min(ret_val.second.get_nodes().begin() + trim_prefix,
-                                  ret_val.second.get_nodes().end() - 1);
-    if (std::find(ret_val.second.get_nodes().begin(), second_end_it,
-                  DeBruijnGraph::npos) != second_end_it)
-        return std::make_pair(Alignment(), *this);
-
-    ret_val.second.trim_reference_prefix(trim_prefix, node_overlap, config, true);
-
+    ret_val.first.trim_reference_suffix(to_trim, config, false);
+    assert(ret_val.first.size());
     return ret_val;
 }
 
