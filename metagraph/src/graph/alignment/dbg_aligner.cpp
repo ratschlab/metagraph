@@ -394,7 +394,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
                 auto merged = *first;
                 auto next_fixed = next;
                 if (overlap > 0)
-                    next_fixed.trim_query_prefix(overlap, graph_.get_k() - 1, config_);
+                    next_fixed.trim_query_prefix(overlap, graph_.get_k() - 1, config_, false);
 
                 next_fixed.insert_gap_prefix(-overlap, graph_.get_k() - 1, config_);
                 merged.splice(std::move(next_fixed));

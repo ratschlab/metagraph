@@ -110,13 +110,21 @@ std::vector<Alignment> SeedFilteringExtender::connect_seeds(const Alignment &fir
     coord_dist += next.get_sequence().size();
     assert(coord_dist > 0);
 
+    const auto &cigar = second.get_cigar().data();
+    auto it = cigar.rbegin();
+    if (it->first == Cigar::CLIPPED)
+        ++it;
+
+    size_t num_exact_match_end = it->first == Cigar::MATCH ? it->second : 0;
+
     auto extensions = get_extensions(next, min_path_score,
-        true,                                               // force_fixed_seed
-        coord_dist,                                         // target_length
-        second.get_nodes().back(),                          // target_node
-        false,                                              // trim_offset_after_extend
-        second.get_end_clipping(),                          // trim_query_suffix
-        std::max(100, first.get_score() - next.get_score()) // added_xdrop
+        true,                                                // force_fixed_seed
+        coord_dist,                                          // target_length
+        second.get_nodes().back(),                           // target_node
+        false,                                               // trim_offset_after_extend
+        second.get_end_clipping(),                           // trim_query_suffix
+        std::max(100, first.get_score() - next.get_score()), // added_xdrop
+        num_exact_match_end                                  // target_exact_match
     );
 
     std::vector<Alignment> alignments;
@@ -332,7 +340,9 @@ void update_column(size_t prev_end,
                    score_t xdrop_cutoff,
                    const DBGAlignerConfig &config_,
                    score_t init_score,
-                   size_t offset) {
+                   size_t offset,
+                   bool allow_delete,
+                   bool allow_insert) {
     static_assert(DefaultColumnExtender::kPadding == 5);
     constexpr size_t width = DefaultColumnExtender::kPadding - 1;
     const simde__m128i gap_open = simde_mm_set1_epi32(config_.gap_opening_penalty);
@@ -358,37 +368,41 @@ void update_column(size_t prev_end,
             match = simde_mm_insert_epi32(match, ninf, 0);
         }
 
-        // del_score = std::max(del_open, del_extend);
-        simde__m128i del_score;
-        if (offset > 1) {
-            del_score = simde_mm_max_epi32(
-                simde_mm_add_epi32(simde_mm_loadu_si128((simde__m128i*)&S_prev_v[j]), gap_open),
-                simde_mm_add_epi32(simde_mm_loadu_si128((simde__m128i*)&F_prev_v[j]), gap_extend)
-            );
-            del_score = simde_mm_add_epi32(del_score, score_v);
-        } else {
-            del_score = ninf_v;
+        if (allow_delete) {
+            // del_score = std::max(del_open, del_extend);
+            simde__m128i del_score;
+            if (offset > 1) {
+                del_score = simde_mm_max_epi32(
+                    simde_mm_add_epi32(simde_mm_loadu_si128((simde__m128i*)&S_prev_v[j]), gap_open),
+                    simde_mm_add_epi32(simde_mm_loadu_si128((simde__m128i*)&F_prev_v[j]), gap_extend)
+                );
+                del_score = simde_mm_add_epi32(del_score, score_v);
+            } else {
+                del_score = ninf_v;
+            }
+
+            // F_v[j] = del_score
+            simde_mm_store_si128((simde__m128i*)&F_v[j], del_score);
+
+            // match = max(match, del_score)
+            match = simde_mm_max_epi32(match, del_score);
         }
 
-        // F_v[j] = del_score
-        simde_mm_store_si128((simde__m128i*)&F_v[j], del_score);
+        if (allow_insert) {
+            // E_v[j + 1] = S[j] + gap_open
+            simde__m128i ins_open_next = simde_mm_add_epi32(match, gap_open);
+            simde_mm_storeu_si128((simde__m128i*)&E_v[j + 1], ins_open_next);
 
-        // match = max(match, del_score)
-        match = simde_mm_max_epi32(match, del_score);
+            // This rolling update is hard to vectorize
+            // E_v[j + 1] = max(E_v[j + 1], E_v[j] + gap_extend)
+            E_v[j + 1] = std::max(E_v[j] + config_.gap_extension_penalty, E_v[j + 1]);
+            E_v[j + 2] = std::max(E_v[j + 1] + config_.gap_extension_penalty, E_v[j + 2]);
+            E_v[j + 3] = std::max(E_v[j + 2] + config_.gap_extension_penalty, E_v[j + 3]);
+            E_v[j + 4] = std::max(E_v[j + 3] + config_.gap_extension_penalty, E_v[j + 4]);
 
-        // E_v[j + 1] = S[j] + gap_open
-        simde__m128i ins_open_next = simde_mm_add_epi32(match, gap_open);
-        simde_mm_storeu_si128((simde__m128i*)&E_v[j + 1], ins_open_next);
-
-        // This rolling update is hard to vectorize
-        // E_v[j + 1] = max(E_v[j + 1], E_v[j] + gap_extend)
-        E_v[j + 1] = std::max(E_v[j] + config_.gap_extension_penalty, E_v[j + 1]);
-        E_v[j + 2] = std::max(E_v[j + 1] + config_.gap_extension_penalty, E_v[j + 2]);
-        E_v[j + 3] = std::max(E_v[j + 2] + config_.gap_extension_penalty, E_v[j + 3]);
-        E_v[j + 4] = std::max(E_v[j + 3] + config_.gap_extension_penalty, E_v[j + 4]);
-
-        // S_v[j] = max(match, E_v[j])
-        match = simde_mm_max_epi32(match, simde_mm_load_si128((simde__m128i*)&E_v[j]));
+            // S_v[j] = max(match, E_v[j])
+            match = simde_mm_max_epi32(match, simde_mm_load_si128((simde__m128i*)&E_v[j]));
+        }
 
         // match >= xdrop_cutoff
         simde__m128i mask = simde_mm_cmpgt_epi32(match, xdrop_v);
@@ -513,8 +527,21 @@ std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score,
                                                      node_index target_node,
                                                      bool trim_offset_after_extend,
                                                      size_t trim_query_suffix,
-                                                     score_t added_xdrop) {
+                                                     score_t added_xdrop,
+                                                     size_t target_exact_match) {
     assert(this->seed_);
+    bool only_match_in_seed = false;
+    if (force_fixed_seed) {
+        const auto &cigar = this->seed_->get_cigar();
+        auto it = cigar.data().begin() + (cigar.data()[0].first == Cigar::CLIPPED);
+        if (it->first == Cigar::MATCH) {
+            ++it;
+            if (it != cigar.data().end() && it->first == Cigar::CLIPPED)
+                ++it;
+
+            only_match_in_seed = (it == cigar.data().end());
+        }
+    }
 
     ++num_extensions_;
 
@@ -697,15 +724,36 @@ std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score,
                 assert(!node_cur || c == graph_->get_node_sequence(node_cur)[
                     std::min(static_cast<ssize_t>(graph_->get_k()) - 1, offset)]);
 
+                ssize_t diag_i = offset - seed_offset;
+                size_t traversed = diag_i;
+
+                bool allow_insert = true;
+                bool allow_delete = true;
+
+                if (in_seed && only_match_in_seed) {
+                    allow_delete = false;
+                    allow_insert = (next_offset - this->seed_->get_offset() + 1
+                                    == this->seed_->get_sequence().size());
+                }
+
+                if (force_fixed_seed && target_length && target_exact_match
+                        && traversed >= target_length + 1 - target_exact_match) {
+                    allow_delete = false;
+                    allow_insert = false;
+                }
+
                 // compute column scores
                 update_column(prev_end - trim,
                               S_prev.data() + trim - trim_prev,
                               F_prev.data() + trim - trim_prev,
                               S, E, F,
                               profile_score_[KmerExtractorBOSS::encode(c)].data() + start + trim,
-                              xdrop_cutoff, config_, score, offset);
+                              xdrop_cutoff, config_, score, offset,
+                              allow_delete,
+                              allow_insert);
 
-                extend_ins_end(S, E, F, window.size() + 1 - trim, xdrop_cutoff, config_);
+                if (allow_insert)
+                    extend_ins_end(S, E, F, window.size() + 1 - trim, xdrop_cutoff, config_);
 
                 assert(max_pos >= trim);
                 assert(static_cast<size_t>(max_pos - trim) < S.size());
@@ -713,7 +761,6 @@ std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score,
                 // find the maximal scoring position which is closest to the diagonal
                 // TODO: this can be done with SIMD, but it's not a bottleneck
                 ssize_t cur_offset = begin;
-                ssize_t diag_i = offset - seed_offset;
                 bool has_extension = in_seed;
                 const score_t *partial_sums = &partial_sums_[start + trim];
                 score_t extension_cutoff
@@ -761,7 +808,7 @@ std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score,
 
                 score_t max_val = S[max_pos - trim];
 
-                if (static_cast<size_t>(offset - seed_offset) < target_length + 1) {
+                if (traversed < target_length + 1) {
                     has_extension = true;
                 } else if (target_length) {
                     DEBUG_LOG("Target distance reached");

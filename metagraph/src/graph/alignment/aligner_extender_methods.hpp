@@ -42,12 +42,14 @@ class SeedFilteringExtender {
                                           node_index target_node = DeBruijnGraph::npos,
                                           bool trim_offset_after_extend = true,
                                           size_t trim_query_suffix = 0,
-                                          score_t added_xdrop = 0) {
+                                          score_t added_xdrop = 0,
+                                          size_t target_exact_match = 0) {
         if (!set_seed(seed))
             return {};
 
         return extend(min_path_score, force_fixed_seed, target_length, target_node,
-                      trim_offset_after_extend, trim_query_suffix, added_xdrop);
+                      trim_offset_after_extend, trim_query_suffix, added_xdrop,
+                      target_exact_match);
     }
 
     virtual std::string_view get_query() const = 0;
@@ -108,7 +110,8 @@ class SeedFilteringExtender {
                                           node_index target_node = DeBruijnGraph::npos,
                                           bool trim_offset_after_extend = true,
                                           size_t trim_query_suffix = 0,
-                                          score_t added_xdrop = 0) = 0;
+                                          score_t added_xdrop = 0,
+                                          size_t target_exact_match = 0) = 0;
 
     virtual bool set_seed(const Alignment &seed);
 
@@ -192,7 +195,8 @@ class DefaultColumnExtender : public SeedFilteringExtender {
                                           node_index target_node = DeBruijnGraph::npos,
                                           bool trim_offset_after_extend = true,
                                           size_t trim_query_suffix = 0,
-                                          score_t added_xdrop = 0) override;
+                                          score_t added_xdrop = 0,
+                                          size_t target_exact_match = 0) override;
 
     virtual void call_outgoing(node_index node,
                                size_t max_prefetch_distance,
