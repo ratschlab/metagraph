@@ -1025,15 +1025,6 @@ void chain_alignments(const IDBGAligner &aligner,
 #ifndef NDEBUG
         // sanity checks
         {
-            auto it = suffix_scores.rbegin();
-            auto cur = alignment;
-            while (cur.size()) {
-                cur.trim_query_suffix(1, config);
-                ++it;
-                assert(cur.empty() || cur.get_score() == *it);
-            }
-        }
-        {
             auto it = prefix_scores.begin();
             auto cur = alignment;
             while (cur.size()) {
@@ -1045,6 +1036,7 @@ void chain_alignments(const IDBGAligner &aligner,
 #endif
         auto cur = alignment;
         while (cur.size()) {
+            assert(cur.get_score() == *(suffix_scores.rbegin() + (alignment.get_query_view().size() - cur.get_query_view().size())));
             auto it = cur.get_cigar().data().rbegin();
             if (it->first == Cigar::CLIPPED)
                 ++it;
@@ -1059,7 +1051,7 @@ void chain_alignments(const IDBGAligner &aligner,
                     cur_aln.trim_query_prefix(begin - query.begin(), graph.get_k() - 1, config);
                     cur_aln.trim_query_suffix(query.end() - end, config);
                     assert(cur_aln.size());
-                    assert(cur_aln.get_score() == suffix_scores[end - query.begin()] - prefix_scores[begin - query.begin()]);
+                    assert(cur_aln.get_score() == cur.get_score() - prefix_scores[begin - query.begin()]);
 #endif
                     // logger->info("\tcut\t{}", cur);
                     anchors.emplace_back(
@@ -1068,7 +1060,7 @@ void chain_alignments(const IDBGAligner &aligner,
                         i,
                         begin,
                         end - begin,
-                        suffix_scores[end - query.begin()] - prefix_scores[begin - query.begin()],
+                        cur.get_score() - prefix_scores[begin - query.begin()],
                         std::numeric_limits<uint32_t>::max(),
                         alignment.get_clipping() + (begin - query.begin()),
                         node_i
