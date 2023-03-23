@@ -53,6 +53,8 @@ DifferentialAssemblyConfig diff_assembly_config(const Json::Value &experiment) {
     diff_config.count_kmers = experiment.get("count_kmers", false).asBool();
     diff_config.family_wise_error_rate = experiment.get("family_wise_error_rate", 0.05).asDouble();
     diff_config.test_by_unitig = experiment.get("test_by_unitig", false).asBool();
+    diff_config.evaluate_assembly = experiment.get("evaluate_assembly", false).asBool();
+
 
     logger->trace("Per-kmer mask in fraction:\t\t{}", diff_config.label_mask_in_kmer_fraction);
     logger->trace("Per-unitig mask in fraction:\t\t{}", diff_config.label_mask_in_unitig_fraction);

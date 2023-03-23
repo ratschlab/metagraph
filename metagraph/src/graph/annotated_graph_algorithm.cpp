@@ -177,6 +177,8 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
                                config, num_threads);
 }
 
+
+
 std::shared_ptr<MaskedDeBruijnGraph>
 mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr, // Myrthe: this version i don't need to change at first
                     const std::vector<std::string> &files,
@@ -204,13 +206,19 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr, // Myrthe: t
                 assert(files.size() > 0);
                 annot::ColumnCompressed<>::load_columns_and_values(files,
                     [&](uint64_t offset, const Label &label, std::unique_ptr<bit_vector> && column, auto&& column_values) {
-                        // TODO Myrthe: equalize coverage; std::ceil(column_values / (column_values sum
                         column_callback(offset, label, [&](const ValueCallback &value_callback) {
                             assert(std::accumulate(column_values.begin(), column_values.end(), 0) > 0);
                             assert(column->num_set_bits() > 0);
                             assert(column->num_set_bits() == column_values.size());
+                            //Normalization. normalize_coverage(column); This constant should be the same for every column. Calculate it from  the max width column. with the max value over all columns being the width of that column devidied by its column_values_sum
+                            int normalization_constant = 1e9;   //(int) 2**16 / width * column_values_sum;
+                            auto total_kmers = std::accumulate(column_values.begin(), column_values.end(), 0);
+                            auto normalization_factor = normalization_constant / total_kmers;
+                            int min_col_width = std::pow(2, 16); //column_values = std::min((int) std::ceil((*column_values)*normalization_factor), min_column_width); // limit to a certain number of bits.
                             call_ones(*column, [&](uint64_t i) {
-                                value_callback(i, column_values[column->rank1(i)-1]);
+                                auto column_value = column_values[column->rank1(i)-1];
+                                column_value = std::min((int) std::ceil(column_value*normalization_factor), min_col_width); // normalize value
+                                value_callback(i, column_value);
                             });
                         });
                     }
@@ -235,6 +243,37 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr, // Myrthe: t
 
 
     auto &[counts, init_mask, other_labels, total_kmers] = count_vector;
+
+    // Myrthe: temporary
+    if (config.evaluate_assembly){     // Myrthe temporary: evaluate what k-mers overlap
+        logger->trace("Evaluate confusion table");
+        assert(counts.size() > 1);
+        assert( std::accumulate(counts.begin(), counts.end(), 0) > 0);
+        int true_positive = 0; int true_negative = 0; int false_positive = 0; int false_negative =0;
+        for (size_t i = 0; i < counts.size() ; i+=2){
+            auto &[counts, init_mask, other_labels, total_kmers] = count_vector;
+            uint64_t true_count = counts[i];
+            uint64_t found_count = counts[i + 1];
+            if (true_count == found_count){
+                true_positive += true_count; // if 0 nothing will be added.
+            }else if (true_count > found_count){
+                false_negative += (true_count - found_count);
+                true_positive += found_count; // add to true_positive
+            }else{false_positive += (found_count - true_count);
+                true_positive += true_count;} // TODO :Why are there no false positives?
+        };
+        // true_negatives: total number of possible k-mers? Total number of k-mers in the original foreground samples from which the result had been calculated ?
+        auto precision = true_positive / ( true_positive - true_negative); // accuracy/precision = Ratio of true positives to total predicted positives.
+        auto recall = true_positive / (true_positive + false_negative);  //recall / sensitivity:  ratio of true positives to total (actual) positives in the data.
+        //auto specificity = true_negative / (true_negative + false_positive); // Specificity is the Ratio of true negatives to total negatives in the data.
+        std::cout<< "precision" << precision << std::endl << std::flush;
+        std::cout<< "recall" << recall << std::endl << std::flush;
+        std::cout << std::accumulate(counts.begin(), counts.end(), 0) << std::flush;
+        assert(true_positive + false_negative + false_positive == std::accumulate(counts.begin(), counts.end(), 0));
+        //std::cout<< "specificity" << specificity << std::endl << std::flush;
+    } // in mask probably only has sequences
+
+
     sdsl::bit_vector other_mask(init_mask.size() * check_other, false);
     if (check_other && sdsl::util::cnt_one_bits(other_labels)) {
         bool parallel = num_parallel_files > 1;
@@ -261,6 +300,7 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr, // Myrthe: t
         }
         std::atomic_thread_fence(std::memory_order_acquire);
     }
+
 
     if (config.family_wise_error_rate == 0){  // make k-mer distribution
         logger->trace("K-mer distribution");
@@ -393,6 +433,7 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         masked_graph->set_mask(new bitmap_vector(std::move(union_mask)));
     }
 
+
     // Filter unitigs from masked graph based on filtration criteria
     logger->trace("Filtering out background");
     if (config.count_kmers) {
@@ -432,9 +473,6 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                                                in_total_kmers, out_total_kmers);
             update_masked_graph_by_unitig(*masked_graph, // intitial mask
                 [&](const std::string &, const std::vector<node_index> &path) -> Intervals { // return a set of intervals to keep in the graph
-                //TODO Myrthe: set the number of test hypotheses to the number of unitigs
-                    size_t begin = path.size();
-                    size_t end = 0;
                     int in_kmer_count_unitig = 0;
                     int out_kmer_count_unitig = 0;
                     for (size_t i = 0; i < path.size(); ++i) {
@@ -442,7 +480,7 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                         out_kmer_count_unitig += counts[path[i] * 2 + 1];
                     }
                     if (statistical_model.likelihood_ratio_test(in_kmer_count_unitig, out_kmer_count_unitig))
-                                return { std::make_pair(begin, end) };
+                        return { std::make_pair(0, path.size()) };
                     else
                         return {};
                 },
@@ -497,7 +535,7 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             size_t begin = path.size();
             size_t end = 0;
             for (size_t i = 0; i < path.size(); ++i) {
-                if (counts[path[i] * 2] >= min_label_in_count) {f
+                if (counts[path[i] * 2] >= min_label_in_count) {
                     if (begin == path.size())
                         begin = i;
 
@@ -831,7 +869,7 @@ void update_masked_graph_by_unitig(MaskedDeBruijnGraph &masked_graph,
             kept_unitigs.fetch_add(1, MO_RELAXED);
             num_kept_nodes.fetch_add(end - begin, MO_RELAXED);
             for ( ; last < begin; ++last) {
-                unset_bit(mask.data(), path[last], parallel, MO_RELAXED);
+                unset_bit(mask.data(), path[last], parallel, MO_RELAXED); // QUESTION Myrthe, why does it unset bits, rather than set bit?
             }
             last = end;
         }
