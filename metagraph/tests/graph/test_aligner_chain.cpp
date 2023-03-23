@@ -168,23 +168,23 @@ TYPED_TEST(DBGAlignerPostChainTest, align_chain_delete1) {
 
 TYPED_TEST(DBGAlignerPostChainTest, align_chain_delete_mismatch) {
     size_t k = 10;
-    std::string reference1 = "AAAAAGGGTTTTTGAGGATCAGTTCTAGCTTG";
-    std::string reference2 =                       "CCCTAGCTTGCTAGCGCTAGCTAGATC";
-    std::string query      = "AAAAAGGGTTTTTGAGGATCAG""CTTGCTTGCTAGCGCTAGCTAGATC";
+    std::string reference1 = "AAAAAGGGTTTTTGAGGATCAGTTCTGCGCTTG";
+    std::string reference2 =                       "CCCTACGCTTGCTAGCGCTAGCTAGATC";
+    std::string query      = "AAAAAGGGTTTTTGAGGATCAG""CTTCGCTTGCTAGCGCTAGCTAGATC";
     //                                                  X
 
     auto graph = build_graph_batch<TypeParam>(k, { reference1, reference2 });
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
-    config.min_seed_length = 5;
-    config.max_seed_length = 5;
+    config.min_seed_length = 6;
+    config.max_seed_length = 6;
     config.set_node_insertion_penalty(k);
     config.allow_jump = true;
 
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
     ASSERT_EQ(1u, paths.size());
-    EXPECT_EQ(std::string("AAAAAGGGTTTTTGAGGATCAGTTCTAGCTTGCTAGCGCTAGCTAGATC"), paths[0].get_sequence());
+    EXPECT_EQ(std::string("AAAAAGGGTTTTTGAGGATCAGTTCTGCGCTTGCTAGCGCTAGCTAGATC"), paths[0].get_sequence());
     check_chain(paths, *graph, config);
 }
 
