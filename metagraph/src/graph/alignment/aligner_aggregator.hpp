@@ -77,7 +77,7 @@ inline bool AlignmentAggregator<AlignmentCompare>::add_alignment(Alignment&& ali
                 return false;
         }
         // If post-alignment chaining is requested, never skip any alignments
-        if (queue.size() < config_.num_alternative_paths) {
+        if (config_.allow_jump || queue.size() < config_.num_alternative_paths) {
             queue.emplace(a);
             return true;
         }
@@ -143,7 +143,7 @@ inline bool AlignmentAggregator<AlignmentCompare>::add_alignment(Alignment&& ali
 
 template <class AlignmentCompare>
 inline auto AlignmentAggregator<AlignmentCompare>::get_global_cutoff() const -> score_t {
-    if (unlabeled_.empty())
+    if (config_.allow_jump || unlabeled_.empty())
         return config_.ninf;
 
     score_t cur_max = unlabeled_.maximum()->get_score();

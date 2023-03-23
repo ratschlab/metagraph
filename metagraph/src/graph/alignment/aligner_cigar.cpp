@@ -304,11 +304,17 @@ bool Cigar::is_valid(std::string_view reference, std::string_view query) const {
     return true;
 }
 
-void Cigar::mark_exact_matches(sdsl::bit_vector &mask) const {
+bool Cigar::mark_exact_matches(sdsl::bit_vector &mask, bool skip_clipping) const {
+    bool added = false;
     auto it = mask.begin();
     for (const auto &[op, num] : cigar_) {
         switch (op) {
-            case CLIPPED:
+            case CLIPPED: {
+                if (!skip_clipping) {
+                    assert(it + num <= mask.end());
+                    it += num;
+                }
+            } break;
             case INSERTION:
             case MISMATCH: {
                 assert(it + num <= mask.end());
@@ -318,12 +324,15 @@ void Cigar::mark_exact_matches(sdsl::bit_vector &mask) const {
             case NODE_INSERTION: {} break;
             case MATCH: {
                 assert(it + num <= mask.end());
+                added |= (std::find(it, it + num, true) != it + num);
                 std::fill(it, it + num, true);
                 it += num;
             } break;
         }
     }
     assert(it == mask.end());
+
+    return added;
 }
 
 } // namespace align

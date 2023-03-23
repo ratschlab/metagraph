@@ -127,29 +127,27 @@ DBGAlignerConfig::score_t DBGAlignerConfig
 std::vector<DBGAlignerConfig::score_t> DBGAlignerConfig
 ::get_per_char_scores(std::string_view reference,
                       std::string_view query,
-                      const Cigar &cigar) const {
+                      const Cigar &cigar,
+                      bool skip_clipping,
+                      bool trim_from_suffix) const {
     assert(cigar.is_valid(reference, query));
 
     if (cigar.empty())
         return {};
 
     std::vector<score_t> scores;
-    scores.reserve(query.size() - cigar.get_clipping() - cigar.get_end_clipping());
+    scores.reserve(query.size());
 
     score_t score = !cigar.get_clipping() ? left_end_bonus : 0;
     score_t last_score = 0;
 
     auto ref_it = reference.begin();
     auto alt_it = query.begin();
-    auto it = cigar.data().begin();
-    if (it->first == Cigar::CLIPPED)
-        ++it;
-
-    for ( ; it != cigar.data().end(); ++it) {
+    for (auto it = cigar.data().begin(); it != cigar.data().end(); ++it) {
         const auto &op = *it;
         switch (op.first) {
             case Cigar::CLIPPED: {
-                if (it + 1 != cigar.data().end())
+                if (!skip_clipping)
                     alt_it += op.second;
             } break;
             case Cigar::MATCH: {
@@ -172,10 +170,16 @@ std::vector<DBGAlignerConfig::score_t> DBGAlignerConfig
                 }
             } break;
             case Cigar::INSERTION: {
-                scores.emplace_back(gap_opening_penalty);
+                if (trim_from_suffix)
+                    scores.emplace_back(score - last_score + gap_opening_penalty);
+
                 for (size_t i = 1; i < op.second; ++i) {
                     scores.emplace_back(gap_extension_penalty);
                 }
+
+                if (!trim_from_suffix)
+                    scores.emplace_back(score - last_score + gap_opening_penalty);
+
                 score += gap_opening_penalty + (op.second - 1) * gap_extension_penalty;
                 last_score = score;
                 alt_it += op.second;
@@ -187,16 +191,27 @@ std::vector<DBGAlignerConfig::score_t> DBGAlignerConfig
                         && (it - 1)->first == Cigar::NODE_INSERTION) {
                     score -= gap_opening_penalty - gap_extension_penalty;
                 }
+
+                if (!trim_from_suffix) {
+                    scores.back() += score - last_score;
+                    last_score = score;
+                }
             } break;
-            case Cigar::NODE_INSERTION: { score += node_insertion_penalty; } break;
+            case Cigar::NODE_INSERTION: {
+                score += node_insertion_penalty;
+                if (!trim_from_suffix) {
+                    scores.back() += score - last_score;
+                    last_score = score;
+                }
+            } break;
         }
     }
 
-    scores.back() += !cigar.get_end_clipping() ? right_end_bonus : 0;
+    scores.back() += score - last_score + (!cigar.get_end_clipping() ? right_end_bonus : 0);
 
     assert(ref_it == reference.end());
     assert(alt_it == query.end());
-    assert(scores.size() == query.size() - cigar.get_clipping() - cigar.get_end_clipping());
+    assert(scores.size() == query.size());
 
     return scores;
 }

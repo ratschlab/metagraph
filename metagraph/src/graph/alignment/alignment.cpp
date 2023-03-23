@@ -1483,7 +1483,7 @@ void Alignment::insert_gap_prefix(ssize_t gap_length,
 
         trim_offset();
         if (offset_) {
-            assert(false && "not implemented");
+            assert(false && "extra node addition to sub-k alignments not implemented");
         }
         assert(get_clipping() >= gap_length);
         trim_clipping();

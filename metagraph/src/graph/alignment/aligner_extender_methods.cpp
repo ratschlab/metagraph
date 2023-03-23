@@ -78,10 +78,12 @@ void SeedFilteringExtender
     bool called = false;
 
 #if _PROTEIN_GRAPH
-    logger->warn("Front extension not supported for amino acid graphs");
+    common::logger->warn("Front extension not supported for amino acid graphs");
 #else
+
     auto rc_graph = std::shared_ptr<const DeBruijnGraph>(
         std::shared_ptr<const DeBruijnGraph>{}, graph_);
+
     if (graph_->get_mode() != DeBruijnGraph::CANONICAL)
         rc_graph = std::make_shared<RCDBG>(rc_graph);
 
@@ -89,13 +91,13 @@ void SeedFilteringExtender
     auto rev = seed;
     rev.reverse_complement(*rc_graph, get_query());
     if (rev.size() && rev.get_nodes().back()) {
-        set_graph(*rc_graph);
         assert(rev.get_end_clipping());
+
+        set_graph(*rc_graph);
         extend_seed_end(rev, [&](Alignment&& aln) {
             aln.reverse_complement(*rc_graph, seed.get_full_query_view());
-            assert(aln.get_offset() == seed.get_offset());
-            assert(aln.get_end_clipping() == seed.get_end_clipping());
             if (aln.size()) {
+                assert(aln.get_end_clipping() == seed.get_end_clipping());
                 assert(aln.get_score() >= min_path_score);
                 callback(std::move(aln));
                 called = true;

@@ -84,7 +84,9 @@ struct DBGAlignerConfig {
 
     std::vector<score_t> get_per_char_scores(std::string_view reference,
                                              std::string_view query,
-                                             const Cigar &cigar) const;
+                                             const Cigar &cigar,
+                                             bool skip_clipping = false,
+                                             bool trim_from_suffix = true) const;
 
     bool check_config_scores() const;
 

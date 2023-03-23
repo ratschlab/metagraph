@@ -33,7 +33,8 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
 std::tuple<size_t, size_t, size_t>
 chain_and_filter_seeds(const IDBGAligner &aligner,
                        std::shared_ptr<ISeeder> &seeder,
-                       SeedFilteringExtender&& extender);
+                       SeedFilteringExtender&& extender,
+                       SeedFilteringExtender&& bwd_extender);
 
 void chain_alignments(const IDBGAligner &aligner,
                       const std::vector<Alignment> &alignments,

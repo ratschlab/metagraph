@@ -545,7 +545,8 @@ chain_seeds(const DBGAlignerConfig &config,
 std::tuple<size_t, size_t, size_t>
 chain_and_filter_seeds(const IDBGAligner &aligner,
                        std::shared_ptr<ISeeder> &seeder,
-                       SeedFilteringExtender&& extender) {
+                       SeedFilteringExtender&& extender,
+                       SeedFilteringExtender&& bwd_extender) {
     std::string_view query = extender.get_query();
     const DeBruijnGraph &graph_ = aligner.get_graph();
     const DBGAlignerConfig &config_ = aligner.get_config();
@@ -676,7 +677,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
             if (k == j)
                 continue;
 
-            if (!labeled_aligner && col != col_j)
+            if ((!config_.allow_label_change || !labeled_aligner) && col != col_j)
                 continue;
 
             if (++num_considered > bandwidth)
@@ -714,8 +715,10 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                 if (begin >= end_j) {
                     // perhaps a disjoint alignment?
                     score_t gap = begin - end_j;
-                    score_t gap_cost = node_insert + gap_open + gap_open
-                                        + std::max(gap - 1, 0) * gap_ext;
+                    score_t gap_cost = node_insert + gap_open;
+                    if (gap > 0)
+                        gap_cost += gap_open + (gap - 1) * gap_ext;
+
                     score_t updated_score = base_added_score + gap_cost;
 
                     if (updated_score > score) {
@@ -835,6 +838,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
     sdsl::bit_vector matching_pos(query.size(), false);
     tsl::hopscotch_map<Alignment::Column, size_t> used_cols;
     std::vector<Alignment> alignments;
+    bool terminate = false;
     for (size_t j = 0; j < best_chain.size(); ++j) {
         auto [nscore, last_dist, k] = best_chain[j];
         if (used[k])
@@ -842,7 +846,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
 
         Alignment::Column col = std::get<1>(seeds[k]);
 
-        if (++used_cols[col] > config_.num_alternative_paths)
+        if ((!config_.allow_jump || terminate) && ++used_cols[col] > config_.num_alternative_paths)
             continue;
 
         std::vector<std::pair<Seed, size_t>> seed_chain;
@@ -865,6 +869,11 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
 
             k = last;
         }
+
+        if (seed_chain.size() == 1
+                && seed_chain.back().first.get_sequence().size() == config_.min_seed_length
+                && (seed_chain.back().first.get_clipping() || seed_chain.back().first.get_end_clipping()))
+            continue;
 
         // merge seeds
         for (auto it = seed_chain.rbegin() + 1; it != seed_chain.rend(); ++it) {
@@ -904,14 +913,40 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                           chain.back().second);
         }
 
+        bool added = false;
         aligner.extend_chain(std::move(chain), extender, [&](Alignment&& aln) {
-            aln.get_cigar().mark_exact_matches(matching_pos);
-            alignments.emplace_back(std::move(aln));
+            std::vector<Alignment> alns;
+            if (!aln.get_end_clipping()) {
+                alns.emplace_back(std::move(aln));
+            } else {
+                alns = extender.get_extensions(aln, 0, true);
+            }
+
+            for (auto&& ext : alns) {
+                if (!ext.get_clipping()) {
+                    added |= ext.get_cigar().mark_exact_matches(matching_pos);
+                    alignments.emplace_back(std::move(ext));
+                } else {
+                    bwd_extender.rc_extend_rc(ext, [&](Alignment&& aln) {
+                        assert(aln.is_valid(graph_, &config_));
+                        for (node_index node : aln.get_nodes()) {
+                            extender.filter_nodes(node, aln.get_clipping(),
+                                                  query.size() - aln.get_end_clipping());
+                        }
+
+                        added |= aln.get_cigar().mark_exact_matches(matching_pos);
+                        alignments.emplace_back(std::move(aln));
+                    }, true, 0);
+                }
+            }
         }, true);
+
+        if (config_.allow_jump && !added)
+            terminate = true;
     }
 
-    num_extensions += extender.num_extensions();
-    num_explored_nodes += extender.num_explored_nodes();
+    num_extensions += extender.num_extensions() + bwd_extender.num_extensions();
+    num_explored_nodes += extender.num_explored_nodes() + bwd_extender.num_explored_nodes();
     seeder = std::make_unique<ManualSeeder>(std::move(alignments),
                                             sdsl::util::cnt_one_bits(matching_pos));
 
@@ -921,12 +956,13 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
 void chain_alignments(const IDBGAligner &aligner,
                       const std::vector<Alignment> &alignments,
                       const std::function<void(Alignment&&)> &callback) {
+    // logger->info("Chaining {} alignments", alignments.size());
+
     const auto &config = aligner.get_config();
     if (alignments.size() <= 1 || (!config.allow_jump && !config.allow_label_change))
         return;
 
     const DeBruijnGraph &graph = aligner.get_graph();
-    std::string_view query_view = alignments[0].get_full_query_view();
 
     using Anchor = std::tuple<std::string_view::const_iterator, // end
                               Alignment::Column, // annotation
@@ -941,83 +977,179 @@ void chain_alignments(const IDBGAligner &aligner,
     static_assert(sizeof(Anchor) == 64);
 
     std::vector<Anchor> anchors;
-    std::vector<std::vector<score_t>> per_char_scores;
+    std::vector<std::vector<score_t>> per_char_scores_prefix;
+    std::vector<std::vector<score_t>> per_char_scores_suffix;
     for (size_t i = 0; i < alignments.size(); ++i) {
         const auto &alignment = alignments[i];
         if (!alignment.get_clipping() && !alignment.get_end_clipping())
             continue;
 
-        std::string_view query_view = alignment.get_query_view();
-        sdsl::bit_vector is_match(query_view.size(), false);
-        alignment.get_cigar().mark_exact_matches(is_match);
+        // logger->info("In: {}\t{}", i, alignment);
 
-        auto &scores = per_char_scores.emplace_back(config.get_per_char_scores(
+        std::string_view query = alignment.get_query_view();
+        std::vector<Cigar::Operator> cigar;
+        for (const auto &[op, count] : alignment.get_cigar().data()) {
+            if (op != Cigar::CLIPPED)
+                cigar.insert(cigar.end(), count, op);
+        }
+
+        auto &prefix_scores = per_char_scores_prefix.emplace_back(config.get_per_char_scores(
             alignment.get_sequence(),
-            query_view,
-            alignment.get_cigar()
+            query,
+            alignment.get_cigar(),
+            true,
+            false
+        ));
+
+        auto &suffix_scores = per_char_scores_suffix.emplace_back(config.get_per_char_scores(
+            alignment.get_sequence(),
+            query,
+            alignment.get_cigar(),
+            true,
+            true
         ));
 
         if (alignment.extra_scores.size()) {
             for (size_t j = 1; j < alignment.get_nodes().size(); ++j) {
-                scores[j] += alignment.extra_scores[j - 1];
+                prefix_scores[j + graph.get_k() - 1 - alignment.get_offset()] += alignment.extra_scores[j - 1];
+                suffix_scores[j + graph.get_k() - 1 - alignment.get_offset()] += alignment.extra_scores[j - 1];
             }
         }
-        scores.insert(scores.begin(), 0);
-        std::partial_sum(scores.begin(), scores.end(), scores.begin());
-        assert(scores.back() == alignment.get_score());
+        prefix_scores.insert(prefix_scores.begin(), 0);
+        suffix_scores.insert(suffix_scores.begin(), 0);
+        std::partial_sum(prefix_scores.begin(), prefix_scores.end(), prefix_scores.begin());
+        std::partial_sum(suffix_scores.begin(), suffix_scores.end(), suffix_scores.begin());
+        assert(prefix_scores.back() == alignment.get_score());
+        assert(suffix_scores.back() == alignment.get_score());
 
-        auto begin = query_view.begin();
-        auto end = query_view.begin() + graph.get_k() - alignment.get_offset();
+#ifndef NDEBUG
+        // sanity checks
+        {
+            auto it = suffix_scores.rbegin();
+            auto cur = alignment;
+            while (cur.size()) {
+                cur.trim_query_suffix(1, config);
+                ++it;
+                assert(cur.empty() || cur.get_score() == *it);
+            }
+        }
+        {
+            auto it = prefix_scores.begin();
+            auto cur = alignment;
+            while (cur.size()) {
+                cur.trim_query_prefix(1, graph.get_k() - 1, config);
+                ++it;
+                assert(cur.empty() || cur.get_score() == prefix_scores.back() - *it);
+            }
+        }
+#endif
+        auto cur = alignment;
+        while (cur.size()) {
+            auto it = cur.get_cigar().data().rbegin();
+            if (it->first == Cigar::CLIPPED)
+                ++it;
 
-        ssize_t num_exact_matches = std::accumulate(
-            is_match.begin(),
-            is_match.begin() + (end - begin),
-            ssize_t(0)
-        );
+            if (it->first == Cigar::MATCH && it->second >= config.min_seed_length) {
+                auto end = cur.get_query_view().end();
+                auto begin = end - config.min_seed_length;
+                size_t node_i = cur.get_nodes().size() - 1;
+                auto add_seed = [&](Alignment::Column col) {
+#ifndef NDEBUG
+                    auto cur_aln = alignment;
+                    cur_aln.trim_query_prefix(begin - query.begin(), graph.get_k() - 1, config);
+                    cur_aln.trim_query_suffix(query.end() - end, config);
+                    assert(cur_aln.size());
+                    assert(cur_aln.get_score() == suffix_scores[end - query.begin()] - prefix_scores[begin - query.begin()]);
+#endif
+                    // logger->info("\tcut\t{}", cur);
+                    anchors.emplace_back(
+                        end,
+                        col,
+                        i,
+                        begin,
+                        end - begin,
+                        suffix_scores[end - query.begin()] - prefix_scores[begin - query.begin()],
+                        std::numeric_limits<uint32_t>::max(),
+                        alignment.get_clipping() + (begin - query.begin()),
+                        node_i
+                    );
+                };
 
-        auto add_seed = [&](Alignment::Column col) {
-            anchors.emplace_back(
-                end,
-                col,
-                i,
-                begin,
-                end - begin,
-                scores[end - query_view.begin()] - scores[begin - query_view.begin()],
-                std::numeric_limits<uint32_t>::max(),
-                alignment.get_clipping() + (begin - query_view.begin()),
-                end - query_view.begin()
-            );
-        };
-
-        while (static_cast<size_t>(end - begin) > config.min_seed_length) {
-            if (num_exact_matches == end - begin) {
-                const auto &columns = alignment.get_columns(0);
+                const auto &columns = cur.get_columns(node_i);
                 std::for_each(columns.begin(), columns.end(), add_seed);
                 if (columns.empty())
                     add_seed(std::numeric_limits<Alignment::Column>::max());
             }
 
-            num_exact_matches -= is_match[begin - query_view.begin()];
-            ++begin;
-        }
+            if (cur.get_nodes().size() == 1 && it->first != Cigar::INSERTION) {
+                while (cur.get_query_view().size() >= config.min_seed_length) {
+                    auto begin = cur.get_query_view().begin();
+                    if (cur.get_query_view().size() > config.min_seed_length) {
+                        auto end = begin + config.min_seed_length;
+                        size_t node_i = std::numeric_limits<size_t>::max();
+                        auto jt = cur.get_cigar().data().begin();
+                        if (jt->first == Cigar::CLIPPED)
+                            ++jt;
 
-        num_exact_matches -= is_match[begin - query_view.begin()];
-        ++begin;
-        num_exact_matches += is_match[end - query_view.begin()];
-        ++end;
+                        if (jt->first == Cigar::MATCH
+                                && jt->second >= config.min_seed_length) {
+                            auto add_seed = [&](Alignment::Column col) {
+                                // logger->info("\tcutf\t{}", cur);
+                                anchors.emplace_back(
+                                    end,
+                                    col,
+                                    i,
+                                    begin,
+                                    end - begin,
+                                    suffix_scores[end - query.begin()] - prefix_scores[begin - query.begin()],
+                                    std::numeric_limits<uint32_t>::max(),
+                                    alignment.get_clipping() + (begin - query.begin()),
+                                    node_i
+                                );
+                            };
 
-        for (size_t j = 1; j < alignment.get_nodes().size(); ++j) {
-            if (num_exact_matches == end - begin) {
-                const auto &columns = alignment.get_columns(j);
-                std::for_each(columns.begin(), columns.end(), add_seed);
-                if (columns.empty())
-                    add_seed(std::numeric_limits<Alignment::Column>::max());
+                            const auto &columns = cur.get_columns(node_i);
+                            std::for_each(columns.begin(), columns.end(), add_seed);
+                            if (columns.empty())
+                                add_seed(std::numeric_limits<Alignment::Column>::max());
+                        }
+                    }
+
+                    auto end = cur.get_query_view().end();
+                    size_t node_i = 0;
+                    auto jt = cur.get_cigar().data().rbegin();
+                    if (jt->first == Cigar::CLIPPED)
+                        ++jt;
+
+                    if (jt->first == Cigar::MATCH
+                            && jt->second >= config.min_seed_length
+                            && (jt + 1 == cur.get_cigar().data().rend()
+                                || (jt + 1)->first == Cigar::CLIPPED)) {
+                        auto add_seed = [&](Alignment::Column col) {
+                            // logger->info("\tcutb\t{}", cur);
+                            anchors.emplace_back(
+                                end,
+                                col,
+                                i,
+                                begin,
+                                end - begin,
+                                suffix_scores[end - query.begin()] - prefix_scores[begin - query.begin()],
+                                std::numeric_limits<uint32_t>::max(),
+                                alignment.get_clipping() + (begin - query.begin()),
+                                node_i
+                            );
+                        };
+
+                        const auto &columns = cur.get_columns(node_i);
+                        std::for_each(columns.begin(), columns.end(), add_seed);
+                        if (columns.empty())
+                            add_seed(std::numeric_limits<Alignment::Column>::max());
+                    }
+                    cur.trim_query_prefix(1, graph.get_k() - 1, config);
+                }
             }
 
-            num_exact_matches -= is_match[begin - query_view.begin()];
-            ++begin;
-            num_exact_matches += is_match[end - query_view.begin()];
-            ++end;
+            cur.trim_query_suffix(1, config);
         }
     }
 
@@ -1025,8 +1157,9 @@ void chain_alignments(const IDBGAligner &aligner,
         return;
 
     const auto *labeled_aligner = dynamic_cast<const ILabeledAligner*>(&aligner);
-    score_t match_score = config.match_score("A");
-    score_t node_insert = config.node_insertion_penalty / match_score;
+    score_t node_insert = config.node_insertion_penalty;
+    score_t gap_open = config.gap_opening_penalty;
+    score_t gap_ext = config.gap_extension_penalty;
 
     std::sort(anchors.begin(), anchors.end());
     std::vector<size_t> start_points;
@@ -1042,24 +1175,41 @@ void chain_alignments(const IDBGAligner &aligner,
     // forward pass
     for (size_t i = 0; i < anchors.size() - 1; ++i) {
         const auto &[end_i, col_i, aln_i, begin_i, mem_length_i, score_i, last_i, last_dist_i, node_i] = anchors[i];
+        size_t lowest_updated = anchors.size();
+        // logger->info("checking {}->{}:{}", i, start_points[i], anchors.size());
         for (size_t j = start_points[i]; j < anchors.size(); ++j) {
             if (i == j)
                 continue;
 
             auto &[end, col, aln, begin, mem_length, score, last, last_dist, node] = anchors[j];
 
+            // logger->info("\tt? {} {}\t{}->{}", aln, aln_i,
+            //     end_i - alignments[0].get_full_query_view().begin(),
+            //     end - alignments[0].get_full_query_view().begin());
+
             if (aln == aln_i) {
                 // connect within an alignment
-                if (end == end_i)
+                if (end <= end_i || node == std::numeric_limits<size_t>::max())
                     continue;
 
+                std::string_view query = alignments[aln].get_query_view();
                 score_t updated_score = score_i
-                    + per_char_scores[aln][end - query_view.begin()]
-                    - per_char_scores[aln][end_i - query_view.begin()];
+                    + per_char_scores_suffix[aln][end - query.begin()]
+                    - per_char_scores_prefix[aln][end_i - query.begin()];
 
+#ifndef NDEBUG
+                auto cur_aln = alignments[aln];
+                cur_aln.trim_query_prefix(end_i - query.begin(), graph.get_k() - 1, config);
+                cur_aln.trim_query_suffix(query.end() - end, config);
+                assert(cur_aln.get_score() == updated_score - score_i);
+#endif
+
+                // logger->info("{}\t{}->{}\t{} >? {}\t{}", aln, i,j,updated_score ,score,
+                //     end - alignments[0].get_full_query_view().begin());
                 if (updated_score > score) {
                     score = updated_score;
                     last = i;
+                    lowest_updated = std::min(lowest_updated, j);
                     last_dist = end - end_i;
                     mem_length = mem_length_i + (end - end_i);
                 }
@@ -1067,24 +1217,49 @@ void chain_alignments(const IDBGAligner &aligner,
                 continue;
             }
 
-            if (end != end_i || begin_i > begin)
-                continue;
-
-            if (!config.allow_label_change && col_i != col)
+            if ((!config.allow_label_change || !labeled_aligner) && col_i != col)
                 continue;
 
             score_t label_change_score = labeled_aligner
                 ? labeled_aligner->get_label_change_score(col_i, col)
                 : 0;
-
             score_t updated_score = score_i + label_change_score;
 
-            if (alignments[aln_i].get_nodes()[node_i] == alignments[aln].get_nodes()[node]) {
+            if (config.allow_jump && begin >= end_i) {
+                // disjoint
+                score_t gap = begin - end_i;
+                score_t gap_cost = node_insert + gap_open;
+                if (gap > 0)
+                    gap_cost += gap_open + (gap - 1) * gap_ext;
+
+                std::string_view query = alignments[aln].get_query_view();
+                updated_score += gap_cost
+                    + per_char_scores_suffix[aln][end - query.begin()]
+                    - per_char_scores_prefix[aln][begin - query.begin()];
+
+                if (updated_score > score) {
+                    score = updated_score;
+                    last = i;
+                    last_dist = std::numeric_limits<uint32_t>::max() + (end - end_i);
+                    lowest_updated = std::min(lowest_updated, j);
+                    mem_length = end - begin;
+                }
+
+                continue;
+            }
+
+            if (end != end_i)
+                continue;
+
+            if (node_i != std::numeric_limits<size_t>::max()
+                    && node != std::numeric_limits<size_t>::max()
+                    && alignments[aln_i].get_nodes()[node_i] == alignments[aln].get_nodes()[node]) {
                 // perfect overlap, easy to connect
                 if (updated_score > score) {
                     score = updated_score;
                     last = i;
                     last_dist = 0;
+                    lowest_updated = std::min(lowest_updated, j);
                     mem_length = std::max(mem_length, mem_length_i);
                 }
 
@@ -1092,14 +1267,25 @@ void chain_alignments(const IDBGAligner &aligner,
             }
 
             if (config.allow_jump && mem_length_i >= graph.get_k()) {
+                // logger->info("foo: {}->{} / {}\t{} -> {}\t{}+{}={} >? {}\t{}",
+                //     i, j, anchors.size(), aln_i, aln,
+                //     updated_score, node_insert, updated_score + node_insert, score,
+                //     end - alignments[0].get_full_query_view().begin());
                 updated_score += node_insert;
                 if (updated_score > score) {
                     score = updated_score;
                     last_dist = 0;
-                    last = j;
+                    last = i;
+                    lowest_updated = std::min(lowest_updated, j);
                     mem_length = end - begin;
                 }
             }
+        }
+
+        // logger->info("lowest_updated: {}", lowest_updated);
+        if (lowest_updated < i) {
+            // logger->info("shifting back {} -> {}", i + 1, start_points[lowest_updated]);
+            i = start_points[lowest_updated] - 1;
         }
     }
 
@@ -1125,6 +1311,7 @@ void chain_alignments(const IDBGAligner &aligner,
         std::vector<std::pair<size_t, size_t>> chain;
         tsl::hopscotch_set<size_t> used_alns;
         while (k != std::numeric_limits<uint32_t>::max()) {
+            used[k] = true;
             const auto &[end, col, aln, begin, mem_length, score, last, last_dist, node] = anchors[k];
             chain.emplace_back(k, aln);
             used_alns.insert(aln);
@@ -1135,32 +1322,47 @@ void chain_alignments(const IDBGAligner &aligner,
             continue;
 
         std::reverse(chain.begin(), chain.end());
-        Alignment alignment = alignments[chain[0].second];
-        alignment.trim_query_prefix(std::get<3>(anchors[chain[0].first]) - alignment.get_query_view().begin(), graph.get_k() - 1, config);
-        size_t last_chain_i = 1;
 
+        std::vector<Alignment> partial_alignments;
+        size_t last_chain_i = 0;
         for (size_t i = 1; i < chain.size(); ++i) {
-            if (chain[i].second != last_chain_i) {
-                // create an alignment
-                const auto &[end_i, col_i, aln_i, begin_i, mem_length_i, score_i, last_i, last_dist_i, node_i] = anchors[chain[last_chain_i].first];
+            if (chain[i].second != chain[last_chain_i].second) {
+                auto &alignment = partial_alignments.emplace_back(alignments[chain[last_chain_i].second]);
+                const auto &[end_i, col_i, aln_i, begin_i, mem_length_i, score_i, last_i, last_dist_i, node_i] = anchors[chain[i - 1].first];
+                alignment.trim_query_prefix(std::get<3>(anchors[chain[last_chain_i].first]) - alignment.get_query_view().begin(), graph.get_k() - 1, config);
                 alignment.trim_query_suffix(alignment.get_query_view().end() - end_i, config);
-
-                Alignment cur = alignments[chain[i - 1].second];
-                const auto &[end, col, aln, begin, mem_length, score, last, last_dist, node] = anchors[chain[i - 1].first];
-                ssize_t overlap = alignment.get_query_view().end() - begin;
-                cur.trim_query_prefix(begin - cur.get_query_view().begin() + overlap, graph.get_k() - 1, config);
-                cur.insert_gap_prefix(-overlap, graph.get_k() - 1, config);
-                alignment.splice(std::move(cur));
-
                 last_chain_i = i;
             }
         }
 
-        if (last_chain_i == 1)
+        {
+            auto &alignment = partial_alignments.emplace_back(alignments[chain[last_chain_i].second]);
+            const auto &[end_i, col_i, aln_i, begin_i, mem_length_i, score_i, last_i, last_dist_i, node_i] = anchors[chain.back().first];
+            alignment.trim_query_prefix(std::get<3>(anchors[chain[last_chain_i].first]) - alignment.get_query_view().begin(), graph.get_k() - 1, config);
+            alignment.trim_query_suffix(alignment.get_query_view().end() - end_i, config);
+        }
+        logger->info("Chain\t{}\n\t{}", -nscore, fmt::join(partial_alignments, "\n\t"));
+
+        if (partial_alignments.size() <= 1)
             continue;
 
-        const auto &[end, col, aln, begin, mem_length, score, last, last_dist, node] = anchors[chain.back().first];
-        alignment.trim_query_suffix(alignment.get_query_view().end() - end, config);
+        auto &alignment = partial_alignments[0];
+        for (size_t i = 1; i < partial_alignments.size(); ++i) {
+            auto &cur = partial_alignments[i];
+            ssize_t overlap = alignment.get_query_view().end() - cur.get_query_view().begin();
+            bool insert_gap_prefix = overlap <= 0 || (cur.get_nodes().front() != alignment.get_nodes().back());
+            if (overlap > 0)
+                cur.trim_query_prefix(overlap, graph.get_k() - 1, config);
+
+            if (insert_gap_prefix)
+                cur.insert_gap_prefix(-overlap, graph.get_k() - 1, config);
+
+            alignment.splice(std::move(cur));
+        }
+
+        assert(alignment.is_valid(graph, &config));
+        logger->info("\tAln: {}", alignment);
+        // assert(alignment.get_score() == -nscore);
         callback(std::move(alignment));
     }
 }

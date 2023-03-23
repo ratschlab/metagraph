@@ -190,16 +190,28 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
                 seeder_rc = std::make_shared<ManualSeeder>();
 
             auto [num_seeds_c, num_extensions_c, num_explored_nodes_c] =
-                chain_and_filter_seeds(*this, seeder, Extender(*this, this_query));
+                chain_and_filter_seeds(*this, seeder, Extender(*this, this_query),
+                    Extender(*this, reverse));
             num_seeds += num_seeds_c;
             num_extensions += num_extensions_c;
             num_explored_nodes += num_explored_nodes_c;
+            auto alignments = seeder->get_alignments();
+            std::for_each(std::make_move_iterator(alignments.begin()),
+                          std::make_move_iterator(alignments.end()),
+                          add_alignment);
+            seeder = std::make_shared<ManualSeeder>();
             if (seeder_rc) {
                 auto [num_seeds_c, num_extensions_c, num_explored_nodes_c] =
-                    chain_and_filter_seeds(*this, seeder_rc, Extender(*this, reverse));
+                    chain_and_filter_seeds(*this, seeder_rc, Extender(*this, reverse),
+                        Extender(*this, this_query));
                 num_seeds += num_seeds_c;
                 num_extensions += num_extensions_c;
                 num_explored_nodes += num_explored_nodes_c;
+                auto alignments = seeder_rc->get_alignments();
+                std::for_each(std::make_move_iterator(alignments.begin()),
+                              std::make_move_iterator(alignments.end()),
+                              add_alignment);
+                seeder_rc = std::make_shared<ManualSeeder>();
             }
         }
 
@@ -245,14 +257,26 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
 
         auto alignments = aggregator.get_alignments();
         if (config_.allow_jump || config_.allow_label_change) {
-            chain_alignments(*this, alignments, [&](auto&& alignment) {
-                assert(alignment.is_valid(graph_, &config_));
-                if (alignment.get_score() > best_score) {
-                    best_score = alignment.get_score();
-                    query_coverage = alignment.get_cigar().get_coverage();
-                }
-                paths[i].emplace_back(std::move(alignment));
-            });
+            auto no_jump_config = config_;
+            no_jump_config.allow_jump = false;
+            AlignmentAggregator<AlignmentCompare> aggregator(no_jump_config);
+            for (auto aln : alignments) {
+                aggregator.add_alignment(std::move(aln));
+            }
+
+            auto add_aln = [&](auto&& alignment) {
+                aggregator.add_alignment(std::move(alignment));
+            };
+
+            std::vector<Alignment> alns[2];
+            for (Alignment &aln : alignments) {
+                bool orientation = aln.get_orientation();
+                alns[orientation].emplace_back(std::move(aln));
+            }
+
+            chain_alignments(*this, alns[0], add_aln);
+            chain_alignments(*this, alns[1], add_aln);
+            alignments = aggregator.get_alignments();
         }
 
         for (auto&& alignment : alignments) {
