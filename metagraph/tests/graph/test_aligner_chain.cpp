@@ -190,16 +190,16 @@ TYPED_TEST(DBGAlignerPostChainTest, align_chain_delete_mismatch) {
 
 TYPED_TEST(DBGAlignerPostChainTest, align_chain_overlap_with_insert) {
     size_t k = 10;
-    std::string reference1 = "TGAGGATCAGTTCTAGCTTG";
+    std::string reference1 =  "TGAGGATCAGTTCTAGCTTG";
     std::string reference2 =            "CCCTAGCTTGCTAGCGCTAGCTAGATC";
-    std::string query      = "TGAGGATCAGTTCTAAGCTTGCTAGCGCTAGCTAGATC";
+    std::string query      = "TGAGGATCAGTTCTGAGCTTGCTAGCGCTAGCTAGATC";
 
     auto graph = build_graph_batch<TypeParam>(k, { reference1, reference2 });
     DBGAlignerConfig config;
     config.gap_opening_penalty = -1;
     config.gap_extension_penalty = -1;
-    config.min_seed_length = 5;
-    config.max_seed_length = 5;
+    config.min_seed_length = 6;
+    config.max_seed_length = 6;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(1, -1, -1);
     config.set_node_insertion_penalty(k);
     config.allow_jump = true;
