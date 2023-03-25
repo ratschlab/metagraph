@@ -39,40 +39,23 @@ class HLLMatrix : public BinaryMatrix {
             return;
         }
 
-        columns_.resize(files.size(), precision_);
-        num_set_bits_.resize(files.size());
+        size_t num_labels = 0;
+        for (const auto &file : files) {
+            num_labels += ColumnCompressed<>::read_num_labels(file);
+        }
+
+        columns_.resize(num_labels, precision_);
+        num_set_bits_.resize(num_labels);
 
         std::atomic<uint64_t> a_num_rows{0};
-        /*
-        std::mutex mu;
+
         ColumnCompressed<>::merge_load(files, [&](uint64_t idx, const auto&, auto&& col) {
             if (a_num_rows == 0)
                 a_num_rows = col->size();
 
-            a_num_rels.fetch_add(col->size(), std::memory_order_relaxed);
-            if (idx >= n_cols) {
-                std::unique_lock<std::mutex> lock(mu);
-                if (idx >= n_cols) {
-                    n_cols = idx + 1;
-                    columns_.resize(n_cols, precision_);
-                }
-            }
-
+            num_set_bits_[idx] = col->num_set_bits();
             col->call_ones([&](size_t i) { columns_[idx].insert(hasher_(i)); });
         }, num_threads);
-        */
-        #pragma omp parallel for num_threads(num_threads)
-        for (size_t i = 0; i < files.size(); ++i) {
-            ColumnCompressed<> col;
-            col.load(files[i]);
-            if (a_num_rows == 0)
-                a_num_rows += col.get_matrix().num_rows();
-
-            num_set_bits_[i] = col.get_matrix().num_relations();
-            col.get_matrix().call_columns({0}, [&](size_t, const auto &bm) {
-                bm.call_ones([&](size_t j) { columns_[i].insert(hasher_(j)); });
-            });
-        }
 
         num_rows_ = a_num_rows;
         num_relations_ = std::accumulate(num_set_bits_.begin(), num_set_bits_.end(), (size_t)0);
