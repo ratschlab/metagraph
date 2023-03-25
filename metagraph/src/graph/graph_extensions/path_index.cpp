@@ -483,6 +483,8 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
         std::atomic<size_t> superbubble_termini_size { num_unitigs_ };
 
         std::atomic<size_t> num_terminal_superbubbles { 0 };
+        sdsl::bit_vector not_in_superbubble(num_unitigs_, false);
+
         std::atomic_thread_fence(std::memory_order_release);
 
         ProgressBar progress_bar(num_unitigs_, "Indexing superbubbles",
@@ -490,6 +492,9 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
         #pragma omp parallel for num_threads(get_num_threads())
         for (size_t i = 0; i < num_unitigs_; ++i) {
             ++progress_bar;
+            if (fetch_bit(not_in_superbubble.data(), i, MO_RELAXED))
+                continue;
+
             tsl::hopscotch_set<size_t> visited;
             VectorMap<size_t, tsl::hopscotch_set<size_t>> seen;
             tsl::hopscotch_map<size_t, std::vector<size_t>> parents;
@@ -504,8 +509,13 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
                 traversal_stack.pop_back();
                 assert(!visited.count(unitig_id));
 
-                visited.insert(unitig_id);
+                if (fetch_bit(not_in_superbubble.data(), unitig_id, MO_RELAXED)) {
+                    is_terminal_superbubble = false;
+                    break;
+                }
+
                 bool has_cycle = false;
+                visited.insert(unitig_id);
                 size_t num_children = 0;
                 size_t length = boundaries[unitig_id + 1] - boundaries[unitig_id];
                 dbg_succ.call_outgoing_kmers(unitig_backs[unitig_id], [&](node_index next, char c) {
@@ -550,6 +560,9 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
 
                 bool reached_end = (traversal_stack.size() == 1 && visited.size() + 1 == seen.size());
                 if (has_cycle) {
+                    for (const auto &[u_id, d] : seen) {
+                        set_bit(not_in_superbubble.data(), u_id, MO_RELAXED);
+                    }
                     is_terminal_superbubble = false;
                     break;
                 }
@@ -573,18 +586,16 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
                         }
                     }
 
-                    set_bit(can_reach_terminus.data(), i, true, MO_RELAXED);
                     const auto &d = seen[terminus];
 
-                    {
-                        std::lock_guard<std::mutex> lock(mu);
-                        superbubble_termini_size -= superbubble_termini[i].second.size();
-                        superbubble_termini_size += d.size();
-                        superbubble_termini[i] = std::make_pair(terminus + 1,
-                            std::vector<size_t>(d.begin(), d.end()));
-                        std::sort(superbubble_termini[i].second.begin(),
-                                  superbubble_termini[i].second.end());
-                    }
+                    superbubble_termini_size.fetch_add(
+                        static_cast<ssize_t>(d.size()) - superbubble_termini[i].second.size(),
+                        MO_RELAXED
+                    );
+                    superbubble_termini[i] = std::make_pair(terminus + 1,
+                        std::vector<size_t>(d.begin(), d.end()));
+                    std::sort(superbubble_termini[i].second.begin(),
+                              superbubble_termini[i].second.end());
 
                     for (const auto &[u_id, d] : seen) {
                         if (u_id == i)
@@ -593,14 +604,20 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
                         std::vector<size_t> cur_d(d.begin(), d.end());
                         std::sort(cur_d.begin(), cur_d.end());
 
+                        std::lock_guard<std::mutex> lock(mu);
                         if (!superbubble_starts[u_id].first
                                 || cur_d.back() < superbubble_starts[u_id].second.back()) {
                             superbubble_start_size -= superbubble_starts[u_id].second.size();
                             superbubble_start_size += cur_d.size();
                             superbubble_starts[u_id] = std::make_pair(i + 1, std::move(cur_d));
                             can_reach_terminus[u_id] = !is_terminal_superbubble;
+                            // set_bit(can_reach_terminus.data(), u_id, !is_terminal_superbubble, MO_RELAXED);
                         }
                     }
+
+                    std::lock_guard<std::mutex> lock(mu);
+                    can_reach_terminus[i] = true;
+                    // set_bit(can_reach_terminus.data(), i, true, MO_RELAXED);
                 }
             }
 
@@ -621,11 +638,11 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
 
                 auto it = found_map.begin();
                 for (const auto &[cur_id, stuff] : seen) {
-                    std::lock_guard<std::mutex> lock(mu);
-
-                    // TODO: what if this is a smaller superbubble, but we can't reach the terminus?
-                    if (superbubble_starts[cur_id].first == i + 1)
-                        can_reach_terminus[cur_id] = *it;
+                    if (!superbubble_termini[i].first) {
+                        std::lock_guard<std::mutex> lock(mu);
+                        if (superbubble_starts[cur_id].first == i + 1)
+                            can_reach_terminus[cur_id] = *it;
+                    }
 
                     ++it;
                 }
