@@ -604,7 +604,8 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
                         std::vector<size_t> cur_d(d.begin(), d.end());
                         std::sort(cur_d.begin(), cur_d.end());
 
-                        std::lock_guard<std::mutex> lock(mu);
+                        #pragma omp critical
+                        {
                         if (!superbubble_starts[u_id].first
                                 || cur_d.back() < superbubble_starts[u_id].second.back()) {
                             superbubble_start_size -= superbubble_starts[u_id].second.size();
@@ -613,9 +614,10 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
                             can_reach_terminus[u_id] = !is_terminal_superbubble;
                             // set_bit(can_reach_terminus.data(), u_id, !is_terminal_superbubble, MO_RELAXED);
                         }
+                        }
                     }
 
-                    std::lock_guard<std::mutex> lock(mu);
+                    #pragma omp critical
                     can_reach_terminus[i] = true;
                     // set_bit(can_reach_terminus.data(), i, true, MO_RELAXED);
                 }
@@ -639,9 +641,11 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
                 auto it = found_map.begin();
                 for (const auto &[cur_id, stuff] : seen) {
                     if (!superbubble_termini[i].first) {
-                        std::lock_guard<std::mutex> lock(mu);
+                        #pragma omp critical
+                        {
                         if (superbubble_starts[cur_id].first == i + 1)
                             can_reach_terminus[cur_id] = *it;
+                        }
                     }
 
                     ++it;
