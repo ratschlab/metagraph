@@ -11,6 +11,7 @@
 #include "graph/alignment/alignment.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 #include "graph/representation/canonical_dbg.hpp"
+#include "common/threads/threading.hpp"
 
 namespace mtg::graph {
 using namespace annot;
@@ -33,10 +34,32 @@ void IPathIndex::call_dists(size_t path_id_1,
                             size_t max_dist) const {
     if (path_id_1 == path_id_2) {
         callback(0);
+
+        if (!is_unitig(path_id_1) || !max_dist)
+            return;
+
+        bool has_self_loop = false;
+        adjacent_outgoing_unitigs(path_id_1, [&](size_t next) {
+            if (next == path_id_1)
+                has_self_loop = true;
+        });
+
+        if (!has_self_loop)
+            return;
+
+        size_t length_1 = path_length(path_id_1);
+        for (size_t d = length_1; d <= max_dist; d += length_1) {
+            callback(d);
+        }
+
         return;
     }
 
-    if (!max_dist || !is_unitig(path_id_1) || !is_unitig(path_id_2) || path_length(path_id_1) > max_dist)
+    if (!max_dist || !is_unitig(path_id_1) || !is_unitig(path_id_2))
+        return;
+
+    size_t length_1 = path_length(path_id_1);
+    if (length_1 > max_dist)
         return;
 
     size_t sb1 = path_id_1;
@@ -53,8 +76,13 @@ void IPathIndex::call_dists(size_t path_id_1,
     if (!is_source2)
         std::tie(sb2, d2) = get_superbubble_and_dist(path_id_2);
 
-    if (!sb1 || !sb2)
+    if (!sb1 || !sb2) {
+        adjacent_outgoing_unitigs(path_id_1, [&](size_t next) {
+            if (next == path_id_2)
+                callback(length_1);
+        });
         return;
+    }
 
     if (sb1 == sb2) {
         if (is_source1) {
@@ -114,8 +142,18 @@ void IPathIndex::call_dists(size_t path_id_1,
 
     size_t chain_1 = get_superbubble_chain(sb1);
     size_t chain_2 = get_superbubble_chain(sb2);
-    if (!chain_1 || !chain_2 || chain_1 != chain_2)
+    if (!chain_1 || !chain_2 || chain_1 != chain_2) {
+        auto [t, d] = get_superbubble_terminus(sb1);
+        if (t == path_id_2 && (is_source1 || d.size() == 1) && (d.size() > 1 || d[0])) {
+            size_t msize = !d[0] ? d[1] : d[0];
+            call_dists(t, path_id_2, [&](size_t l) {
+                for (size_t dd : d) {
+                    callback(l + dd);
+                }
+            }, max_dist - msize);
+        }
         return;
+    }
 
     auto [t, d] = get_superbubble_terminus(sb1);
     if (!is_source1 && d.size() != 1) {
@@ -129,7 +167,7 @@ void IPathIndex::call_dists(size_t path_id_1,
         if (d.size() == 1 && !d[0])
             return;
 
-        size_t msize = d[1];
+        size_t msize = !d[0] ? d[1] : d[0];
         call_dists(t, path_id_2, [&](size_t l) {
             for (size_t dd : d) {
                 callback(l + dd);
@@ -733,34 +771,38 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
 
         sdsl::int_vector<> unitig_fronts_sdsl(dbg_succ.max_index() + 1);
         for (size_t i = 0; i < unitig_fronts.size(); ++i) {
-            unitig_fronts_sdsl[unitig_fronts[i]] = i;
+            unitig_fronts_sdsl[unitig_fronts[i]] = i + 1;
         }
         unitig_fronts_ = SuperbubbleStorage(std::move(unitig_fronts_sdsl));
     }
 
     // chain superbubbles
     {
-        sdsl::int_vector<> chain_parent(num_unitigs_);
+        sdsl::int_vector<> chain_parent(num_unitigs_ + 1);
+        sdsl::int_vector<> distance(num_unitigs_ + 1, std::numeric_limits<uint64_t>::max());
         for (size_t i = 0; i < num_unitigs_; ++i) {
-            auto t = get_superbubble_terminus(i + 1).first;
-            if (!t)
-                continue;
-
-            auto t2 = get_superbubble_terminus(t).first;
-            if (t2 && t - 1 != i)
-                chain_parent[t - 1] = i;
+            auto [t, d] = get_superbubble_terminus(i + 1);
+            if (t && t - 1 != i && d.back() < distance[t]) {
+                chain_parent[t] = i + 1;
+                distance[t] = d.back();
+            }
         }
 
         sdsl::int_vector<> superbubble_chain(num_unitigs_);
         size_t chain_i = 1;
         for (size_t i = 0; i < num_unitigs_; ++i) {
-            if (!superbubble_chain[i] && chain_parent[i] && !get_superbubble_terminus(i + 1).first) {
+            if (!superbubble_chain[i] && chain_parent[i + 1] && !get_superbubble_terminus(i + 1).first) {
                 // end of a superbubble chain
-                size_t j = i;
-                while (chain_parent[j]) {
-                    superbubble_chain[j] = chain_i;
-                    j = chain_parent[j];
+                size_t j = i + 1;
+                if (chain_parent[j]) {
+                    while (chain_parent[j]) {
+                        superbubble_chain[j - 1] = chain_i;
+                        j = chain_parent[j];
+                    }
+
+                    superbubble_chain[j - 1] = chain_i;
                 }
+
                 ++chain_i;
             }
         }
@@ -806,52 +848,69 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
         auto &annotator = const_cast<ColumnCompressed<>&>(
             static_cast<const ColumnCompressed<>&>(anno_graph.get_annotator())
         );
-        size_t seq_count = 0;
+        std::atomic<size_t> seq_count { 0 };
         size_t total_seq_count = 0;
         std::vector<uint64_t> boundaries { 0 };
 
+        logger->trace("Indexing extra sequences");
+        ThreadPool thread_pool(get_num_threads());
+        std::mutex mu;
+
         generate_sequences([&](std::string_view seq) {
-            total_seq_count += 1 + (dbg_succ.get_mode() != DeBruijnGraph::BASIC);
-            auto nodes = map_to_nodes(*check_graph, seq);
-            std::vector<Row> rows;
-            sdsl::bit_vector picked(nodes.size(), false);
-            for (size_t i = 0; i < nodes.size(); ++i) {
-                node_index node = nodes[i];
-                if (has_coord(node)) {
-                    picked[i] = true;
-                    rows.emplace_back(AnnotatedDBG::graph_to_anno_index(node));
+            ++total_seq_count;
+            if (total_seq_count && !(total_seq_count % 1000)) {
+                logger->trace("Processed {} sequences, indexed {} of them",
+                              total_seq_count, seq_count);
+            }
+
+            thread_pool.enqueue([&,s=std::string(seq)]() {
+                auto nodes = map_to_nodes(*check_graph, s);
+                std::vector<Row> rows;
+                sdsl::bit_vector picked(nodes.size(), false);
+                bool any_picked = false;
+                for (size_t i = 0; i < nodes.size(); ++i) {
+                    node_index node = nodes[i];
+                    if (has_coord(node)) {
+                        picked[i] = true;
+                        any_picked = true;
+                        rows.emplace_back(AnnotatedDBG::graph_to_anno_index(node));
+                    }
                 }
-            }
 
-            bool index_read = false;
+                if (any_picked) {
+                    bool index_read = false;
 
-            tsl::hopscotch_set<size_t> unitig_ids;
-            for (const auto &tuples : get_path_row_tuples(rows)) {
-                for (const auto &[c, tuple] : tuples) {
-                    if (!get_superbubble_terminus(c).first && !get_superbubble_and_dist(c).first)
-                        index_read = true;
+                    tsl::hopscotch_set<size_t> unitig_ids;
+                    for (const auto &tuples : get_path_row_tuples(rows)) {
+                        for (const auto &[c, tuple] : tuples) {
+                            if (!get_superbubble_terminus(c).first && !get_superbubble_and_dist(c).first)
+                                index_read = true;
 
-                    if (c)
-                        unitig_ids.insert(c);
+                            if (c)
+                                unitig_ids.insert(c);
+                        }
+                    }
+
+                    if (index_read && unitig_ids.size() > 1) {
+                        ++seq_count;
+                        std::lock_guard<std::mutex> lock(mu);
+                        uint64_t coord = boundaries.back();
+                        annotator.add_labels(rows, DUMMY);
+                        auto it = rows.begin();
+                        for (size_t i = 0; i < nodes.size(); ++i) {
+                            if (picked[i])
+                                annotator.add_label_coord(*it, DUMMY, coord);
+
+                            ++coord;
+                            ++it;
+                        }
+                        boundaries.emplace_back(coord);
+                    }
                 }
-            }
-
-            if (!index_read || unitig_ids.size() == 1)
-                return;
-
-            ++seq_count;
-            uint64_t coord = boundaries.back();
-            annotator.add_labels(rows, DUMMY);
-            auto it = rows.begin();
-            for (size_t i = 0; i < nodes.size(); ++i) {
-                if (picked[i])
-                    annotator.add_label_coord(*it, DUMMY, coord);
-
-                ++coord;
-                ++it;
-            }
-            boundaries.emplace_back(coord);
+            });
         });
+
+        thread_pool.join();
 
         if (!total_seq_count)
             return;
