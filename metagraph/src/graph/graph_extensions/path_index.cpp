@@ -625,30 +625,44 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
 
             if (is_terminal_superbubble && seen.size() > 1 && terminus) {
                 sdsl::bit_vector found_map(seen.size(), false);
-                std::vector<size_t> back_traversal_stack;
+                std::vector<std::pair<size_t, std::vector<size_t>>> back_traversal_stack;
                 back_traversal_stack.reserve(seen.size());
-                back_traversal_stack.emplace_back(terminus);
+                back_traversal_stack.emplace_back(terminus,
+                    std::vector<size_t>(seen[terminus].begin(), seen[terminus].end()));
                 while (back_traversal_stack.size()) {
-                    size_t cur_id = back_traversal_stack.back();
+                    auto [cur_id, d] = back_traversal_stack.back();
                     back_traversal_stack.pop_back();
 
                     found_map[seen.find(cur_id) - seen.begin()] = true;
+                    if (parents[cur_id].empty())
+                        continue;
+
+                    for (auto &dd : d) {
+                        --dd;
+                    }
+
                     for (size_t parent : parents[cur_id]) {
-                        back_traversal_stack.emplace_back(parent);
+                        auto &[p, p_d] = back_traversal_stack.emplace_back(parent, std::vector<size_t>{});
+                        for (auto dd : d) {
+                            if (seen[parent].count(dd))
+                                p_d.emplace_back(dd);
+                        }
+
+                        if (p_d.empty())
+                            back_traversal_stack.pop_back();
                     }
                 }
 
-                auto it = found_map.begin();
-                for (const auto &[cur_id, stuff] : seen) {
-                    if (!superbubble_termini[i].first) {
+                if (!superbubble_termini[i].first) {
+                    auto it = found_map.begin();
+                    for (const auto &[cur_id, stuff] : seen) {
                         #pragma omp critical
                         {
                         if (superbubble_starts[cur_id].first == i + 1)
                             can_reach_terminus[cur_id] = *it;
                         }
+                        ++it;
                     }
-
-                    ++it;
                 }
 
                 num_terminal_superbubbles.fetch_add(1, MO_RELAXED);
