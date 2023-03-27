@@ -336,18 +336,21 @@ size_t Alignment::trim_offset(size_t num_nodes) {
 
     size_t first_dummy = (std::find(nodes_.begin(), nodes_.end(), DeBruijnGraph::npos)
         - nodes_.begin()) - 1;
-    size_t first_extra_score = extra_scores.empty()
-        ? nodes_.size()
-        : (std::find_if(extra_scores.begin(), extra_scores.end(), [](score_t s) { return s; })
-            - extra_scores.begin());
-    size_t trim = std::min({ num_nodes, offset_, nodes_.size() - 1, first_dummy, first_extra_score });
+    size_t trim = std::min({ num_nodes, offset_, nodes_.size() - 1, first_dummy });
+
     if (!trim)
         return trim;
 
     offset_ -= trim;
     nodes_.erase(nodes_.begin(), nodes_.begin() + trim);
-    if (extra_scores.size())
+    if (extra_scores.size()) {
+        score_t removed_extra = std::accumulate(extra_scores.begin(),
+                                                extra_scores.begin() + trim,
+                                                score_t(0));
+        extra_score -= removed_extra;
+        score_ -= removed_extra;
         extra_scores.erase(extra_scores.begin(), extra_scores.begin() + trim);
+    }
 
     if (label_column_diffs.size()) {
         std::swap(label_columns, label_column_diffs[trim - 1]);

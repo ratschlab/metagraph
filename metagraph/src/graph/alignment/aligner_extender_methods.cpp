@@ -89,6 +89,7 @@ void SeedFilteringExtender
 
     const DeBruijnGraph *old_graph = graph_;
     auto rev = seed;
+    rev.trim_offset();
     rev.reverse_complement(*rc_graph, get_query());
     if (rev.size() && rev.get_nodes().back()) {
         assert(rev.get_end_clipping());
