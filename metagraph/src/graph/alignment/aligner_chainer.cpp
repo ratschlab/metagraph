@@ -1073,18 +1073,15 @@ void chain_alignments(const IDBGAligner &aligner,
     std::vector<Anchor> anchors;
     std::vector<std::vector<score_t>> per_char_scores_prefix;
     std::vector<std::vector<score_t>> per_char_scores_suffix;
-    std::vector<std::vector<size_t>> num_nodes_trimmed_suffix;
     std::vector<std::vector<size_t>> offset_prefix;
     per_char_scores_prefix.reserve(alignments.size());
     per_char_scores_suffix.reserve(alignments.size());
-    num_nodes_trimmed_suffix.reserve(alignments.size());
     offset_prefix.reserve(alignments.size());
     for (size_t i = 0; i < alignments.size(); ++i) {
         const auto &alignment = alignments[i];
         if (!alignment.get_clipping() && !alignment.get_end_clipping()) {
             per_char_scores_prefix.emplace_back();
             per_char_scores_suffix.emplace_back();
-            num_nodes_trimmed_suffix.emplace_back();
             offset_prefix.emplace_back();
             continue;
         }
@@ -1099,7 +1096,6 @@ void chain_alignments(const IDBGAligner &aligner,
         }
         auto &prefix_scores = per_char_scores_prefix.emplace_back(std::vector<score_t>(query.size() + 1, 0));
         auto &suffix_scores = per_char_scores_suffix.emplace_back(std::vector<score_t>(query.size() + 1, 0));
-        auto &suffix_nodes = num_nodes_trimmed_suffix.emplace_back(std::vector<size_t>(query.size() + 1, 0));
         auto &prefix_offset = offset_prefix.emplace_back(std::vector<size_t>(query.size() + 1, 0));
         {
             auto cur = alignment;
@@ -1119,19 +1115,14 @@ void chain_alignments(const IDBGAligner &aligner,
         {
             auto cur = alignment;
             auto it = suffix_scores.rbegin();
-            auto jt = suffix_nodes.rbegin();
             *it = cur.get_score();
-            *jt = cur.get_nodes().size();
             while (cur.size()) {
                 cur.trim_query_suffix(1, config);
                 ++it;
-                ++jt;
                 assert(it != suffix_scores.rend());
                 *it = cur.get_score();
-                *jt = cur.get_nodes().size();
             }
             assert(suffix_scores.front() == 0);
-            assert(suffix_nodes.front() == 0);
         }
 
         auto cur = alignment;
@@ -1363,29 +1354,19 @@ void chain_alignments(const IDBGAligner &aligner,
 
             if (config.allow_jump && mem_length_i >= graph.get_k()) {
                 size_t clipping = begin - alignments[aln].get_query_view().begin();
-                size_t end_pos = end - alignments[aln].get_query_view().begin();
-                size_t next_num_nodes = num_nodes_trimmed_suffix[aln][end_pos];
                 size_t next_offset = offset_prefix[aln][clipping];
-                if (alignments[aln].get_offset() + clipping >= graph.get_k()) {
-                    assert(next_offset == graph.get_k() - 1);
-                    size_t num_nodes_to_trim_prefix = alignments[aln].get_offset() + clipping - graph.get_k() + 1;
-                    if (num_nodes_to_trim_prefix < next_num_nodes) {
-                        next_num_nodes -= num_nodes_to_trim_prefix;
-                    } else {
-                        continue;
-                    }
-                }
 
                 size_t overlap = end - std::max(begin, begin_i);
 #ifndef NDEBUG
                 auto cur_aln = alignments[aln];
                 cur_aln.trim_query_prefix(begin - cur_aln.get_query_view().begin(), graph.get_k() - 1, config);
+                assert(cur_aln.size());
                 cur_aln.trim_query_suffix(cur_aln.get_query_view().end() - end, config);
+                assert(cur_aln.size());
                 assert(cur_aln.get_offset() == next_offset);
-                assert(cur_aln.get_nodes().size() == next_num_nodes);
 #endif
 
-                if (next_num_nodes + overlap > next_offset) {
+                if (overlap + 1 > next_offset) {
                     updated_score += node_insert;
                     if (updated_score > score) {
                         score = updated_score;
