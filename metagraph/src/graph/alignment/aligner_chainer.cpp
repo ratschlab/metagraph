@@ -681,8 +681,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
     }
 
 
-    // size_t bandwidth = 65;
-    // ssize_t min_overlap = config_.min_seed_length;
+    size_t bandwidth = 65;
     float sl = -static_cast<float>(config_.min_seed_length) * 0.01;
     score_t match_score = config_.match_score("A");
     score_t gap_open = config_.gap_opening_penalty / match_score;
@@ -695,6 +694,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
         node_index node_i = in_anchors[anchor_ids[a_i.index].first].get_nodes()[anchor_ids[a_i.index].second];
         bool is_rev_i = (nodes[a_i.index] != node_i);
         size_t lowest_updated = anchors.size();
+        size_t num_considered = 0;
 
         for (size_t j = start_points[i]; j < anchors.size(); ++j) {
             if (i == j)
@@ -712,6 +712,9 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
 
             if (label_change_score == DBGAlignerConfig::ninf)
                 continue;
+
+            if (i < j && ++num_considered > bandwidth)
+                break;
 
             ssize_t num_added = a_j.end - std::max(a_j.begin, a_i.end);
             score_t base_added_score = num_added + label_change_score;
@@ -1294,12 +1297,17 @@ void chain_alignments(const IDBGAligner &aligner,
     }
 
     // forward pass
+    size_t bandwidth = 65;
     for (size_t i = 0; i < anchors.size() - 1; ++i) {
         const auto &a_i = anchors[i];
         size_t lowest_updated = anchors.size();
+        size_t num_considered = 0;
         for (size_t j = start_points[i]; j < anchors.size(); ++j) {
             if (i == j)
                 continue;
+
+            if (i < j && ++num_considered > bandwidth)
+                break;
 
             auto &a_j = anchors[j];
             assert(a_j.end >= a_i.end);
