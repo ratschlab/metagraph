@@ -31,7 +31,8 @@ static const std::vector<Label> DUMMY { Label(1, 1) };
 void IPathIndex::call_dists(size_t path_id_1,
                             size_t path_id_2,
                             const std::function<void(size_t)> &callback,
-                            size_t max_dist) const {
+                            size_t max_dist,
+                            size_t max_search_depth) const {
     if (path_id_1 == path_id_2) {
         callback(0);
 
@@ -77,10 +78,17 @@ void IPathIndex::call_dists(size_t path_id_1,
         std::tie(sb2, d2) = get_superbubble_and_dist(path_id_2);
 
     if (!sb1 || !sb2) {
-        adjacent_outgoing_unitigs(path_id_1, [&](size_t next) {
-            if (next == path_id_2)
-                callback(length_1);
-        });
+        if (max_search_depth) {
+            adjacent_outgoing_unitigs(path_id_1, [&](size_t next) {
+                if (next == path_id_2) {
+                    callback(length_1);
+                } else if (max_dist > length_1) {
+                    call_dists(next, path_id_2,
+                               [&](size_t l) { callback(l + length_1); },
+                                max_dist - length_1, max_search_depth - 1);
+                }
+            });
+        }
         return;
     }
 
@@ -807,6 +815,7 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
             }
         }
 
+        logger->info("Indexed {} superbubble chains", chain_i - 1);
         unitig_chain_ = SuperbubbleStorage(std::move(superbubble_chain));
     }
 
@@ -882,12 +891,15 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
 
                     tsl::hopscotch_set<size_t> unitig_ids;
                     for (const auto &tuples : get_path_row_tuples(rows)) {
-                        for (const auto &[c, tuple] : tuples) {
-                            if (!get_superbubble_terminus(c).first && !get_superbubble_and_dist(c).first)
+                        for (const auto &[dummy, tuple] : tuples) {
+                            assert(dummy == 0);
+                            assert(tuple.size());
+                            size_t unitig_id = coord_to_path_id(tuple[0]);
+                            if (!get_superbubble_terminus(unitig_id).first && !get_superbubble_and_dist(unitig_id).first)
                                 index_read = true;
 
-                            if (c)
-                                unitig_ids.insert(c);
+                            if (unitig_id)
+                                unitig_ids.insert(unitig_id);
                         }
                     }
 

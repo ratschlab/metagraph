@@ -63,7 +63,8 @@ class IPathIndex : public SequenceGraph::GraphExtension {
     void call_dists(size_t path_id_1,
                     size_t path_id_2,
                     const std::function<void(size_t)> &callback,
-                    size_t max_dist = std::numeric_limits<size_t>::max()) const;
+                    size_t max_dist = std::numeric_limits<size_t>::max(),
+                    size_t max_search_depth = 2) const;
 
   protected:
     virtual std::vector<RowTuples> get_path_row_tuples(const std::vector<Row> &rows) const = 0;

@@ -189,6 +189,7 @@ void Alignment::merge_annotations(const Alignment &other) {
     }
     score_ += other.extra_score;
     extra_score += other.extra_score;
+    assert(extra_scores.empty() || extra_scores.size() == nodes_.size() - 1);
 }
 
 bool Alignment::splice(Alignment&& other, score_t label_change_score) {
@@ -288,6 +289,7 @@ bool Alignment::append(Alignment&& other, score_t label_change_score) {
             other.extra_scores.resize(other.nodes_.size());
             other.extra_scores[0] = label_change_score;
         } else {
+            assert(other.extra_scores.size() == other.get_nodes().size() - 1);
             other.extra_scores.insert(other.extra_scores.begin(), label_change_score);
         }
         other.extra_score += other.extra_scores[0];
@@ -393,6 +395,7 @@ void Alignment::extend_offset(std::vector<node_index>&& path,
     }
 
     nodes_.insert(nodes_.begin(), path.begin(), path.end());
+    assert(extra_scores.empty() || extra_scores.size() == nodes_.size() - 1);
 }
 
 size_t Alignment::trim_query_prefix(size_t n,
@@ -491,6 +494,7 @@ size_t Alignment::trim_query_prefix(size_t n,
         label_column_diffs.erase(label_column_diffs.begin(), label_column_diffs.begin() + (node_it - nodes_.begin()));
     }
 
+    assert(extra_scores.empty() || extra_scores.size() == nodes_.size() - 1);
     sequence_.erase(sequence_.begin(), s_it);
     it->second -= cigar_offset;
     cigar_.data().erase(cigar_.data().begin(), it);
@@ -583,6 +587,7 @@ size_t Alignment::trim_query_suffix(size_t n,
     if (label_column_diffs.size() >= nodes_.size())
         label_column_diffs.resize(nodes_.size() - 1);
 
+    assert(extra_scores.empty() || extra_scores.size() == nodes_.size() - 1);
     sequence_.erase(s_it.base(), sequence_.end());
     it->second -= cigar_offset;
     cigar_.data().erase(it.base(), cigar_.data().end());
@@ -692,6 +697,7 @@ size_t Alignment::trim_reference_prefix(size_t n,
         label_column_diffs.erase(label_column_diffs.begin(), label_column_diffs.begin() + (node_it - nodes_.begin()));
     }
 
+    assert(extra_scores.empty() || extra_scores.size() == nodes_.size() - 1);
     sequence_.erase(sequence_.begin(), s_it);
     it->second -= cigar_offset;
     cigar_.data().erase(cigar_.data().begin(), it);
@@ -784,6 +790,7 @@ size_t Alignment::trim_reference_suffix(size_t n,
     if (label_column_diffs.size() >= nodes_.size())
         label_column_diffs.resize(nodes_.size() - 1);
 
+    assert(extra_scores.empty() || extra_scores.size() == nodes_.size() - 1);
     sequence_.erase(s_it.base(), sequence_.end());
     it->second -= cigar_offset;
     cigar_.data().erase(it.base(), cigar_.data().end());
@@ -1387,6 +1394,12 @@ void Alignment::splice_with_unknown(Alignment&& other,
         if (overlap) {
             cigar_.data().emplace_back(Cigar::DELETION, overlap);
             nodes_.insert(nodes_.end(), nodes.end() - overlap, nodes.end());
+            if (extra_scores.size())
+                extra_scores.resize(nodes_.size() - 1);
+
+            if (label_column_diffs.size())
+                label_column_diffs.resize(nodes_.size() - 1);
+
             sequence_ += std::string_view(seq.data() + seq.size() - overlap, overlap);
         }
 
@@ -1406,6 +1419,18 @@ void Alignment::splice_with_unknown(Alignment&& other,
     other.nodes_.insert(other.nodes_.begin(),
                         node_overlap + num_unknown - other.offset_,
                         DeBruijnGraph::npos);
+    if (other.extra_scores.size()) {
+        other.extra_scores.insert(other.extra_scores.begin(),
+                                  node_overlap + num_unknown - other.offset_,
+                                  0);
+    }
+
+    if (other.label_column_diffs.size()) {
+        other.label_column_diffs.insert(other.label_column_diffs.begin(),
+                                        node_overlap + num_unknown - other.offset_,
+                                        0);
+    }
+
     other.offset_ = node_overlap;
     for (auto &tuple : other.label_coordinates) {
         for (auto &c : tuple) {
@@ -1510,8 +1535,10 @@ void Alignment::insert_gap_prefix(ssize_t gap_length,
     }
 
     nodes_.insert(nodes_.begin(), extra_nodes, DeBruijnGraph::npos);
-    if (extra_scores.size() && extra_nodes)
+    if (extra_scores.size() && extra_nodes) {
         extra_scores.insert(extra_scores.begin(), extra_nodes, 0);
+        assert(extra_scores.size() == nodes_.size() - 1);
+    }
 
     if (extra_nodes && has_annotation()) {
         if (label_column_diffs.empty()) {

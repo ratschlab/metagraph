@@ -558,8 +558,10 @@ void LabeledExtender::call_alignments(score_t end_score,
                 alignment.label_column_diffs.emplace_back(node_labels_[*it]);
             }
 
-            if (alignment.extra_scores.empty())
+            if (alignment.extra_scores.empty()) {
                 alignment.extra_scores.resize(alignment.label_column_diffs.size(), 0);
+                assert(alignment.extra_scores.size() == alignment.get_nodes().size() - 1);
+            }
 
             label_diff_.assign(1, nannot);
         } else {
