@@ -259,27 +259,34 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
 
         auto alignments = aggregator.get_alignments();
         if (config_.allow_jump || config_.allow_label_change) {
-            alignments.resize(std::min(alignments.size(), size_t(1)));
-        //     auto no_jump_config = config_;
-        //     no_jump_config.allow_jump = false;
-        //     AlignmentAggregator<AlignmentCompare> aggregator(no_jump_config);
-        //     for (auto aln : alignments) {
-        //         aggregator.add_alignment(std::move(aln));
-        //     }
+            auto no_jump_config = config_;
+            no_jump_config.allow_jump = false;
+            AlignmentAggregator<AlignmentCompare> aggregator(no_jump_config);
+            for (auto aln : alignments) {
+                aggregator.add_alignment(std::move(aln));
+            }
 
-        //     auto add_aln = [&](auto&& alignment) {
-        //         aggregator.add_alignment(std::move(alignment));
-        //     };
+            auto get_min_path_score = [&](const Alignment &seed) {
+                return std::max(config_.min_path_score,
+                                seed.has_annotation()
+                                    ? aggregator.get_score_cutoff(seed.get_columns())
+                                    : aggregator.get_global_cutoff());
+            };
 
-        //     std::vector<Alignment> alns[2];
-        //     for (Alignment &aln : alignments) {
-        //         bool orientation = aln.get_orientation();
-        //         alns[orientation].emplace_back(std::move(aln));
-        //     }
+            auto add_aln = [&](auto&& alignment) {
+                if (alignment.get_score() > get_min_path_score(alignment))
+                    aggregator.add_alignment(std::move(alignment));
+            };
 
-        //     chain_alignments(*this, alns[0], add_aln);
-        //     chain_alignments(*this, alns[1], add_aln);
-        //     alignments = aggregator.get_alignments();
+            std::vector<Alignment> alns[2];
+            for (Alignment &aln : alignments) {
+                bool orientation = aln.get_orientation();
+                alns[orientation].emplace_back(std::move(aln));
+            }
+
+            chain_alignments(*this, alns[0], add_aln);
+            chain_alignments(*this, alns[1], add_aln);
+            alignments = aggregator.get_alignments();
         }
 
         for (auto&& alignment : alignments) {

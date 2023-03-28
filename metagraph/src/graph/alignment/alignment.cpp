@@ -1444,6 +1444,7 @@ void Alignment::splice_with_unknown(Alignment&& other,
 void Alignment::insert_gap_prefix(ssize_t gap_length,
                                   size_t node_overlap,
                                   const DBGAlignerConfig &config) {
+    assert(size());
     size_t extra_nodes = node_overlap + 1;
 
     if (gap_length < 0) {
@@ -1535,6 +1536,7 @@ void Alignment::insert_gap_prefix(ssize_t gap_length,
     }
 
     nodes_.insert(nodes_.begin(), extra_nodes, DeBruijnGraph::npos);
+
     if (extra_scores.size() && extra_nodes) {
         extra_scores.insert(extra_scores.begin(), extra_nodes, 0);
         assert(extra_scores.size() == nodes_.size() - 1);
@@ -1550,10 +1552,9 @@ void Alignment::insert_gap_prefix(ssize_t gap_length,
             std::swap(label_column_diffs[extra_nodes - 1], label_columns);
         }
     }
+    offset_ = node_overlap;
 
     assert(nodes_.size() == sequence_.size());
-
-    offset_ = node_overlap;
 }
 
 /**
