@@ -567,6 +567,7 @@ std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score,
     score_t xdrop = std::min(config_.xdrop, std::numeric_limits<score_t>::max() - added_xdrop)
                         + added_xdrop;
     assert(xdrop > 0);
+    DEBUG_LOG("X-drop: {}", xdrop);
 
     xdrop_cutoffs_.assign(1, std::make_pair(0u, std::max(-xdrop, ninf + 1)));
     assert(xdrop_cutoffs_[0].second < 0);
@@ -693,7 +694,7 @@ std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score,
                               }, i, force_fixed_seed);
 
                 if (outgoing.empty()) {
-                    DEBUG_LOG("Positon {}: Tip reached", next_offset - seed_->get_offset());
+                    DEBUG_LOG("Position {}: Tip reached", next_offset - seed_->get_offset());
                     tips.push_back(i);
                     continue;
                 }

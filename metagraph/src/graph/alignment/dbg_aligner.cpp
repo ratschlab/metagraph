@@ -386,7 +386,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
 
             if (!is_coord_jump(cur, chain[i].first)) {
                 assert(coord_offset > 0);
-                config_.allow_label_change = (chain[i].first.label_columns != chain[i - 1].first.label_columns);
+                // config_.allow_label_change = (chain[i].first.label_columns != chain[i - 1].first.label_columns);
                 alignments = extender.connect_seeds(cur, chain[i].first, coord_offset);
             }
         }
