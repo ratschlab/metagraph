@@ -898,22 +898,23 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
     std::unordered_multiset<Chain, ChainHash> chains;
 
     auto callback = [&](Chain&& chain, score_t chain_score) {
-        logger->trace("Chain: {}", chain_score);
-        if (common::get_verbose()) {
-            for (auto it = chain.begin(); it != chain.end(); ++it) {
-                logger->trace("\t{}\t(dist: {}{})",
-                              it->first,
-                              it != chain.begin() && (it - 1)->first.get_query_view().end()
-                                             == it->first.get_query_view().begin() + graph_.get_k() - it->first.get_offset()
-                                  ? "0 + " : "",
-                              it->second);
-            }
+        std::ignore = chain_score;
+        DEBUG_LOG("Chain: {}", chain_score);
+#ifndef NDEBUG
+        for (auto it = chain.begin(); it != chain.end(); ++it) {
+            DEBUG_LOG("\t{}\t(dist: {}{})",
+                      it->first,
+                      it != chain.begin() && (it - 1)->first.get_query_view().end()
+                                     == it->first.get_query_view().begin() + graph_.get_k() - it->first.get_offset()
+                          ? "0 + " : "",
+                      it->second);
         }
+#endif
         bool added = false;
         aligner.extend_chain(std::move(chain), extender, [&](Alignment&& aln) {
             std::vector<Alignment> alns;
             if (!aln.get_end_clipping()) {
-                logger->trace("\t\t{}", aln);
+                DEBUG_LOG("\t\t{}", aln);
                 added |= aln.get_cigar().mark_exact_matches(matching_pos);
                 alns.emplace_back(std::move(aln));
             } else {
@@ -923,7 +924,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
             for (auto&& ext : alns) {
                 if (!ext.get_clipping()) {
                     added |= ext.get_cigar().mark_exact_matches(matching_pos);
-                    logger->trace("\t\t{}", ext);
+                    DEBUG_LOG("\t\t{}", ext);
                     alignments.emplace_back(std::move(ext));
                 } else {
                     bwd_extender.rc_extend_rc(ext, [&](Alignment&& aln) {
@@ -934,7 +935,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                         }
 
                         added |= aln.get_cigar().mark_exact_matches(matching_pos);
-                        logger->trace("\t\t{}", aln);
+                        DEBUG_LOG("\t\t{}", aln);
                         alignments.emplace_back(std::move(aln));
                     }, true, 0);
                 }
@@ -1418,11 +1419,17 @@ void chain_alignments(const IDBGAligner &aligner,
             if (a_j.end != a_i.end)
                 continue;
 
+            if (alignments[a_i.index].get_query_view().end() >= alignments[a_j.index].get_query_view().end()
+                    && a_i.col == a_j.col) {
+                continue;
+            }
+
             size_t overlap = a_i.end - a_j.begin;
             if (overlap >= graph.get_k() - 1)
                 continue;
 
             if (a_i.aln_index >= 0 && a_j.aln_index >= 0
+                    && alignments[a_i.index].get_query_view().end() < alignments[a_j.index].get_query_view().end()
                     && alignments[a_i.index].get_nodes()[a_i.aln_index] == alignments[a_j.index].get_nodes()[a_j.aln_index]
                     && offset_prefix[a_j.index][a_j.begin - alignments[a_j.index].get_query_view().begin()] == graph.get_k() - 1) {
                 // perfect overlap, easy to connect
@@ -1521,7 +1528,7 @@ void chain_alignments(const IDBGAligner &aligner,
 
         std::reverse(chain.begin(), chain.end());
 
-        logger->trace("Chain\t{}", -nscore);
+        DEBUG_LOG("Chain\t{}", -nscore);
         std::vector<std::pair<Alignment, score_t>> partial_alignments;
         size_t last_chain_i = 0;
         for (size_t i = 1; i < chain.size(); ++i) {
@@ -1537,7 +1544,7 @@ void chain_alignments(const IDBGAligner &aligner,
                 alignment.trim_query_suffix(alignment.get_query_view().end() - a_i.end, config);
                 assert(alignment.size());
                 last_chain_i = i;
-                logger->trace("\t{} (i: {}, label_change_score: {})", alignment, i_last, lc_last);
+                DEBUG_LOG("\t{} (i: {}, label_change_score: {})", alignment, i_last, lc_last);
             }
         }
 
@@ -1552,13 +1559,15 @@ void chain_alignments(const IDBGAligner &aligner,
             assert(alignment.size());
             alignment.trim_query_suffix(alignment.get_query_view().end() - a_i.end, config);
             assert(alignment.size());
-            logger->trace("\t{} (i: {}, label_change_score: {})", alignment, i_last, lc_last);
+            DEBUG_LOG("\t{} (i: {}, label_change_score: {})", alignment, i_last, lc_last);
         }
 
         if (partial_alignments.size() <= 1)
             continue;
 
         auto &alignment = partial_alignments[0].first;
+        assert(alignment.size());
+        assert(alignment.is_valid(graph, &config));
         for (size_t i = 1; i < partial_alignments.size(); ++i) {
             auto &[cur, label_change_score] = partial_alignments[i];
             ssize_t overlap = alignment.get_query_view().end() - cur.get_query_view().begin();
@@ -1568,6 +1577,7 @@ void chain_alignments(const IDBGAligner &aligner,
             if (overlap > 0) {
                 cur.trim_query_prefix(overlap, graph.get_k() - 1, config);
                 assert(cur.size());
+                assert(cur.is_valid(graph, &config));
             }
 
             if (insert_gap_prefix) {
@@ -1580,9 +1590,9 @@ void chain_alignments(const IDBGAligner &aligner,
             assert(alignment.is_valid(graph, &config));
         }
 
-        assert(alignment.is_valid(graph, &config));
-        logger->trace("\t\tAln: {}", alignment);
+        DEBUG_LOG("\t\tAln: {}", alignment);
         callback(std::move(alignment));
+        break;
     }
 }
 

@@ -258,35 +258,25 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
         size_t query_coverage = 0;
 
         auto alignments = aggregator.get_alignments();
-        if (config_.allow_jump || config_.allow_label_change) {
-            auto no_jump_config = config_;
-            no_jump_config.allow_jump = false;
-            AlignmentAggregator<AlignmentCompare> aggregator(no_jump_config);
-            for (auto aln : alignments) {
-                aggregator.add_alignment(std::move(aln));
-            }
-
-            auto get_min_path_score = [&](const Alignment &seed) {
-                return std::max(config_.min_path_score,
-                                seed.has_annotation()
-                                    ? aggregator.get_score_cutoff(seed.get_columns())
-                                    : aggregator.get_global_cutoff());
-            };
-
+        if (alignments.size() && (config_.allow_jump || config_.allow_label_change)) {
+            Alignment chained_alignment;
             auto add_aln = [&](auto&& alignment) {
-                if (alignment.get_score() > get_min_path_score(alignment))
-                    aggregator.add_alignment(std::move(alignment));
+                if (chained_alignment.empty() || alignment.get_score() > chained_alignment.get_score())
+                    std::swap(chained_alignment, alignment);
             };
 
             std::vector<Alignment> alns[2];
-            for (Alignment &aln : alignments) {
+            for (const Alignment &aln : alignments) {
                 bool orientation = aln.get_orientation();
-                alns[orientation].emplace_back(std::move(aln));
+                alns[orientation].emplace_back(aln);
             }
+            alignments.resize(1);
 
             chain_alignments(*this, alns[0], add_aln);
             chain_alignments(*this, alns[1], add_aln);
-            alignments = aggregator.get_alignments();
+
+            if (chained_alignment.get_score() > alignments[0].get_score())
+                std::swap(alignments[0], chained_alignment);
         }
 
         for (auto&& alignment : alignments) {
@@ -414,7 +404,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
         is_disconnected.emplace_back(chain.back().second >= std::numeric_limits<uint32_t>::max());
         assert(partial_alignments.size() == coord_offsets.size());
         Alignment *first = &partial_alignments[0];
-        logger->trace("Partial alignments:\n\t{}", fmt::join(partial_alignments, "\n\t"));
+        DEBUG_LOG("Partial alignments:\n\t{}", fmt::join(partial_alignments, "\n\t"));
         for (size_t i = 1; i < partial_alignments.size(); ++i) {
             Alignment &next = partial_alignments[i];
             if (next.get_sequence().size() < graph_.get_k()) {
