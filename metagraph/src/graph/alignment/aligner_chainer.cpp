@@ -1494,14 +1494,12 @@ void chain_alignments(const IDBGAligner &aligner,
 
     std::sort(best_chains.begin(), best_chains.end());
     sdsl::bit_vector used(anchors.size(), false);
-    tsl::hopscotch_map<Alignment::Column, size_t> used_cols;
+
+    score_t last_score = DBGAlignerConfig::ninf;
 
     for (size_t j = 0; j < best_chains.size(); ++j) {
         auto [nscore, k] = best_chains[j];
         if (used[k])
-            continue;
-
-        if (++used_cols[anchors[k].col] > config.num_alternative_paths)
             continue;
 
         std::vector<std::tuple<size_t, size_t, score_t>> chain;
@@ -1591,8 +1589,12 @@ void chain_alignments(const IDBGAligner &aligner,
         }
 
         DEBUG_LOG("\t\tAln: {}", alignment);
-        callback(std::move(alignment));
-        break;
+        if (last_score == DBGAlignerConfig::ninf || alignment.get_score() == last_score) {
+            last_score = alignment.get_score();
+            callback(std::move(alignment));
+        } else {
+            break;
+        }
     }
 }
 

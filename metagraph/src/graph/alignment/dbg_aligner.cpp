@@ -259,10 +259,17 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
 
         auto alignments = aggregator.get_alignments();
         if (alignments.size() && (config_.allow_jump || config_.allow_label_change)) {
-            Alignment chained_alignment;
+            std::vector<Alignment> chained_alignments;
             auto add_aln = [&](auto&& alignment) {
-                if (chained_alignment.empty() || alignment.get_score() > chained_alignment.get_score())
-                    std::swap(chained_alignment, alignment);
+                if (chained_alignments.empty()) {
+                    chained_alignments.emplace_back(std::move(alignment));
+                    return;
+                }
+
+                if (alignment.get_score() > chained_alignments[0].get_score())
+                    chained_alignments.clear();
+
+                chained_alignments.emplace_back(std::move(alignment));
             };
 
             std::vector<Alignment> alns[2];
@@ -275,8 +282,10 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
             chain_alignments(*this, alns[0], add_aln);
             chain_alignments(*this, alns[1], add_aln);
 
-            if (chained_alignment.get_score() > alignments[0].get_score())
-                std::swap(alignments[0], chained_alignment);
+            if (chained_alignments.size()
+                    && chained_alignments[0].get_score() > alignments[0].get_score()) {
+                std::swap(chained_alignments, alignments);
+            }
         }
 
         for (auto&& alignment : alignments) {
