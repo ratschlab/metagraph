@@ -268,10 +268,18 @@ bool Alignment::append(Alignment&& other, score_t label_change_score) {
         std::swap(label_coordinates, merged_label_coordinates);
 
     } else if (has_annotation()) {
-        if ((label_column_diffs.size() ? label_column_diffs.back() : label_columns)
-                == other.label_columns) {
+        auto last_columns = label_column_diffs.size() ? label_column_diffs.back() : label_columns;
+        if (last_columns == other.label_columns)
             label_change_score = 0;
-        }
+
+        const auto &columns_a = label_encoder->get_cached_column_set(last_columns);
+        const auto &columns_b = label_encoder->get_cached_column_set(other.label_columns);
+        std::vector<Column> diff;
+        std::set_difference(columns_b.begin(), columns_b.end(), columns_a.begin(), columns_a.end(),
+                            std::back_inserter(diff));
+
+        if (diff.empty())
+            label_change_score = 0;
 
         if (label_change_score == DBGAlignerConfig::ninf) {
             DEBUG_LOG("Splice failed");

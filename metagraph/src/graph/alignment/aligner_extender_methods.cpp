@@ -147,6 +147,7 @@ std::vector<Alignment> SeedFilteringExtender::connect_seeds(const Alignment &fir
             auto alignment = left;
             assert(extension.get_nodes().front() == next.get_nodes().front());
             alignment.splice(std::move(extension));
+            assert(alignment.size());
             assert(alignment.is_valid(*graph_, &config_));
             alignments.emplace_back(std::move(alignment));
         }

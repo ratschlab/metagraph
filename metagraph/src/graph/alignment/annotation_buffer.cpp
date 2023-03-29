@@ -34,7 +34,7 @@ bool AnnotationBuffer
         std::set_difference(c.begin(), c.end(), labels->begin(), labels->end(),
                             std::back_inserter(diff));
         if (diff.size()) {
-            logger->error("Node {} does not have labels {}", fmt::join(diff, "\t"));
+            logger->error("Node {} does not have labels {}", node, fmt::join(diff, "\t"));
             return false;
         }
     }

@@ -360,6 +360,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
     assert(chain.size());
 
     Alignment cur = std::move(chain[0].first);
+    assert(cur.size());
     assert(cur.is_valid(graph_, &config_));
     Alignment best = cur;
 
@@ -392,6 +393,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
 
         if (alignments.size()) {
             // TODO: what if there are multiple alignments?
+            assert(alignments[0].size());
             std::swap(alignments[0], cur);
             if (AlignmentCompare()(best, cur))
                 best = cur;
@@ -406,6 +408,8 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
             coord_offsets.push_back(coord_offset);
             coord_offset = 0;
         }
+        assert(cur.size());
+        assert(cur.is_valid(graph_, &config_));
     }
 
     if (try_connect && partial_alignments.size()) {
