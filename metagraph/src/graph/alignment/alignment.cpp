@@ -1719,6 +1719,11 @@ bool Alignment::is_valid(const DeBruijnGraph &graph, const DBGAlignerConfig *con
         return false;
     }
 
+    if (label_encoder && !label_encoder->labels_valid(*this)) {
+        logger->error("Stored labels invalid\n{}", *this);
+        return false;
+    }
+
     return true;
 }
 

@@ -18,6 +18,16 @@ typedef annot::binmat::BinaryMatrix::Column Column;
 // dummy index for an unfetched annotations
 static constexpr size_t nannot = std::numeric_limits<size_t>::max();
 
+bool AnnotationBuffer::labels_valid(const Alignment &alignment) const {
+    for (size_t i = 0; i < alignment.get_nodes().size(); ++i) {
+        const auto &labels = alignment.get_columns(i);
+        if (!check_node_labels_is_superset(labels, { alignment.get_nodes()[i] }))
+            return false;
+    }
+
+    return true;
+}
+
 bool AnnotationBuffer
 ::check_node_labels_is_superset(const Columns &c, const std::vector<node_index> &nodes) const {
     if (c.empty())
@@ -34,7 +44,13 @@ bool AnnotationBuffer
         std::set_difference(c.begin(), c.end(), labels->begin(), labels->end(),
                             std::back_inserter(diff));
         if (diff.size()) {
-            logger->error("Node {} does not have labels {}", node, fmt::join(diff, "\t"));
+            std::vector<std::string> diff_labels;
+            diff_labels.reserve(diff.size());
+            const auto &label_encoder = annotator_.get_label_encoder();
+            for (auto c : diff) {
+                diff_labels.emplace_back(label_encoder.decode(c));
+            }
+            logger->error("Node {} does not have labels: {}", node, fmt::join(diff_labels, ";"));
             return false;
         }
     }

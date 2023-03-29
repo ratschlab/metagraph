@@ -117,6 +117,9 @@ void LabeledExtender::flush() {
 #ifndef NDEBUG
         if (table[parent_i].offset >= 0
                 && static_cast<size_t>(table[parent_i].offset) >= graph_->get_k() - 1) {
+            assert(annotation_buffer_.check_node_labels_is_superset(
+                parent_labels, { table[parent_i].node }
+            ));
             const Columns *parent_real_labels;
             if (config_.label_change_union) {
                 parent_real_labels = &annotation_buffer_.get_cached_column_set(remaining_labels_i_);
