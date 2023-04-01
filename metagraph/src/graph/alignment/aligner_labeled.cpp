@@ -743,7 +743,8 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
     }
 
     for (size_t i = 1; i < seeds.size(); ++i) {
-        if (seeds[i].get_query_view().end() == first_end
+        if (seeds[i].empty()
+                || seeds[i].get_query_view().end() == first_end
                 || seeds[i].get_sequence().size() >= max_seed_length_) {
             continue;
         }
