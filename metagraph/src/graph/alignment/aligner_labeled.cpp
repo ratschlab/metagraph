@@ -454,7 +454,8 @@ LabeledAligner<Seeder, Extender, AlignmentCompare>
                  const DBGAlignerConfig &config,
                  const Annotator &annotator)
       : DBGAligner<Seeder, Extender, AlignmentCompare>(graph, config),
-        annotation_buffer_(graph, annotator) {
+        annotation_buffer_(graph, annotator),
+        max_seed_length_(this->config_.max_seed_length) {
     // do not use a global xdrop cutoff since we need separate cutoffs for each label
     if (annotation_buffer_.has_coordinates()) {
         logger->trace("Coordinates detected. Enabling seed chaining");
@@ -717,6 +718,93 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
     assert(std::all_of(seeds.begin(), seeds.end(), [&](const auto &a) {
         return a.get_query_view().size() >= this->config_.min_seed_length;
     }));
+
+    if (seeds.size() == 1 || max_seed_length_ <= this->config_.max_seed_length)
+        return get_num_char_matches_in_seeds(seeds.begin(), seeds.end());
+
+    // merge seeds into MEMs
+    std::sort(seeds.begin(), seeds.end(), [&](const auto &a, const auto &b) {
+        return a.get_query_view().end() < b.get_query_view().end();
+    });
+
+    auto first_end = seeds[0].get_query_view().end();
+    auto last_end = seeds.back().get_query_view().end();
+
+    std::vector<size_t> end_ranges(last_end - first_end,
+                                   std::numeric_limits<size_t>::max());
+    size_t last_i = 0;
+    end_ranges[0] = 0;
+    for (size_t i = 0; i < seeds.size(); ++i) {
+        assert(seeds[i].get_nodes().size() == 1);
+        if (seeds[i].get_query_view().end() != seeds[last_i].get_query_view().end()) {
+            last_i = i;
+            end_ranges[seeds[i].get_query_view().end() - first_end] = i;
+        }
+    }
+
+    for (size_t i = 1; i < seeds.size(); ++i) {
+        if (seeds[i].get_query_view().end() == first_end
+                || seeds[i].get_sequence().size() >= max_seed_length_) {
+            continue;
+        }
+
+        size_t end = end_ranges[seeds[i].get_query_view().end() - first_end];
+        assert(end != std::numeric_limits<size_t>::max());
+
+        size_t begin = end_ranges[seeds[i].get_query_view().end() - first_end - 1];
+        if (begin == std::numeric_limits<size_t>::max())
+            continue;
+
+        for (size_t j = begin; j < end; ++j) {
+            if (seeds[j].empty() || seeds[j].get_sequence().size() >= max_seed_length_)
+                continue;
+
+            if (seeds[j].label_columns != seeds[i].label_columns)
+                continue;
+
+            if (seeds[j].label_coordinates.size() != seeds[i].label_coordinates.size())
+                continue;
+
+            bool coords_can_be_merged = true;
+            for (size_t k = 0; k < seeds[j].label_coordinates.size(); ++k) {
+                if (seeds[j].label_coordinates[k].size()
+                        != seeds[i].label_coordinates[k].size()) {
+                    coords_can_be_merged = false;
+                    break;
+                }
+
+                for (size_t l = 0; l < seeds[i].label_coordinates[k].size(); ++l) {
+                    if (seeds[j].label_coordinates[k][l] + 1
+                            != seeds[i].label_coordinates[k][l]) {
+                        coords_can_be_merged = false;
+                        break;
+                    }
+                }
+
+                if (!coords_can_be_merged)
+                    break;
+            }
+
+            if (!coords_can_be_merged)
+                continue;
+
+            this->graph_.adjacent_outgoing_nodes(seeds[j].get_nodes()[0],
+                [&](node_index next) {
+                    if (next == seeds[i].get_nodes()[0]) {
+                        seeds[j].expand(seeds[i].get_nodes());
+                        std::swap(seeds[j], seeds[i]);
+                        seeds[j] = Seed();
+                    }
+                }
+            );
+        }
+    }
+
+    seed_it = std::remove_if(seeds.begin(), seeds.end(), [&](const auto &a) {
+        return a.empty();
+    });
+
+    seeds.erase(seed_it, seeds.end());
 
     return get_num_char_matches_in_seeds(seeds.begin(), seeds.end());
 }
