@@ -272,15 +272,20 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
                 chained_alignments.emplace_back(std::move(alignment));
             };
 
-            std::vector<Alignment> alns[2];
+            std::vector<Alignment> alns;
+            alns.reserve(alignments.size());
             for (const Alignment &aln : alignments) {
-                bool orientation = aln.get_orientation();
-                alns[orientation].emplace_back(aln);
+                if (!aln.get_orientation())
+                    alns.emplace_back(aln);
             }
+            for (const Alignment &aln : alignments) {
+                if (aln.get_orientation())
+                    alns.emplace_back(aln);
+            }
+            assert(alns.size() == alignments.size());
             alignments.resize(1);
 
-            chain_alignments(*this, alns[0], add_aln);
-            chain_alignments(*this, alns[1], add_aln);
+            chain_alignments(*this, alns, add_aln);
 
             if (chained_alignments.size()
                     && chained_alignments[0].get_score() > alignments[0].get_score()) {

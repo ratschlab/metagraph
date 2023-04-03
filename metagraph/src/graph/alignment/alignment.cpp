@@ -342,8 +342,6 @@ size_t Alignment::trim_offset(size_t num_nodes) {
     assert(extra_scores.empty() || extra_scores.size() == nodes_.size() - 1);
     assert(label_column_diffs.empty() || label_column_diffs.size() == nodes_.size() - 1);
 
-    assert(nodes_.front());
-
     size_t first_dummy = (std::find(nodes_.begin(), nodes_.end(), DeBruijnGraph::npos)
         - nodes_.begin()) - 1;
     size_t trim = std::min({ num_nodes, offset_, nodes_.size() - 1, first_dummy });
