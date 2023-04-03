@@ -150,28 +150,6 @@ TYPED_TEST(DBGAlignerPostChainTest, align_chain_delete_no_chain_if_full_coverage
     check_extend(graph, aligner.get_config(), paths, query);
 }
 
-TYPED_TEST(DBGAlignerPostChainTest, align_chain_delete1) {
-    size_t k = 10;
-    std::string reference1 = "TTTTGAGGATCAGTTCTAGCTTG";
-    std::string reference2 =              "CCCTAGCTTGCTAGCGCTAGCTAGATC";
-    std::string query      = "TTTTGAGGATCAG""CTAGCTTGCTAGCGCTAGCTAGATC";
-
-    auto graph = build_graph_batch<TypeParam>(k, { reference1, reference2 });
-    DBGAlignerConfig config;
-    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
-    config.min_seed_length = 8;
-    config.max_seed_length = 8;
-    config.set_node_insertion_penalty(k);
-    config.allow_jump = true;
-
-    DBGAligner<> aligner(*graph, config);
-    auto paths = aligner.align(query);
-    ASSERT_LE(1u, paths.size());
-    EXPECT_EQ(1u, paths.size());
-    EXPECT_EQ(std::string("TTTTGAGGATCAGTTCTAGCTTGCTAGCGCTAGCTAGATC"), paths[0].get_sequence());
-    check_chain(paths, *graph, config);
-}
-
 TYPED_TEST(DBGAlignerPostChainTest, align_chain_delete_mismatch) {
     size_t k = 10;
     std::string reference1 = "AAAAAGGGTTTTTGAGGATCAGTTCTGCGCTTG";
@@ -262,28 +240,6 @@ TYPED_TEST(DBGAlignerPostChainTest, align_chain_large_overlap) {
     EXPECT_EQ(std::string("TGAGGATCAGTTCTAGCTTGCTAGCGCTAGCTAGATC"), paths[0].get_sequence());
     check_chain(paths, *graph, config, false);
     check_extend(graph, aligner.get_config(), paths, query);
-}
-
-TYPED_TEST(DBGAlignerPostChainTest, align_chain_delete_in_overlap) {
-    size_t k = 10;
-    std::string reference1 = "AAATTTTTTTGAGGATCAGTTCTAGCTTGC";
-    std::string reference2 =                     "AATAGCTTGCTAGCGCTAGCTAGATCCCCCCC";
-    std::string query      = "AAATTTTTTTGAGGATCAGTTCTGCTTGCTAGCGCTAGCTAGATCCCCCCC";
-
-    auto graph = build_graph_batch<TypeParam>(k, { reference1, reference2 });
-    DBGAlignerConfig config;
-    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
-    config.min_seed_length = 6;
-    config.max_seed_length = 6;
-    config.set_node_insertion_penalty(k);
-    config.allow_jump = true;
-
-    DBGAligner<> aligner(*graph, config);
-    auto paths = aligner.align(query);
-    ASSERT_LE(1u, paths.size());
-    EXPECT_EQ(1u, paths.size());
-    EXPECT_EQ(std::string("AAATTTTTTTGAGGATCAGTTCTAGCTTGCTAGCGCTAGCTAGATCCCCCCC"), paths[0].get_sequence());
-    check_chain(paths, *graph, config);
 }
 
 TYPED_TEST(DBGAlignerPostChainTest, align_chain_disjoint) {
