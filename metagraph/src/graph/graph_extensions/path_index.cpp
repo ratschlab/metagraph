@@ -468,8 +468,8 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
 ::PathIndex(std::shared_ptr<const DBGSuccinct> graph,
             const std::string &graph_name,
             const std::function<void(const std::function<void(std::string_view)>)> &generate_sequences) {
-    if (graph->get_mode() == DeBruijnGraph::CANONICAL) {
-        throw std::runtime_error("Only BASIC and PRIMARY graphs supported");
+    if (graph->get_mode() != DeBruijnGraph::BASIC) {
+        throw std::runtime_error("Only BASIC graphs supported");
     }
 
     const DBGSuccinct &dbg_succ = *graph;
