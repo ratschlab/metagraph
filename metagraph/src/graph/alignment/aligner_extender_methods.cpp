@@ -18,6 +18,17 @@ using score_t = Alignment::score_t;
 const score_t ninf = Alignment::ninf;
 using kmer::KmerExtractorBOSS;
 
+score_t get_splice_label_change_score(const Alignment &full,
+                                      const Alignment &left,
+                                      const Alignment &anchor) {
+    return (full.label_column_diffs.empty() || full.extra_scores.empty()
+            || anchor.label_columns == (left.label_column_diffs.size()
+                                        ? left.label_column_diffs.back()
+                                        : left.label_columns))
+        ? DBGAlignerConfig::ninf
+        : full.extra_scores[full.extra_scores.size() - anchor.get_nodes().size()];
+}
+
 void SeedFilteringExtender
 ::extend_seed_end(const Alignment &seed,
                   const std::function<void(Alignment&&)> &callback,
@@ -49,7 +60,8 @@ void SeedFilteringExtender
         if (extension.get_end_clipping() < seed.get_end_clipping()) {
             assert(extension.get_nodes().front() == next.get_nodes().front());
             auto aln = left;
-            aln.splice(std::move(extension));
+            aln.splice(std::move(extension),
+                       get_splice_label_change_score(seed, left, next));
             if (aln.size() && aln.get_score() >= min_path_score) {
                 assert(aln.get_clipping() == seed.get_clipping());
                 if (aln.get_offset() > seed.get_offset())
@@ -146,7 +158,10 @@ std::vector<Alignment> SeedFilteringExtender::connect_seeds(const Alignment &fir
                 && extension.get_nodes().back() == second.get_nodes().back()) {
             auto alignment = left;
             assert(extension.get_nodes().front() == next.get_nodes().front());
-            alignment.splice(std::move(extension));
+
+            alignment.splice(std::move(extension),
+                             get_splice_label_change_score(first, left, next));
+
             assert(alignment.size());
             assert(alignment.is_valid(*graph_, &config_));
             alignments.emplace_back(std::move(alignment));
