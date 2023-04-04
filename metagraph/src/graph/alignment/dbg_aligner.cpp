@@ -430,7 +430,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
                 continue;
             }
 
-            int64_t num_unknown = coord_offsets[i] - first->get_sequence().size();
+            // int64_t num_unknown = coord_offsets[i] - first->get_sequence().size();
             ssize_t overlap = first->get_query_view().end() - next.get_query_view().begin();
             if (is_coord_jump(*first, next) || is_disconnected[i]) {
                 auto merged = *first;
@@ -447,21 +447,21 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
                     first = &next;
                     continue;
                 }
-            } else if (num_unknown > 0 && next.get_clipping() > num_unknown && overlap <= 0) {
-                auto merged = *first;
-                auto next_fixed = next;
-                next_fixed.trim_offset();
-                assert(merged.is_valid(graph_, &config_));
-                assert(next_fixed.is_valid(graph_, &config_));
-                merged.splice_with_unknown(std::move(next_fixed), num_unknown,
-                                           graph_.get_k() - 1, config_);
-                assert(merged.is_valid(graph_, &config_));
-                if (merged.size()) {
-                    std::swap(*first, merged);
-                } else {
-                    first = &next;
-                    continue;
-                }
+            // } else if (num_unknown > 0 && next.get_clipping() > num_unknown && overlap <= 0) {
+            //     auto merged = *first;
+            //     auto next_fixed = next;
+            //     next_fixed.trim_offset();
+            //     assert(merged.is_valid(graph_, &config_));
+            //     assert(next_fixed.is_valid(graph_, &config_));
+            //     merged.splice_with_unknown(std::move(next_fixed), num_unknown,
+            //                                graph_.get_k() - 1, config_);
+            //     assert(merged.is_valid(graph_, &config_));
+            //     if (merged.size()) {
+            //         std::swap(*first, merged);
+            //     } else {
+            //         first = &next;
+            //         continue;
+            //     }
             } else {
                 first = &next;
                 continue;
