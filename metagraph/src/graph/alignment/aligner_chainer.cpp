@@ -1161,7 +1161,7 @@ void chain_alignments(const IDBGAligner &aligner,
                     auto label_change_scores
                         = labeled_aligner->get_label_change_scores(a_i_col, a_j_col);
                     score_t match_score = config.match_score(std::string_view(
-                        a_j.get_query_view().end() - 1, 1
+                        a_j.get_query_view().begin(), 1
                     ));
 
                     for (auto&& [labels, lc_score, is_subset] : label_change_scores) {
@@ -1171,6 +1171,8 @@ void chain_alignments(const IDBGAligner &aligner,
 
                     if (local_label_change_score == DBGAlignerConfig::ninf)
                         return;
+
+                    assert(local_label_change_score <= 0);
 
                     base_updated_score += local_label_change_score;
                 }
@@ -1203,21 +1205,21 @@ void chain_alignments(const IDBGAligner &aligner,
                 if (a_j.get_query_view().end() != a_i.get_query_view().end())
                     return;
 
-                // if (alignments[info_i.index].get_query_view().end() >= alignments[info_j.index].get_query_view().end()
-                //         && a_i_col == a_j_col) {
-                //     return;
-                // }
-
                 size_t overlap = a_i.get_query_view().end() - a_j.get_query_view().begin();
                 if (overlap >= graph.get_k() - 1)
                     return;
 
+                base_updated_score += per_char_scores_suffix[info_i.index][a_i.get_query_view().end() - alignments[info_i.index].get_query_view().begin()]
+                                    - per_char_scores_prefix[info_i.index][a_i.get_query_view().begin() - alignments[info_i.index].get_query_view().begin()]
+                                    - (per_char_scores_suffix[info_j.index][a_j.get_query_view().end() - alignments[info_j.index].get_query_view().begin()]
+                                    - per_char_scores_prefix[info_j.index][a_j.get_query_view().begin() - alignments[info_j.index].get_query_view().begin()]);
+
                 if (info_i.aln_index_back >= 0 && info_j.aln_index_back >= 0
-                        && alignments[info_i.index].get_query_view().end() < alignments[info_j.index].get_query_view().end()
                         && a_i.get_nodes().back() == a_j.get_nodes().back()
                         && a_j.get_offset() == graph.get_k() - 1) {
                     // perfect overlap, easy to connect
                     if (update_score(score_j + base_updated_score, &a_j, 0)) {
+                        // logger->info("{} -> {}\t{}", a_i, a_j, score_j + base_updated_score);
                         info_i.mem_length = a_i.get_query_view().size();
                         info_i.label_change_score = local_label_change_score;
                     }
@@ -1296,11 +1298,13 @@ void chain_alignments(const IDBGAligner &aligner,
                 }
 
             } else {
-                bool insert_gap_prefix = overlap < static_cast<ssize_t>(graph.get_k() - 1)
-                    && (overlap <= 0
-                        || (first->get_nodes().front() != cur.get_nodes().back()));
-
+                bool insert_gap_prefix = overlap < static_cast<ssize_t>(graph.get_k() - 1);
                 if (overlap > 0) {
+                    assert(overlap + cur.get_offset() >= graph.get_k());
+                    insert_gap_prefix &=
+                        (cur.get_nodes()[overlap - graph.get_k() + cur.get_offset()]
+                            != first->get_nodes().back());
+
                     cur.trim_query_prefix(overlap, graph.get_k() - 1, config);
                     assert(cur.size());
                     assert(cur.is_valid(graph, &config));
