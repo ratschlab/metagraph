@@ -612,7 +612,10 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
             if (seeds[i].label_columns == seeds[i - 1].label_columns
                     && seeds[i].get_query_view().end() + 1 == seeds[i - 1].get_query_view().end()
                     && end_counter[seeds[i].get_query_view().end()] == 1
-                    && end_counter[seeds[i].get_query_view().end() + 1] == 1) {
+                    && end_counter[seeds[i].get_query_view().end() + 1] == 1
+                    && graph_.traverse(seeds[i].get_nodes().back(),
+                                       seeds[i - 1].get_query_view().front())
+                        == seeds[i - 1].get_nodes()[0]) {
                 // we have a MUM
                 assert(seeds[i].get_query_view().end() < seeds[i - 1].get_query_view().end());
                 seeds[i].expand(seeds[i - 1].get_nodes());
