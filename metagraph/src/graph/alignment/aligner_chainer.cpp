@@ -1218,7 +1218,8 @@ void chain_alignments(const IDBGAligner &aligner,
                                     - (per_char_scores_suffix[info_j.index][a_j.get_query_view().end() - alignments[info_j.index].get_query_view().begin()]
                                         - per_char_scores_prefix[info_j.index][a_j.get_query_view().end() - overlap - alignments[info_j.index].get_query_view().begin()]);
 
-                if (a_i.get_nodes().back() == a_j.get_nodes().back()) {
+                if (a_i.get_nodes().back() == a_j.get_nodes().back()
+                        && info_j.mem_length > a_j.get_query_view().size()) {
                     // perfect overlap, easy to connect
                     assert(a_i.get_query_view().size() == a_j.get_query_view().size());
                     if (update_score(score_j + base_updated_score, &a_j, 0)) {
@@ -1311,6 +1312,7 @@ void chain_alignments(const IDBGAligner &aligner,
                     bool insert_gap_prefix = (cur.get_nodes()[overlap_position] != first->get_nodes().back());
 
                     cur.trim_query_prefix(overlap, graph.get_k() - 1, config, false);
+                    assert(cur.size());
                     assert(cur.get_nodes().size() == old_cur_size - overlap_position - 1);
                     assert(cur.is_valid(graph, &config));
 
