@@ -1205,21 +1205,20 @@ void chain_alignments(const IDBGAligner &aligner,
                 if (a_j.get_query_view().end() != a_i.get_query_view().end())
                     return;
 
-                size_t overlap = a_i.get_query_view().end() - a_j.get_query_view().begin();
-                if (overlap >= graph.get_k() - 1)
-                    return;
+                size_t overlap = a_i.get_query_view().end()
+                                - std::max(a_i.get_query_view().begin(), a_j.get_query_view().begin());
+                assert(overlap == a_i.get_query_view().size());
+                assert(overlap == a_j.get_query_view().size());
 
                 base_updated_score += per_char_scores_suffix[info_i.index][a_i.get_query_view().end() - alignments[info_i.index].get_query_view().begin()]
-                                    - per_char_scores_prefix[info_i.index][a_i.get_query_view().begin() - alignments[info_i.index].get_query_view().begin()]
+                                    - per_char_scores_prefix[info_i.index][a_i.get_query_view().end() - overlap - alignments[info_i.index].get_query_view().begin()]
                                     - (per_char_scores_suffix[info_j.index][a_j.get_query_view().end() - alignments[info_j.index].get_query_view().begin()]
-                                    - per_char_scores_prefix[info_j.index][a_j.get_query_view().begin() - alignments[info_j.index].get_query_view().begin()]);
+                                        - per_char_scores_prefix[info_j.index][a_j.get_query_view().end() - overlap - alignments[info_j.index].get_query_view().begin()]);
 
-                if (info_i.aln_index_back >= 0 && info_j.aln_index_back >= 0
-                        && a_i.get_nodes().back() == a_j.get_nodes().back()
-                        && a_j.get_offset() == graph.get_k() - 1) {
+                if (a_i.get_nodes().back() == a_j.get_nodes().back()) {
                     // perfect overlap, easy to connect
+                    assert(a_i.get_query_view().size() == a_j.get_query_view().size());
                     if (update_score(score_j + base_updated_score, &a_j, 0)) {
-                        // logger->info("{} -> {}\t{}", a_i, a_j, score_j + base_updated_score);
                         info_i.mem_length = a_i.get_query_view().size();
                         info_i.label_change_score = local_label_change_score;
                     }
@@ -1281,7 +1280,7 @@ void chain_alignments(const IDBGAligner &aligner,
             if (last_index == first_extra_info.index) {
                 if (overlap > 0) {
                     alignment = *first;
-                    cur.trim_query_prefix(overlap, graph.get_k() - 1, config);
+                    cur.trim_query_prefix(overlap, graph.get_k() - 1, config, false);
                     assert(cur.size());
                 } else {
                     alignment = alignments[first_extra_info.index];
@@ -1298,21 +1297,25 @@ void chain_alignments(const IDBGAligner &aligner,
                 }
 
             } else {
-                bool insert_gap_prefix = overlap < static_cast<ssize_t>(graph.get_k() - 1);
-                if (overlap > 0) {
-                    assert(overlap + cur.get_offset() >= graph.get_k());
-                    insert_gap_prefix &=
-                        (cur.get_nodes()[overlap - graph.get_k() + cur.get_offset()]
-                            != first->get_nodes().back());
-
-                    cur.trim_query_prefix(overlap, graph.get_k() - 1, config);
-                    assert(cur.size());
-                    assert(cur.is_valid(graph, &config));
-                }
-
-                if (insert_gap_prefix) {
+                if (overlap <= 0) {
                     cur.insert_gap_prefix(-overlap, graph.get_k() - 1, config);
                     assert(cur.size());
+                } else {
+                    assert(first->get_query_view().begin() == cur.get_query_view().begin());
+                    size_t overlap_position = overlap - 1 - (graph.get_k() - 1 - cur.get_offset());
+                    size_t old_cur_size = cur.get_nodes().size();
+                    std::ignore = old_cur_size;
+                    bool insert_gap_prefix = (cur.get_nodes()[overlap_position] != first->get_nodes().back());
+
+                    cur.trim_query_prefix(overlap, graph.get_k() - 1, config, false);
+                    assert(cur.get_nodes().size() == old_cur_size - overlap_position - 1);
+                    assert(cur.is_valid(graph, &config));
+
+                    if (insert_gap_prefix) {
+                        cur.insert_gap_prefix(-overlap, graph.get_k() - 1, config);
+                        assert(cur.size());
+                        assert(cur.is_valid(graph, &config));
+                    }
                 }
 
                 alignment = *first;
