@@ -655,65 +655,59 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
     auto node_coords = path_index->get_coords(nodes);
     float sl = -static_cast<float>(config_.min_seed_length) * 0.01;
 
-    tsl::hopscotch_map<Alignment::Columns, size_t> used_cols;
     sdsl::bit_vector matching_pos(query.size(), false);
     bool terminate = false;
     score_t best_score = std::numeric_limits<score_t>::min();
-
-    auto callback = [&](Chain&& chain, score_t chain_score) {
-        bool new_label = ++used_cols[chain.back().first.label_columns]
-                                <= config_.num_alternative_paths;
-        score_t local_best_score = std::numeric_limits<score_t>::min();
-        std::ignore = chain_score;
-
-        bool added = false;
-
-        aligner.extend_chain(std::move(chain), extender, [&](Alignment&& aln) {
-            std::vector<Alignment> alns;
-            if (!aln.get_end_clipping()) {
-                DEBUG_LOG("\t\t{}", aln);
-                added |= aln.get_cigar().mark_exact_matches(matching_pos);
-                alns.emplace_back(std::move(aln));
-            } else {
-                alns = extender.get_extensions(aln, 0, true);
-            }
-
-            for (auto&& ext : alns) {
-                if (!ext.get_clipping()) {
-                    added |= ext.get_cigar().mark_exact_matches(matching_pos);
-                    DEBUG_LOG("\t\t{}", ext);
-                    alignments.emplace_back(std::move(ext));
-                    local_best_score = std::max(local_best_score, ext.get_score());
-                } else {
-                    bwd_extender.rc_extend_rc(ext, [&](Alignment&& aln) {
-                        assert(aln.is_valid(graph_, &config_));
-                        for (node_index node : aln.get_nodes()) {
-                            extender.filter_nodes(node, aln.get_clipping(),
-                                                  query.size() - aln.get_end_clipping());
-                        }
-
-                        added |= aln.get_cigar().mark_exact_matches(matching_pos);
-                        DEBUG_LOG("\t\t{}", aln);
-                        alignments.emplace_back(std::move(aln));
-                        local_best_score = std::max(local_best_score, aln.get_score());
-                    }, true, 0);
-                }
-            }
-        }, true);
-
-        bool score_updated = (local_best_score > best_score);
-        best_score = std::max(best_score, local_best_score);
-
-        terminate |= !score_updated && !added && !new_label;
-        terminate |= !config_.allow_jump
-                        && local_best_score < best_score * config_.rel_score_cutoff;
-    };
 
     std::unordered_multiset<Chain, ChainHash> chains;
     score_t last_chain_score = std::numeric_limits<score_t>::min();
     auto flush_chains = [&]() {
         if (chains.empty())
             return;
+
+        auto callback = [&](Chain&& chain, score_t chain_score) {
+            best_score = std::max(best_score, chain_score);
+            bool score_too_low = (chain_score < best_score * config_.rel_score_cutoff);
+            if (!config_.allow_jump && score_too_low) {
+                terminate = true;
+                return;
+            }
+
+            bool added = false;
+
+            aligner.extend_chain(std::move(chain), extender, [&](Alignment&& aln) {
+                std::vector<Alignment> alns;
+                if (!aln.get_end_clipping()) {
+                    DEBUG_LOG("\t\t{}", aln);
+                    added |= aln.get_cigar().mark_exact_matches(matching_pos);
+                    alns.emplace_back(std::move(aln));
+                } else {
+                    alns = extender.get_extensions(aln, 0, true);
+                }
+
+                for (auto&& ext : alns) {
+                    if (!ext.get_clipping()) {
+                        added |= ext.get_cigar().mark_exact_matches(matching_pos);
+                        DEBUG_LOG("\t\t{}", ext);
+                        alignments.emplace_back(std::move(ext));
+                    } else {
+                        bwd_extender.rc_extend_rc(ext, [&](Alignment&& aln) {
+                            assert(aln.is_valid(graph_, &config_));
+                            for (node_index node : aln.get_nodes()) {
+                                extender.filter_nodes(node, aln.get_clipping(),
+                                                      query.size() - aln.get_end_clipping());
+                            }
+
+                            added |= aln.get_cigar().mark_exact_matches(matching_pos);
+                            DEBUG_LOG("\t\t{}", aln);
+                            alignments.emplace_back(std::move(aln));
+                        }, true, 0);
+                    }
+                }
+            }, true);
+
+            terminate |= score_too_low && !added;
+        };
 
         auto it = chains.begin();
         Chain last_chain = *it;
