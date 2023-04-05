@@ -970,9 +970,7 @@ void chain_alignments(const IDBGAligner &aligner,
 
     const DeBruijnGraph &graph = aligner.get_graph();
     std::vector<std::vector<score_t>> per_char_scores_prefix;
-    std::vector<std::vector<score_t>> per_char_scores_suffix;
     per_char_scores_prefix.reserve(alignments.size());
-    per_char_scores_suffix.reserve(alignments.size());
 
     tsl::hopscotch_map<std::string_view::const_iterator, size_t> end_counter;
 
@@ -981,37 +979,18 @@ void chain_alignments(const IDBGAligner &aligner,
         const auto &alignment = alignments[i];
         DEBUG_LOG("Alignment {}:\t{}", i, alignment);
         std::string_view query = alignment.get_query_view();
-        auto &prefix_scores_with_deletions = per_char_scores_prefix.emplace_back(std::vector<score_t>(query.size() + 1, 0));
-        auto &prefix_scores_without_deletions = per_char_scores_suffix.emplace_back(std::vector<score_t>(query.size() + 1, 0));
+        auto &prefix_scores_with_deletions
+            = per_char_scores_prefix.emplace_back(std::vector<score_t>(query.size() + 1, 0));
 
-        {
-            auto cur = alignment;
-            auto it = prefix_scores_with_deletions.begin();
-            while (cur.size()) {
-                cur.trim_query_prefix(1, graph.get_k() - 1, config);
-                ++it;
-                assert(it != prefix_scores_with_deletions.end());
-                *it = alignment.get_score() - cur.get_score();
-            }
-            assert(prefix_scores_with_deletions.front() == 0);
-            assert(prefix_scores_with_deletions.back() == alignment.get_score());
+        auto cur = alignment;
+        auto it = prefix_scores_with_deletions.begin();
+        while (cur.size()) {
+            cur.trim_query_prefix(1, graph.get_k() - 1, config);
+            ++it;
+            assert(it != prefix_scores_with_deletions.end());
+            *it = alignment.get_score() - cur.get_score();
         }
-        {
-            auto cur = alignment;
-            cur.extend_offset(std::vector<node_index>(graph.get_k() - 1 - cur.get_offset(),
-                                                      DeBruijnGraph::npos));
-            assert(cur.get_offset() == graph.get_k() - 1);
-            auto it = prefix_scores_without_deletions.rbegin();
-            *it = cur.get_score();
-            while (cur.size()) {
-                cur.trim_query_suffix(1, config);
-                ++it;
-                assert(it != prefix_scores_without_deletions.rend());
-                *it = cur.get_score();
-            }
-            assert(it + 1 == prefix_scores_without_deletions.rend());
-            assert(prefix_scores_without_deletions.front() == 0);
-        }
+        assert(prefix_scores_with_deletions.back() == alignment.get_score());
     }
 
     size_t seed_size = std::min(config.min_seed_length, graph.get_k());
