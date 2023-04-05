@@ -92,6 +92,11 @@ class Seed {
                 && nodes_ == b.nodes_;
     }
 
+    DBGAlignerConfig::score_t get_score(const DBGAlignerConfig &config) const {
+        return config.match_score(query_view_) + (!clipping_ ? config.left_end_bonus : 0)
+                     + (!end_clipping_ ? config.right_end_bonus : 0);
+    }
+
     AnnotationBuffer *label_encoder = nullptr;
     bool has_annotation() const { return label_encoder; }
 
@@ -178,8 +183,7 @@ class Alignment {
             nodes_(std::vector<node_index>(seed.get_nodes())),
             orientation_(seed.get_orientation()), offset_(seed.get_offset()),
             sequence_(query_view_),
-            score_(config.match_score(query_view_) + (!seed.get_clipping() ? config.left_end_bonus : 0)
-                     + (!seed.get_end_clipping() ? config.right_end_bonus : 0)),
+            score_(seed.get_score(config)),
             cigar_(Cigar::CLIPPED, seed.get_clipping()) {
         cigar_.append(Cigar::MATCH, query_view_.size());
         cigar_.append(Cigar::CLIPPED, seed.get_end_clipping());
@@ -221,6 +225,7 @@ class Alignment {
     bool splice(Alignment&& other, score_t label_change_score = DBGAlignerConfig::ninf);
 
     score_t get_score() const { return score_; }
+    score_t get_score(const DBGAlignerConfig&) const { return score_; }
 
     void extend_query_begin(const char *begin) {
         const char *full_query_begin = query_view_.data() - get_clipping();

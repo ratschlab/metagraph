@@ -86,6 +86,7 @@ TYPED_TEST(DBGAlignerPostChainTest, align_chain_overlap_mismatch) {
     std::string reference1 = "TTTTTCCTGAGGATCCG";
     std::string reference2 =        "CCCGGATCAGCTAGCTAGCTAGC";
     std::string query      = "TTTTTCCTGAGGATCTGCTAGCTAGCTAGC";
+    //                                       X
 
     auto graph = build_graph_batch<TypeParam>(k, { reference1, reference2 });
     DBGAlignerConfig config;

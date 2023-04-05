@@ -11,8 +11,9 @@ using ChainScores = std::vector<std::tuple<score_t, const Anchor*, size_t>>;
 using AlignmentCallback = std::function<void(Alignment&&)>;
 
 template <typename Anchor>
-using AnchorConnector = std::function<void(const Anchor*, // target anchors begin
-                                           const Anchor*, // target anchors end, it to start anchor
+using AnchorConnector = std::function<void(const Anchor&, // start anchor
+                                           const Anchor*, // target anchors begin
+                                           const Anchor*, // target anchors end
                                            typename ChainScores<Anchor>::pointer,
                                            const std::function<bool(score_t,       // connect score
                                                                     const Anchor*, // last
@@ -41,6 +42,7 @@ void chain_anchors(const DBGAlignerConfig &config,
                        = [](const auto*, auto&&, size_t, const auto&) {},
                    const AlignmentCallback &callback = [](auto&&) {},
                    const std::function<bool()> &terminate = []() { return false; },
+                   bool allow_overlap = false,
                    ssize_t max_gap_between_anchors = 100,
                    ssize_t max_gap_shrink_factor = 4) {
     if (terminate() || anchors_begin == anchors_end)
@@ -58,7 +60,7 @@ void chain_anchors(const DBGAlignerConfig &config,
     ChainScores<Anchor> chain_scores;
     chain_scores.reserve(anchors_end - anchors_begin);
     for (auto it = anchors_begin; it != anchors_end; ++it) {
-        chain_scores.emplace_back(it->get_score(), anchors_end, it->get_clipping());
+        chain_scores.emplace_back(it->get_score(config), anchors_end, it->get_clipping());
         if (it != anchors_begin && (it - 1)->get_orientation() != it->get_orientation())
             orientation_change = it;
     }
@@ -75,10 +77,17 @@ void chain_anchors(const DBGAlignerConfig &config,
         ssize_t b_last;
         do {
             auto j = anchors_begin;
-            for (auto i = anchors_begin + 1; i != anchors_end; ++i) {
+            for (auto i = anchors_begin + !allow_overlap; i != anchors_end; ++i) {
                 auto end = i->get_query_view().end();
                 while (j != anchors_end && j->get_query_view().end() - end > b) {
                     ++j;
+                }
+
+                auto i_end = i;
+                if (allow_overlap) {
+                    while (i_end != anchors_end && i_end->get_query_view().end() == end) {
+                        ++i_end;
+                    }
                 }
 
                 auto [max_score, best_last, best_dist] = chain_scores[i - anchors_begin];
@@ -87,7 +96,7 @@ void chain_anchors(const DBGAlignerConfig &config,
                 best_dist = i->get_clipping();
 
                 // align anchor i forwards
-                anchor_connector(j, i, chain_scores + (j - anchors_begin),
+                anchor_connector(*i, j, i_end, chain_scores + (j - anchors_begin),
                     [&](score_t score, const Anchor* last, size_t dist) {
                         assert(last != i);
                         if (std::tie(score, best_dist) > std::tie(max_score, dist)) {
@@ -101,8 +110,16 @@ void chain_anchors(const DBGAlignerConfig &config,
                     }
                 );
 
-                if (max_score > std::numeric_limits<score_t>::min())
-                    chain_scores[i - anchors_begin] = std::tie(max_score, best_last, best_dist);
+                if (max_score > std::numeric_limits<score_t>::min()) {
+                    auto &cur_scores = chain_scores[i - anchors_begin];
+                    bool updated = (max_score > std::get<0>(cur_scores));
+                    cur_scores = std::tie(max_score, best_last, best_dist);
+                    if (allow_overlap && updated) {
+                        while (i >= anchors_begin && i->get_query_view().end() == end) {
+                            --i;
+                        }
+                    }
+                }
             }
             b_last = b;
             b *= max_gap_shrink_factor;

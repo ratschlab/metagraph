@@ -280,10 +280,12 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
                 if (!aln.get_orientation())
                     alns.emplace_back(aln);
             }
+
             for (const Alignment &aln : alignments) {
                 if (aln.get_orientation())
                     alns.emplace_back(aln);
             }
+
             assert(alns.size() == alignments.size());
             alignments.resize(1);
 
