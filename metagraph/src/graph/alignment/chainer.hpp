@@ -5,30 +5,39 @@
 
 namespace mtg::graph::align {
 
-using ChainScores = std::vector<std::tuple<score_t, const Alignment*, size_t>>;
+template <typename Anchor>
+using ChainScores = std::vector<std::tuple<score_t, const Anchor*, size_t>>;
+
 using AlignmentCallback = std::function<void(Alignment&&)>;
-using AnchorConnector = std::function<void(const Alignment*, // target anchors begin
-                                           const Alignment*, // target anchors end, it to start anchor
-                                           ChainScores::pointer,
-                                           const std::function<bool(score_t,          // connect score
-                                                                    const Alignment*, // last
-                                                                    size_t            // distance
+
+template <typename Anchor>
+using AnchorConnector = std::function<void(const Anchor*, // target anchors begin
+                                           const Anchor*, // target anchors end, it to start anchor
+                                           typename ChainScores<Anchor>::pointer,
+                                           const std::function<bool(score_t,       // connect score
+                                                                    const Anchor*, // last
+                                                                    size_t         // distance
                                                                    )>&
                                           )>;
-using AnchorExtender = std::function<void(const Alignment*, // first ptr,
-                                          Alignment&&,      // target,
-                                          size_t,           // distance,
+
+template <typename Anchor>
+using AnchorExtender = std::function<void(const Anchor*, // first ptr,
+                                          Alignment&&,   // target,
+                                          size_t,        // distance,
                                           const AlignmentCallback&)>;
 
-using BacktrackStarter = std::function<bool(const std::vector<std::pair<const Alignment*, size_t>>&,
+template <typename Anchor>
+using BacktrackStarter = std::function<bool(const std::vector<std::pair<const Anchor*, size_t>>&,
                                             score_t)>;
 
-void chain_anchors(const Alignment *anchors_begin,
-                   const Alignment *anchors_end,
-                   const AnchorConnector &anchor_connector,
-                   const BacktrackStarter &start_backtrack
+template <typename Anchor>
+void chain_anchors(const DBGAlignerConfig &config,
+                   const Anchor *anchors_begin,
+                   const Anchor *anchors_end,
+                   const AnchorConnector<Anchor> &anchor_connector,
+                   const BacktrackStarter<Anchor> &start_backtrack
                        = [](const auto&, score_t) { return true; },
-                   const AnchorExtender &anchor_extender
+                   const AnchorExtender<Anchor> &anchor_extender
                        = [](const auto*, auto&&, size_t, const auto&) {},
                    const AlignmentCallback &callback = [](auto&&) {},
                    const std::function<bool()> &terminate = []() { return false; },
@@ -45,8 +54,8 @@ void chain_anchors(const Alignment *anchors_begin,
              > std::make_pair(a.get_orientation(), b.get_query_view().end());
     }));
 
-    const Alignment *orientation_change = anchors_end;
-    ChainScores chain_scores;
+    const Anchor *orientation_change = anchors_end;
+    ChainScores<Anchor> chain_scores;
     chain_scores.reserve(anchors_end - anchors_begin);
     for (auto it = anchors_begin; it != anchors_end; ++it) {
         chain_scores.emplace_back(it->get_score(), anchors_end, it->get_clipping());
@@ -56,8 +65,8 @@ void chain_anchors(const Alignment *anchors_begin,
 
     // forward pass
     max_gap_between_anchors = std::min(max_gap_between_anchors, query_size);
-    auto forward_pass = [&](const Alignment *anchors_begin,
-                            const Alignment *anchors_end,
+    auto forward_pass = [&](const Anchor *anchors_begin,
+                            const Anchor *anchors_end,
                             auto *chain_scores) {
         if (anchors_begin == anchors_end)
             return;
@@ -79,7 +88,7 @@ void chain_anchors(const Alignment *anchors_begin,
 
                 // align anchor i forwards
                 anchor_connector(j, i, chain_scores + (j - anchors_begin),
-                    [&](score_t score, const Alignment* last, size_t dist) {
+                    [&](score_t score, const Anchor* last, size_t dist) {
                         assert(last != i);
                         if (std::tie(score, best_dist) > std::tie(max_score, dist)) {
                             max_score = score;
@@ -126,7 +135,7 @@ void chain_anchors(const Alignment *anchors_begin,
             continue;
 
         used[i] = true;
-        std::vector<std::pair<const Alignment*, size_t>> chain;
+        std::vector<std::pair<const Anchor*, size_t>> chain;
         const auto *last_anchor = anchors_begin + i;
         chain.emplace_back(last_anchor, 0);
         auto [score, last, dist] = chain_scores[i];
@@ -142,7 +151,7 @@ void chain_anchors(const Alignment *anchors_begin,
             continue;
 
         std::vector<Alignment> alns;
-        alns.emplace_back(*chain.back().first);
+        alns.emplace_back(*chain.back().first, config);
         for (auto it = chain.rbegin(); it + 1 != chain.rend(); ++it) {
             std::vector<Alignment> next_alns;
             for (auto&& aln : alns) {
