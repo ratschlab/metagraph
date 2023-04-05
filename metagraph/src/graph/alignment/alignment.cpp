@@ -342,9 +342,7 @@ size_t Alignment::trim_offset(size_t num_nodes) {
     assert(extra_scores.empty() || extra_scores.size() == nodes_.size() - 1);
     assert(label_column_diffs.empty() || label_column_diffs.size() == nodes_.size() - 1);
 
-    size_t first_dummy = (std::find(nodes_.begin(), nodes_.end(), DeBruijnGraph::npos)
-        - nodes_.begin()) - 1;
-    size_t trim = std::min({ num_nodes, offset_, nodes_.size() - 1, first_dummy });
+    size_t trim = std::min({ num_nodes, offset_, nodes_.size() - 1 });
 
     if (!trim)
         return trim;
@@ -374,6 +372,9 @@ size_t Alignment::trim_offset(size_t num_nodes) {
 void Alignment::extend_offset(std::vector<node_index>&& path,
                              std::vector<size_t>&& columns,
                              std::vector<score_t>&& scores) {
+    if (path.empty())
+        return;
+
     offset_ += path.size();
     if (columns.size()) {
         assert(columns.size() == path.size());
@@ -402,6 +403,17 @@ void Alignment::extend_offset(std::vector<node_index>&& path,
 
     nodes_.insert(nodes_.begin(), path.begin(), path.end());
     assert(extra_scores.empty() || extra_scores.size() == nodes_.size() - 1);
+    if (!path[0] && label_columns) {
+        auto it = std::find_if(path.begin(), path.end(), [](const auto &a) { return a; });
+        if (label_column_diffs.empty())
+            label_column_diffs.resize(nodes_.size() - 1, label_columns);
+
+        std::fill(label_column_diffs.begin(),
+                  label_column_diffs.begin() + (it - path.begin()) - 1,
+                  0);
+
+        label_columns = 0;
+    }
 }
 
 size_t Alignment::trim_query_prefix(size_t n,

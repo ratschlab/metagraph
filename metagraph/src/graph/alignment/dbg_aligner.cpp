@@ -186,10 +186,24 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
         std::string_view reverse = paths[i].get_query(true);
         assert(this_query == query);
 
-        if (!config_.chain_alignments
-                && graph_.get_extension_threadsafe<IPathIndex>()) {
+        if (!config_.chain_alignments && graph_.get_extension_threadsafe<IPathIndex>()) {
             if (graph_.get_mode() != DeBruijnGraph::BASIC)
                 seeder_rc = std::make_shared<ManualSeeder>();
+
+            auto in_anchors = seeder->get_seeds();
+            size_t num_matches = seeder->get_num_matches();
+            if (seeder_rc) {
+                auto next = seeder_rc->get_seeds();
+                in_anchors.insert(in_anchors.end(),
+                                  std::make_move_iterator(next.begin()),
+                                  std::make_move_iterator(next.end()));
+                num_matches = std::max(num_matches, seeder_rc->get_num_matches());
+                seeder_rc = std::make_shared<ManualSeeder>();
+            }
+
+            seeder = std::make_shared<ManualMatchingSeeder>(
+                std::move(in_anchors), num_matches, config_
+            );
 
             auto [num_seeds_c, num_extensions_c, num_explored_nodes_c] =
                 chain_and_filter_seeds(*this, seeder, Extender(*this, this_query),
@@ -197,24 +211,12 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
             num_seeds += num_seeds_c;
             num_extensions += num_extensions_c;
             num_explored_nodes += num_explored_nodes_c;
+
             auto alignments = seeder->get_alignments();
             std::for_each(std::make_move_iterator(alignments.begin()),
                           std::make_move_iterator(alignments.end()),
                           add_alignment);
             seeder = std::make_shared<ManualSeeder>();
-            if (seeder_rc) {
-                auto [num_seeds_c, num_extensions_c, num_explored_nodes_c] =
-                    chain_and_filter_seeds(*this, seeder_rc, Extender(*this, reverse),
-                        Extender(*this, this_query));
-                num_seeds += num_seeds_c;
-                num_extensions += num_extensions_c;
-                num_explored_nodes += num_explored_nodes_c;
-                auto alignments = seeder_rc->get_alignments();
-                std::for_each(std::make_move_iterator(alignments.begin()),
-                              std::make_move_iterator(alignments.end()),
-                              add_alignment);
-                seeder_rc = std::make_shared<ManualSeeder>();
-            }
         }
 
 #if ! _PROTEIN_GRAPH

@@ -106,7 +106,9 @@ class Cigar {
         return cigar_.size() == 1 && cigar_.front() == value_type{ MATCH, query_size };
     }
 
-    bool mark_exact_matches(sdsl::bit_vector &mask, bool skip_clipping = false) const;
+    bool mark_exact_matches(sdsl::bit_vector &mask,
+                            bool skip_clipping = false,
+                            bool orientation = false) const;
 
     static constexpr char opt_to_char(Cigar::Operator op) { return op_str_[op]; }
 

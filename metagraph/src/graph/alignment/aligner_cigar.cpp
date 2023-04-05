@@ -304,33 +304,45 @@ bool Cigar::is_valid(std::string_view reference, std::string_view query) const {
     return true;
 }
 
-bool Cigar::mark_exact_matches(sdsl::bit_vector &mask, bool skip_clipping) const {
+bool Cigar::mark_exact_matches(sdsl::bit_vector &mask,
+                               bool skip_clipping,
+                               bool orientation) const {
     bool added = false;
-    auto it = mask.begin();
-    for (const auto &[op, num] : cigar_) {
-        switch (op) {
-            case CLIPPED: {
-                if (!skip_clipping) {
-                    assert(it + num <= mask.end());
+    auto process = [&](auto it, auto end) {
+        for (const auto &[op, num] : cigar_) {
+            switch (op) {
+                case CLIPPED: {
+                    if (!skip_clipping) {
+                        assert(it + num <= end);
+                        it += num;
+                    }
+                } break;
+                case INSERTION:
+                case MISMATCH: {
+                    assert(it + num <= end);
                     it += num;
-                }
-            } break;
-            case INSERTION:
-            case MISMATCH: {
-                assert(it + num <= mask.end());
-                it += num;
-            } break;
-            case DELETION:
-            case NODE_INSERTION: {} break;
-            case MATCH: {
-                assert(it + num <= mask.end());
-                added |= (std::find(it, it + num, true) != it + num);
-                std::fill(it, it + num, true);
-                it += num;
-            } break;
+                } break;
+                case DELETION:
+                case NODE_INSERTION: {} break;
+                case MATCH: {
+                    assert(it + num <= end);
+                    added |= (std::find(it, it + num, true) != it + num);
+                    std::fill(it, it + num, true);
+                    it += num;
+                } break;
+            }
         }
+
+        std::ignore = end;
+        assert(it == end);
+    };
+
+    if (orientation) {
+        process(std::make_reverse_iterator(mask.end()),
+                std::make_reverse_iterator(mask.begin()));
+    } else {
+        process(mask.begin(), mask.end());
     }
-    assert(it == mask.end());
 
     return added;
 }

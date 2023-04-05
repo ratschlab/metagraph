@@ -158,6 +158,8 @@ class Alignment {
     typedef DBGAlignerConfig::score_t score_t;
     static const score_t ninf = DBGAlignerConfig::ninf;
 
+    Alignment(const Alignment &aln, const DBGAlignerConfig&) : Alignment(aln) {}
+
     Alignment(std::string_view query = {},
               std::vector<node_index>&& nodes = {},
               std::string&& sequence = "",
