@@ -912,6 +912,7 @@ void chain_alignments(const IDBGAligner &aligner,
     // preprocess alignments
     for (size_t i = 0; i < alignments.size(); ++i) {
         const auto &alignment = alignments[i];
+        DEBUG_LOG("Alignment {}:\t{}", i, alignment);
         std::string_view query = alignment.get_query_view();
         auto &prefix_scores = per_char_scores_prefix.emplace_back(std::vector<score_t>(query.size() + 1, 0));
         auto &suffix_scores = per_char_scores_suffix.emplace_back(std::vector<score_t>(query.size() + 1, 0));
@@ -953,7 +954,7 @@ void chain_alignments(const IDBGAligner &aligner,
         uint64_t index;
         int64_t aln_index_back;
         int64_t aln_index_front;
-        std::string_view::const_iterator aln_end;
+        std::string_view::const_iterator aln_begin;
 
         uint32_t last;
         uint64_t mem_length;
@@ -975,7 +976,7 @@ void chain_alignments(const IDBGAligner &aligner,
                 .index = i,
                 .aln_index_back = node_i,
                 .aln_index_front = node_i,
-                .aln_end = alignment.get_query_view().end(),
+                .aln_begin = alignment.get_query_view().begin(),
                 .last = std::numeric_limits<uint32_t>::max(),
                 .mem_length = static_cast<uint64_t>(end - begin),
             });
@@ -1038,7 +1039,7 @@ void chain_alignments(const IDBGAligner &aligner,
             return;
 
         std::sort(begin, end, [](const auto &a, const auto &b) {
-            return std::tie(a.end, a.aln_end) > std::tie(b.end, b.aln_end);
+            return std::tie(a.end, a.aln_begin) > std::tie(b.end, b.aln_begin);
         });
         auto rbegin = std::make_reverse_iterator(end);
         auto rend = std::make_reverse_iterator(begin);
