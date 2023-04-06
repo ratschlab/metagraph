@@ -781,6 +781,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
         [&](const Seed &a_i, const Seed *begin, const Seed *end, auto chain_scores, const auto &update_score) {
             const auto &coords_i_back = node_coords[anchor_ends[&a_i - seeds.data()].second];
             const auto &score_i = std::get<0>(*(chain_scores - (begin - seeds.data()) + (&a_i - seeds.data())));
+            std::string_view query_i = a_i.get_query_view();
             --chain_scores;
             std::for_each(begin, end, [&](const Seed &a_j) {
                 // try to connect a_i to a_j
@@ -788,13 +789,13 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                 assert(a_i.get_orientation() == a_j.get_orientation());
                 ++chain_scores;
 
-                // want a_i.begin < a_j.begin && a_i.end < a_j.end
-                if (a_i.get_query_view().begin() >= a_j.get_query_view().begin()
-                        || a_i.get_query_view().end() >= a_j.get_query_view().end()) {
-                    return;
-                }
+                std::string_view query_j = a_j.get_query_view();
 
-                ssize_t dist = a_j.get_query_view().end() - a_i.get_query_view().end();
+                // want a_i.begin < a_j.begin && a_i.end < a_j.end
+                if (query_i.begin() >= query_j.begin() || query_i.end() >= query_j.end())
+                    return;
+
+                ssize_t dist = query_j.end() - query_i.end();
                 score_t label_change_score = 0;
                 if (labeled_aligner) {
                     auto col_i = a_i.get_columns()[0];
@@ -804,15 +805,13 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                         return;
                 }
 
-                ssize_t num_added = a_j.get_query_view().end()
-                    - std::max(a_j.get_query_view().begin(),
-                               a_i.get_query_view().end());
+                ssize_t num_added = query_j.end() - std::max(query_j.begin(), query_i.end());
                 score_t score_j = std::get<0>(*chain_scores);
                 score_t base_added_score = score_j + num_added + label_change_score;
                 if (base_added_score <= score_i)
                     return;
 
-                bool overlap = (a_i.get_query_view().end() > a_j.get_query_view().begin());
+                bool overlap = (query_i.end() > query_j.begin());
 
                 if (num_added == 1) {
                     auto find = out_nodes.find(a_i.get_nodes().back());
