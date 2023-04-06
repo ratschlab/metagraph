@@ -418,6 +418,9 @@ if(BUILD_STATIC AND NOT APPLE)
   find_package(OpenSSL REQUIRED)
   find_package(BZip2 REQUIRED)
   set(METALIBS ${METALIBS} -llzma -lcurl -lssl -lcrypto -lbz2)
+  if (CMAKE_CXX_COMPILER_ID MATCHES "GNU")
+    set(METALIBS ${METALIBS} -lgomp -lrt -lpthread)
+  endif()
 endif()
 
 # check for std::filesystem::temp_directory_path
