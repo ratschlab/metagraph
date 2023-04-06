@@ -309,7 +309,7 @@ int align_to_graph(Config *config) {
     }
 
     auto hll = std::make_shared<HLLWrapper<>>();
-    if (config->alignment_allow_label_change) {
+    if (config->alignment_allow_label_change || config->alignment_post_chain) {
         if (hll->load(utils::remove_suffix(config->infbase, graph->file_extension()))) {
             logger->trace("Loaded HLL sketch with {} columns", hll->data().num_columns());
         } else {
