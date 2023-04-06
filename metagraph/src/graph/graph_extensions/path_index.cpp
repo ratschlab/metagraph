@@ -28,6 +28,8 @@ constexpr std::memory_order MO_RELAXED = std::memory_order_relaxed;
 
 static const std::vector<Label> DUMMY { Label(1, 1) };
 
+static const IPathIndex::SuperbubbleStorage dummy { sdsl::int_vector(1, 0) };
+
 void IPathIndex::call_dists(size_t path_id_1,
                             size_t path_id_2,
                             const std::function<void(size_t)> &callback,
@@ -65,17 +67,19 @@ void IPathIndex::call_dists(size_t path_id_1,
 
     size_t sb1 = path_id_1;
     size_t sb2 = path_id_2;
-    std::vector<size_t> d1 { 0 };
-    std::vector<size_t> d2 { 0 };
+    auto d1_begin = dummy.begin();
+    auto d1_end = dummy.end();
+    auto d2_begin = dummy.begin();
+    auto d2_end = dummy.end();
 
-    bool is_source1 = get_superbubble_terminus(path_id_1).first;
-    bool is_source2 = get_superbubble_terminus(path_id_2).first;
+    bool is_source1 = std::get<0>(get_superbubble_terminus(path_id_1));
+    bool is_source2 = std::get<0>(get_superbubble_terminus(path_id_2));
 
     if (!is_source1)
-        std::tie(sb1, d1) = get_superbubble_and_dist(path_id_1);
+        std::tie(sb1, d1_begin, d1_end) = get_superbubble_and_dist(path_id_1);
 
     if (!is_source2)
-        std::tie(sb2, d2) = get_superbubble_and_dist(path_id_2);
+        std::tie(sb2, d2_begin, d2_end) = get_superbubble_and_dist(path_id_2);
 
     if (!sb1 || !sb2) {
         if (max_search_depth) {
@@ -94,11 +98,9 @@ void IPathIndex::call_dists(size_t path_id_1,
 
     if (sb1 == sb2) {
         if (is_source1) {
-            std::for_each(d2.begin(), d2.end(), callback);
+            std::for_each(d2_begin, d2_end, callback);
             return;
         }
-
-        // logger->info("\tsame superbubble");
 
         if (!can_reach_superbubble_terminus(path_id_1)) {
             if (can_reach_superbubble_terminus(path_id_2))
@@ -125,18 +127,17 @@ void IPathIndex::call_dists(size_t path_id_1,
             return;
         }
 
-        auto [t, d] = get_superbubble_terminus(sb1);
+        auto [t, d_begin, d_end] = get_superbubble_terminus(sb1);
         if (path_id_2 == t) {
-            if (d.size() != 1) {
+            if (d_end - d_begin != 1) {
                 // TODO later
                 return;
             }
 
-            for (size_t dd1 : d1) {
-                for (size_t dd : d) {
-                    callback(dd - dd1);
-                }
-            }
+            size_t dd = *d_begin;
+            std::for_each(d1_begin, d1_end, [&](size_t dd1) {
+                callback(dd - dd1);
+            });
 
             return;
         }
@@ -151,62 +152,60 @@ void IPathIndex::call_dists(size_t path_id_1,
     size_t chain_1 = get_superbubble_chain(sb1);
     size_t chain_2 = get_superbubble_chain(sb2);
     if (!chain_1 || !chain_2 || chain_1 != chain_2) {
-        auto [t, d] = get_superbubble_terminus(sb1);
-        if (t == path_id_2 && (is_source1 || d.size() == 1) && (d.size() > 1 || d[0])) {
-            size_t msize = !d[0] ? d[1] : d[0];
+        auto [t, d_begin, d_end] = get_superbubble_terminus(sb1);
+        if (t == path_id_2 && (is_source1 || d_end - d_begin == 1) && (d_end - d_begin > 1 || *d_begin)) {
+            size_t msize = !*d_begin ? *(d_begin + 1) : *d_begin;
             call_dists(t, path_id_2, [&](size_t l) {
-                for (size_t dd : d) {
+                std::for_each(d_begin, d_end, [&](size_t dd) {
                     callback(l + dd);
-                }
+                });
             }, max_dist - msize);
         }
         return;
     }
 
-    auto [t, d] = get_superbubble_terminus(sb1);
-    if (!is_source1 && d.size() != 1) {
+    auto [t, d_begin, d_end] = get_superbubble_terminus(sb1);
+    if (!is_source1 && d_end - d_begin != 1) {
         // TODO:
         return;
     }
 
-    // logger->info("\tdifferent superbubble");
-
     if (is_source1) {
-        if (d.size() == 1 && !d[0])
+        if (d_end - d_begin == 1 && !*d_begin)
             return;
 
-        size_t msize = !d[0] ? d[1] : d[0];
+        size_t msize = !*d_begin ? *(d_begin + 1) : *d_begin;
         call_dists(t, path_id_2, [&](size_t l) {
-            for (size_t dd : d) {
+            std::for_each(d_begin, d_end, [&](size_t dd) {
                 callback(l + dd);
-            }
+            });
         }, max_dist - msize);
         return;
     }
 
     size_t msize = std::numeric_limits<size_t>::max();
-    for (size_t dd : d) {
-        for (size_t dd1 : d1) {
+    std::for_each(d_begin, d_end, [&](size_t dd) {
+        std::for_each(d1_begin, d1_end, [&](size_t dd1) {
             if (dd > dd1)
                 msize = std::min(msize, dd - dd1);
-        }
-    }
+        });
+    });
     assert(msize);
     if (max_dist > msize) {
         call_dists(t, path_id_2, [&](size_t l) {
-            for (size_t dd : d) {
-                for (size_t dd1 : d1) {
+            std::for_each(d_begin, d_end, [&](size_t dd) {
+                std::for_each(d1_begin, d1_end, [&](size_t dd1) {
                     callback(l + dd - dd1);
-                }
-            }
+                });
+            });
         }, max_dist - msize);
     }
 }
 
 template <class Indicator, class Storage>
-std::pair<size_t, std::vector<size_t>> get_range(const Indicator &indicator,
-                                                 const Storage &storage,
-                                                 size_t i) {
+IPathIndex::SuperbubbleInfo get_range(const Indicator &indicator,
+                                      const Storage &storage,
+                                      size_t i) {
     assert(i);
     size_t num_bits = indicator.num_set_bits();
     assert(storage.size() >= num_bits);
@@ -215,10 +214,10 @@ std::pair<size_t, std::vector<size_t>> get_range(const Indicator &indicator,
     size_t end = i != num_bits ? indicator.next1(begin) : storage.size();
     assert(end <= storage.size());
     assert(begin <= end);
-    std::vector<size_t> values;
-    values.reserve(end - begin);
-    std::copy(storage.begin() + begin, storage.begin() + end, std::back_inserter(values));
-    return std::make_pair(storage[begin - 1], std::move(values));
+
+    return IPathIndex::SuperbubbleInfo(storage[begin - 1],
+                                       storage.begin() + begin,
+                                       storage.begin() + end);
 }
 
 template <class PathStorage,
@@ -241,7 +240,7 @@ template <class PathStorage,
           class PathBoundaries,
           class SuperbubbleIndicator,
           class SuperbubbleStorage>
-std::pair<size_t, std::vector<size_t>>
+IPathIndex::SuperbubbleInfo
 PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
 ::get_superbubble_terminus(size_t path_id) const {
     if (path_id > num_unitigs_ || !path_id)
@@ -254,7 +253,7 @@ template <class PathStorage,
           class PathBoundaries,
           class SuperbubbleIndicator,
           class SuperbubbleStorage>
-std::pair<size_t, std::vector<size_t>>
+IPathIndex::SuperbubbleInfo
 PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
 ::get_superbubble_and_dist(size_t path_id) const {
     if (path_id > num_unitigs_ || !path_id)
@@ -753,7 +752,7 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
                 ++jt;
                 num_superbubbles_ += !d.empty();
                 num_multiple_sizes += (d.size() > 1);
-                if (!start && !get_superbubble_and_dist(i).first)
+                if (!start && !std::get<0>(get_superbubble_and_dist(i)))
                     --num_in_superbubble;
 
                 std::copy(d.begin(), d.end(), it);
@@ -789,17 +788,18 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
         sdsl::int_vector<> chain_parent(num_unitigs_ + 1);
         sdsl::int_vector<> distance(num_unitigs_ + 1, std::numeric_limits<uint64_t>::max());
         for (size_t i = 0; i < num_unitigs_; ++i) {
-            auto [t, d] = get_superbubble_terminus(i + 1);
-            if (t && t - 1 != i && d.back() < distance[t]) {
+            auto [t, d_begin, d_end] = get_superbubble_terminus(i + 1);
+            if (t && t - 1 != i && *(d_end - 1) < distance[t]) {
                 chain_parent[t] = i + 1;
-                distance[t] = d.back();
+                distance[t] = *(d_end - 1);
             }
         }
 
         sdsl::int_vector<> superbubble_chain(num_unitigs_);
         size_t chain_i = 1;
         for (size_t i = 0; i < num_unitigs_; ++i) {
-            if (!superbubble_chain[i] && chain_parent[i + 1] && !get_superbubble_terminus(i + 1).first) {
+            if (!superbubble_chain[i] && chain_parent[i + 1]
+                    && !std::get<0>(get_superbubble_terminus(i + 1))) {
                 // end of a superbubble chain
                 size_t j = i + 1;
                 if (chain_parent[j]) {
@@ -895,8 +895,10 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
                             assert(dummy == 0);
                             assert(tuple.size());
                             size_t unitig_id = coord_to_path_id(tuple[0]);
-                            if (!get_superbubble_terminus(unitig_id).first && !get_superbubble_and_dist(unitig_id).first)
+                            if (!std::get<0>(get_superbubble_terminus(unitig_id))
+                                    && !std::get<0>(get_superbubble_and_dist(unitig_id))) {
                                 index_read = true;
+                            }
 
                             if (unitig_id)
                                 unitig_ids.insert(unitig_id);

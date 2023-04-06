@@ -9,16 +9,6 @@
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
 
-namespace std {
-    template <> struct hash<std::pair<size_t, size_t>>
-    {
-      size_t operator()(const std::pair<size_t, size_t> & x) const
-      {
-        return x.first + x.second;
-      }
-    };
-}
-
 namespace mtg::graph {
 
 class IPathIndex : public SequenceGraph::GraphExtension {
@@ -26,15 +16,19 @@ class IPathIndex : public SequenceGraph::GraphExtension {
     using node_index = SequenceGraph::node_index;
     using Row = annot::binmat::BinaryMatrix::Row;
     using RowTuples = annot::matrix::MultiIntMatrix::RowTuples;
+    using SuperbubbleStorage = sdsl::dac_vector_dp<>;
+    using SuperbubbleInfo = std::tuple<size_t,
+                                       SuperbubbleStorage::const_iterator,
+                                       SuperbubbleStorage::const_iterator>;
 
     virtual ~IPathIndex() {}
 
     virtual std::vector<RowTuples> get_coords(const std::vector<node_index> &nodes) const;
 
-    virtual std::pair<size_t, std::vector<size_t>>
+    virtual SuperbubbleInfo
     get_superbubble_terminus(size_t path_id) const = 0;
 
-    virtual std::pair<size_t, std::vector<size_t>>
+    virtual SuperbubbleInfo
     get_superbubble_and_dist(size_t path_id) const = 0;
 
     virtual size_t get_superbubble_chain(size_t path_id) const = 0;
@@ -78,7 +72,7 @@ class IPathIndex : public SequenceGraph::GraphExtension {
 template <class PathStorage = annot::RowDiffCoordAnnotator::binary_matrix_type,
           class PathBoundaries = bit_vector_smart,
           class SuperbubbleIndicator = bit_vector_smart,
-          class SuperbubbleStorage = sdsl::dac_vector_dp<>>
+          class SuperbubbleStorage = IPathIndex::SuperbubbleStorage>
 class PathIndex : public IPathIndex {
   public:
     PathIndex() {}
@@ -103,10 +97,10 @@ class PathIndex : public IPathIndex {
         return dynamic_cast<const DBGSuccinct*>(&graph) == dbg_succ_.get();
     }
 
-    virtual std::pair<size_t, std::vector<size_t>>
+    virtual SuperbubbleInfo
     get_superbubble_terminus(size_t path_id) const override final;
 
-    virtual std::pair<size_t, std::vector<size_t>>
+    virtual SuperbubbleInfo
     get_superbubble_and_dist(size_t path_id) const override final;
 
     virtual bool can_reach_superbubble_terminus(size_t path_id) const override final;
