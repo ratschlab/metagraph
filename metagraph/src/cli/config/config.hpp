@@ -117,6 +117,7 @@ class Config {
     bool alignment_edit_distance = false;
     bool alignment_chain = false;
     bool alignment_post_chain = false;
+    bool alignment_allow_label_change = false;
     bool alignment_seed_complexity_filter = true;
     bool alignment_label_change_union = false;
 

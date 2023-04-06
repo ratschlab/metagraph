@@ -53,7 +53,7 @@ DBGAlignerConfig initialize_aligner_config(const Config &config,
         .label_change_score = config.alignment_label_change_score,
         .forward_and_reverse_complement = !config.align_only_forwards,
         .chain_alignments = config.alignment_chain,
-        .allow_label_change = config.alignment_post_chain,
+        .allow_label_change = config.alignment_post_chain || config.alignment_allow_label_change,
         .allow_jump = config.alignment_post_chain,
         .seed_complexity_filter = config.alignment_seed_complexity_filter,
         .label_change_union = config.alignment_label_change_union,
@@ -309,7 +309,7 @@ int align_to_graph(Config *config) {
     }
 
     auto hll = std::make_shared<HLLWrapper<>>();
-    if (config->alignment_post_chain) {
+    if (config->alignment_allow_label_change) {
         if (hll->load(utils::remove_suffix(config->infbase, graph->file_extension()))) {
             logger->trace("Loaded HLL sketch with {} columns", hll->data().num_columns());
         } else {
