@@ -283,6 +283,7 @@ add_library(caches INTERFACE)
 target_include_directories(caches INTERFACE external-libraries/caches/include)
 
 
+set(Boost_USE_STATIC_LIBS ON)
 findFolly()
 if(FOLLY_FOUND)
   add_definitions(-D_USE_FOLLY -DUSE_JEMALLOC)
