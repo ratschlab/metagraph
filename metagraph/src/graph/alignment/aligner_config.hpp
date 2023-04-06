@@ -25,6 +25,8 @@ struct DBGAlignerConfig {
     size_t min_seed_length = 0;
     size_t max_seed_length = 0;
     size_t max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
+    size_t max_dist_between_seeds = 300;
+    size_t max_gap_shrinking_factor = 4;
 
     // Lowest possible score. 100 is added to prevent underflow during operations.
     // For this to work, all penalties should be less than 100.

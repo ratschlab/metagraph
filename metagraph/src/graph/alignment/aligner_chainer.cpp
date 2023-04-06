@@ -941,7 +941,10 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
         },
         [](const auto*, auto&&, size_t, const auto&) {},
         [](auto&&) {},
-        [&terminate]() { return terminate; }
+        [&terminate]() { return terminate; },
+        false,
+        config_.max_dist_between_seeds,
+        config_.max_gap_shrinking_factor
     );
 
     if (!terminate)
@@ -1434,7 +1437,9 @@ void chain_alignments(const IDBGAligner &aligner,
             callback(std::move(aln));
         },
         [&]() { return num_found >= config.num_alternative_paths; },
-        true
+        true,
+        config.max_dist_between_seeds,
+        config.max_gap_shrinking_factor
     );
 }
 
