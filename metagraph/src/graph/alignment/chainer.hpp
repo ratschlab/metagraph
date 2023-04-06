@@ -43,7 +43,7 @@ void chain_anchors(const DBGAlignerConfig &config,
                    const AlignmentCallback &callback = [](auto&&) {},
                    const std::function<bool()> &terminate = []() { return false; },
                    bool allow_overlap = false,
-                   ssize_t max_gap_between_anchors = 100,
+                   ssize_t max_gap_between_anchors = 300,
                    ssize_t max_gap_shrink_factor = 4) {
     if (terminate() || anchors_begin == anchors_end)
         return;
