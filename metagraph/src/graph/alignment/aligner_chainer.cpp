@@ -858,8 +858,21 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                     }
                 };
 
-                for (auto &[c_i, tuple_i] : coords_i_back) {
-                    for (auto &[c_j, tuple_j] : coords_j_front) {
+                if (coords_i_back.size() > 1 || coords_j_front.size() > 1) {
+                    for (size_t i = 1; i < coords_i_back.size(); ++i) {
+                        const auto &[c_i, tuple_i] = coords_i_back[i];
+                        for (size_t j = 1; j < coords_j_front.size(); ++j) {
+                            const auto &[c_j, tuple_j] = coords_j_front[j];
+                            if (c_i == c_j)
+                                process_coord_list(tuple_i, tuple_j);
+                        }
+                    }
+
+                    return;
+                }
+
+                for (const auto &[c_i, tuple_i] : coords_i_back) {
+                    for (const auto &[c_j, tuple_j] : coords_j_front) {
                         if (c_i == c_j) {
                             process_coord_list(tuple_i, tuple_j);
 
