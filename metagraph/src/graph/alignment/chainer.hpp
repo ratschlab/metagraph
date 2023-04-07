@@ -90,10 +90,8 @@ void chain_anchors(const DBGAlignerConfig &config,
                     }
                 }
 
-                auto [max_score, best_last, best_dist] = chain_scores[i - anchors_begin];
-                max_score = std::numeric_limits<score_t>::min();
-                best_last = anchors_end;
-                best_dist = i->get_clipping();
+                auto &[max_score, best_last, best_dist] = chain_scores[i - anchors_begin];
+                bool updated = false;
 
                 // align anchor i forwards
                 anchor_connector(*i, j, i_end, chain_scores + (j - anchors_begin),
@@ -103,6 +101,7 @@ void chain_anchors(const DBGAlignerConfig &config,
                             max_score = score;
                             best_last = last;
                             best_dist = dist;
+                            updated = true;
                             return true;
                         }
 
@@ -110,14 +109,9 @@ void chain_anchors(const DBGAlignerConfig &config,
                     }
                 );
 
-                if (max_score > std::numeric_limits<score_t>::min()) {
-                    auto &cur_scores = chain_scores[i - anchors_begin];
-                    bool updated = (max_score > std::get<0>(cur_scores));
-                    cur_scores = std::tie(max_score, best_last, best_dist);
-                    if (allow_overlap && updated) {
-                        while (i >= anchors_begin && i->get_query_view().end() == end) {
-                            --i;
-                        }
+                if (updated && allow_overlap) {
+                    while (i >= anchors_begin && i->get_query_view().end() == end) {
+                        --i;
                     }
                 }
             }
