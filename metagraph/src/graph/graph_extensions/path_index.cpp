@@ -53,7 +53,6 @@ void traverse(const IPathIndex &index,
             continue;
 
         if (std::get<0>(index.get_superbubble_terminus(cur_id))) {
-            assert(dist);
             index.call_dists(cur_id, target, [&](size_t d) { callback(dist + d); },
                              max_dist - dist, depth);
             continue;
@@ -142,9 +141,9 @@ void IPathIndex::call_dists(size_t path_id_1,
         }
 
         if (path_id_2 == t && d_end - d_begin == 1) {
-            size_t dd = *d_begin;
-            std::for_each(d1_begin, d1_end, [&](size_t dd1) {
-                callback(dd - dd1);
+            size_t sb2_to_path_id_2 = *d_begin;
+            std::for_each(d1_begin, d1_end, [&](size_t sb1_to_path_id_1) {
+                callback(sb2_to_path_id_2 - sb1_to_path_id_1);
             });
             return;
         }
@@ -160,66 +159,120 @@ void IPathIndex::call_dists(size_t path_id_1,
     if (!can_reach_superbubble_terminus(path_id_1))
         return;
 
-    auto [ct1, w1_begin, w1_end] = get_superbubble_chain(sb1);
-    if (!ct1) {
-        w1_begin = dummy.begin();
-        w1_end = dummy.end();
+    auto [t, d_begin, d_end] = get_superbubble_terminus(sb1);
+
+    std::function<void(size_t)> call_path_id_1_to_path_id_2 = [&](size_t t_to_path_id_2) {
+        std::for_each(d_begin, d_end, [&](size_t sb1_to_t) {
+            size_t sb1_to_path_id_2 = sb1_to_t + t_to_path_id_2;
+            std::for_each(d1_begin, d1_end, [&](size_t sb1_to_path_id_1) {
+                assert(sb1_to_t >= sb1_to_path_id_1);
+                callback(sb1_to_path_id_2 - sb1_to_path_id_1);
+            });
+        });
+    };
+
+    if (!is_source1 && d1_end != d1_begin + 1) {
+        std::vector<size_t> path_id_1_to_ts;
+        traverse(*this, path_id_1, t, [&](size_t path_id_1_to_t) {
+            path_id_1_to_ts.emplace_back(path_id_1_to_t);
+        }, *(d_end - 1), max_search_depth);
+        std::sort(path_id_1_to_ts.begin(), path_id_1_to_ts.end());
+
+        call_path_id_1_to_path_id_2 = [&](size_t t_to_path_id_2) {
+            for (size_t path_id_1_to_t : path_id_1_to_ts) {
+                callback(path_id_1_to_t + t_to_path_id_2);
+            }
+        };
     }
 
-    auto [ct2, w2_begin, w2_end] = get_superbubble_chain(sb2);
+    if (t == sb2) {
+        find_in_superbubble(t, true, dummy.begin(), dummy.end(),
+                            call_path_id_1_to_path_id_2);
 
-    if (!is_source1 && d1_end - d1_begin != 1) {
-        // TODO
-        assert(false);
         return;
     }
 
+    // now we need the distance from t to sb2
+    auto [ct1, w1_begin, w1_end] = get_superbubble_chain(t);
+    auto [ct2, w2_begin, w2_end] = get_superbubble_chain(sb2);
+    assert(!ct1 || !std::get<0>(get_superbubble_terminus(ct1)));
+    assert(!ct2 || !std::get<0>(get_superbubble_terminus(ct2)));
+
+    size_t sb1_to_t_min = *d_begin;
+    size_t sb1_to_path_id_1_max = *(d1_end - 1);
+    assert(sb1_to_t_min >= sb1_to_path_id_1_max);
+    size_t path_id_1_to_t_min = sb1_to_t_min - sb1_to_path_id_1_max;
+    size_t path_id_1_to_ct1_min = path_id_1_to_t_min + *w1_begin;
+
     if (!ct1 || !sb2 || !ct2) {
-        assert(ct1 || sb1);
         if (ct1) {
-            call_dists(ct1, path_id_2, [&](size_t d) {
-                std::for_each(w1_begin, w1_end, [&](size_t ww) {
-                    std::for_each(d1_begin, d1_end, [&](size_t dd1) {
-                        callback(d + ww - dd1);
-                    });
-                });
-            }, max_dist - *w1_begin, max_search_depth);
+            if (max_dist >= path_id_1_to_ct1_min) {
+                if (sb2) {
+                    traverse(*this, ct1, sb2, [&](size_t ct1_to_sb2) {
+                        std::for_each(w1_begin, w1_end, [&](size_t t_to_ct1) {
+                            size_t t_to_sb2 = t_to_ct1 + ct1_to_sb2;
+                            std::for_each(d2_begin, d2_end, [&](size_t sb2_to_path_id_2) {
+                                size_t t_to_path_id_2 = t_to_sb2 + sb2_to_path_id_2;
+                                call_path_id_1_to_path_id_2(t_to_path_id_2);
+                            });
+                        });
+                    }, max_dist - path_id_1_to_ct1_min, max_search_depth);
+                } else {
+                    traverse(*this, ct1, path_id_2, [&](size_t ct1_to_path_id_2) {
+                        std::for_each(w1_begin, w1_end, [&](size_t t_to_ct1) {
+                            size_t t_to_path_id_2 = t_to_ct1 + ct1_to_path_id_2;
+                            call_path_id_1_to_path_id_2(t_to_path_id_2);
+                        });
+                    }, max_dist - path_id_1_to_ct1_min, max_search_depth);
+                }
+            }
         } else {
-            auto [t, w1_begin, w1_end] = get_superbubble_terminus(sb1);
-            call_dists(t, path_id_2, [&](size_t d) {
-                std::for_each(w1_begin, w1_end, [&](size_t ww) {
-                    std::for_each(d1_begin, d1_end, [&](size_t dd1) {
-                        callback(d + ww - dd1);
-                    });
-                });
-            }, max_dist - *w1_begin, max_search_depth);
+            if (max_dist >= path_id_1_to_t_min) {
+                if (sb2) {
+                    traverse(*this, t, sb2, [&](size_t t_to_sb2) {
+                        std::for_each(d2_begin, d2_end, [&](size_t sb2_to_path_id_2) {
+                            size_t t_to_path_id_2 = t_to_sb2 + sb2_to_path_id_2;
+                            call_path_id_1_to_path_id_2(t_to_path_id_2);
+                        });
+                    }, max_dist - path_id_1_to_t_min, max_search_depth);
+                } else {
+                    traverse(*this, t, path_id_2, call_path_id_1_to_path_id_2,
+                             max_dist - path_id_1_to_t_min, max_search_depth);
+                }
+            }
         }
 
         return;
     }
 
-    if (ct1 != ct2) {
-        // different chain
-        call_dists(ct1, path_id_2, [&](size_t d) {
-            std::for_each(w1_begin, w1_end, [&](size_t ww) {
-                std::for_each(d1_begin, d1_end, [&](size_t dd) {
-                    assert(d + ww >= dd);
-                    callback(d + ww - dd);
-                });
-            });
-        }, max_dist, max_search_depth);
-        return;
-    }
-
-    std::for_each(d1_begin, d1_end, [&](size_t dd) {
-        std::for_each(w1_begin, w1_end, [&](size_t ww1) {
-            std::for_each(w2_begin, w2_end, [&](size_t ww2) {
-                assert(ww1 >= ww2 + dd);
-                callback(ww1 - ww2 - dd);
+    if (ct1 == ct2 && w2_end == w2_begin + 1) {
+        std::for_each(w1_begin, w1_end, [&](size_t t_to_ct1) {
+            std::for_each(w2_begin, w2_end, [&](size_t sb2_to_ct1) {
+                if (t_to_ct1 >= sb2_to_ct1) {
+                    size_t t_to_sb2 = t_to_ct1 - sb2_to_ct1;
+                    std::for_each(d1_begin, d1_end, [&](size_t sb1_to_path_id_1) {
+                        std::for_each(d_begin, d_end, [&](size_t sb1_to_t) {
+                            assert(sb1_to_t >= sb1_to_path_id_1);
+                            size_t path_id_1_to_t = sb1_to_t - sb1_to_path_id_1;
+                            std::for_each(d2_begin, d2_end, [&](size_t sb2_to_path_id_2) {
+                                callback(path_id_1_to_t + t_to_sb2 + sb2_to_path_id_2);
+                            });
+                        });
+                    });
+                }
             });
         });
-    });
-    return;
+    } else if (max_dist >= path_id_1_to_ct1_min) {
+        traverse(*this, ct1, sb2, [&](size_t ct1_to_sb2) {
+            std::for_each(w1_begin, w1_end, [&](size_t t_to_ct1) {
+                size_t t_to_sb2 = t_to_ct1 + ct1_to_sb2;
+                std::for_each(d2_begin, d2_end, [&](size_t sb2_to_path_id_2) {
+                    size_t t_to_path_id_2 = t_to_sb2 + sb2_to_path_id_2;
+                    call_path_id_1_to_path_id_2(t_to_path_id_2);
+                });
+            });
+        }, max_dist - path_id_1_to_ct1_min, max_search_depth);
+    }
 }
 
 template <class PathStorage,
@@ -856,15 +909,20 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
     // chain superbubbles
     {
         sdsl::int_vector<> chain_parent(num_unitigs_ + 1);
-        sdsl::int_vector<> distance(num_unitigs_ + 1, std::numeric_limits<uint64_t>::max());
-        for (size_t i = 0; i < num_unitigs_; ++i) {
-            auto [t, d_begin, d_end] = get_superbubble_terminus(i + 1);
-            assert(t <= num_unitigs_);
-            size_t max_width = *(d_end - 1);
-            if (t && t - 1 != i && max_width < distance[t]) {
-                chain_parent[t] = i + 1;
-                distance[t] = max_width;
-            }
+        for (size_t i = 1; i <= num_unitigs_; ++i) {
+            auto [t, d_begin, d_end] = get_superbubble_terminus(i);
+            if (!t || t == i)
+                continue;
+
+            // we are at a superbubble start
+            auto [t2, d2_begin, d2_end] = get_superbubble_terminus(t);
+            if (!t2)
+                continue;
+
+            // the superbubble starting at i is chained to the one starting at t
+            assert(!chain_parent[t2]);
+            chain_parent[t2] = t;
+            chain_parent[t] = i;
         }
 
         sdsl::int_vector<> superbubble_chain(num_unitigs_ * 2);
@@ -873,22 +931,28 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
         size_t chain_i = 0;
         size_t chain_widths_id = 0;
         for (size_t i = 0; i < num_unitigs_; ++i) {
-            if (!superbubble_chain[i * 2] && chain_parent[i + 1]
-                    && !std::get<0>(get_superbubble_terminus(i + 1))) {
+            if (chain_parent[i + 1] && !std::get<0>(get_superbubble_terminus(i + 1))) {
+                assert(!superbubble_chain[i * 2]);
+
                 // end of a superbubble chain
                 size_t j = i + 1;
-                if (!chain_parent[j])
-                    continue;
-
                 size_t chain_term = i + 1;
+                superbubble_chain[(j - 1) * 2] = chain_term;
+                superbubble_chain[(j - 1) * 2 + 1] = ++chain_widths_id;
+                chain_widths.emplace_back(0);
+                chain_bounds.emplace_back(true);
+
                 tsl::hopscotch_set<size_t> widths;
                 widths.emplace(0);
-                do {
+                while (chain_parent[j]) {
+                    size_t old_j = j;
+                    std::ignore = old_j;
+                    j = chain_parent[j];
                     size_t widths_start = chain_widths.size();
                     superbubble_chain[(j - 1) * 2] = chain_term;
                     superbubble_chain[(j - 1) * 2 + 1] = ++chain_widths_id;
-                    auto [t, d_begin, d_end] = get_superbubble_terminus(chain_parent[j]);
-                    assert(t == j);
+                    auto [t, d_begin, d_end] = get_superbubble_terminus(j);
+                    assert(t == old_j);
                     tsl::hopscotch_set<size_t> next_widths;
                     for (size_t width : widths) {
                         std::for_each(d_begin, d_end, [&](size_t dd) {
@@ -896,17 +960,19 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
                         });
                     }
                     std::swap(next_widths, widths);
+                    assert(widths.size());
                     for (size_t width : widths) {
                         chain_widths.emplace_back(width);
                         chain_bounds.emplace_back(false);
                     }
                     std::sort(chain_widths.end() - widths.size(), chain_widths.end());
-                    j = chain_parent[j];
                     chain_bounds[widths_start] = true;
-                } while (chain_parent[j]);
+                }
+
                 ++chain_i;
             }
         }
+
         chain_bounds.emplace_back(true);
         assert(chain_bounds.size() == chain_widths.size() + 1);
 

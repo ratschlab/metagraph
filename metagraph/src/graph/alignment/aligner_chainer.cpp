@@ -700,12 +700,10 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                 return;
             }
 
-#ifndef NDEBUG
-            DEBUG_LOG("Chain: {}", chain_score);
+            logger->trace("Chain: {}", chain_score);
             for (const auto &[aln, dist] : chain) {
-                DEBUG_LOG("\t{} (dist: {})", aln, dist);
+                logger->trace("\t{} (dist: {})", aln, dist);
             }
-#endif
 
             bool added = false;
 

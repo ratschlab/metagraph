@@ -213,9 +213,9 @@ TYPED_TEST(PathIndexTest, disconnect) {
      *   \ \ /
      *    o o
      */
-    std::string reference_1 = "CGTGGCCCAGGCCCAGGCCCAGGCGCATCATCTAGCTACGATCTAGTGATCGATCGGAGTGACGTGAA";
-    std::string reference_2 = "CGTGGCCCAGGCCCAGGCCCAGC";
-    std::string reference_3 =                        "CGCATCATCTAGCTACGATCTACTGATCGATCGGAGTGACGTGAA";
+    std::string reference_1 = "CGTGGCCCAGGCCCAGGCCCAG""G""CGCATCATCTAGCTACGATCTA""G""TGATCGATCGGAGTGACGTGAA";
+    std::string reference_2 = "CGTGGCCCAGGCCCAGGCCCAG""C";
+    std::string reference_3 =                            "CGCATCATCTAGCTACGATCTA""C""TGATCGATCGGAGTGACGTGAA";
     for (DeBruijnGraph::Mode mode : MODES_TO_TEST) {
         auto graph = build_graph_batch<TypeParam>(k, { reference_1, reference_2, reference_3 }, mode);
         std::vector<std::tuple<std::string::const_iterator,
