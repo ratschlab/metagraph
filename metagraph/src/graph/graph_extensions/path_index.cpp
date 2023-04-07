@@ -37,7 +37,29 @@ void traverse(const IPathIndex &index,
               size_t max_dist,
               size_t max_search_depth,
               size_t stop_at = 0) {
-    assert(start_id != target);
+    if (start_id == target) {
+        callback(0);
+
+        if (!max_dist)
+            return;
+
+        bool has_self_loop = false;
+        index.adjacent_outgoing_unitigs(start_id, [&](size_t next) {
+            if (next == start_id)
+                has_self_loop = true;
+        });
+
+        if (!has_self_loop)
+            return;
+
+        size_t length_1 = index.path_length(start_id);
+        for (size_t d = length_1; d <= max_dist; d += length_1) {
+            callback(d);
+        }
+
+        return;
+    }
+
     std::vector<std::tuple<size_t, size_t, size_t>> search;
     search.emplace_back(start_id, 0, max_search_depth);
     while (search.size()) {
@@ -74,23 +96,10 @@ void IPathIndex::call_dists(size_t path_id_1,
                             size_t max_dist,
                             size_t max_search_depth) const {
     if (path_id_1 == path_id_2) {
-        callback(0);
-
-        if (!is_unitig(path_id_1) || !max_dist)
-            return;
-
-        bool has_self_loop = false;
-        adjacent_outgoing_unitigs(path_id_1, [&](size_t next) {
-            if (next == path_id_1)
-                has_self_loop = true;
-        });
-
-        if (!has_self_loop)
-            return;
-
-        size_t length_1 = path_length(path_id_1);
-        for (size_t d = length_1; d <= max_dist; d += length_1) {
-            callback(d);
+        if (!is_unitig(path_id_1)) {
+            callback(0);
+        } else {
+            traverse(*this, path_id_1, path_id_2, callback, max_dist, max_search_depth);
         }
 
         return;
@@ -209,8 +218,10 @@ void IPathIndex::call_dists(size_t path_id_1,
     assert(d1_begin != d1_end);
     size_t sb1_to_path_id_1_max = *(d1_end - 1);
 
-    assert(sb1_to_t_min >= sb1_to_path_id_1_max);
-    size_t path_id_1_to_t_min = sb1_to_t_min - sb1_to_path_id_1_max;
+    assert(t == path_id_1 || sb1_to_t_min >= sb1_to_path_id_1_max);
+    size_t path_id_1_to_t_min = sb1_to_t_min >= sb1_to_path_id_1_max
+        ? sb1_to_t_min - sb1_to_path_id_1_max
+        : 0;
 
     size_t path_id_1_to_ct1_min = ct1 ? path_id_1_to_t_min + *w1_begin : 0;
 
