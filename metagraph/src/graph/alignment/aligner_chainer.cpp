@@ -775,6 +775,8 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
         chains.clear();
     };
 
+    tsl::hopscotch_map<size_t, tsl::hopscotch_map<size_t, std::vector<size_t>>> dist_cache;
+
     chain_anchors<Seed>(config_, seeds.data(), seeds.data() + seeds.size(),
         [&](const Seed &a_i, const Seed *begin, const Seed *end, auto chain_scores, const auto &update_score) {
             const auto &coords_i_back = node_coords[anchor_ends[&a_i - seeds.data()].second];
@@ -874,17 +876,24 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                             process_coord_list(tuple_i, tuple_j);
 
                         } else if (path_index->is_unitig(c_i) && path_index->is_unitig(c_j)) {
-                            path_index->call_dists(c_i, c_j,
-                                [&](size_t coord_dist) {
-                                    int64_t source_coord = path_index->path_id_to_coord(c_i);
-                                    int64_t target_coord = path_index->path_id_to_coord(c_j);
-                                    process_coord_list(
-                                        tuple_i, tuple_j,
-                                        static_cast<int64_t>(coord_dist + source_coord) - target_coord
-                                    );
-                                },
-                                dist + path_index->path_length(c_i)
-                            );
+                            auto find = dist_cache.find(c_i);
+                            bool prev_cached = find != dist_cache.end() && find->second.count(c_j);
+                            auto &coord_dists = dist_cache[c_i][c_j];
+
+                            if (!prev_cached) {
+                                path_index->call_dists(c_i, c_j, [&](size_t coord_dist) {
+                                    coord_dists.emplace_back(coord_dist);
+                                }, config_.max_dist_between_seeds);
+                            }
+
+                            for (size_t coord_dist : coord_dists) {
+                                int64_t source_coord = path_index->path_id_to_coord(c_i);
+                                int64_t target_coord = path_index->path_id_to_coord(c_j);
+                                process_coord_list(
+                                    tuple_i, tuple_j,
+                                    static_cast<int64_t>(coord_dist + source_coord) - target_coord
+                                );
+                            }
                         }
                     }
                 }
