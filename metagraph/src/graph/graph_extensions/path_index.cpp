@@ -250,14 +250,9 @@ void IPathIndex::call_dists(size_t path_id_1,
             std::for_each(w2_begin, w2_end, [&](size_t sb2_to_ct1) {
                 if (t_to_ct1 >= sb2_to_ct1) {
                     size_t t_to_sb2 = t_to_ct1 - sb2_to_ct1;
-                    std::for_each(d1_begin, d1_end, [&](size_t sb1_to_path_id_1) {
-                        std::for_each(d_begin, d_end, [&](size_t sb1_to_t) {
-                            assert(sb1_to_t >= sb1_to_path_id_1);
-                            size_t path_id_1_to_t = sb1_to_t - sb1_to_path_id_1;
-                            std::for_each(d2_begin, d2_end, [&](size_t sb2_to_path_id_2) {
-                                callback(path_id_1_to_t + t_to_sb2 + sb2_to_path_id_2);
-                            });
-                        });
+                    std::for_each(d2_begin, d2_end, [&](size_t sb2_to_path_id_2) {
+                        size_t t_to_path_id_2 = t_to_sb2 + sb2_to_path_id_2;
+                        call_path_id_1_to_path_id_2(t_to_path_id_2);
                     });
                 }
             });
