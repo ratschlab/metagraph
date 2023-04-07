@@ -31,7 +31,7 @@ class IPathIndex : public SequenceGraph::GraphExtension {
     virtual SuperbubbleInfo
     get_superbubble_and_dist(size_t path_id) const = 0;
 
-    virtual size_t get_superbubble_chain(size_t path_id) const = 0;
+    virtual SuperbubbleInfo get_superbubble_chain(size_t path_id) const = 0;
 
     virtual size_t coord_to_path_id(uint64_t coord) const = 0;
     virtual size_t coord_to_read_id(uint64_t coord) const = 0;
@@ -64,7 +64,7 @@ class IPathIndex : public SequenceGraph::GraphExtension {
     virtual std::vector<RowTuples> get_path_row_tuples(const std::vector<Row> &rows) const = 0;
     virtual std::vector<RowTuples> get_read_row_tuples(const std::vector<Row> &rows) const = 0;
 
-    virtual bool has_coord(node_index) const { return true; }
+    virtual bool has_coord(node_index) const = 0;
 
     virtual const DeBruijnGraph& get_graph() const = 0;
 };
@@ -105,9 +105,7 @@ class PathIndex : public IPathIndex {
 
     virtual bool can_reach_superbubble_terminus(size_t path_id) const override final;
 
-    virtual size_t get_superbubble_chain(size_t path_id) const override final {
-        return --path_id < num_unitigs_ ? unitig_chain_[path_id] : 0;
-    }
+    virtual SuperbubbleInfo get_superbubble_chain(size_t path_id) const override final;
 
     virtual size_t coord_to_path_id(uint64_t coord) const override final {
         return path_boundaries_.rank1(coord);
@@ -136,6 +134,7 @@ class PathIndex : public IPathIndex {
     std::shared_ptr<const DBGSuccinct> dbg_succ_;
     size_t num_unitigs_;
     size_t num_superbubbles_;
+    PathBoundaries dummy_indicator_;
     PathStorage paths_indices_;
     PathBoundaries path_boundaries_;
 
@@ -154,6 +153,8 @@ class PathIndex : public IPathIndex {
     SuperbubbleIndicator can_reach_terminus_;
 
     SuperbubbleStorage unitig_chain_;
+    SuperbubbleStorage unitig_chain_sizes_;
+    SuperbubbleIndicator unitig_chain_b_;
 
     virtual std::vector<RowTuples> get_path_row_tuples(const std::vector<Row> &rows) const override final {
         return paths_indices_.get_row_tuples(rows);
@@ -164,7 +165,9 @@ class PathIndex : public IPathIndex {
             : std::vector<RowTuples>(rows.size(), RowTuples{});
     }
 
-    virtual bool has_coord(node_index node) const override final;
+    virtual bool has_coord(node_index node) const override final {
+        return node != DeBruijnGraph::npos && !dummy_indicator_[node];
+    }
 
     virtual const DeBruijnGraph& get_graph() const override final { return *dbg_succ_; }
 

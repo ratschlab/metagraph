@@ -30,6 +30,45 @@ static const std::vector<Label> DUMMY { Label(1, 1) };
 
 static const IPathIndex::SuperbubbleStorage dummy { sdsl::int_vector(1, 0) };
 
+void traverse(const IPathIndex &index,
+              size_t start_id,
+              size_t target,
+              const std::function<void(size_t)> &callback,
+              size_t max_dist,
+              size_t max_search_depth,
+              size_t stop_at = 0) {
+    assert(start_id != target);
+    std::vector<std::tuple<size_t, size_t, size_t>> search;
+    search.emplace_back(start_id, 0, max_search_depth);
+    while (search.size()) {
+        auto [cur_id, dist, depth] = search.back();
+        search.pop_back();
+
+        if (cur_id == target) {
+            callback(dist);
+            continue;
+        }
+
+        if (dist >= max_dist)
+            continue;
+
+        if (std::get<0>(index.get_superbubble_terminus(cur_id))) {
+            assert(dist);
+            index.call_dists(cur_id, target, [&](size_t d) { callback(dist + d); },
+                             max_dist - dist, depth);
+            continue;
+        }
+
+        if (depth) {
+            dist += index.path_length(cur_id);
+            index.adjacent_outgoing_unitigs(cur_id, [&](size_t next) {
+                if (next != stop_at)
+                    search.emplace_back(next, dist, depth - 1);
+            });
+        }
+    }
+};
+
 void IPathIndex::call_dists(size_t path_id_1,
                             size_t path_id_2,
                             const std::function<void(size_t)> &callback,
@@ -65,6 +104,7 @@ void IPathIndex::call_dists(size_t path_id_1,
     if (length_1 > max_dist)
         return;
 
+    assert(dummy.size() == 1);
     size_t sb1 = path_id_1;
     size_t sb2 = path_id_2;
     auto d1_begin = dummy.begin();
@@ -81,143 +121,105 @@ void IPathIndex::call_dists(size_t path_id_1,
     if (!is_source2)
         std::tie(sb2, d2_begin, d2_end) = get_superbubble_and_dist(path_id_2);
 
-    if (!sb1 || !sb2) {
-        if (max_search_depth) {
-            adjacent_outgoing_unitigs(path_id_1, [&](size_t next) {
-                if (next == path_id_2) {
-                    callback(length_1);
-                } else if (max_dist > length_1) {
-                    call_dists(next, path_id_2,
-                               [&](size_t l) { callback(l + length_1); },
-                                max_dist - length_1, max_search_depth - 1);
-                }
-            });
-        }
+    if (!sb1) {
+        traverse(*this, path_id_1, path_id_2, callback, max_dist, max_search_depth);
         return;
     }
 
-    if (sb1 == sb2) {
+    auto find_in_superbubble = [&](size_t path_id_1, bool is_source1, auto d1_begin, auto d1_end, const auto &callback) {
         if (is_source1) {
             std::for_each(d2_begin, d2_end, callback);
             return;
         }
 
+        auto [t, d_begin, d_end] = get_superbubble_terminus(sb2);
         if (!can_reach_superbubble_terminus(path_id_1)) {
-            if (can_reach_superbubble_terminus(path_id_2))
+            if (path_id_2 == t || can_reach_superbubble_terminus(path_id_2))
                 return;
 
-            std::vector<std::pair<size_t, size_t>> path;
-            path.emplace_back(path_id_1, 0);
-            while (path.size()) {
-                auto [uid, d] = path.back();
-                path.pop_back();
-                if (d > max_dist)
-                    continue;
-
-                size_t len = path_length(uid);
-                adjacent_outgoing_unitigs(uid, [&](size_t next) {
-                    if (next == path_id_2) {
-                        callback(len + d);
-                    } else {
-                        path.emplace_back(next, len + d);
-                    }
-                });
-            }
-
+            traverse(*this, path_id_1, path_id_2, callback, max_dist, max_search_depth, t);
             return;
         }
 
-        auto [t, d_begin, d_end] = get_superbubble_terminus(sb1);
-        if (path_id_2 == t) {
-            if (d_end - d_begin != 1) {
-                // TODO later
-                return;
-            }
-
+        if (path_id_2 == t && d_end - d_begin == 1) {
             size_t dd = *d_begin;
             std::for_each(d1_begin, d1_end, [&](size_t dd1) {
                 callback(dd - dd1);
             });
-
             return;
         }
 
-        // TODO
+        traverse(*this, path_id_1, path_id_2, callback, max_dist, max_search_depth, t);
+    };
+
+    if (sb1 == sb2) {
+        find_in_superbubble(path_id_1, is_source1, d1_begin, d1_end, callback);
         return;
     }
 
     if (!can_reach_superbubble_terminus(path_id_1))
         return;
 
-    size_t chain_1 = get_superbubble_chain(sb1);
-    size_t chain_2 = get_superbubble_chain(sb2);
-    if (!chain_1 || !chain_2 || chain_1 != chain_2) {
-        auto [t, d_begin, d_end] = get_superbubble_terminus(sb1);
-        if (t == path_id_2 && (is_source1 || d_end - d_begin == 1) && (d_end - d_begin > 1 || *d_begin)) {
-            size_t msize = !*d_begin ? *(d_begin + 1) : *d_begin;
-            call_dists(t, path_id_2, [&](size_t l) {
-                std::for_each(d_begin, d_end, [&](size_t dd) {
-                    callback(l + dd);
+    auto [ct1, w1_begin, w1_end] = get_superbubble_chain(sb1);
+    if (!ct1) {
+        w1_begin = dummy.begin();
+        w1_end = dummy.end();
+    }
+
+    auto [ct2, w2_begin, w2_end] = get_superbubble_chain(sb2);
+
+    if (!is_source1 && d1_end - d1_begin != 1) {
+        // TODO
+        assert(false);
+        return;
+    }
+
+    if (!ct1 || !sb2 || !ct2) {
+        assert(ct1 || sb1);
+        if (ct1) {
+            call_dists(ct1, path_id_2, [&](size_t d) {
+                std::for_each(w1_begin, w1_end, [&](size_t ww) {
+                    std::for_each(d1_begin, d1_end, [&](size_t dd1) {
+                        callback(d + ww - dd1);
+                    });
                 });
-            }, max_dist - msize);
+            }, max_dist - *w1_begin, max_search_depth);
+        } else {
+            auto [t, w1_begin, w1_end] = get_superbubble_terminus(sb1);
+            call_dists(t, path_id_2, [&](size_t d) {
+                std::for_each(w1_begin, w1_end, [&](size_t ww) {
+                    std::for_each(d1_begin, d1_end, [&](size_t dd1) {
+                        callback(d + ww - dd1);
+                    });
+                });
+            }, max_dist - *w1_begin, max_search_depth);
         }
+
         return;
     }
 
-    auto [t, d_begin, d_end] = get_superbubble_terminus(sb1);
-    if (!is_source1 && d_end - d_begin != 1) {
-        // TODO:
-        return;
-    }
-
-    if (is_source1) {
-        if (d_end - d_begin == 1 && !*d_begin)
-            return;
-
-        size_t msize = !*d_begin ? *(d_begin + 1) : *d_begin;
-        call_dists(t, path_id_2, [&](size_t l) {
-            std::for_each(d_begin, d_end, [&](size_t dd) {
-                callback(l + dd);
+    if (ct1 != ct2) {
+        // different chain
+        call_dists(ct1, path_id_2, [&](size_t d) {
+            std::for_each(w1_begin, w1_end, [&](size_t ww) {
+                std::for_each(d1_begin, d1_end, [&](size_t dd) {
+                    assert(d + ww >= dd);
+                    callback(d + ww - dd);
+                });
             });
-        }, max_dist - msize);
+        }, max_dist, max_search_depth);
         return;
     }
 
-    size_t msize = std::numeric_limits<size_t>::max();
-    std::for_each(d_begin, d_end, [&](size_t dd) {
-        std::for_each(d1_begin, d1_end, [&](size_t dd1) {
-            if (dd > dd1)
-                msize = std::min(msize, dd - dd1);
+    std::for_each(d1_begin, d1_end, [&](size_t dd) {
+        std::for_each(w1_begin, w1_end, [&](size_t ww1) {
+            std::for_each(w2_begin, w2_end, [&](size_t ww2) {
+                assert(ww1 >= ww2 + dd);
+                callback(ww1 - ww2 - dd);
+            });
         });
     });
-    assert(msize);
-    if (max_dist > msize) {
-        call_dists(t, path_id_2, [&](size_t l) {
-            std::for_each(d_begin, d_end, [&](size_t dd) {
-                std::for_each(d1_begin, d1_end, [&](size_t dd1) {
-                    callback(l + dd - dd1);
-                });
-            });
-        }, max_dist - msize);
-    }
-}
-
-template <class Indicator, class Storage>
-IPathIndex::SuperbubbleInfo get_range(const Indicator &indicator,
-                                      const Storage &storage,
-                                      size_t i) {
-    assert(i);
-    size_t num_bits = indicator.num_set_bits();
-    assert(storage.size() >= num_bits);
-    assert(i <= num_bits);
-    size_t begin = indicator.select1(i) + 1;
-    size_t end = i != num_bits ? indicator.next1(begin) : storage.size();
-    assert(end <= storage.size());
-    assert(begin <= end);
-
-    return IPathIndex::SuperbubbleInfo(storage[begin - 1],
-                                       storage.begin() + begin,
-                                       storage.begin() + end);
+    return;
 }
 
 template <class PathStorage,
@@ -236,6 +238,20 @@ void PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleSto
     });
 }
 
+template <class Indicator, class Storage>
+IPathIndex::SuperbubbleInfo get_range(const Indicator &indicator,
+                                      const Storage &storage,
+                                      size_t i) {
+    assert(i);
+    size_t begin = indicator.select1(i);
+    size_t end = indicator.select1(i + 1);
+    assert(begin < storage.size());
+    assert(end <= storage.size());
+    return IPathIndex::SuperbubbleInfo(storage[begin],
+                                       storage.begin() + begin + 1,
+                                       storage.begin() + end);
+}
+
 template <class PathStorage,
           class PathBoundaries,
           class SuperbubbleIndicator,
@@ -244,7 +260,7 @@ IPathIndex::SuperbubbleInfo
 PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
 ::get_superbubble_terminus(size_t path_id) const {
     if (path_id > num_unitigs_ || !path_id)
-        return {};
+        return SuperbubbleInfo(0, superbubble_termini_.end(), superbubble_termini_.end());
 
     return get_range(superbubble_termini_b_, superbubble_termini_, path_id);
 }
@@ -257,7 +273,7 @@ IPathIndex::SuperbubbleInfo
 PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
 ::get_superbubble_and_dist(size_t path_id) const {
     if (path_id > num_unitigs_ || !path_id)
-        return {};
+        return SuperbubbleInfo(0, superbubble_sources_.end(), superbubble_sources_.end());
 
     return get_range(superbubble_sources_b_, superbubble_sources_, path_id);
 }
@@ -268,9 +284,36 @@ template <class PathStorage,
           class SuperbubbleStorage>
 bool PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
 ::can_reach_superbubble_terminus(size_t path_id) const {
-    return --path_id < num_unitigs_ && can_reach_terminus_[path_id];
+    return path_id && --path_id < num_unitigs_ && can_reach_terminus_[path_id];
 }
 
+template <class PathStorage,
+          class PathBoundaries,
+          class SuperbubbleIndicator,
+          class SuperbubbleStorage>
+IPathIndex::SuperbubbleInfo
+PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
+::get_superbubble_chain(size_t path_id) const {
+    if (!path_id || --path_id >= num_unitigs_)
+        return SuperbubbleInfo(0, unitig_chain_sizes_.end(), unitig_chain_sizes_.end());
+
+    assert(path_id * 2 < unitig_chain_.size());
+    if (size_t chain_term_id = unitig_chain_[path_id * 2]) {
+        size_t dists_id = unitig_chain_[path_id * 2 + 1];
+
+        size_t begin = unitig_chain_b_.select1(dists_id);
+        size_t end = unitig_chain_b_.select1(dists_id + 1);
+        assert(begin < unitig_chain_sizes_.size());
+        assert(end <= unitig_chain_sizes_.size());
+
+        return SuperbubbleInfo(chain_term_id,
+            unitig_chain_sizes_.begin() + begin,
+            unitig_chain_sizes_.begin() + end
+        );
+    }
+
+    return SuperbubbleInfo(0, unitig_chain_sizes_.end(), unitig_chain_sizes_.end());
+}
 
 template <class PathStorage,
           class PathBoundaries,
@@ -284,6 +327,9 @@ bool PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleSto
 
     num_unitigs_ = load_number(*in);
     num_superbubbles_ = load_number(*in);
+
+    if (!dummy_indicator_.load(*in))
+        return false;
 
     if (!paths_indices_.load(*in))
         return false;
@@ -319,9 +365,13 @@ bool PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleSto
 
     try {
         unitig_chain_.load(*in);
+        unitig_chain_sizes_.load(*in);
     } catch (...) {
         return false;
     }
+
+    if (!unitig_chain_b_.load(*in))
+        return false;
 
     logger->trace("Loaded {} superbubbles", num_superbubbles_);
 
@@ -337,6 +387,7 @@ void PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleSto
     std::ofstream fout(filename_base + kPathIndexExtension);
     serialize_number(fout, num_unitigs_);
     serialize_number(fout, num_superbubbles_);
+    dummy_indicator_.serialize(fout);
     paths_indices_.serialize(fout);
     path_boundaries_.serialize(fout);
     read_indices_.serialize(fout);
@@ -349,6 +400,8 @@ void PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleSto
     superbubble_termini_b_.serialize(fout);
     can_reach_terminus_.serialize(fout);
     unitig_chain_.serialize(fout);
+    unitig_chain_sizes_.serialize(fout);
+    unitig_chain_b_.serialize(fout);
 }
 
 template <class PathStorage,
@@ -484,17 +537,28 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
     );
 
     std::shared_ptr<const DeBruijnGraph> check_graph = graph;
+
+#if 0
     std::shared_ptr<const CanonicalDBG> canonical;
     if (dbg_succ.get_mode() == DeBruijnGraph::PRIMARY) {
         canonical = std::make_shared<CanonicalDBG>(graph);
         check_graph = canonical;
     }
+#endif
 
     std::vector<uint64_t> boundaries { 0 };
     std::vector<node_index> unitig_fronts;
     std::vector<node_index> unitig_backs;
     tsl::hopscotch_map<node_index, size_t> front_to_unitig_id;
     tsl::hopscotch_map<node_index, size_t> back_to_unitig_id;
+
+    if (!dbg_succ.get_mask()) {
+        dummy_indicator_ = PathBoundaries(
+            dbg_succ.get_boss().mark_all_dummy_edges(get_num_threads())
+        );
+    } else {
+        dummy_indicator_ = PathBoundaries(dbg_succ.max_index() + 1, false);
+    }
 
     std::mutex mu;
     dbg_succ.call_unitigs([&](const auto &seq, const auto &path) {
@@ -718,7 +782,7 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
 
         {
             sdsl::int_vector<> sources(superbubble_start_size);
-            sdsl::bit_vector source_indicator(superbubble_start_size);
+            sdsl::bit_vector source_indicator(superbubble_start_size + 1);
             auto it = sources.begin();
             auto jt = source_indicator.begin();
             size_t j = 0;
@@ -732,6 +796,9 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
                 jt += d.size();
                 ++j;
             }
+
+            assert(jt + 1 == source_indicator.end());
+            *jt = true;
             superbubble_sources_ = SuperbubbleStorage(std::move(sources));
             superbubble_sources_b_ = SuperbubbleIndicator(std::move(source_indicator));
         }
@@ -741,7 +808,7 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
         size_t num_in_superbubble = num_unitigs_;
         {
             sdsl::int_vector<> termini(superbubble_termini_size);
-            sdsl::bit_vector termini_indicator(superbubble_termini_size);
+            sdsl::bit_vector termini_indicator(superbubble_termini_size + 1);
             auto it = termini.begin();
             auto jt = termini_indicator.begin();
             size_t i = 1;
@@ -760,6 +827,9 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
                 jt += d.size();
                 ++i;
             }
+
+            assert(jt + 1 == termini_indicator.end());
+            *jt = true;
             superbubble_termini_ = SuperbubbleStorage(std::move(termini));
             superbubble_termini_b_ = SuperbubbleIndicator(std::move(termini_indicator));
         }
@@ -789,34 +859,67 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
         sdsl::int_vector<> distance(num_unitigs_ + 1, std::numeric_limits<uint64_t>::max());
         for (size_t i = 0; i < num_unitigs_; ++i) {
             auto [t, d_begin, d_end] = get_superbubble_terminus(i + 1);
-            if (t && t - 1 != i && *(d_end - 1) < distance[t]) {
+            assert(t <= num_unitigs_);
+            size_t max_width = *(d_end - 1);
+            if (t && t - 1 != i && max_width < distance[t]) {
                 chain_parent[t] = i + 1;
-                distance[t] = *(d_end - 1);
+                distance[t] = max_width;
             }
         }
 
-        sdsl::int_vector<> superbubble_chain(num_unitigs_);
-        size_t chain_i = 1;
+        sdsl::int_vector<> superbubble_chain(num_unitigs_ * 2);
+        std::vector<bool> chain_bounds;
+        std::vector<uint64_t> chain_widths;
+        size_t chain_i = 0;
+        size_t chain_widths_id = 0;
         for (size_t i = 0; i < num_unitigs_; ++i) {
-            if (!superbubble_chain[i] && chain_parent[i + 1]
+            if (!superbubble_chain[i * 2] && chain_parent[i + 1]
                     && !std::get<0>(get_superbubble_terminus(i + 1))) {
                 // end of a superbubble chain
                 size_t j = i + 1;
-                if (chain_parent[j]) {
-                    while (chain_parent[j]) {
-                        superbubble_chain[j - 1] = chain_i;
-                        j = chain_parent[j];
+                if (!chain_parent[j])
+                    continue;
+
+                size_t chain_term = i + 1;
+                tsl::hopscotch_set<size_t> widths;
+                widths.emplace(0);
+                do {
+                    size_t widths_start = chain_widths.size();
+                    superbubble_chain[(j - 1) * 2] = chain_term;
+                    superbubble_chain[(j - 1) * 2 + 1] = ++chain_widths_id;
+                    auto [t, d_begin, d_end] = get_superbubble_terminus(chain_parent[j]);
+                    assert(t == j);
+                    tsl::hopscotch_set<size_t> next_widths;
+                    for (size_t width : widths) {
+                        std::for_each(d_begin, d_end, [&](size_t dd) {
+                            next_widths.emplace(dd + width);
+                        });
                     }
-
-                    superbubble_chain[j - 1] = chain_i;
-                }
-
+                    std::swap(next_widths, widths);
+                    for (size_t width : widths) {
+                        chain_widths.emplace_back(width);
+                        chain_bounds.emplace_back(false);
+                    }
+                    std::sort(chain_widths.end() - widths.size(), chain_widths.end());
+                    j = chain_parent[j];
+                    chain_bounds[widths_start] = true;
+                } while (chain_parent[j]);
                 ++chain_i;
             }
         }
+        chain_bounds.emplace_back(true);
+        assert(chain_bounds.size() == chain_widths.size() + 1);
 
-        logger->info("Indexed {} superbubble chains", chain_i - 1);
+        logger->info("Indexed {} superbubble chains containing {} superbubbles",
+                     chain_i, chain_widths_id);
         unitig_chain_ = SuperbubbleStorage(std::move(superbubble_chain));
+
+        sdsl::int_vector<> chain_widths_sd(chain_widths.size());
+        std::copy(chain_widths.begin(), chain_widths.end(), chain_widths_sd.begin());
+        unitig_chain_sizes_ = SuperbubbleStorage(std::move(chain_widths_sd));
+
+        unitig_chain_b_ = SuperbubbleIndicator(to_sdsl(std::move(chain_bounds)));
+        assert(unitig_chain_b_.num_set_bits() == chain_widths_id + 1);
     }
 
     assert(annotator.num_labels() <= 1);
@@ -1012,17 +1115,6 @@ auto IPathIndex
     }
 
     return ret_val;
-}
-
-template <class PathStorage,
-          class PathBoundaries,
-          class SuperbubbleIndicator,
-          class SuperbubbleStorage>
-bool PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
-::has_coord(node_index node) const {
-    assert(dbg_succ_);
-    return node != DeBruijnGraph::npos
-        && dbg_succ_->get_node_sequence(node).find(boss::BOSS::kSentinel) == std::string::npos;
 }
 
 template class PathIndex<>;

@@ -122,8 +122,8 @@ TYPED_TEST(PathIndexTest, simple_superbubble) {
      *   \ /
      *    o
      */
-    std::string reference_1 = "CGTGGCCCAGGCCCAGGCCCAGGCGCATCATCTAGCTACGATCTA";
-    std::string reference_2 = "CGTGGCCCAGGCCCAGGCCCAGCCGCATCATCTAGCTACGATCTA";
+    std::string reference_1 = "CGTGGCCCAGGCCCAGGCCCAG""G""CGCATCATCTAGCTACGATCTA";
+    std::string reference_2 = "CGTGGCCCAGGCCCAGGCCCAG""C""CGCATCATCTAGCTACGATCTA";
 
     for (DeBruijnGraph::Mode mode : MODES_TO_TEST) {
         auto graph = build_graph_batch<TypeParam>(k, { reference_1, reference_2 }, mode);
@@ -155,8 +155,8 @@ TYPED_TEST(PathIndexTest, double_superbubble_chain) {
      *   \ / \ /
      *    o   o
      */
-    std::string reference_1 = "CGTGGCCCAGGCCCAGGCCCAGGCGCATCATCTAGCTACGATCTAGTGATCGATCGGAGTGACGTGAA";
-    std::string reference_2 = "CGTGGCCCAGGCCCAGGCCCAGCCGCATCATCTAGCTACGATCTACTGATCGATCGGAGTGACGTGAA";
+    std::string reference_1 = "CGTGGCCCAGGCCCAGGCCCAG""G""CGCATCATCTAGCTACGATCTA""G""TGATCGATCGGAGTGACGTGAA";
+    std::string reference_2 = "CGTGGCCCAGGCCCAGGCCCAG""C""CGCATCATCTAGCTACGATCTA""C""TGATCGATCGGAGTGACGTGAA";
 
     for (DeBruijnGraph::Mode mode : MODES_TO_TEST) {
         auto graph = build_graph_batch<TypeParam>(k, { reference_1, reference_2 }, mode);
@@ -183,9 +183,10 @@ TYPED_TEST(PathIndexTest, nested_superbubbles) {
      *  |       |
      *  ----o----
      */
-    std::string reference_1 = "CGTGGCCCAGGCCCAGGCCCAGGCGCATCATCTAGCTACGATCTAGTGATCGATCGGAGTGACGTGAA";
-    std::string reference_2 = "CGTGGCCCAGGCCCAGGCCCAGCCGCATCATCTAGCTACGATCTACTGATCGATCGGAGTGACGTGAA";
-    std::string reference_3 = "CGTGGCCCAGGCCCAGGCCCAGAGCTAGTCGATGCCTAGCTGGCGATGATCGATCGGAGTGACGTGAA";
+    std::string reference_1 = "CGTGGCCCAGGCCCAGGCCCAG""G""CGCATCATCTAGCTACGATCTA""G""TGATCGATCGGAGTGACGTGAA";
+    std::string reference_2 = "CGTGGCCCAGGCCCAGGCCCAG""C""CGCATCATCTAGCTACGATCTA""C""TGATCGATCGGAGTGACGTGAA";
+
+    std::string reference_3 = "CGTGGCCCAGGCCCAGGCCCAG""""AGCTAGTCGATGCCTAGCTGGCGA""""TGATCGATCGGAGTGACGTGAA";
 
     for (DeBruijnGraph::Mode mode : MODES_TO_TEST) {
         auto graph = build_graph_batch<TypeParam>(k, { reference_1, reference_2, reference_3 }, mode);
@@ -193,12 +194,11 @@ TYPED_TEST(PathIndexTest, nested_superbubbles) {
                                std::string::const_iterator,
                                size_t>> tests;
         for (size_t i = 1; i <= k; ++i) {
+            tests.emplace_back(reference_1.begin() + i, reference_2.end() - k, (k + 1) * 2 - 1);
             tests.emplace_back(reference_3.begin() + i, reference_2.end() - k, (k + 1) * 2 - 1);
+
             tests.emplace_back(reference_3.begin() + i, reference_2.end() - k - 1, std::numeric_limits<size_t>::max());
         }
-
-        // the lower long unitig forces this entire graph to be a superbubble
-        tests.emplace_back(reference_1.begin() + 1, reference_2.end() - k - 1, std::numeric_limits<size_t>::max());
 
         test_traversal_distances<TypeParam>(*graph, tests);
     }
