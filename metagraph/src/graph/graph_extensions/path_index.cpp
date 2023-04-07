@@ -171,6 +171,7 @@ void IPathIndex::call_dists(size_t path_id_1,
         });
     };
 
+    assert(d_begin != d_end);
     if (!is_source1 && d1_end != d1_begin + 1) {
         std::vector<size_t> path_id_1_to_ts;
         traverse(*this, path_id_1, t, [&](size_t path_id_1_to_t) {
@@ -183,6 +184,11 @@ void IPathIndex::call_dists(size_t path_id_1,
                 callback(path_id_1_to_t + t_to_path_id_2);
             }
         };
+    }
+
+    if (t == path_id_2) {
+        call_path_id_1_to_path_id_2(0);
+        return;
     }
 
     if (t == sb2) {
@@ -199,10 +205,14 @@ void IPathIndex::call_dists(size_t path_id_1,
     assert(!ct2 || !std::get<0>(get_superbubble_terminus(ct2)));
 
     size_t sb1_to_t_min = *d_begin;
+
+    assert(d1_begin != d1_end);
     size_t sb1_to_path_id_1_max = *(d1_end - 1);
+
     assert(sb1_to_t_min >= sb1_to_path_id_1_max);
     size_t path_id_1_to_t_min = sb1_to_t_min - sb1_to_path_id_1_max;
-    size_t path_id_1_to_ct1_min = path_id_1_to_t_min + *w1_begin;
+
+    size_t path_id_1_to_ct1_min = ct1 ? path_id_1_to_t_min + *w1_begin : 0;
 
     if (!ct1 || !sb2 || !ct2) {
         if (ct1) {

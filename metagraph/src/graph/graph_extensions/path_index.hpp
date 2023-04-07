@@ -166,6 +166,7 @@ class PathIndex : public IPathIndex {
     }
 
     virtual bool has_coord(node_index node) const override final {
+        assert(node < dummy_indicator_.size());
         return node != DeBruijnGraph::npos && !dummy_indicator_[node];
     }
 
