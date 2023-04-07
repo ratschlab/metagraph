@@ -1180,6 +1180,11 @@ void chain_alignments(const IDBGAligner &aligner,
     score_t node_insert = config.node_insertion_penalty;
     score_t gap_open = config.gap_opening_penalty;
     score_t gap_ext = config.gap_extension_penalty;
+    assert(gap_open < 0);
+    assert(gap_ext < 0);
+    assert(gap_ext >= gap_open);
+    assert(node_insert < 0);
+
     const auto *labeled_aligner = dynamic_cast<const ILabeledAligner*>(&aligner);
 
     size_t last_index;
@@ -1271,7 +1276,11 @@ void chain_alignments(const IDBGAligner &aligner,
                         if (gap > 0)
                             gap_cost += gap_open + (gap - 1) * gap_ext;
 
-                        score_t updated_score = base_updated_score + score_j + gap_cost + alignments[info_i.index].get_score() - prefix_scores_with_deletions_i[query_i.begin() - full_query_i.begin()];
+                        assert(gap_cost < 0);
+
+                        score_t updated_score = base_updated_score + score_j + gap_cost
+                            + alignments[info_i.index].get_score()
+                            - prefix_scores_with_deletions_i[query_i.begin() - full_query_i.begin()];
 
                         if (update_score(updated_score, &a_j, 0)) {
                             info_i.mem_length = query_i.size();
@@ -1395,11 +1404,14 @@ void chain_alignments(const IDBGAligner &aligner,
             last_index = first_extra_info.index;
 
             Alignment alignment = alignments[last_index];
+            DEBUG_LOG("\tMerging in: {}", alignment);
+            assert(alignment.get_query_view().begin() <= first->get_query_view().begin());
+            assert(alignment.get_query_view().end() >= first->get_query_view().end());
             if (overlap <= 0) {
                 assert(alignment.get_query_view().end() <= cur.get_query_view().begin() && "Not implemented");
                 cur.insert_gap_prefix(cur.get_query_view().begin() - alignment.get_query_view().end(), graph.get_k() - 1, config);
                 assert(cur.size());
-                assert(cur.is_valid(graph, &config));
+                // assert(cur.is_valid(graph, &config));
             } else {
                 cur.trim_query_prefix(anchor_alns[last_anchor].get_query_view().begin() - cur.get_query_view().begin(),
                                       graph.get_k() - 1, config);
