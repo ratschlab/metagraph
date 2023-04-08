@@ -169,31 +169,36 @@ void IPathIndex::call_dists(size_t path_id_1,
         return;
 
     auto [t, d_begin, d_end] = get_superbubble_terminus(sb1);
-
-    std::function<void(size_t)> call_path_id_1_to_path_id_2 = [&](size_t t_to_path_id_2) {
-        std::for_each(d_begin, d_end, [&](size_t sb1_to_t) {
-            size_t sb1_to_path_id_2 = sb1_to_t + t_to_path_id_2;
-            std::for_each(d1_begin, d1_end, [&](size_t sb1_to_path_id_1) {
-                assert(sb1_to_t >= sb1_to_path_id_1);
-                callback(sb1_to_path_id_2 - sb1_to_path_id_1);
-            });
-        });
-    };
-
+    assert(t);
     assert(d_begin != d_end);
+
+    std::vector<size_t> path_id_1_to_ts;
     if (!is_source1 && d1_end != d1_begin + 1) {
-        std::vector<size_t> path_id_1_to_ts;
         traverse(*this, path_id_1, t, [&](size_t path_id_1_to_t) {
             path_id_1_to_ts.emplace_back(path_id_1_to_t);
         }, *(d_end - 1), max_search_depth);
-        std::sort(path_id_1_to_ts.begin(), path_id_1_to_ts.end());
-
-        call_path_id_1_to_path_id_2 = [&](size_t t_to_path_id_2) {
-            for (size_t path_id_1_to_t : path_id_1_to_ts) {
-                callback(path_id_1_to_t + t_to_path_id_2);
-            }
-        };
+    } else {
+        std::for_each(d_begin, d_end, [&](size_t sb1_to_t) {
+            std::for_each(d1_begin, d1_end, [&](size_t sb1_to_path_id_1) {
+                assert(sb1_to_t >= sb1_to_path_id_1);
+                path_id_1_to_ts.emplace_back(sb1_to_t - sb1_to_path_id_1);
+            });
+        });
     }
+
+    if (path_id_1_to_ts.empty())
+        return;
+
+    std::sort(path_id_1_to_ts.begin(), path_id_1_to_ts.end());
+    path_id_1_to_ts.erase(std::unique(path_id_1_to_ts.begin(), path_id_1_to_ts.end()),
+                          path_id_1_to_ts.end());
+    size_t path_id_1_to_t_min = path_id_1_to_ts.front();
+
+    auto call_path_id_1_to_path_id_2 = [&](size_t t_to_path_id_2) {
+        for (size_t path_id_1_to_t : path_id_1_to_ts) {
+            callback(path_id_1_to_t + t_to_path_id_2);
+        }
+    };
 
     if (t == path_id_2) {
         call_path_id_1_to_path_id_2(0);
@@ -213,72 +218,37 @@ void IPathIndex::call_dists(size_t path_id_1,
     assert(!ct1 || !std::get<0>(get_superbubble_terminus(ct1)));
     assert(!ct2 || !std::get<0>(get_superbubble_terminus(ct2)));
 
-    size_t sb1_to_t_min = *d_begin;
+    if (ct1) {
+        size_t path_id_1_to_ct1_min = path_id_1_to_t_min + *w1_begin;
 
-    assert(d1_begin != d1_end);
-    size_t sb1_to_path_id_1_max = *(d1_end - 1);
-
-    assert(t == path_id_1 || sb1_to_t_min >= sb1_to_path_id_1_max);
-    size_t path_id_1_to_t_min = sb1_to_t_min >= sb1_to_path_id_1_max
-        ? sb1_to_t_min - sb1_to_path_id_1_max
-        : 0;
-
-    size_t path_id_1_to_ct1_min = ct1 ? path_id_1_to_t_min + *w1_begin : 0;
-
-    if (!ct1 || !sb2 || !ct2) {
-        if (ct1) {
-            if (max_dist >= path_id_1_to_ct1_min) {
-                if (sb2) {
-                    traverse(*this, ct1, sb2, [&](size_t ct1_to_sb2) {
-                        std::for_each(w1_begin, w1_end, [&](size_t t_to_ct1) {
-                            size_t t_to_sb2 = t_to_ct1 + ct1_to_sb2;
-                            std::for_each(d2_begin, d2_end, [&](size_t sb2_to_path_id_2) {
-                                size_t t_to_path_id_2 = t_to_sb2 + sb2_to_path_id_2;
-                                call_path_id_1_to_path_id_2(t_to_path_id_2);
-                            });
-                        });
-                    }, max_dist - path_id_1_to_ct1_min, max_search_depth);
-                } else {
-                    traverse(*this, ct1, path_id_2, [&](size_t ct1_to_path_id_2) {
-                        std::for_each(w1_begin, w1_end, [&](size_t t_to_ct1) {
-                            size_t t_to_path_id_2 = t_to_ct1 + ct1_to_path_id_2;
-                            call_path_id_1_to_path_id_2(t_to_path_id_2);
-                        });
-                    }, max_dist - path_id_1_to_ct1_min, max_search_depth);
-                }
-            }
-        } else {
-            if (max_dist >= path_id_1_to_t_min) {
-                if (sb2) {
-                    traverse(*this, t, sb2, [&](size_t t_to_sb2) {
+        if (ct1 == ct2 && w2_end == w2_begin + 1) {
+            std::for_each(w1_begin, w1_end, [&](size_t t_to_ct1) {
+                std::for_each(w2_begin, w2_end, [&](size_t sb2_to_ct1) {
+                    if (t_to_ct1 >= sb2_to_ct1) {
+                        size_t t_to_sb2 = t_to_ct1 - sb2_to_ct1;
                         std::for_each(d2_begin, d2_end, [&](size_t sb2_to_path_id_2) {
                             size_t t_to_path_id_2 = t_to_sb2 + sb2_to_path_id_2;
                             call_path_id_1_to_path_id_2(t_to_path_id_2);
                         });
-                    }, max_dist - path_id_1_to_t_min, max_search_depth);
-                } else {
-                    traverse(*this, t, path_id_2, call_path_id_1_to_path_id_2,
-                             max_dist - path_id_1_to_t_min, max_search_depth);
-                }
-            }
+                    }
+                });
+            });
         }
 
-        return;
-    }
+        if (max_dist < path_id_1_to_ct1_min)
+            return;
 
-    if (ct1 == ct2 && w2_end == w2_begin + 1) {
-        std::for_each(w1_begin, w1_end, [&](size_t t_to_ct1) {
-            std::for_each(w2_begin, w2_end, [&](size_t sb2_to_ct1) {
-                if (t_to_ct1 >= sb2_to_ct1) {
-                    size_t t_to_sb2 = t_to_ct1 - sb2_to_ct1;
-                    std::for_each(d2_begin, d2_end, [&](size_t sb2_to_path_id_2) {
-                        size_t t_to_path_id_2 = t_to_sb2 + sb2_to_path_id_2;
-                        call_path_id_1_to_path_id_2(t_to_path_id_2);
-                    });
-                }
-            });
-        });
-    } else if (max_dist >= path_id_1_to_ct1_min) {
+        if (!sb2 && !ct2) {
+            traverse(*this, ct1, path_id_2, [&](size_t ct1_to_path_id_2) {
+                std::for_each(w1_begin, w1_end, [&](size_t t_to_ct1) {
+                    size_t t_to_path_id_2 = t_to_ct1 + ct1_to_path_id_2;
+                    call_path_id_1_to_path_id_2(t_to_path_id_2);
+                });
+            }, max_dist - path_id_1_to_ct1_min, max_search_depth);
+
+            return;
+        }
+
         traverse(*this, ct1, sb2, [&](size_t ct1_to_sb2) {
             std::for_each(w1_begin, w1_end, [&](size_t t_to_ct1) {
                 size_t t_to_sb2 = t_to_ct1 + ct1_to_sb2;
@@ -288,6 +258,23 @@ void IPathIndex::call_dists(size_t path_id_1,
                 });
             });
         }, max_dist - path_id_1_to_ct1_min, max_search_depth);
+
+        return;
+    }
+
+    if (path_id_1_to_t_min > max_dist)
+        return;
+
+    if (sb2) {
+        traverse(*this, t, sb2, [&](size_t t_to_sb2) {
+            std::for_each(d2_begin, d2_end, [&](size_t sb2_to_path_id_2) {
+                size_t t_to_path_id_2 = t_to_sb2 + sb2_to_path_id_2;
+                call_path_id_1_to_path_id_2(t_to_path_id_2);
+            });
+        }, max_dist - path_id_1_to_t_min, max_search_depth);
+    } else {
+        traverse(*this, t, path_id_2, call_path_id_1_to_path_id_2,
+                 max_dist - path_id_1_to_t_min, max_search_depth);
     }
 }
 
