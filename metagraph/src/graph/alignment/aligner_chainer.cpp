@@ -1194,6 +1194,9 @@ void chain_alignments(const IDBGAligner &aligner,
     chain_anchors<Alignment>(config, anchor_alns.data(), anchor_alns.data() + anchor_alns.size(),
         [&](const Alignment &a_i, const Alignment *begin, const Alignment *end, auto chain_scores, const auto &update_score) {
             auto &info_i = anchor_extra_info[&a_i - anchor_alns.data()];
+            score_t &score_i = std::get<0>(*(
+                chain_scores - (begin - anchor_alns.data()) + (&a_i - anchor_alns.data())
+            ));
             std::string_view full_query_i = alignments[info_i.index].get_query_view();
             std::string_view query_i = a_i.get_query_view();
             const auto &prefix_scores_with_deletions_i = per_char_scores_prefix[info_i.index];
@@ -1237,36 +1240,27 @@ void chain_alignments(const IDBGAligner &aligner,
                     return;
                 }
 
-                auto a_i_col = a_i.label_column_diffs.size()
-                    ? a_i.label_column_diffs.back()
-                    : a_i.label_columns;
-                auto a_j_col = a_j.label_columns;
-                score_t local_label_change_score = 0;
-                if ((!config.allow_label_change || !labeled_aligner) && a_i_col != a_j_col)
-                    return;
+                auto get_label_change_score = [&](auto a_i_col, auto a_j_col,
+                                                  std::string_view c) {
+                    if (!labeled_aligner || a_i_col == a_j_col)
+                        return 0;
 
-                score_t base_updated_score = 0;
+                    score_t label_change_score = DBGAlignerConfig::ninf;
 
-                if (labeled_aligner) {
-                    local_label_change_score = DBGAlignerConfig::ninf;
-                    auto label_change_scores
-                        = labeled_aligner->get_label_change_scores(a_i_col, a_j_col);
-                    score_t match_score = config.match_score(std::string_view(
-                        query_j.begin(), 1
-                    ));
-
-                    for (auto&& [labels, lc_score, is_subset] : label_change_scores) {
-                        local_label_change_score = std::max(local_label_change_score,
-                                                            lc_score * match_score);
+                    if (!a_i_col || !a_j_col
+                            || (!config.allow_label_change && a_i_col != a_j_col)) {
+                        return label_change_score;
                     }
 
-                    if (local_label_change_score == DBGAlignerConfig::ninf)
-                        return;
+                    score_t match_score = config.match_score(c);
 
-                    assert(local_label_change_score <= 0);
+                    for (auto&& [labels, lc_score, is_subset] : labeled_aligner->get_label_change_scores(a_i_col, a_j_col)) {
+                        label_change_score = std::max(label_change_score,
+                                                      lc_score * match_score);
+                    }
 
-                    base_updated_score += local_label_change_score;
-                }
+                    return label_change_score;
+                };
 
                 if (config.allow_jump && full_query_i.end() <= full_query_j.begin()) {
                     // completely disjoint
@@ -1278,13 +1272,25 @@ void chain_alignments(const IDBGAligner &aligner,
 
                         assert(gap_cost < 0);
 
-                        score_t updated_score = base_updated_score + score_j + gap_cost
+                        score_t base_updated_score = score_j + gap_cost
                             + alignments[info_i.index].get_score()
                             - prefix_scores_with_deletions_i[query_i.begin() - full_query_i.begin()];
 
+                        if (base_updated_score <= score_i)
+                            return;
+
+                        score_t label_change_score = get_label_change_score(
+                            a_i.label_column_diffs.size() ? a_i.label_column_diffs.back()
+                                                          : a_i.label_columns,
+                            a_j.label_columns,
+                            std::string_view(full_query_j.begin(), 1)
+                        );
+
+                        score_t updated_score = base_updated_score + label_change_score;
+
                         if (update_score(updated_score, &a_j, 0)) {
                             info_i.mem_length = query_i.size();
-                            info_i.label_change_score = local_label_change_score;
+                            info_i.label_change_score = label_change_score;
                         }
                     }
 
@@ -1294,24 +1300,6 @@ void chain_alignments(const IDBGAligner &aligner,
                 score_t gap = query_j.begin() - query_i.end();
                 if (config.allow_jump && gap >= 0) {
                     // alignments overlap, but there's no overlapping k-mer
-                    // TODO: figure this out later!
-                    // if (info_j.mem_length >= graph.get_k()) {
-                    //     score_t gap_cost = node_insert + gap_open;
-                    //     if (gap > 0)
-                    //         gap_cost += gap_open + (gap - 1) * gap_ext;
-
-                    //     score_t updated_score = base_updated_score + score_j + gap_cost
-                    //         - prefix_scores_j[query_j.begin() - full_query_j.begin()]
-                    //         + prefix_scores_i[query_i.end() - full_query_i.begin()];
-
-                    //     size_t coord_dist = (query_j.begin() - query_i.end())
-                    //                             + a_i.get_sequence().size();
-                    //     if (update_score(updated_score, &a_j, coord_dist)) {
-                    //         info_i.mem_length = query_i.size();
-                    //         info_i.label_change_score = local_label_change_score;
-                    //     }
-                    // }
-
                     return;
                 }
 
@@ -1321,28 +1309,38 @@ void chain_alignments(const IDBGAligner &aligner,
                 if (info_i.aln_index_front < static_cast<ssize_t>(alignments[info_i.index].get_offset()) + 1)
                     return;
 
-                base_updated_score += a_i.get_score() - a_j.get_score();
+                score_t base_updated_score = score_j + a_i.get_score() - a_j.get_score();
+
+                auto update_score_with_labels = [&]() {
+                    if (base_updated_score <= score_i)
+                        return;
+
+                    score_t label_change_score = get_label_change_score(
+                        a_i.label_column_diffs.size() ? a_i.label_column_diffs.back()
+                                                      : a_i.label_columns,
+                        a_j.label_columns,
+                        std::string_view(query_j.begin(), 1)
+                    );
+
+                    score_t updated_score = base_updated_score + label_change_score;
+                    if (update_score(updated_score, &a_j, 0)) {
+                        info_i.mem_length = query_i.size();
+                        info_i.label_change_score = label_change_score;
+                    }
+                };
 
                 if (a_i.get_nodes().back() == a_j.get_nodes().back()
                         && info_j.mem_length > query_j.size()) {
                     // perfect overlap, easy to connect
                     assert(query_i.size() == query_j.size());
-                    score_t updated_score = score_j + base_updated_score;
-                    if (update_score(updated_score, &a_j, 0)) {
-                        info_i.mem_length = query_i.size();
-                        info_i.label_change_score = local_label_change_score;
-                    }
-
+                    update_score_with_labels();
                     return;
                 }
 
                 if (config.allow_jump && info_j.mem_length >= graph.get_k()) {
                     assert(query_i.end() > query_j.begin());
-                    score_t updated_score = score_j + base_updated_score + node_insert;
-                    if (update_score(updated_score, &a_j, 0)) {
-                        info_i.mem_length = query_i.size();
-                        info_i.label_change_score = local_label_change_score;
-                    }
+                    base_updated_score += node_insert;
+                    update_score_with_labels();
                 }
             });
         },
