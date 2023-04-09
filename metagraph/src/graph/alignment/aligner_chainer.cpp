@@ -777,6 +777,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
 
     tsl::hopscotch_map<size_t, tsl::hopscotch_map<size_t, std::vector<size_t>>> dist_cache;
 
+    logger->trace("Chaining {} anchors for a query of length {}", seeds.size(), query_size);
     chain_anchors<Seed>(config_, seeds.data(), seeds.data() + seeds.size(),
         [&](const Seed &a_i, const Seed *begin, const Seed *end, auto chain_scores, const auto &update_score) {
             const auto &coords_i_back = node_coords[anchor_ends[&a_i - seeds.data()].second];
