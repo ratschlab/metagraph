@@ -129,6 +129,9 @@ void IPathIndex::call_dists(size_t path_id_1,
     if (!is_source2)
         std::tie(sb2, d2_begin, d2_end) = get_superbubble_and_dist(path_id_2);
 
+    assert(std::is_sorted(d1_begin, d1_end));
+    assert(std::is_sorted(d2_begin, d2_end));
+
     if (!sb1) {
         traverse(*this, path_id_1, path_id_2, callback, max_dist, max_search_depth);
         return;
@@ -171,27 +174,35 @@ void IPathIndex::call_dists(size_t path_id_1,
     auto [t, d_begin, d_end] = get_superbubble_terminus(sb1);
     assert(t);
     assert(d_begin != d_end);
+    assert(std::is_sorted(d_begin, d_end));
+    assert(*(d_end - 1) >= *(d1_end - 1));
 
     std::vector<size_t> path_id_1_to_ts;
-    if (!is_source1 && d1_end != d1_begin + 1) {
-        traverse(*this, path_id_1, t, [&](size_t path_id_1_to_t) {
-            path_id_1_to_ts.emplace_back(path_id_1_to_t);
-        }, *(d_end - 1), max_search_depth);
+    if (is_source1) {
+        assert(path_id_1 == sb1);
+        auto it = *d_begin ? d_begin : d_begin + 1;
+        path_id_1_to_ts.reserve(d_end - it);
+        std::copy(it, d_end, std::back_inserter(path_id_1_to_ts));
+    } else if (d_end == d_begin + 1) {
+        size_t sb1_to_t = *d_begin;
+        assert(sb1_to_t >= *(d1_end - 1));
+        path_id_1_to_ts.resize(d1_end - d1_begin);
+        std::transform(d1_begin, d1_end, path_id_1_to_ts.rbegin(),
+                       [&](size_t sb1_to_path_id_1) { return sb1_to_t - sb1_to_path_id_1; });
     } else {
-        std::for_each(d_begin, d_end, [&](size_t sb1_to_t) {
-            std::for_each(d1_begin, d1_end, [&](size_t sb1_to_path_id_1) {
-                assert(sb1_to_t >= sb1_to_path_id_1);
-                path_id_1_to_ts.emplace_back(sb1_to_t - sb1_to_path_id_1);
-            });
-        });
+        traverse(*this, path_id_1, t, [&](size_t path_id_1_to_t) {
+            if (path_id_1_to_t)
+                path_id_1_to_ts.emplace_back(path_id_1_to_t);
+        }, *(d_end - 1), max_search_depth);
+        std::sort(path_id_1_to_ts.begin(), path_id_1_to_ts.end());
+        path_id_1_to_ts.erase(std::unique(path_id_1_to_ts.begin(), path_id_1_to_ts.end()),
+                              path_id_1_to_ts.end());
     }
 
     if (path_id_1_to_ts.empty())
         return;
 
-    std::sort(path_id_1_to_ts.begin(), path_id_1_to_ts.end());
-    path_id_1_to_ts.erase(std::unique(path_id_1_to_ts.begin(), path_id_1_to_ts.end()),
-                          path_id_1_to_ts.end());
+    assert(std::is_sorted(path_id_1_to_ts.begin(), path_id_1_to_ts.end()));
     size_t path_id_1_to_t_min = path_id_1_to_ts.front();
 
     auto call_path_id_1_to_path_id_2 = [&](size_t t_to_path_id_2) {
@@ -204,6 +215,9 @@ void IPathIndex::call_dists(size_t path_id_1,
         call_path_id_1_to_path_id_2(0);
         return;
     }
+
+    if (path_id_1_to_t_min > max_dist)
+        return;
 
     if (t == sb2) {
         find_in_superbubble(t, true, dummy.begin(), dummy.end(),
@@ -262,9 +276,6 @@ void IPathIndex::call_dists(size_t path_id_1,
 
         return;
     }
-
-    if (path_id_1_to_t_min > max_dist)
-        return;
 
     if (sb2) {
         traverse(*this, t, sb2, call_to_path_id_2,
