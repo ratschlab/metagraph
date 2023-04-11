@@ -107,21 +107,21 @@ bit_vector_stat get_boss_mask(const DBGSuccinct &dbg_succ,
 void MaskedDeBruijnGraph::call_sequences(const CallPath &callback,
                                          size_t num_threads,
                                          bool kmers_in_single_form) const {
-    if (auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(graph_.get())) {
-        bit_vector_stat mask = get_boss_mask(*dbg_succ, *kmers_in_graph_,
-                                             only_valid_nodes_in_mask_);
-
-        dbg_succ->get_boss().call_sequences([&](std::string&& sequence, auto&& path) {
-            for (auto &node : path) {
-                node = dbg_succ->boss_to_kmer_index(node);
-            }
-            callback(sequence, path);
-
-        }, num_threads, kmers_in_single_form, &mask);
-
-    } else {
+//    if (auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(graph_.get())) {
+//            bit_vector_stat mask = get_boss_mask(*dbg_succ, *kmers_in_graph_,
+//                                             only_valid_nodes_in_mask_);
+//
+//        dbg_succ->get_boss().call_sequences([&](std::string&& sequence, auto&& path) {
+//            for (auto &node : path) {
+//                node = dbg_succ->boss_to_kmer_index(node);
+//            }
+//            callback(sequence, path);
+//
+//        }, num_threads, kmers_in_single_form, &mask);
+//
+//    } else {
         DeBruijnGraph::call_sequences(callback, num_threads, kmers_in_single_form);
-    }
+    //} Myrthe temporaryly mute
 }
 
 void MaskedDeBruijnGraph::call_unitigs(const CallPath &callback,

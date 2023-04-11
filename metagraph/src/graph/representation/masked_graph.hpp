@@ -129,6 +129,8 @@ class MaskedDeBruijnGraph : public DBGWrapper<DeBruijnGraph> {
         });
     }
 
+    std::vector<double> likelihood_ratios{}; // likelihood ratios
+
   private:
     std::unique_ptr<bitmap> kmers_in_graph_;
     bool only_valid_nodes_in_mask_;

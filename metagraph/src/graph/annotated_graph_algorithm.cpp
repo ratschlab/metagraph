@@ -244,8 +244,8 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr, // Myrthe: t
 
     auto &[counts, init_mask, other_labels, total_kmers] = count_vector;
 
-    // Myrthe: temporary
     if (config.evaluate_assembly){     // Myrthe temporary: evaluate what k-mers overlap
+
         logger->trace("Evaluate confusion table");
         assert(counts.size() > 1);
         assert( std::accumulate(counts.begin(), counts.end(), 0) > 0);
@@ -270,7 +270,6 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr, // Myrthe: t
         std::cout<< "recall" << recall << std::endl << std::flush;
         std::cout << std::accumulate(counts.begin(), counts.end(), 0) << std::flush;
         assert(true_positive + false_negative + false_positive == std::accumulate(counts.begin(), counts.end(), 0));
-        //std::cout<< "specificity" << specificity << std::endl << std::flush;
     } // in mask probably only has sequences
 
 
@@ -302,7 +301,7 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr, // Myrthe: t
     }
 
 
-    if (config.family_wise_error_rate == 0){  // make k-mer distribution
+    if (config.family_wise_error_rate == 0){  // Temporary code to make k-mer distribution
         logger->trace("K-mer distribution");
 
         auto masked_graph = make_initial_masked_graph(graph_ptr, counts, std::move(init_mask),
@@ -319,7 +318,7 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr, // Myrthe: t
                                    });
                                }
                                else {
-                                   for(size_t i = 0; i < column->size(); i++){  // Myrthe actually here, we should for unitigs, call all values.
+                                   for(size_t i = 0; i < column->size(); i++){
                                        double value = (*column)[i];
                                        if (value) value = column_values[column->rank1(i)- 1];
                                        value_callback(i, value);
@@ -452,7 +451,7 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             call_ones(in_mask, [&](node_index node) {
                 uint64_t in_sum = counts[node * 2];
                 uint64_t out_sum = counts[node * 2 + 1];
-                if (statistical_model.likelihood_ratio_test(in_sum, out_sum))
+                if (std::get<0>(statistical_model.likelihood_ratio_test(in_sum, out_sum)))
                     ++kept_nodes;
                 else
                     mask[node] = false;
@@ -462,7 +461,9 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
             logger->trace("Kept {} out of {} nodes", kept_nodes, total_nodes);
 
-        } else { // Myrthe: maybe it is more efficient to do this at an earlier stage, while calculating the counts vector.
+        } else {
+            masked_graph->likelihood_ratios.resize(counts.size()/2+1);
+            std::fill(masked_graph->likelihood_ratios.begin(), masked_graph->likelihood_ratios.end(), 0);
             std::atomic<uint64_t> total_unitigs(0);
             masked_graph->call_unitigs([&](const std::string &, const std::vector<node_index> &) {
                 total_unitigs.fetch_add(1, MO_RELAXED);
@@ -479,13 +480,20 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                         in_kmer_count_unitig += counts[path[i] * 2];
                         out_kmer_count_unitig += counts[path[i] * 2 + 1];
                     }
-                    if (statistical_model.likelihood_ratio_test(in_kmer_count_unitig, out_kmer_count_unitig))
+                    auto [significance, likelihood_ratio] = statistical_model.likelihood_ratio_test(in_kmer_count_unitig, out_kmer_count_unitig);
+
+                    if (significance){
+                        for (size_t i = 0; i < path.size(); ++i) { // if significant add the likelihood ratio or the effect (in_kmer_count_unitig - out_kmer_count_unitig) to the likelihood_ratios vector. This is a temporary solution
+                            masked_graph->likelihood_ratios[path[i]] = in_kmer_count_unitig - out_kmer_count_unitig; //likelihood_ratio;
+                        }
                         return { std::make_pair(0, path.size()) };
+                    }
                     else
                         return {};
                 },
                 num_threads);
             }
+            //std::fill(masked_graph->likelihood_ratios.begin(), masked_graph->likelihood_ratios.end(), 0.01); // Myrthe: For testing. temporary
             return masked_graph;
     }
 
@@ -664,7 +672,7 @@ construct_diff_label_count_vector(const ColumnGenerator &generate_columns,
             auto label_encoder = annot::ColumnCompressed<>::read_label_encoder(files[i]);
             for (size_t c = 0; c < label_encoder.size(); ++c) {
                 auto label = label_encoder.decode(c);
-                if (labels_in.count(label)) sum_widths_in += std::pow(2, col_width); // QUESTION; Will arithmetics be ok despite type conversions? Seems correct
+                if (labels_in.count(label)) sum_widths_in += std::pow(2, col_width);
                 if (labels_out.count(label)) sum_widths_out += std::pow(2, col_width);
             }
         }
@@ -678,7 +686,8 @@ construct_diff_label_count_vector(const ColumnGenerator &generate_columns,
 
     logger->trace("Allocating count vector");
     // the in and out counts are stored interleaved
-    sdsl::int_vector<> counts = aligned_int_vector(indicator.size() * 2, 0, width, 16); //Myrthe later: int_vector_buffer. In that case the function also to be a template too, or a template based argument, if vector_type== buffered_int_vector, then it should be a buffered (// if constexpr (std::is_same_v<vector_type, Bitmap>) { })
+    sdsl::int_vector<> counts = aligned_int_vector(indicator.size() * 2, 0, width, 16); //Myrthe later: int_vector_buffer. In that case the function also to be a template too, or a template based argument, if vector_type== buffered_int_vector, then it should be a buffered (// if constexpr (std::is_same_v<vector_type, Bitmap>) { } //sdsl::int_vector_buffer<> counts = aligned_int_vector(
+
     logger->trace("done");
 
     sdsl::bit_vector other_labels(num_labels, false);
@@ -703,8 +712,7 @@ construct_diff_label_count_vector(const ColumnGenerator &generate_columns,
             i = AnnotatedDBG::anno_to_graph_index(i); // indices in the annotation matrix have an offset of 1 compared to those in the graph. Since the mask should be compatible with the graph, we have to convert the index.
             assert(i != DeBruijnGraph::npos);
             set_bit(indicator.data(), i, parallel, MO_RELAXED); // set the corresponding bit to true in the mask, with the 'indicator' representing the mask.
-            //atomic_fetch_and_add(counts, i * 2, value, vector_backup_mutex, MO_RELAXED); // TODO Myrthe later: make sure that values do not overflow in neighbouring cells.
-            counts[i*2] += value;
+            atomic_fetch_and_add(counts, i * 2, value, vector_backup_mutex, MO_RELAXED); // TODO Myrthe later: make sure that values do not overflow in neighbouring cells.
             in_total_kmers += value;
         };
 
@@ -713,8 +721,7 @@ construct_diff_label_count_vector(const ColumnGenerator &generate_columns,
             assert(i != DeBruijnGraph::npos);
             if (add_out_labels_to_mask)
                 set_bit(indicator.data(), i, parallel, MO_RELAXED);
-            //atomic_fetch_and_add(counts, i * 2 + 1, value, vector_backup_mutex, MO_RELAXED);
-            counts[i*2 + 1] += value;
+            atomic_fetch_and_add(counts, i * 2 + 1, value, vector_backup_mutex, MO_RELAXED);
             out_total_kmers += value;
         };
 
@@ -784,6 +791,8 @@ void kmer_distribution_table(const ColumnGenerator &generate_columns,
             case 3: { value_generator(add_both); } break;
             default: {}
         }
+
+        // Calculate the product of the poisson probabilities and compare with negative binom
     });
 
     if (config.test_by_unitig){         // unitig mode.
@@ -869,7 +878,7 @@ void update_masked_graph_by_unitig(MaskedDeBruijnGraph &masked_graph,
             kept_unitigs.fetch_add(1, MO_RELAXED);
             num_kept_nodes.fetch_add(end - begin, MO_RELAXED);
             for ( ; last < begin; ++last) {
-                unset_bit(mask.data(), path[last], parallel, MO_RELAXED); // QUESTION Myrthe, why does it unset bits, rather than set bit?
+                unset_bit(mask.data(), path[last], parallel, MO_RELAXED);
             }
             last = end;
         }
@@ -883,13 +892,15 @@ void update_masked_graph_by_unitig(MaskedDeBruijnGraph &masked_graph,
 
     masked_graph.set_mask(new bitmap_vector(std::move(mask)));
 
-    logger->trace("Kept {} out of {} unitigs with average length {}",
+    logger->trace("Kept {} out of {} unitigs with average length {} and a total of {} nodes",
                   kept_unitigs, total_unitigs,
                   static_cast<double>(num_kept_nodes + kept_unitigs * (masked_graph.get_k() - 1))
-                      / kept_unitigs);
+                      / kept_unitigs,
+                  num_kept_nodes);
 }
 
-
+//%TODO A post-filtering step is done to filter out short contigs, percentage/cutoff , that is set to by default.  Short unitigs are removed afterwards
+//        % TODO For each contig the confidence score is output
 
 
 } // namespace graph

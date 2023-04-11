@@ -252,6 +252,7 @@ int assemble(Config *config) {
                                    num_threads, config->min_tip_size,
                                    config->kmers_in_single_form);
             } else {
+                //assert(std::accumulate(graph.lrs.begin(), graph.lrs.end(), 0) > 0);
                 graph.call_sequences([&](const std::string &seq, auto&&) {
                                          std::lock_guard<std::mutex> lock(write_mutex);
                                          writer.write(seq);
@@ -262,12 +263,13 @@ int assemble(Config *config) {
 
         if (files.size() > 1 or config->infbase_annotators.size() > 1) { // Checks the infbase_annotators in the case that annotation columns are provided in the commandline using '-a' or '--annotator'
             config->fnames.erase(config->fnames.begin(), config->fnames.begin() + 1);
-            call_masked_graphs(graph, config, graph_callback); // Does NOT support kmer-counts assembly?
+            call_masked_graphs(graph, config, graph_callback); // Does NOT support kmer-counts assembly
         } else {
             config->infbase = files.at(0);
             auto anno_graph = initialize_annotated_dbg(graph, *config);
-            call_masked_graphs(*anno_graph, config, graph_callback); // Does support kmer-counts assembly?
+            call_masked_graphs(*anno_graph, config, graph_callback); // Does support kmer-counts assembly
         }
+
         return 0;
     }
 

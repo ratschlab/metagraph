@@ -9,6 +9,7 @@
 #include "common/threads/threading.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 #include "graph/representation/canonical_dbg.hpp"
+#include "graph/representation/masked_graph.hpp"
 
 
 namespace mtg {
@@ -114,7 +115,7 @@ void call_sequences_from(const DeBruijnGraph &graph,
                          bool call_unitigs,
                          uint64_t min_tip_size,
                          bool kmers_in_single_form) {
-    assert(start >= 1 && start <= graph.max_index());
+    assert(start >= 1 && start <= graph.max_index()); // TODO Myrthe: pick as starting node one with the highest signficance or effect .
     assert((min_tip_size <= 1 || call_unitigs)
                 && "tip pruning works only for unitig extraction");
     assert(visited);
@@ -128,6 +129,8 @@ void call_sequences_from(const DeBruijnGraph &graph,
     std::string sequence;
 
     std::vector<std::pair<node_index, char>> targets;
+    const mtg::graph::MaskedDeBruijnGraph *downcasted_graph = // Create a downcasted graph object, such that the likelihood ratio vector can be accessed.
+            dynamic_cast<const mtg::graph::MaskedDeBruijnGraph*>(&graph);
 
     // keep traversing until we have worked off all branches from the queue
     while (queue.size()) {
@@ -153,7 +156,7 @@ void call_sequences_from(const DeBruijnGraph &graph,
             ++progress_bar;
 
             targets.clear();
-            graph.call_outgoing_kmers(node,
+            graph.call_outgoing_kmers(node, // finds the subsequent nodes and adds them to the target vector
                 [&](node_index next, char c) { targets.emplace_back(next, c); }
             );
 
@@ -182,25 +185,48 @@ void call_sequences_from(const DeBruijnGraph &graph,
             }
 
             node_index next_node = DeBruijnGraph::npos;
+            char next_c;
             //  _____.___
             //      \.___
-            for (const auto &[next, c] : targets) {
-                if (next_node == DeBruijnGraph::npos
-                        && !call_unitigs
-                        && !(*visited)[next]) {
-                    (*discovered)[next] = true;
-                    next_node = next;
-                    sequence.push_back(c);
-                    path.push_back(next);
-                } else if (!(*discovered)[next]) {
-                    (*discovered)[next] = true;
-                    queue.push_back(next);
+
+
+                        // Original way
+                        node_index next_node_original = next_node;
+                        for (const auto &[next, c] : targets) {
+                            if (next_node_original == DeBruijnGraph::npos
+                                && !call_unitigs // Myrthe: if not in unitig mode, (which just returns the unitigs)
+                                && !(*visited)[next]) { // Myrthe: return call-back here.  input a callback as input to call_sequences_from , with default return false. also adapt in sequence_graph.hpp
+                                (*discovered)[next] = true; // Myrthe: if the node was not visited yet.
+                                next_node_original = next; // then  `next_node == DeBruijnGraph::npos` becomes false.
+                            }
+                        }
+
+            double next_likelihood = 0; // start with a likelihood of 0, s.t. only unitigs are added with a better Likelihood Ratio.
+            for (const auto &[next, c] : targets) { // If there are multiple descendents.
+                if (!(*visited)[next]){ // the node was not visited yet.
+                    if (!(*discovered)[next]) { // The node was not encountered before.
+                        (*discovered)[next] = true;
+                        queue.push_back(next); // The queue grows a bit faster compared to the original case.
+                        // TODO: make sure that the selected node is not added to the queue --> problems if run on  multiple threads.
+                    }
+                    if (!call_unitigs // In the unitig mode (i.e. if call_unitigs is true), simply the unitigs must be returned, rather than longer contigs
+                        && downcasted_graph // TODO feature is temporary
+                        && downcasted_graph->likelihood_ratios[next] > next_likelihood){ // If the likelihood of this unitig is better than the current likelihood
+                        next_likelihood = downcasted_graph->likelihood_ratios[next];
+                        next_node = next;
+                        next_c = c;
+                    }
                 }
             }
 
+            if (next_node != next_node_original)
+                std::cout << "different node selected compared to original method " <<std::flush;
             if (next_node == DeBruijnGraph::npos)
                 break;
-
+            else {
+                sequence.push_back(next_c);
+                path.push_back(next_node);
+            }
             node = next_node;
         }
 
@@ -321,6 +347,10 @@ void call_sequences(const DeBruijnGraph &graph,
                              "Traverse graph",
                              std::cerr, !common::get_verbose());
 
+//    // Myrthe: TODO define callback
+//    const std::function<bool(node_index, node_index)> &pick_edge
+//            = [](node_index, node_index){ return false; };
+
     auto call_paths_from = [&](node_index node) {
         call_sequences_from(graph,
                             node,
@@ -330,7 +360,9 @@ void call_sequences(const DeBruijnGraph &graph,
                             progress_bar,
                             call_unitigs,
                             min_tip_size,
-                            kmers_in_single_form);
+                            kmers_in_single_form
+                            //pick_edge
+                            );
     };
 
     if (call_unitigs) {
@@ -471,10 +503,19 @@ void DeBruijnGraph
 }
 
 
+void DeBruijnGraph::lrt_resize(size_t size){
+    lrs.reserve(size);
+}; // Myrthe
+void DeBruijnGraph::lrt_set_value(double value, size_t index){
+    lrs[index] = value;
+};
+
 std::ostream& operator<<(std::ostream &out, const DeBruijnGraph &graph) {
     graph.print(out);
     return out;
 }
+
+//DeBruijnGraph::DeBruijnGraph(const std::vector<double> &lrs) : lrs(lrs) {} //Myrthe
 
 // returns the edge rank, starting from zero
 size_t incoming_edge_rank(const SequenceGraph &graph,

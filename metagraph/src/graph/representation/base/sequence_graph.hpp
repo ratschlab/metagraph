@@ -146,6 +146,9 @@ class SequenceGraph {
 
 
 class DeBruijnGraph : public SequenceGraph {
+  private:
+    std::vector<double> lrs1{}; // likelihood ratios
+
   public:
     enum Mode { BASIC = 0, CANONICAL, PRIMARY };
 
@@ -190,7 +193,10 @@ class DeBruijnGraph : public SequenceGraph {
      */
     virtual void call_sequences(const CallPath &callback,
                                 size_t num_threads = 1,
-                                bool kmers_in_single_form = false) const;
+                                bool kmers_in_single_form = false
+//                              ,  const std::function<bool(node_index, node_index)> &pick_edge
+//                                = [](node_index, node_index){ return false; }
+            ) const; //Myrthe
     /**
      * Call all unitigs except short tips, where tips are
      * the unitigs with InDegree(first) + OutDegree(last) < 2.
@@ -239,6 +245,11 @@ class DeBruijnGraph : public SequenceGraph {
 
     // Call all nodes that have no incoming edges
     virtual void call_source_nodes(const std::function<void(node_index)> &callback) const;
+
+    void lrt_resize(size_t size); // Myrthe
+    void lrt_set_value(double value, size_t index);
+    mutable std::vector<double> lrs{}; // likelihood ratios
+
 };
 
 
