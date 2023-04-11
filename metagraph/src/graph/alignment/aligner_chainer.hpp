@@ -3,7 +3,6 @@
 
 #include "alignment.hpp"
 
-
 namespace mtg {
 namespace graph {
 namespace align {
@@ -34,7 +33,8 @@ std::tuple<size_t, size_t, size_t>
 chain_and_filter_seeds(const IDBGAligner &aligner,
                        std::shared_ptr<ISeeder> &seeder,
                        SeedFilteringExtender&& extender,
-                       SeedFilteringExtender&& bwd_extender);
+                       SeedFilteringExtender&& bwd_extender,
+                       bool allow_label_change = true);
 
 void chain_alignments(const IDBGAligner &aligner,
                       const std::vector<Alignment> &alignments,

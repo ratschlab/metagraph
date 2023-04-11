@@ -547,7 +547,8 @@ std::tuple<size_t, size_t, size_t>
 chain_and_filter_seeds(const IDBGAligner &aligner,
                        std::shared_ptr<ISeeder> &seeder,
                        SeedFilteringExtender&& extender,
-                       SeedFilteringExtender&& bwd_extender) {
+                       SeedFilteringExtender&& bwd_extender,
+                       bool allow_label_change) {
     size_t query_size = extender.get_query().size();
     const DeBruijnGraph &graph_ = aligner.get_graph();
     const DBGAlignerConfig &config_ = aligner.get_config();
@@ -695,7 +696,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
             bool orientation = chain[0].first.get_orientation();
             best_score = std::max(best_score, chain_score);
             bool score_too_low = (chain_score < best_score * config_.rel_score_cutoff);
-            if (!config_.allow_jump && score_too_low) {
+            if (score_too_low) {
                 terminate = true;
                 return;
             }
@@ -783,6 +784,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
             const auto &coords_i_back = node_coords[anchor_ends[&a_i - seeds.data()].second];
             const auto &score_i = std::get<0>(*(chain_scores - (begin - seeds.data()) + (&a_i - seeds.data())));
             std::string_view query_i = a_i.get_query_view();
+            auto col_i = a_i.get_columns()[0];
             --chain_scores;
             std::for_each(begin, end, [&](const Seed &a_j) {
                 // try to connect a_i to a_j
@@ -799,8 +801,10 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                 ssize_t dist = query_j.end() - query_i.end();
                 score_t label_change_score = 0;
                 if (labeled_aligner) {
-                    auto col_i = a_i.get_columns()[0];
                     auto col_j = a_j.get_columns()[0];
+                    if (!allow_label_change && col_i != col_j)
+                        return;
+
                     label_change_score = labeled_aligner->get_label_change_score(col_i, col_j);
                     if (label_change_score == DBGAlignerConfig::ninf)
                         return;
