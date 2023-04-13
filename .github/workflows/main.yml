@@ -89,11 +89,23 @@ jobs:
           sudo add-apt-repository -s 'deb http://archive.ubuntu.com/ubuntu/ focal main universe multiverse'
           sudo apt-get update
           sudo apt-get build-dep libhts-dev
+          sudo apt-get remove libdeflate-dev
+
+          wget https://github.com/ebiggers/libdeflate/archive/refs/tags/v1.18.tar.gz
+          tar -xvf v1.18.tar.gz
+          cd libdeflate-1.18
+          mkdir _build
+          cd _build
+          cmake -DLIBDEFLATE_BUILD_STATIC_LIB=ON -DLIBDEFLATE_BUILD_SHARED_LIB=OFF ..
+          make -j2
+          sudo make install
+          cd ../..
+
           wget https://github.com/samtools/htslib/releases/download/1.17/htslib-1.17.tar.bz2
           tar -xvf htslib-1.17.tar.bz2
           cd htslib-1.17
           autoreconf -i
-          ./configure --prefix=/usr --disable-libcurl --disable-lzma --disable-bz2 --without-libdeflate
+          ./configure --prefix=/usr --disable-libcurl
           make -j 2
           sudo make install
           cd ..
