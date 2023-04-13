@@ -18,7 +18,7 @@ env:
 jobs:
 
   Linux:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-20.04.1
 
     strategy:
       matrix:
@@ -73,7 +73,7 @@ jobs:
             sudo apt-get install ${{ matrix.compiler }}
         fi
 
-        sudo apt-get install libbz2-dev libjemalloc-dev libboost-all-dev
+        sudo apt-get install libbz2-dev libjemalloc-dev libboost-all-dev libhts-dev
 
         if [ "${{ matrix.build_static }}" = "ON" ]; then
           # for static builds, compile curl ourselves
@@ -84,33 +84,6 @@ jobs:
           make -j 2
           sudo make install
           cd ..
-
-          sudo apt-get install autoconf software-properties-common
-          sudo add-apt-repository -s 'deb http://archive.ubuntu.com/ubuntu/ focal main universe multiverse'
-          sudo apt-get update
-          sudo apt-get build-dep libhts-dev
-          sudo apt-get remove libdeflate-dev
-
-          wget https://github.com/ebiggers/libdeflate/archive/refs/tags/v1.18.tar.gz
-          tar -xvf v1.18.tar.gz
-          cd libdeflate-1.18
-          mkdir _build
-          cd _build
-          cmake -DCMAKE_INSTALL_PREFIX=/usr -DLIBDEFLATE_BUILD_STATIC_LIB=ON -DLIBDEFLATE_BUILD_SHARED_LIB=OFF ..
-          make -j 2 EXTRA_CFLAGS='-fPIC' EXTRA_CXXFLAGS='-fPIC'
-          sudo make install
-          cd ../..
-
-          wget https://github.com/samtools/htslib/releases/download/1.17/htslib-1.17.tar.bz2
-          tar -xvf htslib-1.17.tar.bz2
-          cd htslib-1.17
-          autoreconf -i
-          ./configure --prefix=/usr --disable-libcurl
-          make -j 2 lib-static
-          sudo make install lib-static
-          cd ..
-        else
-          sudo apt-get install libhts-dev
         fi
 
         echo "CC=$(which ${{ matrix.cc }})" >> $GITHUB_ENV
