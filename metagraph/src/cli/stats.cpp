@@ -204,11 +204,12 @@ void print_annotation_stats(const std::string &fname, const Config &config) {
             exit(1);
         }
 
-        std::cout << "Number of columns: " << label_encoder.size() << std::endl;
+        std::cout << "Number of columns: " << label_encoder.size() << '\n';
         for (size_t c = 0; c < label_encoder.size(); ++c) {
             std::cout << label_encoder.decode(c) << '\n';
         }
 
+        std::cout << std::flush;
         return;
     }
 
@@ -232,14 +233,14 @@ void print_annotation_stats(const std::string &fname, const Config &config) {
         }
     }
 
-    std::cout << "=================== ANNOTATION STATS ===================" << std::endl;
-    std::cout << "labels:  " << annotation.num_labels() << std::endl;
-    std::cout << "objects: " << annotation.num_objects() << std::endl;
+    std::cout << "=================== ANNOTATION STATS ===================" << '\n';
+    std::cout << "labels:  " << annotation.num_labels() << '\n';
+    std::cout << "objects: " << annotation.num_objects() << '\n';
     std::cout << "density: " << static_cast<double>(annotation.num_relations())
                                     / annotation.num_objects()
-                                    / annotation.num_labels() << std::endl;
+                                    / annotation.num_labels() << '\n';
     std::cout << "representation: "
-              << utils::split_string(annotation.file_extension(), ".").at(0) << std::endl;
+              << utils::split_string(annotation.file_extension(), ".").at(0) << '\n';
 
     using namespace annot::binmat;
 
@@ -247,9 +248,9 @@ void print_annotation_stats(const std::string &fname, const Config &config) {
 
 #define CHECK_IF_DIFFED_AND_PRINT_STATS(RD_TYPE, NAME) \
     if (const auto *rd = dynamic_cast<const RD_TYPE *>(mat)) { \
-        std::cout << "=================== DIFF ANNOTATION ====================" << std::endl; \
+        std::cout << "=================== DIFF ANNOTATION ====================" << '\n'; \
         print_anchor_stats(*rd); \
-        std::cout << "underlying matrix: " NAME << std::endl; \
+        std::cout << "underlying matrix: " NAME << '\n'; \
         mat = &rd->diffs(); \
     }
 
@@ -267,8 +268,8 @@ void print_annotation_stats(const std::string &fname, const Config &config) {
                                                         + annot::ColumnCompressed<>::kCoordExtension;
 
     if (const auto *mat_coord = dynamic_cast<const annot::matrix::MultiIntMatrix *>(mat)) {
-        std::cout << "================== COORDINATES STATS ===================" << std::endl;
-        std::cout << "coordinates: " << mat_coord->num_attributes() << std::endl;
+        std::cout << "================== COORDINATES STATS ===================" << '\n';
+        std::cout << "coordinates: " << mat_coord->num_attributes() << '\n';
         mat = &mat_coord->get_binary_matrix();
     } else if (parse_annotation_type(fname) == Config::ColumnCompressed
                                 && std::filesystem::exists(coords_fname)) {
@@ -291,8 +292,8 @@ void print_annotation_stats(const std::string &fname, const Config &config) {
                     coords.load(*in);
                 }
             }
-            std::cout << "================== COORDINATES STATS ===================" << std::endl;
-            std::cout << "coordinates: " << num_coords << std::endl;
+            std::cout << "================== COORDINATES STATS ===================" << '\n';
+            std::cout << "coordinates: " << num_coords << '\n';
         } catch (...) {
             logger->error("Couldn't read coordinates from {}", coords_fname);
             exit(1);
@@ -302,8 +303,8 @@ void print_annotation_stats(const std::string &fname, const Config &config) {
     }
 
     if (const auto *rbmat = dynamic_cast<const RainbowMatrix *>(mat)) {
-        std::cout << "================= RAINBOW MATRIX STATS =================" << std::endl;
-        std::cout << "distinct rows: " << rbmat->num_distinct_rows() << std::endl;
+        std::cout << "================= RAINBOW MATRIX STATS =================" << '\n';
+        std::cout << "distinct rows: " << rbmat->num_distinct_rows() << '\n';
         if (const auto *rb_brwt = dynamic_cast<const Rainbow<BRWT> *>(mat))
             mat = &rb_brwt->get_reduced_matrix();
     }
@@ -312,7 +313,7 @@ void print_annotation_stats(const std::string &fname, const Config &config) {
         print_brwt_stats(*brwt);
 
     if (config.print_counts_hist || config.count_quantiles.size()) {
-        std::cout << "===================== COUNTS STATS =====================" << std::endl;
+        std::cout << "===================== COUNTS STATS =====================" << '\n';
         if (!dynamic_cast<const annot::ColumnCompressed<> *>(&annotation)) {
             logger->error("Printing statistics for counts is currently only supported for"
                           " ColumnCompressed ({}) annotations with counts",
@@ -334,7 +335,7 @@ void print_annotation_stats(const std::string &fname, const Config &config) {
         if (config.print_counts_hist)
             std::cout << fmt::format("\tHistogram(count:multiplicity[,...])");
 
-        std::cout << std::endl;
+        std::cout << '\n';
 
         annot::ColumnCompressed<>::load_column_values({ fname },
             [&](size_t j, const std::string &label, sdsl::int_vector<>&& counts) {
@@ -371,7 +372,7 @@ void print_annotation_stats(const std::string &fname, const Config &config) {
                     }
                 }
 
-                std::cout << std::endl;
+                std::cout << '\n';
             }
         );
     }
