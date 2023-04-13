@@ -342,6 +342,9 @@ ExternalProject_Add(HTSLIB_Project
   SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib
   CONFIGURE_COMMAND autoreconf -i ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib && ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib/configure --prefix=${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib --disable-libcurl --disable-bz2 --disable-lzma
 )
+link_directories(
+  ${CMAKE_BINARY_DIR}/HTSLIB_Project-prefix/src/HTSLIB_Project-build
+)
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH}
   "${CMAKE_SOURCE_DIR}/external-libraries/binrel_wt/cmake/modules"
@@ -401,7 +404,7 @@ add_executable(metagraph "src/main.cpp")
 set_target_properties(metagraph PROPERTIES OUTPUT_NAME "metagraph_${CMAKE_DBG_ALPHABET}")
 
 set(METALIBS ${METALIBS}
-  -lKMC
+  -lKMC -lhts
   zlib
   -lsdsl
   brwt
@@ -413,7 +416,6 @@ set(METALIBS ${METALIBS}
   XXSDS_DYNAMIC
   ips4o
   caches
-  ${CMAKE_BINARY_DIR}/HTSLIB_Project-prefix/src/HTSLIB_Project-build/libhts.a
 )
 if(APPLE)
   set(METALIBS ${METALIBS} ${OpenMP_CXX_LIBRARIES})
