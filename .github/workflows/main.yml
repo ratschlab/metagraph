@@ -96,7 +96,7 @@ jobs:
           cd libdeflate-1.18
           mkdir _build
           cd _build
-          cmake -DLIBDEFLATE_BUILD_STATIC_LIB=ON -DLIBDEFLATE_BUILD_SHARED_LIB=OFF ..
+          cmake -DCMAKE_INSTALL_PREFIX=/usr -DLIBDEFLATE_BUILD_STATIC_LIB=ON -DLIBDEFLATE_BUILD_SHARED_LIB=OFF ..
           make -j2 CFLAGS='-fPIC'
           sudo make install
           cd ../..
