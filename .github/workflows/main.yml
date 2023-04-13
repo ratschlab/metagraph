@@ -44,10 +44,6 @@ jobs:
             cxx: g++-11
             cc: gcc-11
 
-          - compiler: g++
-            cxx: g++
-            cc: gcc
-
         exclude:
           - alphabet: Protein
             compiler: g++-9
