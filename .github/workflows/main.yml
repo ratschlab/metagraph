@@ -18,7 +18,7 @@ env:
 jobs:
 
   Linux:
-    runs-on: ubuntu-20.04.1
+    runs-on: ubuntu-22.04
 
     strategy:
       matrix:
@@ -28,10 +28,6 @@ jobs:
         build_static: [OFF, ON]
         with_avx: [OFF, ON]
         include:
-          - compiler: g++-8
-            cxx: g++-8
-            cc: gcc-8
-
           - compiler: g++-9
             cxx: g++-9
             cc: gcc-9
@@ -46,11 +42,7 @@ jobs:
 
         exclude:
           - alphabet: Protein
-            compiler: g++-8
-          - alphabet: Protein
             compiler: g++-9
-          - compiler: g++-8
-            build_static: ON
           - compiler: g++-9
             build_static: ON
           - build_type: Debug
