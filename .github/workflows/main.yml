@@ -97,7 +97,7 @@ jobs:
           mkdir _build
           cd _build
           cmake -DCMAKE_INSTALL_PREFIX=/usr -DLIBDEFLATE_BUILD_STATIC_LIB=ON -DLIBDEFLATE_BUILD_SHARED_LIB=OFF ..
-          make -j2 CFLAGS='-fPIC'
+          make -j 2
           sudo make install
           cd ../..
 
@@ -106,8 +106,8 @@ jobs:
           cd htslib-1.17
           autoreconf -i
           ./configure --prefix=/usr --disable-libcurl
-          make -j 2
-          sudo make install
+          make -j 2 libhts.a
+          sudo make install libhts.a
           cd ..
         else
           sudo apt-get install libhts-dev
