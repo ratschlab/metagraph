@@ -106,8 +106,8 @@ jobs:
           cd htslib-1.17
           autoreconf -i
           ./configure --prefix=/usr --disable-libcurl
-          make -j 2 libhts.a
-          sudo make install libhts.a
+          make -j 2 lib-static
+          sudo make install lib-static
           cd ..
         else
           sudo apt-get install libhts-dev
