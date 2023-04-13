@@ -258,7 +258,7 @@ include_directories(
   external-libraries/KMC/kmc_api
   external-libraries/sdsl-lite/include
   external-libraries/eigen
-  external-libraries/htslib/include
+  external-libraries/htslib
   external-libraries/hopscotch-map/include
   external-libraries/ordered-map/include
   external-libraries/binrel_wt/include
