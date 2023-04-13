@@ -73,7 +73,7 @@ jobs:
             sudo apt-get install ${{ matrix.compiler }}
         fi
 
-        sudo apt-get install libbz2-dev libjemalloc-dev libboost-all-dev libhts-dev
+        sudo apt-get install libbz2-dev libjemalloc-dev libboost-all-dev
 
         if [ "${{ matrix.build_static }}" = "ON" ]; then
           # for static builds, compile curl ourselves
@@ -158,7 +158,7 @@ jobs:
       run: git submodule update --init --recursive
 
     - name: install dependencies
-      run: brew install bzip2 htslib libomp boost jemalloc
+      run: brew install bzip2 libomp boost jemalloc
 
     - name: install dependencies for integration tests
       run: pip3 install parameterized
