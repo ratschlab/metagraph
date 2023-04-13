@@ -97,7 +97,7 @@ jobs:
           mkdir _build
           cd _build
           cmake -DCMAKE_INSTALL_PREFIX=/usr -DLIBDEFLATE_BUILD_STATIC_LIB=ON -DLIBDEFLATE_BUILD_SHARED_LIB=OFF ..
-          make -j 2 CFLAGS='-fPIC' LDFLAGS='-fPIC'
+          make -j 2 EXTRA_CFLAGS='-fPIC'
           sudo make install
           cd ../..
 
