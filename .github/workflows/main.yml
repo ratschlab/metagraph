@@ -93,7 +93,7 @@ jobs:
           tar -xvf htslib-1.17.tar.bz2
           cd htslib-1.17
           autoreconf -i
-          ./configure --prefix=/usr --disable-libcurl
+          ./configure --prefix=/usr --disable-libcurl --disable-lzma --disable-bz2 --without-libdeflate
           make -j 2
           sudo make install
           cd ..
