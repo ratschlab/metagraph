@@ -258,6 +258,7 @@ include_directories(
   external-libraries/KMC/kmc_api
   external-libraries/sdsl-lite/include
   external-libraries/eigen
+  external-libraries/htslib/include
   external-libraries/hopscotch-map/include
   external-libraries/ordered-map/include
   external-libraries/binrel_wt/include
@@ -333,7 +334,14 @@ add_library(mersenne_twister STATIC
 add_library(sdust STATIC
   external-libraries/sdust/sdust.c
 )
+
 target_compile_options(sdust PRIVATE -Wall -Wc++-compat -Wno-error)
+
+include(ExternalProject)
+ExternalProject_Add(HTSLIB_Project
+  SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib
+  CONFIGURE_COMMAND autoreconf -i ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib && ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib/configure --prefix=${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib --disable-libcurl --disable-bz2 --disable-lzma
+)
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH}
   "${CMAKE_SOURCE_DIR}/external-libraries/binrel_wt/cmake/modules"
@@ -394,7 +402,7 @@ set_target_properties(metagraph PROPERTIES OUTPUT_NAME "metagraph_${CMAKE_DBG_AL
 
 set(METALIBS ${METALIBS}
   -lKMC
-  -lhts zlib
+  zlib
   -lsdsl
   brwt
   jsoncpp_lib
@@ -405,6 +413,7 @@ set(METALIBS ${METALIBS}
   XXSDS_DYNAMIC
   ips4o
   caches
+  ${CMAKE_BINARY_DIR}/HTSLIB_Project-prefix/src/HTSLIB_Project-build/libhts.a
 )
 if(APPLE)
   set(METALIBS ${METALIBS} ${OpenMP_CXX_LIBRARIES})
@@ -416,11 +425,7 @@ endif()
 if(BUILD_STATIC AND NOT APPLE)
   set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static")
   find_package(OpenSSL REQUIRED)
-  find_package(BZip2 REQUIRED)
-  set(METALIBS ${METALIBS} -llzma -lcurl -lssl -lcrypto -lbz2)
-  if (CMAKE_CXX_COMPILER_ID MATCHES "GNU")
-    set(METALIBS ${METALIBS} -lgomp -lrt -lpthread)
-  endif()
+  set(METALIBS ${METALIBS} -lssl -lcrypto)
 endif()
 
 # check for std::filesystem::temp_directory_path
