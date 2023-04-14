@@ -399,6 +399,7 @@ file(GLOB metagraph_cli_files
   "src/cli/*/*/*.cpp"
 )
 add_library(metagraph-cli STATIC ${metagraph_cli_files})
+add_dependencies(metagraph-core HTSLIB_Project)
 
 add_executable(metagraph "src/main.cpp")
 set_target_properties(metagraph PROPERTIES OUTPUT_NAME "metagraph_${CMAKE_DBG_ALPHABET}")
