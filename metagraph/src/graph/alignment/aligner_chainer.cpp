@@ -780,7 +780,12 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
 
     logger->trace("Chaining {} anchors for a query of length {}", seeds.size(), query_size);
     chain_anchors<Seed>(config_, seeds.data(), seeds.data() + seeds.size(),
-        [&](const Seed &a_i, const Seed *begin, const Seed *end, auto chain_scores, const auto &update_score) {
+        [&](const Seed &a_i,
+            ssize_t max_coord_dist,
+            const Seed *begin,
+            const Seed *end,
+            auto chain_scores,
+            const auto &update_score) {
             const auto &coords_i_back = node_coords[anchor_ends[&a_i - seeds.data()].second];
             const auto &score_i = std::get<0>(*(chain_scores - (begin - seeds.data()) + (&a_i - seeds.data())));
             std::string_view query_i = a_i.get_query_view();
@@ -888,7 +893,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                             if (!prev_cached) {
                                 path_index->call_dists(c_i, c_j, [&](size_t coord_dist) {
                                     coord_dists.emplace_back(coord_dist);
-                                }, config_.max_dist_between_seeds);
+                                }, max_coord_dist);
                             }
 
                             for (size_t coord_dist : coord_dists) {
@@ -1197,7 +1202,12 @@ void chain_alignments(const IDBGAligner &aligner,
     score_t chain_score;
     Alignment start_back_aln;
     chain_anchors<Alignment>(config, anchor_alns.data(), anchor_alns.data() + anchor_alns.size(),
-        [&](const Alignment &a_i, const Alignment *begin, const Alignment *end, auto chain_scores, const auto &update_score) {
+        [&](const Alignment &a_i,
+            ssize_t,
+            const Alignment *begin,
+            const Alignment *end,
+            auto chain_scores,
+            const auto &update_score) {
             auto &info_i = anchor_extra_info[&a_i - anchor_alns.data()];
             score_t &score_i = std::get<0>(*(
                 chain_scores - (begin - anchor_alns.data()) + (&a_i - anchor_alns.data())

@@ -12,6 +12,7 @@ using AlignmentCallback = std::function<void(Alignment&&)>;
 
 template <typename Anchor>
 using AnchorConnector = std::function<void(const Anchor&, // start anchor
+                                           ssize_t b,     // max dist
                                            const Anchor*, // target anchors begin
                                            const Anchor*, // target anchors end
                                            typename ChainScores<Anchor>::pointer,
@@ -94,7 +95,7 @@ void chain_anchors(const DBGAlignerConfig &config,
                 bool updated = false;
 
                 // align anchor i forwards
-                anchor_connector(*i, j, i_end, chain_scores + (j - anchors_begin),
+                anchor_connector(*i, b, j, i_end, chain_scores + (j - anchors_begin),
                     [&](score_t score, const Anchor* last, size_t dist) {
                         assert(last != i);
                         if (std::tie(score, best_dist) > std::tie(max_score, dist)) {
