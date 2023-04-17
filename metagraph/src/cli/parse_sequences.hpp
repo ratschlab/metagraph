@@ -26,12 +26,38 @@ namespace cli {
 
 using namespace mtg::seq_io;
 
-
-template <class Callback, class CallWeighted>
+template <class Callback>
 void parse_sequences(const std::string &file,
                      const Config &config,
-                     Callback call_sequence,
-                     CallWeighted call_weighted_sequence) {
+                     Callback call_sequence);
+
+
+template <class Callback>
+void parse_sequences_and_log(const std::string &file,
+                             const Config &config,
+                             size_t k,
+                             Callback call_sequence) {
+    uint64_t num_bp = 0;
+    uint64_t num_kmers = 0;
+    Timer timer;
+
+    parse_sequences(file, config,
+        [&](std::string_view seq, auto count) {
+            call_sequence(seq, count);
+            num_bp += seq.size();
+            num_kmers += seq.size() >= k ? seq.size() - k + 1 : 0;
+        }
+    );
+
+    mtg::common::logger->trace("Extracted all sequences (total of {} bp, {} k-mers) from file {} in {} sec",
+                               num_bp, num_kmers, file, timer.elapsed());
+}
+
+
+template <class Callback>
+void parse_sequences(const std::string &file,
+                     const Config &config,
+                     Callback call_sequence) {
     mtg::common::logger->trace("Parsing {}", file);
 
     if (config.graph_mode == graph::DeBruijnGraph::PRIMARY && file_format(file) != "FASTA") {
@@ -44,7 +70,7 @@ void parse_sequences(const std::string &file,
         read_vcf_file_critical(file,
                                config.refpath,
                                config.k,
-                               call_sequence,
+                               [&](const auto &seq) { call_sequence(seq, 1); },
                                config.forward_and_reverse);
 
     } else if (file_format(file) == "KMC") {
@@ -88,10 +114,10 @@ void parse_sequences(const std::string &file,
                 if (config.forward_and_reverse) {
                     std::string reverse(sequence);
                     reverse_complement(reverse.begin(), reverse.end());
-                    call_weighted_sequence(sequence, count);
-                    call_weighted_sequence(reverse, count);
+                    call_sequence(sequence, count);
+                    call_sequence(reverse, count);
                 } else {
-                    call_weighted_sequence(sequence, count);
+                    call_sequence(sequence, count);
                 }
             },
             // For canonical graph the rev-compl sequences will be called automatically anyway.
@@ -130,7 +156,7 @@ void parse_sequences(const std::string &file,
                         );
                         size_t segment_size = same_counts_end - kmer_counts;
 
-                        call_weighted_sequence(std::string_view(seq, segment_size + k - 1), *kmer_counts);
+                        call_sequence(std::string_view(seq, segment_size + k - 1), *kmer_counts);
 
                         kmer_counts += segment_size;
                         seq += segment_size;
@@ -145,8 +171,7 @@ void parse_sequences(const std::string &file,
         } else {
             read_fasta_file_critical(file, [&](kseq_t *read_stream) {
                 // add read to the graph constructor as a callback
-                call_sequence(std::string_view(read_stream->seq.s,
-                                               read_stream->seq.l));
+                call_sequence(std::string_view(read_stream->seq.s, read_stream->seq.l), 1);
             }, config.forward_and_reverse);
         }
     } else {
