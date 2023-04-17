@@ -31,10 +31,10 @@ const uint64_t kBytesInGigabyte = 1'000'000'000;
 template <class GraphConstructor>
 void push_sequences(const std::vector<std::string> &files,
                     const Config &config,
-                    const Timer &timer,
                     GraphConstructor *constructor) {
     #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic, 1)
     for (size_t i = 0; i < files.size(); ++i) {
+        Timer timer;
         BatchAccumulator<std::pair<std::string, uint64_t>> batcher(
             [constructor](auto&& sequences) {
                 constructor->add_sequences(std::move(sequences));
@@ -123,8 +123,6 @@ int build_graph(Config *config) {
 
         //one pass per suffix
         for (const std::string &suffix : suffixes) {
-            timer.reset();
-
             if (suffix.size() > 0 || suffixes.size() > 1) {
                 logger->info("k-mer suffix: '{}'", suffix);
             }
@@ -143,7 +141,7 @@ int build_graph(Config *config) {
                 config->disk_cap_bytes
             );
 
-            push_sequences(files, *config, timer, constructor.get());
+            push_sequences(files, *config, constructor.get());
 
             boss::BOSS::Chunk next_chunk = constructor->build_chunk();
             logger->trace("Graph chunk with {} k-mers was built in {} sec",
@@ -151,9 +149,8 @@ int build_graph(Config *config) {
 
             if (config->suffix.size()) {
                 logger->info("Serialize the graph chunk for suffix '{}'...", suffix);
-                timer.reset();
                 next_chunk.serialize(config->outfbase + "." + suffix);
-                logger->info("Serialization done in {} sec", timer.elapsed());
+                logger->info("Serialization done");
                 return 0;
             }
 
@@ -206,8 +203,6 @@ int build_graph(Config *config) {
 
         //one pass per suffix
         for (const std::string &suffix : suffixes) {
-            timer.reset();
-
             if ((suffix.size() > 0 || suffixes.size() > 1)) {
                 logger->trace("k-mer suffix: '{}'", suffix);
             }
@@ -223,7 +218,7 @@ int build_graph(Config *config) {
                 )
             );
 
-            push_sequences(files, *config, timer, constructor.get());
+            push_sequences(files, *config, constructor.get());
 
             if (!suffix.size()) {
                 assert(suffixes.size() == 1);
@@ -245,7 +240,7 @@ int build_graph(Config *config) {
                 );
                 std::ofstream out(chunk_filenames.back(), std::ios::binary);
                 chunk.serialize(out);
-                logger->trace("Serialization done in {} sec", timer.elapsed());
+                logger->trace("Serialization done");
             }
 
             // only one chunk had to be constructed
@@ -255,7 +250,6 @@ int build_graph(Config *config) {
 
         if (suffixes.size() > 1) {
             assert(chunk_filenames.size());
-            timer.reset();
             graph.reset(constructor->build_graph_from_chunks(chunk_filenames,
                                                              config->graph_mode,
                                                              get_verbose()));
