@@ -342,9 +342,14 @@ std::string SeqSearchResult::to_string(const std::string delimiter,
         }
     } else if (const auto *v = std::get_if<LabelOverlappingReads>(&result_)) {
         // output += fmt::format("\n");
+        uint64_t counter = 0;
         for (const auto & overlapping_reads : *v) {
             for (const auto & [read_seq, read_lab, pos_in_input, pos_in_ref] : overlapping_reads) {
-                output += fmt::format("\n{}\t{}\t{}\t{}", read_seq, read_lab, pos_in_input, pos_in_ref);
+                if (!counter)
+                    output += fmt::format("\t{}\t{}\t{}\t{}", read_seq, read_lab, pos_in_input, pos_in_ref);
+                else
+                    output += fmt::format("\n{}\t{}\t{}\t{}\t{}\t{}", sequence_.id, sequence_.name, read_seq, read_lab, pos_in_input, pos_in_ref);
+                ++counter;
             }
             // output += fmt::format("\n");
         }
@@ -1194,14 +1199,14 @@ int query_graph(Config *config) {
                                  [config, &anno_graph = std::as_const(*anno_graph)]
                                  (const std::string &read, const SeqSearchResult &result) {
                 // TODO: implement this
-                // std::ignore = read;
+                std::ignore = read;
                 // std::ignore = result;
 
                 if (config->output_json) {
                     logger->error("Json output for querying reads is currently not supported");
                 } else {
-                    std::cout << "\nQuery sequence: " << read << "\n";
-                    std::cout << "Overlapping reads:\n";
+                    // std::cout << "Query sequence: " << read << "\n";
+                    // std::cout << "Overlapping reads:\n";
                     std::cout << result.to_string(config->anno_labels_delimiter,
                                                   config->suppress_unlabeled,
                                                   config->verbose_output

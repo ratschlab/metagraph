@@ -8,7 +8,6 @@
 #include <vector>
 #include <unordered_map>
 #include <unordered_set>
-#include <set>
 
 #include "common/vectors/bit_vector_adaptive.hpp"
 #include "common/vector_map.hpp"
@@ -415,10 +414,8 @@ std::vector<RowTuples> &rd_rows, std::unordered_map<Column, std::vector<Row>> &r
         // for each adjacent outgoing k-mer 
         graph_->call_outgoing_kmers(current_parent_to_graph, [&](auto next, char c) {
 
-            if (c == graph::boss::BOSS::kSentinel) {
-                // std::cout << "current node outgoing edge has $ label" << "  node index = " << current_parent << '\n';
+            if (c == graph::boss::BOSS::kSentinel)
                 return;
-            }
             
             Row next_to_anno = graph::AnnotatedSequenceGraph::graph_to_anno_index(next);
             RowTuples next_annotations;
@@ -488,16 +485,6 @@ std::vector<RowTuples> &rd_rows, std::unordered_map<Column, std::vector<Row>> &r
                 next_annotations = rows_annotations[next_to_anno];
             }
 
-            // if (c == graph::boss::BOSS::kSentinel) {
-            //     std::cout << "the annotations for the dummy sink k-mer:\n";
-            //     for (auto & rowt_dummy : next_annotations) {
-            //         std::cout << " column = " << rowt_dummy.first << " coords: ";
-            //         for (auto & qweq_dummy : rowt_dummy.second)
-            //             std::cout << qweq_dummy << ", ";
-            //         std::cout << '\n';
-            //     }
-            // }
-
             // acceptable node is a node whose labels match
             // the labels of the start node
             bool acceptable_node = false;
@@ -544,9 +531,8 @@ std::vector<RowTuples> &rd_rows, std::unordered_map<Column, std::vector<Row>> &r
 
         graph_->call_incoming_kmers(current_child_to_graph, [&](auto previous, char c) {
 
-            if (c == graph::boss::BOSS::kSentinel) {
+            if (c == graph::boss::BOSS::kSentinel)
                 return;
-            }
             
             Row previous_to_anno = graph::AnnotatedSequenceGraph::graph_to_anno_index(previous);
             RowTuples previous_annotations;
@@ -626,40 +612,6 @@ std::vector<RowTuples> &rd_rows, std::unordered_map<Column, std::vector<Row>> &r
 
     }
 
-
-    // std::vector<Row> visited_rows_to_test_vector;
-    // visited_rows_to_test_vector.insert(visited_rows_to_test_vector.begin(), visited_rows_to_test.begin(), visited_rows_to_test.end());
-    // auto test_decompressed_annotations = get_row_tuples(visited_rows_to_test_vector);
-
-    // // separate rows' annotations by labels
-    // std::unordered_map<Column, std::unordered_map<Row, std::vector<uint64_t>>> annotations_map_sep_by_labels_test;
-    // for (size_t test_curi = 0; test_curi < visited_rows_to_test_vector.size(); ++test_curi) {
-    //     for (auto & rowt_curi : test_decompressed_annotations[test_curi]) {
-    //         if (!labels_of_the_start_node.count(rowt_curi.first)) {
-    //             continue;
-    //         }
-    //         for (uint64_t &c : rowt_curi.second) {
-    //             annotations_map_sep_by_labels_test[rowt_curi.first][visited_rows_to_test_vector[test_curi]].push_back(c);
-    //         }
-    //     }
-    // }
-
-
-    // std::cout << "decompressed annotations using existing api TEST:\n";
-
-    // for (auto & [j_lab, j_map] : annotations_map_sep_by_labels_test) {
-    //     std::cout << " label = " << j_lab << '\n';
-    //     for (auto & [rrr, vvv] : j_map) {
-    //         std::cout << "     row = " << rrr << "   :   ";
-    //         for (auto & ccc : vvv) {
-    //             std::cout << ccc << ", ";
-    //         }
-    //         std::cout << '\n';
-    //     }
-    // }
-
-
-
     // separate rows' annotations by labels
     std::unordered_map<Column, std::unordered_map<Row, std::vector<uint64_t>>> annotations_map_sep_by_labels;
     for (auto & [row, row_tuples] : rows_annotations) {
@@ -673,43 +625,6 @@ std::vector<RowTuples> &rd_rows, std::unordered_map<Column, std::vector<Row>> &r
         }
     }
     
-    // std::cout << "annotations map:\n";
-
-    // for (auto & [j_lab, j_map] : annotations_map_sep_by_labels) {
-    //     std::cout << " label = " << j_lab << '\n';
-    //     for (auto & [rrr, vvv] : j_map) {
-    //         std::cout << "     row = " << rrr << "   :   ";
-    //         for (auto & ccc : vvv) {
-    //             std::cout << ccc << ", ";
-    //         }
-    //         std::cout << '\n';
-    //     }
-    // }
-
-
-    // std::cout << "labeled children map:\n";
-    // for (auto & [j, children_map] : labeled_children_map) {
-    //     std::cout << "label = " << j << '\n';
-    //     for (auto & [nod, child_nods] : children_map) {
-    //         std::cout << "children[" << nod << "] = ";
-    //         for (auto & child_nod : child_nods)
-    //             std::cout << child_nod << ", ";
-    //         std::cout << std::endl;
-    //     }
-    // }
-
-    // std::cout << "labeled parents map:\n";
-    // for (auto & [j, children_map] : labeled_parents_map) {
-    //     std::cout << "label = " << j << '\n';
-    //     for (auto & [nod, child_nods] : children_map) {
-    //         std::cout << "children[" << nod << "] = ";
-    //         for (auto & child_nod : child_nods)
-    //             std::cout << child_nod << ", ";
-    //         std::cout << std::endl;
-    //     }
-    // }
-
-    // std::cout << "started finding forward targets\n";
     // part 2. Paths reconstruction
 
     // each labeled sequence can have only one target (that is the last kmer in the sequence)
@@ -725,8 +640,6 @@ std::vector<RowTuples> &rd_rows, std::unordered_map<Column, std::vector<Row>> &r
         uint64_t final_coord = annotations_map_sep_by_labels[j][children_map.begin()->first].back();
         Row final_target = children_map.begin()->first;
         Row current_row = final_target;
-
-        // std::cout << "label = " << j << " final target = " << final_target << "(" << final_coord << ")" << '\n';
 
         // while current_row has children
         while (children_map.count(current_row)) {
@@ -746,7 +659,6 @@ std::vector<RowTuples> &rd_rows, std::unordered_map<Column, std::vector<Row>> &r
 
                 // check if set of coordinates for the current child node contains increased coordinate
                 if (curr_cand_coordinates_set.count(final_coord_candidate)) {
-                    // std::cout << "+ found child with the bigger coord\n";
                     final_coord = final_coord_candidate;
                     current_row = current_child_candidate;
                     coordinates_can_increase_more = true;
@@ -757,20 +669,12 @@ std::vector<RowTuples> &rd_rows, std::unordered_map<Column, std::vector<Row>> &r
 
             // if haven't found the child node with the increased coordinate, then current node is the target
             if (!coordinates_can_increase_more) {
-                // std::cout << "- haven't found child with the bigger coord, setting current row as target = " << current_row << "\n";
                 final_target = current_row;
                 break;
             }
         }
         labeled_targets[j] = final_target;
     }
-
-    // std::cout << "labeled targets : \n";
-    // for (auto & [j_lab, j_targ] : labeled_targets) {
-    //     std::cout << "    label = " << j_lab << " : " << j_targ << "\n";
-    // }
-
-
 
     // for each label trace the forward path 
     std::unordered_map<Column, std::vector<std::pair<Row, uint64_t>>> traces_forward_sep_by_labels;
@@ -815,39 +719,6 @@ std::vector<RowTuples> &rd_rows, std::unordered_map<Column, std::vector<Row>> &r
         traces_forward_sep_by_labels[target_label] = current_trace;
     }
 
-    // std::cout << "forward traces:\n";
-    // for (auto & [j_lab, j_trace] : traces_forward_sep_by_labels) {
-    //     std::cout << "for label = " << j_lab << ": ";
-    //     for (auto & ccc : j_trace)
-    //         std::cout << ccc.first << "(" << ccc.second << ")" << ", ";
-    //     std::cout << std::endl;
-    // }
-
-
-    // std::cout << "labeled children map backwards:\n";
-    // for (auto & [j, children_map] : labeled_children_map_backward) {
-    //     std::cout << "label = " << j << '\n';
-    //     for (auto & [nod, child_nods] : children_map) {
-    //         std::cout << "children[" << nod << "] = ";
-    //         for (auto & child_nod : child_nods)
-    //             std::cout << child_nod << ", ";
-    //         std::cout << std::endl;
-    //     }
-    // }
-
-    // std::cout << "labeled parents map backwards:\n";
-    // for (auto & [j, children_map] : labeled_parents_map_backward) {
-    //     std::cout << "label = " << j << '\n';
-    //     for (auto & [nod, child_nods] : children_map) {
-    //         std::cout << "children[" << nod << "] = ";
-    //         for (auto & child_nod : child_nods)
-    //             std::cout << child_nod << ", ";
-    //         std::cout << std::endl;
-    //     }
-    // }
-
-
-    // std::cout << "started finding backward targets\n";
     // similarly, the backward traversal targets are found
     std::unordered_map<Column, Row> labeled_targets_backward;
     for (auto & [j, children_map] : labeled_children_map_backward) {
@@ -858,8 +729,6 @@ std::vector<RowTuples> &rd_rows, std::unordered_map<Column, std::vector<Row>> &r
         uint64_t final_coord = annotations_map_sep_by_labels[j][children_map.begin()->first].front();
         Row final_target = children_map.begin()->first;
         Row current_row = final_target;
-
-        // std::cout << "label = " << j << " final target = " << final_target << "(" << final_coord << ")" << '\n';
 
         while (children_map.count(current_row)) {
             std::vector<Row> current_children = children_map[current_row];
@@ -873,7 +742,6 @@ std::vector<RowTuples> &rd_rows, std::unordered_map<Column, std::vector<Row>> &r
                                                                        curr_cand_coordinates.end());
 
                 if (curr_cand_coordinates_set.count(final_coord_candidate)) {
-                    // std::cout << "+ found child with the smaller coord\n";
                     final_coord = final_coord_candidate;
                     current_row = current_child_candidate;
                     coordinates_can_decrease_more = true;
@@ -883,19 +751,12 @@ std::vector<RowTuples> &rd_rows, std::unordered_map<Column, std::vector<Row>> &r
             }
 
             if (!coordinates_can_decrease_more) {
-                // std::cout << "- haven't found child with the smaller coord, setting current row as target = " << current_row << "\n";
                 final_target = current_row;
                 break;
             }
         }
         labeled_targets_backward[j] = final_target;
-    }
-
-    // std::cout << "labeled targets backwards : \n";
-    // for (auto & [j_lab, j_targ] : labeled_targets_backward) {
-    //     std::cout << "    label = " << j_lab << " : " << j_targ << "\n";
-    // }
-   
+    }   
 
     // similarly, for each label the backward path is traced
     std::unordered_map<Column, std::vector<std::pair<Row, uint64_t>>> traces_backward_sep_by_labels;
@@ -935,18 +796,7 @@ std::vector<RowTuples> &rd_rows, std::unordered_map<Column, std::vector<Row>> &r
 
     }
 
-
-    // std::cout << "backward traces:\n";
-    // for (auto & [j_lab, j_trace] : traces_backward_sep_by_labels) {
-    //     std::cout << "for label = " << j_lab << ": ";
-    //     for (auto & ccc : j_trace)
-    //         std::cout << ccc.first << "(" << ccc.second << ")" << ", ";
-    //     std::cout << std::endl;
-    // }
-
     // concatenate all labeled paths
-    
-
     for (Column const &j : labels_of_the_start_node) {
 
         std::vector<std::pair<Row, uint64_t>> path_to_start = traces_backward_sep_by_labels[j];
