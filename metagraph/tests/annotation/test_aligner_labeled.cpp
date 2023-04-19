@@ -57,6 +57,9 @@ typedef ::testing::Types<std::pair<DBGHashFast, annot::ColumnCompressed<>>,
 TYPED_TEST_SUITE(LabeledAlignerTest, FewGraphAnnotationPairTypes);
 
 TYPED_TEST(LabeledAlignerTest, GetTracesWithRow) {
+    if constexpr(!std::is_same_v<typename TypeParam::second_type, annot::RowDiffColumnAnnotator>) {
+        return;
+    }
      size_t k = 4;
     /*
         A    A    AB    B    B    B

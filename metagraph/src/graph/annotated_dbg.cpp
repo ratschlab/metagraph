@@ -687,7 +687,7 @@ AnnotatedDBG::get_overlapping_reads(const std::vector<node_index> &nodes) const 
     std::vector<std::vector<std::tuple<std::string, Label, uint64_t, uint64_t>>> result;
     result.reserve(rows.size());
 
-    std::unordered_map<Label, std::string> paths_spellings;
+    // std::unordered_map<Label, std::string> paths_spellings;
 
     auto traces = tuple_row_diff->get_traces_with_row(rows);
     for (size_t i = 0; i < traces.size(); ++i) {
@@ -701,13 +701,15 @@ AnnotatedDBG::get_overlapping_reads(const std::vector<node_index> &nodes) const 
 
             Label label = annotator_->get_label_encoder().decode(j);
 
-            std::string path_spelling;
-            if (!paths_spellings.count(label)) {
-                path_spelling = mtg::graph::align::spell_path(dbg_, trace_to_graph_index);
-                paths_spellings[label] = path_spelling;
-            } else {
-                path_spelling = paths_spellings[label];
-            }
+            // std::string path_spelling;
+            // if (!paths_spellings.count(label)) {
+            //     path_spelling = mtg::graph::align::spell_path(dbg_, trace_to_graph_index);
+            //     paths_spellings[label] = path_spelling;
+            // } else {
+            //     path_spelling = paths_spellings[label];
+            // }
+
+            std::string path_spelling = mtg::graph::align::spell_path(dbg_, trace_to_graph_index);
 
             row_result.push_back(std::make_tuple(path_spelling, label, rows_to_nodes[i], input_start_pos_in_ref));
         }

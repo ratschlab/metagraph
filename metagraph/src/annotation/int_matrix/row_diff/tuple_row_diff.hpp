@@ -270,10 +270,15 @@ std::vector<RowTuples> &rd_rows, std::unordered_map<Column, std::vector<Row>> &r
     assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
     assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());    
 
+    std::ignore = reconstructed_reads;
+
     const graph::boss::BOSS &boss = graph_->get_boss();
     const bit_vector &rd_succ = fork_succ_.size() ? fork_succ_ : boss.get_last();
 
-    
+    std::unordered_map<Column, std::set<uint64_t>> discovered_coordinates;
+
+    std::unordered_map<Column, std::map<uint64_t, Row>> test_new_path_reconstruction;
+
     // part 1. Graph traversal
 
     // step 1. Build row-diff path for the input Row
@@ -352,12 +357,12 @@ std::vector<RowTuples> &rd_rows, std::unordered_map<Column, std::vector<Row>> &r
     // step 2.3 Set up adjacency lists for each label of the input Row
 
     // the adjacency lists for the subgraph traversed forwards
-    std::unordered_map<Column, std::unordered_map<Row, std::vector<Row>>> labeled_parents_map;
-    std::unordered_map<Column, std::unordered_map<Row, std::vector<Row>>> labeled_children_map;
+    // std::unordered_map<Column, std::unordered_map<Row, std::vector<Row>>> labeled_parents_map;
+    // std::unordered_map<Column, std::unordered_map<Row, std::vector<Row>>> labeled_children_map;
 
     // the adjacency lists for the subgraph traversed backwards
-    std::unordered_map<Column, std::unordered_map<Row, std::vector<Row>>> labeled_parents_map_backward;
-    std::unordered_map<Column, std::unordered_map<Row, std::vector<Row>>> labeled_children_map_backward;
+    // std::unordered_map<Column, std::unordered_map<Row, std::vector<Row>>> labeled_parents_map_backward;
+    // std::unordered_map<Column, std::unordered_map<Row, std::vector<Row>>> labeled_children_map_backward;
 
     std::vector<std::tuple<std::vector<Row>, Column, uint64_t>> result;
 
@@ -365,26 +370,45 @@ std::vector<RowTuples> &rd_rows, std::unordered_map<Column, std::vector<Row>> &r
 
     for (auto &[j, tuple] : input_row_row_tuples) {
 
-        if (!reconstructed_reads.count(j)) {
-            labels_of_the_start_node.insert(j);
+        // if (!reconstructed_reads.count(j)) {
+        //     labels_of_the_start_node.insert(j);
 
-            // initialize adjacency lists for each label
-            labeled_parents_map[j];
-            labeled_children_map[j];
+        //     // initialize adjacency lists for each label
+        //     labeled_parents_map[j];
+        //     labeled_children_map[j];
 
-            labeled_parents_map_backward[j];
-            labeled_children_map_backward[j];
+        //     labeled_parents_map_backward[j];
+        //     labeled_children_map_backward[j];
 
-            input_row_position_in_ref_seq[j] = tuple.front();
-        } else {
-            // return this as well
-            result.push_back(std::make_tuple(reconstructed_reads[j], j, tuple.front()));
-        }
+        //     input_row_position_in_ref_seq[j] = tuple.front();
+        // } else {
+        //     // return this as well
+        //     result.push_back(std::make_tuple(reconstructed_reads[j], j, tuple.front()));
+        // }
+        
+
+        labels_of_the_start_node.insert(j);
+
+        // initialize adjacency lists for each label
+        // labeled_parents_map[j];
+        // labeled_children_map[j];
+
+        // labeled_parents_map_backward[j];
+        // labeled_children_map_backward[j];
+
+        input_row_position_in_ref_seq[j] = tuple.front();
     }
 
-    if (labels_of_the_start_node.empty()) {
-        return result;
-    }
+    // std::cout << "labels of the start node:";
+    // for (auto & lab_st : labels_of_the_start_node) {
+    //     std::cout << lab_st << ", ";
+    // }
+
+    // std::cout << '\n';
+    // if (labels_of_the_start_node.empty()) {
+    //     return result;
+    // }
+
 
     // step 3. Traverse the graph using DFS 
     // and fill adjacency lists along the way
@@ -413,7 +437,7 @@ std::vector<RowTuples> &rd_rows, std::unordered_map<Column, std::vector<Row>> &r
         
         // for each adjacent outgoing k-mer 
         graph_->call_outgoing_kmers(current_parent_to_graph, [&](auto next, char c) {
-
+            // std::ignore = c;
             if (c == graph::boss::BOSS::kSentinel)
                 return;
             
@@ -494,8 +518,8 @@ std::vector<RowTuples> &rd_rows, std::unordered_map<Column, std::vector<Row>> &r
                 // and add the child-parent relation to the corresponding map
                 if (labels_of_the_start_node.count(j_next) && current_parent_labels.count(j_next)) {
                     acceptable_node = true;
-                    labeled_parents_map[j_next][next_to_anno].push_back(current_parent);
-                    labeled_children_map[j_next][current_parent].push_back(next_to_anno);
+                    // labeled_parents_map[j_next][next_to_anno].push_back(current_parent);
+                    // labeled_children_map[j_next][current_parent].push_back(next_to_anno);
                 }
             }
 
@@ -511,6 +535,7 @@ std::vector<RowTuples> &rd_rows, std::unordered_map<Column, std::vector<Row>> &r
     // DFS backwards is similar to the DFS forwards
     to_visit.clear();
     to_visit.push_back(i);
+
 
     std::unordered_set<Row> visited_nodes_backward;
     while (!to_visit.empty()) {
@@ -600,8 +625,8 @@ std::vector<RowTuples> &rd_rows, std::unordered_map<Column, std::vector<Row>> &r
             for (auto &[j_prev, tuple_prev] : previous_annotations) {
                 if (labels_of_the_start_node.count(j_prev) && current_child_labels.count(j_prev)) {
                     acceptable_node = true;
-                    labeled_parents_map_backward[j_prev][previous_to_anno].push_back(current_child);
-                    labeled_children_map_backward[j_prev][current_child].push_back(previous_to_anno);
+                    // labeled_parents_map_backward[j_prev][previous_to_anno].push_back(current_child);
+                    // labeled_children_map_backward[j_prev][current_child].push_back(previous_to_anno);
                 }
             }
             if (acceptable_node) {
@@ -613,261 +638,357 @@ std::vector<RowTuples> &rd_rows, std::unordered_map<Column, std::vector<Row>> &r
     }
 
     // separate rows' annotations by labels
-    std::unordered_map<Column, std::unordered_map<Row, std::vector<uint64_t>>> annotations_map_sep_by_labels;
+    // std::unordered_map<Column, std::unordered_map<Row, std::vector<uint64_t>>> annotations_map_sep_by_labels;
     for (auto & [row, row_tuples] : rows_annotations) {
         for (auto & [j, tuple] : row_tuples) {
             if (!labels_of_the_start_node.count(j)) {
                 continue;
             }
             for (uint64_t &c : tuple) {
-                annotations_map_sep_by_labels[j][row].push_back(c);
+                discovered_coordinates[j].insert(c);
+                test_new_path_reconstruction[j][c] = row;
+
+                // annotations_map_sep_by_labels[j][row].push_back(c);
             }
         }
     }
     
     // part 2. Paths reconstruction
 
-    // each labeled sequence can have only one target (that is the last kmer in the sequence)
-    std::unordered_map<Column, Row> labeled_targets;
+    // // each labeled sequence can have only one target (that is the last kmer in the sequence)
+    // std::unordered_map<Column, Row> labeled_targets;
 
-    // find the ends of the sequences
-    for (auto & [j, children_map] : labeled_children_map) {
-        if (!children_map.size()) {
-            continue;
-        }        
+    // // find the ends of the sequences
+    // for (auto & [j, children_map] : labeled_children_map) {
+    //     if (!children_map.size()) {
+    //         continue;
+    //     }        
 
-        // we can pick any key node from children_map to follow the edges and find the target
-        uint64_t final_coord = annotations_map_sep_by_labels[j][children_map.begin()->first].back();
-        Row final_target = children_map.begin()->first;
-        Row current_row = final_target;
+    //     // we can pick any key node from children_map to follow the edges and find the target
+    //     uint64_t final_coord = annotations_map_sep_by_labels[j][children_map.begin()->first].back();
+    //     Row final_target = children_map.begin()->first;
+    //     Row current_row = final_target;
 
-        // while current_row has children
-        while (children_map.count(current_row)) {
-            std::vector<Row> current_children = children_map[current_row];
+    //     // while current_row has children
+    //     while (children_map.count(current_row)) {
+    //         std::vector<Row> current_children = children_map[current_row];
 
-            // the next coordinate must increase by 1
-            uint64_t final_coord_candidate = final_coord + SHIFT;
-            bool coordinates_can_increase_more = false;
+    //         // the next coordinate must increase by 1
+    //         uint64_t final_coord_candidate = final_coord + SHIFT;
+    //         bool coordinates_can_increase_more = false;
 
-            // find an adjacent outgoing node with the next coordinate
-            for (Row & current_child_candidate : current_children) {
-                std::vector<uint64_t> curr_cand_coordinates = annotations_map_sep_by_labels[j][current_child_candidate];
+    //         // find an adjacent outgoing node with the next coordinate
+    //         for (Row & current_child_candidate : current_children) {
+    //             std::vector<uint64_t> curr_cand_coordinates = annotations_map_sep_by_labels[j][current_child_candidate];
 
-                // convert the vector of coordinates into set to check if it contains final_coord_candindate
-                std::unordered_set<uint64_t> curr_cand_coordinates_set(curr_cand_coordinates.begin(),
-                                                                       curr_cand_coordinates.end());
+    //             // convert the vector of coordinates into set to check if it contains final_coord_candindate
+    //             std::unordered_set<uint64_t> curr_cand_coordinates_set(curr_cand_coordinates.begin(),
+    //                                                                    curr_cand_coordinates.end());
 
-                // check if set of coordinates for the current child node contains increased coordinate
-                if (curr_cand_coordinates_set.count(final_coord_candidate)) {
-                    final_coord = final_coord_candidate;
-                    current_row = current_child_candidate;
-                    coordinates_can_increase_more = true;
-                    final_target = current_row;
-                    break;
+    //             // check if set of coordinates for the current child node contains increased coordinate
+    //             if (curr_cand_coordinates_set.count(final_coord_candidate)) {
+    //                 final_coord = final_coord_candidate;
+    //                 current_row = current_child_candidate;
+    //                 coordinates_can_increase_more = true;
+    //                 final_target = current_row;
+    //                 break;
+    //             }
+    //         }
+
+    //         // if haven't found the child node with the increased coordinate, then current node is the target
+    //         if (!coordinates_can_increase_more) {
+    //             final_target = current_row;
+    //             break;
+    //         }
+    //     }
+    //     labeled_targets[j] = final_target;
+    // }
+
+    // // for each label trace the forward path 
+    // std::unordered_map<Column, std::vector<std::pair<Row, uint64_t>>> traces_forward_sep_by_labels;
+    // for (auto & [target_label, target_row] : labeled_targets) {
+    //     Row current_row = target_row;
+    //     std::vector<std::pair<Row, uint64_t>> current_trace;
+        
+    //     // get the very last coordinate of the target node (that is the biggest one)
+    //     // question: is the biggest coordinate in annotations always the last one?
+    //     uint64_t current_coord = annotations_map_sep_by_labels[target_label][current_row].back(); 
+    //     current_trace.push_back(std::make_pair(current_row, current_coord));
+
+    //     // start traversing the incoming edges and trace the path by checking the coordinates decrease
+    //     while (labeled_parents_map[target_label].count(current_row)) {                
+    //         std::vector<Row> current_parents = labeled_parents_map[target_label][current_row];
+
+    //         uint64_t current_coord_candidate = current_coord - SHIFT;
+    //         bool coordinates_can_decrease_more = false;
+
+    //         // find the previous row in path with the decreased coordinate
+    //         for (Row & current_row_candidate : current_parents) {
+    //             std::vector<uint64_t> curr_cand_coordinates = annotations_map_sep_by_labels[target_label][current_row_candidate];
+    //             std::unordered_set<uint64_t> curr_cand_coordinates_set(curr_cand_coordinates.begin(),
+    //                                                                    curr_cand_coordinates.end());
+
+    //             if (curr_cand_coordinates_set.count(current_coord_candidate)) {
+    //                 current_coord = current_coord_candidate;
+    //                 current_row = current_row_candidate;
+    //                 coordinates_can_decrease_more = true;
+    //                 break;
+    //             }
+    //         }
+
+    //         // if haven't found the parent node with the decreased coordinate, then current node is the start of the path
+    //         if (!coordinates_can_decrease_more)   
+    //             break;                
+            
+    //         current_trace.push_back(std::make_pair(current_row, current_coord));                     
+    //     }
+
+    //     std::reverse(current_trace.begin(), current_trace.end());
+    //     traces_forward_sep_by_labels[target_label] = current_trace;
+    // }
+
+    // // similarly, the backward traversal targets are found
+    // std::unordered_map<Column, Row> labeled_targets_backward;
+    // for (auto & [j, children_map] : labeled_children_map_backward) {
+    //     if (!children_map.size()) {
+    //         continue;
+    //     }
+
+    //     uint64_t final_coord = annotations_map_sep_by_labels[j][children_map.begin()->first].front();
+    //     Row final_target = children_map.begin()->first;
+    //     Row current_row = final_target;
+
+    //     while (children_map.count(current_row)) {
+    //         std::vector<Row> current_children = children_map[current_row];
+
+    //         uint64_t final_coord_candidate = final_coord - SHIFT;            
+    //         bool coordinates_can_decrease_more = false;
+
+    //         for (Row & current_child_candidate : current_children) {
+    //             std::vector<uint64_t> curr_cand_coordinates = annotations_map_sep_by_labels[j][current_child_candidate];
+    //             std::unordered_set<uint64_t> curr_cand_coordinates_set(curr_cand_coordinates.begin(),
+    //                                                                    curr_cand_coordinates.end());
+
+    //             if (curr_cand_coordinates_set.count(final_coord_candidate)) {
+    //                 final_coord = final_coord_candidate;
+    //                 current_row = current_child_candidate;
+    //                 coordinates_can_decrease_more = true;
+    //                 final_target = current_row;
+    //                 break;
+    //             }
+    //         }
+
+    //         if (!coordinates_can_decrease_more) {
+    //             final_target = current_row;
+    //             break;
+    //         }
+    //     }
+    //     labeled_targets_backward[j] = final_target;
+    // }   
+
+    // // similarly, for each label the backward path is traced
+    // std::unordered_map<Column, std::vector<std::pair<Row, uint64_t>>> traces_backward_sep_by_labels;
+    // for (auto & [target_label, target_row] : labeled_targets_backward) {
+    //     Row current_row = target_row;
+    //     std::vector<std::pair<Row, uint64_t>> current_trace;
+
+    //     uint64_t current_coord = annotations_map_sep_by_labels[target_label][current_row].front(); 
+    //     current_trace.push_back(std::make_pair(current_row, current_coord));
+        
+    //     while (labeled_parents_map_backward[target_label].count(current_row)) { 
+    //         std::vector<Row> current_parents = labeled_parents_map_backward[target_label][current_row];
+
+    //         uint64_t curr_coord_candidate = current_coord + SHIFT;
+    //         bool coordinates_can_increase_more = false;
+
+    //         for (Row & current_row_candidate : current_parents) {
+    //             std::vector<uint64_t> curr_cand_coordinates = annotations_map_sep_by_labels[target_label][current_row_candidate];
+    //             std::unordered_set<uint64_t> curr_cand_coordinates_set(curr_cand_coordinates.begin(),
+    //                                                                    curr_cand_coordinates.end());
+
+    //             if (curr_cand_coordinates_set.count(curr_coord_candidate)) {
+    //                 current_coord = curr_coord_candidate;
+    //                 current_row = current_row_candidate;
+    //                 coordinates_can_increase_more = true;
+    //                 break;
+    //             }
+    //         }
+
+    //         if (!coordinates_can_increase_more)
+    //             break;            
+            
+    //         current_trace.push_back(std::make_pair(current_row, current_coord));          
+    //     }
+
+    //     traces_backward_sep_by_labels[target_label] = current_trace;
+
+    // }
+
+    // new path reconstruction for graphs with unlabeled reads
+
+    std::unordered_map<Column, std::vector<std::pair<Row, uint64_t>>> traces_unlabeled;
+
+    for (auto & [j, coords_map] : test_new_path_reconstruction) {
+        for (auto & [ccoord, rrow] : coords_map) {
+            traces_unlabeled[j].push_back(std::make_pair(rrow, ccoord));
+        }
+    }
+
+    // extact reads from walk that has jumps in coordinates
+
+    std::vector<std::tuple<std::vector<std::pair<Row, uint64_t>>, Column, uint64_t>> result_coords;
+
+    for (auto & [j, trace_with_jumps] : traces_unlabeled) {
+
+        uint64_t curr_read_start_coord = trace_with_jumps.front().second;
+        uint64_t curr_read_curr_coord = curr_read_start_coord;
+
+        std::vector<Row> curr_read_trace;
+        curr_read_trace.push_back(trace_with_jumps.front().first);
+
+        auto curr_edge_node = graph::AnnotatedSequenceGraph::anno_to_graph_index(trace_with_jumps.front().first);
+
+
+        std::vector<std::pair<Row, uint64_t>> curr_read_trace_coords;
+        curr_read_trace_coords.push_back(trace_with_jumps.front());
+
+        for (size_t cur_pos = 1; cur_pos < trace_with_jumps.size(); ++cur_pos) {
+
+            auto curr_next_edge_node = graph::AnnotatedSequenceGraph::anno_to_graph_index(trace_with_jumps[cur_pos].first);
+            
+            bool edge_exists = false;
+
+            graph_->adjacent_outgoing_nodes(curr_edge_node, [&](auto adj_outg_node) {
+                if (adj_outg_node == curr_next_edge_node) {
+                    edge_exists = true;
+                    return;
                 }
+            });
+
+
+            if ((trace_with_jumps[cur_pos].second == (curr_read_curr_coord + SHIFT)) && edge_exists) {
+                curr_read_trace.push_back(trace_with_jumps[cur_pos].first);
+                curr_read_trace_coords.push_back(trace_with_jumps[cur_pos]);
+
+                curr_read_curr_coord += SHIFT;                
+
+            } else {
+                result.push_back(std::make_tuple(curr_read_trace, j, curr_read_start_coord));
+
+                result_coords.push_back(std::make_tuple(curr_read_trace_coords, j, curr_read_start_coord));
+
+                curr_read_start_coord = trace_with_jumps[cur_pos].second;
+                curr_read_curr_coord = curr_read_start_coord;
+
+                curr_read_trace.clear();
+                curr_read_trace.push_back(trace_with_jumps[cur_pos].first);
+
+                curr_read_trace_coords.clear();
+                curr_read_trace_coords.push_back(trace_with_jumps[cur_pos]);
             }
 
-            // if haven't found the child node with the increased coordinate, then current node is the target
-            if (!coordinates_can_increase_more) {
-                final_target = current_row;
+            curr_edge_node = curr_next_edge_node;
+        }
+    }
+
+
+    std::vector<std::tuple<std::vector<std::pair<Row, uint64_t>>, Column, uint64_t>> final_result;
+    
+    for (auto & [read_trace, read_label, read_start_coord] : result_coords) { 
+        for (size_t cur_pos = 0; cur_pos < read_trace.size(); ++cur_pos) {
+            if (read_trace[cur_pos].first == i) {
+                final_result.push_back(std::make_tuple(read_trace, read_label, cur_pos));
                 break;
             }
         }
-        labeled_targets[j] = final_target;
     }
 
-    // for each label trace the forward path 
-    std::unordered_map<Column, std::vector<std::pair<Row, uint64_t>>> traces_forward_sep_by_labels;
-    for (auto & [target_label, target_row] : labeled_targets) {
-        Row current_row = target_row;
-        std::vector<std::pair<Row, uint64_t>> current_trace;
-        
-        // get the very last coordinate of the target node (that is the biggest one)
-        // question: is the biggest coordinate in annotations always the last one?
-        uint64_t current_coord = annotations_map_sep_by_labels[target_label][current_row].back(); 
-        current_trace.push_back(std::make_pair(current_row, current_coord));
+    std::vector<std::tuple<std::vector<Row>, Column, uint64_t>> final_final_result;
 
-        // start traversing the incoming edges and trace the path by checking the coordinates decrease
-        while (labeled_parents_map[target_label].count(current_row)) {                
-            std::vector<Row> current_parents = labeled_parents_map[target_label][current_row];
 
-            uint64_t current_coord_candidate = current_coord - SHIFT;
-            bool coordinates_can_decrease_more = false;
-
-            // find the previous row in path with the decreased coordinate
-            for (Row & current_row_candidate : current_parents) {
-                std::vector<uint64_t> curr_cand_coordinates = annotations_map_sep_by_labels[target_label][current_row_candidate];
-                std::unordered_set<uint64_t> curr_cand_coordinates_set(curr_cand_coordinates.begin(),
-                                                                       curr_cand_coordinates.end());
-
-                if (curr_cand_coordinates_set.count(current_coord_candidate)) {
-                    current_coord = current_coord_candidate;
-                    current_row = current_row_candidate;
-                    coordinates_can_decrease_more = true;
-                    break;
-                }
-            }
-
-            // if haven't found the parent node with the decreased coordinate, then current node is the start of the path
-            if (!coordinates_can_decrease_more)   
-                break;                
-            
-            current_trace.push_back(std::make_pair(current_row, current_coord));                     
+    for (auto & [read_trace, read_label, cur_pos] : final_result) {
+        std::vector<Row> cur_trace_rows;
+        for (auto & el : read_trace) {
+            cur_trace_rows.push_back(el.first);
         }
 
-        std::reverse(current_trace.begin(), current_trace.end());
-        traces_forward_sep_by_labels[target_label] = current_trace;
+        final_final_result.push_back(std::make_tuple(cur_trace_rows, read_label, cur_pos));
     }
 
-    // similarly, the backward traversal targets are found
-    std::unordered_map<Column, Row> labeled_targets_backward;
-    for (auto & [j, children_map] : labeled_children_map_backward) {
-        if (!children_map.size()) {
-            continue;
-        }
+    return final_final_result;
 
-        uint64_t final_coord = annotations_map_sep_by_labels[j][children_map.begin()->first].front();
-        Row final_target = children_map.begin()->first;
-        Row current_row = final_target;
+    // // concatenate all labeled paths
+    // for (Column const &j : labels_of_the_start_node) {
 
-        while (children_map.count(current_row)) {
-            std::vector<Row> current_children = children_map[current_row];
+    //     std::vector<std::pair<Row, uint64_t>> path_to_start = traces_backward_sep_by_labels[j];
+    //     std::vector<std::pair<Row, uint64_t>> path_to_end = traces_forward_sep_by_labels[j];
 
-            uint64_t final_coord_candidate = final_coord - SHIFT;            
-            bool coordinates_can_decrease_more = false;
-
-            for (Row & current_child_candidate : current_children) {
-                std::vector<uint64_t> curr_cand_coordinates = annotations_map_sep_by_labels[j][current_child_candidate];
-                std::unordered_set<uint64_t> curr_cand_coordinates_set(curr_cand_coordinates.begin(),
-                                                                       curr_cand_coordinates.end());
-
-                if (curr_cand_coordinates_set.count(final_coord_candidate)) {
-                    final_coord = final_coord_candidate;
-                    current_row = current_child_candidate;
-                    coordinates_can_decrease_more = true;
-                    final_target = current_row;
-                    break;
-                }
-            }
-
-            if (!coordinates_can_decrease_more) {
-                final_target = current_row;
-                break;
-            }
-        }
-        labeled_targets_backward[j] = final_target;
-    }   
-
-    // similarly, for each label the backward path is traced
-    std::unordered_map<Column, std::vector<std::pair<Row, uint64_t>>> traces_backward_sep_by_labels;
-    for (auto & [target_label, target_row] : labeled_targets_backward) {
-        Row current_row = target_row;
-        std::vector<std::pair<Row, uint64_t>> current_trace;
-
-        uint64_t current_coord = annotations_map_sep_by_labels[target_label][current_row].front(); 
-        current_trace.push_back(std::make_pair(current_row, current_coord));
-        
-        while (labeled_parents_map_backward[target_label].count(current_row)) { 
-            std::vector<Row> current_parents = labeled_parents_map_backward[target_label][current_row];
-
-            uint64_t curr_coord_candidate = current_coord + SHIFT;
-            bool coordinates_can_increase_more = false;
-
-            for (Row & current_row_candidate : current_parents) {
-                std::vector<uint64_t> curr_cand_coordinates = annotations_map_sep_by_labels[target_label][current_row_candidate];
-                std::unordered_set<uint64_t> curr_cand_coordinates_set(curr_cand_coordinates.begin(),
-                                                                       curr_cand_coordinates.end());
-
-                if (curr_cand_coordinates_set.count(curr_coord_candidate)) {
-                    current_coord = curr_coord_candidate;
-                    current_row = current_row_candidate;
-                    coordinates_can_increase_more = true;
-                    break;
-                }
-            }
-
-            if (!coordinates_can_increase_more)
-                break;            
+    //     if (path_to_start.empty()) {
             
-            current_trace.push_back(std::make_pair(current_row, current_coord));          
-        }
+    //         std::vector<Row> path_to_add_to_result;
+    //         path_to_add_to_result.reserve(path_to_end.size());
+    //         for (auto & [row, c] : path_to_end) { 
+    //             path_to_add_to_result.push_back(row);
+    //         }
 
-        traces_backward_sep_by_labels[target_label] = current_trace;
+    //         reconstructed_reads[j] = path_to_add_to_result;
+    //         result.push_back(std::make_tuple(path_to_add_to_result, j, input_row_position_in_ref_seq[j]));
 
-    }
+    //     } else if (path_to_end.empty()) {
 
-    // concatenate all labeled paths
-    for (Column const &j : labels_of_the_start_node) {
+    //         std::vector<Row> path_to_add_to_result;
+    //         path_to_add_to_result.reserve(path_to_start.size());
+    //         for (auto & [row, c] : path_to_start) { 
+    //             path_to_add_to_result.push_back(row);
+    //         }
 
-        std::vector<std::pair<Row, uint64_t>> path_to_start = traces_backward_sep_by_labels[j];
-        std::vector<std::pair<Row, uint64_t>> path_to_end = traces_forward_sep_by_labels[j];
+    //         reconstructed_reads[j] = path_to_add_to_result;
+    //         result.push_back(std::make_tuple(path_to_add_to_result, j, input_row_position_in_ref_seq[j]));
 
-        if (path_to_start.empty()) {
-            
-            std::vector<Row> path_to_add_to_result;
-            path_to_add_to_result.reserve(path_to_end.size());
-            for (auto & [row, c] : path_to_end) { 
-                path_to_add_to_result.push_back(row);
-            }
+    //     } else {
 
-            reconstructed_reads[j] = path_to_add_to_result;
-            result.push_back(std::make_tuple(path_to_add_to_result, j, input_row_position_in_ref_seq[j]));
+    //         // if graph contains cycles then forward and backward paths may overlap
+    //         std::vector<std::pair<Row, uint64_t>> starting_path;
+    //         std::vector<std::pair<Row, uint64_t>> ending_path;
 
-        } else if (path_to_end.empty()) {
+    //         // find which path has a starting node (i.e. first node with lower coordinate)
+    //         if (path_to_start.front().second < path_to_end.front().second)
+    //             starting_path = path_to_start;
+    //         else
+    //             starting_path = path_to_end;
 
-            std::vector<Row> path_to_add_to_result;
-            path_to_add_to_result.reserve(path_to_start.size());
-            for (auto & [row, c] : path_to_start) { 
-                path_to_add_to_result.push_back(row);
-            }
+    //         // find which path has an starting node (i.e. last node with bigger coordinate)
+    //         if (path_to_start.back().second > path_to_end.back().second)
+    //             ending_path = path_to_start;
+    //         else
+    //             ending_path = path_to_end;
 
-            reconstructed_reads[j] = path_to_add_to_result;
-            result.push_back(std::make_tuple(path_to_add_to_result, j, input_row_position_in_ref_seq[j]));
+    //         uint64_t last_coord_start_path = starting_path.back().second;
+    //         std::vector<Row> path_to_add_to_result;
 
-        } else {
+    //         for (auto it = ending_path.rbegin(); it < ending_path.rend(); ++it) {
+    //             if (it->second > last_coord_start_path)
+    //                 path_to_add_to_result.insert(path_to_add_to_result.begin(), it->first);
+    //             else
+    //                 break;
+    //         }
 
-            // if graph contains cycles then forward and backward paths may overlap
-            std::vector<std::pair<Row, uint64_t>> starting_path;
-            std::vector<std::pair<Row, uint64_t>> ending_path;
+    //         std::vector<Row> rows_start_path;
+    //         rows_start_path.reserve(starting_path.size());
+    //         for (auto & [row, c] : starting_path) {
+    //             rows_start_path.push_back(row);
+    //         }            
 
-            // find which path has a starting node (i.e. first node with lower coordinate)
-            if (path_to_start.front().second < path_to_end.front().second)
-                starting_path = path_to_start;
-            else
-                starting_path = path_to_end;
+    //         path_to_add_to_result.insert(path_to_add_to_result.begin(),
+    //                                      rows_start_path.begin(),
+    //                                      rows_start_path.end());
 
-            // find which path has an starting node (i.e. last node with bigger coordinate)
-            if (path_to_start.back().second > path_to_end.back().second)
-                ending_path = path_to_start;
-            else
-                ending_path = path_to_end;
+    //         reconstructed_reads[j] = path_to_add_to_result;
+    //         result.push_back(std::make_tuple(path_to_add_to_result, j, input_row_position_in_ref_seq[j]));
+    //     }
+    // }    
 
-            uint64_t last_coord_start_path = starting_path.back().second;
-            std::vector<Row> path_to_add_to_result;
-
-            for (auto it = ending_path.rbegin(); it < ending_path.rend(); ++it) {
-                if (it->second > last_coord_start_path)
-                    path_to_add_to_result.insert(path_to_add_to_result.begin(), it->first);
-                else
-                    break;
-            }
-
-            std::vector<Row> rows_start_path;
-            rows_start_path.reserve(starting_path.size());
-            for (auto & [row, c] : starting_path) {
-                rows_start_path.push_back(row);
-            }            
-
-            path_to_add_to_result.insert(path_to_add_to_result.begin(),
-                                         rows_start_path.begin(),
-                                         rows_start_path.end());
-
-            reconstructed_reads[j] = path_to_add_to_result;
-            result.push_back(std::make_tuple(path_to_add_to_result, j, input_row_position_in_ref_seq[j]));
-        }
-    }    
-
-    return result;
+    // return result;
 }
 
 } // namespace matrix
