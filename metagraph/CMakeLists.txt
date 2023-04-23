@@ -426,7 +426,7 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "GNU" OR NOT ${CMAKE_SYSTEM_NAME} MATCHES "Dar
 endif()
 
 if(BUILD_STATIC AND NOT APPLE)
-  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static")
+  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static -static-libstdc++ -static-libgcc")
   find_package(OpenSSL REQUIRED)
   set(METALIBS ${METALIBS} -lssl -lcrypto -lgomp -lrt -ldl)
 endif()
