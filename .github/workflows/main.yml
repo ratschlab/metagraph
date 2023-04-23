@@ -53,7 +53,7 @@ jobs:
             build_static: ON
           - compiler: g++-10
             build_static: ON
-          - build_type: Release
+          - build_type: Debug
             build_static: ON
           - with_avx: OFF
             build_static: OFF
