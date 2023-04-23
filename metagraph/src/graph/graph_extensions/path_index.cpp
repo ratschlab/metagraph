@@ -11,6 +11,7 @@
 #include "graph/alignment/alignment.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 #include "graph/representation/canonical_dbg.hpp"
+#include "graph/representation/hash/dbg_hash_fast.hpp"
 #include "common/threads/threading.hpp"
 
 namespace mtg::graph {
@@ -23,6 +24,372 @@ using common::logger;
 using Label = AnnotatedDBG::Label;
 using Row = MultiIntMatrix::Row;
 using Tuple = MultiIntMatrix::Tuple;
+
+
+ColumnPathIndex::ColumnPathIndex(std::shared_ptr<const DBGSuccinct> graph,
+                                 const annot::LabelEncoder<Label> &label_encoder,
+                                 const FastaGenerator &fasta_generator,
+                                 const std::string &graph_fname)
+      : dbg_succ_(graph) {
+    std::ignore = graph_fname;
+    std::ignore = label_encoder;
+
+    AnnotatedDBG anno_graph(std::const_pointer_cast<DBGSuccinct>(graph),
+                            std::make_unique<ColumnCompressed<>>(dbg_succ_->max_index()));
+
+    auto &annotator = const_cast<ColumnCompressed<>&>(
+        static_cast<const ColumnCompressed<>&>(anno_graph.get_annotator())
+    );
+
+    {
+        auto &new_label_encoder = const_cast<LabelEncoder<Label>&>(annotator.get_label_encoder());
+        for (const auto &label : label_encoder.get_labels()) {
+            new_label_encoder.insert_and_encode(label);
+        }
+    }
+
+    fasta_generator([&](const std::string &label, const SequenceGenerator &generate) {
+        std::vector<std::string> labels { label };
+        // make DBG
+        DBGHashFast dbg(graph->get_k());
+        size_t num_seqs = 0;
+        generate([&](const std::string &seq) {
+            dbg.add_sequence(seq);
+            ++num_seqs;
+        });
+
+        // assemble unitigs
+        std::vector<std::pair<std::string, std::vector<node_index>>> unitigs;
+        tsl::hopscotch_map<node_index, size_t> front_to_unitig_id;
+        tsl::hopscotch_map<node_index, size_t> back_to_unitig_id;
+        unitigs.reserve(num_seqs);
+        dbg.call_unitigs([&](const std::string &seq, const std::vector<node_index> &path) {
+            front_to_unitig_id[path.front()] = unitigs.size();
+            front_to_unitig_id[path.back()] = unitigs.size();
+            unitigs.emplace_back(seq, path);
+        });
+        size_t num_unitigs = unitigs.size();
+
+        // detect superbubbles
+        sdsl::bit_vector can_reach_terminus(num_unitigs, false);
+        std::vector<std::pair<uint64_t, std::vector<size_t>>> superbubble_starts(num_unitigs);
+        size_t superbubble_start_size = num_unitigs;
+        std::vector<std::pair<uint64_t, std::vector<size_t>>> superbubble_termini(num_unitigs);
+        size_t superbubble_termini_size = num_unitigs;
+
+        size_t num_terminal_superbubbles = 0;
+        sdsl::bit_vector not_in_superbubble(num_unitigs, false);
+
+        for (size_t i = 0; i < num_unitigs; ++i) {
+            if (not_in_superbubble[i])
+                continue;
+
+            tsl::hopscotch_set<size_t> visited;
+            VectorMap<size_t, tsl::hopscotch_set<size_t>> seen;
+            tsl::hopscotch_map<size_t, std::vector<size_t>> parents;
+            std::vector<std::pair<size_t, size_t>> traversal_stack;
+            traversal_stack.emplace_back(i, 0);
+            seen[i].emplace(0);
+            bool is_terminal_superbubble = false;
+            size_t terminus = 0;
+            size_t term_dist = 0;
+            while (traversal_stack.size()) {
+                auto [unitig_id, dist] = traversal_stack.back();
+                traversal_stack.pop_back();
+                assert(!visited.count(unitig_id));
+
+                if (not_in_superbubble[unitig_id]) {
+                    is_terminal_superbubble = false;
+                    break;
+                }
+
+                bool has_cycle = false;
+                visited.insert(unitig_id);
+                size_t num_children = 0;
+                size_t length = unitigs[unitig_id].second.size();
+                dbg.call_outgoing_kmers(unitigs[unitig_id].second.back(), [&](node_index next, char) {
+                    if (next == unitigs[unitig_id].second.front())
+                        return;
+
+                    ++num_children;
+
+                    if (has_cycle)
+                        return;
+
+                    if (next == unitigs[i].second.front()) {
+                        has_cycle = true;
+                        return;
+                    }
+
+                    size_t next_id = front_to_unitig_id[next];
+
+                    bool add_parents = !seen.count(next_id);
+
+                    seen[next_id].emplace(dist + length);
+                    bool all_visited = true;
+                    dbg.call_incoming_kmers(next, [&](node_index sibling, char) {
+                        assert(back_to_unitig_id.count(sibling));
+                        size_t sibling_id = back_to_unitig_id[sibling];
+                        if (sibling_id == next_id)
+                            return;
+
+                        if (add_parents)
+                            parents[next_id].emplace_back(sibling_id);
+
+                        if (all_visited && !visited.count(sibling_id))
+                            all_visited = false;
+                    });
+
+                    if (all_visited)
+                        traversal_stack.emplace_back(next_id, dist + length);
+                });
+
+                bool reached_end = (traversal_stack.size() == 1 && visited.size() + 1 == seen.size());
+                if (has_cycle) {
+                    for (const auto &[u_id, d] : seen) {
+                        not_in_superbubble[u_id] = true;
+                    }
+                    is_terminal_superbubble = false;
+                    break;
+                }
+
+                if (!num_children) {
+                    is_terminal_superbubble = true;
+                }
+
+                if (reached_end) {
+                    auto [unitig_id, dist] = traversal_stack.back();
+                    traversal_stack.pop_back();
+
+                    terminus = unitig_id;
+                    term_dist = dist;
+                    for (const auto &[u_id, d] : seen) {
+                        for (size_t dist : d) {
+                            if (dist > term_dist) {
+                                terminus = u_id;
+                                term_dist = dist;
+                            }
+                        }
+                    }
+
+                    const auto &d = seen[terminus];
+                    superbubble_termini_size += static_cast<ssize_t>(d.size()) - superbubble_termini[i].second.size();
+                    superbubble_termini[i] = std::make_pair(terminus + 1,
+                        std::vector<size_t>(d.begin(), d.end()));
+                    std::sort(superbubble_termini[i].second.begin(),
+                              superbubble_termini[i].second.end());
+
+                    for (const auto &[u_id, d] : seen) {
+                        if (u_id == i)
+                            continue;
+
+                        std::vector<size_t> cur_d(d.begin(), d.end());
+                        std::sort(cur_d.begin(), cur_d.end());
+
+                        if (!superbubble_starts[u_id].first
+                                || cur_d.back() < superbubble_starts[u_id].second.back()) {
+                            superbubble_start_size -= superbubble_starts[u_id].second.size();
+                            superbubble_start_size += cur_d.size();
+                            superbubble_starts[u_id] = std::make_pair(i + 1, std::move(cur_d));
+                            can_reach_terminus[u_id] = !is_terminal_superbubble;
+                        }
+                    }
+
+                    can_reach_terminus[i] = true;
+                }
+            }
+
+            if (is_terminal_superbubble && seen.size() > 1 && terminus) {
+                sdsl::bit_vector found_map(seen.size(), false);
+                std::vector<std::pair<size_t, std::vector<size_t>>> back_traversal_stack;
+                back_traversal_stack.reserve(seen.size());
+                back_traversal_stack.emplace_back(terminus,
+                    std::vector<size_t>(seen[terminus].begin(), seen[terminus].end()));
+                while (back_traversal_stack.size()) {
+                    auto [cur_id, d] = back_traversal_stack.back();
+                    back_traversal_stack.pop_back();
+
+                    found_map[seen.find(cur_id) - seen.begin()] = true;
+                    if (parents[cur_id].empty())
+                        continue;
+
+                    for (auto &dd : d) {
+                        --dd;
+                    }
+
+                    for (size_t parent : parents[cur_id]) {
+                        auto &[p, p_d] = back_traversal_stack.emplace_back(parent, std::vector<size_t>{});
+                        for (auto dd : d) {
+                            if (seen[parent].count(dd))
+                                p_d.emplace_back(dd);
+                        }
+
+                        if (p_d.empty())
+                            back_traversal_stack.pop_back();
+                    }
+                }
+
+                if (!superbubble_termini[i].first) {
+                    auto it = found_map.begin();
+                    for (const auto &[cur_id, stuff] : seen) {
+                        #pragma omp critical
+                        {
+                        if (superbubble_starts[cur_id].first == i + 1)
+                            can_reach_terminus[cur_id] = *it;
+                        }
+                        ++it;
+                    }
+                }
+
+                ++num_terminal_superbubbles;
+            }
+        }
+
+        // chain superbubbles
+        tsl::hopscotch_map<size_t, std::vector<size_t>> superbubble_storage;
+
+        sdsl::int_vector<> chain_parent(num_unitigs + 1);
+        for (size_t i = 1; i <= num_unitigs; ++i) {
+            size_t t = superbubble_termini[i - 1].first;
+            if (!t) {
+                if (size_t sb = superbubble_starts[i - 1].first)
+                    superbubble_storage[sb].emplace(i);
+            } else {
+                // this is a superbubble start
+                superbubble_storage[i].emplace(i);
+                if (size_t sb = superbubble_starts[i - 1].first)
+                    superbubble_storage[sb].emplace(i);
+            }
+
+            if (!t || t == i)
+                continue;
+
+            // we are at a superbubble start
+            size_t t2 = superbubble_termini[t - 1].first;
+            if (!t2)
+                continue;
+
+            // the superbubble starting at i is chained to the one starting at t
+            assert(!chain_parent[t2]);
+            chain_parent[t2] = t;
+            chain_parent[t] = i;
+        }
+
+        sdsl::int_vector<> superbubble_chain(num_unitigs * 2);
+        std::vector<bool> chain_bounds;
+        std::vector<uint64_t> chain_widths;
+        std::vector<size_t> chain_starts;
+        size_t chain_i = 0;
+        size_t chain_widths_id = 0;
+        for (size_t i = 0; i < num_unitigs; ++i) {
+            if (chain_parent[i + 1] && !superbubble_termini[i].first) {
+                assert(!superbubble_chain[i * 2]);
+
+                // end of a superbubble chain
+                size_t j = i + 1;
+                size_t chain_term = i + 1;
+                superbubble_chain[(j - 1) * 2] = chain_term;
+                superbubble_chain[(j - 1) * 2 + 1] = ++chain_widths_id;
+                chain_widths.emplace_back(0);
+                chain_bounds.emplace_back(true);
+
+                tsl::hopscotch_set<size_t> widths;
+                widths.emplace(0);
+                while (chain_parent[j]) {
+                    size_t old_j = j;
+                    std::ignore = old_j;
+                    j = chain_parent[j];
+                    size_t widths_start = chain_widths.size();
+                    superbubble_chain[(j - 1) * 2] = chain_term;
+                    superbubble_chain[(j - 1) * 2 + 1] = ++chain_widths_id;
+                    const auto &[t, d] = superbubble_termini[j - 1];
+                    assert(t == old_j);
+                    tsl::hopscotch_set<size_t> next_widths;
+                    for (size_t width : widths) {
+                        std::for_each(d.begin(), d.end(), [&](size_t dd) {
+                            next_widths.emplace(dd + width);
+                        });
+                    }
+                    std::swap(next_widths, widths);
+                    assert(widths.size());
+                    for (size_t width : widths) {
+                        chain_widths.emplace_back(width);
+                        chain_bounds.emplace_back(false);
+                    }
+                    std::sort(chain_widths.end() - widths.size(), chain_widths.end());
+                    chain_bounds[widths_start] = true;
+                }
+
+                chain_starts.emplace_back(j);
+
+                ++chain_i;
+            }
+        }
+
+        // assign coordinates
+
+        sdsl::bit_vector coords_assigned(num_unitigs + 1, false);
+        for (size_t u_id : chain_starts) {
+            size_t chain_term = superbubble_chain[(u_id - 1) * 2];
+            std::vector<std::pair<size_t, tsl::hopscotch_set<size_t>>> traversal_stack;
+            traversal_stack.emplace_back(u_id, tsl::hopscotch_set<size_t>{ 0 });
+            while (traversal_stack.size()) {
+                auto [u_id, d] = std::move(traversal_stack.back());
+                traversal_stack.pop_back();
+                coords_assigned[u_id] = true;
+                const auto &nodes = unitigs[u_id - 1].second;
+                std::vector<uint64_t> rows;
+                rows.reserve(nodes.size());
+                std::transform(nodes.begin(), nodes.end(), std::back_inserter(rows),
+                               AnnotatedDBG::graph_to_anno_index);
+                annotator.add_labels(rows, labels);
+                for (size_t j = 0; j < rows.size(); ++j) {
+                    for (size_t dd : d) {
+                        annotator.add_label_coord(rows[j], labels, dd + j);
+                    }
+                }
+
+                if (u_id == chain_term)
+                    continue;
+
+                auto t = superbubble_termini[u_id - 1].first;
+                assert(superbubble_storage.count(u_id));
+                for (size_t sb_u_id : superbubble_storage[u_id]) {
+                    const auto &[sb, dists] = superbubble_starts[sb_u_id - 1];
+                    tsl::hopscotch_set<size_t> next_d;
+                    for (size_t dd : d) {
+                        for (size_t ddt : dists) {
+                            next_d.emplace(dd + ddt);
+                        }
+                    }
+                    if (sb_u_id == t) {
+                        traversal_stack.emplace_back(t, std::move(next_d));
+                        continue;
+                    }
+                    assert(sb == u_id);
+                    const auto &nodes = unitigs[sb_u_id - 1].second;
+                    std::vector<uint64_t> rows;
+                    rows.reserve(nodes.size());
+                    std::transform(nodes.begin(), nodes.end(), std::back_inserter(rows),
+                                   AnnotatedDBG::graph_to_anno_index);
+                    annotator.add_labels(rows, labels);
+                    for (size_t j = 0; j < nodes.size(); ++j) {
+
+                    }
+                }
+            }
+        }
+    });
+}
+
+
+
+
+
+
+
+
+
 
 constexpr std::memory_order MO_RELAXED = std::memory_order_relaxed;
 

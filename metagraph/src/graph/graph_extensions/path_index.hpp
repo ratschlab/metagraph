@@ -11,6 +11,49 @@
 
 namespace mtg::graph {
 
+class ColumnPathIndex : public SequenceGraph::GraphExtension {
+  public:
+    using node_index = SequenceGraph::node_index;
+    using Row = annot::binmat::BinaryMatrix::Row;
+    using RowTuples = annot::matrix::MultiIntMatrix::RowTuples;
+    using Label = std::string;
+    using SequenceCallback = std::function<void(const std::string&)>;
+    using SequenceGenerator = std::function<void(const SequenceCallback&)>;
+    using FastaCallback = std::function<void(const std::string &, const SequenceGenerator&)>;
+    using FastaGenerator = std::function<void(const FastaCallback&)>;
+
+    ColumnPathIndex(std::shared_ptr<const DBGSuccinct> graph,
+                    const annot::LabelEncoder<Label> &label_encoder,
+                    const FastaGenerator &fasta_generator,
+                    const std::string &graph_fname = "");
+
+    ColumnPathIndex(const DBGSuccinct &graph,
+                    const annot::LabelEncoder<Label> &label_encoder,
+                    const FastaGenerator &fasta_generator,
+                    const std::string &graph_fname = "")
+          : ColumnPathIndex(decltype(dbg_succ_)(decltype(dbg_succ_){}, &graph),
+                            label_encoder,
+                            fasta_generator,
+                            graph_fname) {}
+
+    std::vector<RowTuples> get_coords(const std::vector<node_index> &nodes) const;
+
+    void adjacent_outgoing_unitigs(size_t path_id,
+                                   const std::function<void(size_t)> &callback) const;
+
+    void set_graph(std::shared_ptr<const DBGSuccinct> graph);
+
+    bool load(const std::string &) { return true; }
+    void serialize(const std::string &) const {}
+
+    bool is_compatible(const SequenceGraph &graph, bool = true) const {
+        return dynamic_cast<const DBGSuccinct*>(&graph) == dbg_succ_.get();
+    }
+
+  private:
+    std::shared_ptr<const DBGSuccinct> dbg_succ_;
+};
+
 class IPathIndex : public SequenceGraph::GraphExtension {
   public:
     using node_index = SequenceGraph::node_index;
