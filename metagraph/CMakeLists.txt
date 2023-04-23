@@ -405,8 +405,8 @@ add_executable(metagraph "src/main.cpp")
 set_target_properties(metagraph PROPERTIES OUTPUT_NAME "metagraph_${CMAKE_DBG_ALPHABET}")
 
 set(METALIBS ${METALIBS}
-  -lKMC -lhts
-  zlib
+  -lKMC
+  -lhts zlib
   -lsdsl
   brwt
   jsoncpp_lib
@@ -428,7 +428,7 @@ endif()
 if(BUILD_STATIC AND NOT APPLE)
   set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static -static-libstdc++ -static-libgcc")
   find_package(OpenSSL REQUIRED)
-  set(METALIBS ${METALIBS} -lssl -lcrypto -lgomp -lrt -ldl -lpthread)
+  set(METALIBS ${METALIBS} -lssl -lcrypto -lgomp -lrt -ldl -Wl,--whole-archive -lpthread -Wl,--no-whole-archive)
 endif()
 
 # check for std::filesystem::temp_directory_path
