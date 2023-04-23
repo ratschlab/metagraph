@@ -428,7 +428,7 @@ endif()
 if(BUILD_STATIC AND NOT APPLE)
   set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static")
   find_package(OpenSSL REQUIRED)
-  set(METALIBS ${METALIBS} -lssl -lcrypto)
+  set(METALIBS ${METALIBS} -lssl -lcrypto -lgomp -lrt -ldl)
 endif()
 
 # check for std::filesystem::temp_directory_path
