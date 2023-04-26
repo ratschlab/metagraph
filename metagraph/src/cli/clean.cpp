@@ -203,7 +203,7 @@ int clean_graph(Config *config) {
 
             fasta_fname = writer.get_fname();
         }
-        logger->info("Extracted {} bp of sequences with {} k-mers and wrote to {}",
+        logger->trace("Extracted {} bp of sequences with {} k-mers and wrote to {}",
                       num_bp, num_kmers, fasta_fname);
     };
 
