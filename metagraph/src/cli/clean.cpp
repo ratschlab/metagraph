@@ -158,6 +158,7 @@ int clean_graph(Config *config) {
         std::mutex seq_mutex;
         uint64_t num_bp = 0;
         uint64_t num_kmers = 0;
+        std::string fasta_fname;
 
         if (node_weights) {
             if (!node_weights->is_compatible(*graph)) {
@@ -186,6 +187,8 @@ int clean_graph(Config *config) {
                 num_kmers += contig.size() - graph->get_k() + 1;
             }, get_num_threads());
 
+            fasta_fname = writer.get_fasta_fname();
+
         } else {
             FastaWriter writer(outfbase, config->header,
                                config->enumerate_out_sequences,
@@ -197,9 +200,11 @@ int clean_graph(Config *config) {
                 num_bp += contig.size();
                 num_kmers += contig.size() - graph->get_k() + 1;
             }, get_num_threads());
+
+            fasta_fname = writer.get_fname();
         }
-        logger->trace("Extracted {} bp of sequences with {} k-mers and wrote to {}", num_bp,
-                      num_kmers, utils::remove_suffix(outfbase, ".gz", ".fasta") + ".fasta.gz");
+        logger->info("Extracted {} bp of sequences with {} k-mers and wrote to {}",
+                      num_bp, num_kmers, fasta_fname);
     };
 
     assert(config->count_slice_quantiles.size() >= 2);
