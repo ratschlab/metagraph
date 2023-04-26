@@ -422,7 +422,7 @@ Config::Config(int argc, char *argv[]) {
         parallel_nodes = get_num_threads();
 
     if (identity == TRANSFORM && to_fasta)
-        identity = ASSEMBLE;
+        identity = CLEAN;
 
     if (!xdrop_override && alignment_chain)
         alignment_xdrop = 100;
@@ -576,7 +576,7 @@ Config::Config(int argc, char *argv[]) {
         print_usage_and_exit = true;
     }
 
-    if ((identity == ASSEMBLE || identity == TRANSFORM)
+    if (identity == ASSEMBLE
             && (infbase_annotators.size() && assembly_config_file.empty())) {
         std::cerr << "Error: annotator passed, but no differential assembly rule config file provided" << std::endl;
         print_usage_and_exit = true;

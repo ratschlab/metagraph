@@ -339,7 +339,7 @@ add_library(sdust STATIC
 target_compile_options(sdust PRIVATE -Wall -Wc++-compat -Wno-error)
 
 include(ExternalProject)
-ExternalProject_Add(HTSLIB_Project
+ExternalProject_Add(HTSLIB
   SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib
   CONFIGURE_COMMAND autoreconf -i ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib && ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib/configure --prefix=${CMAKE_BINARY_DIR}/external-libraries --disable-libcurl --disable-bz2 --disable-lzma
 )
@@ -399,7 +399,7 @@ file(GLOB metagraph_cli_files
   "src/cli/*/*/*.cpp"
 )
 add_library(metagraph-cli STATIC ${metagraph_cli_files})
-add_dependencies(metagraph-core HTSLIB_Project)
+add_dependencies(metagraph-core HTSLIB)
 
 add_executable(metagraph "src/main.cpp")
 set_target_properties(metagraph PROPERTIES OUTPUT_NAME "metagraph_${CMAKE_DBG_ALPHABET}")
