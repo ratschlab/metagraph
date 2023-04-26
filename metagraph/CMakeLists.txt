@@ -260,7 +260,6 @@ include_directories(
   external-libraries/KMC/kmc_api
   external-libraries/sdsl-lite/include
   external-libraries/eigen
-  external-libraries/htslib
   external-libraries/hopscotch-map/include
   external-libraries/ordered-map/include
   external-libraries/binrel_wt/include
@@ -342,11 +341,10 @@ target_compile_options(sdust PRIVATE -Wall -Wc++-compat -Wno-error)
 include(ExternalProject)
 ExternalProject_Add(HTSLIB_Project
   SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib
-  CONFIGURE_COMMAND autoreconf -i ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib && ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib/configure --prefix=${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib --disable-libcurl --disable-bz2 --disable-lzma
+  CONFIGURE_COMMAND autoreconf -i ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib && ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib/configure --prefix=${CMAKE_BINARY_DIR}/external-libraries --disable-libcurl --disable-bz2 --disable-lzma
 )
-link_directories(
-  ${CMAKE_BINARY_DIR}/HTSLIB_Project-prefix/src/HTSLIB_Project-build
-)
+link_directories(${CMAKE_BINARY_DIR}/external-libraries/htslib/lib)
+include_directories(${CMAKE_BINARY_DIR}/external-libraries/htslib/include)
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH}
   "${CMAKE_SOURCE_DIR}/external-libraries/binrel_wt/cmake/modules"
