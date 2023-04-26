@@ -65,6 +65,7 @@ enableCCache()
 if(BUILD_STATIC)
   set(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
   set(BUILD_SHARED_LIBS OFF)
+  set(OPENSSL_USE_STATIC_LIBS TRUE)
 endif()
 
 if(NOT CMAKE_BUILD_TYPE)
@@ -259,6 +260,7 @@ include_directories(
   external-libraries/KMC/kmc_api
   external-libraries/sdsl-lite/include
   external-libraries/eigen
+  external-libraries/htslib
   external-libraries/hopscotch-map/include
   external-libraries/ordered-map/include
   external-libraries/binrel_wt/include
@@ -285,6 +287,7 @@ add_library(caches INTERFACE)
 target_include_directories(caches INTERFACE external-libraries/caches/include)
 
 
+set(Boost_USE_STATIC_LIBS ON)
 findFolly()
 if(FOLLY_FOUND)
   add_definitions(-D_USE_FOLLY -DUSE_JEMALLOC)
@@ -333,7 +336,17 @@ add_library(mersenne_twister STATIC
 add_library(sdust STATIC
   external-libraries/sdust/sdust.c
 )
+
 target_compile_options(sdust PRIVATE -Wall -Wc++-compat -Wno-error)
+
+include(ExternalProject)
+ExternalProject_Add(HTSLIB_Project
+  SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib
+  CONFIGURE_COMMAND autoreconf -i ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib && ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib/configure --prefix=${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib --disable-libcurl --disable-bz2 --disable-lzma
+)
+link_directories(
+  ${CMAKE_BINARY_DIR}/HTSLIB_Project-prefix/src/HTSLIB_Project-build
+)
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH}
   "${CMAKE_SOURCE_DIR}/external-libraries/binrel_wt/cmake/modules"
@@ -388,6 +401,7 @@ file(GLOB metagraph_cli_files
   "src/cli/*/*/*.cpp"
 )
 add_library(metagraph-cli STATIC ${metagraph_cli_files})
+add_dependencies(metagraph-core HTSLIB_Project)
 
 add_executable(metagraph "src/main.cpp")
 set_target_properties(metagraph PROPERTIES OUTPUT_NAME "metagraph_${CMAKE_DBG_ALPHABET}")
@@ -414,11 +428,9 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "GNU" OR NOT ${CMAKE_SYSTEM_NAME} MATCHES "Dar
 endif()
 
 if(BUILD_STATIC AND NOT APPLE)
-  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static")
-  set(OPENSSL_USE_STATIC_LIBS TRUE)
+  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static -static-libstdc++ -static-libgcc")
   find_package(OpenSSL REQUIRED)
-  find_package(BZip2 REQUIRED)
-  set(METALIBS ${METALIBS} -llzma -lcurl -lssl -lcrypto -lbz2)
+  set(METALIBS ${METALIBS} -lssl -lcrypto -lgomp -lrt -ldl -Wl,--whole-archive -lpthread -Wl,--no-whole-archive)
 endif()
 
 # check for std::filesystem::temp_directory_path

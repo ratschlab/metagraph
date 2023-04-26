@@ -18,7 +18,7 @@ env:
 jobs:
 
   Linux:
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-20.04
 
     strategy:
       matrix:
@@ -46,12 +46,12 @@ jobs:
 
         exclude:
           - alphabet: Protein
-            compiler: g++-8
-          - alphabet: Protein
             compiler: g++-9
           - compiler: g++-8
             build_static: ON
           - compiler: g++-9
+            build_static: ON
+          - compiler: g++-10
             build_static: ON
           - build_type: Debug
             build_static: ON
@@ -73,7 +73,7 @@ jobs:
             sudo apt-get install ${{ matrix.compiler }}
         fi
 
-        sudo apt-get install libbz2-dev libhts-dev libjemalloc-dev libboost-all-dev
+        sudo apt-get install libbz2-dev libjemalloc-dev libboost-all-dev
 
         if [ "${{ matrix.build_static }}" = "ON" ]; then
           # for static builds, compile curl ourselves
@@ -83,6 +83,7 @@ jobs:
           cmake -DBUILD_SHARED_LIBS=off ..
           make -j 2
           sudo make install
+          cd ..
         fi
 
         echo "CC=$(which ${{ matrix.cc }})" >> $GITHUB_ENV
@@ -118,17 +119,6 @@ jobs:
       if: matrix.build_static == 'OFF'
       run: cd metagraph/build && make -j 2
 
-    - name: run unit tests
-      if: matrix.build_static == 'OFF'
-      run: |
-        export LD_LIBRARY_PATH="/usr/local/lib/:$LD_LIBRARY_PATH"
-        cd metagraph/build && ./unit_tests
-
-    - name: run integration tests
-      run: |
-        export LD_LIBRARY_PATH="/usr/local/lib/:$LD_LIBRARY_PATH"
-        cd metagraph/build && make check
-
     # for potential release
     - name: rename binary
       if: matrix.with_avx == 'OFF'
@@ -139,7 +129,17 @@ jobs:
       with:
         name: metagraph_${{ matrix.alphabet }}_linux_x86
         path: metagraph/build/metagraph_${{ matrix.alphabet }}${{ matrix.with_avx == 'OFF' && '_noAVX' || '' }}
+        
+    - name: run unit tests
+      if: matrix.build_static == 'OFF'
+      run: |
+        export LD_LIBRARY_PATH="/usr/local/lib/:$LD_LIBRARY_PATH"
+        cd metagraph/build && ./unit_tests
 
+    - name: run integration tests
+      run: |
+        export LD_LIBRARY_PATH="/usr/local/lib/:$LD_LIBRARY_PATH"
+        cd metagraph/build && make check
 
   MacOS:
     runs-on: macos-latest
@@ -157,7 +157,7 @@ jobs:
       run: git submodule update --init --recursive
 
     - name: install dependencies
-      run: brew install bzip2 htslib libomp boost jemalloc
+      run: brew install bzip2 libomp boost jemalloc autoconf automake libtool
 
     - name: install dependencies for integration tests
       run: pip3 install parameterized
