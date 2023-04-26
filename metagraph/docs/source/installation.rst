@@ -73,28 +73,28 @@ Before compiling MetaGraph, install the following dependencies:
 
         For compiling with **AppleClang**, the prerequisites can be installed as easy as::
 
-            brew install libomp cmake make bzip2 htslib boost jemalloc
+            brew install libomp cmake make bzip2 boost jemalloc
 
 
     .. group-tab:: Ubuntu / Debian
 
         For **Ubuntu** (20.04 LTS or higher) or **Debian** (10 or higher)::
 
-            sudo apt-get install cmake libbz2-dev libhts-dev libjemalloc-dev libboost-all-dev
+            sudo apt-get install cmake libbz2-dev libjemalloc-dev libboost-all-dev
 
 
     .. group-tab:: CentOS
 
         For **CentOS** (8 or higher)::
 
-            yum install cmake bzip2-devel htslib-devel jemalloc-devel boost-devel
+            yum install cmake bzip2-devel jemalloc-devel boost-devel
 
 
     .. group-tab:: brew + GNU gcc
 
         GNU GCC and all the prerequisites can be installed with `brew <https://brew.sh/>`_ as follows::
 
-            brew install gcc autoconf automake libtool cmake make htslib
+            brew install gcc autoconf automake libtool cmake make
             [[ "$OSTYPE" == "darwin"* ]] \
                 && brew remove -f boost \
                 && brew install --cc=gcc-7 boost \
@@ -116,7 +116,7 @@ Before compiling MetaGraph, install the following dependencies:
 
         For compiling with LLVM Clang installed with `brew <https://brew.sh/>`_, the prerequisites can be installed with::
 
-            brew install llvm libomp autoconf automake libtool cmake make htslib boost
+            brew install llvm libomp autoconf automake libtool cmake make boost
 
         Then, the following environment variables have to be set::
 
