@@ -127,7 +127,9 @@ if(APPLE)
   include_directories(SYSTEM /usr/local/include)
   include_directories(SYSTEM /opt/homebrew/include)
   link_directories(/usr/local/lib)
-  link_directories(/opt/homebrew/lib)
+  if(EXISTS /opt/homebrew/lib)
+    link_directories(/opt/homebrew/lib)
+  endif()
   include(CheckCXXCompilerFlag)
   check_cxx_compiler_flag(-Wno-poison-system-directories SUPPORT_NO_POISON_SYS_DIR)
   if(SUPPORT_NO_POISON_SYS_DIR)
@@ -341,7 +343,7 @@ target_compile_options(sdust PRIVATE -Wall -Wc++-compat -Wno-error)
 include(ExternalProject)
 ExternalProject_Add(HTSLIB
   SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib
-  CONFIGURE_COMMAND autoreconf -i ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib && ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib/configure --prefix=${CMAKE_BINARY_DIR}/external-libraries --disable-libcurl --disable-bz2 --disable-lzma
+  CONFIGURE_COMMAND autoreconf -i ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib && ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib/configure --prefix=${CMAKE_BINARY_DIR}/external-libraries/htslib --disable-libcurl --disable-bz2 --disable-lzma
 )
 link_directories(${CMAKE_BINARY_DIR}/external-libraries/htslib/lib)
 include_directories(${CMAKE_BINARY_DIR}/external-libraries/htslib/include)

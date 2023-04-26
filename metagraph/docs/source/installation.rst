@@ -57,7 +57,6 @@ Before compiling MetaGraph, install the following dependencies:
 - cmake 3.10 or higher
 - GNU GCC with C++17 (gcc-8.0.1 or higher), LLVM Clang (clang-7 or higher), or AppleClang
 - bzip2
-- HTSlib
 
 *Optional:*
 
