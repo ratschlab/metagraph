@@ -647,17 +647,17 @@ AnnotatedDBG::get_kmer_coordinates(const std::vector<node_index> &nodes,
 }
 
 std::vector<std::vector<std::tuple<std::string, Label, uint64_t, uint64_t>>>
-AnnotatedDBG::get_overlapping_reads(std::string_view sequence) const {
+AnnotatedDBG::get_overlapping_reads(std::string_view sequence, bool auto_labels) const {
     
     if (sequence.size() < dbg_.get_k())
         return {};
 
     std::vector<node_index> nodes = map_to_nodes(dbg_, sequence);
-    return get_overlapping_reads(nodes);
+    return get_overlapping_reads(nodes, auto_labels);
 }
 
 std::vector<std::vector<std::tuple<std::string, Label, uint64_t, uint64_t>>>
-AnnotatedDBG::get_overlapping_reads(const std::vector<node_index> &nodes) const {
+AnnotatedDBG::get_overlapping_reads(const std::vector<node_index> &nodes, bool auto_labels) const {
     
     if (!nodes.size())
         return {};    
@@ -687,34 +687,67 @@ AnnotatedDBG::get_overlapping_reads(const std::vector<node_index> &nodes) const 
     std::vector<std::vector<std::tuple<std::string, Label, uint64_t, uint64_t>>> result;
     result.reserve(rows.size());
 
-    // std::unordered_map<Label, std::string> paths_spellings;
+    if (auto_labels) {
+        /* to be implemented*/
+        auto traces = tuple_row_diff->get_traces_with_row_auto_labels(rows);
 
-    auto traces = tuple_row_diff->get_traces_with_row(rows);
-    for (size_t i = 0; i < traces.size(); ++i) {
-        std::vector<std::tuple<std::string, Label, uint64_t, uint64_t>> row_result;
-        for (auto & [row_trace, j, input_start_pos_in_ref] : traces[i]) {
-            std::vector<node_index> trace_to_graph_index;
-            trace_to_graph_index.reserve(row_trace.size());
-            for (row_index & row_in_trace : row_trace) {
-                trace_to_graph_index.push_back(anno_to_graph_index(row_in_trace));
+        // since traces don't have unique labels, the index will be added as suffix to the label
+        uint64_t trace_id = 0;
+        std::unordered_map<std::string, uint64_t> reads_ids; 
+
+        for (size_t i = 0; i < traces.size(); ++i) {
+            std::vector<std::tuple<std::string, Label, uint64_t, uint64_t>> row_result;
+            for (auto & [row_trace, j, input_start_pos_in_ref] : traces[i]) {
+                Label label = annotator_->get_label_encoder().decode(j);
+
+                std::vector<node_index> trace_to_graph_index;
+                trace_to_graph_index.reserve(row_trace.size());
+                for (row_index & row_in_trace : row_trace) {
+                    trace_to_graph_index.push_back(anno_to_graph_index(row_in_trace));
+                }
+
+                std::string path_spelling = mtg::graph::align::spell_path(dbg_, trace_to_graph_index);
+                
+                uint64_t cur_trace_id;
+
+                if (!reads_ids.count(path_spelling)) {
+                    reads_ids[path_spelling] = trace_id;
+                    cur_trace_id = trace_id;
+                    ++trace_id;
+                } else {
+                    cur_trace_id = reads_ids[path_spelling];
+                }
+                
+                row_result.push_back(std::make_tuple(path_spelling, fmt::format("{}_{}", label, cur_trace_id), rows_to_nodes[i], input_start_pos_in_ref));
             }
+            result.push_back(row_result);
+        }
+    } else {
+        auto [reads_paths, traces] = tuple_row_diff->get_traces_with_row(rows);
+        std::unordered_map<Label, std::string> paths_spellings;
 
-            Label label = annotator_->get_label_encoder().decode(j);
-
-            // std::string path_spelling;
-            // if (!paths_spellings.count(label)) {
-            //     path_spelling = mtg::graph::align::spell_path(dbg_, trace_to_graph_index);
-            //     paths_spellings[label] = path_spelling;
-            // } else {
-            //     path_spelling = paths_spellings[label];
-            // }
-
+        for (auto & [j, j_path] : reads_paths) {
+            std::vector<node_index> trace_to_graph_index;
+            for (row_index & row_in_trace : j_path)
+                trace_to_graph_index.push_back(anno_to_graph_index(row_in_trace));
+            
             std::string path_spelling = mtg::graph::align::spell_path(dbg_, trace_to_graph_index);
 
-            row_result.push_back(std::make_tuple(path_spelling, label, rows_to_nodes[i], input_start_pos_in_ref));
+            Label label = annotator_->get_label_encoder().decode(j);
+            paths_spellings[label] = path_spelling;
         }
 
-        result.push_back(row_result);
+        for (size_t i = 0; i < traces.size(); ++i) {
+            std::vector<std::tuple<std::string, Label, uint64_t, uint64_t>> row_result;
+            for (auto & [j, input_start_pos_in_ref] : traces[i]) {
+                Label label = annotator_->get_label_encoder().decode(j);
+
+                std::string path_spelling = paths_spellings[label];
+                row_result.push_back(std::make_tuple(path_spelling, label, rows_to_nodes[i], input_start_pos_in_ref));
+            }
+
+            result.push_back(row_result);
+        }
     }
 
     return result;

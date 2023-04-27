@@ -47,6 +47,10 @@ class IRowDiff {
     std::pair<std::vector<BinaryMatrix::Row>, std::vector<std::vector<size_t>>>
     get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids) const;
 
+    std::pair<std::vector<BinaryMatrix::Row>, std::vector<size_t>>
+    get_rd_ids(BinaryMatrix::Row row, std::vector<BinaryMatrix::Row> &rd_ids,
+    VectorMap<BinaryMatrix::Row, size_t> &node_to_rd, const graph::boss::BOSS &boss, const bit_vector &rd_succ) const;
+
     const graph::DBGSuccinct *graph_ = nullptr;
     anchor_bv_type anchor_;
     fork_succ_bv_type fork_succ_;

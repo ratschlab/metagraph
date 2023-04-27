@@ -41,18 +41,33 @@ class TupleRowDiff : public binmat::IRowDiff, public MultiIntMatrix {
     RowTuples get_row_tuples(Row i) const override;
     std::vector<RowTuples> get_row_tuples(const std::vector<Row> &rows) const override;
 
+    RowTuples get_row_tuples(Row i, std::vector<Row> &rd_ids,
+    VectorMap<Row, size_t> &node_to_rd, std::vector<RowTuples> &rd_rows,
+    std::unordered_map<Row, RowTuples> &rows_annotations,
+    const graph::boss::BOSS &boss, const bit_vector &rd_succ) const;
+
     /** Returns all labeled traces that pass through a given row.
      * 
      * @param i Index of the row.
+     * @param auto_labels If true, the read labels will be derived based on k-mer coordinates.
+     * Use if the graph doesn't have distinct labels for different reads.
      * 
      * @return Vector of pairs (path, column), where path is
      * a vector of Row indices and column is a corresponding Label index.
      */
+    std::vector<std::tuple<std::vector<Row>, Column, uint64_t>> get_traces_with_row_auto_labels(Row i) const;
     std::vector<std::tuple<std::vector<Row>, Column, uint64_t>> get_traces_with_row(Row i) const;
 
-    std::vector<std::tuple<std::vector<Row>, Column, uint64_t>> get_traces_with_row(Row i, std::unordered_map<Row, RowTuples> &rows_annotations, 
+    // auto_labels means that the labels will be derived based on coordinates
+    // this is needed for the graphs where reads are not marked with different labels
+    std::pair<std::unordered_map<Column, std::vector<Row>>, std::vector<std::vector<std::pair<Column, uint64_t>>>> get_traces_with_row(std::vector<Row> i) const;
+    std::vector<std::pair<Column, uint64_t>> get_traces_with_row(Row i, std::unordered_map<Row, RowTuples> &rows_annotations, 
     std::vector<Row> &rd_ids, VectorMap<Row, size_t> &node_to_rd, std::vector<RowTuples> &rd_rows, std::unordered_map<Column, std::vector<Row>> &reconstructed_reads) const;
-    std::vector<std::vector<std::tuple<std::vector<Row>, Column, uint64_t>>> get_traces_with_row(std::vector<Row> i) const;
+
+    std::vector<std::vector<std::tuple<std::vector<Row>, Column, uint64_t>>> get_traces_with_row_auto_labels(std::vector<Row> i) const;
+    std::vector<std::tuple<std::vector<Row>, Column, uint64_t>> get_traces_with_row_auto_labels(Row i, std::unordered_map<Row, RowTuples> &rows_annotations, 
+    std::vector<Row> &rd_ids, VectorMap<Row, size_t> &node_to_rd, std::vector<RowTuples> &rd_rows) const;
+    
 
     uint64_t num_columns() const override { return diffs_.num_columns(); }
     uint64_t num_relations() const override { return diffs_.num_relations(); }
@@ -147,6 +162,49 @@ TupleRowDiff<BaseMatrix>::get_row_tuples(const std::vector<Row> &row_ids) const 
 }
 
 template <class BaseMatrix>
+MultiIntMatrix::RowTuples TupleRowDiff<BaseMatrix>::get_row_tuples(Row i, std::vector<Row> &rd_ids,
+VectorMap<Row, size_t> &node_to_rd, std::vector<RowTuples> &rd_rows,
+std::unordered_map<Row, RowTuples> &rows_annotations,
+const graph::boss::BOSS &boss, const bit_vector &rd_succ) const {
+    assert(graph_ && "graph must be loaded");
+    assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
+    assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());
+
+    // get row-diff paths
+    auto [rd_ids_current, rd_path_trunc] = get_rd_ids(i, rd_ids, node_to_rd, boss, rd_succ);
+
+    std::vector<RowTuples> rd_rows_current = diffs_.get_row_tuples(rd_ids_current);
+    for (auto &row : rd_rows_current) {
+        decode_diffs(&row);
+    }
+
+    rd_rows.insert(rd_rows.end(), rd_rows_current.begin(), rd_rows_current.end());
+
+    RowTuples result;     
+    auto it = rd_path_trunc.rbegin();
+    std::sort(rd_rows[*it].begin(), rd_rows[*it].end());
+
+    result = rd_rows[*it];
+    rows_annotations[rd_ids[*it]] = result;
+
+    // propagate back and reconstruct full annotations for predecessors
+    for (++it ; it != rd_path_trunc.rend(); ++it) {
+        std::sort(rd_rows[*it].begin(), rd_rows[*it].end());
+        add_diff(rd_rows[*it], &result);
+        // replace diff row with full reconstructed annotation
+        rd_rows[*it] = result;
+
+        // keep the decompressed annotations for the Rows
+        // along that row-diff path
+        rows_annotations[rd_ids[*it]] = result;
+    }
+    assert(std::all_of(result.begin(), result.end(),
+                        [](auto &p) { return p.second.size(); }));
+
+    return result;
+}
+
+template <class BaseMatrix>
 bool TupleRowDiff<BaseMatrix>::load(std::istream &in) {
     std::string version(4, '\0');
     in.read(version.data(), 4);
@@ -212,8 +270,36 @@ void TupleRowDiff<BaseMatrix>::add_diff(const RowTuples &diff, RowTuples *row) {
 }
 
 template <class BaseMatrix>
-std::vector<std::vector<std::tuple<std::vector<MultiIntMatrix::Row>, MultiIntMatrix::Column, uint64_t>>> TupleRowDiff<BaseMatrix>
+std::pair<std::unordered_map<MultiIntMatrix::Column, std::vector<MultiIntMatrix::Row>>, std::vector<std::vector<std::pair<MultiIntMatrix::Column, uint64_t>>>> TupleRowDiff<BaseMatrix>
 ::get_traces_with_row(std::vector<Row> i) const {
+    assert(graph_ && "graph must be loaded");
+    assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
+    assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());
+
+    // a map that stores decompressed annotations for the rows
+    std::unordered_map<Row, RowTuples> rows_annotations;
+
+    // diff rows annotating nodes along the row-diff paths
+    std::vector<Row> rd_ids;
+    // map row index to its index in |rd_rows|
+    VectorMap<Row, size_t> node_to_rd;
+
+    std::vector<RowTuples> rd_rows;
+    std::unordered_map<Column, std::vector<Row>> reconstructed_reads;
+
+    std::vector<std::vector<std::pair<Column, uint64_t>>> result;
+
+    for (Row &row_i : i) {
+        auto curr_res = get_traces_with_row(row_i, rows_annotations, rd_ids, node_to_rd, rd_rows, reconstructed_reads);
+        result.push_back(curr_res);
+    }
+
+    return std::make_pair(std::move(reconstructed_reads), std::move(result));
+}
+
+template <class BaseMatrix>
+std::vector<std::vector<std::tuple<std::vector<MultiIntMatrix::Row>, MultiIntMatrix::Column, uint64_t>>> TupleRowDiff<BaseMatrix>
+::get_traces_with_row_auto_labels(std::vector<Row> i) const {
     assert(graph_ && "graph must be loaded");
     assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
     assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());
@@ -232,7 +318,7 @@ std::vector<std::vector<std::tuple<std::vector<MultiIntMatrix::Row>, MultiIntMat
     std::vector<std::vector<std::tuple<std::vector<Row>, Column, uint64_t>>> result;
 
     for (Row &row_i : i) {
-        auto curr_res = get_traces_with_row(row_i, rows_annotations, rd_ids, node_to_rd, rd_rows, reconstructed_reads);
+        auto curr_res = get_traces_with_row_auto_labels(row_i, rows_annotations, rd_ids, node_to_rd, rd_rows);
         result.push_back(curr_res);
     }
 
@@ -242,133 +328,58 @@ std::vector<std::vector<std::tuple<std::vector<MultiIntMatrix::Row>, MultiIntMat
 
 template <class BaseMatrix>
 std::vector<std::tuple<std::vector<MultiIntMatrix::Row>, MultiIntMatrix::Column, uint64_t>> TupleRowDiff<BaseMatrix>
-::get_traces_with_row(Row i) const {
-
-    assert(graph_ && "graph must be loaded");
-    assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
-    assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());
-
-    // a map that stores decompressed annotations for the rows
-    std::unordered_map<Row, RowTuples> rows_annotations;
-
-    // diff rows annotating nodes along the row-diff paths
-    std::vector<Row> rd_ids;
-    // map row index to its index in |rd_rows|
-    VectorMap<Row, size_t> node_to_rd;
-
-    std::vector<RowTuples> rd_rows;
-    std::unordered_map<Column, std::vector<Row>> reconstructed_reads;
-
-    return get_traces_with_row(i, rows_annotations, rd_ids, node_to_rd, rd_rows, reconstructed_reads);
+::get_traces_with_row_auto_labels(Row i) const {
+    return get_traces_with_row_auto_labels(std::vector<Row>{ i })[0];
 }
 
 template <class BaseMatrix>
 std::vector<std::tuple<std::vector<MultiIntMatrix::Row>, MultiIntMatrix::Column, uint64_t>> TupleRowDiff<BaseMatrix>
-::get_traces_with_row(Row i, std::unordered_map<Row, RowTuples> &rows_annotations, std::vector<Row> &rd_ids, VectorMap<Row, size_t> &node_to_rd, 
-std::vector<RowTuples> &rd_rows, std::unordered_map<Column, std::vector<Row>> &reconstructed_reads) const {
+::get_traces_with_row(Row i) const {
+    auto [labeled_paths, overlapping_reads] = get_traces_with_row(std::vector<Row>{ i });
+    std::vector<std::tuple<std::vector<Row>, Column, uint64_t>> result;
+
+    for (auto & [j, c] : overlapping_reads[0]) {
+        result.push_back(std::make_tuple(labeled_paths[j], j, c));
+    }
+
+    return result;
+}
+
+template <class BaseMatrix>
+std::vector<std::tuple<std::vector<MultiIntMatrix::Row>, MultiIntMatrix::Column, uint64_t>> TupleRowDiff<BaseMatrix>
+::get_traces_with_row_auto_labels(Row i, std::unordered_map<Row, RowTuples> &rows_annotations, std::vector<Row> &rd_ids, VectorMap<Row, size_t> &node_to_rd, 
+std::vector<RowTuples> &rd_rows) const {
     assert(graph_ && "graph must be loaded");
     assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
     assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());    
 
-    std::ignore = reconstructed_reads;
-
     const graph::boss::BOSS &boss = graph_->get_boss();
     const bit_vector &rd_succ = fork_succ_.size() ? fork_succ_ : boss.get_last();
 
-    std::unordered_map<Column, std::set<uint64_t>> discovered_coordinates;
-
-    std::unordered_map<Column, std::map<uint64_t, Row>> test_new_path_reconstruction;
+    std::unordered_map<Column, std::map<uint64_t, Row>> reconstucted_paths;
 
     // part 1. Graph traversal
 
     // step 1. Build row-diff path for the input Row
-    RowTuples input_row_row_tuples;
+    RowTuples input_row_tuples;
 
     if (!rows_annotations.count(i)) {
-        std::vector<size_t> rd_path_trunc; 
-        std::vector<Row> rd_ids_start;
-
-        graph::boss::BOSS::edge_index boss_edge = graph_->kmer_to_boss_index(
-                    graph::AnnotatedSequenceGraph::anno_to_graph_index(i));
-
-        while (true) {
-            Row row = graph::AnnotatedSequenceGraph::graph_to_anno_index(
-                    graph_->boss_to_kmer_index(boss_edge));
-
-            auto [it, is_new] = node_to_rd.try_emplace(row, rd_ids.size());
-            rd_path_trunc.push_back(it.value());
-
-            if (!is_new)
-                break;
-
-            rd_ids.push_back(row);
-            rd_ids_start.push_back(row); 
-
-            if (anchor_[row])
-                break;
-
-            boss_edge = boss.row_diff_successor(boss_edge, rd_succ);
-        }
-
-        // step 2.1 Decompress annotations for the input Row 
-        std::vector<RowTuples> rd_rows_start = diffs_.get_row_tuples(rd_ids_start);
-        for (auto &row : rd_rows_start) {
-            // no encoding
-            decode_diffs(&row);
-        }
-
-        rd_rows.insert(rd_rows.end(), rd_rows_start.begin(), rd_rows_start.end());
-
-        RowTuples result_of_decompression;     
-        auto it = rd_path_trunc.rbegin();
-        std::sort(rd_rows[*it].begin(), rd_rows[*it].end());
-
-        result_of_decompression = rd_rows[*it];
-        rows_annotations[rd_ids[*it]] = result_of_decompression;
-
-        // propagate back and reconstruct full annotations for predecessors
-        for (++it ; it != rd_path_trunc.rend(); ++it) {
-            std::sort(rd_rows[*it].begin(), rd_rows[*it].end());
-            add_diff(rd_rows[*it], &result_of_decompression);
-            // replace diff row with full reconstructed annotation
-            rd_rows[*it] = result_of_decompression;
-
-            // keep the decompressed annotations for the Rows
-            // along that row-diff path
-            rows_annotations[rd_ids[*it]] = result_of_decompression;
-        }
-        assert(std::all_of(result_of_decompression.begin(), result_of_decompression.end(),
-                            [](auto &p) { return p.second.size(); }));
-        
-        
-        
-        input_row_row_tuples = result_of_decompression;
+        input_row_tuples = get_row_tuples(i, rd_ids, node_to_rd, rd_rows,
+        rows_annotations, boss, rd_succ);
     } else {
         // if we already decompressed the annotations for this node
         // then simply retrieve them from the map
-        input_row_row_tuples = rows_annotations[i];
+        input_row_tuples = rows_annotations[i];
     }
-
-    
 
     // step 2.2 Save labels of the input Row in a set
     std::unordered_set<Column> labels_of_the_start_node;
-
-    // step 2.3 Set up adjacency lists for each label of the input Row
-
-    // the adjacency lists for the subgraph traversed forwards
-    // std::unordered_map<Column, std::unordered_map<Row, std::vector<Row>>> labeled_parents_map;
-    // std::unordered_map<Column, std::unordered_map<Row, std::vector<Row>>> labeled_children_map;
-
-    // the adjacency lists for the subgraph traversed backwards
-    // std::unordered_map<Column, std::unordered_map<Row, std::vector<Row>>> labeled_parents_map_backward;
-    // std::unordered_map<Column, std::unordered_map<Row, std::vector<Row>>> labeled_children_map_backward;
 
     std::vector<std::tuple<std::vector<Row>, Column, uint64_t>> result;
 
     std::unordered_map<Column, uint64_t> input_row_position_in_ref_seq;
 
-    for (auto &[j, tuple] : input_row_row_tuples) {
+    for (auto &[j, tuple] : input_row_tuples) {
 
         // if (!reconstructed_reads.count(j)) {
         //     labels_of_the_start_node.insert(j);
@@ -398,16 +409,6 @@ std::vector<RowTuples> &rd_rows, std::unordered_map<Column, std::vector<Row>> &r
 
         input_row_position_in_ref_seq[j] = tuple.front();
     }
-
-    // std::cout << "labels of the start node:";
-    // for (auto & lab_st : labels_of_the_start_node) {
-    //     std::cout << lab_st << ", ";
-    // }
-
-    // std::cout << '\n';
-    // if (labels_of_the_start_node.empty()) {
-    //     return result;
-    // }
 
 
     // step 3. Traverse the graph using DFS 
@@ -448,61 +449,8 @@ std::vector<RowTuples> &rd_rows, std::unordered_map<Column, std::vector<Row>> &r
             // build rd-path and decompress the annotations
             // (repeat steps 1-2.1)
             if (!rows_annotations.count(next_to_anno)) {
-                
-                // commented last
-                std::vector<size_t> rd_path_next; 
-                std::vector<Row> rd_ids_next;
-
-                graph::boss::BOSS::edge_index boss_edge = graph_->kmer_to_boss_index(next);
-
-                while (true) {
-                    Row row_w = graph::AnnotatedSequenceGraph::graph_to_anno_index(
-                            graph_->boss_to_kmer_index(boss_edge));
-
-                    auto [it, is_new] = node_to_rd.try_emplace(row_w, rd_ids.size());
-                    rd_path_next.push_back(it.value());
-
-                    if (!is_new)
-                        break;                        
-
-                    rd_ids.push_back(row_w);
-                    rd_ids_next.push_back(row_w);  
-
-                    if (anchor_[row_w])
-                        break;
-
-                    boss_edge = boss.row_diff_successor(boss_edge, rd_succ);
-                }
-
-                // get the RowTuples for the new rows along the rd-path
-                std::vector<RowTuples> rd_rows_next = diffs_.get_row_tuples(rd_ids_next);
-              
-                for (auto &row : rd_rows_next) {
-                    decode_diffs(&row);
-                }
-
-                // add the new rows to the vector of all rows
-                rd_rows.insert(rd_rows.end(), rd_rows_next.begin(), rd_rows_next.end());
-                
-                RowTuples result_of_decompression_next; 
-
-                auto it = rd_path_next.rbegin();
-                std::sort(rd_rows[*it].begin(), rd_rows[*it].end());
-
-                result_of_decompression_next = rd_rows[*it];
-                rows_annotations[rd_ids[*it]] = result_of_decompression_next;
-
-                // propagate back and reconstruct full annotations for predecessors
-                for (++it ; it != rd_path_next.rend(); ++it) {
-                    std::sort(rd_rows[*it].begin(), rd_rows[*it].end());
-                    add_diff(rd_rows[*it], &result_of_decompression_next);
-                    // replace diff row with full reconstructed annotation
-                    rd_rows[*it] = result_of_decompression_next;
-                    
-                    rows_annotations[rd_ids[*it]] = result_of_decompression_next;
-                }
-
-                next_annotations = result_of_decompression_next;
+                next_annotations = get_row_tuples(next_to_anno, rd_ids, node_to_rd, rd_rows,
+                rows_annotations, boss, rd_succ);
             } else {
                 // if we already decompressed the annotations for this node
                 // then simply retrieve them from the map
@@ -518,8 +466,6 @@ std::vector<RowTuples> &rd_rows, std::unordered_map<Column, std::vector<Row>> &r
                 // and add the child-parent relation to the corresponding map
                 if (labels_of_the_start_node.count(j_next) && current_parent_labels.count(j_next)) {
                     acceptable_node = true;
-                    // labeled_parents_map[j_next][next_to_anno].push_back(current_parent);
-                    // labeled_children_map[j_next][current_parent].push_back(next_to_anno);
                 }
             }
 
@@ -563,57 +509,8 @@ std::vector<RowTuples> &rd_rows, std::unordered_map<Column, std::vector<Row>> &r
             RowTuples previous_annotations;
 
             if (!rows_annotations.count(previous_to_anno)) {
-
-                // commented last
-                std::vector<size_t> rd_path_previous; 
-                std::vector<Row> rd_ids_previous;
-
-                graph::boss::BOSS::edge_index boss_edge = graph_->kmer_to_boss_index(previous);
-
-                while (true) {
-                    Row row_w = graph::AnnotatedSequenceGraph::graph_to_anno_index(
-                            graph_->boss_to_kmer_index(boss_edge));
-
-                    auto [it, is_new] = node_to_rd.try_emplace(row_w, rd_ids.size());
-                    rd_path_previous.push_back(it.value());
-
-                    if (!is_new)
-                        break;
-
-                    rd_ids.push_back(row_w);
-                    rd_ids_previous.push_back(row_w);  
-
-                    if (anchor_[row_w])
-                        break;
-
-                    boss_edge = boss.row_diff_successor(boss_edge, rd_succ);
-                }
-
-                std::vector<RowTuples> rd_rows_previous = diffs_.get_row_tuples(rd_ids_previous);
-
-                for (auto &row : rd_rows_previous) {
-                    decode_diffs(&row);
-                }
-                
-                rd_rows.insert(rd_rows.end(), rd_rows_previous.begin(), rd_rows_previous.end());
-                
-                RowTuples result_of_decompression_previous;
-                auto it = rd_path_previous.rbegin();
-
-                std::sort(rd_rows[*it].begin(), rd_rows[*it].end());
-                result_of_decompression_previous = rd_rows[*it];
-                
-                rows_annotations[rd_ids[*it]] = result_of_decompression_previous;
-
-                for (++it ; it != rd_path_previous.rend(); ++it) {
-                    std::sort(rd_rows[*it].begin(), rd_rows[*it].end());
-                    add_diff(rd_rows[*it], &result_of_decompression_previous);
-                    rd_rows[*it] = result_of_decompression_previous;
-                    
-                    rows_annotations[rd_ids[*it]] = result_of_decompression_previous;
-                }
-
-                previous_annotations = result_of_decompression_previous;
+                previous_annotations = get_row_tuples(previous_to_anno, rd_ids, node_to_rd, rd_rows,
+                rows_annotations, boss, rd_succ);
             } else {
                 previous_annotations = rows_annotations[previous_to_anno];
             }
@@ -625,8 +522,6 @@ std::vector<RowTuples> &rd_rows, std::unordered_map<Column, std::vector<Row>> &r
             for (auto &[j_prev, tuple_prev] : previous_annotations) {
                 if (labels_of_the_start_node.count(j_prev) && current_child_labels.count(j_prev)) {
                     acceptable_node = true;
-                    // labeled_parents_map_backward[j_prev][previous_to_anno].push_back(current_child);
-                    // labeled_children_map_backward[j_prev][current_child].push_back(previous_to_anno);
                 }
             }
             if (acceptable_node) {
@@ -637,198 +532,24 @@ std::vector<RowTuples> &rd_rows, std::unordered_map<Column, std::vector<Row>> &r
 
     }
 
-    // separate rows' annotations by labels
-    // std::unordered_map<Column, std::unordered_map<Row, std::vector<uint64_t>>> annotations_map_sep_by_labels;
     for (auto & [row, row_tuples] : rows_annotations) {
         for (auto & [j, tuple] : row_tuples) {
             if (!labels_of_the_start_node.count(j)) {
                 continue;
             }
             for (uint64_t &c : tuple) {
-                discovered_coordinates[j].insert(c);
-                test_new_path_reconstruction[j][c] = row;
-
-                // annotations_map_sep_by_labels[j][row].push_back(c);
+                reconstucted_paths[j][c] = row;
             }
         }
     }
     
     // part 2. Paths reconstruction
 
-    // // each labeled sequence can have only one target (that is the last kmer in the sequence)
-    // std::unordered_map<Column, Row> labeled_targets;
-
-    // // find the ends of the sequences
-    // for (auto & [j, children_map] : labeled_children_map) {
-    //     if (!children_map.size()) {
-    //         continue;
-    //     }        
-
-    //     // we can pick any key node from children_map to follow the edges and find the target
-    //     uint64_t final_coord = annotations_map_sep_by_labels[j][children_map.begin()->first].back();
-    //     Row final_target = children_map.begin()->first;
-    //     Row current_row = final_target;
-
-    //     // while current_row has children
-    //     while (children_map.count(current_row)) {
-    //         std::vector<Row> current_children = children_map[current_row];
-
-    //         // the next coordinate must increase by 1
-    //         uint64_t final_coord_candidate = final_coord + SHIFT;
-    //         bool coordinates_can_increase_more = false;
-
-    //         // find an adjacent outgoing node with the next coordinate
-    //         for (Row & current_child_candidate : current_children) {
-    //             std::vector<uint64_t> curr_cand_coordinates = annotations_map_sep_by_labels[j][current_child_candidate];
-
-    //             // convert the vector of coordinates into set to check if it contains final_coord_candindate
-    //             std::unordered_set<uint64_t> curr_cand_coordinates_set(curr_cand_coordinates.begin(),
-    //                                                                    curr_cand_coordinates.end());
-
-    //             // check if set of coordinates for the current child node contains increased coordinate
-    //             if (curr_cand_coordinates_set.count(final_coord_candidate)) {
-    //                 final_coord = final_coord_candidate;
-    //                 current_row = current_child_candidate;
-    //                 coordinates_can_increase_more = true;
-    //                 final_target = current_row;
-    //                 break;
-    //             }
-    //         }
-
-    //         // if haven't found the child node with the increased coordinate, then current node is the target
-    //         if (!coordinates_can_increase_more) {
-    //             final_target = current_row;
-    //             break;
-    //         }
-    //     }
-    //     labeled_targets[j] = final_target;
-    // }
-
-    // // for each label trace the forward path 
-    // std::unordered_map<Column, std::vector<std::pair<Row, uint64_t>>> traces_forward_sep_by_labels;
-    // for (auto & [target_label, target_row] : labeled_targets) {
-    //     Row current_row = target_row;
-    //     std::vector<std::pair<Row, uint64_t>> current_trace;
-        
-    //     // get the very last coordinate of the target node (that is the biggest one)
-    //     // question: is the biggest coordinate in annotations always the last one?
-    //     uint64_t current_coord = annotations_map_sep_by_labels[target_label][current_row].back(); 
-    //     current_trace.push_back(std::make_pair(current_row, current_coord));
-
-    //     // start traversing the incoming edges and trace the path by checking the coordinates decrease
-    //     while (labeled_parents_map[target_label].count(current_row)) {                
-    //         std::vector<Row> current_parents = labeled_parents_map[target_label][current_row];
-
-    //         uint64_t current_coord_candidate = current_coord - SHIFT;
-    //         bool coordinates_can_decrease_more = false;
-
-    //         // find the previous row in path with the decreased coordinate
-    //         for (Row & current_row_candidate : current_parents) {
-    //             std::vector<uint64_t> curr_cand_coordinates = annotations_map_sep_by_labels[target_label][current_row_candidate];
-    //             std::unordered_set<uint64_t> curr_cand_coordinates_set(curr_cand_coordinates.begin(),
-    //                                                                    curr_cand_coordinates.end());
-
-    //             if (curr_cand_coordinates_set.count(current_coord_candidate)) {
-    //                 current_coord = current_coord_candidate;
-    //                 current_row = current_row_candidate;
-    //                 coordinates_can_decrease_more = true;
-    //                 break;
-    //             }
-    //         }
-
-    //         // if haven't found the parent node with the decreased coordinate, then current node is the start of the path
-    //         if (!coordinates_can_decrease_more)   
-    //             break;                
-            
-    //         current_trace.push_back(std::make_pair(current_row, current_coord));                     
-    //     }
-
-    //     std::reverse(current_trace.begin(), current_trace.end());
-    //     traces_forward_sep_by_labels[target_label] = current_trace;
-    // }
-
-    // // similarly, the backward traversal targets are found
-    // std::unordered_map<Column, Row> labeled_targets_backward;
-    // for (auto & [j, children_map] : labeled_children_map_backward) {
-    //     if (!children_map.size()) {
-    //         continue;
-    //     }
-
-    //     uint64_t final_coord = annotations_map_sep_by_labels[j][children_map.begin()->first].front();
-    //     Row final_target = children_map.begin()->first;
-    //     Row current_row = final_target;
-
-    //     while (children_map.count(current_row)) {
-    //         std::vector<Row> current_children = children_map[current_row];
-
-    //         uint64_t final_coord_candidate = final_coord - SHIFT;            
-    //         bool coordinates_can_decrease_more = false;
-
-    //         for (Row & current_child_candidate : current_children) {
-    //             std::vector<uint64_t> curr_cand_coordinates = annotations_map_sep_by_labels[j][current_child_candidate];
-    //             std::unordered_set<uint64_t> curr_cand_coordinates_set(curr_cand_coordinates.begin(),
-    //                                                                    curr_cand_coordinates.end());
-
-    //             if (curr_cand_coordinates_set.count(final_coord_candidate)) {
-    //                 final_coord = final_coord_candidate;
-    //                 current_row = current_child_candidate;
-    //                 coordinates_can_decrease_more = true;
-    //                 final_target = current_row;
-    //                 break;
-    //             }
-    //         }
-
-    //         if (!coordinates_can_decrease_more) {
-    //             final_target = current_row;
-    //             break;
-    //         }
-    //     }
-    //     labeled_targets_backward[j] = final_target;
-    // }   
-
-    // // similarly, for each label the backward path is traced
-    // std::unordered_map<Column, std::vector<std::pair<Row, uint64_t>>> traces_backward_sep_by_labels;
-    // for (auto & [target_label, target_row] : labeled_targets_backward) {
-    //     Row current_row = target_row;
-    //     std::vector<std::pair<Row, uint64_t>> current_trace;
-
-    //     uint64_t current_coord = annotations_map_sep_by_labels[target_label][current_row].front(); 
-    //     current_trace.push_back(std::make_pair(current_row, current_coord));
-        
-    //     while (labeled_parents_map_backward[target_label].count(current_row)) { 
-    //         std::vector<Row> current_parents = labeled_parents_map_backward[target_label][current_row];
-
-    //         uint64_t curr_coord_candidate = current_coord + SHIFT;
-    //         bool coordinates_can_increase_more = false;
-
-    //         for (Row & current_row_candidate : current_parents) {
-    //             std::vector<uint64_t> curr_cand_coordinates = annotations_map_sep_by_labels[target_label][current_row_candidate];
-    //             std::unordered_set<uint64_t> curr_cand_coordinates_set(curr_cand_coordinates.begin(),
-    //                                                                    curr_cand_coordinates.end());
-
-    //             if (curr_cand_coordinates_set.count(curr_coord_candidate)) {
-    //                 current_coord = curr_coord_candidate;
-    //                 current_row = current_row_candidate;
-    //                 coordinates_can_increase_more = true;
-    //                 break;
-    //             }
-    //         }
-
-    //         if (!coordinates_can_increase_more)
-    //             break;            
-            
-    //         current_trace.push_back(std::make_pair(current_row, current_coord));          
-    //     }
-
-    //     traces_backward_sep_by_labels[target_label] = current_trace;
-
-    // }
-
     // new path reconstruction for graphs with unlabeled reads
 
     std::unordered_map<Column, std::vector<std::pair<Row, uint64_t>>> traces_unlabeled;
 
-    for (auto & [j, coords_map] : test_new_path_reconstruction) {
+    for (auto & [j, coords_map] : reconstucted_paths) {
         for (auto & [ccoord, rrow] : coords_map) {
             traces_unlabeled[j].push_back(std::make_pair(rrow, ccoord));
         }
@@ -880,11 +601,35 @@ std::vector<RowTuples> &rd_rows, std::unordered_map<Column, std::vector<Row>> &r
                 curr_read_start_coord = trace_with_jumps[cur_pos].second;
                 curr_read_curr_coord = curr_read_start_coord;
 
-                curr_read_trace.clear();
-                curr_read_trace.push_back(trace_with_jumps[cur_pos].first);
+                // curr_read_trace.clear();
+                // curr_read_trace.push_back(trace_with_jumps[cur_pos].first);
 
-                curr_read_trace_coords.clear();
-                curr_read_trace_coords.push_back(trace_with_jumps[cur_pos]);
+                // curr_read_trace_coords.clear();
+                // curr_read_trace_coords.push_back(trace_with_jumps[cur_pos]);
+
+                if (edge_exists) {
+                    size_t delta_coord = curr_read_curr_coord - trace_with_jumps[cur_pos].second;
+
+                    std::vector<Row> trace_slice;
+                    trace_slice = std::vector<Row>(curr_read_trace.begin() + (curr_read_trace.size() - delta_coord), curr_read_trace.end());
+                    std::vector<std::pair<Row, uint64_t>> trace_slice_coords;
+                    trace_slice_coords = std::vector<std::pair<Row, uint64_t>>(curr_read_trace_coords.begin() + (curr_read_trace_coords.size() - delta_coord), curr_read_trace_coords.end());
+
+                    curr_read_trace.clear();
+                    curr_read_trace_coords.clear();
+
+                    curr_read_trace.insert(curr_read_trace.begin(), trace_slice.begin(), trace_slice.end());
+                    curr_read_trace_coords.insert(curr_read_trace_coords.begin(), trace_slice_coords.begin(), trace_slice_coords.end());
+
+                    curr_read_trace.push_back(trace_with_jumps[cur_pos].first);
+                    curr_read_trace_coords.push_back(trace_with_jumps[cur_pos]);
+                } else {
+                    curr_read_trace.clear();
+                    curr_read_trace_coords.clear();
+
+                    curr_read_trace.push_back(trace_with_jumps[cur_pos].first);
+                    curr_read_trace_coords.push_back(trace_with_jumps[cur_pos]);
+                }
             }
 
             curr_edge_node = curr_next_edge_node;
@@ -989,6 +734,171 @@ std::vector<RowTuples> &rd_rows, std::unordered_map<Column, std::vector<Row>> &r
     // }    
 
     // return result;
+}
+
+template <class BaseMatrix>
+std::vector<std::pair<MultiIntMatrix::Column, uint64_t>> TupleRowDiff<BaseMatrix>
+::get_traces_with_row(Row i, std::unordered_map<Row, RowTuples> &rows_annotations, std::vector<Row> &rd_ids, VectorMap<Row, size_t> &node_to_rd, 
+std::vector<RowTuples> &rd_rows, std::unordered_map<Column, std::vector<Row>> &reconstructed_reads) const {
+    assert(graph_ && "graph must be loaded");
+    assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
+    assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());   
+
+    const graph::boss::BOSS &boss = graph_->get_boss();
+    const bit_vector &rd_succ = fork_succ_.size() ? fork_succ_ : boss.get_last();
+
+    std::unordered_map<Column, std::map<uint64_t, Row>> reconstructed_paths;
+
+    // get annotations for the start node to obtain labels of paths to reconstuct
+    RowTuples input_row_tuples;
+    if (!rows_annotations.count(i)) {
+        input_row_tuples = get_row_tuples(i, rd_ids, node_to_rd, rd_rows,
+        rows_annotations, boss, rd_succ);
+    } else {
+        // if we already decompressed the annotations for this node
+        // then simply retrieve them from the map
+        input_row_tuples = rows_annotations[i];
+    }
+
+    std::unordered_set<Column> labels_of_the_start_node;
+
+    // initialize the result 
+    std::vector<std::pair<Column, uint64_t>> result;
+
+    // positions of the input k-mer in reconstucted reads
+    std::unordered_map<Column, uint64_t> input_row_position_in_ref_seq;
+
+    for (auto &[j, tuple] : input_row_tuples) {
+        if (!reconstructed_reads.count(j)) {
+            labels_of_the_start_node.insert(j);
+            input_row_position_in_ref_seq[j] = tuple.front();
+            for (uint64_t &c : tuple)
+                reconstructed_paths[j][c] = i;
+        } else {
+            // add already reconstucted path to the result
+            result.push_back(std::make_pair(j, tuple.front()));
+        }
+    }
+
+    if (labels_of_the_start_node.empty())
+        return result;
+
+    // DFS traversal forwards
+    std::vector<Row> to_visit;
+    to_visit.push_back(i);
+
+    std::unordered_set<Row> visited_nodes_forward;
+    while (!to_visit.empty()) {
+        Row current_parent = to_visit.back();
+        to_visit.pop_back();
+
+        if (visited_nodes_forward.count(current_parent))
+            continue;
+
+        visited_nodes_forward.insert(current_parent);
+
+        graph::AnnotatedSequenceGraph::node_index current_parent_to_graph = graph::AnnotatedSequenceGraph::anno_to_graph_index(
+            current_parent);
+
+        // for each adjacent outgoing k-mer get the annotations
+        graph_->call_outgoing_kmers(current_parent_to_graph, [&](auto next, char c) {
+            if (c == graph::boss::BOSS::kSentinel)
+                return;
+            
+            Row next_to_anno = graph::AnnotatedSequenceGraph::graph_to_anno_index(next);
+            RowTuples next_annotations;
+
+            // if the annotations for the child node are not decompressed,
+            // build rd-path and decompress the annotations
+            if (!rows_annotations.count(next_to_anno)) {
+                next_annotations = get_row_tuples(next_to_anno, rd_ids, node_to_rd, rd_rows,
+                rows_annotations, boss, rd_succ);
+            } else {
+                // if we already decompressed the annotations for this node
+                // then simply retrieve them from the map
+                next_annotations = rows_annotations[next_to_anno];
+            }
+
+            // acceptable node is a node whose labels match
+            // the labels of the start node
+            bool acceptable_node = false;
+            
+            for (auto &[j_next, tuple_next] : next_annotations) {
+                // check if the label matches the start row labels
+                if (labels_of_the_start_node.count(j_next)) {
+                    acceptable_node = true;
+                    for (uint64_t &c : tuple_next)
+                        reconstructed_paths[j_next][c] = next_to_anno;
+                }
+                    
+            }
+
+            // if the row has at least one label that matches
+            // the start row's labels then add it to the stack
+            if (acceptable_node) {
+                to_visit.push_back(next_to_anno);
+            }
+
+        } );   
+    }
+
+    // DFS backwards is similar to the DFS forwards
+    to_visit.clear();
+    to_visit.push_back(i);
+
+    std::unordered_set<Row> visited_nodes_backward;
+    while (!to_visit.empty()) {
+        Row current_child = to_visit.back();
+        to_visit.pop_back();
+
+        if (visited_nodes_backward.count(current_child))
+            continue;
+        
+        visited_nodes_backward.insert(current_child);
+        graph::AnnotatedSequenceGraph::node_index current_child_to_graph = graph::AnnotatedSequenceGraph::anno_to_graph_index(
+            current_child);
+
+        graph_->call_incoming_kmers(current_child_to_graph, [&](auto previous, char c) {
+            if (c == graph::boss::BOSS::kSentinel)
+                return;
+            
+            Row previous_to_anno = graph::AnnotatedSequenceGraph::graph_to_anno_index(previous);
+            RowTuples previous_annotations;
+
+            if (!rows_annotations.count(previous_to_anno)) {
+                previous_annotations = get_row_tuples(previous_to_anno, rd_ids, node_to_rd, rd_rows,
+                rows_annotations, boss, rd_succ);
+            } else {
+                previous_annotations = rows_annotations[previous_to_anno];
+            }
+
+            // aceptable node is a node whose labels match
+            // the labels of the start node
+            bool acceptable_node = false;
+
+            for (auto &[j_prev, tuple_prev] : previous_annotations) {
+                if (labels_of_the_start_node.count(j_prev)) {
+                    acceptable_node = true;
+                    for (uint64_t &c : tuple_prev)
+                        reconstructed_paths[j_prev][c] = previous_to_anno;
+                }
+            }
+
+            if (acceptable_node)
+                to_visit.push_back(previous_to_anno);
+        } );
+    }
+    
+    for (auto & [j, coords_map] : reconstructed_paths) {
+        std::vector<Row> labeled_trace;
+        for (auto & [c, row_c] : coords_map) {
+            labeled_trace.push_back(row_c);
+        }
+        reconstructed_reads[j] = labeled_trace;
+        result.push_back(std::make_pair(j, input_row_position_in_ref_seq[j]));        
+    }
+
+    return result;
 }
 
 } // namespace matrix

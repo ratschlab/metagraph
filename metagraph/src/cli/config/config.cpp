@@ -230,6 +230,8 @@ Config::Config(int argc, char *argv[]) {
             query_coords = true;
         } else if (!strcmp(argv[i], "--query-reads")) {
             query_reads = true;
+        } else if (!strcmp(argv[i], "--auto-labels")) {
+            auto_labels = true;
         } else if (!strcmp(argv[i], "--verbose-output")) {
             verbose_output = true;
         } else if (!strcmp(argv[i], "--filter-present")) {

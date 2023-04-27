@@ -92,6 +92,44 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids) const {
     return std::make_pair(std::move(rd_ids), std::move(rd_paths_trunc));
 }
 
+std::pair<std::vector<BinaryMatrix::Row>, std::vector<size_t>>
+IRowDiff::get_rd_ids(BinaryMatrix::Row row, std::vector<BinaryMatrix::Row> &rd_ids,
+VectorMap<BinaryMatrix::Row, size_t> &node_to_rd, const graph::boss::BOSS &boss, const bit_vector &rd_succ) const {
+    assert(graph_ && "graph must be loaded");
+    assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());
+
+    using Row = BinaryMatrix::Row;
+    
+    std::vector<Row> rd_ids_current;
+    rd_ids_current.reserve(RD_PATH_RESERVE_SIZE);
+
+    std::vector<size_t> rd_path_current;
+
+    graph::boss::BOSS::edge_index boss_edge = graph_->kmer_to_boss_index(
+                graph::AnnotatedSequenceGraph::anno_to_graph_index(row));
+
+    while (true) {
+        Row row_next = graph::AnnotatedSequenceGraph::graph_to_anno_index(
+                    graph_->boss_to_kmer_index(boss_edge));
+
+        auto [it, is_new] = node_to_rd.try_emplace(row_next, rd_ids.size());
+        rd_path_current.push_back(it.value());
+
+        if (!is_new)
+            break;
+
+        rd_ids.push_back(row_next);
+        rd_ids_current.push_back(row_next); 
+
+        if (anchor_[row_next])
+            break;
+
+        boss_edge = boss.row_diff_successor(boss_edge, rd_succ);
+    }
+
+    return std::make_pair(std::move(rd_ids_current), std::move(rd_path_current));
+}
+
 } // namespace binmat
 } // namespace annot
 } // namespace mtg
