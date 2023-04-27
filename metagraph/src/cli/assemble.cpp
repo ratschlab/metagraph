@@ -51,7 +51,8 @@ DifferentialAssemblyConfig diff_assembly_config(const Json::Value &experiment) {
     diff_config.label_mask_other_unitig_fraction = experiment.get("unitig_other_max_fraction", 1.0).asDouble();
     diff_config.add_complement = experiment.get("forward_and_reverse", false).asBool();
     diff_config.count_kmers = experiment.get("count_kmers", false).asBool();
-    diff_config.family_wise_error_rate = experiment.get("family_wise_error_rate", 0.05).asDouble();
+    diff_config.pvalue = experiment.get("pvalue", 0).asDouble();
+    diff_config.family_wise_error_rate = experiment.get("family_wise_error_rate", 0).asDouble();
     diff_config.test_by_unitig = experiment.get("test_by_unitig", false).asBool();
     diff_config.evaluate_assembly = experiment.get("evaluate_assembly", false).asBool();
 
@@ -62,15 +63,19 @@ DifferentialAssemblyConfig diff_assembly_config(const Json::Value &experiment) {
     logger->trace("Per-unitig mask out fraction:\t\t{}", diff_config.label_mask_out_unitig_fraction);
     logger->trace("Per-unitig other label fraction:\t{}", diff_config.label_mask_other_unitig_fraction);
     logger->trace("Include reverse complements:\t\t{}", diff_config.add_complement);
-    logger->trace("Include k-mer counts if preseadd_complementnt in the graph:\t\t{}", diff_config.count_kmers); // if node weights (k-mer count) are present in the graph and should be included in the differential assembly.
-    logger->trace("Family wise error rate for the Bonferroni test:\t{}", diff_config.family_wise_error_rate);
+
+    logger->trace("Include k-mer counts if present in the graph:\t\t{}", diff_config.count_kmers); // if node weights (k-mer count) are present in the graph and should be included in the differential assembly.
+    if (diff_config.count_kmers){
+        if (diff_config.family_wise_error_rate)
+            logger->trace("Family wise error rate for the Bonferroni test:\t{}", diff_config.family_wise_error_rate);
+        else{
+            logger->trace("No multiple testing is used.");
+            logger->trace("The p-value for the statistical tests:\t\t{}", diff_config.pvalue);
+        }
+        logger->trace("Do statistical tests per unitig:\t\t{}", diff_config.test_by_unitig);
+    }
 
 
-    // TODO get the folder with the annotation columns from the .json or command, because it is redundant to have to give all of them as an input.
-            //  How to? For all the in_labels and out_labels, collect the folder/<filename>.column.annodbg file and push them in the list of config->infbase_annotators.
-//    config->enumerate_out_sequences;
-//    config->infbase_annotators = ;
-    // but you would still need to match them?
     return diff_config;
 }
 

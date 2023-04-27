@@ -210,7 +210,7 @@ void call_sequences_from(const DeBruijnGraph &graph,
                         // TODO: make sure that the selected node is not added to the queue --> problems if run on  multiple threads.
                     }
                     if (!call_unitigs // In the unitig mode (i.e. if call_unitigs is true), simply the unitigs must be returned, rather than longer contigs
-                        && downcasted_graph // TODO feature is temporary
+                        && downcasted_graph // TODO if not a downcasted graph it doesnt work anymore, make a seperate method.
                         && downcasted_graph->likelihood_ratios[next] > next_likelihood){ // If the likelihood of this unitig is better than the current likelihood
                         next_likelihood = downcasted_graph->likelihood_ratios[next];
                         next_node = next;
@@ -347,9 +347,7 @@ void call_sequences(const DeBruijnGraph &graph,
                              "Traverse graph",
                              std::cerr, !common::get_verbose());
 
-//    // Myrthe: TODO define callback
-//    const std::function<bool(node_index, node_index)> &pick_edge
-//            = [](node_index, node_index){ return false; };
+
 
     auto call_paths_from = [&](node_index node) {
         call_sequences_from(graph,
@@ -386,7 +384,7 @@ void call_sequences(const DeBruijnGraph &graph,
                 call_paths_from(node);
         });
 
-    } else {
+    } else { //TODO an error occurs if k-mer counts are not used.
         // start at the source nodes (those with indegree == 0)
         //  .____  or  .____
         //              \___

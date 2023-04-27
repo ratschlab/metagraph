@@ -7,6 +7,7 @@
 
 #include <sdsl/int_vector.hpp>
 #include <sdsl/select_support_scan.hpp>
+#include "sdsl/int_vector_buffer.hpp"
 
 class ThreadPool;
 class bit_vector;
@@ -381,7 +382,7 @@ inline uint64_t atomic_fetch_and_add(sdsl::int_vector<> &vector,
                                      uint64_t i,
                                      uint64_t val,
                                      std::mutex &backup_mutex,
-                                     int mo) {
+                                     int mo) { // TODO: make a version for int_vector_buffer, which does not have the .data method
     const uint8_t width = vector.width();
     const size_t bit_pos = i * width;
     const uint64_t mask = (1llu << width) - 1;
@@ -390,7 +391,7 @@ inline uint64_t atomic_fetch_and_add(sdsl::int_vector<> &vector,
         std::lock_guard<std::mutex> lock(backup_mutex);
         const uint64_t old_val = vector[i];
         vector[i] = old_val + val;
-        return old_val;
+        return old_val; // TODO make sure that values do not overflow in neighbouring cells.
     } else if ((bit_pos & 0x3F) + width <= 64) {
         // element fits in an aligned word
         uint64_t *word = &vector.data()[bit_pos >> 6];
@@ -432,6 +433,82 @@ inline uint64_t atomic_fetch_and_add(sdsl::int_vector<> &vector,
 
     return 0;
 }
+
+// BUFFERED VECTOR TODO
+//template <uint8_t t_width=0>
+//class int_vector_buffer_access {
+//  public:
+//    std::unique_ptr<sdsl::isfstream> m_ifile;
+//    std::unique_ptr<sdsl::osfstream> m_ofile;
+//    std::streampos m_start;
+//    std::string m_filename;
+//    sdsl::int_vector<t_width> m_buffer;
+//    bool m_need_to_write;
+//    std::streampos m_offset;
+//    uint64_t m_buffersize;
+//    uint64_t m_size;
+//    uint64_t m_begin;
+//};
+//
+//inline uint64_t atomic_fetch_and_add(sdsl::int_vector_buffer<> &buffer,
+//                                     uint64_t i,
+//                                     uint64_t val,
+//                                     std::mutex &backup_mutex,
+//                                     int mo) { // TODO: make a version for int_vector_buffer, which does not have the .data method
+//    static_assert(sizeof(int_vector_buffer_access<>) == sizeof(sdsl::int_vector_buffer<>));
+//    //sdsl::int_vector_buffer<> buffer;
+//    auto &vector = reinterpret_cast<int_vector_buffer_access<>&>(buffer); // public version
+//
+//    const uint8_t width = vector.width();
+//    const size_t bit_pos = i * width;
+//    const uint64_t mask = (1llu << width) - 1;
+//    if (width + 7 > 64) {
+//        // there is no way to reliably modify without a mutex
+//        std::lock_guard<std::mutex> lock(backup_mutex);
+//        const uint64_t old_val = vector[i];
+//        vector[i] = old_val + val;
+//        return old_val; // TODO make sure that values do not overflow in neighbouring cells.
+//    } else if ((bit_pos & 0x3F) + width <= 64) {
+//        // element fits in an aligned word
+//        uint64_t *word = &vector.data()[bit_pos >> 6]; // TODO
+//        const uint8_t shift = bit_pos & 0x3F;
+//        return (__atomic_fetch_add(word, val << shift, mo) >> shift) & mask;
+//#if defined(MODE_TI) && defined(__CX16__)
+//    } else if ((bit_pos & 0x7F) + width <= 128) {
+//        // element fits in an aligned double word
+//        __uint128_t *word = &reinterpret_cast<__uint128_t*>(vector.data())[bit_pos >> 7];
+//        const uint8_t shift = bit_pos & 0x7F;
+//        // TODO: GCC only generates cmpxchg16b instruction with older __sync functions
+//        return (__sync_fetch_and_add(word, __uint128_t(val) << shift) >> shift) & mask;
+//#endif
+//    } else {
+//        uint8_t shift = bit_pos & 0x7;
+//        if (shift + width <= 8) {
+//            // read from a byte
+//            uint8_t *word = &reinterpret_cast<uint8_t*>(vector.data())[bit_pos >> 3];
+//            return (__atomic_fetch_add(word, val << shift, mo) >> shift) & mask;
+//        } else if (shift + width <= 16) {
+//            // unaligned read from two bytes
+//            uint16_t *word = &reinterpret_cast<uint16_t*>(vector.data())[bit_pos >> 4];
+//            shift = bit_pos & 0xF;
+//            return (__atomic_fetch_add(word, val << shift, mo) >> shift) & mask;
+//        } else if (shift + width <= 32) {
+//            // unaligned read from four bytes
+//            uint32_t *word = &reinterpret_cast<uint32_t*>(vector.data())[bit_pos >> 5];
+//            shift = bit_pos & 0x1F;
+//            return (__atomic_fetch_add(word, val << shift, mo) >> shift) & mask;
+//        } else if (shift + width <= 64) {
+//            // unaligned read from eight bytes
+//            uint64_t *word = &vector.data()[bit_pos >> 6];
+//            shift = bit_pos & 0x3F;
+//            return (__atomic_fetch_add(word, val << shift, mo) >> shift) & mask;
+//        } else {
+//            assert(false);
+//        }
+//    }
+//
+//    return 0;
+//}
 
 inline uint64_t atomic_exchange(sdsl::int_vector<> &vector,
                                 uint64_t i,

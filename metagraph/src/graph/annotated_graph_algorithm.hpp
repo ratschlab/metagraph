@@ -32,10 +32,11 @@ struct DifferentialAssemblyConfig {
     double label_mask_out_unitig_fraction = 0.0;
     double label_mask_out_kmer_fraction = 0.0;
     double label_mask_other_unitig_fraction = 1.0;
-    bool add_complement = false;
-    bool count_kmers = false; // Myrthe
-    double family_wise_error_rate = 0.05; //Myrthe: differential assembly statistical tests, or the family wise rate for bonferonni or a p-value
-    bool test_by_unitig = false; // Myrthe
+    bool add_complement = true;
+    bool count_kmers = true;
+    double pvalue = 0.05; // Differential assembly statistical test cutoff
+    double family_wise_error_rate = 0; // The family wise rate for bonferonni multiple testing correction. If 0, no multiple testing is used.
+    bool test_by_unitig = false;
     bool evaluate_assembly = false; // Myrthe temporary : evaluate an assembly
 };
 

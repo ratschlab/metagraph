@@ -61,7 +61,7 @@ void kmer_distribution_table(const ColumnGenerator &generate_columns,
                              const DifferentialAssemblyConfig &config,
                              size_t num_threads);  // For kmer distribution.
 
-std::tuple<sdsl::int_vector<>, sdsl::bit_vector, sdsl::bit_vector, std::tuple<size_t, size_t>>
+std::tuple<sdsl::int_vector_buffer<>, sdsl::bit_vector, sdsl::bit_vector, std::tuple<size_t, size_t>>
 construct_diff_label_count_vector(const ColumnGenerator &generate_columns,
                                   const std::vector<std::string> &files,
                                   const tsl::hopscotch_set<Label> &labels_in,
@@ -88,7 +88,7 @@ void update_masked_graph_by_unitig(MaskedDeBruijnGraph &masked_graph,
 // is true, then add the reverse complements of all nodes to the graph as well.
 std::shared_ptr<MaskedDeBruijnGraph>
 make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> graph_ptr,
-                          sdsl::int_vector<> &counts,
+                          sdsl::int_vector_buffer<> &counts,
                           sdsl::bit_vector&& mask,
                           bool add_complement,
                           size_t num_threads);
@@ -97,7 +97,7 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 std::shared_ptr<MaskedDeBruijnGraph>
 mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     const AnnotatedDBG *anno_graph,
-                    sdsl::int_vector<>&& counts,
+                    sdsl::int_vector_buffer<>&& counts,
                     sdsl::bit_vector&& mask,
                     sdsl::bit_vector&& other_mask,
                     size_t num_labels,
@@ -210,12 +210,12 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr, // Myrthe: t
                             assert(std::accumulate(column_values.begin(), column_values.end(), 0) > 0);
                             assert(column->num_set_bits() > 0);
                             assert(column->num_set_bits() == column_values.size());
-                            //Normalization. normalize_coverage(column); This constant should be the same for every column. Calculate it from  the max width column. with the max value over all columns being the width of that column devidied by its column_values_sum
-                            int normalization_constant = 1e9;   //(int) 2**16 / width * column_values_sum;
+                            int normalization_constant = 1e9;  //Normalization. This constant should be the same for every column. Calculate it from  the max width column. with the max value over all columns being the width of that column devidied by its column_values_sum, //(int) 2**16 / width * column_values_sum;
                             auto total_kmers = std::accumulate(column_values.begin(), column_values.end(), 0);
                             auto normalization_factor = normalization_constant / total_kmers;
                             int min_col_width = std::pow(2, 16); //column_values = std::min((int) std::ceil((*column_values)*normalization_factor), min_column_width); // limit to a certain number of bits.
                             call_ones(*column, [&](uint64_t i) {
+                                // TODO instead of looping per column, m_buffersize
                                 auto column_value = column_values[column->rank1(i)-1];
                                 column_value = std::min((int) std::ceil(column_value*normalization_factor), min_col_width); // normalize value
                                 value_callback(i, column_value);
@@ -301,38 +301,6 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr, // Myrthe: t
     }
 
 
-    if (config.family_wise_error_rate == 0){  // Temporary code to make k-mer distribution
-        logger->trace("K-mer distribution");
-
-        auto masked_graph = make_initial_masked_graph(graph_ptr, counts, std::move(init_mask),
-                                                      add_complement, num_threads);
-        kmer_distribution_table(
-                [&](const ColumnCallback &column_callback) {
-                    annot::ColumnCompressed<>::load_columns_and_values(files,
-                       [&](uint64_t offset, const Label &label, std::unique_ptr<bit_vector> && column, auto&& column_values) {
-                           column_callback(offset, label, [&](const ValueCallback &value_callback) {
-
-                               if (config.test_by_unitig == false) {
-                                   call_ones(*column, [&](uint64_t i) {
-                                       value_callback(i, column_values[column->rank1(i)- 1]);
-                                   });
-                               }
-                               else {
-                                   for(size_t i = 0; i < column->size(); i++){
-                                       double value = (*column)[i];
-                                       if (value) value = column_values[column->rank1(i)- 1];
-                                       value_callback(i, value);
-                                   }
-                               }
-                           });
-                       }
-                    );
-                },
-                labels_in, labels_out, graph_ptr->max_index(), *masked_graph, config, num_threads
-        );
-        std::exit(EXIT_SUCCESS);
-    }
-
     return mask_nodes_by_label(graph_ptr, nullptr,
                                std::move(counts), std::move(init_mask),
                                std::move(other_mask),
@@ -345,7 +313,7 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr, // Myrthe: t
 std::shared_ptr<MaskedDeBruijnGraph>
 mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                     const AnnotatedDBG *anno_graph,
-                    sdsl::int_vector<>&& counts,
+                    sdsl::int_vector_buffer<>&& counts,
                     sdsl::bit_vector&& init_mask,
                     sdsl::bit_vector&& other_mask,
                     size_t num_labels,
@@ -398,8 +366,8 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                       call_ones(b, [&](size_t i) {
                           if (id_map[i]) {
                               set_bit(a.data(), id_map[i], parallel, MO_RELAXED);
-                              atomic_fetch_and_add(counts, id_map[i] * 2 + offset, 1,
-                                                   vector_backup_mutex, MO_RELAXED);
+
+                              counts[id_map[i] * 2 + offset] += 1;//atomic_fetch_and_add(counts, id_map[i] * 2 + offset, 1, vector_backup_mutex, MO_RELAXED);
                           }
                       });
                   };
@@ -440,10 +408,8 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
         if (config.test_by_unitig == false) { // Statistical testing part when k-mer counts are included. // TODO change to test_by_unitig
             auto total_hypotheses = counts.size()/2; // the total number of hypotheses tested.
-            auto statistical_model = DifferentialTest(config.family_wise_error_rate, total_hypotheses,
-                                                      std::min((int) std::distance(counts.begin(), std::max_element(counts.begin(), counts.end())), (int) 100000),
+            auto statistical_model = DifferentialTest(config.family_wise_error_rate, total_hypotheses, config.pvalue,
                                                       in_total_kmers, out_total_kmers); // similar to the width of the counts vector, the size of the log-factorial table should be the maximum joint coverage over the in_labels resp. out_labels. Convert the width from bits to the number of stored values.
-            // std::min(std::pow(2, counts.width()), 10000) TODO Myrthe: limit the power of the width by some reasonable number, that is lower than 4,294,967,296, the current maximum, i.e. (2^32) or calculate it by the maximum of the counts vector.
             const auto &in_mask = static_cast<const bitmap_vector &>(masked_graph->get_mask()).data();
             sdsl::bit_vector mask = in_mask;
             size_t total_nodes = masked_graph->num_nodes();
@@ -469,9 +435,7 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 total_unitigs.fetch_add(1, MO_RELAXED);
             });
             auto statistical_model = DifferentialTest(config.family_wise_error_rate, total_unitigs, // total number of hypotheses equals the number of unitigs
-                                               std::min((int) std::distance(counts.begin(),
-                                               std::max_element(counts.begin(), counts.end())), (int) 100000), // Myrthe: the factorial should increase for the unitig mode.
-                                               in_total_kmers, out_total_kmers);
+                                               config.pvalue, in_total_kmers, out_total_kmers);
             update_masked_graph_by_unitig(*masked_graph, // intitial mask
                 [&](const std::string &, const std::vector<node_index> &path) -> Intervals { // return a set of intervals to keep in the graph
                     int in_kmer_count_unitig = 0;
@@ -493,7 +457,6 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 },
                 num_threads);
             }
-            //std::fill(masked_graph->likelihood_ratios.begin(), masked_graph->likelihood_ratios.end(), 0.01); // Myrthe: For testing. temporary
             return masked_graph;
     }
 
@@ -594,7 +557,8 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
 std::shared_ptr<MaskedDeBruijnGraph>
 make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> graph_ptr,
-                          sdsl::int_vector<> &counts, // Myrthe later: int_vector_buffer and make it a template class. Otherwise the function stays the same because initial mask should only check if a k-mer is present just once in either set.
+                          sdsl::int_vector_buffer<> &counts,
+                          // TODO: Why make it a template class? int_vector_buffer and make it a template class.
                           sdsl::bit_vector&& mask,
                           bool add_complement,
                           size_t num_threads) {
@@ -624,10 +588,10 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             auto it = rc_path.rbegin();
             for (size_t i = 0; i < path.size(); ++i, ++it) {
                 if (*it) {
-                    uint64_t in_count = atomic_fetch(counts, path[i] * 2, vector_backup_mutex, MO_RELAXED);
-                    uint64_t out_count = atomic_fetch(counts, path[i] * 2 + 1, vector_backup_mutex, MO_RELAXED);
-                    atomic_fetch_and_add(counts, *it * 2, in_count, vector_backup_mutex, MO_RELAXED);
-                    atomic_fetch_and_add(counts, *it * 2 + 1, out_count, vector_backup_mutex, MO_RELAXED);
+                    uint64_t in_count = counts[path[i] * 2]; //atomic_fetch(counts, path[i] * 2, vector_backup_mutex, MO_RELAXED);
+                    uint64_t out_count = counts[path[i] * 2 + 1]; //atomic_fetch(counts, path[i] * 2 + 1, vector_backup_mutex, MO_RELAXED);
+                    counts[*it * 2] += in_count; //atomic_fetch_and_add(counts, *it * 2, in_count, vector_backup_mutex, MO_RELAXED);
+                    counts[*it * 2 + 1] += out_count; //atomic_fetch_and_add(counts, *it * 2 + 1, out_count, vector_backup_mutex, MO_RELAXED);
 
                     set_bit(mask.data(), *it, in_count, MO_RELAXED);
                 }
@@ -645,7 +609,7 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 }
 
 
-std::tuple<sdsl::int_vector<>, sdsl::bit_vector, sdsl::bit_vector, std::tuple<size_t, size_t>>
+std::tuple<sdsl::int_vector_buffer<>, sdsl::bit_vector, sdsl::bit_vector, std::tuple<size_t, size_t>>
 construct_diff_label_count_vector(const ColumnGenerator &generate_columns,
                                   const std::vector<std::string> &files,
                                   const tsl::hopscotch_set<Label> &labels_in,
@@ -683,10 +647,17 @@ construct_diff_label_count_vector(const ColumnGenerator &generate_columns,
     assert(width);
 
     sdsl::bit_vector indicator(max_index + 1, false);
+    size_t length = indicator.size() * 2;
 
-    logger->trace("Allocating count vector");
-    // the in and out counts are stored interleaved
-    sdsl::int_vector<> counts = aligned_int_vector(indicator.size() * 2, 0, width, 16); //Myrthe later: int_vector_buffer. In that case the function also to be a template too, or a template based argument, if vector_type== buffered_int_vector, then it should be a buffered (// if constexpr (std::is_same_v<vector_type, Bitmap>) { } //sdsl::int_vector_buffer<> counts = aligned_int_vector(
+    logger->trace("Allocating count vector"); // the in and out counts are stored interleaved
+
+    // TODO In that case the function also to be a template too, or a template based argument, previously: sdsl::int_vector<> counts = aligned_int_vector(indicator.size() * 2, 0, width, 16);
+    // Myrthe later: For the buffered_int_vector we would have to use operators [ ] [ ], but it might be problematic if it runs out of memory and push_back would need to be used instead.
+    // Myrthe later: The second problem with buffered_int_vector might be that it is expensive, because we do random access on it. Instead a solution might be to use a piority queue of L columns, storing the smallest element as a triple (column , index, value), such that always k-mers in row x are processed before row x + 1.
+
+    std::string filename = std::tmpnam(nullptr);
+    sdsl::int_vector_buffer<> counts(filename, std::ios::out, 1024*1024, width);
+    for (size_t i = 0; i < length; ++i) counts.push_back(0); // set the size of the count vector using push backs
 
     logger->trace("done");
 
@@ -694,9 +665,8 @@ construct_diff_label_count_vector(const ColumnGenerator &generate_columns,
     std::mutex vector_backup_mutex;
 
     logger->trace("Populating count vector");
-    std::atomic_thread_fence(std::memory_order_release); //Myrthe ANSWER: outer loop is over the columns, inner loop over the kmers (i indicating the rows)
-            // Myrthe later: For the buffered_int_vector we would have to use operators [ ] [ ], but it might be problematic if it runs out of memory and push_back would need to be used instead.
-            // Myrthe later: The second problem with buffered_int_vector might be that it is expensive, because we do random access on it. Instead a solution might be to use a piority queue of L columns, storing the smallest element as a triple (column , index, value), such that always k-mers in row x are processed before row x + 1.
+    std::atomic_thread_fence(std::memory_order_release);
+
 
     size_t in_total_kmers = 0; size_t out_total_kmers = 0;
 
@@ -712,7 +682,7 @@ construct_diff_label_count_vector(const ColumnGenerator &generate_columns,
             i = AnnotatedDBG::anno_to_graph_index(i); // indices in the annotation matrix have an offset of 1 compared to those in the graph. Since the mask should be compatible with the graph, we have to convert the index.
             assert(i != DeBruijnGraph::npos);
             set_bit(indicator.data(), i, parallel, MO_RELAXED); // set the corresponding bit to true in the mask, with the 'indicator' representing the mask.
-            atomic_fetch_and_add(counts, i * 2, value, vector_backup_mutex, MO_RELAXED); // TODO Myrthe later: make sure that values do not overflow in neighbouring cells.
+            counts[i * 2] += value; //atomic_fetch_and_add(counts, i * 2, value, vector_backup_mutex, MO_RELAXED);
             in_total_kmers += value;
         };
 
@@ -721,7 +691,7 @@ construct_diff_label_count_vector(const ColumnGenerator &generate_columns,
             assert(i != DeBruijnGraph::npos);
             if (add_out_labels_to_mask)
                 set_bit(indicator.data(), i, parallel, MO_RELAXED);
-            atomic_fetch_and_add(counts, i * 2 + 1, value, vector_backup_mutex, MO_RELAXED);
+            counts[i * 2 + 1] += value; //atomic_fetch_and_add(counts, i * 2 + 1, value, vector_backup_mutex, MO_RELAXED);
             out_total_kmers += value;
         };
 
@@ -729,8 +699,8 @@ construct_diff_label_count_vector(const ColumnGenerator &generate_columns,
             i = AnnotatedDBG::anno_to_graph_index(i);
             assert(i != DeBruijnGraph::npos);
             set_bit(indicator.data(), i, parallel, MO_RELAXED);
-            atomic_fetch_and_add(counts, i * 2, value, vector_backup_mutex, MO_RELAXED);
-            atomic_fetch_and_add(counts, i * 2 + 1, value, vector_backup_mutex, MO_RELAXED);
+            counts[i * 2] += value; //atomic_fetch_and_add(counts, i * 2, value, vector_backup_mutex, MO_RELAXED);
+            counts[i * 2 + 1] += value; //atomic_fetch_and_add(counts, i * 2 + 1, value, vector_backup_mutex, MO_RELAXED);
             out_total_kmers += value;
             in_total_kmers += value;
         };
