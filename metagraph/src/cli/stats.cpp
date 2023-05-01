@@ -181,6 +181,40 @@ void print_brwt_stats(const annot::binmat::BRWT& brwt) {
 }
 
 void print_annotation_stats(const std::string &fname, const Config &config) {
+    if (config.print_column_names) {
+        annot::LabelEncoder<std::string> label_encoder;
+
+        logger->info("Scanning annotation '{}'", fname);
+
+        try {
+            std::ifstream instream(fname, std::ios::binary);
+
+            // TODO: make this more reliable
+            if (parse_annotation_type(fname) == Config::ColumnCompressed) {
+                // Column compressed dumps the number of rows first
+                // skipping it...
+                load_number(instream);
+            }
+
+            if (!label_encoder.load(instream))
+                throw std::ios_base::failure("");
+
+        } catch (...) {
+            logger->error("Cannot read label encoder from file '{}'", fname);
+            exit(1);
+        }
+
+        std::cout << "Number of columns: " << label_encoder.size() << '\n';
+        for (size_t c = 0; c < label_encoder.size(); ++c) {
+            std::cout << label_encoder.decode(c) << '\n';
+        }
+
+        std::cout << std::flush;
+        return;
+    }
+
+    logger->info("Statistics for annotation '{}'", fname);
+
     std::unique_ptr<annot::MultiLabelEncoded<std::string>> anno_p
             = initialize_annotation(fname, config);
     auto &annotation = *anno_p;
@@ -199,14 +233,14 @@ void print_annotation_stats(const std::string &fname, const Config &config) {
         }
     }
 
-    std::cout << "=================== ANNOTATION STATS ===================" << std::endl;
-    std::cout << "labels:  " << annotation.num_labels() << std::endl;
-    std::cout << "objects: " << annotation.num_objects() << std::endl;
+    std::cout << "=================== ANNOTATION STATS ===================" << '\n';
+    std::cout << "labels:  " << annotation.num_labels() << '\n';
+    std::cout << "objects: " << annotation.num_objects() << '\n';
     std::cout << "density: " << static_cast<double>(annotation.num_relations())
                                     / annotation.num_objects()
-                                    / annotation.num_labels() << std::endl;
+                                    / annotation.num_labels() << '\n';
     std::cout << "representation: "
-              << utils::split_string(annotation.file_extension(), ".").at(0) << std::endl;
+              << utils::split_string(annotation.file_extension(), ".").at(0) << '\n';
 
     using namespace annot::binmat;
 
@@ -214,9 +248,9 @@ void print_annotation_stats(const std::string &fname, const Config &config) {
 
 #define CHECK_IF_DIFFED_AND_PRINT_STATS(RD_TYPE, NAME) \
     if (const auto *rd = dynamic_cast<const RD_TYPE *>(mat)) { \
-        std::cout << "=================== DIFF ANNOTATION ====================" << std::endl; \
+        std::cout << "=================== DIFF ANNOTATION ====================" << '\n'; \
         print_anchor_stats(*rd); \
-        std::cout << "underlying matrix: " NAME << std::endl; \
+        std::cout << "underlying matrix: " NAME << '\n'; \
         mat = &rd->diffs(); \
     }
 
@@ -230,17 +264,47 @@ void print_annotation_stats(const std::string &fname, const Config &config) {
     CHECK_IF_DIFFED_AND_PRINT_STATS(typename annot::RowDiffCoordAnnotator::binary_matrix_type, "ColumnMajor");
     CHECK_IF_DIFFED_AND_PRINT_STATS(typename annot::RowDiffBRWTCoordAnnotator::binary_matrix_type, "Multi-BRWT");
 
+    const auto &coords_fname = utils::remove_suffix(fname, annot::ColumnCompressed<>::kExtension)
+                                                        + annot::ColumnCompressed<>::kCoordExtension;
+
     if (const auto *mat_coord = dynamic_cast<const annot::matrix::MultiIntMatrix *>(mat)) {
-        std::cout << "================== COORDINATES STATS ===================" << std::endl;
-        std::cout << "coordinates: " << mat_coord->num_attributes() << std::endl;
+        std::cout << "================== COORDINATES STATS ===================" << '\n';
+        std::cout << "coordinates: " << mat_coord->num_attributes() << '\n';
         mat = &mat_coord->get_binary_matrix();
+    } else if (parse_annotation_type(fname) == Config::ColumnCompressed
+                                && std::filesystem::exists(coords_fname)) {
+        std::unique_ptr<std::ifstream> in = utils::open_ifstream(coords_fname);
+        if (!*in) {
+            logger->error("Could not open file with coordinates {}", coords_fname);
+            exit(1);
+        }
+
+        uint64_t num_coords = 0;
+        try {
+            for (size_t j = 0; j < annotation.num_labels(); ++j) {
+                {
+                    bit_vector_smart delims;
+                    delims.load(*in);
+                    num_coords += delims.size() - delims.num_set_bits();
+                }
+                if (j + 1 < annotation.num_labels()) {
+                    sdsl::int_vector<> coords;
+                    coords.load(*in);
+                }
+            }
+            std::cout << "================== COORDINATES STATS ===================" << '\n';
+            std::cout << "coordinates: " << num_coords << '\n';
+        } catch (...) {
+            logger->error("Couldn't read coordinates from {}", coords_fname);
+            exit(1);
+        }
     } else if (const auto *int_mat = dynamic_cast<const annot::matrix::IntMatrix *>(mat)) {
         mat = &int_mat->get_binary_matrix();
     }
 
     if (const auto *rbmat = dynamic_cast<const RainbowMatrix *>(mat)) {
-        std::cout << "================= RAINBOW MATRIX STATS =================" << std::endl;
-        std::cout << "distinct rows: " << rbmat->num_distinct_rows() << std::endl;
+        std::cout << "================= RAINBOW MATRIX STATS =================" << '\n';
+        std::cout << "distinct rows: " << rbmat->num_distinct_rows() << '\n';
         if (const auto *rb_brwt = dynamic_cast<const Rainbow<BRWT> *>(mat))
             mat = &rb_brwt->get_reduced_matrix();
     }
@@ -249,7 +313,7 @@ void print_annotation_stats(const std::string &fname, const Config &config) {
         print_brwt_stats(*brwt);
 
     if (config.print_counts_hist || config.count_quantiles.size()) {
-        std::cout << "===================== COUNTS STATS =====================" << std::endl;
+        std::cout << "===================== COUNTS STATS =====================" << '\n';
         if (!dynamic_cast<const annot::ColumnCompressed<> *>(&annotation)) {
             logger->error("Printing statistics for counts is currently only supported for"
                           " ColumnCompressed ({}) annotations with counts",
@@ -271,7 +335,7 @@ void print_annotation_stats(const std::string &fname, const Config &config) {
         if (config.print_counts_hist)
             std::cout << fmt::format("\tHistogram(count:multiplicity[,...])");
 
-        std::cout << std::endl;
+        std::cout << '\n';
 
         annot::ColumnCompressed<>::load_column_values({ fname },
             [&](size_t j, const std::string &label, sdsl::int_vector<>&& counts) {
@@ -308,7 +372,7 @@ void print_annotation_stats(const std::string &fname, const Config &config) {
                     }
                 }
 
-                std::cout << std::endl;
+                std::cout << '\n';
             }
         );
     }
@@ -322,6 +386,11 @@ int print_stats(Config *config) {
     const auto &files = config->fnames;
 
     for (const auto &file : files) {
+        if (utils::ends_with(file, ".annodbg")) {
+            print_annotation_stats(file, *config);
+            continue;
+        }
+
         std::shared_ptr<graph::DeBruijnGraph> graph;
 
         graph = load_critical_dbg(file);
@@ -348,38 +417,6 @@ int print_stats(Config *config) {
     }
 
     for (const std::string &file : config->infbase_annotators) {
-        if (config->print_column_names) {
-            annot::LabelEncoder<std::string> label_encoder;
-
-            logger->info("Scanning annotation '{}'", file);
-
-            try {
-                std::ifstream instream(file, std::ios::binary);
-
-                // TODO: make this more reliable
-                if (parse_annotation_type(file) == Config::ColumnCompressed) {
-                    // Column compressed dumps the number of rows first
-                    // skipping it...
-                    load_number(instream);
-                }
-
-                if (!label_encoder.load(instream))
-                    throw std::ios_base::failure("");
-
-            } catch (...) {
-                logger->error("Cannot read label encoder from file '{}'", file);
-                exit(1);
-            }
-
-            std::cout << "Number of columns: " << label_encoder.size() << std::endl;
-            for (size_t c = 0; c < label_encoder.size(); ++c) {
-                std::cout << label_encoder.decode(c) << '\n';
-            }
-
-            continue;
-        }
-
-        logger->info("Statistics for annotation '{}'", file);
         print_annotation_stats(file, *config);
     }
 

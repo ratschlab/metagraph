@@ -125,7 +125,11 @@ endif()
 if(APPLE)
   # add path to system libraries but avoid cross-compilation errors
   include_directories(SYSTEM /usr/local/include)
+  include_directories(SYSTEM /opt/homebrew/include)
   link_directories(/usr/local/lib)
+  if(EXISTS /opt/homebrew/lib)
+    link_directories(/opt/homebrew/lib)
+  endif()
   include(CheckCXXCompilerFlag)
   check_cxx_compiler_flag(-Wno-poison-system-directories SUPPORT_NO_POISON_SYS_DIR)
   if(SUPPORT_NO_POISON_SYS_DIR)
@@ -258,7 +262,6 @@ include_directories(
   external-libraries/KMC/kmc_api
   external-libraries/sdsl-lite/include
   external-libraries/eigen
-  external-libraries/htslib
   external-libraries/hopscotch-map/include
   external-libraries/ordered-map/include
   external-libraries/binrel_wt/include
@@ -338,13 +341,12 @@ add_library(sdust STATIC
 target_compile_options(sdust PRIVATE -Wall -Wc++-compat -Wno-error)
 
 include(ExternalProject)
-ExternalProject_Add(HTSLIB_Project
+ExternalProject_Add(HTSLIB
   SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib
-  CONFIGURE_COMMAND autoreconf -i ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib && ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib/configure --prefix=${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib --disable-libcurl --disable-bz2 --disable-lzma
+  CONFIGURE_COMMAND autoreconf -i ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib && ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/htslib/configure --prefix=${CMAKE_BINARY_DIR}/external-libraries/htslib --disable-libcurl --disable-bz2 --disable-lzma
 )
-link_directories(
-  ${CMAKE_BINARY_DIR}/HTSLIB_Project-prefix/src/HTSLIB_Project-build
-)
+link_directories(${CMAKE_BINARY_DIR}/external-libraries/htslib/lib)
+include_directories(${CMAKE_BINARY_DIR}/external-libraries/htslib/include)
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH}
   "${CMAKE_SOURCE_DIR}/external-libraries/binrel_wt/cmake/modules"
@@ -399,7 +401,7 @@ file(GLOB metagraph_cli_files
   "src/cli/*/*/*.cpp"
 )
 add_library(metagraph-cli STATIC ${metagraph_cli_files})
-add_dependencies(metagraph-core HTSLIB_Project)
+add_dependencies(metagraph-core HTSLIB)
 
 add_executable(metagraph "src/main.cpp")
 set_target_properties(metagraph PROPERTIES OUTPUT_NAME "metagraph_${CMAKE_DBG_ALPHABET}")
