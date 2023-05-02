@@ -18,6 +18,51 @@ typedef std::function<size_t()> LabelCountCallback;
 
 constexpr std::memory_order MO_RELAXED = std::memory_order_relaxed;
 
+uint64_t atomic_fetch(const sdsl::int_vector<> &vector,
+                      uint64_t i,
+                      std::mutex &backup_mutex,
+                      int mo) {
+    const uint8_t width = vector.width();
+    if (width == 64)
+        return __atomic_load_n(vector.data() + i, mo);
+
+    if (width == 32)
+        return __atomic_load_n((uint32_t*)vector.data() + i, mo);
+
+    if (width == 16)
+        return __atomic_load_n((uint16_t*)vector.data() + i, mo);
+
+    if (width == 8)
+        return __atomic_load_n((uint8_t*)vector.data() + i, mo);
+
+    std::lock_guard<std::mutex> lock(backup_mutex);
+    return vector[i];
+}
+
+uint64_t atomic_fetch_and_add(sdsl::int_vector<> &vector,
+                              uint64_t i,
+                              uint64_t val,
+                              std::mutex &backup_mutex,
+                              int mo) {
+    const uint8_t width = vector.width();
+    if (width == 64)
+        return __atomic_fetch_add(vector.data() + i, val, mo);
+
+    if (width == 32)
+        return __atomic_fetch_add((uint32_t*)vector.data() + i, val, mo);
+
+    if (width == 16)
+        return __atomic_fetch_add((uint16_t*)vector.data() + i, val, mo);
+
+    if (width == 8)
+        return __atomic_fetch_add((uint8_t*)vector.data() + i, val, mo);
+
+    std::lock_guard<std::mutex> lock(backup_mutex);
+    uint64_t old_val = vector[i];
+    vector[i] += val;
+    return old_val;
+}
+
 
 /**
  * Return an int_vector<>, bit_vector pair, of lengths anno_graph.get_graph().max_index() * 2

@@ -443,8 +443,6 @@ int transform_annotation(Config *config) {
         //       increments don't overflow
         sdsl::int_vector<> sum(0, 0, sdsl::bits::hi(num_columns) + 1);
         ProgressBar progress_bar(num_columns, "Intersect columns", std::cerr, !get_verbose());
-        ThreadPool thread_pool(get_num_threads(), 1);
-        std::mutex mu_sum;
         std::mutex mu;
 
         if (filter_values) {
@@ -462,14 +460,12 @@ int transform_annotation(Config *config) {
                     exit(1);
                 }
 
-                thread_pool.enqueue([&,col(std::move(col)),values(std::move(values))]() {
-                    assert(col->num_set_bits() == values.size());
-                    for (uint64_t r = 0; r < values.size(); ++r) {
-                        if (values[r] >= config->min_value && values[r] <= config->max_value)
-                            atomic_fetch_and_add(sum, col->select1(r + 1), 1, mu_sum, __ATOMIC_RELAXED);
-                    }
-                    ++progress_bar;
-                });
+                assert(col->num_set_bits() == values.size());
+                for (uint64_t r = 0; r < values.size(); ++r) {
+                    if (values[r] >= config->min_value && values[r] <= config->max_value)
+                        ++sum[col->select1(r + 1)];
+                }
+                ++progress_bar;
             };
 
             ColumnCompressed<>::load_columns_and_values(files, on_column, get_num_threads());
@@ -487,12 +483,8 @@ int transform_annotation(Config *config) {
                     exit(1);
                 }
 
-                thread_pool.enqueue([&,col{std::move(col)}]() {
-                    col->call_ones([&](uint64_t i) {
-                        atomic_fetch_and_add(sum, i, 1, mu_sum, __ATOMIC_RELAXED);
-                    });
-                    ++progress_bar;
-                });
+                col->call_ones([&](uint64_t i) { ++sum[i]; });
+                ++progress_bar;
             };
 
             if (!ColumnCompressed<>::merge_load(files, on_column, get_num_threads())) {
@@ -501,7 +493,6 @@ int transform_annotation(Config *config) {
             }
         }
 
-        thread_pool.join();
         std::atomic_thread_fence(std::memory_order_acquire);
 
         logger->trace("Selecting k-mers annotated in {} <= * <= {} (out of {}) columns",

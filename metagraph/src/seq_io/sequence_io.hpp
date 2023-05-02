@@ -34,9 +34,12 @@ class FastaWriter {
 
     void flush();
 
+    const std::string& get_fname() const { return fname_; }
+
   private:
     void write_to_disk(const std::string &sequence);
 
+    std::string fname_;
     gzFile gz_out_;
     const std::string header_;
     bool enumerate_sequences_;
@@ -79,9 +82,12 @@ class ExtendedFastaWriter {
 
     void flush();
 
+    const std::string& get_fasta_fname() const { return fasta_fname_; }
+
   private:
     void write_to_disk(const value_type &value_pair);
 
+    std::string fasta_fname_;
     gzFile fasta_gz_out_;
     gzFile feature_gz_out_;
     uint32_t kmer_length_;

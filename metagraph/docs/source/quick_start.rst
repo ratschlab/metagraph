@@ -151,11 +151,8 @@ The assembled contigs are written to a compressed FASTA file, which can be inspe
 To extract all unitigs (linear paths in the graph) instead of contigs, add flag ``--unitigs`` to the same ``metagraph transform`` command.
 
 .. note::
-    Extraction of contigs with k-mer counts from a *weighted* de Bruijn graph (see section :ref:`construct_weighted_graph`),
-    is currently only possible with the command ``metagraph clean`` instead of ``metagraph transform``. Note, however, that this will actually perform
-    no cleaning or k-mer filtering unless additional cleaning parameters are passed (see more details in :ref:`graph_cleaning`).
-    Instead, this will simply extract a set of contigs (written to file ``*.fasta.gz``) covering all the k-mers from
-    the graph and write counts of their constituting k-mers to file ``*.kmer_counts.gz``.
+    If the source de Bruijn graph is *weighted* (see section :ref:`construct_weighted_graph`), the contigs (written to file ``*.fasta.gz``)
+    will be extracted along with the counts of their constituting k-mers, written to file ``*.kmer_counts.gz``.
 
 
 Construct canonical graph
@@ -380,12 +377,7 @@ label (typically, sequencing sample) before annotating it. This technique consis
 (see :ref:`construct_weighted_graph` and note that it can be constructed from raw input sequences as well as from pre-computed KMC counters)
 and transforming it to contigs with counts associated with their constituting k-mers::
 
-    metagraph clean -v -p 4 --to-fasta -o contigs sample_graph.dbg
-
-.. note::
-    As noted above in section :ref:`graph_cleaning`, the command ``metagraph clean`` does not actually do any cleaning or k-mer filtering
-    unless additional cleaning parameters are passed to it. Thus, the set of contigs extracted by the command above will cover
-    all the k-mers from the de Bruijn graph ``graph.dbg``.
+    metagraph transform -v -p 4 --to-fasta -o contigs sample_graph.dbg
 
 Then, the contigs written to ``contigs.fasta.gz`` and the counts associated with their k-mers written to ``contigs.kmer_counts.gz``
 can be used when constructing a count-aware graph annotation::
