@@ -351,16 +351,16 @@ std::vector<std::tuple<std::vector<MultiIntMatrix::Row>, MultiIntMatrix::Column,
 std::vector<RowTuples> &rd_rows) const {
     assert(graph_ && "graph must be loaded");
     assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
-    assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());    
+    assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());
 
     const graph::boss::BOSS &boss = graph_->get_boss();
     const bit_vector &rd_succ = fork_succ_.size() ? fork_succ_ : boss.get_last();
 
     std::unordered_map<Column, std::map<uint64_t, Row>> reconstucted_paths;
 
-    // part 1. Graph traversal
+    // each label corresponds to a sample which can contain multiple reads
+    std::unordered_map<Column, std::set<uint64_t>> coordinates_to_check_if_traverse_more;
 
-    // step 1. Build row-diff path for the input Row
     RowTuples input_row_tuples;
 
     if (!rows_annotations.count(i)) {
@@ -372,73 +372,42 @@ std::vector<RowTuples> &rd_rows) const {
         input_row_tuples = rows_annotations[i];
     }
 
-    // step 2.2 Save labels of the input Row in a set
-    std::unordered_set<Column> labels_of_the_start_node;
-
-    std::vector<std::tuple<std::vector<Row>, Column, uint64_t>> result;
-
-    std::unordered_map<Column, uint64_t> input_row_position_in_ref_seq;
-
+    // collect the coordinates of the start node in two structures
     for (auto &[j, tuple] : input_row_tuples) {
+        for (uint64_t &c : tuple) {
+            // used to check if the graph has to be traversed more
+            // based on the coordinates shift
+            coordinates_to_check_if_traverse_more[j].insert(c);
 
-        // if (!reconstructed_reads.count(j)) {
-        //     labels_of_the_start_node.insert(j);
-
-        //     // initialize adjacency lists for each label
-        //     labeled_parents_map[j];
-        //     labeled_children_map[j];
-
-        //     labeled_parents_map_backward[j];
-        //     labeled_children_map_backward[j];
-
-        //     input_row_position_in_ref_seq[j] = tuple.front();
-        // } else {
-        //     // return this as well
-        //     result.push_back(std::make_tuple(reconstructed_reads[j], j, tuple.front()));
-        // }
-        
-
-        labels_of_the_start_node.insert(j);
-
-        // initialize adjacency lists for each label
-        // labeled_parents_map[j];
-        // labeled_children_map[j];
-
-        // labeled_parents_map_backward[j];
-        // labeled_children_map_backward[j];
-
-        input_row_position_in_ref_seq[j] = tuple.front();
+            // used to collect all visited nodes and tracec the result paths
+            reconstucted_paths[j][c] = i;
+        }
     }
 
-
-    // step 3. Traverse the graph using DFS 
-    // and fill adjacency lists along the way
+    // stack for the DFS traversal
+    // (std::vector is used because it has to be cleared after forward traversal)
     std::vector<Row> to_visit;
     to_visit.push_back(i);
 
-    std::unordered_set<Row> visited_nodes_forward;
     while (!to_visit.empty()) {
         // pick a node from the stack
         Row current_parent = to_visit.back();
         to_visit.pop_back();
-    
-        // if it was already visited, continue
-        if (visited_nodes_forward.count(current_parent))
-            continue;
 
-        // collect the current node's labels into a set
-        std::unordered_set<Column> current_parent_labels;
-        for (auto &rowt_parent : rows_annotations[current_parent]) {
-            current_parent_labels.insert(rowt_parent.first);
+        // collect visited node's coordinates into path reconstruction map
+        for (auto & [j_cur_par, tuple_cur_par] : rows_annotations[current_parent]) {
+            for (uint64_t &c_cur_par : tuple_cur_par) {
+                reconstucted_paths[j_cur_par][c_cur_par] = current_parent;
+            }
         }
-        
-        visited_nodes_forward.insert(current_parent);
 
         graph::AnnotatedSequenceGraph::node_index current_parent_to_graph = graph::AnnotatedSequenceGraph::anno_to_graph_index(current_parent);
+
+        // sets of increased coordinates found in the adj. outgoing nodes
+        std::unordered_map<Column, std::set<uint64_t>> sets_to_update_cur_coords_with;
         
         // for each adjacent outgoing k-mer 
         graph_->call_outgoing_kmers(current_parent_to_graph, [&](auto next, char c) {
-            // std::ignore = c;
             if (c == graph::boss::BOSS::kSentinel)
                 return;
             
@@ -446,62 +415,85 @@ std::vector<RowTuples> &rd_rows) const {
             RowTuples next_annotations;
 
             // if the annotations for the child node are not decompressed,
-            // build rd-path and decompress the annotations
-            // (repeat steps 1-2.1)
+            // build rd-path and decompress them manunally
             if (!rows_annotations.count(next_to_anno)) {
                 next_annotations = get_row_tuples(next_to_anno, rd_ids, node_to_rd, rd_rows,
                 rows_annotations, boss, rd_succ);
             } else {
                 // if we already decompressed the annotations for this node
-                // then simply retrieve them from the map
+                // simply retrieve them from the map
                 next_annotations = rows_annotations[next_to_anno];
             }
-
-            // acceptable node is a node whose labels match
-            // the labels of the start node
-            bool acceptable_node = false;
             
-            for (auto &[j_next, tuple_next] : next_annotations) {
-                // check if the label matches the start row labels
-                // and add the child-parent relation to the corresponding map
-                if (labels_of_the_start_node.count(j_next) && current_parent_labels.count(j_next)) {
-                    acceptable_node = true;
+            // collect all coordinates of the next node for each label separately
+            std::unordered_map<Column, std::set<uint64_t>> coordinates_of_the_next_node;
+            for (auto & [j_next, tuple_next] : next_annotations) {
+                for (uint64_t &c_next : tuple_next) {
+                    coordinates_of_the_next_node[j_next].insert(c_next);
                 }
             }
 
-            // if the row has at least one label that matches
-            // the start row's labels then add it to the stack
-            if (acceptable_node) {
-                to_visit.push_back(next_to_anno);
+            // collect those coordinates that are increased by SHIFT value
+            // with respect to the current coordinates set
+            std::unordered_map<Column, std::set<uint64_t>> coordinates_to_check_if_traverse_more_updated;
+            for (auto & [j_all, c_all] : coordinates_to_check_if_traverse_more) {
+                for (const uint64_t &c_all_one : c_all) {
+                    if (coordinates_of_the_next_node[j_all].count(c_all_one + SHIFT)) {
+                        coordinates_to_check_if_traverse_more_updated[j_all].insert(c_all_one + SHIFT);
+                    }
+                }
             }
 
+            // if there is at least one shifted coordinate then the next node is acceptable to be
+            // added to the stack and traversed later
+            if (!coordinates_to_check_if_traverse_more_updated.empty()) {
+                to_visit.push_back(next_to_anno);
+
+                // also, collect the shifted coordinates to update the current coordinates set
+                for (auto & [j_check, cs_check] : coordinates_to_check_if_traverse_more_updated) {
+                    sets_to_update_cur_coords_with[j_check].insert(cs_check.begin(), cs_check.end());
+                }
+            }
         } );
+
+        // update the current coordinates set with the increased coordinates of the adj. outgoing nodes
+        for (auto & [cur_j_set, cur_set_to_up] : sets_to_update_cur_coords_with) {
+            for (auto & cur_c_to_up : cur_set_to_up) {
+                coordinates_to_check_if_traverse_more[cur_j_set].erase(cur_c_to_up - SHIFT);
+                coordinates_to_check_if_traverse_more[cur_j_set].insert(cur_c_to_up);
+            }
+        }
     }
 
     // DFS backwards is similar to the DFS forwards
     to_visit.clear();
     to_visit.push_back(i);
 
+    // free the current coordinates maps
+    // coordinates_to_check_if_traverse_more.clear();
+    std::unordered_map<Column, std::set<uint64_t>>().swap(coordinates_to_check_if_traverse_more);
 
-    std::unordered_set<Row> visited_nodes_backward;
+    // and start with the coordinates of the input node
+    for (auto &[j, tuple] : input_row_tuples) {
+        for (uint64_t &c : tuple) {
+            coordinates_to_check_if_traverse_more[j].insert(c);
+        }
+    }
+
     while (!to_visit.empty()) {
         Row current_child = to_visit.back();
         to_visit.pop_back();
 
-        if (visited_nodes_backward.count(current_child))
-            continue;
-
-        std::unordered_set<Column> current_child_labels;
-        for (auto &rowt_parent : rows_annotations[current_child]) {
-            current_child_labels.insert(rowt_parent.first);
+        for (auto & [j_cur_child, tuple_cur_child] : rows_annotations[current_child]) {
+            for (uint64_t &c_cur_child : tuple_cur_child) {
+                reconstucted_paths[j_cur_child][c_cur_child] = current_child;
+            }
         }
-        
-        visited_nodes_backward.insert(current_child);
 
         graph::AnnotatedSequenceGraph::node_index current_child_to_graph = graph::AnnotatedSequenceGraph::anno_to_graph_index(current_child);
+        std::unordered_map<Column, std::set<uint64_t>> sets_to_update_cur_coords_with;
 
         graph_->call_incoming_kmers(current_child_to_graph, [&](auto previous, char c) {
-
             if (c == graph::boss::BOSS::kSentinel)
                 return;
             
@@ -515,60 +507,58 @@ std::vector<RowTuples> &rd_rows) const {
                 previous_annotations = rows_annotations[previous_to_anno];
             }
 
-            // aceptable node is a node whose labels match
-            // the labels of the start node
-            bool acceptable_node = false;
-
+            std::unordered_map<Column, std::set<uint64_t>> coordinates_of_the_prev_node;
             for (auto &[j_prev, tuple_prev] : previous_annotations) {
-                if (labels_of_the_start_node.count(j_prev) && current_child_labels.count(j_prev)) {
-                    acceptable_node = true;
+                for (uint64_t &c_prev : tuple_prev)
+                    coordinates_of_the_prev_node[j_prev].insert(c_prev);
+            }
+
+            std::unordered_map<Column, std::set<uint64_t>> coordinates_to_check_if_traverse_more_updated;
+            for (auto & [j_all, c_all] : coordinates_to_check_if_traverse_more) {
+                for (const uint64_t &c_all_one : c_all) {
+                    if (c_all_one == 0)
+                        continue;
+
+                    if (coordinates_of_the_prev_node[j_all].count(c_all_one - SHIFT)) {
+                        coordinates_to_check_if_traverse_more_updated[j_all].insert(c_all_one - SHIFT);
+                    }
                 }
             }
-            if (acceptable_node) {
+
+            if (!coordinates_to_check_if_traverse_more_updated.empty()) {
                 to_visit.push_back(previous_to_anno);
+                for (auto & [j_check, cs_check] : coordinates_to_check_if_traverse_more_updated) {
+                    sets_to_update_cur_coords_with[j_check].insert(cs_check.begin(), cs_check.end());
+                }
             }
-                        
         } );
 
-    }
-
-    for (auto & [row, row_tuples] : rows_annotations) {
-        for (auto & [j, tuple] : row_tuples) {
-            if (!labels_of_the_start_node.count(j)) {
-                continue;
-            }
-            for (uint64_t &c : tuple) {
-                reconstucted_paths[j][c] = row;
+        for (auto & [cur_j_set, cur_set_to_up] : sets_to_update_cur_coords_with) {
+            for (auto & cur_c_to_up : cur_set_to_up) {
+                coordinates_to_check_if_traverse_more[cur_j_set].erase(cur_c_to_up + SHIFT);
+                coordinates_to_check_if_traverse_more[cur_j_set].insert(cur_c_to_up);
             }
         }
     }
-    
-    // part 2. Paths reconstruction
 
-    // new path reconstruction for graphs with unlabeled reads
+    // reconstruct the paths
 
+    // traces where separate reads don't have distinct labels
     std::unordered_map<Column, std::vector<std::pair<Row, uint64_t>>> traces_unlabeled;
-
     for (auto & [j, coords_map] : reconstucted_paths) {
         for (auto & [ccoord, rrow] : coords_map) {
             traces_unlabeled[j].push_back(std::make_pair(rrow, ccoord));
         }
     }
 
-    // extact reads from walk that has jumps in coordinates
-
+    // extract reads from walks which have jumps in coordinates
     std::vector<std::tuple<std::vector<std::pair<Row, uint64_t>>, Column, uint64_t>> result_coords;
 
     for (auto & [j, trace_with_jumps] : traces_unlabeled) {
-
         uint64_t curr_read_start_coord = trace_with_jumps.front().second;
         uint64_t curr_read_curr_coord = curr_read_start_coord;
 
-        std::vector<Row> curr_read_trace;
-        curr_read_trace.push_back(trace_with_jumps.front().first);
-
         auto curr_edge_node = graph::AnnotatedSequenceGraph::anno_to_graph_index(trace_with_jumps.front().first);
-
 
         std::vector<std::pair<Row, uint64_t>> curr_read_trace_coords;
         curr_read_trace_coords.push_back(trace_with_jumps.front());
@@ -577,8 +567,8 @@ std::vector<RowTuples> &rd_rows) const {
 
             auto curr_next_edge_node = graph::AnnotatedSequenceGraph::anno_to_graph_index(trace_with_jumps[cur_pos].first);
             
+            // check if an edge exists between the current and next node
             bool edge_exists = false;
-
             graph_->adjacent_outgoing_nodes(curr_edge_node, [&](auto adj_outg_node) {
                 if (adj_outg_node == curr_next_edge_node) {
                     edge_exists = true;
@@ -586,59 +576,34 @@ std::vector<RowTuples> &rd_rows) const {
                 }
             });
 
-
+            // if edge exists, then we are still in the current read
             if ((trace_with_jumps[cur_pos].second == (curr_read_curr_coord + SHIFT)) && edge_exists) {
-                curr_read_trace.push_back(trace_with_jumps[cur_pos].first);
                 curr_read_trace_coords.push_back(trace_with_jumps[cur_pos]);
-
-                curr_read_curr_coord += SHIFT;                
-
+                curr_read_curr_coord += SHIFT;
             } else {
-                result.push_back(std::make_tuple(curr_read_trace, j, curr_read_start_coord));
+                // otherwise, the read has ended and the new one started
 
+                // add the current path to the result
                 result_coords.push_back(std::make_tuple(curr_read_trace_coords, j, curr_read_start_coord));
 
+                // and update the start coordinate of the read
                 curr_read_start_coord = trace_with_jumps[cur_pos].second;
                 curr_read_curr_coord = curr_read_start_coord;
 
-                // curr_read_trace.clear();
-                // curr_read_trace.push_back(trace_with_jumps[cur_pos].first);
-
-                // curr_read_trace_coords.clear();
-                // curr_read_trace_coords.push_back(trace_with_jumps[cur_pos]);
-
-                if (edge_exists) {
-                    size_t delta_coord = curr_read_curr_coord - trace_with_jumps[cur_pos].second;
-
-                    std::vector<Row> trace_slice;
-                    trace_slice = std::vector<Row>(curr_read_trace.begin() + (curr_read_trace.size() - delta_coord), curr_read_trace.end());
-                    std::vector<std::pair<Row, uint64_t>> trace_slice_coords;
-                    trace_slice_coords = std::vector<std::pair<Row, uint64_t>>(curr_read_trace_coords.begin() + (curr_read_trace_coords.size() - delta_coord), curr_read_trace_coords.end());
-
-                    curr_read_trace.clear();
-                    curr_read_trace_coords.clear();
-
-                    curr_read_trace.insert(curr_read_trace.begin(), trace_slice.begin(), trace_slice.end());
-                    curr_read_trace_coords.insert(curr_read_trace_coords.begin(), trace_slice_coords.begin(), trace_slice_coords.end());
-
-                    curr_read_trace.push_back(trace_with_jumps[cur_pos].first);
-                    curr_read_trace_coords.push_back(trace_with_jumps[cur_pos]);
-                } else {
-                    curr_read_trace.clear();
-                    curr_read_trace_coords.clear();
-
-                    curr_read_trace.push_back(trace_with_jumps[cur_pos].first);
-                    curr_read_trace_coords.push_back(trace_with_jumps[cur_pos]);
-                }
+                // start collecting nodes into a new path
+                curr_read_trace_coords.clear();
+                curr_read_trace_coords.push_back(trace_with_jumps[cur_pos]);
             }
 
             curr_edge_node = curr_next_edge_node;
         }
+
+        // add the last path to the result
+        result_coords.push_back(std::make_tuple(curr_read_trace_coords, j, curr_read_start_coord));
     }
 
-
+    // save only reads that contain the input node
     std::vector<std::tuple<std::vector<std::pair<Row, uint64_t>>, Column, uint64_t>> final_result;
-    
     for (auto & [read_trace, read_label, read_start_coord] : result_coords) { 
         for (size_t cur_pos = 0; cur_pos < read_trace.size(); ++cur_pos) {
             if (read_trace[cur_pos].first == i) {
@@ -648,92 +613,18 @@ std::vector<RowTuples> &rd_rows) const {
         }
     }
 
+    // discard the coordinates from the result as we don't longer need them
+    // (we need only a vector of Rows representing a path)
     std::vector<std::tuple<std::vector<Row>, Column, uint64_t>> final_final_result;
-
-
     for (auto & [read_trace, read_label, cur_pos] : final_result) {
         std::vector<Row> cur_trace_rows;
         for (auto & el : read_trace) {
             cur_trace_rows.push_back(el.first);
         }
-
         final_final_result.push_back(std::make_tuple(cur_trace_rows, read_label, cur_pos));
     }
 
     return final_final_result;
-
-    // // concatenate all labeled paths
-    // for (Column const &j : labels_of_the_start_node) {
-
-    //     std::vector<std::pair<Row, uint64_t>> path_to_start = traces_backward_sep_by_labels[j];
-    //     std::vector<std::pair<Row, uint64_t>> path_to_end = traces_forward_sep_by_labels[j];
-
-    //     if (path_to_start.empty()) {
-            
-    //         std::vector<Row> path_to_add_to_result;
-    //         path_to_add_to_result.reserve(path_to_end.size());
-    //         for (auto & [row, c] : path_to_end) { 
-    //             path_to_add_to_result.push_back(row);
-    //         }
-
-    //         reconstructed_reads[j] = path_to_add_to_result;
-    //         result.push_back(std::make_tuple(path_to_add_to_result, j, input_row_position_in_ref_seq[j]));
-
-    //     } else if (path_to_end.empty()) {
-
-    //         std::vector<Row> path_to_add_to_result;
-    //         path_to_add_to_result.reserve(path_to_start.size());
-    //         for (auto & [row, c] : path_to_start) { 
-    //             path_to_add_to_result.push_back(row);
-    //         }
-
-    //         reconstructed_reads[j] = path_to_add_to_result;
-    //         result.push_back(std::make_tuple(path_to_add_to_result, j, input_row_position_in_ref_seq[j]));
-
-    //     } else {
-
-    //         // if graph contains cycles then forward and backward paths may overlap
-    //         std::vector<std::pair<Row, uint64_t>> starting_path;
-    //         std::vector<std::pair<Row, uint64_t>> ending_path;
-
-    //         // find which path has a starting node (i.e. first node with lower coordinate)
-    //         if (path_to_start.front().second < path_to_end.front().second)
-    //             starting_path = path_to_start;
-    //         else
-    //             starting_path = path_to_end;
-
-    //         // find which path has an starting node (i.e. last node with bigger coordinate)
-    //         if (path_to_start.back().second > path_to_end.back().second)
-    //             ending_path = path_to_start;
-    //         else
-    //             ending_path = path_to_end;
-
-    //         uint64_t last_coord_start_path = starting_path.back().second;
-    //         std::vector<Row> path_to_add_to_result;
-
-    //         for (auto it = ending_path.rbegin(); it < ending_path.rend(); ++it) {
-    //             if (it->second > last_coord_start_path)
-    //                 path_to_add_to_result.insert(path_to_add_to_result.begin(), it->first);
-    //             else
-    //                 break;
-    //         }
-
-    //         std::vector<Row> rows_start_path;
-    //         rows_start_path.reserve(starting_path.size());
-    //         for (auto & [row, c] : starting_path) {
-    //             rows_start_path.push_back(row);
-    //         }            
-
-    //         path_to_add_to_result.insert(path_to_add_to_result.begin(),
-    //                                      rows_start_path.begin(),
-    //                                      rows_start_path.end());
-
-    //         reconstructed_reads[j] = path_to_add_to_result;
-    //         result.push_back(std::make_tuple(path_to_add_to_result, j, input_row_position_in_ref_seq[j]));
-    //     }
-    // }    
-
-    // return result;
 }
 
 template <class BaseMatrix>
@@ -742,7 +633,7 @@ std::vector<std::pair<MultiIntMatrix::Column, uint64_t>> TupleRowDiff<BaseMatrix
 std::vector<RowTuples> &rd_rows, std::unordered_map<Column, std::vector<Row>> &reconstructed_reads) const {
     assert(graph_ && "graph must be loaded");
     assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
-    assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());   
+    assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());
 
     const graph::boss::BOSS &boss = graph_->get_boss();
     const bit_vector &rd_succ = fork_succ_.size() ? fork_succ_ : boss.get_last();
@@ -762,7 +653,7 @@ std::vector<RowTuples> &rd_rows, std::unordered_map<Column, std::vector<Row>> &r
 
     std::unordered_set<Column> labels_of_the_start_node;
 
-    // initialize the result 
+    // initialize the result
     std::vector<std::pair<Column, uint64_t>> result;
 
     // positions of the input k-mer in reconstucted reads
@@ -830,7 +721,6 @@ std::vector<RowTuples> &rd_rows, std::unordered_map<Column, std::vector<Row>> &r
                     for (uint64_t &c : tuple_next)
                         reconstructed_paths[j_next][c] = next_to_anno;
                 }
-                    
             }
 
             // if the row has at least one label that matches
@@ -838,8 +728,7 @@ std::vector<RowTuples> &rd_rows, std::unordered_map<Column, std::vector<Row>> &r
             if (acceptable_node) {
                 to_visit.push_back(next_to_anno);
             }
-
-        } );   
+        } );
     }
 
     // DFS backwards is similar to the DFS forwards
@@ -895,7 +784,7 @@ std::vector<RowTuples> &rd_rows, std::unordered_map<Column, std::vector<Row>> &r
             labeled_trace.push_back(row_c);
         }
         reconstructed_reads[j] = labeled_trace;
-        result.push_back(std::make_pair(j, input_row_position_in_ref_seq[j]));        
+        result.push_back(std::make_pair(j, input_row_position_in_ref_seq[j]));
     }
 
     return result;
