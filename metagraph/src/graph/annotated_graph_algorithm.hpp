@@ -59,6 +59,22 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
                     const DifferentialAssemblyConfig &config,
                     size_t num_threads = 1);
 
+using SequenceCallback = std::function<void(const std::string&)>;
+using SequenceGenerator = std::function<void(const SequenceCallback&)>;
+using SequenceCoordCallback = std::function<void(const std::string&,
+                                                 size_t, /* superbubble ID */
+                                                 size_t, /* unitig ID */
+                                                 const std::vector<int64_t>&, /* distance from superbubble start */
+                                                 const std::vector<int64_t>& /* distance to superbubble end */
+                                                 )>;
+using SuperbubbleInfo = std::vector<std::tuple<size_t, /* chain id */
+                                               size_t, /* superbubble terminus */
+                                               std::vector<int64_t>, /* superbubble widths */
+                                               std::vector<int64_t> /* distance from chain end */
+                                              >>;
+SuperbubbleInfo assemble_with_coordinates(const SequenceGenerator &input_generator,
+                                          const SequenceCoordCallback &callback);
+
 } // namespace graph
 } // namespace mtg
 
