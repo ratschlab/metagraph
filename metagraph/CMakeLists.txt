@@ -103,9 +103,12 @@ add_subdirectory(external-libraries/jsoncpp)
 
 add_compile_options(
   -Wall -Wextra -Werror
-  -D_THREAD_SAFE -pthread
+  -D_THREAD_SAFE
   # -DDBGDEBUG -Wconversion -Wsign-conversion -Werror=shadow=compatible-local
 )
+if(NOT BUILD_STATIC OR APPLE)
+  add_compile_options(-pthread)
+endif()
 
 if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(
