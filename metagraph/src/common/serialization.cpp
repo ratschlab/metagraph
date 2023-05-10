@@ -120,6 +120,10 @@ void serialize_number_vector(std::ostream &out,
     int_vector.serialize(out);
 }
 
+template void serialize_number_vector<int64_t>(std::ostream &out,
+                                               const std::vector<int64_t> &vector,
+                                               size_t bits_per_number = 64);
+
 template void serialize_number_vector<uint64_t>(std::ostream &out,
                                                 const std::vector<uint64_t> &vector,
                                                 size_t bits_per_number = 64);

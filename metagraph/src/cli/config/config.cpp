@@ -609,8 +609,10 @@ Config::Config(int argc, char *argv[]) {
             || identity == ASSEMBLE
             || identity == RELAX_BRWT)
                     && fnames.size() != 1) {
-        std::cerr << "Error: exactly one graph must be provided for this mode" << std::endl;
-        print_usage_and_exit = true;
+        if (identity == TRANSFORM && !coordinates) {
+            std::cerr << "Error: exactly one graph must be provided for this mode" << std::endl;
+            print_usage_and_exit = true;
+        }
     }
 
     if ((identity == TRANSFORM

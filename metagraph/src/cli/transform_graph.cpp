@@ -12,6 +12,8 @@
 #include "config/config.hpp"
 #include "load/load_graph.hpp"
 #include "seq_io/sequence_io.hpp"
+#include "graph/annotated_graph_algorithm.hpp"
+#include "common/serialization.hpp"
 
 
 namespace mtg {
@@ -31,6 +33,45 @@ int transform_graph(Config *config) {
     if (config->initialize_bloom)
         std::filesystem::remove(utils::make_suffix(config->outfbase, ".bloom"));
 
+    if (config->coordinates) {
+        std::string outfname = config->outfbase + ".fasta.gz";
+        gzFile gzout = gzopen(outfname.c_str(), "wb");
+        size_t unitig_id = 1;
+        graph::assemble_with_coordinates(config->k,
+            [&](const auto &callback) {
+                for (const auto &file : files) {
+                    seq_io::read_fasta_file_critical(file, [&](auto *read_stream) {
+                        callback(std::string(read_stream->seq.s, read_stream->seq.l));
+                    }, config->forward_and_reverse);
+                }
+            },
+            [&](const std::string &unitig,
+                size_t superbubble_id,
+                const std::vector<int64_t> &distances_to_sb_begin,
+                const std::vector<int64_t> &distances_to_sb_end,
+                size_t chain_id,
+                size_t sb_term,
+                const auto &widths,
+                const auto &d) {
+                std::string header = fmt::format("{}\t{};{};{}\t{};{};{};{}",
+                    unitig_id++,
+                    superbubble_id,
+                    fmt::join(distances_to_sb_begin, ","),
+                    fmt::join(distances_to_sb_end, ","),
+                    chain_id,
+                    sb_term,
+                    fmt::join(widths, ","),
+                    fmt::join(d, ",")
+                );
+
+                seq_io::write_fasta(gzout, header, unitig);
+            }
+        );
+        gzclose(gzout);
+
+        return 0;
+    }
+
     Timer timer;
     logger->trace("Graph loading...");
 
@@ -42,18 +83,6 @@ int transform_graph(Config *config) {
 
     if (!dbg_succ.get())
         throw std::runtime_error("Only implemented for DBGSuccinct");
-
-    if (config->coordinates) {
-        graph::PathIndex<>(*dbg_succ, files.at(0),
-            [&](const auto &callback) {
-                if (config->infbase.size()) {
-                    seq_io::read_fasta_file_critical(config->infbase, [&](auto *read_stream) {
-                        callback(std::string_view(read_stream->seq.s, read_stream->seq.l));
-                    }, config->forward_and_reverse);
-                }
-            }).serialize(config->outfbase + dbg_succ->file_extension());
-        return 0;
-    }
 
     if (config->adjrc) {
         graph::NodeRC(*dbg_succ, true).serialize(config->outfbase + dbg_succ->file_extension());

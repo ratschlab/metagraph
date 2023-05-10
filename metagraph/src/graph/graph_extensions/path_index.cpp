@@ -253,12 +253,12 @@ ColumnPathIndex::ColumnPathIndex(std::shared_ptr<const DBGSuccinct> graph,
             size_t t = superbubble_termini[i - 1].first;
             if (!t) {
                 if (size_t sb = superbubble_starts[i - 1].first)
-                    superbubble_storage[sb].emplace(i);
+                    superbubble_storage[sb].emplace_back(i);
             } else {
                 // this is a superbubble start
-                superbubble_storage[i].emplace(i);
+                superbubble_storage[i].emplace_back(i);
                 if (size_t sb = superbubble_starts[i - 1].first)
-                    superbubble_storage[sb].emplace(i);
+                    superbubble_storage[sb].emplace_back(i);
             }
 
             if (!t || t == i)
