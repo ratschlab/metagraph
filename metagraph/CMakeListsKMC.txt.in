@@ -2,10 +2,12 @@ cmake_minimum_required(VERSION 2.8.12)
 
 project(KMC)
 
-add_compile_options(-Wall -O3 -m64 -pthread -std=c++11)
+add_compile_options(-Wall -O3 -m64 -std=c++11)
 
 if(@BUILD_STATIC@)
-string(APPEND CMAKE_CXX_FLAGS " -static ")
+string(APPEND CMAKE_CXX_FLAGS " -static -Wl,--whole-archive -lpthread -Wl,--no-whole-archive")
+else()
+add_compile_options(-pthread)
 endif()
 
 set(KMC_MAIN_DIR @KMC_MAIN_DIR@)
@@ -75,7 +77,10 @@ find_package(BZip2 REQUIRED)
 target_link_libraries(kmc
     KMCcore
     ${BZIP2_LIBRARIES}
-    -lz -lpthread
+    -lz
 )
+if(NOT @BUILD_STATIC@)
+    target_link_libraries(kmc -lpthread)
+endif()
 
 endif()
