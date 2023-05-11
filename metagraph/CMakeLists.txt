@@ -181,35 +181,6 @@ else()
 message(WARNING "Compiling without AVX instructions!")
 endif()
 
-#-------------------
-# KMC k-mer counter
-#-------------------
-set(KMC_MAIN_DIR "${PROJECT_SOURCE_DIR}/external-libraries/KMC/kmer_counter")
-if(NOT DEFINED BUILD_KMC)
-set(BUILD_KMC TRUE)
-endif()
-configure_file(CMakeListsKMC.txt.in KMC/CMakeLists.txt @ONLY)
-execute_process(COMMAND ${CMAKE_COMMAND} -G "${CMAKE_GENERATOR}" .
-  RESULT_VARIABLE result
-  WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/KMC
-)
-if(result)
-  message(FATAL_ERROR "CMake step for KMC failed: ${result}")
-endif()
-include(ProcessorCount)
-ProcessorCount(N)
-if(N EQUAL 0)
-  set(N 1)
-endif()
-execute_process(COMMAND ${CMAKE_COMMAND} --build . --config Release -- -j${N}
-  RESULT_VARIABLE result
-  WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/KMC
-)
-if(result)
-  message(FATAL_ERROR "Build step for KMC failed: ${result}")
-endif()
-
-
 # Profile with gprof
 set(CMAKE_CXX_FLAGS_PROFILE "-pg -DNDEBUG -O2 -g")
 set(CMAKE_EXE_LINKER_FLAGS_PROFILE "-pg -g")
@@ -256,13 +227,11 @@ set(CMAKE_EXE_LINKER_FLAGS_THREADS "-g -fsanitize=thread")
 set(CMAKE_SHARED_LINKER_FLAGS_THREADS "-g -fsanitize=thread")
 
 link_directories(
-  ${CMAKE_BINARY_DIR}/KMC
   external-libraries/sdsl-lite/lib
 )
 
 include_directories(
  PUBLIC
-  external-libraries/KMC/kmc_api
   external-libraries/sdsl-lite/include
   external-libraries/eigen
   external-libraries/hopscotch-map/include
@@ -291,7 +260,9 @@ add_library(caches INTERFACE)
 target_include_directories(caches INTERFACE external-libraries/caches/include)
 
 
+if(BUILD_STATIC)
 set(Boost_USE_STATIC_LIBS ON)
+endif()
 findFolly()
 if(FOLLY_FOUND)
   add_definitions(-D_USE_FOLLY -DUSE_JEMALLOC)
@@ -351,6 +322,17 @@ ExternalProject_Add(HTSLIB
 link_directories(${CMAKE_BINARY_DIR}/external-libraries/htslib/lib)
 include_directories(${CMAKE_BINARY_DIR}/external-libraries/htslib/include)
 
+ExternalProject_Add(KMC
+  DOWNLOAD_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/KMC
+  DOWNLOAD_COMMAND ""
+  SOURCE_DIR ${CMAKE_BINARY_DIR}/external-libraries/KMC
+  BUILD_IN_SOURCE TRUE
+  CONFIGURE_COMMAND mkdir -p ${CMAKE_BINARY_DIR}/external-libraries && cp -r ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/KMC ${CMAKE_BINARY_DIR}/external-libraries && mv ${CMAKE_BINARY_DIR}/external-libraries/KMC/makefile ${CMAKE_BINARY_DIR}/external-libraries/KMC/Makefile && sed -i "s/-static/-march=core2/" ${CMAKE_BINARY_DIR}/external-libraries/KMC/Makefile
+  BUILD_COMMAND make kmc
+  INSTALL_COMMAND ""
+)
+include_directories(${CMAKE_BINARY_DIR}/external-libraries/KMC/kmc_api)
+
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH}
   "${CMAKE_SOURCE_DIR}/external-libraries/binrel_wt/cmake/modules"
 )
@@ -405,12 +387,17 @@ file(GLOB metagraph_cli_files
 )
 add_library(metagraph-cli STATIC ${metagraph_cli_files})
 add_dependencies(metagraph-core HTSLIB)
+add_dependencies(metagraph-core KMC)
+target_link_libraries(metagraph-core
+  ${CMAKE_BINARY_DIR}/external-libraries/KMC/kmc_api/kmc_file.o
+  ${CMAKE_BINARY_DIR}/external-libraries/KMC/kmc_api/mmer.o
+  ${CMAKE_BINARY_DIR}/external-libraries/KMC/kmc_api/kmer_api.o
+)
 
 add_executable(metagraph "src/main.cpp")
 set_target_properties(metagraph PROPERTIES OUTPUT_NAME "metagraph_${CMAKE_DBG_ALPHABET}")
 
 set(METALIBS ${METALIBS}
-  -lKMC
   -lhts zlib
   -lsdsl
   brwt
