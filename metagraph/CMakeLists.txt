@@ -322,12 +322,18 @@ ExternalProject_Add(HTSLIB
 link_directories(${CMAKE_BINARY_DIR}/external-libraries/htslib/lib)
 include_directories(${CMAKE_BINARY_DIR}/external-libraries/htslib/include)
 
+if(APPLE)
+  set(SED gsed)
+else()
+  set(SED sed)
+endif()
+
 ExternalProject_Add(KMC
   DOWNLOAD_DIR ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/KMC
   DOWNLOAD_COMMAND ""
   SOURCE_DIR ${CMAKE_BINARY_DIR}/external-libraries/KMC
   BUILD_IN_SOURCE TRUE
-  CONFIGURE_COMMAND mkdir -p ${CMAKE_BINARY_DIR}/external-libraries && cp -r ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/KMC ${CMAKE_BINARY_DIR}/external-libraries && mv ${CMAKE_BINARY_DIR}/external-libraries/KMC/makefile ${CMAKE_BINARY_DIR}/external-libraries/KMC/Makefile && sed -i "s/-static/-march=core2/" ${CMAKE_BINARY_DIR}/external-libraries/KMC/Makefile
+  CONFIGURE_COMMAND mkdir -p ${CMAKE_BINARY_DIR}/external-libraries && cp -r ${CMAKE_CURRENT_SOURCE_DIR}/external-libraries/KMC ${CMAKE_BINARY_DIR}/external-libraries && mv ${CMAKE_BINARY_DIR}/external-libraries/KMC/makefile ${CMAKE_BINARY_DIR}/external-libraries/KMC/Makefile && ${SED} -i "s/-static/-march=core2/" ${CMAKE_BINARY_DIR}/external-libraries/KMC/Makefile
   BUILD_COMMAND make kmc
   INSTALL_COMMAND ""
 )
