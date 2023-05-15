@@ -161,6 +161,26 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
                          double discovery_fraction,
                          double presence_fraction) const;
 
+    /** For each kmer from a given sequence returns all labeled sequences from the graph that contain it.
+     * 
+     * @param sequence DNA sequence.
+     * 
+     * @return For each kmer from the given sequence a vector of tuples 
+     * (path_spelling, label, position_in_input_sequence, position_in_ref_sequence) is returned.
+     */
+    std::vector<std::vector<std::tuple<std::string, Label, uint64_t, uint64_t>>>
+    get_overlapping_reads(std::string_view sequence, bool auto_labels = false) const;
+
+    /** For each node from a given vector returns all labeled sequences that contain the corresponding k-mer. 
+     * 
+     * @param nodes Vector of nodes.
+     * 
+     * @return For each node from the given vector a vector of tuples 
+     * (path_spelling, label, position_in_input_sequence, position_in_ref_sequence) is returned.
+     */
+    std::vector<std::vector<std::tuple<std::string, Label, uint64_t, uint64_t>>>
+    get_overlapping_reads(const std::vector<node_index> &nodes, bool auto_labels = false) const;
+
     std::vector<std::pair<Label, sdsl::bit_vector>>
     get_top_label_signatures(std::string_view sequence,
                              size_t num_top_labels,

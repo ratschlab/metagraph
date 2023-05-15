@@ -99,11 +99,16 @@ class SeqSearchResult {
     typedef std::vector<std::tuple<Label, size_t, std::vector<size_t>>> LabelCountAbundancesVec;
     typedef std::vector<std::tuple<Label, size_t, std::vector<SmallVector<uint64_t>>>> LabelCountCoordsVec;
 
+    // should it be like that?
+    typedef std::vector<std::vector<std::tuple<std::string, Label, uint64_t, uint64_t>>> LabelOverlappingReads;
+
+    // add here LabelOverlappingReads
     typedef std::variant<LabelVec,
                          LabelCountVec,
                          LabelSigVec,
                          LabelCountAbundancesVec,
-                         LabelCountCoordsVec> result_type;
+                         LabelCountCoordsVec,
+                         LabelOverlappingReads> result_type;
 
     // JSON Field Keys
     static constexpr auto SEQ_DESCRIPTION_JSON_FIELD = "seq_description";
@@ -194,6 +199,10 @@ class QueryExecutor {
      */
     void query_fasta(const std::string &file_path,
                      const std::function<void(const SeqSearchResult &)> &callback);
+
+    // TODO: add docstring
+    void query_reads(const std::string &file_path,
+                     const std::function<void(const std::string &, const SeqSearchResult &)> &callback);
 
     static SeqSearchResult execute_query(QuerySequence&& sequence,
                                          bool count_labels,

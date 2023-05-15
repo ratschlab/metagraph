@@ -230,6 +230,10 @@ Config::Config(int argc, char *argv[]) {
             query_counts = true;
         } else if (!strcmp(argv[i], "--query-coords")) {
             query_coords = true;
+        } else if (!strcmp(argv[i], "--query-reads")) {
+            query_reads = true;
+        } else if (!strcmp(argv[i], "--auto-labels")) {
+            auto_labels = true;
         } else if (!strcmp(argv[i], "--verbose-output")) {
             verbose_output = true;
         } else if (!strcmp(argv[i], "--filter-present")) {
@@ -1313,6 +1317,7 @@ if (advanced) {
                             "\t                  \t\t\tOutput format: '<pos in query>-<pos in sample>' (single k-mer match)\n"
                             "\t                  \t\t\t    or '<start pos in query>-<first pos in sample>-<last pos in sample>' (segment match)\n"
                             "\t                  \t\t\tAll positions start with 0\n");
+            fprintf(stderr, "\t   --query-reads \t\tprint all reads that overlap with the query in FASTA format [off]\n");
             fprintf(stderr, "\t   --print-signature \t\tprint vectors indicating present/absent k-mers [off]\n");
 if (advanced) {
             fprintf(stderr, "\t   --verbose-output \t\tdo not collapse continuous coord or count ranges (for query-coords and query-counts) [off]\n");
