@@ -48,53 +48,44 @@ auto ColumnPathIndex::get_chain_info(const Label &check_label, node_index node) 
         { node }, std::numeric_limits<size_t>::max(), 0.0, 0.0
     );
 
-    std::vector<LabeledNodesInfo> ret_val;
-    ret_val.reserve(kmer_coords.size());
-
-    const auto &label_encoder = topo_annotator_.get_label_encoder();
-    const auto &col_mat = static_cast<const ColumnMajor&>(static_cast<const IntMatrix&>(topo_annotator_.get_matrix()).get_binary_matrix());
-
+    InfoPair info;
     for (auto &[label, num_kmer_matches, node_coords] : kmer_coords) {
-        assert(node_coords.size() == nodes.size());
+        assert(node_coords.size() == 1);
         if (label != check_label)
             continue;
 
-        NodesInfo nodes_info;
-
+        const auto &label_encoder = topo_annotator_.get_label_encoder();
         Column unitig_col = label_encoder.encode(std::string(1, '\1') + label);
         Column sb_col = label_encoder.encode(std::string(1, '\2') + label);
         Column chain_col = label_encoder.encode(std::string(1, '\3') + label);
 
-        nodes_info.reserve(node_coords.size());
-        for (auto &coords : node_coords) {
-            assert(coords.size() <= 3);
-            auto &[chain_info, coord_info] = nodes_info.emplace_back();
-            if (coords.empty())
-                continue;
+        auto &coords = node_coords[0];
+        assert(coords.size() <= 3);
+        if (coords.empty())
+            return info;
 
-            int64_t global_coord = coords[0];
+        auto &[chain_info, coord_info] = info;
+        int64_t global_coord = coords[0];
 
-            chain_info = ChainInfo(
-                col_mat.data()[unitig_col]->rank1(global_coord),
-                col_mat.data()[sb_col]->rank1(global_coord),
-                col_mat.data()[chain_col]->rank1(global_coord)
-            );
-            std::get<0>(coord_info) = global_coord;
+        const auto &col_mat = static_cast<const ColumnMajor&>(static_cast<const IntMatrix&>(topo_annotator_.get_matrix()).get_binary_matrix()).data();
+        chain_info = ChainInfo(col_mat[unitig_col]->rank1(global_coord),
+                               col_mat[sb_col]->rank1(global_coord),
+                               col_mat[chain_col]->rank1(global_coord));
+        std::get<0>(coord_info) = global_coord;
 
-            for (size_t i = 1; i < coords.size(); ++i) {
-                int64_t coord = static_cast<int64_t>(coords[i]);
-                if (coord >= 0) {
-                    std::get<1>(coord_info).emplace_back(coord);
-                } else {
-                    std::get<2>(coord_info).emplace_back(coord);
-                }
+        for (size_t i = 1; i < coords.size(); ++i) {
+            int64_t coord = static_cast<int64_t>(coords[i]);
+            if (coord >= 0) {
+                std::get<1>(coord_info).emplace_back(coord);
+            } else {
+                std::get<2>(coord_info).emplace_back(coord);
             }
-
-            return nodes_info.back();
         }
+
+        return info;
     }
 
-    return {};
+    return info;
 }
 
 auto ColumnPathIndex::get_chain_info(const std::vector<node_index> &nodes) const
@@ -231,7 +222,7 @@ void ColumnPathIndex::call_distances(const Label &label,
         if (max_distance > ds_to_end_a.front()) {
             call_distances(
                 label,
-                get_chain_info(label, get_unitig_back(label, unitig_id_a)),
+                get_chain_info(label, get_unitig_back(label, chain_id_a)),
                 info_b,
                 [&](int64_t dist) {
                     for (int64_t dd : ds_to_end_a) {
