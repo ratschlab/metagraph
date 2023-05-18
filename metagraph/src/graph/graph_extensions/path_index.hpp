@@ -24,6 +24,7 @@ class ColumnPathIndex : public SequenceGraph::GraphExtension {
     ColumnPathIndex(const AnnotatedDBG &anno_graph,
                     const AnnotatedDBG::Annotator &topo_annotator);
 
+    InfoPair get_chain_info(const Label &label, node_index node) const;
     std::vector<LabeledNodesInfo> get_chain_info(const std::vector<node_index> &nodes) const;
 
     void call_distances(const Label &label,
@@ -45,6 +46,7 @@ class ColumnPathIndex : public SequenceGraph::GraphExtension {
     const AnnotatedDBG::Annotator &topo_annotator_;
 
     int64_t get_global_coord(const Label &label, size_t unitig_id) const;
+    node_index get_unitig_back(const Label &label, size_t unitig_id) const;
 
     void adjacent_outgoing_unitigs(const Label &label, size_t unitig_id, const std::function<void(size_t, int64_t)> &callback) const;
 };
