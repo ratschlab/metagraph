@@ -99,7 +99,8 @@ void ColumnPathIndex::call_distances(const Label &label,
                                      const InfoPair &info_a,
                                      const InfoPair &info_b,
                                      const std::function<void(size_t)> &callback,
-                                     int64_t max_distance) const {
+                                     int64_t max_distance,
+                                     size_t max_steps) const {
     const auto &[unitig_id_a, sb_id_a, chain_id_a] = info_a.first;
     const auto &[unitig_id_b, sb_id_b, chain_id_b] = info_b.first;
 
@@ -119,7 +120,10 @@ void ColumnPathIndex::call_distances(const Label &label,
     if (chain_id_a) {
         if (chain_id_b && chain_id_a == chain_id_b) {
             // different superbubble
-            if (sb_id_a != sb_id_b) {
+            if (unitig_id_b == chain_id_b) {
+                std::for_each(ds_to_end_a.begin(), ds_to_end_a.end(), callback);
+                return;
+            } else if (sb_id_a != sb_id_b || (ds_from_start_b.size() == 1 && unitig_id_b == sb_id_b)) {
                 for (int64_t db : ds_from_start_b) {
                     for (int64_t da : ds_from_start_a) {
                         assert(db > da);
@@ -133,8 +137,37 @@ void ColumnPathIndex::call_distances(const Label &label,
             if (ds_from_start_a.front() >= ds_from_start_b.back())
                 return;
 
-            // TODO
             // traverse in the same superbubble to get the distance
+            std::vector<std::tuple<size_t, int64_t, Vector<int64_t>::const_iterator>> traversal_stack;
+            int64_t coord_offset = global_coord_b - get_global_coord(label, unitig_id_b);
+            traversal_stack.emplace_back(unitig_id_a,
+                                         global_coord_a - get_global_coord(label, unitig_id_a + 1),
+                                         ds_from_start_b.begin());
+            while (traversal_stack.size()) {
+                auto [u_id, dist, it] = traversal_stack.back();
+                traversal_stack.pop_back();
+
+                if (u_id == unitig_id_b) {
+                    callback(dist + coord_offset);
+                    continue;
+                }
+
+                if (u_id == sb_id_a)
+                    continue;
+
+                while (it != ds_from_start_b.end() && dist > *it) {
+                    ++it;
+                }
+
+                if (it == ds_from_start_b.end() || dist > max_distance)
+                    continue;
+
+                adjacent_outgoing_unitigs(label, u_id, [&](size_t next_u_id, int64_t len) {
+                    if (dist + len <= max_distance)
+                        traversal_stack.emplace_back(next_u_id, dist + len, it);
+                });
+            }
+
             return;
         }
 
@@ -157,8 +190,29 @@ void ColumnPathIndex::call_distances(const Label &label,
         return;
     }
 
-    // TODO
     // traverse from here
+    std::vector<std::tuple<size_t, int64_t, size_t>> traversal_stack;
+    int64_t coord_offset = global_coord_b - get_global_coord(label, unitig_id_b);
+    traversal_stack.emplace_back(unitig_id_a,
+                                 global_coord_a - get_global_coord(label, unitig_id_a + 1),
+                                 0);
+    while (traversal_stack.size()) {
+        auto [u_id, dist, n_steps] = traversal_stack.back();
+        traversal_stack.pop_back();
+
+        if (u_id == unitig_id_b) {
+            callback(dist + coord_offset);
+            continue;
+        }
+
+        if (u_id == sb_id_b || n_steps >= max_steps || dist > max_distance)
+            continue;
+
+        adjacent_outgoing_unitigs(label, u_id, [&](size_t next_u_id, int64_t len) {
+            if (dist + len <= max_distance)
+                traversal_stack.emplace_back(next_u_id, dist + len, n_steps + 1);
+        });
+    }
 }
 
 int64_t ColumnPathIndex::get_global_coord(const Label &label, size_t unitig_id) const {
@@ -173,7 +227,7 @@ void ColumnPathIndex
                             size_t unitig_id,
                             const std::function<void(size_t, int64_t)> &callback) const {
     const auto &label_encoder = topo_annotator_.get_label_encoder();
-    Column unitig_front_col = label_encoder.encode(std::string(1, '\4') + label);
+    Column unitig_front_col = label_encoder.encode(std::string(1, '\1') + label);
     Column unitig_back_col = label_encoder.encode(std::string(1, '\4') + label);
 
     const auto &col_mat = static_cast<const ColumnMajor&>(static_cast<const IntMatrix&>(topo_annotator_.get_matrix()).get_binary_matrix());
