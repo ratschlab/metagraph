@@ -236,6 +236,25 @@ void ColumnPathIndex::call_distances(const Label &label,
         return;
     }
 
+    if (sb_id_a && sb_id_b != sb_id_a) {
+        // jump to the end of the superbubble and traverse from there
+        if (max_distance > ds_to_end_a.front()) {
+            call_distances(
+                label,
+                get_chain_info(label, get_unitig_back(label, sb_id_a)),
+                info_b,
+                [&](int64_t dist) {
+                    for (int64_t dd : ds_to_end_a) {
+                        callback(dist + dd);
+                    }
+                },
+                max_distance - ds_to_end_a.front()
+            );
+        }
+
+        return;
+    }
+
     // traverse from here
     std::vector<std::tuple<size_t, int64_t, size_t>> traversal_stack;
     int64_t coord_offset = global_coord_b - get_global_coord(label, unitig_id_b);
