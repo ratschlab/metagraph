@@ -141,6 +141,10 @@ template <class Annotator>
 StaticBinRelAnnotator<matrix::TupleCSCMatrix<typename Annotator::binary_matrix_type>, std::string>
 load_coords(Annotator&& anno, const std::vector<std::string> &files);
 
+template <class Annotator>
+StaticBinRelAnnotator<matrix::CSCMatrix<typename Annotator::binary_matrix_type, CountsVector>, std::string>
+load_counts(Annotator&& anno, const std::vector<std::string> &files);
+
 } // namespace annot
 } // namespace mtg
 

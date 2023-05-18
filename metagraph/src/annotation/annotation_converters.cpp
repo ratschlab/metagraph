@@ -39,6 +39,7 @@ using mtg::common::logger;
 namespace fs = std::filesystem;
 
 typedef LabelEncoder<std::string> LEncoder;
+typedef matrix::CSCMatrix<binmat::ColumnMajor, CountsVector> IntCSC;
 typedef matrix::TupleCSCMatrix<binmat::ColumnMajor> TupleCSC;
 typedef matrix::TupleCSCMatrix<binmat::BRWT> TupleBRWT;
 
@@ -1893,6 +1894,31 @@ load_coords<ColumnCompressed<>>(ColumnCompressed<>&&, const std::vector<std::str
 template
 StaticBinRelAnnotator<TupleBRWT, std::string>
 load_coords<MultiBRWTAnnotator>(MultiBRWTAnnotator&&, const std::vector<std::string> &);
+
+template <class Annotator>
+StaticBinRelAnnotator<matrix::CSCMatrix<typename Annotator::binary_matrix_type, CountsVector>, std::string>
+load_counts(Annotator&& anno, const std::vector<std::string> &files) {
+    std::vector<CountsVector> column_values(anno.num_labels());
+
+    ColumnCompressed<>::load_column_values(files,
+        [&](size_t j, const std::string&, sdsl::int_vector<>&& values) {
+            column_values[j] = CountsVector(std::move(values));
+        },
+        get_num_threads()
+    );
+
+    auto label_encoder = anno.get_label_encoder();
+
+    return StaticBinRelAnnotator<matrix::CSCMatrix<typename Annotator::binary_matrix_type, CountsVector>, std::string>(
+            std::make_unique<matrix::CSCMatrix<typename Annotator::binary_matrix_type, CountsVector>>(
+                    std::move(*anno.release_matrix()),
+                    std::move(column_values)),
+            std::move(label_encoder));
+}
+
+template
+StaticBinRelAnnotator<IntCSC, std::string>
+load_counts<ColumnCompressed<>>(ColumnCompressed<>&&, const std::vector<std::string> &);
 
 } // namespace annot
 } // namespace mtg

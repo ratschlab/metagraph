@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "annotation/int_matrix/base/int_matrix.hpp"
+#include "annotation/binary_matrix/column_sparse/column_major.hpp"
 #include "common/logger.hpp"
 #include "common/vectors/bit_vector_adaptive.hpp"
 
@@ -56,6 +57,9 @@ class TupleCSCMatrix : public MultiIntMatrix {
 
     // row is in [0, num_rows), column is in [0, num_columns)
     bool get(Row row, Column column) const { return binary_matrix_.get(row, column); }
+
+    Tuple get_tuple(Row row, Column column) const override;
+
     SetBitPositions get_row(Row row) const { return binary_matrix_.get_row(row); }
     std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const {
         return binary_matrix_.get_rows(rows);
@@ -123,6 +127,45 @@ uint64_t TupleCSCMatrix<BaseMatrix, Values, Delims>::num_attributes() const {
         num_attributes += column_values_[j].size();
     }
     return num_attributes;
+}
+
+template <class BaseMatrix, class Values, class Delims>
+inline typename TupleCSCMatrix<BaseMatrix, Values, Delims>::Tuple
+TupleCSCMatrix<BaseMatrix, Values, Delims>::get_tuple(Row row, Column column) const {
+    if constexpr(std::is_same_v<BaseMatrix, binmat::ColumnMajor>) {
+        const auto &col_maj = static_cast<const binmat::ColumnMajor&>(binary_matrix_);
+        if (uint64_t r = col_maj.data()[column]->conditional_rank1(row)) {
+            size_t begin = delimiters_[column].select1(r) + 1 - r;
+            size_t end = delimiters_[column].select1(r + 1) - r;
+
+            Tuple tuple;
+            tuple.reserve(end - begin);
+            for (size_t t = begin; t < end; ++t) {
+                tuple.push_back(column_values_[column][t]);
+            }
+
+            return tuple;
+        }
+    } else {
+        const auto &column_ranks = binary_matrix_.get_column_ranks(row);
+        for (auto [j, r] : column_ranks) {
+            if (j == column) {
+                assert(r >= 1 && "matches can't have zero-rank");
+                size_t begin = delimiters_[j].select1(r) + 1 - r;
+                size_t end = delimiters_[j].select1(r + 1) - r;
+
+                Tuple tuple;
+                tuple.reserve(end - begin);
+                for (size_t t = begin; t < end; ++t) {
+                    tuple.push_back(column_values_[j][t]);
+                }
+
+                return tuple;
+            }
+        }
+    }
+
+    return {};
 }
 
 template <class BaseMatrix, class Values, class Delims>

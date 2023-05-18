@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "annotation/int_matrix/base/int_matrix.hpp"
+#include "annotation/binary_matrix/column_sparse/column_major.hpp"
 #include "common/logger.hpp"
 
 
@@ -40,6 +41,9 @@ class CSCMatrix : public IntMatrix {
 
     // row is in [0, num_rows), column is in [0, num_columns)
     bool get(Row row, Column column) const { return binary_matrix_.get(row, column); }
+
+    typename ColumnValues::value_type get_value(Row row, Column column) const override;
+
     SetBitPositions get_row(Row row) const { return binary_matrix_.get_row(row); }
     std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const {
         return binary_matrix_.get_rows(rows);
@@ -62,6 +66,27 @@ class CSCMatrix : public IntMatrix {
     std::vector<ColumnValues> column_values_;
 };
 
+
+template <class BaseMatrix, class ColumnValues>
+inline typename ColumnValues::value_type
+CSCMatrix<BaseMatrix, ColumnValues>::get_value(Row row, Column column) const {
+    if constexpr(std::is_same_v<BaseMatrix, binmat::ColumnMajor>) {
+        const auto &col_maj = static_cast<const binmat::ColumnMajor&>(binary_matrix_);
+        if (size_t r = col_maj.data()[column]->conditional_rank1(row))
+            return column_values_[column][r - 1];
+    } else {
+        const auto &column_ranks = binary_matrix_.get_column_ranks(row);
+        RowValues row_values;
+        row_values.reserve(column_ranks.size());
+        for (auto [j, r] : column_ranks) {
+            assert(r >= 1 && "matches can't have zero-rank");
+            if (j == column)
+                return column_values_[j][r - 1];
+        }
+    }
+
+    return 0;
+}
 
 template <class BaseMatrix, class ColumnValues>
 inline typename CSCMatrix<BaseMatrix, ColumnValues>::RowValues

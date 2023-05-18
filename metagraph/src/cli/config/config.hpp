@@ -66,6 +66,7 @@ class Config {
     bool aggregate_columns = false;
     bool coordinates = false;
     bool filter_reads = false;
+    bool unitig_coords = false;
     bool advanced = false;
 
     unsigned int k = 3;
@@ -218,6 +219,7 @@ class Config {
         RowSparse,
         RBFish,
         RbBRWT,
+        IntColumn,
         IntBRWT,
         IntRowDiffBRWT,
         IntRowDiffDisk,

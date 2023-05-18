@@ -701,6 +701,13 @@ int transform_annotation(Config *config) {
                 assert(false);
                 break;
             }
+            case Config::IntColumn: {
+                IntColumnAnnotator int_column = load_counts(std::move(*annotator), files);
+                logger->trace("Annotation converted in {} sec", timer.elapsed());
+                int_column.serialize(config->outfbase);
+                logger->trace("Serialized to {}", config->outfbase);
+                break;
+            }
             case Config::ColumnCoord: {
                 ColumnCoordAnnotator column_coord = load_coords(std::move(*annotator), files);
                 logger->trace("Annotation converted in {} sec", timer.elapsed());

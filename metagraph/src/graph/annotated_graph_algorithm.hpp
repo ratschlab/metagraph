@@ -63,12 +63,9 @@ using SequenceCallback = std::function<void(const std::string&)>;
 using SequenceGenerator = std::function<void(const SequenceCallback&)>;
 using SequenceCoordCallback = std::function<void(const std::string&,
                                                  size_t, /* superbubble ID */
-                                                 const std::vector<int64_t>&, /* distance from superbubble start */
-                                                 const std::vector<int64_t>&, /* distance to superbubble end */
                                                  size_t, /* chain id */
-                                                 size_t, /* superbubble terminus */
-                                                 std::vector<int64_t>, /* superbubble widths */
-                                                 std::vector<int64_t> /* distance from chain end */
+                                                 const std::vector<int64_t>&, /* distance from chain/superbubble start */
+                                                 const std::vector<int64_t>& /* distance to chain/superbubble end */
                                                  )>;
 void assemble_with_coordinates(size_t k,
                                const SequenceGenerator &input_generator,

@@ -238,6 +238,8 @@ Config::Config(int argc, char *argv[]) {
             filter_present = true;
         } else if (!strcmp(argv[i], "--filter-reads")) {
             filter_reads = true;
+        } else if (!strcmp(argv[i], "--unitig-coordinates")) {
+            unitig_coords = true;
         } else if (!strcmp(argv[i], "--count-labels")) {
             count_labels = true;
         } else if (!strcmp(argv[i], "--print-signature")) {
@@ -686,6 +688,11 @@ Config::Config(int argc, char *argv[]) {
         print_usage_and_exit = true;
     }
 
+    if (unitig_coords && count_width != 64) {
+        std::cerr << "Warning: setting count width to 64" << std::endl;
+        count_width = 64;
+    }
+
     if (outfbase.size()
             && !(utils::check_if_writable(outfbase)
                     || (separately
@@ -765,6 +772,8 @@ std::string Config::annotype_to_string(AnnotationType state) {
             return "row_diff_int_disk";
         case RowDiffDiskCoord:
             return "row_diff_disk_coord";
+        case IntColumn:
+            return "int_column";
         case IntBRWT:
             return "int_brwt";
         case IntRowDiffBRWT:
@@ -814,6 +823,8 @@ Config::AnnotationType Config::string_to_annotype(const std::string &string) {
         return AnnotationType::IntRowDiffDisk;
     } else if (string == "row_diff_disk_coord") {
         return AnnotationType::RowDiffDiskCoord;
+    } else if (string == "int_column") {
+        return AnnotationType::IntColumn;
     } else if (string == "int_brwt") {
         return AnnotationType::IntBRWT;
     } else if (string == "row_diff_int_brwt") {
@@ -887,7 +898,7 @@ DeBruijnGraph::Mode Config::string_to_graphmode(const std::string &string) {
 
 
 void Config::print_usage(const std::string &prog_name, IdentityType identity) {
-    const char annotation_list[] = "\t\t( column, brwt, rb_brwt, int_brwt,\n"
+    const char annotation_list[] = "\t\t( column, brwt, rb_brwt, int_column, int_brwt,\n"
                                    "\t\t  column_coord, brwt_coord, row_diff_coord, row_diff_brwt_coord,\n"
                                    "\t\t  row_diff, row_diff_brwt, row_diff_flat, row_diff_sparse, row_diff_int_brwt,\n"
                                    "\t\t  row_diff_disk, row_diff_int_disk, row_diff_disk_coord,\n"

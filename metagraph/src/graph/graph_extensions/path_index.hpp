@@ -14,44 +14,38 @@ namespace mtg::graph {
 class ColumnPathIndex : public SequenceGraph::GraphExtension {
   public:
     using node_index = SequenceGraph::node_index;
-    using Row = annot::binmat::BinaryMatrix::Row;
-    using RowTuples = annot::matrix::MultiIntMatrix::RowTuples;
-    using Label = std::string;
-    using SequenceCallback = std::function<void(const std::string&)>;
-    using SequenceGenerator = std::function<void(const SequenceCallback&)>;
-    using FastaCallback = std::function<void(const std::string &, const SequenceGenerator&)>;
-    using FastaGenerator = std::function<void(const FastaCallback&)>;
+    using Label = AnnotatedDBG::Label;
+    using ChainInfo = std::tuple<size_t, size_t, size_t>;
+    using CoordInfo = std::tuple<int64_t, Vector<int64_t>, Vector<int64_t>>;
+    using InfoPair = std::pair<ChainInfo, CoordInfo>;
+    using NodesInfo = Vector<InfoPair>;
+    using LabeledNodesInfo = std::pair<Label, NodesInfo>;
 
-    ColumnPathIndex(std::shared_ptr<const DBGSuccinct> graph,
-                    const annot::LabelEncoder<Label> &label_encoder,
-                    const FastaGenerator &fasta_generator,
-                    const std::string &graph_fname = "");
+    ColumnPathIndex(const AnnotatedDBG &anno_graph,
+                    const AnnotatedDBG::Annotator &topo_annotator);
 
-    ColumnPathIndex(const DBGSuccinct &graph,
-                    const annot::LabelEncoder<Label> &label_encoder,
-                    const FastaGenerator &fasta_generator,
-                    const std::string &graph_fname = "")
-          : ColumnPathIndex(decltype(dbg_succ_)(decltype(dbg_succ_){}, &graph),
-                            label_encoder,
-                            fasta_generator,
-                            graph_fname) {}
+    std::vector<LabeledNodesInfo> get_chain_info(const std::vector<node_index> &nodes) const;
 
-    std::vector<RowTuples> get_coords(const std::vector<node_index> &nodes) const;
+    void call_distances(const Label &label,
+                        const InfoPair &info_a,
+                        const InfoPair &info_b,
+                        const std::function<void(size_t)> &callback,
+                        int64_t max_distance = std::numeric_limits<int64_t>::max()) const;
 
-    void adjacent_outgoing_unitigs(size_t path_id,
-                                   const std::function<void(size_t)> &callback) const;
-
-    void set_graph(std::shared_ptr<const DBGSuccinct> graph);
-
-    bool load(const std::string &) { return true; }
-    void serialize(const std::string &) const {}
+    bool load(const std::string &) { throw std::runtime_error("Load not implemented for ColumnPathIndex"); }
+    void serialize(const std::string &) const { throw std::runtime_error("Serialize not implemented for ColumnPathIndex"); }
 
     bool is_compatible(const SequenceGraph &graph, bool = true) const {
-        return dynamic_cast<const DBGSuccinct*>(&graph) == dbg_succ_.get();
+        return anno_graph_.check_compatibility() && &graph == &anno_graph_.get_graph();
     }
 
   private:
-    std::shared_ptr<const DBGSuccinct> dbg_succ_;
+    const AnnotatedDBG &anno_graph_;
+    const AnnotatedDBG::Annotator &topo_annotator_;
+
+    int64_t get_global_coord(const Label &label, size_t unitig_id) const;
+
+    void adjacent_outgoing_unitigs(const Label &label, size_t unitig_id, const std::function<void(size_t, int64_t)> &callback) const;
 };
 
 class IPathIndex : public SequenceGraph::GraphExtension {

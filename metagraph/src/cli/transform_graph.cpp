@@ -46,23 +46,29 @@ int transform_graph(Config *config) {
                 }
             },
             [&](const std::string &unitig,
-                size_t superbubble_id,
-                const std::vector<int64_t> &distances_to_sb_begin,
-                const std::vector<int64_t> &distances_to_sb_end,
-                size_t chain_id,
                 size_t sb_term,
-                const auto &widths,
-                const auto &d) {
-                std::string header = fmt::format("{}\t{};{};{}\t{};{};{};{}",
-                    unitig_id++,
-                    superbubble_id,
-                    fmt::join(distances_to_sb_begin, ","),
-                    fmt::join(distances_to_sb_end, ","),
-                    chain_id,
-                    sb_term,
-                    fmt::join(widths, ","),
-                    fmt::join(d, ",")
-                );
+                size_t chain_id,
+                const std::vector<int64_t> &distances_from_begin,
+                const std::vector<int64_t> &distances_to_end) {
+                std::string header;
+                if (!sb_term) {
+                    header = fmt::format("{}", unitig_id++);
+                } else if (!chain_id) {
+                    header = fmt::format("{}\t{}\t{};{}",
+                        unitig_id++,
+                        sb_term,
+                        fmt::join(distances_from_begin, ","),
+                        fmt::join(distances_to_end, ",")
+                    );
+                } else {
+                    header = fmt::format("{}\t{};{}\t{};{}",
+                        unitig_id++,
+                        sb_term,
+                        chain_id,
+                        fmt::join(distances_from_begin, ","),
+                        fmt::join(distances_to_end, ",")
+                    );
+                }
 
                 seq_io::write_fasta(gzout, header, unitig);
             }

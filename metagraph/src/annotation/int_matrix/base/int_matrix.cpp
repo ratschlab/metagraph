@@ -72,6 +72,17 @@ IntMatrix::get_rows(const std::vector<Row> &row_ids) const {
     return result;
 }
 
+IntMatrix::Value IntMatrix::get_value(Row row, Column column) const {
+    RowValues values = get_row_values(row);
+
+    for (size_t k = 0; k < values.size(); ++k) {
+        if (values[k].first == column)
+            return values[k].second;
+    }
+
+    return 0;
+}
+
 // return the positions of all non-empty tuples in the row
 MultiIntMatrix::SetBitPositions MultiIntMatrix::get_row(Row i) const {
     RowTuples row = get_row_tuples(i);
@@ -129,6 +140,16 @@ MultiIntMatrix::get_row_values(const std::vector<Row> &rows) const {
     }
 
     return row_values;
+}
+
+MultiIntMatrix::Tuple MultiIntMatrix::get_tuple(Row row, Column column) const {
+    RowTuples row_tuples = get_row_tuples(row);
+    for (size_t i = 0; i < row_tuples.size(); ++i) {
+        if (row_tuples[i].first == column)
+            return row_tuples[i].second;
+    }
+
+    return {};
 }
 
 } // namespace matrix
