@@ -4,6 +4,7 @@
 #include <cstdlib>
 
 #include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
+#include "annotation/binary_matrix/multi_brwt/brwt.hpp"
 #include "annotation/int_matrix/base/int_matrix.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "common/aligned_vector.hpp"
@@ -677,7 +678,7 @@ AnnotatedDBG::get_overlapping_reads(const std::vector<node_index> &nodes, bool a
         assert(anno_to_graph_index(rows[i]) == nodes[rows_to_nodes[i]]);
     }
 
-    const auto *tuple_row_diff = dynamic_cast<const TupleRowDiff<TupleCSCMatrix<ColumnMajor>> *>(&annotator_->get_matrix());
+    const auto *tuple_row_diff = dynamic_cast<const TupleRowDiff<TupleCSCMatrix<annot::binmat::BRWT>> *>(&annotator_->get_matrix());
     if (!tuple_row_diff) {
         logger->error("k-mer coordinates are not indexed in this annotator");
         exit(1);
