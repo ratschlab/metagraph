@@ -127,19 +127,19 @@ void chain_anchors(const DBGAlignerConfig &config,
                  chain_scores.data() + (orientation_change - anchors_begin));
 
     // backtracking
-    std::vector<std::pair<score_t, size_t>> best_chains;
+    std::vector<std::tuple<score_t, bool, size_t>> best_chains;
     best_chains.reserve(chain_scores.size());
     for (size_t i = 0; i < chain_scores.size(); ++i) {
         const auto &[score, last, dist] = chain_scores[i];
 
         if (score > 0)
-            best_chains.emplace_back(-score, i);
+            best_chains.emplace_back(-score, anchors_begin + i >= orientation_change, i);
     }
 
     std::sort(best_chains.begin(), best_chains.end());
 
     sdsl::bit_vector used(chain_scores.size());
-    for (auto [nscore, i] : best_chains) {
+    for (auto [nscore, orientation, i] : best_chains) {
         if (terminate())
             return;
 
