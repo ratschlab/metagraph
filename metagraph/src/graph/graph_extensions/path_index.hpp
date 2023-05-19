@@ -41,6 +41,8 @@ class ColumnPathIndex : public SequenceGraph::GraphExtension {
         return anno_graph_.check_compatibility() && &graph == &anno_graph_.get_graph();
     }
 
+    const AnnotatedDBG& get_anno_graph() const { return anno_graph_; }
+
   private:
     const AnnotatedDBG &anno_graph_;
     const AnnotatedDBG::Annotator &topo_annotator_;

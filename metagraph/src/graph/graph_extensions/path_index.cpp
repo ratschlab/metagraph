@@ -91,7 +91,7 @@ auto ColumnPathIndex::get_chain_info(const Label &check_label, node_index node) 
 auto ColumnPathIndex::get_chain_info(const std::vector<node_index> &nodes) const
         -> std::vector<LabeledNodesInfo> {
     auto kmer_coords = anno_graph_.get_kmer_coordinates(
-        nodes, std::numeric_limits<size_t>::max(), 0.0, 0.0
+        nodes, anno_graph_.get_annotator().get_label_encoder().size(), 0.0, 0.0
     );
 
     std::vector<LabeledNodesInfo> ret_val;

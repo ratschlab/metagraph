@@ -354,17 +354,20 @@ int align_to_graph(Config *config) {
     std::shared_ptr<AnnotatedDBG> col_anno_dbg;
     std::shared_ptr<AnnotatedDBG::Annotator> col_topo_anno;
     auto col_anno = initialize_annotation(config->infbase + ".global.column_coord.annodbg", *config);
-    if (col_anno) {
+    if (col_anno->load(config->infbase + ".global.column_coord.annodbg")) {
         logger->trace("Loading path index");
         col_topo_anno = initialize_annotation(config->infbase + ".topo.int_column.annodbg", *config);
-        if (col_topo_anno) {
+        if (col_topo_anno->load(config->infbase + ".topo.int_column.annodbg")) {
             col_anno_dbg = std::make_shared<AnnotatedDBG>(graph, std::move(col_anno));
             col_path_index = std::make_shared<ColumnPathIndex>(*col_anno_dbg, *col_topo_anno);
             graph->add_extension(col_path_index);
         } else {
+            col_topo_anno.reset();
             logger->error("Failed to load graph topology");
             exit(1);
         }
+    } else {
+        col_anno.reset();
     }
 
     Timer timer;

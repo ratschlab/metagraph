@@ -186,7 +186,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
         std::string_view reverse = paths[i].get_query(true);
         assert(this_query == query);
 
-        if (!config_.chain_alignments && graph_.get_extension_threadsafe<IPathIndex>()) {
+        if (!config_.chain_alignments && graph_.get_extension_threadsafe<ColumnPathIndex>()) {
             if (graph_.get_mode() != DeBruijnGraph::BASIC)
                 seeder_rc = std::make_shared<ManualSeeder>();
 

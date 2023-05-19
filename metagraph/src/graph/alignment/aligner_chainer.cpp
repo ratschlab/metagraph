@@ -549,13 +549,15 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                        SeedFilteringExtender&& extender,
                        SeedFilteringExtender&& bwd_extender,
                        bool allow_label_change) {
+    allow_label_change = false;
     size_t query_size = extender.get_query().size();
     const DeBruijnGraph &graph_ = aligner.get_graph();
     const DBGAlignerConfig &config_ = aligner.get_config();
-    auto path_index = graph_.get_extension_threadsafe<IPathIndex>();
-    if (!path_index)
+    auto column_path_index = graph_.get_extension_threadsafe<ColumnPathIndex>();
+    if (!column_path_index)
         return {};
 
+    const auto &label_encoder = column_path_index->get_anno_graph().get_annotator().get_label_encoder();
     const auto &in_anchors = seeder->get_seeds();
     if (in_anchors.empty())
         return {};
@@ -621,7 +623,8 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
             return;
 
         std::sort(begin, end, [](const auto &a, const auto &b) {
-            return a.get_query_view().end() > b.get_query_view().end();
+            return std::pair(b.label_columns, a.get_query_view().end())
+                    > std::pair(a.label_columns, b.get_query_view().end());
         });
 
         if (end_counter.empty())
@@ -676,7 +679,11 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
         }
     }
 
-    auto node_coords = path_index->get_coords(nodes);
+    tsl::hopscotch_map<size_t, ColumnPathIndex::NodesInfo> node_col_coords;
+    for (auto &[label, nodes_info] : column_path_index->get_chain_info(nodes)) {
+        node_col_coords.emplace(label_encoder.encode(label), std::move(nodes_info));
+    }
+
     float sl = -static_cast<float>(config_.min_seed_length) * 0.01;
 
     sdsl::bit_vector matching_pos[2] {
@@ -786,10 +793,12 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
             const Seed *end,
             auto chain_scores,
             const auto &update_score) {
-            const auto &coords_i_back = node_coords[anchor_ends[&a_i - seeds.data()].second];
+            size_t node_i = anchor_ends[&a_i - seeds.data()].second;
             const auto &score_i = std::get<0>(*(chain_scores - (begin - seeds.data()) + (&a_i - seeds.data())));
             std::string_view query_i = a_i.get_query_view();
             auto col_i = a_i.get_columns()[0];
+            const auto &coords_i_back = node_col_coords[col_i][node_i];
+
             --chain_scores;
             std::for_each(begin, end, [&](const Seed &a_j) {
                 // try to connect a_i to a_j
@@ -805,8 +814,8 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
 
                 ssize_t dist = query_j.end() - query_i.end();
                 score_t label_change_score = 0;
+                auto col_j = a_j.get_columns()[0];
                 if (labeled_aligner) {
-                    auto col_j = a_j.get_columns()[0];
                     if (!allow_label_change && col_i != col_j)
                         return;
 
@@ -844,69 +853,24 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                     }
                 }
 
-                const auto &coords_j_front = node_coords[anchor_ends[&a_j - seeds.data()].first];
+                size_t node_j = anchor_ends[&a_j - seeds.data()].first;
+                const auto &coords_j_front = node_col_coords[col_j][node_j];
 
-                auto process_coord_list = [&](const auto &list_a,
-                                              const auto &list_b,
-                                              int64_t offset = 0) {
-                    for (int64_t c_j : list_a) {
-                        for (int64_t c : list_b) {
-                            int64_t coord_dist = c - c_j + offset;
-                            if (coord_dist <= 0 || num_added > coord_dist)
-                                continue;
+                column_path_index->call_distances(label_encoder.decode(col_i),
+                                                  coords_i_back, coords_j_front,
+                                                  [&](int64_t coord_dist) {
+                    if (num_added > coord_dist)
+                        return;
 
-                            float gap = std::abs(coord_dist - dist);
-                            if (gap != 0 && overlap)
-                                continue;
+                    float gap = std::abs(coord_dist - dist);
+                    if (gap != 0 && overlap)
+                        return;
 
-                            score_t gap_cost = ceil(sl * gap - log2(gap + 1) * 0.5);
-                            assert(gap > 0 || gap_cost == 0);
+                    score_t gap_cost = ceil(sl * gap - log2(gap + 1) * 0.5);
+                    assert(gap > 0 || gap_cost == 0);
 
-                            update_score(base_added_score + gap_cost, &a_j, coord_dist);
-                        }
-                    }
-                };
-
-                if (coords_i_back.size() > 1 || coords_j_front.size() > 1) {
-                    for (size_t i = 1; i < coords_i_back.size(); ++i) {
-                        const auto &[c_i, tuple_i] = coords_i_back[i];
-                        for (size_t j = 1; j < coords_j_front.size(); ++j) {
-                            const auto &[c_j, tuple_j] = coords_j_front[j];
-                            if (c_i == c_j)
-                                process_coord_list(tuple_i, tuple_j);
-                        }
-                    }
-
-                    return;
-                }
-
-                for (const auto &[c_i, tuple_i] : coords_i_back) {
-                    for (const auto &[c_j, tuple_j] : coords_j_front) {
-                        if (c_i == c_j) {
-                            process_coord_list(tuple_i, tuple_j);
-
-                        } else if (path_index->is_unitig(c_i) && path_index->is_unitig(c_j)) {
-                            auto find = dist_cache.find(c_i);
-                            bool prev_cached = find != dist_cache.end() && find->second.count(c_j);
-                            auto &coord_dists = dist_cache[c_i][c_j];
-
-                            if (!prev_cached) {
-                                path_index->call_dists(c_i, c_j, [&](size_t coord_dist) {
-                                    coord_dists.emplace_back(coord_dist);
-                                }, max_coord_dist);
-                            }
-
-                            for (size_t coord_dist : coord_dists) {
-                                int64_t source_coord = path_index->path_id_to_coord(c_i);
-                                int64_t target_coord = path_index->path_id_to_coord(c_j);
-                                process_coord_list(
-                                    tuple_i, tuple_j,
-                                    static_cast<int64_t>(coord_dist + source_coord) - target_coord
-                                );
-                            }
-                        }
-                    }
-                }
+                    update_score(base_added_score + gap_cost, &a_j, coord_dist);
+                }, max_coord_dist, 2);
             });
         },
         [&](const auto &chain, score_t score) {
