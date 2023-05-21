@@ -178,6 +178,8 @@ void ColumnPathIndex::call_distances(const Label &label,
                 return;
             }
 
+            assert(ds_from_start_a.size());
+            assert(ds_from_start_b.size());
             if (ds_from_start_a.front() >= ds_from_start_b.back())
                 return;
 
@@ -215,30 +217,28 @@ void ColumnPathIndex::call_distances(const Label &label,
             return;
         }
 
-        if (ds_to_end_a.front() > max_distance)
+        if (ds_to_end_a.empty() || ds_to_end_a.front() > max_distance)
             return;
 
         // jump to the end of the chain, then traverse from there
-        if (max_distance > ds_to_end_a.front()) {
-            call_distances(
-                label,
-                get_chain_info(label, get_unitig_back(label, chain_id_a)),
-                info_b,
-                [&](int64_t dist) {
-                    for (int64_t dd : ds_to_end_a) {
-                        callback(dist + dd);
-                    }
-                },
-                max_distance - ds_to_end_a.front()
-            );
-        }
+        call_distances(
+            label,
+            get_chain_info(label, get_unitig_back(label, chain_id_a)),
+            info_b,
+            [&](int64_t dist) {
+                for (int64_t dd : ds_to_end_a) {
+                    callback(dist + dd);
+                }
+            },
+            max_distance - ds_to_end_a.front()
+        );
 
         return;
     }
 
     if (sb_id_a && sb_id_b != sb_id_a) {
         // jump to the end of the superbubble and traverse from there
-        if (max_distance > ds_to_end_a.front()) {
+        if (ds_to_end_a.size() && max_distance >= ds_to_end_a.front()) {
             call_distances(
                 label,
                 get_chain_info(label, get_unitig_back(label, sb_id_a)),

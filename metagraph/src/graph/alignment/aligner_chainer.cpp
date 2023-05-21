@@ -797,6 +797,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
             const auto &score_i = std::get<0>(*(chain_scores - (begin - seeds.data()) + (&a_i - seeds.data())));
             std::string_view query_i = a_i.get_query_view();
             auto col_i = a_i.get_columns()[0];
+            assert(node_col_coords[col_i].size() == nodes.size());
             const auto &coords_i_back = node_col_coords[col_i][node_i];
 
             --chain_scores;
@@ -854,6 +855,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                 }
 
                 size_t node_j = anchor_ends[&a_j - seeds.data()].first;
+                assert(node_col_coords[col_j].size() == nodes.size());
                 const auto &coords_j_front = node_col_coords[col_j][node_j];
 
                 column_path_index->call_distances(label_encoder.decode(col_i),
