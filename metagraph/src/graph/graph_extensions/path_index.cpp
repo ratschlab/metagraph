@@ -190,23 +190,19 @@ void ColumnPathIndex::call_distances(const Label &label,
 
             // traverse in the same superbubble to get the distance
             std::vector<std::tuple<size_t, int64_t, Vector<int64_t>::const_iterator>> traversal_stack;
-            int64_t coord_offset = global_coord_b - get_global_coord(label, unitig_id_b);
+            int64_t coord_offset = get_global_coord(label, unitig_id_b + 1) - global_coord_b;
+            int64_t dist_offset = ds_from_start_a.front() - get_global_coord(label, unitig_id_a) + global_coord_a + coord_offset;
             traversal_stack.emplace_back(unitig_id_a,
-                                         global_coord_a - get_global_coord(label, unitig_id_a + 1),
+                                         get_global_coord(label, unitig_id_a + 1) - global_coord_a - coord_offset,
                                          ds_from_start_b.begin());
             while (traversal_stack.size()) {
                 auto [u_id, dist, it] = traversal_stack.back();
                 traversal_stack.pop_back();
 
-                if (u_id == unitig_id_b) {
-                    callback(dist + coord_offset);
-                    continue;
-                }
-
                 if (u_id == sb_id_a)
                     continue;
 
-                while (it != ds_from_start_b.end() && dist > *it) {
+                while (it != ds_from_start_b.end() && dist_offset + dist > *it) {
                     ++it;
                 }
 
@@ -214,8 +210,11 @@ void ColumnPathIndex::call_distances(const Label &label,
                     continue;
 
                 adjacent_outgoing_unitigs(label, u_id, [&](size_t next_u_id, int64_t len) {
-                    if (dist + len <= max_distance)
+                    if (next_u_id == unitig_id_b) {
+                        callback(dist + len);
+                    } else if (dist + len <= max_distance) {
                         traversal_stack.emplace_back(next_u_id, dist + len, it);
+                    }
                 });
             }
 
@@ -262,25 +261,23 @@ void ColumnPathIndex::call_distances(const Label &label,
 
     // traverse from here
     std::vector<std::tuple<size_t, int64_t, size_t>> traversal_stack;
-    int64_t coord_offset = global_coord_b - get_global_coord(label, unitig_id_b);
+    int64_t coord_offset = get_global_coord(label, unitig_id_b + 1) - global_coord_b;
     traversal_stack.emplace_back(unitig_id_a,
-                                 global_coord_a - get_global_coord(label, unitig_id_a + 1),
+                                 get_global_coord(label, unitig_id_a + 1) - global_coord_a - coord_offset,
                                  0);
     while (traversal_stack.size()) {
         auto [u_id, dist, n_steps] = traversal_stack.back();
         traversal_stack.pop_back();
 
-        if (u_id == unitig_id_b) {
-            callback(dist + coord_offset);
-            continue;
-        }
-
         if (u_id == sb_id_b || n_steps >= max_steps || dist > max_distance)
             continue;
 
         adjacent_outgoing_unitigs(label, u_id, [&](size_t next_u_id, int64_t len) {
-            if (dist + len <= max_distance)
+            if (next_u_id == unitig_id_b) {
+                callback(dist + len);
+            } else if (dist + len <= max_distance) {
                 traversal_stack.emplace_back(next_u_id, dist + len, n_steps + 1);
+            }
         });
     }
 }
