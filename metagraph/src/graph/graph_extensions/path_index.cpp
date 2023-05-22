@@ -150,7 +150,6 @@ void ColumnPathIndex::call_distances(const Label &label,
                                      const std::function<void(size_t)> &callback,
                                      int64_t max_distance,
                                      size_t max_steps) const {
-    // TODO: handle cycles
     const auto &[unitig_id_a, sb_id_a, chain_id_a] = info_a.first;
     const auto &[unitig_id_b, sb_id_b, chain_id_b] = info_b.first;
 
@@ -159,7 +158,64 @@ void ColumnPathIndex::call_distances(const Label &label,
 
     // same unitig
     if (unitig_id_a == unitig_id_b) {
-        callback(global_coord_b - global_coord_a);
+        int64_t dist = global_coord_b - global_coord_a;
+        if (dist >= 0)
+            callback(dist);
+
+        if (chain_id_a || sb_id_a) {
+            size_t target = chain_id_a ? chain_id_a : sb_id_a;
+            int64_t length = 0;
+            adjacent_outgoing_unitigs(label, target, [&](size_t next_u_id, int64_t len) {
+                if (length == 0) {
+                    auto next_info = get_chain_info(label, get_unitig_back(label, next_u_id));
+                    if (target == chain_id_a) {
+                        if (std::get<0>(next_info.first) == chain_id_a)
+                            length = len;
+                    } else if (std::get<1>(next_info.first) == sb_id_a) {
+                        length = len;
+                    }
+                }
+            });
+
+            if (length > 0) {
+                tsl::hopscotch_set<int64_t> cycle_sizes;
+                for (int64_t dstart : ds_from_start_a) {
+                    for (int64_t dend : ds_to_end_a) {
+                        if (length + dstart + dend <= max_distance)
+                            cycle_sizes.emplace(length + dstart + dend);
+                    }
+                }
+
+                tsl::hopscotch_set<int64_t> next_cycle_sizes;
+                do {
+                    for (int64_t cycle : cycle_sizes) {
+                        if (dist + cycle <= max_distance) {
+                            if (dist + cycle > 0)
+                                callback(dist + cycle);
+
+                            next_cycle_sizes.emplace(dist + cycle);
+                        }
+                    }
+
+                    std::swap(next_cycle_sizes, cycle_sizes);
+                } while (cycle_sizes.size());
+            }
+
+        } else {
+            int64_t length = 0;
+            adjacent_outgoing_unitigs(label, unitig_id_a, [&](size_t next_u_id, int64_t len) {
+                if (next_u_id == unitig_id_a)
+                    length = len;
+            });
+
+            if (length != 0) {
+                // found a cycle
+                for ( ; dist < max_distance; dist += length) {
+                    callback(dist);
+                }
+            }
+        }
+
         return;
     }
 
@@ -168,6 +224,7 @@ void ColumnPathIndex::call_distances(const Label &label,
 
     // same chain
     if (chain_id_a) {
+        // TODO: handle cycles
         if (chain_id_b && chain_id_a == chain_id_b) {
             // different superbubble
             if (unitig_id_b == chain_id_b) {
