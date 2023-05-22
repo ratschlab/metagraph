@@ -6,6 +6,7 @@
 #include "graph/representation/masked_graph.hpp"
 #include "graph/representation/hash/dbg_hash_ordered.hpp"
 #include "common/vector_map.hpp"
+#include "common/vector_set.hpp"
 
 
 namespace mtg {
@@ -636,15 +637,18 @@ void assemble_with_coordinates(size_t k,
         }
 
         // construct a chain
-        auto &chain = chains.emplace_back();
+        VectorSet<size_t> chain;
         while (true) {
             const auto &[terminus, seens] = superbubbles[i];
             if (terminus == i || terminus == std::numeric_limits<size_t>::max())
                 break;
 
-            chain.emplace_back(i);
+            if (!chain.emplace(i).second)
+                break;
+
             i = terminus;
         }
+        chains.emplace_back(const_cast<std::vector<size_t>&&>(chain.values_container()));
     });
 
     logger->trace("Found {} chains", chains.size());

@@ -150,6 +150,7 @@ void ColumnPathIndex::call_distances(const Label &label,
                                      const std::function<void(size_t)> &callback,
                                      int64_t max_distance,
                                      size_t max_steps) const {
+    // TODO: handle cycles
     const auto &[unitig_id_a, sb_id_a, chain_id_a] = info_a.first;
     const auto &[unitig_id_b, sb_id_b, chain_id_b] = info_b.first;
 
