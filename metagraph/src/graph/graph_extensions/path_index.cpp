@@ -26,6 +26,11 @@ using Row = MultiIntMatrix::Row;
 using Tuple = MultiIntMatrix::Tuple;
 using Column = BinaryMatrix::Column;
 
+const std::string ColumnPathIndex::UNITIG_FRONT_TAG(1, '\1');
+const std::string ColumnPathIndex::UNITIG_BACK_TAG(1, '\4');
+const std::string ColumnPathIndex::SUPERBUBBLE_TAG(1, '\2');
+const std::string ColumnPathIndex::CHAIN_TAG(1, '\3');
+
 ColumnPathIndex::ColumnPathIndex(const AnnotatedDBG &anno_graph,
                                  const AnnotatedDBG::Annotator &topo_annotator)
       : anno_graph_(anno_graph), topo_annotator_(topo_annotator) {
@@ -55,9 +60,9 @@ auto ColumnPathIndex::get_chain_info(const Label &check_label, node_index node) 
             continue;
 
         const auto &label_encoder = topo_annotator_.get_label_encoder();
-        Column unitig_col = label_encoder.encode(std::string(1, '\1') + label);
-        Column sb_col = label_encoder.encode(std::string(1, '\2') + label);
-        Column chain_col = label_encoder.encode(std::string(1, '\3') + label);
+        Column unitig_col = label_encoder.encode(UNITIG_FRONT_TAG + label);
+        Column sb_col = label_encoder.encode(SUPERBUBBLE_TAG + label);
+        Column chain_col = label_encoder.encode(CHAIN_TAG + label);
 
         auto &coords = node_coords[0];
         assert(coords.size() <= 3);
@@ -105,9 +110,9 @@ auto ColumnPathIndex::get_chain_info(const std::vector<node_index> &nodes) const
         auto &[_, nodes_info] = ret_val.emplace_back(label, NodesInfo{});
         assert(_ == label);
 
-        Column unitig_col = label_encoder.encode(std::string(1, '\1') + label);
-        Column sb_col = label_encoder.encode(std::string(1, '\2') + label);
-        Column chain_col = label_encoder.encode(std::string(1, '\3') + label);
+        Column unitig_col = label_encoder.encode(UNITIG_FRONT_TAG + label);
+        Column sb_col = label_encoder.encode(SUPERBUBBLE_TAG + label);
+        Column chain_col = label_encoder.encode(CHAIN_TAG + label);
 
         nodes_info.reserve(node_coords.size());
         for (auto &coords : node_coords) {
@@ -283,13 +288,13 @@ void ColumnPathIndex::call_distances(const Label &label,
 int64_t ColumnPathIndex::get_global_coord(const Label &label, size_t unitig_id) const {
     const auto &label_encoder = topo_annotator_.get_label_encoder();
     const auto &col_mat = static_cast<const ColumnMajor&>(static_cast<const IntMatrix&>(topo_annotator_.get_matrix()).get_binary_matrix());
-    Column unitig_col = label_encoder.encode(std::string(1, '\1') + label);
+    Column unitig_col = label_encoder.encode(UNITIG_FRONT_TAG + label);
     return col_mat.data()[unitig_col]->select1(unitig_id);
 }
 
 ColumnPathIndex::node_index ColumnPathIndex::get_unitig_back(const Label &label, size_t unitig_id) const {
 const auto &label_encoder = topo_annotator_.get_label_encoder();
-    Column unitig_back_col = label_encoder.encode(std::string(1, '\4') + label);
+    Column unitig_back_col = label_encoder.encode(UNITIG_BACK_TAG + label);
     const auto &col_int_mat = static_cast<const IntMatrix&>(topo_annotator_.get_matrix());
     const auto &col_mat = static_cast<const ColumnMajor&>(static_cast<const IntMatrix&>(topo_annotator_.get_matrix()).get_binary_matrix());
     int64_t global_coord = col_mat.data()[unitig_back_col]->select1(unitig_id);
@@ -301,7 +306,7 @@ void ColumnPathIndex
                             size_t unitig_id,
                             const std::function<void(size_t, int64_t)> &callback) const {
     const auto &label_encoder = topo_annotator_.get_label_encoder();
-    Column unitig_front_col = label_encoder.encode(std::string(1, '\1') + label);
+    Column unitig_front_col = label_encoder.encode(UNITIG_FRONT_TAG + label);
 
     const auto &col_mat = static_cast<const ColumnMajor&>(static_cast<const IntMatrix&>(topo_annotator_.get_matrix()).get_binary_matrix());
     const auto &front_col = *col_mat.data()[unitig_front_col];

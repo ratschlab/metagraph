@@ -15,6 +15,7 @@
 #include "load/load_graph.hpp"
 #include "load/load_annotated_graph.hpp"
 #include "graph/annotated_dbg.hpp"
+#include "graph/graph_extensions/path_index.hpp"
 
 
 namespace mtg {
@@ -227,8 +228,14 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
     const size_t batch_length = 100'000;
 
     if (config.unitig_coords) {
+        std::mutex mu;
         auto topo_anno_graph = initialize_annotated_dbg(graph, config, num_chunks_open);
+
+        auto &annotator = const_cast<graph::AnnotatedDBG::Annotator&>(anno_graph->get_annotator());
         auto &topo_annotator = const_cast<graph::AnnotatedDBG::Annotator&>(topo_anno_graph->get_annotator());
+        auto &label_encoder = const_cast<annot::LabelEncoder<graph::AnnotatedDBG::Label>&>(annotator.get_label_encoder());
+        auto &topo_label_encoder = const_cast<annot::LabelEncoder<graph::AnnotatedDBG::Label>&>(topo_annotator.get_label_encoder());
+
         for (const auto &file : files) {
             BatchAccumulator<std::tuple<std::string, std::string, std::string, std::vector<std::string>, uint64_t>> batcher(
                 [&](auto&& all_data) {
@@ -268,14 +275,20 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                             const auto &[seq, labels, coord] = data[i];
                             u_labels.reserve(labels.size() * (2 + unitig_data[i].first + unitig_data[i].second));
                             for (const auto &label : labels) {
-                                u_labels.emplace_back(std::string(1, '\1') + label);
-                                u_labels.emplace_back(std::string(1, '\4') + label);
+                                u_labels.emplace_back(graph::ColumnPathIndex::UNITIG_FRONT_TAG + label);
+                                u_labels.emplace_back(graph::ColumnPathIndex::UNITIG_BACK_TAG + label);
 
                                 if (unitig_data[i].first)
-                                    u_labels.emplace_back(std::string(1, '\2') + label);
+                                    u_labels.emplace_back(graph::ColumnPathIndex::SUPERBUBBLE_TAG + label);
 
                                 if (unitig_data[i].second)
-                                    u_labels.emplace_back(std::string(1, '\3') + label);
+                                    u_labels.emplace_back(graph::ColumnPathIndex::CHAIN_TAG + label);
+
+                                std::lock_guard<std::mutex> lock(mu);
+                                label_encoder.insert_and_encode(label);
+                                for (const auto &l : u_labels) {
+                                    topo_label_encoder.insert_and_encode(l);
+                                }
                             }
 
                             topo_annotator.add_labels({ coord }, u_labels);
@@ -345,7 +358,7 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
 
         thread_pool.join();
 
-        anno_graph->get_annotator().serialize(annotator_filename + ".global");
+        annotator.serialize(annotator_filename + ".global");
         topo_annotator.serialize(annotator_filename + ".topo");
         return;
     }

@@ -783,8 +783,6 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
         chains.clear();
     };
 
-    tsl::hopscotch_map<size_t, tsl::hopscotch_map<size_t, std::vector<size_t>>> dist_cache;
-
     logger->trace("Chaining {} anchors for a query of length {}", seeds.size(), query_size);
     chain_anchors<Seed>(config_, seeds.data(), seeds.data() + seeds.size(),
         [&](const Seed &a_i,
@@ -826,6 +824,8 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                 }
 
                 ssize_t num_added = query_j.end() - std::max(query_j.begin(), query_i.end());
+                assert(num_added >= 0);
+
                 score_t score_j = std::get<0>(*chain_scores);
                 score_t base_added_score = score_j + num_added + label_change_score;
                 if (base_added_score <= score_i)
@@ -861,7 +861,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                 column_path_index->call_distances(label_encoder.decode(col_i),
                                                   coords_i_back, coords_j_front,
                                                   [&](int64_t coord_dist) {
-                    if (num_added > coord_dist)
+                    if (num_added > coord_dist || (!num_added && coord_dist == 0))
                         return;
 
                     float gap = std::abs(coord_dist - dist);
@@ -876,7 +876,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
             });
         },
         [&](const auto &chain, score_t score) {
-            if (chain.size() == 1 && chain[0].first->get_query_view().size() <= config_.min_seed_length)
+            if (chain.empty() || (chain.size() == 1 && chain[0].first->get_query_view().size() <= config_.min_seed_length))
                 return false;
 
             if (last_chain_score != score) {
@@ -890,37 +890,32 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                 merged_chain.emplace_back(*seed_ptr, dist);
             }
 
-            for (auto it = merged_chain.begin() + 1; it != merged_chain.end(); ++it) {
-                it->second += (it - 1)->second;
-            }
-
             for (auto jt = merged_chain.rbegin(); jt + 1 != merged_chain.rend(); ++jt) {
-                if (jt->first.get_clipping() - (jt + 1)->first.get_clipping() == 1
-                        && jt->second - (jt + 1)->second == 1
-                        && jt->first.label_columns == (jt + 1)->first.label_columns) {
-                    assert(graph_.traverse((jt + 1)->first.get_nodes().back(),
-                                           *(jt + 1)->first.get_query_view().end())
-                            == jt->first.get_nodes()[0]);
-                    (jt + 1)->first.expand(jt->first.get_nodes());
-                    jt->first = Seed();
+                auto &prev_seed = (jt + 1)->first;
+                auto &cur_seed = jt->first;
+                auto prev_end = prev_seed.get_query_view().end();
+                if (prev_seed.get_clipping() + 1 == cur_seed.get_clipping()
+                        && prev_end + 1 == cur_seed.get_query_view().end() && jt->second == 1
+                        && cur_seed.label_columns == prev_seed.label_columns) {
+                    assert(graph_.traverse(prev_seed.get_nodes().back(), *prev_end) == cur_seed.get_nodes()[0]);
+                    prev_seed.expand(cur_seed.get_nodes());
+                    cur_seed = Seed();
                 }
             }
-            auto end = std::remove_if(merged_chain.begin(), merged_chain.end(),
-                                      [](const auto &a) { return a.first.empty(); });
 
             Chain cur_chain;
-            for (auto it = merged_chain.begin(); it != end; ++it) {
-                ssize_t dist = it != merged_chain.begin()
-                   ? it->second + it->first.get_query_view().size()
-                        - (it - 1)->second - (it - 1)->first.get_query_view().size()
-                   : 0;
-                assert(dist >= 0);
-                cur_chain.emplace_back(Alignment(it->first, config_), dist);
+            for (const auto &[seed, dist] : merged_chain) {
+                if (!seed.empty())
+                    cur_chain.emplace_back(Alignment(seed, config_), dist);
             }
+
+            assert(std::all_of(cur_chain.begin() + 1, cur_chain.end(),
+                               [&](const auto &a) { return a.second > 0; }));
 
             chains.emplace(std::move(cur_chain));
             return true;
         },
+        false,
         [](const auto*, auto&&, size_t, const auto&) {},
         [](auto&&) {},
         [&terminate]() { return terminate; },
@@ -1364,6 +1359,7 @@ void chain_alignments(const IDBGAligner &aligner,
 
             return true;
         },
+        true,
         [&](const Alignment *first, Alignment&& cur, size_t, const auto &callback) {
             if (start_back_aln.size()) {
                 std::swap(cur, start_back_aln);

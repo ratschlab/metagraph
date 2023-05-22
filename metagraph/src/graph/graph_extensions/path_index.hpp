@@ -43,6 +43,12 @@ class ColumnPathIndex : public SequenceGraph::GraphExtension {
 
     const AnnotatedDBG& get_anno_graph() const { return anno_graph_; }
 
+    static const std::string UNITIG_FRONT_TAG;
+    static const std::string UNITIG_BACK_TAG;
+    static const std::string SUPERBUBBLE_TAG;
+    static const std::string CHAIN_TAG;
+
+
   private:
     const AnnotatedDBG &anno_graph_;
     const AnnotatedDBG::Annotator &topo_annotator_;

@@ -39,6 +39,7 @@ void chain_anchors(const DBGAlignerConfig &config,
                    const AnchorConnector<Anchor> &anchor_connector,
                    const BacktrackStarter<Anchor> &start_backtrack
                        = [](const auto&, score_t) { return true; },
+                   bool extend_anchors = true,
                    const AnchorExtender<Anchor> &anchor_extender
                        = [](const auto*, auto&&, size_t, const auto&) {},
                    const AlignmentCallback &callback = [](auto&&) {},
@@ -62,8 +63,10 @@ void chain_anchors(const DBGAlignerConfig &config,
     chain_scores.reserve(anchors_end - anchors_begin);
     for (auto it = anchors_begin; it != anchors_end; ++it) {
         chain_scores.emplace_back(it->get_score(config), anchors_end, it->get_clipping());
-        if (it != anchors_begin && (it - 1)->get_orientation() != it->get_orientation())
+        if (it != anchors_begin && (it - 1)->get_orientation() != it->get_orientation()) {
+            assert(it->get_orientation());
             orientation_change = it;
+        }
     }
 
     // forward pass
@@ -122,9 +125,10 @@ void chain_anchors(const DBGAlignerConfig &config,
                     < query_size - b_last / 2);
     };
 
+    size_t num_forward = orientation_change - anchors_begin;
+
     forward_pass(anchors_begin, orientation_change, chain_scores.data());
-    forward_pass(orientation_change, anchors_end,
-                 chain_scores.data() + (orientation_change - anchors_begin));
+    forward_pass(orientation_change, anchors_end, chain_scores.data() + num_forward);
 
     // backtracking
     std::vector<std::tuple<score_t, bool, size_t>> best_chains;
@@ -133,7 +137,7 @@ void chain_anchors(const DBGAlignerConfig &config,
         const auto &[score, last, dist] = chain_scores[i];
 
         if (score > 0)
-            best_chains.emplace_back(-score, anchors_begin + i >= orientation_change, i);
+            best_chains.emplace_back(-score, i >= num_forward, i);
     }
 
     std::sort(best_chains.begin(), best_chains.end());
@@ -153,6 +157,8 @@ void chain_anchors(const DBGAlignerConfig &config,
         while (last != anchors_end) {
             last_anchor = last;
             size_t to_traverse = dist;
+            assert(to_traverse > 0);
+
             std::tie(score, last, dist) = chain_scores[last - anchors_begin];
             chain.emplace_back(last_anchor, to_traverse);
         }
@@ -163,6 +169,9 @@ void chain_anchors(const DBGAlignerConfig &config,
         for (const auto &[a_ptr, dist] : chain) {
             used[a_ptr - anchors_begin] = true;
         }
+
+        if (!extend_anchors)
+            continue;
 
         std::vector<Alignment> alns;
         alns.emplace_back(*chain.back().first, config);
