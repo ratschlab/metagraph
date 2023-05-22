@@ -83,15 +83,15 @@ void chain_anchors(const DBGAlignerConfig &config,
             auto j = anchors_begin;
             for (auto i = anchors_begin + !allow_overlap; i != anchors_end; ++i) {
                 auto end = i->get_query_view().end();
-                while (j != anchors_end && j->get_query_view().end() - end > b) {
-                    ++j;
-                }
+                j = std::find_if(j, anchors_end, [&](const auto &s_j) {
+                    return s_j.get_query_view().end() - end <= b;
+                });
 
                 auto i_end = i;
                 if (allow_overlap) {
-                    while (i_end != anchors_end && i_end->get_query_view().end() == end) {
-                        ++i_end;
-                    }
+                    i_end = std::find_if(i_end, anchors_end, [&](const auto &s_i_end) {
+                        return s_i_end.get_query_view().end() != end;
+                    });
                 }
 
                 auto &[max_score, best_last, best_dist] = chain_scores[i - anchors_begin];
@@ -114,9 +114,11 @@ void chain_anchors(const DBGAlignerConfig &config,
                 );
 
                 if (updated && allow_overlap) {
-                    while (i >= anchors_begin && i->get_query_view().end() == end) {
-                        --i;
-                    }
+                    i = std::find_if(std::make_reverse_iterator(i + 1),
+                                     std::make_reverse_iterator(anchors_begin),
+                                     [&](const auto &s_i) {
+                                         return s_i.get_query_view().end() != end;
+                                     }).base();
                 }
             }
             b_last = b;

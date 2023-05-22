@@ -202,9 +202,8 @@ void ColumnPathIndex::call_distances(const Label &label,
                 if (u_id == sb_id_a)
                     continue;
 
-                while (it != ds_from_start_b.end() && dist_offset + dist > *it) {
-                    ++it;
-                }
+                it = std::find_if(it, ds_from_start_b.end(),
+                                  [&](int64_t d) { return dist_offset + dist <= d; });
 
                 if (it == ds_from_start_b.end() || dist > max_distance)
                     continue;
