@@ -50,27 +50,12 @@ int transform_graph(Config *config) {
                 size_t chain_id,
                 const std::vector<int64_t> &distances_from_begin,
                 const std::vector<int64_t> &distances_to_end) {
-                std::string header;
-                if (!sb_term) {
-                    header = fmt::format("{}", unitig_id++);
-                } else if (!chain_id) {
-                    header = fmt::format("{}\t{}\t{};{}",
-                        unitig_id++,
-                        sb_term,
-                        fmt::join(distances_from_begin, ","),
-                        fmt::join(distances_to_end, ",")
-                    );
-                } else {
-                    header = fmt::format("{}\t{};{}\t{};{}",
-                        unitig_id++,
-                        sb_term,
-                        chain_id,
-                        fmt::join(distances_from_begin, ","),
-                        fmt::join(distances_to_end, ",")
-                    );
-                }
-
-                seq_io::write_fasta(gzout, header, unitig);
+                seq_io::write_fasta(
+                    gzout,
+                    graph::format_header(unitig_id++, sb_term, chain_id,
+                                         distances_from_begin, distances_to_end),
+                    unitig
+                );
             }
         );
         gzclose(gzout);

@@ -359,7 +359,7 @@ int align_to_graph(Config *config) {
         col_topo_anno = initialize_annotation(config->infbase + ".topo.int_column.annodbg", *config);
         if (col_topo_anno->load(config->infbase + ".topo.int_column.annodbg")) {
             col_anno_dbg = std::make_shared<AnnotatedDBG>(graph, std::move(col_anno));
-            col_path_index = std::make_shared<ColumnPathIndex>(*col_anno_dbg, *col_topo_anno);
+            col_path_index = std::make_shared<ColumnPathIndex>(col_anno_dbg, col_topo_anno);
             graph->add_extension(col_path_index);
         } else {
             col_topo_anno.reset();

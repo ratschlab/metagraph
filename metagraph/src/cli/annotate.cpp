@@ -228,138 +228,27 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
     const size_t batch_length = 100'000;
 
     if (config.unitig_coords) {
-        std::mutex mu;
-        auto topo_anno_graph = initialize_annotated_dbg(graph, config, num_chunks_open);
-
-        auto &annotator = const_cast<graph::AnnotatedDBG::Annotator&>(anno_graph->get_annotator());
-        auto &topo_annotator = const_cast<graph::AnnotatedDBG::Annotator&>(topo_anno_graph->get_annotator());
-        auto &label_encoder = const_cast<annot::LabelEncoder<graph::AnnotatedDBG::Label>&>(annotator.get_label_encoder());
-        auto &topo_label_encoder = const_cast<annot::LabelEncoder<graph::AnnotatedDBG::Label>&>(topo_annotator.get_label_encoder());
-
-        for (const auto &file : files) {
-            BatchAccumulator<std::tuple<std::string, std::string, std::string, std::vector<std::string>, uint64_t>> batcher(
-                [&](auto&& all_data) {
-                    std::vector<std::tuple<std::string, std::vector<std::string>, uint64_t>> data;
-                    data.reserve(all_data.size());
-                    std::vector<std::tuple<std::string, std::vector<std::string>, uint64_t>> extra_data;
-                    std::vector<std::pair<bool, bool>> unitig_data;
-                    for (auto &[seq, name, comment, labels, coord] : all_data) {
-                        data.emplace_back(std::move(seq), std::move(labels), coord);
-                        unitig_data.emplace_back(true, true);
-                        if (comment.size()) {
-                            auto c_split = utils::split_string(comment, "\t");
-                            auto sb_split = utils::split_string(c_split[0], ";");
-                            if (sb_split.size() && sb_split[0] != name) {
-                                unitig_data.back().first = false;
-                                unitig_data.back().second = false;
-                            }
-
-                            if (sb_split.size() == 2 && sb_split[1] != name) {
-                                unitig_data.back().second = false;
-                            }
-
-                            auto coord_split = utils::split_string(c_split[1], ";");
-                            extra_data.emplace_back(std::get<0>(data.back()),
-                                                    std::get<1>(data.back()),
-                                                    atoi(coord_split[0].c_str()));
-                            extra_data.emplace_back(std::get<0>(data.back()),
-                                                    std::get<1>(data.back()),
-                                                    static_cast<uint64_t>(atoi(coord_split[1].c_str())));
-                        }
-                    }
-                    thread_pool.enqueue([&](auto &data, auto &extra_data, auto &unitig_data) {
-                        std::vector<std::vector<std::string>> u_labels_v;
-                        u_labels_v.reserve(unitig_data.size());
-                        for (size_t i = 0; i < unitig_data.size(); ++i) {
-                            auto &u_labels = u_labels_v.emplace_back();
-                            const auto &[seq, labels, coord] = data[i];
-                            u_labels.reserve(labels.size() * (2 + unitig_data[i].first + unitig_data[i].second));
-                            for (const auto &label : labels) {
-                                u_labels.emplace_back(graph::ColumnPathIndex::UNITIG_FRONT_TAG + label);
-                                u_labels.emplace_back(graph::ColumnPathIndex::UNITIG_BACK_TAG + label);
-
-                                if (unitig_data[i].first)
-                                    u_labels.emplace_back(graph::ColumnPathIndex::SUPERBUBBLE_TAG + label);
-
-                                if (unitig_data[i].second)
-                                    u_labels.emplace_back(graph::ColumnPathIndex::CHAIN_TAG + label);
-
-                                std::lock_guard<std::mutex> lock(mu);
-                                label_encoder.insert_and_encode(label);
-                                for (const auto &l : u_labels) {
-                                    topo_label_encoder.insert_and_encode(l);
-                                }
-                            }
-
-                            topo_annotator.add_labels({ coord }, u_labels);
-                        }
-
-                        for (size_t i = 0; i < unitig_data.size(); ++i) {
-                            const auto &[seq, labels, coord] = data[i];
-                            std::vector<std::string> u_labels_1 = { u_labels_v[i][0] };
-                            std::vector<std::string> u_labels_2 = { u_labels_v[i][1] };
-
-                            const auto &graph = anno_graph->get_graph();
-                            std::string_view first_kmer(seq.c_str(), k);
-                            std::string_view last_kmer(seq.c_str() + seq.size() - k, k);
-                            auto first_node = map_to_nodes(graph, first_kmer);
-                            auto last_node = map_to_nodes(graph, last_kmer);
-                            topo_annotator.add_label_counts({ coord }, u_labels_1, first_node);
-                            topo_annotator.add_label_counts({ coord }, u_labels_2, last_node);
-                        }
-
-                        anno_graph->annotate_kmer_coords(std::move(data));
-                        anno_graph->add_kmer_coords(extra_data);
-
-                    }, std::move(data), std::move(extra_data), std::move(unitig_data));
-                },
-                batch_size, batch_length, batch_size
-            );
-
-            logger->trace("Annotating k-mer coordinates for file {}", file);
-
-            if (file_format(file) != "FASTA"
-                    && file_format(file) != "FASTQ") {
-                logger->error("Currently only FASTA or FASTQ format is supported"
-                              " for annotating k-mer coordinates");
-                exit(1);
+        graph::ColumnPathIndex column_path_index(graph, [&](const auto &callback) {
+            for (const auto &file : files) {
+                call_annotations(
+                    file,
+                    config.refpath,
+                    anno_graph->get_graph(),
+                    forward_and_reverse,
+                    config.min_count,
+                    config.max_count,
+                    config.filename_anno,
+                    config.annotate_sequence_headers,
+                    config.fasta_anno_comment_delim,
+                    config.fasta_header_delimiter,
+                    config.anno_labels,
+                    callback
+                );
             }
+        }, config.num_columns_cached, config.tmp_dir, config.memory_available, num_chunks_open);
 
-            VectorSet<std::string> label_set;
-            uint64_t coord = 0;
-            call_annotations(
-                file,
-                config.refpath,
-                anno_graph->get_graph(),
-                forward_and_reverse,
-                config.min_count,
-                config.max_count,
-                config.filename_anno,
-                config.annotate_sequence_headers,
-                config.fasta_anno_comment_delim,
-                config.fasta_header_delimiter,
-                config.anno_labels,
-                [&](std::string sequence, std::string name, std::string comment, auto labels) {
-                    if (sequence.size() >= k) {
-                        uint64_t num_kmers = sequence.size() - k + 1;
-                        label_set.insert(labels.begin(), labels.end());
-                        batcher.push_and_pay(sequence.size(),
-                                             std::move(sequence),
-                                             std::move(name),
-                                             std::move(comment),
-                                             std::move(labels),
-                                             coord);
-                        coord += num_kmers;
-                    }
-                }
-            );
-            topo_annotator.add_labels({ coord }, label_set.values_container());
-        }
-
-        thread_pool.join();
-
-        annotator.serialize(annotator_filename + ".global");
-        topo_annotator.serialize(annotator_filename + ".topo");
+        column_path_index.get_anno_graph().get_annotator().serialize(annotator_filename + ".global");
+        column_path_index.get_topology_annotator().serialize(annotator_filename + ".topo");
         return;
     }
 

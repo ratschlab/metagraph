@@ -21,8 +21,24 @@ class ColumnPathIndex : public SequenceGraph::GraphExtension {
     using NodesInfo = Vector<InfoPair>;
     using LabeledNodesInfo = std::pair<Label, NodesInfo>;
 
+    using Labels = std::vector<Label>;
+    using LabeledSeqCallback = std::function<void(std::string, std::string, std::string, const Labels&)>;
+    using LabeledSeqGenerator = std::function<void(const LabeledSeqCallback&)>;
+
+    ColumnPathIndex(std::shared_ptr<DeBruijnGraph> graph,
+                    const LabeledSeqGenerator &generator,
+                    size_t num_columns_cached = 10,
+                    const std::string &tmp_dir = "",
+                    double memory_available_gb = 1.0,
+                    size_t max_chunks_open = 2000);
+
+    ColumnPathIndex(std::shared_ptr<const AnnotatedDBG> anno_graph,
+                    std::shared_ptr<const AnnotatedDBG::Annotator> topo_annotator);
+
     ColumnPathIndex(const AnnotatedDBG &anno_graph,
-                    const AnnotatedDBG::Annotator &topo_annotator);
+                    const AnnotatedDBG::Annotator &topo_annotator)
+          : anno_graph_(std::shared_ptr<const AnnotatedDBG>{}, &anno_graph),
+            topo_annotator_(std::shared_ptr<const AnnotatedDBG::Annotator>{}, &topo_annotator) {}
 
     InfoPair get_chain_info(const Label &label, node_index node) const;
     std::vector<LabeledNodesInfo> get_chain_info(const std::vector<node_index> &nodes) const;
@@ -38,10 +54,11 @@ class ColumnPathIndex : public SequenceGraph::GraphExtension {
     void serialize(const std::string &) const { throw std::runtime_error("Serialize not implemented for ColumnPathIndex"); }
 
     bool is_compatible(const SequenceGraph &graph, bool = true) const {
-        return anno_graph_.check_compatibility() && &graph == &anno_graph_.get_graph();
+        return anno_graph_->check_compatibility() && &graph == &anno_graph_->get_graph();
     }
 
-    const AnnotatedDBG& get_anno_graph() const { return anno_graph_; }
+    const AnnotatedDBG& get_anno_graph() const { return *anno_graph_; }
+    const AnnotatedDBG::Annotator& get_topology_annotator() const { return *topo_annotator_; }
 
     static const std::string UNITIG_FRONT_TAG;
     static const std::string UNITIG_BACK_TAG;
@@ -50,8 +67,12 @@ class ColumnPathIndex : public SequenceGraph::GraphExtension {
 
 
   private:
-    const AnnotatedDBG &anno_graph_;
-    const AnnotatedDBG::Annotator &topo_annotator_;
+    std::shared_ptr<const AnnotatedDBG> anno_graph_;
+    std::shared_ptr<const AnnotatedDBG::Annotator> topo_annotator_;
+
+    ColumnPathIndex(std::pair<std::shared_ptr<const AnnotatedDBG>,
+                              std::shared_ptr<const AnnotatedDBG::Annotator>> annotators)
+          : ColumnPathIndex(annotators.first, annotators.second) {}
 
     const annot::matrix::IntMatrix& get_topo_matrix() const;
     const annot::matrix::MultiIntMatrix& get_coord_matrix() const;

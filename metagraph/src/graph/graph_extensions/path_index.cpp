@@ -13,6 +13,9 @@
 #include "graph/representation/canonical_dbg.hpp"
 #include "graph/representation/hash/dbg_hash_fast.hpp"
 #include "common/threads/threading.hpp"
+#include "common/vector_set.hpp"
+#include "common/batch_accumulator.hpp"
+
 
 namespace mtg::graph {
 using namespace annot;
@@ -32,23 +35,178 @@ const std::string ColumnPathIndex::SUPERBUBBLE_TAG(1, '\2');
 const std::string ColumnPathIndex::CHAIN_TAG(1, '\3');
 
 const IntMatrix& ColumnPathIndex::get_topo_matrix() const {
-    assert(dynamic_cast<const IntMatrix*>(&topo_annotator_.get_matrix()));
-    return static_cast<const IntMatrix&>(topo_annotator_.get_matrix());
+    assert(dynamic_cast<const IntMatrix*>(&topo_annotator_->get_matrix()));
+    return static_cast<const IntMatrix&>(topo_annotator_->get_matrix());
 }
 
 const MultiIntMatrix& ColumnPathIndex::get_coord_matrix() const {
-    assert(dynamic_cast<const MultiIntMatrix*>(&anno_graph_.get_annotator().get_matrix()));
-    return static_cast<const MultiIntMatrix&>(anno_graph_.get_annotator().get_matrix());
+    assert(dynamic_cast<const MultiIntMatrix*>(&anno_graph_->get_annotator().get_matrix()));
+    return static_cast<const MultiIntMatrix&>(anno_graph_->get_annotator().get_matrix());
 }
 
-ColumnPathIndex::ColumnPathIndex(const AnnotatedDBG &anno_graph,
-                                 const AnnotatedDBG::Annotator &topo_annotator)
+std::pair<std::shared_ptr<const AnnotatedDBG>,
+          std::shared_ptr<const AnnotatedDBG::Annotator>>
+generate_anno_graphs(std::shared_ptr<DeBruijnGraph> graph,
+                     const ColumnPathIndex::LabeledSeqGenerator &generator,
+                     size_t num_columns_cached,
+                     const std::string &tmp_dir_prefix,
+                     double memory_available_gb,
+                     size_t max_chunks_open) {
+    const size_t k = graph->get_k();
+    std::filesystem::path tmp_dir = utils::create_temp_dir(tmp_dir_prefix, "test_col");
+    std::string out_path = tmp_dir/"test_col";
+
+    auto anno_graph = std::make_shared<AnnotatedDBG>(graph,
+        std::make_unique<ColumnCompressed<>>(graph->max_index(), num_columns_cached,
+                                             tmp_dir, memory_available_gb * 1000000000,
+                                             8, max_chunks_open)
+    );
+
+    ThreadPool thread_pool(get_num_threads() > 1 ? get_num_threads() : 0);
+    auto topo_annotator_ptr = std::make_shared<ColumnCompressed<>>(
+        graph->max_index(), num_columns_cached, tmp_dir, memory_available_gb * 1000000000,
+        64, max_chunks_open
+    );
+
+    auto &annotator = const_cast<ColumnCompressed<>&>(static_cast<const ColumnCompressed<>&>(anno_graph->get_annotator()));
+    auto &topo_annotator = *topo_annotator_ptr;
+    auto &label_encoder = const_cast<LabelEncoder<graph::AnnotatedDBG::Label>&>(annotator.get_label_encoder());
+    auto &topo_label_encoder = const_cast<LabelEncoder<graph::AnnotatedDBG::Label>&>(topo_annotator.get_label_encoder());
+
+    const size_t batch_size = 1'000;
+    const size_t batch_length = 100'000;
+    VectorSet<std::string> label_set;
+    std::mutex mu;
+
+    BatchAccumulator<std::tuple<std::string, std::string, std::string, std::vector<std::string>, uint64_t>> batcher(
+        [&](auto&& all_data) {
+            std::vector<std::tuple<std::string, std::vector<std::string>, uint64_t>> data;
+            data.reserve(all_data.size());
+            std::vector<std::tuple<std::string, std::vector<std::string>, uint64_t>> extra_data;
+            std::vector<std::pair<bool, bool>> unitig_data;
+            for (auto &[seq, name, comment, labels, coord] : all_data) {
+                data.emplace_back(std::move(seq), std::move(labels), coord);
+                unitig_data.emplace_back(true, true);
+                if (comment.size()) {
+                    auto c_split = utils::split_string(comment, "\t");
+                    auto sb_split = utils::split_string(c_split[0], ";");
+                    if (sb_split.size() && sb_split[0] != name) {
+                        unitig_data.back().first = false;
+                        unitig_data.back().second = false;
+                    }
+
+                    if (sb_split.size() == 2 && sb_split[1] != name) {
+                        unitig_data.back().second = false;
+                    }
+
+                    auto coord_split = utils::split_string(c_split[1], ";");
+                    extra_data.emplace_back(std::get<0>(data.back()),
+                                            std::get<1>(data.back()),
+                                            atoi(coord_split[0].c_str()));
+                    extra_data.emplace_back(std::get<0>(data.back()),
+                                            std::get<1>(data.back()),
+                                            static_cast<uint64_t>(atoi(coord_split[1].c_str())));
+                }
+            }
+            thread_pool.enqueue([&](auto &data, auto &extra_data, auto &unitig_data) {
+                std::vector<std::vector<std::string>> u_labels_v;
+                u_labels_v.reserve(unitig_data.size());
+                for (size_t i = 0; i < unitig_data.size(); ++i) {
+                    auto &u_labels = u_labels_v.emplace_back();
+                    const auto &[seq, labels, coord] = data[i];
+                    u_labels.reserve(labels.size() * (2 + unitig_data[i].first + unitig_data[i].second));
+                    for (const auto &label : labels) {
+                        u_labels.emplace_back(graph::ColumnPathIndex::UNITIG_FRONT_TAG + label);
+                        u_labels.emplace_back(graph::ColumnPathIndex::UNITIG_BACK_TAG + label);
+
+                        if (unitig_data[i].first)
+                            u_labels.emplace_back(graph::ColumnPathIndex::SUPERBUBBLE_TAG + label);
+
+                        if (unitig_data[i].second)
+                            u_labels.emplace_back(graph::ColumnPathIndex::CHAIN_TAG + label);
+
+                        std::lock_guard<std::mutex> lock(mu);
+                        label_encoder.insert_and_encode(label);
+                        for (const auto &l : u_labels) {
+                            topo_label_encoder.insert_and_encode(l);
+                        }
+                    }
+
+                    topo_annotator.add_labels({ coord }, u_labels);
+                }
+
+                for (size_t i = 0; i < unitig_data.size(); ++i) {
+                    const auto &[seq, labels, coord] = data[i];
+                    std::vector<std::string> u_labels_1 = { u_labels_v[i][0] };
+                    std::vector<std::string> u_labels_2 = { u_labels_v[i][1] };
+
+                    const auto &graph = anno_graph->get_graph();
+                    std::string_view first_kmer(seq.c_str(), k);
+                    std::string_view last_kmer(seq.c_str() + seq.size() - k, k);
+                    auto first_node = map_to_nodes(graph, first_kmer);
+                    auto last_node = map_to_nodes(graph, last_kmer);
+                    topo_annotator.add_label_counts({ coord }, u_labels_1, first_node);
+                    topo_annotator.add_label_counts({ coord }, u_labels_2, last_node);
+                }
+
+                anno_graph->annotate_kmer_coords(std::move(data));
+                anno_graph->add_kmer_coords(extra_data);
+
+            }, std::move(data), std::move(extra_data), std::move(unitig_data));
+        },
+        batch_size, batch_length, batch_size
+    );
+
+    uint64_t coord = 0;
+
+    generator([&](std::string sequence, std::string name, std::string comment, auto labels) {
+        if (sequence.size() >= k) {
+            uint64_t num_kmers = sequence.size() - k + 1;
+            label_set.insert(labels.begin(), labels.end());
+            batcher.push_and_pay(sequence.size(),
+                                 std::move(sequence),
+                                 std::move(name),
+                                 std::move(comment),
+                                 std::move(labels),
+                                 coord);
+            coord += num_kmers;
+        }
+    });
+    topo_annotator.add_labels({ coord }, label_set.values_container());
+
+    thread_pool.join();
+
+    annotator.serialize(out_path + ".global");
+    topo_annotator.serialize(out_path + ".topo");
+
+    auto merged_global_annotator = std::make_unique<ColumnCoordAnnotator>(
+        load_coords(std::move(annotator), { out_path + ".global.column.annodbg" })
+    );
+
+    return std::make_pair(
+        std::make_shared<AnnotatedDBG>(graph, std::move(merged_global_annotator)),
+        std::make_shared<IntColumnAnnotator>(load_counts(std::move(topo_annotator),
+                                                         { out_path + ".topo.column.annodbg" }))
+    );
+}
+
+ColumnPathIndex::ColumnPathIndex(std::shared_ptr<DeBruijnGraph> graph,
+                                 const LabeledSeqGenerator &generator,
+                                 size_t num_columns_cached,
+                                 const std::string &tmp_dir,
+                                 double memory_available_gb,
+                                 size_t max_chunks_open)
+      : ColumnPathIndex(generate_anno_graphs(graph, generator, num_columns_cached,
+                                             tmp_dir, memory_available_gb, max_chunks_open)) {}
+
+ColumnPathIndex::ColumnPathIndex(std::shared_ptr<const AnnotatedDBG> anno_graph,
+                                 std::shared_ptr<const AnnotatedDBG::Annotator> topo_annotator)
       : anno_graph_(anno_graph), topo_annotator_(topo_annotator) {
-    if (!dynamic_cast<const MultiIntMatrix*>(&anno_graph_.get_annotator().get_matrix())) {
+    if (!dynamic_cast<const MultiIntMatrix*>(&anno_graph_->get_annotator().get_matrix())) {
         throw std::runtime_error("Annotator must contain coordinates");
     }
 
-    const auto *int_mat = dynamic_cast<const IntMatrix*>(&topo_annotator_.get_matrix());
+    const auto *int_mat = dynamic_cast<const IntMatrix*>(&topo_annotator_->get_matrix());
     if (!int_mat) {
         throw std::runtime_error("Topology annotator must contain counts");
     }
@@ -59,7 +217,7 @@ ColumnPathIndex::ColumnPathIndex(const AnnotatedDBG &anno_graph,
 }
 
 auto ColumnPathIndex::get_chain_info(const Label &check_label, node_index node) const -> InfoPair {
-    auto kmer_coords = anno_graph_.get_kmer_coordinates(
+    auto kmer_coords = anno_graph_->get_kmer_coordinates(
         { node }, std::numeric_limits<size_t>::max(), 0.0, 0.0
     );
 
@@ -69,7 +227,7 @@ auto ColumnPathIndex::get_chain_info(const Label &check_label, node_index node) 
         if (label != check_label)
             continue;
 
-        const auto &label_encoder = topo_annotator_.get_label_encoder();
+        const auto &label_encoder = topo_annotator_->get_label_encoder();
         Column unitig_col = label_encoder.encode(UNITIG_FRONT_TAG + label);
         Column sb_col = label_encoder.encode(SUPERBUBBLE_TAG + label);
         Column chain_col = label_encoder.encode(CHAIN_TAG + label);
@@ -107,14 +265,14 @@ auto ColumnPathIndex::get_chain_info(const Label &check_label, node_index node) 
 
 auto ColumnPathIndex::get_chain_info(const std::vector<node_index> &nodes) const
         -> std::vector<LabeledNodesInfo> {
-    auto kmer_coords = anno_graph_.get_kmer_coordinates(
-        nodes, anno_graph_.get_annotator().get_label_encoder().size(), 0.0, 0.0
+    auto kmer_coords = anno_graph_->get_kmer_coordinates(
+        nodes, anno_graph_->get_annotator().get_label_encoder().size(), 0.0, 0.0
     );
 
     std::vector<LabeledNodesInfo> ret_val;
     ret_val.reserve(kmer_coords.size());
 
-    const auto &label_encoder = topo_annotator_.get_label_encoder();
+    const auto &label_encoder = topo_annotator_->get_label_encoder();
     const auto &col_int_mat = get_topo_matrix();
     assert(dynamic_cast<const ColumnMajor*>(&col_int_mat.get_binary_matrix()));
 
@@ -308,7 +466,7 @@ void ColumnPathIndex::call_distances(const Label &label,
 
 int64_t ColumnPathIndex::get_global_coord(const Label &label, size_t unitig_id) const {
     assert(unitig_id);
-    const auto &label_encoder = topo_annotator_.get_label_encoder();
+    const auto &label_encoder = topo_annotator_->get_label_encoder();
     const auto &col_int_mat = get_topo_matrix();
     assert(dynamic_cast<const ColumnMajor*>(&col_int_mat.get_binary_matrix()));
 
@@ -317,9 +475,10 @@ int64_t ColumnPathIndex::get_global_coord(const Label &label, size_t unitig_id) 
     return col_mat.data()[unitig_col]->select1(unitig_id);
 }
 
-ColumnPathIndex::node_index ColumnPathIndex::get_unitig_back(const Label &label, size_t unitig_id) const {
+ColumnPathIndex::node_index ColumnPathIndex
+::get_unitig_back(const Label &label, size_t unitig_id) const {
     assert(unitig_id);
-    const auto &label_encoder = topo_annotator_.get_label_encoder();
+    const auto &label_encoder = topo_annotator_->get_label_encoder();
     Column unitig_back_col = label_encoder.encode(UNITIG_BACK_TAG + label);
     const auto &col_int_mat = get_topo_matrix();
     assert(dynamic_cast<const ColumnMajor*>(&col_int_mat.get_binary_matrix()));
@@ -337,8 +496,8 @@ void ColumnPathIndex
                             size_t unitig_id,
                             const std::function<void(size_t, int64_t)> &callback) const {
     assert(unitig_id);
-    const auto &label_encoder = anno_graph_.get_annotator().get_label_encoder();
-    const auto &topo_label_encoder = topo_annotator_.get_label_encoder();
+    const auto &label_encoder = anno_graph_->get_annotator().get_label_encoder();
+    const auto &topo_label_encoder = topo_annotator_->get_label_encoder();
     Column unitig_col = label_encoder.encode(label);
     Column unitig_front_col = topo_label_encoder.encode(UNITIG_FRONT_TAG + label);
     node_index unitig_back = get_unitig_back(label, unitig_id);
@@ -350,7 +509,7 @@ void ColumnPathIndex
     const auto &front_col = *col_mat.data()[unitig_front_col];
 
     const auto &global_coord_mat = get_coord_matrix();
-    anno_graph_.get_graph().adjacent_outgoing_nodes(unitig_back, [&](node_index next) {
+    anno_graph_->get_graph().adjacent_outgoing_nodes(unitig_back, [&](node_index next) {
         auto next_global_coords = global_coord_mat.get_tuple(
             AnnotatedDBG::graph_to_anno_index(next), unitig_col
         );
