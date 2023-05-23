@@ -31,6 +31,16 @@ const std::string ColumnPathIndex::UNITIG_BACK_TAG(1, '\4');
 const std::string ColumnPathIndex::SUPERBUBBLE_TAG(1, '\2');
 const std::string ColumnPathIndex::CHAIN_TAG(1, '\3');
 
+const IntMatrix& ColumnPathIndex::get_topo_matrix() const {
+    assert(dynamic_cast<const IntMatrix*>(&topo_annotator_.get_matrix()));
+    return static_cast<const IntMatrix&>(topo_annotator_.get_matrix());
+}
+
+const MultiIntMatrix& ColumnPathIndex::get_coord_matrix() const {
+    assert(dynamic_cast<const MultiIntMatrix*>(&anno_graph_.get_annotator().get_matrix()));
+    return static_cast<const MultiIntMatrix&>(anno_graph_.get_annotator().get_matrix());
+}
+
 ColumnPathIndex::ColumnPathIndex(const AnnotatedDBG &anno_graph,
                                  const AnnotatedDBG::Annotator &topo_annotator)
       : anno_graph_(anno_graph), topo_annotator_(topo_annotator) {
@@ -72,7 +82,9 @@ auto ColumnPathIndex::get_chain_info(const Label &check_label, node_index node) 
         auto &[chain_info, coord_info] = info;
         int64_t global_coord = coords[0];
 
-        const auto &col_mat = static_cast<const ColumnMajor&>(static_cast<const IntMatrix&>(topo_annotator_.get_matrix()).get_binary_matrix()).data();
+        const auto &col_int_mat = get_topo_matrix();
+        assert(dynamic_cast<const ColumnMajor*>(&col_int_mat.get_binary_matrix()));
+        const auto &col_mat = static_cast<const ColumnMajor&>(col_int_mat.get_binary_matrix()).data();
         chain_info = ChainInfo(col_mat[unitig_col]->rank1(global_coord),
                                col_mat[sb_col]->rank1(global_coord),
                                col_mat[chain_col]->rank1(global_coord));
@@ -103,7 +115,10 @@ auto ColumnPathIndex::get_chain_info(const std::vector<node_index> &nodes) const
     ret_val.reserve(kmer_coords.size());
 
     const auto &label_encoder = topo_annotator_.get_label_encoder();
-    const auto &col_mat = static_cast<const ColumnMajor&>(static_cast<const IntMatrix&>(topo_annotator_.get_matrix()).get_binary_matrix());
+    const auto &col_int_mat = get_topo_matrix();
+    assert(dynamic_cast<const ColumnMajor*>(&col_int_mat.get_binary_matrix()));
+
+    const auto &col_mat = static_cast<const ColumnMajor&>(col_int_mat.get_binary_matrix());
 
     for (auto &[label, num_kmer_matches, node_coords] : kmer_coords) {
         assert(node_coords.size() == nodes.size());
@@ -159,26 +174,26 @@ void ColumnPathIndex::call_distances(const Label &label,
     size_t cycle_target = chain_id_a ? chain_id_a : (sb_id_a ? sb_id_a : unitig_id_a);
 
     std::vector<int64_t> cycle_lengths;
-    adjacent_outgoing_unitigs(label, cycle_target, [&](size_t next_u_id, int64_t len) {
-        if (cycle_lengths.size())
-            return;
+    if ((!chain_id_a && !sb_id_a) || ds_to_end_a.size()) {
+        adjacent_outgoing_unitigs(label, cycle_target, [&](size_t next_u_id, int64_t len) {
+            if (cycle_lengths.size())
+                return;
 
-        if (chain_id_a || sb_id_a) {
-            if (ds_to_end_a.size()) {
+            if (chain_id_a || sb_id_a) {
                 auto next_info = get_chain_info(label, get_unitig_back(label, next_u_id));
                 if ((chain_id_a && chain_id_a == std::get<0>(next_info.first))
-                        || (sb_id_a == std::get<1>(next_info.first))) {
+                        || (sb_id_a && sb_id_a == std::get<1>(next_info.first))) {
                     for (int64_t dstart : ds_from_start_a) {
                         for (int64_t dend : ds_to_end_a) {
                             cycle_lengths.emplace_back(dstart + dend + len);
                         }
                     }
                 }
+            } else if (next_u_id == unitig_id_a) {
+                cycle_lengths.emplace_back(len);
             }
-        } else if (next_u_id == unitig_id_a) {
-            cycle_lengths.emplace_back(len);
-        }
-    });
+        });
+    }
 
     std::vector<int64_t> dists;
 
@@ -266,42 +281,79 @@ void ColumnPathIndex::call_distances(const Label &label,
         }
     }
 
-    if (cycle_lengths.empty()) {
-        std::for_each(dists.begin(), dists.end(), callback);
-    } else {
-        std::for_each(dists.begin(), dists.end(), callback);
+    std::for_each(dists.begin(), dists.end(), callback);
+
+    if (cycle_lengths.empty())
+        return;
+
+    tsl::hopscotch_set<int64_t> seen_lengths;
+    bool inserted = true;
+    while (inserted) {
+        inserted = false;
+        for (int64_t cycle : cycle_lengths) {
+            for (int64_t prev_cycle : seen_lengths) {
+                const auto &[it, try_inserted] = seen_lengths.emplace(prev_cycle + cycle);
+                if (try_inserted) {
+                    for (int64_t d : dists) {
+                        if (d + *it <= max_distance) {
+                            callback(d + *it);
+                            inserted = true;
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
 int64_t ColumnPathIndex::get_global_coord(const Label &label, size_t unitig_id) const {
+    assert(unitig_id);
     const auto &label_encoder = topo_annotator_.get_label_encoder();
-    const auto &col_mat = static_cast<const ColumnMajor&>(static_cast<const IntMatrix&>(topo_annotator_.get_matrix()).get_binary_matrix());
+    const auto &col_int_mat = get_topo_matrix();
+    assert(dynamic_cast<const ColumnMajor*>(&col_int_mat.get_binary_matrix()));
+
+    const auto &col_mat = static_cast<const ColumnMajor&>(col_int_mat.get_binary_matrix());
     Column unitig_col = label_encoder.encode(UNITIG_FRONT_TAG + label);
     return col_mat.data()[unitig_col]->select1(unitig_id);
 }
 
 ColumnPathIndex::node_index ColumnPathIndex::get_unitig_back(const Label &label, size_t unitig_id) const {
-const auto &label_encoder = topo_annotator_.get_label_encoder();
+    assert(unitig_id);
+    const auto &label_encoder = topo_annotator_.get_label_encoder();
     Column unitig_back_col = label_encoder.encode(UNITIG_BACK_TAG + label);
-    const auto &col_int_mat = static_cast<const IntMatrix&>(topo_annotator_.get_matrix());
-    const auto &col_mat = static_cast<const ColumnMajor&>(static_cast<const IntMatrix&>(topo_annotator_.get_matrix()).get_binary_matrix());
+    const auto &col_int_mat = get_topo_matrix();
+    assert(dynamic_cast<const ColumnMajor*>(&col_int_mat.get_binary_matrix()));
+
+    const auto &col_mat = static_cast<const ColumnMajor&>(col_int_mat.get_binary_matrix());
     int64_t global_coord = col_mat.data()[unitig_back_col]->select1(unitig_id);
-    return col_int_mat.get_value(global_coord, unitig_back_col);
+    node_index ret_val = col_int_mat.get_value(global_coord, unitig_back_col);
+    assert(ret_val);
+
+    return ret_val;
 }
 
 void ColumnPathIndex
 ::adjacent_outgoing_unitigs(const Label &label,
                             size_t unitig_id,
                             const std::function<void(size_t, int64_t)> &callback) const {
-    const auto &label_encoder = topo_annotator_.get_label_encoder();
-    Column unitig_front_col = label_encoder.encode(UNITIG_FRONT_TAG + label);
+    assert(unitig_id);
+    const auto &label_encoder = anno_graph_.get_annotator().get_label_encoder();
+    const auto &topo_label_encoder = topo_annotator_.get_label_encoder();
+    Column unitig_col = label_encoder.encode(label);
+    Column unitig_front_col = topo_label_encoder.encode(UNITIG_FRONT_TAG + label);
+    node_index unitig_back = get_unitig_back(label, unitig_id);
 
-    const auto &col_mat = static_cast<const ColumnMajor&>(static_cast<const IntMatrix&>(topo_annotator_.get_matrix()).get_binary_matrix());
+    const auto &col_int_mat = get_topo_matrix();
+    assert(dynamic_cast<const ColumnMajor*>(&col_int_mat.get_binary_matrix()));
+
+    const auto &col_mat = static_cast<const ColumnMajor&>(col_int_mat.get_binary_matrix());
     const auto &front_col = *col_mat.data()[unitig_front_col];
 
-    const auto &global_coord_mat = static_cast<const MultiIntMatrix&>(anno_graph_.get_annotator().get_matrix());
-    anno_graph_.get_graph().adjacent_outgoing_nodes(get_unitig_back(label, unitig_id), [&](node_index next) {
-        auto next_global_coords = global_coord_mat.get_tuple(AnnotatedDBG::graph_to_anno_index(next), unitig_front_col);
+    const auto &global_coord_mat = get_coord_matrix();
+    anno_graph_.get_graph().adjacent_outgoing_nodes(unitig_back, [&](node_index next) {
+        auto next_global_coords = global_coord_mat.get_tuple(
+            AnnotatedDBG::graph_to_anno_index(next), unitig_col
+        );
         if (next_global_coords.size()) {
             size_t next_unitig_id = front_col.rank1(next_global_coords[0]);
             int64_t length = front_col.next1(next_global_coords[0] + 1) - next_unitig_id;

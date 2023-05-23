@@ -53,6 +53,9 @@ class ColumnPathIndex : public SequenceGraph::GraphExtension {
     const AnnotatedDBG &anno_graph_;
     const AnnotatedDBG::Annotator &topo_annotator_;
 
+    const annot::matrix::IntMatrix& get_topo_matrix() const;
+    const annot::matrix::MultiIntMatrix& get_coord_matrix() const;
+
     int64_t get_global_coord(const Label &label, size_t unitig_id) const;
     node_index get_unitig_back(const Label &label, size_t unitig_id) const;
 
