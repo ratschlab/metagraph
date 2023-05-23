@@ -255,3 +255,89 @@ bsub -J "gtex_count_${WINDOW_SIZE}_rd_brwt_relax" \
             ${DIR}/annotation.row_diff_int_brwt.annodbg \
             2>&1 | tee ${DIR}/logs/count_rd_brwt_relax.log";
 ```
+
+
+
+```bash
+################################## No counts ##################################
+
+DIR=~/metagenome/data/gtex_counts/build/nobackup;
+mkdir $DIR/rd;
+mkdir $DIR/rd/rd_columns;
+ln -s $DIR/graph_primary.dbg ${DIR}/rd/graph.dbg;
+
+METAGRAPH=~/projects/projects2014-metagenome/metagraph/build_release/metagraph;
+
+sbatch -J "gtex_rd_0" \
+     -o $DIR/logs/rd_0.slog \
+     -t 00-24 \
+     --cpus-per-task 34 \
+     --mem-per-cpu=10G \
+    --wrap="find ${DIR}/smoothing_1/columns -name \"*.column.annodbg\" \
+        | /usr/bin/time -v $METAGRAPH transform_anno -v \
+            --anno-type row_diff \
+            --row-diff-stage 0 \
+            --mem-cap-gb 200 \
+            --disk-swap ~/metagenome/scratch/nobackup/stripe_1 \
+            -i ${DIR}/rd/graph.dbg \
+            -o ${DIR}/rd/rd_columns/out \
+            -p 34";
+
+sbatch -J "gtex_rd_1" \
+     -d afterok:$(get_jobid gtex_rd_0) \
+     -o $DIR/logs/rd_1.slog \
+     -t 00-24 \
+     --cpus-per-task 34 \
+     --mem-per-cpu=10G \
+    --wrap="find ${DIR}/smoothing_1/columns -name \"*.column.annodbg\" \
+        | /usr/bin/time -v $METAGRAPH transform_anno -v \
+            --anno-type row_diff \
+            --row-diff-stage 1 \
+            --mem-cap-gb 200 \
+            --disk-swap ~/metagenome/scratch/nobackup/stripe_1 \
+            -i ${DIR}/rd/graph.dbg \
+            -o ${DIR}/rd/rd_columns/out \
+            -p 34";
+
+sbatch -J "gtex_rd_2" \
+     -d afterok:$(get_jobid gtex_rd_1) \
+     -o $DIR/logs/rd_2.slog \
+     -t 00-24 \
+     --cpus-per-task 34 \
+     --mem-per-cpu=10G \
+    --wrap="find ${DIR}/smoothing_1/columns -name \"*.column.annodbg\" \
+        | /usr/bin/time -v $METAGRAPH transform_anno -v \
+            --anno-type row_diff \
+            --row-diff-stage 2 \
+            --mem-cap-gb 200 \
+            --disk-swap ~/metagenome/scratch/nobackup/stripe_1 \
+            -i ${DIR}/rd/graph.dbg \
+            -o ${DIR}/rd/rd_columns/out \
+            -p 34";
+
+sbatch -J "gtex_rd_brwt" \
+     -d afterok:$(get_jobid gtex_rd_2) \
+     -o $DIR/logs/rd_brwt.slog \
+     -t 00-24 \
+     --cpus-per-task 34 \
+     --mem-per-cpu=10G \
+    --wrap="find ${DIR}/rd/rd_columns -name \"*.annodbg\" \
+        | /usr/bin/time -v $METAGRAPH transform_anno -v \
+            --anno-type row_diff_brwt \
+            --greedy --fast --subsample 1000000 \
+            -i ${DIR}/rd/graph.dbg \
+            -o ${DIR}/annotation \
+            -p 34 --parallel-nodes 10";
+
+sbatch -J "gtex_rd_brwt_relax" \
+     -d afterok:$(get_jobid gtex_rd_brwt) \
+     -o $DIR/logs/rd_brwt_relax.slog \
+     -t 00-24 \
+     --cpus-per-task 34 \
+     --mem-per-cpu=10G \
+    --wrap="/usr/bin/time -v $METAGRAPH relax_brwt -v \
+            -p 34 \
+            --relax-arity 32 \
+            -o ${DIR}/annotation.relaxed \
+            ${DIR}/annotation.row_diff_brwt.annodbg";
+```
