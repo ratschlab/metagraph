@@ -681,7 +681,8 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
 
     tsl::hopscotch_map<size_t, ColumnPathIndex::NodesInfo> node_col_coords;
     for (auto &[label, nodes_info] : column_path_index->get_chain_info(nodes)) {
-        node_col_coords.emplace(label_encoder.encode(label), std::move(nodes_info));
+        auto encode = label.size() ? label_encoder.encode(label) : std::numeric_limits<Seed::Column>::max();
+        node_col_coords.emplace(encode, std::move(nodes_info));
     }
 
     float sl = -static_cast<float>(config_.min_seed_length) * 0.01;
@@ -858,7 +859,10 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                 assert(node_col_coords[col_j].size() == nodes.size());
                 const auto &coords_j_front = node_col_coords[col_j][node_j];
 
-                column_path_index->call_distances(label_encoder.decode(col_i),
+                const std::string &label = col_i == std::numeric_limits<Seed::Column>::max()
+                    ? "" : label_encoder.decode(col_i);
+
+                column_path_index->call_distances(label,
                                                   coords_i_back, coords_j_front,
                                                   [&](int64_t coord_dist) {
                     if (num_added > coord_dist || (!num_added && coord_dist == 0))

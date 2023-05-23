@@ -71,8 +71,7 @@ void assemble_with_coordinates(size_t k,
                                const SequenceGenerator &input_generator,
                                const SequenceCoordCallback &callback);
 
-std::string format_header(size_t unitig_id,
-                          size_t superbubble_id,
+std::string format_header(size_t superbubble_id,
                           size_t chain_id,
                           const std::vector<int64_t> &dist_from_start,
                           const std::vector<int64_t> &dist_to_end);

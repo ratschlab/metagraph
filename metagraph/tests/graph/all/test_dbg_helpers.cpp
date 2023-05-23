@@ -8,6 +8,8 @@
 #include "graph/graph_extensions/node_rc.hpp"
 #include "graph/graph_extensions/node_first_cache.hpp"
 #include "graph/graph_extensions/path_index.hpp"
+#include "common/utils/file_utils.hpp"
+#include "graph/annotated_graph_algorithm.hpp"
 
 
 namespace mtg {
@@ -288,8 +290,27 @@ build_graph<DBGSuccinctUnitigIndexed>(uint64_t k,
                                       std::vector<std::string> sequences,
                                       DeBruijnGraph::Mode mode) {
     auto graph = build_graph<DBGSuccinct>(k, sequences, mode);
-    DBGSuccinct &dbg_succ = get_dbg_succ(*graph);
-    graph->add_extension(std::make_shared<graph::PathIndex<>>(dbg_succ));
+    std::filesystem::path swap_dir = utils::create_temp_dir("", "tmp_path_col");
+    std::string column_file = swap_dir/"tmp_paths";
+    graph::ColumnPathIndex::annotate_columns(graph, column_file, [&](const auto &callback) {
+        size_t unitig_id = 1;
+        graph::assemble_with_coordinates(k,
+            [&](const auto &c) { std::for_each(sequences.begin(), sequences.end(), c); },
+            [&](const std::string &unitig,
+                size_t sb_term,
+                size_t chain_id,
+                const std::vector<int64_t> &distances_from_begin,
+                const std::vector<int64_t> &distances_to_end) {
+                std::string header = graph::format_header(sb_term, chain_id,
+                                                          distances_from_begin, distances_to_end);
+                callback(unitig, std::to_string(unitig_id++), header, { "" });
+            }
+        );
+    }, 10, swap_dir);
+
+    graph->add_extension(std::make_shared<graph::ColumnPathIndex>(
+        graph, std::vector<std::string>{ column_file }
+    ));
 
     return graph;
 }
@@ -488,8 +509,27 @@ build_graph_batch<DBGSuccinctUnitigIndexed>(uint64_t k,
                                             std::vector<std::string> sequences,
                                             DeBruijnGraph::Mode mode) {
     auto graph = build_graph_batch<DBGSuccinct>(k, sequences, mode);
-    DBGSuccinct &dbg_succ = get_dbg_succ(*graph);
-    graph->add_extension(std::make_shared<graph::PathIndex<>>(dbg_succ));
+    std::filesystem::path swap_dir = utils::create_temp_dir("", "tmp_path_col");
+    std::string column_file = swap_dir/"tmp_paths";
+    graph::ColumnPathIndex::annotate_columns(graph, column_file, [&](const auto &callback) {
+        size_t unitig_id = 1;
+        graph::assemble_with_coordinates(k,
+            [&](const auto &c) { std::for_each(sequences.begin(), sequences.end(), c); },
+            [&](const std::string &unitig,
+                size_t sb_term,
+                size_t chain_id,
+                const std::vector<int64_t> &distances_from_begin,
+                const std::vector<int64_t> &distances_to_end) {
+                std::string header = graph::format_header(sb_term, chain_id,
+                                                          distances_from_begin, distances_to_end);
+                callback(unitig, std::to_string(unitig_id++), header, { "" });
+            }
+        );
+    }, 10, swap_dir);
+
+    graph->add_extension(std::make_shared<graph::ColumnPathIndex>(
+        graph, std::vector<std::string>{ column_file }
+    ));
 
     return graph;
 }

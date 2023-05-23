@@ -52,8 +52,9 @@ int transform_graph(Config *config) {
                 const std::vector<int64_t> &distances_to_end) {
                 seq_io::write_fasta(
                     gzout,
-                    graph::format_header(unitig_id++, sb_term, chain_id,
-                                         distances_from_begin, distances_to_end),
+                    fmt::format("{}\t{}", unitig_id++,
+                        graph::format_header(sb_term, chain_id,
+                                             distances_from_begin, distances_to_end)),
                     unitig
                 );
             }

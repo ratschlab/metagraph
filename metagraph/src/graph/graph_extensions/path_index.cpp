@@ -62,7 +62,7 @@ void ColumnPathIndex::annotate_columns(std::shared_ptr<DeBruijnGraph> graph,
 
     ThreadPool thread_pool(get_num_threads() > 1 ? get_num_threads() : 0);
     auto topo_annotator_ptr = std::make_shared<ColumnCompressed<>>(
-        graph->max_index(), num_columns_cached, tmp_dir, memory_available_gb * 1000000000,
+        graph->max_index() + 1, num_columns_cached, tmp_dir, memory_available_gb * 1000000000,
         64, max_chunks_open
     );
 
@@ -86,8 +86,11 @@ void ColumnPathIndex::annotate_columns(std::shared_ptr<DeBruijnGraph> graph,
             std::vector<std::pair<bool, bool>> unitig_data;
             unitig_data.reserve(all_data.size());
 
-            for (auto &[seq, name, comment, labels, coord] : all_data) {
-                data.emplace_back(std::move(seq), std::move(labels), coord);
+            for (auto &[in_seq, name, comment, in_labels, coord] : all_data) {
+                assert(coord < graph->max_index());
+                const auto &[seq, labels, _] = data.emplace_back(
+                    std::move(in_seq), std::move(in_labels), coord
+                );
                 unitig_data.emplace_back(true, true);
                 if (comment.size()) {
                     auto c_split = utils::split_string(comment, "\t");
@@ -102,16 +105,15 @@ void ColumnPathIndex::annotate_columns(std::shared_ptr<DeBruijnGraph> graph,
                     }
 
                     auto coord_split = utils::split_string(c_split[1], ";");
-                    extra_data.emplace_back(std::get<0>(data.back()),
-                                            std::get<1>(data.back()),
-                                            atoi(coord_split[0].c_str()));
-                    extra_data.emplace_back(std::get<0>(data.back()),
-                                            std::get<1>(data.back()),
+                    extra_data.emplace_back(seq, labels, atoi(coord_split[0].c_str()));
+                    extra_data.emplace_back(seq, labels,
                                             static_cast<uint64_t>(atoi(coord_split[1].c_str())));
                 }
             }
 
             thread_pool.enqueue([&](auto &data, auto &extra_data, auto &unitig_data) {
+                assert(data.size() == unitig_data.size());
+
                 std::vector<std::vector<std::string>> u_labels_v;
                 u_labels_v.reserve(unitig_data.size());
                 for (size_t i = 0; i < unitig_data.size(); ++i) {
@@ -140,6 +142,10 @@ void ColumnPathIndex::annotate_columns(std::shared_ptr<DeBruijnGraph> graph,
 
                 for (size_t i = 0; i < unitig_data.size(); ++i) {
                     const auto &[seq, labels, coord] = data[i];
+                    assert(u_labels_v[i].size() >= 2);
+                    assert(topo_label_encoder.label_exists(u_labels_v[i][0]));
+                    assert(topo_label_encoder.label_exists(u_labels_v[i][1]));
+
                     std::vector<std::string> u_labels_1 = { u_labels_v[i][0] };
                     std::vector<std::string> u_labels_2 = { u_labels_v[i][1] };
 
@@ -148,6 +154,8 @@ void ColumnPathIndex::annotate_columns(std::shared_ptr<DeBruijnGraph> graph,
                     std::string_view last_kmer(seq.c_str() + seq.size() - k, k);
                     auto first_node = map_to_nodes(graph, first_kmer);
                     auto last_node = map_to_nodes(graph, last_kmer);
+                    assert(first_node[0]);
+                    assert(last_node[0]);
                     topo_annotator.add_label_counts({ coord }, u_labels_1, first_node);
                     topo_annotator.add_label_counts({ coord }, u_labels_2, last_node);
                 }
@@ -165,6 +173,7 @@ void ColumnPathIndex::annotate_columns(std::shared_ptr<DeBruijnGraph> graph,
     generator([&](std::string sequence, std::string name, std::string comment, auto labels) {
         if (sequence.size() >= k) {
             uint64_t num_kmers = sequence.size() - k + 1;
+            assert(coord + num_kmers <= graph->max_index());
             label_set.insert(labels.begin(), labels.end());
             batcher.push_and_pay(sequence.size(),
                                  std::move(sequence),

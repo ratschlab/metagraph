@@ -734,25 +734,22 @@ void assemble_with_coordinates(size_t k,
     }
 }
 
-std::string format_header(size_t unitig_id,
-                          size_t superbubble_id,
+std::string format_header(size_t superbubble_id,
                           size_t chain_id,
                           const std::vector<int64_t> &dist_from_start,
                           const std::vector<int64_t> &dist_to_end) {
     if (!superbubble_id)
-        return fmt::format("{}", unitig_id);
+        return "";
 
     if (!chain_id) {
-        return fmt::format("{}\t{}\t{};{}",
-            unitig_id,
+        return fmt::format("{}\t{};{}",
             superbubble_id,
             fmt::join(dist_from_start, ","),
             fmt::join(dist_to_end, ",")
         );
     }
 
-    return fmt::format("{}\t{};{}\t{};{}",
-        unitig_id,
+    return fmt::format("{};{}\t{};{}",
         superbubble_id,
         chain_id,
         fmt::join(dist_from_start, ","),
