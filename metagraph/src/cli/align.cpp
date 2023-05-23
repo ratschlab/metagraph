@@ -374,7 +374,7 @@ int align_to_graph(Config *config) {
 
         std::ostream *out = ofile ? ofile.get() : &std::cout;
 
-        const uint64_t batch_size = config->query_batch_size_in_bytes;
+        const uint64_t batch_size = config->query_batch_size;
 
         auto it = fasta_parser.begin();
         auto end = fasta_parser.end();

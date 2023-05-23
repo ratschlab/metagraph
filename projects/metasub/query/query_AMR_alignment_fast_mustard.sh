@@ -24,4 +24,4 @@ pmem=$((${mem} / ${threads}))
 
 log=${outdir}/amr_mustard_all_ard_k${K}.fast.log
 out=${outdir}/amr_mustard_all_ard_k${K}.fast.tsv
-echo "/usr/bin/time -v $metagraph query --align --fast --suppress-unlabeled -i $graph -a ${annotation} -p ${threads} --count-labels --discovery-fraction 0.1 ${query} > $out" | bsub -J ms_q_amr${K} -oo ${log} -We 24:00 -n $threads -M ${mem} -R "rusage[mem=${pmem}]" -R "span[hosts=1]"
+echo "/usr/bin/time -v $metagraph query --align --suppress-unlabeled -i $graph -a ${annotation} -p ${threads} --count-labels --discovery-fraction 0.1 ${query} > $out" | bsub -J ms_q_amr${K} -oo ${log} -We 24:00 -n $threads -M ${mem} -R "rusage[mem=${pmem}]" -R "span[hosts=1]"

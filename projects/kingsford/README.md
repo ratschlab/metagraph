@@ -219,7 +219,7 @@ bsub -J "kingsford_count_rd_brwt" \
     "find ${DIR}/rd/rd_columns -name \"*.column.annodbg\" \
         | /usr/bin/time -v $METAGRAPH transform_anno -v \
             --anno-type row_diff_int_brwt \
-            --greedy --fast --subsample 1000000 \
+            --greedy --subsample 1000000 \
             -i ${DIR}/rd/graph.dbg \
             -o ${DIR}/annotation \
             -p 72 --parallel-nodes 10 \
@@ -249,7 +249,7 @@ bsub -J "kingsford_query_old" \
      -oo ${DIR}/logs/query_rd_brwt_relax_old.lsf \
      -W 4:00 \
      -n 1 -R "rusage[mem=30000] span[hosts=1]" \
-    "/usr/bin/time -v $METAGRAPH query --count-labels --fast -v \
+    "/usr/bin/time -v $METAGRAPH query --count-labels -v \
             -i ${DIR}/kingsford_small.dbg \
             -a ${DIR}/annotation_old.relaxed.row_diff_brwt.annodbg \
             ~/projects/projects2014-metagenome/metagraph/tests/data/transcripts_100.fa \
@@ -258,7 +258,7 @@ bsub -J "kingsford_query" \
      -oo ${DIR}/logs/query_rd_brwt_relax.lsf \
      -W 4:00 \
      -n 1 -R "rusage[mem=30000] span[hosts=1]" \
-    "/usr/bin/time -v $METAGRAPH query --count-labels --fast -v \
+    "/usr/bin/time -v $METAGRAPH query --count-labels -v \
             -i ${DIR}/kingsford_small.dbg \
             -a ${DIR}/annotation.relaxed.row_diff_brwt.annodbg \
             ~/projects/projects2014-metagenome/metagraph/tests/data/transcripts_100.fa \
@@ -274,7 +274,7 @@ bsub -J "kingsford_count_query" \
      -oo ${DIR}/logs/query_count_rd_brwt_relax.lsf \
      -W 4:00 \
      -n 1 -R "rusage[mem=30000] span[hosts=1]" \
-    "/usr/bin/time -v $METAGRAPH query --count-labels --count-kmers --fast -v \
+    "/usr/bin/time -v $METAGRAPH query --count-labels --count-kmers -v \
             -i ${DIR}/../kingsford_small.dbg \
             -a ${DIR}/annotation.relaxed.row_diff_int_brwt.annodbg \
             ~/projects/projects2014-metagenome/metagraph/tests/data/transcripts_100.fa \
@@ -354,7 +354,7 @@ bsub -J "kingsford_rd_brwt" \
     "find ${DIR}/rd/rd_columns -name \"*.row_diff.annodbg\" \
         | /usr/bin/time -v $METAGRAPH transform_anno -v \
             --anno-type row_diff_brwt \
-            --greedy --fast --subsample 1000000 \
+            --greedy --subsample 1000000 \
             -i ${DIR}/rd/graph.dbg \
             -o ${DIR}/annotation \
             -p 72 --parallel-nodes 10 \
@@ -433,7 +433,7 @@ bsub -J "kingsford_rd_old_brwt" \
     "find ${DIR}/rd_old/rd_columns -name \"*.row_diff.annodbg\" \
         | /usr/bin/time -v $METAGRAPH transform_anno -v \
             --anno-type row_diff_brwt \
-            --greedy --fast --subsample 1000000 \
+            --greedy --subsample 1000000 \
             -i ${DIR}/rd_old/graph.dbg \
             -o ${DIR}/annotation_old \
             -p 72 --parallel-nodes 10 \

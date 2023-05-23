@@ -1301,15 +1301,15 @@ void QueryExecutor::query_fasta(const string &file,
         exit(1);
     }
 
-    if (config_.fast) {
-        // TODO: Implement batch mode for query_coords queries
-        if (config_.query_coords) {
-            logger->error("Querying coordinates in batch mode is currently not supported");
-            exit(1);
+    if (config_.query_batch_size) {
+        if (!config_.query_coords) {
+            // Construct a query graph and query against it
+            batched_query_fasta(fasta_parser, callback);
+            return;
+        } else {
+            // TODO: Implement batch mode for query_coords queries
+            logger->warn("Querying coordinates in batch mode is currently not supported. Querying sequentially...");
         }
-        // Construct a query graph and query against it
-        batched_query_fasta(fasta_parser, callback);
-        return;
     }
 
     // Query sequences independently
@@ -1333,7 +1333,7 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
     auto it = fasta_parser.begin();
     auto end = fasta_parser.end();
 
-    const uint64_t batch_size = config_.query_batch_size_in_bytes;
+    const uint64_t batch_size = config_.query_batch_size;
 
     size_t seq_count = 0;
 

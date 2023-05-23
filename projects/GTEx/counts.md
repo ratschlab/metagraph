@@ -235,7 +235,7 @@ bsub -J "gtex_count_${WINDOW_SIZE}_rd_brwt" \
     "find ${DIR}/rd/rd_columns -name \"*.column.annodbg\" \
         | /usr/bin/time -v $METAGRAPH transform_anno -v \
             --anno-type row_diff_int_brwt \
-            --greedy --fast --subsample 1000000 \
+            --greedy --subsample 1000000 \
             -i ${DIR}/rd/graph.dbg \
             -o ${DIR}/annotation \
             -p 72 --parallel-nodes 10 \
@@ -324,7 +324,7 @@ sbatch -J "gtex_rd_brwt" \
     --wrap="find ${DIR}/rd/rd_columns -name \"*.annodbg\" \
         | /usr/bin/time -v $METAGRAPH transform_anno -v \
             --anno-type row_diff_brwt \
-            --greedy --fast --subsample 1000000 \
+            --greedy --subsample 1000000 \
             -i ${DIR}/rd/graph.dbg \
             -o ${DIR}/annotation \
             -p 34 --parallel-nodes 10";

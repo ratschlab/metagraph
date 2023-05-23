@@ -64,7 +64,6 @@ std::string process_search_request(const std::string &received_message,
 
     config.count_labels = true;
     config.num_top_labels = json.get("num_labels", config.num_top_labels).asInt();
-    config.fast = json.get("fast", config.fast).asBool();
     config.print_signature = json.get("with_signature", config.print_signature).asBool();
     config.query_coords = json.get("query_coords", config.query_coords).asBool();
     config.count_kmers = json.get("abundance_sum", config.count_kmers).asBool();
@@ -82,12 +81,6 @@ std::string process_search_request(const std::string &received_message,
                         &anno_graph.get_annotator().get_matrix())) {
             throw std::invalid_argument("Annotation does not support k-mer coordinate queries");
         }
-
-        if (config.fast) {
-            config.fast = false;
-            logger->warn("Attempted to query k-mer coordinates in batch mode. "
-                         "Defaulted to basic query mode.");
-        }
     }
 
     std::unique_ptr<align::DBGAlignerConfig> aligner_config;
@@ -104,7 +97,7 @@ std::string process_search_request(const std::string &received_message,
     // writing to temporary file in order to reuse query code. This is not optimal and
     // may turn out to be an issue in production. However, adapting FastaParser to
     // work on strings seems non-trivial. An alternative would be to use
-    // read_fasta_from_string for non fast queries.
+    // read_fasta_from_string.
     utils::TempFile tf(config.tmp_dir);
     tf.ofstream() << fasta.asString();
     tf.ofstream().close();
@@ -295,7 +288,6 @@ int run_server(Config *config) {
 
     // defaults for the server
     config->num_top_labels = 10000;
-    config->fast = true;
 
     // the actual server
     HttpServer server;

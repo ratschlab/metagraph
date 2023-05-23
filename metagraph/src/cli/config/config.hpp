@@ -47,7 +47,7 @@ class Config {
     bool filter_present = false;
     bool dump_text_anno = false;
     bool sparse = false;
-    bool fast = false;
+    bool subsample_rows = false;
     bool batch_align = false;
     bool count_labels = false;
     bool suppress_unlabeled = false;
@@ -104,7 +104,7 @@ class Config {
     unsigned int smoothing_window = 1;  // no smoothing by default
     unsigned int num_kmers_in_seq = 0;  // assume all input reads have this length
 
-    unsigned long long int query_batch_size_in_bytes = 100'000'000;
+    unsigned long long int query_batch_size = 100'000'000;
     unsigned long long int num_rows_subsampled = 1'000'000;
     unsigned long long int num_singleton_kmers = 0;
     unsigned long long int max_hull_depth = -1;  // the default is a function of input

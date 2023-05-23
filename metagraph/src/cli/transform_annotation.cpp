@@ -156,7 +156,7 @@ binmat::LinkageMatrix compute_linkage(const std::vector<std::string> &files,
                                       Config::AnnotationType anno_type,
                                       const Config &config) {
     if (config.greedy_brwt) {
-        if (config.fast) {
+        if (config.subsample_rows) {
             return cluster_columns<binmat::SparseColumn>(files, anno_type,
                                                          config.num_rows_subsampled);
         } else {
