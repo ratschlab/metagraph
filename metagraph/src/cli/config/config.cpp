@@ -55,8 +55,6 @@ Config::Config(int argc, char *argv[]) {
         identity = STATS;
     } else if (!strcmp(argv[1], "annotate")) {
         identity = ANNOTATE;
-    } else if (!strcmp(argv[1], "coordinate")) {
-        identity = ANNOTATE_COORDINATES;
     } else if (!strcmp(argv[1], "merge_anno")) {
         identity = MERGE_ANNOTATIONS;
     } else if (!strcmp(argv[1], "query")) {
@@ -560,12 +558,7 @@ Config::Config(int argc, char *argv[]) {
     if (identity == ANNOTATE && infbase.empty())
         print_usage_and_exit = true;
 
-    if (identity == ANNOTATE_COORDINATES && infbase.empty())
-        print_usage_and_exit = true;
-
-    if ((identity == ANNOTATE_COORDINATES
-            || identity == ANNOTATE
-            || identity == EXTEND) && infbase_annotators.size() > 1) {
+    if ((identity == ANNOTATE || identity == EXTEND) && infbase_annotators.size() > 1) {
         std::cerr << "Error: one annotator at most is allowed for extension." << std::endl;
         print_usage_and_exit = true;
     }
@@ -582,12 +575,6 @@ Config::Config(int argc, char *argv[]) {
         print_usage_and_exit = true;
     }
 
-    if (identity == ANNOTATE_COORDINATES && outfbase.empty())
-        outfbase = utils::remove_suffix(infbase, ".dbg",
-                                                 ".orhashdbg",
-                                                 ".hashstrdbg",
-                                                 ".hashfastdbg",
-                                                 ".bitmapdbg");
     if (identity == EXTEND && infbase.empty())
         print_usage_and_exit = true;
 
@@ -912,9 +899,6 @@ if (advanced) {
             fprintf(stderr, "\tannotate\tgiven a graph and a fast[a|q] file, annotate\n");
             fprintf(stderr, "\t\t\tthe respective kmers\n\n");
 if (advanced) {
-            fprintf(stderr, "\tcoordinate\tgiven a graph and a fast[a|q] file, annotate\n");
-            fprintf(stderr, "\t\t\tkmers with their respective coordinates in genomes\n\n");
-
             fprintf(stderr, "\tmerge_anno\tmerge annotation columns\n\n");
 }
             fprintf(stderr, "\trelax_brwt\toptimize the tree structure in brwt annotator\n\n");
@@ -1206,20 +1190,6 @@ if (advanced) {
             fprintf(stderr, "\t   --coordinates \tannotate coordinates as multi-integer attributes [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
-            // fprintf(stderr, "\t   --fast \t\t\tannotate in fast regime (leads to repeated labels and bigger annotation) [off]\n");
-        } break;
-        case ANNOTATE_COORDINATES: {
-            fprintf(stderr, "Usage: %s coordinate -i <GRAPH> [options] FASTA1 [[FASTA2] ...]\n\n", prog_name.c_str());
-
-            fprintf(stderr, "Available options for annotate:\n");
-#if ! _PROTEIN_GRAPH
-            fprintf(stderr, "\t   --fwd-and-reverse \t\tprocess both forward and reverse complement sequences [off]\n");
-#endif
-            fprintf(stderr, "\t-a --annotator [STR] \t\tannotator to update []\n");
-            fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file [<GRAPH>]\n");
-            fprintf(stderr, "\t   --coord-binsize [INT]\tstepsize for k-mer coordinates in input sequences from the fasta files [1000]\n");
-            fprintf(stderr, "\t   --fast \t\t\tannotate in fast regime [off]\n");
-            fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
         } break;
         case MERGE_ANNOTATIONS: {
             fprintf(stderr, "Usage: %s merge_anno -o <annotation-basename> [options] ANNOT1 [[ANNOT2] ...]\n\n", prog_name.c_str());

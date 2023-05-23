@@ -181,7 +181,6 @@ class Config {
         ALIGN,
         STATS,
         ANNOTATE,
-        ANNOTATE_COORDINATES,
         MERGE_ANNOTATIONS,
         TRANSFORM,
         TRANSFORM_ANNOTATION,
