@@ -9,8 +9,6 @@ class Config;
 
 int annotate_graph(Config *config);
 
-int annotate_graph_with_genome_coordinates(Config *config);
-
 } // namespace cli
 } // namespace mtg
 

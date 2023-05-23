@@ -390,91 +390,6 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
 }
 
 
-void annotate_coordinates(const std::vector<std::string> &files,
-                          graph::AnnotatedDBG *anno_graph,
-                          bool forward_and_reverse,
-                          size_t genome_bin_size) {
-    size_t total_seqs = 0;
-
-    Timer timer;
-
-    const size_t k = anno_graph->get_graph().get_k();
-
-    ThreadPool thread_pool(get_num_threads() > 1 ? get_num_threads() : 0);
-
-    // iterate over input files
-    for (const auto &file : files) {
-        Timer data_reading_timer;
-
-        logger->trace("Parsing '{}'", file);
-
-        // open stream
-        if (file_format(file) == "FASTA"
-                    || file_format(file) == "FASTQ") {
-
-            bool forward_strand = true;
-
-            read_fasta_file_critical(file,
-                [&](kseq_t *read_stream) {
-                    std::vector<std::string> labels {
-                        file,
-                        read_stream->name.s,
-                        std::to_string(forward_and_reverse && (total_seqs % 2)), // whether the read is reverse
-                        "",
-                    };
-
-                    const std::string sequence(read_stream->seq.s);
-                    for (size_t i = 0; i < sequence.size(); i += genome_bin_size) {
-                        labels.back() = fmt::format_int(i).c_str();
-
-                        // forward: |0 =>  |6 =>  |12=>  |18=>  |24=>  |30=>|
-                        // reverse: |<=30|  <=24|  <=18|  <=12|  <= 6|  <= 0|
-                        const size_t bin_size = std::min(
-                            static_cast<size_t>(sequence.size() - i),
-                            static_cast<size_t>(genome_bin_size + k - 1)
-                        );
-                        thread_pool.enqueue(
-                            [anno_graph](const std::string &sequence, const auto &labels) {
-                                anno_graph->annotate_sequence(
-                                    sequence, { utils::join_strings(labels, "\1"), }
-                                );
-                            },
-                            forward_strand
-                                ? sequence.substr(i, bin_size)
-                                : sequence.substr(sequence.size() - i - bin_size, bin_size),
-                            labels
-                        );
-                    }
-
-                    total_seqs += 1;
-
-                    if (logger->level() <= spdlog::level::level_enum::trace
-                                                    && total_seqs % 10000 == 0) {
-                        logger->trace("processed {} sequences, last was {}, annotated as <{}>, {} sec",
-                                      total_seqs, read_stream->name.s, fmt::join(labels, "><"), timer.elapsed());
-                    }
-
-                    // If we read both strands, the next sequence is
-                    // either reverse (if the current one is forward)
-                    // or new (if the current one is reverse), and therefore forward
-                    if (forward_and_reverse)
-                        forward_strand = !forward_strand;
-                },
-                forward_and_reverse
-            );
-        } else {
-            logger->error("The type of file '{}' is not supported", file);
-            exit(1);
-        }
-
-        logger->trace("File '{}' processed in {} sec, current mem usage: {} MiB, total time {} sec",
-                      file, data_reading_timer.elapsed(), get_curr_RSS() >> 20, timer.elapsed());
-    }
-
-    thread_pool.join();
-}
-
-
 int annotate_graph(Config *config) {
     assert(config);
 
@@ -512,45 +427,6 @@ int annotate_graph(Config *config) {
                 2000 / std::max((size_t)1, num_threads));
         }
     }
-
-    return 0;
-}
-
-int annotate_graph_with_genome_coordinates(Config *config) {
-    assert(config);
-
-    const auto &files = config->fnames;
-
-    assert(config->infbase_annotators.size() <= 1);
-
-    auto graph_temp = load_critical_dbg(config->infbase);
-
-    auto annotation_temp
-        = std::make_unique<annot::RowCompressed<>>(graph_temp->max_index());
-
-    if (config->infbase_annotators.size()
-            && !annotation_temp->load(config->infbase_annotators.at(0))) {
-        logger->error("Cannot load annotations from '{}'",
-                      config->infbase_annotators.at(0));
-        exit(1);
-    }
-
-    // load graph
-    graph::AnnotatedDBG anno_graph(graph_temp,
-                                   std::move(annotation_temp),
-                                   config->fast);
-
-    if (!anno_graph.check_compatibility()) {
-        logger->error("Graph and annotation are incompatible");
-        exit(1);
-    }
-
-    annotate_coordinates(files,
-                         &anno_graph,
-                         config->forward_and_reverse,
-                         config->genome_binsize_anno);
-
-    anno_graph.get_annotator().serialize(config->outfbase);
 
     return 0;
 }
