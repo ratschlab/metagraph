@@ -26,11 +26,15 @@ class ColumnPathIndex : public SequenceGraph::GraphExtension {
     using LabeledSeqGenerator = std::function<void(const LabeledSeqCallback&)>;
 
     ColumnPathIndex(std::shared_ptr<DeBruijnGraph> graph,
-                    const LabeledSeqGenerator &generator,
-                    size_t num_columns_cached = 10,
-                    const std::string &tmp_dir = "",
-                    double memory_available_gb = 1.0,
-                    size_t max_chunks_open = 2000);
+                    const std::vector<std::string> &prefixes);
+
+    static void annotate_columns(std::shared_ptr<DeBruijnGraph> graph,
+                                 const std::string &out_prefix,
+                                 const LabeledSeqGenerator &generator,
+                                 size_t num_columns_cached = 10,
+                                 const std::string &tmp_dir = "",
+                                 double memory_available_gb = 1.0,
+                                 size_t max_chunks_open = 2000);
 
     ColumnPathIndex(std::shared_ptr<const AnnotatedDBG> anno_graph,
                     std::shared_ptr<const AnnotatedDBG::Annotator> topo_annotator);
@@ -51,7 +55,11 @@ class ColumnPathIndex : public SequenceGraph::GraphExtension {
                         size_t max_steps = std::numeric_limits<int64_t>::max()) const;
 
     bool load(const std::string &) { throw std::runtime_error("Load not implemented for ColumnPathIndex"); }
-    void serialize(const std::string &) const { throw std::runtime_error("Serialize not implemented for ColumnPathIndex"); }
+
+    void serialize(const std::string &filename) const {
+        anno_graph_->get_annotator().serialize(filename + ".global");
+        topo_annotator_->serialize(filename + ".topo");
+    }
 
     bool is_compatible(const SequenceGraph &graph, bool = true) const {
         return anno_graph_->check_compatibility() && &graph == &anno_graph_->get_graph();

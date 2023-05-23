@@ -44,17 +44,15 @@ const MultiIntMatrix& ColumnPathIndex::get_coord_matrix() const {
     return static_cast<const MultiIntMatrix&>(anno_graph_->get_annotator().get_matrix());
 }
 
-std::pair<std::shared_ptr<const AnnotatedDBG>,
-          std::shared_ptr<const AnnotatedDBG::Annotator>>
-generate_anno_graphs(std::shared_ptr<DeBruijnGraph> graph,
-                     const ColumnPathIndex::LabeledSeqGenerator &generator,
-                     size_t num_columns_cached,
-                     const std::string &tmp_dir_prefix,
-                     double memory_available_gb,
-                     size_t max_chunks_open) {
+void ColumnPathIndex::annotate_columns(std::shared_ptr<DeBruijnGraph> graph,
+                                       const std::string &out_prefix,
+                                       const LabeledSeqGenerator &generator,
+                                       size_t num_columns_cached,
+                                       const std::string &tmp_dir_prefix,
+                                       double memory_available_gb,
+                                       size_t max_chunks_open) {
     const size_t k = graph->get_k();
     std::filesystem::path tmp_dir = utils::create_temp_dir(tmp_dir_prefix, "test_col");
-    std::string out_path = tmp_dir/"test_col";
 
     auto anno_graph = std::make_shared<AnnotatedDBG>(graph,
         std::make_unique<ColumnCompressed<>>(graph->max_index(), num_columns_cached,
@@ -82,8 +80,12 @@ generate_anno_graphs(std::shared_ptr<DeBruijnGraph> graph,
         [&](auto&& all_data) {
             std::vector<std::tuple<std::string, std::vector<std::string>, uint64_t>> data;
             data.reserve(all_data.size());
+
             std::vector<std::tuple<std::string, std::vector<std::string>, uint64_t>> extra_data;
+
             std::vector<std::pair<bool, bool>> unitig_data;
+            unitig_data.reserve(all_data.size());
+
             for (auto &[seq, name, comment, labels, coord] : all_data) {
                 data.emplace_back(std::move(seq), std::move(labels), coord);
                 unitig_data.emplace_back(true, true);
@@ -108,6 +110,7 @@ generate_anno_graphs(std::shared_ptr<DeBruijnGraph> graph,
                                             static_cast<uint64_t>(atoi(coord_split[1].c_str())));
                 }
             }
+
             thread_pool.enqueue([&](auto &data, auto &extra_data, auto &unitig_data) {
                 std::vector<std::vector<std::string>> u_labels_v;
                 u_labels_v.reserve(unitig_data.size());
@@ -172,32 +175,64 @@ generate_anno_graphs(std::shared_ptr<DeBruijnGraph> graph,
             coord += num_kmers;
         }
     });
+
     topo_annotator.add_labels({ coord }, label_set.values_container());
 
     thread_pool.join();
+    batcher.process_all_buffered();
 
-    annotator.serialize(out_path + ".global");
-    topo_annotator.serialize(out_path + ".topo");
 
-    auto merged_global_annotator = std::make_unique<ColumnCoordAnnotator>(
-        load_coords(std::move(annotator), { out_path + ".global.column.annodbg" })
+    logger->trace("Serializing annotations");
+    annotator.serialize(out_prefix + ".global");
+    topo_annotator.serialize(out_prefix + ".topo");
+}
+
+std::pair<std::shared_ptr<const AnnotatedDBG>,
+          std::shared_ptr<const AnnotatedDBG::Annotator>>
+merge_load(std::shared_ptr<DeBruijnGraph> graph, const std::vector<std::string> &prefixes) {
+    std::vector<std::string> global_files;
+    std::vector<std::string> topo_files;
+
+    global_files.reserve(prefixes.size());
+    topo_files.reserve(prefixes.size());
+
+    for (const auto &prefix : prefixes) {
+        global_files.emplace_back(prefix + ".global" + ColumnCompressed<>::kExtension);
+        topo_files.emplace_back(prefix + ".topo" + ColumnCompressed<>::kExtension);
+    }
+
+    logger->trace("Reloading coordinates");
+    ColumnCompressed<> global_annotator(0);
+    if (!global_annotator.merge_load(global_files)) {
+        logger->error("Failed to load coordinate annotator");
+        exit(1);
+    }
+
+    auto merged_global_annotator = std::make_unique<ColumnCoordAnnotator>(load_coords(
+        std::move(global_annotator), global_files
+    ));
+    logger->trace("Done");
+
+    logger->trace("Reloading topology");
+    ColumnCompressed<> topo_annotator(0);
+    if (!topo_annotator.merge_load(topo_files)) {
+        logger->error("Failed to load topology annotator");
+        exit(1);
+    }
+    auto merged_topo_annotator = std::make_shared<IntColumnAnnotator>(
+        load_counts(std::move(topo_annotator), topo_files)
     );
+    logger->trace("Done");
 
     return std::make_pair(
         std::make_shared<AnnotatedDBG>(graph, std::move(merged_global_annotator)),
-        std::make_shared<IntColumnAnnotator>(load_counts(std::move(topo_annotator),
-                                                         { out_path + ".topo.column.annodbg" }))
+        merged_topo_annotator
     );
 }
 
 ColumnPathIndex::ColumnPathIndex(std::shared_ptr<DeBruijnGraph> graph,
-                                 const LabeledSeqGenerator &generator,
-                                 size_t num_columns_cached,
-                                 const std::string &tmp_dir,
-                                 double memory_available_gb,
-                                 size_t max_chunks_open)
-      : ColumnPathIndex(generate_anno_graphs(graph, generator, num_columns_cached,
-                                             tmp_dir, memory_available_gb, max_chunks_open)) {}
+                                 const std::vector<std::string> &prefixes)
+      : ColumnPathIndex(merge_load(graph, prefixes)) {}
 
 ColumnPathIndex::ColumnPathIndex(std::shared_ptr<const AnnotatedDBG> anno_graph,
                                  std::shared_ptr<const AnnotatedDBG::Annotator> topo_annotator)

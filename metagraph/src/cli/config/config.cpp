@@ -688,11 +688,6 @@ Config::Config(int argc, char *argv[]) {
         print_usage_and_exit = true;
     }
 
-    if (unitig_coords && count_width != 64) {
-        std::cerr << "Warning: setting count width to 64" << std::endl;
-        count_width = 64;
-    }
-
     if (outfbase.size()
             && !(utils::check_if_writable(outfbase)
                     || (separately

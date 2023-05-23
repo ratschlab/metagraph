@@ -13,6 +13,8 @@
 #include "annotation/annotation_converters.hpp"
 #include "config/config.hpp"
 #include "load/load_annotation.hpp"
+#include "load/load_graph.hpp"
+#include "graph/graph_extensions/path_index.hpp"
 
 
 namespace mtg {
@@ -953,6 +955,12 @@ int merge_annotation(Config *config) {
     assert(config);
 
     const auto &files = config->fnames;
+
+    if (config->unitig_coords) {
+        graph::ColumnPathIndex(load_critical_dbg(config->infbase),
+                               files).serialize(config->infbase);
+        return 0;
+    }
 
     if (config->anno_type == Config::ColumnCompressed) {
         ColumnCompressed<> annotation(0, config->num_columns_cached);

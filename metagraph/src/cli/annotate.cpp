@@ -228,27 +228,27 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
     const size_t batch_length = 100'000;
 
     if (config.unitig_coords) {
-        graph::ColumnPathIndex column_path_index(graph, [&](const auto &callback) {
-            for (const auto &file : files) {
-                call_annotations(
-                    file,
-                    config.refpath,
-                    anno_graph->get_graph(),
-                    forward_and_reverse,
-                    config.min_count,
-                    config.max_count,
-                    config.filename_anno,
-                    config.annotate_sequence_headers,
-                    config.fasta_anno_comment_delim,
-                    config.fasta_header_delimiter,
-                    config.anno_labels,
-                    callback
-                );
-            }
-        }, config.num_columns_cached, config.tmp_dir, config.memory_available, num_chunks_open);
-
-        column_path_index.get_anno_graph().get_annotator().serialize(annotator_filename + ".global");
-        column_path_index.get_topology_annotator().serialize(annotator_filename + ".topo");
+        graph::ColumnPathIndex::annotate_columns(graph, annotator_filename,
+            [&](const auto &callback) {
+                for (const auto &file : files) {
+                    call_annotations(
+                        file,
+                        config.refpath,
+                        anno_graph->get_graph(),
+                        forward_and_reverse,
+                        config.min_count,
+                        config.max_count,
+                        config.filename_anno,
+                        config.annotate_sequence_headers,
+                        config.fasta_anno_comment_delim,
+                        config.fasta_header_delimiter,
+                        config.anno_labels,
+                        callback
+                    );
+                }
+            },
+            config.num_columns_cached, config.tmp_dir, config.memory_available, num_chunks_open
+        );
         return;
     }
 
