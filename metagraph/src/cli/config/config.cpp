@@ -164,10 +164,8 @@ Config::Config(int argc, char *argv[]) {
             sparse = true;
         } else if (!strcmp(argv[i], "--cache")) {
             num_columns_cached = atoi(get_value(i++));
-        } else if (!strcmp(argv[i], "--fast")) {
-            fast = true;
         } else if (!strcmp(argv[i], "--batch-size")) {
-            query_batch_size_in_bytes = atoll(get_value(i++));
+            query_batch_size = atoll(get_value(i++));
         } else if (!strcmp(argv[i], "-p") || !strcmp(argv[i], "--parallel")) {
             set_num_threads(atoi(get_value(i++)));
         } else if (!strcmp(argv[i], "--parallel-nodes")) {
@@ -389,6 +387,8 @@ Config::Config(int argc, char *argv[]) {
             cluster_linkage = true;
         } else if (!strcmp(argv[i], "--subsample")) {
             num_rows_subsampled = atoll(get_value(i++));
+        } else if (!strcmp(argv[i], "--subsample-rows")) {
+            subsample_rows = true;
         } else if (!strcmp(argv[i], "--linkage-file")) {
             linkage_file = get_value(i++);
         } else if (!strcmp(argv[i], "--arity")) {
@@ -1021,7 +1021,7 @@ if (advanced) {
             fprintf(stderr, "\t   --query-presence \t\ttest sequences for presence, report as 0 or 1 [off]\n");
             fprintf(stderr, "\t   --filter-present \t\treport only present input sequences as FASTA [off]\n");
 if (advanced) {
-            fprintf(stderr, "\t   --batch-size \t\tquery batch size (number of base pairs) [100000000]\n");
+            fprintf(stderr, "\t   --batch-size [INT] \t\tquery batch size (number of base pairs) [100'000'000]\n");
 }
             fprintf(stderr, "\n");
             fprintf(stderr, "Available options for alignment:\n");
@@ -1228,8 +1228,8 @@ if (advanced) {
             fprintf(stderr, "\t                       \texample: '0 1 <dist> 4\n");
             fprintf(stderr, "\t                       \t          2 3 <dist> 5\n");
             fprintf(stderr, "\t                       \t          4 5 <dist> 6'\n");
-            fprintf(stderr, "\t   --fast \t\tuse sparse subsampling of columns for clustering [off]\n");
-            fprintf(stderr, "\t   --subsample [INT] \tnumber of rows subsampled for distance estimation in column clustering [1000000]\n");
+            fprintf(stderr, "\t   --subsample [INT] \tnumber of bits subsampled for distance estimation in column clustering [1'000'000]\n");
+            fprintf(stderr, "\t   --subsample-rows \tsubsample rows (the same positions in all columns) instead of only set bits [off]\n");
             fprintf(stderr, "\t   --dump-text-anno \tdump the columns of the annotator as separate text files [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --row-diff-stage [0|1|2] \tstage of the row_diff construction [0]\n");
@@ -1298,8 +1298,7 @@ if (advanced) {
             fprintf(stderr, "\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
             // fprintf(stderr, "\t   --cache-size [INT] \tnumber of uncompressed rows to store in the cache [0]\n");
-            fprintf(stderr, "\t   --fast \t\tquery in batches [off]\n");
-            fprintf(stderr, "\t   --batch-size \tquery batch size (number of base pairs) [100000000]\n");
+            fprintf(stderr, "\t   --batch-size [INT] \tquery batch size in bp (0 to disable batch query) [100'000'000]\n");
 if (advanced) {
             fprintf(stderr, "\t   --RA-ivbuff-size [INT] \tsize (in bytes) of int_vector_buffer used in random access mode (e.g. by row disk annotator) [16384]\n");
 }

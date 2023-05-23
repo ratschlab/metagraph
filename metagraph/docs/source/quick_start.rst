@@ -485,12 +485,12 @@ The conversion to ``Multi-BRWT`` can be done either
 *   with a single command, e.g.::
 
         find . -name "*.column.annodbg" | metagraph transform_anno -v -p 18 --anno-type brwt \
-                                                        --greedy --fast -o anno
+                                                        --greedy -o anno
 
 *   or with pre-computing a column clustering with::
 
         find . -name "*.column.annodbg" | metagraph transform_anno -v -p 18 --anno-type brwt \
-                                                        --linkage --greedy --fast -o linkage.txt
+                                                        --linkage --greedy -o linkage.txt
 
     and next converting the annotation to Multi-BRWT according to the pre-computed clustering (linkage)::
 
@@ -555,7 +555,7 @@ Converting a graph annotation supplemented with k-mer counts (``*.column.annodbg
 to Int-Multi-BRWT (``int_brwt``) is done exactly the same way as converting a binary annotation to Multi-BRWT (see :ref:`to_multi_brwt`),
 with simply replacing ``--anno-type brwt`` with ``--anno-type int_brwt``::
 
-    metagraph transform_anno --anno-type int_brwt --greedy --fast ...
+    metagraph transform_anno --anno-type int_brwt --greedy ...
 
 For converting to RowDiff<Int-Multi-BRWT> (``row_diff_int_brwt``), perform the same steps as when
 :ref:`converting to RowDiff\<Multi-BRWT\> <to_row_diff_brwt>` with the following exceptions.
