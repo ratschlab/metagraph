@@ -156,96 +156,48 @@ void ColumnPathIndex::call_distances(const Label &label,
     const auto &[global_coord_a, ds_from_start_a, ds_to_end_a] = info_a.second;
     const auto &[global_coord_b, ds_from_start_b, ds_to_end_b] = info_b.second;
 
-    // same unitig
-    if (unitig_id_a == unitig_id_b) {
-        int64_t dist = global_coord_b - global_coord_a;
-        if (dist >= 0)
-            callback(dist);
+    size_t cycle_target = chain_id_a ? chain_id_a : (sb_id_a ? sb_id_a : unitig_id_a);
+
+    std::vector<int64_t> cycle_lengths;
+    adjacent_outgoing_unitigs(label, cycle_target, [&](size_t next_u_id, int64_t len) {
+        if (cycle_lengths.size())
+            return;
 
         if (chain_id_a || sb_id_a) {
-            size_t target = chain_id_a ? chain_id_a : sb_id_a;
-            int64_t length = 0;
-            adjacent_outgoing_unitigs(label, target, [&](size_t next_u_id, int64_t len) {
-                if (length == 0) {
-                    auto next_info = get_chain_info(label, get_unitig_back(label, next_u_id));
-                    if (target == chain_id_a) {
-                        if (std::get<0>(next_info.first) == chain_id_a)
-                            length = len;
-                    } else if (std::get<1>(next_info.first) == sb_id_a) {
-                        length = len;
-                    }
-                }
-            });
-
-            if (length > 0) {
-                tsl::hopscotch_set<int64_t> cycle_sizes;
-                for (int64_t dstart : ds_from_start_a) {
-                    for (int64_t dend : ds_to_end_a) {
-                        if (length + dstart + dend <= max_distance)
-                            cycle_sizes.emplace(length + dstart + dend);
-                    }
-                }
-
-                tsl::hopscotch_set<int64_t> next_cycle_sizes;
-                do {
-                    for (int64_t cycle : cycle_sizes) {
-                        if (dist + cycle <= max_distance) {
-                            if (dist + cycle > 0)
-                                callback(dist + cycle);
-
-                            next_cycle_sizes.emplace(dist + cycle);
+            if (ds_to_end_a.size()) {
+                auto next_info = get_chain_info(label, get_unitig_back(label, next_u_id));
+                if ((chain_id_a && chain_id_a == std::get<0>(next_info.first))
+                        || (sb_id_a == std::get<1>(next_info.first))) {
+                    for (int64_t dstart : ds_from_start_a) {
+                        for (int64_t dend : ds_to_end_a) {
+                            cycle_lengths.emplace_back(dstart + dend + len);
                         }
                     }
-
-                    std::swap(next_cycle_sizes, cycle_sizes);
-                } while (cycle_sizes.size());
-            }
-
-        } else {
-            int64_t length = 0;
-            adjacent_outgoing_unitigs(label, unitig_id_a, [&](size_t next_u_id, int64_t len) {
-                if (next_u_id == unitig_id_a)
-                    length = len;
-            });
-
-            if (length != 0) {
-                // found a cycle
-                for ( ; dist < max_distance; dist += length) {
-                    callback(dist);
                 }
             }
+        } else if (next_u_id == unitig_id_a) {
+            cycle_lengths.emplace_back(len);
         }
+    });
 
-        return;
-    }
+    std::vector<int64_t> dists;
 
-    if (max_distance <= 0)
-        return;
-
-    // same chain
-    if (chain_id_a) {
-        // TODO: handle cycles
-        if (chain_id_b && chain_id_a == chain_id_b) {
-            // different superbubble
-            if (unitig_id_b == chain_id_b) {
-                std::for_each(ds_to_end_a.begin(), ds_to_end_a.end(), callback);
-                return;
-            } else if (sb_id_a != sb_id_b || (ds_from_start_b.size() == 1 && unitig_id_b == sb_id_b)) {
-                for (int64_t db : ds_from_start_b) {
-                    for (int64_t da : ds_from_start_a) {
-                        assert(db > da);
-                        callback(db - da);
-                    }
-                }
-
-                return;
+    if (unitig_id_a == unitig_id_b) {
+        // same unitig
+        dists.emplace_back(global_coord_b - global_coord_a);
+    } else if (sb_id_a && sb_id_a == sb_id_b) {
+        // same superbubble
+        if (!chain_id_a && sb_id_b == unitig_id_b) {
+            int64_t coord_offset_b = global_coord_b - get_global_coord(label, unitig_id_b);
+            for (int64_t dend : ds_to_end_a) {
+                dists.emplace_back(dend + coord_offset_b);
             }
-
-            assert(ds_from_start_a.size());
-            assert(ds_from_start_b.size());
-            if (ds_from_start_a.front() >= ds_from_start_b.back())
-                return;
-
+        } else if (!chain_id_a && ds_from_start_a.size() == 1 && ds_from_start_a[0] == 0) {
+            int64_t coord_offset_b = global_coord_b - get_global_coord(label, unitig_id_b);
+            for (int64_t dstart : ds_from_start_b) {
+                dists.emplace_back(dstart + coord_offset_b);
+            }
+        } else if (ds_to_end_a.size() || ds_to_end_b.empty()) {
             // traverse in the same superbubble to get the distance
             std::vector<std::tuple<size_t, int64_t, Vector<int64_t>::const_iterator>> traversal_stack;
             int64_t coord_offset = get_global_coord(label, unitig_id_b + 1) - global_coord_b;
@@ -268,74 +220,56 @@ void ColumnPathIndex::call_distances(const Label &label,
 
                 adjacent_outgoing_unitigs(label, u_id, [&](size_t next_u_id, int64_t len) {
                     if (next_u_id == unitig_id_b) {
-                        callback(dist + len);
+                        dists.emplace_back(dist + len);
                     } else if (dist + len <= max_distance) {
                         traversal_stack.emplace_back(next_u_id, dist + len, it);
                     }
                 });
             }
-
-            return;
         }
-
-        if (ds_to_end_a.empty() || ds_to_end_a.front() > max_distance)
-            return;
-
-        // jump to the end of the chain, then traverse from there
-        call_distances(
-            label,
-            get_chain_info(label, get_unitig_back(label, chain_id_a)),
-            info_b,
-            [&](int64_t dist) {
-                for (int64_t dd : ds_to_end_a) {
-                    callback(dist + dd);
-                }
-            },
-            max_distance - ds_to_end_a.front()
-        );
-
-        return;
-    }
-
-    if (sb_id_a && sb_id_b != sb_id_a) {
-        // jump to the end of the superbubble and traverse from there
-        if (ds_to_end_a.size() && max_distance >= ds_to_end_a.front()) {
-            call_distances(
-                label,
-                get_chain_info(label, get_unitig_back(label, sb_id_a)),
-                info_b,
-                [&](int64_t dist) {
-                    for (int64_t dd : ds_to_end_a) {
-                        callback(dist + dd);
-                    }
-                },
-                max_distance - ds_to_end_a.front()
-            );
-        }
-
-        return;
-    }
-
-    // traverse from here
-    std::vector<std::tuple<size_t, int64_t, size_t>> traversal_stack;
-    int64_t coord_offset = get_global_coord(label, unitig_id_b + 1) - global_coord_b;
-    traversal_stack.emplace_back(unitig_id_a,
-                                 get_global_coord(label, unitig_id_a + 1) - global_coord_a - coord_offset,
-                                 0);
-    while (traversal_stack.size()) {
-        auto [u_id, dist, n_steps] = traversal_stack.back();
-        traversal_stack.pop_back();
-
-        if (u_id == sb_id_b || n_steps >= max_steps || dist > max_distance)
-            continue;
-
-        adjacent_outgoing_unitigs(label, u_id, [&](size_t next_u_id, int64_t len) {
-            if (next_u_id == unitig_id_b) {
-                callback(dist + len);
-            } else if (dist + len <= max_distance) {
-                traversal_stack.emplace_back(next_u_id, dist + len, n_steps + 1);
+    } else if (chain_id_a && chain_id_a == chain_id_b) {
+        // same chain, different superbubble
+        for (int64_t db : ds_from_start_b) {
+            for (int64_t da : ds_from_start_a) {
+                dists.emplace_back(db - da);
             }
-        });
+        }
+    } else if ((!chain_id_a && !sb_id_a) || ds_to_end_a.size()) {
+        // traverse normally
+        int64_t coord_offset_a = get_global_coord(label, cycle_target + 1)
+            - (chain_id_a || sb_id_a ? get_global_coord(label, cycle_target) : global_coord_a);
+        int64_t coord_offset_b = get_global_coord(label, unitig_id_b + 1) - global_coord_b;
+        std::vector<std::tuple<size_t, int64_t, size_t>> traversal_stack;
+        traversal_stack.emplace_back(cycle_target,
+                                     coord_offset_a - coord_offset_b,
+                                     0);
+        while (traversal_stack.size()) {
+            auto [u_id, dist, n_steps] = traversal_stack.back();
+            traversal_stack.pop_back();
+
+            if (u_id == sb_id_b || n_steps >= max_steps || dist > max_distance)
+                continue;
+
+            adjacent_outgoing_unitigs(label, u_id, [&](size_t next_u_id, int64_t len) {
+                if (next_u_id == unitig_id_b) {
+                    if (ds_to_end_a.size()) {
+                        for (int64_t dend : ds_to_end_a) {
+                            dists.emplace_back(dend + dist + len);
+                        }
+                    } else {
+                        dists.emplace_back(dist + len);
+                    }
+                } else if (dist + len <= max_distance) {
+                    traversal_stack.emplace_back(next_u_id, dist + len, n_steps + 1);
+                }
+            });
+        }
+    }
+
+    if (cycle_lengths.empty()) {
+        std::for_each(dists.begin(), dists.end(), callback);
+    } else {
+        std::for_each(dists.begin(), dists.end(), callback);
     }
 }
 
