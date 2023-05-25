@@ -290,23 +290,29 @@ build_graph<DBGSuccinctUnitigIndexed>(uint64_t k,
                                       std::vector<std::string> sequences,
                                       DeBruijnGraph::Mode mode) {
     auto graph = build_graph<DBGSuccinct>(k, sequences, mode);
+
+    std::vector<std::tuple<std::string, size_t, size_t, std::vector<int64_t>, std::vector<int64_t>>> data;
+    graph::assemble_with_coordinates(k,
+        [&](const auto &c) { std::for_each(sequences.begin(), sequences.end(), c); },
+        [&](const std::string &unitig,
+            size_t sb_term,
+            size_t chain_id,
+            const std::vector<int64_t> &distances_from_begin,
+            const std::vector<int64_t> &distances_to_end) {
+            data.emplace_back(unitig, sb_term, chain_id, distances_from_begin, distances_to_end);
+        }
+    );
+
     std::filesystem::path swap_dir = utils::create_temp_dir("", "tmp_path_col");
     std::string column_file = swap_dir/"tmp_paths";
     graph::ColumnPathIndex::annotate_columns(graph, column_file, [&](const auto &callback) {
-        size_t unitig_id = 1;
-        graph::assemble_with_coordinates(k,
-            [&](const auto &c) { std::for_each(sequences.begin(), sequences.end(), c); },
-            [&](const std::string &unitig,
-                size_t sb_term,
-                size_t chain_id,
-                const std::vector<int64_t> &distances_from_begin,
-                const std::vector<int64_t> &distances_to_end) {
-                std::string coords = sb_term || chain_id
-                    ? graph::format_coords(distances_from_begin, distances_to_end)
-                    : "";
-                callback(unitig, unitig_id++, sb_term, chain_id, coords, { "" });
-            }
-        );
+        for (size_t i = 0; i < data.size(); ++i) {
+            auto &[unitig, sb_term, chain_id, distances_from_begin, distances_to_end] = data[i];
+            std::string coords = sb_term || chain_id
+                ? graph::format_coords(distances_from_begin, distances_to_end)
+                : "";
+            callback(unitig, i + 1, sb_term, chain_id, coords, { "" });
+        }
     }, 10, swap_dir);
 
     graph->add_extension(std::make_shared<graph::ColumnPathIndex>(
@@ -510,23 +516,29 @@ build_graph_batch<DBGSuccinctUnitigIndexed>(uint64_t k,
                                             std::vector<std::string> sequences,
                                             DeBruijnGraph::Mode mode) {
     auto graph = build_graph_batch<DBGSuccinct>(k, sequences, mode);
+
+    std::vector<std::tuple<std::string, size_t, size_t, std::vector<int64_t>, std::vector<int64_t>>> data;
+    graph::assemble_with_coordinates(k,
+        [&](const auto &c) { std::for_each(sequences.begin(), sequences.end(), c); },
+        [&](const std::string &unitig,
+            size_t sb_term,
+            size_t chain_id,
+            const std::vector<int64_t> &distances_from_begin,
+            const std::vector<int64_t> &distances_to_end) {
+            data.emplace_back(unitig, sb_term, chain_id, distances_from_begin, distances_to_end);
+        }
+    );
+
     std::filesystem::path swap_dir = utils::create_temp_dir("", "tmp_path_col");
     std::string column_file = swap_dir/"tmp_paths";
     graph::ColumnPathIndex::annotate_columns(graph, column_file, [&](const auto &callback) {
-        size_t unitig_id = 1;
-        graph::assemble_with_coordinates(k,
-            [&](const auto &c) { std::for_each(sequences.begin(), sequences.end(), c); },
-            [&](const std::string &unitig,
-                size_t sb_term,
-                size_t chain_id,
-                const std::vector<int64_t> &distances_from_begin,
-                const std::vector<int64_t> &distances_to_end) {
-                std::string coords = sb_term || chain_id
-                    ? graph::format_coords(distances_from_begin, distances_to_end)
-                    : "";
-                callback(unitig, unitig_id++, sb_term, chain_id, coords, { "" });
-            }
-        );
+        for (size_t i = 0; i < data.size(); ++i) {
+            auto &[unitig, sb_term, chain_id, distances_from_begin, distances_to_end] = data[i];
+            std::string coords = sb_term || chain_id
+                ? graph::format_coords(distances_from_begin, distances_to_end)
+                : "";
+            callback(unitig, i + 1, sb_term, chain_id, coords, { "" });
+        }
     }, 10, swap_dir);
 
     graph->add_extension(std::make_shared<graph::ColumnPathIndex>(

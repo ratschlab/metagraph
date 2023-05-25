@@ -115,7 +115,7 @@ void ColumnPathIndex::annotate_columns(std::shared_ptr<DeBruijnGraph> graph,
                 if (!chain_id)
                     chain_id = sb_id;
 
-                logger->info("Checking\t{}\t{},{},{}\t{}\t{}", in_seq, unitig_id, sb_id, chain_id, coord, local_coords);
+                // logger->info("Checking\t{}\t{},{},{}\t{}\t{}", in_seq, unitig_id, sb_id, chain_id, coord, local_coords);
                 assert(sb_id >= unitig_id);
                 assert(chain_id >= unitig_id);
 
@@ -211,7 +211,7 @@ void ColumnPathIndex::annotate_columns(std::shared_ptr<DeBruijnGraph> graph,
                     u_labels_2.reserve(labels.size());
                     for (const auto &label : labels) {
                         u_labels_1.emplace_back(graph::ColumnPathIndex::UNITIG_FRONT_TAG + label);
-                        u_labels_2.emplace_back(graph::ColumnPathIndex::UNITIG_FRONT_TAG + label);
+                        u_labels_2.emplace_back(graph::ColumnPathIndex::UNITIG_BACK_TAG + label);
                     }
                     const auto &graph = anno_graph->get_graph();
                     std::string_view first_kmer(seq.c_str(), k);
@@ -369,11 +369,11 @@ auto ColumnPathIndex::get_chain_info(const std::vector<node_index> &nodes) const
             if (!std::get<0>(chain_info))
                 continue;
 
-            std::cerr << "foo\t" << std::get<0>(chain_info) << ","
-                                 << std::get<1>(chain_info) << ","
-                                 << std::get<2>(chain_info) << "\t"
-                                 << std::get<1>(coord_info).size() << ","
-                                 << std::get<2>(coord_info).size() << std::endl;
+            // std::cerr << "foo\t" << std::get<0>(chain_info) << ","
+            //                      << std::get<1>(chain_info) << ","
+            //                      << std::get<2>(chain_info) << "\t"
+            //                      << std::get<1>(coord_info).size() << ","
+            //                      << std::get<2>(coord_info).size() << std::endl;
 
             assert((std::get<0>(chain_info) == std::get<1>(chain_info)
                     && std::get<0>(chain_info) == std::get<2>(chain_info))

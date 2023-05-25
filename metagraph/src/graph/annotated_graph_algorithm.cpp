@@ -475,14 +475,14 @@ void assemble_with_coordinates(size_t k,
         std::vector<std::pair<size_t, size_t>> traversal_stack;
         traversal_stack.emplace_back(i, 0);
         seens[i].first.emplace_back(0);
-        std::cerr << "starting at\t" << unitigs[i].first << std::endl;
+        // std::cerr << "starting at\t" << unitigs[i].first << std::endl;
 
         while (traversal_stack.size()) {
             auto [unitig_id, dist] = traversal_stack.back();
             traversal_stack.pop_back();
 
             const auto &[unitig, unipath] = unitigs[unitig_id];
-            std::cerr << "\tvisiting\t" << unitig << std::endl;
+            // std::cerr << "\tvisiting\t" << unitig << std::endl;
             node_index back = unipath.back();
             size_t length = unipath.size();
 
@@ -495,9 +495,9 @@ void assemble_with_coordinates(size_t k,
                 ++num_children;
 
                 size_t next_id = node_to_unitig[next];
-                std::cerr << "\tseen\t" << unitigs[next_id].first << std::endl;
+                // std::cerr << "\tseen\t" << unitigs[next_id].first << std::endl;
                 if (next_id == i || unitig_id == next_id) {
-                    std::cerr << "\tfound cycle" << std::endl;
+                    // std::cerr << "\tfound cycle" << std::endl;
                     found_cycle = true;
                     traversal_stack.clear();
                     return;
@@ -519,7 +519,7 @@ void assemble_with_coordinates(size_t k,
             });
 
             if (!num_children) {
-                std::cerr << "\tfound dead end" << std::endl;
+                // std::cerr << "\tfound dead end" << std::endl;
                 seens.clear();
                 break;
             }
@@ -534,7 +534,7 @@ void assemble_with_coordinates(size_t k,
         }
 
         if (terminus == std::numeric_limits<size_t>::max()) {
-            std::cerr << "\tno terminus found" << std::endl;
+            // std::cerr << "\tno terminus found" << std::endl;
             seens.clear();
             continue;
         }
@@ -542,7 +542,7 @@ void assemble_with_coordinates(size_t k,
         dbg.adjacent_outgoing_nodes(unitigs[terminus].second.back(), [&](node_index next) {
             size_t next_id = node_to_unitig[next];
             if (next_id == i) {
-                std::cerr << "\tfound cycle" << std::endl;
+                // std::cerr << "\tfound cycle" << std::endl;
                 seens.clear();
             }
         });
@@ -552,7 +552,7 @@ void assemble_with_coordinates(size_t k,
 
         is_superbubble_start[i] = true;
 
-        std::cerr << "\tfound superbubble" << std::endl;
+        // std::cerr << "\tfound superbubble" << std::endl;
 
         assert(seens.size() >= 4);
 
@@ -563,8 +563,8 @@ void assemble_with_coordinates(size_t k,
             d.erase(std::unique(d.begin(), d.end()), d.end());
         }
 
-        logger->info("Found superbubble with {} unitigs with widths {}", seens.size(),
-            fmt::join(seens[terminus].first, ","));
+        // logger->info("Found superbubble with {} unitigs with widths {}", seens.size(),
+        //     fmt::join(seens[terminus].first, ","));
 
         if (seens[terminus].first.size() == 1) {
             // easy case
@@ -636,7 +636,7 @@ void assemble_with_coordinates(size_t k,
     call_zeros(in_superbubble, [&](size_t i) {
         const auto &[unitig, path] = unitigs[i];
         ++cur_unitig_id;
-        logger->info("U:\t{}", unitig);
+        // logger->info("U:\t{}", unitig);
         callback(unitig, 0, 0, std::vector<int64_t>{}, std::vector<int64_t>{});
     });
 
@@ -733,7 +733,7 @@ void assemble_with_coordinates(size_t k,
                 }
                 std::sort(de_chain.begin(), de_chain.end());
                 de_chain.erase(std::unique(de_chain.begin(), de_chain.end()), de_chain.end());
-                logger->info("U:\t{}\t{};{}\t{};{}", unitig, fmt::join(d.first, ","), fmt::join(d.second, ","), fmt::join(d_chain, ","), fmt::join(de_chain, ","));
+                // logger->info("U:\t{}\t{};{}\t{};{}", unitig, fmt::join(d.first, ","), fmt::join(d.second, ","), fmt::join(d_chain, ","), fmt::join(de_chain, ","));
                 callback(unitig, term_unitig_id, term_id, d_chain, de_chain);
             }
         }
@@ -752,7 +752,7 @@ void assemble_with_coordinates(size_t k,
         }
         std::sort(d_chain.begin(), d_chain.end());
         d_chain.erase(std::unique(d_chain.begin(), d_chain.end()), d_chain.end());
-        logger->info("U:\t{}\t{};{}\t{};{}", unitig, fmt::join(d.first, ","), fmt::join(d.second, ","), fmt::join(d_chain, ","), fmt::join(d.second, ","));
+        // logger->info("U:\t{}\t{};{}\t{};{}", unitig, fmt::join(d.first, ","), fmt::join(d.second, ","), fmt::join(d_chain, ","), fmt::join(d.second, ","));
         callback(unitig, cur_unitig_id, term_id, d_chain, d.second);
     }
 }
