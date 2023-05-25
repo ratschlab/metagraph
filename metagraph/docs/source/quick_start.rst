@@ -400,9 +400,9 @@ For more details, see section :ref:`transform_count_annotations`.
 
 Once the annotation is transformed, k-mer abundances can be queried with::
 
-    metagraph query --query-counts ...
+    metagraph query --query-mode counts ...
 
-Note that if flag ``--query-counts`` is not passed, the index will be queried in the default k-mer presence/absence regime.
+Note that if flag ``--query-mode counts`` is not passed, the index will be queried in the default k-mer presence/absence regime.
 
 
 .. _indexing coordinates:
@@ -438,10 +438,10 @@ Query k-mer coordinates
 Once a coordinate-aware annotation is constructed, it can be transformed into a more memory-efficient representation supporting
 querying (see :ref:`transform_coord_annotations` below) and then queried with::
 
-    metagraph query --query-coords ...
+    metagraph query --query-mode coords ...
 
-As the coordinate-aware annotations also contain the information about k-mer abundance, they can be queried to retrieve k-mer counts (simply pass ``--query-counts`` instead of ``--query-coords``).
-Note that if neither ``--query-coords`` nor ``--query-counts`` is passed, the index will be queried in the default k-mer presence/absence regime.
+As the coordinate-aware annotations also contain the information about k-mer abundance, they can be queried to retrieve k-mer counts (simply pass ``--query-mode counts`` instead of ``--query-mode coords``).
+Note that if neither ``--query-mode coords`` nor ``--query-mode counts`` is passed, the index will be queried in the default k-mer presence/absence regime.
 
 .. _transform annotation:
 
@@ -589,7 +589,6 @@ To query a MetaGraph index (graph + annotation) using the command line interface
 
     metagraph query -i graph.dbg \
                     -a annotation.column.annodbg \
-                    --count-kmers \
                     --discovery-fraction 0.1 \
                     transcripts_1000.fa
 

@@ -145,7 +145,7 @@ class TestQuery(TestingBase):
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 137140)
 
-        query_command = '{exe} query --batch-size 0 --count-labels -i {graph} -a {annotation} --discovery-fraction 1.0 {input}'.format(
+        query_command = '{exe} query --batch-size 0 --query-mode matches -i {graph} -a {annotation} --discovery-fraction 1.0 {input}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
@@ -168,7 +168,7 @@ class TestQuery(TestingBase):
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 261390)
 
-        query_command = '{exe} query --batch-size 0 --fwd-and-reverse --count-labels -i {graph} -a {annotation} --discovery-fraction 1.0 {input}'.format(
+        query_command = '{exe} query --batch-size 0 --fwd-and-reverse --query-mode matches -i {graph} -a {annotation} --discovery-fraction 1.0 {input}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
@@ -191,7 +191,7 @@ class TestQuery(TestingBase):
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 137140)
 
-        query_command = '{exe} query --batch-size 0 --count-labels -i {graph} -a {annotation} -p {num_theads} --discovery-fraction 1.0 {input}'.format(
+        query_command = '{exe} query --batch-size 0 --query-mode matches -i {graph} -a {annotation} -p {num_theads} --discovery-fraction 1.0 {input}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
@@ -216,7 +216,7 @@ class TestQuery(TestingBase):
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 261390)
 
-        query_command = '{exe} query --batch-size 0 --fwd-and-reverse --count-labels -i {graph} -a {annotation} -p {num_theads} --discovery-fraction 1.0 {input}'.format(
+        query_command = '{exe} query --batch-size 0 --fwd-and-reverse --query-mode matches -i {graph} -a {annotation} -p {num_theads} --discovery-fraction 1.0 {input}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
@@ -241,7 +241,7 @@ class TestQuery(TestingBase):
         else:
             self.assertEqual(len(res.stdout), 12244)
 
-        query_command = '{exe} query --batch-size 0 --align --count-labels -i {graph} -a {annotation} --discovery-fraction 0.0 --align-min-exact-match 0.0 {input}'.format(
+        query_command = '{exe} query --batch-size 0 --align --query-mode matches -i {graph} -a {annotation} --discovery-fraction 0.0 --align-min-exact-match 0.0 {input}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
@@ -269,7 +269,7 @@ class TestQuery(TestingBase):
         else:
             self.assertEqual(len(res.stdout), 12244)
 
-        query_command = '{exe} query --batch-size 0 --align --count-labels -i {graph} -a {annotation} -p {num_theads} --discovery-fraction 0.0 --align-min-exact-match 0.0 {input}'.format(
+        query_command = '{exe} query --batch-size 0 --align --query-mode matches -i {graph} -a {annotation} -p {num_theads} --discovery-fraction 0.0 --align-min-exact-match 0.0 {input}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
@@ -297,7 +297,7 @@ class TestQuery(TestingBase):
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 24567)
 
-        query_command = '{exe} query --batch-size 0 --fwd-and-reverse --align --count-labels -i {graph} -a {annotation} -p {num_theads} --discovery-fraction 0.0 --align-min-exact-match 0.0 {input}'.format(
+        query_command = '{exe} query --batch-size 0 --fwd-and-reverse --align --query-mode matches -i {graph} -a {annotation} -p {num_theads} --discovery-fraction 0.0 --align-min-exact-match 0.0 {input}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
@@ -319,7 +319,7 @@ class TestQuery(TestingBase):
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 137140)
 
-        query_command = '{exe} query --batch-size 100000000 --count-labels -i {graph} -a {annotation} --discovery-fraction 1.0 {input}'.format(
+        query_command = '{exe} query --batch-size 100000000 --query-mode matches -i {graph} -a {annotation} --discovery-fraction 1.0 {input}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
@@ -342,7 +342,7 @@ class TestQuery(TestingBase):
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 261390)
 
-        query_command = '{exe} query --batch-size 100000000 --fwd-and-reverse --count-labels -i {graph} -a {annotation} --discovery-fraction 1.0 {input}'.format(
+        query_command = '{exe} query --batch-size 100000000 --fwd-and-reverse --query-mode matches -i {graph} -a {annotation} --discovery-fraction 1.0 {input}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
@@ -365,7 +365,7 @@ class TestQuery(TestingBase):
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 137140)
 
-        query_command = '{exe} query --batch-size 100000000 --count-labels -i {graph} -a {annotation} -p {num_threads} --discovery-fraction 1.0 {input}'.format(
+        query_command = '{exe} query --batch-size 100000000 --query-mode matches -i {graph} -a {annotation} -p {num_threads} --discovery-fraction 1.0 {input}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
@@ -390,7 +390,7 @@ class TestQuery(TestingBase):
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 261390)
 
-        query_command = '{exe} query --batch-size 100000000 --fwd-and-reverse --count-labels -i {graph} -a {annotation} -p {num_theads} --discovery-fraction 1.0 {input}'.format(
+        query_command = '{exe} query --batch-size 100000000 --fwd-and-reverse --query-mode matches -i {graph} -a {annotation} -p {num_theads} --discovery-fraction 1.0 {input}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
@@ -415,7 +415,7 @@ class TestQuery(TestingBase):
         else:
             self.assertEqual(len(res.stdout), 12244)
 
-        query_command = '{exe} query --batch-size 100000000 --align --count-labels -i {graph} -a {annotation} --discovery-fraction 0.0 --align-min-exact-match 0.0 {input}'.format(
+        query_command = '{exe} query --batch-size 100000000 --align --query-mode matches -i {graph} -a {annotation} --discovery-fraction 0.0 --align-min-exact-match 0.0 {input}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
@@ -443,7 +443,7 @@ class TestQuery(TestingBase):
         else:
             self.assertEqual(len(res.stdout), 12244)
 
-        query_command = '{exe} query --batch-size 100000000 --align --count-labels -i {graph} -a {annotation} -p {num_threads} --discovery-fraction 0.0 --align-min-exact-match 0.0 {input}'.format(
+        query_command = '{exe} query --batch-size 100000000 --align --query-mode matches -i {graph} -a {annotation} -p {num_threads} --discovery-fraction 0.0 --align-min-exact-match 0.0 {input}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
@@ -471,7 +471,7 @@ class TestQuery(TestingBase):
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 24567)
 
-        query_command = '{exe} query --batch-size 100000000 --fwd-and-reverse --align --count-labels -i {graph} -a {annotation} -p {num_theads} --discovery-fraction 0.0 --align-min-exact-match 0.0 {input}'.format(
+        query_command = '{exe} query --batch-size 100000000 --fwd-and-reverse --align --query-mode matches -i {graph} -a {annotation} -p {num_theads} --discovery-fraction 0.0 --align-min-exact-match 0.0 {input}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
@@ -493,7 +493,7 @@ class TestQuery(TestingBase):
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 137140)
 
-        query_command = '{exe} query --batch-size 100000000 --batch-size 100 --count-labels -i {graph} -a {annotation} --discovery-fraction 1.0 {input}'.format(
+        query_command = '{exe} query --batch-size 100000000 --batch-size 100 --query-mode matches -i {graph} -a {annotation} --discovery-fraction 1.0 {input}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
@@ -507,7 +507,7 @@ class TestQuery(TestingBase):
         if not self.anno_repr.endswith('_coord'):
             self.skipTest('annotation does not support coordinates')
 
-        query_command = f'{METAGRAPH} query --batch-size 0 --query-coords \
+        query_command = f'{METAGRAPH} query --batch-size 0 --query-mode coords \
                             -i {self.tempdir.name}/graph{graph_file_extension[self.graph_repr]} \
                             -a {self.tempdir.name}/annotation{anno_file_extension[self.anno_repr]} \
                             --discovery-fraction 0.05 {TEST_DATA_DIR}/transcripts_100.fa' + MMAP_FLAG
@@ -516,7 +516,7 @@ class TestQuery(TestingBase):
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 139268)
 
-        query_command = f'{METAGRAPH} query --batch-size 0 --query-coords \
+        query_command = f'{METAGRAPH} query --batch-size 0 --query-mode coords \
                             -i {self.tempdir.name}/graph{graph_file_extension[self.graph_repr]} \
                             -a {self.tempdir.name}/annotation{anno_file_extension[self.anno_repr]} \
                             --discovery-fraction 0.95 {TEST_DATA_DIR}/transcripts_100.fa' + MMAP_FLAG
@@ -529,7 +529,7 @@ class TestQuery(TestingBase):
         if not self.anno_repr.endswith('_coord'):
             self.skipTest('annotation does not support coordinates')
 
-        query_command = f'{METAGRAPH} query --batch-size 0 --query-coords --verbose-output \
+        query_command = f'{METAGRAPH} query --batch-size 0 --query-mode coords --verbose-output \
                             -i {self.tempdir.name}/graph{graph_file_extension[self.graph_repr]} \
                             -a {self.tempdir.name}/annotation{anno_file_extension[self.anno_repr]} \
                             --discovery-fraction 0.05 {TEST_DATA_DIR}/transcripts_100.fa' + MMAP_FLAG
@@ -538,7 +538,7 @@ class TestQuery(TestingBase):
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 1619883)
 
-        query_command = f'{METAGRAPH} query --batch-size 0 --query-coords --verbose-output \
+        query_command = f'{METAGRAPH} query --batch-size 0 --query-mode coords --verbose-output \
                             -i {self.tempdir.name}/graph{graph_file_extension[self.graph_repr]} \
                             -a {self.tempdir.name}/annotation{anno_file_extension[self.anno_repr]} \
                             --discovery-fraction 0.95 {TEST_DATA_DIR}/transcripts_100.fa' + MMAP_FLAG
@@ -612,7 +612,7 @@ class TestQueryTinyLinear(TestingBase):
         if not self.anno_repr.endswith('_coord'):
             self.skipTest('annotation does not support coordinates')
 
-        query_command = f'{METAGRAPH} query --batch-size 0 --query-coords  --verbose-output \
+        query_command = f'{METAGRAPH} query --batch-size 0 --query-mode coords  --verbose-output \
                             -i {self.tempdir.name}/graph{graph_file_extension[self.graph_repr]} \
                             -a {self.tempdir.name}/annotation{anno_file_extension[self.anno_repr]} \
                             --discovery-fraction 0.05 {self.fasta_graph}' + MMAP_FLAG
@@ -714,7 +714,7 @@ class TestQuery1Column(TestingBase):
         self.assertEqual(res.returncode, 0)
         self.assertEqual(hashlib.sha224(res.stdout).hexdigest(), '254d173abb255a81a4ab8a685201a73de8dbad4546c378e0a645d454')
 
-        query_command = f'{METAGRAPH} query --batch-size 0 --count-labels \
+        query_command = f'{METAGRAPH} query --batch-size 0 --query-mode matches \
                             -i {self.tempdir.name}/graph{graph_file_extension[self.graph_repr]} \
                             -a {self.tempdir.name}/annotation{anno_file_extension[self.anno_repr]} \
                             --discovery-fraction 1.0 \
@@ -872,7 +872,7 @@ class TestQueryCounts(TestingBase):
 
                     expected_output += '\n'
 
-            query_command = f'{METAGRAPH} query --batch-size 100000000 --count-kmers \
+            query_command = f'{METAGRAPH} query --batch-size 100000000 --query-mode counts-sum \
                             -i {self.tempdir.name}/graph{graph_file_extension[self.graph_repr]} \
                             -a {self.tempdir.name}/annotation{anno_file_extension[self.anno_repr]} \
                             --discovery-fraction {discovery_rate} {query_file}' + MMAP_FLAG
@@ -911,7 +911,7 @@ class TestQueryCounts(TestingBase):
 
                     expected_output += '\n'
 
-            query_command = f'{METAGRAPH} query --batch-size 100000000 --query-counts --verbose-output \
+            query_command = f'{METAGRAPH} query --batch-size 100000000 --query-mode counts --verbose-output \
                             -i {self.tempdir.name}/graph{graph_file_extension[self.graph_repr]} \
                             -a {self.tempdir.name}/annotation{anno_file_extension[self.anno_repr]} \
                             --discovery-fraction {discovery_rate} {query_file}' + MMAP_FLAG
@@ -920,7 +920,7 @@ class TestQueryCounts(TestingBase):
             self.assertEqual(res.returncode, 0)
             self._compare_unsorted_results(res.stdout.decode(), expected_output)
 
-        query_command = f'{METAGRAPH} query --batch-size 100000000 --query-counts \
+        query_command = f'{METAGRAPH} query --batch-size 100000000 --query-mode counts \
                         -i {self.tempdir.name}/graph{graph_file_extension[self.graph_repr]} \
                         -a {self.tempdir.name}/annotation{anno_file_extension[self.anno_repr]} \
                         --discovery-fraction {discovery_rate} {query_file}' + MMAP_FLAG
@@ -1057,7 +1057,7 @@ class TestQueryCanonical(TestingBase):
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 137269)
 
-        query_command = '{exe} query --batch-size 0 --count-labels -i {graph} -a {annotation} --discovery-fraction 1.0 {input}'.format(
+        query_command = '{exe} query --batch-size 0 --query-mode matches -i {graph} -a {annotation} --discovery-fraction 1.0 {input}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
@@ -1078,7 +1078,7 @@ class TestQueryCanonical(TestingBase):
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 12840)
 
-        query_command = '{exe} query --batch-size 0 --align --count-labels -i {graph} -a {annotation} --discovery-fraction 0.0 --align-min-exact-match 0.0 {input}'.format(
+        query_command = '{exe} query --batch-size 0 --align --query-mode matches -i {graph} -a {annotation} --discovery-fraction 0.0 --align-min-exact-match 0.0 {input}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
@@ -1099,7 +1099,7 @@ class TestQueryCanonical(TestingBase):
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 137269)
 
-        query_command = '{exe} query --batch-size 100000000 --count-labels -i {graph} -a {annotation} --discovery-fraction 1.0 {input}'.format(
+        query_command = '{exe} query --batch-size 100000000 --query-mode matches -i {graph} -a {annotation} --discovery-fraction 1.0 {input}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
@@ -1120,7 +1120,7 @@ class TestQueryCanonical(TestingBase):
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 12840)
 
-        query_command = '{exe} query --batch-size 100000000 --align --count-labels -i {graph} -a {annotation} --discovery-fraction 0.0 --align-min-exact-match 0.0 {input}'.format(
+        query_command = '{exe} query --batch-size 100000000 --align --query-mode matches -i {graph} -a {annotation} --discovery-fraction 0.0 --align-min-exact-match 0.0 {input}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
@@ -1141,7 +1141,7 @@ class TestQueryCanonical(TestingBase):
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 137269)
 
-        query_command = '{exe} query --batch-size 100000000 --batch-size 100 --count-labels -i {graph} -a {annotation} --discovery-fraction 1.0 {input}'.format(
+        query_command = '{exe} query --batch-size 100000000 --batch-size 100 --query-mode matches -i {graph} -a {annotation} --discovery-fraction 1.0 {input}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
@@ -1224,7 +1224,7 @@ class TestQueryPrimary(TestingBase):
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 137269)
 
-        query_command = '{exe} query --batch-size 0 --count-labels -i {graph} -a {annotation} --discovery-fraction 1.0 {input}'.format(
+        query_command = '{exe} query --batch-size 0 --query-mode matches -i {graph} -a {annotation} --discovery-fraction 1.0 {input}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
@@ -1245,7 +1245,7 @@ class TestQueryPrimary(TestingBase):
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 12840)
 
-        query_command = '{exe} query --batch-size 0 --align --count-labels -i {graph} -a {annotation} --discovery-fraction 0.0 --align-min-exact-match 0.0 {input}'.format(
+        query_command = '{exe} query --batch-size 0 --align --query-mode matches -i {graph} -a {annotation} --discovery-fraction 0.0 --align-min-exact-match 0.0 {input}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
@@ -1266,7 +1266,7 @@ class TestQueryPrimary(TestingBase):
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 137269)
 
-        query_command = '{exe} query --batch-size 100000000 --count-labels -i {graph} -a {annotation} --discovery-fraction 1.0 {input}'.format(
+        query_command = '{exe} query --batch-size 100000000 --query-mode matches -i {graph} -a {annotation} --discovery-fraction 1.0 {input}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
@@ -1287,7 +1287,7 @@ class TestQueryPrimary(TestingBase):
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 12840)
 
-        query_command = '{exe} query --batch-size 100000000 --align --count-labels -i {graph} -a {annotation} --discovery-fraction 0.0 --align-min-exact-match 0.0 {input}'.format(
+        query_command = '{exe} query --batch-size 100000000 --align --query-mode matches -i {graph} -a {annotation} --discovery-fraction 0.0 --align-min-exact-match 0.0 {input}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],
@@ -1308,7 +1308,7 @@ class TestQueryPrimary(TestingBase):
         self.assertEqual(res.returncode, 0)
         self.assertEqual(len(res.stdout), 137269)
 
-        query_command = '{exe} query --batch-size 100000000 --batch-size 100 --count-labels -i {graph} -a {annotation} --discovery-fraction 1.0 {input}'.format(
+        query_command = '{exe} query --batch-size 100000000 --batch-size 100 --query-mode matches -i {graph} -a {annotation} --discovery-fraction 1.0 {input}'.format(
             exe=METAGRAPH,
             graph=self.tempdir.name + '/graph' + graph_file_extension[self.graph_repr],
             annotation=self.tempdir.name + '/annotation' + anno_file_extension[self.anno_repr],

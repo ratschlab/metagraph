@@ -524,6 +524,9 @@ Config::Config(int argc, char *argv[]) {
                           && alignment_num_alternative_paths != 1)
         print_usage_and_exit = true;
 
+    if (identity == QUERY && count_quantiles.size())
+        query_mode = COUNTS;
+
     if (identity == ALIGN && infbase.empty())
         print_usage_and_exit = true;
 

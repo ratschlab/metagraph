@@ -15,4 +15,4 @@ graph=${basedir}/gtex/graphs/output_k${K}_trimmed_clean_graph_chunked/graph_merg
 annotation=${basedir}/gtex/graphs/output_k${K}_trimmed_clean.abundance.brwt.annodbg
 query=${query_dir}/gencode.v30.first_exons.fa
 
-$metagraph query -p ${threads} --discovery-fraction 0.0 --count-labels -i ${graph} -a ${annotation} ${query} > ${query_dir}/gencode.v30.first_exons.result.txt
+$metagraph query -p ${threads} --discovery-fraction 0.0 --query-mode matches -i ${graph} -a ${annotation} ${query} > ${query_dir}/gencode.v30.first_exons.result.txt

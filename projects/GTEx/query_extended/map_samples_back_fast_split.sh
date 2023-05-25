@@ -80,7 +80,7 @@ do
             echo "$fbase already done"
             continue
         fi
-        echo "(/usr/bin/time -v $metagraph query --discovery-fraction 0.0 --count-labels -v -i $graph -a $anno -p $threads $fname | gzip > $outfile) && touch $donefile" | bsub -M $mem -n $threads -R "rusage[mem=${pmem}]" -We 48:00 -n 1 -J map_gtex -oo $logfile  #-R "select[model==XeonGold_6150]"
+        echo "(/usr/bin/time -v $metagraph query --discovery-fraction 0.0 --query-mode matches -v -i $graph -a $anno -p $threads $fname | gzip > $outfile) && touch $donefile" | bsub -M $mem -n $threads -R "rusage[mem=${pmem}]" -We 48:00 -n 1 -J map_gtex -oo $logfile  #-R "select[model==XeonGold_6150]"
     done
     exit
 done < <(shuf -n 10 --random-source $metadata $metadata | tr $'\t' ',')
