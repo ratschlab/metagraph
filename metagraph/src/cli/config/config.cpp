@@ -142,6 +142,8 @@ Config::Config(int argc, char *argv[]) {
             forward_and_reverse = true;
         } else if (!strcmp(argv[i], "--mode")) {
             graph_mode = string_to_graphmode(get_value(i++));
+        } else if (!strcmp(argv[i], "--query-mode")) {
+            query_mode = string_to_querymode(get_value(i++));
         } else if (!strcmp(argv[i], "--complete")) {
             complete = true;
         } else if (!strcmp(argv[i], "--dynamic")) {
@@ -222,18 +224,10 @@ Config::Config(int argc, char *argv[]) {
             presence_fraction = std::stof(get_value(i++));
         } else if (!strcmp(argv[i], "--query-presence")) {
             query_presence = true;
-        } else if (!strcmp(argv[i], "--query-counts")) {
-            query_counts = true;
-        } else if (!strcmp(argv[i], "--query-coords")) {
-            query_coords = true;
         } else if (!strcmp(argv[i], "--verbose-output")) {
             verbose_output = true;
         } else if (!strcmp(argv[i], "--filter-present")) {
             filter_present = true;
-        } else if (!strcmp(argv[i], "--count-labels")) {
-            count_labels = true;
-        } else if (!strcmp(argv[i], "--print-signature")) {
-            print_signature = true;
         } else if (!strcmp(argv[i], "--map")) {
             map_sequences = true;
         } else if (!strcmp(argv[i], "--align")) {
@@ -860,6 +854,43 @@ DeBruijnGraph::Mode Config::string_to_graphmode(const std::string &string) {
     }
 }
 
+std::string Config::querymode_to_string(QueryMode mode) {
+    switch (mode) {
+        case QueryMode::LABELS:
+                return "labels";
+        case QueryMode::MATCHES:
+                return "matches";
+        case QueryMode::COUNTS_SUM:
+                return "counts-sum";
+        case QueryMode::COUNTS:
+                return "counts";
+        case QueryMode::COORDS:
+                return "coords";
+        case QueryMode::SIGNATURE:
+                return "signature";
+    }
+    throw std::runtime_error("Never happens");
+}
+
+QueryMode Config::string_to_querymode(const std::string &string) {
+    if (string == "labels") {
+        return QueryMode::LABELS;
+    } else if (string == "matches") {
+        return QueryMode::MATCHES;
+    } else if (string == "counts-sum") {
+        return QueryMode::COUNTS_SUM;
+    } else if (string == "counts") {
+        return QueryMode::COUNTS;
+    } else if (string == "coords") {
+        return QueryMode::COORDS;
+    } else if (string == "signature") {
+        return QueryMode::SIGNATURE;
+    } else {
+        std::cerr << "Error: unknown query mode. Check value passed with flag '--query-mode'." << std::endl;
+        exit(1);
+    }
+}
+
 
 void Config::print_usage(const std::string &prog_name, IdentityType identity) {
     const char annotation_list[] = "\t\t( column, brwt, rb_brwt, int_brwt,\n"
@@ -1266,26 +1297,27 @@ if (advanced) {
 }
             fprintf(stderr, "\t   --json \t\toutput query results in JSON format [off]\n");
             fprintf(stderr, "\n");
-            // TODO: remove flag `--count-labels` (do always)?
-            fprintf(stderr, "\t   --count-labels \t\tprint number of k-mer matches for every label with enough matches [off]\n");
+            fprintf(stderr, "\t   --query-mode \tquery mode (only labels with enough k-mer matches are reported) [%s]\n", querymode_to_string(LABELS).c_str());
+            fprintf(stderr, "\t       Available modes:\n");
+            fprintf(stderr, "\t                %s \t\tprint labels (with enough k-mer matches)\n", querymode_to_string(LABELS).c_str());
+            fprintf(stderr, "\t                %s \tprint number of k-mer matches (for every label with enough k-mer matches)\n", querymode_to_string(MATCHES).c_str());
 if (advanced) {
-            fprintf(stderr, "\t   --count-kmers \t\tweight k-mers with their annotated counts (requires count annotation) [off]\n");
+            fprintf(stderr, "\t                %s \tprint masks indicating present/absent k-mers (...)\n", querymode_to_string(SIGNATURE).c_str());
+            fprintf(stderr, "\t                %s \tprint sum of counts for the matched k-mers, requires count or coord annotation (...)\n", querymode_to_string(COUNTS_SUM).c_str());
 }
-            fprintf(stderr, "\t   --count-quantiles ['FLOAT ...'] \tprint k-mer count quantiles (requires count or coord annotation) [off]\n"
-                            "\t                                 \t\tExample: --count-quantiles '0 0.33 0.5 0.66 1'\n"
-                            "\t                                 \t\t(0 corresponds to MIN, 1 corresponds to MAX)\n"
-                            "\t                                 \t\tRequires count or coord annotation\n");
-            fprintf(stderr, "\t   --query-counts \t\tprint k-mer counts (requires count or coord annotation) [off]\n"
-                            "\t                  \t\t\tOutput format: '<pos in query>=<abundance>' (single k-mer match)\n"
-                            "\t                  \t\t\t    or '<first pos>-<last pos>=<abundance>' (segment match)\n"
-                            "\t                  \t\t\tAll positions start with 0\n");
-            fprintf(stderr, "\t   --query-coords \t\tprint k-mer coordinates (requires coord annotation) [off]\n"
-                            "\t                  \t\t\tOutput format: '<pos in query>-<pos in sample>' (single k-mer match)\n"
-                            "\t                  \t\t\t    or '<start pos in query>-<first pos in sample>-<last pos in sample>' (segment match)\n"
-                            "\t                  \t\t\tAll positions start with 0\n");
-            fprintf(stderr, "\t   --print-signature \t\tprint vectors indicating present/absent k-mers [off]\n");
+            fprintf(stderr, "\t                %s \t\tprint k-mer counts, requires count or coord annotation (...)\n", querymode_to_string(COUNTS).c_str());
+            fprintf(stderr, "\t                \t\t\t\tOutput format: '<pos in query>=<abundance>' (single k-mer match)\n"
+                            "\t                \t\t\t\t    or '<first pos>-<last pos>=<abundance>' (segment match)\n"
+                            "\t                \t\t\t\tAll positions start with 0\n");
+            fprintf(stderr, "\t                %s \t\tprint k-mer coordinates, requires coord annotation (...)\n", querymode_to_string(COORDS).c_str());
+            fprintf(stderr, "\t                \t\t\t\tOutput format: '<pos in query>-<pos in sample>' (single k-mer match)\n"
+                            "\t                \t\t\t\t    or '<start pos in query>-<first pos in sample>-<last pos in sample>' (segment match)\n"
+                            "\t                \t\t\t\tAll positions start with 0\n");
+            fprintf(stderr, "\t   --count-quantiles ['FLOAT ...'] \tin the '%s' query mode, aggregate the counts and compute their quantiles [off]\n", querymode_to_string(COUNTS).c_str());
+            fprintf(stderr, "\t                                 \t\tExample: --query-mode %s --count-quantiles '0 0.33 0.5 0.66 1'\n", querymode_to_string(COUNTS).c_str());
+            fprintf(stderr, "\t                                 \t\t(0 corresponds to MIN, 1 corresponds to MAX)\n");
 if (advanced) {
-            fprintf(stderr, "\t   --verbose-output \t\tdo not collapse continuous coord or count ranges (for query-coords and query-counts) [off]\n");
+            fprintf(stderr, "\t   --verbose-output \t\tdo not collapse continuous coord or count ranges (for query coords and counts) [off]\n");
 }
             fprintf(stderr, "\t   --num-top-labels [INT] \tmaximum number of top labels to output [inf]\n");
             fprintf(stderr, "\t   --discovery-fraction [FLOAT] min fraction of k-mers from the query required to be present in a label [0.7]\n");

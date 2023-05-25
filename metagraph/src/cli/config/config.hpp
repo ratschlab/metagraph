@@ -8,6 +8,7 @@
 #include "kmer/kmer_collector_config.hpp"
 #include "graph/representation/succinct/boss.hpp"
 #include "graph/representation/base/sequence_graph.hpp"
+#include "cli/query.hpp"
 
 
 namespace mtg {
@@ -39,17 +40,13 @@ class Config {
     bool kmers_in_single_form = false;
     bool initialize_bloom = false;
     bool count_kmers = false;
-    bool print_signature = false;
     bool query_presence = false;
-    bool query_counts = false;
-    bool query_coords = false;
     bool verbose_output = false;
     bool filter_present = false;
     bool dump_text_anno = false;
     bool sparse = false;
     bool subsample_rows = false;
     bool batch_align = false;
-    bool count_labels = false;
     bool suppress_unlabeled = false;
     bool inplace = false;
     bool clear_dummy = false;
@@ -241,6 +238,10 @@ class Config {
     graph::DeBruijnGraph::Mode graph_mode = graph::DeBruijnGraph::BASIC;
     static std::string graphmode_to_string(graph::DeBruijnGraph::Mode mode);
     static graph::DeBruijnGraph::Mode string_to_graphmode(const std::string &string);
+
+    QueryMode query_mode = LABELS;
+    static std::string querymode_to_string(QueryMode mode);
+    static QueryMode string_to_querymode(const std::string &string);
 
     void print_usage(const std::string &prog_name,
                      IdentityType identity = NO_IDENTITY);

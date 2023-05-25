@@ -62,25 +62,31 @@ std::string process_search_request(const std::string &received_message,
                 + std::to_string(config.alignment_min_exact_match));
     }
 
-    config.count_labels = true;
     config.num_top_labels = json.get("num_labels", config.num_top_labels).asInt();
-    config.print_signature = json.get("with_signature", config.print_signature).asBool();
-    config.query_coords = json.get("query_coords", config.query_coords).asBool();
-    config.count_kmers = json.get("abundance_sum", config.count_kmers).asBool();
-    config.query_counts = json.get("query_counts", config.query_counts).asBool();
+
+    if (json.get("query_coords", false).asBool()) {
+        config.query_mode = COORDS;
+    } else if (json.get("query_counts", false).asBool()) {
+        config.query_mode = COUNTS;
+    } else if (json.get("with_signature", false).asBool()) {
+        config.query_mode = SIGNATURE;
+    } else if (json.get("abundance_sum", false).asBool()) {
+        config.query_mode = COUNTS_SUM;
+    } else {
+        config.query_mode = MATCHES;
+    }
 
     // Throw client an error if they try to query coordinates/kmer-counts on unsupported indexes
-    if ((config.count_kmers || config.query_counts)
-            && !(dynamic_cast<const annot::matrix::IntMatrix *>(
-                            &anno_graph.get_annotator().get_matrix()))) {
+    if ((config.query_mode == COUNTS || config.query_mode == COUNTS_SUM)
+            && !dynamic_cast<const annot::matrix::IntMatrix *>(
+                            &anno_graph.get_annotator().get_matrix())) {
         throw std::invalid_argument("Annotation does not support k-mer count queries");
     }
 
-    if (config.query_coords) {
-        if (!dynamic_cast<const annot::matrix::MultiIntMatrix *>(
-                        &anno_graph.get_annotator().get_matrix())) {
-            throw std::invalid_argument("Annotation does not support k-mer coordinate queries");
-        }
+    if (config.query_mode == COORDS
+            && !dynamic_cast<const annot::matrix::MultiIntMatrix *>(
+                            &anno_graph.get_annotator().get_matrix())) {
+        throw std::invalid_argument("Annotation does not support k-mer coordinate queries");
     }
 
     std::unique_ptr<align::DBGAlignerConfig> aligner_config;
