@@ -243,7 +243,26 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
                         config.fasta_anno_comment_delim,
                         config.fasta_header_delimiter,
                         config.anno_labels,
-                        callback
+                        [&](std::string&& unitig, std::string&& name, std::string&& comment, auto&& labels) {
+                            size_t unitig_id = atoll(name.c_str());
+
+                            if (comment.empty()) {
+                                callback(std::move(unitig), unitig_id, 0, 0, comment,
+                                         std::move(labels));
+                            } else {
+                                auto c_split = utils::split_string(comment, "\t");
+                                auto sb_split = utils::split_string(c_split[0], ";");
+                                assert(sb_split.size() <= 2);
+
+                                size_t chain_id = 0;
+                                size_t sb_id = atoll(sb_split[0].c_str());
+                                if (sb_split.size() == 2)
+                                    chain_id = atoll(sb_split[1].c_str());
+
+                                callback(std::move(unitig), unitig_id, sb_id, chain_id,
+                                         c_split[1], std::move(labels));
+                            }
+                        }
                     );
                 }
             },

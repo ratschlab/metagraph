@@ -44,6 +44,31 @@ const MultiIntMatrix& ColumnPathIndex::get_coord_matrix() const {
     return static_cast<const MultiIntMatrix&>(anno_graph_->get_annotator().get_matrix());
 }
 
+std::pair<std::shared_ptr<const AnnotatedDBG>,
+          std::shared_ptr<const AnnotatedDBG::Annotator>>
+merge_load(std::shared_ptr<DeBruijnGraph> graph, const std::vector<std::string> &prefixes);
+
+ColumnPathIndex::ColumnPathIndex(std::shared_ptr<DeBruijnGraph> graph,
+                                 const std::vector<std::string> &prefixes)
+      : ColumnPathIndex(merge_load(graph, prefixes)) {}
+
+ColumnPathIndex::ColumnPathIndex(std::shared_ptr<const AnnotatedDBG> anno_graph,
+                                 std::shared_ptr<const AnnotatedDBG::Annotator> topo_annotator)
+      : anno_graph_(anno_graph), topo_annotator_(topo_annotator) {
+    if (!dynamic_cast<const MultiIntMatrix*>(&anno_graph_->get_annotator().get_matrix())) {
+        throw std::runtime_error("Annotator must contain coordinates");
+    }
+
+    const auto *int_mat = dynamic_cast<const IntMatrix*>(&topo_annotator_->get_matrix());
+    if (!int_mat) {
+        throw std::runtime_error("Topology annotator must contain counts");
+    }
+
+    if (!dynamic_cast<const ColumnMajor*>(&int_mat->get_binary_matrix())) {
+        throw std::runtime_error("Topology annotator must be column major");
+    }
+}
+
 void ColumnPathIndex::annotate_columns(std::shared_ptr<DeBruijnGraph> graph,
                                        const std::string &out_prefix,
                                        const LabeledSeqGenerator &generator,
@@ -68,57 +93,68 @@ void ColumnPathIndex::annotate_columns(std::shared_ptr<DeBruijnGraph> graph,
 
     auto &annotator = const_cast<ColumnCompressed<>&>(static_cast<const ColumnCompressed<>&>(anno_graph->get_annotator()));
     auto &topo_annotator = *topo_annotator_ptr;
-    auto &label_encoder = const_cast<LabelEncoder<graph::AnnotatedDBG::Label>&>(annotator.get_label_encoder());
-    auto &topo_label_encoder = const_cast<LabelEncoder<graph::AnnotatedDBG::Label>&>(topo_annotator.get_label_encoder());
 
     const size_t batch_size = 1'000;
     const size_t batch_length = 100'000;
-    VectorSet<std::string> label_set;
-    std::mutex mu;
 
-    BatchAccumulator<std::tuple<std::string, std::string, std::string, std::vector<std::string>, uint64_t>> batcher(
+    BatchAccumulator<std::tuple<std::string, size_t, size_t, size_t, std::string, std::vector<std::string>, uint64_t>> batcher(
         [&](auto&& all_data) {
             std::vector<std::tuple<std::string, std::vector<std::string>, uint64_t>> data;
             data.reserve(all_data.size());
 
-            std::vector<std::tuple<std::string, std::vector<std::string>, uint64_t>> extra_data;
-
             std::vector<std::pair<bool, bool>> unitig_data;
             unitig_data.reserve(all_data.size());
 
-            for (auto &[in_seq, name, comment, in_labels, coord] : all_data) {
+            std::vector<std::tuple<std::string, std::vector<std::string>, uint64_t>> seq_data;
+            seq_data.reserve(all_data.size());
+
+            for (auto &[in_seq, unitig_id, sb_id, chain_id, local_coords, in_labels, coord] : all_data) {
+                if (!sb_id)
+                    sb_id = unitig_id;
+
+                if (!chain_id)
+                    chain_id = sb_id;
+
+                logger->info("Checking\t{}\t{},{},{}\t{}\t{}", in_seq, unitig_id, sb_id, chain_id, coord, local_coords);
+                assert(sb_id >= unitig_id);
+                assert(chain_id >= unitig_id);
+
                 assert(coord < graph->max_index());
                 const auto &[seq, labels, _] = data.emplace_back(
                     std::move(in_seq), std::move(in_labels), coord
                 );
-                unitig_data.emplace_back(true, true);
-                if (comment.size()) {
-                    auto c_split = utils::split_string(comment, "\t");
-                    auto sb_split = utils::split_string(c_split[0], ";");
-                    if (sb_split.size() && sb_split[0] != name) {
-                        unitig_data.back().first = false;
-                        unitig_data.back().second = false;
-                    }
+                seq_data.emplace_back(seq, labels, coord);
+                unitig_data.emplace_back(sb_id == unitig_id, chain_id == unitig_id);
 
-                    if (sb_split.size() == 2 && sb_split[1] != name) {
-                        unitig_data.back().second = false;
+                if (local_coords.size()) {
+                    Labels sec_labels;
+                    sec_labels.reserve(labels.size());
+                    for (const auto &label : labels) {
+                        sec_labels.emplace_back(UNITIG_FRONT_TAG + label);
                     }
+                    auto coord_split = utils::split_string(local_coords, ";");
 
-                    auto coord_split = utils::split_string(c_split[1], ";");
-                    extra_data.emplace_back(seq, labels, atoi(coord_split[0].c_str()));
-                    extra_data.emplace_back(seq, labels,
-                                            static_cast<uint64_t>(atoi(coord_split[1].c_str())));
+                    for (const auto &c : utils::split_string(coord_split[0], ",")) {
+                        data.emplace_back(seq, sec_labels, atoll(c.c_str()));
+                    }
+                    for (const auto &c : utils::split_string(coord_split[1], ",")) {
+                        data.emplace_back(seq, sec_labels, static_cast<uint64_t>(atoll(c.c_str())));
+                    }
                 }
             }
 
-            thread_pool.enqueue([&](auto &data, auto &extra_data, auto &unitig_data) {
-                assert(data.size() == unitig_data.size());
+            thread_pool.enqueue([&anno_graph,d=std::move(data)]() {
+                anno_graph->annotate_kmer_coords(std::move(d));
+            });
+
+            thread_pool.enqueue([&](auto &unitig_data, auto &seq_data) {
+                assert(seq_data.size() == unitig_data.size());
 
                 std::vector<std::vector<std::string>> u_labels_v;
                 u_labels_v.reserve(unitig_data.size());
                 for (size_t i = 0; i < unitig_data.size(); ++i) {
                     auto &u_labels = u_labels_v.emplace_back();
-                    const auto &[seq, labels, coord] = data[i];
+                    const auto &[seq, labels, coord] = seq_data[i];
                     u_labels.reserve(labels.size() * (2 + unitig_data[i].first + unitig_data[i].second));
                     for (const auto &label : labels) {
                         u_labels.emplace_back(graph::ColumnPathIndex::UNITIG_FRONT_TAG + label);
@@ -129,56 +165,31 @@ void ColumnPathIndex::annotate_columns(std::shared_ptr<DeBruijnGraph> graph,
 
                         if (unitig_data[i].second)
                             u_labels.emplace_back(graph::ColumnPathIndex::CHAIN_TAG + label);
-
-                        std::lock_guard<std::mutex> lock(mu);
-                        label_encoder.insert_and_encode(label);
-                        for (const auto &l : u_labels) {
-                            topo_label_encoder.insert_and_encode(l);
-                        }
                     }
 
                     topo_annotator.add_labels({ coord }, u_labels);
                 }
-
-                for (size_t i = 0; i < unitig_data.size(); ++i) {
-                    const auto &[seq, labels, coord] = data[i];
-                    assert(u_labels_v[i].size() >= 2);
-                    assert(topo_label_encoder.label_exists(u_labels_v[i][0]));
-                    assert(topo_label_encoder.label_exists(u_labels_v[i][1]));
-
-                    std::vector<std::string> u_labels_1 = { u_labels_v[i][0] };
-                    std::vector<std::string> u_labels_2 = { u_labels_v[i][1] };
-
-                    const auto &graph = anno_graph->get_graph();
-                    std::string_view first_kmer(seq.c_str(), k);
-                    std::string_view last_kmer(seq.c_str() + seq.size() - k, k);
-                    auto first_node = map_to_nodes(graph, first_kmer);
-                    auto last_node = map_to_nodes(graph, last_kmer);
-                    assert(first_node[0]);
-                    assert(last_node[0]);
-                    topo_annotator.add_label_counts({ coord }, u_labels_1, first_node);
-                    topo_annotator.add_label_counts({ coord }, u_labels_2, last_node);
-                }
-
-                anno_graph->annotate_kmer_coords(std::move(data));
-                anno_graph->add_kmer_coords(extra_data);
-
-            }, std::move(data), std::move(extra_data), std::move(unitig_data));
+            }, std::move(unitig_data), std::move(seq_data));
         },
         batch_size, batch_length, batch_size
     );
 
     uint64_t coord = 0;
+    VectorSet<std::string> label_set;
 
-    generator([&](std::string sequence, std::string name, std::string comment, auto labels) {
+    generator([&](std::string&& sequence, size_t unitig_id, size_t superbubble_id, size_t chain_id, std::string&& local_coords, auto&& labels) {
         if (sequence.size() >= k) {
             uint64_t num_kmers = sequence.size() - k + 1;
             assert(coord + num_kmers <= graph->max_index());
-            label_set.insert(labels.begin(), labels.end());
+            for (const auto &label : labels) {
+                label_set.insert(graph::ColumnPathIndex::UNITIG_FRONT_TAG + label);
+            }
             batcher.push_and_pay(sequence.size(),
                                  std::move(sequence),
-                                 std::move(name),
-                                 std::move(comment),
+                                 unitig_id,
+                                 superbubble_id,
+                                 chain_id,
+                                 std::move(local_coords),
                                  std::move(labels),
                                  coord);
             coord += num_kmers;
@@ -187,9 +198,49 @@ void ColumnPathIndex::annotate_columns(std::shared_ptr<DeBruijnGraph> graph,
 
     topo_annotator.add_labels({ coord }, label_set.values_container());
 
-    thread_pool.join();
     batcher.process_all_buffered();
+    thread_pool.join();
 
+    BatchAccumulator<std::tuple<std::string, std::vector<std::string>, uint64_t>> unitig_batcher(
+        [&](auto&& data) {
+            for (auto &[seq, labels, coord] : data) {
+                thread_pool.enqueue([&](std::string seq, auto labels, uint64_t coord) {
+                    std::vector<std::string> u_labels_1;
+                    std::vector<std::string> u_labels_2;
+                    u_labels_1.reserve(labels.size());
+                    u_labels_2.reserve(labels.size());
+                    for (const auto &label : labels) {
+                        u_labels_1.emplace_back(graph::ColumnPathIndex::UNITIG_FRONT_TAG + label);
+                        u_labels_2.emplace_back(graph::ColumnPathIndex::UNITIG_FRONT_TAG + label);
+                    }
+                    const auto &graph = anno_graph->get_graph();
+                    std::string_view first_kmer(seq.c_str(), k);
+                    std::string_view last_kmer(seq.c_str() + seq.size() - k, k);
+                    auto first_node = map_to_nodes_sequentially(graph, first_kmer);
+                    auto last_node = map_to_nodes_sequentially(graph, last_kmer);
+                    assert(first_node[0]);
+                    assert(last_node[0]);
+
+                    topo_annotator.add_label_counts({ coord }, u_labels_1, first_node);
+                    topo_annotator.add_label_counts({ coord }, u_labels_2, last_node);
+                }, std::move(seq), std::move(labels), coord);
+            }
+        },
+        batch_size, batch_length, batch_size
+    );
+
+    coord = 0;
+    generator([&](std::string&& sequence, size_t, size_t, size_t, std::string&&, auto&& labels) {
+        if (sequence.size() >= k) {
+            uint64_t num_kmers = sequence.size() - k + 1;
+            assert(coord + num_kmers <= graph->max_index());
+            unitig_batcher.push_and_pay(sequence.size(), std::move(sequence), std::move(labels), coord);
+            coord += num_kmers;
+        }
+    });
+
+    unitig_batcher.process_all_buffered();
+    thread_pool.join();
 
     logger->trace("Serializing annotations");
     annotator.serialize(out_prefix + ".global");
@@ -239,72 +290,14 @@ merge_load(std::shared_ptr<DeBruijnGraph> graph, const std::vector<std::string> 
     );
 }
 
-ColumnPathIndex::ColumnPathIndex(std::shared_ptr<DeBruijnGraph> graph,
-                                 const std::vector<std::string> &prefixes)
-      : ColumnPathIndex(merge_load(graph, prefixes)) {}
-
-ColumnPathIndex::ColumnPathIndex(std::shared_ptr<const AnnotatedDBG> anno_graph,
-                                 std::shared_ptr<const AnnotatedDBG::Annotator> topo_annotator)
-      : anno_graph_(anno_graph), topo_annotator_(topo_annotator) {
-    if (!dynamic_cast<const MultiIntMatrix*>(&anno_graph_->get_annotator().get_matrix())) {
-        throw std::runtime_error("Annotator must contain coordinates");
-    }
-
-    const auto *int_mat = dynamic_cast<const IntMatrix*>(&topo_annotator_->get_matrix());
-    if (!int_mat) {
-        throw std::runtime_error("Topology annotator must contain counts");
-    }
-
-    if (!dynamic_cast<const ColumnMajor*>(&int_mat->get_binary_matrix())) {
-        throw std::runtime_error("Topology annotator must be column major");
-    }
-}
-
 auto ColumnPathIndex::get_chain_info(const Label &check_label, node_index node) const -> InfoPair {
-    auto kmer_coords = anno_graph_->get_kmer_coordinates(
-        { node }, std::numeric_limits<size_t>::max(), 0.0, 0.0
-    );
-
-    InfoPair info;
-    for (auto &[label, num_kmer_matches, node_coords] : kmer_coords) {
-        assert(node_coords.size() == 1);
-        if (label != check_label)
-            continue;
-
-        const auto &label_encoder = topo_annotator_->get_label_encoder();
-        Column unitig_col = label_encoder.encode(UNITIG_FRONT_TAG + label);
-        Column sb_col = label_encoder.encode(SUPERBUBBLE_TAG + label);
-        Column chain_col = label_encoder.encode(CHAIN_TAG + label);
-
-        auto &coords = node_coords[0];
-        assert(coords.size() <= 3);
-        if (coords.empty())
-            return info;
-
-        auto &[chain_info, coord_info] = info;
-        int64_t global_coord = coords[0];
-
-        const auto &col_int_mat = get_topo_matrix();
-        assert(dynamic_cast<const ColumnMajor*>(&col_int_mat.get_binary_matrix()));
-        const auto &col_mat = static_cast<const ColumnMajor&>(col_int_mat.get_binary_matrix()).data();
-        chain_info = ChainInfo(col_mat[unitig_col]->rank1(global_coord),
-                               col_mat[sb_col]->rank1(global_coord),
-                               col_mat[chain_col]->rank1(global_coord));
-        std::get<0>(coord_info) = global_coord;
-
-        for (size_t i = 1; i < coords.size(); ++i) {
-            int64_t coord = static_cast<int64_t>(coords[i]);
-            if (coord >= 0) {
-                std::get<1>(coord_info).emplace_back(coord);
-            } else {
-                std::get<2>(coord_info).emplace_back(coord);
-            }
-        }
-
-        return info;
+    // TODO: make this more efficient
+    for (auto&& [label, ret_val] : get_chain_info({ node })) {
+        if (label == check_label)
+            return ret_val[0];
     }
 
-    return info;
+    return {};
 }
 
 auto ColumnPathIndex::get_chain_info(const std::vector<node_index> &nodes) const
@@ -313,8 +306,7 @@ auto ColumnPathIndex::get_chain_info(const std::vector<node_index> &nodes) const
         nodes, anno_graph_->get_annotator().get_label_encoder().size(), 0.0, 0.0
     );
 
-    std::vector<LabeledNodesInfo> ret_val;
-    ret_val.reserve(kmer_coords.size());
+    VectorMap<Label, NodesInfo> ret_val;
 
     const auto &label_encoder = topo_annotator_->get_label_encoder();
     const auto &col_int_mat = get_topo_matrix();
@@ -322,43 +314,74 @@ auto ColumnPathIndex::get_chain_info(const std::vector<node_index> &nodes) const
 
     const auto &col_mat = static_cast<const ColumnMajor&>(col_int_mat.get_binary_matrix());
 
-    for (auto &[label, num_kmer_matches, node_coords] : kmer_coords) {
+    for (auto &[stored_label, num_kmer_matches, node_coords] : kmer_coords) {
         assert(node_coords.size() == nodes.size());
-        auto &[_, nodes_info] = ret_val.emplace_back(label, NodesInfo{});
-        assert(_ == label);
 
-        Column unitig_col = label_encoder.encode(UNITIG_FRONT_TAG + label);
-        Column sb_col = label_encoder.encode(SUPERBUBBLE_TAG + label);
-        Column chain_col = label_encoder.encode(CHAIN_TAG + label);
+        bool is_local_coord = (stored_label.size() && stored_label[0] == UNITIG_FRONT_TAG[0]);
+        std::string label = is_local_coord ? stored_label.substr(1) : stored_label;
 
-        nodes_info.reserve(node_coords.size());
-        for (auto &coords : node_coords) {
-            assert(coords.size() <= 3);
-            auto &[chain_info, coord_info] = nodes_info.emplace_back();
+        auto &nodes_info = ret_val.try_emplace(label, NodesInfo{}).first.value();
+        nodes_info.resize(node_coords.size());
+        for (size_t i = 0; i < nodes_info.size(); ++i) {
+            auto &coords = node_coords[i];
+            auto &[chain_info, coord_info] = nodes_info[i];
+
             if (coords.empty())
                 continue;
 
-            int64_t global_coord = coords[0];
+            if (!is_local_coord) {
+                assert(coords.size() == 1);
 
-            chain_info = ChainInfo(
-                col_mat.data()[unitig_col]->rank1(global_coord),
-                col_mat.data()[sb_col]->rank1(global_coord),
-                col_mat.data()[chain_col]->rank1(global_coord)
-            );
-            std::get<0>(coord_info) = global_coord;
+                Column unitig_col = label_encoder.encode(UNITIG_FRONT_TAG + label);
+                Column sb_col = label_encoder.encode(SUPERBUBBLE_TAG + label);
+                Column chain_col = label_encoder.encode(CHAIN_TAG + label);
 
-            for (size_t i = 1; i < coords.size(); ++i) {
-                int64_t coord = static_cast<int64_t>(coords[i]);
-                if (coord >= 0) {
-                    std::get<1>(coord_info).emplace_back(coord);
-                } else {
-                    std::get<2>(coord_info).emplace_back(coord);
+                uint64_t global_coord = coords[0];
+                std::get<0>(coord_info) = global_coord;
+                uint64_t start_coord = col_mat.data()[unitig_col]->prev1(global_coord);
+                assert(col_mat.data()[unitig_col]->rank1(global_coord)
+                    == col_mat.data()[unitig_col]->rank1(start_coord));
+                chain_info = ChainInfo(
+                    col_mat.data()[unitig_col]->rank1(global_coord),
+                    col_mat.data()[unitig_col]->rank1(col_mat.data()[sb_col]->next1(start_coord)),
+                    col_mat.data()[unitig_col]->rank1(col_mat.data()[chain_col]->next1(start_coord))
+                );
+                assert(std::get<0>(chain_info));
+                assert(std::get<1>(chain_info));
+                assert(std::get<2>(chain_info));
+                assert(std::get<1>(chain_info) >= std::get<0>(chain_info));
+                assert(std::get<2>(chain_info) >= std::get<0>(chain_info));
+            } else {
+                for (size_t i = 0; i < coords.size(); ++i) {
+                    int64_t coord = static_cast<int64_t>(coords[i]);
+                    if (coord >= 0) {
+                        std::get<1>(coord_info).emplace_back(coord);
+                    } else {
+                        std::get<2>(coord_info).emplace_back(-(coord + 1));
+                    }
                 }
             }
         }
     }
 
-    return ret_val;
+    for (const auto &[label, coords] : ret_val) {
+        for (const auto &[chain_info, coord_info] : coords) {
+            if (!std::get<0>(chain_info))
+                continue;
+
+            std::cerr << "foo\t" << std::get<0>(chain_info) << ","
+                                 << std::get<1>(chain_info) << ","
+                                 << std::get<2>(chain_info) << "\t"
+                                 << std::get<1>(coord_info).size() << ","
+                                 << std::get<2>(coord_info).size() << std::endl;
+
+            assert((std::get<0>(chain_info) == std::get<1>(chain_info)
+                    && std::get<0>(chain_info) == std::get<2>(chain_info))
+                    || (std::get<1>(coord_info).size() && std::get<2>(coord_info).size()));
+        }
+    }
+
+    return const_cast<std::vector<LabeledNodesInfo>&&>(ret_val.values_container());
 }
 
 void ColumnPathIndex::call_distances(const Label &label,
@@ -373,86 +396,111 @@ void ColumnPathIndex::call_distances(const Label &label,
     const auto &[global_coord_a, ds_from_start_a, ds_to_end_a] = info_a.second;
     const auto &[global_coord_b, ds_from_start_b, ds_to_end_b] = info_b.second;
 
-    size_t cycle_target = chain_id_a ? chain_id_a : (sb_id_a ? sb_id_a : unitig_id_a);
-
     std::vector<int64_t> cycle_lengths;
-    if ((!chain_id_a && !sb_id_a) || ds_to_end_a.size()) {
-        adjacent_outgoing_unitigs(label, cycle_target, [&](size_t next_u_id, int64_t len) {
-            if (cycle_lengths.size())
-                return;
-
-            if (chain_id_a || sb_id_a) {
-                auto next_info = get_chain_info(label, get_unitig_back(label, next_u_id));
-                if ((chain_id_a && chain_id_a == std::get<0>(next_info.first))
-                        || (sb_id_a && sb_id_a == std::get<1>(next_info.first))) {
-                    for (int64_t dstart : ds_from_start_a) {
-                        for (int64_t dend : ds_to_end_a) {
-                            cycle_lengths.emplace_back(dstart + dend + len);
-                        }
+    adjacent_outgoing_unitigs(label, chain_id_a, [&](size_t next_u_id, int64_t len) {
+        if (cycle_lengths.size())
+            return;
+        auto next_info = get_chain_info(label, get_unitig_back(label, next_u_id));
+        if (chain_id_a == std::get<0>(next_info.first)) {
+            if (ds_from_start_a.size() && ds_to_end_a.size()) {
+                for (int64_t dstart : ds_from_start_a) {
+                    for (int64_t dend : ds_to_end_a) {
+                        cycle_lengths.emplace_back(dstart + dend + len);
                     }
                 }
             } else if (next_u_id == unitig_id_a) {
                 cycle_lengths.emplace_back(len);
             }
-        });
-    }
+        }
+    });
 
     std::vector<int64_t> dists;
 
     if (unitig_id_a == unitig_id_b) {
         // same unitig
         dists.emplace_back(global_coord_b - global_coord_a);
-    } else if (sb_id_a && sb_id_a == sb_id_b) {
-        // same superbubble
-        if (!chain_id_a && sb_id_b == unitig_id_b) {
-            int64_t coord_offset_b = global_coord_b - get_global_coord(label, unitig_id_b);
+    } else if (unitig_id_b == chain_id_a) {
+        // target is at the end of the superbubble or chain
+
+        if (ds_to_end_a.size()) {
+            int64_t dist_in_unitig_a = global_coord_a - get_global_coord(label, unitig_id_a);
+            int64_t dist_in_unitig_b = global_coord_b - get_global_coord(label, unitig_id_b);
+            int64_t dist_offset = dist_in_unitig_b - dist_in_unitig_a;
             for (int64_t dend : ds_to_end_a) {
-                dists.emplace_back(dend + coord_offset_b);
-            }
-        } else if (!chain_id_a && ds_from_start_a.size() == 1 && ds_from_start_a[0] == 0) {
-            int64_t coord_offset_b = global_coord_b - get_global_coord(label, unitig_id_b);
-            for (int64_t dstart : ds_from_start_b) {
-                dists.emplace_back(dstart + coord_offset_b);
-            }
-        } else if (ds_to_end_a.size() || ds_to_end_b.empty()) {
-            // traverse in the same superbubble to get the distance
-            std::vector<std::tuple<size_t, int64_t, Vector<int64_t>::const_iterator>> traversal_stack;
-            int64_t coord_offset = get_global_coord(label, unitig_id_b + 1) - global_coord_b;
-            int64_t dist_offset = ds_from_start_a.front() - get_global_coord(label, unitig_id_a) + global_coord_a + coord_offset;
-            traversal_stack.emplace_back(unitig_id_a,
-                                         get_global_coord(label, unitig_id_a + 1) - global_coord_a - coord_offset,
-                                         ds_from_start_b.begin());
-            while (traversal_stack.size()) {
-                auto [u_id, dist, it] = traversal_stack.back();
-                traversal_stack.pop_back();
-
-                if (u_id == sb_id_a)
-                    continue;
-
-                it = std::find_if(it, ds_from_start_b.end(),
-                                  [&](int64_t d) { return dist_offset + dist <= d; });
-
-                if (it == ds_from_start_b.end() || dist > max_distance)
-                    continue;
-
-                adjacent_outgoing_unitigs(label, u_id, [&](size_t next_u_id, int64_t len) {
-                    if (next_u_id == unitig_id_b) {
-                        dists.emplace_back(dist + len);
-                    } else if (dist + len <= max_distance) {
-                        traversal_stack.emplace_back(next_u_id, dist + len, it);
-                    }
-                });
+                dists.emplace_back(dend + dist_offset);
             }
         }
-    } else if (chain_id_a && chain_id_a == chain_id_b) {
+    } else if (chain_id_a == chain_id_b && sb_id_a != sb_id_b) {
         // same chain, different superbubble
-        for (int64_t db : ds_from_start_b) {
-            for (int64_t da : ds_from_start_a) {
-                dists.emplace_back(db - da);
+
+        // if the source reaches the end, but the target doesn't, then the source can't
+        // reach the target
+        if (ds_to_end_a.size() && ds_to_end_b.empty())
+            return;
+
+        if (ds_from_start_a.size() > 1 && ds_from_start_b.size() > 1) {
+            assert(false);
+            throw std::runtime_error("This case in traversal not implemented");
+        }
+
+        assert(ds_from_start_a.size());
+        assert(ds_from_start_b.size());
+
+        int64_t dist_in_unitig_a = global_coord_a - get_global_coord(label, unitig_id_a);
+        int64_t dist_in_unitig_b = global_coord_b - get_global_coord(label, unitig_id_b);
+        int64_t dist_offset = dist_in_unitig_b - dist_in_unitig_a;
+        for (int64_t d_start_a : ds_from_start_a) {
+            for (int64_t d_start_b : ds_from_start_b) {
+                dists.emplace_back(d_start_b - d_start_a + dist_offset);
             }
         }
-    } else if ((!chain_id_a && !sb_id_a) || ds_to_end_a.size()) {
+    } else if (sb_id_a == sb_id_b) {
+        // same superbubble
+
+        // this was covered in the first case
+        assert(chain_id_a || sb_id_a != unitig_id_b);
+
+        // if the source reaches the end, but the target doesn't, then the source can't
+        // reach the target
+        if (ds_to_end_a.size() && ds_to_end_b.empty())
+            return;
+
+        assert(ds_from_start_a.size());
+
+        // traverse in the same superbubble to get the distance
+        std::vector<std::tuple<size_t, int64_t, Vector<int64_t>::const_iterator>> traversal_stack;
+        int64_t coord_offset = get_global_coord(label, unitig_id_b + 1) - global_coord_b;
+        int64_t dist_offset = ds_from_start_a.front() - get_global_coord(label, unitig_id_a) + global_coord_a + coord_offset;
+        traversal_stack.emplace_back(unitig_id_a,
+                                     get_global_coord(label, unitig_id_a + 1) - global_coord_a - coord_offset,
+                                     ds_from_start_b.begin());
+        while (traversal_stack.size()) {
+            auto [u_id, dist, it] = traversal_stack.back();
+            traversal_stack.pop_back();
+
+            if (u_id == sb_id_a)
+                continue;
+
+            it = std::find_if(it, ds_from_start_b.end(),
+                              [&](int64_t d) { return dist_offset + dist <= d; });
+
+            if (it == ds_from_start_b.end() || dist > max_distance)
+                continue;
+
+            adjacent_outgoing_unitigs(label, u_id, [&](size_t next_u_id, int64_t len) {
+                if (next_u_id == unitig_id_b) {
+                    dists.emplace_back(dist + len);
+                } else if (dist + len <= max_distance) {
+                    traversal_stack.emplace_back(next_u_id, dist + len, it);
+                }
+            });
+        }
+    } else {
         // traverse normally
+        if ((chain_id_a || sb_id_a) && ds_to_end_a.empty())
+            return;
+
+        size_t cycle_target = chain_id_a ? chain_id_a : (sb_id_a ? sb_id_a : unitig_id_a);
         int64_t coord_offset_a = get_global_coord(label, cycle_target + 1)
             - (chain_id_a || sb_id_a ? get_global_coord(label, cycle_target) : global_coord_a);
         int64_t coord_offset_b = get_global_coord(label, unitig_id_b + 1) - global_coord_b;
@@ -483,7 +531,10 @@ void ColumnPathIndex::call_distances(const Label &label,
         }
     }
 
-    std::for_each(dists.begin(), dists.end(), callback);
+    for (int64_t d : dists) {
+        if (d > 0)
+            callback(d);
+    }
 
     if (cycle_lengths.empty())
         return;
@@ -497,7 +548,7 @@ void ColumnPathIndex::call_distances(const Label &label,
                 const auto &[it, try_inserted] = seen_lengths.emplace(prev_cycle + cycle);
                 if (try_inserted) {
                     for (int64_t d : dists) {
-                        if (d + *it <= max_distance) {
+                        if (d + *it > 0 && d + *it <= max_distance) {
                             callback(d + *it);
                             inserted = true;
                         }
@@ -559,7 +610,9 @@ void ColumnPathIndex
         );
         if (next_global_coords.size()) {
             size_t next_unitig_id = front_col.rank1(next_global_coords[0]);
-            int64_t length = front_col.next1(next_global_coords[0] + 1) - next_unitig_id;
+            assert(next_unitig_id);
+
+            int64_t length = front_col.next1(next_global_coords[0] + 1) - next_global_coords[0];
             callback(next_unitig_id, length);
         }
     });

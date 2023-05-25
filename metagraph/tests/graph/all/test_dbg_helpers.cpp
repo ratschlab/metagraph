@@ -301,9 +301,10 @@ build_graph<DBGSuccinctUnitigIndexed>(uint64_t k,
                 size_t chain_id,
                 const std::vector<int64_t> &distances_from_begin,
                 const std::vector<int64_t> &distances_to_end) {
-                std::string header = graph::format_header(sb_term, chain_id,
-                                                          distances_from_begin, distances_to_end);
-                callback(unitig, std::to_string(unitig_id++), header, { "" });
+                std::string coords = sb_term || chain_id
+                    ? graph::format_coords(distances_from_begin, distances_to_end)
+                    : "";
+                callback(unitig, unitig_id++, sb_term, chain_id, coords, { "" });
             }
         );
     }, 10, swap_dir);
@@ -520,9 +521,10 @@ build_graph_batch<DBGSuccinctUnitigIndexed>(uint64_t k,
                 size_t chain_id,
                 const std::vector<int64_t> &distances_from_begin,
                 const std::vector<int64_t> &distances_to_end) {
-                std::string header = graph::format_header(sb_term, chain_id,
-                                                          distances_from_begin, distances_to_end);
-                callback(unitig, std::to_string(unitig_id++), header, { "" });
+                std::string coords = sb_term || chain_id
+                    ? graph::format_coords(distances_from_begin, distances_to_end)
+                    : "";
+                callback(unitig, unitig_id++, sb_term, chain_id, coords, { "" });
             }
         );
     }, 10, swap_dir);

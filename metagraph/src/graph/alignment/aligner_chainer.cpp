@@ -681,7 +681,8 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
 
     tsl::hopscotch_map<size_t, ColumnPathIndex::NodesInfo> node_col_coords;
     for (auto &[label, nodes_info] : column_path_index->get_chain_info(nodes)) {
-        auto encode = label.size() ? label_encoder.encode(label) : std::numeric_limits<Seed::Column>::max();
+        auto encode = label.size() ? label_encoder.encode(label)
+                                   : std::numeric_limits<Seed::Column>::max();
         node_col_coords.emplace(encode, std::move(nodes_info));
     }
 
@@ -796,8 +797,11 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
             const auto &score_i = std::get<0>(*(chain_scores - (begin - seeds.data()) + (&a_i - seeds.data())));
             std::string_view query_i = a_i.get_query_view();
             auto col_i = a_i.get_columns()[0];
+
+            assert(node_col_coords.count(col_i));
             assert(node_col_coords[col_i].size() == nodes.size());
             const auto &coords_i_back = node_col_coords[col_i][node_i];
+            assert(std::get<0>(coords_i_back.first));
 
             --chain_scores;
             std::for_each(begin, end, [&](const Seed &a_j) {
@@ -856,8 +860,11 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                 }
 
                 size_t node_j = anchor_ends[&a_j - seeds.data()].first;
+
+                assert(node_col_coords.count(col_j));
                 assert(node_col_coords[col_j].size() == nodes.size());
                 const auto &coords_j_front = node_col_coords[col_j][node_j];
+                assert(std::get<0>(coords_j_front.first));
 
                 const std::string &label = col_i == std::numeric_limits<Seed::Column>::max()
                     ? "" : label_encoder.decode(col_i);

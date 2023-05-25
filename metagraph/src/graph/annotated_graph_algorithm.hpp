@@ -76,6 +76,9 @@ std::string format_header(size_t superbubble_id,
                           const std::vector<int64_t> &dist_from_start,
                           const std::vector<int64_t> &dist_to_end);
 
+std::string format_coords(const std::vector<int64_t> &dist_from_start,
+                          const std::vector<int64_t> &dist_to_end);
+
 } // namespace graph
 } // namespace mtg
 

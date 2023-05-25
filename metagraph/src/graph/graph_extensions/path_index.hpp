@@ -22,7 +22,7 @@ class ColumnPathIndex : public SequenceGraph::GraphExtension {
     using LabeledNodesInfo = std::pair<Label, NodesInfo>;
 
     using Labels = std::vector<Label>;
-    using LabeledSeqCallback = std::function<void(std::string, std::string, std::string, const Labels&)>;
+    using LabeledSeqCallback = std::function<void(std::string, size_t, size_t, size_t, std::string, const Labels&)>;
     using LabeledSeqGenerator = std::function<void(const LabeledSeqCallback&)>;
 
     ColumnPathIndex(std::shared_ptr<DeBruijnGraph> graph,
