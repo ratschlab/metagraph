@@ -76,6 +76,9 @@ void ColumnPathIndex::annotate_columns(std::shared_ptr<DeBruijnGraph> graph,
                                        const std::string &tmp_dir_prefix,
                                        double memory_available_gb,
                                        size_t max_chunks_open) {
+    if (graph->get_mode() != DeBruijnGraph::BASIC) {
+        throw std::runtime_error("Only implemented for BASIC graphs");
+    }
     const size_t k = graph->get_k();
     std::filesystem::path tmp_dir = utils::create_temp_dir(tmp_dir_prefix, "test_col");
 
