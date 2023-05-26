@@ -524,9 +524,6 @@ Config::Config(int argc, char *argv[]) {
                           && alignment_num_alternative_paths != 1)
         print_usage_and_exit = true;
 
-    if (identity == QUERY && count_quantiles.size())
-        query_mode = COUNTS;
-
     if (identity == ALIGN && infbase.empty())
         print_usage_and_exit = true;
 
@@ -1316,9 +1313,6 @@ if (advanced) {
             fprintf(stderr, "\t                \t\t\t\tOutput format: '<pos in query>-<pos in sample>' (single k-mer match)\n"
                             "\t                \t\t\t\t    or '<start pos in query>-<first pos in sample>-<last pos in sample>' (segment match)\n"
                             "\t                \t\t\t\tAll positions start with 0\n");
-            fprintf(stderr, "\t   --count-quantiles ['FLOAT ...'] \tin the '%s' query mode, aggregate the counts and compute their quantiles [off]\n", querymode_to_string(COUNTS).c_str());
-            fprintf(stderr, "\t                                 \t\tExample: --query-mode %s --count-quantiles '0 0.33 0.5 0.66 1'\n", querymode_to_string(COUNTS).c_str());
-            fprintf(stderr, "\t                                 \t\t(0 corresponds to MIN, 1 corresponds to MAX)\n");
 if (advanced) {
             fprintf(stderr, "\t   --verbose-output \t\tdo not collapse continuous coord or count ranges (for query coords and counts) [off]\n");
 }

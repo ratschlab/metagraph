@@ -209,8 +209,7 @@ class QueryExecutor {
                                          size_t num_top_labels,
                                          double discovery_fraction,
                                          double presence_fraction,
-                                         const graph::AnnotatedDBG &anno_graph,
-                                         const std::vector<double> &count_quantiles = {});
+                                         const graph::AnnotatedDBG &anno_graph);
 
   private:
     const Config &config_;

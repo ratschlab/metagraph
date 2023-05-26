@@ -941,49 +941,6 @@ class TestQueryCounts(TestingBase):
             f"10\ts10\t<{self.fasta_file_1}>:0=10:1=11:2=12:3=1:4=2:5=3:6=4:7=5:8=6:9=7\n"
             "11\ts11\n")
 
-    def test_count_quantiles(self):
-        query_file = self.tempdir.name + '/query.fa'
-        quantiles = np.linspace(0, 1, 100)
-        expected_output = ''
-        with open(query_file, 'w') as f:
-            for i, s in enumerate(self.queries):
-                f.write(f'>s{i}\n{s}\n')
-                expected_output += f'{i}\ts{i}\t<{self.fasta_file_1}>'
-                def get_count(d, kmer):
-                    try:
-                        return d[kmer]
-                    except:
-                        return 0
-                for p in quantiles:
-                    counts = [get_count(self.kmer_counts_1, s[i:i + self.k]) for i in range(len(s) - self.k + 1)]
-                    expected_output += f':{np.quantile(counts, p, interpolation="lower")}'
-                expected_output += f'\t<{self.fasta_file_2}>'
-                for p in quantiles:
-                    counts = [get_count(self.kmer_counts_2, s[i:i + self.k]) for i in range(len(s) - self.k + 1)]
-                    expected_output += f':{np.quantile(counts, p, interpolation="lower")}'
-                expected_output += '\n'
-
-        query_command = f'{METAGRAPH} query --batch-size 100000000 --count-quantiles <SET_BELOW> \
-                        -i {self.tempdir.name}/graph{graph_file_extension[self.graph_repr]} \
-                        -a {self.tempdir.name}/annotation{anno_file_extension[self.anno_repr]} \
-                        --discovery-fraction 0.0 {query_file}' + MMAP_FLAG
-
-        query_command = query_command.split()
-        query_command[5] = ' '.join([str(p) for p in quantiles])
-        res = subprocess.run(query_command, stdout=PIPE)
-        self.assertEqual(res.returncode, 0)
-        self._compare_unsorted_results(res.stdout.decode(), expected_output)
-
-        query_command = f'{METAGRAPH} query --batch-size 100000000 --count-quantiles <SET_BELOW> \
-                        -i {self.tempdir.name}/graph{graph_file_extension[self.graph_repr]} \
-                        -a {self.tempdir.name}/annotation{anno_file_extension[self.anno_repr]} \
-                        --discovery-fraction 1.0 {query_file}' + MMAP_FLAG
-
-        query_command = query_command.split()
-        query_command[5] = ' '.join([str(p) for p in quantiles])
-        res = subprocess.run(query_command, stdout=PIPE)
-        self.assertEqual(res.returncode, 0)
-
 
 @parameterized_class(('graph_repr', 'anno_repr'),
     input_values=(product(list(set(GRAPH_TYPES) - {'hashstr'}), ANNO_TYPES) +

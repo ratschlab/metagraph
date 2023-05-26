@@ -364,8 +364,7 @@ SeqSearchResult QueryExecutor::execute_query(QuerySequence&& sequence,
                                              size_t num_top_labels,
                                              double discovery_fraction,
                                              double presence_fraction,
-                                             const graph::AnnotatedDBG &anno_graph,
-                                             const std::vector<double> &count_quantiles) {
+                                             const graph::AnnotatedDBG &anno_graph) {
     // Perform a different action depending on the type (specified by config flags)
     SeqSearchResult::result_type result;
 
@@ -387,20 +386,11 @@ SeqSearchResult QueryExecutor::execute_query(QuerySequence&& sequence,
             break;
         }
         case COUNTS: {
-            if (count_quantiles.size()) {
-                // Get labels with count quantiles
-                result = anno_graph.get_label_count_quantiles(sequence.sequence,
-                                                              num_top_labels,
-                                                              discovery_fraction,
-                                                              presence_fraction,
-                                                              count_quantiles);
-            } else {
-                // Get labels with k-mer counts
-                result = anno_graph.get_kmer_counts(sequence.sequence,
-                                                    num_top_labels,
-                                                    discovery_fraction,
-                                                    presence_fraction);
-            }
+            // Get labels with k-mer counts
+            result = anno_graph.get_kmer_counts(sequence.sequence,
+                                                num_top_labels,
+                                                discovery_fraction,
+                                                presence_fraction);
             break;
         }
         case MATCHES: {
@@ -1277,8 +1267,7 @@ SeqSearchResult query_sequence(QuerySequence&& sequence,
     SeqSearchResult result = QueryExecutor::execute_query(std::move(sequence),
             config.query_mode,
             config.num_top_labels, config.discovery_fraction,
-            config.presence_fraction, anno_graph,
-            config.count_quantiles);
+            config.presence_fraction, anno_graph);
 
     if (aligner_config)
         result.get_alignment() = alignment;
