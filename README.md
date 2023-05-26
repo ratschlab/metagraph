@@ -152,7 +152,7 @@ Requires `M*V/8 + Size(BRWT)` bytes of RAM, where `M` is the number of rows in t
 ```bash
 ./metagraph query -v -i <GRAPH_DIR>/graph.dbg \
                         -a <GRAPH_DIR>/annotation.column.annodbg \
-                        --discovery-fraction 0.8 --labels-delimiter ", " \
+                        --min-kmers-fraction-label 0.8 --labels-delimiter ", " \
                         query_seq.fa
 ```
 

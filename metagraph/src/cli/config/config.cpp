@@ -216,11 +216,11 @@ Config::Config(int argc, char *argv[]) {
             memory_available = atof(get_value(i++));
         } else if (!strcmp(argv[i], "--dump-text-anno")) {
             dump_text_anno = true;
-        } else if (!strcmp(argv[i], "--discovery-fraction")) {
+        } else if (!strcmp(argv[i], "--min-kmers-fraction-label")) {
             discovery_fraction = std::stof(get_value(i++));
         } else if (!strcmp(argv[i], "--align-rel-score-cutoff")) {
             alignment_rel_score_cutoff = std::stof(get_value(i++));
-        } else if (!strcmp(argv[i], "--presence-fraction")) {
+        } else if (!strcmp(argv[i], "--min-kmers-fraction-graph")) {
             presence_fraction = std::stof(get_value(i++));
         } else if (!strcmp(argv[i], "--query-presence")) {
             query_presence = true;
@@ -1316,9 +1316,9 @@ if (advanced) {
 if (advanced) {
             fprintf(stderr, "\t   --verbose-output \t\tdo not collapse continuous coord or count ranges (for query coords and counts) [off]\n");
 }
-            fprintf(stderr, "\t   --num-top-labels [INT] \tmaximum number of top labels to output [inf]\n");
-            fprintf(stderr, "\t   --discovery-fraction [FLOAT] min fraction of k-mers from the query required to be present in a label [0.7]\n");
-            fprintf(stderr, "\t   --presence-fraction [FLOAT] \tmin fraction of k-mers from the query required to be present in the graph [0.0]\n");
+            fprintf(stderr, "\t   --num-top-labels [INT] \t\tmaximum number of top labels to output [inf]\n");
+            fprintf(stderr, "\t   --min-kmers-fraction-label [FLOAT] \tmin fraction of k-mers from the query required to be present in a label [0.7]\n");
+            fprintf(stderr, "\t   --min-kmers-fraction-graph [FLOAT] \tmin fraction of k-mers from the query required to be present in the graph [0.0]\n");
 if (advanced) {
             fprintf(stderr, "\t   --labels-delimiter [STR]\tdelimiter for annotation labels [\":\"]\n");
             fprintf(stderr, "\t   --suppress-unlabeled \tdo not show results for sequences missing in graph [off]\n");

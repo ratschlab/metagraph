@@ -604,7 +604,7 @@ To query a MetaGraph index (graph + annotation) using the command line interface
 
     metagraph query -i graph.dbg \
                     -a annotation.column.annodbg \
-                    --discovery-fraction 0.1 \
+                    --min-kmers-fraction-label 0.1 \
                     transcripts_1000.fa
 
 For alignment, see ``metagraph align``.

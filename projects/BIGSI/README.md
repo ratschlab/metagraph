@@ -529,7 +529,7 @@ for QUERY in ~/metagenome/data/BIGSI/subsets/query/samples/haib18CEM5453_HMCMJCC
     mkdir -p $OUTDIR
 
     for num_columns in $(seq 750 3000 24750); do
-        run="$METAGRAPH query -v --discovery-fraction 0.0 --query-mode matches \
+        run="$METAGRAPH query -v --min-kmers-fraction-label 0.0 --query-mode matches \
                 -i \${TMPDIR}/graph.dbg \
                 -a \${TMPDIR}/graph.row_diff_brwt.annodbg \
                 $QUERY"
@@ -639,7 +639,7 @@ done
 #QUERY=~/metagenome/data/BIGSI/subsets/query/samples/haib18CEM5453_HMCMJCCXY_SL336225.fasta
 QUERY=~/metagenome/data/BIGSI/subsets/query/samples/nucleotide_fasta_protein_homolog_model.fasta
 #QUERY=~/metagenome/data/BIGSI/subsets/query/samples/DRR067889.fasta
-./metagraph query -v --discovery-fraction 0.0 --query-mode matches \
+./metagraph query -v --min-kmers-fraction-label 0.0 --query-mode matches \
     -i ~/metagenome/data/BIGSI/subsets/graph_subset_24750.dbg \
     -a ~/metagenome/data/BIGSI/subsets/annotation/annotation_subset_24750.rb_brwt.annodbg \
     $QUERY \
