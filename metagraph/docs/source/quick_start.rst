@@ -457,6 +457,7 @@ compression performance and the complexity of the construction algorithm.
 In contrast, ``RowDiff<Multi-BRWT>`` typically achieves
 the best compression while still providing a good query performance, and thus, it is
 recommended for very large problem instances.
+Finally, ``RowDiff<RowSparse>`` provides a good trade-off between the query speed and compression performance.
 
 Convert annotation to Rainbowfish
 """""""""""""""""""""""""""""""""
@@ -537,6 +538,7 @@ The conversion to ``RowDiff<Multi-BRWT>`` is done in two steps.
 2.  Transform the diff-transformed columns ``*.row_diff.annodbg`` to ``Multi-BRWT``::
 
         find . -name "*.row_diff.annodbg" | metagraph transform_anno -v -p 18 \
+                                                        -i graph.dbg \
                                                         --anno-type row_diff_brwt \
                                                         --greedy ...
         metagraph relax_brwt -v -p 18 \
@@ -545,6 +547,19 @@ The conversion to ``RowDiff<Multi-BRWT>`` is done in two steps.
                              annotation.row_diff_brwt.annodbg
 
     Also see the above paragraph :ref:`to_multi_brwt` for other options.
+
+
+.. _to_row_diff_sparse:
+
+Convert annotation to RowDiff<RowSparse>
+"""""""""""""""""""""""""""""""""""""""""
+The conversion to ``RowDiff<RowSparse>`` is similar to :ref:`to_row_diff_brwt`. The first step is the same.
+In the second step, the diff-transformed columns ``*.row_diff.annodbg`` are converted to ``RowSparse``::
+
+        find . -name "*.row_diff.annodbg" | metagraph transform_anno -v -p 18 \
+                                                        -i graph.dbg \
+                                                        --anno-type row_diff_sparse
+
 
 .. _transform_count_annotations:
 
