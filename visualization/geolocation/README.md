@@ -24,7 +24,7 @@ open world_data.html
 
 1. Run server
 ```
-../../metagraph/build/metagraph server_query -i data/test_graph -a data/test_annotation.column.annodbg --count-labels
+../../metagraph/build/metagraph server_query -i data/test_graph -a data/test_annotation.column.annodbg
 ```
 2. Run client
 ```

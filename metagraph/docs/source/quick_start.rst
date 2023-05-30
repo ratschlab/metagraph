@@ -400,9 +400,9 @@ For more details, see section :ref:`transform_count_annotations`.
 
 Once the annotation is transformed, k-mer abundances can be queried with::
 
-    metagraph query --query-counts ...
+    metagraph query --query-mode counts ...
 
-Note that if flag ``--query-counts`` is not passed, the index will be queried in the default k-mer presence/absence regime.
+Note that if flag ``--query-mode counts`` is not passed, the index will be queried in the default k-mer presence/absence regime.
 
 
 .. _indexing coordinates:
@@ -438,10 +438,10 @@ Query k-mer coordinates
 Once a coordinate-aware annotation is constructed, it can be transformed into a more memory-efficient representation supporting
 querying (see :ref:`transform_coord_annotations` below) and then queried with::
 
-    metagraph query --query-coords ...
+    metagraph query --query-mode coords ...
 
-As the coordinate-aware annotations also contain the information about k-mer abundance, they can be queried to retrieve k-mer counts (simply pass ``--query-counts`` instead of ``--query-coords``).
-Note that if neither ``--query-coords`` nor ``--query-counts`` is passed, the index will be queried in the default k-mer presence/absence regime.
+As the coordinate-aware annotations also contain the information about k-mer abundance, they can be queried to retrieve k-mer counts (simply pass ``--query-mode counts`` instead of ``--query-mode coords``).
+Note that if neither ``--query-mode coords`` nor ``--query-mode counts`` is passed, the index will be queried in the default k-mer presence/absence regime.
 
 .. _transform annotation:
 
@@ -457,6 +457,7 @@ compression performance and the complexity of the construction algorithm.
 In contrast, ``RowDiff<Multi-BRWT>`` typically achieves
 the best compression while still providing a good query performance, and thus, it is
 recommended for very large problem instances.
+Finally, ``RowDiff<RowSparse>`` provides a good trade-off between the query speed and compression performance.
 
 Convert annotation to Rainbowfish
 """""""""""""""""""""""""""""""""
@@ -537,6 +538,7 @@ The conversion to ``RowDiff<Multi-BRWT>`` is done in two steps.
 2.  Transform the diff-transformed columns ``*.row_diff.annodbg`` to ``Multi-BRWT``::
 
         find . -name "*.row_diff.annodbg" | metagraph transform_anno -v -p 18 \
+                                                        -i graph.dbg \
                                                         --anno-type row_diff_brwt \
                                                         --greedy ...
         metagraph relax_brwt -v -p 18 \
@@ -545,6 +547,19 @@ The conversion to ``RowDiff<Multi-BRWT>`` is done in two steps.
                              annotation.row_diff_brwt.annodbg
 
     Also see the above paragraph :ref:`to_multi_brwt` for other options.
+
+
+.. _to_row_diff_sparse:
+
+Convert annotation to RowDiff<RowSparse>
+"""""""""""""""""""""""""""""""""""""""""
+The conversion to ``RowDiff<RowSparse>`` is similar to :ref:`to_row_diff_brwt`. The first step is the same.
+In the second step, the diff-transformed columns ``*.row_diff.annodbg`` are converted to ``RowSparse``::
+
+        find . -name "*.row_diff.annodbg" | metagraph transform_anno -v -p 18 \
+                                                        -i graph.dbg \
+                                                        --anno-type row_diff_sparse
+
 
 .. _transform_count_annotations:
 
@@ -589,8 +604,7 @@ To query a MetaGraph index (graph + annotation) using the command line interface
 
     metagraph query -i graph.dbg \
                     -a annotation.column.annodbg \
-                    --count-kmers \
-                    --discovery-fraction 0.1 \
+                    --min-kmers-fraction-label 0.1 \
                     transcripts_1000.fa
 
 For alignment, see ``metagraph align``.

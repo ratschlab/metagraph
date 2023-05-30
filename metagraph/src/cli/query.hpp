@@ -173,6 +173,15 @@ class SeqSearchResult {
 };
 
 
+enum QueryMode {
+    LABELS = 0,
+    MATCHES,
+    COUNTS_SUM,
+    COUNTS,
+    COORDS,
+    SIGNATURE
+};
+
 class QueryExecutor {
   public:
     QueryExecutor(const Config &config,
@@ -196,16 +205,11 @@ class QueryExecutor {
                      const std::function<void(const SeqSearchResult &)> &callback);
 
     static SeqSearchResult execute_query(QuerySequence&& sequence,
-                                         bool count_labels,
-                                         bool print_signature,
+                                         QueryMode query_mode,
                                          size_t num_top_labels,
                                          double discovery_fraction,
                                          double presence_fraction,
-                                         const graph::AnnotatedDBG &anno_graph,
-                                         bool with_kmer_counts = false,
-                                         const std::vector<double> &count_quantiles = {},
-                                         bool query_counts = false,
-                                         bool query_coords = false);
+                                         const graph::AnnotatedDBG &anno_graph);
 
   private:
     const Config &config_;

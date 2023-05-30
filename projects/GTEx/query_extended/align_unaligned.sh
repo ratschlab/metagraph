@@ -20,6 +20,6 @@ do
     logfile=${query_dir}/align_unaligned.${sample}.lsf.log
     if [ ! -f ${outfile} ]
     then
-        echo "/usr/bin/time -v $metagraph query --align --discovery-fraction 0.0 --count-labels -v -p ${threads} -i ${basedir}/output_k${K}_trimmed_clean_graph_extended_chunked/graph_k${K}.dbg -a ${basedir}/output_k${K}_trimmed_extended.samples.brwt.annodbg ${fname} | gzip > $outfile" | bsub -M $mem -We 24:00 -n ${threads} -R "rusage[mem=${pmem}]" -R "span[hosts=1]" -J aln_gtex -oo $logfile
+        echo "/usr/bin/time -v $metagraph query --align --min-kmers-fraction-label 0.0 --query-mode matches -v -p ${threads} -i ${basedir}/output_k${K}_trimmed_clean_graph_extended_chunked/graph_k${K}.dbg -a ${basedir}/output_k${K}_trimmed_extended.samples.brwt.annodbg ${fname} | gzip > $outfile" | bsub -M $mem -We 24:00 -n ${threads} -R "rusage[mem=${pmem}]" -R "span[hosts=1]" -J aln_gtex -oo $logfile
     fi
 done

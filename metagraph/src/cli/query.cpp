@@ -360,56 +360,64 @@ std::string SeqSearchResult::to_string(const std::string delimiter,
 
 
 SeqSearchResult QueryExecutor::execute_query(QuerySequence&& sequence,
-                                             bool count_labels,
-                                             bool print_signature,
+                                             QueryMode query_mode,
                                              size_t num_top_labels,
                                              double discovery_fraction,
                                              double presence_fraction,
-                                             const graph::AnnotatedDBG &anno_graph,
-                                             bool with_kmer_counts,
-                                             const std::vector<double> &count_quantiles,
-                                             bool query_counts,
-                                             bool query_coords) {
+                                             const graph::AnnotatedDBG &anno_graph) {
     // Perform a different action depending on the type (specified by config flags)
     SeqSearchResult::result_type result;
 
-    if (print_signature) {
-        // Get labels with presence/absence signatures
-        result = anno_graph.get_top_label_signatures(sequence.sequence,
+    switch (query_mode) {
+        case SIGNATURE: {
+            // Get labels with presence/absence signatures
+            result = anno_graph.get_top_label_signatures(sequence.sequence,
+                                                         num_top_labels,
+                                                         discovery_fraction,
+                                                         presence_fraction);
+            break;
+        }
+        case COORDS: {
+            // Get labels with k-mer coordinates
+            result = anno_graph.get_kmer_coordinates(sequence.sequence,
                                                      num_top_labels,
                                                      discovery_fraction,
                                                      presence_fraction);
-    } else if (query_coords) {
-        // Get labels with k-mer coordinates
-        result = anno_graph.get_kmer_coordinates(sequence.sequence,
-                                                 num_top_labels,
-                                                 discovery_fraction,
-                                                 presence_fraction);
-    } else if (query_counts) {
-        // Get labels with k-mer counts
-        result = anno_graph.get_kmer_counts(sequence.sequence,
-                                            num_top_labels,
-                                            discovery_fraction,
-                                            presence_fraction);
-    } else if (count_quantiles.size()) {
-        // Get labels with count quantiles
-        result = anno_graph.get_label_count_quantiles(sequence.sequence,
-                                                      num_top_labels,
-                                                      discovery_fraction,
-                                                      presence_fraction,
-                                                      count_quantiles);
-    } else if (count_labels || with_kmer_counts) {
-        // Get labels with label counts / kmer counts
-        result = anno_graph.get_top_labels(sequence.sequence,
-                                           num_top_labels,
+            break;
+        }
+        case COUNTS: {
+            // Get labels with k-mer counts
+            result = anno_graph.get_kmer_counts(sequence.sequence,
+                                                num_top_labels,
+                                                discovery_fraction,
+                                                presence_fraction);
+            break;
+        }
+        case MATCHES: {
+            // Get labels with label counts
+            result = anno_graph.get_top_labels(sequence.sequence,
+                                               num_top_labels,
+                                               discovery_fraction,
+                                               presence_fraction,
+                                               false);
+            break;
+        }
+        case COUNTS_SUM: {
+            // Get labels with label counts / kmer counts
+            result = anno_graph.get_top_labels(sequence.sequence,
+                                               num_top_labels,
+                                               discovery_fraction,
+                                               presence_fraction,
+                                               true);
+            break;
+        }
+        case LABELS: {
+            // Default, just get labels
+            result = anno_graph.get_labels(sequence.sequence,
                                            discovery_fraction,
-                                           presence_fraction,
-                                           with_kmer_counts);
-    } else {
-        // Default, just get labels
-        result = anno_graph.get_labels(sequence.sequence,
-                                       discovery_fraction,
-                                       presence_fraction);
+                                           presence_fraction);
+            break;
+        }
     }
 
     // Create seq search instance and move sequence into it
@@ -1188,14 +1196,14 @@ int query_graph(Config *config) {
             if (config->output_json) {
                 std::ostringstream ss;
                 ss << result.to_json(config->verbose_output
-                                         || !(config->query_counts || config->query_coords),
+                                         || !(config->query_mode == COUNTS || config->query_mode == COORDS),
                                      anno_graph) << "\n";
                 std::cout << ss.str();
             } else {
                 std::cout << result.to_string(config->anno_labels_delimiter,
                                               config->suppress_unlabeled,
                                               config->verbose_output
-                                                || !(config->query_counts || config->query_coords),
+                                                || !(config->query_mode == COUNTS || config->query_mode == COORDS),
                                               anno_graph) + "\n";
             }
         });
@@ -1257,11 +1265,9 @@ SeqSearchResult query_sequence(QuerySequence&& sequence,
 
     // Get sequence search result by executing query
     SeqSearchResult result = QueryExecutor::execute_query(std::move(sequence),
-            config.count_labels, config.print_signature,
+            config.query_mode,
             config.num_top_labels, config.discovery_fraction,
-            config.presence_fraction, anno_graph,
-            config.count_kmers, config.count_quantiles,
-            config.query_counts, config.query_coords);
+            config.presence_fraction, anno_graph);
 
     if (aligner_config)
         result.get_alignment() = alignment;
@@ -1277,8 +1283,9 @@ void QueryExecutor::query_fasta(const string &file,
     seq_io::FastaParser fasta_parser(file, config_.forward_and_reverse);
 
     // Only query_coords/count_kmers if using coord/count aware index.
-    if (this->config_.query_coords && !(dynamic_cast<const annot::matrix::MultiIntMatrix *>(
-            &this->anno_graph_.get_annotator().get_matrix()))) {
+    if (config_.query_mode == COORDS
+            && !dynamic_cast<const annot::matrix::MultiIntMatrix *>(
+                    &this->anno_graph_.get_annotator().get_matrix())) {
         logger->error("Annotation does not support k-mer coordinate queries. "
                       "First transform this annotation to include coordinate data "
                       "(e.g., {}, {}, {}, {}, {}).",
@@ -1290,8 +1297,9 @@ void QueryExecutor::query_fasta(const string &file,
         exit(1);
     }
 
-    if (this->config_.count_kmers && !(dynamic_cast<const annot::matrix::IntMatrix *>(
-            &this->anno_graph_.get_annotator().get_matrix()))) {
+    if ((config_.query_mode == COUNTS || config_.query_mode == COUNTS_SUM)
+            && !dynamic_cast<const annot::matrix::IntMatrix *>(
+                    &this->anno_graph_.get_annotator().get_matrix())) {
         logger->error("Annotation does not support k-mer count queries. "
                       "First transform this annotation to include count data "
                       "(e.g., {}, {}, {}).",
@@ -1302,7 +1310,7 @@ void QueryExecutor::query_fasta(const string &file,
     }
 
     if (config_.query_batch_size) {
-        if (!config_.query_coords) {
+        if (config_.query_mode != COORDS) {
             // Construct a query graph and query against it
             batched_query_fasta(fasta_parser, callback);
             return;

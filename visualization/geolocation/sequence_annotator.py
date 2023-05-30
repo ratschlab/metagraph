@@ -28,7 +28,7 @@ class SequenceAnnotator():
                     self.executable, 'query',
                     '-i', self.graph,
                     '-a', self.annotation,
-                    '--count-labels',
+                    *('--query-mode matches'.split()),
                     f_in.name
                 ],
                 stderr=subprocess.STDOUT
