@@ -46,7 +46,7 @@ class IRowDiff {
 
   protected:
     // get row-diff paths starting at |row_ids|
-    std::pair<std::vector<BinaryMatrix::Row>, std::vector<std::vector<size_t>>>
+    std::tuple<std::vector<BinaryMatrix::Row>, std::vector<std::vector<size_t>>, std::vector<size_t>>
     get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids) const;
 
     const graph::DBGSuccinct *graph_ = nullptr;
@@ -182,71 +182,13 @@ RowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
     assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
     assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());
 
-    // map row index to its index in |rd_rows|
-    VectorMap<Row, size_t> node_to_rd;
-    node_to_rd.reserve(row_ids.size() * RD_PATH_RESERVE_SIZE);
-
-    // keeps how many times rows in |rd_rows| will be queried
-    std::vector<size_t> times_traversed;
-    times_traversed.reserve(row_ids.size() * RD_PATH_RESERVE_SIZE);
-
-    // Truncated row-diff paths, indexes to |rd_rows|.
-    // The last index in each path points to an anchor or to a row which had
-    // been reached before, and thus, will be reconstructed before this one.
-    std::vector<std::vector<size_t>> rd_paths_trunc(row_ids.size());
-
-    const graph::boss::BOSS &boss = graph_->get_boss();
-    const bit_vector &rd_succ = fork_succ_.size() ? fork_succ_ : boss.get_last();
-
-    for (size_t i = 0; i < row_ids.size(); ++i) {
-        Row row = row_ids[i];
-
-        graph::boss::BOSS::edge_index boss_edge = graph_->kmer_to_boss_index(
-                graph::AnnotatedSequenceGraph::anno_to_graph_index(row));
-
-        while (true) {
-            row = graph::AnnotatedSequenceGraph::graph_to_anno_index(
-                    graph_->boss_to_kmer_index(boss_edge));
-
-            auto [it, is_new] = node_to_rd.try_emplace(row, node_to_rd.size());
-            rd_paths_trunc[i].push_back(it.value());
-
-            // If a node had been reached before, we interrupt the diff path.
-            // The annotation for that node will have been reconstructed earlier
-            // than for other nodes in this path as well. Thus, we will start
-            // reconstruction from that node and don't need its successors.
-            if (!is_new) {
-                times_traversed[it.value()]++;
-                break;
-            }
-
-            times_traversed.push_back(1);
-
-            if (anchor_[row])
-                break;
-
-            boss_edge = boss.row_diff_successor(boss_edge, rd_succ);
-        }
-    }
-
-    auto &m = const_cast<std::vector<std::pair<Row, size_t>>&>(node_to_rd.values_container());
-    std::sort(m.begin(), m.end(), utils::LessFirst());
-
-    // diff rows annotating nodes along the row-diff paths
-    std::vector<Row> rd_ids(m.size());
-    for (size_t i = 0; i < m.size(); ++i) {
-        rd_ids[i] = m[i].first;
-    }
+    // get row-diff paths
+    auto [rd_ids, rd_paths_trunc, times_traversed] = get_rd_ids(row_ids);
 
     std::vector<SetBitPositions> rd_rows = diffs_.get_rows(rd_ids);
     DEBUG_LOG("Queried batch of {} diffed rows", rd_ids.size());
 
-    for (size_t i = 0; i < m.size(); ++i) {
-        rd_ids[m[i].second] = i;
-    }
-
-    // release memory and `m`
-    node_to_rd = VectorMap<Row, size_t>();
+    rd_ids = std::vector<Row>();
 
     // reconstruct annotation rows from row-diff
     std::vector<SetBitPositions> rows(row_ids.size());
@@ -255,15 +197,14 @@ RowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
         SetBitPositions &result = rows[i];
         // propagate back and reconstruct full annotations for predecessors
         for (auto it = rd_paths_trunc[i].rbegin(); it != rd_paths_trunc[i].rend(); ++it) {
-            auto &rd_row = rd_rows[rd_ids[*it]];
-            std::sort(rd_row.begin(), rd_row.end());
-            add_diff(rd_row, &result);
+            std::sort(rd_rows[*it].begin(), rd_rows[*it].end());
+            add_diff(rd_rows[*it], &result);
             // replace diff row with full reconstructed annotation
             if (--times_traversed[*it]) {
-                rd_row = result;
+                rd_rows[*it] = result;
             } else {
                 // free memory
-                rd_row = {};
+                rd_rows[*it] = {};
             }
         }
     }

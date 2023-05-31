@@ -98,7 +98,7 @@ TupleRowDiff<BaseMatrix>::get_row_tuples(const std::vector<Row> &row_ids) const 
     assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());
 
     // get row-diff paths
-    auto [rd_ids, rd_paths_trunc] = get_rd_ids(row_ids);
+    auto [rd_ids, rd_paths_trunc, times_traversed] = get_rd_ids(row_ids);
 
     std::vector<RowTuples> rd_rows = diffs_.get_row_tuples(rd_ids);
     for (auto &row : rd_rows) {
@@ -121,7 +121,12 @@ TupleRowDiff<BaseMatrix>::get_row_tuples(const std::vector<Row> &row_ids) const 
             std::sort(rd_rows[*it].begin(), rd_rows[*it].end());
             add_diff(rd_rows[*it], &result);
             // replace diff row with full reconstructed annotation
-            rd_rows[*it] = result;
+            if (--times_traversed[*it]) {
+                rd_rows[*it] = result;
+            } else {
+                // free memory
+                rd_rows[*it] = {};
+            }
         }
         assert(std::all_of(result.begin(), result.end(),
                            [](auto &p) { return p.second.size(); }));

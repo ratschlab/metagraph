@@ -38,16 +38,12 @@ void IRowDiff::load_fork_succ(const std::string &filename) {
     fork_succ_.load(*f);
 }
 
-std::pair<std::vector<BinaryMatrix::Row>, std::vector<std::vector<size_t>>>
+std::tuple<std::vector<BinaryMatrix::Row>, std::vector<std::vector<size_t>>, std::vector<size_t>>
 IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids) const {
     assert(graph_ && "graph must be loaded");
     assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());
 
     using Row = BinaryMatrix::Row;
-
-    // diff rows annotating nodes along the row-diff paths
-    std::vector<Row> rd_ids;
-    rd_ids.reserve(row_ids.size() * RD_PATH_RESERVE_SIZE);
 
     // map row index to its index in |rd_rows|
     VectorMap<Row, size_t> node_to_rd;
@@ -71,7 +67,7 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids) const {
             row = graph::AnnotatedSequenceGraph::graph_to_anno_index(
                     graph_->boss_to_kmer_index(boss_edge));
 
-            auto [it, is_new] = node_to_rd.try_emplace(row, rd_ids.size());
+            auto [it, is_new] = node_to_rd.try_emplace(row, node_to_rd.size());
             rd_paths_trunc[i].push_back(it.value());
 
             // If a node had been reached before, we interrupt the diff path.
@@ -81,8 +77,6 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids) const {
             if (!is_new)
                 break;
 
-            rd_ids.push_back(row);
-
             if (anchor_[row])
                 break;
 
@@ -90,7 +84,29 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids) const {
         }
     }
 
-    return std::make_pair(std::move(rd_ids), std::move(rd_paths_trunc));
+    auto &m = const_cast<std::vector<std::pair<Row, size_t>>&>(node_to_rd.values_container());
+    std::sort(m.begin(), m.end(), utils::LessFirst());
+
+    // diff rows annotating nodes along the row-diff paths
+    std::vector<Row> rd_ids(m.size());
+    for (size_t i = 0; i < m.size(); ++i) {
+        rd_ids[i] = m[i].first;
+        m[i].first = i;
+    }
+
+    std::sort(m.begin(), m.end(), utils::LessSecond());
+
+    // keeps how many times rows in |rd_rows| will be queried
+    std::vector<size_t> times_traversed(rd_ids.size(), 0);
+
+    for (size_t i = 0; i < row_ids.size(); ++i) {
+        for (auto &j : rd_paths_trunc[i]) {
+            j = m[j].first;
+            times_traversed[j]++;
+        }
+    }
+
+    return std::make_tuple(std::move(rd_ids), std::move(rd_paths_trunc), std::move(times_traversed));
 }
 
 } // namespace binmat
