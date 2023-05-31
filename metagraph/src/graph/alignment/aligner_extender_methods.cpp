@@ -1003,6 +1003,7 @@ std::vector<Alignment> DefaultColumnExtender::backtrack(score_t min_path_score,
     }
 
     DEBUG_LOG("Backtracked from {}/{} indices", num_backtracks, indices.size());
+    std::ignore = num_backtracks;
 
     if (extensions.empty() && this->seed_->get_score() >= min_path_score)
         extensions.emplace_back(*this->seed_);

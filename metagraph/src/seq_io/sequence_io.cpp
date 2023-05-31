@@ -364,8 +364,6 @@ template <class Callback>
 void read_fasta_file_critical(gzFile input_p,
                               Callback callback,
                               bool with_reverse) {
-    size_t seq_count = 0;
-
     if (input_p == Z_NULL) {
         std::cerr << "ERROR: Null file descriptor" << std::endl;
         exit(1);
@@ -383,8 +381,6 @@ void read_fasta_file_critical(gzFile input_p,
             reverse_complement(read_stream->seq);
             callback(read_stream);
         }
-
-        seq_count++;
     }
 
     kseq_destroy(read_stream);

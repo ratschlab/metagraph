@@ -261,7 +261,6 @@ include_directories(
  PUBLIC
   external-libraries/KMC/kmc_api
   external-libraries/sdsl-lite/include
-  external-libraries/eigen
   external-libraries/hopscotch-map/include
   external-libraries/ordered-map/include
   external-libraries/binrel_wt/include
@@ -286,6 +285,10 @@ target_include_directories(ips4o INTERFACE external-libraries/ips4o)
 
 add_library(caches INTERFACE)
 target_include_directories(caches INTERFACE external-libraries/caches/include)
+
+add_library(eigen INTERFACE)
+target_include_directories(eigen INTERFACE external-libraries/eigen)
+target_compile_options(eigen INTERFACE -Wno-unused-but-set-variable)
 
 
 set(Boost_USE_STATIC_LIBS ON)
@@ -324,6 +327,7 @@ target_compile_options(zlib
     -Wno-unused-variable
     -Wno-sign-compare
     -Wno-implicit-fallthrough
+    -Wno-deprecated-non-prototype
 )
 
 add_library(progress_bar STATIC
@@ -419,6 +423,7 @@ set(METALIBS ${METALIBS}
   XXSDS_DYNAMIC
   ips4o
   caches
+  eigen
 )
 if(APPLE)
   set(METALIBS ${METALIBS} ${OpenMP_CXX_LIBRARIES})
