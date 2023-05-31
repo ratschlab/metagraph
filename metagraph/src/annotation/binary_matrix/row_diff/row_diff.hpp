@@ -182,10 +182,6 @@ RowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
     assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
     assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());
 
-    // diff rows annotating nodes along the row-diff paths
-    std::vector<Row> rd_ids;
-    rd_ids.reserve(row_ids.size() * RD_PATH_RESERVE_SIZE);
-
     // map row index to its index in |rd_rows|
     VectorMap<Row, size_t> node_to_rd;
     node_to_rd.reserve(row_ids.size() * RD_PATH_RESERVE_SIZE);
@@ -212,7 +208,7 @@ RowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
             row = graph::AnnotatedSequenceGraph::graph_to_anno_index(
                     graph_->boss_to_kmer_index(boss_edge));
 
-            auto [it, is_new] = node_to_rd.try_emplace(row, rd_ids.size());
+            auto [it, is_new] = node_to_rd.try_emplace(row, node_to_rd.size());
             rd_paths_trunc[i].push_back(it.value());
 
             // If a node had been reached before, we interrupt the diff path.
@@ -224,7 +220,6 @@ RowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
                 break;
             }
 
-            rd_ids.push_back(row);
             times_traversed.push_back(1);
 
             if (anchor_[row])
@@ -234,12 +229,24 @@ RowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
         }
     }
 
-    node_to_rd = VectorMap<Row, size_t>();
+    auto &m = const_cast<std::vector<std::pair<Row, size_t>>&>(node_to_rd.values_container());
+    std::sort(m.begin(), m.end(), utils::LessFirst());
+
+    // diff rows annotating nodes along the row-diff paths
+    std::vector<Row> rd_ids(m.size());
+    for (size_t i = 0; i < m.size(); ++i) {
+        rd_ids[i] = m[i].first;
+    }
 
     std::vector<SetBitPositions> rd_rows = diffs_.get_rows(rd_ids);
     DEBUG_LOG("Queried batch of {} diffed rows", rd_ids.size());
 
-    rd_ids = std::vector<Row>();
+    for (size_t i = 0; i < m.size(); ++i) {
+        rd_ids[m[i].second] = i;
+    }
+
+    // release memory and `m`
+    node_to_rd = VectorMap<Row, size_t>();
 
     // reconstruct annotation rows from row-diff
     std::vector<SetBitPositions> rows(row_ids.size());
@@ -248,14 +255,15 @@ RowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
         SetBitPositions &result = rows[i];
         // propagate back and reconstruct full annotations for predecessors
         for (auto it = rd_paths_trunc[i].rbegin(); it != rd_paths_trunc[i].rend(); ++it) {
-            std::sort(rd_rows[*it].begin(), rd_rows[*it].end());
-            add_diff(rd_rows[*it], &result);
+            auto &rd_row = rd_rows[rd_ids[*it]];
+            std::sort(rd_row.begin(), rd_row.end());
+            add_diff(rd_row, &result);
             // replace diff row with full reconstructed annotation
             if (--times_traversed[*it]) {
-                rd_rows[*it] = result;
+                rd_row = result;
             } else {
                 // free memory
-                rd_rows[*it] = {};
+                rd_row = {};
             }
         }
     }
