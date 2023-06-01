@@ -85,16 +85,18 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids) const {
     }
 
     auto &m = const_cast<std::vector<std::pair<Row, size_t>>&>(node_to_rd.values_container());
+    // sort by indexes of rd rows
+    // the second value points to the index in batch
     std::sort(m.begin(), m.end(), utils::LessFirst());
-
-    // diff rows annotating nodes along the row-diff paths
+    // collect an array of rd rows
     std::vector<Row> rd_ids(m.size());
     for (size_t i = 0; i < m.size(); ++i) {
         rd_ids[i] = m[i].first;
-        m[i].first = i;
     }
-
-    std::sort(m.begin(), m.end(), utils::LessSecond());
+    // make m[].first map indexes in batch to new indexes (where rows are sorted)
+    for (size_t i = 0; i < m.size(); ++i) {
+        m[m[i].second].first = i;
+    }
 
     // keeps how many times rows in |rd_rows| will be queried
     std::vector<size_t> times_traversed(rd_ids.size(), 0);
