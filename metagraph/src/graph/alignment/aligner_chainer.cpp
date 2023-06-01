@@ -609,7 +609,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
     }
 
     if (seeds.size() <= 1) {
-        if (seeds.size() == 1 && seeds[0].get_query_view().size() >= config_.min_seed_length)
+        if (seeds.size() == 1 && seeds[0].get_query_view().size() > config_.min_seed_length)
             alignments.emplace_back(seeds[0], config_);
 
         seeder = std::make_unique<ManualSeeder>(std::move(alignments), query_size);
@@ -846,8 +846,8 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                         bool found = false;
                         for (node_index next : find->second) {
                             if (next == a_j.get_nodes().front()) {
-                                score_t gap_cost = ceil(sl * gap - log2(gap + 1) * 0.5);
-                                assert(gap > 0 || gap_cost == 0);
+                                score_t gap_cost = floor(sl * gap - log2(gap + 1) * 0.5);
+                                assert((gap > 0) == (gap_cost < 0));
                                 found |= update_score(base_added_score + gap_cost,
                                                       &a_j, coord_dist);
                                 break;
@@ -879,15 +879,15 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                     if (gap != 0 && overlap)
                         return;
 
-                    score_t gap_cost = ceil(sl * gap - log2(gap + 1) * 0.5);
-                    assert(gap > 0 || gap_cost == 0);
+                    score_t gap_cost = floor(sl * gap - log2(gap + 1) * 0.5);
+                    assert((gap > 0) == (gap_cost < 0));
 
                     update_score(base_added_score + gap_cost, &a_j, coord_dist);
                 }, max_coord_dist, 2);
             });
         },
         [&](const auto &chain, score_t score) {
-            if (chain.empty() || (chain.size() == 1 && chain[0].first->get_query_view().size() < config_.min_seed_length))
+            if (chain.empty() || (chain.size() == 1 && chain[0].first->get_query_view().size() <= config_.min_seed_length))
                 return false;
 
             if (last_chain_score != score) {
