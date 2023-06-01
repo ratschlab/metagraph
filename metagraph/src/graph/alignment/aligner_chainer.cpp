@@ -633,13 +633,18 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
 
         // merge into MUMs
         for (auto i = end - 1; i != begin; --i) {
-            assert(end_counter[i->get_orientation()].count(i->get_query_view().end()));
-            assert(end_counter[i->get_orientation()].count(i->get_query_view().end() + 1));
+            if (i->label_columns != (i - 1)->label_columns
+                    || i->get_query_view().end() + 1 != (i - 1)->get_query_view().end()) {
+                continue;
+            }
 
-            if (i->label_columns == (i - 1)->label_columns
-                    && i->get_query_view().end() + 1 == (i - 1)->get_query_view().end()
-                    && end_counter[i->get_orientation()][i->get_query_view().end()] == 1
-                    && end_counter[i->get_orientation()][i->get_query_view().end() + 1] == 1
+            auto cur_find = end_counter[i->get_orientation()].find(i->get_query_view().end());
+            auto next_find = end_counter[i->get_orientation()].find(i->get_query_view().end() + 1);
+            assert(cur_find != end_counter[i->get_orientation()].end());
+            assert(next_find != end_counter[i->get_orientation()].end());
+
+            if (cur_find->second == 1
+                    && next_find->second == 1
                     && graph_.traverse(i->get_nodes().back(),
                                        (i - 1)->get_query_view().front())
                         == (i - 1)->get_nodes()[0]) {
