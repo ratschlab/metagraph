@@ -901,12 +901,15 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                 merged_chain.emplace_back(*seed_ptr, dist);
             }
 
+            for (auto jt = merged_chain.begin() + 1; jt != merged_chain.end(); ++jt) {
+                jt->second += (jt - 1)->second;
+            }
+
             for (auto jt = merged_chain.rbegin(); jt + 1 != merged_chain.rend(); ++jt) {
                 auto &prev_seed = (jt + 1)->first;
                 auto &cur_seed = jt->first;
                 auto prev_end = prev_seed.get_query_view().end();
                 if (prev_seed.get_clipping() + 1 == cur_seed.get_clipping()
-                        && prev_end + 1 == cur_seed.get_query_view().end() && jt->second == 1
                         && cur_seed.label_columns == prev_seed.label_columns) {
                     assert(graph_.traverse(prev_seed.get_nodes().back(), *prev_end) == cur_seed.get_nodes()[0]);
                     prev_seed.expand(cur_seed.get_nodes());
@@ -915,9 +918,12 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
             }
 
             Chain cur_chain;
+            int64_t last_dist = 0;
             for (const auto &[seed, dist] : merged_chain) {
-                if (!seed.empty())
-                    cur_chain.emplace_back(Alignment(seed, config_), dist);
+                if (!seed.empty()) {
+                    cur_chain.emplace_back(Alignment(seed, config_), dist - last_dist);
+                    last_dist = dist;
+                }
             }
 
             assert(std::all_of(cur_chain.begin() + 1, cur_chain.end(),
