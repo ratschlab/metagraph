@@ -672,7 +672,7 @@ void assemble_with_coordinates(size_t k,
 
     logger->info("Found {} chains", chains.size());
     for (size_t i = 0; i < chains.size(); ++i) {
-        logger->info("Processing chain of size {}", chains[i].size());
+        DEBUG_LOG("Processing chain of size {}", chains[i].size());
         assert(chains[i].size());
         size_t term_id = cur_unitig_id + superbubbles[chains[i].front()].second.size();
         std::vector<tsl::hopscotch_set<int64_t>> distances_to_end(chains[i].size());

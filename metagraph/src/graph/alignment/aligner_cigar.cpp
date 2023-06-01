@@ -326,7 +326,7 @@ bool Cigar::mark_exact_matches(sdsl::bit_vector &mask,
                 case NODE_INSERTION: {} break;
                 case MATCH: {
                     assert(it + num <= end);
-                    added |= (std::find(it, it + num, true) != it + num);
+                    added |= (std::find(it, it + num, false) != it + num);
                     std::fill(it, it + num, true);
                     it += num;
                 } break;

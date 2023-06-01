@@ -572,7 +572,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
 
     num_seeds += in_anchors.size();
     const auto *labeled_aligner = dynamic_cast<const ILabeledAligner*>(&aligner);
-    tsl::hopscotch_map<std::string_view::const_iterator, size_t> end_counter;
+    tsl::hopscotch_map<std::string_view::const_iterator, size_t> end_counter[2];
 
     std::vector<Alignment> alignments;
     std::vector<Seed> seeds;
@@ -586,6 +586,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                 if (seeds.size() && in_anchor.get_orientation() != seeds.back().get_orientation())
                     orientation_change = seeds.size();
 
+                ++end_counter[in_anchor.get_orientation()][in_anchor.get_query_view().end()];
                 seeds.emplace_back(in_anchor);
            }
         }
@@ -596,7 +597,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                 continue;
 
             }
-            ++end_counter[in_anchor.get_query_view().end()];
+            ++end_counter[in_anchor.get_orientation()][in_anchor.get_query_view().end()];
             const auto &cols = in_anchor.get_columns();
             for (auto col : cols) {
                 if (seeds.size() && in_anchor.get_orientation() != seeds.back().get_orientation())
@@ -627,15 +628,18 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                     > std::pair(a.label_columns, b.get_query_view().end());
         });
 
-        if (end_counter.empty())
+        if (end_counter[begin->get_orientation()].empty())
             return;
 
         // merge into MUMs
         for (auto i = end - 1; i != begin; --i) {
+            assert(end_counter[i->get_orientation()].count(i->get_query_view().end()));
+            assert(end_counter[i->get_orientation()].count(i->get_query_view().end() + 1));
+
             if (i->label_columns == (i - 1)->label_columns
                     && i->get_query_view().end() + 1 == (i - 1)->get_query_view().end()
-                    && end_counter[i->get_query_view().end()] == 1
-                    && end_counter[i->get_query_view().end() + 1] == 1
+                    && end_counter[i->get_orientation()][i->get_query_view().end()] == 1
+                    && end_counter[i->get_orientation()][i->get_query_view().end() + 1] == 1
                     && graph_.traverse(i->get_nodes().back(),
                                        (i - 1)->get_query_view().front())
                         == (i - 1)->get_nodes()[0]) {
@@ -686,7 +690,6 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
         node_col_coords.emplace(encode, std::move(nodes_info));
     }
 
-    float sl = -static_cast<float>(config_.min_seed_length) * 0.01;
 
     sdsl::bit_vector matching_pos[2] {
         sdsl::bit_vector(query_size, false),
@@ -697,6 +700,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
 
     std::unordered_multiset<Chain, ChainHash> chains;
     score_t last_chain_score = std::numeric_limits<score_t>::min();
+    score_t last_output_chain_score = std::numeric_limits<score_t>::min();
     auto flush_chains = [&]() {
         if (chains.empty())
             return;
@@ -710,10 +714,19 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                 return;
             }
 
-            logger->trace("Chain: {}", chain_score);
+            bool pick_chain = false;
+            logger->info("Chain: {}", chain_score);
             for (const auto &[aln, dist] : chain) {
-                logger->trace("\t{} (dist: {})", aln, dist);
+                pick_chain |= aln.get_cigar().mark_exact_matches(matching_pos[orientation]);
+                logger->info("\t{} (dist: {})", aln, dist);
             }
+
+            if (!pick_chain && chain_score < last_output_chain_score) {
+                terminate = true;
+                return;
+            }
+
+            last_output_chain_score = std::max(chain_score, last_output_chain_score);
 
             bool added = false;
 
@@ -785,6 +798,9 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
         chains.clear();
     };
 
+    ssize_t seed_size = config_.min_seed_length;
+    ssize_t graph_k = graph_.get_k();
+    score_t match_score = config_.match_score("A");
     logger->trace("Chaining {} anchors for a query of length {}", seeds.size(), query_size);
     chain_anchors<Seed>(config_, seeds.data(), seeds.data() + seeds.size(),
         [&](const Seed &a_i,
@@ -826,60 +842,80 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                     label_change_score = labeled_aligner->get_label_change_score(col_i, col_j);
                     if (label_change_score == DBGAlignerConfig::ninf)
                         return;
+
+                    label_change_score *= match_score;
                 }
 
                 ssize_t num_added = query_j.end() - std::max(query_j.begin(), query_i.end());
+                std::string_view added_seq(query_j.end() - num_added, num_added);
                 assert(num_added >= 0);
 
                 score_t score_j = std::get<0>(*chain_scores);
-                score_t base_added_score = score_j + num_added + label_change_score;
+                score_t base_added_score = score_j + config_.match_score(added_seq) + label_change_score;
                 if (base_added_score <= score_i)
                     return;
 
-                bool overlap = (query_i.end() > query_j.begin());
+                ssize_t overlap = query_i.end() - query_j.begin();
+                if (num_added > 0 && overlap >= seed_size - 1) {
+                    auto range_end = query_i.end() + 1;
+                    auto first_node_end = query_j.begin() + graph_.get_k() - a_j.get_offset();
+                    assert(range_end >= first_node_end);
+                    size_t a_j_node_idx = range_end - first_node_end;
+                    int64_t coord_dist = a_j.get_nodes().size() - a_j_node_idx;
+                    int64_t gap = std::abs(dist - coord_dist);
 
-                if (num_added == 1) {
-                    auto find = out_nodes.find(a_i.get_nodes().back());
-                    if (find != out_nodes.end()) {
-                        int64_t coord_dist = 1;
-                        float gap = dist - coord_dist;
-                        bool found = false;
-                        for (node_index next : find->second) {
-                            if (next == a_j.get_nodes().front()) {
-                                score_t gap_cost = floor(sl * gap - log2(gap + 1) * 0.5);
-                                assert((gap > 0) == (gap_cost < 0));
-                                found |= update_score(base_added_score + gap_cost,
-                                                      &a_j, coord_dist);
-                                break;
+                    bool found = false;
+                    if (overlap >= graph_k - 1) {
+                        // we know that the next node exists
+                        score_t gap_cost = gap > 0 ? config_.gap_opening_penalty + (gap - 1) * config_.gap_extension_penalty : 0;
+                        assert((gap > 0) == (gap_cost < 0));
+                        found |= update_score(base_added_score + gap_cost,
+                                              &a_j, coord_dist);
+                    } else {
+                        auto find = out_nodes.find(a_i.get_nodes().back());
+                        if (find != out_nodes.end()) {
+                            for (node_index next : find->second) {
+                                if (next == a_j.get_nodes().front()) {
+                                    score_t gap_cost = gap > 0 ? config_.gap_opening_penalty + (gap - 1) * config_.gap_extension_penalty : 0;
+                                    assert((gap > 0) == (gap_cost < 0));
+                                    found |= update_score(base_added_score + gap_cost,
+                                                          &a_j, coord_dist);
+                                    break;
+                                }
                             }
                         }
-
-                        if (found && gap == 0)
-                            return;
                     }
+
+                    if (found && gap == 0)
+                        return;
                 }
 
-                size_t node_j = anchor_ends[&a_j - seeds.data()].first;
+                auto [node_j, node_j_end] = anchor_ends[&a_j - seeds.data()];
+                if (overlap)
+                    node_j = node_j_end;
 
                 assert(node_col_coords.count(col_j));
                 assert(node_col_coords[col_j].size() == nodes.size());
-                const auto &coords_j_front = node_col_coords[col_j][node_j];
-                assert(std::get<0>(coords_j_front.first));
+                const auto &coords_j = node_col_coords[col_j][node_j];
+                assert(std::get<0>(coords_j.first));
 
                 const std::string &label = col_i == std::numeric_limits<Seed::Column>::max()
                     ? "" : label_encoder.decode(col_i);
 
                 column_path_index->call_distances(label,
-                                                  coords_i_back, coords_j_front,
+                                                  coords_i_back, coords_j,
                                                   [&](int64_t coord_dist) {
+                    if (!overlap)
+                        coord_dist += a_j.get_nodes().size() - 1;
+
                     if (num_added > coord_dist || (!num_added && coord_dist == 0))
                         return;
 
                     float gap = std::abs(coord_dist - dist);
-                    if (gap != 0 && overlap)
+                    if (gap != 0 && overlap > 0)
                         return;
 
-                    score_t gap_cost = floor(sl * gap - log2(gap + 1) * 0.5);
+                    score_t gap_cost = gap > 0 ? config_.gap_opening_penalty + (gap - 1) * config_.gap_extension_penalty : 0;
                     assert((gap > 0) == (gap_cost < 0));
 
                     update_score(base_added_score + gap_cost, &a_j, coord_dist);
@@ -901,6 +937,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                 merged_chain.emplace_back(*seed_ptr, dist);
             }
 
+            // merge adjacent anchors
             for (auto jt = merged_chain.begin() + 1; jt != merged_chain.end(); ++jt) {
                 jt->second += (jt - 1)->second;
             }
@@ -908,10 +945,10 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
             for (auto jt = merged_chain.rbegin(); jt + 1 != merged_chain.rend(); ++jt) {
                 auto &prev_seed = (jt + 1)->first;
                 auto &cur_seed = jt->first;
-                auto prev_end = prev_seed.get_query_view().end();
                 if (prev_seed.get_clipping() + 1 == cur_seed.get_clipping()
                         && cur_seed.label_columns == prev_seed.label_columns) {
-                    assert(graph_.traverse(prev_seed.get_nodes().back(), *prev_end) == cur_seed.get_nodes()[0]);
+                    assert(graph_.traverse(prev_seed.get_nodes().back(),
+                                           *prev_seed.get_query_view().end()) == cur_seed.get_nodes()[0]);
                     prev_seed.expand(cur_seed.get_nodes());
                     cur_seed = Seed();
                 }
@@ -943,6 +980,8 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
 
     if (!terminate)
         flush_chains();
+
+    logger->info("Done chaining");
 
     num_extensions += extender.num_extensions() + bwd_extender.num_extensions();
     num_explored_nodes += extender.num_explored_nodes() + bwd_extender.num_explored_nodes();

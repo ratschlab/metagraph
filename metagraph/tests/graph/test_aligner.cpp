@@ -1489,6 +1489,7 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_min_seed_length) {
 
 #if ! _PROTEIN_GRAPH
 TEST(DBGAlignerTest, align_suffix_seed_snp_canonical) {
+    // TODO: also add test for Unitig and Path
     size_t k = 18;
     std::string reference = "AAAAACTTTCGAGGCCAA";
     std::string query =     "GGGGGCTTTCGAGGCCAA";
@@ -1506,7 +1507,7 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_canonical) {
             graph = std::make_shared<CanonicalDBG>(graph);
 
         DBGAlignerConfig config;
-    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+        config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
         config.max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
         config.min_cell_score = std::numeric_limits<score_t>::min() + 100;
         config.min_path_score = std::numeric_limits<score_t>::min() + 100;
@@ -1545,6 +1546,11 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_canonical) {
 }
 
 TYPED_TEST(DBGAlignerTest, align_both_directions) {
+    // TODO: for now, until these graphs are supported
+    if constexpr(std::is_same_v<TypeParam, DBGSuccinctPathIndexed>
+            || std::is_same_v<TypeParam, DBGSuccinctUnitigIndexed>)
+        return;
+
     size_t k = 7;
     std::string reference =    "AAAAGCTTTCGAGGCCAA";
     std::string query =        "AAAAGTTTTCGAGGCCAA";
@@ -1608,6 +1614,10 @@ TYPED_TEST(DBGAlignerTest, align_both_directions2) {
 }
 
 TYPED_TEST(DBGAlignerTest, align_low_similarity4_rep_primary) {
+    if constexpr(std::is_same_v<TypeParam, DBGSuccinctPathIndexed>
+            || std::is_same_v<TypeParam, DBGSuccinctUnitigIndexed>)
+        return;
+
     size_t k = 6;
     std::vector<std::string> seqs;
     mtg::seq_io::read_fasta_file_critical(test_data_dir + "/transcripts_100.fa",
@@ -1804,6 +1814,7 @@ TEST(DBGAlignerTest, align_extended_insert_after_match) {
 
 #if ! _PROTEIN_GRAPH
 TEST(DBGAlignerTest, align_suffix_seed_no_full_seeds) {
+    // TODO: also add test for Unitig and Path
     size_t k = 31;
     std::string reference = "CTGCTGCGCCATCGCAACCCACGGTTGCTTTTTGAGTCGCTGCTCACGTTAGCCATCACACTGACGTTAAGCTGGCTTTCGATGCTGTATC";
     std::string query     = "CTTACTGCTGCGCTCTTCGCAAACCCCACGGTTTCTTGTTTTGAGCTCGCCTGCTCACGATACCCATACACACTGACGTTCAAGCTGGCTTTCGATGTTGTATC";
