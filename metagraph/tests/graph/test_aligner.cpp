@@ -148,7 +148,7 @@ TYPED_TEST(DBGAlignerTest, align_big_self_loop) {
     ASSERT_EQ(1ull, paths.size());
     auto path = paths[0];
 
-    EXPECT_EQ(7ull, path.size());
+    EXPECT_EQ(query.size() - k + 1, path.size());
     EXPECT_EQ(query, path.get_sequence());
     EXPECT_EQ(config.match_score(query), path.get_score());
     EXPECT_EQ("9=", path.get_cigar().to_string());
@@ -177,7 +177,7 @@ TYPED_TEST(DBGAlignerTest, align_single_node) {
     ASSERT_EQ(1ull, paths.size());
     auto path = paths[0];
 
-    EXPECT_EQ(1ull, path.size());
+    EXPECT_EQ(query.size() - k + 1, path.size());
     EXPECT_EQ("CAT", path.get_sequence());
     EXPECT_EQ(config.match_score(query), path.get_score());
     EXPECT_EQ("3=", path.get_cigar().to_string());
@@ -1585,7 +1585,7 @@ TYPED_TEST(DBGAlignerTest, align_both_directions) {
 }
 
 TYPED_TEST(DBGAlignerTest, align_both_directions2) {
-    size_t k = 11;
+    size_t k = 9;
     std::string reference =    "GTAGTGCTAGCTGTAGTCGTGCTGATGC";
     std::string query =        "GTAGTGCTACCTGTAGTCGTGGTGATGC";
     //                                   X           X
@@ -1598,7 +1598,7 @@ TYPED_TEST(DBGAlignerTest, align_both_directions2) {
     ASSERT_EQ(1ull, paths.size());
     auto path = paths[0];
 
-    EXPECT_EQ(18u, path.size());
+    EXPECT_EQ(reference.size() - k + 1, path.size());
     EXPECT_EQ(reference, path.get_sequence());
     EXPECT_EQ(config.score_sequences(query, reference), path.get_score());
     EXPECT_TRUE(path.is_valid(*graph, &config));

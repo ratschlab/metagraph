@@ -609,7 +609,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
     }
 
     if (seeds.size() <= 1) {
-        if (seeds.size() == 1 && seeds[0].get_query_view().size() > config_.min_seed_length)
+        if (seeds.size() == 1 && seeds[0].get_query_view().size() >= config_.min_seed_length)
             alignments.emplace_back(seeds[0], config_);
 
         seeder = std::make_unique<ManualSeeder>(std::move(alignments), query_size);
@@ -720,7 +720,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
             aligner.extend_chain(std::move(chain), extender, [&](Alignment&& aln) {
                 std::vector<Alignment> alns;
                 if (!aln.get_end_clipping()) {
-                    DEBUG_LOG("\t\t{}", aln);
+                    DEBUG_LOG("\tAln:\t{}", aln);
                     added |= aln.get_cigar().mark_exact_matches(matching_pos[orientation]);
                     alns.emplace_back(std::move(aln));
                 } else {
@@ -730,7 +730,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                 for (auto&& ext : alns) {
                     if (!ext.get_clipping()) {
                         added |= ext.get_cigar().mark_exact_matches(matching_pos[orientation]);
-                        DEBUG_LOG("\t\t{}", ext);
+                        DEBUG_LOG("\tAln:\t{}", ext);
                         alignments.emplace_back(std::move(ext));
                     } else {
                         bwd_extender.rc_extend_rc(ext, [&](Alignment&& aln) {
@@ -741,7 +741,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                             }
 
                             added |= aln.get_cigar().mark_exact_matches(matching_pos[orientation]);
-                            DEBUG_LOG("\t\t{}", aln);
+                            DEBUG_LOG("\tAln:\t{}", aln);
                             alignments.emplace_back(std::move(aln));
                         }, true, 0);
                     }
@@ -887,7 +887,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
             });
         },
         [&](const auto &chain, score_t score) {
-            if (chain.empty() || (chain.size() == 1 && chain[0].first->get_query_view().size() <= config_.min_seed_length))
+            if (chain.empty() || (chain.size() == 1 && chain[0].first->get_query_view().size() < config_.min_seed_length))
                 return false;
 
             if (last_chain_score != score) {

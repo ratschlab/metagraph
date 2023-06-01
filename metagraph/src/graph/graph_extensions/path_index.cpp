@@ -500,7 +500,7 @@ void ColumnPathIndex::call_distances(const Label &label,
         }
     } else {
         // traverse normally
-        if ((chain_id_a || sb_id_a) && ds_to_end_a.empty())
+        if ((chain_id_a != unitig_id_a || sb_id_a != unitig_id_a) && ds_to_end_a.empty())
             return;
 
         size_t cycle_target = chain_id_a ? chain_id_a : (sb_id_a ? sb_id_a : unitig_id_a);
