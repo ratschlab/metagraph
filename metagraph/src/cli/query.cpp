@@ -1170,8 +1170,6 @@ int query_graph(Config *config) {
 
     ThreadPool thread_pool(std::max(1u, get_num_threads()) - 1, 1000);
 
-    Timer timer;
-
     std::unique_ptr<align::DBGAlignerConfig> aligner_config;
     if (config->align_sequences) {
         assert(config->alignment_num_alternative_paths == 1u
@@ -1207,8 +1205,8 @@ int query_graph(Config *config) {
         };
         size_t num_bp = executor.query_fasta(file, query_callback);
         auto time = curr_timer.elapsed();
-        logger->trace("File '{}' was processed in {} sec, total time: {} sec, throughput: {:.1f} bp/s", file,
-                      time, timer.elapsed(), (double)num_bp / time);
+        logger->trace("File '{}' with {} base pairs was processed in {} sec, throughput: {:.1f} bp/s",
+                      file, num_bp, time, (double)num_bp / time);
     }
 
     return 0;
@@ -1393,9 +1391,7 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
             aligner_config_ && config_.batch_align ? &config_ : NULL
         );
 
-        logger->trace("Query graph constructed for batch of sequences"
-                      " with {} bases from '{}' in {} sec",
-                      num_bytes_read, fasta_parser.get_filename(), batch_timer.elapsed());
+        auto query_graph_construction = batch_timer.elapsed();
         batch_timer.reset();
 
         #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
@@ -1410,8 +1406,12 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
             callback(search_result);
         }
 
-        logger->trace("Batch of {} bytes from '{}' queried in {} sec", num_bytes_read,
-                      fasta_parser.get_filename(), batch_timer.elapsed());
+        logger->trace("Query graph constructed for batch of sequences"
+                      " with {} bases from '{}' in {:.5f} sec, query redundancy: {:.2f} bp/kmer, queried in {:.5f} sec",
+                      num_bytes_read, fasta_parser.get_filename(), query_graph_construction,
+                      (double)num_bytes_read / query_graph->get_graph().num_nodes(),
+                      batch_timer.elapsed());
+
         num_bp += num_bytes_read;
     }
 
