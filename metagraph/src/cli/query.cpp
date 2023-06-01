@@ -1005,7 +1005,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                                    std::lock_guard<std::mutex> lock(seq_mutex);
                                    contigs.emplace_back(contig, std::vector<node_index>{});
                                },
-                               get_num_threads(),
+                               num_threads,
                                // pull only primary contigs when building canonical query graph
                                full_dbg.get_mode() == DeBruijnGraph::CANONICAL);
 
@@ -1014,7 +1014,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
 
     logger->trace("[Query graph construction] Mapping k-mers back to full graph...");
     // map from nodes in query graph to full graph
-    #pragma omp parallel for num_threads(get_num_threads())
+    #pragma omp parallel for num_threads(num_threads)
     for (size_t i = 0; i < contigs.size(); ++i) {
         contigs[i].second.reserve(contigs[i].first.length() - graph_init->get_k() + 1);
         full_dbg.map_to_nodes(contigs[i].first,
@@ -1190,9 +1190,7 @@ int query_graph(Config *config) {
 
         // Callback, which captures the config pointer and a const reference to the anno_graph
         // instance pointed to by our unique_ptr...
-        executor.query_fasta(file,
-                             [config, &anno_graph = std::as_const(*anno_graph)]
-                             (const SeqSearchResult &result) {
+        auto query_callback = [config, &anno_graph=std::as_const(*anno_graph)](const SeqSearchResult &result) {
             if (config->output_json) {
                 std::ostringstream ss;
                 ss << result.to_json(config->verbose_output
@@ -1206,9 +1204,11 @@ int query_graph(Config *config) {
                                                 || !(config->query_mode == COUNTS || config->query_mode == COORDS),
                                               anno_graph) + "\n";
             }
-        });
-        logger->trace("File '{}' was processed in {} sec, total time: {}", file,
-                      curr_timer.elapsed(), timer.elapsed());
+        };
+        size_t num_bp = executor.query_fasta(file, query_callback);
+        auto time = curr_timer.elapsed();
+        logger->trace("File '{}' was processed in {} sec, total time: {} sec, throughput: {:.1f} bp/s", file,
+                      time, timer.elapsed(), (double)num_bp / time);
     }
 
     return 0;
@@ -1276,8 +1276,8 @@ SeqSearchResult query_sequence(QuerySequence&& sequence,
 }
 
 
-void QueryExecutor::query_fasta(const string &file,
-                                const std::function<void(const SeqSearchResult &)> &callback) {
+size_t QueryExecutor::query_fasta(const string &file,
+                                  const std::function<void(const SeqSearchResult &)> &callback) {
     logger->trace("Parsing sequences from file '{}'", file);
 
     seq_io::FastaParser fasta_parser(file, config_.forward_and_reverse);
@@ -1312,8 +1312,7 @@ void QueryExecutor::query_fasta(const string &file,
     if (config_.query_batch_size) {
         if (config_.query_mode != COORDS) {
             // Construct a query graph and query against it
-            batched_query_fasta(fasta_parser, callback);
-            return;
+            return batched_query_fasta(fasta_parser, callback);
         } else {
             // TODO: Implement batch mode for query_coords queries
             logger->warn("Querying coordinates in batch mode is currently not supported. Querying sequentially...");
@@ -1322,6 +1321,7 @@ void QueryExecutor::query_fasta(const string &file,
 
     // Query sequences independently
     size_t seq_count = 0;
+    size_t num_bp = 0;
 
     for (const seq_io::kseq_t &kseq : fasta_parser) {
         thread_pool_.enqueue([&](QuerySequence &sequence) {
@@ -1329,13 +1329,16 @@ void QueryExecutor::query_fasta(const string &file,
             callback(query_sequence(std::move(sequence), anno_graph_,
                                     config_, aligner_config_.get()));
         }, QuerySequence { seq_count++, std::string(kseq.name.s), std::string(kseq.seq.s) });
+        num_bp += kseq.seq.l;
     }
 
     // wait while all threads finish processing the current file
     thread_pool_.join();
+
+    return num_bp;
 }
 
-void
+size_t
 QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
                                    const std::function<void(const SeqSearchResult &)> &callback) {
     auto it = fasta_parser.begin();
@@ -1344,6 +1347,7 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
     const uint64_t batch_size = config_.query_batch_size;
 
     size_t seq_count = 0;
+    size_t num_bp = 0;
 
     while (it != end) {
         Timer batch_timer;
@@ -1408,7 +1412,10 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
 
         logger->trace("Batch of {} bytes from '{}' queried in {} sec", num_bytes_read,
                       fasta_parser.get_filename(), batch_timer.elapsed());
+        num_bp += num_bytes_read;
     }
+
+    return num_bp;
 }
 
 } // namespace cli
