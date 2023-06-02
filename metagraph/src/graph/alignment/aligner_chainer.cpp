@@ -869,17 +869,15 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                     return;
 
                 if (num_added > 0) {
-                    auto a_i_back_end = query_i.end();
-                    auto a_j_front_end = query_j.begin() + graph_k - a_j.get_offset();
-
-                    // we want a_j_front_end + x == a_i_back_end + 1
-                    // -> x == a_i_back_end + 1 - a_j_front_end >= 0
-                    ssize_t a_j_node_idx = a_i_back_end + 1 - a_j_front_end;
+                    // we want query_j.begin() + graph_k - a_j.get_offset() + x == query_i.end() + 1
+                    // ->      graph_k - a_j.get_offset() + x == overlap + 1
+                    // -> x == overlap + 1 + a_j.get_offset() - graph_k
+                    ssize_t a_j_node_idx = overlap + 1 + a_j.get_offset() - graph_k;
+                    assert(a_j_node_idx < static_cast<ssize_t>(a_j.get_nodes().size()));
                     if (a_j_node_idx >= 0) {
-                        assert(a_j_node_idx < static_cast<ssize_t>(a_j.get_nodes().size()));
                         if (overlap >= graph_k - 1) {
                             // we know they are connected
-                            assert(graph_.traverse(a_i.get_nodes().back(), *a_i_back_end)
+                            assert(graph_.traverse(a_i.get_nodes().back(), *query_i.end())
                                     == a_j.get_nodes()[a_j_node_idx]);
                             int64_t coord_dist = a_j.get_nodes().size() - a_j_node_idx;
                             int64_t gap = std::abs(dist - coord_dist);
