@@ -200,9 +200,11 @@ class QueryExecutor {
      *
      * @param file_path     path to FASTA file
      * @param callback      callback function
+     *
+     * @return the number of base pairs (characters) in query file
      */
-    void query_fasta(const std::string &file_path,
-                     const std::function<void(const SeqSearchResult &)> &callback);
+    size_t query_fasta(const std::string &file_path,
+                       const std::function<void(const SeqSearchResult &)> &callback);
 
     static SeqSearchResult execute_query(QuerySequence&& sequence,
                                          QueryMode query_mode,
@@ -217,8 +219,8 @@ class QueryExecutor {
     std::unique_ptr<graph::align::DBGAlignerConfig> aligner_config_;
     ThreadPool &thread_pool_;
 
-    void batched_query_fasta(mtg::seq_io::FastaParser &fasta_parser,
-                             const std::function<void(const SeqSearchResult &)> &callback);
+    size_t batched_query_fasta(mtg::seq_io::FastaParser &fasta_parser,
+                               const std::function<void(const SeqSearchResult &)> &callback);
 };
 
 
