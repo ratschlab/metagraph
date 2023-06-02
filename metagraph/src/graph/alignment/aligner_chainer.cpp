@@ -958,46 +958,52 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                 merged_chain.emplace_back(*seed_ptr, dist);
             }
 
-            // // merge adjacent anchors
-            // for (auto jt = merged_chain.begin() + 1; jt != merged_chain.end(); ++jt) {
-            //     jt->second += (jt - 1)->second;
-            // }
+            // merge adjacent anchors
+            for (auto jt = merged_chain.begin() + 1; jt != merged_chain.end(); ++jt) {
+                jt->second += (jt - 1)->second;
+            }
 
-            // for (auto jt = merged_chain.rbegin(); jt + 1 != merged_chain.rend(); ++jt) {
-            //     auto &prev_seed = (jt + 1)->first;
-            //     auto &cur_seed = jt->first;
+            for (auto jt = merged_chain.rbegin(); jt + 1 != merged_chain.rend(); ++jt) {
+                auto &a_i = (jt + 1)->first;
+                auto &a_j = jt->first;
+                assert(a_i.size());
+                assert(a_j.size());
 
-            //     if (cur_seed.label_columns != prev_seed.label_columns
-            //             || prev_seed.get_query_view().end() <= cur_seed.get_query_view().begin()) {
-            //         continue;
-            //     }
-
-            //     assert(cur_seed.get_query_view().end() >= prev_seed.get_query_view().end());
-            //     size_t dist = cur_seed.get_query_view().end() - prev_seed.get_query_view().end();
-            //     if (dist != jt->second)
-            //         continue;
-
-            //     auto cur_first_node_end = cur_seed.get_query_view().begin() + graph_.get_k() - cur_seed.get_offset();
-            //     if (prev_seed.get_query_view().end() + 1 < cur_first_node_end)
-            //         continue;
-
-            //     auto cur_node_it = cur_seed.get_nodes().begin() + (prev_seed.get_query_view().end() + 1 - cur_first_node_end);
-            //     assert(cur_node_it < cur_seed.get_nodes().end());
-
-            //     assert(graph_.traverse(prev_seed.get_nodes().back(),
-            //                            *prev_seed.get_query_view().end())
-            //             == *cur_node_it);
-
-            //     prev_seed.expand(std::vector<node_index>(cur_node_it, cur_seed.get_nodes().end()));
-            //     cur_seed = Seed();
-            // }
+                std::string_view query_i = a_i.get_query_view();
+                std::string_view query_j = a_j.get_query_view();
+                ssize_t num_added = query_j.end() - std::max(query_j.begin(), query_i.end());
+                ssize_t overlap = query_i.end() - query_j.begin();
+                // logger->info("{}>?0,{}>=?{}\t{} -> {}",num_added,overlap,seed_size-1,
+                    // Alignment(a_i, config_),Alignment(a_j, config_));
+                if (num_added > 0 && overlap >= seed_size - 1) {
+                    // we want query_j.begin() + graph_k - a_j.get_offset() + x == query_i.end() + 1
+                    // ->      graph_k - a_j.get_offset() + x == overlap + 1
+                    // -> x == overlap + 1 + a_j.get_offset() - graph_k
+                    ssize_t a_j_node_idx = overlap + 1 + a_j.get_offset() - graph_k;
+                    assert(a_j_node_idx < static_cast<ssize_t>(a_j.get_nodes().size()));
+                    // logger->info("\ti: {}",a_j_node_idx);
+                    if (a_j_node_idx >= 0) {
+                        int64_t coord_dist = jt->second - (jt + 1)->second;
+                        int64_t dist = query_j.end() - query_i.end();
+                        // logger->info("\tcd: {},dd: {}",coord_dist,dist);
+                        if (coord_dist == dist) {
+                            size_t num_inserted = a_j.get_nodes().size() - a_j_node_idx;
+                            a_i.expand(std::vector<node_index>(a_j.get_nodes().begin() + a_j_node_idx,
+                                                               a_j.get_nodes().end()));
+                            (jt + 1)->second += num_inserted;
+                            a_j = Seed();
+                            // logger->info("\t{}", Alignment(a_i, config_));
+                        }
+                    }
+                }
+            }
 
             Chain cur_chain;
             int64_t last_dist = 0;
             for (const auto &[seed, dist] : merged_chain) {
                 if (!seed.empty()) {
                     cur_chain.emplace_back(Alignment(seed, config_), dist - last_dist);
-                    // last_dist = dist;
+                    last_dist = dist;
                 }
             }
 
