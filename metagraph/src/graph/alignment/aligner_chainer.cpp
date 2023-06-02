@@ -1000,29 +1000,32 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                 ssize_t overlap = query_i.end() - query_j.begin();
                 // logger->info("{}>?0,{}>=?{}\t{} -> {}",num_added,overlap,seed_size-1,
                     // Alignment(a_i, config_),Alignment(a_j, config_));
-                if (num_added > 0 && overlap >= seed_size - 1) {
-                    // we want query_j.begin() + graph_k - a_j.get_offset() + x == query_i.end() + 1
-                    // ->      graph_k - a_j.get_offset() + x == overlap + 1
-                    // -> x == overlap + 1 + a_j.get_offset() - graph_k
-                    ssize_t a_j_node_idx = overlap + 1 + a_j.get_offset() - graph_k;
-                    ssize_t num_nodes = static_cast<ssize_t>(a_j.get_nodes().size());
-                    assert(a_j_node_idx < num_nodes);
-                    // logger->info("\ti: {}",a_j_node_idx);
-                    if (a_j_node_idx >= 0) {
-                        int64_t coord_dist = jt->second - (jt + 1)->second;
-                        assert(coord_dist == num_nodes - a_j_node_idx);
-                        int64_t dist = query_j.end() - query_i.end();
-                        // logger->info("\tcd: {},dd: {}",coord_dist,dist);
-                        if (coord_dist == dist) {
-                            size_t num_inserted = a_j.get_nodes().size() - a_j_node_idx;
-                            a_i.expand(std::vector<node_index>(a_j.get_nodes().begin() + a_j_node_idx,
-                                                               a_j.get_nodes().end()));
-                            (jt + 1)->second += num_inserted;
-                            a_j = Seed();
-                            // logger->info("\t{}", Alignment(a_i, config_));
-                        }
-                    }
-                }
+                if (num_added <= 0 || overlap < seed_size - 1)
+                    continue;
+
+                // we want query_j.begin() + graph_k - a_j.get_offset() + x == query_i.end() + 1
+                // ->      graph_k - a_j.get_offset() + x == overlap + 1
+                // -> x == overlap + 1 + a_j.get_offset() - graph_k
+                ssize_t a_j_node_idx = overlap + 1 + a_j.get_offset() - graph_k;
+                assert(a_j_node_idx < static_cast<ssize_t>(a_j.get_nodes().size()));
+                // logger->info("\ti: {}",a_j_node_idx);
+                if (a_j_node_idx < 0)
+                    continue;
+
+                int64_t coord_dist = jt->second - (jt + 1)->second;
+                assert(coord_dist == static_cast<ssize_t>(a_j.get_nodes().size()) - a_j_node_idx);
+                int64_t dist = query_j.end() - query_i.end();
+                // logger->info("\tcd: {},dd: {}",coord_dist,dist);
+
+                if (coord_dist != dist)
+                    continue;
+
+                size_t num_inserted = a_j.get_nodes().size() - a_j_node_idx;
+                a_i.expand(std::vector<node_index>(a_j.get_nodes().begin() + a_j_node_idx,
+                                                   a_j.get_nodes().end()));
+                (jt + 1)->second += num_inserted;
+                a_j = Seed();
+                // logger->info("\t{}", Alignment(a_i, config_));
             }
 
             Chain cur_chain;
