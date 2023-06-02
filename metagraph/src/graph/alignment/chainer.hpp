@@ -101,9 +101,6 @@ void chain_anchors(const DBGAlignerConfig &config,
                 anchor_connector(*i, b, j, i_end, chain_scores + (j - anchors_begin),
                     [&](score_t score, const Anchor* last, size_t dist) {
                         assert(last != i);
-                        // common::logger->info("Try to connect2 {} -> {}\t{},{} vs. {},{}",
-                        //     Alignment(*i, config), Alignment(*last, config),
-                        //     score,dist,max_score,best_dist);
                         if (std::tie(score, best_dist) > std::tie(max_score, dist)) {
                             max_score = score;
                             best_last = last;

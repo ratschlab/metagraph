@@ -618,6 +618,8 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
     }
 
     orientation_change = std::min(orientation_change, seeds.size());
+    ssize_t seed_size = config_.min_seed_length;
+    ssize_t graph_k = graph_.get_k();
 
     auto preprocess_anchors = [&](auto begin, auto end) {
         if (begin == end)
@@ -631,30 +633,55 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
         if (end_counter[begin->get_orientation()].empty())
             return;
 
-        // // merge into MUMs
-        // for (auto i = end - 1; i != begin; --i) {
-        //     if (i->label_columns != (i - 1)->label_columns
-        //             || i->get_query_view().end() + 1 != (i - 1)->get_query_view().end()) {
-        //         continue;
-        //     }
+        // merge into MUMs
+        for (auto i = begin; i + 1 != end; ++i) {
+            auto &a_i = *(i + 1);
+            auto &a_j = *i;
 
-        //     auto cur_find = end_counter[i->get_orientation()].find(i->get_query_view().end());
-        //     auto next_find = end_counter[i->get_orientation()].find(i->get_query_view().end() + 1);
-        //     assert(cur_find != end_counter[i->get_orientation()].end());
-        //     assert(next_find != end_counter[i->get_orientation()].end());
+            if (a_i.label_columns != a_j.label_columns)
+                continue;
 
-        //     if (cur_find->second == 1
-        //             && next_find->second == 1
-        //             && graph_.traverse(i->get_nodes().back(),
-        //                                (i - 1)->get_query_view().front())
-        //                 == (i - 1)->get_nodes()[0]) {
-        //         // we have a MUM
-        //         assert(i->get_query_view().end() < (i - 1)->get_query_view().end());
-        //         i->expand((i - 1)->get_nodes());
-        //         std::swap(*i, *(i - 1));
-        //         *i = Seed();
-        //     }
-        // }
+            std::string_view query_i = a_i.get_query_view();
+            std::string_view query_j = a_j.get_query_view();
+
+            ssize_t num_added = query_j.end() - std::max(query_j.begin(), query_i.end());
+            ssize_t overlap = query_i.end() - query_j.begin();
+            if (num_added <= 0 || overlap < seed_size - 1)
+                continue;
+
+            // we want query_j.begin() + graph_k - a_j.get_offset() + x == query_i.end() + 1
+            // ->      graph_k - a_j.get_offset() + x == overlap + 1
+            // -> x == overlap + 1 + a_j.get_offset() - graph_k
+            ssize_t a_j_node_idx = overlap + 1 + a_j.get_offset() - graph_k;
+            assert(a_j_node_idx < static_cast<ssize_t>(a_j.get_nodes().size()));
+
+            if (a_j_node_idx < 0)
+                continue;
+
+            int64_t coord_dist = a_j.get_nodes().size() - a_j_node_idx;
+            int64_t dist = query_j.end() - query_i.end();
+            if (coord_dist != dist)
+                continue;
+
+            auto i_find = end_counter[a_i.get_orientation()].find(query_i.end());
+            auto j_find = end_counter[a_j.get_orientation()].find(query_j.end());
+            assert(i_find != end_counter[a_i.get_orientation()].end());
+            assert(j_find != end_counter[a_j.get_orientation()].end());
+
+            if (i_find->second != 1 || j_find->second != 1)
+                continue;
+
+            assert(overlap < graph_k - 1
+                    || graph_.traverse(a_i.get_nodes().back(), *query_i.end()) == a_j.get_nodes()[a_j_node_idx]);
+
+            if (overlap >= graph_k - 1
+                    || graph_.traverse(a_i.get_nodes().back(), *query_i.end()) == a_j.get_nodes()[a_j_node_idx]) {
+                // we have a MUM
+                a_i.expand(std::vector<node_index>(a_j.get_nodes().begin() + a_j_node_idx,
+                                                   a_j.get_nodes().end()));
+                a_j = Seed();
+            }
+        }
     };
 
     preprocess_anchors(seeds.begin(), seeds.begin() + orientation_change);
@@ -676,7 +703,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                 out_nodes[seed.get_nodes().back()].emplace_back(next);
         });
 
-        // logger->info("Anchor: {}", Alignment(seed, config_));
+        logger->info("Anchor: {}", Alignment(seed, config_));
 
         auto &[anchor_front_idx, anchor_back_idx] = anchor_ends.emplace_back(
             nodes.size(), nodes.size()
@@ -803,8 +830,6 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
         chains.clear();
     };
 
-    ssize_t seed_size = config_.min_seed_length;
-    ssize_t graph_k = graph_.get_k();
     score_t match_score = config_.match_score("A");
     logger->trace("Chaining {} anchors for a query of length {}", seeds.size(), query_size);
     chain_anchors<Seed>(config_, seeds.data(), seeds.data() + seeds.size(),
@@ -980,10 +1005,12 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                     // ->      graph_k - a_j.get_offset() + x == overlap + 1
                     // -> x == overlap + 1 + a_j.get_offset() - graph_k
                     ssize_t a_j_node_idx = overlap + 1 + a_j.get_offset() - graph_k;
-                    assert(a_j_node_idx < static_cast<ssize_t>(a_j.get_nodes().size()));
+                    ssize_t num_nodes = static_cast<ssize_t>(a_j.get_nodes().size());
+                    assert(a_j_node_idx < num_nodes);
                     // logger->info("\ti: {}",a_j_node_idx);
                     if (a_j_node_idx >= 0) {
                         int64_t coord_dist = jt->second - (jt + 1)->second;
+                        assert(coord_dist == num_nodes - a_j_node_idx);
                         int64_t dist = query_j.end() - query_i.end();
                         // logger->info("\tcd: {},dd: {}",coord_dist,dist);
                         if (coord_dist == dist) {

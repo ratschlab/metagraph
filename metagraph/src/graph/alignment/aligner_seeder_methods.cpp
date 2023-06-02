@@ -374,16 +374,17 @@ auto UniMEMSeeder::get_seeds() const -> std::vector<Seed> {
             continue;
         }
 
-        if (start_new || graph_.has_single_incoming(query_nodes_[i])) {
+        if (start_new || !graph_.has_single_incoming(query_nodes_[i])) {
             seeds.emplace_back(std::string_view(query_.begin() + i, k),
-                               std::vector<node_index> { query_nodes_[i] },
+                               std::vector<node_index>(1, query_nodes_[i]),
                                orientation_, 0, i, query_.size() - i - k);
 
             start_new = !graph_.has_single_outgoing(query_nodes_[i]);
         } else {
             assert(seeds.size());
-            seeds.back().expand({ query_nodes_[i] });
-            start_new |= graph_.has_multiple_outgoing(query_nodes_[i]);
+            assert(seeds.back().get_nodes().back() == query_nodes_[i - 1]);
+            seeds.back().expand(std::vector<node_index>(1, query_nodes_[i]));
+            start_new |= !graph_.has_single_outgoing(query_nodes_[i]);
         }
     }
 
@@ -391,8 +392,8 @@ auto UniMEMSeeder::get_seeds() const -> std::vector<Seed> {
     for (const auto &seed : seeds) {
         const auto &nodes = seed.get_nodes();
         for (size_t i = 1; i + 1 < nodes.size(); ++i) {
-            assert(graph_.has_single_incoming(nodes[i])
-                    && graph_.has_single_outgoing(nodes[i]));
+            assert(graph_.has_single_incoming(nodes[i]));
+            assert(graph_.has_single_outgoing(nodes[i]));
         }
     }
 #endif
