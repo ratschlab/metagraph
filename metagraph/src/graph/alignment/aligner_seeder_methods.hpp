@@ -101,37 +101,14 @@ class ExactSeeder : public ISeeder {
     size_t num_exact_matching() const;
 };
 
-class MEMSeeder : public ExactSeeder {
+class UniMEMSeeder : public ExactSeeder {
   public:
     template <typename... Args>
-    MEMSeeder(Args&&... args) : ExactSeeder(std::forward<Args>(args)...) {}
-
-    virtual ~MEMSeeder() {}
-
-    std::vector<Seed> get_seeds() const override;
-
-    virtual const bitmap& get_mem_terminator() const = 0;
-};
-
-class UniMEMSeeder : public MEMSeeder {
-  public:
-    template <typename... Args>
-    UniMEMSeeder(Args&&... args)
-          : MEMSeeder(std::forward<Args>(args)...),
-            is_mem_terminus_([&](auto i) {
-                                 return graph_.has_multiple_outgoing(i)
-                                     || !graph_.has_single_incoming(i);
-                             },
-                             graph_.max_index() + 1) {
-        assert(is_mem_terminus_.size() == graph_.max_index() + 1);
-    }
+    UniMEMSeeder(Args&&... args) : ExactSeeder(std::forward<Args>(args)...) {}
 
     virtual ~UniMEMSeeder() {}
 
-    const bitmap& get_mem_terminator() const override { return is_mem_terminus_; }
-
-  private:
-    bitmap_lazy is_mem_terminus_;
+    std::vector<Seed> get_seeds() const override;
 };
 
 template <class BaseSeeder>

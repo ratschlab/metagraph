@@ -399,23 +399,71 @@ void ColumnPathIndex::call_distances(const Label &label,
     const auto &[global_coord_a, ds_from_start_a, ds_to_end_a] = info_a.second;
     const auto &[global_coord_b, ds_from_start_b, ds_to_end_b] = info_b.second;
 
+    // logger->info("\t\tA: {},{},{},{}", unitig_id_a, sb_id_a, chain_id_a, global_coord_a);
+    // logger->info("\t\tB: {},{},{},{}", unitig_id_b, sb_id_b, chain_id_b, global_coord_b);
+
     std::vector<int64_t> cycle_lengths;
-    adjacent_outgoing_unitigs(label, chain_id_a, [&](size_t next_u_id, int64_t len) {
-        if (cycle_lengths.size())
-            return;
-        auto next_info = get_chain_info(label, get_unitig_back(label, next_u_id));
-        if (chain_id_a == std::get<0>(next_info.first)) {
-            if (ds_from_start_a.size() && ds_to_end_a.size()) {
-                for (int64_t dstart : ds_from_start_a) {
-                    for (int64_t dend : ds_to_end_a) {
-                        cycle_lengths.emplace_back(dstart + dend + len);
-                    }
+
+    if (max_steps) {
+        std::vector<std::tuple<size_t, size_t, std::vector<int64_t>>> traversal_stack;
+        auto &init_dists = std::get<2>(traversal_stack.emplace_back(chain_id_a, 0, std::vector<int64_t>{}));
+        if (ds_to_end_a.size()) {
+            for (int64_t dstart : ds_from_start_a) {
+                for (int64_t dend : ds_to_end_a) {
+                    init_dists.emplace_back(dstart + dend);
                 }
-            } else if (next_u_id == unitig_id_a) {
-                cycle_lengths.emplace_back(len);
             }
+        } else if (ds_from_start_a.empty()) {
+            init_dists.emplace_back(get_global_coord(label, unitig_id_a + 1) - get_global_coord(label, unitig_id_a));
+        } else {
+            traversal_stack.clear();
         }
-    });
+
+        while (traversal_stack.size()) {
+            auto [u_id, n_steps, dists] = std::move(traversal_stack.back());
+            traversal_stack.pop_back();
+
+            adjacent_outgoing_unitigs(label, u_id, [&](size_t next_u_id, int64_t len) {
+                if (next_u_id == unitig_id_a) {
+                    for (int64_t d : dists) {
+                        cycle_lengths.emplace_back(d);
+                    }
+                    return;
+                }
+
+                auto next_info = get_chain_info(label, get_unitig_back(label, next_u_id));
+                const auto &[next_unitig_id, next_sb_id, next_chain_id] = next_info.first;
+                const auto &[next_global_coord, next_ds_from_start, next_ds_to_end] = next_info.second;
+
+                if (next_chain_id == chain_id_a) {
+                    for (int64_t d : dists) {
+                        cycle_lengths.emplace_back(d);
+                    }
+                    return;
+                }
+
+                if (n_steps + 1 >= max_steps)
+                    return;
+
+                auto &next_dists = std::get<2>(traversal_stack.emplace_back(next_chain_id, n_steps + 1, std::vector<int64_t>{}));
+                if (next_ds_to_end.size()) {
+                    for (int64_t dend : next_ds_to_end) {
+                        for (int64_t d : dists) {
+                            next_dists.emplace_back(dend + d);
+                        }
+                    }
+                } else if (next_ds_from_start.empty()) {
+                    for (int64_t d : dists) {
+                        next_dists.emplace_back(len + d);
+                    }
+                } else {
+                    traversal_stack.pop_back();
+                }
+            });
+        }
+    }
+
+    // logger->info("#cycles: {}", cycle_lengths.size());
 
     std::vector<int64_t> dists;
 
@@ -500,22 +548,28 @@ void ColumnPathIndex::call_distances(const Label &label,
         }
     } else {
         // traverse normally
-        if ((chain_id_a != unitig_id_a || sb_id_a != unitig_id_a) && ds_to_end_a.empty())
-            return;
-
-        size_t cycle_target = chain_id_a ? chain_id_a : (sb_id_a ? sb_id_a : unitig_id_a);
-        int64_t coord_offset_a = get_global_coord(label, cycle_target + 1)
-            - (chain_id_a || sb_id_a ? get_global_coord(label, cycle_target) : global_coord_a);
-        int64_t coord_offset_b = get_global_coord(label, unitig_id_b + 1) - global_coord_b;
         std::vector<std::tuple<size_t, int64_t, size_t>> traversal_stack;
-        traversal_stack.emplace_back(cycle_target,
-                                     coord_offset_a - coord_offset_b,
-                                     0);
+        if (chain_id_a == unitig_id_a) {
+            int64_t coord_offset_b = get_global_coord(label, unitig_id_b + 1) - global_coord_b;
+            traversal_stack.emplace_back(
+                unitig_id_a,
+                get_global_coord(label, unitig_id_a + 1) - global_coord_a - coord_offset_b,
+                0
+            );
+        } else if (ds_to_end_a.size()) {
+            int64_t coord_offset_b = get_global_coord(label, unitig_id_b + 1) - global_coord_b;
+            traversal_stack.emplace_back(
+                chain_id_a,
+                get_global_coord(label, unitig_id_a) - global_coord_a - coord_offset_b,
+                0
+            );
+        }
+
         while (traversal_stack.size()) {
             auto [u_id, dist, n_steps] = traversal_stack.back();
             traversal_stack.pop_back();
 
-            if (u_id == sb_id_b || n_steps >= max_steps || dist > max_distance)
+            if (n_steps >= max_steps || dist > max_distance)
                 continue;
 
             adjacent_outgoing_unitigs(label, u_id, [&](size_t next_u_id, int64_t len) {
@@ -543,6 +597,7 @@ void ColumnPathIndex::call_distances(const Label &label,
         return;
 
     tsl::hopscotch_set<int64_t> seen_lengths;
+    seen_lengths.emplace(0);
     bool inserted = true;
     while (inserted) {
         inserted = false;
@@ -1244,7 +1299,7 @@ PathIndex<PathStorage, PathBoundaries, SuperbubbleIndicator, SuperbubbleStorage>
     }, get_num_threads());
 
     num_unitigs_ = boundaries.size() - 1;
-    logger->info("Indexed {} unitigs", num_unitigs_);
+    // logger->info("Indexed {} unitigs", num_unitigs_);
 
     // enumerate superbubbles
     {

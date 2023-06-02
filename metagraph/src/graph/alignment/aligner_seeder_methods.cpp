@@ -357,7 +357,7 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
     }
 }
 
-auto MEMSeeder::get_seeds() const -> std::vector<Seed> {
+auto UniMEMSeeder::get_seeds() const -> std::vector<Seed> {
     size_t k = graph_.get_k();
 
     if (k >= config_.max_seed_length)
@@ -366,60 +366,36 @@ auto MEMSeeder::get_seeds() const -> std::vector<Seed> {
     if (num_matching_ < config_.min_exact_match * query_.size())
         return {};
 
-    std::vector<uint8_t> query_node_flags(query_nodes_.size(), 0);
-    for (size_t i = 0; i < query_node_flags.size(); ++i) {
-        if (query_nodes_[i] != DeBruijnGraph::npos) {
-            // the second bit indicates that a node has been found, while the
-            // first bit indicates if the node is a maximal exact match terminus
-            query_node_flags[i] = 2 |
-                (i + 1 == query_nodes_.size()
-                    || query_nodes_[i + 1] == DeBruijnGraph::npos
-                    || get_mem_terminator()[query_nodes_[i]]);
-
-        }
-    }
-
     std::vector<Seed> seeds;
-
-    // find start of MEM
-    auto it = query_node_flags.begin();
-    while ((it = std::find_if(it, query_node_flags.end(),
-                              [](uint8_t flags) { return flags & 2; }))
-            != query_node_flags.end()) {
-        // find end of MEM
-        auto next = std::find_if(
-            it, query_node_flags.end(),
-            [](uint8_t flags) { return (flags & 1) == 1 || (flags & 2) == 0; }
-        );
-
-        if (next != query_node_flags.end() && ((*next) & 2))
-            ++next;
-
-        assert(next > it);
-        assert(next <= query_node_flags.end());
-
-        size_t i = it - query_node_flags.begin();
-        assert(it == query_node_flags.end()
-                || query_nodes_[i] != DeBruijnGraph::npos);
-
-        size_t mem_length = (next - it) + k - 1;
-        assert(i + mem_length <= query_.size());
-
-        if (mem_length >= config_.min_seed_length) {
-            const char *begin_it = query_.data() + i;
-            auto node_begin_it = query_nodes_.begin() + i;
-            auto node_end_it = node_begin_it + (next - it);
-            assert(std::find(node_begin_it, node_end_it, DeBruijnGraph::npos)
-                    == node_end_it);
-
-            seeds.emplace_back(std::string_view(begin_it, mem_length),
-                               std::vector<node_index>{ node_begin_it, node_end_it },
-                               orientation_, 0, i, query_.size() - i - mem_length);
+    bool start_new = true;
+    for (size_t i = 0; i < query_nodes_.size(); ++i) {
+        if (!query_nodes_[i]) {
+            start_new = true;
+            continue;
         }
 
-        it = next;
+        if (start_new || graph_.has_single_incoming(query_nodes_[i])) {
+            seeds.emplace_back(std::string_view(query_.begin() + i, k),
+                               std::vector<node_index> { query_nodes_[i] },
+                               orientation_, 0, i, query_.size() - i - k);
+
+            start_new = !graph_.has_single_outgoing(query_nodes_[i]);
+        } else {
+            assert(seeds.size());
+            seeds.back().expand({ query_nodes_[i] });
+            start_new |= graph_.has_multiple_outgoing(query_nodes_[i]);
+        }
     }
 
+#ifndef NDEBUG
+    for (const auto &seed : seeds) {
+        const auto &nodes = seed.get_nodes();
+        for (size_t i = 1; i + 1 < nodes.size(); ++i) {
+            assert(graph_.has_single_incoming(nodes[i])
+                    && graph_.has_single_outgoing(nodes[i]));
+        }
+    }
+#endif
     return seeds;
 }
 

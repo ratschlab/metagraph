@@ -62,7 +62,7 @@ void chain_anchors(const DBGAlignerConfig &config,
     ChainScores<Anchor> chain_scores;
     chain_scores.reserve(anchors_end - anchors_begin);
     for (auto it = anchors_begin; it != anchors_end; ++it) {
-        chain_scores.emplace_back(it->get_score(config), anchors_end, it->get_clipping());
+        chain_scores.emplace_back(it->get_score(config), anchors_end, std::numeric_limits<size_t>::max());
         if (it != anchors_begin && (it - 1)->get_orientation() != it->get_orientation()) {
             assert(it->get_orientation());
             orientation_change = it;
@@ -101,6 +101,9 @@ void chain_anchors(const DBGAlignerConfig &config,
                 anchor_connector(*i, b, j, i_end, chain_scores + (j - anchors_begin),
                     [&](score_t score, const Anchor* last, size_t dist) {
                         assert(last != i);
+                        // common::logger->info("Try to connect2 {} -> {}\t{},{} vs. {},{}",
+                        //     Alignment(*i, config), Alignment(*last, config),
+                        //     score,dist,max_score,best_dist);
                         if (std::tie(score, best_dist) > std::tie(max_score, dist)) {
                             max_score = score;
                             best_last = last;
