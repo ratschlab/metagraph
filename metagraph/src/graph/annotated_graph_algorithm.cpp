@@ -469,109 +469,105 @@ void assemble_with_coordinates(size_t k,
     sdsl::bit_vector in_superbubble(num_unitigs, false);
     sdsl::bit_vector is_superbubble_start(num_unitigs, false);
     std::vector<std::pair<size_t, VectorMap<size_t, std::pair<std::vector<int64_t>, std::vector<int64_t>>>>> superbubbles(unitigs.size());
+
     for (size_t i = 0; i < unitigs.size(); ++i) {
-        auto &[terminus, seens] = superbubbles[i];
+        // topologically sort the subgraph starting at unitig i using Kahn's algorithm
+        auto &[terminus, visited] = superbubbles[i];
+        assert(visited.empty());
         terminus = std::numeric_limits<size_t>::max();
-
-        tsl::hopscotch_set<size_t> visited;
-        std::vector<std::pair<size_t, size_t>> traversal_stack;
-        traversal_stack.emplace_back(i, 0);
-        seens[i].first.emplace_back(0);
-        // std::cerr << "starting at\t" << unitigs[i].first << std::endl;
-
-        while (traversal_stack.size()) {
-            auto [unitig_id, dist] = traversal_stack.back();
-            traversal_stack.pop_back();
-
-            const auto &[unitig, unipath] = unitigs[unitig_id];
-            // std::cerr << "\tvisiting\t" << unitig << std::endl;
-            node_index back = unipath.back();
-            size_t length = unipath.size();
-
-            bool found_cycle = false;
-            size_t num_children = 0;
-            dbg.adjacent_outgoing_nodes(back, [&](node_index next) {
-                if (found_cycle)
-                    return;
-
-                ++num_children;
-
-                size_t next_id = node_to_unitig[next];
-                // std::cerr << "\tseen\t" << unitigs[next_id].first << std::endl;
-                if (next_id == i || unitig_id == next_id) {
-                    // std::cerr << "\tfound cycle" << std::endl;
-                    found_cycle = true;
-                    traversal_stack.clear();
-                    return;
-                }
-
-                seens[next_id].first.emplace_back(dist + length);
-                bool all_visited = true;
-                dbg.adjacent_incoming_nodes(next, [&](node_index sibling) {
-                    size_t sibling_id = node_to_unitig[sibling];
-                    if (sibling_id == unitig_id)
-                        return;
-
-                    if (all_visited && !visited.count(sibling_id))
-                        all_visited = false;
-                });
-
-                if (all_visited)
-                    traversal_stack.emplace_back(next_id, dist + length);
-            });
-
-            if (!num_children) {
-                // std::cerr << "\tfound dead end" << std::endl;
-                seens.clear();
-                break;
-            }
-
-            visited.emplace(unitig_id);
-
-            if (traversal_stack.size() == 1 && visited.size() + 1 == seens.size()) {
+        {
+            auto seens = visited;
+            std::vector<std::pair<size_t, size_t>> traversal_stack;
+            traversal_stack.emplace_back(i, 0);
+            seens[i].first.emplace_back(0);
+            tsl::hopscotch_map<size_t, tsl::hopscotch_set<size_t>> edges_seen;
+            while (traversal_stack.size()) {
                 auto [unitig_id, dist] = traversal_stack.back();
                 traversal_stack.pop_back();
-                terminus = unitig_id;
+                visited[unitig_id] = seens[unitig_id];
+                const auto &[unitig, unipath] = unitigs[unitig_id];
+                node_index back = unipath.back();
+                size_t length = unipath.size();
+                size_t num_children = 0;
+                bool found_cycle = false;
+                dbg.adjacent_outgoing_nodes(back, [&](node_index next) {
+                    size_t next_id = node_to_unitig[next];
+                    if (found_cycle || next_id == unitig_id || next_id == i) {
+                        found_cycle = true;
+                        return;
+                    }
+
+                    ++num_children;
+
+                    seens[next_id].first.emplace_back(dist + length);
+                    bool inserted = edges_seen[unitig_id].emplace(next_id).second;
+                    std::ignore = inserted;
+                    assert(inserted);
+
+                    bool all_visited = true;
+                    dbg.adjacent_incoming_nodes(next, [&](node_index sibling) {
+                        if (!all_visited)
+                            return;
+
+                        size_t sibling_id = node_to_unitig[sibling];
+                        all_visited &= (edges_seen.count(sibling_id)
+                                        && edges_seen[sibling_id].count(next_id));
+                    });
+
+                    if (all_visited)
+                        traversal_stack.emplace_back(next_id, dist + length);
+                });
+
+                if (found_cycle || !num_children) {
+                    visited.clear();
+                    break;
+                }
+
+                if (traversal_stack.size() == 1 && seens.size() == visited.size() + 1) {
+                    auto [unitig_id, dist] = traversal_stack.back();
+                    traversal_stack.pop_back();
+                    dbg.adjacent_outgoing_nodes(unitigs[unitig_id].second.back(),
+                        [&](node_index next) {
+                            if (visited.size()) {
+                                size_t next_id = node_to_unitig[next];
+                                if (next_id == i)
+                                    visited.clear();
+                            }
+                        }
+                    );
+
+                    if (visited.size()) {
+                        is_superbubble_start[i] = true;
+                        terminus = unitig_id;
+                        visited[terminus] = seens[terminus];
+                        assert(visited.size() == seens.size());
+                    }
+
+                    assert(traversal_stack.empty());
+                }
+            }
+
+            if (visited.empty() || terminus == std::numeric_limits<size_t>::max()) {
+                visited.clear();
+                continue;
             }
         }
 
-        if (terminus == std::numeric_limits<size_t>::max()) {
-            // std::cerr << "\tno terminus found" << std::endl;
-            seens.clear();
-            continue;
-        }
+        assert(terminus < num_unitigs);
+        assert(visited.size());
+        assert(visited.size() >= 4);
 
-        dbg.adjacent_outgoing_nodes(unitigs[terminus].second.back(), [&](node_index next) {
-            size_t next_id = node_to_unitig[next];
-            if (next_id == i) {
-                // std::cerr << "\tfound cycle" << std::endl;
-                seens.clear();
-            }
-        });
-
-        if (seens.empty())
-            continue;
-
-        is_superbubble_start[i] = true;
-
-        // std::cerr << "\tfound superbubble" << std::endl;
-
-        assert(seens.size() >= 4);
-
-        for (auto it = seens.begin(); it != seens.end(); ++it) {
+        for (auto it = visited.begin(); it != visited.end(); ++it) {
             auto &d = it.value().first;
             in_superbubble[it->first] = true;
             std::sort(d.begin(), d.end());
             d.erase(std::unique(d.begin(), d.end()), d.end());
         }
 
-        // logger->info("Found superbubble with {} unitigs with widths {}", seens.size(),
-        //     fmt::join(seens[terminus].first, ","));
-
-        if (seens[terminus].first.size() == 1) {
+        if (visited[terminus].first.size() == 1) {
             // easy case
-            int64_t sb_size = seens[terminus].first[0] + 1;
-            for (auto it = seens.begin(); it != seens.end(); ++it) {
+            int64_t sb_size = visited[terminus].first[0] + 1;
+            for (auto it = visited.begin(); it != visited.end(); ++it) {
                 auto &[d, de] = it.value();
                 assert(d.size());
                 de.reserve(d.size());
@@ -584,52 +580,36 @@ void assemble_with_coordinates(size_t k,
             }
         } else {
             // hard case, multiple ways to get to the end
-            assert(seens.count(terminus));
-            std::vector<std::tuple<size_t, tsl::hopscotch_set<int64_t>>> traversal;
-            traversal.emplace_back(terminus, tsl::hopscotch_set<int64_t>{ -1 });
+            assert(visited.count(terminus));
+            std::vector<std::tuple<size_t,
+                                   tsl::hopscotch_set<int64_t>,
+                                   tsl::hopscotch_set<int64_t>>> traversal;
+            traversal.emplace_back(terminus,
+                                   tsl::hopscotch_set<int64_t>(visited[terminus].first.begin(),
+                                                               visited[terminus].first.end()),
+                                   tsl::hopscotch_set<int64_t>{ -1 });
             while (traversal.size()) {
-                auto [u_id, d_end] = std::move(traversal.back());
+                auto [u_id, d_begin, d_end] = std::move(traversal.back());
                 traversal.pop_back();
+                assert(d_begin.size());
                 assert(d_end.size());
 
-                assert(seens.count(u_id));
-                assert(std::is_sorted(seens[u_id].second.begin(), seens[u_id].second.end()));
+                assert(visited.count(u_id));
+                assert(std::is_sorted(visited[u_id].second.begin(), visited[u_id].second.end()));
 
                 std::vector<int64_t> d_end_v(d_end.begin(), d_end.end());
                 std::sort(d_end_v.begin(), d_end_v.end());
 
-                if (seens[u_id].second.size()) {
+                if (visited[u_id].second.size()) {
                     std::vector<int64_t> d_end_union;
-                    d_end_union.reserve(seens[u_id].second.size() + d_end.size());
+                    d_end_union.reserve(visited[u_id].second.size() + d_end.size());
                     std::set_union(d_end_v.begin(), d_end_v.end(),
-                                   seens[u_id].second.begin(), seens[u_id].second.end(),
+                                   visited[u_id].second.begin(), visited[u_id].second.end(),
                                    std::back_inserter(d_end_union));
-                    std::swap(d_end_union, seens[u_id].second);
+                    std::swap(d_end_union, visited[u_id].second);
                 } else {
-                    std::swap(d_end_v, seens[u_id].second);
+                    std::swap(d_end_v, visited[u_id].second);
                 }
-
-#ifndef NDEBUG
-                bool found = false;
-                for (int64_t dend : seens[u_id].second) {
-                    if (found)
-                        break;
-
-                    for (int64_t dstart : seens[u_id].first) {
-                        if (found)
-                            break;
-
-                        for (int64_t dtstart : seens[terminus].first) {
-                            if (dtstart == dstart + dend + 1) {
-                                found = true;
-                                break;
-                            }
-                        }
-                    }
-                }
-
-                assert(found);
-#endif
 
                 if (u_id == i)
                     continue;
@@ -638,27 +618,38 @@ void assemble_with_coordinates(size_t k,
                 dbg.adjacent_incoming_nodes(front, [&](node_index prev) {
                     size_t prev_id = node_to_unitig[prev];
                     size_t length = unitigs[prev_id].second.size();
-                    auto &[p, d_end_prev] = traversal.emplace_back(prev_id, tsl::hopscotch_set<int64_t>{});
-                    for (int64_t dde : d_end) {
-                        d_end_prev.emplace(dde - length);
+                    auto &[p, d_begin_prev, d_end_prev] = traversal.emplace_back(
+                        prev_id,
+                        tsl::hopscotch_set<int64_t>{},
+                        tsl::hopscotch_set<int64_t>{}
+                    );
+                    const auto &d_prev = visited[prev_id].first;
+                    for (int64_t dd_prev : d_prev) {
+                        if (!d_begin.count(dd_prev + length))
+                            continue;
+
+                        d_begin_prev.emplace(dd_prev);
+                        for (int64_t dde : d_end) {
+                            d_end_prev.emplace(dde - length);
+                        }
                     }
                 });
             }
 
-            assert(std::all_of(seens.begin(), seens.end(), [&](const auto &a) {
+            assert(std::all_of(visited.begin(), visited.end(), [&](const auto &a) {
                 return a.second.first.size();
             }));
 
-            assert(std::all_of(seens.begin(), seens.end(), [&](const auto &a) {
+            assert(std::all_of(visited.begin(), visited.end(), [&](const auto &a) {
                 return std::all_of(a.second.first.begin(), a.second.first.end(),
                         [&](int64_t c) { return c >= 0; });
             }));
 
-            assert(std::all_of(seens.begin(), seens.end(), [&](const auto &a) {
+            assert(std::all_of(visited.begin(), visited.end(), [&](const auto &a) {
                 return a.second.second.size();
             }));
 
-            assert(std::all_of(seens.begin(), seens.end(), [&](const auto &a) {
+            assert(std::all_of(visited.begin(), visited.end(), [&](const auto &a) {
                 return std::all_of(a.second.second.begin(), a.second.second.end(),
                         [&](int64_t c) { return c < 0; });
             }));
