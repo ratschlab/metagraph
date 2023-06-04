@@ -136,6 +136,7 @@ void ColumnPathIndex::annotate_columns(std::shared_ptr<DeBruijnGraph> graph,
                         sec_labels.emplace_back(UNITIG_FRONT_TAG + label);
                     }
                     auto coord_split = utils::split_string(local_coords, ";");
+                    assert(coord_split.size() == 2);
 
                     for (const auto &c : utils::split_string(coord_split[0], ",")) {
                         data.emplace_back(seq, sec_labels, atoll(c.c_str()));

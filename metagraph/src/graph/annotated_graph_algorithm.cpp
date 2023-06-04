@@ -1,5 +1,7 @@
 #include "annotated_graph_algorithm.hpp"
 
+#include <algorithm>
+
 #include "common/logger.hpp"
 #include "common/vectors/vector_algorithm.hpp"
 #include "common/vectors/bitmap.hpp"
@@ -582,6 +584,7 @@ void assemble_with_coordinates(size_t k,
             }
         } else {
             // hard case, multiple ways to get to the end
+            assert(seens.count(terminus));
             std::vector<std::tuple<size_t, tsl::hopscotch_set<int64_t>, tsl::hopscotch_set<int64_t>>> traversal;
             traversal.emplace_back(terminus,
                                    tsl::hopscotch_set<int64_t>(seens[terminus].first.begin(),
@@ -590,12 +593,36 @@ void assemble_with_coordinates(size_t k,
             while (traversal.size()) {
                 auto [u_id, d_begin, d_end] = std::move(traversal.back());
                 traversal.pop_back();
+                assert(d_begin.size());
                 assert(d_end.size());
-                assert(std::all_of(d_end.begin(), d_end.end(), [&](int64_t d) { return d < 0; }));
-                seens[u_id].second = std::vector<int64_t>(d_end.begin(), d_end.end());
-                seens[u_id].second.erase(std::unique(seens[u_id].second.begin(),
-                                                     seens[u_id].second.end()),
-                                         seens[u_id].second.end());
+
+                assert(seens.count(u_id));
+                assert(std::is_sorted(seens[u_id].first.begin(), seens[u_id].first.end()));
+                assert(std::is_sorted(seens[u_id].second.begin(), seens[u_id].second.end()));
+#ifndef NDEBUG
+                std::vector<int64_t> d_begin_v(d_begin.begin(), d_begin.end());
+                std::sort(d_begin_v.begin(), d_begin_v.end());
+                std::vector<int64_t> inter;
+                std::set_intersection(d_begin_v.begin(), d_begin_v.end(),
+                                      seens[u_id].first.begin(), seens[u_id].first.end(),
+                                      std::back_inserter(inter));
+                assert(std::equal(inter.begin(), inter.end(),
+                                  d_begin_v.begin(), d_begin_v.end()));
+#endif
+
+                std::vector<int64_t> d_end_v(d_end.begin(), d_end.end());
+                std::sort(d_end_v.begin(), d_end_v.end());
+
+                if (seens[u_id].second.size()) {
+                    std::vector<int64_t> d_end_union;
+                    d_end_union.reserve(seens[u_id].second.size() + d_end.size());
+                    std::set_union(d_end_v.begin(), d_end_v.end(),
+                                   seens[u_id].second.begin(), seens[u_id].second.end(),
+                                   std::back_inserter(d_end_union));
+                    std::swap(d_end_union, seens[u_id].second);
+                } else {
+                    std::swap(d_end_v, seens[u_id].second);
+                }
 
                 if (u_id == i)
                     continue;
@@ -605,8 +632,11 @@ void assemble_with_coordinates(size_t k,
                     size_t prev_id = node_to_unitig[prev];
                     size_t length = unitigs[prev_id].second.size();
                     auto &[p, d_begin_prev, d_end_prev] = traversal.emplace_back(prev_id, tsl::hopscotch_set<int64_t>{}, tsl::hopscotch_set<int64_t>{});
+                    assert(seens.count(prev_id));
                     const auto &d = seens[prev_id].first;
+                    assert(d.size());
                     for (int64_t dd : d) {
+                        assert(dd || prev_id == i);
                         if (d_begin.count(dd + length)) {
                             d_begin_prev.emplace(dd);
                             for (int64_t dde : d_end) {
@@ -621,10 +651,20 @@ void assemble_with_coordinates(size_t k,
             }
 
             assert(std::all_of(seens.begin(), seens.end(), [&](const auto &a) {
-                return a.second.first.size() && a.second.second.size()
-                    && std::all_of(a.second.first.begin(), a.second.first.end(),
-                        [&](int64_t c) { return c >= 0; })
-                    && std::all_of(a.second.second.begin(), a.second.second.end(),
+                return a.second.first.size();
+            }));
+
+            assert(std::all_of(seens.begin(), seens.end(), [&](const auto &a) {
+                return std::all_of(a.second.first.begin(), a.second.first.end(),
+                        [&](int64_t c) { return c >= 0; });
+            }));
+
+            assert(std::all_of(seens.begin(), seens.end(), [&](const auto &a) {
+                return a.second.second.size();
+            }));
+
+            assert(std::all_of(seens.begin(), seens.end(), [&](const auto &a) {
+                return std::all_of(a.second.second.begin(), a.second.second.end(),
                         [&](int64_t c) { return c < 0; });
             }));
         }
@@ -734,6 +774,8 @@ void assemble_with_coordinates(size_t k,
                 std::sort(de_chain.begin(), de_chain.end());
                 de_chain.erase(std::unique(de_chain.begin(), de_chain.end()), de_chain.end());
                 // logger->info("U:\t{}\t{};{}\t{};{}", unitig, fmt::join(d.first, ","), fmt::join(d.second, ","), fmt::join(d_chain, ","), fmt::join(de_chain, ","));
+                assert(d_chain.size());
+                assert(de_chain.size());
                 callback(unitig, term_unitig_id, term_id, d_chain, de_chain);
             }
         }
@@ -753,6 +795,8 @@ void assemble_with_coordinates(size_t k,
         std::sort(d_chain.begin(), d_chain.end());
         d_chain.erase(std::unique(d_chain.begin(), d_chain.end()), d_chain.end());
         // logger->info("U:\t{}\t{};{}\t{};{}", unitig, fmt::join(d.first, ","), fmt::join(d.second, ","), fmt::join(d_chain, ","), fmt::join(d.second, ","));
+        assert(d_chain.size());
+        assert(d.second.size());
         callback(unitig, cur_unitig_id, term_id, d_chain, d.second);
     }
 }
