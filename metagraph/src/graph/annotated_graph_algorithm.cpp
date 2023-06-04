@@ -585,30 +585,15 @@ void assemble_with_coordinates(size_t k,
         } else {
             // hard case, multiple ways to get to the end
             assert(seens.count(terminus));
-            std::vector<std::tuple<size_t, tsl::hopscotch_set<int64_t>, tsl::hopscotch_set<int64_t>>> traversal;
-            traversal.emplace_back(terminus,
-                                   tsl::hopscotch_set<int64_t>(seens[terminus].first.begin(),
-                                                               seens[terminus].first.end()),
-                                   tsl::hopscotch_set<int64_t>{ -1 });
+            std::vector<std::tuple<size_t, tsl::hopscotch_set<int64_t>>> traversal;
+            traversal.emplace_back(terminus, tsl::hopscotch_set<int64_t>{ -1 });
             while (traversal.size()) {
-                auto [u_id, d_begin, d_end] = std::move(traversal.back());
+                auto [u_id, d_end] = std::move(traversal.back());
                 traversal.pop_back();
-                assert(d_begin.size());
                 assert(d_end.size());
 
                 assert(seens.count(u_id));
-                assert(std::is_sorted(seens[u_id].first.begin(), seens[u_id].first.end()));
                 assert(std::is_sorted(seens[u_id].second.begin(), seens[u_id].second.end()));
-#ifndef NDEBUG
-                std::vector<int64_t> d_begin_v(d_begin.begin(), d_begin.end());
-                std::sort(d_begin_v.begin(), d_begin_v.end());
-                std::vector<int64_t> inter;
-                std::set_intersection(d_begin_v.begin(), d_begin_v.end(),
-                                      seens[u_id].first.begin(), seens[u_id].first.end(),
-                                      std::back_inserter(inter));
-                assert(std::equal(inter.begin(), inter.end(),
-                                  d_begin_v.begin(), d_begin_v.end()));
-#endif
 
                 std::vector<int64_t> d_end_v(d_end.begin(), d_end.end());
                 std::sort(d_end_v.begin(), d_end_v.end());
@@ -624,6 +609,28 @@ void assemble_with_coordinates(size_t k,
                     std::swap(d_end_v, seens[u_id].second);
                 }
 
+#ifndef NDEBUG
+                bool found = false;
+                for (int64_t dend : seens[u_id].second) {
+                    if (found)
+                        break;
+
+                    for (int64_t dstart : seens[u_id].first) {
+                        if (found)
+                            break;
+
+                        for (int64_t dtstart : seens[terminus].first) {
+                            if (dtstart == dstart + dend + 1) {
+                                found = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                assert(found);
+#endif
+
                 if (u_id == i)
                     continue;
 
@@ -631,22 +638,10 @@ void assemble_with_coordinates(size_t k,
                 dbg.adjacent_incoming_nodes(front, [&](node_index prev) {
                     size_t prev_id = node_to_unitig[prev];
                     size_t length = unitigs[prev_id].second.size();
-                    auto &[p, d_begin_prev, d_end_prev] = traversal.emplace_back(prev_id, tsl::hopscotch_set<int64_t>{}, tsl::hopscotch_set<int64_t>{});
-                    assert(seens.count(prev_id));
-                    const auto &d = seens[prev_id].first;
-                    assert(d.size());
-                    for (int64_t dd : d) {
-                        assert(dd || prev_id == i);
-                        if (d_begin.count(dd + length)) {
-                            d_begin_prev.emplace(dd);
-                            for (int64_t dde : d_end) {
-                                d_end_prev.emplace(dde - length);
-                            }
-                        }
+                    auto &[p, d_end_prev] = traversal.emplace_back(prev_id, tsl::hopscotch_set<int64_t>{});
+                    for (int64_t dde : d_end) {
+                        d_end_prev.emplace(dde - length);
                     }
-
-                    if (d_begin_prev.empty())
-                        traversal.pop_back();
                 });
             }
 
