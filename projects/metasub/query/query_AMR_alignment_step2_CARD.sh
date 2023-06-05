@@ -28,4 +28,4 @@ if [ ! -f ${query} ]
 then
     python tsv2fasta.py ${query%fa}tsv > $query
 fi
-echo "/usr/bin/time -v $metagraph query -i $graph -a ${annotation} -p ${threads} --count-labels --discovery-fraction 0.1 ${query} > $out" | bsub -J ms_q_amr${K} -oo ${log} -We 24:00 -n $threads -M ${mem} -R "rusage[mem=${pmem}]" -R "span[hosts=1]"
+echo "/usr/bin/time -v $metagraph query -i $graph -a ${annotation} -p ${threads} --query-mode matches --min-kmers-fraction-label 0.1 ${query} > $out" | bsub -J ms_q_amr${K} -oo ${log} -We 24:00 -n $threads -M ${mem} -R "rusage[mem=${pmem}]" -R "span[hosts=1]"

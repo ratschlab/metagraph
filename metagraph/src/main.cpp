@@ -44,9 +44,6 @@ int main(int argc, char *argv[]) {
         case Config::ANNOTATE:
             return cli::annotate_graph(config.get());
 
-        case Config::ANNOTATE_COORDINATES:
-            return cli::annotate_graph_with_genome_coordinates(config.get());
-
         case Config::MERGE_ANNOTATIONS:
             return cli::merge_annotation(config.get());
 

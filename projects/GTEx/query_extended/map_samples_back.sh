@@ -51,5 +51,5 @@ do
         echo No fastq file for $uuid
         continue
     fi
-    echo "(/usr/bin/time -v $metagraph query --discovery-fraction 0.0 --count-labels -v -i $graph -a $anno -p $threads $fq1 $fq2 | gzip > $outfile) && touch $donefile" | bsub -M $mem -n $threads -R "rusage[mem=${pmem}]" -We 48:00 -n 1 -J map_gtex -oo $logfile  #-R "select[model==XeonGold_6150]"
+    echo "(/usr/bin/time -v $metagraph query --min-kmers-fraction-label 0.0 --query-mode matches -v -i $graph -a $anno -p $threads $fq1 $fq2 | gzip > $outfile) && touch $donefile" | bsub -M $mem -n $threads -R "rusage[mem=${pmem}]" -We 48:00 -n 1 -J map_gtex -oo $logfile  #-R "select[model==XeonGold_6150]"
 done < <(shuf -n 10 --random-source $metadata $metadata | tr $'\t' ',')

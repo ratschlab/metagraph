@@ -9,6 +9,7 @@
 #include "graph/representation/succinct/boss.hpp"
 #include "graph/representation/base/sequence_graph.hpp"
 #include "graph/alignment/aligner_config.hpp"
+#include "cli/query.hpp"
 
 
 namespace mtg {
@@ -40,17 +41,13 @@ class Config {
     bool kmers_in_single_form = false;
     bool initialize_bloom = false;
     bool count_kmers = false;
-    bool print_signature = false;
     bool query_presence = false;
-    bool query_counts = false;
-    bool query_coords = false;
     bool verbose_output = false;
     bool filter_present = false;
     bool dump_text_anno = false;
     bool sparse = false;
-    bool fast = false;
+    bool subsample_rows = false;
     bool batch_align = false;
-    bool count_labels = false;
     bool suppress_unlabeled = false;
     bool inplace = false;
     bool clear_dummy = false;
@@ -107,7 +104,7 @@ class Config {
     unsigned int smoothing_window = 1;  // no smoothing by default
     unsigned int num_kmers_in_seq = 0;  // assume all input reads have this length
 
-    unsigned long long int query_batch_size_in_bytes = 100'000'000;
+    unsigned long long int query_batch_size = 100'000'000;
     unsigned long long int num_rows_subsampled = 1'000'000;
     unsigned long long int num_singleton_kmers = 0;
     unsigned long long int max_hull_depth = -1;  // the default is a function of input
@@ -188,7 +185,6 @@ class Config {
         ALIGN,
         STATS,
         ANNOTATE,
-        ANNOTATE_COORDINATES,
         MERGE_ANNOTATIONS,
         TRANSFORM,
         TRANSFORM_ANNOTATION,
@@ -250,6 +246,10 @@ class Config {
     graph::DeBruijnGraph::Mode graph_mode = graph::DeBruijnGraph::BASIC;
     static std::string graphmode_to_string(graph::DeBruijnGraph::Mode mode);
     static graph::DeBruijnGraph::Mode string_to_graphmode(const std::string &string);
+
+    QueryMode query_mode = LABELS;
+    static std::string querymode_to_string(QueryMode mode);
+    static QueryMode string_to_querymode(const std::string &string);
 
     void print_usage(const std::string &prog_name,
                      IdentityType identity = NO_IDENTITY);

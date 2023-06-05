@@ -276,7 +276,7 @@ std::string format_alignment(const std::string &header,
         }
 
         if (paths.empty()) {
-            Json::Value json_line = Alignment().to_json(graph.get_k(), secondary, header);
+            Json::Value json_line = graph::align::Alignment().to_json(graph.get_k(), secondary, header);
             sout += fmt::format("{}\n", Json::writeString(builder, json_line));
         }
     } else {
@@ -457,7 +457,7 @@ int align_to_graph(Config *config) {
 
         std::ostream *out = ofile ? ofile.get() : &std::cout;
 
-        const uint64_t batch_size = config->query_batch_size_in_bytes;
+        const uint64_t batch_size = config->query_batch_size;
 
         auto it = fasta_parser.begin();
         auto end = fasta_parser.end();
