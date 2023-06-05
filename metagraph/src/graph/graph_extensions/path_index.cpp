@@ -397,69 +397,6 @@ void ColumnPathIndex::call_distances(const Label &label,
     // logger->info("\t\tA: {},{},{},{}", unitig_id_a, sb_id_a, chain_id_a, global_coord_a);
     // logger->info("\t\tB: {},{},{},{}", unitig_id_b, sb_id_b, chain_id_b, global_coord_b);
 
-    std::vector<int64_t> cycle_lengths;
-
-    if (max_steps) {
-        std::vector<std::tuple<size_t, size_t, std::vector<int64_t>>> traversal_stack;
-        auto &init_dists = std::get<2>(traversal_stack.emplace_back(chain_id_a, 0, std::vector<int64_t>{}));
-        if (ds_to_end_a.size()) {
-            for (int64_t dstart : ds_from_start_a) {
-                for (int64_t dend : ds_to_end_a) {
-                    init_dists.emplace_back(dstart + dend);
-                }
-            }
-        } else if (ds_from_start_a.empty()) {
-            init_dists.emplace_back(get_global_coord(label, unitig_id_a + 1) - get_global_coord(label, unitig_id_a));
-        } else {
-            traversal_stack.clear();
-        }
-
-        while (traversal_stack.size()) {
-            auto [u_id, n_steps, dists] = std::move(traversal_stack.back());
-            traversal_stack.pop_back();
-
-            adjacent_outgoing_unitigs(label, u_id, [&](size_t next_u_id, int64_t len) {
-                if (next_u_id == unitig_id_a) {
-                    for (int64_t d : dists) {
-                        cycle_lengths.emplace_back(d);
-                    }
-                    return;
-                }
-
-                auto next_info = get_chain_info(label, get_unitig_back(label, next_u_id));
-                const auto &[next_unitig_id, next_sb_id, next_chain_id] = next_info.first;
-                const auto &[next_global_coord, next_ds_from_start, next_ds_to_end] = next_info.second;
-
-                if (next_chain_id == chain_id_a) {
-                    for (int64_t d : dists) {
-                        cycle_lengths.emplace_back(d);
-                    }
-                    return;
-                }
-
-                if (n_steps + 1 >= max_steps)
-                    return;
-
-                auto &next_dists = std::get<2>(traversal_stack.emplace_back(next_chain_id, n_steps + 1, std::vector<int64_t>{}));
-                if (next_ds_to_end.size()) {
-                    for (int64_t dend : next_ds_to_end) {
-                        for (int64_t d : dists) {
-                            next_dists.emplace_back(dend + d);
-                        }
-                    }
-                } else if (next_ds_from_start.empty()) {
-                    for (int64_t d : dists) {
-                        next_dists.emplace_back(len + d);
-                    }
-                } else {
-                    traversal_stack.pop_back();
-                }
-            });
-        }
-    }
-
-    // logger->info("#cycles: {}", cycle_lengths.size());
-
     std::vector<int64_t> dists;
 
     if (unitig_id_a == unitig_id_b) {
@@ -586,6 +523,75 @@ void ColumnPathIndex::call_distances(const Label &label,
     for (int64_t d : dists) {
         if (d > 0)
             callback(d);
+    }
+
+    if (dists.empty() || !max_steps)
+        return;
+
+    int64_t min_dist = *std::min_element(dists.begin(), dists.end());
+
+    std::vector<int64_t> cycle_lengths;
+
+    std::vector<std::tuple<size_t, size_t, std::vector<int64_t>>> traversal_stack;
+    auto &init_dists = std::get<2>(traversal_stack.emplace_back(chain_id_a, 0, std::vector<int64_t>{}));
+    if (ds_to_end_a.size()) {
+        for (int64_t dstart : ds_from_start_a) {
+            for (int64_t dend : ds_to_end_a) {
+                if (dstart + dend + min_dist <= max_distance)
+                    init_dists.emplace_back(dstart + dend);
+            }
+        }
+    } else if (ds_from_start_a.empty()) {
+        int64_t init_dist = get_global_coord(label, unitig_id_a + 1) - get_global_coord(label, unitig_id_a);
+        if (init_dist + min_dist <= max_distance)
+            init_dists.emplace_back(init_dist);
+    } else {
+        traversal_stack.clear();
+    }
+
+    while (traversal_stack.size()) {
+        auto [u_id, n_steps, dists] = std::move(traversal_stack.back());
+        traversal_stack.pop_back();
+
+        adjacent_outgoing_unitigs(label, u_id, [&](size_t next_u_id, int64_t len) {
+            if (next_u_id == unitig_id_a) {
+                for (int64_t d : dists) {
+                    cycle_lengths.emplace_back(d);
+                }
+                return;
+            }
+
+            auto next_info = get_chain_info(label, get_unitig_back(label, next_u_id));
+            const auto &[next_unitig_id, next_sb_id, next_chain_id] = next_info.first;
+            const auto &[next_global_coord, next_ds_from_start, next_ds_to_end] = next_info.second;
+
+            if (next_chain_id == chain_id_a) {
+                for (int64_t d : dists) {
+                    cycle_lengths.emplace_back(d);
+                }
+                return;
+            }
+
+            if (n_steps + 1 >= max_steps)
+                return;
+
+            auto &next_dists = std::get<2>(traversal_stack.emplace_back(next_chain_id, n_steps + 1, std::vector<int64_t>{}));
+            if (next_ds_to_end.size()) {
+                for (int64_t dend : next_ds_to_end) {
+                    for (int64_t d : dists) {
+                        if (dend + d + min_dist <= max_distance)
+                            next_dists.emplace_back(dend + d);
+                    }
+                }
+            } else if (next_ds_from_start.empty()) {
+                for (int64_t d : dists) {
+                    if (len + d + min_dist <= max_distance)
+                        next_dists.emplace_back(len + d);
+                }
+            } else {
+                traversal_stack.pop_back();
+            }
+        });
     }
 
     if (cycle_lengths.empty())

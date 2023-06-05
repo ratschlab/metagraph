@@ -740,7 +740,6 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
 
     std::unordered_multiset<Chain, ChainHash> chains;
     score_t last_chain_score = std::numeric_limits<score_t>::min();
-    score_t last_output_chain_score = std::numeric_limits<score_t>::min();
     auto flush_chains = [&]() {
         if (chains.empty())
             return;
@@ -761,20 +760,14 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                 logger->info("\t{} (dist: {})", aln, dist);
             }
 
-            if (!pick_chain && chain_score < last_output_chain_score) {
-                terminate = true;
+            if (!pick_chain)
                 return;
-            }
-
-            last_output_chain_score = std::max(chain_score, last_output_chain_score);
-
-            bool added = false;
 
             aligner.extend_chain(std::move(chain), extender, [&](Alignment&& aln) {
                 std::vector<Alignment> alns;
                 if (!aln.get_end_clipping()) {
                     DEBUG_LOG("\tAln:\t{}", aln);
-                    added |= aln.get_cigar().mark_exact_matches(matching_pos[orientation]);
+                    aln.get_cigar().mark_exact_matches(matching_pos[orientation]);
                     alns.emplace_back(std::move(aln));
                 } else {
                     alns = extender.get_extensions(aln, 0, true);
@@ -782,7 +775,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
 
                 for (auto&& ext : alns) {
                     if (!ext.get_clipping()) {
-                        added |= ext.get_cigar().mark_exact_matches(matching_pos[orientation]);
+                        ext.get_cigar().mark_exact_matches(matching_pos[orientation]);
                         DEBUG_LOG("\tAln:\t{}", ext);
                         alignments.emplace_back(std::move(ext));
                     } else {
@@ -793,15 +786,13 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                                                       query_size - aln.get_end_clipping());
                             }
 
-                            added |= aln.get_cigar().mark_exact_matches(matching_pos[orientation]);
+                            aln.get_cigar().mark_exact_matches(matching_pos[orientation]);
                             DEBUG_LOG("\tAln:\t{}", aln);
                             alignments.emplace_back(std::move(aln));
                         }, true, 0);
                     }
                 }
             }, true);
-
-            terminate |= score_too_low && !added;
         };
 
         auto it = chains.begin();
