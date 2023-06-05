@@ -156,8 +156,8 @@ std::string process_align_request(const std::string &received_message,
     if (!config.alignment_num_alternative_paths) {
         // TODO: better throw an exception and send an error response to the client
         logger->warn("[Server] Got invalid value of alignment_num_alternative_paths = {}."
-                     " The default value of 1 will be used instead...", config.alignment_num_alternative_paths);
-        config.alignment_num_alternative_paths = 1;
+                     " The default value of inf will be used instead...", config.alignment_num_alternative_paths);
+        config.alignment_num_alternative_paths = std::numeric_limits<size_t>::max();
     }
 
     config.alignment_min_exact_match

@@ -518,12 +518,6 @@ Config::Config(int argc, char *argv[]) {
         print_usage_and_exit = true;
     }
 
-    // only the best alignment is used in query
-    // |alignment_num_alternative_paths| must be set to 1
-    if (identity == QUERY && align_sequences
-                          && alignment_num_alternative_paths != 1)
-        print_usage_and_exit = true;
-
     if (identity == ALIGN && infbase.empty())
         print_usage_and_exit = true;
 
@@ -1063,7 +1057,7 @@ if (advanced) {
             fprintf(stderr, "\t   --align-only-forwards \t\t\tdo not align backwards from a seed on basic-mode graphs [off]\n");
             fprintf(stderr, "\t   --align-no-seed-complexity-filter \t\t\t\tdisable the filter for low-complexity seeds. [off]\n");
 }
-            fprintf(stderr, "\t   --align-alternative-alignments \t\tthe number of alternative paths to report per seed [1]\n");
+            fprintf(stderr, "\t   --align-alternative-alignments \t\tthe maxium number of paths to report per seed [inf]\n");
             fprintf(stderr, "\t   --align-chain \t\t\t\tconstruct seed chains before alignment. Useful for long error-prone reads. [off]\n");
             fprintf(stderr, "\t   --align-post-chain \t\t\tperform multiple local alignments and chain them together into a single alignment. Useful for long error-prone reads. [off]\n");
             fprintf(stderr, "\t         \t\t\t\t\t\tA '$' inserted into the reference sequence indicates a jump in the graph.\n");

@@ -288,7 +288,7 @@ target_include_directories(caches INTERFACE external-libraries/caches/include)
 
 add_library(eigen INTERFACE)
 target_include_directories(eigen INTERFACE external-libraries/eigen)
-target_compile_options(eigen INTERFACE -Wno-unused-but-set-variable)
+target_compile_options(eigen INTERFACE -Wno-unused-but-set-variable -Wno-unused-parameter)
 
 
 set(Boost_USE_STATIC_LIBS ON)
