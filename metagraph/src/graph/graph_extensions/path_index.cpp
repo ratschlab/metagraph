@@ -373,12 +373,6 @@ auto ColumnPathIndex::get_chain_info(const std::vector<node_index> &nodes) const
             if (!std::get<0>(chain_info))
                 continue;
 
-            // std::cerr << "foo\t" << std::get<0>(chain_info) << ","
-            //                      << std::get<1>(chain_info) << ","
-            //                      << std::get<2>(chain_info) << "\t"
-            //                      << std::get<1>(coord_info).size() << ","
-            //                      << std::get<2>(coord_info).size() << std::endl;
-
             assert((std::get<0>(chain_info) == std::get<1>(chain_info)
                     && std::get<0>(chain_info) == std::get<2>(chain_info))
                     || (std::get<1>(coord_info).size() && std::get<2>(coord_info).size()));

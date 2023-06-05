@@ -721,12 +721,14 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
         }
     }
 
+    logger->trace("Prefetching node coordinates");
     for (auto &[label, nodes_info] : column_path_index->get_chain_info(nodes)) {
         auto encode = label.size() ? labeled_aligner->get_annotation_buffer().get_annotator().get_label_encoder().encode(label)
                                    : std::numeric_limits<Seed::Column>::max();
         if (node_col_coords.count(encode))
             node_col_coords[encode] = std::move(nodes_info);
     }
+    logger->trace("Done prefetching");
 
 
     sdsl::bit_vector matching_pos[2] {

@@ -672,6 +672,8 @@ void assemble_with_coordinates(size_t k,
         }
     }
 
+    // TODO: precompute cycle distances
+
     size_t cur_unitig_id = 0;
     logger->info("Outputting {} unitigs not in a superbubble",
                   num_unitigs - sdsl::util::cnt_one_bits(in_superbubble));
