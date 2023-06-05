@@ -557,7 +557,6 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
     if (!column_path_index)
         return {};
 
-    const auto &label_encoder = column_path_index->get_anno_graph().get_annotator().get_label_encoder();
     const auto &in_anchors = seeder->get_seeds();
     if (in_anchors.empty())
         return {};
@@ -578,6 +577,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
     std::vector<Seed> seeds;
     seeds.reserve(in_anchors.size());
     size_t orientation_change = std::numeric_limits<size_t>::max();
+    tsl::hopscotch_map<size_t, ColumnPathIndex::NodesInfo> node_col_coords;
     if (!labeled_aligner) {
         for (const auto &in_anchor : in_anchors) {
             if (!in_anchor.get_clipping() && !in_anchor.get_end_clipping()) {
@@ -588,6 +588,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
 
                 ++end_counter[in_anchor.get_orientation()][in_anchor.get_query_view().end()];
                 seeds.emplace_back(in_anchor);
+                node_col_coords.emplace(in_anchor.get_columns()[0], ColumnPathIndex::NodesInfo{});
            }
         }
     } else {
@@ -600,11 +601,12 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
             ++end_counter[in_anchor.get_orientation()][in_anchor.get_query_view().end()];
             const auto &cols = in_anchor.get_columns();
             for (auto col : cols) {
+                node_col_coords.emplace(col, ColumnPathIndex::NodesInfo{});
                 if (seeds.size() && in_anchor.get_orientation() != seeds.back().get_orientation())
                     orientation_change = seeds.size();
 
                 auto &anchor = seeds.emplace_back(in_anchor);
-                anchor.set_columns({ col });
+                anchor.set_columns(Vector<Alignment::Column>(1, col));
             }
         }
     }
@@ -682,6 +684,10 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                 a_j = Seed();
             }
         }
+
+        std::sort(begin, end, [](const auto &a, const auto &b) {
+            return a.get_query_view().end() > b.get_query_view().end();
+        });
     };
 
     preprocess_anchors(seeds.begin(), seeds.begin() + orientation_change);
@@ -703,7 +709,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                 out_nodes[seed.get_nodes().back()].emplace_back(next);
         });
 
-        logger->info("Anchor: {}", Alignment(seed, config_));
+        DEBUG_LOG("Anchor: {}", Alignment(seed, config_));
 
         auto &[anchor_front_idx, anchor_back_idx] = anchor_ends.emplace_back(
             nodes.size(), nodes.size()
@@ -715,11 +721,11 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
         }
     }
 
-    tsl::hopscotch_map<size_t, ColumnPathIndex::NodesInfo> node_col_coords;
     for (auto &[label, nodes_info] : column_path_index->get_chain_info(nodes)) {
-        auto encode = label.size() ? label_encoder.encode(label)
+        auto encode = label.size() ? labeled_aligner->get_annotation_buffer().get_annotator().get_label_encoder().encode(label)
                                    : std::numeric_limits<Seed::Column>::max();
-        node_col_coords.emplace(encode, std::move(nodes_info));
+        if (node_col_coords.count(encode))
+            node_col_coords[encode] = std::move(nodes_info);
     }
 
 
@@ -942,7 +948,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                 assert(std::get<0>(coords_j.first));
 
                 const std::string &label = col_i == std::numeric_limits<Seed::Column>::max()
-                    ? "" : label_encoder.decode(col_i);
+                    ? "" : labeled_aligner->get_annotation_buffer().get_annotator().get_label_encoder().decode(col_i);
 
                 // logger->info("Try to connect3 {} -> {}\tadded: {}",
                 //     Alignment(a_i, config_), Alignment(a_j, config_), num_added);
