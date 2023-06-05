@@ -480,17 +480,17 @@ void assemble_with_coordinates(size_t k,
         int64_t width = 0;
         {
             Superbubble seens;
-            std::vector<std::pair<size_t, size_t>> traversal_stack;
-            traversal_stack.emplace_back(i, 0);
+            std::vector<size_t> traversal_stack;
+            traversal_stack.emplace_back(i);
             seens[i].first.emplace_back(0);
             while (traversal_stack.size()) {
-                auto [unitig_id, dist] = traversal_stack.back();
+                size_t unitig_id = traversal_stack.back();
                 traversal_stack.pop_back();
 
                 visited[unitig_id] = seens[unitig_id];
                 const auto &unipath = unitigs[unitig_id].second;
                 node_index back = unipath.back();
-                dist += unipath.size();
+                size_t length = unipath.size();
                 size_t num_children = 0;
                 bool found_cycle = false;
                 dbg.adjacent_outgoing_nodes(back, [&](node_index next) {
@@ -504,7 +504,9 @@ void assemble_with_coordinates(size_t k,
                     ++num_children;
 
                     assert(!visited.count(next_id));
-                    seens[next_id].first.emplace_back(dist);
+                    for (int64_t dist : seens[unitig_id].first) {
+                        seens[next_id].first.emplace_back(dist + length);
+                    }
 
                     bool all_visited = true;
                     dbg.adjacent_incoming_nodes(next, [&](node_index sibling) {
@@ -516,9 +518,8 @@ void assemble_with_coordinates(size_t k,
                         all_visited &= visited.count(sibling_id);
                     });
 
-                    if (all_visited) {
-                        traversal_stack.emplace_back(next_id, dist);
-                    }
+                    if (all_visited)
+                        traversal_stack.emplace_back(next_id);
                 });
 
                 if (found_cycle || !num_children) {
@@ -527,7 +528,7 @@ void assemble_with_coordinates(size_t k,
                 }
 
                 if (traversal_stack.size() == 1 && seens.size() == visited.size() + 1) {
-                    auto [unitig_id, dist] = traversal_stack.back();
+                    size_t unitig_id = traversal_stack.back();
                     assert(seens.count(unitig_id));
                     if (!visited.count(unitig_id)) {
                         traversal_stack.pop_back();
