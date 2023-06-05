@@ -90,7 +90,7 @@ void test_traversal_distances(const DeBruijnGraph &graph,
         ASSERT_EQ(2u, chain_info.size());
 
         bool found = false;
-        path_index->call_distances("", chain_info[0], chain_info[0], [&](int64_t dist) {
+        path_index->call_distances("", chain_info[0], chain_info[1], [&](int64_t dist) {
             found = true;
             ASSERT_EQ(exp_dist, dist)
                 << (canonical ? "PRIMARY\t" : "BASIC\t")
@@ -125,10 +125,11 @@ TYPED_TEST(PathIndexTest, simple_superbubble) {
         tests.emplace_back(reference_1.begin(), reference_1.end() - k, k + 1);
         for (size_t i = 1; i <= k; ++i) {
             tests.emplace_back(reference_1.begin() + i, reference_2.begin() + i, std::numeric_limits<size_t>::max());
-            tests.emplace_back(reference_1.begin(), reference_2.begin() + i, 1);
             tests.emplace_back(reference_1.begin() + i, reference_2.begin(), std::numeric_limits<size_t>::max());
-            tests.emplace_back(reference_1.begin() + i, reference_2.end() - k, k);
             tests.emplace_back(reference_1.end() - k, reference_2.begin() + i, std::numeric_limits<size_t>::max());
+
+            tests.emplace_back(reference_1.begin(), reference_2.begin() + i, i);
+            tests.emplace_back(reference_1.begin() + i, reference_2.end() - k, k + 1 - i);
         }
 
         test_traversal_distances<TypeParam>(*graph, tests);
@@ -154,7 +155,8 @@ TYPED_TEST(PathIndexTest, double_superbubble_chain) {
                                size_t>> tests;
         tests.emplace_back(reference_1.begin(), reference_2.end() - k, (k + 1) * 2);
         for (size_t i = 1; i <= k; ++i) {
-            tests.emplace_back(reference_1.begin() + i, reference_2.end() - k, (k + 1) * 2 - 1);
+            tests.emplace_back(reference_1.begin() + i, reference_2.end() - k, (k + 1) * 2 - i);
+            tests.emplace_back(reference_1.begin() + i, reference_2.end() - k - 1, (k + 1) * 2 - i - 1);
         }
 
         test_traversal_distances<TypeParam>(*graph, tests);
@@ -183,8 +185,8 @@ TYPED_TEST(PathIndexTest, nested_superbubbles) {
                                std::string::const_iterator,
                                size_t>> tests;
         for (size_t i = 1; i <= k; ++i) {
-            tests.emplace_back(reference_1.begin() + i, reference_2.end() - k, (k + 1) * 2 - 1);
-            tests.emplace_back(reference_3.begin() + i, reference_2.end() - k, (k + 1) * 2 - 1);
+            tests.emplace_back(reference_1.begin() + i, reference_2.end() - k, (k + 1) * 2 - i);
+            tests.emplace_back(reference_3.begin() + i, reference_2.end() - k, (k + 1) * 2 - i);
 
             tests.emplace_back(reference_3.begin() + i, reference_2.end() - k - 1, std::numeric_limits<size_t>::max());
         }
@@ -214,7 +216,7 @@ TYPED_TEST(PathIndexTest, disconnect) {
         tests.emplace_back(reference_2.begin() + 1, reference_1.begin() + 1, std::numeric_limits<size_t>::max());
         tests.emplace_back(reference_1.begin(), reference_3.end() - k, (k + 1) * 2);
         tests.emplace_back(reference_1.begin() + 1, reference_3.end() - k, (k + 1) * 2 - 1);
-        tests.emplace_back(reference_1.begin() + 1, reference_3.end() - k - 1, (k + 1) * 2 - 1 - k);
+        tests.emplace_back(reference_1.begin() + 1, reference_3.end() - k - 1, (k + 1) * 2 - 2);
         test_traversal_distances<TypeParam>(*graph, tests);
     }
 }

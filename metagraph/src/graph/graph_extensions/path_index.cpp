@@ -100,6 +100,8 @@ void ColumnPathIndex::annotate_columns(std::shared_ptr<DeBruijnGraph> graph,
     const size_t batch_size = 1'000;
     const size_t batch_length = 100'000;
 
+    tsl::hopscotch_set<size_t> sb_ids;
+
     BatchAccumulator<std::tuple<std::string, size_t, size_t, size_t, std::string, std::vector<std::string>, uint64_t>> batcher(
         [&](auto&& all_data) {
             std::vector<std::tuple<std::string, std::vector<std::string>, uint64_t>> data;
@@ -112,13 +114,34 @@ void ColumnPathIndex::annotate_columns(std::shared_ptr<DeBruijnGraph> graph,
             seq_data.reserve(all_data.size());
 
             for (auto &[in_seq, unitig_id, sb_id, chain_id, local_coords, in_labels, coord] : all_data) {
-                if (!sb_id)
+                bool mark_sb_id = false;
+                if (!sb_id) {
                     sb_id = unitig_id;
+                    mark_sb_id = true;
+                } else if (sb_id != unitig_id) {
+                    if (sb_ids.count(unitig_id)) {
+                        mark_sb_id = true;
+                        sb_ids.erase(unitig_id);
+                    }
+
+                    sb_ids.emplace(sb_id);
+                } else {
+                    mark_sb_id = true;
+                    assert(sb_ids.count(unitig_id));
+                    sb_ids.erase(unitig_id);
+                }
+
+                mark_sb_id |= (sb_id == unitig_id);
 
                 if (!chain_id)
                     chain_id = sb_id;
 
-                // logger->info("Checking\t{}\t{},{},{}\t{}\t{}", in_seq, unitig_id, sb_id, chain_id, coord, local_coords);
+                logger->info("Checking\t{}\t{},{},{}\t{},{}\t{}\t{}",
+                    in_seq,
+                    unitig_id, sb_id, chain_id,
+                    mark_sb_id, chain_id == unitig_id,
+                    coord,
+                    local_coords);
                 assert(sb_id >= unitig_id);
                 assert(chain_id >= unitig_id);
 
@@ -126,8 +149,9 @@ void ColumnPathIndex::annotate_columns(std::shared_ptr<DeBruijnGraph> graph,
                 const auto &[seq, labels, _] = data.emplace_back(
                     std::move(in_seq), std::move(in_labels), coord
                 );
+
                 seq_data.emplace_back(seq, labels, coord);
-                unitig_data.emplace_back(sb_id == unitig_id, chain_id == unitig_id);
+                unitig_data.emplace_back(mark_sb_id, chain_id == unitig_id);
 
                 if (local_coords.size()) {
                     Labels sec_labels;
@@ -204,6 +228,8 @@ void ColumnPathIndex::annotate_columns(std::shared_ptr<DeBruijnGraph> graph,
 
     batcher.process_all_buffered();
     thread_pool.join();
+
+    assert(sb_ids.empty());
 
     BatchAccumulator<std::tuple<std::string, std::vector<std::string>, uint64_t>> unitig_batcher(
         [&](auto&& data) {
@@ -361,7 +387,7 @@ auto ColumnPathIndex::get_chain_info(const std::vector<node_index> &nodes) const
                     if (coord >= 0) {
                         std::get<1>(coord_info).emplace_back(coord);
                     } else {
-                        std::get<2>(coord_info).emplace_back(-(coord + 1));
+                        std::get<2>(coord_info).emplace_back(-coord - 1);
                     }
                 }
             }
@@ -406,11 +432,9 @@ void ColumnPathIndex::call_distances(const Label &label,
         // target is at the end of the superbubble or chain
 
         if (ds_to_end_a.size()) {
-            int64_t dist_in_unitig_a = global_coord_a - get_global_coord(label, unitig_id_a);
             int64_t dist_in_unitig_b = global_coord_b - get_global_coord(label, unitig_id_b);
-            int64_t dist_offset = dist_in_unitig_b - dist_in_unitig_a;
             for (int64_t dend : ds_to_end_a) {
-                dists.emplace_back(dend + dist_offset);
+                dists.emplace_back(dend + dist_in_unitig_b);
             }
         }
     } else if (chain_id_a == chain_id_b && sb_id_a != sb_id_b) {
@@ -429,12 +453,9 @@ void ColumnPathIndex::call_distances(const Label &label,
         assert(ds_from_start_a.size());
         assert(ds_from_start_b.size());
 
-        int64_t dist_in_unitig_a = global_coord_a - get_global_coord(label, unitig_id_a);
-        int64_t dist_in_unitig_b = global_coord_b - get_global_coord(label, unitig_id_b);
-        int64_t dist_offset = dist_in_unitig_b - dist_in_unitig_a;
         for (int64_t d_start_a : ds_from_start_a) {
             for (int64_t d_start_b : ds_from_start_b) {
-                dists.emplace_back(d_start_b - d_start_a + dist_offset);
+                dists.emplace_back(d_start_b - d_start_a);
             }
         }
     } else if (sb_id_a == sb_id_b) {

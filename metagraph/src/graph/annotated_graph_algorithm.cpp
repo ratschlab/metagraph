@@ -580,6 +580,8 @@ void assemble_with_coordinates(size_t k,
         assert(visited.size());
         assert(visited.size() >= 4);
 
+        logger->info("Found superbubble at {} containing {} unitigs", i, visited.size());
+
         if (visited[terminus].first.size() == 1) {
             // easy case
             int64_t sb_size = visited[terminus].first[0] + 1;
