@@ -230,8 +230,6 @@ Config::Config(int argc, char *argv[]) {
             verbose_output = true;
         } else if (!strcmp(argv[i], "--filter-present")) {
             filter_present = true;
-        } else if (!strcmp(argv[i], "--filter-reads")) {
-            filter_reads = true;
         } else if (!strcmp(argv[i], "--unitig-coordinates")) {
             unitig_coords = true;
         } else if (!strcmp(argv[i], "--map")) {

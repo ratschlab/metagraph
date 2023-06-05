@@ -62,7 +62,6 @@ class Config {
     bool output_json = false;
     bool aggregate_columns = false;
     bool coordinates = false;
-    bool filter_reads = false;
     bool unitig_coords = false;
     bool advanced = false;
 
