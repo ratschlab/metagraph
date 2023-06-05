@@ -468,29 +468,33 @@ void assemble_with_coordinates(size_t k,
     // enumerate superbubbles
     sdsl::bit_vector in_superbubble(num_unitigs, false);
     sdsl::bit_vector is_superbubble_start(num_unitigs, false);
-    std::vector<std::pair<size_t, VectorMap<size_t, std::pair<std::vector<int64_t>, std::vector<int64_t>>>>> superbubbles(unitigs.size());
+    using Superbubble = VectorMap<size_t, std::pair<std::vector<int64_t>,
+                                                    std::vector<int64_t>>>;
+    std::vector<std::pair<size_t, Superbubble>> superbubbles(unitigs.size());
 
     for (size_t i = 0; i < unitigs.size(); ++i) {
         // topologically sort the subgraph starting at unitig i using Kahn's algorithm
         auto &[terminus, visited] = superbubbles[i];
         assert(visited.empty());
         terminus = std::numeric_limits<size_t>::max();
+        int64_t width = 0;
         {
-            auto seens = visited;
+            Superbubble seens;
             std::vector<std::pair<size_t, size_t>> traversal_stack;
             traversal_stack.emplace_back(i, 0);
             seens[i].first.emplace_back(0);
-            tsl::hopscotch_map<size_t, tsl::hopscotch_set<size_t>> edges_seen;
             while (traversal_stack.size()) {
                 auto [unitig_id, dist] = traversal_stack.back();
                 traversal_stack.pop_back();
+
                 visited[unitig_id] = seens[unitig_id];
-                const auto &[unitig, unipath] = unitigs[unitig_id];
+                const auto &unipath = unitigs[unitig_id].second;
                 node_index back = unipath.back();
-                size_t length = unipath.size();
+                dist += unipath.size();
                 size_t num_children = 0;
                 bool found_cycle = false;
                 dbg.adjacent_outgoing_nodes(back, [&](node_index next) {
+                    assert(node_to_unitig.count(next));
                     size_t next_id = node_to_unitig[next];
                     if (found_cycle || next_id == unitig_id || next_id == i) {
                         found_cycle = true;
@@ -499,23 +503,22 @@ void assemble_with_coordinates(size_t k,
 
                     ++num_children;
 
-                    seens[next_id].first.emplace_back(dist + length);
-                    bool inserted = edges_seen[unitig_id].emplace(next_id).second;
-                    std::ignore = inserted;
-                    assert(inserted);
+                    assert(!visited.count(next_id));
+                    seens[next_id].first.emplace_back(dist);
 
                     bool all_visited = true;
                     dbg.adjacent_incoming_nodes(next, [&](node_index sibling) {
                         if (!all_visited)
                             return;
 
+                        assert(node_to_unitig.count(sibling));
                         size_t sibling_id = node_to_unitig[sibling];
-                        all_visited &= (edges_seen.count(sibling_id)
-                                        && edges_seen[sibling_id].count(next_id));
+                        all_visited &= visited.count(sibling_id);
                     });
 
-                    if (all_visited)
-                        traversal_stack.emplace_back(next_id, dist + length);
+                    if (all_visited) {
+                        traversal_stack.emplace_back(next_id, dist);
+                    }
                 });
 
                 if (found_cycle || !num_children) {
@@ -525,25 +528,30 @@ void assemble_with_coordinates(size_t k,
 
                 if (traversal_stack.size() == 1 && seens.size() == visited.size() + 1) {
                     auto [unitig_id, dist] = traversal_stack.back();
-                    traversal_stack.pop_back();
-                    dbg.adjacent_outgoing_nodes(unitigs[unitig_id].second.back(),
-                        [&](node_index next) {
-                            if (visited.size()) {
-                                size_t next_id = node_to_unitig[next];
-                                if (next_id == i)
-                                    visited.clear();
+                    assert(seens.count(unitig_id));
+                    if (!visited.count(unitig_id)) {
+                        traversal_stack.pop_back();
+                        dbg.adjacent_outgoing_nodes(unitigs[unitig_id].second.back(),
+                            [&](node_index next) {
+                                if (visited.size()) {
+                                    size_t next_id = node_to_unitig[next];
+                                    if (next_id == i)
+                                        visited.clear();
+                                }
                             }
+                        );
+
+                        if (visited.size()) {
+                            is_superbubble_start[i] = true;
+                            terminus = unitig_id;
+                            visited[terminus] = seens[terminus];
+                            assert(visited.size() == seens.size());
+                            width = *std::max_element(visited[terminus].first.begin(),
+                                                      visited[terminus].first.end());
                         }
-                    );
 
-                    if (visited.size()) {
-                        is_superbubble_start[i] = true;
-                        terminus = unitig_id;
-                        visited[terminus] = seens[terminus];
-                        assert(visited.size() == seens.size());
+                        assert(traversal_stack.empty());
                     }
-
-                    assert(traversal_stack.empty());
                 }
             }
 
@@ -562,7 +570,12 @@ void assemble_with_coordinates(size_t k,
             in_superbubble[it->first] = true;
             std::sort(d.begin(), d.end());
             d.erase(std::unique(d.begin(), d.end()), d.end());
+            assert(d.back() <= width);
         }
+
+        assert(terminus < num_unitigs);
+        assert(visited.size());
+        assert(visited.size() >= 4);
 
         if (visited[terminus].first.size() == 1) {
             // easy case
