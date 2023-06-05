@@ -130,7 +130,7 @@ class Config {
     int32_t alignment_xdrop = 27;
     int32_t alignment_label_change_score = graph::align::DBGAlignerConfig::ninf;
 
-    size_t alignment_num_alternative_paths = 1;
+    size_t alignment_num_alternative_paths = std::numeric_limits<size_t>::max();
     size_t alignment_min_seed_length = 19;
     size_t alignment_max_seed_length = std::numeric_limits<size_t>::max();
     size_t alignment_max_num_seeds_per_locus = 1000;

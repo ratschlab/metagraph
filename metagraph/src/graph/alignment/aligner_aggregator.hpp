@@ -172,10 +172,7 @@ template <class AlignmentCompare>
 inline auto AlignmentAggregator<AlignmentCompare>
 ::get_label_cutoff(Column label) const -> score_t {
     auto find = path_queue_.find(label);
-    return find == path_queue_.end()
-            || find->second.size() < config_.num_alternative_paths
-        ? config_.ninf
-        : find->second.minimum()->get_score();
+    return find == path_queue_.end() ? config_.ninf : find->second.minimum()->get_score();
 }
 
 template <class AlignmentCompare>
