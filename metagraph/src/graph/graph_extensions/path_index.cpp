@@ -521,7 +521,7 @@ void ColumnPathIndex::call_distances(const Label &label,
     }
 
     for (int64_t d : dists) {
-        if (d > 0)
+        if (d >= 0)
             callback(d);
     }
 
