@@ -477,7 +477,6 @@ void assemble_with_coordinates(size_t k,
         auto &[terminus, visited] = superbubbles[i];
         assert(visited.empty());
         terminus = std::numeric_limits<size_t>::max();
-        int64_t width = 0;
         {
             Superbubble seens;
             std::vector<size_t> traversal_stack;
@@ -547,8 +546,6 @@ void assemble_with_coordinates(size_t k,
                             terminus = unitig_id;
                             visited[terminus] = seens[terminus];
                             assert(visited.size() == seens.size());
-                            width = *std::max_element(visited[terminus].first.begin(),
-                                                      visited[terminus].first.end());
                         }
 
                         assert(traversal_stack.empty());
@@ -565,6 +562,11 @@ void assemble_with_coordinates(size_t k,
         assert(terminus < num_unitigs);
         assert(visited.size());
         assert(visited.size() >= 4);
+
+#ifndef NDEBUG
+        int64_t width = *std::max_element(visited[terminus].first.begin(),
+                                          visited[terminus].first.end());
+#endif
 
         for (auto it = visited.begin(); it != visited.end(); ++it) {
             auto &d = it.value().first;
