@@ -11,8 +11,7 @@ using node_index = DeBruijnGraph::node_index;
 template <typename Graph>
 class PathIndexTest : public DeBruijnGraphTest<Graph> {};
 
-typedef ::testing::Types<DBGSuccinctUnitigIndexed,
-                         DBGSuccinctPathIndexed> ChainGraphTypes;
+typedef ::testing::Types<DBGSuccinctUnitigIndexed> ChainGraphTypes;
 
 TYPED_TEST_SUITE(PathIndexTest, ChainGraphTypes);
 
@@ -39,21 +38,22 @@ TYPED_TEST(PathIndexTest, single_unitig) {
     std::string reference = "ACGATGCGATG";
     for (DeBruijnGraph::Mode mode : MODES_TO_TEST) {
         auto graph = build_graph_batch<TypeParam>(k, { reference }, mode);
-        auto path_index = graph->template get_extension_threadsafe<IPathIndex>();
+        auto path_index = graph->template get_extension_threadsafe<ColumnPathIndex>();
         ASSERT_NE(nullptr, path_index);
 
         auto nodes = map_to_nodes(*graph, reference);
         ASSERT_EQ(1u, nodes.size());
 
         node_index node = nodes[0];
-        auto coords = path_index->get_coords({ node });
-        ASSERT_EQ(1u, coords.size());
-        ASSERT_EQ(1u, coords[0].size());
+        auto chain_info_all = path_index->get_chain_info({ node });
+        ASSERT_EQ(1u, chain_info_all.size());
+        auto &chain_info = chain_info_all[0].second;
+        ASSERT_EQ(1u, chain_info.size());
 
         bool found = false;
-        path_index->call_dists(coords[0][0].first, coords[0][0].first, [&](size_t dist) {
+        path_index->call_distances("", chain_info[0], chain_info[0], [&](int64_t dist) {
             found = true;
-            EXPECT_EQ(0u, dist);
+            EXPECT_EQ(0, dist);
         });
         EXPECT_TRUE(found);
     }
@@ -64,7 +64,7 @@ void test_traversal_distances(const DeBruijnGraph &graph,
                               const std::vector<std::tuple<std::string::const_iterator,
                                                            std::string::const_iterator, size_t>> &tests) {
     size_t k = graph.get_k();
-    auto path_index = graph.get_extension_threadsafe<IPathIndex>();
+    auto path_index = graph.get_extension_threadsafe<ColumnPathIndex>();
     ASSERT_NE(nullptr, path_index);
     for (auto [i1, i2, exp_dist] : tests) {
         auto nodes_1 = map_to_nodes_sequentially(graph, std::string_view(&*i1, k));
@@ -84,24 +84,13 @@ void test_traversal_distances(const DeBruijnGraph &graph,
             }
         }
 
-        auto coords = path_index->get_coords({ nodes_1[0], nodes_2[0] });
-        ASSERT_EQ(2u, coords.size());
-
-        if constexpr(std::is_same_v<TypeParam, DBGSuccinctUnitigIndexed>) {
-            ASSERT_EQ(1u, coords[0].size());
-            ASSERT_EQ(1u, coords[1].size());
-        } else {
-            ASSERT_LE(1u, coords[0].size());
-            ASSERT_LE(1u, coords[1].size());
-        }
-
-        size_t internal1 = coords[0][0].first;
-        size_t internal2 = coords[1][0].first;
-        ASSERT_EQ(nodes_1[0] == nodes_2[0],
-                  coords[0][0].second == coords[1][0].second);
+        auto chain_info_all = path_index->get_chain_info({ nodes_1[0], nodes_2[0] });
+        ASSERT_EQ(1u, chain_info_all.size());
+        auto &chain_info = chain_info_all[0].second;
+        ASSERT_EQ(2u, chain_info.size());
 
         bool found = false;
-        path_index->call_dists(internal1, internal2, [&](size_t dist) {
+        path_index->call_distances("", chain_info[0], chain_info[0], [&](int64_t dist) {
             found = true;
             ASSERT_EQ(exp_dist, dist)
                 << (canonical ? "PRIMARY\t" : "BASIC\t")

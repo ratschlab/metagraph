@@ -325,7 +325,6 @@ int align_to_graph(Config *config) {
     // for dummy nodes to be matched by suffix seeding
     auto dbg_succ = std::dynamic_pointer_cast<DBGSuccinct>(graph);
 
-    std::shared_ptr<PathIndex<>> path_index;
     if (dbg_succ) {
         dbg_succ->reset_mask();
         if (dbg_succ->get_mode() == DeBruijnGraph::PRIMARY) {
@@ -338,15 +337,6 @@ int align_to_graph(Config *config) {
                              "Alignment speed will be significantly slower. "
                              "Use metagraph transform to generate an adj-rc index.");
             }
-        }
-
-        path_index = std::make_shared<PathIndex<>>();
-        if (path_index->load(config->infbase)) {
-            logger->trace("Loaded path index");
-            path_index->set_graph(dbg_succ);
-            graph->add_extension(path_index);
-        } else {
-            path_index.reset();
         }
     }
 
@@ -473,9 +463,6 @@ int align_to_graph(Config *config) {
 
                 if (hll)
                     aln_graph->add_extension(hll);
-
-                if (path_index)
-                    aln_graph->add_extension(path_index);
 
                 if (col_path_index)
                     aln_graph->add_extension(col_path_index);

@@ -1016,8 +1016,7 @@ TYPED_TEST(DBGAlignerTest, align_straight_long_xdrop) {
 }
 
 TYPED_TEST(DBGAlignerTest, align_drop_seed) {
-    if constexpr(std::is_same_v<TypeParam, DBGSuccinctPathIndexed>
-            || std::is_same_v<TypeParam, DBGSuccinctUnitigIndexed>)
+    if constexpr(std::is_same_v<TypeParam, DBGSuccinctUnitigIndexed>)
         return;
 
     size_t k = 4;
@@ -1054,8 +1053,7 @@ TYPED_TEST(DBGAlignerTest, align_drop_seed) {
 }
 
 TYPED_TEST(DBGAlignerTest, align_long_gap_after_seed) {
-    if constexpr(std::is_same_v<TypeParam, DBGSuccinctPathIndexed>
-            || std::is_same_v<TypeParam, DBGSuccinctUnitigIndexed>)
+    if constexpr(std::is_same_v<TypeParam, DBGSuccinctUnitigIndexed>)
         return;
 
     size_t k = 4;
@@ -1547,8 +1545,7 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_canonical) {
 
 TYPED_TEST(DBGAlignerTest, align_both_directions) {
     // TODO: for now, until these graphs are supported
-    if constexpr(std::is_same_v<TypeParam, DBGSuccinctPathIndexed>
-            || std::is_same_v<TypeParam, DBGSuccinctUnitigIndexed>)
+    if constexpr(std::is_same_v<TypeParam, DBGSuccinctUnitigIndexed>)
         return;
 
     size_t k = 7;
@@ -1614,8 +1611,7 @@ TYPED_TEST(DBGAlignerTest, align_both_directions2) {
 }
 
 TYPED_TEST(DBGAlignerTest, align_low_similarity4_rep_primary) {
-    if constexpr(std::is_same_v<TypeParam, DBGSuccinctPathIndexed>
-            || std::is_same_v<TypeParam, DBGSuccinctUnitigIndexed>)
+    if constexpr(std::is_same_v<TypeParam, DBGSuccinctUnitigIndexed>)
         return;
 
     size_t k = 6;
