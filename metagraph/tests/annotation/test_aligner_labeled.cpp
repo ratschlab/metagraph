@@ -399,7 +399,7 @@ TYPED_TEST(DBGAlignerTestLabeled, SimpleTangleGraphSuffixSeed) {
 
 #if ! _PROTEIN_GRAPH
 TYPED_TEST(DBGAlignerTestLabeled, CanonicalTangleGraph) {
-    if constexpr(std::is_same_v<TypeParam, DBGSuccinctUnitigIndexed>) {
+    if constexpr(std::is_same_v<typename TypeParam::first_type, DBGSuccinctUnitigIndexed>) {
         logger->warn("Distance indexing only supported for BASIC graphs");
         return;
     }
