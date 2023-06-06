@@ -98,7 +98,7 @@ class DBGAligner : public IDBGAligner {
                           const ISeeder &forward_seeder,
                           const ISeeder &reverse_seeder,
                           const std::function<void(Alignment&&)> &callback,
-                          const std::function<score_t(const Alignment&)> &get_min_path_score) const;
+                          const std::function<score_t()> &get_min_path_score) const;
 };
 
 } // namespace align

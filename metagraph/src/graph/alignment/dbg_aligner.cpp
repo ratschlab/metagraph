@@ -168,13 +168,13 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
         size_t num_explored_nodes = 0;
         size_t num_extensions = 0;
 
-        auto get_min_path_score = [&](const Alignment &) {
+        auto get_min_path_score = [&]() {
             return std::max(config_.min_path_score, aggregator.get_global_cutoff());
         };
 
         auto add_alignment = [&](Alignment&& alignment) {
             assert(alignment.is_valid(graph_, &config_));
-            if (config_.allow_jump || alignment.get_score() >= get_min_path_score(alignment)) {
+            if (config_.allow_jump || alignment.get_score() >= get_min_path_score()) {
                 aggregator.add_alignment(std::move(alignment));
             }
         };
@@ -335,7 +335,7 @@ std::tuple<size_t, size_t, size_t>
 align_core(const Seeder &seeder,
            Extender&& extender,
            const std::function<void(Alignment&&)> &callback,
-           const std::function<score_t(const Alignment&)> &get_min_path_score,
+           const std::function<score_t()> &get_min_path_score,
            bool force_fixed_seed) {
     auto seeds = seeder.get_alignments();
 
@@ -343,8 +343,7 @@ align_core(const Seeder &seeder,
         if (seeds[i].empty())
             continue;
 
-        extender.extend_seed_end(seeds[i], callback, force_fixed_seed,
-                                 get_min_path_score(seeds[i]));
+        extender.extend_seed_end(seeds[i], callback, force_fixed_seed, get_min_path_score());
 
         for (size_t j = i + 1; j < seeds.size(); ++j) {
             if (seeds[j].size() && !extender.check_seed(seeds[j]))
@@ -494,7 +493,7 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
                         const ISeeder &forward_seeder,
                         const ISeeder &reverse_seeder,
                         const std::function<void(Alignment&&)> &callback,
-                        const std::function<score_t(const Alignment&)> &get_min_path_score) const {
+                        const std::function<score_t()> &get_min_path_score) const {
     size_t num_seeds = 0;
     size_t num_extensions = 0;
     size_t num_explored_nodes = 0;
@@ -566,7 +565,7 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
         num_explored_nodes += num_nodes;
 
         for (Alignment &alignment : aggregator.get_alignments()) {
-            if (alignment.get_score() < get_min_path_score(alignment))
+            if (alignment.get_score() < get_min_path_score())
                 continue;
 
             if (graph_.get_mode() == DeBruijnGraph::CANONICAL && alignment.get_orientation()) {
@@ -620,7 +619,7 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
 
             std::vector<Alignment> alignments_to_front_extend;
             for (Alignment &path : extensions) {
-                if (path.get_score() >= get_min_path_score(path))
+                if (path.get_score() >= get_min_path_score())
                     callback(Alignment(path));
 
                 if (path.get_clipping() && !path.get_offset())
@@ -636,7 +635,7 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
                     }
 
                     callback(std::move(aln));
-                }, true, get_min_path_score(seed));
+                }, true, get_min_path_score());
             }
 
             for (size_t j = i + 1; j < seeds.size(); ++j) {
