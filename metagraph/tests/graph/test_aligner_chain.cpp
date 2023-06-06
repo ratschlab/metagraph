@@ -15,10 +15,10 @@ using namespace mtg::test;
 using namespace mtg::kmer;
 
 template <typename Graph>
-class DBGAlignerPostChainTest : public DeBruijnGraphTest<Graph> {};
+class DBGAlignerTestPostChain : public DeBruijnGraphTest<Graph> {};
 
 typedef ::testing::Types<DBGSuccinct, DBGSuccinctUnitigIndexed> ChainGraphTypes;
-TYPED_TEST_SUITE(DBGAlignerPostChainTest, ChainGraphTypes);
+TYPED_TEST_SUITE(DBGAlignerTestPostChain, ChainGraphTypes);
 
 inline void check_chain(const AlignmentResults &paths,
                         const DeBruijnGraph &graph,
@@ -34,7 +34,7 @@ inline void check_chain(const AlignmentResults &paths,
     }
 }
 
-TYPED_TEST(DBGAlignerPostChainTest, align_chain_swap) {
+TYPED_TEST(DBGAlignerTestPostChain, align_chain_swap) {
     size_t k = 11;
     std::string reference = "ATGATATGAGGGGGGGGGGGGTTTTTTTTGACCCCGGTTTAA";
     std::string query     = "TTTTTTTTGACCCCGGTTTAAATGATATGAGGGGGGGGGGGG";
@@ -56,7 +56,7 @@ TYPED_TEST(DBGAlignerPostChainTest, align_chain_swap) {
     check_extend(graph, aligner.get_config(), paths, query);
 }
 
-TYPED_TEST(DBGAlignerPostChainTest, align_chain_overlap_2) {
+TYPED_TEST(DBGAlignerTestPostChain, align_chain_overlap_2) {
     size_t k = 9;
     std::string reference1 = "CCCCCCTTTGAGGATCAG";
     std::string reference2 =          "CCGGATCAGCTAGCTAGCTAGC";
@@ -79,7 +79,7 @@ TYPED_TEST(DBGAlignerPostChainTest, align_chain_overlap_2) {
     check_chain(paths, *graph, config);
 }
 
-TYPED_TEST(DBGAlignerPostChainTest, align_chain_overlap_mismatch) {
+TYPED_TEST(DBGAlignerTestPostChain, align_chain_overlap_mismatch) {
     size_t k = 8;
     std::string reference1 = "TTTTTCCTGAGGATCCG";
     std::string reference2 =        "CCCGGATCAGCTAGCTAGCTAGC";
@@ -103,7 +103,7 @@ TYPED_TEST(DBGAlignerPostChainTest, align_chain_overlap_mismatch) {
     check_chain(paths, *graph, config);
 }
 
-TYPED_TEST(DBGAlignerPostChainTest, align_chain_overlap_3_prefer_mismatch_over_gap) {
+TYPED_TEST(DBGAlignerTestPostChain, align_chain_overlap_3_prefer_mismatch_over_gap) {
     size_t k = 11;
     std::string reference1 = "AAATTTTGAGGATCAG";
     std::string reference2 =      "CCCCGGATCAGGTTTATTTAATTAGCT";
@@ -128,7 +128,7 @@ TYPED_TEST(DBGAlignerPostChainTest, align_chain_overlap_3_prefer_mismatch_over_g
     check_chain(paths, *graph, config);
 }
 
-TYPED_TEST(DBGAlignerPostChainTest, align_chain_delete_no_chain_if_full_coverage) {
+TYPED_TEST(DBGAlignerTestPostChain, align_chain_delete_no_chain_if_full_coverage) {
     size_t k = 10;
     std::string reference = "TGAGGATCAGTTCTAGCTTGCTAGC";
     std::string query     = "TGAGGATCAG""CTAGCTTGCTAGC";
@@ -149,7 +149,7 @@ TYPED_TEST(DBGAlignerPostChainTest, align_chain_delete_no_chain_if_full_coverage
     check_extend(graph, aligner.get_config(), paths, query);
 }
 
-TYPED_TEST(DBGAlignerPostChainTest, align_chain_delete_mismatch) {
+TYPED_TEST(DBGAlignerTestPostChain, align_chain_delete_mismatch) {
     size_t k = 10;
     std::string reference1 = "AAAAAGGGTTTTTGAGGATCAGTTCTGCGCTTG";
     std::string reference2 =                       "CCCTACGCTTGCTAGCGCTAGCTAGATC";
@@ -172,7 +172,7 @@ TYPED_TEST(DBGAlignerPostChainTest, align_chain_delete_mismatch) {
     check_chain(paths, *graph, config);
 }
 
-TYPED_TEST(DBGAlignerPostChainTest, align_chain_overlap_with_insert) {
+TYPED_TEST(DBGAlignerTestPostChain, align_chain_overlap_with_insert) {
     size_t k = 10;
     std::string reference1 =  "TGAGGATCAGTTCTAGCTTG";
     std::string reference2 =            "CCCTAGCTTGCTAGCGCTAGCTAGATC";
@@ -197,7 +197,7 @@ TYPED_TEST(DBGAlignerPostChainTest, align_chain_overlap_with_insert) {
 }
 
 
-TYPED_TEST(DBGAlignerPostChainTest, align_chain_deletion_in_overlapping_node) {
+TYPED_TEST(DBGAlignerTestPostChain, align_chain_deletion_in_overlapping_node) {
     size_t k = 10;
     std::string reference1 = "AAATTTTTTTGAGGATCAGTTCTAAGCTTG";
     std::string reference2 =                     "CCCCAGCTTGCTAGCGCTAGCTAGATC";
@@ -219,7 +219,7 @@ TYPED_TEST(DBGAlignerPostChainTest, align_chain_deletion_in_overlapping_node) {
     check_chain(paths, *graph, config);
 }
 
-TYPED_TEST(DBGAlignerPostChainTest, align_chain_large_overlap) {
+TYPED_TEST(DBGAlignerTestPostChain, align_chain_large_overlap) {
     size_t k = 10;
     std::string reference1 = "TGAGGATCAGTTCTAGCTTG";
     std::string reference2 =      "ATCAGTTCTAGCTTGCTAGCGCTAGCTAGATC";
@@ -241,7 +241,7 @@ TYPED_TEST(DBGAlignerPostChainTest, align_chain_large_overlap) {
     check_extend(graph, aligner.get_config(), paths, query);
 }
 
-TYPED_TEST(DBGAlignerPostChainTest, align_chain_disjoint) {
+TYPED_TEST(DBGAlignerTestPostChain, align_chain_disjoint) {
     size_t k = 10;
     std::string reference1 = "GGGGGGGGGGAAACCCCCCCCTGAGGATCAG";
     std::string reference2 =                                "TTCACTAGCTAGCCCCCCCCCGGGGGGGGGG";
@@ -264,7 +264,7 @@ TYPED_TEST(DBGAlignerPostChainTest, align_chain_disjoint) {
     check_extend(graph, aligner.get_config(), paths, query);
 }
 
-TYPED_TEST(DBGAlignerPostChainTest, align_chain_gap) {
+TYPED_TEST(DBGAlignerTestPostChain, align_chain_gap) {
     size_t k = 10;
     std::string reference1 = "AAAAACCCCCTGAGGATCAG";
     std::string reference2 =                        "ACTAGCTAGCCCCCCAAAAA";

@@ -20,6 +20,7 @@ using namespace mtg::graph;
 using namespace mtg::graph::align;
 using namespace mtg::test;
 using namespace mtg::kmer;
+using namespace mtg::common;
 
 inline std::vector<std::string> get_alignment_labels(const AnnotatedDBG &anno_graph,
                                                      const Alignment &alignment,
@@ -46,7 +47,7 @@ inline std::vector<std::string> get_alignment_labels(const AnnotatedDBG &anno_gr
 }
 
 template <typename GraphAnnotationPair>
-class LabeledAlignerTest : public ::testing::Test {};
+class DBGAlignerTestLabeled : public ::testing::Test {};
 
 typedef ::testing::Types<std::pair<DBGHashFast, annot::ColumnCompressed<>>,
                          std::pair<DBGSuccinctUnitigIndexed, annot::ColumnCompressed<>>,
@@ -55,9 +56,9 @@ typedef ::testing::Types<std::pair<DBGHashFast, annot::ColumnCompressed<>>,
                          std::pair<DBGSuccinct, annot::RowDiffColumnAnnotator>,
                          std::pair<DBGSuccinct, annot::RowDiffDiskAnnotator>> FewGraphAnnotationPairTypes;
 
-TYPED_TEST_SUITE(LabeledAlignerTest, FewGraphAnnotationPairTypes);
+TYPED_TEST_SUITE(DBGAlignerTestLabeled, FewGraphAnnotationPairTypes);
 
-TYPED_TEST(LabeledAlignerTest, SimpleLinearGraph) {
+TYPED_TEST(DBGAlignerTestLabeled, SimpleLinearGraph) {
     size_t k = 4;
     /*
         A    A    B    B    B    B
@@ -102,7 +103,7 @@ TYPED_TEST(LabeledAlignerTest, SimpleLinearGraph) {
     }
 }
 
-TYPED_TEST(LabeledAlignerTest, SimpleTangleGraph) {
+TYPED_TEST(DBGAlignerTestLabeled, SimpleTangleGraph) {
     size_t k = 3;
     /*  B                  AB  AB
        CGA                 GCC-CCT
@@ -151,7 +152,7 @@ TYPED_TEST(LabeledAlignerTest, SimpleTangleGraph) {
     }
 }
 
-TYPED_TEST(LabeledAlignerTest, SimpleTangleGraphCoords) {
+TYPED_TEST(DBGAlignerTestLabeled, SimpleTangleGraphCoords) {
     // TODO: for now, not implemented for other annotators
     if constexpr(!std::is_same_v<typename TypeParam::second_type, annot::ColumnCompressed<>>
                     && !std::is_same_v<typename TypeParam::second_type, annot::RowDiffColumnAnnotator>) {
@@ -214,7 +215,7 @@ TYPED_TEST(LabeledAlignerTest, SimpleTangleGraphCoords) {
     }
 }
 
-TYPED_TEST(LabeledAlignerTest, SimpleTangleGraphCoordsMiddle) {
+TYPED_TEST(DBGAlignerTestLabeled, SimpleTangleGraphCoordsMiddle) {
     // TODO: for now, not implemented for other annotators
     if constexpr(!std::is_same_v<typename TypeParam::second_type, annot::ColumnCompressed<>>
                     && !std::is_same_v<typename TypeParam::second_type, annot::RowDiffColumnAnnotator>) {
@@ -277,7 +278,7 @@ TYPED_TEST(LabeledAlignerTest, SimpleTangleGraphCoordsMiddle) {
     }
 }
 
-TYPED_TEST(LabeledAlignerTest, SimpleTangleGraphCoordsCycle) {
+TYPED_TEST(DBGAlignerTestLabeled, SimpleTangleGraphCoordsCycle) {
     // TODO: for now, not implemented for other annotators
     if constexpr(!std::is_same_v<typename TypeParam::second_type, annot::ColumnCompressed<>>
                     && !std::is_same_v<typename TypeParam::second_type, annot::RowDiffColumnAnnotator>) {
@@ -335,7 +336,12 @@ TYPED_TEST(LabeledAlignerTest, SimpleTangleGraphCoordsCycle) {
     }
 }
 
-TEST(LabeledAlignerTest, SimpleTangleGraphSuffixSeed) {
+TYPED_TEST(DBGAlignerTestLabeled, SimpleTangleGraphSuffixSeed) {
+    if constexpr(!std::is_base_of_v<DBGSuccinct, TypeParam>) {
+        logger->warn("Sub-k seeding only supported for DBGSuccinct");
+        return;
+    }
+
     size_t k = 4;
     /*  B    B                  AB   AB
        TCGA-CGAA                TGCC-GCCT
@@ -392,7 +398,12 @@ TEST(LabeledAlignerTest, SimpleTangleGraphSuffixSeed) {
 }
 
 #if ! _PROTEIN_GRAPH
-TYPED_TEST(LabeledAlignerTest, CanonicalTangleGraph) {
+TYPED_TEST(DBGAlignerTestLabeled, CanonicalTangleGraph) {
+    if constexpr(std::is_same_v<TypeParam, DBGSuccinctUnitigIndexed>) {
+        logger->warn("Distance indexing only supported for BASIC graphs");
+        return;
+    }
+
     size_t k = 5;
     /*   B     B                AB    AB
        TTAGT-TAGTC             TCGAA-CGAAA
