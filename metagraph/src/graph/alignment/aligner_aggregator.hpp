@@ -46,7 +46,6 @@ class AlignmentAggregator {
     bool add_alignment(Alignment&& alignment);
 
     score_t get_global_cutoff() const;
-    score_t get_score_cutoff(const Columns &labels) const;
 
     std::vector<Alignment> get_alignments();
 
@@ -59,8 +58,6 @@ class AlignmentAggregator {
     VectorMap<Column, PathQueue> path_queue_;
     PathQueue unlabeled_;
     ValCmp cmp_;
-
-    score_t get_label_cutoff(Column label) const;
 };
 
 // return true if the alignment was added
@@ -146,30 +143,6 @@ inline auto AlignmentAggregator<AlignmentCompare>
     score_t cur_max = unlabeled_.maximum()->get_score();
 
     return cur_max > 0 ? cur_max * config_.rel_score_cutoff : cur_max;
-}
-
-// TODO: define it the same way as in get_global_cutoff()?
-template <class AlignmentCompare>
-inline auto AlignmentAggregator<AlignmentCompare>
-::get_score_cutoff(const Vector<Column> &labels) const -> score_t {
-    assert(labels.size());
-
-    score_t global_min = get_global_cutoff();
-
-    score_t min_score = std::numeric_limits<score_t>::max();
-    for (Column label : labels) {
-        min_score = std::min(min_score, get_label_cutoff(label));
-        if (min_score < global_min)
-            return global_min;
-    }
-    return min_score;
-}
-
-template <class AlignmentCompare>
-inline auto AlignmentAggregator<AlignmentCompare>
-::get_label_cutoff(Column label) const -> score_t {
-    auto find = path_queue_.find(label);
-    return find == path_queue_.end() ? config_.ninf : find->second.minimum()->get_score();
 }
 
 template <class AlignmentCompare>

@@ -275,10 +275,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
         };
 
         auto get_min_path_score = [&](const Alignment &seed) {
-            return std::max(config_.min_path_score,
-                            seed.label_columns.size()
-                                ? aggregator.get_score_cutoff(seed.label_columns)
-                                : aggregator.get_global_cutoff());
+            return std::max(config_.min_path_score, aggregator.get_global_cutoff());
         };
 
         std::string_view this_query = paths[i].get_query(false);
