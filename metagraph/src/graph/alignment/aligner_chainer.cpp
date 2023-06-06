@@ -552,7 +552,6 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
     allow_label_change = false;
     size_t query_size = extender.get_query().size();
     const DeBruijnGraph &graph_ = aligner.get_graph();
-    const DBGAlignerConfig &config_ = aligner.get_config();
     auto column_path_index = graph_.get_extension_threadsafe<ColumnPathIndex>();
     if (!column_path_index)
         return {};
@@ -560,6 +559,15 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
     const auto &in_anchors = seeder->get_seeds();
     if (in_anchors.empty())
         return {};
+
+    const DBGAlignerConfig &config_ = aligner.get_config();
+    std::vector<Alignment> alignments;
+    if (in_anchors.size() == 1) {
+        alignments.emplace_back(in_anchors[0], config_);
+        seeder = std::make_unique<ManualSeeder>(std::move(alignments),
+                                                in_anchors[0].get_query_view().size());
+        return {};
+    }
 
     assert(is_sorted(in_anchors.begin(), in_anchors.end(), [](const auto &a, const auto &b) {
         return a.get_orientation() < b.get_orientation();
@@ -573,7 +581,6 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
     const auto *labeled_aligner = dynamic_cast<const ILabeledAligner*>(&aligner);
     tsl::hopscotch_map<std::string_view::const_iterator, size_t> end_counter[2];
 
-    std::vector<Alignment> alignments;
     std::vector<Seed> seeds;
     seeds.reserve(in_anchors.size());
     size_t orientation_change = std::numeric_limits<size_t>::max();
