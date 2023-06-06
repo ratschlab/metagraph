@@ -274,7 +274,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
             aggregator.add_alignment(std::move(alignment));
         };
 
-        auto get_min_path_score = [&](const Alignment &) {
+        auto get_min_path_score = [&]() {
             return std::max(config_.min_path_score, aggregator.get_global_cutoff());
         };
 
@@ -358,7 +358,7 @@ template <class Seeder, class Extender>
 void align_core(const Seeder &seeder,
                 Extender &extender,
                 const std::function<void(Alignment&&)> &callback,
-                const std::function<score_t(const Alignment&)> &get_min_path_score,
+                const std::function<score_t()> &get_min_path_score,
                 bool force_fixed_seed) {
     auto seeds = seeder.get_alignments();
 
@@ -366,7 +366,7 @@ void align_core(const Seeder &seeder,
         if (seeds[i].empty())
             continue;
 
-        score_t min_path_score = get_min_path_score(seeds[i]);
+        score_t min_path_score = get_min_path_score();
 
         for (auto&& extension : extender.get_extensions(seeds[i], min_path_score,
                                                         force_fixed_seed)) {
@@ -535,7 +535,7 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
                         Extender &forward_extender,
                         Extender &reverse_extender,
                         const std::function<void(Alignment&&)> &callback,
-                        const std::function<score_t(const Alignment&)> &get_min_path_score) const {
+                        const std::function<score_t()> &get_min_path_score) const {
     size_t num_seeds = 0;
     size_t num_extensions = 0;
     size_t num_explored_nodes = 0;
@@ -613,7 +613,7 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
         } catch (const std::bad_function_call&) {}
 
         for (Alignment &alignment : aggregator.get_alignments()) {
-            if (alignment.get_score() < get_min_path_score(alignment))
+            if (alignment.get_score() < get_min_path_score())
                 continue;
 
             if (graph_.get_mode() == DeBruijnGraph::CANONICAL && alignment.get_orientation()) {
@@ -673,7 +673,7 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
 
             std::vector<Alignment> rc_of_alignments;
             for (Alignment &path : extensions) {
-                if (path.get_score() >= get_min_path_score(path)) {
+                if (path.get_score() >= get_min_path_score()) {
                     if (is_reversible(path)) {
                         Alignment out_path = path;
                         out_path.reverse_complement(graph_, query_rc);

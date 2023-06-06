@@ -85,7 +85,7 @@ class DBGAligner : public IDBGAligner {
                           Extender &forward_extender,
                           Extender &reverse_extender,
                           const std::function<void(Alignment&&)> &callback,
-                          const std::function<score_t(const Alignment&)> &get_min_path_score) const;
+                          const std::function<score_t()> &get_min_path_score) const;
 
     // Construct a full alignment from a chain by aligning the query agaisnt
     // the graph in the regions of the query in between the chain seeds.
