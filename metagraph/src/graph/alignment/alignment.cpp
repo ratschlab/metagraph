@@ -836,23 +836,9 @@ void Alignment::reverse_complement(const DeBruijnGraph &graph,
     if (extra_scores.size())
         std::reverse(extra_scores.begin(), extra_scores.end());
 
-    if (dynamic_cast<const RCDBG*>(&graph)) {
-        if (offset_) {
-            *this = Alignment();
-        } else {
-            std::reverse(cigar_.data().begin(), cigar_.data().end());
-            std::reverse(nodes_.begin(), nodes_.end());
-            ::reverse_complement(sequence_.begin(), sequence_.end());
-            assert(query_rev_comp.size() >= get_clipping() + get_end_clipping());
-
-            orientation_ = !orientation_;
-            query_view_ = { query_rev_comp.data() + get_clipping(),
-                            query_rev_comp.size() - get_clipping() - get_end_clipping() };
-        }
-        return;
-    }
-
-    if (!offset_) {
+    if (dynamic_cast<const RCDBG*>(&graph) && offset_) {
+        *this = Alignment();
+    } else if (!offset_) {
         reverse_complement_seq_path(graph, sequence_, nodes_);
     } else {
         assert(nodes_.size() == 1);
@@ -869,8 +855,6 @@ void Alignment::reverse_complement(const DeBruijnGraph &graph,
 
             // TODO: this cascade of graph unwrapping is ugly, find a cleaner way to do it
             const DeBruijnGraph *base_graph = &graph;
-            if (const auto *rc_dbg = dynamic_cast<const RCDBG*>(base_graph))
-                base_graph = &rc_dbg->get_graph();
 
             const auto *canonical = dynamic_cast<const CanonicalDBG*>(base_graph);
             if (canonical)
@@ -984,12 +968,15 @@ void Alignment::reverse_complement(const DeBruijnGraph &graph,
         assert(graph.get_node_sequence(nodes_[0]).substr(offset_) == sequence_);
     }
 
-    std::reverse(cigar_.data().begin(), cigar_.data().end());
-    assert(query_rev_comp.size() >= get_clipping() + get_end_clipping());
+    if (!empty()) {
+        std::reverse(cigar_.data().begin(), cigar_.data().end());
+        assert(query_rev_comp.size() >= get_clipping() + get_end_clipping());
 
-    orientation_ = !orientation_;
-    query_view_ = { query_rev_comp.data() + get_clipping(),
-                    query_rev_comp.size() - get_clipping() - get_end_clipping() };
+        orientation_ = !orientation_;
+        query_view_ = { query_rev_comp.data() + get_clipping(),
+                        query_rev_comp.size() - get_clipping() - get_end_clipping() };
+    }
+
     assert(is_valid(graph));
 }
 
