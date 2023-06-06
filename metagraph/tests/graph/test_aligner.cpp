@@ -18,6 +18,7 @@ using namespace mtg::graph;
 using namespace mtg::graph::align;
 using namespace mtg::test;
 using namespace mtg::kmer;
+using namespace mtg::common;
 
 const std::string test_data_dir = "../tests/data";
 const bool PICK_REV_COMP = true;
@@ -1016,8 +1017,10 @@ TYPED_TEST(DBGAlignerTest, align_straight_long_xdrop) {
 }
 
 TYPED_TEST(DBGAlignerTest, align_drop_seed) {
-    if constexpr(std::is_same_v<TypeParam, DBGSuccinctUnitigIndexed>)
+    if constexpr(std::is_same_v<TypeParam, DBGSuccinctUnitigIndexed>) {
+        logger->warn("Distance indexing only supported for BASIC graphs");
         return;
+    }
 
     size_t k = 4;
     std::string reference = "TTTCCCTGGCGCTCTC";
@@ -1048,13 +1051,14 @@ TYPED_TEST(DBGAlignerTest, align_drop_seed) {
     EXPECT_TRUE(path.is_valid(*graph, &config));
     check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
 
-    // TODO: re-enable this when gap extension is fixed
     check_extend(graph, aligner.get_config(), paths, query);
 }
 
 TYPED_TEST(DBGAlignerTest, align_long_gap_after_seed) {
-    if constexpr(std::is_same_v<TypeParam, DBGSuccinctUnitigIndexed>)
+    if constexpr(std::is_same_v<TypeParam, DBGSuccinctUnitigIndexed>) {
+        logger->warn("Distance indexing only supported for BASIC graphs");
         return;
+    }
 
     size_t k = 4;
     std::string reference = "TTTCCCTTAAGGCGCTCTC";
@@ -1450,6 +1454,11 @@ TYPED_TEST(DBGAlignerTest, align_low_similarity5) {
 }
 
 TYPED_TEST(DBGAlignerTest, align_suffix_seed_snp_min_seed_length) {
+    if constexpr(!std::is_base_of_v<DBGSuccinct, TypeParam>) {
+        logger->warn("Sub-k seeding only supported for DBGSuccinct");
+        return;
+    }
+
     size_t k = 7;
     std::string reference = "AAAAGCTTTCGAGGCCAA";
     std::string query =        "ACCTTTCGAGGCCAA";
@@ -1485,6 +1494,16 @@ TYPED_TEST(DBGAlignerTest, align_suffix_seed_snp_min_seed_length) {
 
 #if ! _PROTEIN_GRAPH
 TYPED_TEST(DBGAlignerTest, align_suffix_seed_snp_canonical) {
+    if constexpr(!std::is_base_of_v<DBGSuccinct, TypeParam>) {
+        logger->warn("Sub-k seeding only supported for DBGSuccinct");
+        return;
+    }
+
+    if constexpr(std::is_same_v<TypeParam, DBGSuccinctUnitigIndexed>) {
+        logger->warn("Distance indexing only supported for BASIC graphs");
+        return;
+    }
+
     size_t k = 18;
     std::string reference = "AAAAACTTTCGAGGCCAA";
     std::string query =     "GGGGGCTTTCGAGGCCAA";
@@ -1528,17 +1547,15 @@ TYPED_TEST(DBGAlignerTest, align_suffix_seed_snp_canonical) {
         EXPECT_FALSE(is_exact_match(path));
         EXPECT_TRUE(path.is_valid(*graph, &config));
         check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
-
-        // TODO: sub-k seeds which are sink tips in the underlying graph currently can't be found
-        if (mode != DeBruijnGraph::PRIMARY)
-            check_extend(graph, aligner.get_config(), paths, query);
+        check_extend(graph, aligner.get_config(), paths, query);
     }
 }
 
 TYPED_TEST(DBGAlignerTest, align_both_directions) {
-    // TODO: for now, until these graphs are supported
-    if constexpr(std::is_same_v<TypeParam, DBGSuccinctUnitigIndexed>)
+    if constexpr(std::is_same_v<TypeParam, DBGSuccinctUnitigIndexed>) {
+        logger->warn("Distance indexing only supported for BASIC graphs");
         return;
+    }
 
     size_t k = 7;
     std::string reference =    "AAAAGCTTTCGAGGCCAA";
@@ -1603,8 +1620,10 @@ TYPED_TEST(DBGAlignerTest, align_both_directions2) {
 }
 
 TYPED_TEST(DBGAlignerTest, align_low_similarity4_rep_primary) {
-    if constexpr(std::is_same_v<TypeParam, DBGSuccinctUnitigIndexed>)
+    if constexpr(std::is_same_v<TypeParam, DBGSuccinctUnitigIndexed>) {
+        logger->warn("Distance indexing only supported for BASIC graphs");
         return;
+    }
 
     size_t k = 6;
     std::vector<std::string> seqs;
@@ -1721,6 +1740,11 @@ TYPED_TEST(DBGAlignerTest, align_bfs_vs_dfs_xdrop) {
 }
 
 TYPED_TEST(DBGAlignerTest, align_dummy) {
+    if constexpr(!std::is_base_of_v<DBGSuccinct, TypeParam>) {
+        logger->warn("Sub-k seeding only supported for DBGSuccinct");
+        return;
+    }
+
     size_t k = 7;
     std::string reference = "AAAAGCTTTCGAGGCCAA";
     std::string query =     "AAAAGTTTTCGAGGCCAA";
@@ -1775,6 +1799,11 @@ TYPED_TEST(DBGAlignerTest, align_branch_single_superbubble) {
 }
 
 TYPED_TEST(DBGAlignerTest, align_extended_insert_after_match) {
+    if constexpr(!std::is_base_of_v<DBGSuccinct, TypeParam>) {
+        logger->warn("Sub-k seeding only supported for DBGSuccinct");
+        return;
+    }
+
     size_t k = 27;
     std::string reference_1 = "CGTGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAAGCC";
     std::string reference_2 = "CGTGGCCCAGGCCCAGGCCCAGCCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAAGCC";
@@ -1799,6 +1828,16 @@ TYPED_TEST(DBGAlignerTest, align_extended_insert_after_match) {
 
 #if ! _PROTEIN_GRAPH
 TYPED_TEST(DBGAlignerTest, align_suffix_seed_no_full_seeds) {
+    if constexpr(std::is_same_v<TypeParam, DBGSuccinctUnitigIndexed>) {
+        logger->warn("Distance indexing only supported for BASIC graphs");
+        return;
+    }
+
+    if constexpr(!std::is_base_of_v<DBGSuccinct, TypeParam>) {
+        logger->warn("Sub-k seeding only supported for DBGSuccinct");
+        return;
+    }
+
     size_t k = 31;
     std::string reference = "CTGCTGCGCCATCGCAACCCACGGTTGCTTTTTGAGTCGCTGCTCACGTTAGCCATCACACTGACGTTAAGCTGGCTTTCGATGCTGTATC";
     std::string query     = "CTTACTGCTGCGCTCTTCGCAAACCCCACGGTTTCTTGTTTTGAGCTCGCCTGCTCACGATACCCATACACACTGACGTTCAAGCTGGCTTTCGATGTTGTATC";
