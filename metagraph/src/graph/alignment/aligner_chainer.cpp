@@ -738,6 +738,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
     DEBUG_LOG("Done prefetching");
 
 
+    tsl::hopscotch_set<Alignment::Column> labels;
     sdsl::bit_vector matching_pos[2] {
         sdsl::bit_vector(query_size, false),
         sdsl::bit_vector(query_size, false)
@@ -763,6 +764,9 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
             bool pick_chain = false;
             DEBUG_LOG("Chain: score: {} len: {}", chain_score, chain.size());
             for (const auto &[aln, dist] : chain) {
+                for (auto col : aln.get_columns()) {
+                    pick_chain |= labels.emplace(col).second;
+                }
                 pick_chain |= aln.get_cigar().mark_exact_matches(matching_pos[orientation]);
                 DEBUG_LOG("\t{} (dist: {})", aln, dist);
             }
@@ -975,7 +979,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
             });
         },
         [&](const auto &chain, score_t score) {
-            if (chain.empty() || (chain.size() == 1 && chain[0].first->get_query_view().size() <= config_.min_seed_length))
+            if (chain.empty())
                 return false;
 
             if (last_chain_score != score) {
