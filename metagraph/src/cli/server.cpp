@@ -151,7 +151,7 @@ std::string process_align_request(const std::string &received_message,
 
     config.alignment_num_alternative_paths = json.get(
         "max_alternative_alignments",
-        (uint64_t)config.alignment_num_alternative_paths).asInt();
+        (uint64_t)config.alignment_num_alternative_paths).asUInt64();
 
     if (!config.alignment_num_alternative_paths) {
         // TODO: better throw an exception and send an error response to the client
