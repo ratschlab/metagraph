@@ -52,7 +52,7 @@ class ColumnPathIndex : public SequenceGraph::GraphExtension {
                         const InfoPair &info_b,
                         const std::function<void(size_t)> &callback,
                         int64_t max_distance = std::numeric_limits<int64_t>::max(),
-                        size_t max_steps = std::numeric_limits<int64_t>::max()) const;
+                        size_t max_steps = std::numeric_limits<size_t>::max()) const;
 
     bool load(const std::string &) { throw std::runtime_error("Load not implemented for ColumnPathIndex"); }
 

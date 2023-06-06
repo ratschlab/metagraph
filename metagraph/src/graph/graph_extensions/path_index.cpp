@@ -136,12 +136,12 @@ void ColumnPathIndex::annotate_columns(std::shared_ptr<DeBruijnGraph> graph,
                 if (!chain_id)
                     chain_id = sb_id;
 
-                logger->info("Checking\t{}\t{},{},{}\t{},{}\t{}\t{}",
-                    in_seq,
-                    unitig_id, sb_id, chain_id,
-                    mark_sb_id, chain_id == unitig_id,
-                    coord,
-                    local_coords);
+                // logger->info("Checking\t{}\t{},{},{}\t{},{}\t{}\t{}",
+                //     in_seq,
+                //     unitig_id, sb_id, chain_id,
+                //     mark_sb_id, chain_id == unitig_id,
+                //     coord,
+                //     local_coords);
                 assert(sb_id >= unitig_id);
                 assert(chain_id >= unitig_id);
 
@@ -541,6 +541,9 @@ void ColumnPathIndex::call_distances(const Label &label,
         }
     }
 
+    std::sort(dists.begin(), dists.end());
+    dists.erase(std::unique(dists.begin(), dists.end()), dists.end());
+
     for (int64_t d : dists) {
         if (d >= 0)
             callback(d);
@@ -562,16 +565,25 @@ void ColumnPathIndex::call_distances(const Label &label,
                     init_dists.emplace_back(dstart + dend);
             }
         }
+
+        if (init_dists.empty())
+            traversal_stack.clear();
+
     } else if (ds_from_start_a.empty()) {
         int64_t init_dist = get_global_coord(label, unitig_id_a + 1) - get_global_coord(label, unitig_id_a);
-        if (init_dist + min_dist <= max_distance)
+        if (init_dist + min_dist <= max_distance) {
             init_dists.emplace_back(init_dist);
+        } else {
+            traversal_stack.clear();
+        }
+
     } else {
         traversal_stack.clear();
     }
 
     while (traversal_stack.size()) {
         auto [u_id, n_steps, dists] = std::move(traversal_stack.back());
+        assert(dists.size());
         traversal_stack.pop_back();
 
         adjacent_outgoing_unitigs(label, u_id, [&](size_t next_u_id, int64_t len) {
@@ -609,9 +621,10 @@ void ColumnPathIndex::call_distances(const Label &label,
                     if (len + d + min_dist <= max_distance)
                         next_dists.emplace_back(len + d);
                 }
-            } else {
-                traversal_stack.pop_back();
             }
+
+            if (next_dists.empty())
+                traversal_stack.pop_back();
         });
     }
 
@@ -624,7 +637,8 @@ void ColumnPathIndex::call_distances(const Label &label,
     while (inserted) {
         inserted = false;
         for (int64_t cycle : cycle_lengths) {
-            for (int64_t prev_cycle : seen_lengths) {
+            auto cur_lengths = seen_lengths;
+            for (int64_t prev_cycle : cur_lengths) {
                 const auto &[it, try_inserted] = seen_lengths.emplace(prev_cycle + cycle);
                 if (try_inserted) {
                     for (int64_t d : dists) {

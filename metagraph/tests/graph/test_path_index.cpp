@@ -59,14 +59,16 @@ TYPED_TEST(PathIndexTest, single_unitig) {
     }
 }
 
-template <class TypeParam>
 void test_traversal_distances(const DeBruijnGraph &graph,
-                              const std::vector<std::tuple<std::string::const_iterator,
-                                                           std::string::const_iterator, size_t>> &tests) {
+                              std::vector<std::tuple<std::string::const_iterator,
+                                                     std::string::const_iterator,
+                                                     tsl::hopscotch_set<size_t>>>&& tests,
+                              int64_t max_distance = std::numeric_limits<int64_t>::max(),
+                              size_t max_steps = 100) {
     size_t k = graph.get_k();
     auto path_index = graph.get_extension_threadsafe<ColumnPathIndex>();
     ASSERT_NE(nullptr, path_index);
-    for (auto [i1, i2, exp_dist] : tests) {
+    for (auto &[i1, i2, exp_dists] : tests) {
         auto nodes_1 = map_to_nodes_sequentially(graph, std::string_view(&*i1, k));
         ASSERT_EQ(1u, nodes_1.size());
 
@@ -89,17 +91,52 @@ void test_traversal_distances(const DeBruijnGraph &graph,
         auto &chain_info = chain_info_all[0].second;
         ASSERT_EQ(2u, chain_info.size());
 
-        bool found = false;
+        tsl::hopscotch_set<size_t> extra_dists;
+        tsl::hopscotch_set<size_t> found_dists;
+
         path_index->call_distances("", chain_info[0], chain_info[1], [&](int64_t dist) {
-            found = true;
-            ASSERT_EQ(exp_dist, dist)
+            ASSERT_FALSE(found_dists.count(dist))
                 << (canonical ? "PRIMARY\t" : "BASIC\t")
-                << std::string_view(&*i1, k) << "\t" << std::string_view(&*i2, k);
-        }, 100);
-        ASSERT_EQ(found, exp_dist != std::numeric_limits<size_t>::max())
-                << (canonical ? "PRIMARY\t" : "BASIC\t")
-                << std::string_view(&*i1, k) << "\t" << std::string_view(&*i2, k);
+                << std::string_view(&*i1, k) << "\t" << std::string_view(&*i2, k) << "\n"
+                << fmt::format("{}\t{}", dist, fmt::join(found_dists.begin(), found_dists.end(), ","));
+
+            found_dists.emplace(dist);
+
+            if (exp_dists.count(dist)) {
+                exp_dists.erase(dist);
+            } else {
+                extra_dists.emplace(dist);
+            }
+        }, max_distance, max_steps);
+
+        ASSERT_TRUE(exp_dists.empty())
+            << (canonical ? "PRIMARY\t" : "BASIC\t")
+            << std::string_view(&*i1, k) << "\t" << std::string_view(&*i2, k) << "\n"
+            << fmt::format("{}", fmt::join(exp_dists.begin(), exp_dists.end(), ","));
+        ASSERT_TRUE(extra_dists.empty())
+            << (canonical ? "PRIMARY\t" : "BASIC\t")
+            << std::string_view(&*i1, k) << "\t" << std::string_view(&*i2, k) << "\n"
+            << fmt::format("{}", fmt::join(extra_dists.begin(), extra_dists.end(), ","));
     }
+}
+
+void test_traversal_distances(const DeBruijnGraph &graph,
+                              std::vector<std::tuple<std::string::const_iterator,
+                                                     std::string::const_iterator,
+                                                     size_t>>&& tests,
+                              int64_t max_distance = std::numeric_limits<int64_t>::max(),
+                              size_t max_steps = 100) {
+    std::vector<std::tuple<std::string::const_iterator,
+                           std::string::const_iterator,
+                           tsl::hopscotch_set<size_t>>> long_tests;
+    long_tests.reserve(tests.size());
+    for (const auto &[begin, end, d] : tests) {
+        auto &[i, j, d_s] = long_tests.emplace_back(begin, end, tsl::hopscotch_set<size_t>{});
+        if (d != std::numeric_limits<size_t>::max())
+            d_s.emplace(d);
+    }
+
+    test_traversal_distances(graph, std::move(long_tests), max_distance, max_steps);
 }
 
 TYPED_TEST(PathIndexTest, simple_superbubble) {
@@ -132,7 +169,7 @@ TYPED_TEST(PathIndexTest, simple_superbubble) {
             tests.emplace_back(reference_1.begin() + i, reference_2.end() - k, k + 1 - i);
         }
 
-        test_traversal_distances<TypeParam>(*graph, tests);
+        test_traversal_distances(*graph, std::move(tests));
     }
 }
 
@@ -159,7 +196,7 @@ TYPED_TEST(PathIndexTest, double_superbubble_chain) {
             tests.emplace_back(reference_1.begin() + i, reference_2.end() - k - 1, (k + 1) * 2 - i - 1);
         }
 
-        test_traversal_distances<TypeParam>(*graph, tests);
+        test_traversal_distances(*graph, std::move(tests));
     }
 }
 
@@ -191,7 +228,7 @@ TYPED_TEST(PathIndexTest, nested_superbubbles) {
             tests.emplace_back(reference_3.begin() + i, reference_2.end() - k - 1, std::numeric_limits<size_t>::max());
         }
 
-        test_traversal_distances<TypeParam>(*graph, tests);
+        test_traversal_distances(*graph, std::move(tests));
     }
 }
 
@@ -217,7 +254,7 @@ TYPED_TEST(PathIndexTest, disconnect) {
         tests.emplace_back(reference_1.begin(), reference_3.end() - k, (k + 1) * 2);
         tests.emplace_back(reference_1.begin() + 1, reference_3.end() - k, (k + 1) * 2 - 1);
         tests.emplace_back(reference_1.begin() + 1, reference_3.end() - k - 1, (k + 1) * 2 - 2);
-        test_traversal_distances<TypeParam>(*graph, tests);
+        test_traversal_distances(*graph, std::move(tests));
     }
 }
 
@@ -228,7 +265,11 @@ TYPED_TEST(PathIndexTest, simple_cycle) {
         auto graph = build_graph_batch<TypeParam>(k, { reference }, mode);
         std::vector<std::tuple<std::string::const_iterator,
                                std::string::const_iterator,
-                               size_t>> tests;
+                               tsl::hopscotch_set<size_t>>> tests;
+        tests.emplace_back(reference.begin(), reference.begin(), tsl::hopscotch_set<size_t>{
+            0, 11, 22, 33
+        });
+        test_traversal_distances(*graph, std::move(tests), k * 3, 3);
     }
 }
 
