@@ -728,14 +728,14 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
         }
     }
 
-    logger->trace("Prefetching node coordinates");
+    DEBUG_LOG("Prefetching node coordinates");
     for (auto &[label, nodes_info] : column_path_index->get_chain_info(nodes)) {
         auto encode = label.size() ? labeled_aligner->get_annotation_buffer().get_annotator().get_label_encoder().encode(label)
                                    : std::numeric_limits<Seed::Column>::max();
         if (node_col_coords.count(encode))
             node_col_coords[encode] = std::move(nodes_info);
     }
-    logger->trace("Done prefetching");
+    DEBUG_LOG("Done prefetching");
 
 
     sdsl::bit_vector matching_pos[2] {
@@ -761,10 +761,10 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
             }
 
             bool pick_chain = false;
-            logger->info("Chain: score: {} len: {}", chain_score, chain.size());
+            DEBUG_LOG("Chain: score: {} len: {}", chain_score, chain.size());
             for (const auto &[aln, dist] : chain) {
                 pick_chain |= aln.get_cigar().mark_exact_matches(matching_pos[orientation]);
-                logger->info("\t{} (dist: {})", aln, dist);
+                DEBUG_LOG("\t{} (dist: {})", aln, dist);
             }
 
             if (!pick_chain)
@@ -837,7 +837,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
     };
 
     score_t match_score = config_.match_score("A");
-    logger->trace("Chaining {} anchors for a query of length {}", seeds.size(), query_size);
+    DEBUG_LOG("Chaining {} anchors for a query of length {}", seeds.size(), query_size);
     chain_anchors<Seed>(config_, seeds.data(), seeds.data() + seeds.size(),
         [&](const Seed &a_i,
             ssize_t max_coord_dist,
@@ -1061,7 +1061,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
     if (!terminate)
         flush_chains();
 
-    logger->info("Done chaining");
+    DEBUG_LOG("Done chaining");
 
     num_extensions += extender.num_extensions() + bwd_extender.num_extensions();
     num_explored_nodes += extender.num_explored_nodes() + bwd_extender.num_explored_nodes();

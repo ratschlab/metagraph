@@ -16,6 +16,8 @@
 #define protected public
 #include "annotation/annotation_converters.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
+#include "graph/annotated_graph_algorithm.hpp"
+#include "graph/graph_extensions/path_index.hpp"
 
 namespace mtg {
 namespace test {
@@ -35,7 +37,47 @@ std::unique_ptr<AnnotatedDBG> build_anno_graph(uint64_t k,
                                                DeBruijnGraph::Mode mode,
                                                bool coordinates) {
     assert(sequences.size() == labels.size());
-    auto graph = build_graph_batch<Graph>(k, sequences, mode);
+    std::shared_ptr<DeBruijnGraph> graph;
+
+    if constexpr(std::is_same_v<Graph, DBGSuccinctUnitigIndexed>) {
+        graph = build_graph_batch<DBGSuccinct>(k, sequences, mode);
+
+        tsl::hopscotch_map<std::string, std::vector<std::tuple<std::string, size_t, size_t, std::vector<int64_t>, std::vector<int64_t>>>> data;
+        for (size_t i = 0; i < sequences.size(); ++i) {
+            graph::assemble_with_coordinates(k,
+                [&](const auto &callback) { callback(sequences[i]); },
+                [&](const std::string &unitig,
+                    size_t sb_term,
+                    size_t chain_id,
+                    const std::vector<int64_t> &distances_from_begin,
+                    const std::vector<int64_t> &distances_to_end) {
+                    data[labels[i]].emplace_back(unitig, sb_term, chain_id, distances_from_begin, distances_to_end);
+                }
+            );
+        }
+
+        std::vector<std::string> columns;
+        size_t i = 0;
+        std::filesystem::path swap_dir = utils::create_temp_dir("", "tmp_path_col");
+        for (const auto &[label, l_data] : data) {
+            std::string &column_file = columns.emplace_back(fmt::format("{}.{}", std::string(swap_dir/"tmp_paths"), i));
+            graph::ColumnPathIndex::annotate_columns(graph, column_file, [&](const auto &callback) {
+                for (size_t j = 0; j < l_data.size(); ++j) {
+                    auto &[unitig, sb_term, chain_id, distances_from_begin, distances_to_end] = l_data[j];
+                    std::string coords = sb_term || chain_id
+                        ? graph::format_coords(distances_from_begin, distances_to_end)
+                        : "";
+                    callback(unitig, j + 1, sb_term, chain_id, coords, { label });
+                }
+            }, 10, swap_dir);
+            ++i;
+        }
+
+        graph->add_extension(std::make_shared<graph::ColumnPathIndex>(graph, columns));
+
+    } else {
+        graph = build_graph_batch<Graph>(k, sequences, mode);
+    }
 
     // TODO: what if CanonicalDBG is not the highest level? find a better way to do this
     auto canonical = dynamic_pointer_cast<const CanonicalDBG>(graph);

@@ -580,7 +580,7 @@ void assemble_with_coordinates(size_t k,
         assert(visited.size());
         assert(visited.size() >= 4);
 
-        logger->info("Found superbubble at {} containing {} unitigs", i, visited.size());
+        logger->trace("Found superbubble at {} containing {} unitigs", i, visited.size());
 
         if (visited[terminus].first.size() == 1) {
             // easy case
@@ -677,8 +677,8 @@ void assemble_with_coordinates(size_t k,
     // TODO: precompute cycle distances
 
     size_t cur_unitig_id = 0;
-    logger->info("Outputting {} unitigs not in a superbubble",
-                  num_unitigs - sdsl::util::cnt_one_bits(in_superbubble));
+    logger->trace("Outputting {} unitigs not in a superbubble",
+                   num_unitigs - sdsl::util::cnt_one_bits(in_superbubble));
     call_zeros(in_superbubble, [&](size_t i) {
         const auto &[unitig, path] = unitigs[i];
         ++cur_unitig_id;
@@ -686,7 +686,7 @@ void assemble_with_coordinates(size_t k,
         callback(unitig, 0, 0, std::vector<int64_t>{}, std::vector<int64_t>{});
     });
 
-    logger->info("Found {} superbubbles covering {} unitigs",
+    logger->trace("Found {} superbubbles covering {} unitigs",
                   sdsl::util::cnt_one_bits(is_superbubble_start),
                   sdsl::util::cnt_one_bits(in_superbubble));
 
@@ -716,7 +716,7 @@ void assemble_with_coordinates(size_t k,
         chains.emplace_back(const_cast<std::vector<size_t>&&>(chain.values_container()));
     });
 
-    logger->info("Found {} chains", chains.size());
+    logger->trace("Found {} chains", chains.size());
     for (size_t i = 0; i < chains.size(); ++i) {
         DEBUG_LOG("Processing chain of size {}", chains[i].size());
         assert(chains[i].size());
