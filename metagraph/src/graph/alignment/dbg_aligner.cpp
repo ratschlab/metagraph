@@ -168,11 +168,8 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
         size_t num_explored_nodes = 0;
         size_t num_extensions = 0;
 
-        auto get_min_path_score = [&](const Alignment &seed) {
-            return std::max(config_.min_path_score,
-                            seed.has_annotation()
-                                ? aggregator.get_score_cutoff(seed.get_columns())
-                                : aggregator.get_global_cutoff());
+        auto get_min_path_score = [&](const Alignment &) {
+            return std::max(config_.min_path_score, aggregator.get_global_cutoff());
         };
 
         auto add_alignment = [&](Alignment&& alignment) {
