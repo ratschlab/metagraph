@@ -108,7 +108,7 @@ void SeedFilteringExtender
 
         set_graph(*rc_graph);
         extend_seed_end(rev, [&](Alignment&& aln) {
-            aln.reverse_complement(*rc_graph, seed.get_full_query_view());
+            aln.reverse_complement(*old_graph, seed.get_full_query_view());
             if (aln.size()) {
                 assert(aln.get_end_clipping() == seed.get_end_clipping());
                 assert(aln.get_score() >= min_path_score);
