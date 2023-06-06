@@ -36,7 +36,7 @@ bool AnnotationBuffer
     for (node_index node : nodes) {
         const auto *labels = get_labels(node);
         if (!labels) {
-            logger->error("Node {} has no labels", node);
+            logger->error("Labels for node {} have not been fetched", node);
             return false;
         }
 
@@ -88,10 +88,13 @@ void AnnotationBuffer::fetch_queued_annotations() {
 
     for (const auto &path : queued_paths_) {
         std::vector<node_index> base_path;
+        std::vector<node_index> rc_path;
         if (base_graph->get_mode() == DeBruijnGraph::CANONICAL) {
             // TODO: avoid this call of spell_path
             std::string query = spell_path(graph_, path);
             base_path = map_to_nodes(*base_graph, query);
+            reverse_complement(query.begin(), query.end());
+            rc_path = map_to_nodes_sequentially(*base_graph, query);
 
         } else if (canonical_) {
             base_path.reserve(path.size());
@@ -172,6 +175,16 @@ void AnnotationBuffer::fetch_queued_annotations() {
                     find_b.value() = label_i;
                 }
             }
+
+            if (rc_path.size()) {
+                node_index rc_node = *(rc_path.rbegin() + i);
+                auto find_c = node_to_cols_.find(rc_node);
+                if (find_c == node_to_cols_.end()) {
+                    node_to_cols_.emplace(rc_node, nannot);
+                    queued_rows.push_back(row);
+                    queued_nodes.push_back(rc_node);
+                }
+            }
         }
     }
 
@@ -193,6 +206,7 @@ void AnnotationBuffer::fetch_queued_annotations() {
         } else if (canonical_) {
             node_to_cols_[base_node] = label_i;
         } else {
+            assert(graph_.get_mode() == DeBruijnGraph::CANONICAL);
             node_to_cols_[*node_it] = label_i;
             if (base_node != *node_it && node_to_cols_.try_emplace(base_node, label_i).second
                     && has_coordinates()) {

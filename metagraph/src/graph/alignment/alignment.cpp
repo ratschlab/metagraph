@@ -821,6 +821,9 @@ size_t Alignment::trim_reference_suffix(size_t n,
 void Alignment::reverse_complement(const DeBruijnGraph &graph,
                                    std::string_view query_rev_comp) {
     assert(query_view_.size() + get_end_clipping() == query_rev_comp.size() - get_clipping());
+    assert((sequence_.empty() && nodes_.empty())
+        || sequence_.size() == nodes_.size() + graph.get_k() - 1 - offset_);
+
 
     trim_offset();
     assert(!offset_ || nodes_.size() == 1);
