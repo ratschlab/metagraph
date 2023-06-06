@@ -159,7 +159,7 @@ void chain_anchors(const DBGAlignerConfig &config,
         while (last != anchors_end) {
             last_anchor = last;
             size_t to_traverse = dist;
-            assert(to_traverse > 0);
+            assert(allow_overlap || to_traverse > 0);
 
             std::tie(score, last, dist) = chain_scores[last - anchors_begin];
             chain.emplace_back(last_anchor, to_traverse);
