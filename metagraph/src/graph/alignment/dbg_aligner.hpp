@@ -81,7 +81,8 @@ class DBGAligner : public IDBGAligner {
     mutable DBGAlignerConfig config_;
 
     virtual BatchSeeders build_seeders(const std::vector<Query> &seq_batch,
-                                       const std::vector<AlignmentResults> &wrapped_seqs) const;
+                                       const std::vector<AlignmentResults> &wrapped_seqs,
+                                       std::vector<std::pair<std::vector<Seed>, std::vector<Seed>>> &discarded_seeds) const;
 
   private:
     /**

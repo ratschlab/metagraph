@@ -162,10 +162,12 @@ class LabeledAligner : public DBGAligner<Seeder, Extender, AlignmentCompare>, pu
     typedef typename DBGAligner<Seeder, Extender, AlignmentCompare>::BatchSeeders BatchSeeders;
     BatchSeeders
     virtual build_seeders(const std::vector<IDBGAligner::Query> &seq_batch,
-                          const std::vector<AlignmentResults> &wrapped_seqs) const override final;
+                          const std::vector<AlignmentResults> &wrapped_seqs,
+                          std::vector<std::pair<std::vector<Seed>, std::vector<Seed>>> &discarded_seeds) const override final;
 
     // helper for the build_seeders method
-    size_t filter_seeds(std::vector<Seed> &seeds) const;
+    size_t filter_seeds(std::vector<Seed> &seeds,
+                        std::vector<Seed> &discarded_seeds) const;
 };
 
 } // namespace align
