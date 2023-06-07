@@ -741,6 +741,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
         sdsl::bit_vector(query_size, false),
         sdsl::bit_vector(query_size, false)
     };
+    size_t num_matching_pos[2] = { 0, 0 };
 
     std::unordered_multiset<Chain, ChainHash> chains;
     score_t last_chain_score = std::numeric_limits<score_t>::min();
@@ -749,17 +750,21 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
             return;
 
         auto callback = [&](Chain&& chain, score_t chain_score, auto &extender, auto &bwd_extender) {
+            assert(chain.size());
             bool orientation = chain[0].first.get_orientation();
-            bool pick_chain = false;
+            size_t num_added = 0;
             for (const auto &[aln, dist] : chain) {
-                pick_chain |= aln.get_cigar().mark_exact_matches(matching_pos[orientation]);
+                num_added += aln.get_cigar().mark_exact_matches(matching_pos[orientation]);
             }
 
-            if (!pick_chain)
+            if (num_matching_pos[orientation] && num_added < graph_.get_k())
                 return;
 
+            num_matching_pos[orientation] += num_added;
+
             if (common::get_verbose()) {
-                logger->trace("Chain: score: {} len: {}", chain_score, chain.size());
+                logger->trace("Chain: score: {} len: {} num_added: {}",
+                              chain_score, chain.size(), num_added);
                 for (const auto &[aln, dist] : chain) {
                     logger->trace("\t{} (dist: {})", aln, dist);
                 }

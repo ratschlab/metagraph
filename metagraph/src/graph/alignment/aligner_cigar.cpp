@@ -304,10 +304,10 @@ bool Cigar::is_valid(std::string_view reference, std::string_view query) const {
     return true;
 }
 
-bool Cigar::mark_exact_matches(sdsl::bit_vector &mask,
-                               bool skip_clipping,
-                               bool orientation) const {
-    bool added = false;
+size_t Cigar::mark_exact_matches(sdsl::bit_vector &mask,
+                                 bool skip_clipping,
+                                 bool orientation) const {
+    size_t num_added = 0;
     auto process = [&](auto it, auto end) {
         for (const auto &[op, num] : cigar_) {
             switch (op) {
@@ -326,7 +326,7 @@ bool Cigar::mark_exact_matches(sdsl::bit_vector &mask,
                 case NODE_INSERTION: {} break;
                 case MATCH: {
                     assert(it + num <= end);
-                    added |= (std::find(it, it + num, false) != it + num);
+                    num_added += std::count_if(it, it + num, [](bool a) { return !a; });
                     std::fill(it, it + num, true);
                     it += num;
                 } break;
@@ -344,7 +344,7 @@ bool Cigar::mark_exact_matches(sdsl::bit_vector &mask,
         process(mask.begin(), mask.end());
     }
 
-    return added;
+    return num_added;
 }
 
 } // namespace align
