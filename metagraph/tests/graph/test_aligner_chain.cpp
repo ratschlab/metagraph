@@ -105,11 +105,11 @@ TYPED_TEST(DBGAlignerTestPostChain, align_chain_overlap_mismatch) {
 
 TYPED_TEST(DBGAlignerTestPostChain, align_chain_overlap_3_prefer_mismatch_over_gap) {
     size_t k = 11;
-    std::string reference1 = "AAATTTTGAGGATCAG";
-    std::string reference2 =      "CCCCGGATCAGGTTTATTTAATTAGCT";
-    std::string reference3 =                      "CCCCATTAGCTTGCTAGCAAAAA";
-    std::string query      = "AAATTTTGAGGATCAGCTTTATTTAATTAGCTTGCTAGCAAAAA";
-    //                                        X
+    std::string reference1 = "GCAAATTTTGAGGATCAG";
+    std::string reference2 =        "CCCCGGATCAGGTTTATTTAATTAGCT";
+    std::string reference3 =                        "CCCCATTAGCTTGCTAGCAAAAA";
+    std::string query      = "GCAAATTTTGAGGATCAGCTTTATTTAATTAGCTTGCTAGCAAAAA";
+    //                                          X
 
     auto graph = build_graph_batch<TypeParam>(k, { reference1, reference2, reference3 });
     DBGAlignerConfig config;
@@ -124,7 +124,7 @@ TYPED_TEST(DBGAlignerTestPostChain, align_chain_overlap_3_prefer_mismatch_over_g
     auto paths = aligner.align(query);
     ASSERT_LE(1u, paths.size());
     EXPECT_EQ(1u, paths.size());
-    EXPECT_EQ(std::string("AAATTTTGAGGATCAGGTTTATTTAATTAGCTTGCTAGCAAAAA"), paths[0].get_sequence());
+    EXPECT_EQ(std::string("GCAAATTTTGAGGATCAGGTTTATTTAATTAGCTTGCTAGCAAAAA"), paths[0].get_sequence());
     check_chain(paths, *graph, config);
 }
 

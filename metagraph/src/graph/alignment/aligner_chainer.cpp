@@ -767,17 +767,17 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
 
             num_matching_pos[orientation] += num_added;
 
-            // if (common::get_verbose()) {
-                logger->info("Chain: score: {} len: {} num_added: {}",
-                              chain_score, chain.size(), num_added);
+            if (common::get_verbose()) {
+                DEBUG_LOG("Chain: score: {} len: {} num_added: {}",
+                          chain_score, chain.size(), num_added);
                 for (const auto &[aln, dist] : chain) {
-                    logger->info("\t{} (dist: {})", aln, dist);
+                    DEBUG_LOG("\t{} (dist: {})", aln, dist);
                 }
-            // }
+            }
 
             auto add_alignment = [&](auto &aln_v, Alignment&& aln) {
                 size_t num_added = aln.get_cigar().mark_exact_matches(matching_pos[orientation]);
-                logger->info("\tAln: num_added: {}\t{}", num_added, aln);
+                DEBUG_LOG("\tAln: num_added: {}\t{}", num_added, aln);
                 num_matching_pos[orientation] += num_added;
                 aln_v.emplace_back(std::move(aln));
             };
