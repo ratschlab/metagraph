@@ -650,6 +650,8 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
             auto &a_i = *(i + 1);
             auto &a_j = *i;
 
+            assert(Alignment(a_j, config_).is_valid(graph_, &config_));
+
             if (a_i.label_columns != a_j.label_columns)
                 continue;
 
@@ -664,7 +666,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
             // we want query_j.begin() + graph_k - a_j.get_offset() + x == query_i.end() + 1
             // ->      graph_k - a_j.get_offset() + x == overlap + 1
             // -> x == overlap + 1 + a_j.get_offset() - graph_k
-            ssize_t a_j_node_idx = overlap + 1 + a_j.get_offset() - graph_k;
+            ssize_t a_j_node_idx = overlap + 1 + static_cast<ssize_t>(a_j.get_offset()) - graph_k;
             assert(a_j_node_idx < static_cast<ssize_t>(a_j.get_nodes().size()));
 
             if (a_j_node_idx < 0)

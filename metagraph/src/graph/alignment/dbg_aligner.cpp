@@ -126,7 +126,7 @@ auto DBGAligner<Seeder, Extender, AlignmentCompare>
                 || config_.forward_and_reverse_complement) {
             nodes_rc = nodes;
             std::string dummy(query);
-            if (config_.max_seed_length >= graph_.get_k()) {
+            if (nodes.size()) {
                 reverse_complement_seq_path(graph_, dummy, nodes_rc);
                 assert(dummy == wrapped_seqs[i].get_query(true));
             }
