@@ -61,11 +61,11 @@ TYPED_TEST_SUITE(DBGAlignerTestLabeled, FewGraphAnnotationPairTypes);
 TYPED_TEST(DBGAlignerTestLabeled, SimpleLinearGraph) {
     size_t k = 4;
     /*
-        A    A    B    B    B    B
-        GCAA-CAAT-AATG-ATGC-TGCT-GCTT
+        A    A    A    A    B    B    B    B
+        TGGC-GGCA-GCAA-CAAT-AATG-ATGC-TGCT-GCTT
     */
     const std::vector<std::string> sequences {
-        "GCAAT",
+        "TGGCAAT",
         "AATGCTT"
     };
     const std::vector<std::string> labels { "A", "B" };
@@ -79,8 +79,8 @@ TYPED_TEST(DBGAlignerTestLabeled, SimpleLinearGraph) {
     LabeledAligner<> aligner(anno_graph->get_graph(), config, anno_graph->get_annotator());
 
     std::unordered_map<std::string, std::unordered_map<std::string, std::string>> exp_alignments {{
-        { std::string("GCAATGCTT"), {{ { std::string("B"), std::string("AATGCTT") }, // 2S7=
-                                       { std::string("A"), std::string("GCAAT") } //5=4S
+        { std::string("TGGCAATGCTT"), {{ { std::string("B"), std::string("AATGCTT") },  // 4S7=
+                                         { std::string("A"), std::string("TGGCAAT") }   // 7=4S
                                      }} }
     }};
 
