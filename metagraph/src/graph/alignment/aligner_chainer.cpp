@@ -737,14 +737,10 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
     }
     DEBUG_LOG("Done prefetching");
 
-
-    tsl::hopscotch_set<Alignment::Column> labels;
     sdsl::bit_vector matching_pos[2] {
         sdsl::bit_vector(query_size, false),
         sdsl::bit_vector(query_size, false)
     };
-    bool terminate = false;
-    score_t best_score = std::numeric_limits<score_t>::min();
 
     std::unordered_multiset<Chain, ChainHash> chains;
     score_t last_chain_score = std::numeric_limits<score_t>::min();
@@ -754,25 +750,20 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
 
         auto callback = [&](Chain&& chain, score_t chain_score, auto &extender, auto &bwd_extender) {
             bool orientation = chain[0].first.get_orientation();
-            best_score = std::max(best_score, chain_score);
-            bool score_too_low = (chain_score < best_score * config_.rel_score_cutoff);
-            if (score_too_low) {
-                terminate = true;
-                return;
-            }
-
             bool pick_chain = false;
-            DEBUG_LOG("Chain: score: {} len: {}", chain_score, chain.size());
             for (const auto &[aln, dist] : chain) {
-                for (auto col : aln.get_columns()) {
-                    pick_chain |= labels.emplace(col).second;
-                }
                 pick_chain |= aln.get_cigar().mark_exact_matches(matching_pos[orientation]);
-                DEBUG_LOG("\t{} (dist: {})", aln, dist);
             }
 
             if (!pick_chain)
                 return;
+
+            if (common::get_verbose()) {
+                logger->trace("Chain: score: {} len: {}", chain_score, chain.size());
+                for (const auto &[aln, dist] : chain) {
+                    logger->trace("\t{} (dist: {})", aln, dist);
+                }
+            }
 
             aligner.extend_chain(std::move(chain), extender, [&](Alignment&& aln) {
                 std::vector<Alignment> alns;
@@ -1056,14 +1047,13 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
         false,
         [](const auto*, auto&&, size_t, const auto&) {},
         [](auto&&) {},
-        [&terminate]() { return terminate; },
+        []() { return false; },
         false,
         config_.max_dist_between_seeds,
         config_.max_gap_shrinking_factor
     );
 
-    if (!terminate)
-        flush_chains();
+    flush_chains();
 
     DEBUG_LOG("Done chaining");
 
