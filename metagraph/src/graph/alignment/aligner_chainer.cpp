@@ -563,7 +563,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
     const DBGAlignerConfig &config_ = aligner.get_config();
     std::vector<Alignment> alignments;
     if (in_anchors.size() == 1) {
-        DEBUG_LOG("In Anchor: {}", Alignment(in_anchors[0], config_));
+        // DEBUG_LOG("In Anchor: {}", Alignment(in_anchors[0], config_));
         alignments.emplace_back(in_anchors[0], config_);
         seeder = std::make_unique<ManualSeeder>(std::move(alignments),
                                                 in_anchors[0].get_query_view().size());
@@ -588,7 +588,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
     tsl::hopscotch_map<size_t, ColumnPathIndex::NodesInfo> node_col_coords;
     if (!labeled_aligner) {
         for (const auto &in_anchor : in_anchors) {
-            DEBUG_LOG("In Anchor: {}", Alignment(in_anchor, config_));
+            // DEBUG_LOG("In Anchor: {}", Alignment(in_anchor, config_));
             if (!in_anchor.get_clipping() && !in_anchor.get_end_clipping()) {
                 alignments.emplace_back(in_anchor, config_);
             } else {
@@ -602,7 +602,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
         }
     } else {
         for (const auto &in_anchor : in_anchors) {
-            DEBUG_LOG("In Anchor: {}", Alignment(in_anchor, config_));
+            // DEBUG_LOG("In Anchor: {}", Alignment(in_anchor, config_));
             if (!in_anchor.get_clipping() && !in_anchor.get_end_clipping()) {
                 alignments.emplace_back(in_anchor, config_);
                 continue;
@@ -721,7 +721,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                 out_nodes[seed.get_nodes().back()].emplace_back(next);
         });
 
-        DEBUG_LOG("Anchor: {}", Alignment(seed, config_));
+        // DEBUG_LOG("Anchor: {}", Alignment(seed, config_));
 
         auto &[anchor_front_idx, anchor_back_idx] = anchor_ends.emplace_back(
             nodes.size(), nodes.size()
