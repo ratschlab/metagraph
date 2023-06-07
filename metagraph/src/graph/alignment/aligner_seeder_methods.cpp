@@ -71,11 +71,17 @@ auto ExactSeeder::get_seeds() const -> std::vector<Seed> {
     if (num_matching_ < config_.min_exact_match * query_.size())
         return {};
 
-    std::vector<Seed> seeds;
-
     if (config_.max_seed_length < k)
-        return seeds;
+        return {};
 
+    return generate_seeds();
+}
+
+auto ExactSeeder::generate_seeds() const -> std::vector<Seed> {
+    size_t k = graph_.get_k();
+    assert(k >= config_.min_seed_length);
+
+    std::vector<Seed> seeds;
     size_t end_clipping = query_.size() - k;
     for (size_t i = 0; i < query_nodes_.size(); ++i, --end_clipping) {
         if (query_nodes_[i] != DeBruijnGraph::npos) {
@@ -354,6 +360,21 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
             }
             last_end = end;
         }
+    }
+
+    if (this->config_.max_seed_length < this->graph_.get_k()) {
+        auto full_k_seeds = this->BaseSeeder::generate_seeds();
+        logger->warn("Max seed length < graph k, adding in {} k-length seeds",
+                     full_k_seeds.size());
+        std::vector<Seed> merged_seeds;
+        merged_seeds.reserve(seeds_.size() + full_k_seeds.size());
+        std::merge(seeds_.begin(), seeds_.end(), full_k_seeds.begin(), full_k_seeds.end(),
+                   std::back_inserter(merged_seeds),
+                   [&](const Seed &a, const Seed &b) {
+                       return std::make_pair(a.get_query_view().begin(), a.get_query_view().end())
+                            < std::make_pair(b.get_query_view().begin(), b.get_query_view().end());
+                   });
+        std::swap(merged_seeds, seeds_);
     }
 }
 

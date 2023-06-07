@@ -563,6 +563,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
     const DBGAlignerConfig &config_ = aligner.get_config();
     std::vector<Alignment> alignments;
     if (in_anchors.size() == 1) {
+        DEBUG_LOG("In Anchor: {}", Alignment(in_anchors[0], config_));
         alignments.emplace_back(in_anchors[0], config_);
         seeder = std::make_unique<ManualSeeder>(std::move(alignments),
                                                 in_anchors[0].get_query_view().size());
@@ -587,6 +588,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
     tsl::hopscotch_map<size_t, ColumnPathIndex::NodesInfo> node_col_coords;
     if (!labeled_aligner) {
         for (const auto &in_anchor : in_anchors) {
+            DEBUG_LOG("In Anchor: {}", Alignment(in_anchor, config_));
             if (!in_anchor.get_clipping() && !in_anchor.get_end_clipping()) {
                 alignments.emplace_back(in_anchor, config_);
             } else {
@@ -600,6 +602,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
         }
     } else {
         for (const auto &in_anchor : in_anchors) {
+            DEBUG_LOG("In Anchor: {}", Alignment(in_anchor, config_));
             if (!in_anchor.get_clipping() && !in_anchor.get_end_clipping()) {
                 alignments.emplace_back(in_anchor, config_);
                 continue;
@@ -762,29 +765,32 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
 
             num_matching_pos[orientation] += num_added;
 
-            if (common::get_verbose()) {
-                logger->trace("Chain: score: {} len: {} num_added: {}",
+            // if (common::get_verbose()) {
+                logger->info("Chain: score: {} len: {} num_added: {}",
                               chain_score, chain.size(), num_added);
                 for (const auto &[aln, dist] : chain) {
-                    logger->trace("\t{} (dist: {})", aln, dist);
+                    logger->info("\t{} (dist: {})", aln, dist);
                 }
-            }
+            // }
+
+            auto add_alignment = [&](auto &aln_v, Alignment&& aln) {
+                size_t num_added = aln.get_cigar().mark_exact_matches(matching_pos[orientation]);
+                logger->info("\tAln: num_added: {}\t{}", num_added, aln);
+                num_matching_pos[orientation] += num_added;
+                aln_v.emplace_back(std::move(aln));
+            };
 
             aligner.extend_chain(std::move(chain), extender, [&](Alignment&& aln) {
                 std::vector<Alignment> alns;
                 if (!aln.get_end_clipping()) {
-                    DEBUG_LOG("\tAln:\t{}", aln);
-                    aln.get_cigar().mark_exact_matches(matching_pos[orientation]);
-                    alns.emplace_back(std::move(aln));
+                    add_alignment(alns, std::move(aln));
                 } else {
                     alns = extender.get_extensions(aln, 0, true);
                 }
 
                 for (auto&& ext : alns) {
                     if (!ext.get_clipping()) {
-                        ext.get_cigar().mark_exact_matches(matching_pos[orientation]);
-                        DEBUG_LOG("\tAln:\t{}", ext);
-                        alignments.emplace_back(std::move(ext));
+                        add_alignment(alignments, std::move(ext));
                     } else {
                         bwd_extender.rc_extend_rc(ext, [&](Alignment&& aln) {
                             assert(aln.is_valid(graph_, &config_));
@@ -793,9 +799,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                                                       query_size - aln.get_end_clipping());
                             }
 
-                            aln.get_cigar().mark_exact_matches(matching_pos[orientation]);
-                            DEBUG_LOG("\tAln:\t{}", aln);
-                            alignments.emplace_back(std::move(aln));
+                            add_alignment(alignments, std::move(aln));
                         }, true, 0);
                     }
                 }

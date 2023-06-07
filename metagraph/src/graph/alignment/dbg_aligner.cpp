@@ -104,11 +104,8 @@ auto DBGAligner<Seeder, Extender, AlignmentCompare>
         assert(this_query == query);
 
         std::vector<node_index> nodes;
-        if (config_.max_seed_length >= graph_.get_k()) {
+        if (this_query.size() >= graph_.get_k())
             nodes = map_to_nodes_sequentially(graph_, query);
-        } else if (this_query.size() >= graph_.get_k()) {
-            nodes.resize(this_query.size() - graph_.get_k() + 1);
-        }
 
         std::shared_ptr<ISeeder> seeder
             = std::make_shared<Seeder>(graph_, this_query, false,

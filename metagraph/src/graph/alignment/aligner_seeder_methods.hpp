@@ -99,6 +99,8 @@ class ExactSeeder : public ISeeder {
     size_t num_matching_;
 
     size_t num_exact_matching() const;
+
+    std::vector<Seed> generate_seeds() const;
 };
 
 class UniMEMSeeder : public ExactSeeder {
