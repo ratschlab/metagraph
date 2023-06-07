@@ -193,8 +193,12 @@ bool align_connect(const DeBruijnGraph &graph,
 template <class Seeder, class Extender, class AlignmentCompare>
 auto DBGAligner<Seeder, Extender, AlignmentCompare>
 ::build_seeders(const std::vector<IDBGAligner::Query> &seq_batch,
-                const std::vector<AlignmentResults> &wrapped_seqs) const -> BatchSeeders {
+                const std::vector<AlignmentResults> &wrapped_seqs,
+                std::vector<std::pair<std::vector<Seed>, std::vector<Seed>>> &discarded_seeds) const -> BatchSeeders {
     assert(seq_batch.size() == wrapped_seqs.size());
+    discarded_seeds.clear();
+    discarded_seeds.resize(seq_batch.size());
+
     BatchSeeders result;
     result.reserve(seq_batch.size());
 
@@ -257,7 +261,8 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
         paths.emplace_back(query);
     }
 
-    auto seeders = build_seeders(seq_batch, paths);
+    std::vector<std::pair<std::vector<Seed>, std::vector<Seed>>> discarded_seeds;
+    auto seeders = build_seeders(seq_batch, paths, discarded_seeds);
     assert(seeders.size() == seq_batch.size());
 
     for (size_t i = 0; i < seq_batch.size(); ++i) {
@@ -273,6 +278,13 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
             assert(alignment.is_valid(graph_, &config_));
             aggregator.add_alignment(std::move(alignment));
         };
+
+        for (auto &seed : discarded_seeds[i].first) {
+            add_alignment(Alignment(seed, config_));
+        }
+        for (auto &seed : discarded_seeds[i].second) {
+            add_alignment(Alignment(seed, config_));
+        }
 
         auto get_min_path_score = [&]() {
             return std::max(config_.min_path_score, aggregator.get_global_cutoff());
