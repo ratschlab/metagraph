@@ -909,8 +909,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
 
                 ssize_t overlap = query_i.end() - query_j.begin();
                 if (query_i.end() == query_j.end() && query_i.begin() <= query_j.begin() && graph_k - static_cast<ssize_t>(a_j.get_offset()) == overlap && (allow_label_change || allow_jump)) {
-                    ssize_t num_added = query_j.end() - std::max(query_j.begin(), query_i.end());
-                    assert(num_added >= 0);
+                    assert(query_j.end() - std::max(query_j.begin(), query_i.end()) >= 0);
                     std::string_view added_seq(query_i.begin(),
                                                std::min(query_i.end(), query_j.begin()) - query_i.begin());
 

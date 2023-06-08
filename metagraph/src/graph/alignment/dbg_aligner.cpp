@@ -268,42 +268,43 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
         size_t query_coverage = 0;
 
         auto alignments = aggregator.get_alignments();
-        // if (alignments.size() && (config_.allow_jump || config_.allow_label_change)) {
-        //     std::vector<Alignment> chained_alignments;
-        //     auto add_aln = [&](auto&& alignment) {
-        //         if (chained_alignments.empty()) {
-        //             chained_alignments.emplace_back(std::move(alignment));
-        //             return;
-        //         }
+        if (alignments.size() && (config_.allow_jump || config_.allow_label_change)
+                && (config_.chain_alignments || !graph_.get_extension_threadsafe<ColumnPathIndex>())) {
+            std::vector<Alignment> chained_alignments;
+            auto add_aln = [&](auto&& alignment) {
+                if (chained_alignments.empty()) {
+                    chained_alignments.emplace_back(std::move(alignment));
+                    return;
+                }
 
-        //         if (alignment.get_score() > chained_alignments[0].get_score())
-        //             chained_alignments.clear();
+                if (alignment.get_score() > chained_alignments[0].get_score())
+                    chained_alignments.clear();
 
-        //         chained_alignments.emplace_back(std::move(alignment));
-        //     };
+                chained_alignments.emplace_back(std::move(alignment));
+            };
 
-        //     std::vector<Alignment> alns;
-        //     alns.reserve(alignments.size());
-        //     for (const Alignment &aln : alignments) {
-        //         if (!aln.get_orientation())
-        //             alns.emplace_back(aln);
-        //     }
+            std::vector<Alignment> alns;
+            alns.reserve(alignments.size());
+            for (const Alignment &aln : alignments) {
+                if (!aln.get_orientation())
+                    alns.emplace_back(aln);
+            }
 
-        //     for (const Alignment &aln : alignments) {
-        //         if (aln.get_orientation())
-        //             alns.emplace_back(aln);
-        //     }
+            for (const Alignment &aln : alignments) {
+                if (aln.get_orientation())
+                    alns.emplace_back(aln);
+            }
 
-        //     assert(alns.size() == alignments.size());
-        //     alignments.resize(1);
+            assert(alns.size() == alignments.size());
+            alignments.resize(1);
 
-        //     chain_alignments(*this, alns, add_aln);
+            chain_alignments(*this, alns, add_aln);
 
-        //     if (chained_alignments.size()
-        //             && chained_alignments[0].get_score() > alignments[0].get_score()) {
-        //         std::swap(chained_alignments, alignments);
-        //     }
-        // }
+            if (chained_alignments.size()
+                    && chained_alignments[0].get_score() > alignments[0].get_score()) {
+                std::swap(chained_alignments, alignments);
+            }
+        }
 
         for (auto&& alignment : alignments) {
             assert(alignment.is_valid(graph_, &config_));
