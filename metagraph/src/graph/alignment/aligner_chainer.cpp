@@ -703,6 +703,10 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
             if (i_find->second != 1 || j_find->second != 1)
                 continue;
 
+            if (i + 2 != end && (i + 2)->get_query_view().end() > query_i.begin()
+                    && query_i.begin() - (i + 2)->get_query_view().begin() != 1)
+                continue;
+
             assert(overlap < graph_k - 1
                     || graph_.traverse(a_i.get_nodes().back(), *query_i.end()) == a_j.get_nodes()[a_j_node_idx]);
 
@@ -789,7 +793,11 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                 logger->info("Chain: score: {} len: {} num_added: {}",
                           chain_score, chain.size(), num_added);
                 for (const auto &[aln, dist] : chain) {
-                    logger->info("\t{} (dist: {})", aln, dist);
+                    logger->info("\t{} (dist: {})", aln,
+                        dist >= std::numeric_limits<uint32_t>::max()
+                            ? fmt::format("jump + {}", dist - std::numeric_limits<uint32_t>::max())
+                            : fmt::format("{}", dist)
+                    );
                 }
             // }
 
@@ -861,7 +869,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
     };
 
     score_t match_score = config_.match_score("A");
-    DEBUG_LOG("Chaining {} anchors for a query of length {}", seeds.size(), query_size);
+    logger->trace("Chaining {} anchors for a query of length {}", seeds.size(), query_size);
     chain_anchors<Seed>(config_, seeds.data(), seeds.data() + seeds.size(),
         [&](const Seed &a_i,
             ssize_t max_coord_dist,
@@ -1027,6 +1035,8 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                 const auto &coords_j = node_col_coords[col_j][node_j];
                 assert(std::get<0>(coords_j.first));
 
+                // logger->info("Try connect: {} -> {}",
+                //     Alignment(a_i, config_), Alignment(a_j, config_));
                 if (query_i.end() < query_j.begin()) {
                     // assume that there are no seeds in this range, meaning at best
                     // there is an error every seed_size characters
@@ -1050,6 +1060,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                     if (!overlap)
                         coord_dist += a_j.get_nodes().size() - 1;
 
+                    // logger->info("Found!\t{} vs. {}\tnum_added: {}\toverlap: {}", coord_dist, dist, num_added, overlap);
                     if (num_added > coord_dist || (!num_added && coord_dist == 0))
                         return;
 
@@ -1060,7 +1071,9 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                     score_t gap_cost = gap > 0 ? config_.gap_opening_penalty + (gap - 1) * config_.gap_extension_penalty : 0;
                     assert((gap > 0) == (gap_cost < 0));
 
+                    // logger->info("\ttrying: {}", base_added_score + gap_cost);
                     update_score(base_added_score + gap_cost, &a_j, coord_dist);
+                        // logger->info("\tworked!");
                 }, max_coord_dist + (overlap ? query_j.size() : 0), 2);
             });
         },
@@ -1068,8 +1081,10 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
             if (chain.empty())
                 return false;
 
-            if ((allow_label_change || allow_jump) && alignments.size())
+            if ((allow_label_change || allow_jump) && alignments.size()) {
+                flush_chains();
                 return false;
+            }
 
             if (last_chain_score != score) {
                 flush_chains();
@@ -1570,7 +1585,11 @@ void chain_alignments(const IDBGAligner &aligner,
             for (size_t i = 1; i < chain.size(); ++i) {
                 const auto &info = anchor_extra_info[chain[i].first - anchor_alns.data()];
                 DEBUG_LOG("\t{} (aln: {}; dist: {}; length: {})",
-                          *chain[i].first, info.index, chain[i].second, info.mem_length);
+                          *chain[i].first, info.index,
+                          chain[i].second >= std::numeric_limits<uint32_t>::max()
+                            ? fmt::format("jump + {}", chain[i].second - std::numeric_limits<uint32_t>::max())
+                            : fmt::format("{}", chain[i].second),
+                          info.mem_length);
                 all_equal &= (info.index
                                 == anchor_extra_info[chain[i - 1].first - anchor_alns.data()].index);
             }
