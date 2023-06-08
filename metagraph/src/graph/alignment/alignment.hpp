@@ -405,6 +405,7 @@ class AlignmentResults {
     }
 
     size_t size() const { return alignments_.size(); }
+    void resize(size_t next_size) { alignments_.resize(next_size); }
     bool empty() const { return alignments_.empty(); }
     const Alignment& operator[](size_t i) const { return alignments_[i]; }
 

@@ -34,7 +34,8 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                        std::shared_ptr<ISeeder> &seeder,
                        SeedFilteringExtender&& extender,
                        SeedFilteringExtender&& bwd_extender,
-                       bool allow_label_change = true);
+                       bool allow_label_change = false,
+                       bool allow_jump = false);
 
 void chain_alignments(const IDBGAligner &aligner,
                       const std::vector<Alignment> &alignments,

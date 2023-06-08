@@ -114,11 +114,9 @@ void chain_anchors(const DBGAlignerConfig &config,
                 );
 
                 if (updated && allow_overlap) {
-                    i = std::find_if(std::make_reverse_iterator(i + 1),
-                                     std::make_reverse_iterator(anchors_begin),
-                                     [&](const auto &s_i) {
-                                         return s_i.get_query_view().end() != end;
-                                     }).base();
+                    while (i->get_query_view().end() == end) {
+                        --i;
+                    }
                 }
             }
             b_last = b;
@@ -149,6 +147,7 @@ void chain_anchors(const DBGAlignerConfig &config,
         if (terminate())
             return;
 
+        // TODO: FIX THIS?
         // if (used[i])
         //     continue;
 

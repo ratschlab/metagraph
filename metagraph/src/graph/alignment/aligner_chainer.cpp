@@ -548,7 +548,8 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                        std::shared_ptr<ISeeder> &seeder,
                        SeedFilteringExtender&& extender,
                        SeedFilteringExtender&& bwd_extender,
-                       bool allow_label_change) {
+                       bool allow_label_change,
+                       bool allow_jump) {
     allow_label_change = false;
     size_t query_size = extender.get_query().size();
     const DeBruijnGraph &graph_ = aligner.get_graph();
@@ -637,10 +638,17 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
         if (begin == end)
             return;
 
-        std::sort(begin, end, [](const auto &a, const auto &b) {
-            return std::pair(b.label_columns, a.get_query_view().end())
-                    > std::pair(a.label_columns, b.get_query_view().end());
-        });
+        if (allow_label_change) {
+            std::sort(begin, end, [](const auto &a, const auto &b) {
+                return std::pair(a.get_query_view().end(), a.get_query_view().begin())
+                    > std::pair(b.get_query_view().end(), b.get_query_view().begin());
+            });
+        } else {
+            std::sort(begin, end, [](const auto &a, const auto &b) {
+                return std::make_tuple(b.label_columns, a.get_query_view().end(), a.get_query_view().begin())
+                        > std::make_tuple(a.label_columns, b.get_query_view().end(), b.get_query_view().begin());
+            });
+        }
 
         if (end_counter[begin->get_orientation()].empty())
             return;
@@ -660,8 +668,18 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
 
             ssize_t num_added = query_j.end() - std::max(query_j.begin(), query_i.end());
             ssize_t overlap = query_i.end() - query_j.begin();
-            if (num_added <= 0 || overlap < seed_size - 1)
+            if (num_added < 0 || overlap < seed_size - 1)
                 continue;
+
+            if (num_added == 0) {
+                if (a_i.get_nodes().back() == a_j.get_nodes().back()) {
+                    if (a_j.get_query_view().size() > a_i.get_query_view().size())
+                        std::swap(a_i, a_j);
+
+                    a_j = Seed();
+                }
+                continue;
+            }
 
             // we want query_j.begin() + graph_k - a_j.get_offset() + x == query_i.end() + 1
             // ->      graph_k - a_j.get_offset() + x == overlap + 1
@@ -721,7 +739,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                 out_nodes[seed.get_nodes().back()].emplace_back(next);
         });
 
-        // DEBUG_LOG("Anchor: {}", Alignment(seed, config_));
+        DEBUG_LOG("Anchor: {}", Alignment(seed, config_));
 
         auto &[anchor_front_idx, anchor_back_idx] = anchor_ends.emplace_back(
             nodes.size(), nodes.size()
@@ -767,17 +785,17 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
 
             num_matching_pos[orientation] += num_added;
 
-            if (common::get_verbose()) {
-                DEBUG_LOG("Chain: score: {} len: {} num_added: {}",
+            // if (common::get_verbose()) {
+                logger->info("Chain: score: {} len: {} num_added: {}",
                           chain_score, chain.size(), num_added);
                 for (const auto &[aln, dist] : chain) {
-                    DEBUG_LOG("\t{} (dist: {})", aln, dist);
+                    logger->info("\t{} (dist: {})", aln, dist);
                 }
-            }
+            // }
 
             auto add_alignment = [&](auto &aln_v, Alignment&& aln) {
                 size_t num_added = aln.get_cigar().mark_exact_matches(matching_pos[orientation]);
-                DEBUG_LOG("\tAln: num_added: {}\t{}", num_added, aln);
+                logger->info("\tAln: num_added: {}\t{}", num_added, aln);
                 num_matching_pos[orientation] += num_added;
                 aln_v.emplace_back(std::move(aln));
             };
@@ -785,7 +803,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
             aligner.extend_chain(std::move(chain), extender, [&](Alignment&& aln) {
                 std::vector<Alignment> alns;
                 if (!aln.get_end_clipping()) {
-                    add_alignment(alns, std::move(aln));
+                    alns.emplace_back(std::move(aln));
                 } else {
                     alns = extender.get_extensions(aln, 0, true);
                 }
@@ -863,15 +881,62 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
 
             --chain_scores;
             std::for_each(begin, end, [&](const Seed &a_j) {
-                // try to connect a_i to a_j
-                assert(&a_i != &a_j);
-                assert(a_i.get_orientation() == a_j.get_orientation());
                 ++chain_scores;
+                // try to connect a_i to a_j
+                assert(allow_label_change || allow_jump || &a_i != &a_j);
+                if (&a_i == &a_j)
+                    return;
 
-                // logger->info("Try to connect1 {} -> {}",
-                //     Alignment(a_i, config_), Alignment(a_j, config_));
+                assert(a_i.get_orientation() == a_j.get_orientation());
+
+                auto col_j = a_j.get_columns()[0];
+
+                if (!allow_label_change && col_i != col_j)
+                    return;
 
                 std::string_view query_j = a_j.get_query_view();
+
+                if (col_i != col_j && query_i.end() != query_j.end())
+                    return;
+
+                score_t score_j = std::get<0>(*chain_scores);
+
+                // logger->info("Try to connect1: {}: {} -> {}: {}\t{}",
+                //     &a_i - seeds.data(),
+                //     Alignment(a_i, config_),
+                //     &a_j - seeds.data(),
+                //     score_j, Alignment(a_j, config_));
+
+                ssize_t overlap = query_i.end() - query_j.begin();
+                if (query_i.end() == query_j.end() && query_i.begin() <= query_j.begin() && graph_k - static_cast<ssize_t>(a_j.get_offset()) == overlap && (allow_label_change || allow_jump)) {
+                    ssize_t num_added = query_j.end() - std::max(query_j.begin(), query_i.end());
+                    assert(num_added >= 0);
+                    std::string_view added_seq(query_i.begin(),
+                                               std::min(query_i.end(), query_j.begin()) - query_i.begin());
+
+                    // logger->info("Connect: {} -> {} (len: {})",
+                    //     Alignment(a_i, config_), Alignment(a_j, config_), added_seq.size());
+
+                    score_t base_added_score = score_j + config_.match_score(added_seq);
+
+                    if (a_i.get_nodes().back() != a_j.get_nodes().back())
+                        base_added_score += config_.node_insertion_penalty;
+
+                    if (base_added_score <= score_i)
+                        return;
+
+                    score_t label_change_score = allow_label_change && labeled_aligner
+                        ? labeled_aligner->get_label_change_score(col_i, col_j)
+                        : (col_i == col_j ? 0 : DBGAlignerConfig::ninf);
+
+                    if (label_change_score == DBGAlignerConfig::ninf)
+                        return;
+
+                    base_added_score += label_change_score * match_score;
+                    update_score(base_added_score, &a_j, 0);
+
+                    return;
+                }
 
                 // want a_i.begin < a_j.begin && a_i.end < a_j.end
                 // i.e.  [-------)    a_i
@@ -880,63 +945,73 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                     return;
 
                 ssize_t dist = query_j.end() - query_i.end();
-                score_t label_change_score = 0;
-                auto col_j = a_j.get_columns()[0];
-                if (labeled_aligner) {
-                    if (!allow_label_change && col_i != col_j)
-                        return;
-
-                    label_change_score = labeled_aligner->get_label_change_score(col_i, col_j);
-                    if (label_change_score == DBGAlignerConfig::ninf)
-                        return;
-
-                    label_change_score *= match_score;
-                }
-
                 ssize_t num_added = query_j.end() - std::max(query_j.begin(), query_i.end());
                 std::string_view added_seq(query_i.begin(),
                                            std::min(query_i.end(), query_j.begin()) - query_i.begin());
                 assert(num_added >= 0);
 
-                score_t score_j = std::get<0>(*chain_scores);
-                score_t base_added_score = score_j + config_.match_score(added_seq) + label_change_score;
-                ssize_t overlap = query_i.end() - query_j.begin();
+                score_t base_added_score = score_j + config_.match_score(added_seq);
 
                 if (base_added_score < score_i || (base_added_score == score_i && dist_i == 1))
                     return;
 
                 if (num_added > 0) {
-                    // we want query_j.begin() + graph_k - a_j.get_offset() + x == query_i.end() + 1
-                    // ->      graph_k - a_j.get_offset() + x == overlap + 1
-                    // -> x == overlap + 1 + a_j.get_offset() - graph_k
-                    ssize_t a_j_node_idx = overlap + 1 + a_j.get_offset() - graph_k;
-                    assert(a_j_node_idx < static_cast<ssize_t>(a_j.get_nodes().size()));
-                    if (a_j_node_idx >= 0) {
-                        if (overlap >= graph_k - 1) {
-                            // we know they are connected
-                            assert(graph_.traverse(a_i.get_nodes().back(), *query_i.end())
-                                    == a_j.get_nodes()[a_j_node_idx]);
-                            int64_t coord_dist = a_j.get_nodes().size() - a_j_node_idx;
-                            int64_t gap = std::abs(dist - coord_dist);
-                            score_t gap_cost = gap > 0 ? config_.gap_opening_penalty + (gap - 1) * config_.gap_extension_penalty : 0;
-                            assert((gap > 0) == (gap_cost < 0));
-                            if (update_score(base_added_score + gap_cost, &a_j, coord_dist)
-                                    && gap == 0) {
-                                return;
+                    if (num_added == static_cast<ssize_t>(query_j.size())) {
+                        // disjoint
+                        assert(added_seq.size() == query_i.size());
+                        if (allow_jump) {
+                            score_t gap = query_j.begin() - query_i.end();
+                            assert(gap >= 0);
+                            score_t gap_cost = config_.node_insertion_penalty + config_.gap_opening_penalty + (gap > 0
+                                ? config_.gap_opening_penalty + (gap - 1) * config_.gap_extension_penalty
+                                : 0);
+                            score_t label_change_score = allow_label_change && labeled_aligner
+                                ? labeled_aligner->get_label_change_score(col_i, col_j)
+                                : (col_i == col_j ? 0 : DBGAlignerConfig::ninf);
+
+                            if (label_change_score != DBGAlignerConfig::ninf) {
+                                // logger->info("\tpp\t{}", base_added_score + gap_cost
+                                //                 + label_change_score * match_score);
+                                update_score(base_added_score
+                                                + gap_cost
+                                                + label_change_score * match_score,
+                                    &a_j, std::numeric_limits<uint32_t>::max() + query_j.size());
                             }
-                        } else if (overlap >= seed_size - 1) {
-                            // we need to check if they are connected
-                            node_index next_node = a_j.get_nodes()[a_j_node_idx];
-                            auto find = out_nodes.find(a_i.get_nodes().back());
-                            if (find != out_nodes.end()) {
-                                if (std::find(find->second.begin(), find->second.end(), next_node) != find->second.end()) {
-                                    int64_t coord_dist = a_j.get_nodes().size() - a_j_node_idx;
-                                    int64_t gap = std::abs(dist - coord_dist);
-                                    score_t gap_cost = gap > 0 ? config_.gap_opening_penalty + (gap - 1) * config_.gap_extension_penalty : 0;
-                                    assert((gap > 0) == (gap_cost < 0));
-                                    if (update_score(base_added_score + gap_cost, &a_j, coord_dist)
-                                            && gap == 0) {
-                                        return;
+                        }
+                    } else {
+                        // we want query_j.begin() + graph_k - a_j.get_offset() + x == query_i.end() + 1
+                        // ->      graph_k - a_j.get_offset() + x == overlap + 1
+                        // -> x == overlap + 1 + a_j.get_offset() - graph_k
+                        ssize_t a_j_node_idx = overlap + 1 + a_j.get_offset() - graph_k;
+                        assert(a_j_node_idx < static_cast<ssize_t>(a_j.get_nodes().size()));
+                        if (a_j_node_idx >= 0) {
+                            if (overlap >= graph_k - 1) {
+                                // we know they are connected
+                                assert(graph_.traverse(a_i.get_nodes().back(), *query_i.end())
+                                        == a_j.get_nodes()[a_j_node_idx]);
+                                int64_t coord_dist = a_j.get_nodes().size() - a_j_node_idx;
+                                int64_t gap = std::abs(dist - coord_dist);
+                                score_t gap_cost = gap > 0 ? config_.gap_opening_penalty + (gap - 1) * config_.gap_extension_penalty : 0;
+                                assert((gap > 0) == (gap_cost < 0));
+                                if (update_score(base_added_score + gap_cost, &a_j, coord_dist)
+                                        && gap == 0) {
+                                    return;
+                                }
+                            } else if (overlap >= seed_size - 1) {
+                                // we need to check if they are connected
+                                node_index next_node = a_j.get_nodes()[a_j_node_idx];
+                                auto find = out_nodes.find(a_i.get_nodes().back());
+                                if (find != out_nodes.end()) {
+                                    if (std::find(find->second.begin(), find->second.end(), next_node) != find->second.end()) {
+                                        int64_t coord_dist = a_j.get_nodes().size() - a_j_node_idx;
+                                        int64_t gap = std::abs(dist - coord_dist);
+                                        score_t gap_cost = gap > 0 ? config_.gap_opening_penalty + (gap - 1) * config_.gap_extension_penalty : 0;
+                                        assert((gap > 0) == (gap_cost < 0));
+                                        if (update_score(base_added_score + gap_cost, &a_j, coord_dist)
+                                                && gap == 0) {
+                                            // logger->info("\tfff\t{}", base_added_score + gap_cost);
+                                            return;
+                                        }
                                     }
                                 }
                             }
@@ -956,16 +1031,12 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                 const std::string &label = col_i == std::numeric_limits<Seed::Column>::max()
                     ? "" : labeled_aligner->get_annotation_buffer().get_annotator().get_label_encoder().decode(col_i);
 
-                // logger->info("Try to connect3 {} -> {}\tadded: {}",
-                //     Alignment(a_i, config_), Alignment(a_j, config_), num_added);
-
                 column_path_index->call_distances(label,
                                                   coords_i_back, coords_j,
                                                   [&](int64_t coord_dist) {
                     if (!overlap)
                         coord_dist += a_j.get_nodes().size() - 1;
 
-                    // logger->info("\tcoord_dist: {}\tdist: {}\tscore_i: {}\tbase_score: {}", coord_dist, dist, score_i, base_added_score);
                     if (num_added > coord_dist || (!num_added && coord_dist == 0))
                         return;
 
@@ -1008,12 +1079,17 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
 
                 std::string_view query_i = a_i.get_query_view();
                 std::string_view query_j = a_j.get_query_view();
+
                 ssize_t num_added = query_j.end() - std::max(query_j.begin(), query_i.end());
                 ssize_t overlap = query_i.end() - query_j.begin();
-                // logger->info("{}>?0,{}>=?{}\t{} -> {}",num_added,overlap,seed_size-1,
-                    // Alignment(a_i, config_),Alignment(a_j, config_));
                 if (num_added <= 0 || overlap < seed_size - 1)
                     continue;
+
+                if (graph_k - static_cast<ssize_t>(a_j.get_offset()) == overlap) {
+                    assert(allow_label_change || allow_jump);
+                    if (a_i.get_nodes().back() != a_j.get_nodes().back() || a_i.label_columns != a_j.label_columns)
+                        continue;
+                }
 
                 // we want query_j.begin() + graph_k - a_j.get_offset() + x == query_i.end() + 1
                 // ->      graph_k - a_j.get_offset() + x == overlap + 1
@@ -1050,7 +1126,9 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
             }
 
             assert(std::all_of(cur_chain.begin() + 1, cur_chain.end(),
-                               [&](const auto &a) { return a.second > 0; }));
+                               [&](const auto &a) {
+                                   return allow_label_change || allow_jump || a.second > 0;
+                               }));
 
             chains.emplace(std::move(cur_chain));
             return true;
@@ -1059,7 +1137,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
         [](const auto*, auto&&, size_t, const auto&) {},
         [](auto&&) {},
         []() { return false; },
-        false,
+        allow_jump || allow_label_change,
         config_.max_dist_between_seeds,
         config_.max_gap_shrinking_factor
     );

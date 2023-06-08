@@ -362,18 +362,28 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
         }
     }
 
-    if (this->config_.max_seed_length < this->graph_.get_k()) {
+    if (this->config_.max_seed_length < this->graph_.get_k() && this->query_nodes_.front()) {
         auto full_k_seeds = this->BaseSeeder::generate_seeds();
+        if (full_k_seeds.empty())
+            return;
+
+        auto seed_query_earlier = [](const Seed &a, const Seed &b) {
+            return std::make_pair(a.get_query_view().begin(), a.get_query_view().end())
+                < std::make_pair(b.get_query_view().begin(), b.get_query_view().end());
+        };
+
+        std::sort(full_k_seeds.begin(), full_k_seeds.end(), seed_query_earlier);
+
+        auto it = std::find_if(full_k_seeds.begin() + 1, full_k_seeds.end(), [&](const auto &a) {
+            return a.get_query_view().begin() != full_k_seeds[0].get_query_view().begin();
+        });
+
         logger->warn("Max seed length < graph k, adding in {} k-length seeds",
-                     full_k_seeds.size());
+                     it - full_k_seeds.begin());
         std::vector<Seed> merged_seeds;
-        merged_seeds.reserve(seeds_.size() + full_k_seeds.size());
-        std::merge(seeds_.begin(), seeds_.end(), full_k_seeds.begin(), full_k_seeds.end(),
-                   std::back_inserter(merged_seeds),
-                   [&](const Seed &a, const Seed &b) {
-                       return std::make_pair(a.get_query_view().begin(), a.get_query_view().end())
-                            < std::make_pair(b.get_query_view().begin(), b.get_query_view().end());
-                   });
+        merged_seeds.reserve(seeds_.size() + (it - full_k_seeds.begin()));
+        std::merge(seeds_.begin(), seeds_.end(), full_k_seeds.begin(), it,
+                   std::back_inserter(merged_seeds), seed_query_earlier);
         std::swap(merged_seeds, seeds_);
     }
 }
