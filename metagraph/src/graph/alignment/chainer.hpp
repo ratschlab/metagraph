@@ -147,9 +147,8 @@ void chain_anchors(const DBGAlignerConfig &config,
         if (terminate())
             return;
 
-        // TODO: FIX THIS?
-        // if (used[i])
-        //     continue;
+        if (used[i])
+            continue;
 
         std::vector<std::pair<const Anchor*, size_t>> chain;
         const auto *last_anchor = anchors_begin + i;

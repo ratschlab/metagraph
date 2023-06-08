@@ -284,7 +284,7 @@ TYPED_TEST(DBGAlignerTestPostChain, align_chain_gap) {
     EXPECT_EQ(std::string("AAAAACCCCCTGAGGATCAG$ACTAGCTAGCCCCCCAAAAA"), paths[0].get_sequence());
     paths.resize(1);
     check_chain(paths, *graph, config);
-    // check_extend(graph, aligner.get_config(), paths, query);
+    check_extend(graph, aligner.get_config(), paths, query);
 }
 
 } // namespace
