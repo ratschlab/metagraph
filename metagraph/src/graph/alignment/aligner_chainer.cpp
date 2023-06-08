@@ -1027,6 +1027,20 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                 const auto &coords_j = node_col_coords[col_j][node_j];
                 assert(std::get<0>(coords_j.first));
 
+                if (query_i.end() < query_j.begin()) {
+                    // assume that there are no seeds in this range, meaning at best
+                    // there is an error every seed_size characters
+                    double error_rate = 1.0 / seed_size;
+                    size_t gap_length = query_j.begin() - query_i.end();
+                    score_t mismatches = config_.score_sequences(
+                        std::string_view(&*query_i.end(), gap_length),
+                        std::string(gap_length, 'N')
+                    );
+                    score_t matches = config_.match_score(std::string_view(&*query_i.end(), gap_length));
+                    assert(mismatches < 0);
+                    base_added_score += (1.0 - error_rate) * matches + error_rate * mismatches;
+                }
+
                 const std::string &label = col_i == std::numeric_limits<Seed::Column>::max()
                     ? "" : labeled_aligner->get_annotation_buffer().get_annotator().get_label_encoder().decode(col_i);
 
@@ -1047,11 +1061,14 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                     assert((gap > 0) == (gap_cost < 0));
 
                     update_score(base_added_score + gap_cost, &a_j, coord_dist);
-                }, max_coord_dist, 2);
+                }, max_coord_dist + (overlap ? query_j.size() : 0), 2);
             });
         },
         [&](const auto &chain, score_t score) {
             if (chain.empty())
+                return false;
+
+            if ((allow_label_change || allow_jump) && alignments.size())
                 return false;
 
             if (last_chain_score != score) {
