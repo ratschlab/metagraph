@@ -596,6 +596,11 @@ void assemble_with_coordinates(size_t k,
             if (!in_superbubble[it->first]) {
                 in_superbubble[it->first] = true;
                 --num_not_in_superbubble;
+            } else if (it->first != i && it->first != terminus && is_superbubble_start[it->first]) {
+                is_superbubble_start[it->first] = false;
+                auto &[other_terminus, other_visited] = superbubbles[it->first];
+                other_terminus = std::numeric_limits<size_t>::max();
+                other_visited.clear();
             }
         }
 
