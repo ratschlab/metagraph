@@ -360,6 +360,10 @@ auto ColumnPathIndex::get_chain_info(const std::vector<node_index> &nodes) const
                 continue;
 
             if (!is_local_coord) {
+                if (coords.size() != 1) {
+                    logger->info("Label: {}, Node: {}, coords: {}", stored_label, anno_graph_->get_graph().get_node_sequence(nodes[i]),
+                        coords.size());
+                }
                 assert(coords.size() == 1);
 
                 Column unitig_col = label_encoder.encode(UNITIG_FRONT_TAG + label);

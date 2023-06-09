@@ -779,7 +779,6 @@ void assemble_with_coordinates(size_t k,
                 }
                 std::sort(de_chain.begin(), de_chain.end());
                 de_chain.erase(std::unique(de_chain.begin(), de_chain.end()), de_chain.end());
-                // logger->info("U:\t{}\t{};{}\t{};{}", unitig, fmt::join(d.first, ","), fmt::join(d.second, ","), fmt::join(d_chain, ","), fmt::join(de_chain, ","));
                 assert(d_chain.size());
                 assert(de_chain.size());
                 callback(unitig, term_unitig_id, term_id, d_chain, de_chain);
@@ -800,7 +799,6 @@ void assemble_with_coordinates(size_t k,
         }
         std::sort(d_chain.begin(), d_chain.end());
         d_chain.erase(std::unique(d_chain.begin(), d_chain.end()), d_chain.end());
-        // logger->info("U:\t{}\t{};{}\t{};{}", unitig, fmt::join(d.first, ","), fmt::join(d.second, ","), fmt::join(d_chain, ","), fmt::join(d.second, ","));
         assert(d_chain.size());
         assert(d.second.size());
         callback(unitig, cur_unitig_id, term_id, d_chain, d.second);

@@ -1065,8 +1065,10 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                         return;
 
                     float gap = std::abs(coord_dist - dist);
-                    if (gap != 0 && overlap > 0)
-                        return;
+                    // if (gap != 0 && overlap > 0) {
+                    //     logger->info("Fail connect: {} -> {}", Alignment(a_i, config_), Alignment(a_j, config_));
+                    //     return;
+                    // }
 
                     score_t gap_cost = gap > 0 ? config_.gap_opening_penalty + (gap - 1) * config_.gap_extension_penalty : 0;
                     assert((gap > 0) == (gap_cost < 0));
