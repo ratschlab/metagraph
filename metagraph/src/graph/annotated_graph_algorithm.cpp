@@ -467,6 +467,8 @@ void assemble_with_coordinates(size_t k,
 
     // enumerate superbubbles
     sdsl::bit_vector in_superbubble(num_unitigs, false);
+    size_t num_not_in_superbubble = num_unitigs;
+
     sdsl::bit_vector is_superbubble_start(num_unitigs, false);
     using Superbubble = VectorMap<size_t, std::pair<std::vector<int64_t>,
                                                     std::vector<int64_t>>>;
@@ -542,7 +544,6 @@ void assemble_with_coordinates(size_t k,
                         );
 
                         if (visited.size()) {
-                            is_superbubble_start[i] = true;
                             terminus = unitig_id;
                             visited[terminus] = seens[terminus];
                             assert(visited.size() == seens.size());
@@ -563,17 +564,39 @@ void assemble_with_coordinates(size_t k,
         assert(visited.size());
         assert(visited.size() >= 4);
 
+        size_t already_in_superbubble = std::count_if(visited.begin(), visited.end(),
+            [&](const auto &a) { return in_superbubble[a.first]; }
+        );
+
+        if (already_in_superbubble == visited.size()) {
+            // this is a nested superbubble
+            DEBUG_LOG("Ignoring nested superbubble at {}", i);
+            visited.clear();
+            terminus = std::numeric_limits<size_t>::max();
+            continue;
+        }
+
+        assert(!already_in_superbubble
+            || (already_in_superbubble == 1 && (in_superbubble[terminus] || in_superbubble[i]))
+            || (already_in_superbubble == 2 && in_superbubble[terminus] && in_superbubble[i]));
+
 #ifndef NDEBUG
         int64_t width = *std::max_element(visited[terminus].first.begin(),
                                           visited[terminus].first.end());
 #endif
 
+        is_superbubble_start[i] = true;
+
         for (auto it = visited.begin(); it != visited.end(); ++it) {
             auto &d = it.value().first;
-            in_superbubble[it->first] = true;
             std::sort(d.begin(), d.end());
             d.erase(std::unique(d.begin(), d.end()), d.end());
             assert(d.back() <= width);
+
+            if (!in_superbubble[it->first]) {
+                in_superbubble[it->first] = true;
+                --num_not_in_superbubble;
+            }
         }
 
         assert(terminus < num_unitigs);
@@ -674,11 +697,10 @@ void assemble_with_coordinates(size_t k,
         }
     }
 
-    // TODO: precompute cycle distances
+    // TODO: precompute cycle distances?
 
     size_t cur_unitig_id = 0;
-    logger->trace("Outputting {} unitigs not in a superbubble",
-                   num_unitigs - sdsl::util::cnt_one_bits(in_superbubble));
+    logger->trace("Outputting {} unitigs not in a superbubble", num_not_in_superbubble);
     call_zeros(in_superbubble, [&](size_t i) {
         const auto &[unitig, path] = unitigs[i];
         ++cur_unitig_id;
@@ -688,7 +710,7 @@ void assemble_with_coordinates(size_t k,
 
     logger->trace("Found {} superbubbles covering {} unitigs",
                   sdsl::util::cnt_one_bits(is_superbubble_start),
-                  sdsl::util::cnt_one_bits(in_superbubble));
+                  num_unitigs - num_not_in_superbubble);
 
     // chain superbubbles
     sdsl::bit_vector chain_middle(num_unitigs, false);
