@@ -576,16 +576,17 @@ void assemble_with_coordinates(size_t k,
             continue;
         }
 
-        assert(!already_in_superbubble
-            || (already_in_superbubble == 1 && (in_superbubble[terminus] || in_superbubble[i]))
-            || (already_in_superbubble == 2 && in_superbubble[terminus] && in_superbubble[i]));
-
 #ifndef NDEBUG
         int64_t width = *std::max_element(visited[terminus].first.begin(),
                                           visited[terminus].first.end());
 #endif
 
         is_superbubble_start[i] = true;
+        assert(terminus < num_unitigs);
+        assert(visited.size());
+        assert(visited.size() >= 4);
+
+        logger->trace("Found superbubble at {} containing {} unitigs", i, visited.size());
 
         for (auto it = visited.begin(); it != visited.end(); ++it) {
             auto &d = it.value().first;
@@ -597,18 +598,15 @@ void assemble_with_coordinates(size_t k,
                 in_superbubble[it->first] = true;
                 --num_not_in_superbubble;
             } else if (it->first != i && it->first != terminus && is_superbubble_start[it->first]) {
+                if (is_superbubble_start[it->first])
+                    DEBUG_LOG("\tDiscarding nested superbubble at {}", it->first);
+
                 is_superbubble_start[it->first] = false;
                 auto &[other_terminus, other_visited] = superbubbles[it->first];
                 other_terminus = std::numeric_limits<size_t>::max();
                 other_visited.clear();
             }
         }
-
-        assert(terminus < num_unitigs);
-        assert(visited.size());
-        assert(visited.size() >= 4);
-
-        logger->trace("Found superbubble at {} containing {} unitigs", i, visited.size());
 
         if (visited[terminus].first.size() == 1) {
             // easy case
