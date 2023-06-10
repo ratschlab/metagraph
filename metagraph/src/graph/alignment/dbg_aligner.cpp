@@ -458,6 +458,9 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
                     for (const auto &[change_labels, score, is_subset] : label_change_scores) {
                         label_change_score = std::max(label_change_score, score);
                     }
+
+                    if (label_change_score != DBGAlignerConfig::ninf)
+                        label_change_score *= config_.match_score("A");
                 }
 
                 if (overlap < static_cast<ssize_t>(graph_.get_k() - 1))
