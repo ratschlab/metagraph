@@ -550,7 +550,6 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                        SeedFilteringExtender&& bwd_extender,
                        bool allow_label_change,
                        bool allow_jump) {
-    allow_label_change = false;
     size_t query_size = extender.get_query().size();
     const DeBruijnGraph &graph_ = aligner.get_graph();
     auto column_path_index = graph_.get_extension_threadsafe<ColumnPathIndex>();
