@@ -460,7 +460,9 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
                     }
                 }
 
-                next_fixed.insert_gap_prefix(-overlap, graph_.get_k() - 1, config_);
+                if (overlap < static_cast<ssize_t>(graph_.get_k() - 1))
+                    next_fixed.insert_gap_prefix(-overlap, graph_.get_k() - 1, config_);
+
                 merged.splice(std::move(next_fixed), label_change_score);
                 assert(merged.is_valid(graph_, &config_));
                 if (merged.size()) {
