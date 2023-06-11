@@ -627,7 +627,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
 
         sdsl::int_vector<2> end_counter(query_size, 0);
         std::for_each(begin, end, [&](const auto &a) {
-            logger->info("In Anchor: {}", Alignment(a, config_));
+            // logger->info("In Anchor: {}", Alignment(a, config_));
             size_t i = a.get_end_clipping();
             if (end_counter[i] < 2)
                 ++end_counter[i];
@@ -717,7 +717,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
             if (seed.empty())
                 return;
 
-            logger->info("Merged in anchor: {}", Alignment(seed, config_));
+            // logger->info("Merged in anchor: {}", Alignment(seed, config_));
 
             if (!seed.get_clipping() && !seed.get_end_clipping()) {
                 alignments.emplace_back(std::move(seed), config_);
