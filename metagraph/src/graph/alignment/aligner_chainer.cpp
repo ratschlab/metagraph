@@ -889,14 +889,18 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
 
     tsl::hopscotch_map<node_index, std::vector<node_index>> out_nodes;
     std::vector<node_index> nodes;
+    VectorSet<node_index> unique_nodes;
+    std::vector<std::vector<size_t>> unique_node_to_nodes;
+
     std::vector<std::pair<size_t, size_t>> anchor_ends;
     anchor_ends.reserve(seeds.size());
     nodes.reserve(seeds.size());
     out_nodes.reserve(seeds.size());
     for (const auto &seed : seeds) {
-        graph_.call_outgoing_kmers(seed.get_nodes().back(), [&](node_index next, char c) {
+        const auto &seed_nodes = seed.get_nodes();
+        graph_.call_outgoing_kmers(seed_nodes.back(), [&](node_index next, char c) {
             if (c != boss::BOSS::kSentinel)
-                out_nodes[seed.get_nodes().back()].emplace_back(next);
+                out_nodes[seed_nodes.back()].emplace_back(next);
         });
 
         // logger->info("Anchor: {}", Alignment(seed, config_));
@@ -904,19 +908,47 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
         auto &[anchor_front_idx, anchor_back_idx] = anchor_ends.emplace_back(
             nodes.size(), nodes.size()
         );
-        nodes.emplace_back(seed.get_nodes().front());
+
+        auto find = unique_nodes.find(seed_nodes.front());
+        if (find != unique_nodes.end()) {
+            unique_node_to_nodes[find - unique_nodes.begin()].emplace_back(nodes.size());
+        } else {
+            unique_nodes.emplace(seed_nodes.front());
+            unique_node_to_nodes.emplace_back(1, nodes.size());
+        }
+
+        nodes.emplace_back(seed_nodes.front());
         if (seed.get_nodes().size() > 1) {
             ++anchor_back_idx;
-            nodes.emplace_back(seed.get_nodes().back());
+            auto find = unique_nodes.find(seed_nodes.back());
+            if (find != unique_nodes.end()) {
+                unique_node_to_nodes[find - unique_nodes.begin()].emplace_back(nodes.size());
+            } else {
+                unique_nodes.emplace(seed_nodes.back());
+                unique_node_to_nodes.emplace_back(1, nodes.size());
+            }
+            nodes.emplace_back(seed_nodes.back());
         }
     }
 
-    DEBUG_LOG("Prefetching node coordinates for {} seeds", seeds.size());
-    for (auto &[label, nodes_info] : column_path_index->get_chain_info(nodes)) {
+    assert(unique_node_to_nodes.size() == unique_nodes.size());
+
+    DEBUG_LOG("Prefetching node coordinates for {} nodes from {} seeds", unique_nodes.size(), seeds.size());
+    for (auto &[label, nodes_info] : column_path_index->get_chain_info(unique_nodes.values_container())) {
         auto encode = label.size() ? labeled_aligner->get_annotation_buffer().get_annotator().get_label_encoder().encode(label)
                                    : std::numeric_limits<Seed::Column>::max();
-        if (node_col_coords.count(encode))
-            node_col_coords[encode] = std::move(nodes_info);
+
+        if (!node_col_coords.count(encode))
+            continue;
+
+        auto &bucket = node_col_coords[encode];
+        bucket.resize(nodes.size());
+        assert(nodes_info.size() == unique_nodes.size());
+        for (size_t i = 0; i < nodes_info.size(); ++i) {
+            for (size_t j : unique_node_to_nodes[i]) {
+                bucket[j] = nodes_info[i];
+            }
+        }
     }
     DEBUG_LOG("Done prefetching");
 
