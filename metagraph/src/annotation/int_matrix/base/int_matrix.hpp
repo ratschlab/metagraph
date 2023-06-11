@@ -63,6 +63,9 @@ class MultiIntMatrix : public IntMatrix {
     virtual std::vector<RowTuples>
     get_row_tuples(const std::vector<Row> &rows) const = 0;
 
+    virtual std::vector<Tuple>
+    get_row_tuples(Column column, const std::vector<Row> &rows) const = 0;
+
     virtual Tuple get_tuple(Row row, Column column) const;
 };
 

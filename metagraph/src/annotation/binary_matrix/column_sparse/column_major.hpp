@@ -27,6 +27,8 @@ class ColumnMajor : public BinaryMatrix {
     Vector<std::pair<Column, uint64_t>> get_column_ranks(Row row) const;
     std::vector<Vector<std::pair<Column, uint64_t>>>
     get_column_ranks(const std::vector<Row> &rows) const;
+    std::vector<uint64_t>
+    get_column_ranks(Column column, const std::vector<Row> &rows) const;
     std::vector<Row> get_column(Column column) const override;
     // get all selected rows appended with -1 and concatenated
     std::vector<Column> slice_rows(const std::vector<Row> &rows) const override;

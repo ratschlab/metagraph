@@ -639,6 +639,75 @@ AnnotatedDBG::get_kmer_coordinates(const std::vector<node_index> &nodes,
     return result;
 }
 
+std::pair<size_t, std::vector<SmallVector<uint64_t>>>
+AnnotatedDBG::get_kmer_coordinates(const std::vector<node_index> &nodes,
+                                   const Label &label,
+                                   double discovery_fraction,
+                                   double presence_fraction) const {
+    assert(discovery_fraction >= 0.);
+    assert(discovery_fraction <= 1.);
+    assert(presence_fraction >= 0.);
+    assert(presence_fraction <= 1.);
+    assert(check_compatibility());
+
+    if (!nodes.size())
+        return {};
+
+    std::vector<row_index> rows;
+    rows.reserve(nodes.size());
+
+    std::vector<size_t> ids;
+    ids.reserve(nodes.size());
+
+    for (node_index i : nodes) {
+        if (i > 0) {
+            ids.push_back(rows.size());
+            rows.push_back(graph_to_anno_index(i));
+        } else {
+            ids.push_back(-1);
+        }
+    }
+
+    uint64_t min_count = std::max(1.0, std::ceil(presence_fraction * nodes.size()));
+    if (rows.size() < min_count)
+        return {};
+
+    min_count = std::max(1.0, std::ceil(discovery_fraction * nodes.size()));
+    if (rows.size() < min_count)
+        return {};
+
+    const auto *tuple_matrix = dynamic_cast<const MultiIntMatrix *>(&annotator_->get_matrix());
+    if (!tuple_matrix) {
+        logger->error("k-mer coordinates are not indexed in this annotator");
+        exit(1);
+    }
+
+    auto target_column = annotator_->get_label_encoder().encode(label);
+    auto rows_tuples = tuple_matrix->get_row_tuples(target_column, rows);
+
+    size_t count = 0;
+    for (const auto &tuple : rows_tuples) {
+        count += !tuple.empty();
+    }
+
+    std::vector<SmallVector<uint64_t>> result;
+    for (size_t i : ids) {
+        result.emplace_back();
+
+        // leave all tuples empty if the k-mer is missing
+        if (i == (size_t)-1)
+            continue;
+
+        // set the non-empty tuples
+        std::swap(result.back(), rows_tuples[i]);
+    }
+
+    assert(count == std::accumulate(result.begin(), result.end(), size_t(0),
+                                    [&](size_t s, const auto &a) { return s + !a.empty(); }));
+
+    return std::make_pair(count, std::move(result));
+}
+
 std::vector<std::pair<Label, sdsl::bit_vector>>
 AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
                                        size_t num_top_labels,

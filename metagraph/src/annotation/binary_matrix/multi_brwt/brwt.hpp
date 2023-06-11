@@ -38,6 +38,8 @@ class BRWT : public BinaryMatrix {
     Vector<std::pair<Column, uint64_t>> get_column_ranks(Row row) const;
     std::vector<Vector<std::pair<Column, uint64_t>>>
     get_column_ranks(const std::vector<Row> &rows) const;
+    std::vector<uint64_t>
+    get_column_ranks(Column column, const std::vector<Row> &rows) const;
 
     bool load(std::istream &in) override;
     void serialize(std::ostream &out) const override;

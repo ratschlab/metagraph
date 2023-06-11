@@ -51,6 +51,9 @@ class TupleCSCMatrix : public MultiIntMatrix {
     std::vector<RowTuples>
     get_row_tuples(const std::vector<Row> &rows) const;
 
+    std::vector<Tuple>
+    get_row_tuples(Column column, const std::vector<Row> &rows) const;
+
     uint64_t num_columns() const { return binary_matrix_.num_columns(); }
     uint64_t num_rows() const { return binary_matrix_.num_rows(); }
     uint64_t num_relations() const { return binary_matrix_.num_relations(); }
@@ -209,6 +212,28 @@ TupleCSCMatrix<BaseMatrix, Values, Delims>::get_row_tuples(const std::vector<Row
         }
     }
     return row_tuples;
+}
+
+template <class BaseMatrix, class Values, class Delims>
+inline std::vector<typename TupleCSCMatrix<BaseMatrix, Values, Delims>::Tuple>
+TupleCSCMatrix<BaseMatrix, Values, Delims>::get_row_tuples(Column j, const std::vector<Row> &rows) const {
+    const auto &column_ranks = binary_matrix_.get_column_ranks(j, rows);
+    assert(column_ranks.size() == rows.size());
+
+    std::vector<Tuple> tuples(rows.size());
+    // TODO: reshape?
+    for (size_t i = 0; i < rows.size(); ++i) {
+        if (auto r = column_ranks[i]) {
+            size_t begin = delimiters_[j].select1(r) + 1 - r;
+            size_t end = delimiters_[j].select1(r + 1) - r;
+            Tuple &tuple = tuples[i];
+            tuple.reserve(end - begin);
+            for (size_t t = begin; t < end; ++t) {
+                tuple.push_back(column_values_[j][t]);
+            }
+        }
+    }
+    return tuples;
 }
 
 template <class BaseMatrix, class Values, class Delims>

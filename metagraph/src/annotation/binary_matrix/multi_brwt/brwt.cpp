@@ -266,6 +266,23 @@ BRWT::get_column_ranks(const std::vector<Row> &row_ids) const {
     return rows;
 }
 
+std::vector<uint64_t>
+BRWT::get_column_ranks(Column column, const std::vector<Row> &row_ids) const {
+    std::vector<uint64_t> rows;
+    rows.reserve(row_ids.size());
+
+    // TODO: make more efficient
+    for (auto &result : get_column_ranks(row_ids)) {
+        auto &col_r = rows.emplace_back(0);
+        for (auto [j, r] : result) {
+            if (j == column)
+                col_r = r;
+        }
+    }
+
+    return rows;
+}
+
 std::vector<BRWT::Row> BRWT::get_column(Column column) const {
     assert(column < num_columns());
 

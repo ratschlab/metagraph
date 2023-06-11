@@ -46,6 +46,9 @@ class CoordRowDisk : public MultiIntMatrix {
     std::vector<RowTuples> get_row_tuples(const std::vector<Row> &rows) const {
         return get_view().get_row_tuples(rows);
     }
+    std::vector<Tuple> get_row_tuples(Column column, const std::vector<Row> &rows) const {
+        return get_view().get_row_tuples(column, rows);
+    }
 
     bool load(std::istream &f);
 
@@ -95,8 +98,10 @@ class CoordRowDisk : public MultiIntMatrix {
         std::vector<RowValues> get_row_values(const std::vector<Row> &row_ids) const;
 
         RowTuples get_row_tuples(Row i) const;
+        Tuple get_tuple(Row i, Column column) const;
 
         std::vector<RowTuples> get_row_tuples(const std::vector<Row> &rows) const;
+        std::vector<Tuple> get_row_tuples(Column column, const std::vector<Row> &rows) const;
 
       private:
         std::ifstream open_and_set_pos(const std::string filename, size_t offset) {

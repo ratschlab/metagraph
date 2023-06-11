@@ -161,6 +161,13 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
                          double discovery_fraction,
                          double presence_fraction) const;
 
+    // returns pair (num_kmer_matches, kmer_coordinates)
+    std::pair<size_t, std::vector<SmallVector<uint64_t>>>
+    get_kmer_coordinates(const std::vector<node_index> &nodes,
+                         const Label &label,
+                         double discovery_fraction,
+                         double presence_fraction) const;
+
     std::vector<std::pair<Label, sdsl::bit_vector>>
     get_top_label_signatures(std::string_view sequence,
                              size_t num_top_labels,

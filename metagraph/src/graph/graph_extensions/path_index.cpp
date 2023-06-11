@@ -320,14 +320,68 @@ merge_load(std::shared_ptr<DeBruijnGraph> graph, const std::vector<std::string> 
     );
 }
 
-auto ColumnPathIndex::get_chain_info(const Label &check_label, node_index node) const -> InfoPair {
-    // TODO: make this more efficient
-    for (auto&& [label, ret_val] : get_chain_info({ node })) {
-        if (label == check_label)
-            return ret_val[0];
+auto ColumnPathIndex::get_chain_info(const Label &label, node_index node) const -> InfoPair {
+    auto [num_kmer_matches, node_coords] = anno_graph_->get_kmer_coordinates(
+        { node }, label, 0.0, 0.0
+    );
+
+    if (!num_kmer_matches)
+        return {};
+
+    assert(node_coords.size() == 1);
+    assert(num_kmer_matches == 1);
+
+    auto [num_kmer_matches_local, local_node_coords] = anno_graph_->get_kmer_coordinates(
+        { node }, UNITIG_FRONT_TAG + label, 0.0, 0.0
+    );
+
+    InfoPair ret_val;
+    auto &[chain_info, coord_info] = ret_val;
+    if (num_kmer_matches_local) {
+        assert(local_node_coords.size() == 1);
+        assert(num_kmer_matches_local == 1);
+        for (size_t i = 0; i < local_node_coords[0].size(); ++i) {
+            int64_t coord = static_cast<int64_t>(local_node_coords[0][i]);
+            if (coord >= 0) {
+                std::get<1>(coord_info).emplace_back(coord);
+            } else {
+                std::get<2>(coord_info).emplace_back(-coord - 1);
+            }
+        }
     }
 
-    return {};
+    auto &coords = node_coords[0];
+    assert(coords.size() == 1);
+    const auto &col_int_mat = get_topo_matrix();
+    assert(dynamic_cast<const ColumnMajor*>(&col_int_mat.get_binary_matrix()));
+    const auto &col_mat = static_cast<const ColumnMajor&>(col_int_mat.get_binary_matrix());
+
+    const auto &label_encoder = topo_annotator_->get_label_encoder();
+    Column unitig_col = label_encoder.encode(UNITIG_FRONT_TAG + label);
+    Column sb_col = label_encoder.encode(SUPERBUBBLE_TAG + label);
+    Column chain_col = label_encoder.encode(CHAIN_TAG + label);
+
+    uint64_t global_coord = coords[0];
+    std::get<0>(coord_info) = global_coord;
+    uint64_t start_coord = col_mat.data()[unitig_col]->prev1(global_coord);
+    assert(col_mat.data()[unitig_col]->rank1(global_coord)
+        == col_mat.data()[unitig_col]->rank1(start_coord));
+    chain_info = ChainInfo(
+        col_mat.data()[unitig_col]->rank1(global_coord),
+        col_mat.data()[unitig_col]->rank1(col_mat.data()[sb_col]->next1(start_coord)),
+        col_mat.data()[unitig_col]->rank1(col_mat.data()[chain_col]->next1(start_coord))
+    );
+    assert(std::get<0>(chain_info));
+    assert(std::get<1>(chain_info));
+    assert(std::get<2>(chain_info));
+    assert(std::get<1>(chain_info) >= std::get<0>(chain_info));
+    assert(std::get<2>(chain_info) >= std::get<0>(chain_info));
+
+    assert((std::get<0>(chain_info) == std::get<1>(chain_info)
+            && std::get<0>(chain_info) == std::get<2>(chain_info))
+            || (std::get<1>(coord_info).size() && std::get<2>(coord_info).size()));
+
+    return ret_val;
 }
 
 auto ColumnPathIndex::get_chain_info(const std::vector<node_index> &nodes) const
@@ -398,16 +452,16 @@ auto ColumnPathIndex::get_chain_info(const std::vector<node_index> &nodes) const
         }
     }
 
+#ifndef NDEBUG
     for (const auto &[label, coords] : ret_val) {
         for (const auto &[chain_info, coord_info] : coords) {
-            if (!std::get<0>(chain_info))
-                continue;
-
-            assert((std::get<0>(chain_info) == std::get<1>(chain_info)
+            assert(!std::get<0>(chain_info)
+                    || (std::get<0>(chain_info) == std::get<1>(chain_info)
                     && std::get<0>(chain_info) == std::get<2>(chain_info))
                     || (std::get<1>(coord_info).size() && std::get<2>(coord_info).size()));
         }
     }
+#endif
 
     return const_cast<std::vector<LabeledNodesInfo>&&>(ret_val.values_container());
 }

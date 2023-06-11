@@ -89,6 +89,23 @@ ColumnMajor::get_column_ranks(const std::vector<Row> &row_ids) const {
     return result;
 }
 
+std::vector<uint64_t>
+ColumnMajor::get_column_ranks(Column j, const std::vector<Row> &row_ids) const {
+    std::vector<uint64_t> result;
+    result.reserve(row_ids.size());
+
+    assert(columns_[j]);
+    const bit_vector &col = *columns_[j];
+
+    for (size_t i = 0; i < row_ids.size(); ++i) {
+        assert(row_ids[i] < num_rows());
+
+        result.emplace_back(col.conditional_rank1(row_ids[i]));
+    }
+
+    return result;
+}
+
 std::vector<ColumnMajor::Column>
 ColumnMajor::slice_rows(const std::vector<Row> &row_ids) const {
     std::vector<Column> slice;

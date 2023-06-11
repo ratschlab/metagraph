@@ -37,6 +37,7 @@ class TupleRowDiff : public binmat::IRowDiff, public MultiIntMatrix {
     std::vector<Row> get_column(Column j) const override;
     RowTuples get_row_tuples(Row i) const override;
     std::vector<RowTuples> get_row_tuples(const std::vector<Row> &rows) const override;
+    std::vector<Tuple> get_row_tuples(Column column, const std::vector<Row> &rows) const override;
 
     uint64_t num_columns() const override { return diffs_.num_columns(); }
     uint64_t num_relations() const override { return diffs_.num_relations(); }
@@ -130,6 +131,24 @@ TupleRowDiff<BaseMatrix>::get_row_tuples(const std::vector<Row> &row_ids) const 
         }
         assert(std::all_of(result.begin(), result.end(),
                            [](auto &p) { return p.second.size(); }));
+    }
+
+    return rows;
+}
+
+template <class BaseMatrix>
+std::vector<MultiIntMatrix::Tuple>
+TupleRowDiff<BaseMatrix>::get_row_tuples(Column column, const std::vector<Row> &row_ids) const {
+    std::vector<Tuple> rows;
+    rows.reserve(row_ids.size());
+
+    // TODO: make more efficient
+    for (auto &row_tuple : get_row_tuples(row_ids)) {
+        auto &cur_tuple = rows.emplace_back();
+        for (auto &[j, tuple] : row_tuple) {
+            if (j == column)
+                std::swap(tuple, cur_tuple);
+        }
     }
 
     return rows;

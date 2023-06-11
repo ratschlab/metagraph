@@ -556,7 +556,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
     if (!column_path_index)
         return {};
 
-    const auto &in_anchors = seeder->get_seeds();
+    auto in_anchors = seeder->get_seeds();
     if (in_anchors.empty())
         return {};
 
@@ -579,91 +579,78 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
     size_t num_explored_nodes = 0;
 
     num_seeds += in_anchors.size();
-    const auto *labeled_aligner = dynamic_cast<const ILabeledAligner*>(&aligner);
-    tsl::hopscotch_map<std::string_view::const_iterator, size_t> end_counter[2];
 
-    std::vector<Seed> seeds;
-    seeds.reserve(in_anchors.size());
-    size_t orientation_change = std::numeric_limits<size_t>::max();
-    tsl::hopscotch_map<size_t, ColumnPathIndex::NodesInfo> node_col_coords;
-    if (!labeled_aligner) {
-        for (const auto &in_anchor : in_anchors) {
-            // DEBUG_LOG("In Anchor: {}", Alignment(in_anchor, config_));
-            if (!in_anchor.get_clipping() && !in_anchor.get_end_clipping()) {
-                alignments.emplace_back(in_anchor, config_);
-            } else {
-                if (seeds.size() && in_anchor.get_orientation() != seeds.back().get_orientation())
-                    orientation_change = seeds.size();
+    auto in_orientation_change = std::find_if(in_anchors.begin(), in_anchors.end(),
+                                              [](const auto &a) { return a.get_orientation(); });
 
-                ++end_counter[in_anchor.get_orientation()][in_anchor.get_query_view().end()];
-                seeds.emplace_back(in_anchor);
-                node_col_coords.emplace(in_anchor.get_columns()[0], ColumnPathIndex::NodesInfo{});
-           }
-        }
-    } else {
-        for (const auto &in_anchor : in_anchors) {
-            // DEBUG_LOG("In Anchor: {}", Alignment(in_anchor, config_));
-            if (!in_anchor.get_clipping() && !in_anchor.get_end_clipping()) {
-                alignments.emplace_back(in_anchor, config_);
-                continue;
-
-            }
-            ++end_counter[in_anchor.get_orientation()][in_anchor.get_query_view().end()];
-            const auto &cols = in_anchor.get_columns();
-            for (auto col : cols) {
-                node_col_coords.emplace(col, ColumnPathIndex::NodesInfo{});
-                if (seeds.size() && in_anchor.get_orientation() != seeds.back().get_orientation())
-                    orientation_change = seeds.size();
-
-                auto &anchor = seeds.emplace_back(in_anchor);
-                anchor.set_columns(Vector<Alignment::Column>(1, col));
-            }
-        }
-    }
-
-    if (seeds.size() <= 1) {
-        if (seeds.size() == 1 && seeds[0].get_query_view().size() > config_.min_seed_length)
-            alignments.emplace_back(seeds[0], config_);
-
-        seeder = std::make_unique<ManualSeeder>(std::move(alignments), query_size);
-        return {};
-    }
-
-    orientation_change = std::min(orientation_change, seeds.size());
     ssize_t seed_size = config_.min_seed_length;
     ssize_t graph_k = graph_.get_k();
+    std::vector<Seed> seeds;
+    seeds.reserve(in_anchors.size());
+    tsl::hopscotch_map<size_t, ColumnPathIndex::NodesInfo> node_col_coords;
 
     auto preprocess_anchors = [&](auto begin, auto end) {
         if (begin == end)
             return;
 
-        if (allow_label_change) {
-            std::sort(begin, end, [](const auto &a, const auto &b) {
-                return std::pair(a.get_query_view().end(), a.get_query_view().begin())
-                    > std::pair(b.get_query_view().end(), b.get_query_view().begin());
-            });
-        } else {
-            std::sort(begin, end, [](const auto &a, const auto &b) {
-                return std::make_tuple(b.label_columns, a.get_query_view().end(), a.get_query_view().begin())
-                        > std::make_tuple(a.label_columns, b.get_query_view().end(), b.get_query_view().begin());
-            });
-        }
+        std::sort(begin, end, [](const auto &a, const auto &b) {
+            return std::pair(a.get_query_view().end(), a.get_query_view().begin())
+                > std::pair(b.get_query_view().end(), b.get_query_view().begin());
+        });
 
-        if (end_counter[begin->get_orientation()].empty())
-            return;
-
-        // merge into MUMs
+        // first, discard redundant seeds
         for (auto i = begin; i + 1 != end; ++i) {
-            auto &a_i = *(i + 1);
-            auto &a_j = *i;
+            Seed &a_i = *(i + 1);
+            Seed &a_j = *i;
 
             assert(Alignment(a_j, config_).is_valid(graph_, &config_));
-
             if (a_i.label_columns != a_j.label_columns)
                 continue;
 
+            const auto &nodes_i = a_i.get_nodes();
+            const auto &nodes_j = a_j.get_nodes();
             std::string_view query_i = a_i.get_query_view();
             std::string_view query_j = a_j.get_query_view();
+
+            if (a_i.get_end_clipping() == a_j.get_end_clipping()
+                    && nodes_j.back() == nodes_i.back()) {
+                // logger->info("Merging: {} -> {}",
+                //     Alignment(a_i, config_), Alignment(a_j, config_));
+                if (query_j.size() > query_i.size())
+                    std::swap(a_i, a_j);
+
+                a_j = Seed();
+            }
+        }
+
+        end = std::remove_if(begin, end, [](const auto &a) { return a.empty(); });
+
+        sdsl::int_vector<2> end_counter(query_size, 0);
+        std::for_each(begin, end, [&](const auto &a) {
+            logger->info("In Anchor: {}", Alignment(a, config_));
+            size_t i = a.get_end_clipping();
+            if (end_counter[i] < 2)
+                ++end_counter[i];
+        });
+
+        // merge anchors into MUMs
+        for (auto i = begin; i + 1 != end; ++i) {
+            // try to merge a_i to a_j
+            Seed &a_i = *(i + 1);
+            Seed &a_j = *i;
+
+            assert(Alignment(a_j, config_).is_valid(graph_, &config_));
+            if (a_i.label_columns != a_j.label_columns)
+                continue;
+
+            const auto &nodes_i = a_i.get_nodes();
+            const auto &nodes_j = a_j.get_nodes();
+            std::string_view query_i = a_i.get_query_view();
+            std::string_view query_j = a_j.get_query_view();
+
+            // alignments are disjoint
+            if (query_i.end() <= query_j.begin())
+                continue;
 
             ssize_t num_added = query_j.end() - std::max(query_j.begin(), query_i.end());
             ssize_t overlap = query_i.end() - query_j.begin();
@@ -671,8 +658,8 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                 continue;
 
             if (num_added == 0) {
-                if (a_i.get_nodes().back() == a_j.get_nodes().back()) {
-                    if (a_j.get_query_view().size() > a_i.get_query_view().size())
+                if (nodes_i.back() == nodes_j.back()) {
+                    if (query_j.size() > query_i.size())
                         std::swap(a_i, a_j);
 
                     a_j = Seed();
@@ -684,51 +671,221 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
             // ->      graph_k - a_j.get_offset() + x == overlap + 1
             // -> x == overlap + 1 + a_j.get_offset() - graph_k
             ssize_t a_j_node_idx = overlap + 1 + static_cast<ssize_t>(a_j.get_offset()) - graph_k;
-            assert(a_j_node_idx < static_cast<ssize_t>(a_j.get_nodes().size()));
+            assert(a_j_node_idx < static_cast<ssize_t>(nodes_j.size()));
 
             if (a_j_node_idx < 0)
                 continue;
 
-            int64_t coord_dist = a_j.get_nodes().size() - a_j_node_idx;
+            int64_t coord_dist = nodes_j.size() - a_j_node_idx;
             int64_t dist = query_j.end() - query_i.end();
             if (coord_dist != dist)
                 continue;
 
-            auto i_find = end_counter[a_i.get_orientation()].find(query_i.end());
-            auto j_find = end_counter[a_j.get_orientation()].find(query_j.end());
-            assert(i_find != end_counter[a_i.get_orientation()].end());
-            assert(j_find != end_counter[a_j.get_orientation()].end());
+            // logger->info("Try to merge, check {} elements: {}: {} -> {}: {}",
+            //     query_j.end() - query_i.end(),
+            //     a_i.label_columns, Alignment(a_i, config_), a_j.label_columns, Alignment(a_j, config_));
 
-            if (i_find->second != 1 || j_find->second != 1)
-                continue;
+            bool unique = true;
+            for (size_t i = a_j.get_end_clipping(); i < a_i.get_end_clipping(); ++i) {
+                if (end_counter[i] == 2) {
+                    unique = false;
+                    break;
+                }
+            }
 
-            if (i + 2 != end && (i + 2)->get_query_view().end() > query_i.begin()
-                    && query_i.begin() - (i + 2)->get_query_view().begin() != 1)
+            if (!unique) {
+                // logger->info("\tfailed");
                 continue;
+            }
+
+            // logger->info("\tkeep checking");
 
             assert(overlap < graph_k - 1
-                    || graph_.traverse(a_i.get_nodes().back(), *query_i.end()) == a_j.get_nodes()[a_j_node_idx]);
+                    || graph_.traverse(nodes_i.back(), *query_i.end()) == nodes_j[a_j_node_idx]);
 
             if (overlap >= graph_k - 1
-                    || graph_.traverse(a_i.get_nodes().back(), *query_i.end()) == a_j.get_nodes()[a_j_node_idx]) {
+                    || graph_.traverse(nodes_i.back(), *query_i.end()) == nodes_j[a_j_node_idx]) {
                 // we have a MUM
-                a_i.expand(std::vector<node_index>(a_j.get_nodes().begin() + a_j_node_idx,
-                                                   a_j.get_nodes().end()));
+                // logger->info("\tworked!");
+                a_i.expand(std::vector<node_index>(nodes_j.begin() + a_j_node_idx,
+                                                   nodes_j.end()));
                 a_j = Seed();
             }
         }
 
-        std::sort(begin, end, [](const auto &a, const auto &b) {
-            return a.get_query_view().end() > b.get_query_view().end();
+        std::for_each(begin, end, [&](auto &seed) {
+            if (seed.empty())
+                return;
+
+            logger->info("Merged in anchor: {}", Alignment(seed, config_));
+
+            if (!seed.get_clipping() && !seed.get_end_clipping()) {
+                alignments.emplace_back(std::move(seed), config_);
+                seed = Seed();
+            } else {
+                for (auto col : seed.get_columns()) {
+                    auto &anchor = seeds.emplace_back(seed);
+                    anchor.set_columns(Vector<Alignment::Column>(1, col));
+                    node_col_coords.emplace(col, ColumnPathIndex::NodesInfo{});
+                }
+            }
         });
     };
 
-    preprocess_anchors(seeds.begin(), seeds.begin() + orientation_change);
-    preprocess_anchors(seeds.begin() + orientation_change, seeds.end());
+    preprocess_anchors(in_anchors.begin(), in_orientation_change);
+    preprocess_anchors(in_orientation_change, in_anchors.end());
 
-    seeds.erase(std::remove_if(seeds.begin(), seeds.end(),
-                               [](const auto &a) { return a.empty(); }),
-                seeds.end());
+    const auto *labeled_aligner = dynamic_cast<const ILabeledAligner*>(&aligner);
+
+    // tsl::hopscotch_map<std::string_view::const_iterator, size_t> end_counter[2];
+
+    // std::vector<Seed> seeds;
+    // seeds.reserve(in_anchors.size());
+    // size_t orientation_change = std::numeric_limits<size_t>::max();
+    // tsl::hopscotch_map<size_t, ColumnPathIndex::NodesInfo> node_col_coords;
+    // if (!labeled_aligner) {
+    //     for (const auto &in_anchor : in_anchors) {
+    //         // DEBUG_LOG("In Anchor: {}", Alignment(in_anchor, config_));
+    //         if (!in_anchor.get_clipping() && !in_anchor.get_end_clipping()) {
+    //             alignments.emplace_back(in_anchor, config_);
+    //         } else {
+    //             if (seeds.size() && in_anchor.get_orientation() != seeds.back().get_orientation())
+    //                 orientation_change = seeds.size();
+
+    //             ++end_counter[in_anchor.get_orientation()][in_anchor.get_query_view().end()];
+    //             seeds.emplace_back(in_anchor);
+    //             node_col_coords.emplace(in_anchor.get_columns()[0], ColumnPathIndex::NodesInfo{});
+    //        }
+    //     }
+    // } else {
+    //     for (const auto &in_anchor : in_anchors) {
+    //         // DEBUG_LOG("In Anchor: {}", Alignment(in_anchor, config_));
+    //         if (!in_anchor.get_clipping() && !in_anchor.get_end_clipping()) {
+    //             alignments.emplace_back(in_anchor, config_);
+    //             continue;
+
+    //         }
+    //         ++end_counter[in_anchor.get_orientation()][in_anchor.get_query_view().end()];
+    //         const auto &cols = in_anchor.get_columns();
+    //         for (auto col : cols) {
+    //             node_col_coords.emplace(col, ColumnPathIndex::NodesInfo{});
+    //             if (seeds.size() && in_anchor.get_orientation() != seeds.back().get_orientation())
+    //                 orientation_change = seeds.size();
+
+    //             auto &anchor = seeds.emplace_back(in_anchor);
+    //             anchor.set_columns(Vector<Alignment::Column>(1, col));
+    //         }
+    //     }
+    // }
+
+    if (seeds.size() <= 1) {
+        if (seeds.size() == 1 && seeds[0].get_query_view().size() > config_.min_seed_length) {
+            // logger->info("Anchor: {}", Alignment(seeds[0], config_));
+            alignments.emplace_back(seeds[0], config_);
+        }
+
+        seeder = std::make_unique<ManualSeeder>(std::move(alignments), query_size);
+        return {};
+    }
+
+    // orientation_change = std::min(orientation_change, seeds.size());
+
+    // auto preprocess_anchors = [&](auto begin, auto end) {
+    //     if (begin == end)
+    //         return;
+
+    //     if (allow_label_change) {
+    //         std::sort(begin, end, [](const auto &a, const auto &b) {
+    //             return std::pair(a.get_query_view().end(), a.get_query_view().begin())
+    //                 > std::pair(b.get_query_view().end(), b.get_query_view().begin());
+    //         });
+    //     } else {
+    //         std::sort(begin, end, [](const auto &a, const auto &b) {
+    //             return std::make_tuple(b.label_columns, a.get_query_view().end(), a.get_query_view().begin())
+    //                     > std::make_tuple(a.label_columns, b.get_query_view().end(), b.get_query_view().begin());
+    //         });
+    //     }
+
+    //     if (end_counter[begin->get_orientation()].empty())
+    //         return;
+
+    //     // merge into MUMs
+    //     for (auto i = begin; i + 1 != end; ++i) {
+    //         auto &a_i = *(i + 1);
+    //         auto &a_j = *i;
+
+    //         assert(Alignment(a_j, config_).is_valid(graph_, &config_));
+
+    //         if (a_i.label_columns != a_j.label_columns)
+    //             continue;
+
+    //         std::string_view query_i = a_i.get_query_view();
+    //         std::string_view query_j = a_j.get_query_view();
+
+    //         ssize_t num_added = query_j.end() - std::max(query_j.begin(), query_i.end());
+    //         ssize_t overlap = query_i.end() - query_j.begin();
+    //         if (num_added < 0 || overlap < seed_size - 1)
+    //             continue;
+
+    //         if (num_added == 0) {
+    //             if (a_i.get_nodes().back() == a_j.get_nodes().back()) {
+    //                 if (a_j.get_query_view().size() > a_i.get_query_view().size())
+    //                     std::swap(a_i, a_j);
+
+    //                 a_j = Seed();
+    //             }
+    //             continue;
+    //         }
+
+    //         // we want query_j.begin() + graph_k - a_j.get_offset() + x == query_i.end() + 1
+    //         // ->      graph_k - a_j.get_offset() + x == overlap + 1
+    //         // -> x == overlap + 1 + a_j.get_offset() - graph_k
+    //         ssize_t a_j_node_idx = overlap + 1 + static_cast<ssize_t>(a_j.get_offset()) - graph_k;
+    //         assert(a_j_node_idx < static_cast<ssize_t>(a_j.get_nodes().size()));
+
+    //         if (a_j_node_idx < 0)
+    //             continue;
+
+    //         int64_t coord_dist = a_j.get_nodes().size() - a_j_node_idx;
+    //         int64_t dist = query_j.end() - query_i.end();
+    //         if (coord_dist != dist)
+    //             continue;
+
+    //         auto i_find = end_counter[a_i.get_orientation()].find(query_i.end());
+    //         auto j_find = end_counter[a_j.get_orientation()].find(query_j.end());
+    //         assert(i_find != end_counter[a_i.get_orientation()].end());
+    //         assert(j_find != end_counter[a_j.get_orientation()].end());
+
+    //         if (i_find->second != 1 || j_find->second != 1)
+    //             continue;
+
+    //         if (i + 2 != end && (i + 2)->get_query_view().end() > query_i.begin()
+    //                 && query_i.begin() - (i + 2)->get_query_view().begin() != 1)
+    //             continue;
+
+    //         assert(overlap < graph_k - 1
+    //                 || graph_.traverse(a_i.get_nodes().back(), *query_i.end()) == a_j.get_nodes()[a_j_node_idx]);
+
+    //         if (overlap >= graph_k - 1
+    //                 || graph_.traverse(a_i.get_nodes().back(), *query_i.end()) == a_j.get_nodes()[a_j_node_idx]) {
+    //             // we have a MUM
+    //             a_i.expand(std::vector<node_index>(a_j.get_nodes().begin() + a_j_node_idx,
+    //                                                a_j.get_nodes().end()));
+    //             a_j = Seed();
+    //         }
+    //     }
+
+    //     std::sort(begin, end, [](const auto &a, const auto &b) {
+    //         return a.get_query_view().end() > b.get_query_view().end();
+    //     });
+    // };
+
+    // preprocess_anchors(seeds.begin(), seeds.begin() + orientation_change);
+    // preprocess_anchors(seeds.begin() + orientation_change, seeds.end());
+
+    // seeds.erase(std::remove_if(seeds.begin(), seeds.end(),
+    //                            [](const auto &a) { return a.empty(); }),
+    //             seeds.end());
 
     tsl::hopscotch_map<node_index, std::vector<node_index>> out_nodes;
     std::vector<node_index> nodes;
@@ -742,7 +899,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
                 out_nodes[seed.get_nodes().back()].emplace_back(next);
         });
 
-        DEBUG_LOG("Anchor: {}", Alignment(seed, config_));
+        // logger->info("Anchor: {}", Alignment(seed, config_));
 
         auto &[anchor_front_idx, anchor_back_idx] = anchor_ends.emplace_back(
             nodes.size(), nodes.size()
@@ -754,7 +911,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
         }
     }
 
-    DEBUG_LOG("Prefetching node coordinates");
+    DEBUG_LOG("Prefetching node coordinates for {} seeds", seeds.size());
     for (auto &[label, nodes_info] : column_path_index->get_chain_info(nodes)) {
         auto encode = label.size() ? labeled_aligner->get_annotation_buffer().get_annotator().get_label_encoder().encode(label)
                                    : std::numeric_limits<Seed::Column>::max();

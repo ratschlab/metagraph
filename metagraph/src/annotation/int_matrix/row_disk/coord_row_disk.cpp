@@ -127,12 +127,58 @@ MultiIntMatrix::RowTuples CoordRowDisk::View::get_row_tuples(Row row) const {
     return result;
 }
 
+MultiIntMatrix::Tuple CoordRowDisk::View::get_tuple(Row row, Column column) const {
+    assert(boundary_[boundary_.size() - 1] == 1);
+    uint64_t pos = row == 0 ? 0 : boundary_.select1(row) + 1 - row;
+    uint64_t end = boundary_.select1(row + 1) - row;
+
+    set_bits_.start_reading_at(pos);
+
+    // TODO: make more efficient
+    while (pos < end) {
+        Column col_id = set_bits_.get(bits_for_col_id_);
+        pos += bits_for_col_id_;
+
+        uint64_t num_values = set_bits_.get(bits_for_number_of_vals_);
+
+        pos += bits_for_number_of_vals_;
+
+        Tuple tuple;
+        if (col_id == column)
+            tuple.reserve(num_values);
+
+        for (size_t i = 0 ; i < num_values ; ++i) {
+            Value val = set_bits_.get(bits_for_single_value_);
+            if (col_id == column)
+                tuple.push_back(val);
+
+            pos += bits_for_single_value_;
+        }
+
+        if (col_id == column)
+            return tuple;
+    }
+
+    return {};
+}
+
 std::vector<MultiIntMatrix::RowTuples>
 CoordRowDisk::View::get_row_tuples(const std::vector<Row> &rows) const {
     std::vector<RowTuples> rows_with_tuples(rows.size());
 
     for (size_t i = 0; i < rows.size(); ++i) {
         rows_with_tuples[i] = get_row_tuples(rows[i]);
+    }
+
+    return rows_with_tuples;
+}
+
+std::vector<MultiIntMatrix::Tuple>
+CoordRowDisk::View::get_row_tuples(Column column, const std::vector<Row> &rows) const {
+    std::vector<Tuple> rows_with_tuples(rows.size());
+
+    for (size_t i = 0; i < rows.size(); ++i) {
+        rows_with_tuples[i] = get_tuple(rows[i], column);
     }
 
     return rows_with_tuples;
