@@ -935,6 +935,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
 
     DEBUG_LOG("Prefetching node coordinates for {} nodes from {} seeds", unique_nodes.size(), seeds.size());
     for (auto &[label, nodes_info] : column_path_index->get_chain_info(unique_nodes.values_container())) {
+        assert(label.empty() || labeled_aligner);
         auto encode = label.size() ? labeled_aligner->get_annotation_buffer().get_annotator().get_label_encoder().encode(label)
                                    : std::numeric_limits<Seed::Column>::max();
 

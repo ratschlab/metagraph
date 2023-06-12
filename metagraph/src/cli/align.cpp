@@ -340,26 +340,6 @@ int align_to_graph(Config *config) {
         }
     }
 
-    std::shared_ptr<ColumnPathIndex> col_path_index;
-    std::shared_ptr<AnnotatedDBG> col_anno_dbg;
-    std::shared_ptr<AnnotatedDBG::Annotator> col_topo_anno;
-    auto col_anno = initialize_annotation(config->infbase + ".global.column_coord.annodbg", *config);
-    if (col_anno->load(config->infbase + ".global.column_coord.annodbg")) {
-        logger->trace("Loading path index");
-        col_topo_anno = initialize_annotation(config->infbase + ".topo.int_column.annodbg", *config);
-        if (col_topo_anno->load(config->infbase + ".topo.int_column.annodbg")) {
-            col_anno_dbg = std::make_shared<AnnotatedDBG>(graph, std::move(col_anno));
-            col_path_index = std::make_shared<ColumnPathIndex>(col_anno_dbg, col_topo_anno);
-            graph->add_extension(col_path_index);
-        } else {
-            col_topo_anno.reset();
-            logger->error("Failed to load graph topology");
-            exit(1);
-        }
-    } else {
-        col_anno.reset();
-    }
-
     Timer timer;
     ThreadPool thread_pool(get_num_threads());
     std::mutex print_mutex;
@@ -403,6 +383,40 @@ int align_to_graph(Config *config) {
     if (config->infbase_annotators.size()) {
         assert(config->infbase_annotators.size() == 1);
         anno_dbg = initialize_annotated_dbg(graph, *config);
+    }
+
+    std::shared_ptr<ColumnPathIndex> col_path_index;
+    std::shared_ptr<AnnotatedDBG> col_anno_dbg;
+    std::shared_ptr<AnnotatedDBG::Annotator> col_topo_anno;
+    auto col_anno = initialize_annotation(config->infbase + ".global.column_coord.annodbg", *config);
+    if (col_anno->load(config->infbase + ".global.column_coord.annodbg")) {
+        logger->trace("Loading path index");
+        if (anno_dbg) {
+            for (const auto &label : anno_dbg->get_annotator().get_label_encoder().get_labels()) {
+                if (!col_anno->get_label_encoder().label_exists(label)) {
+                    throw std::runtime_error("Label " + label + " not found in path index");
+                }
+            }
+        } else {
+            for (const auto &label : col_anno->get_label_encoder().get_labels()) {
+                if (label != "" || label != ColumnPathIndex::UNITIG_FRONT_TAG) {
+                    throw std::runtime_error("Path index contains label " + label +". Please align with an annotator");
+                }
+            }
+        }
+
+        col_topo_anno = initialize_annotation(config->infbase + ".topo.int_column.annodbg", *config);
+        if (col_topo_anno->load(config->infbase + ".topo.int_column.annodbg")) {
+            col_anno_dbg = std::make_shared<AnnotatedDBG>(graph, std::move(col_anno));
+            col_path_index = std::make_shared<ColumnPathIndex>(col_anno_dbg, col_topo_anno);
+            graph->add_extension(col_path_index);
+        } else {
+            col_topo_anno.reset();
+            logger->error("Failed to load graph topology");
+            exit(1);
+        }
+    } else {
+        col_anno.reset();
     }
 
     for (const auto &file : files) {
