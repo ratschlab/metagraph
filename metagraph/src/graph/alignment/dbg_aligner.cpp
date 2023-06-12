@@ -371,6 +371,9 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
                                                                    config_,
                                                                    graph_.get_k() - 1)) {
             assert(alignment.is_valid(graph_, &config_));
+            if (alignment.get_score() < config_.min_path_score)
+                continue;
+
             if (alignment.get_score() > best_score) {
                 best_score = alignment.get_score();
                 query_coverage = alignment.get_query_view().size();
