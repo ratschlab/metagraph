@@ -91,7 +91,7 @@ void NodeRC::call_outgoing_from_rc(node_index node,
         const BOSS &boss = dbg_succ_->get_boss();
         edge_index rc_edge = 0;
 
-        if (rc_.size() && !rc_.conditional_rank1(node))
+        if (rc_.size() && !rc_[node])
             return;
 
         std::string rev_seq = dbg_succ_->get_node_sequence(node).substr(0, boss.get_k());
@@ -148,7 +148,7 @@ void NodeRC::call_incoming_from_rc(node_index node,
         const BOSS &boss = dbg_succ_->get_boss();
         edge_index rc_edge = 0;
 
-        if (rc_.size() && !rc_.conditional_rank1(node))
+        if (rc_.size() && !rc_[node])
             return;
 
         std::string rev_seq = dbg_succ_->get_node_sequence(node).substr(1);
