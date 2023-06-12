@@ -39,7 +39,8 @@ class NodeRC : public SequenceGraph::GraphExtension {
 
     // Indicates whether a reverse complement prefix/suffix exists for each graph node.
     // If the index is initialized, then rc_.size() == graph_->max_index() + 1
-    Indicator rc_;
+    Indicator rc_prefix_;
+    Indicator rc_suffix_;
 
     static constexpr auto kRCExtension = ".rc_adj";
 };

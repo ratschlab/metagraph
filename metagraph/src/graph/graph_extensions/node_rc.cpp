@@ -34,7 +34,8 @@ NodeRC::NodeRC(const DeBruijnGraph &graph, bool construct_index) : graph_(&graph
 
     std::mutex mu;
 
-    std::vector<node_index> rc_nodes;
+    std::vector<node_index> rc_nodes_prefix;
+    std::vector<node_index> rc_nodes_suffix;
     graph.call_sequences([&](const std::string &seq, const std::vector<node_index> &path) {
         assert(seq.size() == path.size() + boss.get_k());
         std::string rev_seq = seq;
@@ -55,27 +56,43 @@ NodeRC::NodeRC(const DeBruijnGraph &graph, bool construct_index) : graph_(&graph
         // complement maps to a BOSS node. If so, then record that node
         auto it = rc_edges.begin();
         for (size_t i = 0; i < path.size(); ++i, ++it) {
-            if (*it || *(it + 1)) {
+            if (*it) {
                 std::lock_guard<std::mutex> lock(mu);
-                rc_nodes.emplace_back(path[i]);
+                rc_nodes_prefix.emplace_back(path[i]);
+            }
+
+            if (*(it + 1)) {
+                std::lock_guard<std::mutex> lock(mu);
+                rc_nodes_suffix.emplace_back(path[i]);
             }
         }
     }, get_num_threads());
 
     logger->trace("Found {} / {} ({:.2f}%) nodes with reverse complements",
-                  rc_nodes.size(), graph.num_nodes(),
-                  100.0 * rc_nodes.size() / graph.num_nodes());
+                  rc_nodes_prefix.size() + rc_nodes_suffix.size(), graph.num_nodes(),
+                  100.0 * (rc_nodes_prefix.size() + rc_nodes_suffix.size()) / graph.num_nodes());
 
     // sort by node ID, then construct the binary indicator vector
     logger->trace("Constructing reverse complement map");
-    ips4o::parallel::sort(rc_nodes.begin(), rc_nodes.end(), std::less<node_index>(),
-                          get_num_threads());
+    ips4o::parallel::sort(rc_nodes_prefix.begin(), rc_nodes_prefix.end(),
+                          std::less<node_index>(), get_num_threads());
+    ips4o::parallel::sort(rc_nodes_suffix.begin(), rc_nodes_suffix.end(),
+                          std::less<node_index>(), get_num_threads());
 
-    rc_ = Indicator([&](const auto &callback) {
-                        std::for_each(rc_nodes.begin(), rc_nodes.end(), callback);
-                    },
-                    graph.max_index() + 1,
-                    rc_nodes.size());
+    rc_prefix_ = Indicator([&](const auto &callback) {
+                               std::for_each(rc_nodes_prefix.begin(),
+                                             rc_nodes_prefix.end(),
+                                             callback);
+                           },
+                           graph.max_index() + 1,
+                           rc_nodes_prefix.size());
+    rc_suffix_ = Indicator([&](const auto &callback) {
+                               std::for_each(rc_nodes_suffix.begin(),
+                                             rc_nodes_suffix.end(),
+                                             callback);
+                           },
+                           graph.max_index() + 1,
+                           rc_nodes_suffix.size());
 }
 
 void NodeRC::call_outgoing_from_rc(node_index node,
@@ -91,7 +108,7 @@ void NodeRC::call_outgoing_from_rc(node_index node,
         const BOSS &boss = dbg_succ_->get_boss();
         edge_index rc_edge = 0;
 
-        if (rc_.size() && !rc_[node])
+        if (rc_prefix_.size() && !rc_prefix_[node])
             return;
 
         std::string rev_seq = dbg_succ_->get_node_sequence(node).substr(0, boss.get_k());
@@ -148,7 +165,7 @@ void NodeRC::call_incoming_from_rc(node_index node,
         const BOSS &boss = dbg_succ_->get_boss();
         edge_index rc_edge = 0;
 
-        if (rc_.size() && !rc_[node])
+        if (rc_suffix_.size() && !rc_suffix_[node])
             return;
 
         std::string rev_seq = dbg_succ_->get_node_sequence(node).substr(1);
@@ -205,7 +222,8 @@ bool NodeRC::load(const std::string &filename_base) {
         if (!in->good())
             return false;
 
-        rc_.load(*in);
+        rc_prefix_.load(*in);
+        rc_suffix_.load(*in);
         return true;
 
     } catch (...) {
@@ -214,17 +232,18 @@ bool NodeRC::load(const std::string &filename_base) {
 }
 
 void NodeRC::serialize(const std::string &filename_base) const {
-    if (!rc_.size())
+    if (!rc_prefix_.size() || !rc_suffix_.size())
         logger->warn("NodeRC was initialized with set_graph, so nothing to serialize.");
 
     const auto fname = utils::make_suffix(filename_base, kRCExtension);
 
     std::ofstream out = utils::open_new_ofstream(fname);
-    rc_.serialize(out);
+    rc_prefix_.serialize(out);
+    rc_suffix_.serialize(out);
 }
 
 bool NodeRC::is_compatible(const SequenceGraph &graph, bool) const {
-    if (!rc_.size()) {
+    if (!rc_prefix_.size() || !rc_suffix_.size()) {
         if (const auto *dbg = dynamic_cast<const DeBruijnGraph*>(&graph)) {
             if (dbg == graph_)
                 return true;
@@ -237,7 +256,12 @@ bool NodeRC::is_compatible(const SequenceGraph &graph, bool) const {
         return false;
     }
 
-    if (graph.max_index() + 1 != rc_.size()) {
+    if (graph.max_index() + 1 != rc_prefix_.size()) {
+        logger->error("RC file does not match number of nodes in graph");
+        return false;
+    }
+
+    if (graph.max_index() + 1 != rc_suffix_.size()) {
         logger->error("RC file does not match number of nodes in graph");
         return false;
     }
