@@ -213,9 +213,11 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
             );
 
             auto [num_seeds_c, num_extensions_c, num_explored_nodes_c] =
-                chain_and_filter_seeds(*this, seeder, Extender(*this, this_query),
+                chain_and_filter_seeds(*this, seeder,
+                    Extender(*this, this_query),
                     Extender(*this, reverse),
                     config_.allow_label_change, config_.allow_jump);
+
             num_seeds += num_seeds_c;
             num_extensions += num_extensions_c;
             num_explored_nodes += num_explored_nodes_c;

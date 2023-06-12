@@ -87,7 +87,7 @@ class SeedFilteringExtender {
 
   protected:
     const DeBruijnGraph *graph_;
-    const DBGAlignerConfig &config_;
+    mutable DBGAlignerConfig config_;
     const Alignment *seed_ = nullptr;
     size_t query_size_;
 

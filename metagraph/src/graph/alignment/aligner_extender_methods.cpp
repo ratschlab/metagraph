@@ -141,6 +141,9 @@ std::vector<Alignment> SeedFilteringExtender::connect_seeds(const Alignment &fir
 
     size_t num_exact_match_end = it->first == Cigar::MATCH ? it->second : 0;
 
+    bool allow_label_change = false;
+    std::swap(allow_label_change, config_.allow_label_change);
+    DEBUG_LOG("Try to connect: nsteps: {}\t{} -> {}", coord_dist, next, second);
     auto extensions = get_extensions(next, min_path_score,
         true,                                                // force_fixed_seed
         coord_dist,                                          // target_length
@@ -150,6 +153,7 @@ std::vector<Alignment> SeedFilteringExtender::connect_seeds(const Alignment &fir
         std::max(100, first.get_score() - next.get_score()), // added_xdrop
         num_exact_match_end                                  // target_exact_match
     );
+    std::swap(allow_label_change, config_.allow_label_change);
 
     std::vector<Alignment> alignments;
 
