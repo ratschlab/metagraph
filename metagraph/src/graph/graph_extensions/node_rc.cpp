@@ -5,6 +5,7 @@
 #include <ips4o.hpp>
 
 #include "graph/representation/succinct/dbg_succinct.hpp"
+#include "graph/graph_extensions/node_first_cache.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/utils/template_utils.hpp"
 #include "common/utils/file_utils.hpp"
@@ -111,7 +112,15 @@ void NodeRC::call_outgoing_from_rc(node_index node,
         if (rc_prefix_.size() && !rc_prefix_[node])
             return;
 
-        std::string rev_seq = dbg_succ_->get_node_sequence(node).substr(0, boss.get_k());
+        std::string rev_seq;
+        if (auto first_cache = dbg_succ_->get_extension<NodeFirstCache>()) {
+            rev_seq = first_cache->get_node_sequence(node);
+        } else {
+            rev_seq = dbg_succ_->get_node_sequence(node);
+        }
+        rev_seq.pop_back();
+        assert(rev_seq.size() == boss.get_k());
+
         if (rev_seq[0] == BOSS::kSentinel)
             return;
 
@@ -168,7 +177,12 @@ void NodeRC::call_incoming_from_rc(node_index node,
         if (rc_suffix_.size() && !rc_suffix_[node])
             return;
 
-        std::string rev_seq = dbg_succ_->get_node_sequence(node).substr(1);
+        std::string rev_seq;
+        if (auto first_cache = dbg_succ_->get_extension<NodeFirstCache>()) {
+            rev_seq = first_cache->get_node_sequence(node).substr(1);
+        } else {
+            rev_seq = dbg_succ_->get_node_sequence(node).substr(1);
+        }
         assert(rev_seq.size() == boss.get_k());
 
         if (rev_seq[0] == BOSS::kSentinel)

@@ -16,6 +16,33 @@ char NodeFirstCache::get_first_char(node_index node) const {
     return boss.decode(s);
 }
 
+std::string NodeFirstCache::get_node_sequence(node_index node) const {
+    assert(dbg_succ_);
+    assert(node > 0 && node <= dbg_succ_->num_nodes());
+
+    boss::BOSS::edge_index x = dbg_succ_->kmer_to_boss_index(node);
+
+    if (!first_cache_.TryGet(x))
+        return dbg_succ_->get_node_sequence(node);
+
+    const auto &boss = dbg_succ_->get_boss();
+
+    std::vector<boss::BOSS::TAlphabet> ret(boss.get_k());
+    size_t i = boss.get_k();
+
+    ret[--i] = boss.get_node_last_value(x);
+
+    boss::BOSS::edge_index last_edge = 0;
+    while (i > 0) {
+        boss::BOSS::edge_index bwd = get_parent_pair(x, last_edge).first;
+        last_edge = x;
+        x = bwd;
+        ret[--i] = boss.get_node_last_value(x);
+    }
+
+    return boss.decode(ret) + boss.decode(boss.get_W(x) % boss.alph_size);
+}
+
 void NodeFirstCache::call_incoming_kmers(node_index node,
                                          const IncomingEdgeCallback &callback) const {
     assert(dbg_succ_);

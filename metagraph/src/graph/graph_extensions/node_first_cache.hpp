@@ -22,6 +22,8 @@ class NodeFirstCache : public SequenceGraph::GraphExtension {
     NodeFirstCache(const DBGSuccinct &graph, size_t cache_size = 100'000)
           : dbg_succ_(&graph), first_cache_(cache_size) {}
 
+    std::string get_node_sequence(node_index node) const;
+
     // Returns the first character of the node's sequence
     char get_first_char(node_index node) const;
 
