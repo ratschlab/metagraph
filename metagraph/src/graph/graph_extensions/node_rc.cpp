@@ -104,22 +104,20 @@ void NodeRC::call_outgoing_from_rc(node_index node,
         const BOSS &boss = dbg_succ_->get_boss();
         edge_index rc_edge = 0;
 
-        if (rc_.size()) {
-            if (auto rank = rc_.conditional_rank1(node))
-                rc_edge = mapping_[(rank - 1) * 2];
-        } else {
-            std::string rev_seq = dbg_succ_->get_node_sequence(node).substr(0, boss.get_k());
-            if (rev_seq[0] == BOSS::kSentinel)
-                return;
+        if (rc_.size() && !rc_.conditional_rank1(node))
+            return;
 
-            ::reverse_complement(rev_seq.begin(), rev_seq.end());
-            auto encoded = boss.encode(rev_seq);
-            auto [edge, edge_2, end] = boss.index_range(encoded.begin(), encoded.end());
+        std::string rev_seq = dbg_succ_->get_node_sequence(node).substr(0, boss.get_k());
+        if (rev_seq[0] == BOSS::kSentinel)
+            return;
 
-            if (end == encoded.end()) {
-                assert(edge == edge_2);
-                rc_edge = edge;
-            }
+        ::reverse_complement(rev_seq.begin(), rev_seq.end());
+        auto encoded = boss.encode(rev_seq);
+        auto [edge, edge_2, end] = boss.index_range(encoded.begin(), encoded.end());
+
+        if (end == encoded.end()) {
+            assert(edge == edge_2);
+            rc_edge = edge;
         }
 
         if (!rc_edge)
@@ -163,24 +161,22 @@ void NodeRC::call_incoming_from_rc(node_index node,
         const BOSS &boss = dbg_succ_->get_boss();
         edge_index rc_edge = 0;
 
-        if (rc_.size()) {
-            if (auto rank = rc_.conditional_rank1(node))
-                rc_edge = mapping_[(rank - 1) * 2 + 1];
-        } else {
-            std::string rev_seq = dbg_succ_->get_node_sequence(node).substr(1);
-            assert(rev_seq.size() == boss.get_k());
+        if (rc_.size() && !rc_.conditional_rank1(node))
+            return;
 
-            if (rev_seq[0] == BOSS::kSentinel)
-                return;
+        std::string rev_seq = dbg_succ_->get_node_sequence(node).substr(1);
+        assert(rev_seq.size() == boss.get_k());
 
-            ::reverse_complement(rev_seq.begin(), rev_seq.end());
-            auto encoded = boss.encode(rev_seq);
-            auto [edge, edge_2, end] = boss.index_range(encoded.begin(), encoded.end());
+        if (rev_seq[0] == BOSS::kSentinel)
+            return;
 
-            if (end == encoded.end()) {
-                assert(edge == edge_2);
-                rc_edge = edge;
-            }
+        ::reverse_complement(rev_seq.begin(), rev_seq.end());
+        auto encoded = boss.encode(rev_seq);
+        auto [edge, edge_2, end] = boss.index_range(encoded.begin(), encoded.end());
+
+        if (end == encoded.end()) {
+            assert(edge == edge_2);
+            rc_edge = edge;
         }
 
         if (!rc_edge)
