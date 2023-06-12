@@ -34,7 +34,7 @@ NodeRC::NodeRC(const DeBruijnGraph &graph, bool construct_index) : graph_(&graph
 
     std::mutex mu;
 
-    std::vector<std::pair<node_index, std::pair<edge_index, edge_index>>> mapping;
+    std::vector<node_index> rc_nodes;
     graph.call_sequences([&](const std::string &seq, const std::vector<node_index> &path) {
         assert(seq.size() == path.size() + boss.get_k());
         std::string rev_seq = seq;
@@ -52,43 +52,30 @@ NodeRC::NodeRC(const DeBruijnGraph &graph, bool construct_index) : graph_(&graph
         assert(rc_edges.size() == path.size() + 1);
 
         // For each contig node, determine if the prefix or the suffix of its reverse
-        // complement maps to a BOSS node. If so, then record the mapping
+        // complement maps to a BOSS node. If so, then record that node
         auto it = rc_edges.begin();
         for (size_t i = 0; i < path.size(); ++i, ++it) {
             if (*it || *(it + 1)) {
                 std::lock_guard<std::mutex> lock(mu);
-                mapping.emplace_back(path[i], std::make_pair(*it, *(it + 1)));
+                rc_nodes.emplace_back(path[i]);
             }
         }
     }, get_num_threads());
 
     logger->trace("Found {} / {} ({:.2f}%) nodes with reverse complements",
-                  mapping.size(), graph.num_nodes(),
-                  100.0 * mapping.size() / graph.num_nodes());
+                  rc_nodes.size(), graph.num_nodes(),
+                  100.0 * rc_nodes.size() / graph.num_nodes());
 
-    // sort by node ID, then construct the binary indicator vector at the compressed
-    // node-to-rc mapping
+    // sort by node ID, then construct the binary indicator vector
     logger->trace("Constructing reverse complement map");
-    ips4o::parallel::sort(mapping.begin(), mapping.end(), utils::LessFirst(),
+    ips4o::parallel::sort(rc_nodes.begin(), rc_nodes.end(), std::less<node_index>(),
                           get_num_threads());
 
-    std::vector<uint64_t> map;
-    map.reserve(mapping.size() * 2);
-
     rc_ = Indicator([&](const auto &callback) {
-                        for (const auto &[node, rc] : mapping) {
-                            callback(node);
-                            map.emplace_back(rc.first);
-                            map.emplace_back(rc.second);
-                        }
+                        std::for_each(rc_nodes.begin(), rc_nodes.end(), callback);
                     },
                     graph.max_index() + 1,
-                    mapping.size());
-
-    mapping = decltype(mapping)();
-
-    logger->trace("Compressing reverse complement map");
-    mapping_ = { std::move(map) };
+                    rc_nodes.size());
 }
 
 void NodeRC::call_outgoing_from_rc(node_index node,
@@ -219,7 +206,6 @@ bool NodeRC::load(const std::string &filename_base) {
             return false;
 
         rc_.load(*in);
-        mapping_.load(*in);
         return true;
 
     } catch (...) {
@@ -235,7 +221,6 @@ void NodeRC::serialize(const std::string &filename_base) const {
 
     std::ofstream out = utils::open_new_ofstream(fname);
     rc_.serialize(out);
-    mapping_.serialize(out);
 }
 
 bool NodeRC::is_compatible(const SequenceGraph &graph, bool) const {
@@ -254,11 +239,6 @@ bool NodeRC::is_compatible(const SequenceGraph &graph, bool) const {
 
     if (graph.max_index() + 1 != rc_.size()) {
         logger->error("RC file does not match number of nodes in graph");
-        return false;
-    }
-
-    if (rc_.num_set_bits() * 2 != mapping_.size()) {
-        logger->error("RC file contains the wrong mapping");
         return false;
     }
 
