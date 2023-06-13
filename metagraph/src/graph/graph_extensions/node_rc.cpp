@@ -121,6 +121,7 @@ void NodeRC::adjacent_outgoing_from_rc(node_index node,
         rev_seq.pop_back();
         assert(rev_seq.size() == boss.get_k());
 
+        assert(!rc_prefix_.size() || rev_seq[0] != BOSS::kSentinel);
         if (rev_seq[0] == BOSS::kSentinel)
             return;
 
@@ -128,6 +129,7 @@ void NodeRC::adjacent_outgoing_from_rc(node_index node,
         auto encoded = boss.encode(rev_seq);
         auto [edge, edge_2, end] = boss.index_range(encoded.begin(), encoded.end());
 
+        assert(!rc_prefix_.size() || end == encoded.end());
         if (end == encoded.end()) {
             assert(edge == edge_2);
             rc_edge = edge;
@@ -186,6 +188,7 @@ void NodeRC::adjacent_incoming_from_rc(node_index node,
         }
         assert(rev_seq.size() == boss.get_k());
 
+        assert(!rc_suffix_.size() || rev_seq[0] != BOSS::kSentinel);
         if (rev_seq[0] == BOSS::kSentinel)
             return;
 
@@ -193,6 +196,7 @@ void NodeRC::adjacent_incoming_from_rc(node_index node,
         auto encoded = boss.encode(rev_seq);
         auto [edge, edge_2, end] = boss.index_range(encoded.begin(), encoded.end());
 
+        assert(!rc_suffix_.size() || end == encoded.end());
         if (end == encoded.end()) {
             assert(edge == edge_2);
             rc_edge = edge;
