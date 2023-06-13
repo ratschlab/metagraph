@@ -424,7 +424,8 @@ void CanonicalDBG::call_unitigs(const CallPath &callback,
 std::string CanonicalDBG::get_node_sequence(node_index index) const {
     assert(index <= offset_ * 2);
     node_index node = get_base_node(index);
-    std::string seq = graph_->get_node_sequence(node);
+    const auto *cache = get_extension_threadsafe<NodeFirstCache>();
+    std::string seq = cache ? cache->get_node_sequence(node) : graph_->get_node_sequence(node);
 
     if (node != index)
         ::reverse_complement(seq.begin(), seq.end());
@@ -456,6 +457,7 @@ DeBruijnGraph::node_index CanonicalDBG::traverse_back(node_index node,
         node = traverse(node - offset_, complement(prev_char));
         return node != npos ? reverse_complement(node) : npos;
     } else {
+        // TODO: use the cache here?
         node_index prev = graph_->traverse_back(node, prev_char);
         if (prev != npos)
             return prev;

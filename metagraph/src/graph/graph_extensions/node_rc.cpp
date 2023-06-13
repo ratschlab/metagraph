@@ -202,7 +202,9 @@ void NodeRC::adjacent_incoming_from_rc(node_index node,
             return;
 
         // rc_edge may be a dummy sink, so this won't work with graph_->call_incoming_kmers
-        boss.call_incoming_to_target(boss.bwd(rc_edge), boss.get_node_last_value(rc_edge),
+        boss.call_incoming_to_target(
+            first_cache ? first_cache->get_parent_pair(rc_edge).first : boss.bwd(rc_edge),
+            boss.get_node_last_value(rc_edge),
             [&](edge_index incoming_boss_edge) {
                 node_index next = dbg_succ_->boss_to_kmer_index(incoming_boss_edge);
                 if (next != DeBruijnGraph::npos)
