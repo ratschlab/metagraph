@@ -46,6 +46,8 @@ void AnnotationBuffer::fetch_queued_annotations() {
     const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(base_graph);
     const boss::BOSS *boss = dbg_succ ? &dbg_succ->get_boss() : nullptr;
 
+    tsl::hopscotch_map<node_index, std::vector<node_index>> dummy_to_annotated_nodes;
+
     for (const auto &path : queued_paths_) {
         std::vector<node_index> base_path;
         if (base_graph->get_mode() == DeBruijnGraph::CANONICAL) {
@@ -72,23 +74,13 @@ void AnnotationBuffer::fetch_queued_annotations() {
             if (base_path[i] == DeBruijnGraph::npos) {
                 // this can happen when the base graph is CANONICAL and path[i] is a
                 // dummy node
-                if (node_to_cols_.try_emplace(path[i], 0).second && has_coordinates())
-                    label_coords_.emplace_back();
-
+                dummy_to_annotated_nodes[path[i]] = std::vector<node_index>{};
                 continue;
             }
 
             if (boss && !boss->get_W(dbg_succ->kmer_to_boss_index(base_path[i]))) {
                 // skip dummy nodes
-                if (node_to_cols_.try_emplace(base_path[i], 0).second && has_coordinates())
-                    label_coords_.emplace_back();
-
-                if (graph_.get_mode() == DeBruijnGraph::CANONICAL
-                        && base_path[i] != path[i]
-                        && node_to_cols_.emplace(path[i], 0).second && has_coordinates()) {
-                    label_coords_.emplace_back();
-                }
-
+                dummy_to_annotated_nodes[path[i]] = std::vector<node_index>{};
                 continue;
             }
 
@@ -134,6 +126,15 @@ void AnnotationBuffer::fetch_queued_annotations() {
             }
         }
     }
+
+    tsl::hopscotch_map<node_index, std::vector<node_index>> annotated_to_dummy_nodes;
+    for (auto it = dummy_to_annotated_nodes.begin(); it != dummy_to_annotated_nodes.end(); ++it) {
+        node_index node = it->first;
+        auto &annotated_nodes = it.value();
+
+    }
+
+    dummy_to_annotated_nodes.clear();
 
     queued_paths_.clear();
 
