@@ -23,8 +23,11 @@ class NodeRC : public SequenceGraph::GraphExtension {
     // unless the index is loaded with load().
     NodeRC(const DeBruijnGraph &graph, bool construct_index = false);
 
-    void call_outgoing_from_rc(node_index node, const std::function<void(node_index)> &callback) const;
-    void call_incoming_from_rc(node_index node, const std::function<void(node_index)> &callback) const;
+    void adjacent_outgoing_from_rc(node_index node, const std::function<void(node_index)> &callback) const;
+    void adjacent_incoming_from_rc(node_index node, const std::function<void(node_index)> &callback) const;
+
+    void call_outgoing_from_rc(node_index node, const std::function<void(node_index, char)> &callback) const;
+    void call_incoming_from_rc(node_index node, const std::function<void(node_index, char)> &callback) const;
 
     bool load(const std::string &filename_base);
     void serialize(const std::string &filename_base) const;

@@ -96,8 +96,8 @@ NodeRC::NodeRC(const DeBruijnGraph &graph, bool construct_index) : graph_(&graph
                            rc_nodes_suffix.size());
 }
 
-void NodeRC::call_outgoing_from_rc(node_index node,
-                                   const std::function<void(node_index)> &callback) const {
+void NodeRC::adjacent_outgoing_from_rc(node_index node,
+                                       const std::function<void(node_index)> &callback) const {
     //        lshift    rc
     // AGCCAT -> *AGCCA -> TGGCT*
     assert(graph_);
@@ -161,8 +161,8 @@ void NodeRC::call_outgoing_from_rc(node_index node,
     }
 }
 
-void NodeRC::call_incoming_from_rc(node_index node,
-                                   const std::function<void(node_index)> &callback) const {
+void NodeRC::adjacent_incoming_from_rc(node_index node,
+                                       const std::function<void(node_index)> &callback) const {
     //        rshift    rc
     // ATGGCT -> TGGCT* -> *AGCCA
     assert(graph_);
@@ -178,7 +178,8 @@ void NodeRC::call_incoming_from_rc(node_index node,
             return;
 
         std::string rev_seq;
-        if (auto first_cache = dbg_succ_->get_extension<NodeFirstCache>()) {
+        auto first_cache = dbg_succ_->get_extension<NodeFirstCache>();
+        if (first_cache) {
             rev_seq = first_cache->get_node_sequence(node).substr(1);
         } else {
             rev_seq = dbg_succ_->get_node_sequence(node).substr(1);
@@ -226,6 +227,60 @@ void NodeRC::call_incoming_from_rc(node_index node,
             if (next != DeBruijnGraph::npos)
                 callback(next);
         }
+    }
+}
+
+void NodeRC::call_outgoing_from_rc(node_index node,
+                                   const std::function<void(node_index, char)> &callback) const {
+    assert(graph_);
+
+    if (const auto *dbg_succ_ = dynamic_cast<const DBGSuccinct*>(graph_)) {
+        const auto &boss = dbg_succ_->get_boss();
+        adjacent_outgoing_from_rc(node, [&](node_index next) {
+            char c = boss.decode(boss.get_W(dbg_succ_->kmer_to_boss_index(next)) % boss.alph_size);
+
+            if (c == boss::BOSS::kSentinel)
+                return;
+
+            callback(next, complement(c));
+        });
+    } else {
+        adjacent_outgoing_from_rc(node, [&](node_index next) {
+            char c = graph_->get_node_sequence(next).back();
+            if (c == boss::BOSS::kSentinel)
+                return;
+
+            callback(next, complement(c));
+        });
+    }
+}
+
+void NodeRC::call_incoming_from_rc(node_index node,
+                                   const std::function<void(node_index, char)> &callback) const {
+    assert(graph_);
+
+    if (const auto *dbg_succ_ = dynamic_cast<const DBGSuccinct*>(graph_)) {
+        const auto &boss = dbg_succ_->get_boss();
+        auto first_cache = dbg_succ_->get_extension<NodeFirstCache>();
+        adjacent_incoming_from_rc(node, [&](node_index prev) {
+            char c = first_cache
+                ? first_cache->get_first_char(prev)
+                : boss.decode(boss.get_minus_k_value(
+                    dbg_succ_->kmer_to_boss_index(prev), boss.get_k() - 1).first);
+
+            if (c == boss::BOSS::kSentinel)
+                return;
+
+            callback(prev, complement(c));
+        });
+    } else {
+        adjacent_incoming_from_rc(node, [&](node_index prev) {
+            char c = graph_->get_node_sequence(prev)[0];
+            if (c == boss::BOSS::kSentinel)
+                return;
+
+            callback(prev, complement(c));
+        });
     }
 }
 

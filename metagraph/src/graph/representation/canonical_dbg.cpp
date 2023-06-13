@@ -191,25 +191,7 @@ void CanonicalDBG
     // TGGCTrc(n) as index(nAGCCA) + offset_
     assert(get_extension_threadsafe<NodeRC>());
 
-    const DBGSuccinct *dbg_succ = get_dbg_succ(*graph_);
-    const boss::BOSS *boss = dbg_succ ? &dbg_succ->get_boss() : nullptr;
-    const auto *cache = get_extension_threadsafe<NodeFirstCache>();
-
-    get_extension_threadsafe<NodeRC>()->call_incoming_from_rc(node, [&](node_index next) {
-        char c;
-        if (cache) {
-            c = cache->get_first_char(next);
-        } else if (boss) {
-            c = boss->decode(boss->get_minus_k_value(
-                    dbg_succ->kmer_to_boss_index(next), boss->get_k() - 1).first);
-        } else {
-            c = graph_->get_node_sequence(next)[0];
-        }
-
-        if (c == boss::BOSS::kSentinel)
-            return;
-
-        c = complement(c);
+    get_extension_threadsafe<NodeRC>()->call_incoming_from_rc(node, [&](node_index next, char c) {
         auto s = alphabet_encoder_[c];
 
         if (children[s] == npos) {
@@ -263,7 +245,7 @@ void CanonicalDBG
         return;
 
     assert(get_extension_threadsafe<NodeRC>());
-    get_extension_threadsafe<NodeRC>()->call_incoming_from_rc(node, [&](node_index next) {
+    get_extension_threadsafe<NodeRC>()->adjacent_incoming_from_rc(node, [&](node_index next) {
         callback(next + offset_);
     });
 }
@@ -346,18 +328,7 @@ void CanonicalDBG
     // rc(n)AGCCA as index(TGGCTn) + offset_
     assert(get_extension_threadsafe<NodeRC>());
 
-    const DBGSuccinct *dbg_succ = get_dbg_succ(*graph_);
-    const boss::BOSS *boss = dbg_succ ? &dbg_succ->get_boss() : nullptr;
-
-    get_extension_threadsafe<NodeRC>()->call_outgoing_from_rc(node, [&](node_index prev) {
-        char c = boss
-            ? boss->decode(boss->get_W(dbg_succ->kmer_to_boss_index(prev)) % boss->alph_size)
-            : graph_->get_node_sequence(prev).back();
-
-        if (c == boss::BOSS::kSentinel)
-            return;
-
-        c = complement(c);
+    get_extension_threadsafe<NodeRC>()->call_outgoing_from_rc(node, [&](node_index prev, char c) {
         auto s = alphabet_encoder_[c];
 
         if (parents[s] == npos) {
@@ -412,7 +383,7 @@ void CanonicalDBG
 
     assert(get_extension_threadsafe<NodeRC>());
 
-    get_extension_threadsafe<NodeRC>()->call_outgoing_from_rc(node, [&](node_index prev) {
+    get_extension_threadsafe<NodeRC>()->adjacent_outgoing_from_rc(node, [&](node_index prev) {
         callback(prev + offset_);
     });
 }
