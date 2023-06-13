@@ -10,8 +10,9 @@ char NodeFirstCache::get_first_char(node_index node, node_index child_hint) cons
     edge_index edge = dbg_succ_->kmer_to_boss_index(node);
     assert(boss.bwd(edge) == get_parent_pair(edge).first);
 
-    boss::BOSS::TAlphabet s = boss.get_node_last_value(get_parent_pair(
-        edge, child_hint ? dbg_succ_->kmer_to_boss_index(child_hint) : 0
+    boss::BOSS::TAlphabet s = boss.get_node_last_value(get_parent_pair(edge,
+        child_hint ? dbg_succ_->kmer_to_boss_index(child_hint)
+                   : boss.fwd(edge)
     ).second);
     assert(s == boss.get_minus_k_value(edge, boss.get_k() - 1).first);
 
