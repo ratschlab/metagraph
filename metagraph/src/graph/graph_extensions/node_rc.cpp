@@ -60,7 +60,8 @@ NodeRC::NodeRC(const DeBruijnGraph &graph, bool construct_index) : graph_(&graph
             if (*it) {
                 bool found = false;
                 boss.call_outgoing(*it, [&](edge_index adjacent_edge) {
-                    found |= (dbg_succ->boss_to_kmer_index(adjacent_edge) != DeBruijnGraph::npos);
+                    found |= (boss.get_W(adjacent_edge) % boss.alph_size
+                                != BOSS::kSentinelCode);
                 });
                 if (found) {
                     std::lock_guard<std::mutex> lock(mu);
@@ -74,7 +75,10 @@ NodeRC::NodeRC(const DeBruijnGraph &graph, bool construct_index) : graph_(&graph
                     boss.bwd(*(it + 1)),
                     boss.get_node_last_value(*(it + 1)),
                     [&](edge_index incoming_boss_edge) {
-                        found |= (dbg_succ->boss_to_kmer_index(incoming_boss_edge) != DeBruijnGraph::npos);
+                        // TODO: make this more efficient?
+                        found |= (boss.get_minus_k_value(incoming_boss_edge,
+                                                         boss.get_k() - 1).first
+                                     != BOSS::kSentinelCode);
                     }
                 );
                 if (found) {
