@@ -58,13 +58,29 @@ NodeRC::NodeRC(const DeBruijnGraph &graph, bool construct_index) : graph_(&graph
         auto it = rc_edges.begin();
         for (size_t i = 0; i < path.size(); ++i, ++it) {
             if (*it) {
-                std::lock_guard<std::mutex> lock(mu);
-                rc_nodes_prefix.emplace_back(path[i]);
+                bool found = false;
+                boss.call_outgoing(*it, [&](edge_index adjacent_edge) {
+                    found |= (dbg_succ->boss_to_kmer_index(adjacent_edge) != DeBruijnGraph::npos);
+                });
+                if (found) {
+                    std::lock_guard<std::mutex> lock(mu);
+                    rc_nodes_prefix.emplace_back(path[i]);
+                }
             }
 
             if (*(it + 1)) {
-                std::lock_guard<std::mutex> lock(mu);
-                rc_nodes_suffix.emplace_back(path[i]);
+                bool found = false;
+                boss.call_incoming_to_target(
+                    boss.bwd(*(it + 1)),
+                    boss.get_node_last_value(*(it + 1)),
+                    [&](edge_index incoming_boss_edge) {
+                        found |= (dbg_succ->boss_to_kmer_index(incoming_boss_edge) != DeBruijnGraph::npos);
+                    }
+                );
+                if (found) {
+                    std::lock_guard<std::mutex> lock(mu);
+                    rc_nodes_suffix.emplace_back(path[i]);
+                }
             }
         }
     }, get_num_threads());
