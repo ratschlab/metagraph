@@ -32,12 +32,12 @@ NodeRC::NodeRC(const DeBruijnGraph &graph, bool construct_index) : graph_(&graph
         return;
 
     const BOSS &boss = dbg_succ->get_boss();
-    const auto *mask = dbg_succ->get_mask();
-    std::unique_ptr<bit_vector_stat> computed_mask;
+    const bitmap *mask = dbg_succ->get_mask();
+    std::unique_ptr<bitmap_vector> computed_mask;
     if (!mask) {
         auto sdsl_mask = boss.mark_all_dummy_edges(get_num_threads());
         sdsl_mask.flip();
-        computed_mask = std::make_unique<bit_vector_stat>(std::move(sdsl_mask));
+        computed_mask = std::make_unique<bitmap_vector>(std::move(sdsl_mask));
         mask = computed_mask.get();
     }
 
