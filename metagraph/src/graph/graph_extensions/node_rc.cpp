@@ -32,6 +32,14 @@ NodeRC::NodeRC(const DeBruijnGraph &graph, bool construct_index) : graph_(&graph
         return;
 
     const BOSS &boss = dbg_succ->get_boss();
+    const auto *mask = dbg_succ->get_mask();
+    std::unique_ptr<bit_vector_stat> computed_mask;
+    if (!mask) {
+        auto sdsl_mask = boss.mark_all_dummy_edges(get_num_threads());
+        sdsl_mask.flip();
+        computed_mask = std::make_unique<bit_vector_stat>(std::move(sdsl_mask));
+        mask = computed_mask.get();
+    }
 
     std::mutex mu;
 
@@ -60,8 +68,7 @@ NodeRC::NodeRC(const DeBruijnGraph &graph, bool construct_index) : graph_(&graph
             if (*it) {
                 bool found = false;
                 boss.call_outgoing(*it, [&](edge_index adjacent_edge) {
-                    found |= (boss.get_W(adjacent_edge) % boss.alph_size
-                                != BOSS::kSentinelCode);
+                    found |= (*mask)[adjacent_edge];
                 });
                 if (found) {
                     std::lock_guard<std::mutex> lock(mu);
@@ -75,10 +82,7 @@ NodeRC::NodeRC(const DeBruijnGraph &graph, bool construct_index) : graph_(&graph
                     boss.bwd(*(it + 1)),
                     boss.get_node_last_value(*(it + 1)),
                     [&](edge_index incoming_boss_edge) {
-                        // TODO: make this more efficient?
-                        found |= (boss.get_minus_k_value(incoming_boss_edge,
-                                                         boss.get_k() - 1).first
-                                     != BOSS::kSentinelCode);
+                        found |= (*mask)[incoming_boss_edge];
                     }
                 );
                 if (found) {
