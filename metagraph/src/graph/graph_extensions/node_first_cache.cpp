@@ -3,14 +3,16 @@
 namespace mtg {
 namespace graph {
 
-char NodeFirstCache::get_first_char(node_index node) const {
+char NodeFirstCache::get_first_char(node_index node, node_index child_hint) const {
     assert(dbg_succ_);
     const boss::BOSS &boss = dbg_succ_->get_boss();
 
     edge_index edge = dbg_succ_->kmer_to_boss_index(node);
     assert(boss.bwd(edge) == get_parent_pair(edge).first);
 
-    boss::BOSS::TAlphabet s = boss.get_node_last_value(get_parent_pair(edge).second);
+    boss::BOSS::TAlphabet s = boss.get_node_last_value(get_parent_pair(
+        edge, child_hint ? dbg_succ_->kmer_to_boss_index(child_hint) : 0
+    ).second);
     assert(s == boss.get_minus_k_value(edge, boss.get_k() - 1).first);
 
     return boss.decode(s);
@@ -67,14 +69,8 @@ void NodeFirstCache::call_incoming_kmers(node_index node,
                     == boss.get_node_last_value(edge));
 
             node_index prev = dbg_succ_->boss_to_kmer_index(incoming_boss_edge);
-            if (prev != DeBruijnGraph::npos) {
-                boss::BOSS::TAlphabet s = boss.get_node_last_value(
-                    get_parent_pair(incoming_boss_edge, edge).second
-                );
-                assert(boss.get_minus_k_value(incoming_boss_edge,
-                                              boss.get_k() - 1).first == s);
-                callback(prev, boss.decode(s));
-            }
+            if (prev != DeBruijnGraph::npos)
+                callback(prev, get_first_char(prev, node));
         }
     );
 }

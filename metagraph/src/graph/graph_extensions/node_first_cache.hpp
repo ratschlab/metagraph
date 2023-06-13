@@ -29,7 +29,7 @@ class NodeFirstCache : public SequenceGraph::GraphExtension {
     std::string get_node_sequence(node_index node) const;
 
     // Returns the first character of the node's sequence
-    char get_first_char(node_index node) const;
+    char get_first_char(node_index node, node_index child_hint = 0) const;
 
     void call_incoming_kmers(node_index node, const IncomingEdgeCallback &callback) const;
 
