@@ -121,7 +121,8 @@ NodeRC::NodeRC(const DeBruijnGraph &graph, bool construct_index) : graph_(&graph
 }
 
 void NodeRC::adjacent_outgoing_from_rc(node_index node,
-                                       const std::function<void(node_index)> &callback) const {
+                                       const std::function<void(node_index)> &callback,
+                                       const NodeFirstCache *cache) const {
     //        lshift    rc
     // AGCCAT -> *AGCCA -> TGGCT*
     assert(graph_);
@@ -136,12 +137,10 @@ void NodeRC::adjacent_outgoing_from_rc(node_index node,
         if (rc_prefix_.size() && !rc_prefix_[node])
             return;
 
-        std::string rev_seq;
-        if (auto first_cache = dbg_succ_->get_extension<NodeFirstCache>()) {
-            rev_seq = first_cache->get_node_sequence(node);
-        } else {
-            rev_seq = dbg_succ_->get_node_sequence(node);
-        }
+        std::string rev_seq = cache
+            ? cache->get_node_sequence(node)
+            : dbg_succ_->get_node_sequence(node);
+
         rev_seq.pop_back();
         assert(rev_seq.size() == boss.get_k());
 
@@ -188,7 +187,8 @@ void NodeRC::adjacent_outgoing_from_rc(node_index node,
 }
 
 void NodeRC::adjacent_incoming_from_rc(node_index node,
-                                       const std::function<void(node_index)> &callback) const {
+                                       const std::function<void(node_index)> &callback,
+                                       const NodeFirstCache *cache) const {
     //        rshift    rc
     // ATGGCT -> TGGCT* -> *AGCCA
     assert(graph_);
@@ -203,13 +203,10 @@ void NodeRC::adjacent_incoming_from_rc(node_index node,
         if (rc_suffix_.size() && !rc_suffix_[node])
             return;
 
-        std::string rev_seq;
-        auto first_cache = dbg_succ_->get_extension<NodeFirstCache>();
-        if (first_cache) {
-            rev_seq = first_cache->get_node_sequence(node).substr(1);
-        } else {
-            rev_seq = dbg_succ_->get_node_sequence(node).substr(1);
-        }
+        std::string rev_seq = cache
+            ? cache->get_node_sequence(node).substr(1)
+            : dbg_succ_->get_node_sequence(node).substr(1);
+
         assert(rev_seq.size() == boss.get_k());
 
         assert(!rc_suffix_.size() || rev_seq[0] != BOSS::kSentinel);
@@ -231,7 +228,7 @@ void NodeRC::adjacent_incoming_from_rc(node_index node,
 
         // rc_edge may be a dummy sink, so this won't work with graph_->call_incoming_kmers
         boss.call_incoming_to_target(
-            first_cache ? first_cache->get_parent_pair(rc_edge).first : boss.bwd(rc_edge),
+            cache ? cache->get_parent_pair(rc_edge).first : boss.bwd(rc_edge),
             boss.get_node_last_value(rc_edge),
             [&](edge_index incoming_boss_edge) {
                 node_index next = dbg_succ_->boss_to_kmer_index(incoming_boss_edge);
@@ -261,7 +258,8 @@ void NodeRC::adjacent_incoming_from_rc(node_index node,
 }
 
 void NodeRC::call_outgoing_from_rc(node_index node,
-                                   const std::function<void(node_index, char)> &callback) const {
+                                   const std::function<void(node_index, char)> &callback,
+                                   const NodeFirstCache *cache) const {
     assert(graph_);
 
     if (const auto *dbg_succ_ = dynamic_cast<const DBGSuccinct*>(graph_)) {
@@ -273,7 +271,7 @@ void NodeRC::call_outgoing_from_rc(node_index node,
                 return;
 
             callback(next, complement(c));
-        });
+        }, cache);
     } else {
         adjacent_outgoing_from_rc(node, [&](node_index next) {
             char c = graph_->get_node_sequence(next).back();
@@ -281,20 +279,20 @@ void NodeRC::call_outgoing_from_rc(node_index node,
                 return;
 
             callback(next, complement(c));
-        });
+        }, cache);
     }
 }
 
 void NodeRC::call_incoming_from_rc(node_index node,
-                                   const std::function<void(node_index, char)> &callback) const {
+                                   const std::function<void(node_index, char)> &callback,
+                                   const NodeFirstCache *cache) const {
     assert(graph_);
 
     if (const auto *dbg_succ_ = dynamic_cast<const DBGSuccinct*>(graph_)) {
         const auto &boss = dbg_succ_->get_boss();
-        auto first_cache = dbg_succ_->get_extension<NodeFirstCache>();
         adjacent_incoming_from_rc(node, [&](node_index prev) {
-            char c = first_cache
-                ? first_cache->get_first_char(prev)
+            char c = cache
+                ? cache->get_first_char(prev)
                 : boss.decode(boss.get_minus_k_value(
                     dbg_succ_->kmer_to_boss_index(prev), boss.get_k() - 1).first);
 
@@ -302,7 +300,7 @@ void NodeRC::call_incoming_from_rc(node_index node,
                 return;
 
             callback(prev, complement(c));
-        });
+        }, cache);
     } else {
         adjacent_incoming_from_rc(node, [&](node_index prev) {
             char c = graph_->get_node_sequence(prev)[0];
@@ -310,7 +308,7 @@ void NodeRC::call_incoming_from_rc(node_index node,
                 return;
 
             callback(prev, complement(c));
-        });
+        }, cache);
     }
 }
 

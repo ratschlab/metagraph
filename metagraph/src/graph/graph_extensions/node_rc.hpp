@@ -10,6 +10,8 @@
 namespace mtg {
 namespace graph {
 
+class NodeFirstCache;
+
 // Maps each node in a PRIMARY-mode DeBruijnGraph to nodes adjacent to its reverse
 // complement. When using the index construct constructor on DBGSuccinct, or when
 // loading such an index, this stores a map from each DBGSuccinct to the BOSS nodes
@@ -23,11 +25,19 @@ class NodeRC : public SequenceGraph::GraphExtension {
     // unless the index is loaded with load().
     NodeRC(const DeBruijnGraph &graph, bool construct_index = false);
 
-    void adjacent_outgoing_from_rc(node_index node, const std::function<void(node_index)> &callback) const;
-    void adjacent_incoming_from_rc(node_index node, const std::function<void(node_index)> &callback) const;
+    void adjacent_outgoing_from_rc(node_index node,
+                                   const std::function<void(node_index)> &callback,
+                                   const NodeFirstCache *cache = nullptr) const;
+    void adjacent_incoming_from_rc(node_index node,
+                                   const std::function<void(node_index)> &callback,
+                                   const NodeFirstCache *cache = nullptr) const;
 
-    void call_outgoing_from_rc(node_index node, const std::function<void(node_index, char)> &callback) const;
-    void call_incoming_from_rc(node_index node, const std::function<void(node_index, char)> &callback) const;
+    void call_outgoing_from_rc(node_index node,
+                               const std::function<void(node_index, char)> &callback,
+                               const NodeFirstCache *cache = nullptr) const;
+    void call_incoming_from_rc(node_index node,
+                               const std::function<void(node_index, char)> &callback,
+                               const NodeFirstCache *cache = nullptr) const;
 
     bool load(const std::string &filename_base);
     void serialize(const std::string &filename_base) const;
