@@ -166,6 +166,7 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
     }
 
     const DBGSuccinct &dbg_succ = get_base_dbg_succ(&this->graph_);
+    assert(!dbg_succ.get_mask());
 
     std::vector<std::vector<Seed>> suffix_seeds(
         this->query_.size() - this->config_.min_seed_length + 1

@@ -472,6 +472,8 @@ class BOSS {
     TAlphabet encode(char s) const;
     std::vector<TAlphabet> encode(std::string_view sequence) const;
 
+    bool is_dummy(edge_index edge) const;
+
     /**
      * Given iterators to an input sequence, this function finds the index range
      * of nodes with the maximal length suffix matching a prefix of the sequence.

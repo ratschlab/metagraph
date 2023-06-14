@@ -63,22 +63,25 @@ template <class Graph>
 std::shared_ptr<DeBruijnGraph>
 build_graph(uint64_t k,
             std::vector<std::string> sequences = {},
-            DeBruijnGraph::Mode mode = DeBruijnGraph::BASIC);
+            DeBruijnGraph::Mode mode = DeBruijnGraph::BASIC,
+            bool mask_dummy_kmers = true);
 
 template <class Graph>
 std::shared_ptr<DeBruijnGraph>
 build_graph_batch(uint64_t k,
                   std::vector<std::string> sequences = {},
-                  DeBruijnGraph::Mode mode = DeBruijnGraph::BASIC);
+                  DeBruijnGraph::Mode mode = DeBruijnGraph::BASIC,
+                  bool mask_dummy_kmers = true);
 
 template <class Graph>
 std::shared_ptr<DeBruijnGraph>
 build_graph_iterative(uint64_t k,
                       std::function<void(std::function<void(const std::string&)>)> generate,
-                      DeBruijnGraph::Mode mode = DeBruijnGraph::BASIC) {
+                      DeBruijnGraph::Mode mode = DeBruijnGraph::BASIC,
+                      bool mask_dummy_kmers = true) {
     std::vector<std::string> sequences;
     generate([&](const auto &sequence) { sequences.push_back(sequence); });
-    return build_graph_batch<Graph>(k, sequences, mode);
+    return build_graph_batch<Graph>(k, sequences, mode, mask_dummy_kmers);
 }
 
 template <class Graph>

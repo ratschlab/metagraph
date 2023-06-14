@@ -334,13 +334,15 @@ TYPED_TEST(LabeledAlignerTest, SimpleTangleGraphCoordsCycle) {
     }
 }
 
-TEST(LabeledAlignerTest, SimpleGraphSuffixNoSeed) {
+TEST(LabeledAlignerTest, SimpleGraphSuffixDummySeed) {
     size_t k = 7;
     std::string query = "TCGTACGGGGGG";
     const std::vector<std::string> sequences { "TCGTACTAGCTA" };
     const std::vector<std::string> labels { "A" };
 
-    auto anno_graph = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(k, sequences, labels);
+    auto anno_graph = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+        k, sequences, labels, DeBruijnGraph::BASIC, false, false
+    );
 
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -1);
@@ -348,7 +350,7 @@ TEST(LabeledAlignerTest, SimpleGraphSuffixNoSeed) {
     LabeledAligner<> aligner(anno_graph->get_graph(), config, anno_graph->get_annotator());
 
     auto alignments = aligner.align(query);
-    EXPECT_EQ(0u, alignments.size());
+    EXPECT_LE(1u, alignments.size());
 }
 
 TEST(LabeledAlignerTest, SimpleTangleGraphSuffixSeed) {

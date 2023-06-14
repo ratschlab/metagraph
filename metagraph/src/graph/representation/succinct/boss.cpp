@@ -295,6 +295,51 @@ void BOSS::serialize(Chunk&& chunk, std::ofstream &out, State state) {
     out.flush();
 }
 
+bool BOSS::is_dummy(edge_index x) const {
+    CHECK_INDEX(x);
+    auto seq = get_node_seq(x);
+    return std::find(seq.begin(), seq.end(), kSentinelCode) != seq.end()
+        || !get_W(x);
+    // if (!get_W(x))
+    //     return true;
+
+    // size_t i = k_;
+
+    // // TODO: benchmark for short suffixes where select0 might actually be slower
+    // if (indexed_suffix_length_) {
+    //     while (i > indexed_suffix_length_) {
+    //         CHECK_INDEX(x);
+
+    //         if (!get_node_last_value(x))
+    //             return true;
+
+    //         x = bwd(x);
+    //     }
+
+    //     // find end of range
+    //     // 0001001000010100011...
+    //     //    [  ]    [ ]   []
+    //     uint64_t index = indexed_suffix_ranges_slct0_(x + 1) - x;
+
+    //     // check if the index is in an indexed range (k-mer without dummy characters)
+    //     if (index % 2)
+    //         return false;
+    // }
+
+    // if (!get_node_last_value(x))
+    //     return true;
+
+    // while (i > 0) {
+    //     CHECK_INDEX(x);
+
+    //     x = bwd(x);
+    //     if (!get_node_last_value(x))
+    //         return true;
+    // }
+
+    // return false;
+}
+
 bool BOSS::load(std::ifstream &instream) {
     // if not specified in the file, the default for loading is dynamic
     state = State::DYN;
