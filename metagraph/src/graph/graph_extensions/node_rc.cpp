@@ -214,7 +214,7 @@ void NodeRC::adjacent_incoming_from_rc(node_index node,
         if (spelling_hint.size()) {
             rev_seq = spelling_hint.substr(1);
         } else if (cache) {
-            rev_seq = first_cache->get_node_sequence(node).substr(1);
+            rev_seq = cache->get_node_sequence(node).substr(1);
         } else {
             rev_seq = dbg_succ_->get_node_sequence(node).substr(1);
         }

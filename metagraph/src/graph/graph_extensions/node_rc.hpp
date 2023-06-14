@@ -27,20 +27,20 @@ class NodeRC : public SequenceGraph::GraphExtension {
 
     void adjacent_outgoing_from_rc(node_index node,
                                    const std::function<void(node_index)> &callback,
-                                   const NodeFirstCache *cache = nullptr
+                                   const NodeFirstCache *cache = nullptr,
                                    const std::string &spelling_hint = "") const;
     void adjacent_incoming_from_rc(node_index node,
                                    const std::function<void(node_index)> &callback,
-                                   const NodeFirstCache *cache = nullptr
+                                   const NodeFirstCache *cache = nullptr,
                                    const std::string &spelling_hint = "") const;
 
     void call_outgoing_from_rc(node_index node,
                                const std::function<void(node_index, char)> &callback,
-                               const NodeFirstCache *cache = nullptr
+                               const NodeFirstCache *cache = nullptr,
                                const std::string &spelling_hint = "") const;
     void call_incoming_from_rc(node_index node,
                                const std::function<void(node_index, char)> &callback,
-                               const NodeFirstCache *cache = nullptr
+                               const NodeFirstCache *cache = nullptr,
                                const std::string &spelling_hint = "") const;
 
     bool load(const std::string &filename_base);
