@@ -350,7 +350,7 @@ void CanonicalDBG
         }
 
         is_palindrome_cache_.Put(prev, true);
-    });
+    }, get_extension_threadsafe<NodeFirstCache>());
 }
 
 void CanonicalDBG
@@ -385,7 +385,7 @@ void CanonicalDBG
 
     get_extension_threadsafe<NodeRC>()->adjacent_outgoing_from_rc(node, [&](node_index prev) {
         callback(prev + offset_);
-    });
+    }, get_extension_threadsafe<NodeFirstCache>());
 }
 
 size_t CanonicalDBG::outdegree(node_index node) const {
