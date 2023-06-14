@@ -147,15 +147,19 @@ void CanonicalDBG::map_to_nodes(std::string_view sequence,
 }
 
 void CanonicalDBG
-::call_outgoing_kmers(node_index node, const OutgoingEdgeCallback &callback) const {
+::call_outgoing_kmers_hint(node_index node,
+                           const OutgoingEdgeCallback &callback,
+                           const std::string &spelling_hint) const {
     assert(node);
     assert(node <= offset_ * 2);
     if (node > offset_) {
-        call_incoming_kmers(node - offset_, [&](node_index next, char c) {
+        std::string rc_hint = spelling_hint;
+        ::reverse_complement(rc_hint.begin(), rc_hint.end());
+        call_incoming_kmers_hint(node - offset_, [&](node_index next, char c) {
             c = complement(c);
             callback(reverse_complement(next), c);
             assert(traverse(node, c) == reverse_complement(next));
-        });
+        }, rc_hint);
         return;
     }
 
@@ -212,25 +216,28 @@ void CanonicalDBG
         }
 
         is_palindrome_cache_.Put(next, true);
-    }, get_extension_threadsafe<NodeFirstCache>());
+    }, get_extension_threadsafe<NodeFirstCache>(), spelling_hint);
 }
 
 void CanonicalDBG
-::adjacent_outgoing_nodes(node_index node,
-                          const std::function<void(node_index)> &callback) const {
+::adjacent_outgoing_nodes_hint(node_index node,
+                               const std::function<void(node_index)> &callback,
+                               const std::string &spelling_hint) const {
     if (!k_odd_) {
-        call_outgoing_kmers(node, [&](node_index next, char) {
+        call_outgoing_kmers_hint(node, [&](node_index next, char) {
             callback(next);
-        });
+        }, spelling_hint);
         return;
     }
 
     assert(node);
     assert(node <= offset_ * 2);
     if (node > offset_) {
-        adjacent_incoming_nodes(node - offset_, [&](node_index next) {
+        std::string rc_hint = spelling_hint;
+        ::reverse_complement(rc_hint.begin(), rc_hint.end());
+        adjacent_incoming_nodes_hint(node - offset_, [&](node_index next) {
             callback(reverse_complement(next));
-        });
+        }, rc_hint);
         return;
     }
 
@@ -247,7 +254,7 @@ void CanonicalDBG
     assert(get_extension_threadsafe<NodeRC>());
     get_extension_threadsafe<NodeRC>()->adjacent_incoming_from_rc(node, [&](node_index next) {
         callback(next + offset_);
-    }, get_extension_threadsafe<NodeFirstCache>());
+    }, get_extension_threadsafe<NodeFirstCache>(), spelling_hint);
 }
 
 bool CanonicalDBG::has_multiple_outgoing(node_index node) const {
@@ -279,15 +286,19 @@ bool CanonicalDBG::has_single_incoming(node_index node) const {
 }
 
 void CanonicalDBG
-::call_incoming_kmers(node_index node, const IncomingEdgeCallback &callback) const {
+::call_incoming_kmers_hint(node_index node,
+                           const IncomingEdgeCallback &callback,
+                           const std::string &spelling_hint) const {
     assert(node);
     assert(node <= offset_ * 2);
     if (node > offset_) {
-        call_outgoing_kmers(node - offset_, [&](node_index prev, char c) {
+        std::string rc_hint = spelling_hint;
+        ::reverse_complement(rc_hint.begin(), rc_hint.end());
+        call_outgoing_kmers_hint(node - offset_, [&](node_index prev, char c) {
             c = complement(c);
             callback(reverse_complement(prev), c);
             assert(traverse_back(node, c) == reverse_complement(prev));
-        });
+        }, rc_hint);
         return;
     }
 
@@ -350,25 +361,28 @@ void CanonicalDBG
         }
 
         is_palindrome_cache_.Put(prev, true);
-    }, get_extension_threadsafe<NodeFirstCache>());
+    }, get_extension_threadsafe<NodeFirstCache>(), spelling_hint);
 }
 
 void CanonicalDBG
-::adjacent_incoming_nodes(node_index node,
-                          const std::function<void(node_index)> &callback) const {
+::adjacent_incoming_nodes_hint(node_index node,
+                               const std::function<void(node_index)> &callback,
+                               const std::string &spelling_hint) const {
     if (!k_odd_) {
-        call_incoming_kmers(node, [&](node_index prev, char) {
+        call_incoming_kmers_hint(node, [&](node_index prev, char) {
             callback(prev);
-        });
+        }, spelling_hint);
         return;
     }
 
     assert(node);
     assert(node <= offset_ * 2);
     if (node > offset_) {
-        adjacent_outgoing_nodes(node - offset_, [&](node_index prev) {
+        std::string rc_hint = spelling_hint;
+        ::reverse_complement(rc_hint.begin(), rc_hint.end());
+        adjacent_outgoing_nodes_hint(node - offset_, [&](node_index prev) {
             callback(reverse_complement(prev));
-        });
+        }, rc_hint);
         return;
     }
 
@@ -385,7 +399,7 @@ void CanonicalDBG
 
     get_extension_threadsafe<NodeRC>()->adjacent_outgoing_from_rc(node, [&](node_index prev) {
         callback(prev + offset_);
-    }, get_extension_threadsafe<NodeFirstCache>());
+    }, get_extension_threadsafe<NodeFirstCache>(), spelling_hint);
 }
 
 size_t CanonicalDBG::outdegree(node_index node) const {

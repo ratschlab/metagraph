@@ -57,17 +57,45 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
 
     // Given a node index, call the target nodes of all edges outgoing from it.
     virtual void adjacent_outgoing_nodes(node_index node,
-                                         const std::function<void(node_index)> &callback) const override final;
+                                         const std::function<void(node_index)> &callback) const override final {
+        adjacent_outgoing_nodes_hint(node, callback, "");
+    }
 
     virtual void call_outgoing_kmers(node_index kmer,
-                                     const OutgoingEdgeCallback &callback) const override final;
+                                     const OutgoingEdgeCallback &callback) const override final {
+        call_outgoing_kmers_hint(kmer, callback, "");
+    }
 
     virtual void call_incoming_kmers(node_index kmer,
-                                     const IncomingEdgeCallback &callback) const override final;
+                                     const IncomingEdgeCallback &callback) const override final {
+        call_incoming_kmers_hint(kmer, callback, "");
+    }
 
     // Given a node index, call the source nodes of all edges incoming to it.
     virtual void adjacent_incoming_nodes(node_index node,
-                                         const std::function<void(node_index)> &callback) const override final;
+                                         const std::function<void(node_index)> &callback) const override final {
+        adjacent_incoming_nodes_hint(node, callback, "");
+    }
+
+
+    // Given a node index, call the target nodes of all edges outgoing from it.
+    virtual void adjacent_outgoing_nodes_hint(node_index node,
+                                              const std::function<void(node_index)> &callback,
+                                              const std::string &spelling_hint) const;
+
+    virtual void call_outgoing_kmers_hint(node_index kmer,
+                                          const OutgoingEdgeCallback &callback,
+                                          const std::string &spelling_hint) const;
+
+    virtual void call_incoming_kmers_hint(node_index kmer,
+                                          const IncomingEdgeCallback &callback,
+                                          const std::string &spelling_hint) const;
+
+    // Given a node index, call the source nodes of all edges incoming to it.
+    virtual void adjacent_incoming_nodes_hint(node_index node,
+                                              const std::function<void(node_index)> &callback,
+                                              const std::string &spelling_hint) const;
+
 
     virtual void call_sequences(const CallPath &callback,
                                 size_t num_threads = 1,

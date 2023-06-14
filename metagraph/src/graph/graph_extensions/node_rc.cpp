@@ -122,7 +122,8 @@ NodeRC::NodeRC(const DeBruijnGraph &graph, bool construct_index) : graph_(&graph
 
 void NodeRC::adjacent_outgoing_from_rc(node_index node,
                                        const std::function<void(node_index)> &callback,
-                                       const NodeFirstCache *cache) const {
+                                       const NodeFirstCache *cache,
+                                       const std::string &spelling_hint) const {
     //        lshift    rc
     // AGCCAT -> *AGCCA -> TGGCT*
     assert(graph_);
@@ -137,9 +138,14 @@ void NodeRC::adjacent_outgoing_from_rc(node_index node,
         if (rc_prefix_.size() && !rc_prefix_[node])
             return;
 
-        std::string rev_seq = cache
-            ? cache->get_node_sequence(node)
-            : dbg_succ_->get_node_sequence(node);
+        std::string rev_seq;
+        if (spelling_hint.size()) {
+            rev_seq = spelling_hint;
+        } else if (cache) {
+            rev_seq = cache->get_node_sequence(node);
+        } else {
+            rev_seq = dbg_succ_->get_node_sequence(node);
+        }
 
         rev_seq.pop_back();
         assert(rev_seq.size() == boss.get_k());
@@ -188,7 +194,8 @@ void NodeRC::adjacent_outgoing_from_rc(node_index node,
 
 void NodeRC::adjacent_incoming_from_rc(node_index node,
                                        const std::function<void(node_index)> &callback,
-                                       const NodeFirstCache *cache) const {
+                                       const NodeFirstCache *cache,
+                                       const std::string &spelling_hint) const {
     //        rshift    rc
     // ATGGCT -> TGGCT* -> *AGCCA
     assert(graph_);
@@ -203,9 +210,14 @@ void NodeRC::adjacent_incoming_from_rc(node_index node,
         if (rc_suffix_.size() && !rc_suffix_[node])
             return;
 
-        std::string rev_seq = cache
-            ? cache->get_node_sequence(node).substr(1)
-            : dbg_succ_->get_node_sequence(node).substr(1);
+        std::string rev_seq;
+        if (spelling_hint.size()) {
+            rev_seq = spelling_hint.substr(1);
+        } else if (cache) {
+            rev_seq = first_cache->get_node_sequence(node).substr(1);
+        } else {
+            rev_seq = dbg_succ_->get_node_sequence(node).substr(1);
+        }
 
         assert(rev_seq.size() == boss.get_k());
 
@@ -259,7 +271,8 @@ void NodeRC::adjacent_incoming_from_rc(node_index node,
 
 void NodeRC::call_outgoing_from_rc(node_index node,
                                    const std::function<void(node_index, char)> &callback,
-                                   const NodeFirstCache *cache) const {
+                                   const NodeFirstCache *cache,
+                                   const std::string &spelling_hint) const {
     assert(graph_);
 
     if (const auto *dbg_succ_ = dynamic_cast<const DBGSuccinct*>(graph_)) {
@@ -271,7 +284,7 @@ void NodeRC::call_outgoing_from_rc(node_index node,
                 return;
 
             callback(next, complement(c));
-        }, cache);
+        }, cache, spelling_hint);
     } else {
         adjacent_outgoing_from_rc(node, [&](node_index next) {
             char c = graph_->get_node_sequence(next).back();
@@ -279,13 +292,14 @@ void NodeRC::call_outgoing_from_rc(node_index node,
                 return;
 
             callback(next, complement(c));
-        }, cache);
+        }, cache, spelling_hint);
     }
 }
 
 void NodeRC::call_incoming_from_rc(node_index node,
                                    const std::function<void(node_index, char)> &callback,
-                                   const NodeFirstCache *cache) const {
+                                   const NodeFirstCache *cache,
+                                   const std::string &spelling_hint) const {
     assert(graph_);
 
     if (const auto *dbg_succ_ = dynamic_cast<const DBGSuccinct*>(graph_)) {
@@ -300,7 +314,7 @@ void NodeRC::call_incoming_from_rc(node_index node,
                 return;
 
             callback(prev, complement(c));
-        }, cache);
+        }, cache, spelling_hint);
     } else {
         adjacent_incoming_from_rc(node, [&](node_index prev) {
             char c = graph_->get_node_sequence(prev)[0];
@@ -308,7 +322,7 @@ void NodeRC::call_incoming_from_rc(node_index node,
                 return;
 
             callback(prev, complement(c));
-        }, cache);
+        }, cache, spelling_hint);
     }
 }
 

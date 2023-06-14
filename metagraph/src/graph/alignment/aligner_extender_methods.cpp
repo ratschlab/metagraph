@@ -6,6 +6,7 @@
 #include "common/utils/template_utils.hpp"
 #include "common/logger.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
+#include "graph/representation/canonical_dbg.hpp"
 #include "graph/representation/rc_dbg.hpp"
 #include "kmer/kmer_extractor.hpp"
 
@@ -357,10 +358,31 @@ void DefaultColumnExtender
                 graph_->traverse(node, next_c) == next_node);
     } else {
         assert(node);
-        graph_->call_outgoing_kmers(node, [&](node_index next, char c) {
-            if (c != boss::BOSS::kSentinel)
-                callback(next, c, 0);
-        });
+        if (const auto *canonical = dynamic_cast<const CanonicalDBG*>(graph_)) {
+            std::string hint;
+            if (seed_pos >= graph_->get_k()) {
+                hint = std::string(graph_->get_k(), '$');
+                size_t cur_table_i = table_i;
+                for (auto it = hint.rbegin(); it != hint.rend(); ++it) {
+                    assert(cur_table_i < table.size());
+                    const auto &[S, E, F, node, i_prev, c, offset, max_pos, trim,
+                                 xdrop_cutoff_i, score] = table[cur_table_i];
+                    *it = c;
+                    cur_table_i = i_prev;
+                }
+                assert(hint == graph_->get_node_sequence(node));
+            }
+
+            canonical->call_outgoing_kmers_hint(node, [&](node_index next, char c) {
+                if (c != boss::BOSS::kSentinel)
+                    callback(next, c, 0);
+            }, hint);
+        } else {
+            graph_->call_outgoing_kmers(node, [&](node_index next, char c) {
+                if (c != boss::BOSS::kSentinel)
+                    callback(next, c, 0);
+            });
+        }
     }
 }
 
