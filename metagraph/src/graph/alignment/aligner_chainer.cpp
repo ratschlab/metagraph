@@ -580,8 +580,10 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
 
     num_seeds += in_anchors.size();
 
-    auto in_orientation_change = std::find_if(in_anchors.begin(), in_anchors.end(),
-                                              [](const auto &a) { return a.get_orientation(); });
+    auto in_orientation_change = std::find_if(
+        in_anchors.data(), in_anchors.data() + in_anchors.size(),
+        [](const auto &a) { return a.get_orientation(); }
+    );
 
     ssize_t seed_size = config_.min_seed_length;
     ssize_t graph_k = graph_.get_k();
@@ -593,125 +595,7 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
         if (begin == end)
             return;
 
-        std::sort(begin, end, [](const auto &a, const auto &b) {
-            return std::pair(a.get_query_view().end(), a.get_query_view().begin())
-                > std::pair(b.get_query_view().end(), b.get_query_view().begin());
-        });
-
-        // first, discard redundant seeds
-        for (auto i = begin; i + 1 != end; ++i) {
-            Seed &a_i = *(i + 1);
-            Seed &a_j = *i;
-
-            assert(Alignment(a_j, config_).is_valid(graph_, &config_));
-            if (a_i.label_columns != a_j.label_columns)
-                continue;
-
-            const auto &nodes_i = a_i.get_nodes();
-            const auto &nodes_j = a_j.get_nodes();
-            std::string_view query_i = a_i.get_query_view();
-            std::string_view query_j = a_j.get_query_view();
-
-            if (a_i.get_end_clipping() == a_j.get_end_clipping()
-                    && nodes_j.back() == nodes_i.back()) {
-                // logger->info("Merging: {} -> {}",
-                //     Alignment(a_i, config_), Alignment(a_j, config_));
-                if (query_j.size() > query_i.size())
-                    std::swap(a_i, a_j);
-
-                a_j = Seed();
-            }
-        }
-
-        end = std::remove_if(begin, end, [](const auto &a) { return a.empty(); });
-
-        sdsl::int_vector<2> end_counter(query_size, 0);
-        std::for_each(begin, end, [&](const auto &a) {
-            // logger->info("In Anchor: {}", Alignment(a, config_));
-            size_t i = a.get_end_clipping();
-            if (end_counter[i] < 2)
-                ++end_counter[i];
-        });
-
-        // merge anchors into MUMs
-        for (auto i = begin; i + 1 != end; ++i) {
-            // try to merge a_i to a_j
-            Seed &a_i = *(i + 1);
-            Seed &a_j = *i;
-
-            assert(Alignment(a_j, config_).is_valid(graph_, &config_));
-            if (a_i.label_columns != a_j.label_columns)
-                continue;
-
-            const auto &nodes_i = a_i.get_nodes();
-            const auto &nodes_j = a_j.get_nodes();
-            std::string_view query_i = a_i.get_query_view();
-            std::string_view query_j = a_j.get_query_view();
-
-            // alignments are disjoint
-            if (query_i.end() <= query_j.begin())
-                continue;
-
-            ssize_t num_added = query_j.end() - std::max(query_j.begin(), query_i.end());
-            ssize_t overlap = query_i.end() - query_j.begin();
-            if (num_added < 0 || overlap < seed_size - 1)
-                continue;
-
-            if (num_added == 0) {
-                if (nodes_i.back() == nodes_j.back()) {
-                    if (query_j.size() > query_i.size())
-                        std::swap(a_i, a_j);
-
-                    a_j = Seed();
-                }
-                continue;
-            }
-
-            // we want query_j.begin() + graph_k - a_j.get_offset() + x == query_i.end() + 1
-            // ->      graph_k - a_j.get_offset() + x == overlap + 1
-            // -> x == overlap + 1 + a_j.get_offset() - graph_k
-            ssize_t a_j_node_idx = overlap + 1 + static_cast<ssize_t>(a_j.get_offset()) - graph_k;
-            assert(a_j_node_idx < static_cast<ssize_t>(nodes_j.size()));
-
-            if (a_j_node_idx < 0)
-                continue;
-
-            int64_t coord_dist = nodes_j.size() - a_j_node_idx;
-            int64_t dist = query_j.end() - query_i.end();
-            if (coord_dist != dist)
-                continue;
-
-            // logger->info("Try to merge, check {} elements: {}: {} -> {}: {}",
-            //     query_j.end() - query_i.end(),
-            //     a_i.label_columns, Alignment(a_i, config_), a_j.label_columns, Alignment(a_j, config_));
-
-            bool unique = true;
-            for (size_t i = a_j.get_end_clipping(); i < a_i.get_end_clipping(); ++i) {
-                if (end_counter[i] == 2) {
-                    unique = false;
-                    break;
-                }
-            }
-
-            if (!unique) {
-                // logger->info("\tfailed");
-                continue;
-            }
-
-            // logger->info("\tkeep checking");
-
-            assert(overlap < graph_k - 1
-                    || graph_.traverse(nodes_i.back(), *query_i.end()) == nodes_j[a_j_node_idx]);
-
-            if (overlap >= graph_k - 1
-                    || graph_.traverse(nodes_i.back(), *query_i.end()) == nodes_j[a_j_node_idx]) {
-                // we have a MUM
-                // logger->info("\tworked!");
-                a_i.expand(std::vector<node_index>(nodes_j.begin() + a_j_node_idx,
-                                                   nodes_j.end()));
-                a_j = Seed();
-            }
-        }
+        merge_into_mums(graph_, begin, end, seed_size);
 
         std::for_each(begin, end, [&](auto &seed) {
             if (seed.empty())
@@ -732,8 +616,8 @@ chain_and_filter_seeds(const IDBGAligner &aligner,
         });
     };
 
-    preprocess_anchors(in_anchors.begin(), in_orientation_change);
-    preprocess_anchors(in_orientation_change, in_anchors.end());
+    preprocess_anchors(in_anchors.data(), in_orientation_change);
+    preprocess_anchors(in_orientation_change, in_anchors.data() + in_anchors.size());
 
     const auto *labeled_aligner = dynamic_cast<const ILabeledAligner*>(&aligner);
 

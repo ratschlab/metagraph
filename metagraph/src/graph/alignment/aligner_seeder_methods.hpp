@@ -132,6 +132,11 @@ class SuffixSeeder : public BaseSeeder {
     std::vector<Seed> seeds_;
 };
 
+Seed* merge_into_mums(const DeBruijnGraph &graph,
+                      Seed *begin,
+                      Seed *end,
+                      ssize_t min_seed_size);
+
 } // namespace align
 } // namespace graph
 } // namespace mtg
