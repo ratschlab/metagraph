@@ -276,7 +276,9 @@ void AnnotationBuffer::fetch_queued_annotations() {
         const auto &mapping = mapping_pair.second;
         assert(mapping.size());
 
-        for (const auto &[annotated_node, dists] : mapping) {
+        for (auto it = mapping.begin(); it != mapping.end(); ++it) {
+            node_index annotated_node = it->first;
+            const auto &dists = it->second;
             auto [cur_labels, cur_coords] = get_labels_and_coords(annotated_node);
             assert(cur_labels);
             assert(!has_coordinates() || cur_coords);
