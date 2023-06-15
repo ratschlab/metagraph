@@ -340,7 +340,13 @@ TEST(LabeledAlignerTest, SimpleGraphSuffixDummySeed) {
     const std::vector<std::string> sequences { "TCGTACTAGCTA" };
     const std::vector<std::string> labels { "A" };
 
-    for (DeBruijnGraph::Mode mode : { DeBruijnGraph::BASIC, DeBruijnGraph::CANONICAL, DeBruijnGraph::PRIMARY }) {
+    for (DeBruijnGraph::Mode mode : {
+#if ! _PROTEIN_GRAPH
+                                      DeBruijnGraph::CANONICAL,
+                                      DeBruijnGraph::PRIMARY,
+#endif
+                                      DeBruijnGraph::BASIC
+                                  }) {
         auto anno_graph = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
             k, sequences, labels, mode, false, false
         );
