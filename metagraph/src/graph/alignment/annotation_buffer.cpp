@@ -204,9 +204,9 @@ void AnnotationBuffer::fetch_queued_annotations() {
             }
 
             spelling.push_back(boss::BOSS::kSentinel);
-            graph_.call_outgoing_kmers(cur_node, [&](node_index next, char c) {
+            graph_.call_outgoing_kmers(cur_node, [&,s=std::move(spelling)](node_index next, char c) {
                 if (c != boss::BOSS::kSentinel) {
-                    auto &[_, next_spelling] = traversal.emplace_back(next, spelling);
+                    auto &[_, next_spelling] = traversal.emplace_back(next, s);
                     next_spelling.back() = c;
                 }
             });
@@ -296,7 +296,7 @@ void AnnotationBuffer::fetch_queued_annotations() {
                 CoordinateSet union_coords;
                 utils::match_indexed_values(labels.begin(), labels.end(), coords.begin(),
                                             cur_labels->begin(), cur_labels->end(), cur_coords->begin(),
-                                            [&](const auto label, const auto &c1, const auto &c2) {
+                                            [&union_coords,&union_labels,&dists](const auto label, const auto &c1, const auto &c2) {
                     union_labels.emplace_back(label);
                     auto &merge_coords = union_coords.emplace_back();
                     for (ssize_t d : dists) {
