@@ -340,17 +340,19 @@ TEST(LabeledAlignerTest, SimpleGraphSuffixDummySeed) {
     const std::vector<std::string> sequences { "TCGTACTAGCTA" };
     const std::vector<std::string> labels { "A" };
 
-    auto anno_graph = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
-        k, sequences, labels, DeBruijnGraph::BASIC, false, false
-    );
+    for (DeBruijnGraph::Mode mode : { DeBruijnGraph::BASIC, DeBruijnGraph::CANONICAL, DeBruijnGraph::PRIMARY }) {
+        auto anno_graph = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+            k, sequences, labels, mode, false, false
+        );
 
-    DBGAlignerConfig config;
-    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -1);
-    config.min_seed_length = 6;
-    LabeledAligner<> aligner(anno_graph->get_graph(), config, anno_graph->get_annotator());
+        DBGAlignerConfig config;
+        config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -1);
+        config.min_seed_length = 6;
+        LabeledAligner<> aligner(anno_graph->get_graph(), config, anno_graph->get_annotator());
 
-    auto alignments = aligner.align(query);
-    EXPECT_LE(1u, alignments.size());
+        auto alignments = aligner.align(query);
+        EXPECT_LE(1u, alignments.size());
+    }
 }
 
 TEST(LabeledAlignerTest, SimpleTangleGraphSuffixSeed) {
