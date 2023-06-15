@@ -161,8 +161,17 @@ void AnnotationBuffer::fetch_queued_annotations() {
             auto [cur_node, spelling] = std::move(traversal.back());
             traversal.pop_back();
 
-            if (node_to_cols_.count(cur_node)
-                    || *(spelling.rbegin() + graph_.get_k() - 1) != boss::BOSS::kSentinel) {
+            if (node_to_cols_.count(cur_node)) {
+                discovered = true;
+                assert(spelling.size() > graph_.get_k());
+                auto &mapping = dummy_to_annotated_node.try_emplace(
+                    node, std::make_pair(base_node, NodeToDist{})
+                ).first.value().second;
+                mapping[cur_node].emplace_back(spelling.size() - graph_.get_k());
+                continue;
+            }
+
+            if (*(spelling.rbegin() + graph_.get_k() - 1) != boss::BOSS::kSentinel) {
                 discovered = true;
                 assert(spelling.size() > graph_.get_k());
                 auto &mapping = dummy_to_annotated_node.try_emplace(
