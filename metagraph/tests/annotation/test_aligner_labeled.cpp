@@ -369,7 +369,9 @@ TEST(LabeledAlignerTest, SimpleTangleGraphSuffixSeed) {
     };
     const std::vector<std::string> labels { "A", "B", "C" };
 
-    auto anno_graph = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(k, sequences, labels);
+    auto anno_graph = build_anno_graph<DBGSuccinct, annot::ColumnCompressed<>>(
+        k, sequences, labels, DeBruijnGraph::BASIC, false, false
+    );
 
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -1);

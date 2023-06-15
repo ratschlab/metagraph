@@ -108,6 +108,11 @@ void LabeledExtender::flush() {
         auto cur_labels = annotation_buffer_.get_labels(table_elem.node);
         assert(cur_labels);
 
+        if (cur_labels->empty()) {
+            assert(table_elem.offset - this->seed_->get_offset() < graph_->get_k());
+            continue;
+        }
+
 #ifndef NDEBUG
         if (table[parent_i].offset >= 0
                 && static_cast<size_t>(table[parent_i].offset) >= graph_->get_k() - 1) {
@@ -227,6 +232,13 @@ void LabeledExtender
             auto next_labels = annotation_buffer_.get_labels(next);
             assert(next_labels);
 
+            if (next_labels->empty()) {
+                assert(next_offset < graph_->get_k());
+                node_labels_.push_back(node_labels_[table_i]);
+                callback(next, c, score);
+                continue;
+            }
+
             Columns intersect_labels;
             std::set_intersection(columns.begin(), columns.end(),
                                   next_labels->begin(), next_labels->end(),
@@ -261,6 +273,13 @@ void LabeledExtender
         if (dynamic_cast<const RCDBG*>(graph_)) {
             std::swap(base_labels, next_labels);
             std::swap(base_coords, next_coords);
+        }
+
+        if (next_labels->empty()) {
+            assert(next_offset < graph_->get_k());
+            node_labels_.push_back(node_labels_[table_i]);
+            callback(next, c, score);
+            continue;
         }
 
         // check if at least one label has consistent coordinates

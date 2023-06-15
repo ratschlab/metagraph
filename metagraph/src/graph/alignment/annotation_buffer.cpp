@@ -74,6 +74,9 @@ void AnnotationBuffer::fetch_queued_annotations() {
     };
 
     auto queue_node = [&](node_index node, node_index base_node) {
+        if (node_to_cols_.count(node))
+            return;
+
         if (base_node == DeBruijnGraph::npos) {
             // this can happen when the base graph is CANONICAL and path[i] is a
             // dummy node
@@ -147,27 +150,55 @@ void AnnotationBuffer::fetch_queued_annotations() {
     for (const auto &[node, base_node] : dummy_nodes) {
         assert(boss);
         assert(graph_.get_mode() == DeBruijnGraph::CANONICAL || base_node);
+        assert(!node_to_cols_.count(node));
+
         std::vector<std::pair<node_index, std::string>> traversal;
         traversal.emplace_back(node, graph_.get_node_sequence(node));
         assert(traversal.back().second[0] == boss::BOSS::kSentinel);
+        bool discovered = false;
         while (traversal.size()) {
             auto [cur_node, spelling] = std::move(traversal.back());
             traversal.pop_back();
+
+            auto find = node_to_cols_.find(cur_node);
+            if (find != node_to_cols_.end()) {
+                if (has_coordinates()) {
+                    auto &coords = label_coords_.emplace_back();
+                    const auto &cur_coords = label_coords_[find - node_to_cols_.begin()];
+                    ssize_t dist = spelling.size() - graph_.get_k();
+                    for (const auto &coord_set : cur_coords) {
+                        auto &cur_coord_set = coords.emplace_back();
+                        for (auto coord : coord_set) {
+                            cur_coord_set.emplace_back(coord - dist);
+                        }
+                    }
+                }
+
+                node_to_cols_[node] = find->second;
+                if (base_node && base_node != node) {
+                    assert(!node_to_cols_.count(base_node));
+                    node_to_cols_[base_node] = find->second;
+                    if (has_coordinates())
+                        label_coords_.emplace_back(label_coords_.back());
+                }
+
+                continue;
+            }
+
             if (*(spelling.rbegin() + graph_.get_k() - 1) != boss::BOSS::kSentinel) {
+                discovered = true;
                 assert(spelling.size() > graph_.get_k());
                 auto &mapping = dummy_to_annotated_node.try_emplace(
                     node,
                     std::make_pair(base_node ? base_node : node, NodeToDist{})
                 ).first.value().second;
-                if (!mapping.count(cur_node)) {
-                    mapping[cur_node].emplace_back(spelling.size() - graph_.get_k());
-                    node_index base_node = get_base_path({ cur_node })[0];
-                    assert(base_node);
-                    assert(graph_.get_node_sequence(base_node).find(boss::BOSS::kSentinel) == std::string::npos);
-                    assert(!boss->is_dummy(dbg_succ->kmer_to_boss_index(cur_node)));
-                    assert(!boss->is_dummy(dbg_succ->kmer_to_boss_index(base_node)));
-                    queue_node(cur_node, base_node);
-                }
+                mapping[cur_node].emplace_back(spelling.size() - graph_.get_k());
+                node_index cur_base_node = get_base_path({ cur_node })[0];
+                assert(cur_base_node);
+                assert(graph_.get_node_sequence(cur_base_node).find(boss::BOSS::kSentinel) == std::string::npos);
+                assert(!boss->is_dummy(dbg_succ->kmer_to_boss_index(cur_node)));
+                assert(!boss->is_dummy(dbg_succ->kmer_to_boss_index(cur_base_node)));
+                queue_node(cur_node, cur_base_node);
 
                 continue;
             }
@@ -181,11 +212,13 @@ void AnnotationBuffer::fetch_queued_annotations() {
             });
         }
 
+        if (!discovered)
+            continue;
+
         if (base_node != node)
             node_to_cols_.try_emplace(base_node, nannot);
 
         node_to_cols_.try_emplace(node, nannot);
-
         assert(queued_nodes.size());
         assert(queued_rows.size());
     }
@@ -266,8 +299,10 @@ void AnnotationBuffer::fetch_queued_annotations() {
                                             [&](const auto label, const auto &c1, const auto &c2) {
                     union_labels.emplace_back(label);
                     auto &merge_coords = union_coords.emplace_back();
-                    std::set_union(c1.begin(), c1.end(), c2.begin(), c2.end(),
-                                   std::back_inserter(merge_coords));
+                    for (ssize_t d : dists) {
+                        utils::set_union(c2.begin(), c2.end(), c1.begin(), c1.end(),
+                                         std::back_inserter(merge_coords), -d);
+                    }
                 });
                 std::swap(union_coords, coords);
             } else {
@@ -279,7 +314,6 @@ void AnnotationBuffer::fetch_queued_annotations() {
 
         push_node_labels(dummy_node, AnnotatedDBG::graph_to_anno_index(base_node),
                          std::move(labels), coords);
-
     }
 
 #ifndef NDEBUG
