@@ -427,11 +427,11 @@ auto MEMSeeder::get_seeds() const -> std::vector<Seed> {
 template class SuffixSeeder<ExactSeeder>;
 template class SuffixSeeder<UniMEMSeeder>;
 
-Seed* merge_into_mums(const DeBruijnGraph &graph,
-                      Seed *begin,
-                      Seed *end,
-                      ssize_t min_seed_size,
-                      size_t max_seed_size) {
+Seed* merge_into_unitig_mums(const DeBruijnGraph &graph,
+                             Seed *begin,
+                             Seed *end,
+                             ssize_t min_seed_size,
+                             size_t max_seed_size) {
     if (begin == end)
         return end;
 
@@ -532,6 +532,10 @@ Seed* merge_into_mums(const DeBruijnGraph &graph,
         }
 
         if (!unique)
+            continue;
+
+        if (graph.has_multiple_outgoing(nodes_i.back())
+                || !graph.has_single_incoming(nodes_i.back()))
             continue;
 
         assert(overlap < graph_k - 1

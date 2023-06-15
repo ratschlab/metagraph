@@ -473,7 +473,8 @@ LabeledAligner<Seeder, Extender, AlignmentCompare>
                  const DBGAlignerConfig &config,
                  const Annotator &annotator)
       : DBGAligner<Seeder, Extender, AlignmentCompare>(graph, config),
-        annotation_buffer_(graph, annotator) {
+        annotation_buffer_(graph, annotator),
+        max_seed_length_(this->config_.max_seed_length) {
     // do not use a global xdrop cutoff since we need separate cutoffs for each label
     if (annotation_buffer_.has_coordinates()) {
         logger->trace("Coordinates detected. Enabling seed chaining");
@@ -782,6 +783,19 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
     assert(std::all_of(seeds.begin(), seeds.end(), [&](const auto &a) {
         return a.get_query_view().size() >= this->config_.min_seed_length;
     }));
+
+    auto end = merge_into_unitig_mums(this->graph_, seeds.data(), seeds.data() + seeds.size(),
+                                      this->config_.min_seed_length, max_seed_length_);
+    seeds.erase(seeds.begin() + (end - seeds.data()), seeds.end());
+    assert(seeds.size());
+
+    if (discarded_seeds.size()) {
+        end = merge_into_unitig_mums(this->graph_, discarded_seeds.data(),
+                                     discarded_seeds.data() + discarded_seeds.size(),
+                                     this->config_.min_seed_length);
+        discarded_seeds.erase(discarded_seeds.begin() + (end - discarded_seeds.data()),
+                              discarded_seeds.end());
+    }
 
     return get_num_char_matches_in_seeds(seeds.begin(), seeds.end());
 }

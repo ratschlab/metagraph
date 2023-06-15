@@ -153,11 +153,11 @@ class SuffixSeeder : public BaseSeeder {
     std::vector<Seed> seeds_;
 };
 
-Seed* merge_into_mums(const DeBruijnGraph &graph,
-                      Seed *begin,
-                      Seed *end,
-                      ssize_t min_seed_size,
-                      size_t max_seed_size = std::numeric_limits<size_t>::max());
+Seed* merge_into_unitig_mums(const DeBruijnGraph &graph,
+                             Seed *begin,
+                             Seed *end,
+                             ssize_t min_seed_size,
+                             size_t max_seed_size = std::numeric_limits<size_t>::max());
 
 } // namespace align
 } // namespace graph
