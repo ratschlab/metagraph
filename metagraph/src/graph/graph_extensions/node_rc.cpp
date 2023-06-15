@@ -138,30 +138,28 @@ void NodeRC::adjacent_outgoing_from_rc(node_index node,
         if (rc_prefix_.size() && !rc_prefix_[node])
             return;
 
-        std::string rev_seq;
-        if (spelling_hint.size()) {
-            rev_seq = spelling_hint;
-        } else if (cache) {
-            rev_seq = cache->get_node_sequence(node);
+        if (cache) {
+            rc_edge = cache->get_prefix_rc(node, spelling_hint);
         } else {
-            rev_seq = dbg_succ_->get_node_sequence(node);
-        }
+            std::string rev_seq = spelling_hint.size()
+                ? spelling_hint
+                : dbg_succ_->get_node_sequence(node);
+            rev_seq.pop_back();
+            assert(rev_seq.size() == boss.get_k());
 
-        rev_seq.pop_back();
-        assert(rev_seq.size() == boss.get_k());
+            assert(!rc_prefix_.size() || rev_seq[0] != BOSS::kSentinel);
+            if (rev_seq[0] == BOSS::kSentinel)
+                return;
 
-        assert(!rc_prefix_.size() || rev_seq[0] != BOSS::kSentinel);
-        if (rev_seq[0] == BOSS::kSentinel)
-            return;
+            ::reverse_complement(rev_seq.begin(), rev_seq.end());
+            auto encoded = boss.encode(rev_seq);
+            auto [edge, edge_2, end] = boss.index_range(encoded.begin(), encoded.end());
 
-        ::reverse_complement(rev_seq.begin(), rev_seq.end());
-        auto encoded = boss.encode(rev_seq);
-        auto [edge, edge_2, end] = boss.index_range(encoded.begin(), encoded.end());
-
-        assert(!rc_prefix_.size() || end == encoded.end());
-        if (end == encoded.end()) {
-            assert(edge == edge_2);
-            rc_edge = edge;
+            assert(!rc_prefix_.size() || end == encoded.end());
+            if (end == encoded.end()) {
+                assert(edge == edge_2);
+                rc_edge = edge;
+            }
         }
 
         if (!rc_edge)
@@ -210,29 +208,28 @@ void NodeRC::adjacent_incoming_from_rc(node_index node,
         if (rc_suffix_.size() && !rc_suffix_[node])
             return;
 
-        std::string rev_seq;
-        if (spelling_hint.size()) {
-            rev_seq = spelling_hint.substr(1);
-        } else if (cache) {
-            rev_seq = cache->get_node_sequence(node).substr(1);
+        if (cache) {
+            rc_edge = cache->get_suffix_rc(node, spelling_hint);
         } else {
-            rev_seq = dbg_succ_->get_node_sequence(node).substr(1);
-        }
+            std::string rev_seq = spelling_hint.size()
+                ? spelling_hint.substr(1)
+                : dbg_succ_->get_node_sequence(node).substr(1);
 
-        assert(rev_seq.size() == boss.get_k());
+            assert(rev_seq.size() == boss.get_k());
 
-        assert(!rc_suffix_.size() || rev_seq[0] != BOSS::kSentinel);
-        if (rev_seq[0] == BOSS::kSentinel)
-            return;
+            assert(!rc_suffix_.size() || rev_seq[0] != BOSS::kSentinel);
+            if (rev_seq[0] == BOSS::kSentinel)
+                return;
 
-        ::reverse_complement(rev_seq.begin(), rev_seq.end());
-        auto encoded = boss.encode(rev_seq);
-        auto [edge, edge_2, end] = boss.index_range(encoded.begin(), encoded.end());
+            ::reverse_complement(rev_seq.begin(), rev_seq.end());
+            auto encoded = boss.encode(rev_seq);
+            auto [edge, edge_2, end] = boss.index_range(encoded.begin(), encoded.end());
 
-        assert(!rc_suffix_.size() || end == encoded.end());
-        if (end == encoded.end()) {
-            assert(edge == edge_2);
-            rc_edge = edge;
+            assert(!rc_suffix_.size() || end == encoded.end());
+            if (end == encoded.end()) {
+                assert(edge == edge_2);
+                rc_edge = edge;
+            }
         }
 
         if (!rc_edge)

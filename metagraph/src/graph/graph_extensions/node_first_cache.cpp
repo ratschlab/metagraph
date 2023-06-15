@@ -1,5 +1,7 @@
 #include "node_first_cache.hpp"
 
+#include "common/seq_tools/reverse_complement.hpp"
+
 namespace mtg {
 namespace graph {
 
@@ -137,6 +139,69 @@ auto NodeFirstCache::get_parent_pair(edge_index edge, edge_index child_hint) con
     first_cache_.Put(edge, ret_val);
 
     return ret_val;
+}
+
+auto NodeFirstCache
+::get_prefix_rc(node_index node, const std::string &spelling_hint) const -> edge_index {
+    if (auto fetch = prefix_rc_cache_.TryGet(node))
+        return *fetch;
+
+    assert(dbg_succ_);
+    const boss::BOSS &boss = dbg_succ_->get_boss();
+
+    std::string rev_seq = spelling_hint.size()
+        ? spelling_hint
+        : get_node_sequence(node);
+    rev_seq.pop_back();
+    assert(rev_seq.size() == boss.get_k());
+
+    if (rev_seq[0] == boss::BOSS::kSentinel) {
+        prefix_rc_cache_.Put(node, 0);
+        return 0;
+    }
+
+    ::reverse_complement(rev_seq.begin(), rev_seq.end());
+    auto encoded = boss.encode(rev_seq);
+    auto [edge, edge_2, end] = boss.index_range(encoded.begin(), encoded.end());
+
+    if (end != encoded.end()) {
+        prefix_rc_cache_.Put(node, 0);
+        return 0;
+    }
+
+    prefix_rc_cache_.Put(node, edge);
+    return edge;
+}
+
+auto NodeFirstCache
+::get_suffix_rc(node_index node, const std::string &spelling_hint) const -> edge_index {
+    if (auto fetch = suffix_rc_cache_.TryGet(node))
+        return *fetch;
+
+    assert(dbg_succ_);
+    const boss::BOSS &boss = dbg_succ_->get_boss();
+
+    std::string rev_seq = spelling_hint.size()
+        ? spelling_hint.substr(1)
+        : get_node_sequence(node).substr(1);
+    assert(rev_seq.size() == boss.get_k());
+
+    if (rev_seq[0] == boss::BOSS::kSentinel) {
+        suffix_rc_cache_.Put(node, 0);
+        return 0;
+    }
+
+    ::reverse_complement(rev_seq.begin(), rev_seq.end());
+    auto encoded = boss.encode(rev_seq);
+    auto [edge, edge_2, end] = boss.index_range(encoded.begin(), encoded.end());
+
+    if (end != encoded.end()) {
+        suffix_rc_cache_.Put(node, 0);
+        return 0;
+    }
+
+    suffix_rc_cache_.Put(node, edge);
+    return edge;
 }
 
 } // namespace graph
