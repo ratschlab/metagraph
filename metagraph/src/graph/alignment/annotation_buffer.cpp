@@ -269,9 +269,13 @@ void AnnotationBuffer::fetch_queued_annotations() {
     for (const auto &[dummy_node, mapping_pair] : dummy_to_annotated_node) {
         Columns labels;
         CoordinateSet coords;
-        const auto &[base_node, mapping] = mapping_pair;
-        assert(base_node != DeBruijnGraph::npos);
+
+        assert(mapping_pair.first != DeBruijnGraph::npos);
+        auto row = AnnotatedDBG::graph_to_anno_index(mapping_pair.first);
+
+        const auto &mapping = mapping_pair.second;
         assert(mapping.size());
+
         for (const auto &[annotated_node, dists] : mapping) {
             auto [cur_labels, cur_coords] = get_labels_and_coords(annotated_node);
             assert(cur_labels);
@@ -281,7 +285,7 @@ void AnnotationBuffer::fetch_queued_annotations() {
                 CoordinateSet union_coords;
                 utils::match_indexed_values(labels.begin(), labels.end(), coords.begin(),
                                             cur_labels->begin(), cur_labels->end(), cur_coords->begin(),
-                                            [&union_coords,&union_labels,&dists](const auto label, const auto &c1, const auto &c2) {
+                                            [&](const auto label, const auto &c1, const auto &c2) {
                     union_labels.emplace_back(label);
                     auto &merge_coords = union_coords.emplace_back();
                     for (ssize_t d : dists) {
@@ -297,8 +301,7 @@ void AnnotationBuffer::fetch_queued_annotations() {
             std::swap(union_labels, labels);
         }
 
-        push_node_labels(dummy_node, AnnotatedDBG::graph_to_anno_index(base_node),
-                         std::move(labels), coords);
+        push_node_labels(dummy_node, row, std::move(labels), coords);
     }
 
 #ifndef NDEBUG
