@@ -13,16 +13,11 @@ namespace graph {
 class NodeFirstCache;
 
 // Maps each node in a PRIMARY-mode DeBruijnGraph to nodes adjacent to its reverse
-// complement. When using the index construct constructor on DBGSuccinct, or when
-// loading such an index, this stores a map from each DBGSuccinct to the BOSS nodes
-// corresponding to the reverse complements of its k-1 prefix and k-1 suffix.
+// complement.
 class NodeRC : public SequenceGraph::GraphExtension {
   public:
     using node_index = SequenceGraph::node_index;
 
-    // If construct_index is true, a fully pre-computed index will be constructed.
-    // Otherwise, call_*_from_rc will invoke on-the-fly computations on the graph,
-    // unless the index is loaded with load().
     NodeRC(const DeBruijnGraph &graph);
 
     void adjacent_outgoing_from_rc(node_index node,
