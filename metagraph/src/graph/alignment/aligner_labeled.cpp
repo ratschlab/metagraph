@@ -550,6 +550,7 @@ auto LabeledAligner<Seeder, Extender, AlignmentCompare>
 
     size_t num_seeds_left = 0;
     size_t num_seeds_rc_left = 0;
+    size_t num_discarded_seeds = 0;
 
     for (size_t i = 0; i < counted_seeds.size(); ++i) {
         auto &[seeder, seeder_rc] = seeders[i];
@@ -572,11 +573,14 @@ auto LabeledAligner<Seeder, Extender, AlignmentCompare>
             seeder_rc = make_shared<ManualMatchingSeeder>(std::move(seeds), num_matching, this->config_);
         }
 #endif
+
+        num_discarded_seeds += discarded_seeds[i].first.size() + discarded_seeds[i].second.size();
     }
 
-    logger->trace("Old seed count: {}\tNew seed count: {}",
+    logger->trace("Old seed count: {}\tSeeds to extend: {}\tSeeds to report: {}",
                   num_seeds + num_seeds_rc,
-                  num_seeds_left + num_seeds_rc_left);
+                  num_seeds_left + num_seeds_rc_left,
+                  num_discarded_seeds);
 
     return seeders;
 }
