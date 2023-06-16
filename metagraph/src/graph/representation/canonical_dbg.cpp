@@ -440,6 +440,7 @@ std::string CanonicalDBG::get_node_sequence(node_index index) const {
     node_index node = get_base_node(index);
     const auto *cache = get_extension_threadsafe<NodeFirstCache>();
     std::string seq = cache ? cache->get_node_sequence(node) : graph_->get_node_sequence(node);
+    assert(!cache || seq == graph_->get_node_sequence(node));
 
     if (node != index)
         ::reverse_complement(seq.begin(), seq.end());
@@ -542,7 +543,7 @@ DeBruijnGraph::node_index CanonicalDBG::reverse_complement(node_index node) cons
     if (auto fetch = is_palindrome_cache_.TryGet(node))
         return *fetch ? node : node + offset_;
 
-    std::string seq = graph_->get_node_sequence(node);
+    std::string seq = get_node_sequence(node);
     std::string rev_seq = seq;
     ::reverse_complement(rev_seq.begin(), rev_seq.end());
     bool palindrome = (rev_seq == seq);

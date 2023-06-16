@@ -40,6 +40,8 @@ void NodeRC::adjacent_outgoing_from_rc(node_index node,
             std::string rev_seq = spelling_hint.size()
                 ? spelling_hint
                 : dbg_succ_->get_node_sequence(node);
+            assert(spelling_hint.empty()
+                    || spelling_hint == dbg_succ_->get_node_sequence(node));
             rev_seq.pop_back();
             assert(rev_seq.size() == boss.get_k());
 
@@ -105,6 +107,8 @@ void NodeRC::adjacent_incoming_from_rc(node_index node,
             std::string rev_seq = spelling_hint.size()
                 ? spelling_hint.substr(1)
                 : dbg_succ_->get_node_sequence(node).substr(1);
+            assert(spelling_hint.empty()
+                    || spelling_hint == dbg_succ_->get_node_sequence(node));
 
             assert(rev_seq.size() == boss.get_k());
 

@@ -46,6 +46,8 @@ std::string NodeFirstCache::get_node_sequence(node_index node) const {
         ret[--i] = boss.get_node_last_value(x);
     }
 
+    assert(boss.decode(ret) == dbg_succ_->get_node_sequence(node));
+
     return boss.decode(ret);
 }
 
