@@ -250,8 +250,6 @@ auto DBGAligner<Seeder, Extender, AlignmentCompare>
         std::shared_ptr<ISeeder> seeder
             = std::make_shared<Seeder>(graph_, this_query, false,
                                        std::vector<node_index>(nodes), config_);
-        if (this_query.size() * config_.min_exact_match > seeder->get_num_matches())
-            seeder = std::make_shared<ManualMatchingSeeder>(std::vector<Seed>{}, 0, config_);
 
         std::shared_ptr<ISeeder> seeder_rc;
         std::vector<node_index> nodes_rc;
@@ -272,8 +270,6 @@ auto DBGAligner<Seeder, Extender, AlignmentCompare>
 
             seeder_rc = std::make_shared<Seeder>(graph_, reverse, true,
                                                  std::move(nodes_rc), config_);
-            if (reverse.size() * config_.min_exact_match > seeder_rc->get_num_matches())
-                seeder_rc = std::make_shared<ManualMatchingSeeder>(std::vector<Seed>{}, 0, config_);
         }
 #endif
         result.emplace_back(std::move(seeder), std::move(seeder_rc));
@@ -309,6 +305,18 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
             assert(alignment.is_valid(graph_, &config_));
             aggregator.add_alignment(std::move(alignment));
         };
+
+        if (seeder->get_num_matches() < query.size() * config_.min_exact_match) {
+            discarded_seeds[i].first = seeder->get_seeds();
+            seeder = std::make_shared<ManualMatchingSeeder>(std::vector<Seed>{}, 0, config_);
+        }
+
+#if ! _PROTEIN_GRAPH
+        if (seeder_rc && seeder_rc->get_num_matches() < query.size() * config_.min_exact_match) {
+            discarded_seeds[i].second = seeder_rc->get_seeds();
+            seeder_rc = std::make_shared<ManualMatchingSeeder>(std::vector<Seed>{}, 0, config_);
+        }
+#endif
 
         for (auto &seed : discarded_seeds[i].first) {
             add_alignment(Alignment(seed, config_));

@@ -68,9 +68,6 @@ auto ExactSeeder::get_seeds() const -> std::vector<Seed> {
     size_t k = graph_.get_k();
     assert(k >= config_.min_seed_length);
 
-    if (num_matching_ < config_.min_exact_match * query_.size())
-        return {};
-
     std::vector<Seed> seeds;
 
     if (config_.max_seed_length < k)
@@ -364,9 +361,6 @@ auto MEMSeeder::get_seeds() const -> std::vector<Seed> {
 
     if (k >= config_.max_seed_length)
         return ExactSeeder::get_seeds();
-
-    if (num_matching_ < config_.min_exact_match * query_.size())
-        return {};
 
     std::vector<uint8_t> query_node_flags(query_nodes_.size(), 0);
     for (size_t i = 0; i < query_node_flags.size(); ++i) {
