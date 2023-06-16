@@ -362,6 +362,8 @@ int align_to_graph(Config *config) {
         anno_dbg = initialize_annotated_dbg(graph, *config);
     }
 
+    timer.reset();
+
     for (const auto &file : files) {
         logger->trace("Align sequences from file {}", file);
         seq_io::FastaParser fasta_parser(file, config->forward_and_reverse);
@@ -379,7 +381,7 @@ int align_to_graph(Config *config) {
         auto it = fasta_parser.begin();
         auto end = fasta_parser.end();
 
-        size_t num_batches = 0;
+        size_t num_bp = 0;
 
         while (it != end) {
             uint64_t num_bytes_read = 0;
@@ -399,7 +401,6 @@ int align_to_graph(Config *config) {
                 num_bytes_read += it->seq.l;
             }
 
-            ++num_batches;
             thread_pool.enqueue([&,graph,batch=std::move(seq_batch)]() {
                 // Make a dummy shared_ptr
                 auto aln_graph
@@ -433,14 +434,16 @@ int align_to_graph(Config *config) {
                     }
                 );
             });
+
+            num_bp += num_bytes_read;
         };
 
         thread_pool.join();
 
-        logger->trace("File {} processed in {} sec, "
-                      "num batches: {}, batch size: {} KB, "
+        auto time = data_reading_timer.elapsed();
+        logger->trace("File {} with {} base pairs was processed in {} sec, throughput: {:.1f} bp/s, "
                       "current mem usage: {} MB, total time {} sec",
-                      file, data_reading_timer.elapsed(), num_batches, batch_size / 1e3,
+                      file, num_bp, time, (double)num_bp / time,
                       get_curr_RSS() / 1e6, timer.elapsed());
     }
 

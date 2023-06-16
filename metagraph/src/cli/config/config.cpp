@@ -1051,9 +1051,7 @@ if (advanced) {
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --query-presence \t\ttest sequences for presence, report as 0 or 1 [off]\n");
             fprintf(stderr, "\t   --filter-present \t\treport only present input sequences as FASTA [off]\n");
-if (advanced) {
             fprintf(stderr, "\t   --batch-size [INT] \t\tquery batch size (number of base pairs) [100'000'000]\n");
-}
             fprintf(stderr, "\n");
             fprintf(stderr, "Available options for alignment:\n");
             fprintf(stderr, "\t-a --annotator [STR] \t\t\t\tannotator to load for label/trace-consistent alignment []\n");
