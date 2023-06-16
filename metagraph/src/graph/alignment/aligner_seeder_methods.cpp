@@ -179,6 +179,7 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
                 this->config_.min_seed_length
             );
         }
+        this->num_matching_ = get_num_char_matches_in_seeds(seeds_.begin(), seeds_.end());
 
         return;
     }
