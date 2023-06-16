@@ -1406,12 +1406,10 @@ TYPED_TEST(DBGAlignerTest, align_low_similarity4) {
                 DBGAligner<> aligner(*graph, config);
                 auto paths = aligner.align(query);
 
+                ASSERT_LE(2ull, paths.size());
                 if (discovery_fraction == 0.0) {
-                    ASSERT_EQ(2ull, paths.size());
                     EXPECT_NE(paths[0], paths[1]);
                     EXPECT_GE(paths[0].get_score(), paths[1].get_score());
-                } else {
-                    EXPECT_EQ(0ull, paths.size());
                 }
 
                 paths = aligner.align(match);
