@@ -166,7 +166,8 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
     }
 
     const DBGSuccinct &dbg_succ = get_base_dbg_succ(&this->graph_);
-    assert(!dbg_succ.get_mask());
+    if (dbg_succ.get_mask())
+        logger->warn("Graph has a dummy k-mer mask. Seeds containing dummy k-mers will be missed.");
 
     std::vector<std::vector<Seed>> suffix_seeds(
         this->query_.size() - this->config_.min_seed_length + 1
