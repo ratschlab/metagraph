@@ -791,7 +791,6 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
     auto end = merge_into_unitig_mums(this->graph_, seeds.data(), seeds.data() + seeds.size(),
                                       this->config_.min_seed_length, max_seed_length_);
     seeds.erase(seeds.begin() + (end - seeds.data()), seeds.end());
-    assert(seeds.size());
 
     if (discarded_seeds.size()) {
         end = merge_into_unitig_mums(this->graph_, discarded_seeds.data(),

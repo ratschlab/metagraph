@@ -430,7 +430,6 @@ Seed* merge_into_unitig_mums(const DeBruijnGraph &graph,
     if (begin == end)
         return end;
 
-
     ssize_t graph_k = graph.get_k();
     std::sort(begin, end, [](const auto &a, const auto &b) {
         return std::pair(a.get_query_view().end(), a.get_query_view().begin())
@@ -545,7 +544,10 @@ Seed* merge_into_unitig_mums(const DeBruijnGraph &graph,
         }
     }
 
-    return std::remove_if(begin, end, [](const auto &a) { return a.empty(); });
+    end = std::remove_if(begin, end, [](const auto &a) { return a.empty(); });
+    std::reverse(begin, end);
+
+    return end;
 }
 
 } // namespace align

@@ -303,6 +303,10 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
             aggregator.add_alignment(std::move(alignment));
         };
 
+        assert(std::is_sorted(seeder->get_seeds().begin(), seeder->get_seeds().end(),
+            [](const auto &a, const auto &b) { return a.get_query_view().end() < b.get_query_view().end(); }
+        ));
+
         if (seeder->get_num_matches() < query.size() * config_.min_exact_match) {
             for (auto &seed : seeder->get_seeds()) {
                 add_alignment(Alignment(seed, config_));
@@ -311,6 +315,10 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
         }
 
 #if ! _PROTEIN_GRAPH
+        assert(!seeder_rc || std::is_sorted(seeder_rc->get_seeds().begin(), seeder_rc->get_seeds().end(),
+            [](const auto &a, const auto &b) { return a.get_query_view().end() < b.get_query_view().end(); }
+        ));
+
         if (seeder_rc && seeder_rc->get_num_matches() < query.size() * config_.min_exact_match) {
             for (auto &seed : seeder_rc->get_seeds()) {
                 add_alignment(Alignment(seed, config_));
