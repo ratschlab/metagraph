@@ -1,11 +1,7 @@
 #ifndef __NODE_RC_HPP__
 #define __NODE_RC_HPP__
 
-#include <sdsl/dac_vector.hpp>
-#include <sdsl/rrr_vector.hpp>
-
 #include "graph/representation/base/sequence_graph.hpp"
-#include "common/vectors/bit_vector_adaptive.hpp"
 
 namespace mtg {
 namespace graph {

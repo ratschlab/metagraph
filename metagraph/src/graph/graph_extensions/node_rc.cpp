@@ -1,14 +1,8 @@
 #include "node_rc.hpp"
 
-#include <mutex>
-
-#include <ips4o.hpp>
-
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/graph_extensions/node_first_cache.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
-#include "common/utils/template_utils.hpp"
-#include "common/utils/file_utils.hpp"
 
 namespace mtg {
 namespace graph {
