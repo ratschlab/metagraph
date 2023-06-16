@@ -124,13 +124,11 @@ Alignment filter_seed(const Alignment &prev, Alignment &a) {
             return filtered;
         }
 
-        if (intersection.size()) {
-            Alignment filtered = a;
+        Alignment filtered = a;
+        if (intersection.size())
             std::swap(filtered.label_columns, intersection);
-            return filtered;
-        }
 
-        return {};
+        return filtered;
     }
 
     Vector<Alignment::Column> intersection;
@@ -169,14 +167,13 @@ Alignment filter_seed(const Alignment &prev, Alignment &a) {
         return filtered;
     }
 
+    Alignment filtered = a;
     if (intersection.size()) {
-        Alignment filtered = a;
         std::swap(a.label_columns, intersection);
         std::swap(a.label_coordinates, intersection_coords);
-        return filtered;
     }
 
-    return {};
+    return filtered;
 }
 
 // Extend the alignment first until it reaches the end of the alignment second.
