@@ -18,106 +18,11 @@ using edge_index = BOSS::edge_index;
 using mtg::common::logger;
 
 
-NodeRC::NodeRC(const DeBruijnGraph &graph, bool construct_index) : graph_(&graph) {
+NodeRC::NodeRC(const DeBruijnGraph &graph) : graph_(&graph) {
     if (graph.get_mode() != DeBruijnGraph::PRIMARY) {
         logger->error("Only implemented for PRIMARY graphs");
         exit(1);
     }
-
-    if (!construct_index)
-        return;
-
-    const auto *dbg_succ = dynamic_cast<const DBGSuccinct*>(&graph);
-    if (!dbg_succ)
-        return;
-
-    const BOSS &boss = dbg_succ->get_boss();
-    const bitmap *mask = dbg_succ->get_mask();
-    std::unique_ptr<bitmap_vector> computed_mask;
-    if (!mask) {
-        auto sdsl_mask = boss.mark_all_dummy_edges(get_num_threads());
-        sdsl_mask.flip();
-        computed_mask = std::make_unique<bitmap_vector>(std::move(sdsl_mask));
-        mask = computed_mask.get();
-    }
-
-    std::mutex mu;
-
-    std::vector<node_index> rc_nodes_prefix;
-    std::vector<node_index> rc_nodes_suffix;
-    graph.call_sequences([&](const std::string &seq, const std::vector<node_index> &path) {
-        assert(seq.size() == path.size() + boss.get_k());
-        std::string rev_seq = seq;
-        ::reverse_complement(rev_seq.begin(), rev_seq.end());
-
-        // map each (k-1)-mer from the reverse complement to BOSS nodes
-        auto encoded = boss.encode(rev_seq);
-        std::vector<edge_index> rc_edges;
-        rc_edges.reserve(path.size() + 1);
-        for (auto it = encoded.rbegin() + boss.get_k(); it <= encoded.rend(); ++it) {
-            auto [edge, edge_2, end] = boss.index_range(it.base(), it.base() + boss.get_k());
-            assert(end != it.base() + boss.get_k() || edge == edge_2);
-            rc_edges.emplace_back(end == it.base() + boss.get_k() ? edge : 0);
-        }
-        assert(rc_edges.size() == path.size() + 1);
-
-        // For each contig node, determine if the prefix or the suffix of its reverse
-        // complement maps to a BOSS node. If so, then record that node
-        auto it = rc_edges.begin();
-        for (size_t i = 0; i < path.size(); ++i, ++it) {
-            if (*it) {
-                bool found = false;
-                boss.call_outgoing(*it, [&](edge_index adjacent_edge) {
-                    found |= (*mask)[adjacent_edge];
-                });
-                if (found) {
-                    std::lock_guard<std::mutex> lock(mu);
-                    rc_nodes_prefix.emplace_back(path[i]);
-                }
-            }
-
-            if (*(it + 1)) {
-                bool found = false;
-                boss.call_incoming_to_target(
-                    boss.bwd(*(it + 1)),
-                    boss.get_node_last_value(*(it + 1)),
-                    [&](edge_index incoming_boss_edge) {
-                        found |= (*mask)[incoming_boss_edge];
-                    }
-                );
-                if (found) {
-                    std::lock_guard<std::mutex> lock(mu);
-                    rc_nodes_suffix.emplace_back(path[i]);
-                }
-            }
-        }
-    }, get_num_threads());
-
-    logger->trace("Found {} / {} ({:.2f}%) nodes with reverse complements",
-                  rc_nodes_prefix.size() + rc_nodes_suffix.size(), graph.num_nodes(),
-                  100.0 * (rc_nodes_prefix.size() + rc_nodes_suffix.size()) / graph.num_nodes());
-
-    // sort by node ID, then construct the binary indicator vector
-    logger->trace("Constructing reverse complement map");
-    ips4o::parallel::sort(rc_nodes_prefix.begin(), rc_nodes_prefix.end(),
-                          std::less<node_index>(), get_num_threads());
-    ips4o::parallel::sort(rc_nodes_suffix.begin(), rc_nodes_suffix.end(),
-                          std::less<node_index>(), get_num_threads());
-
-    rc_prefix_ = Indicator([&](const auto &callback) {
-                               std::for_each(rc_nodes_prefix.begin(),
-                                             rc_nodes_prefix.end(),
-                                             callback);
-                           },
-                           graph.max_index() + 1,
-                           rc_nodes_prefix.size());
-    rc_suffix_ = Indicator([&](const auto &callback) {
-                               std::for_each(rc_nodes_suffix.begin(),
-                                             rc_nodes_suffix.end(),
-                                             callback);
-                           },
-                           graph.max_index() + 1,
-                           rc_nodes_suffix.size());
 }
 
 void NodeRC::adjacent_outgoing_from_rc(node_index node,
@@ -135,9 +40,6 @@ void NodeRC::adjacent_outgoing_from_rc(node_index node,
         const BOSS &boss = dbg_succ_->get_boss();
         edge_index rc_edge = 0;
 
-        if (rc_prefix_.size() && !rc_prefix_[node])
-            return;
-
         if (cache) {
             rc_edge = cache->get_prefix_rc(node, spelling_hint);
         } else {
@@ -147,7 +49,6 @@ void NodeRC::adjacent_outgoing_from_rc(node_index node,
             rev_seq.pop_back();
             assert(rev_seq.size() == boss.get_k());
 
-            assert(!rc_prefix_.size() || rev_seq[0] != BOSS::kSentinel);
             if (rev_seq[0] == BOSS::kSentinel)
                 return;
 
@@ -155,7 +56,6 @@ void NodeRC::adjacent_outgoing_from_rc(node_index node,
             auto encoded = boss.encode(rev_seq);
             auto [edge, edge_2, end] = boss.index_range(encoded.begin(), encoded.end());
 
-            assert(!rc_prefix_.size() || end == encoded.end());
             if (end == encoded.end()) {
                 assert(edge == edge_2);
                 rc_edge = edge;
@@ -205,9 +105,6 @@ void NodeRC::adjacent_incoming_from_rc(node_index node,
         const BOSS &boss = dbg_succ_->get_boss();
         edge_index rc_edge = 0;
 
-        if (rc_suffix_.size() && !rc_suffix_[node])
-            return;
-
         if (cache) {
             rc_edge = cache->get_suffix_rc(node, spelling_hint);
         } else {
@@ -217,7 +114,6 @@ void NodeRC::adjacent_incoming_from_rc(node_index node,
 
             assert(rev_seq.size() == boss.get_k());
 
-            assert(!rc_suffix_.size() || rev_seq[0] != BOSS::kSentinel);
             if (rev_seq[0] == BOSS::kSentinel)
                 return;
 
@@ -225,7 +121,6 @@ void NodeRC::adjacent_incoming_from_rc(node_index node,
             auto encoded = boss.encode(rev_seq);
             auto [edge, edge_2, end] = boss.index_range(encoded.begin(), encoded.end());
 
-            assert(!rc_suffix_.size() || end == encoded.end());
             if (end == encoded.end()) {
                 assert(edge == edge_2);
                 rc_edge = edge;
@@ -323,58 +218,17 @@ void NodeRC::call_incoming_from_rc(node_index node,
     }
 }
 
-bool NodeRC::load(const std::string &filename_base) {
-    const auto rc_filename = utils::make_suffix(filename_base, kRCExtension);
-    try {
-        std::unique_ptr<std::ifstream> in = utils::open_ifstream(rc_filename);
-        if (!in->good())
-            return false;
-
-        rc_prefix_.load(*in);
-        rc_suffix_.load(*in);
-        return true;
-
-    } catch (...) {
-        return false;
-    }
-}
-
-void NodeRC::serialize(const std::string &filename_base) const {
-    if (!rc_prefix_.size() || !rc_suffix_.size())
-        logger->warn("NodeRC was initialized with set_graph, so nothing to serialize.");
-
-    const auto fname = utils::make_suffix(filename_base, kRCExtension);
-
-    std::ofstream out = utils::open_new_ofstream(fname);
-    rc_prefix_.serialize(out);
-    rc_suffix_.serialize(out);
-}
-
 bool NodeRC::is_compatible(const SequenceGraph &graph, bool) const {
-    if (!rc_prefix_.size() || !rc_suffix_.size()) {
-        if (const auto *dbg = dynamic_cast<const DeBruijnGraph*>(&graph)) {
-            if (dbg == graph_)
-                return true;
+    if (const auto *dbg = dynamic_cast<const DeBruijnGraph*>(&graph)) {
+        if (dbg == graph_)
+            return true;
 
-            logger->error("Stored graph pointer does not match");
-            return false;
-        }
-
-        logger->error("Only compatible with DeBruijnGraph");
+        logger->error("Stored graph pointer does not match");
         return false;
     }
 
-    if (graph.max_index() + 1 != rc_prefix_.size()) {
-        logger->error("RC file does not match number of nodes in graph");
-        return false;
-    }
-
-    if (graph.max_index() + 1 != rc_suffix_.size()) {
-        logger->error("RC file does not match number of nodes in graph");
-        return false;
-    }
-
-    return true;
+    logger->error("Only compatible with DeBruijnGraph");
+    return false;
 }
 
 } // namespace graph

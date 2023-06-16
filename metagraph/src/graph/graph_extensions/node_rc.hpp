@@ -23,7 +23,7 @@ class NodeRC : public SequenceGraph::GraphExtension {
     // If construct_index is true, a fully pre-computed index will be constructed.
     // Otherwise, call_*_from_rc will invoke on-the-fly computations on the graph,
     // unless the index is loaded with load().
-    NodeRC(const DeBruijnGraph &graph, bool construct_index = false);
+    NodeRC(const DeBruijnGraph &graph);
 
     void adjacent_outgoing_from_rc(node_index node,
                                    const std::function<void(node_index)> &callback,
@@ -43,23 +43,13 @@ class NodeRC : public SequenceGraph::GraphExtension {
                                const NodeFirstCache *cache = nullptr,
                                const std::string &spelling_hint = "") const;
 
-    bool load(const std::string &filename_base);
-    void serialize(const std::string &filename_base) const;
+    bool load(const std::string &) { throw std::runtime_error("Loading NodeRC not possible"); }
+    void serialize(const std::string &) const { throw std::runtime_error("Serializing NodeRC not possible"); }
 
     bool is_compatible(const SequenceGraph &graph, bool verbose = true) const;
 
   private:
     const DeBruijnGraph *graph_;
-
-    typedef bit_vector_smart Indicator;
-    typedef sdsl::dac_vector_dp<sdsl::rrr_vector<>> Mapping;
-
-    // Indicates whether a reverse complement prefix/suffix exists for each graph node.
-    // If the index is initialized, then rc_.size() == graph_->max_index() + 1
-    Indicator rc_prefix_;
-    Indicator rc_suffix_;
-
-    static constexpr auto kRCExtension = ".rc_adj";
 };
 
 } // namespace graph
