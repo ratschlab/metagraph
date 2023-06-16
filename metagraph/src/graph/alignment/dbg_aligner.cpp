@@ -307,13 +307,17 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
         };
 
         if (seeder->get_num_matches() < query.size() * config_.min_exact_match) {
-            discarded_seeds[i].first = seeder->get_seeds();
+            for (auto &seed : seeder->get_seeds()) {
+                add_alignment(Alignment(seed, config_));
+            }
             seeder = std::make_shared<ManualMatchingSeeder>(std::vector<Seed>{}, 0, config_);
         }
 
 #if ! _PROTEIN_GRAPH
         if (seeder_rc && seeder_rc->get_num_matches() < query.size() * config_.min_exact_match) {
-            discarded_seeds[i].second = seeder_rc->get_seeds();
+            for (auto &seed : seeder_rc->get_seeds()) {
+                add_alignment(Alignment(seed, config_));
+            }
             seeder_rc = std::make_shared<ManualMatchingSeeder>(std::vector<Seed>{}, 0, config_);
         }
 #endif
