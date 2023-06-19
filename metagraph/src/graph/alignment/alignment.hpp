@@ -98,31 +98,26 @@ class Seed {
 
 template <class It>
 inline size_t get_num_char_matches_in_seeds(It begin, It end) {
-    size_t num_matching = 0;
-    size_t last_q_end = 0;
-    for (auto it = begin; it != end; ++it) {
-        const auto &aln = utils::get_first(*it);
+    if (begin == end)
+        return 0;
+
+    sdsl::bit_vector found;
+    std::for_each(begin, end, [&](const auto &obj) {
+        const auto &aln = utils::get_first(obj);
         if (aln.empty())
-            continue;
+            return;
 
-        size_t q_begin = aln.get_clipping();
-        size_t q_end = q_begin + aln.get_query_view().size();
-        if (q_end > last_q_end) {
-            num_matching += q_end - q_begin;
-            if (q_begin < last_q_end)
-                num_matching -= last_q_end - q_begin;
+        if (!found.size()) {
+            found = sdsl::bit_vector(aln.get_clipping() + aln.get_query_view().size()
+                                        + aln.get_end_clipping());
         }
 
-        if (size_t offset = aln.get_offset()) {
-            size_t clipping = aln.get_clipping();
-            for (++it; it != end && aln.get_offset() == offset
-                                    && aln.get_clipping() == clipping; ++it) {}
-            --it;
-        }
+        std::fill(found.begin() + aln.get_clipping(),
+                  found.begin() + aln.get_clipping() + aln.get_query_view().size(),
+                  true);
+    });
 
-        last_q_end = q_end;
-    }
-    return num_matching;
+    return sdsl::util::cnt_one_bits(found);
 }
 
 // Note: this object stores pointers to the query sequence, so it is the user's

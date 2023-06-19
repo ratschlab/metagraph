@@ -302,6 +302,17 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
             assert(alignment.is_valid(graph_, &config_));
             aggregator.add_alignment(std::move(alignment));
         };
+        DEBUG_LOG("Length: {}; Length cutoff: {}; Fwd num matches: {}"
+#if ! _PROTEIN_GRAPH
+            "; Bwd num matches: {}"
+#endif
+            ,
+            query.size(), query.size() * config_.min_exact_match,
+            seeder->get_num_matches()
+#if ! _PROTEIN_GRAPH
+            , seeder_rc ? seeder_rc->get_num_matches() : 0
+#endif
+        );
 
         if (seeder->get_num_matches() < query.size() * config_.min_exact_match) {
             for (auto &seed : seeder->get_seeds()) {

@@ -167,6 +167,17 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
         logger->warn("Graph has a dummy k-mer mask. Seeds containing dummy k-mers will be missed.");
 
     seeds_.clear();
+    if (this->query_.size() >= this->graph_.get_k()) {
+        std::string_view window(this->query_.data(), this->graph_.get_k());
+        auto first_path = map_to_nodes_sequentially(this->graph_, window);
+        assert(first_path.size() == 1);
+        if (first_path[0]) {
+            seeds_.emplace_back(window, std::move(first_path), this->orientation_,
+                                this->graph_.get_k() - window.size(),
+                                0, this->query_.size() - window.size());
+        }
+    }
+
     for (size_t i = 0; i + this->config_.min_seed_length <= this->query_.size(); ++i) {
         std::string_view window(this->query_.data() + i, this->config_.min_seed_length);
         dbg_succ.call_nodes_with_suffix_matching_longest_prefix(window,
