@@ -1,6 +1,7 @@
 #include "aligner_seeder_methods.hpp"
 
 #include <sdust.h>
+#include <tsl/hopscotch_set.h>
 
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/canonical_dbg.hpp"
@@ -197,40 +198,45 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
         std::string query_rc(this->query_);
         ::reverse_complement(query_rc.begin(), query_rc.end());
         for (size_t i = 0; i + this->config_.min_seed_length <= query_rc.size(); ++i) {
-            std::string_view window_rc(query_rc.data() + i, this->config_.min_seed_length);
+            std::string_view window_rc(query_rc.data() + i,
+                                       this->config_.min_seed_length);
 
             std::string_view window(
                 this->query_.data() + this->query_.size() - this->config_.min_seed_length - i,
                 this->config_.min_seed_length
             );
 
+            tsl::hopscotch_set<node_index> found_nodes;
             dbg_succ.call_nodes_with_suffix_matching_longest_prefix(window_rc,
                 [&](node_index rc_alt_node, size_t) {
                     const auto &boss = dbg_succ.get_boss();
                     auto encoded = boss.encode(window_rc);
-                    auto [first, last, end] = boss.index_range(encoded.begin(), encoded.end());
+                    auto [first, last, end] = boss.index_range(encoded.begin(),
+                                                               encoded.end());
                     if (end != encoded.end())
                         return;
 
                     suffix_to_prefix(
                         dbg_succ,
                         std::make_tuple(boss.pred_last(first - 1) + 1,
-                                        last,
-                                        this->config_.min_seed_length),
+                                        last, this->config_.min_seed_length),
                         [&](node_index alt_node) {
-                            alt_node = canonical->reverse_complement(alt_node);
-                            assert(this->graph_.get_node_sequence(alt_node).substr(this->graph_.get_k() - window.size())
-                                    == window);
-                            seeds_.emplace_back(window, std::vector<node_index>{ alt_node },
-                                                this->orientation_,
-                                                this->graph_.get_k() - window.size(),
-                                                this->query_.size() - i - window.size(), i);
+                            found_nodes.emplace(canonical->reverse_complement(alt_node));
                         }
                     );
 
                 },
                 this->config_.min_seed_length
             );
+
+            for (node_index alt_node : found_nodes) {
+                assert(this->graph_.get_node_sequence(alt_node).substr(this->graph_.get_k() - window.size())
+                        == window);
+                seeds_.emplace_back(window, std::vector<node_index>{ alt_node },
+                                    this->orientation_,
+                                    this->graph_.get_k() - window.size(),
+                                    this->query_.size() - i - window.size(), i);
+            }
         }
     }
 
