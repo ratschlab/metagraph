@@ -13,8 +13,9 @@ namespace graph {
 class CanonicalDBG;
 
 // This cache stores intermediate results from BOSS bwd calls to speed up calls
-// to call_incoming_kmers in DBGSuccinct.
-// This stores 80 bytes per cached 8-byte node index.
+// to call_incoming_kmers in DBGSuccinct. In addition, it caches the indices
+// corresponding to the reverse complements of the k-1 prefixes and suffixes of
+// each traversed node.
 class NodeFirstCache : public SequenceGraph::GraphExtension {
   friend CanonicalDBG;
 
