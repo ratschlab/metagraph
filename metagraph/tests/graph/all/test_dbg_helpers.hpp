@@ -52,20 +52,6 @@ class DBGSuccinctCached : public DBGSuccinct {
           : DBGSuccinct(std::forward<Args>(args)...) {}
 };
 
-class DBGSuccinctRCIndexed : public DBGSuccinct {
-  public:
-    template <typename... Args>
-    DBGSuccinctRCIndexed(Args&&... args)
-          : DBGSuccinct(std::forward<Args>(args)...) {}
-};
-
-class DBGSuccinctCachedRCIndexed : public DBGSuccinct {
-  public:
-    template <typename... Args>
-    DBGSuccinctCachedRCIndexed(Args&&... args)
-          : DBGSuccinct(std::forward<Args>(args)...) {}
-};
-
 template <class Graph>
 std::shared_ptr<DeBruijnGraph>
 build_graph(uint64_t k,
@@ -115,9 +101,7 @@ typedef ::testing::Types<DBGBitmap,
                          DBGSuccinctBloomFPR<1, 10>,
                          DBGSuccinctBloom<4, 1>,
                          DBGSuccinctBloom<4, 50>,
-                         DBGSuccinctRCIndexed,
-                         DBGSuccinctCached,
-                         DBGSuccinctCachedRCIndexed> GraphTypes;
+                         DBGSuccinctCached> GraphTypes;
 
 // in stable graphs the order of input sequences
 // does not change the order of k-mers and their indexes
@@ -134,9 +118,7 @@ typedef ::testing::Types<DBGBitmap,
                          DBGSuccinctBloomFPR<1, 10>,
                          DBGSuccinctBloom<4, 1>,
                          DBGSuccinctBloom<4, 50>,
-                         DBGSuccinctRCIndexed,
-                         DBGSuccinctCached,
-                         DBGSuccinctCachedRCIndexed> StableGraphTypes;
+                         DBGSuccinctCached> StableGraphTypes;
 
 typedef ::testing::Types<DBGHashFast, DBGSuccinct> FewGraphTypes;
 

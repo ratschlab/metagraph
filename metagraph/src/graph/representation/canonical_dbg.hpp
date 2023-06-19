@@ -140,6 +140,20 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
     bool has_sentinel_;
 
     std::array<size_t, 256> alphabet_encoder_;
+
+    void adjacent_outgoing_from_rc(node_index node,
+                                   const std::function<void(node_index)> &callback,
+                                   const std::string &spelling_hint) const;
+    void adjacent_incoming_from_rc(node_index node,
+                                   const std::function<void(node_index)> &callback,
+                                   const std::string &spelling_hint) const;
+
+    void call_outgoing_from_rc(node_index node,
+                               const std::function<void(node_index, char)> &callback,
+                               const std::string &spelling_hint) const;
+    void call_incoming_from_rc(node_index node,
+                               const std::function<void(node_index, char)> &callback,
+                               const std::string &spelling_hint) const;
 };
 
 } // namespace graph

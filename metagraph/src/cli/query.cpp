@@ -17,7 +17,6 @@
 #include "graph/representation/hash/dbg_hash_ordered.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/succinct/boss_construct.hpp"
-#include "graph/graph_extensions/node_rc.hpp"
 #include "seq_io/sequence_io.hpp"
 #include "config/config.hpp"
 #include "load/load_graph.hpp"
@@ -1151,12 +1150,6 @@ int query_graph(Config *config) {
     assert(config->infbase_annotators.size() == 1);
 
     std::shared_ptr<DeBruijnGraph> graph = load_critical_dbg(config->infbase);
-
-    if (auto dbg_succ = std::dynamic_pointer_cast<DBGSuccinct>(graph)) {
-        if (config->align_sequences && dbg_succ->get_mode() == DeBruijnGraph::PRIMARY)
-            dbg_succ->add_extension(std::make_shared<NodeRC>(*dbg_succ));
-    }
-
     std::unique_ptr<AnnotatedDBG> anno_graph = initialize_annotated_dbg(graph, *config);
 
     ThreadPool thread_pool(std::max(1u, get_num_threads()) - 1, 1000);

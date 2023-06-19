@@ -10,13 +10,13 @@
 namespace mtg {
 namespace graph {
 
-class NodeRC;
+class CanonicalDBG;
 
 // This cache stores intermediate results from BOSS bwd calls to speed up calls
 // to call_incoming_kmers in DBGSuccinct.
 // This stores 80 bytes per cached 8-byte node index.
 class NodeFirstCache : public SequenceGraph::GraphExtension {
-  friend NodeRC;
+  friend CanonicalDBG;
 
   public:
     using node_index = typename SequenceGraph::node_index;
