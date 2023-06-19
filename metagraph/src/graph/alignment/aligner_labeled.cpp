@@ -146,9 +146,10 @@ bool LabeledExtender::set_seed(const Alignment &seed) {
         return false;
 
     assert(std::all_of(seed.get_nodes().begin(), seed.get_nodes().end(),
-                    [&](node_index n) {
-                        return n == DeBruijnGraph::npos || annotation_buffer_.get_labels(n);
-                    }));
+                       [&](node_index n) {
+                           return n == DeBruijnGraph::npos
+                                    || annotation_buffer_.get_labels(n);
+                       }));
 
     // the first node of the seed has already been flushed
     last_flushed_table_i_ = 1;
@@ -782,10 +783,6 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
         return !a.label_encoder || a.label_columns.empty();
     });
 
-    assert(std::all_of(seeds.begin(), end, [&](const auto &a) {
-        return a.get_query_view().size() >= this->config_.min_seed_length;
-    }));
-
     seeds.erase(merge_into_unitig_mums(this->graph_, seeds.begin(), end,
                                        this->config_.min_seed_length, max_seed_length_),
                 seeds.end());
@@ -795,6 +792,19 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
                                                  discarded_seeds.end(),
                                                  this->config_.min_seed_length),
                           discarded_seeds.end());
+
+    assert(std::all_of(seeds.begin(), seeds.end(), [&](const auto &seed) {
+        return seed.get_query_view().size() >= this->config_.min_seed_length;
+    }));
+
+    assert(std::all_of(seeds.begin(), seeds.end(), [&](const auto &seed) {
+        return std::all_of(seed.get_nodes().begin(), seed.get_nodes().end(),
+            [&](node_index n) {
+                return n == DeBruijnGraph::npos
+                         || annotation_buffer_.get_labels(n);
+            }
+        );
+    }));
 
     return get_num_char_matches_in_seeds(seeds.begin(), seeds.end());
 }

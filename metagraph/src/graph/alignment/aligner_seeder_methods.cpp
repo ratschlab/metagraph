@@ -563,12 +563,7 @@ It merge_into_unitig_mums(const DeBruijnGraph &graph,
         }
     }
 
-    end = std::remove_if(begin, end, [](const auto &a) { return a.empty(); });
-    std::sort(begin, end, [](const auto &a, const auto &b) {
-        return a.get_query_view().begin() < b.get_query_view().begin();
-    });
-
-    return end;
+    return std::remove_if(begin, end, [](const auto &a) { return a.empty(); });
 }
 
 template Seed* merge_into_unitig_mums(const DeBruijnGraph &, Seed*, Seed*, ssize_t, size_t);

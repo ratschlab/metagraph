@@ -303,12 +303,6 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
             aggregator.add_alignment(std::move(alignment));
         };
 
-        assert(std::is_sorted(seeder->get_seeds().begin(), seeder->get_seeds().end(),
-            [](const auto &a, const auto &b) {
-                return a.get_query_view().begin() < b.get_query_view().begin();
-            }
-        ));
-
         if (seeder->get_num_matches() < query.size() * config_.min_exact_match) {
             for (auto &seed : seeder->get_seeds()) {
                 add_alignment(Alignment(seed, config_));
@@ -317,10 +311,6 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
         }
 
 #if ! _PROTEIN_GRAPH
-        assert(!seeder_rc || std::is_sorted(seeder_rc->get_seeds().begin(), seeder_rc->get_seeds().end(),
-            [](const auto &a, const auto &b) { return a.get_query_view().end() < b.get_query_view().end(); }
-        ));
-
         if (seeder_rc && seeder_rc->get_num_matches() < query.size() * config_.min_exact_match) {
             for (auto &seed : seeder_rc->get_seeds()) {
                 add_alignment(Alignment(seed, config_));
@@ -426,6 +416,9 @@ void align_core(const Seeder &seeder,
                 const std::function<score_t()> &get_min_path_score,
                 bool force_fixed_seed) {
     auto seeds = seeder.get_alignments();
+    std::sort(seeds.begin(), seeds.end(), [](const auto &a, const auto &b) {
+        return a.get_query_view().begin() < b.get_query_view().begin();
+    });
 
     for (size_t i = 0; i < seeds.size(); ++i) {
         if (seeds[i].empty())
@@ -615,9 +608,15 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
         }
 
         auto fwd_seeds = forward_seeder.get_seeds();
+        std::sort(fwd_seeds.begin(), fwd_seeds.end(), [](const auto &a, const auto &b) {
+            return a.get_query_view().begin() < b.get_query_view().begin();
+        });
 
 #if ! _PROTEIN_GRAPH
         auto bwd_seeds = reverse_seeder.get_seeds();
+        std::sort(bwd_seeds.begin(), bwd_seeds.end(), [](const auto &a, const auto &b) {
+            return a.get_query_view().begin() < b.get_query_view().begin();
+        });
 #else
         std::vector<Seed> bwd_seeds;
         std::ignore = reverse_seeder;
