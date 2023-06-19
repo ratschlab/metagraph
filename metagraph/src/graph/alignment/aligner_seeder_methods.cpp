@@ -168,29 +168,41 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
         logger->warn("Graph has a dummy k-mer mask. Seeds containing dummy k-mers will be missed.");
 
     seeds_.clear();
+    sdsl::bit_vector found(this->query_.size(), false);
     if (this->query_.size() >= this->graph_.get_k()) {
-        std::string_view window(this->query_.data(), this->graph_.get_k());
-        auto first_path = map_to_nodes_sequentially(this->graph_, window);
-        assert(first_path.size() == 1);
-        if (first_path[0]) {
-            seeds_.emplace_back(window, std::move(first_path), this->orientation_,
-                                this->graph_.get_k() - window.size(),
-                                0, this->query_.size() - window.size());
+        if (this->config_.max_seed_length >= this->graph_.get_k()) {
+            seeds_ = this->BaseSeeder::get_seeds();
+            for (const auto &seed : seeds_) {
+                found[seed.get_end_clipping()] = true;
+            }
+        } else {
+            std::string_view window(this->query_.data(), this->graph_.get_k());
+            auto first_path = map_to_nodes_sequentially(this->graph_, window);
+            assert(first_path.size() == 1);
+            if (first_path[0]) {
+                size_t end_clipping = this->query_.size() - window.size();
+                seeds_.emplace_back(window, std::move(first_path), this->orientation_,
+                                    this->graph_.get_k() - window.size(),
+                                    0, end_clipping);
+                found[end_clipping] = true;
+            }
         }
     }
-
-    bool found_end = false;
 
     auto add_seeds = [&](size_t i, size_t max_seed_length) {
         std::string_view max_window(this->query_.data() + i, max_seed_length);
         dbg_succ.call_nodes_with_suffix_matching_longest_prefix(max_window,
             [&](node_index alt_node, size_t seed_len) {
                 std::string_view window(this->query_.data() + i, seed_len);
+                size_t end_clipping = this->query_.size() - i - window.size();
+                if (found[end_clipping])
+                    return;
+
                 seeds_.emplace_back(window, std::vector<node_index>{ alt_node },
                                     this->orientation_,
                                     this->graph_.get_k() - window.size(),
-                                    i, this->query_.size() - i - window.size());
-                found_end |= (window.end() == this->query_.end());
+                                    i, end_clipping);
+                found[end_clipping] = true;
             },
             this->config_.min_seed_length
         );
@@ -201,7 +213,7 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
         add_seeds(i, max_seed_length);
     }
 
-    if (!found_end && this->config_.min_seed_length < max_seed_length) {
+    if (!found[0] && this->config_.min_seed_length < max_seed_length) {
         for (size_t i = this->query_.size() - max_seed_length + 1; i + this->config_.min_seed_length <= this->query_.size(); ++i) {
             add_seeds(i, this->config_.min_seed_length);
         }
@@ -212,13 +224,17 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
         assert(canonical);
         std::string query_rc(this->query_);
         ::reverse_complement(query_rc.begin(), query_rc.end());
-        found_end = false;
+        found[0] = false;
         auto add_seeds = [&](size_t i, size_t max_seed_length) {
             std::string_view max_window_rc(query_rc.data() + i, max_seed_length);
             tsl::hopscotch_map<node_index, tsl::hopscotch_set<size_t>> found_nodes;
 
             dbg_succ.call_nodes_with_suffix_matching_longest_prefix(max_window_rc,
                 [&](node_index rc_alt_node, size_t seed_len) {
+                    size_t end_clipping = i + (max_seed_length - seed_len);
+                    if (found[end_clipping])
+                        return;
+
                     const auto &boss = dbg_succ.get_boss();
                     auto encoded = boss.encode(std::string_view(max_window_rc.data(), seed_len));
                     auto [first, last, end] = boss.index_range(encoded.begin(),
@@ -240,18 +256,16 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
 
             for (const auto &[alt_node, lens] : found_nodes) {
                 for (size_t seed_len : lens) {
-                    std::string_view window(
-                        this->query_.data() + this->query_.size() - seed_len - i,
-                        seed_len
-                    );
-
-                    found_end |= (window.end() == this->query_.end());
+                    size_t end_clipping = i + (max_seed_length - seed_len);
+                    size_t clipping = this->query_.size() - end_clipping - seed_len;
+                    std::string_view window(this->query_.data() + clipping, seed_len);
+                    found[end_clipping] = true;
                     assert(this->graph_.get_node_sequence(alt_node).substr(this->graph_.get_k() - window.size())
                             == window);
                     seeds_.emplace_back(window, std::vector<node_index>{ alt_node },
                                         this->orientation_,
                                         this->graph_.get_k() - window.size(),
-                                        this->query_.size() - i - window.size(), i);
+                                        clipping, end_clipping);
                 }
             }
         };
@@ -260,7 +274,7 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
             add_seeds(i, max_seed_length);
         }
 
-        if (!found_end && this->config_.min_seed_length < max_seed_length) {
+        if (!found[0] && this->config_.min_seed_length < max_seed_length) {
             for (size_t i = this->query_.size() - max_seed_length + 1; i + this->config_.min_seed_length <= this->query_.size(); ++i) {
                 add_seeds(i, this->config_.min_seed_length);
             }
