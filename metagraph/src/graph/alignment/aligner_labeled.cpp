@@ -778,27 +778,23 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
         }
     }
 
-    auto seed_it = std::remove_if(seeds.begin(), seeds.end(), [&](const auto &a) {
+    auto end = std::remove_if(seeds.begin(), seeds.end(), [&](const auto &a) {
         return !a.label_encoder || a.label_columns.empty();
     });
 
-    seeds.erase(seed_it, seeds.end());
-
-    assert(std::all_of(seeds.begin(), seeds.end(), [&](const auto &a) {
+    assert(std::all_of(seeds.begin(), end, [&](const auto &a) {
         return a.get_query_view().size() >= this->config_.min_seed_length;
     }));
 
-    auto end = merge_into_unitig_mums(this->graph_, seeds.data(), seeds.data() + seeds.size(),
-                                      this->config_.min_seed_length, max_seed_length_);
-    seeds.erase(seeds.begin() + (end - seeds.data()), seeds.end());
+    seeds.erase(merge_into_unitig_mums(this->graph_, seeds.begin(), end,
+                                       this->config_.min_seed_length, max_seed_length_),
+                seeds.end());
 
-    if (discarded_seeds.size()) {
-        end = merge_into_unitig_mums(this->graph_, discarded_seeds.data(),
-                                     discarded_seeds.data() + discarded_seeds.size(),
-                                     this->config_.min_seed_length);
-        discarded_seeds.erase(discarded_seeds.begin() + (end - discarded_seeds.data()),
-                              discarded_seeds.end());
-    }
+    discarded_seeds.erase(merge_into_unitig_mums(this->graph_,
+                                                 discarded_seeds.begin(),
+                                                 discarded_seeds.end(),
+                                                 this->config_.min_seed_length),
+                          discarded_seeds.end());
 
     return get_num_char_matches_in_seeds(seeds.begin(), seeds.end());
 }

@@ -440,11 +440,12 @@ auto MEMSeeder::get_seeds() const -> std::vector<Seed> {
 template class SuffixSeeder<ExactSeeder>;
 template class SuffixSeeder<UniMEMSeeder>;
 
-Seed* merge_into_unitig_mums(const DeBruijnGraph &graph,
-                             Seed *begin,
-                             Seed *end,
-                             ssize_t min_seed_size,
-                             size_t max_seed_size) {
+template <typename It>
+It merge_into_unitig_mums(const DeBruijnGraph &graph,
+                          It begin,
+                          It end,
+                          ssize_t min_seed_size,
+                          size_t max_seed_size) {
     if (begin == end)
         return end;
 
@@ -563,10 +564,19 @@ Seed* merge_into_unitig_mums(const DeBruijnGraph &graph,
     }
 
     end = std::remove_if(begin, end, [](const auto &a) { return a.empty(); });
-    std::reverse(begin, end);
+    std::sort(begin, end, [](const auto &a, const auto &b) {
+        return a.get_query_view().begin() < b.get_query_view().begin();
+    });
 
     return end;
 }
+
+template Seed* merge_into_unitig_mums(const DeBruijnGraph &, Seed*, Seed*, ssize_t, size_t);
+template std::vector<Seed>::iterator merge_into_unitig_mums(const DeBruijnGraph &,
+                                                            std::vector<Seed>::iterator,
+                                                            std::vector<Seed>::iterator,
+                                                            ssize_t,
+                                                            size_t);
 
 } // namespace align
 } // namespace graph

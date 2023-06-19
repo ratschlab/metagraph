@@ -304,7 +304,9 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
         };
 
         assert(std::is_sorted(seeder->get_seeds().begin(), seeder->get_seeds().end(),
-            [](const auto &a, const auto &b) { return a.get_query_view().end() < b.get_query_view().end(); }
+            [](const auto &a, const auto &b) {
+                return a.get_query_view().begin() < b.get_query_view().begin();
+            }
         ));
 
         if (seeder->get_num_matches() < query.size() * config_.min_exact_match) {
