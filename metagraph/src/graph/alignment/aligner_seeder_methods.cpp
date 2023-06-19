@@ -171,6 +171,7 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
     sdsl::bit_vector found(this->query_.size(), false);
     if (this->query_.size() >= this->graph_.get_k()) {
         if (this->config_.max_seed_length >= this->graph_.get_k()) {
+            assert(this->query_nodes_.size() == this->query_.size() - this->graph_.get_k() + 1);
             seeds_ = this->BaseSeeder::get_seeds();
             for (const auto &seed : seeds_) {
                 found[seed.get_end_clipping()] = true;
