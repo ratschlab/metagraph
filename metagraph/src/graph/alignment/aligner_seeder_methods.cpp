@@ -173,7 +173,8 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
             dbg_succ.call_nodes_with_suffix_matching_longest_prefix(window,
                 [&](node_index alt_node, size_t) {
                     seeds_.emplace_back(window, std::vector<node_index>{ alt_node },
-                                        this->orientation_, this->graph_.get_k() - window.size(),
+                                        this->orientation_,
+                                        this->graph_.get_k() - window.size(),
                                         i, this->query_.size() - i - window.size());
                 },
                 this->config_.min_seed_length
@@ -324,7 +325,9 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
                 dbg_succ,
                 std::make_tuple(boss.pred_last(first - 1) + 1, last, seed_length),
                 [&](node_index match) {
-                    append_suffix_seed(j, canonical->reverse_complement(match), seed_length);
+                    append_suffix_seed(j,
+                                       canonical->reverse_complement(match),
+                                       seed_length);
                 }
             );
         }
@@ -555,7 +558,8 @@ It merge_into_unitig_mums(const DeBruijnGraph &graph,
                 || graph.traverse(nodes_i.back(), *query_i.end()) == nodes_j[a_j_node_idx]);
 
         if (overlap >= graph_k - 1
-                || graph.traverse(nodes_i.back(), *query_i.end()) == nodes_j[a_j_node_idx]) {
+                || graph.traverse(nodes_i.back(), *query_i.end())
+                    == nodes_j[a_j_node_idx]) {
             // we have a MUM
             a_i.expand(std::vector<Alignment::node_index>(nodes_j.begin() + a_j_node_idx,
                                                           nodes_j.end()));

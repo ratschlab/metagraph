@@ -91,7 +91,9 @@ void AnnotationBuffer::fetch_queued_annotations() {
             return;
         }
 
-        assert(!boss || dbg_succ->get_node_sequence(base_node).find(boss::BOSS::kSentinel) == std::string::npos);
+        assert(!boss
+            || dbg_succ->get_node_sequence(base_node).find(boss::BOSS::kSentinel)
+                == std::string::npos);
 
         Row row = AnnotatedDBG::graph_to_anno_index(base_node);
         if (canonical_ || graph_.get_mode() == DeBruijnGraph::BASIC) {
@@ -186,12 +188,14 @@ void AnnotationBuffer::fetch_queued_annotations() {
             }
 
             spelling.push_back(boss::BOSS::kSentinel);
-            graph_.call_outgoing_kmers(cur_node, [&,s=std::move(spelling)](node_index next, char c) {
-                if (c != boss::BOSS::kSentinel) {
-                    auto &[_, next_spelling] = traversal.emplace_back(next, s);
-                    next_spelling.back() = c;
+            graph_.call_outgoing_kmers(cur_node,
+                [&,s=std::move(spelling)](node_index next, char c) {
+                    if (c != boss::BOSS::kSentinel) {
+                        auto &[_, next_spelling] = traversal.emplace_back(next, s);
+                        next_spelling.back() = c;
+                    }
                 }
-            });
+            );
         }
 
         assert(discovered);
@@ -205,7 +209,10 @@ void AnnotationBuffer::fetch_queued_annotations() {
     dummy_nodes.clear();
     queued_paths_.clear();
 
-    auto push_node_labels = [&](node_index node, auto row, auto&& labels, const CoordinateSet &coords = CoordinateSet{}) {
+    auto push_node_labels = [&](node_index node,
+                                auto row,
+                                auto&& labels,
+                                const CoordinateSet &coords = CoordinateSet{}) {
         node_index base_node = AnnotatedDBG::anno_to_graph_index(row);
 
         auto node_find = node_to_cols_.find(node);
@@ -311,8 +318,11 @@ void AnnotationBuffer::fetch_queued_annotations() {
             if (cur_coords) {
                 CoordinateSet union_coords;
                 utils::match_indexed_values(labels.begin(), labels.end(), coords.begin(),
-                                            cur_labels->begin(), cur_labels->end(), cur_coords->begin(),
-                                            [&](const auto label, const auto &c1, const auto &c2) {
+                                            cur_labels->begin(), cur_labels->end(),
+                                            cur_coords->begin(),
+                                            [&](const auto label,
+                                                const auto &c1,
+                                                const auto &c2) {
                     union_labels.emplace_back(label);
                     auto &merge_coords = union_coords.emplace_back();
                     for (ssize_t d : dists) {
@@ -322,8 +332,8 @@ void AnnotationBuffer::fetch_queued_annotations() {
                 });
                 std::swap(union_coords, coords);
             } else {
-                std::set_union(labels.begin(), labels.end(), cur_labels->begin(), cur_labels->end(),
-                               std::back_inserter(union_labels));
+                std::set_union(labels.begin(), labels.end(), cur_labels->begin(),
+                               cur_labels->end(), std::back_inserter(union_labels));
             }
             std::swap(union_labels, labels);
         }
