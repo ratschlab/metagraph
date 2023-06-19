@@ -227,11 +227,22 @@ void AnnotationBuffer::fetch_queued_annotations() {
             base_node_find.value() = label_i;
         } else {
             node_find.value() = label_i;
-            if (base_node != node && base_node_find.value() != label_i) {
-                assert(base_node_find->second == nannot);
-                base_node_find.value() = label_i;
-                if (has_coordinates()) {
-                    assert(node_to_cols_.begin() + label_coords_.size() == base_node_find);
+            if (base_node != node) {
+                if (base_node_find.value() != label_i) {
+                    assert(base_node_find->second == nannot);
+                    base_node_find.value() = label_i;
+                    if (has_coordinates()) {
+                        assert(node_to_cols_.begin() + label_coords_.size() == base_node_find);
+                        label_coords_.emplace_back(coords);
+                    }
+                }
+            } else {
+                std::vector<node_index> path { node };
+                std::string spelling = spell_path(graph_, path);
+                reverse_complement_seq_path(graph_, spelling, path);
+                auto [it, inserted] = node_to_cols_.try_emplace(path[0], label_i);
+                if (has_coordinates() && inserted) {
+                    assert(node_to_cols_.begin() + label_coords_.size() == it);
                     label_coords_.emplace_back(coords);
                 }
             }
