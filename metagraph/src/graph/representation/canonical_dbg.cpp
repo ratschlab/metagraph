@@ -697,6 +697,7 @@ void CanonicalDBG
     } else {
         adjacent_incoming_from_rc(node, [&](node_index prev) {
             char c = graph_->get_node_sequence(prev)[0];
+
             if (c == boss::BOSS::kSentinel)
                 return;
 
