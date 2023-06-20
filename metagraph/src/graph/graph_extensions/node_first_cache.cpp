@@ -137,8 +137,8 @@ auto NodeFirstCache
         return 0;
     }
 
-    prefix_rc_cache_.Put(edge, rc_edge_1);
-    return edge;
+    prefix_rc_cache_.Put(edge, rc_edge_2);
+    return rc_edge_2;
 }
 
 auto NodeFirstCache
@@ -167,7 +167,7 @@ auto NodeFirstCache
     }
 
     suffix_rc_cache_.Put(edge, rc_edge_1);
-    return edge;
+    return rc_edge_1;
 }
 
 } // namespace graph
