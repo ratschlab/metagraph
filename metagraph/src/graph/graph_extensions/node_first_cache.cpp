@@ -26,10 +26,12 @@ char NodeFirstCache::get_first_char(node_index node, edge_index child_hint) cons
 void NodeFirstCache::call_incoming_kmers(node_index node,
                                          const IncomingEdgeCallback &callback) const {
     assert(dbg_succ_);
-    assert(node > 0 && node <= dbg_succ_->num_nodes());
-    if (!cache_size)
+    if (!cache_size_) {
         dbg_succ_->call_incoming_kmers(node, callback);
+        return;
+    }
 
+    assert(node > 0 && node <= dbg_succ_->num_nodes());
     const BOSS &boss = dbg_succ_->get_boss();
     edge_index edge = dbg_succ_->kmer_to_boss_index(node);
     edge_index bwd = get_parent_pair(edge).first;
