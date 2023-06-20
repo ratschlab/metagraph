@@ -242,7 +242,7 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
         ::reverse_complement(query_rc.begin(), query_rc.end());
         auto add_seeds = [&](size_t i, size_t max_seed_length) {
             std::string_view max_window_rc(query_rc.data() + i, max_seed_length);
-            tsl::hopscotch_map<node_index, tsl::hopscotch_set<size_t>> found_nodes;
+            tsl::hopscotch_set<node_index> found_nodes;
 
             const auto &boss = dbg_succ.get_boss();
             auto encoded = boss.encode(max_window_rc);
@@ -265,22 +265,20 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
             suffix_to_prefix(dbg_succ,
                 std::make_tuple(boss.pred_last(first - 1) + 1, last, seed_len),
                 [&](node_index alt_node) {
-                    found_nodes[canonical->reverse_complement(alt_node)].emplace(seed_len);
+                    found_nodes.emplace(canonical->reverse_complement(alt_node));
                 }
             );
 
-            for (const auto &[alt_node, lens] : found_nodes) {
-                for (size_t seed_len : lens) {
-                    size_t clipping = this->query_.size() - i - seed_len;
-                    std::string_view window(this->query_.data() + clipping, seed_len);
-                    assert(this->graph_.get_node_sequence(alt_node).substr(
-                        this->graph_.get_k() - window.size()) == window);
-                    bucket.emplace_back(window, std::vector<node_index>{ alt_node },
-                                        this->orientation_,
-                                        this->graph_.get_k() - window.size(),
-                                        clipping, i);
-                    ++total_seed_count;
-                }
+            for (node_index alt_node : found_nodes) {
+                size_t clipping = this->query_.size() - i - seed_len;
+                std::string_view window(this->query_.data() + clipping, seed_len);
+                assert(this->graph_.get_node_sequence(alt_node).substr(
+                    this->graph_.get_k() - window.size()) == window);
+                bucket.emplace_back(window, std::vector<node_index>{ alt_node },
+                                    this->orientation_,
+                                    this->graph_.get_k() - window.size(),
+                                    clipping, i);
+                ++total_seed_count;
             }
         };
 
