@@ -143,6 +143,9 @@ class TestingBase(unittest.TestCase):
             command += ' --count-kmers'
 
         res = subprocess.run([command], shell=True)
+        if res.returncode != 0:
+            print(res.stderr.decode())
+
         assert(res.returncode == 0)
 
         if target_anno == anno_repr:
