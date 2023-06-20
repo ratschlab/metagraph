@@ -324,14 +324,14 @@ bool BOSS::is_dummy(edge_index x) const {
             return false;
     }
 
-    if (get_node_last_value(x))
+    if (get_node_last_value(x) == kSentinelCode)
         return true;
 
     while (--i > 0) {
         CHECK_INDEX(x);
 
         x = bwd(x);
-        if (get_node_last_value(x))
+        if (get_node_last_value(x) == kSentinelCode)
             return true;
     }
 
