@@ -2,7 +2,6 @@
 
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/logger.hpp"
-#include "graph/graph_extensions/node_first_cache.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 
 
@@ -36,6 +35,9 @@ CanonicalDBG::CanonicalDBG(std::shared_ptr<const DeBruijnGraph> graph, size_t ca
         if (graph_->alphabet()[i] == boss::BOSS::kSentinel)
             has_sentinel_ = true;
     }
+
+    if (const DBGSuccinct *dbg_succ = get_dbg_succ(*graph_))
+        fallback_cache_ = std::make_unique<NodeFirstCache>(*dbg_succ, 0);
 }
 
 void CanonicalDBG
@@ -207,7 +209,7 @@ void CanonicalDBG
         }
 
         is_palindrome_cache_.Put(next, true);
-    }, spelling_hint);
+    }, spelling_hint.size() ? spelling_hint : get_node_sequence(node));
 }
 
 void CanonicalDBG
@@ -244,7 +246,7 @@ void CanonicalDBG
 
     adjacent_incoming_from_rc(node, [&](node_index next) {
         callback(next + offset_);
-    }, spelling_hint);
+    }, spelling_hint.size() ? spelling_hint : get_node_sequence(node));
 }
 
 bool CanonicalDBG::has_multiple_outgoing(node_index node) const {
@@ -306,11 +308,11 @@ void CanonicalDBG
         }
     };
 
-    if (const auto *cache = get_extension_threadsafe<NodeFirstCache>()) {
-        cache->call_incoming_kmers(node, incoming_kmer_callback);
-    } else {
-        graph_->call_incoming_kmers(node, incoming_kmer_callback);
-    }
+    const auto *cache = get_extension_threadsafe<NodeFirstCache>();
+    if (!cache)
+        cache = fallback_cache_.get();
+
+    cache->call_incoming_kmers(node, incoming_kmer_callback);
 
     if (!max_num_edges_left)
         return;
@@ -349,7 +351,7 @@ void CanonicalDBG
         }
 
         is_palindrome_cache_.Put(prev, true);
-    }, spelling_hint);
+    }, spelling_hint.size() ? spelling_hint : get_node_sequence(node));
 }
 
 void CanonicalDBG
@@ -385,7 +387,7 @@ void CanonicalDBG
 
     adjacent_outgoing_from_rc(node, [&](node_index prev) {
         callback(prev + offset_);
-    }, spelling_hint);
+    }, spelling_hint.size() ? spelling_hint : get_node_sequence(node));
 }
 
 size_t CanonicalDBG::outdegree(node_index node) const {
@@ -424,11 +426,7 @@ void CanonicalDBG::call_unitigs(const CallPath &callback,
 std::string CanonicalDBG::get_node_sequence(node_index index) const {
     assert(index <= offset_ * 2);
     node_index node = get_base_node(index);
-    const auto *cache = get_extension_threadsafe<NodeFirstCache>();
-    std::string seq = cache
-        ? cache->get_node_sequence(node)
-        : graph_->get_node_sequence(node);
-    assert(!cache || seq == graph_->get_node_sequence(node));
+    std::string seq = graph_->get_node_sequence(node);
 
     if (node != index)
         ::reverse_complement(seq.begin(), seq.end());
@@ -566,31 +564,13 @@ void CanonicalDBG
         //-> TCAAGCAGAAGACGGCATACGAGATCCTCT
         const boss::BOSS &boss = dbg_succ_->get_boss();
         auto *cache = get_extension_threadsafe<NodeFirstCache>();
-        boss::BOSS::edge_index rc_edge = 0;
+        if (!cache)
+            cache = fallback_cache_.get();
 
-        if (cache) {
-            rc_edge = cache->get_prefix_rc(node, spelling_hint);
-        } else {
-            std::string rev_seq = spelling_hint.size()
-                ? spelling_hint
-                : dbg_succ_->get_node_sequence(node);
-            assert(spelling_hint.empty()
-                    || spelling_hint == dbg_succ_->get_node_sequence(node));
-            rev_seq.pop_back();
-            assert(rev_seq.size() == boss.get_k());
-
-            if (rev_seq[0] == boss::BOSS::kSentinel)
-                return;
-
-            ::reverse_complement(rev_seq.begin(), rev_seq.end());
-            auto encoded = boss.encode(rev_seq);
-            auto [edge, edge_2, end] = boss.index_range(encoded.begin(), encoded.end());
-
-            if (end == encoded.end()) {
-                assert(edge == edge_2);
-                rc_edge = edge;
-            }
-        }
+        boss::BOSS::edge_index rc_edge = cache->get_prefix_rc(
+            dbg_succ_->kmer_to_boss_index(node),
+            spelling_hint
+        );
 
         if (!rc_edge)
             return;
@@ -632,31 +612,11 @@ void CanonicalDBG
         //->  CTCAAGCAGAAGACGGCATACGAGATCCTC
         const boss::BOSS &boss = dbg_succ_->get_boss();
         auto *cache = get_extension_threadsafe<NodeFirstCache>();
-        boss::BOSS::edge_index rc_edge = 0;
 
-        if (cache) {
-            rc_edge = cache->get_suffix_rc(node, spelling_hint);
-        } else {
-            std::string rev_seq = spelling_hint.size()
-                ? spelling_hint.substr(1)
-                : dbg_succ_->get_node_sequence(node).substr(1);
-            assert(spelling_hint.empty()
-                    || spelling_hint == dbg_succ_->get_node_sequence(node));
-
-            assert(rev_seq.size() == boss.get_k());
-
-            if (rev_seq[0] == boss::BOSS::kSentinel)
-                return;
-
-            ::reverse_complement(rev_seq.begin(), rev_seq.end());
-            auto encoded = boss.encode(rev_seq);
-            auto [edge, edge_2, end] = boss.index_range(encoded.begin(), encoded.end());
-
-            if (end == encoded.end()) {
-                assert(edge == edge_2);
-                rc_edge = edge;
-            }
-        }
+        boss::BOSS::edge_index rc_edge = (cache ? cache : fallback_cache_.get())->get_suffix_rc(
+            dbg_succ_->kmer_to_boss_index(node),
+            spelling_hint
+        );
 
         if (!rc_edge)
             return;
@@ -721,14 +681,13 @@ void CanonicalDBG
 ::call_incoming_from_rc(node_index node,
                         const std::function<void(node_index, char)> &callback,
                         const std::string &spelling_hint) const {
-    if (const auto *dbg_succ_ = get_dbg_succ(*graph_)) {
-        const boss::BOSS &boss = dbg_succ_->get_boss();
+    if (get_dbg_succ(*graph_)) {
         auto *cache = get_extension_threadsafe<NodeFirstCache>();
+        if (!cache)
+            cache = fallback_cache_.get();
+
         adjacent_incoming_from_rc(node, [&](node_index prev) {
-            char c = cache
-                ? cache->get_first_char(prev)
-                : boss.decode(boss.get_minus_k_value(
-                    dbg_succ_->kmer_to_boss_index(prev), boss.get_k() - 1).first);
+            char c = cache->get_first_char(prev);
 
             if (c == boss::BOSS::kSentinel)
                 return;

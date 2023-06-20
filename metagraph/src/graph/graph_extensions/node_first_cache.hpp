@@ -24,13 +24,12 @@ class NodeFirstCache : public SequenceGraph::GraphExtension {
     using IncomingEdgeCallback = DeBruijnGraph::IncomingEdgeCallback;
 
     NodeFirstCache()
-          : dbg_succ_(nullptr), first_cache_(1),
-            prefix_rc_cache_(1), suffix_rc_cache_(1) {}
+          : dbg_succ_(nullptr), first_cache_(0),
+            prefix_rc_cache_(0), suffix_rc_cache_(0) {}
+
     NodeFirstCache(const DBGSuccinct &graph, size_t cache_size = 100'000)
           : dbg_succ_(&graph), first_cache_(cache_size),
             prefix_rc_cache_(cache_size), suffix_rc_cache_(cache_size) {}
-
-    std::string get_node_sequence(node_index node) const;
 
     // Returns the first character of the node's sequence
     char get_first_char(node_index node, node_index child_hint = 0) const;
@@ -59,13 +58,13 @@ class NodeFirstCache : public SequenceGraph::GraphExtension {
     std::pair<edge_index, edge_index>
     get_parent_pair(edge_index edge, edge_index child_hint = 0) const;
 
-    mutable caches::fixed_sized_cache<node_index, edge_index,
+    mutable caches::fixed_sized_cache<edge_index, edge_index,
                                       caches::LRUCachePolicy<edge_index>> prefix_rc_cache_;
-    mutable caches::fixed_sized_cache<node_index, edge_index,
+    mutable caches::fixed_sized_cache<edge_index, edge_index,
                                       caches::LRUCachePolicy<edge_index>> suffix_rc_cache_;
 
-    edge_index get_prefix_rc(node_index node, const std::string &spelling_hint = "") const;
-    edge_index get_suffix_rc(node_index node, const std::string &spelling_hint = "") const;
+    edge_index get_prefix_rc(edge_index node, const std::string &spelling) const;
+    edge_index get_suffix_rc(edge_index node, const std::string &spelling) const;
 };
 
 } // namespace graph

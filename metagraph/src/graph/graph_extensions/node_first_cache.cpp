@@ -14,41 +14,11 @@ char NodeFirstCache::get_first_char(node_index node, node_index child_hint) cons
 
     boss::BOSS::TAlphabet s = boss.get_node_last_value(get_parent_pair(edge,
         child_hint ? dbg_succ_->kmer_to_boss_index(child_hint)
-                   : boss.fwd(edge)
+                   : 0
     ).second);
     assert(s == boss.get_minus_k_value(edge, boss.get_k() - 1).first);
 
     return boss.decode(s);
-}
-
-std::string NodeFirstCache::get_node_sequence(node_index node) const {
-    assert(dbg_succ_);
-    assert(node > 0 && node <= dbg_succ_->num_nodes());
-
-    boss::BOSS::edge_index x = dbg_succ_->kmer_to_boss_index(node);
-
-    if (!first_cache_.TryGet(x))
-        return dbg_succ_->get_node_sequence(node);
-
-    const auto &boss = dbg_succ_->get_boss();
-
-    std::vector<boss::BOSS::TAlphabet> ret(boss.get_k() + 1);
-    ret.back() = boss.get_W(x) % boss.alph_size;
-
-    size_t i = boss.get_k();
-    ret[--i] = boss.get_node_last_value(x);
-
-    boss::BOSS::edge_index last_edge = 0;
-    while (i > 0) {
-        boss::BOSS::edge_index bwd = get_parent_pair(x, last_edge).first;
-        last_edge = x;
-        x = bwd;
-        ret[--i] = boss.get_node_last_value(x);
-    }
-
-    assert(boss.decode(ret) == dbg_succ_->get_node_sequence(node));
-
-    return boss.decode(ret);
 }
 
 void NodeFirstCache::call_incoming_kmers(node_index node,
@@ -59,14 +29,7 @@ void NodeFirstCache::call_incoming_kmers(node_index node,
     assert(node > 0 && node <= dbg_succ_->num_nodes());
 
     edge_index edge = dbg_succ_->kmer_to_boss_index(node);
-
-    edge_index bwd = 0;
-    if (auto fetch = first_cache_.TryGet(edge)) {
-        assert(fetch->first == boss.bwd(edge));
-        bwd = fetch->first;
-    } else {
-        bwd = boss.bwd(edge);
-    }
+    edge_index bwd = get_parent_pair(edge).first;
 
     boss.call_incoming_to_target(bwd, boss.get_node_last_value(edge),
         [&](boss::BOSS::edge_index incoming_boss_edge) {
@@ -144,65 +107,61 @@ auto NodeFirstCache::get_parent_pair(edge_index edge, edge_index child_hint) con
 }
 
 auto NodeFirstCache
-::get_prefix_rc(node_index node, const std::string &spelling_hint) const -> edge_index {
-    if (auto fetch = prefix_rc_cache_.TryGet(node))
+::get_prefix_rc(edge_index edge, const std::string &spelling) const -> edge_index {
+    if (auto fetch = prefix_rc_cache_.TryGet(edge))
         return *fetch;
 
     assert(dbg_succ_);
     const boss::BOSS &boss = dbg_succ_->get_boss();
 
-    std::string rev_seq = spelling_hint.size()
-        ? spelling_hint
-        : get_node_sequence(node);
+    assert(spelling.size() == dbg_succ_->get_k());
+    std::string rev_seq = spelling;
     rev_seq.pop_back();
-    assert(rev_seq.size() == boss.get_k());
 
     if (rev_seq[0] == boss::BOSS::kSentinel) {
-        prefix_rc_cache_.Put(node, 0);
+        prefix_rc_cache_.Put(edge, 0);
         return 0;
     }
 
     ::reverse_complement(rev_seq.begin(), rev_seq.end());
     auto encoded = boss.encode(rev_seq);
-    auto [edge, edge_2, end] = boss.index_range(encoded.begin(), encoded.end());
+    auto [rc_edge_1, rc_edge_2, end] = boss.index_range(encoded.begin(), encoded.end());
 
     if (end != encoded.end()) {
-        prefix_rc_cache_.Put(node, 0);
+        prefix_rc_cache_.Put(edge, 0);
         return 0;
     }
 
-    prefix_rc_cache_.Put(node, edge);
+    prefix_rc_cache_.Put(edge, rc_edge_1);
     return edge;
 }
 
 auto NodeFirstCache
-::get_suffix_rc(node_index node, const std::string &spelling_hint) const -> edge_index {
-    if (auto fetch = suffix_rc_cache_.TryGet(node))
+::get_suffix_rc(edge_index edge, const std::string &spelling) const -> edge_index {
+    if (auto fetch = suffix_rc_cache_.TryGet(edge))
         return *fetch;
 
     assert(dbg_succ_);
     const boss::BOSS &boss = dbg_succ_->get_boss();
 
-    std::string rev_seq = spelling_hint.size()
-        ? spelling_hint.substr(1)
-        : get_node_sequence(node).substr(1);
-    assert(rev_seq.size() == boss.get_k());
+    assert(spelling.size() == dbg_succ_->get_k());
+    std::string rev_seq = spelling.substr(1);
 
     if (rev_seq[0] == boss::BOSS::kSentinel) {
-        suffix_rc_cache_.Put(node, 0);
+        suffix_rc_cache_.Put(edge, 0);
         return 0;
     }
 
     ::reverse_complement(rev_seq.begin(), rev_seq.end());
     auto encoded = boss.encode(rev_seq);
-    auto [edge, edge_2, end] = boss.index_range(encoded.begin(), encoded.end());
+    auto [rc_edge_1, rc_edge_2, end] = boss.index_range(encoded.begin(), encoded.end());
 
     if (end != encoded.end()) {
-        suffix_rc_cache_.Put(node, 0);
+        suffix_rc_cache_.Put(edge, 0);
         return 0;
     }
 
-    suffix_rc_cache_.Put(node, edge);
+    suffix_rc_cache_.Put(edge, rc_edge_1);
     return edge;
 }
 

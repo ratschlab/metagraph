@@ -9,6 +9,7 @@
 
 #include "common/vector.hpp"
 #include "graph/representation/base/dbg_wrapper.hpp"
+#include "graph/graph_extensions/node_first_cache.hpp"
 
 
 namespace mtg {
@@ -140,6 +141,10 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
     bool has_sentinel_;
 
     std::array<size_t, 256> alphabet_encoder_;
+
+    // a thread-safe 0-size NodeFirstCache to use as a fallback if another NodeFirstCache
+    // extension is not available
+    mutable std::unique_ptr<NodeFirstCache> fallback_cache_;
 
     void adjacent_outgoing_from_rc(node_index node,
                                    const std::function<void(node_index)> &callback,
