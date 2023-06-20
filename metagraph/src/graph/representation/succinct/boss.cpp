@@ -297,47 +297,45 @@ void BOSS::serialize(Chunk&& chunk, std::ofstream &out, State state) {
 
 bool BOSS::is_dummy(edge_index x) const {
     CHECK_INDEX(x);
-    auto seq = get_node_seq(x);
-    return std::find(seq.begin(), seq.end(), kSentinelCode) != seq.end()
-        || !get_W(x);
-    // if (!get_W(x))
-    //     return true;
 
-    // size_t i = k_;
+    if (!get_W(x))
+        return true;
 
-    // // TODO: benchmark for short suffixes where select0 might actually be slower
-    // if (indexed_suffix_length_) {
-    //     while (i > indexed_suffix_length_) {
-    //         CHECK_INDEX(x);
+    size_t i = k_;
 
-    //         if (!get_node_last_value(x))
-    //             return true;
+    // TODO: benchmark for short suffixes where select0 might actually be slower
+    if (indexed_suffix_length_) {
+        while (i-- > indexed_suffix_length_) {
+            CHECK_INDEX(x);
 
-    //         x = bwd(x);
-    //     }
+            if (get_node_last_value(x) == kSentinelCode)
+                return true;
 
-    //     // find end of range
-    //     // 0001001000010100011...
-    //     //    [  ]    [ ]   []
-    //     uint64_t index = indexed_suffix_ranges_slct0_(x + 1) - x;
+            x = bwd(x);
+        }
 
-    //     // check if the index is in an indexed range (k-mer without dummy characters)
-    //     if (index % 2)
-    //         return false;
-    // }
+        // find end of range
+        // 0001001000010100011...
+        //    [  ]    [ ]   []
+        uint64_t index = indexed_suffix_ranges_slct0_(x + 1) - x;
 
-    // if (!get_node_last_value(x))
-    //     return true;
+        // check if the index is in an indexed range (k-mer without dummy characters)
+        if (index % 2)
+            return false;
+    }
 
-    // while (i > 0) {
-    //     CHECK_INDEX(x);
+    if (get_node_last_value(x))
+        return true;
 
-    //     x = bwd(x);
-    //     if (!get_node_last_value(x))
-    //         return true;
-    // }
+    while (--i > 0) {
+        CHECK_INDEX(x);
 
-    // return false;
+        x = bwd(x);
+        if (get_node_last_value(x))
+            return true;
+    }
+
+    return false;
 }
 
 bool BOSS::load(std::ifstream &instream) {
