@@ -191,10 +191,17 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
         }
     }
 
+    tsl::hopscotch_set<node_index> last_nodes;
+    tsl::hopscotch_set<node_index> cur_nodes;
     auto add_seeds = [&](size_t i, size_t max_seed_length) {
+        cur_nodes.clear();
         std::string_view max_window(this->query_.data() + i, max_seed_length);
         dbg_succ.call_nodes_with_suffix_matching_longest_prefix(max_window,
             [&](node_index alt_node, size_t seed_len) {
+                if (last_nodes.count(alt_node))
+                    return;
+
+                cur_nodes.emplace(alt_node);
                 std::string_view window(this->query_.data() + i, seed_len);
                 size_t end_clipping = this->query_.size() - i - window.size();
                 if (found[end_clipping])
@@ -208,6 +215,7 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
             },
             this->config_.min_seed_length
         );
+        std::swap(last_nodes, cur_nodes);
     };
 
     size_t max_seed_length = std::min(this->graph_.get_k() - 1,
