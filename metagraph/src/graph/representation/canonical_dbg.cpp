@@ -190,6 +190,10 @@ void CanonicalDBG
     // for each n, check for nAGCCA. If found, define and store the index for
     // TGGCTrc(n) as index(nAGCCA) + offset_
     call_incoming_from_rc(node, [&](node_index next, char c) {
+        assert(c == get_node_sequence(next)[0]);
+
+        c = complement(c);
+        assert(c == get_node_sequence(next + offset_).back());
         auto s = alphabet_encoder_[c];
 
         if (children[s] == npos) {
@@ -203,7 +207,7 @@ void CanonicalDBG
 
         if (k_odd_) {
             logger->error(
-                "Primary graph contains both forward and reverse complement: {} {} -> {} {}\t{} {}",
+                "Forward traversal: Primary graph contains both forward and reverse complement: {} {} -> {} {}\t{} {}",
                 node, get_node_sequence(node), children[s], get_node_sequence(children[s]),
                 next, get_node_sequence(next));
             exit(1);
@@ -335,6 +339,10 @@ void CanonicalDBG
     // for each n, check for TGGCTn. If found, define and store the index for
     // rc(n)AGCCA as index(TGGCTn) + offset_
     call_outgoing_from_rc(node, [&](node_index prev, char c) {
+        assert(c == get_node_sequence(prev).back());
+
+        c = complement(c);
+        assert(c == get_node_sequence(prev + offset_)[0]);
         auto s = alphabet_encoder_[c];
 
         if (parents[s] == npos) {
@@ -348,7 +356,7 @@ void CanonicalDBG
 
         if (k_odd_) {
             logger->error(
-                "Primary graph contains both forward and reverse complement: {} {} <- {} {}\t{} {}",
+                "Bachward traversal: Primary graph contains both forward and reverse complement: {} {} <- {} {}\t{} {}",
                 node, get_node_sequence(node), parents[s], get_node_sequence(parents[s]),
                 prev, get_node_sequence(prev)
             );
@@ -667,11 +675,8 @@ void CanonicalDBG
         const boss::BOSS &boss = dbg_succ_->get_boss();
         adjacent_outgoing_from_rc(node, [&](node_index next) {
             char c = boss.decode(boss.get_W(dbg_succ_->kmer_to_boss_index(next)) % boss.alph_size);
-
-            if (c == boss::BOSS::kSentinel)
-                return;
-
-            callback(next, complement(c));
+            if (c != boss::BOSS::kSentinel)
+                callback(next, c);
         }, spelling_hint);
 
         return;
@@ -679,11 +684,8 @@ void CanonicalDBG
 
     adjacent_outgoing_from_rc(node, [&](node_index next) {
         char c = graph_->get_node_sequence(next).back();
-
-        if (c == boss::BOSS::kSentinel)
-            return;
-
-        callback(next, complement(c));
+        if (c != boss::BOSS::kSentinel)
+            callback(next, c);
     }, spelling_hint);
 }
 
@@ -698,11 +700,8 @@ void CanonicalDBG
 
         adjacent_incoming_from_rc(node, [&](node_index prev, edge_index rc_edge) {
             char c = cache->get_first_char(prev, rc_edge);
-
-            if (c == boss::BOSS::kSentinel)
-                return;
-
-            callback(prev, complement(c));
+            if (c != boss::BOSS::kSentinel)
+                callback(prev, c);
         }, spelling_hint);
 
         return;
@@ -710,11 +709,8 @@ void CanonicalDBG
 
     adjacent_incoming_from_rc(node, [&](node_index prev, edge_index) {
         char c = graph_->get_node_sequence(prev)[0];
-
-        if (c == boss::BOSS::kSentinel)
-            return;
-
-        callback(prev, complement(c));
+        if (c != boss::BOSS::kSentinel)
+            callback(prev, c);
     }, spelling_hint);
 }
 

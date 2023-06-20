@@ -13,7 +13,7 @@ char NodeFirstCache::get_first_char(node_index node, edge_index child_hint) cons
 
     edge_index edge = dbg_succ_->kmer_to_boss_index(node);
     if (!cache_size_)
-        return boss.get_minus_k_value(edge, boss.get_k() - 1).first;
+        return boss.decode(boss.get_minus_k_value(edge, boss.get_k() - 1).first);
 
     assert(boss.bwd(edge) == get_parent_pair(edge).first);
 
