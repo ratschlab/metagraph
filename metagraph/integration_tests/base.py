@@ -142,7 +142,7 @@ class TestingBase(unittest.TestCase):
         if with_counts:
             command += ' --count-kmers'
 
-        res = subprocess.run([command], shell=True)
+        res = subprocess.run([command], shell=True, stdout=PIPE, stderr=PIPE)
         if res.returncode != 0:
             print(res.stderr.decode())
 
