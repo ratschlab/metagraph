@@ -5,17 +5,19 @@
 namespace mtg {
 namespace graph {
 
-char NodeFirstCache::get_first_char(node_index node, node_index child_hint) const {
+using namespace boss;
+
+char NodeFirstCache::get_first_char(node_index node, edge_index child_hint) const {
     assert(dbg_succ_);
-    const boss::BOSS &boss = dbg_succ_->get_boss();
+    const BOSS &boss = dbg_succ_->get_boss();
 
     edge_index edge = dbg_succ_->kmer_to_boss_index(node);
+    if (!cache_size_)
+        return boss.get_minus_k_value(edge, boss.get_k() - 1).first;
+
     assert(boss.bwd(edge) == get_parent_pair(edge).first);
 
-    boss::BOSS::TAlphabet s = boss.get_node_last_value(get_parent_pair(edge,
-        child_hint ? dbg_succ_->kmer_to_boss_index(child_hint)
-                   : 0
-    ).second);
+    BOSS::TAlphabet s = boss.get_node_last_value(get_parent_pair(edge, child_hint).second);
     assert(s == boss.get_minus_k_value(edge, boss.get_k() - 1).first);
 
     return boss.decode(s);
@@ -24,21 +26,22 @@ char NodeFirstCache::get_first_char(node_index node, node_index child_hint) cons
 void NodeFirstCache::call_incoming_kmers(node_index node,
                                          const IncomingEdgeCallback &callback) const {
     assert(dbg_succ_);
-    const boss::BOSS &boss = dbg_succ_->get_boss();
-
     assert(node > 0 && node <= dbg_succ_->num_nodes());
+    if (!cache_size)
+        dbg_succ_->call_incoming_kmers(node, callback);
 
+    const BOSS &boss = dbg_succ_->get_boss();
     edge_index edge = dbg_succ_->kmer_to_boss_index(node);
     edge_index bwd = get_parent_pair(edge).first;
 
     boss.call_incoming_to_target(bwd, boss.get_node_last_value(edge),
-        [&](boss::BOSS::edge_index incoming_boss_edge) {
+        [&](BOSS::edge_index incoming_boss_edge) {
             assert(boss.get_W(incoming_boss_edge) % boss.alph_size
                     == boss.get_node_last_value(edge));
 
             node_index prev = dbg_succ_->boss_to_kmer_index(incoming_boss_edge);
             if (prev != DeBruijnGraph::npos)
-                callback(prev, get_first_char(prev, node));
+                callback(prev, get_first_char(prev, edge));
         }
     );
 }
@@ -65,7 +68,7 @@ bool NodeFirstCache::is_compatible(const SequenceGraph &graph, bool verbose) con
 auto NodeFirstCache::get_parent_pair(edge_index edge, edge_index child_hint) const
         -> std::pair<edge_index, edge_index> {
     assert(dbg_succ_);
-    const boss::BOSS &boss = dbg_succ_->get_boss();
+    const BOSS &boss = dbg_succ_->get_boss();
 
     if (boss.get_k() == 1)
         return std::make_pair(boss.bwd(edge), edge);
@@ -112,13 +115,13 @@ auto NodeFirstCache
         return *fetch;
 
     assert(dbg_succ_);
-    const boss::BOSS &boss = dbg_succ_->get_boss();
+    const BOSS &boss = dbg_succ_->get_boss();
 
     assert(spelling.size() == dbg_succ_->get_k());
     std::string rev_seq = spelling;
     rev_seq.pop_back();
 
-    if (rev_seq[0] == boss::BOSS::kSentinel) {
+    if (rev_seq[0] == BOSS::kSentinel) {
         prefix_rc_cache_.Put(edge, 0);
         return 0;
     }
@@ -142,12 +145,12 @@ auto NodeFirstCache
         return *fetch;
 
     assert(dbg_succ_);
-    const boss::BOSS &boss = dbg_succ_->get_boss();
+    const BOSS &boss = dbg_succ_->get_boss();
 
     assert(spelling.size() == dbg_succ_->get_k());
     std::string rev_seq = spelling.substr(1);
 
-    if (rev_seq[0] == boss::BOSS::kSentinel) {
+    if (rev_seq[0] == BOSS::kSentinel) {
         suffix_rc_cache_.Put(edge, 0);
         return 0;
     }

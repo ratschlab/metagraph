@@ -22,17 +22,18 @@ class NodeFirstCache : public SequenceGraph::GraphExtension {
   public:
     using node_index = typename SequenceGraph::node_index;
     using IncomingEdgeCallback = DeBruijnGraph::IncomingEdgeCallback;
+    using edge_index = boss::BOSS::edge_index;
 
     NodeFirstCache()
-          : dbg_succ_(nullptr), first_cache_(0),
+          : dbg_succ_(nullptr), cache_size_(0), first_cache_(0),
             prefix_rc_cache_(0), suffix_rc_cache_(0) {}
 
     NodeFirstCache(const DBGSuccinct &graph, size_t cache_size = 100'000)
-          : dbg_succ_(&graph), first_cache_(cache_size),
+          : dbg_succ_(&graph), cache_size_(cache_size), first_cache_(cache_size),
             prefix_rc_cache_(cache_size), suffix_rc_cache_(cache_size) {}
 
     // Returns the first character of the node's sequence
-    char get_first_char(node_index node, node_index child_hint = 0) const;
+    char get_first_char(node_index node, edge_index child_hint = 0) const;
 
     void call_incoming_kmers(node_index node, const IncomingEdgeCallback &callback) const;
 
@@ -41,10 +42,11 @@ class NodeFirstCache : public SequenceGraph::GraphExtension {
 
     bool is_compatible(const SequenceGraph &graph, bool verbose = true) const;
 
+    size_t max_size() const { return cache_size_; }
+
   private:
     const DBGSuccinct *dbg_succ_;
-
-    using edge_index = boss::BOSS::edge_index;
+    size_t cache_size_;
 
     // Maps a BOSS edge e to the pair (bwd(e), bwd^(k-1)(e)), where k is the node
     // size in a BOSS graph.
@@ -65,6 +67,8 @@ class NodeFirstCache : public SequenceGraph::GraphExtension {
 
     edge_index get_prefix_rc(edge_index node, const std::string &spelling) const;
     edge_index get_suffix_rc(edge_index node, const std::string &spelling) const;
+
+    void call_incoming_kmers_no_mask(edge_index edge, const IncomingEdgeCallback &callback) const;
 };
 
 } // namespace graph

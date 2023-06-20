@@ -9,6 +9,7 @@ namespace mtg {
 namespace graph {
 
 using mtg::common::logger;
+using edge_index = boss::BOSS::edge_index;
 
 inline const DBGSuccinct* get_dbg_succ(const DeBruijnGraph &graph) {
     const DeBruijnGraph *base_graph = &graph;
@@ -244,7 +245,7 @@ void CanonicalDBG
     if (!max_num_edges_left)
         return;
 
-    adjacent_incoming_from_rc(node, [&](node_index next) {
+    adjacent_incoming_from_rc(node, [&](node_index next, edge_index) {
         callback(next + offset_);
     }, spelling_hint.size() ? spelling_hint : get_node_sequence(node));
 }
@@ -604,7 +605,7 @@ void CanonicalDBG
 
 void CanonicalDBG
 ::adjacent_incoming_from_rc(node_index node,
-                            const std::function<void(node_index)> &callback,
+                            const std::function<void(node_index, edge_index)> &callback,
                             const std::string &spelling_hint) const {
     //        rshift    rc
     // ATGGCT -> TGGCT* -> *AGCCA
@@ -630,7 +631,7 @@ void CanonicalDBG
             [&](boss::BOSS::edge_index incoming_boss_edge) {
                 node_index next = dbg_succ_->boss_to_kmer_index(incoming_boss_edge);
                 if (next != DeBruijnGraph::npos)
-                    callback(next);
+                    callback(next, rc_edge);
             }
         );
 
@@ -649,7 +650,7 @@ void CanonicalDBG
             rev_seq[0] = complement(alphabet[c]);
             node_index next = graph_->kmer_to_node(rev_seq);
             if (next != DeBruijnGraph::npos)
-                callback(next);
+                callback(next, 0);
         }
     }
 }
@@ -686,25 +687,13 @@ void CanonicalDBG
 ::call_incoming_from_rc(node_index node,
                         const std::function<void(node_index, char)> &callback,
                         const std::string &spelling_hint) const {
-    if (const auto *dbg_succ_ = get_dbg_succ(*graph_)) {
+    if (get_dbg_succ(*graph_)) {
         auto *cache = get_extension_threadsafe<NodeFirstCache>();
         if (!cache)
             cache = fallback_cache_.get();
 
-        if (!dbg_succ_->get_mask()) {
-            if (auto rc_edge = cache->get_suffix_rc(dbg_succ_->kmer_to_boss_index(node),
-                                                    spelling_hint)) {
-                assert(rc_edge == dbg_succ_.boss_to_kmer_index(rc_edge));
-                cache->call_incoming_kmers(rc_edge, callback);
-            }
-
-            return;
-        }
-
-        // if the graph has a mask, then we need to use this just in case
-        // the reverse complement node is a dummy sink
-        adjacent_incoming_from_rc(node, [&](node_index prev) {
-            char c = cache->get_first_char(prev);
+        adjacent_incoming_from_rc(node, [&](node_index prev, edge_index rc_edge) {
+            char c = cache->get_first_char(prev, rc_edge);
 
             if (c == boss::BOSS::kSentinel)
                 return;
@@ -715,7 +704,7 @@ void CanonicalDBG
         return;
     }
 
-    adjacent_incoming_from_rc(node, [&](node_index prev) {
+    adjacent_incoming_from_rc(node, [&](node_index prev, edge_index) {
         char c = graph_->get_node_sequence(prev)[0];
 
         if (c == boss::BOSS::kSentinel)
