@@ -210,7 +210,7 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
         );
     };
 
-    size_t max_seed_length = std::min(this->graph_.get_k(),
+    size_t max_seed_length = std::min(this->graph_.get_k() - 1,
                                       this->config_.max_seed_length);
     size_t i = 0;
     for ( ; i + max_seed_length <= this->query_.size(); ++i) {
@@ -237,26 +237,18 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
             std::string_view max_window_rc(query_rc.data() + i, max_seed_length);
             tsl::hopscotch_map<node_index, tsl::hopscotch_set<size_t>> found_nodes;
 
-            dbg_succ.call_nodes_with_suffix_matching_longest_prefix(max_window_rc,
-                [&](node_index rc_alt_node, size_t seed_len) {
-                    const auto &boss = dbg_succ.get_boss();
-                    auto encoded = boss.encode(std::string_view(max_window_rc.data(),
-                                                                seed_len));
-                    auto [first, last, end] = boss.index_range(encoded.begin(),
-                                                               encoded.end());
-                    if (end != encoded.end())
-                        return;
+            const auto &boss = dbg_succ.get_boss();
+            auto encoded = boss.encode(max_window_rc);
+            auto [first, last, end] = boss.index_range(encoded.begin(), encoded.end());
+            size_t seed_len = end - encoded.begin();
+            if (seed_len < this->config_.min_seed_length)
+                return;
 
-                    suffix_to_prefix(
-                        dbg_succ,
-                        std::make_tuple(boss.pred_last(first - 1) + 1, last, seed_len),
-                        [&](node_index alt_node) {
-                            found_nodes[canonical->reverse_complement(alt_node)].emplace(seed_len);
-                        }
-                    );
-
-                },
-                this->config_.min_seed_length
+            suffix_to_prefix(dbg_succ,
+                std::make_tuple(boss.pred_last(first - 1) + 1, last, seed_len),
+                [&](node_index alt_node) {
+                    found_nodes[canonical->reverse_complement(alt_node)].emplace(seed_len);
+                }
             );
 
             for (const auto &[alt_node, lens] : found_nodes) {
