@@ -313,7 +313,11 @@ void CanonicalDBG
     if (!cache)
         cache = fallback_cache_.get();
 
-    cache->call_incoming_kmers(node, incoming_kmer_callback);
+    if (cache) {
+        cache->call_incoming_kmers(node, incoming_kmer_callback);
+    } else {
+        graph_->call_incoming_kmers(node, incoming_kmer_callback);
+    }
 
     if (!max_num_edges_left)
         return;
