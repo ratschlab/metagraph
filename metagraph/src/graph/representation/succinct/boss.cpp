@@ -297,6 +297,9 @@ void BOSS::serialize(Chunk&& chunk, std::ofstream &out, State state) {
 
 bool BOSS::is_dummy(edge_index x) const {
     CHECK_INDEX(x);
+#ifndef NDEBUG
+    edge_index orig_x = x;
+#endif
 
     if (!get_W(x))
         return true;
@@ -308,8 +311,10 @@ bool BOSS::is_dummy(edge_index x) const {
         while (i-- > indexed_suffix_length_) {
             CHECK_INDEX(x);
 
-            if (get_node_last_value(x) == kSentinelCode)
+            if (get_node_last_value(x) == kSentinelCode) {
+                assert(get_node_str(orig_x).find(kSentinel) != std::string::npos);
                 return true;
+            }
 
             x = bwd(x);
         }
@@ -320,21 +325,28 @@ bool BOSS::is_dummy(edge_index x) const {
         uint64_t index = indexed_suffix_ranges_slct0_(x + 1) - x;
 
         // check if the index is in an indexed range (k-mer without dummy characters)
-        if (index % 2)
+        if (index % 2) {
+            assert(get_node_str(orig_x).find(kSentinel) == std::string::npos);
             return false;
+        }
     }
 
-    if (get_node_last_value(x) == kSentinelCode)
+    if (get_node_last_value(x) == kSentinelCode) {
+        assert(get_node_str(orig_x).find(kSentinel) != std::string::npos);
         return true;
+    }
 
     while (--i > 0) {
         CHECK_INDEX(x);
 
         x = bwd(x);
-        if (get_node_last_value(x) == kSentinelCode)
+        if (get_node_last_value(x) == kSentinelCode) {
+            assert(get_node_str(orig_x).find(kSentinel) != std::string::npos);
             return true;
+        }
     }
 
+    assert(get_node_str(orig_x).find(kSentinel) == std::string::npos);
     return false;
 }
 

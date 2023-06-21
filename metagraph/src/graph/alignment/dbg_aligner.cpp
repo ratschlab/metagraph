@@ -627,15 +627,9 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
         }
 
         auto fwd_seeds = forward_seeder.get_seeds();
-        std::sort(fwd_seeds.begin(), fwd_seeds.end(), [](const auto &a, const auto &b) {
-            return a.get_query_view().begin() < b.get_query_view().begin();
-        });
 
 #if ! _PROTEIN_GRAPH
         auto bwd_seeds = reverse_seeder.get_seeds();
-        std::sort(bwd_seeds.begin(), bwd_seeds.end(), [](const auto &a, const auto &b) {
-            return a.get_query_view().begin() < b.get_query_view().begin();
-        });
 #else
         std::vector<Seed> bwd_seeds;
         std::ignore = reverse_seeder;
@@ -722,7 +716,13 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
 #endif
 
     auto fwd_seeds = forward_seeder.get_alignments();
+    std::sort(fwd_seeds.begin(), fwd_seeds.end(), [](const auto &a, const auto &b) {
+        return a.get_query_view().begin() < b.get_query_view().begin();
+    });
     auto bwd_seeds = reverse_seeder.get_alignments();
+    std::sort(bwd_seeds.begin(), bwd_seeds.end(), [](const auto &a, const auto &b) {
+        return a.get_query_view().begin() < b.get_query_view().begin();
+    });
 
     RCDBG rc_dbg(std::shared_ptr<const DeBruijnGraph>(
                     std::shared_ptr<const DeBruijnGraph>(), &graph_));
