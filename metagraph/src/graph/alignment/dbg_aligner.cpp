@@ -124,6 +124,8 @@ Alignment filter_seed(const Alignment &prev, Alignment &a) {
             return filtered;
         }
 
+        std::swap(a.label_columns, diff);
+
         Alignment filtered = a;
         if (intersection.size())
             std::swap(filtered.label_columns, intersection);
@@ -167,10 +169,13 @@ Alignment filter_seed(const Alignment &prev, Alignment &a) {
         return filtered;
     }
 
+    std::swap(a.label_columns, diff);
+    std::swap(a.label_coordinates, diff_coords);
+
     Alignment filtered = a;
     if (intersection.size()) {
-        std::swap(a.label_columns, intersection);
-        std::swap(a.label_coordinates, intersection_coords);
+        std::swap(filtered.label_columns, intersection);
+        std::swap(filtered.label_coordinates, intersection_coords);
     }
 
     return filtered;
