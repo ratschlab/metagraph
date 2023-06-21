@@ -167,7 +167,7 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
     if (dbg_succ.get_mask())
         logger->warn("Graph has a dummy k-mer mask. Seeds containing dummy k-mers will be missed.");
 
-    std::vector<std::vector<Seed>> found_seeds(this->query_.size() - this->config_.min_seed_length);
+    std::vector<std::vector<Seed>> found_seeds(this->query_.size() - this->config_.min_seed_length + 1);
     size_t total_seed_count = 0;
     if (this->query_.size() >= this->graph_.get_k()) {
         if (this->config_.max_seed_length >= this->graph_.get_k()) {
