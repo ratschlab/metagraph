@@ -2,10 +2,10 @@
 #define __ALIGNER_AGGREGATOR_HPP__
 
 #include <priority_deque.hpp>
+#include <tsl/hopscotch_map.h>
 
 #include "alignment.hpp"
 #include "common/algorithms.hpp"
-#include "common/vector_map.hpp"
 #include "common/utils/template_utils.hpp"
 
 
@@ -23,9 +23,10 @@ class PriorityDeque : public boost::container::priority_deque<T, Container, Comp
 
 template <class AlignmentCompare>
 class AlignmentAggregator {
+    typedef std::shared_ptr<Alignment> value_type;
+
     struct ValCmp {
-        bool operator()(const std::shared_ptr<Alignment> &a,
-                        const std::shared_ptr<Alignment> &b) const {
+        bool operator()(const value_type &a, const value_type &b) const {
             return base_cmp_(*a, *b);
         }
 
@@ -35,9 +36,7 @@ class AlignmentAggregator {
   public:
     typedef Alignment::score_t score_t;
     typedef Alignment::Column Column;
-    typedef Alignment::Columns Columns;
-    typedef PriorityDeque<std::shared_ptr<Alignment>,
-                          std::vector<std::shared_ptr<Alignment>>, ValCmp> PathQueue;
+    typedef PriorityDeque<value_type, std::vector<value_type>, ValCmp> PathQueue;
 
     explicit AlignmentAggregator(const DBGAlignerConfig &config) : config_(config) {
         assert(config_.num_alternative_paths);
@@ -51,12 +50,15 @@ class AlignmentAggregator {
 
     size_t num_aligned_labels() const { return path_queue_.size(); }
 
-    void clear() { path_queue_.clear(); unlabeled_.clear(); }
+    void clear() {
+        path_queue_.clear();
+        best_alignment_.reset();
+    }
 
   private:
     const DBGAlignerConfig &config_;
-    VectorMap<Column, PathQueue> path_queue_;
-    PathQueue unlabeled_;
+    tsl::hopscotch_map<Column, PathQueue> path_queue_;
+    value_type best_alignment_;
     ValCmp cmp_;
 };
 
@@ -65,71 +67,17 @@ template <class AlignmentCompare>
 inline bool AlignmentAggregator<AlignmentCompare>::add_alignment(Alignment&& alignment) {
     // first, wrap the alignment so that duplicates are not stored in each per-label queue
     auto a = std::make_shared<Alignment>(std::move(alignment));
+    if (!best_alignment_ || cmp_(best_alignment_, a))
+        best_alignment_ = a;
 
-    // if nothing has been added to the queue so far, add the alignment
-    if (unlabeled_.empty()) {
-        unlabeled_.emplace(a);
-        for (Column c : a->label_columns) {
-            path_queue_[c].emplace(a);
-        }
-        return true;
-    }
+    if (a->label_columns.empty()) {
+        path_queue_[std::numeric_limits<Column>::max()].emplace(a);
 
-    // if the score is less than the cutoff, don't add it
-    if (a->get_score() < get_global_cutoff())
-        return false;
-
-    // helper for adding alignments to the queue
-    auto push_to_queue = [&](auto &queue) {
-        // check for duplicates
-        for (const auto &aln : queue) {
-            if (*a == *aln)
-                return config_.post_chain_alignments;
-        }
-        // If post-alignment chaining is requested, never skip any alignments
-        if (config_.post_chain_alignments || queue.size() < config_.num_alternative_paths) {
-            queue.emplace(a);
-            return true;
-        }
-        // the queue is full
-        assert(queue.size() == config_.num_alternative_paths);
-        if (cmp_(a, queue.minimum()))
-            return false;
-
-        queue.update(queue.begin(), a);
-        return true;
-    };
-
-    // if we are in the unlabeled case, only consider the global queue
-    if (a->label_columns.empty())
-        return push_to_queue(unlabeled_);
-
-    // if an incoming alignment has labels, and we haven't encountered a labeled
-    // alignment yet, we only need the ncol queue for fetching the global minimum,
-    // so shrink it to only one element
-    if (path_queue_.empty()) {
-        if (unlabeled_.size() > 1) {
-            // maximum is stored at begin+1
-            auto max = std::move(*(unlabeled_.begin() + 1));
-            unlabeled_.clear();
-            unlabeled_.push(std::move(max));
+    } else {
+        for (Column column : a->label_columns) {
+            path_queue_[column].emplace(a);
         }
     }
-    assert(unlabeled_.size() == 1);
-
-    // add the alignment to its labeled queues
-    bool added = false;
-    for (Column c : a->label_columns) {
-        added |= push_to_queue(path_queue_[c]);
-    }
-
-    if (!added)
-        return false;
-
-    // TODO: maintain a pointer to the best alignment
-    // if this is the best alignment so far, update the global queue
-    if (!cmp_(a, unlabeled_.maximum()))
-        unlabeled_.update(unlabeled_.begin(), a);
 
     return true;
 }
@@ -137,35 +85,45 @@ inline bool AlignmentAggregator<AlignmentCompare>::add_alignment(Alignment&& ali
 template <class AlignmentCompare>
 inline auto AlignmentAggregator<AlignmentCompare>
 ::get_global_cutoff() const -> score_t {
-    if (unlabeled_.empty())
+    if (!best_alignment_)
         return config_.ninf;
 
-    score_t cur_max = unlabeled_.maximum()->get_score();
-
+    score_t cur_max = best_alignment_->get_score();
     return cur_max > 0 ? cur_max * config_.rel_score_cutoff : cur_max;
 }
 
 template <class AlignmentCompare>
 inline std::vector<Alignment> AlignmentAggregator<AlignmentCompare>::get_alignments() {
-    // move all alignments to one vector
-    std::vector<std::shared_ptr<Alignment>> ptrs;
-    for (const auto &[_, alns] : path_queue_) {
-        std::copy(alns.begin(), alns.end(), std::back_inserter(ptrs));
+    if (!best_alignment_) {
+        assert(path_queue_.empty());
+        return {};
     }
-    std::copy(unlabeled_.begin(), unlabeled_.end(), std::back_inserter(ptrs));
-    clear();
-    // sort by value (not by pointer value)
-    std::sort(ptrs.begin(), ptrs.end(), cmp_);
-    // transform pointers to objects
-    std::vector<Alignment> alignments;
-    alignments.reserve(ptrs.size());
-    for (auto it = ptrs.rbegin(); it != ptrs.rend(); ++it) {
-        // make sure this alignment hasn't been moved yet
-        if ((*it)->size()) {
-            alignments.emplace_back(std::move(**it));
-            **it = Alignment();
+
+    std::vector<value_type> alignment_ptrs;
+    size_t max_num_alignments = config_.post_chain_alignments
+        ? std::numeric_limits<size_t>::max()
+        : config_.num_alternative_paths;
+
+    for (auto it = path_queue_.begin(); it != path_queue_.end(); ++it) {
+        auto &queue = it.value();
+        size_t added = 0;
+        while (queue.size() && added < max_num_alignments) {
+            alignment_ptrs.emplace_back(queue.maximum());
+            queue.pop_maximum();
+            ++added;
         }
     }
+
+    std::sort(alignment_ptrs.begin(), alignment_ptrs.end(), cmp_);
+
+    std::vector<Alignment> alignments;
+    std::for_each(alignment_ptrs.rbegin(), alignment_ptrs.rend(), [&](value_type &aln_ptr) {
+        assert(aln_ptr);
+        if (!aln_ptr->empty()) {
+            alignments.emplace_back(std::move(*aln_ptr));
+            *aln_ptr = Alignment();
+        }
+    });
 
     return alignments;
 }
