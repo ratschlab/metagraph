@@ -107,11 +107,7 @@ void LabeledExtender::flush() {
 
         auto cur_labels = annotation_buffer_.get_labels(table_elem.node);
         assert(cur_labels);
-
-        if (cur_labels->empty()) {
-            assert(table_elem.offset - this->seed_->get_offset() < graph_->get_k());
-            continue;
-        }
+        assert(cur_labels->size());
 
 #ifndef NDEBUG
         if (table[parent_i].offset >= 0
@@ -232,13 +228,7 @@ void LabeledExtender
         for (const auto &[next, c, score] : outgoing) {
             auto next_labels = annotation_buffer_.get_labels(next);
             assert(next_labels);
-
-            if (next_labels->empty()) {
-                assert(next_offset < graph_->get_k());
-                node_labels_.push_back(node_labels_[table_i]);
-                callback(next, c, score);
-                continue;
-            }
+            assert(next_labels->size());
 
             Columns intersect_labels;
             std::set_intersection(columns.begin(), columns.end(),
@@ -269,6 +259,8 @@ void LabeledExtender
             = annotation_buffer_.get_labels_and_coords(next);
 
         assert(next_coords);
+        assert(next_labels);
+        assert(next_labels->size());
 
         // if we are traversing backwards, then negate the coordinate delta
         if (dynamic_cast<const RCDBG*>(graph_)) {

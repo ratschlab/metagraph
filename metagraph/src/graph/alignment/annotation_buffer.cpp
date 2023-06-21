@@ -74,8 +74,10 @@ void AnnotationBuffer::fetch_queued_annotations() {
     };
 
     auto queue_node = [&](node_index node, node_index base_node) {
-        if (node_to_cols_.count(node))
+        if (node_to_cols_.count(node)) {
+            assert(node_to_cols_.count(base_node));
             return;
+        }
 
         if (base_node == DeBruijnGraph::npos) {
             // this can happen when the base graph is CANONICAL and path[i] is a
@@ -87,6 +89,7 @@ void AnnotationBuffer::fetch_queued_annotations() {
         if (boss && (!boss->get_W(dbg_succ->kmer_to_boss_index(base_node))
                     || boss->is_dummy(dbg_succ->kmer_to_boss_index(base_node)))) {
             // skip dummy nodes
+            assert(canonical_ || node == base_node);
             dummy_nodes.emplace(node, base_node);
             return;
         }
@@ -146,46 +149,52 @@ void AnnotationBuffer::fetch_queued_annotations() {
         }
     }
 
-    using NodeToDist = tsl::hopscotch_map<node_index, std::vector<size_t>>;
-    VectorMap<node_index,
-              std::pair<node_index, NodeToDist>> dummy_to_annotated_node;
+    using DistToNodes = std::vector<std::vector<node_index>>;
+    VectorMap<node_index, std::pair<node_index, DistToNodes>> dummy_to_annotated_node;
     for (const auto &[node, base_node] : dummy_nodes) {
         assert(boss);
         assert(base_node);
         assert(!node_to_cols_.count(node));
         assert(!node_to_cols_.count(base_node));
 
-        std::vector<std::pair<node_index, std::string>> traversal;
+        std::deque<std::pair<node_index, std::string>> traversal;
         traversal.emplace_back(node, graph_.get_node_sequence(node));
         assert(traversal.back().second[0] == boss::BOSS::kSentinel);
-        bool discovered = false;
+
+        auto &mapping = dummy_to_annotated_node.try_emplace(
+            node, std::make_pair(base_node, DistToNodes{})
+        ).first.value().second;
         while (traversal.size()) {
             auto [cur_node, spelling] = std::move(traversal.back());
-            traversal.pop_back();
+            traversal.pop_front();
 
-            if (node_to_cols_.count(cur_node)) {
-                discovered = true;
-                assert(spelling.size() > graph_.get_k());
-                auto &mapping = dummy_to_annotated_node.try_emplace(
-                    node, std::make_pair(base_node, NodeToDist{})
-                ).first.value().second;
-                mapping[cur_node].emplace_back(spelling.size() - graph_.get_k());
-                continue;
+            node_index cur_base_node = canonical_
+                ? canonical_->get_base_node(cur_node)
+                : cur_node;
+            assert(cur_base_node);
+
+            if (size_t dist = spelling.size() - graph_.get_k()) {
+                if (dist > mapping.size()) {
+                    assert(dist == mapping.size() + 1);
+                    mapping.emplace_back();
+                }
+
+                mapping[dist - 1].emplace_back(cur_node);
             }
 
             if (*(spelling.rbegin() + graph_.get_k() - 1) != boss::BOSS::kSentinel) {
-                discovered = true;
-                assert(spelling.size() > graph_.get_k());
-                auto &mapping = dummy_to_annotated_node.try_emplace(
-                    node, std::make_pair(base_node, NodeToDist{})
-                ).first.value().second;
-                mapping[cur_node].emplace_back(spelling.size() - graph_.get_k());
-                node_index cur_base_node = get_base_path({ cur_node })[0];
-                assert(cur_base_node);
                 assert(!boss->is_dummy(dbg_succ->kmer_to_boss_index(cur_base_node)));
                 queue_node(cur_node, cur_base_node);
                 continue;
             }
+
+            if (!node_to_cols_.try_emplace(cur_node).second) {
+                assert(node_to_cols_.count(base_node));
+                continue;
+            }
+
+            if (cur_base_node != cur_node)
+                node_to_cols_.try_emplace(cur_base_node, nannot);
 
             spelling.push_back(boss::BOSS::kSentinel);
             graph_.call_outgoing_kmers(cur_node,
@@ -197,13 +206,6 @@ void AnnotationBuffer::fetch_queued_annotations() {
                 }
             );
         }
-
-        assert(discovered);
-
-        if (base_node != node)
-            node_to_cols_.try_emplace(base_node, nannot);
-
-        node_to_cols_.try_emplace(node, nannot);
     }
 
     dummy_nodes.clear();
@@ -306,11 +308,11 @@ void AnnotationBuffer::fetch_queued_annotations() {
         auto row = AnnotatedDBG::graph_to_anno_index(mapping_pair.first);
 
         const auto &mapping = mapping_pair.second;
-        assert(mapping.size());
+        if (mapping.empty())
+            continue;
 
-        for (auto it = mapping.begin(); it != mapping.end(); ++it) {
-            node_index annotated_node = it->first;
-            const auto &dists = it->second;
+        ssize_t d = mapping.size();
+        for (node_index annotated_node : mapping.back()) {
             auto [cur_labels, cur_coords] = get_labels_and_coords(annotated_node);
             assert(cur_labels);
             assert(!has_coordinates() || cur_coords);
@@ -325,10 +327,8 @@ void AnnotationBuffer::fetch_queued_annotations() {
                                                 const auto &c2) {
                     union_labels.emplace_back(label);
                     auto &merge_coords = union_coords.emplace_back();
-                    for (ssize_t d : dists) {
-                        utils::set_union(c2.begin(), c2.end(), c1.begin(), c1.end(),
-                                         std::back_inserter(merge_coords), -d);
-                    }
+                    utils::set_union(c2.begin(), c2.end(), c1.begin(), c1.end(),
+                                     std::back_inserter(merge_coords), -d);
                 });
                 std::swap(union_coords, coords);
             } else {
@@ -338,7 +338,21 @@ void AnnotationBuffer::fetch_queued_annotations() {
             std::swap(union_labels, labels);
         }
 
-        push_node_labels(dummy_node, row, std::move(labels), coords);
+        push_node_labels(dummy_node, row, decltype(labels)(labels), coords);
+
+        std::for_each(mapping.begin(), mapping.end() - 1, [&](const auto &nodes) {
+            for (auto &tuple : coords) {
+                for (auto &c : tuple) {
+                    ++c;
+                }
+            }
+
+            for (node_index node : nodes) {
+                node_index base_node = canonical_ ? canonical_->get_base_node(node) : node;
+                push_node_labels(node, AnnotatedDBG::graph_to_anno_index(base_node),
+                                 decltype(labels)(labels), coords);
+            }
+        });
     }
 
 #ifndef NDEBUG
