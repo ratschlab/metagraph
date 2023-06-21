@@ -921,6 +921,7 @@ bool BOSS::is_dummy(edge_index x) const {
         }
     }
 
+    --i;
     if (get_node_last_value(x) == kSentinelCode) {
         assert(get_node_str(orig_x).find(kSentinel) != std::string::npos);
         return true;
