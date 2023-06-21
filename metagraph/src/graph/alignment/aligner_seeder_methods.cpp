@@ -167,7 +167,7 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
     if (dbg_succ.get_mask())
         logger->warn("Graph has a dummy k-mer mask. Seeds containing dummy k-mers will be missed.");
 
-    std::vector<std::vector<Seed>> found_seeds(this->query_.size());
+    std::vector<std::vector<Seed>> found_seeds(this->query_.size() - this->config_.min_seed_length);
     size_t total_seed_count = 0;
     if (this->query_.size() >= this->graph_.get_k()) {
         if (this->config_.max_seed_length >= this->graph_.get_k()) {
@@ -269,9 +269,9 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
                 }
             );
 
+            size_t clipping = this->query_.size() - i - seed_len;
+            std::string_view window(this->query_.data() + clipping, seed_len);
             for (node_index alt_node : found_nodes) {
-                size_t clipping = this->query_.size() - i - seed_len;
-                std::string_view window(this->query_.data() + clipping, seed_len);
                 assert(this->graph_.get_node_sequence(alt_node).substr(
                     this->graph_.get_k() - window.size()) == window);
                 bucket.emplace_back(window, std::vector<node_index>{ alt_node },
