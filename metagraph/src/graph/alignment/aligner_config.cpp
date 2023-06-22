@@ -15,7 +15,8 @@ void DBGAlignerConfig::print_summary() const {
     logger->trace("Alignment settings:");
     logger->trace("\t Alignments to report: {}", num_alternative_paths);
     logger->trace("\t Min seed length: {}", min_seed_length);
-    logger->trace("\t Max seed length: {}", max_seed_length);
+    logger->trace("\t Max seed length: {}", max_seed_length == std::numeric_limits<size_t>::max()
+        ? "inf" : std::to_string(max_seed_length));
     logger->trace("\t Max num seeds per locus: {}", max_num_seeds_per_locus);
     logger->trace("\t Max num nodes per sequence char: {}", max_nodes_per_seq_char);
     logger->trace("\t Max RAM per alignment: {}", max_ram_per_alignment);
