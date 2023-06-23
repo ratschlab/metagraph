@@ -283,6 +283,20 @@ void AnnotationBuffer::fetch_queued_annotations() {
         assert(find != node_to_cols_.end());
         assert(find->second == nannot || find->second == find_base->second);
         find.value() = find_base->second;
+        if (has_coordinates()) {
+            size_t base_coord_idx = find_base - node_to_cols_.begin();
+            assert(base_coord_idx < label_coords_.size());
+
+            const auto &coords = label_coords_[base_coord_idx];
+
+            size_t coord_idx = find - node_to_cols_.begin();
+            if (coord_idx == label_coords_.size()) {
+                label_coords_.emplace_back(coords);
+            } else {
+                label_coords_.resize(std::max(label_coords_.size(), coord_idx + 1));
+                label_coords_[coord_idx] = coords;
+            }
+        }
     }
 
     for (node_index node : annotated_nodes) {
