@@ -63,6 +63,7 @@ void AnnotationBuffer::fetch_queued_annotations() {
 
             if (dbg_succ && !dbg_succ->get_mask()
                     && dbg_succ->get_boss().is_dummy(base_node)) {
+                assert(!node_to_cols_.count(node));
                 dummy_nodes.emplace(node);
                 return;
             }
@@ -82,6 +83,7 @@ void AnnotationBuffer::fetch_queued_annotations() {
 
             if (dbg_succ && !dbg_succ->get_mask()
                     && dbg_succ->get_boss().is_dummy(node)) {
+                assert(!node_to_cols_.count(node));
                 dummy_nodes.emplace(node);
                 return;
             }
@@ -111,6 +113,7 @@ void AnnotationBuffer::fetch_queued_annotations() {
                 assert(dbg_succ);
                 assert(!dbg_succ->get_mask());
                 assert(dbg_succ->get_boss().is_dummy(node));
+                assert(!node_to_cols_.count(node));
                 dummy_nodes.emplace(node);
             }
         };
@@ -142,7 +145,12 @@ void AnnotationBuffer::fetch_queued_annotations() {
     tsl::hopscotch_map<node_index, std::vector<node_index>> parents;
     for (node_index node : dummy_nodes) {
         assert(dbg_succ);
-        assert(!node_to_cols_.count(node));
+
+        // if we already discovered this via another node, move on
+        node_index base_node = canonical_ ? canonical_->get_base_node(node) : node;
+        assert(base_node);
+        if (node_to_cols_.count(base_node))
+            continue;
 
         std::vector<std::pair<node_index, size_t>> traversal;
         std::string spelling = graph_.get_node_sequence(node);
@@ -159,9 +167,15 @@ void AnnotationBuffer::fetch_queued_annotations() {
                 : cur_node;
             assert(cur_base_node);
 
-            if (node_to_cols_.count(cur_base_node)) {
+            auto find_base = node_to_cols_.find(cur_base_node);
+            if (find_base != node_to_cols_.end()) {
+                assert(num_sentinels_left
+                    || find_base->second != nannot
+                    || queued_rows.count(AnnotatedDBG::graph_to_anno_index(cur_base_node)));
                 assert(canonical_ || node_to_cols_.count(cur_node));
-                annotated_nodes.emplace(cur_node);
+                if (!num_sentinels_left)
+                    annotated_nodes.emplace(cur_node);
+
                 continue;
             }
 
@@ -302,6 +316,7 @@ void AnnotationBuffer::fetch_queued_annotations() {
 
     for (node_index node : annotated_nodes) {
         assert(parents.count(node));
+        assert(get_labels(node));
         std::vector<node_index> back_traversal;
         back_traversal.emplace_back(node);
         while (back_traversal.size()) {

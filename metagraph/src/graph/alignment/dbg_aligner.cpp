@@ -315,7 +315,8 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
             "; Bwd num matches: {}"
 #endif
             ,
-            query.size(), query.size() * config_.min_exact_match,
+            query.size(),
+            static_cast<size_t>(ceil(query.size() * config_.min_exact_match)),
             seeder->get_num_matches()
 #if ! _PROTEIN_GRAPH
             , seeder_rc ? seeder_rc->get_num_matches() : 0
