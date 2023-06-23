@@ -49,7 +49,8 @@ void AnnotationBuffer::fetch_queued_annotations() {
 
     std::vector<std::pair<node_index, node_index>> add_base_annot;
 
-    std::function<void(node_index, node_index)> queue_node = [](node_index, node_index) {};
+    std::function<void(node_index, node_index)> queue_node
+        = [](node_index, node_index) {};
     if (canonical_) {
         queue_node = [&](node_index node, node_index base_node) {
             assert(base_node);
@@ -60,7 +61,8 @@ void AnnotationBuffer::fetch_queued_annotations() {
                 return;
             }
 
-            if (dbg_succ && !dbg_succ->get_mask() && dbg_succ->get_boss().is_dummy(base_node)) {
+            if (dbg_succ && !dbg_succ->get_mask()
+                    && dbg_succ->get_boss().is_dummy(base_node)) {
                 dummy_nodes.emplace(node);
                 return;
             }
@@ -78,7 +80,8 @@ void AnnotationBuffer::fetch_queued_annotations() {
                 return;
             }
 
-            if (dbg_succ && !dbg_succ->get_mask() && dbg_succ->get_boss().is_dummy(node)) {
+            if (dbg_succ && !dbg_succ->get_mask()
+                    && dbg_succ->get_boss().is_dummy(node)) {
                 dummy_nodes.emplace(node);
                 return;
             }
@@ -93,7 +96,8 @@ void AnnotationBuffer::fetch_queued_annotations() {
             if (base_node) {
                 auto find_base = node_to_cols_.find(base_node);
                 if (find_base == node_to_cols_.end()) {
-                    if (queued_rows.emplace(AnnotatedDBG::graph_to_anno_index(base_node)).second) {
+                    auto row = AnnotatedDBG::graph_to_anno_index(base_node);
+                    if (queued_rows.emplace(row).second) {
                         node_to_cols_.emplace(base_node, nannot);
                         node_to_cols_.emplace(node, nannot);
                         queued_nodes.emplace_back(node);
@@ -138,8 +142,6 @@ void AnnotationBuffer::fetch_queued_annotations() {
     tsl::hopscotch_map<node_index, std::vector<node_index>> parents;
     for (node_index node : dummy_nodes) {
         assert(dbg_succ);
-        const auto &boss = dbg_succ->get_boss();
-
         assert(!node_to_cols_.count(node));
 
         std::vector<std::pair<node_index, size_t>> traversal;
@@ -163,7 +165,9 @@ void AnnotationBuffer::fetch_queued_annotations() {
             }
 
             if (!num_sentinels_left) {
-                assert(!boss.is_dummy(dbg_succ->kmer_to_boss_index(cur_base_node)));
+                assert(!dbg_succ->get_boss().is_dummy(
+                    dbg_succ->kmer_to_boss_index(cur_base_node)
+                ));
                 queue_node(cur_node, cur_base_node);
                 assert(node_to_cols_.count(cur_base_node));
                 annotated_nodes.emplace(cur_node);
