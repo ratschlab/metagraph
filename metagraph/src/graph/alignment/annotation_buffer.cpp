@@ -150,7 +150,8 @@ void AnnotationBuffer::fetch_queued_annotations() {
         assert(traversal.back().second < spelling.size());
 
         while (traversal.size()) {
-            auto [cur_node, num_sentinels_left] = traversal.back();
+            node_index cur_node = traversal.back().first;
+            size_t num_sentinels_left = traversal.back().second;
             traversal.pop_back();
 
             node_index cur_base_node = canonical_
@@ -364,8 +365,10 @@ void AnnotationBuffer::fetch_queued_annotations() {
                                      merged_prev_coords);
                 }
 
-                if (parents.count(prev))
+                if (parents.count(prev)) {
+                    assert(get_labels(prev));
                     back_traversal.emplace_back(prev);
+                }
             }
         }
     }
