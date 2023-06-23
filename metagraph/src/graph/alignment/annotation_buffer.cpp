@@ -196,20 +196,25 @@ void AnnotationBuffer::fetch_queued_annotations() {
                                 auto row,
                                 auto&& labels,
                                 const CoordinateSet coords = {}) {
+        auto do_push = [&](auto find, size_t labels_i) {
+            find.value() = labels_i;
+            if (has_coordinates()) {
+                assert(coords.size());
+                size_t coord_idx = find - node_to_cols_.begin();
+                if (coord_idx == label_coords_.size()) {
+                    label_coords_.emplace_back(coords);
+                } else {
+                    label_coords_.resize(std::max(label_coords_.size(), coord_idx + 1));
+                    label_coords_[coord_idx] = coords;
+                }
+            }
+        };
+
         node_index base_node = AnnotatedDBG::anno_to_graph_index(row);
         auto find_base = node_to_cols_.find(base_node);
         assert(find_base != node_to_cols_.end());
-        find_base.value() = cache_column_set(std::move(labels));
-        if (has_coordinates()) {
-            assert(coords.size());
-            size_t coord_idx = find_base - node_to_cols_.begin();
-            if (coord_idx == label_coords_.size()) {
-                label_coords_.emplace_back(coords);
-            } else {
-                label_coords_.resize(std::max(label_coords_.size(), coord_idx + 1));
-                label_coords_[coord_idx] = coords;
-            }
-        }
+        size_t labels_i = cache_column_set(std::move(labels));;
+        do_push(find_base, labels_i);
 
         if (canonical_ || graph_.get_mode() == DeBruijnGraph::BASIC || base_node == node)
             return;
@@ -218,17 +223,7 @@ void AnnotationBuffer::fetch_queued_annotations() {
         assert(find != node_to_cols_.end());
         assert(find->second == nannot);
         assert(find_base->second != nannot);
-        find.value() = find_base->second;
-        if (has_coordinates()) {
-            assert(coords.size());
-            size_t coord_idx = find - node_to_cols_.begin();
-            if (coord_idx == label_coords_.size()) {
-                label_coords_.emplace_back(coords);
-            } else {
-                label_coords_.resize(std::max(label_coords_.size(), coord_idx + 1));
-                label_coords_[coord_idx] = coords;
-            }
-        }
+        do_push(find, labels_i);
     };
 
     auto row_it = queued_rows.begin();
