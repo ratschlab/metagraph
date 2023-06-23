@@ -69,7 +69,7 @@ void AnnotationBuffer::fetch_queued_annotations() {
                 node_to_cols_.emplace(base_node, nannot);
         };
     } else if (graph_.get_mode() == DeBruijnGraph::BASIC) {
-        queue_node = [&](node_index node, node_index) {
+        queue_node = [&](node_index node, node_index = 0) {
             assert(node);
             auto find = node_to_cols_.find(node);
             auto row = AnnotatedDBG::graph_to_anno_index(node);
@@ -142,12 +142,13 @@ void AnnotationBuffer::fetch_queued_annotations() {
 
         assert(!node_to_cols_.count(node));
 
-        std::vector<std::pair<node_index, std::string>> traversal;
-        traversal.emplace_back(node, graph_.get_node_sequence(node));
-        assert(traversal.back().second[0] == boss::BOSS::kSentinel);
+        std::vector<std::pair<node_index, size_t>> traversal;
+        std::string spelling = graph_.get_node_sequence(node);
+        traversal.emplace_back(node, spelling.find_last_of(boss::BOSS::kSentinel) + 1);
+        assert(traversal.back().second < spelling.size());
 
         while (traversal.size()) {
-            auto [cur_node, spelling] = std::move(traversal.back());
+            auto [cur_node, num_sentinels_left] = std::move(traversal.back());
             traversal.pop_back();
 
             node_index cur_base_node = canonical_
@@ -161,7 +162,7 @@ void AnnotationBuffer::fetch_queued_annotations() {
                 continue;
             }
 
-            if (*(spelling.rbegin() + graph_.get_k() - 1) != boss::BOSS::kSentinel) {
+            if (!num_sentinels_left) {
                 assert(!boss.is_dummy(dbg_succ->kmer_to_boss_index(cur_base_node)));
                 queue_node(cur_node, cur_base_node);
                 assert(node_to_cols_.count(cur_base_node));
@@ -175,16 +176,11 @@ void AnnotationBuffer::fetch_queued_annotations() {
                 node_to_cols_.try_emplace(cur_node, nannot);
             }
 
-            spelling.push_back(boss::BOSS::kSentinel);
-            graph_.call_outgoing_kmers(cur_node,
-                [&,s=std::move(spelling)](node_index next, char c) {
-                    if (c != boss::BOSS::kSentinel) {
-                        parents[next].emplace_back(cur_node);
-                        auto &[_, next_spelling] = traversal.emplace_back(next, s);
-                        next_spelling.back() = c;
-                    }
-                }
-            );
+            --num_sentinels_left;
+            graph_.adjacent_outgoing_nodes(cur_node, [&](node_index next) {
+                parents[next].emplace_back(cur_node);
+                traversal.emplace_back(next, num_sentinels_left);
+            });
         }
     }
 
