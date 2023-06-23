@@ -628,6 +628,8 @@ void CanonicalDBG
         const boss::BOSS &boss = dbg_succ_->get_boss();
         auto *cache = get_extension_threadsafe<NodeFirstCache>();
 
+        bool is_dummy = (spelling_hint[0] == boss::BOSS::kSentinel);
+
         boss::BOSS::edge_index rc_edge = (cache ? cache : fallback_cache_.get())->get_suffix_rc(
             dbg_succ_->kmer_to_boss_index(node),
             spelling_hint
@@ -642,8 +644,18 @@ void CanonicalDBG
             boss.get_node_last_value(rc_edge),
             [&](boss::BOSS::edge_index incoming_boss_edge) {
                 node_index next = dbg_succ_->boss_to_kmer_index(incoming_boss_edge);
-                if (next != DeBruijnGraph::npos)
-                    callback(next, rc_edge);
+                if (next == DeBruijnGraph::npos)
+                    return;
+
+                if (is_dummy) {
+                    char c = (cache ? cache : fallback_cache_.get())->get_first_char(
+                        incoming_boss_edge, rc_edge
+                    );
+                    if (c == boss::BOSS::kSentinel)
+                        return;
+                }
+
+                callback(next, rc_edge);
             }
         );
 

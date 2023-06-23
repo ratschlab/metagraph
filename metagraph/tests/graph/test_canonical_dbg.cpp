@@ -1178,7 +1178,7 @@ TYPED_TEST(CanonicalDBGTest, TraversalDummy) {
     std::string query = "CTTCCTTCCTTCTTTCCTTCCTTCCTTCCT";
     auto encoded = boss.encode(query);
     auto [edge_1, edge_2, end] = boss.index_range(encoded.begin(), encoded.end());
-    assert(end == encoded.end());
+    ASSERT_EQ(end, encoded.end());
     edge_2 = boss.bwd(edge_2);
 
     ASSERT_EQ(std::string(1, '$') + query, canonical.get_node_sequence(edge_2));
@@ -1229,29 +1229,51 @@ TYPED_TEST(CanonicalDBGTest, TraverseNoDummyToDummy) {
     CanonicalDBG canonical(graph);
     const auto &boss = dbg_succ.get_boss();
 
-    std::string query = "TGTGCGGCGGGAATATGTACGAAGCGCAGG";
+    {
+        std::string query = "TGTGCGGCGGGAATATGTACGAAGCGCAGG";
 
-    auto encoded = boss.encode(query);
-    auto [edge_1, edge_2, end] = boss.index_range(encoded.begin(), encoded.end());
-    assert(end == encoded.end());
-    edge_2 = boss.bwd(edge_2);
+        auto encoded = boss.encode(query);
+        auto [edge_1, edge_2, end] = boss.index_range(encoded.begin(), encoded.end());
+        ASSERT_EQ(end, encoded.end());
+        edge_2 = boss.bwd(edge_2);
 
-    ASSERT_EQ(std::string(1, '$') + query, canonical.get_node_sequence(edge_2));
-    bool found_edge = false;
-    graph->call_outgoing_kmers(edge_2, [&](auto, char c) {
-        found_edge = true;
-        EXPECT_EQ('A', c);
-    });
-    EXPECT_TRUE(found_edge);
+        ASSERT_EQ(std::string(1, '$') + query, canonical.get_node_sequence(edge_2));
+        bool found_edge = false;
+        graph->call_outgoing_kmers(edge_2, [&](auto, char c) {
+            found_edge = true;
+            EXPECT_EQ('A', c);
+        });
+        EXPECT_TRUE(found_edge);
 
-    canonical.call_outgoing_kmers(edge_2, [&](auto next, char c) {
-        EXPECT_NE(boss::BOSS::kSentinel, c);
-    });
+        canonical.call_outgoing_kmers(edge_2, [&](auto next, char c) {
+            EXPECT_NE(boss::BOSS::kSentinel, c);
+        });
 
-    canonical.adjacent_outgoing_nodes(edge_2, [&](auto next) {
-        char c = canonical.get_node_sequence(next).back();
-        EXPECT_NE(boss::BOSS::kSentinel, c);
-    });
+        canonical.adjacent_outgoing_nodes(edge_2, [&](auto next) {
+            char c = canonical.get_node_sequence(next).back();
+            EXPECT_NE(boss::BOSS::kSentinel, c);
+        });
+    }
+    {
+        std::string query = "CCTGCGCTTCGTACATATTCCCGCCGCACA";
+        auto encoded = boss.encode(query);
+        auto [edge_1, edge_2, end] = boss.index_range(encoded.begin(), encoded.end());
+        ASSERT_EQ(end, encoded.end());
+        ASSERT_EQ('G', boss.decode(boss.get_W(edge_2)));
+        edge_2 = boss.bwd(edge_2);
+        auto node = canonical.reverse_complement(edge_2);
+        ASSERT_EQ(boss::BOSS::kSentinel, canonical.get_node_sequence(node).back())
+            << canonical.get_node_sequence(node);
+
+        canonical.call_incoming_kmers(node, [&](auto, char c) {
+            EXPECT_NE(boss::BOSS::kSentinel, c);
+        });
+
+        canonical.adjacent_incoming_nodes(node, [&](auto prev) {
+            char c = canonical.get_node_sequence(prev)[0];
+            EXPECT_NE(boss::BOSS::kSentinel, c);
+        });
+    }
 }
 
 #endif // ! _PROTEIN_GRAPH
