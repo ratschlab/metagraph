@@ -5,7 +5,6 @@
 
 #include "common/seq_tools/reverse_complement.hpp"
 #include "graph/representation/canonical_dbg.hpp"
-#include "graph/graph_extensions/node_rc.hpp"
 #include "graph/graph_extensions/node_first_cache.hpp"
 
 
@@ -1169,9 +1168,6 @@ TYPED_TEST(CanonicalDBGTest, TraversalDummy) {
     }
 
     DBGSuccinct &dbg_succ = *dynamic_cast<DBGSuccinct*>(graph.get());
-
-    if (std::is_same_v<TypeParam, DBGSuccinctRCIndexed>)
-        dbg_succ.add_extension(std::make_shared<graph::NodeRC>(dbg_succ, true));
 
     if (std::is_same_v<TypeParam, DBGSuccinctCached>)
         graph->add_extension(std::make_shared<graph::NodeFirstCache>(dbg_succ));
