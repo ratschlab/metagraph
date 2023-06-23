@@ -374,6 +374,7 @@ template class SuffixSeeder<UniMEMSeeder>;
 
 template <typename It>
 It merge_into_unitig_mums(const DeBruijnGraph &graph,
+                          const DBGAlignerConfig &config,
                           It begin,
                           It end,
                           ssize_t min_seed_size,
@@ -492,6 +493,7 @@ It merge_into_unitig_mums(const DeBruijnGraph &graph,
             // we have a MUM
             a_i.expand(std::vector<Alignment::node_index>(nodes_j.begin() + a_j_node_idx,
                                                           nodes_j.end()));
+            assert(Alignment(a_i, config).is_valid(graph, &config));
             a_j = Seed();
         }
     }
@@ -499,8 +501,14 @@ It merge_into_unitig_mums(const DeBruijnGraph &graph,
     return std::remove_if(begin, end, [](const auto &a) { return a.empty(); });
 }
 
-template Seed* merge_into_unitig_mums(const DeBruijnGraph &, Seed*, Seed*, ssize_t, size_t);
+template Seed* merge_into_unitig_mums(const DeBruijnGraph &,
+                                      const DBGAlignerConfig &,
+                                      Seed*,
+                                      Seed*,
+                                      ssize_t,
+                                      size_t);
 template std::vector<Seed>::iterator merge_into_unitig_mums(const DeBruijnGraph &,
+                                                            const DBGAlignerConfig &,
                                                             std::vector<Seed>::iterator,
                                                             std::vector<Seed>::iterator,
                                                             ssize_t,

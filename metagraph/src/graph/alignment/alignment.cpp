@@ -1234,6 +1234,9 @@ std::string spell_path(const DeBruijnGraph &graph,
                                   path[i - 1], path[i],
                                   graph.get_node_sequence(path[i - 1]),
                                   graph.get_node_sequence(path[i]));
+                    graph.call_outgoing_kmers(path[i - 1], [&](auto next_node, char c) {
+                        logger->error("\tReal edge: {} {}", next_node, c);
+                    });
                     throw std::runtime_error("");
                 }
 

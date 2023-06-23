@@ -13,8 +13,9 @@ using mtg::common::logger;
 
 void DBGAlignerConfig::print_summary() const {
     logger->trace("Alignment settings:");
-    logger->trace("\t Alignments to report: {}", num_alternative_paths == std::numeric_limits<size_t>::max()
-        ? "inf" : std::to_string(num_alternative_paths));
+    logger->trace("\t Alignments to report: {}",
+                  num_alternative_paths == std::numeric_limits<size_t>::max()
+                      ? "inf" : std::to_string(num_alternative_paths));
     logger->trace("\t Min seed length: {}", min_seed_length);
     logger->trace("\t Max seed length: {}", max_seed_length == std::numeric_limits<size_t>::max()
         ? "inf" : std::to_string(max_seed_length));

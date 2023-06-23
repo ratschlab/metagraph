@@ -775,11 +775,12 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
         return !a.label_encoder || a.label_columns.empty();
     });
 
-    seeds.erase(merge_into_unitig_mums(this->graph_, seeds.begin(), end,
+    seeds.erase(merge_into_unitig_mums(this->graph_, this->config_, seeds.begin(), end,
                                        this->config_.min_seed_length, max_seed_length_),
                 seeds.end());
 
     discarded_seeds.erase(merge_into_unitig_mums(this->graph_,
+                                                 this->config_,
                                                  discarded_seeds.begin(),
                                                  discarded_seeds.end(),
                                                  this->config_.min_seed_length),

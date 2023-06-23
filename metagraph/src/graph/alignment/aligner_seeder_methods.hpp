@@ -155,6 +155,7 @@ class SuffixSeeder : public BaseSeeder {
 
 template <typename It>
 It merge_into_unitig_mums(const DeBruijnGraph &graph,
+                          const DBGAlignerConfig &config,
                           It begin,
                           It end,
                           ssize_t min_seed_size,
