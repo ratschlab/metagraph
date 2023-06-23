@@ -5,6 +5,8 @@
 
 #include "common/seq_tools/reverse_complement.hpp"
 #include "graph/representation/canonical_dbg.hpp"
+#include "graph/graph_extensions/node_rc.hpp"
+#include "graph/graph_extensions/node_first_cache.hpp"
 
 
 namespace {
@@ -1148,6 +1150,60 @@ TYPED_TEST(CanonicalDBGTest, CallUnitigsCross) {
             }
         }
     }
+}
+
+TYPED_TEST(CanonicalDBGTest, TraversalDummy) {
+    if (!std::is_base_of_v<DBGSuccinct, TypeParam>) {
+        common::logger->warn("Dummy k-mers only supported for DBGSuccinct");
+        return;
+    }
+
+    std::vector<std::string> sequences {
+        "CTTCCTTCCTTCTTTCCTTCCTTCCTTCCTC",
+        "AAGGAAGGAAGGAAGGAAAGAAGGAAGGAAG"
+    };
+
+    auto graph = std::make_shared<DBGSuccinct>(31, DeBruijnGraph::PRIMARY);
+    for (const auto &sequence : sequences) {
+        graph->add_sequence(sequence);
+    }
+
+    DBGSuccinct &dbg_succ = *dynamic_cast<DBGSuccinct*>(graph.get());
+
+    if (std::is_same_v<TypeParam, DBGSuccinctRCIndexed>)
+        dbg_succ.add_extension(std::make_shared<graph::NodeRC>(dbg_succ, true));
+
+    if (std::is_same_v<TypeParam, DBGSuccinctCached>)
+        graph->add_extension(std::make_shared<graph::NodeFirstCache>(dbg_succ));
+
+    CanonicalDBG canonical(graph);
+    const auto &boss = dbg_succ.get_boss();
+
+    std::string query = "CTTCCTTCCTTCTTTCCTTCCTTCCTTCCT";
+    auto encoded = boss.encode(query);
+    auto [edge_1, edge_2, end] = boss.index_range(encoded.begin(), encoded.end());
+    assert(end == encoded.end());
+    edge_2 = boss.bwd(edge_2);
+
+    ASSERT_EQ(std::string(1, '$') + query, canonical.get_node_sequence(edge_2));
+
+    size_t num_real_edges = 0;
+    graph->call_outgoing_kmers(edge_2, [&](auto, char c) {
+        EXPECT_EQ('C', c);
+        ++num_real_edges;
+    });
+    EXPECT_EQ(1u, num_real_edges);
+
+    std::vector<char> out_edges;
+    canonical.call_outgoing_kmers(edge_2, [&](auto, char c) {
+        out_edges.emplace_back(c);
+    });
+
+    ASSERT_EQ(2u, out_edges.size());
+    if (out_edges[0] > out_edges[1])
+        std::swap(out_edges[0], out_edges[1]);
+
+    EXPECT_EQ(std::vector<char>({ 'C', 'T' }), out_edges);
 }
 
 #endif // ! _PROTEIN_GRAPH
