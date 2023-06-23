@@ -431,6 +431,23 @@ It merge_into_unitig_mums(const DeBruijnGraph &graph,
         if (a_i.label_columns != a_j.label_columns)
             continue;
 
+        bool coordinates_consistent = true;
+        assert(a_i.label_coordinates.size() == a_j.label_coordinates.size());
+        auto jt = a_j.label_coordinates.begin();
+        for (auto &tuple : a_i.label_coordinates) {
+            assert(jt != a_j.label_coordinates.end());
+            if (tuple.size() != jt->size()) {
+                coordinates_consistent = false;
+                break;
+            }
+            ++jt;
+        }
+
+        if (!coordinates_consistent)
+            continue;
+
+        assert(jt == a_j.label_coordinates.end());
+
         const auto &nodes_i = a_i.get_nodes();
         const auto &nodes_j = a_j.get_nodes();
         std::string_view query_i = a_i.get_query_view();
@@ -487,15 +504,44 @@ It merge_into_unitig_mums(const DeBruijnGraph &graph,
         assert(overlap < graph_k - 1
                 || graph.traverse(nodes_i.back(), *query_i.end()) == nodes_j[a_j_node_idx]);
 
-        if (overlap >= graph_k - 1
-                || graph.traverse(nodes_i.back(), *query_i.end())
-                    == nodes_j[a_j_node_idx]) {
-            // we have a MUM
-            a_i.expand(std::vector<Alignment::node_index>(nodes_j.begin() + a_j_node_idx,
-                                                          nodes_j.end()));
-            assert(Alignment(a_i, config).is_valid(graph, &config));
-            a_j = Seed();
+        if (overlap < graph_k - 1 && graph.traverse(nodes_i.back(), *query_i.end())
+                                        != nodes_j[a_j_node_idx])
+            continue;
+
+        jt = a_j.label_coordinates.begin();
+        if (!coordinates_consistent)
+            continue;
+
+        for (auto &tuple : a_i.label_coordinates) {
+            assert(jt != a_j.label_coordinates.end());
+            assert(tuple.size() == jt->size());
+
+            auto jt_c = jt->begin();
+            for (ssize_t c : tuple) {
+                assert(jt_c != jt->end());
+
+                if (c + static_cast<ssize_t>(nodes_i.size()) != *jt_c + a_j_node_idx) {
+                    coordinates_consistent = false;
+                    break;
+                }
+
+                ++jt_c;
+            }
+
+            if (!coordinates_consistent)
+                break;
+
+            assert(jt_c == jt->end());
+            ++jt;
         }
+
+        assert(jt == a_j.label_coordinates.end());
+
+        // we have a MUM
+        a_i.expand(std::vector<Alignment::node_index>(nodes_j.begin() + a_j_node_idx,
+                                                      nodes_j.end()));
+        assert(Alignment(a_i, config).is_valid(graph, &config));
+        a_j = Seed();
     }
 
     return std::remove_if(begin, end, [](const auto &a) { return a.empty(); });
