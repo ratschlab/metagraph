@@ -1080,7 +1080,7 @@ void convert_to_row_disk(
             uint64_t file_size = utils::with_mmap() ? 0 : fs::file_size(files[i]);
 
             if (file_size > mem_bytes) {
-                logger->error("Not enough memory to load {}, requires {} MB",
+                logger->error("Not enough memory to load {}, requires at least {} MB",
                               files[i], file_size / 1e6);
                 exit(1);
             }
