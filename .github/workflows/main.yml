@@ -142,7 +142,9 @@ jobs:
         timeout_minutes: 1000
         max_attempts: 5
         retry_on: error
-        command: export LD_LIBRARY_PATH="/usr/local/lib/:$LD_LIBRARY_PATH" && cd metagraph/build && make check
+        command: |
+          export LD_LIBRARY_PATH="/usr/local/lib/:$LD_LIBRARY_PATH"
+          cd metagraph/build && make check
 
   MacOS:
     runs-on: macos-latest
