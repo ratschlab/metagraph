@@ -759,6 +759,7 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
     };
 
     auto fwd_seeds = forward_seeder.get_alignments();
+    size_t old_seed_count = fwd_seeds.size();
     if (config_.seed_complexity_filter) {
         fwd_seeds.erase(std::remove_if(fwd_seeds.begin(), fwd_seeds.end(),
                                        discard_low_complexity),
@@ -772,6 +773,7 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
     std::vector<Alignment> bwd_seeds;
     if (reverse_seeder) {
         bwd_seeds = reverse_seeder->get_alignments();
+        old_seed_count += bwd_seeds.size();
         if (config_.seed_complexity_filter) {
             bwd_seeds.erase(std::remove_if(bwd_seeds.begin(), bwd_seeds.end(),
                                            discard_low_complexity),
@@ -782,6 +784,9 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
     std::sort(bwd_seeds.begin(), bwd_seeds.end(), [](const auto &a, const auto &b) {
         return a.get_query_view().begin() < b.get_query_view().begin();
     });
+
+    logger->trace("Seed complexity filter: {} seeds -> {} seeds",
+                  old_seed_count, fwd_seeds.size() + bwd_seeds.size());
 
     RCDBG rc_dbg(std::shared_ptr<const DeBruijnGraph>(
                     std::shared_ptr<const DeBruijnGraph>(), &graph_));
