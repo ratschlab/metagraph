@@ -349,6 +349,23 @@ int align_to_graph(Config *config) {
         anno_dbg = initialize_annotated_dbg(graph, *config);
     }
 
+    auto wrap_graph = [&](auto graph) {
+        if (graph->get_mode() == DeBruijnGraph::PRIMARY) {
+            graph = std::make_shared<CanonicalDBG>(graph);
+            logger->trace("Primary graph wrapped into canonical");
+        }
+
+        // If backwards traversal on DBGSuccinct will be needed, then add a cache
+        // to speed it up.
+        if (dbg_succ)
+            graph->add_extension(std::make_shared<NodeFirstCache>(*dbg_succ));
+
+        return graph;
+    };
+
+    if (get_num_threads() <= 2)
+        graph = wrap_graph(graph);
+
     timer.reset();
 
     for (const auto &file : files) {
@@ -393,15 +410,11 @@ int align_to_graph(Config *config) {
                 auto aln_graph
                     = std::shared_ptr<DeBruijnGraph>(std::shared_ptr<DeBruijnGraph>{}, graph.get());
 
-                // Wrap it in CanonicalDBG if needed. This way, each thread gets its
-                // own wrapper (and more importantly, its own local cache).
+                // Give each thread a separate cache if using many threads to avoid
+                // contention
                 if (aln_graph->get_mode() == DeBruijnGraph::PRIMARY) {
-                    aln_graph = std::make_shared<CanonicalDBG>(aln_graph);
-                    logger->trace("Primary graph wrapped into canonical");
-                    // If backwards traversal on DBGSuccinct will be needed, then
-                    // add a cache to speed it up.
-                    if (dbg_succ)
-                        aln_graph->add_extension(std::make_shared<NodeFirstCache>(*dbg_succ));
+                    assert(get_num_threads() > 2);
+                    aln_graph = wrap_graph(aln_graph);
                 }
 
                 std::unique_ptr<IDBGAligner> aligner;
