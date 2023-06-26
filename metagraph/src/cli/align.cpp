@@ -25,6 +25,10 @@ using namespace mtg::graph::align;
 using mtg::seq_io::kseq_t;
 using mtg::common::logger;
 
+// after how many threads should per-thread traversal caches be used instead of
+// a single shared cache
+const size_t SEPARATE_CACHES_SWITCHOVER_THREADS = 8;
+
 
 DBGAlignerConfig initialize_aligner_config(const Config &config,
                                            const DeBruijnGraph &graph) {
@@ -363,7 +367,8 @@ int align_to_graph(Config *config) {
         return graph;
     };
 
-    if (get_num_threads() <= 2)
+    // if using a small niumber of threads, use a shared cache for all threads
+    if (get_num_threads() <= SEPARATE_CACHES_SWITCHOVER_THREADS)
         graph = wrap_graph(graph);
 
     timer.reset();
@@ -413,7 +418,7 @@ int align_to_graph(Config *config) {
                 // Give each thread a separate cache if using many threads to avoid
                 // contention
                 if (aln_graph->get_mode() == DeBruijnGraph::PRIMARY) {
-                    assert(get_num_threads() > 2);
+                    assert(get_num_threads() > SEPARATE_CACHES_SWITCHOVER_THREADS);
                     aln_graph = wrap_graph(aln_graph);
                 }
 
