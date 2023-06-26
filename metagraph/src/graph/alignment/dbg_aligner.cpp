@@ -653,7 +653,9 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
         };
 
         auto fwd_seeds = forward_seeder.get_seeds();
+        size_t old_seed_count = 0;
         if (config_.seed_complexity_filter) {
+            old_seed_count = fwd_seeds.size();
             fwd_seeds.erase(std::remove_if(fwd_seeds.begin(), fwd_seeds.end(),
                                            discard_low_complexity),
                             fwd_seeds.end());
@@ -663,10 +665,16 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
         if (reverse_seeder) {
             bwd_seeds = reverse_seeder->get_seeds();
             if (config_.seed_complexity_filter) {
+                old_seed_count += bwd_seeds.size();
                 bwd_seeds.erase(std::remove_if(bwd_seeds.begin(), bwd_seeds.end(),
                                                discard_low_complexity),
                                 bwd_seeds.end());
             }
+        }
+
+        if (config_.seed_complexity_filter) {
+            DEBUG_LOG("Seed complexity filter: {} seeds -> {} seeds",
+                      old_seed_count, fwd_seeds.size() + bwd_seeds.size());
         }
 
         if (fwd_seeds.empty() && bwd_seeds.empty())
@@ -759,8 +767,9 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
     };
 
     auto fwd_seeds = forward_seeder.get_alignments();
-    size_t old_seed_count = fwd_seeds.size();
+    size_t old_seed_count = 0;
     if (config_.seed_complexity_filter) {
+        old_seed_count = fwd_seeds.size();
         fwd_seeds.erase(std::remove_if(fwd_seeds.begin(), fwd_seeds.end(),
                                        discard_low_complexity),
                         fwd_seeds.end());
@@ -785,8 +794,10 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
         return a.get_query_view().begin() < b.get_query_view().begin();
     });
 
-    logger->trace("Seed complexity filter: {} seeds -> {} seeds",
+    if (config_.seed_complexity_filter) {
+        DEBUG_LOG("Seed complexity filter: {} seeds -> {} seeds",
                   old_seed_count, fwd_seeds.size() + bwd_seeds.size());
+    }
 
     RCDBG rc_dbg(std::shared_ptr<const DeBruijnGraph>(
                     std::shared_ptr<const DeBruijnGraph>(), &graph_));
