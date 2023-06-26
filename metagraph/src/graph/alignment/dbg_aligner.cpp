@@ -260,8 +260,8 @@ auto DBGAligner<Seeder, Extender, AlignmentCompare>
         std::vector<node_index> nodes_rc;
 
 #if ! _PROTEIN_GRAPH
-        if (graph_.get_mode() == DeBruijnGraph::CANONICAL
-                || config_.forward_and_reverse_complement) {
+        if (graph_.get_mode() != DeBruijnGraph::CANONICAL
+                && config_.forward_and_reverse_complement) {
             nodes_rc = nodes;
             std::string dummy(query);
             if (config_.max_seed_length >= graph_.get_k()) {
@@ -356,12 +356,12 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
         Extender extender(*this, this_query);
 
 #if ! _PROTEIN_GRAPH
-        if (seeder_rc) {
+        if (graph_.get_mode() == DeBruijnGraph::CANONICAL || seeder_rc) {
             std::string_view reverse = paths[i].get_query(true);
             Extender extender_rc(*this, reverse);
 
             auto [seeds, extensions, explored_nodes] =
-                align_both_directions(this_query, reverse, *seeder, *seeder_rc,
+                align_both_directions(this_query, reverse, *seeder, seeder_rc,
                                       extender, extender_rc,
                                       add_alignment, get_min_path_score);
 
@@ -377,7 +377,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
             std::string_view reverse = paths[i].get_query(true);
             Extender extender_rc(*this, reverse);
             auto [seeds, extensions, explored_nodes] =
-                align_both_directions(this_query, reverse, *seeder, *seeder_rc,
+                align_both_directions(this_query, reverse, *seeder, seeder_rc,
                                       extender, extender_rc,
                                       add_alignment, get_min_path_score);
 
@@ -612,7 +612,7 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
 ::align_both_directions(std::string_view forward,
                         std::string_view reverse,
                         const ISeeder &forward_seeder,
-                        const ISeeder &reverse_seeder,
+                        std::shared_ptr<ISeeder> reverse_seeder,
                         Extender &forward_extender,
                         Extender &reverse_extender,
                         const std::function<void(Alignment&&)> &callback,
@@ -629,12 +629,9 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
 
         auto fwd_seeds = forward_seeder.get_seeds();
 
-#if ! _PROTEIN_GRAPH
-        auto bwd_seeds = reverse_seeder.get_seeds();
-#else
         std::vector<Seed> bwd_seeds;
-        std::ignore = reverse_seeder;
-#endif
+        if (reverse_seeder)
+            bwd_seeds = reverse_seeder->get_seeds();
 
         if (fwd_seeds.empty() && bwd_seeds.empty())
             return std::make_tuple(num_seeds, num_extensions, num_explored_nodes);
@@ -720,7 +717,11 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
     std::sort(fwd_seeds.begin(), fwd_seeds.end(), [](const auto &a, const auto &b) {
         return a.get_query_view().begin() < b.get_query_view().begin();
     });
-    auto bwd_seeds = reverse_seeder.get_alignments();
+
+    std::vector<Alignment> bwd_seeds;
+    if (reverse_seeder)
+        bwd_seeds = reverse_seeder->get_alignments();
+
     std::sort(bwd_seeds.begin(), bwd_seeds.end(), [](const auto &a, const auto &b) {
         return a.get_query_view().begin() < b.get_query_view().begin();
     });
@@ -823,7 +824,7 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
     };
 
     size_t fwd_num_matches = forward_seeder.get_num_matches();
-    size_t bwd_num_matches = reverse_seeder.get_num_matches();
+    size_t bwd_num_matches = reverse_seeder ? reverse_seeder->get_num_matches() : 0;
 
     if (fwd_num_matches >= bwd_num_matches) {
         aln_both(forward, reverse, std::move(fwd_seeds),

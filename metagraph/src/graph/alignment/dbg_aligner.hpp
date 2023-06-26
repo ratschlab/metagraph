@@ -82,7 +82,7 @@ class DBGAligner : public IDBGAligner {
     align_both_directions(std::string_view forward,
                           std::string_view reverse,
                           const ISeeder &forward_seeder,
-                          const ISeeder &reverse_seeder,
+                          std::shared_ptr<ISeeder> reverse_seeder,
                           Extender &forward_extender,
                           Extender &reverse_extender,
                           const std::function<void(Alignment&&)> &callback,
