@@ -20,7 +20,7 @@ typedef Alignment::score_t score_t;
 
 
 #if ! _PROTEIN_GRAPH
-inline bool is_low_complexity(std::string_view s, int T = 20, int W = 64) {
+bool is_low_complexity(std::string_view s, int T, int W) {
     int n;
     std::unique_ptr<uint64_t, decltype(std::free)*> r {
         sdust(0, (const uint8_t*)s.data(), s.size(), T, W, &n),
@@ -29,7 +29,7 @@ inline bool is_low_complexity(std::string_view s, int T = 20, int W = 64) {
     return n > 0;
 }
 #else
-inline bool is_low_complexity(std::string_view, int = 20, int = 64) {
+bool is_low_complexity(std::string_view, int, int) {
     // TODO: implement a checker here
     return false;
 }
@@ -79,11 +79,9 @@ auto ExactSeeder::get_seeds() const -> std::vector<Seed> {
         if (query_nodes_[i] != DeBruijnGraph::npos) {
             assert(i + k <= query_.size());
             std::string_view query_window = query_.substr(i, k);
-            if (!config_.seed_complexity_filter || !is_low_complexity(query_window)) {
-                seeds.emplace_back(query_window,
-                                   std::vector<node_index>{ query_nodes_[i] },
-                                   orientation_, 0, i, end_clipping);
-            }
+            seeds.emplace_back(query_window,
+                               std::vector<node_index>{ query_nodes_[i] },
+                               orientation_, 0, i, end_clipping);
         }
     }
 
@@ -180,33 +178,25 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
             }
         } else {
             std::string_view window(this->query_.data(), this->graph_.get_k());
-            if (!is_low_complexity(window)) {
-                auto first_path = map_to_nodes_sequentially(this->graph_, window);
-                assert(first_path.size() == 1);
-                if (first_path[0]) {
-                    size_t end_clipping = this->query_.size() - window.size();
-                    found_seeds[end_clipping].emplace_back(
-                        window, std::move(first_path), this->orientation_,
-                        this->graph_.get_k() - window.size(),
-                        0, end_clipping
-                    );
-                    ++total_seed_count;
-                }
+            auto first_path = map_to_nodes_sequentially(this->graph_, window);
+            assert(first_path.size() == 1);
+            if (first_path[0]) {
+                size_t end_clipping = this->query_.size() - window.size();
+                found_seeds[end_clipping].emplace_back(
+                    window, std::move(first_path), this->orientation_,
+                    this->graph_.get_k() - window.size(),
+                    0, end_clipping
+                );
+                ++total_seed_count;
             }
         }
     }
 
     auto add_seeds = [&](size_t i, size_t max_seed_length) {
         std::string_view max_window(this->query_.data() + i, max_seed_length);
-        if (is_low_complexity(max_window))
-            return;
-
         dbg_succ.call_nodes_with_suffix_matching_longest_prefix(max_window,
             [&](node_index alt_node, size_t seed_len) {
                 std::string_view window(this->query_.data() + i, seed_len);
-                if (is_low_complexity(window))
-                    return;
-
                 size_t end_clipping = this->query_.size() - i - window.size();
                 auto &bucket = found_seeds[end_clipping];
                 if (bucket.size()) {
@@ -250,9 +240,6 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
         ::reverse_complement(query_rc.begin(), query_rc.end());
         auto add_seeds = [&](size_t i, size_t max_seed_length) {
             std::string_view max_window_rc(query_rc.data() + i, max_seed_length);
-            if (is_low_complexity(max_window_rc))
-                return;
-
             tsl::hopscotch_set<node_index> found_nodes;
 
             const auto &boss = dbg_succ.get_boss();
@@ -264,9 +251,6 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
 
             size_t clipping = this->query_.size() - i - seed_len;
             std::string_view window(this->query_.data() + clipping, seed_len);
-            if (is_low_complexity(window))
-                return;
-
             auto &bucket = found_seeds[i];
             if (bucket.size()) {
                 if (seed_len < bucket[0].get_query_view().size())

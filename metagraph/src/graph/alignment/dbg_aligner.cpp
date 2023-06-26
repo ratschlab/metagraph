@@ -370,7 +370,8 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
             num_explored_nodes += explored_nodes + extender_rc.num_explored_nodes();
 
         } else {
-            align_core(*seeder, extender, add_alignment, get_min_path_score, false);
+            align_core(*seeder, extender, add_alignment, get_min_path_score, false,
+                       config_.seed_complexity_filter);
         }
 #else
         if (config_.chain_alignments) {
@@ -383,7 +384,8 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
 
             num_seeds += seeds;
         } else {
-            align_core(*seeder, extender, add_alignment, get_min_path_score, false);
+            align_core(*seeder, extender, add_alignment, get_min_path_score, false,
+                       config_.seed_complexity_filter);
         }
 #endif
 
@@ -434,8 +436,22 @@ void align_core(const Seeder &seeder,
                 Extender &extender,
                 const std::function<void(Alignment&&)> &callback,
                 const std::function<score_t()> &get_min_path_score,
-                bool force_fixed_seed) {
+                bool force_fixed_seed,
+                bool seed_complexity_filter) {
     auto seeds = seeder.get_alignments();
+    if (seed_complexity_filter) {
+        seeds.erase(std::remove_if(seeds.begin(), seeds.end(),
+                                   [&](auto &seed) {
+                                       if (is_low_complexity(seed.get_query_view())) {
+                                           callback(std::move(seed));
+                                           return true;
+                                       }
+
+                                       return false;
+                                   }),
+                    seeds.end());
+    }
+
     std::sort(seeds.begin(), seeds.end(), [](const auto &a, const auto &b) {
         return a.get_query_view().begin() < b.get_query_view().begin();
     });
@@ -627,11 +643,31 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
             exit(1);
         }
 
+        auto discard_low_complexity = [&](const auto &seed) {
+            if (is_low_complexity(seed.get_query_view())) {
+                callback(Alignment(seed, config_));
+                return true;
+            }
+
+            return false;
+        };
+
         auto fwd_seeds = forward_seeder.get_seeds();
+        if (config_.seed_complexity_filter) {
+            fwd_seeds.erase(std::remove_if(fwd_seeds.begin(), fwd_seeds.end(),
+                                           discard_low_complexity),
+                            fwd_seeds.end());
+        }
 
         std::vector<Seed> bwd_seeds;
-        if (reverse_seeder)
+        if (reverse_seeder) {
             bwd_seeds = reverse_seeder->get_seeds();
+            if (config_.seed_complexity_filter) {
+                bwd_seeds.erase(std::remove_if(bwd_seeds.begin(), bwd_seeds.end(),
+                                               discard_low_complexity),
+                                bwd_seeds.end());
+            }
+        }
 
         if (fwd_seeds.empty() && bwd_seeds.empty())
             return std::make_tuple(num_seeds, num_extensions, num_explored_nodes);
@@ -713,14 +749,35 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
 
 #endif
 
+    auto discard_low_complexity = [&](auto &seed) {
+        if (is_low_complexity(seed.get_query_view())) {
+            callback(std::move(seed));
+            return true;
+        }
+
+        return false;
+    };
+
     auto fwd_seeds = forward_seeder.get_alignments();
+    if (config_.seed_complexity_filter) {
+        fwd_seeds.erase(std::remove_if(fwd_seeds.begin(), fwd_seeds.end(),
+                                       discard_low_complexity),
+                        fwd_seeds.end());
+    }
+
     std::sort(fwd_seeds.begin(), fwd_seeds.end(), [](const auto &a, const auto &b) {
         return a.get_query_view().begin() < b.get_query_view().begin();
     });
 
     std::vector<Alignment> bwd_seeds;
-    if (reverse_seeder)
+    if (reverse_seeder) {
         bwd_seeds = reverse_seeder->get_alignments();
+        if (config_.seed_complexity_filter) {
+            bwd_seeds.erase(std::remove_if(bwd_seeds.begin(), bwd_seeds.end(),
+                                           discard_low_complexity),
+                            bwd_seeds.end());
+        }
+    }
 
     std::sort(bwd_seeds.begin(), bwd_seeds.end(), [](const auto &a, const auto &b) {
         return a.get_query_view().begin() < b.get_query_view().begin();
@@ -810,7 +867,8 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
                     callback(std::move(path));
                 },
                 get_min_path_score,
-                true /* alignments must have the seed as a prefix */
+                true, /* alignments must have the seed as a prefix */
+                config_.seed_complexity_filter
             );
 
             for (size_t j = i + 1; j < seeds.size(); ++j) {

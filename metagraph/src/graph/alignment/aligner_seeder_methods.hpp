@@ -161,6 +161,8 @@ It merge_into_unitig_mums(const DeBruijnGraph &graph,
                           ssize_t min_seed_size,
                           size_t max_seed_size = std::numeric_limits<size_t>::max());
 
+bool is_low_complexity(std::string_view s, int T = 20, int W = 64);
+
 } // namespace align
 } // namespace graph
 } // namespace mtg
