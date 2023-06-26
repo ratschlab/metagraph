@@ -599,6 +599,7 @@ Config::Config(int argc, char *argv[]) {
         print_usage_and_exit = true;
 
     if (identity == TRANSFORM_ANNOTATION) {
+        memory_available = 1000; // 1 TB
         const bool to_row_diff = anno_type == RowDiff
                                     || anno_type == RowDiffBRWT
                                     || anno_type == RowDiffDisk
@@ -1263,7 +1264,7 @@ if (advanced) {
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --row-diff-stage [0|1|2] \tstage of the row_diff construction [0]\n");
             fprintf(stderr, "\t   --max-path-length [INT] \tmaximum path length in row_diff annotation [100]\n");
-            fprintf(stderr, "\t   --mem-cap-gb [FLOAT]\tmemory in GB available for the transform [1]\n");
+            fprintf(stderr, "\t   --mem-cap-gb [FLOAT]\tmemory in GB available for the transform [1000]\n");
             fprintf(stderr, "\t-i --infile-base [STR] \t\tgraph for generating succ/pred/anchors (for row_diff types) []\n");
             fprintf(stderr, "\t   --count-kmers \t\tadd k-mer counts to the row_diff annotation [off]\n");
             fprintf(stderr, "\t   --coordinates \t\tadd k-mer coordinates to the row_diff annotation [off]\n");
