@@ -580,6 +580,8 @@ void CanonicalDBG
         if (!cache)
             cache = fallback_cache_.get();
 
+        bool is_dummy = (spelling_hint.back() == boss::BOSS::kSentinel);
+
         boss::BOSS::edge_index rc_edge = cache->get_prefix_rc(
             dbg_succ_->kmer_to_boss_index(node),
             spelling_hint
@@ -591,8 +593,10 @@ void CanonicalDBG
         boss.call_outgoing(rc_edge, [&](boss::BOSS::edge_index adjacent_edge) {
             assert(dbg_succ_);
             node_index prev = dbg_succ_->boss_to_kmer_index(adjacent_edge);
-            if (prev != DeBruijnGraph::npos)
+            if (prev != DeBruijnGraph::npos
+                    && (!is_dummy || boss.get_W(adjacent_edge) != boss::BOSS::kSentinelCode)) {
                 callback(prev);
+            }
         });
 
         return;

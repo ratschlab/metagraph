@@ -1202,7 +1202,7 @@ TYPED_TEST(CanonicalDBGTest, TraversalDummy) {
     EXPECT_EQ(std::vector<char>({ 'C', 'T' }), out_edges);
 }
 
-TYPED_TEST(CanonicalDBGTest, TraverseNoDummyToDummy) {
+TYPED_TEST(CanonicalDBGTest, TraverseNoDummyToDummyForward) {
     if (!std::is_base_of_v<DBGSuccinct, TypeParam>) {
         common::logger->warn("Dummy k-mers only supported for DBGSuccinct");
         return;
@@ -1229,51 +1229,80 @@ TYPED_TEST(CanonicalDBGTest, TraverseNoDummyToDummy) {
     CanonicalDBG canonical(graph);
     const auto &boss = dbg_succ.get_boss();
 
-    {
-        std::string query = "TGTGCGGCGGGAATATGTACGAAGCGCAGG";
+    std::string query = "TGTGCGGCGGGAATATGTACGAAGCGCAGG";
 
-        auto encoded = boss.encode(query);
-        auto [edge_1, edge_2, end] = boss.index_range(encoded.begin(), encoded.end());
-        ASSERT_EQ(end, encoded.end());
-        edge_2 = boss.bwd(edge_2);
+    auto encoded = boss.encode(query);
+    auto [edge_1, edge_2, end] = boss.index_range(encoded.begin(), encoded.end());
+    ASSERT_EQ(end, encoded.end());
+    edge_2 = boss.bwd(edge_2);
 
-        ASSERT_EQ(std::string(1, '$') + query, canonical.get_node_sequence(edge_2));
-        bool found_edge = false;
-        graph->call_outgoing_kmers(edge_2, [&](auto, char c) {
-            found_edge = true;
-            EXPECT_EQ('A', c);
-        });
-        EXPECT_TRUE(found_edge);
+    ASSERT_EQ(std::string(1, '$') + query, canonical.get_node_sequence(edge_2));
+    bool found_edge = false;
+    graph->call_outgoing_kmers(edge_2, [&](auto, char c) {
+        found_edge = true;
+        EXPECT_EQ('A', c);
+    });
+    EXPECT_TRUE(found_edge);
 
-        canonical.call_outgoing_kmers(edge_2, [&](auto next, char c) {
-            EXPECT_NE(boss::BOSS::kSentinel, c);
-        });
+    canonical.call_outgoing_kmers(edge_2, [&](auto next, char c) {
+        EXPECT_NE(boss::BOSS::kSentinel, c);
+    });
 
-        canonical.adjacent_outgoing_nodes(edge_2, [&](auto next) {
-            char c = canonical.get_node_sequence(next).back();
-            EXPECT_NE(boss::BOSS::kSentinel, c);
-        });
+    canonical.adjacent_outgoing_nodes(edge_2, [&](auto next) {
+        char c = canonical.get_node_sequence(next).back();
+        EXPECT_NE(boss::BOSS::kSentinel, c);
+    });
+}
+
+TYPED_TEST(CanonicalDBGTest, TraverseNoDummyToDummyBackward) {
+    if (!std::is_base_of_v<DBGSuccinct, TypeParam>) {
+        common::logger->warn("Dummy k-mers only supported for DBGSuccinct");
+        return;
     }
-    {
-        std::string query = "CCTGCGCTTCGTACATATTCCCGCCGCACA";
-        auto encoded = boss.encode(query);
-        auto [edge_1, edge_2, end] = boss.index_range(encoded.begin(), encoded.end());
-        ASSERT_EQ(end, encoded.end());
-        ASSERT_EQ('G', boss.decode(boss.get_W(edge_2)));
-        edge_2 = boss.bwd(edge_2);
-        auto node = canonical.reverse_complement(edge_2);
-        ASSERT_EQ(boss::BOSS::kSentinel, canonical.get_node_sequence(node).back())
-            << canonical.get_node_sequence(node);
 
-        canonical.call_incoming_kmers(node, [&](auto, char c) {
-            EXPECT_NE(boss::BOSS::kSentinel, c);
-        });
+    // meant to make sure that the following traversal doesn't happen
+    // $TCCTGCGCTTCGTACATATTCCCGCCGCAC         -> TCCTGCGCTTCGTACATATTCCCGCCGCAC$
+    // (r.c. GTGCGGCGGGAATATGTACGAAGCGCAGGA$)
+    std::vector<std::string> sequences {
+        "TGTGCGGCGGGAATATGTACGAAGCGCAGGA",
+        "TTCCTGCGCTTCGTACATATTCCCGCCGCAC",
+    };
 
-        canonical.adjacent_incoming_nodes(node, [&](auto prev) {
-            char c = canonical.get_node_sequence(prev)[0];
-            EXPECT_NE(boss::BOSS::kSentinel, c);
-        });
+    auto graph = std::make_shared<DBGSuccinct>(31, DeBruijnGraph::PRIMARY);
+    for (const auto &sequence : sequences) {
+        graph->add_sequence(sequence);
     }
+
+    DBGSuccinct &dbg_succ = *dynamic_cast<DBGSuccinct*>(graph.get());
+
+    if (std::is_same_v<TypeParam, DBGSuccinctCached>)
+        graph->add_extension(std::make_shared<graph::NodeFirstCache>(dbg_succ));
+
+    CanonicalDBG canonical(graph);
+    const auto &boss = dbg_succ.get_boss();
+
+    std::string query = "GTGCGGCGGGAATATGTACGAAGCGCAGGA";
+    auto encoded = boss.encode(query);
+    auto [edge_1, edge_2, end] = boss.index_range(encoded.begin(), encoded.end());
+    ASSERT_EQ(end, encoded.end());
+    ASSERT_EQ(edge_1, edge_2);
+    ASSERT_EQ(boss::BOSS::kSentinelCode, boss.get_W(edge_2));
+
+    auto node = canonical.reverse_complement(edge_2);
+    bool found = false;
+    canonical.call_outgoing_kmers(node, [&](auto, char c) {
+        found = true;
+        EXPECT_EQ('A', c);
+    });
+    ASSERT_TRUE(found);
+
+    found = false;
+    canonical.adjacent_outgoing_nodes(node, [&](auto next) {
+        found = true;
+        char c = canonical.get_node_sequence(next).back();
+        EXPECT_EQ('A', c);
+    });
+    EXPECT_TRUE(found);
 }
 
 #endif // ! _PROTEIN_GRAPH
