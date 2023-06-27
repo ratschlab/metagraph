@@ -884,7 +884,7 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
                 },
                 get_min_path_score,
                 true, /* alignments must have the seed as a prefix */
-                config_.seed_complexity_filter
+                false /* don't apply the seed complexity filter here */
             );
 
             for (size_t j = i + 1; j < seeds.size(); ++j) {
