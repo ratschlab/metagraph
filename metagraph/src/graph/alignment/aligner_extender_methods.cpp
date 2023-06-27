@@ -856,7 +856,7 @@ std::vector<Alignment> DefaultColumnExtender::backtrack(score_t min_path_score,
         std::pop_heap(indices.begin(), it.base());
         const auto &[start_score, neg_off_diag, neg_j_start, start_pos] = *it;
 
-        if (terminate_backtrack_start(extensions))
+        if (terminate_backtrack_start(start_score, extensions))
             break;
 
         size_t j = -neg_j_start;

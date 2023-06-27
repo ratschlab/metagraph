@@ -191,8 +191,9 @@ class DefaultColumnExtender : public SeedFilteringExtender {
      */
 
     // stop considering new points from which to start backtracking
-    virtual bool terminate_backtrack_start(const std::vector<Alignment> &extensions) const {
-        return extensions.size() >= config_.num_alternative_paths;
+    virtual bool terminate_backtrack_start(score_t start_score,
+                                           const std::vector<Alignment> &extensions) const {
+        return extensions.size() && start_score < extensions.back().get_score();
     }
 
     // skip a backtracking start point

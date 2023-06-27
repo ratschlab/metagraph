@@ -52,7 +52,8 @@ class LabeledExtender : public DefaultColumnExtender {
     virtual bool set_seed(const Alignment &seed) override final;
 
     // overrides for backtracking helpers
-    virtual bool terminate_backtrack_start(const std::vector<Alignment> &) const override final {
+    virtual bool terminate_backtrack_start(score_t,
+                                           const std::vector<Alignment> &) const override final {
         // we are done with backtracking if all seed labels have been accounted for
         return !remaining_labels_i_;
     }
