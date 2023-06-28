@@ -635,6 +635,18 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
     if (seeds.empty())
         return 0;
 
+    size_t num_matches = get_num_char_matches_in_seeds(seeds.begin(), seeds.end());
+
+    if (this->config_.seed_complexity_filter) {
+        seeds.erase(std::remove_if(seeds.begin(), seeds.end(), [](const auto &seed) {
+                                       return is_low_complexity(seed.get_query_view());
+                                   }),
+                    seeds.end());
+
+        if (seeds.empty())
+            return 0;
+    }
+
     size_t query_size = seeds[0].get_clipping() + seeds[0].get_end_clipping()
                             + seeds[0].get_query_view().size();
 
@@ -799,7 +811,7 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
         );
     }));
 
-    return get_num_char_matches_in_seeds(seeds.begin(), seeds.end());
+    return num_matches;
 }
 
 template class LabeledAligner<>;
