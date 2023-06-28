@@ -165,6 +165,7 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
     if (dbg_succ.get_mask())
         logger->warn("Graph has a dummy k-mer mask. Seeds containing dummy k-mers will be missed.");
 
+    bool found_first = false;
     std::vector<std::vector<Seed>> found_seeds(this->query_.size() - this->config_.min_seed_length + 1);
     size_t total_seed_count = 0;
     if (this->query_.size() >= this->graph_.get_k()) {
@@ -172,6 +173,7 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
             assert(this->query_nodes_.size()
                 == this->query_.size() - this->graph_.get_k() + 1);
             for (auto &seed : this->BaseSeeder::get_seeds()) {
+                found_first |= !seed.get_clipping();
                 auto &bucket = found_seeds[seed.get_end_clipping()];
                 bucket.emplace_back(std::move(seed));
                 ++total_seed_count;
@@ -181,6 +183,7 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
             auto first_path = map_to_nodes_sequentially(this->graph_, window);
             assert(first_path.size() == 1);
             if (first_path[0]) {
+                found_first = true;
                 size_t end_clipping = this->query_.size() - window.size();
                 found_seeds[end_clipping].emplace_back(
                     window, std::move(first_path), this->orientation_,
@@ -221,7 +224,7 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
 
     size_t max_seed_length = std::min(this->graph_.get_k() - 1,
                                       this->config_.max_seed_length);
-    size_t i = 0;
+    size_t i = found_first ? this->graph_.get_k() - max_seed_length : 0;
     for ( ; i + max_seed_length <= this->query_.size(); ++i) {
         add_seeds(i, max_seed_length);
     }
@@ -250,6 +253,9 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
                 return;
 
             size_t clipping = this->query_.size() - i - seed_len;
+            if (found_first && !clipping)
+                return;
+
             std::string_view window(this->query_.data() + clipping, seed_len);
             auto &bucket = found_seeds[i];
             if (bucket.size()) {
@@ -291,6 +297,18 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
                 add_seeds(i, this->config_.min_seed_length);
             }
         }
+    }
+
+    auto first_front_match = std::find_if(found_seeds.begin(), found_seeds.end(),
+        [](const auto &bucket) {
+            return bucket.size() && !bucket[0].get_clipping();
+        }
+    );
+
+    if (first_front_match != found_seeds.end()) {
+        std::for_each(first_front_match + 1, found_seeds.end(), [](auto &bucket) {
+            bucket.clear();
+        });
     }
 
     seeds_.clear();
