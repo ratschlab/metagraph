@@ -216,6 +216,7 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
                                     this->orientation_,
                                     this->graph_.get_k() - window.size(),
                                     i, end_clipping);
+                found_first |= !i;
                 ++total_seed_count;
             },
             this->config_.min_seed_length
@@ -229,10 +230,11 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
         add_seeds(i, max_seed_length);
     }
 
-    if (found_seeds[0].empty() && this->config_.min_seed_length < max_seed_length) {
-        assert(i == this->query_.size() - max_seed_length + 1);
+    assert(i == this->query_.size() - max_seed_length + 1);
+    if (this->config_.min_seed_length < max_seed_length) {
+        size_t cur_length = max_seed_length;
         for ( ; i + this->config_.min_seed_length <= this->query_.size(); ++i) {
-            add_seeds(i, this->config_.min_seed_length);
+            add_seeds(i, --cur_length);
         }
     }
 
@@ -282,6 +284,7 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
                                     this->orientation_,
                                     this->graph_.get_k() - window.size(),
                                     clipping, i);
+                found_first |= !clipping;
                 ++total_seed_count;
             }
         };
@@ -291,10 +294,11 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
             add_seeds(i, max_seed_length);
         }
 
+        assert(i == this->query_.size() - max_seed_length + 1);
         if (this->config_.min_seed_length < max_seed_length) {
-            assert(i == this->query_.size() - max_seed_length + 1);
+            size_t cur_length = max_seed_length;
             for ( ; i + this->config_.min_seed_length <= this->query_.size(); ++i) {
-                add_seeds(i, this->config_.min_seed_length);
+                add_seeds(i, --cur_length);
             }
         }
     }
