@@ -8,6 +8,7 @@
 #include "common/logger.hpp"
 #include "common/utils/template_utils.hpp"
 #include "common/seq_tools/reverse_complement.hpp"
+#include "common/algorithms.hpp"
 
 
 namespace mtg {
@@ -413,16 +414,63 @@ It merge_into_unitig_mums(const DeBruijnGraph &graph,
         Seed &a_i = *(i + 1);
         Seed &a_j = *i;
 
-        if (a_i.label_columns != a_j.label_columns)
+        if (a_i.get_end_clipping() != a_j.get_end_clipping())
             continue;
 
         const auto &nodes_i = a_i.get_nodes();
         const auto &nodes_j = a_j.get_nodes();
+        if (a_i.get_clipping() == a_j.get_clipping() && a_i.get_offset() == a_j.get_offset()
+                && nodes_i == nodes_j) {
+            // these are the same alignment, merge their annotations
+            if (a_i.label_columns.empty() || a_j.label_columns.empty()) {
+                if (a_i.label_columns.empty())
+                    std::swap(a_i, a_j);
+
+                a_j = Seed();
+                continue;
+            }
+
+            assert(a_i.label_coordinates.empty() == a_j.label_coordinates.empty());
+
+            Alignment::Columns merged_columns;
+            if (a_i.label_coordinates.empty()) {
+                std::set_union(a_i.label_columns.begin(), a_i.label_columns.end(),
+                               a_j.label_columns.begin(), a_j.label_columns.end(),
+                               std::back_inserter(merged_columns));
+            } else {
+                Alignment::CoordinateSet merged_coords;
+                auto add_diff = [&](auto label, const auto &c) {
+                    merged_columns.emplace_back(label);
+                    merged_coords.emplace_back(c);
+                };
+                utils::match_indexed_values(a_i.label_columns.begin(), a_i.label_columns.end(),
+                                            a_i.label_coordinates.begin(),
+                                            a_j.label_columns.begin(), a_j.label_columns.end(),
+                                            a_j.label_coordinates.begin(),
+                    [&](auto label, const auto &c1, const auto &c2) {
+                        merged_columns.emplace_back(label);
+                        auto &c = merged_coords.emplace_back();
+                        std::set_union(c1.begin(), c1.end(), c2.begin(), c2.end(),
+                                       std::back_inserter(c));
+                    },
+                    add_diff,
+                    add_diff
+                );
+                std::swap(a_i.label_coordinates, merged_coords);
+            }
+
+            std::swap(a_i.label_columns, merged_columns);
+            a_j = Seed();
+            continue;
+        }
+
+        if (a_i.label_columns != a_j.label_columns)
+            continue;
+
         std::string_view query_i = a_i.get_query_view();
         std::string_view query_j = a_j.get_query_view();
 
-        if (a_i.get_end_clipping() == a_j.get_end_clipping()
-                && nodes_j.back() == nodes_i.back()) {
+        if (nodes_j.back() == nodes_i.back()) {
             if (query_j.size() > query_i.size())
                 std::swap(a_i, a_j);
 
