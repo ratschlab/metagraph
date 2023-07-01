@@ -694,7 +694,9 @@ void CanonicalDBG
     if (const auto *dbg_succ_ = get_dbg_succ(*graph_)) {
         const boss::BOSS &boss = dbg_succ_->get_boss();
         adjacent_incoming_rc_strand(node, [&](node_index prev) {
-            char c = complement(boss.decode(boss.get_W(dbg_succ_->kmer_to_boss_index(prev - offset_)) % boss.alph_size));
+            char c = complement(boss.decode(
+                boss.get_W(dbg_succ_->kmer_to_boss_index(prev - offset_)) % boss.alph_size
+            ));
             callback(prev, c);
         }, spelling_hint);
     } else {
