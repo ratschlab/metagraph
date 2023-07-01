@@ -629,14 +629,14 @@ std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score,
 
                     if (!config_.global_xdrop) {
                         scores_reached_[trim + j] = std::max(scores_reached_[trim + j], S[j]);
-                        scores_reached_cutoff = (S[j] >= scores_reached_[trim + j] * config_.rel_score_cutoff);
+                        scores_reached_cutoff = (S[j] > scores_reached_[trim + j] * config_.rel_score_cutoff);
                     }
 
                     // check if this node can be extended to get a better alignment
                     assert(partial_sums[j] - partial_sum_offset
                             == config_.match_score(window.substr(j + trim)));
                     if (!has_extension && scores_reached_cutoff
-                            && S[j] + partial_sums[j] >= extension_cutoff) {
+                            && S[j] + partial_sums[j] > extension_cutoff) {
                         has_extension = true;
                     }
 
