@@ -550,7 +550,7 @@ void CanonicalDBG::reverse_complement(std::string &seq,
  *  AAGCCA                    TGGCTT
  */
 
-// for each n, check for TGGCTn. If found, define and store the index for
+// for each n, check for TGGCTn. If found, define and the index for
 // rc(n)AGCCA as index(TGGCTn) + offset_
 void CanonicalDBG
 ::adjacent_incoming_rc_strand(node_index node,
@@ -619,7 +619,7 @@ void CanonicalDBG
  *         TGGCTT      AAGCCA
  */
 
-// for each n, check for nAGCCA. If found, define and store the index for
+// for each n, check for nAGCCA. If found, define the index for
 // TGGCTrc(n) as index(nAGCCA) + offset_
 void CanonicalDBG
 ::adjacent_outgoing_rc_strand(node_index node,
