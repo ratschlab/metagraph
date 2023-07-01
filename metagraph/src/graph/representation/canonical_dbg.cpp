@@ -184,30 +184,14 @@ void CanonicalDBG
     if (!max_num_edges_left)
         return;
 
-    /**
-     *
-     * find children of node by searching for parents of its reverse complement
-     * e.g., node = ATGGCT. Find TGGCTA and TGGCTT by looking for  TAGCCA and AAGCCA
-     *         TGGCTA      TAGCCA
-     *        /                  \
-     *  ATGGCT         ->         AGCCAT
-     *        \                  /
-     *         TGGCTT      AAGCCA
-     */
-
-    // for each n, check for nAGCCA. If found, define and store the index for
-    // TGGCTrc(n) as index(nAGCCA) + offset_
-    call_incoming_from_rc(node, [&](node_index next, char c) {
-        assert(c == get_node_sequence(next)[0]);
-
-        c = complement(c);
-        assert(c == get_node_sequence(next + offset_).back());
+    call_outgoing_rc_strand(node, [&](node_index next, char c) {
+        assert(c == get_node_sequence(next).back());
         auto s = alphabet_encoder_[c];
 
         if (children[s] == npos) {
-            callback(next + offset_, c);
-            children[s] = next + offset_;
-            assert(traverse(node, c) == next + offset_);
+            callback(next, c);
+            children[s] = next;
+            assert(traverse(node, c) == next);
             return;
         }
 
@@ -217,7 +201,7 @@ void CanonicalDBG
             logger->error(
                 "Forward traversal: Primary graph contains both forward and reverse complement: {} {} -> {} {}\t{} {}",
                 node, get_node_sequence(node), children[s], get_node_sequence(children[s]),
-                next, get_node_sequence(next));
+                next - offset_, get_node_sequence(next - offset_));
             exit(1);
         }
 
@@ -257,9 +241,11 @@ void CanonicalDBG
     if (!max_num_edges_left)
         return;
 
-    adjacent_incoming_from_rc(node, [&](node_index next, edge_index) {
-        callback(next + offset_);
-    }, spelling_hint.size() ? spelling_hint : get_node_sequence(node));
+    adjacent_outgoing_rc_strand(
+        node,
+        [&](node_index next, edge_index) { callback(next); },
+        spelling_hint.size() ? spelling_hint : get_node_sequence(node)
+    );
 }
 
 bool CanonicalDBG::has_multiple_outgoing(node_index node) const {
@@ -329,29 +315,14 @@ void CanonicalDBG
     if (!max_num_edges_left)
         return;
 
-    /**
-     * find parents of node by searching for children of its reverse complement
-     * e.g., node = AGCCAT. Find TAGCCA and AAGCCA by looking for TGGCTA and TGGCTT.
-     *  TAGCCA                    TGGCTA
-     *        \                  /
-     *         AGCCAT  ->  ATGGCT
-     *        /                  \
-     *  AAGCCA                    TGGCTT
-     */
-
-    // for each n, check for TGGCTn. If found, define and store the index for
-    // rc(n)AGCCA as index(TGGCTn) + offset_
-    call_outgoing_from_rc(node, [&](node_index prev, char c) {
-        assert(c == get_node_sequence(prev).back());
-
-        c = complement(c);
-        assert(c == get_node_sequence(prev + offset_)[0]);
+    call_incoming_rc_strand(node, [&](node_index prev, char c) {
+        assert(c == get_node_sequence(prev)[0]);
         auto s = alphabet_encoder_[c];
 
         if (parents[s] == npos) {
-            callback(prev + offset_, c);
-            parents[s] = prev + offset_;
-            assert(traverse_back(node, c) == prev + offset_);
+            callback(prev, c);
+            parents[s] = prev;
+            assert(traverse_back(node, c) == prev);
             return;
         }
 
@@ -361,12 +332,12 @@ void CanonicalDBG
             logger->error(
                 "Bachward traversal: Primary graph contains both forward and reverse complement: {} {} <- {} {}\t{} {}",
                 node, get_node_sequence(node), parents[s], get_node_sequence(parents[s]),
-                prev, get_node_sequence(prev)
+                prev - offset_, get_node_sequence(prev - offset_)
             );
             exit(1);
         }
 
-        is_palindrome_cache_.Put(prev, true);
+        is_palindrome_cache_.Put(prev - offset_, true);
     }, spelling_hint.size() ? spelling_hint : get_node_sequence(node));
 }
 
@@ -401,9 +372,11 @@ void CanonicalDBG
     if (!max_num_edges_left)
         return;
 
-    adjacent_outgoing_from_rc(node, [&](node_index prev) {
-        callback(prev + offset_);
-    }, spelling_hint.size() ? spelling_hint : get_node_sequence(node));
+    adjacent_incoming_rc_strand(
+        node,
+        [&](node_index next) { callback(next); },
+        spelling_hint.size() ? spelling_hint : get_node_sequence(node)
+    );
 }
 
 size_t CanonicalDBG::outdegree(node_index node) const {
@@ -567,9 +540,20 @@ void CanonicalDBG::reverse_complement(std::string &seq,
     std::swap(path, rev_path);
 }
 
+/**
+ * find parents of node by searching for children of its reverse complement
+ * e.g., node = AGCCAT. Find TAGCCA and AAGCCA by looking for TGGCTA and TGGCTT.
+ *  TAGCCA                    TGGCTA
+ *        \                  /
+ *         AGCCAT  ->  ATGGCT
+ *        /                  \
+ *  AAGCCA                    TGGCTT
+ */
 
+// for each n, check for TGGCTn. If found, define and store the index for
+// rc(n)AGCCA as index(TGGCTn) + offset_
 void CanonicalDBG
-::adjacent_outgoing_from_rc(node_index node,
+::adjacent_incoming_rc_strand(node_index node,
                             const std::function<void(node_index)> &callback,
                             const std::string &spelling_hint) const {
     //        lshift    rc
@@ -601,7 +585,7 @@ void CanonicalDBG
                 return;
             }
 
-            callback(prev);
+            callback(prev + offset_);
         });
     } else {
         // Do the checks by directly mapping the sequences of the desired k-mers.
@@ -617,15 +601,28 @@ void CanonicalDBG
             rev_seq.back() = complement(alphabet[c]);
             node_index prev = graph_->kmer_to_node(rev_seq);
             if (prev != DeBruijnGraph::npos)
-                callback(prev);
+                callback(prev + offset_);
         }
     }
 }
 
+/**
+ *
+ * find children of node by searching for parents of its reverse complement
+ * e.g., node = ATGGCT. Find TGGCTA and TGGCTT by looking for  TAGCCA and AAGCCA
+ *         TGGCTA      TAGCCA
+ *        /                  \
+ *  ATGGCT         ->         AGCCAT
+ *        \                  /
+ *         TGGCTT      AAGCCA
+ */
+
+// for each n, check for nAGCCA. If found, define and store the index for
+// TGGCTrc(n) as index(nAGCCA) + offset_
 void CanonicalDBG
-::adjacent_incoming_from_rc(node_index node,
-                            const std::function<void(node_index, edge_index)> &callback,
-                            const std::string &spelling_hint) const {
+::adjacent_outgoing_rc_strand(node_index node,
+                              const std::function<void(node_index, edge_index)> &callback,
+                              const std::string &spelling_hint) const {
     //        rshift    rc
     // ATGGCT -> TGGCT* -> *AGCCA
     if (const auto *dbg_succ_ = get_dbg_succ(*graph_)) {
@@ -664,7 +661,7 @@ void CanonicalDBG
                         return;
                 }
 
-                callback(next, rc_edge);
+                callback(next + offset_, rc_edge);
             }
         );
     } else {
@@ -681,48 +678,48 @@ void CanonicalDBG
             rev_seq[0] = complement(alphabet[c]);
             node_index next = graph_->kmer_to_node(rev_seq);
             if (next != DeBruijnGraph::npos)
-                callback(next, 0);
+                callback(next + offset_, 0);
         }
     }
 }
 
 void CanonicalDBG
-::call_outgoing_from_rc(node_index node,
-                        const std::function<void(node_index, char)> &callback,
-                        const std::string &spelling_hint) const {
+::call_incoming_rc_strand(node_index node,
+                          const std::function<void(node_index, char)> &callback,
+                          const std::string &spelling_hint) const {
     if (const auto *dbg_succ_ = get_dbg_succ(*graph_)) {
         const boss::BOSS &boss = dbg_succ_->get_boss();
-        adjacent_outgoing_from_rc(node, [&](node_index next) {
-            char c = boss.decode(boss.get_W(dbg_succ_->kmer_to_boss_index(next)) % boss.alph_size);
-            callback(next, c);
+        adjacent_incoming_rc_strand(node, [&](node_index prev) {
+            char c = complement(boss.decode(boss.get_W(dbg_succ_->kmer_to_boss_index(prev - offset_)) % boss.alph_size));
+            callback(prev, c);
         }, spelling_hint);
     } else {
-        adjacent_outgoing_from_rc(node, [&](node_index next) {
-            char c = graph_->get_node_sequence(next).back();
+        adjacent_incoming_rc_strand(node, [&](node_index prev) {
+            char c = complement(graph_->get_node_sequence(prev - offset_).back());
             assert(c != boss::BOSS::kSentinel);
-            callback(next, c);
+            callback(prev, c);
         }, spelling_hint);
     }
 }
 
 void CanonicalDBG
-::call_incoming_from_rc(node_index node,
-                        const std::function<void(node_index, char)> &callback,
-                        const std::string &spelling_hint) const {
+::call_outgoing_rc_strand(node_index node,
+                          const std::function<void(node_index, char)> &callback,
+                          const std::string &spelling_hint) const {
     if (get_dbg_succ(*graph_)) {
         const auto *cache = get_cache();
         assert(cache);
-        adjacent_incoming_from_rc(node, [&](node_index prev, edge_index rc_edge) {
-            char c = cache->get_first_char(prev, rc_edge);
-            callback(prev, c);
+        adjacent_outgoing_rc_strand(node, [&](node_index next, edge_index rc_edge) {
+            char c = complement(cache->get_first_char(next - offset_, rc_edge));
+            callback(next, c);
         }, spelling_hint);
 
         return;
     } else {
-        adjacent_incoming_from_rc(node, [&](node_index prev, edge_index) {
-            char c = graph_->get_node_sequence(prev)[0];
+        adjacent_outgoing_rc_strand(node, [&](node_index next, edge_index) {
+            char c = complement(graph_->get_node_sequence(next - offset_)[0]);
             assert(c != boss::BOSS::kSentinel);
-            callback(prev, c);
+            callback(next, c);
         }, spelling_hint);
     }
 }

@@ -146,24 +146,21 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
     // extension is not available
     mutable std::unique_ptr<NodeFirstCache> fallback_cache_;
 
-    // Determine outgoing nodes that are of the opposite orientation of node.
-    void adjacent_outgoing_from_rc(node_index node,
-                                   const std::function<void(node_index)> &callback,
-                                   const std::string &spelling_hint) const;
+    // Find incoming nodes that are on the reverse complement strand of node
+    void adjacent_incoming_rc_strand(node_index node,
+                                     const std::function<void(node_index)> &callback,
+                                     const std::string &spelling_hint) const;
+    void call_incoming_rc_strand(node_index node,
+                                 const std::function<void(node_index, char)> &callback,
+                                 const std::string &spelling_hint) const;
 
-    // Determine incoming nodes that are of the opposite orientation of node.
-    // Find the BOSS node corresponding to the reverse complement of node's suffix,
-    // then call back this BOSS node and all graph nodes incoming to this BOSS node
-    void adjacent_incoming_from_rc(node_index node,
-                                   const std::function<void(node_index, uint64_t)> &callback,
-                                   const std::string &spelling_hint) const;
-
-    void call_outgoing_from_rc(node_index node,
-                               const std::function<void(node_index, char)> &callback,
-                               const std::string &spelling_hint) const;
-    void call_incoming_from_rc(node_index node,
-                               const std::function<void(node_index, char)> &callback,
-                               const std::string &spelling_hint) const;
+    // Find outgoing nodes that are on the reverse complement strand of node
+    void adjacent_outgoing_rc_strand(node_index node,
+                                     const std::function<void(node_index, uint64_t)> &callback,
+                                     const std::string &spelling_hint) const;
+    void call_outgoing_rc_strand(node_index node,
+                                 const std::function<void(node_index, char)> &callback,
+                                 const std::string &spelling_hint) const;
 
     const NodeFirstCache* get_cache() const;
 };
