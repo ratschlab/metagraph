@@ -162,8 +162,9 @@ void CanonicalDBG
         ::reverse_complement(rc_hint.begin(), rc_hint.end());
         call_incoming_kmers_hint(node - offset_, [&](node_index next, char c) {
             c = complement(c);
+            assert(c == boss::BOSS::kSentinel
+                || traverse(node, c) == reverse_complement(next));
             callback(reverse_complement(next), c);
-            assert(traverse(node, c) == reverse_complement(next));
         }, rc_hint);
         return;
     }
@@ -175,8 +176,8 @@ void CanonicalDBG
 
     graph_->call_outgoing_kmers(node, [&](node_index next, char c) {
         assert(has_sentinel_ || c != boss::BOSS::kSentinel);
+        assert(c == boss::BOSS::kSentinel || traverse(node, c) == next);
         callback(next, c);
-        assert(traverse(node, c) == next);
         children[alphabet_encoder_[c]] = next;
         --max_num_edges_left;
     });
@@ -189,9 +190,9 @@ void CanonicalDBG
         auto s = alphabet_encoder_[c];
 
         if (children[s] == npos) {
+            assert(c == boss::BOSS::kSentinel || traverse(node, c) == next);
             callback(next, c);
             children[s] = next;
-            assert(traverse(node, c) == next);
             return;
         }
 
@@ -287,8 +288,9 @@ void CanonicalDBG
         ::reverse_complement(rc_hint.begin(), rc_hint.end());
         call_outgoing_kmers_hint(node - offset_, [&](node_index prev, char c) {
             c = complement(c);
+            assert(c == boss::BOSS::kSentinel
+                || traverse_back(node, c) == reverse_complement(prev));
             callback(reverse_complement(prev), c);
-            assert(traverse_back(node, c) == reverse_complement(prev));
         }, rc_hint);
         return;
     }
@@ -300,9 +302,9 @@ void CanonicalDBG
 
     auto incoming_kmer_callback = [&](node_index prev, char c) {
         assert(has_sentinel_ || c != boss::BOSS::kSentinel);
+        assert(c == boss::BOSS::kSentinel || traverse_back(node, c) == prev);
         callback(prev, c);
         parents[alphabet_encoder_[c]] = prev;
-        assert(traverse_back(node, c) == prev);
         --max_num_edges_left;
     };
 
@@ -320,9 +322,9 @@ void CanonicalDBG
         auto s = alphabet_encoder_[c];
 
         if (parents[s] == npos) {
+            assert(c == boss::BOSS::kSentinel || traverse_back(node, c) == prev);
             callback(prev, c);
             parents[s] = prev;
-            assert(traverse_back(node, c) == prev);
             return;
         }
 
