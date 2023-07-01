@@ -43,6 +43,13 @@ CanonicalDBG::CanonicalDBG(std::shared_ptr<const DeBruijnGraph> graph, size_t ca
     }
 }
 
+const NodeFirstCache* CanonicalDBG::get_cache() const {
+    if (const auto *cache = get_extension_threadsafe<NodeFirstCache>())
+        return cache;
+
+    return fallback_cache_.get();
+}
+
 void CanonicalDBG
 ::map_to_nodes_sequentially(std::string_view sequence,
                             const std::function<void(node_index)> &callback,
@@ -313,11 +320,7 @@ void CanonicalDBG
         --max_num_edges_left;
     };
 
-    const auto *cache = get_extension_threadsafe<NodeFirstCache>();
-    if (!cache)
-        cache = fallback_cache_.get();
-
-    if (cache) {
+    if (const auto *cache = get_cache()) {
         cache->call_incoming_kmers(node, incoming_kmer_callback);
     } else {
         graph_->call_incoming_kmers(node, incoming_kmer_callback);
@@ -576,9 +579,8 @@ void CanonicalDBG
         //-> AGAGGATCTCGTATGCCGTCTTCTGCTTGA
         //-> TCAAGCAGAAGACGGCATACGAGATCCTCT
         const boss::BOSS &boss = dbg_succ_->get_boss();
-        auto *cache = get_extension_threadsafe<NodeFirstCache>();
-        if (!cache)
-            cache = fallback_cache_.get();
+        const auto *cache = get_cache();
+        assert(cache);
 
         bool is_dummy = (spelling_hint.back() == boss::BOSS::kSentinel);
 
@@ -628,11 +630,13 @@ void CanonicalDBG
         //->  GAGGATCTCGTATGCCGTCTTCTGCTTGAG
         //->  CTCAAGCAGAAGACGGCATACGAGATCCTC
         const boss::BOSS &boss = dbg_succ_->get_boss();
-        auto *cache = get_extension_threadsafe<NodeFirstCache>();
+
+        const auto *cache = get_cache();
+        assert(cache);
 
         bool is_dummy = (spelling_hint[0] == boss::BOSS::kSentinel);
 
-        boss::BOSS::edge_index rc_edge = (cache ? cache : fallback_cache_.get())->get_suffix_rc(
+        boss::BOSS::edge_index rc_edge = cache->get_suffix_rc(
             dbg_succ_->kmer_to_boss_index(node),
             spelling_hint
         );
@@ -642,7 +646,9 @@ void CanonicalDBG
 
         // rc_edge may be a dummy sink, so this won't work with graph_->call_incoming_kmers
         boss.call_incoming_to_target(
-            cache ? cache->get_parent_pair(rc_edge).first : boss.bwd(rc_edge),
+            cache != fallback_cache_.get()
+                ? cache->get_parent_pair(rc_edge).first
+                : boss.bwd(rc_edge),
             boss.get_node_last_value(rc_edge),
             [&](boss::BOSS::edge_index incoming_boss_edge) {
                 node_index next = dbg_succ_->boss_to_kmer_index(incoming_boss_edge);
@@ -650,9 +656,7 @@ void CanonicalDBG
                     return;
 
                 if (is_dummy) {
-                    char c = (cache ? cache : fallback_cache_.get())->get_first_char(
-                        incoming_boss_edge, rc_edge
-                    );
+                    char c = cache->get_first_char(incoming_boss_edge, rc_edge);
                     if (c == boss::BOSS::kSentinel)
                         return;
                 }
@@ -703,10 +707,8 @@ void CanonicalDBG
                         const std::function<void(node_index, char)> &callback,
                         const std::string &spelling_hint) const {
     if (get_dbg_succ(*graph_)) {
-        auto *cache = get_extension_threadsafe<NodeFirstCache>();
-        if (!cache)
-            cache = fallback_cache_.get();
-
+        const auto *cache = get_cache();
+        assert(cache);
         adjacent_incoming_from_rc(node, [&](node_index prev, edge_index rc_edge) {
             char c = cache->get_first_char(prev, rc_edge);
             callback(prev, c);

@@ -164,6 +164,8 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
     void call_incoming_from_rc(node_index node,
                                const std::function<void(node_index, char)> &callback,
                                const std::string &spelling_hint) const;
+
+    const NodeFirstCache* get_cache() const;
 };
 
 } // namespace graph
