@@ -645,9 +645,11 @@ void CanonicalDBG
         if (!rc_edge)
             return;
 
+        bool is_dummy_source = (spelling_hint[0] == boss::BOSS::kSentinel);
+
         // rc_edge may be a dummy sink, so this won't work with graph_->call_incoming_kmers
         boss.call_incoming_to_target(
-            cache != fallback_cache_.get()
+            cache != fallback_cache_.get() || is_dummy_source
                 ? cache->get_parent_pair(rc_edge).first
                 : boss.bwd(rc_edge),
             boss.get_node_last_value(rc_edge),
@@ -656,7 +658,7 @@ void CanonicalDBG
                 if (next == DeBruijnGraph::npos)
                     return;
 
-                if (spelling_hint[0] == boss::BOSS::kSentinel) {
+                if (is_dummy_source) {
                     char c = cache->get_first_char(incoming_boss_edge, rc_edge);
                     if (c == boss::BOSS::kSentinel)
                         return;
