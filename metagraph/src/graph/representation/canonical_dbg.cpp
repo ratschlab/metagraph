@@ -598,23 +598,21 @@ void CanonicalDBG
                 callback(prev);
             }
         });
+    } else {
+        // Do the checks by directly mapping the sequences of the desired k-mers.
+        // For non-DBGSuccinct graphs, this should be fast enough.
+        std::string rev_seq = graph_->get_node_sequence(node).substr(0, graph_->get_k() - 1);
+        ::reverse_complement(rev_seq.begin(), rev_seq.end());
+        rev_seq.push_back('\0');
 
-        return;
-    }
-
-    // Do the checks by directly mapping the sequences of the desired k-mers.
-    // For non-DBGSuccinct graphs, this should be fast enough.
-    std::string rev_seq = graph_->get_node_sequence(node).substr(0, graph_->get_k() - 1);
-    ::reverse_complement(rev_seq.begin(), rev_seq.end());
-    rev_seq.push_back('\0');
-
-    const auto &alphabet = graph_->alphabet();
-    for (size_t c = 0; c < alphabet.size(); ++c) {
-        if (alphabet[c] != boss::BOSS::kSentinel) {
-            rev_seq.back() = complement(alphabet[c]);
-            node_index prev = graph_->kmer_to_node(rev_seq);
-            if (prev != DeBruijnGraph::npos)
-                callback(prev);
+        const auto &alphabet = graph_->alphabet();
+        for (size_t c = 0; c < alphabet.size(); ++c) {
+            if (alphabet[c] != boss::BOSS::kSentinel) {
+                rev_seq.back() = complement(alphabet[c]);
+                node_index prev = graph_->kmer_to_node(rev_seq);
+                if (prev != DeBruijnGraph::npos)
+                    callback(prev);
+            }
         }
     }
 }
@@ -662,23 +660,21 @@ void CanonicalDBG
                 callback(next, rc_edge);
             }
         );
+    } else {
+        // Do the checks by directly mapping the sequences of the desired k-mers.
+        // For non-DBGSuccinct graphs, this should be fast enough.
+        std::string rev_seq = graph_->get_node_sequence(node).substr(1) + std::string(1, '\0');
+        ::reverse_complement(rev_seq.begin(), rev_seq.end());
+        assert(rev_seq[0] == '\0');
 
-        return;
-    }
-
-    // Do the checks by directly mapping the sequences of the desired k-mers.
-    // For non-DBGSuccinct graphs, this should be fast enough.
-    std::string rev_seq = graph_->get_node_sequence(node).substr(1) + std::string(1, '\0');
-    ::reverse_complement(rev_seq.begin(), rev_seq.end());
-    assert(rev_seq[0] == '\0');
-
-    const auto &alphabet = graph_->alphabet();
-    for (size_t c = 0; c < alphabet.size(); ++c) {
-        if (alphabet[c] != boss::BOSS::kSentinel) {
-            rev_seq[0] = complement(alphabet[c]);
-            node_index next = graph_->kmer_to_node(rev_seq);
-            if (next != DeBruijnGraph::npos)
-                callback(next, 0);
+        const auto &alphabet = graph_->alphabet();
+        for (size_t c = 0; c < alphabet.size(); ++c) {
+            if (alphabet[c] != boss::BOSS::kSentinel) {
+                rev_seq[0] = complement(alphabet[c]);
+                node_index next = graph_->kmer_to_node(rev_seq);
+                if (next != DeBruijnGraph::npos)
+                    callback(next, 0);
+            }
         }
     }
 }
@@ -694,15 +690,13 @@ void CanonicalDBG
             if (c != boss::BOSS::kSentinel)
                 callback(next, c);
         }, spelling_hint);
-
-        return;
+    } else {
+        adjacent_outgoing_from_rc(node, [&](node_index next) {
+            char c = graph_->get_node_sequence(next).back();
+            if (c != boss::BOSS::kSentinel)
+                callback(next, c);
+        }, spelling_hint);
     }
-
-    adjacent_outgoing_from_rc(node, [&](node_index next) {
-        char c = graph_->get_node_sequence(next).back();
-        if (c != boss::BOSS::kSentinel)
-            callback(next, c);
-    }, spelling_hint);
 }
 
 void CanonicalDBG
@@ -721,13 +715,13 @@ void CanonicalDBG
         }, spelling_hint);
 
         return;
+    } else {
+        adjacent_incoming_from_rc(node, [&](node_index prev, edge_index) {
+            char c = graph_->get_node_sequence(prev)[0];
+            if (c != boss::BOSS::kSentinel)
+                callback(prev, c);
+        }, spelling_hint);
     }
-
-    adjacent_incoming_from_rc(node, [&](node_index prev, edge_index) {
-        char c = graph_->get_node_sequence(prev)[0];
-        if (c != boss::BOSS::kSentinel)
-            callback(prev, c);
-    }, spelling_hint);
 }
 
 } // namespace graph
