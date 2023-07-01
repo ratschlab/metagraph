@@ -582,8 +582,6 @@ void CanonicalDBG
         const auto *cache = get_cache();
         assert(cache);
 
-        bool is_dummy = (spelling_hint.back() == boss::BOSS::kSentinel);
-
         boss::BOSS::edge_index rc_edge = cache->get_prefix_rc(
             dbg_succ_->kmer_to_boss_index(node),
             spelling_hint
@@ -595,10 +593,15 @@ void CanonicalDBG
         boss.call_outgoing(rc_edge, [&](boss::BOSS::edge_index adjacent_edge) {
             assert(dbg_succ_);
             node_index prev = dbg_succ_->boss_to_kmer_index(adjacent_edge);
-            if (prev != DeBruijnGraph::npos
-                    && (!is_dummy || boss.get_W(adjacent_edge) != boss::BOSS::kSentinelCode)) {
-                callback(prev);
+            if (prev == DeBruijnGraph::npos)
+                return;
+
+            if (spelling_hint.back() == boss::BOSS::kSentinel
+                    && boss.get_W(adjacent_edge) != boss::BOSS::kSentinelCode) {
+                return;
             }
+
+            callback(prev);
         });
     } else {
         // Do the checks by directly mapping the sequences of the desired k-mers.
@@ -634,8 +637,6 @@ void CanonicalDBG
         const auto *cache = get_cache();
         assert(cache);
 
-        bool is_dummy = (spelling_hint[0] == boss::BOSS::kSentinel);
-
         boss::BOSS::edge_index rc_edge = cache->get_suffix_rc(
             dbg_succ_->kmer_to_boss_index(node),
             spelling_hint
@@ -655,7 +656,7 @@ void CanonicalDBG
                 if (next == DeBruijnGraph::npos)
                     return;
 
-                if (is_dummy) {
+                if (spelling_hint[0] == boss::BOSS::kSentinel) {
                     char c = cache->get_first_char(incoming_boss_edge, rc_edge);
                     if (c == boss::BOSS::kSentinel)
                         return;
