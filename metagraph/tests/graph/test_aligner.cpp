@@ -1704,7 +1704,6 @@ TYPED_TEST(DBGAlignerTest, align_bfs_vs_dfs_xdrop) {
     config.xdrop = 27;
     config.min_seed_length = 0;
     config.max_seed_length = 0;
-    config.rel_score_cutoff = 0.8;
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
     ASSERT_EQ(1ull, paths.size());
