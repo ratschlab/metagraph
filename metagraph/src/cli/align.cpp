@@ -367,7 +367,7 @@ int align_to_graph(Config *config) {
         return graph;
     };
 
-    // if using a small niumber of threads, use a shared cache for all threads
+    // if using a small number of threads, use a shared cache for all threads
     if (get_num_threads() <= SEPARATE_CACHES_SWITCHOVER_THREADS)
         graph = wrap_graph(graph);
 
