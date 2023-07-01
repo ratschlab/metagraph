@@ -37,8 +37,10 @@ CanonicalDBG::CanonicalDBG(std::shared_ptr<const DeBruijnGraph> graph, size_t ca
             has_sentinel_ = true;
     }
 
-    if (const DBGSuccinct *dbg_succ = get_dbg_succ(*graph_))
+    if (const DBGSuccinct *dbg_succ = get_dbg_succ(*graph_)) {
+        has_sentinel_ = !dbg_succ->get_mask();
         fallback_cache_ = std::make_unique<NodeFirstCache>(*dbg_succ, 0);
+    }
 }
 
 void CanonicalDBG
@@ -165,12 +167,11 @@ void CanonicalDBG
     size_t max_num_edges_left = children.size() - has_sentinel_;
 
     graph_->call_outgoing_kmers(node, [&](node_index next, char c) {
-        if (c != boss::BOSS::kSentinel) {
-            callback(next, c);
-            assert(traverse(node, c) == next);
-            children[alphabet_encoder_[c]] = next;
-            --max_num_edges_left;
-        }
+        assert(has_sentinel_ || c != boss::BOSS::kSentinel);
+        callback(next, c);
+        assert(traverse(node, c) == next);
+        children[alphabet_encoder_[c]] = next;
+        --max_num_edges_left;
     });
 
     if (!max_num_edges_left)
@@ -239,7 +240,7 @@ void CanonicalDBG
         return;
     }
 
-    size_t max_num_edges_left = graph_->alphabet().size();
+    size_t max_num_edges_left = graph_->alphabet().size() - has_sentinel_;
 
     graph_->adjacent_outgoing_nodes(node, [&](node_index next) {
         callback(next);
@@ -305,12 +306,11 @@ void CanonicalDBG
     size_t max_num_edges_left = parents.size() - has_sentinel_;
 
     auto incoming_kmer_callback = [&](node_index prev, char c) {
-        if (c != boss::BOSS::kSentinel) {
-            callback(prev, c);
-            parents[alphabet_encoder_[c]] = prev;
-            assert(traverse_back(node, c) == prev);
-            --max_num_edges_left;
-        }
+        assert(has_sentinel_ || c != boss::BOSS::kSentinel);
+        callback(prev, c);
+        parents[alphabet_encoder_[c]] = prev;
+        assert(traverse_back(node, c) == prev);
+        --max_num_edges_left;
     };
 
     const auto *cache = get_extension_threadsafe<NodeFirstCache>();
@@ -389,7 +389,7 @@ void CanonicalDBG
         return;
     }
 
-    size_t max_num_edges_left = graph_->alphabet().size();
+    size_t max_num_edges_left = graph_->alphabet().size() - has_sentinel_;
     graph_->adjacent_incoming_nodes(node, [&](node_index prev) {
         callback(prev);
         --max_num_edges_left;
@@ -606,13 +606,13 @@ void CanonicalDBG
         rev_seq.push_back('\0');
 
         const auto &alphabet = graph_->alphabet();
+        assert(!has_sentinel_);
         for (size_t c = 0; c < alphabet.size(); ++c) {
-            if (alphabet[c] != boss::BOSS::kSentinel) {
-                rev_seq.back() = complement(alphabet[c]);
-                node_index prev = graph_->kmer_to_node(rev_seq);
-                if (prev != DeBruijnGraph::npos)
-                    callback(prev);
-            }
+            assert(alphabet[c] != boss::BOSS::kSentinel);
+            rev_seq.back() = complement(alphabet[c]);
+            node_index prev = graph_->kmer_to_node(rev_seq);
+            if (prev != DeBruijnGraph::npos)
+                callback(prev);
         }
     }
 }
@@ -668,13 +668,13 @@ void CanonicalDBG
         assert(rev_seq[0] == '\0');
 
         const auto &alphabet = graph_->alphabet();
+        assert(!has_sentinel_);
         for (size_t c = 0; c < alphabet.size(); ++c) {
-            if (alphabet[c] != boss::BOSS::kSentinel) {
-                rev_seq[0] = complement(alphabet[c]);
-                node_index next = graph_->kmer_to_node(rev_seq);
-                if (next != DeBruijnGraph::npos)
-                    callback(next, 0);
-            }
+            assert(alphabet[c] != boss::BOSS::kSentinel);
+            rev_seq[0] = complement(alphabet[c]);
+            node_index next = graph_->kmer_to_node(rev_seq);
+            if (next != DeBruijnGraph::npos)
+                callback(next, 0);
         }
     }
 }
@@ -687,14 +687,13 @@ void CanonicalDBG
         const boss::BOSS &boss = dbg_succ_->get_boss();
         adjacent_outgoing_from_rc(node, [&](node_index next) {
             char c = boss.decode(boss.get_W(dbg_succ_->kmer_to_boss_index(next)) % boss.alph_size);
-            if (c != boss::BOSS::kSentinel)
-                callback(next, c);
+            callback(next, c);
         }, spelling_hint);
     } else {
         adjacent_outgoing_from_rc(node, [&](node_index next) {
             char c = graph_->get_node_sequence(next).back();
-            if (c != boss::BOSS::kSentinel)
-                callback(next, c);
+            assert(c != boss::BOSS::kSentinel);
+            callback(next, c);
         }, spelling_hint);
     }
 }
@@ -710,16 +709,15 @@ void CanonicalDBG
 
         adjacent_incoming_from_rc(node, [&](node_index prev, edge_index rc_edge) {
             char c = cache->get_first_char(prev, rc_edge);
-            if (c != boss::BOSS::kSentinel)
-                callback(prev, c);
+            callback(prev, c);
         }, spelling_hint);
 
         return;
     } else {
         adjacent_incoming_from_rc(node, [&](node_index prev, edge_index) {
             char c = graph_->get_node_sequence(prev)[0];
-            if (c != boss::BOSS::kSentinel)
-                callback(prev, c);
+            assert(c != boss::BOSS::kSentinel);
+            callback(prev, c);
         }, spelling_hint);
     }
 }
