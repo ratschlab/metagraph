@@ -581,7 +581,9 @@ void CanonicalDBG
                 return;
 
             if (spelling_hint.back() == boss::BOSS::kSentinel
-                    && boss.get_W(adjacent_edge) != boss::BOSS::kSentinelCode) {
+                    && boss.get_W(adjacent_edge) == boss::BOSS::kSentinelCode) {
+                // make sure that the following type of backward traversal doesn't happen
+                // TCCTGCGCTTCGTACATATTCCCGCCGCAC$ -> $TCCTGCGCTTCGTACATATTCCCGCCGCAC
                 return;
             }
 
@@ -656,6 +658,8 @@ void CanonicalDBG
                     return;
 
                 if (is_dummy_source) {
+                    // meant to make sure that the following type of traversal doesn't happen
+                    // $TGTGCGGCGGGAATATGTACGAAGCGCAGG -> TGTGCGGCGGGAATATGTACGAAGCGCAGG$
                     char c = cache->get_first_char(incoming_boss_edge, rc_edge);
                     if (c == boss::BOSS::kSentinel)
                         return;
