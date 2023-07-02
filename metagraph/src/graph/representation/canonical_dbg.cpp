@@ -650,7 +650,7 @@ void CanonicalDBG
 
         // rc_edge may be a dummy sink, so this won't work with graph_->call_incoming_kmers
         boss.call_incoming_to_target(
-            cache != fallback_cache_.get() || is_dummy_source
+            cache != fallback_cache_.get() // only use get_parent_pair if the result will be cached
                 ? cache->get_parent_pair(rc_edge).first
                 : boss.bwd(rc_edge),
             boss.get_node_last_value(rc_edge),
