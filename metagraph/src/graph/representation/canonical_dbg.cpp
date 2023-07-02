@@ -721,8 +721,6 @@ void CanonicalDBG
             char c = complement(cache->get_first_char(next - offset_, rc_edge));
             callback(next, c);
         }, spelling_hint);
-
-        return;
     } else {
         adjacent_outgoing_rc_strand(node, [&](node_index next, edge_index) {
             char c = complement(graph_->get_node_sequence(next - offset_)[0]);
