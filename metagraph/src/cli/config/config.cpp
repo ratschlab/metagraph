@@ -1067,10 +1067,10 @@ if (advanced) {
             fprintf(stderr, "\t   --align-min-path-score [INT]\t\t\tmin score that a reported path can have [0]\n");
             fprintf(stderr, "\t   --align-max-nodes-per-seq-char [FLOAT]\tmaximum number of nodes to consider per sequence character [5.0]\n");
             fprintf(stderr, "\t   --align-max-ram [FLOAT]\t\t\tmaximum amount of RAM used per alignment in MB [200.0]\n");
+            fprintf(stderr, "\t   --align-rel-score-cutoff [FLOAT]\t\tmin score relative to the current best alignment to use as a lower bound for subsequent extensions [0.00]\n");
 }
             fprintf(stderr, "\t   --align-xdrop [INT]\t\t\t\tmaximum difference between the current score and the best alignment score [27, 100 if chaining is enabled]\n");
             fprintf(stderr, "\t   \t\t\t\t\t\t\tNote that this parameter should be scaled accordingly when changing the default scoring parameters.\n");
-            fprintf(stderr, "\t   --align-rel-score-cutoff [FLOAT]\t\tmin score relative to the current best alignment to use as a lower bound for subsequent extensions [0.95]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "Advanced options for scoring:\n");
             fprintf(stderr, "\t   --align-match-score [INT]\t\t\tpositive match score [2]\n");
@@ -1082,7 +1082,7 @@ if (advanced) {
             fprintf(stderr, "\t   --align-edit-distance \t\t\tuse unit costs for scoring matrix [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "Advanced options for seeding:\n");
-            fprintf(stderr, "\t   --align-min-seed-length [INT]\t\tmin length of a seed [19]\n");
+            fprintf(stderr, "\t   --align-min-seed-length [INT]\t\tmin length of a seed [15]\n");
             fprintf(stderr, "\t   --align-max-seed-length [INT]\t\tmax length of a seed [inf]\n");
 if (advanced) {
             fprintf(stderr, "\t   --align-min-exact-match [FLOAT] \t\tfraction of matching nucleotides required to align sequence [0.7]\n");
@@ -1358,7 +1358,7 @@ if (advanced) {
 }
             fprintf(stderr, "\n");
             fprintf(stderr, "Advanced options for seeding:\n");
-            fprintf(stderr, "\t   --align-min-seed-length [INT]\t\tmin length of a seed [19]\n");
+            fprintf(stderr, "\t   --align-min-seed-length [INT]\t\tmin length of a seed [15]\n");
             fprintf(stderr, "\t   --align-max-seed-length [INT]\t\tmax length of a seed [inf]\n");
             fprintf(stderr, "\t   --align-min-exact-match [FLOAT]\t\tfraction of matching nucleotides required to align sequence [0.7]\n");
 if (advanced) {
