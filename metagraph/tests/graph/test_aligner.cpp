@@ -992,7 +992,7 @@ TYPED_TEST(DBGAlignerTest, align_straight_long_xdrop) {
     auto graph = build_graph_batch<TypeParam>(k, { reference_1, reference_2 });
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
-    config.xdrop = 30;
+    config.xdrop = 10;
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
 
