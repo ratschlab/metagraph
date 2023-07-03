@@ -409,10 +409,18 @@ It merge_into_unitig_mums(const DeBruijnGraph &graph,
             > std::pair(b.get_query_view().end(), b.get_query_view().begin());
     });
 
+    using seed_t = std::remove_reference_t<decltype(*begin)>;
+
+    static_assert((std::is_same_v<seed_t, Seed> || std::is_same_v<seed_t, Alignment>)
+        && "Only implemented for Seed and Alignment"
+    );
+
+    auto clear_seed = [](auto &seed) { seed = seed_t(); };
+
     // first, discard redundant seeds
     for (auto i = begin; i + 1 != end; ++i) {
-        Seed &a_i = *(i + 1);
-        Seed &a_j = *i;
+        auto &a_i = *(i + 1);
+        auto &a_j = *i;
 
         if (a_i.get_end_clipping() != a_j.get_end_clipping())
             continue;
@@ -426,7 +434,7 @@ It merge_into_unitig_mums(const DeBruijnGraph &graph,
                 if (a_i.label_columns.empty())
                     std::swap(a_i, a_j);
 
-                a_j = Seed();
+                clear_seed(a_j);
                 continue;
             }
 
@@ -460,7 +468,7 @@ It merge_into_unitig_mums(const DeBruijnGraph &graph,
             }
 
             std::swap(a_i.label_columns, merged_columns);
-            a_j = Seed();
+            clear_seed(a_j);
             continue;
         }
 
@@ -474,7 +482,7 @@ It merge_into_unitig_mums(const DeBruijnGraph &graph,
             if (query_j.size() > query_i.size())
                 std::swap(a_i, a_j);
 
-            a_j = Seed();
+            clear_seed(a_j);
         }
     }
 
@@ -490,11 +498,11 @@ It merge_into_unitig_mums(const DeBruijnGraph &graph,
     });
     for (auto i = begin; i + 1 != end; ++i) {
         // try to merge a_i to a_j
-        Seed &a_i = *(i + 1);
+        auto &a_i = *(i + 1);
         if (a_i.get_query_view().size() >= max_seed_size)
             continue;
 
-        Seed &a_j = *i;
+        auto &a_j = *i;
 
         if (a_i.label_columns != a_j.label_columns)
             continue;
@@ -535,7 +543,7 @@ It merge_into_unitig_mums(const DeBruijnGraph &graph,
                 if (query_j.size() > query_i.size())
                     std::swap(a_i, a_j);
 
-                a_j = Seed();
+                clear_seed(a_j);
             }
             continue;
         }
@@ -606,10 +614,25 @@ It merge_into_unitig_mums(const DeBruijnGraph &graph,
         assert(jt == a_j.label_coordinates.end());
 
         // we have a MUM
-        a_i.expand(std::vector<Alignment::node_index>(nodes_j.begin() + a_j_node_idx,
-                                                      nodes_j.end()));
-        assert(Alignment(a_i, config).is_valid(graph, &config));
-        a_j = Seed();
+        std::vector<Alignment::node_index> added_nodes(nodes_j.begin() + a_j_node_idx, nodes_j.end());
+        if constexpr(std::is_same_v<seed_t, Seed>) {
+            a_i.expand(std::move(added_nodes));
+            assert(Alignment(a_i, config).is_valid(graph, &config));
+            clear_seed(a_j);
+        }
+
+        if constexpr(std::is_same_v<seed_t, Alignment>) {
+            std::string_view added_query(query_j.data() + query_j.size() - added_nodes.size(), added_nodes.size());
+            Seed inserted_seed(added_query,
+                               std::move(added_nodes),
+                               a_j.get_orientation(),
+                               graph.get_k() - 1,
+                               a_j.get_clipping() + query_j.size() - added_query.size(),
+                               a_j.get_end_clipping());
+            a_i.append(Alignment(inserted_seed, config));
+            assert(a_i.is_valid(graph, &config));
+            clear_seed(a_j);
+        }
     }
 
     return std::remove_if(begin, end, [](const auto &a) { return a.empty(); });
@@ -627,6 +650,13 @@ template std::vector<Seed>::iterator merge_into_unitig_mums(const DeBruijnGraph 
                                                             std::vector<Seed>::iterator,
                                                             ssize_t,
                                                             size_t);
+
+template std::vector<Alignment>::iterator merge_into_unitig_mums(const DeBruijnGraph &,
+                                                                 const DBGAlignerConfig &,
+                                                                 std::vector<Alignment>::iterator,
+                                                                 std::vector<Alignment>::iterator,
+                                                                 ssize_t,
+                                                                 size_t);
 
 } // namespace align
 } // namespace graph

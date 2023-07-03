@@ -661,10 +661,6 @@ std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score,
                 if (!in_seed && max_val < xdrop_cutoff) {
                     DEBUG_LOG("Position {}: x-drop: {} < {}",
                               next_offset - seed_->get_offset(), max_val, xdrop_cutoff);
-                    pop(table.size() - 1);
-                    if (forked_xdrop)
-                        xdrop_cutoffs_.pop_back();
-
                     continue;
                 }
 
@@ -673,10 +669,6 @@ std::vector<Alignment> DefaultColumnExtender::extend(score_t min_path_score,
                               "Best score so far is {}",
                               next_offset - seed_->get_offset(), max_val,
                               best_score);
-                    pop(table.size() - 1);
-                    if (forked_xdrop)
-                        xdrop_cutoffs_.pop_back();
-
                     continue;
                 }
 
@@ -850,8 +842,6 @@ std::vector<Alignment> DefaultColumnExtender::backtrack(score_t min_path_score,
     // use heap sort to make this run in O(n + (num_alternative_paths) * log(n)) time
     std::make_heap(indices.begin(), indices.end());
 
-    score_t best_score = std::numeric_limits<score_t>::min();
-
     for (auto it = indices.rbegin(); it != indices.rend(); ++it) {
         std::pop_heap(indices.begin(), it.base());
         const auto &[start_score, neg_off_diag, neg_j_start, start_pos] = *it;
@@ -869,9 +859,6 @@ std::vector<Alignment> DefaultColumnExtender::backtrack(score_t min_path_score,
         Cigar ops;
         std::string seq;
         score_t score = start_score;
-
-        if (score - min_cell_score_ < best_score)
-            break;
 
         ++num_backtracks;
 
@@ -984,9 +971,6 @@ std::vector<Alignment> DefaultColumnExtender::backtrack(score_t min_path_score,
         if (trace.size() >= min_trace_length && path.size() && path.back()) {
             assert(!dummy_counter);
             score_t cur_cell_score = table[j].S[pos - table[j].trim];
-            best_score = std::max(best_score, score - cur_cell_score);
-            if (score - min_cell_score_ < best_score)
-                break;
 
             if (score >= min_start_score
                     && (!pos || cur_cell_score == 0)

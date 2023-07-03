@@ -319,8 +319,7 @@ bool LabeledExtender::skip_backtrack_start(size_t i) {
 
     // if this alignment tree node has been visited previously, ignore it
     assert(remaining_labels_i_);
-    if (!prev_starts.emplace(i).second)
-        return true;
+    prev_starts.emplace(i);
 
     // check if this starting point involves seed labels which have not been considered yet
     const auto &end_labels = annotation_buffer_.get_cached_column_set(node_labels_[i]);

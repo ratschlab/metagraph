@@ -310,6 +310,20 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
             assert(alignment.is_valid(graph_, &config_));
             aggregator.add_alignment(std::move(alignment));
         };
+
+        std::vector<Alignment> discarded_alignments[2];
+        auto add_discarded = [&](Alignment&& alignment) {
+            bool orientation = alignment.get_orientation();
+            discarded_alignments[orientation].emplace_back(std::move(alignment));
+        };
+
+        for (auto &seed : discarded_seeds[i].first) {
+            add_discarded(Alignment(seed, config_));
+        }
+        for (auto &seed : discarded_seeds[i].second) {
+            add_discarded(Alignment(seed, config_));
+        }
+
         DEBUG_LOG("Length: {}; Length cutoff: {}; Fwd num matches: {}"
 #if ! _PROTEIN_GRAPH
             "; Bwd num matches: {}"
@@ -339,13 +353,6 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
         }
 #endif
 
-        for (auto &seed : discarded_seeds[i].first) {
-            add_alignment(Alignment(seed, config_));
-        }
-        for (auto &seed : discarded_seeds[i].second) {
-            add_alignment(Alignment(seed, config_));
-        }
-
         auto get_min_path_score = [&]() {
             return std::max(config_.min_path_score, aggregator.get_global_cutoff());
         };
@@ -363,14 +370,14 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
             auto [seeds, extensions, explored_nodes] =
                 align_both_directions(this_query, reverse, *seeder, seeder_rc,
                                       extender, extender_rc,
-                                      add_alignment, get_min_path_score);
+                                      add_alignment, add_discarded, get_min_path_score);
 
             num_seeds += seeds;
             num_extensions += extensions + extender_rc.num_extensions();
             num_explored_nodes += explored_nodes + extender_rc.num_explored_nodes();
 
         } else {
-            align_core(*seeder, extender, add_alignment, get_min_path_score, false,
+            align_core(*seeder, extender, add_alignment, add_discarded, get_min_path_score, false,
                        config_.seed_complexity_filter);
         }
 #else
@@ -380,14 +387,23 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
             auto [seeds, extensions, explored_nodes] =
                 align_both_directions(this_query, reverse, *seeder, seeder_rc,
                                       extender, extender_rc,
-                                      add_alignment, get_min_path_score);
+                                      add_alignment, add_discarded, get_min_path_score);
 
             num_seeds += seeds;
         } else {
-            align_core(*seeder, extender, add_alignment, get_min_path_score, false,
+            align_core(*seeder, extender, add_alignment, add_discarded, get_min_path_score, false,
                        config_.seed_complexity_filter);
         }
 #endif
+
+        for (size_t i = 0; i < 2; ++i) {
+            auto end = merge_into_unitig_mums(graph_, config_,
+                                              discarded_alignments[i].begin(),
+                                              discarded_alignments[i].end(),
+                                              config_.min_seed_length);
+            std::for_each(std::make_move_iterator(discarded_alignments[i].begin()),
+                          std::make_move_iterator(end), add_alignment);
+        }
 
         num_explored_nodes += extender.num_explored_nodes();
         num_extensions += extender.num_extensions();
@@ -435,6 +451,7 @@ template <class Seeder, class Extender>
 void align_core(const Seeder &seeder,
                 Extender &extender,
                 const std::function<void(Alignment&&)> &callback,
+                const std::function<void(Alignment&&)> &callback_discarded,
                 const std::function<score_t()> &get_min_path_score,
                 bool force_fixed_seed,
                 bool seed_complexity_filter) {
@@ -443,7 +460,7 @@ void align_core(const Seeder &seeder,
         seeds.erase(std::remove_if(seeds.begin(), seeds.end(),
                                    [&](auto &seed) {
                                        if (is_low_complexity(seed.get_query_view())) {
-                                           callback(std::move(seed));
+                                           callback_discarded(std::move(seed));
                                            return true;
                                        }
 
@@ -471,7 +488,7 @@ void align_core(const Seeder &seeder,
             if (seeds[j].size() && !extender.check_seed(seeds[j])) {
                 auto filtered_seed = filter_seed(seeds[i], seeds[j]);
                 if (filtered_seed.size())
-                    callback(std::move(filtered_seed));
+                    callback_discarded(std::move(filtered_seed));
             }
         }
     }
@@ -632,6 +649,7 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
                         Extender &forward_extender,
                         Extender &reverse_extender,
                         const std::function<void(Alignment&&)> &callback,
+                        const std::function<void(Alignment&&)> &callback_discarded,
                         const std::function<score_t()> &get_min_path_score) const {
     size_t num_seeds = 0;
     size_t num_extensions = 0;
@@ -645,7 +663,7 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
 
         auto discard_low_complexity = [&](const auto &seed) {
             if (is_low_complexity(seed.get_query_view())) {
-                callback(Alignment(seed, config_));
+                callback_discarded(Alignment(seed, config_));
                 return true;
             }
 
@@ -759,7 +777,7 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
 
     auto discard_low_complexity = [&](auto &seed) {
         if (is_low_complexity(seed.get_query_view())) {
-            callback(std::move(seed));
+            callback_discarded(std::move(seed));
             return true;
         }
 
@@ -816,8 +834,7 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
                         std::string_view query_rc,
                         std::vector<Alignment>&& seeds,
                         Extender &fwd_extender,
-                        Extender &bwd_extender,
-                        const std::function<void(Alignment&&)> &callback) {
+                        Extender &bwd_extender) {
         fwd_extender.set_graph(graph_);
         bwd_extender.set_graph(rc_graph);
         num_seeds += seeds.size();
@@ -882,6 +899,7 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
 
                     callback(std::move(path));
                 },
+                callback_discarded,
                 get_min_path_score,
                 true, /* alignments must have the seed as a prefix */
                 false /* don't apply the seed complexity filter here */
@@ -891,7 +909,7 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
                 if (seeds[j].size() && !fwd_extender.check_seed(seeds[j])) {
                     auto filtered_seed = filter_seed(seeds[i], seeds[j]);
                     if (filtered_seed.size())
-                        callback(std::move(filtered_seed));
+                        callback_discarded(std::move(filtered_seed));
                 }
             }
         }
@@ -902,17 +920,17 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
 
     if (fwd_num_matches >= bwd_num_matches) {
         aln_both(forward, reverse, std::move(fwd_seeds),
-                 forward_extender, reverse_extender, callback);
+                 forward_extender, reverse_extender);
         if (bwd_num_matches >= fwd_num_matches * config_.rel_score_cutoff) {
             aln_both(reverse, forward, std::move(bwd_seeds),
-                     reverse_extender, forward_extender, callback);
+                     reverse_extender, forward_extender);
         }
     } else {
         aln_both(reverse, forward, std::move(bwd_seeds),
-                 reverse_extender, forward_extender, callback);
+                 reverse_extender, forward_extender);
         if (fwd_num_matches >= bwd_num_matches * config_.rel_score_cutoff) {
             aln_both(forward, reverse, std::move(fwd_seeds),
-                     forward_extender, reverse_extender, callback);
+                     forward_extender, reverse_extender);
         }
     }
 

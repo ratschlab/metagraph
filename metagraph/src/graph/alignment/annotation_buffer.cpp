@@ -253,6 +253,9 @@ void AnnotationBuffer::fetch_queued_annotations() {
         assert(multi_int_);
         // extract both labels and coordinates, then store them separately
         for (auto&& row_tuples : multi_int_->get_row_tuples(queued_rows.values_container())) {
+            assert(row_it != queued_rows.end());
+            assert(!dbg_succ || dbg_succ->get_mask()
+                || !dbg_succ->get_boss().is_dummy(AnnotatedDBG::anno_to_graph_index(*row_it)));
             assert(row_tuples.size());
             std::sort(row_tuples.begin(), row_tuples.end(), utils::LessFirst());
             Columns labels;
@@ -277,6 +280,12 @@ void AnnotationBuffer::fetch_queued_annotations() {
         }
     } else {
         for (auto&& labels : annotator_.get_matrix().get_rows(queued_rows.values_container())) {
+            assert(row_it != queued_rows.end());
+            assert(!dbg_succ || dbg_succ->get_mask()
+                || !dbg_succ->get_boss().is_dummy(AnnotatedDBG::anno_to_graph_index(*row_it)));
+            if (labels.empty()) {
+                logger->error("Failed\t{}:{}", AnnotatedDBG::anno_to_graph_index(*row_it),graph_.get_node_sequence(AnnotatedDBG::anno_to_graph_index(*row_it)));
+            }
             assert(labels.size());
             std::sort(labels.begin(), labels.end());
             if (queued_nodes.size()) {
