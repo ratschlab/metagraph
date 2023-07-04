@@ -313,6 +313,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
 
         std::vector<Alignment> discarded_alignments[2];
         auto add_discarded = [&](Alignment&& alignment) {
+            assert(alignment.get_nodes().size());
             bool orientation = alignment.get_orientation();
             discarded_alignments[orientation].emplace_back(std::move(alignment));
         };

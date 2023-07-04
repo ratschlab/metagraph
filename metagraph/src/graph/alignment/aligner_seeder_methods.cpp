@@ -403,13 +403,38 @@ It merge_into_unitig_mums(const DeBruijnGraph &graph,
     if (begin == end)
         return end;
 
+    assert(std::all_of(begin, end, [](const auto &a) { return a.get_nodes().size(); }));
+
+    using seed_t = std::remove_reference_t<decltype(*begin)>;
+
+    if constexpr(std::is_same_v<seed_t, Alignment>) {
+        // first, move all inexact matches to the front and ignore them
+        begin = std::partition(begin, end, [](const auto &a) {
+            const auto &cigar = a.get_cigar().data();
+            auto c_begin = cigar.begin();
+            auto c_end = cigar.end();
+            assert(c_begin != c_end);
+
+            if (c_begin->first == Cigar::CLIPPED)
+                ++c_begin;
+
+            assert(c_begin != c_end);
+
+            if ((c_end - 1)->first == Cigar::CLIPPED)
+                --c_end;
+
+            return c_end != c_begin + 1 || c_begin->first != Cigar::MATCH;
+        });
+
+        if (begin == end)
+            return end;
+    }
+
     ssize_t graph_k = graph.get_k();
     std::sort(begin, end, [](const auto &a, const auto &b) {
         return std::pair(a.get_query_view().end(), a.get_query_view().begin())
             > std::pair(b.get_query_view().end(), b.get_query_view().begin());
     });
-
-    using seed_t = std::remove_reference_t<decltype(*begin)>;
 
     static_assert((std::is_same_v<seed_t, Seed> || std::is_same_v<seed_t, Alignment>)
         && "Only implemented for Seed and Alignment"
@@ -422,11 +447,14 @@ It merge_into_unitig_mums(const DeBruijnGraph &graph,
         auto &a_i = *(i + 1);
         auto &a_j = *i;
 
+        const auto &nodes_i = a_i.get_nodes();
+        const auto &nodes_j = a_j.get_nodes();
+        assert(nodes_i.size());
+        assert(nodes_j.size());
+
         if (a_i.get_end_clipping() != a_j.get_end_clipping())
             continue;
 
-        const auto &nodes_i = a_i.get_nodes();
-        const auto &nodes_j = a_j.get_nodes();
         if (a_i.get_clipping() == a_j.get_clipping() && a_i.get_offset() == a_j.get_offset()
                 && nodes_i == nodes_j) {
             // these are the same alignment, merge their annotations
@@ -435,6 +463,7 @@ It merge_into_unitig_mums(const DeBruijnGraph &graph,
                     std::swap(a_i, a_j);
 
                 clear_seed(a_j);
+                assert(a_i.get_nodes().size());
                 continue;
             }
 
@@ -469,6 +498,7 @@ It merge_into_unitig_mums(const DeBruijnGraph &graph,
 
             std::swap(a_i.label_columns, merged_columns);
             clear_seed(a_j);
+            assert(a_i.get_nodes().size());
             continue;
         }
 
@@ -478,11 +508,14 @@ It merge_into_unitig_mums(const DeBruijnGraph &graph,
         std::string_view query_i = a_i.get_query_view();
         std::string_view query_j = a_j.get_query_view();
 
+        assert(nodes_i.size());
+        assert(nodes_j.size());
         if (nodes_j.back() == nodes_i.back()) {
             if (query_j.size() > query_i.size())
                 std::swap(a_i, a_j);
 
             clear_seed(a_j);
+            assert(a_i.get_nodes().size());
         }
     }
 
