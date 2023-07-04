@@ -166,85 +166,162 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
     if (dbg_succ.get_mask())
         logger->warn("Graph has a dummy k-mer mask. Seeds containing dummy k-mers will be missed.");
 
-    seeds_.clear();
-    std::vector<tsl::hopscotch_set<node_index>> found_nodes(this->query_.size() - this->config_.min_seed_length + 1);
-    for (size_t i = 0; i + this->config_.min_seed_length <= this->query_.size(); ++i) {
-        std::string_view window(this->query_.data() + i, this->config_.min_seed_length);
-        const auto &boss = dbg_succ.get_boss();
-        auto encoded = boss.encode(std::string_view(this->query_.data() + i,
-                                                    this->config_.min_seed_length - 1));
-        auto [first, last, end] = boss.index_range(encoded.begin(), encoded.end());
-
-        std::vector<node_index> nodes;
-        if (end == encoded.end()) {
-            auto s = boss.encode(window.back());
-            for (auto e = boss.succ_W(first, s); e <= last; e = boss.succ_W(e + 1, s)) {
-                if (auto node = dbg_succ.boss_to_kmer_index(e))
-                    nodes.emplace_back(node);
-
-                if (e + 1 == boss.get_W().size())
-                    break;
+    bool found_first = false;
+    std::vector<std::vector<Seed>> found_seeds(this->query_.size() - this->config_.min_seed_length + 1);
+    size_t total_seed_count = 0;
+    if (this->query_.size() >= this->graph_.get_k()) {
+        if (this->config_.max_seed_length >= this->graph_.get_k()) {
+            assert(this->query_nodes_.size()
+                == this->query_.size() - this->graph_.get_k() + 1);
+            for (auto &seed : this->BaseSeeder::get_seeds()) {
+                found_first |= !seed.get_clipping();
+                auto &bucket = found_seeds[seed.get_end_clipping()];
+                bucket.emplace_back(std::move(seed));
+                ++total_seed_count;
             }
-
-            s += boss.alph_size;
-            for (auto e = boss.succ_W(first, s); e <= last; e = boss.succ_W(e + 1, s)) {
-                if (auto node = dbg_succ.boss_to_kmer_index(e))
-                    nodes.emplace_back(node);
-
-                if (e + 1 == boss.get_W().size())
-                    break;
+        } else {
+            std::string_view window(this->query_.data(), this->graph_.get_k());
+            auto first_path = map_to_nodes_sequentially(this->graph_, window);
+            assert(first_path.size() == 1);
+            if (first_path[0]) {
+                found_first = true;
+                size_t end_clipping = this->query_.size() - window.size();
+                found_seeds[end_clipping].emplace_back(
+                    window, std::move(first_path), this->orientation_,
+                    this->graph_.get_k() - window.size(),
+                    0, end_clipping
+                );
+                ++total_seed_count;
             }
         }
+    }
 
-        if (dbg_succ.get_mode() == DeBruijnGraph::PRIMARY) {
-            const auto *canonical = dynamic_cast<const CanonicalDBG*>(&this->graph_);
-            assert(canonical);
-            std::string window_rc(window);
-            ::reverse_complement(window_rc.begin(), window_rc.end());
-            auto encoded = boss.encode(window_rc);
+    auto add_seeds = [&](size_t i, size_t max_seed_length) {
+        std::string_view max_window(this->query_.data() + i, max_seed_length);
+        dbg_succ.call_nodes_with_suffix_matching_longest_prefix(max_window,
+            [&](node_index alt_node, size_t seed_len) {
+                std::string_view window(this->query_.data() + i, seed_len);
+                size_t end_clipping = this->query_.size() - i - window.size();
+                auto &bucket = found_seeds[end_clipping];
+                if (bucket.size()) {
+                    if (seed_len < bucket[0].get_query_view().size())
+                        return;
+
+                    if (seed_len > bucket[0].get_query_view().size()) {
+                        total_seed_count -= bucket.size();
+                        bucket.clear();
+                    }
+                }
+
+                bucket.emplace_back(window, std::vector<node_index>{ alt_node },
+                                    this->orientation_,
+                                    this->graph_.get_k() - window.size(),
+                                    i, end_clipping);
+                found_first |= !i;
+                ++total_seed_count;
+            },
+            this->config_.min_seed_length
+        );
+    };
+
+    size_t max_seed_length = std::min(this->graph_.get_k() - 1,
+                                      this->config_.max_seed_length);
+    size_t i = found_first ? this->graph_.get_k() - max_seed_length : 0;
+    for ( ; i + max_seed_length <= this->query_.size(); ++i) {
+        add_seeds(i, max_seed_length);
+    }
+
+    assert(i == this->query_.size() - max_seed_length + 1);
+    if (this->config_.min_seed_length < max_seed_length) {
+        size_t cur_length = max_seed_length;
+        for ( ; i + this->config_.min_seed_length <= this->query_.size(); ++i) {
+            add_seeds(i, --cur_length);
+        }
+    }
+
+    if (dbg_succ.get_mode() == DeBruijnGraph::PRIMARY) {
+        const auto *canonical = dynamic_cast<const CanonicalDBG*>(&this->graph_);
+        assert(canonical);
+        std::string query_rc(this->query_);
+        ::reverse_complement(query_rc.begin(), query_rc.end());
+        auto add_seeds = [&](size_t i, size_t max_seed_length) {
+            std::string_view max_window_rc(query_rc.data() + i, max_seed_length);
+            tsl::hopscotch_set<node_index> found_nodes;
+
+            const auto &boss = dbg_succ.get_boss();
+            auto encoded = boss.encode(max_window_rc);
             auto [first, last, end] = boss.index_range(encoded.begin(), encoded.end());
-            if (end == encoded.end()) {
-                suffix_to_prefix(dbg_succ,
-                    std::make_tuple(boss.pred_last(first - 1) + 1, last, this->config_.min_seed_length),
-                    [&](node_index node) {
-                        nodes.emplace_back(canonical->reverse_complement(node));
-                    }
-                );
-            }
-        }
+            size_t seed_len = end - encoded.begin();
+            if (seed_len < this->config_.min_seed_length)
+                return;
 
-        for (node_index node : nodes) {
-            if (!found_nodes[i].emplace(node).second)
-                continue;
+            size_t clipping = this->query_.size() - i - seed_len;
+            if (found_first && !clipping)
+                return;
 
-            std::vector<node_index> path;
-            path.emplace_back(node);
-            if (this->config_.max_seed_length > this->config_.min_seed_length) {
-                std::string_view rest(this->query_.data() + i + this->config_.min_seed_length,
-                                      this->query_.size() - i - this->config_.min_seed_length);
-                this->graph_.traverse(node, rest.begin(), rest.end(),
-                    [&](node_index next) {
-                        found_nodes[i + path.size()].emplace(next);
-                        path.emplace_back(next);
-                    },
-                    [&]() {
-                        return this->config_.min_seed_length + path.size() - 1
-                                >= this->config_.max_seed_length;
-                    }
-                );
+            std::string_view window(this->query_.data() + clipping, seed_len);
+            auto &bucket = found_seeds[i];
+            if (bucket.size()) {
+                if (seed_len < bucket[0].get_query_view().size())
+                    return;
+
+                if (seed_len > bucket[0].get_query_view().size()) {
+                    total_seed_count -= bucket.size();
+                    bucket.clear();
+                }
             }
 
-            std::string_view seed_window(this->query_.data() + i,
-                                         this->config_.min_seed_length + path.size() - 1);
-            seeds_.emplace_back(
-                seed_window,
-                std::move(path),
-                this->orientation_,
-                this->graph_.get_k() - this->config_.min_seed_length,
-                i,
-                this->query_.size() - i - seed_window.size()
+            suffix_to_prefix(dbg_succ,
+                std::make_tuple(boss.pred_last(first - 1) + 1, last, seed_len),
+                [&](node_index alt_node) {
+                    found_nodes.emplace(canonical->reverse_complement(alt_node));
+                }
             );
+
+            for (node_index alt_node : found_nodes) {
+                assert(this->graph_.get_node_sequence(alt_node).substr(
+                    this->graph_.get_k() - window.size()) == window);
+                bucket.emplace_back(window, std::vector<node_index>{ alt_node },
+                                    this->orientation_,
+                                    this->graph_.get_k() - window.size(),
+                                    clipping, i);
+                found_first |= !clipping;
+                ++total_seed_count;
+            }
+        };
+
+        size_t i = 0;
+        for ( ; i + max_seed_length <= query_rc.size(); ++i) {
+            add_seeds(i, max_seed_length);
         }
+
+        assert(i == this->query_.size() - max_seed_length + 1);
+        if (this->config_.min_seed_length < max_seed_length) {
+            size_t cur_length = max_seed_length;
+            for ( ; i + this->config_.min_seed_length <= this->query_.size(); ++i) {
+                add_seeds(i, --cur_length);
+            }
+        }
+    }
+
+    auto first_front_match = std::find_if(found_seeds.begin(), found_seeds.end(),
+        [](const auto &bucket) {
+            return bucket.size() && !bucket[0].get_clipping();
+        }
+    );
+
+    if (first_front_match != found_seeds.end()) {
+        std::for_each(first_front_match + 1, found_seeds.end(), [](auto &bucket) {
+            bucket.clear();
+        });
+    }
+
+    seeds_.clear();
+    seeds_.reserve(total_seed_count);
+    for (auto &bucket : found_seeds) {
+        seeds_.insert(seeds_.end(),
+                      std::make_move_iterator(bucket.begin()),
+                      std::make_move_iterator(bucket.end()));
     }
 
     this->num_matching_ = get_num_char_matches_in_seeds(seeds_.begin(), seeds_.end());
