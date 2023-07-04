@@ -254,7 +254,7 @@ void CanonicalDBG
 
         adjacent_outgoing_rc_strand(
             node,
-            [&](node_index next, uint64_t) { callback(next); },
+            [&](node_index next, edge_index) { callback(next); },
             spelling_hint.size() ? spelling_hint : get_node_sequence(node)
         );
     }
