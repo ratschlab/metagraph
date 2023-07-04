@@ -229,32 +229,18 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
                     },
                     [&]() {
                         return this->config_.min_seed_length + path.size() - 1
-                                    >= this->config_.max_seed_length
-                            || this->graph_.has_multiple_outgoing(path.back())
-                            || !this->graph_.has_single_incoming(path.back());
+                                >= this->config_.max_seed_length;
                     }
                 );
             }
 
             std::string_view seed_window(this->query_.data() + i,
                                          this->config_.min_seed_length + path.size() - 1);
-
-            size_t offset = this->graph_.get_k() - this->config_.min_seed_length;
-            if (path.size() > 1 && offset) {
-                if (path.size() - 1 <= offset) {
-                    offset -= path.size() - 1;
-                    path.assign(1, path.back());
-                } else {
-                    path.erase(path.begin(), path.begin() + offset);
-                    offset = 0;
-                }
-            }
-
             seeds_.emplace_back(
                 seed_window,
                 std::move(path),
                 this->orientation_,
-                offset,
+                this->graph_.get_k() - this->config_.min_seed_length,
                 i,
                 this->query_.size() - i - seed_window.size()
             );
