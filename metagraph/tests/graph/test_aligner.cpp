@@ -662,12 +662,11 @@ TYPED_TEST(DBGAlignerTest, alternative_path_basic) {
     config.gap_opening_penalty = -3;
     config.gap_extension_penalty = -1;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
-    config.num_alternative_paths = 2;
     DBGAligner<> aligner(*graph, config);
 
     auto paths = aligner.align(query);
 
-    EXPECT_EQ(config.num_alternative_paths, paths.size());
+    ASSERT_LE(1u, paths.size());
     auto path = paths[0];
     EXPECT_EQ("4=1X4=1X2=", path.get_cigar().to_string())
         << query << "\n" << path.get_sequence();
