@@ -236,48 +236,28 @@ void CanonicalDBG
         return;
     }
 
-    std::vector<node_index> nexts;
-    graph_->adjacent_outgoing_nodes(node, [&](node_index next) {
-        nexts.emplace_back(next);
-    });
+    if (has_sentinel_) {
+        // we need to do extra checks to make sure we don't call dummy outgoing k-mers
+        // from both strands, so use call_outgoing_kmers here
+        call_outgoing_kmers_hint(node, [&](node_index next, char) {
+            callback(next);
+        }, spelling_hint);
+    } else {
+        size_t max_num_edges_left = graph_->alphabet().size();
+        graph_->adjacent_outgoing_nodes(node, [&](node_index next) {
+            callback(next);
+            --max_num_edges_left;
+        });
 
-    if (graph_->alphabet().size() - has_sentinel_ == nexts.size())
-        return;
-
-    // if there was only a single dummy k-mer as the outgoing node, we need to
-    // check the opposite strand before deciding if we should call it back
-    // TODO: is this too complicated? maybe we can just call call_outgoing_kmers
-    // instead. That would be less efficient because we need to call get_W on all
-    // outgoing nodes.
-    if (has_sentinel_ && nexts.size() == 1) {
-        const auto *dbg_succ_ = get_dbg_succ(*graph_);
-        assert(dbg_succ_);
-        assert(!dbg_succ_->get_mask());
-        if (!dbg_succ_->get_boss().get_W(nexts[0])) {
-            call_outgoing_rc_strand(node, [&](node_index next, char c) {
-                // skip dummy k-mers in the opposite strand if one exists in this strand
-                if (c != boss::BOSS::kSentinel)
-                    nexts.emplace_back(next);
-            }, spelling_hint.size() ? spelling_hint : get_node_sequence(node));
-
-            if (nexts.size() > 1) {
-                // skip the first dummy k-mer if more were found
-                std::for_each(nexts.begin() + 1, nexts.end(), callback);
-            } else {
-                callback(nexts[0]);
-            }
-
+        if (!max_num_edges_left)
             return;
-        }
+
+        adjacent_outgoing_rc_strand(
+            node,
+            [&](node_index next, uint64_t) { callback(next); },
+            spelling_hint.size() ? spelling_hint : get_node_sequence(node)
+        );
     }
-
-    std::for_each(nexts.begin(), nexts.end(), callback);
-
-    adjacent_outgoing_rc_strand(
-        node,
-        [&](node_index next, edge_index) { callback(next); },
-        spelling_hint.size() ? spelling_hint : get_node_sequence(node)
-    );
 }
 
 bool CanonicalDBG::has_multiple_outgoing(node_index node) const {
@@ -418,7 +398,7 @@ void CanonicalDBG
 
         adjacent_incoming_rc_strand(
             node,
-            [&](node_index next) { callback(next); },
+            [&](node_index prev) { callback(prev); },
             spelling_hint.size() ? spelling_hint : get_node_sequence(node)
         );
     }
