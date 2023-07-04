@@ -666,6 +666,14 @@ It merge_into_unitig_mums(const DeBruijnGraph &graph,
                      a_j.get_end_clipping()),
                 config
             );
+            inserted_seed.label_columns = a_j.label_columns;
+            inserted_seed.label_coordinates = a_j.label_coordinates;
+            size_t coord_diff = inserted_seed.get_clipping() - a_j.get_clipping();
+            for (auto &tuple : inserted_seed.label_coordinates) {
+                for (auto &c : tuple) {
+                    c += coord_diff;
+                }
+            }
             assert(inserted_seed.is_valid(graph, &config));
             a_i.splice(std::move(inserted_seed));
             assert(a_i.is_valid(graph, &config));
