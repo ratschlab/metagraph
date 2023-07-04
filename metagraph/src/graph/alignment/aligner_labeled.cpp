@@ -475,7 +475,7 @@ LabeledAligner<Seeder, Extender, AlignmentCompare>
     }
 
     this->config_.min_seed_length = std::min(graph.get_k(), this->config_.min_seed_length);
-    this->config_.max_seed_length = std::min(graph.get_k(), this->config_.max_seed_length);
+    this->config_.max_seed_length = this->config_.min_seed_length;
 }
 
 template <class Seeder, class Extender, class AlignmentCompare>
