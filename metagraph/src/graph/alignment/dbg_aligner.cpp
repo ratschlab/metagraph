@@ -102,41 +102,28 @@ std::pair<Alignment, Alignment> split_seed(const DeBruijnGraph &graph,
     return ret_val;
 }
 
-Alignment filter_seed(const Alignment &prev, Alignment &a) {
+void filter_seed(const Alignment &prev, Alignment &a) {
     if (prev.label_columns.empty()) {
-        Alignment filtered = std::move(a);
         a = Alignment();
-        return filtered;
+        return;
     }
 
     if (prev.label_coordinates.empty()) {
-        Vector<Alignment::Column> intersection;
         Vector<Alignment::Column> diff;
-        utils::set_intersection_difference(a.label_columns.begin(),
-                                           a.label_columns.end(),
-                                           prev.label_columns.begin(),
-                                           prev.label_columns.end(),
-                                           std::back_inserter(intersection),
-                                           std::back_inserter(diff));
+        std::set_difference(a.label_columns.begin(),
+                            a.label_columns.end(),
+                            prev.label_columns.begin(),
+                            prev.label_columns.end(),
+                            std::back_inserter(diff));
         if (diff.empty()) {
-            Alignment filtered = std::move(a);
             a = Alignment();
-            return filtered;
+        } else {
+            std::swap(a.label_columns, diff);
         }
 
-        std::swap(a.label_columns, diff);
-
-        if (intersection.size()) {
-            Alignment filtered = a;
-            std::swap(filtered.label_columns, intersection);
-            return filtered;
-        }
-
-        return {};
+        return;
     }
 
-    Vector<Alignment::Column> intersection;
-    Vector<Alignment::Tuple> intersection_coords;
     Vector<Alignment::Column> diff;
     Vector<Alignment::Tuple> diff_coords;
     utils::match_indexed_values(
@@ -149,39 +136,22 @@ Alignment filter_seed(const Alignment &prev, Alignment &a) {
             Alignment::Tuple set_diff;
             // filter_seed: clear the seed a if it has no unexplored labels or coordinates
             // relative to the seed prev
-            utils::set_intersection_difference(coords.begin(), coords.end(),
-                                               other_coords.begin(), other_coords.end(),
-                                               std::back_inserter(set_intersection),
-                                               std::back_inserter(set_diff));
+            std::set_difference(coords.begin(), coords.end(),
+                                other_coords.begin(), other_coords.end(),
+                                std::back_inserter(set_diff));
             if (set_diff.size()) {
                 diff.push_back(col);
                 diff_coords.push_back(std::move(set_diff));
-            }
-
-            if (set_intersection.size()) {
-                intersection.push_back(col);
-                intersection_coords.push_back(std::move(set_intersection));
             }
         }
     );
 
     if (diff.empty()) {
-        Alignment filtered = std::move(a);
         a = Alignment();
-        return filtered;
+    } else {
+        std::swap(a.label_columns, diff);
+        std::swap(a.label_coordinates, diff_coords);
     }
-
-    std::swap(a.label_columns, diff);
-    std::swap(a.label_coordinates, diff_coords);
-
-    if (intersection.size()) {
-        Alignment filtered = a;
-        std::swap(filtered.label_columns, intersection);
-        std::swap(filtered.label_coordinates, intersection_coords);
-        return filtered;
-    }
-
-    return {};
 }
 
 // Extend the alignment first until it reaches the end of the alignment second.
@@ -486,11 +456,8 @@ void align_core(const Seeder &seeder,
         }
 
         for (size_t j = i + 1; j < seeds.size(); ++j) {
-            if (seeds[j].size() && !extender.check_seed(seeds[j])) {
-                auto filtered_seed = filter_seed(seeds[i], seeds[j]);
-                if (filtered_seed.size())
-                    callback_discarded(std::move(filtered_seed));
-            }
+            if (seeds[j].size() && !extender.check_seed(seeds[j]))
+                filter_seed(seeds[i], seeds[j]);
         }
     }
 }
@@ -915,11 +882,8 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
             );
 
             for (size_t j = i + 1; j < seeds.size(); ++j) {
-                if (seeds[j].size() && !fwd_extender.check_seed(seeds[j])) {
-                    auto filtered_seed = filter_seed(seeds[i], seeds[j]);
-                    if (filtered_seed.size())
-                        callback_discarded(std::move(filtered_seed));
-                }
+                if (seeds[j].size() && !fwd_extender.check_seed(seeds[j]))
+                    filter_seed(seeds[i], seeds[j]);
             }
         }
     };
