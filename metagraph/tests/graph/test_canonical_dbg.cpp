@@ -1305,6 +1305,78 @@ TYPED_TEST(CanonicalDBGTest, TraverseNoDummyToDummyBackward) {
     EXPECT_TRUE(found);
 }
 
+TYPED_TEST(CanonicalDBGTest, TraverseNoDualDummy) {
+    if (!std::is_base_of_v<DBGSuccinct, TypeParam>) {
+        common::logger->warn("Dummy k-mers only supported for DBGSuccinct");
+        return;
+    }
+
+    // meant to make sure that the reverse complements of dummy k-mers are not present
+    // $TCCTGCGCTTCGTACATATTCCCGCCGCAC and GTGCGGCGGGAATATGTACGAAGCGCAGGA$
+    std::vector<std::string> sequences {
+        "TCCTGCGCTTCGTACATATTCCCGCCGCACT",
+        "TGTGCGGCGGGAATATGTACGAAGCGCAGGA",
+    };
+
+    auto graph = std::make_shared<DBGSuccinct>(31, DeBruijnGraph::PRIMARY);
+    for (const auto &sequence : sequences) {
+        graph->add_sequence(sequence);
+    }
+
+    DBGSuccinct &dbg_succ = *dynamic_cast<DBGSuccinct*>(graph.get());
+
+    if (std::is_same_v<TypeParam, DBGSuccinctCached>)
+        graph->add_extension(std::make_shared<graph::NodeFirstCache>(dbg_succ));
+
+    CanonicalDBG canonical(graph);
+    const auto &boss = dbg_succ.get_boss();
+
+    {
+        std::string query = "TGTGCGGCGGGAATATGTACGAAGCGCAGG";
+        auto encoded = boss.encode(query);
+        auto [edge_1, edge_2, end] = boss.index_range(encoded.begin(), encoded.end());
+        ASSERT_EQ(end, encoded.end());
+        ASSERT_EQ(edge_1, edge_2);
+        ASSERT_EQ('A', boss.decode(boss.get_W(edge_2)));
+
+        bool found_dummy = false;
+        ASSERT_NO_THROW(canonical.call_outgoing_kmers(edge_2, [&](auto, char c) {
+            EXPECT_FALSE(found_dummy);
+            found_dummy |= (boss::BOSS::kSentinel == c);
+        }));
+        EXPECT_TRUE(found_dummy);
+
+        found_dummy = false;
+        ASSERT_NO_THROW(canonical.adjacent_outgoing_nodes(edge_2, [&](auto next) {
+            EXPECT_FALSE(found_dummy);
+            found_dummy |= (canonical.get_node_sequence(next).back() == boss::BOSS::kSentinel);
+        }));
+        EXPECT_TRUE(found_dummy);
+    }
+    {
+        std::string query = "TCCTGCGCTTCGTACATATTCCCGCCGCAC";
+        auto encoded = boss.encode(query);
+        auto [edge_1, edge_2, end] = boss.index_range(encoded.begin(), encoded.end());
+        ASSERT_EQ(end, encoded.end());
+        ASSERT_EQ(edge_1, edge_2);
+        ASSERT_EQ('T', boss.decode(boss.get_W(edge_2)));
+
+        bool found_dummy = false;
+        ASSERT_NO_THROW(canonical.call_incoming_kmers(edge_2, [&](auto, char c) {
+            EXPECT_FALSE(found_dummy);
+            found_dummy |= (boss::BOSS::kSentinel == c);
+        }));
+        EXPECT_TRUE(found_dummy);
+
+        found_dummy = false;
+        ASSERT_NO_THROW(canonical.adjacent_incoming_nodes(edge_2, [&](auto next) {
+            EXPECT_FALSE(found_dummy);
+            found_dummy |= (canonical.get_node_sequence(next).front() == boss::BOSS::kSentinel);
+        }));
+        EXPECT_TRUE(found_dummy);
+    }
+}
+
 #endif // ! _PROTEIN_GRAPH
 
 } // namespace
