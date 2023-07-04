@@ -577,10 +577,11 @@ It merge_into_unitig_mums(const DeBruijnGraph &graph,
                 || !graph.has_single_incoming(nodes_i.back()))
             continue;
 
+        char next_c = *(query_i.data() + query_i.size());
         assert(overlap < graph_k - 1
-                || graph.traverse(nodes_i.back(), *query_i.end()) == nodes_j[a_j_node_idx]);
+                || graph.traverse(nodes_i.back(), next_c) == nodes_j[a_j_node_idx]);
 
-        if (overlap < graph_k - 1 && graph.traverse(nodes_i.back(), *query_i.end())
+        if (overlap < graph_k - 1 && graph.traverse(nodes_i.back(), next_c)
                                         != nodes_j[a_j_node_idx])
             continue;
 
@@ -623,13 +624,17 @@ It merge_into_unitig_mums(const DeBruijnGraph &graph,
 
         if constexpr(std::is_same_v<seed_t, Alignment>) {
             std::string_view added_query(query_j.data() + query_j.size() - added_nodes.size(), added_nodes.size());
-            Seed inserted_seed(added_query,
-                               std::move(added_nodes),
-                               a_j.get_orientation(),
-                               graph.get_k() - 1,
-                               a_j.get_clipping() + query_j.size() - added_query.size(),
-                               a_j.get_end_clipping());
-            a_i.append(Alignment(inserted_seed, config));
+            Alignment inserted_seed(
+                Seed(added_query,
+                     std::move(added_nodes),
+                     a_j.get_orientation(),
+                     graph.get_k() - 1,
+                     a_j.get_clipping() + query_j.size() - added_query.size(),
+                     a_j.get_end_clipping()),
+                config
+            );
+            assert(inserted_seed.is_valid(graph, &config));
+            a_i.splice(std::move(inserted_seed));
             assert(a_i.is_valid(graph, &config));
             clear_seed(a_j);
         }

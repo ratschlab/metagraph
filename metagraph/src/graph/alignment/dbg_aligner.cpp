@@ -896,10 +896,18 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
                     }
 
                     assert(path.is_valid(graph_, &config_));
-
                     callback(std::move(path));
                 },
-                callback_discarded,
+                [&](Alignment&& path) {
+                    if (use_rcdbg || is_reversible(path)) {
+                        path.reverse_complement(rc_graph, query);
+                        if (path.empty())
+                            return;
+                    }
+
+                    assert(path.is_valid(graph_, &config_));
+                    callback_discarded(std::move(path));
+                },
                 get_min_path_score,
                 true, /* alignments must have the seed as a prefix */
                 false /* don't apply the seed complexity filter here */
