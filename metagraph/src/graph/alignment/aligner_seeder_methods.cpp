@@ -215,7 +215,21 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
 
         if (end == encoded.end()) {
             found = true;
+            low_complexity |= (last - first > this->config_.max_num_seeds_per_locus);
             first = !low_complexity ? boss.pred_last(first - 1) + 1 : 0;
+            if (first && i + this->config_.min_seed_length < this->query_.size()) {
+                auto first_test = first;
+                auto last_test = last;
+                if (boss.tighten_range(&first_test, &last_test, s)) {
+                    auto next_s = boss.encode(this->query_[i + this->config_.min_seed_length]) % boss.alph_size;
+                    if (next_s && first_test == last_test && boss.tighten_range(&first_test, &last_test, next_s)) {
+                        first = 0;
+                    }
+
+                } else {
+                    first = 0;
+                }
+            }
         } else {
             first = 0;
         }
@@ -229,7 +243,14 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
             std::tie(first_rc, last_rc, end) = boss.index_range(encoded.begin(), encoded.end());
             if (end == encoded.end()) {
                 found = true;
+                low_complexity |= (last_rc - first_rc > this->config_.max_num_seeds_per_locus);
                 first_rc = !low_complexity ? boss.pred_last(first_rc - 1) + 1 : 0;
+                if (first_rc && i && first_rc == last_rc) {
+                    auto prev_s = complement(boss.encode(this->query_[i - 1]) % boss.alph_size);
+                    if (prev_s && boss.get_minus_k_value(first_rc, this->config_.min_seed_length).first == prev_s) {
+                        first_rc = 0;
+                    }
+                }
             } else {
                 first_rc = 0;
             }
