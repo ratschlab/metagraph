@@ -154,8 +154,8 @@ class LabeledAligner : public DBGAligner<Seeder, Extender, AlignmentCompare>, pu
                           std::vector<std::pair<std::vector<Seed>, std::vector<Seed>>> &discarded_seeds) const override final;
 
     // helper for the build_seeders method
-    size_t filter_seeds(std::vector<Seed> &seeds,
-                        std::vector<Seed> &discarded_seeds) const;
+    void filter_seeds(std::vector<Seed> &seeds,
+                      std::vector<Seed> &discarded_seeds) const;
 };
 
 } // namespace align

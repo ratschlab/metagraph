@@ -18,6 +18,8 @@ namespace align {
 using mtg::common::logger;
 
 typedef Alignment::score_t score_t;
+typedef boss::BOSS::edge_index edge_index;
+typedef boss::BOSS::TAlphabet TAlphabet;
 
 
 #if ! _PROTEIN_GRAPH
@@ -94,16 +96,32 @@ void suffix_to_prefix(const DBGSuccinct &dbg_succ,
                       const BOSSEdgeRange &index_range,
                       const std::function<void(DBGSuccinct::node_index)> &callback) {
     const auto &boss = dbg_succ.get_boss();
+    assert(std::get<0>(index_range));
+    assert(std::get<1>(index_range));
     assert(std::get<2>(index_range));
     assert(std::get<2>(index_range) < dbg_succ.get_k());
+
+#ifndef NDEBUG
+    size_t offset = boss.get_k() - std::get<2>(index_range);
+    std::string check_str = boss.get_node_str(std::get<0>(index_range)).substr(offset);
+    assert(std::get<0>(index_range) == 1
+        || boss.get_node_str(std::get<0>(index_range) - 1).substr(offset) != check_str);
+
+    assert(boss.get_node_str(std::get<1>(index_range)).substr(offset) == check_str);
+    assert(std::get<1>(index_range) == boss.get_W().size() - 1
+        || boss.get_node_str(std::get<1>(index_range) + 1).substr(offset) != check_str);
+#endif
 
     auto call_nodes_in_range = [&](const BOSSEdgeRange &final_range) {
         const auto &[first, last, seed_length] = final_range;
         assert(seed_length == boss.get_k());
         for (boss::BOSS::edge_index i = first; i <= last; ++i) {
-            DBGSuccinct::node_index node = dbg_succ.boss_to_kmer_index(i);
-            if (node)
+            assert(boss.get_node_str(i).substr(0, std::get<2>(index_range)) == check_str);
+            if (auto node = dbg_succ.boss_to_kmer_index(i)) {
+                assert(dbg_succ.get_node_sequence(node).substr(0, std::get<2>(index_range))
+                    == check_str);
                 callback(node);
+            }
         }
     };
 
@@ -112,7 +130,8 @@ void suffix_to_prefix(const DBGSuccinct &dbg_succ,
         return;
     }
 
-    std::vector<BOSSEdgeRange> range_stack { index_range };
+    std::vector<BOSSEdgeRange> range_stack;
+    range_stack.emplace_back(index_range);
 
     while (range_stack.size()) {
         BOSSEdgeRange cur_range = std::move(range_stack.back());
@@ -149,6 +168,7 @@ const DBGSuccinct& get_base_dbg_succ(const DeBruijnGraph *graph) {
 
 template <class BaseSeeder>
 void SuffixSeeder<BaseSeeder>::generate_seeds() {
+    assert(this->config_.min_seed_length);
     typedef typename BaseSeeder::node_index node_index;
 
     // this method assumes that seeds from the BaseSeeder are exact match only
@@ -166,165 +186,168 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
     if (dbg_succ.get_mask())
         logger->warn("Graph has a dummy k-mer mask. Seeds containing dummy k-mers will be missed.");
 
-    bool found_first = false;
-    std::vector<std::vector<Seed>> found_seeds(this->query_.size() - this->config_.min_seed_length + 1);
-    size_t total_seed_count = 0;
-    if (this->query_.size() >= this->graph_.get_k()) {
-        if (this->config_.max_seed_length >= this->graph_.get_k()) {
-            assert(this->query_nodes_.size()
-                == this->query_.size() - this->graph_.get_k() + 1);
-            for (auto &seed : this->BaseSeeder::get_seeds()) {
-                found_first |= !seed.get_clipping();
-                auto &bucket = found_seeds[seed.get_end_clipping()];
-                bucket.emplace_back(std::move(seed));
-                ++total_seed_count;
-            }
-        } else {
-            std::string_view window(this->query_.data(), this->graph_.get_k());
-            auto first_path = map_to_nodes_sequentially(this->graph_, window);
-            assert(first_path.size() == 1);
-            if (first_path[0]) {
-                found_first = true;
-                size_t end_clipping = this->query_.size() - window.size();
-                found_seeds[end_clipping].emplace_back(
-                    window, std::move(first_path), this->orientation_,
-                    this->graph_.get_k() - window.size(),
-                    0, end_clipping
-                );
-                ++total_seed_count;
-            }
-        }
-    }
+    seeds_.clear();
+    sdsl::bit_vector matching(this->query_.size(), false);
 
-    auto add_seeds = [&](size_t i, size_t max_seed_length) {
-        std::string_view max_window(this->query_.data() + i, max_seed_length);
-        dbg_succ.call_nodes_with_suffix_matching_longest_prefix(max_window,
-            [&](node_index alt_node, size_t seed_len) {
-                std::string_view window(this->query_.data() + i, seed_len);
-                size_t end_clipping = this->query_.size() - i - window.size();
-                auto &bucket = found_seeds[end_clipping];
-                if (bucket.size()) {
-                    if (seed_len < bucket[0].get_query_view().size())
-                        return;
-
-                    if (seed_len > bucket[0].get_query_view().size()) {
-                        total_seed_count -= bucket.size();
-                        bucket.clear();
-                    }
-                }
-
-                bucket.emplace_back(window, std::vector<node_index>{ alt_node },
-                                    this->orientation_,
-                                    this->graph_.get_k() - window.size(),
-                                    i, end_clipping);
-                found_first |= !i;
-                ++total_seed_count;
-            },
-            this->config_.min_seed_length
-        );
-    };
-
-    size_t max_seed_length = std::min(this->graph_.get_k() - 1,
-                                      this->config_.max_seed_length);
-    size_t i = found_first ? this->graph_.get_k() - max_seed_length : 0;
-    for ( ; i + max_seed_length <= this->query_.size(); ++i) {
-        add_seeds(i, max_seed_length);
-    }
-
-    assert(i == this->query_.size() - max_seed_length + 1);
-    if (this->config_.min_seed_length < max_seed_length) {
-        size_t cur_length = max_seed_length;
-        for ( ; i + this->config_.min_seed_length <= this->query_.size(); ++i) {
-            add_seeds(i, --cur_length);
-        }
-    }
-
-    if (dbg_succ.get_mode() == DeBruijnGraph::PRIMARY) {
-        const auto *canonical = dynamic_cast<const CanonicalDBG*>(&this->graph_);
-        assert(canonical);
-        std::string query_rc(this->query_);
-        ::reverse_complement(query_rc.begin(), query_rc.end());
-        auto add_seeds = [&](size_t i, size_t max_seed_length) {
-            std::string_view max_window_rc(query_rc.data() + i, max_seed_length);
-            tsl::hopscotch_set<node_index> found_nodes;
-
-            const auto &boss = dbg_succ.get_boss();
-            auto encoded = boss.encode(max_window_rc);
-            auto [first, last, end] = boss.index_range(encoded.begin(), encoded.end());
-            size_t seed_len = end - encoded.begin();
-            if (seed_len < this->config_.min_seed_length)
-                return;
-
-            size_t clipping = this->query_.size() - i - seed_len;
-            if (found_first && !clipping)
-                return;
-
-            std::string_view window(this->query_.data() + clipping, seed_len);
-            auto &bucket = found_seeds[i];
-            if (bucket.size()) {
-                if (seed_len < bucket[0].get_query_view().size())
-                    return;
-
-                if (seed_len > bucket[0].get_query_view().size()) {
-                    total_seed_count -= bucket.size();
-                    bucket.clear();
-                }
-            }
-
-            suffix_to_prefix(dbg_succ,
-                std::make_tuple(boss.pred_last(first - 1) + 1, last, seed_len),
-                [&](node_index alt_node) {
-                    found_nodes.emplace(canonical->reverse_complement(alt_node));
-                }
-            );
-
-            for (node_index alt_node : found_nodes) {
-                assert(this->graph_.get_node_sequence(alt_node).substr(
-                    this->graph_.get_k() - window.size()) == window);
-                bucket.emplace_back(window, std::vector<node_index>{ alt_node },
-                                    this->orientation_,
-                                    this->graph_.get_k() - window.size(),
-                                    clipping, i);
-                found_first |= !clipping;
-                ++total_seed_count;
-            }
-        };
-
-        size_t i = 0;
-        for ( ; i + max_seed_length <= query_rc.size(); ++i) {
-            add_seeds(i, max_seed_length);
-        }
-
-        assert(i == this->query_.size() - max_seed_length + 1);
-        if (this->config_.min_seed_length < max_seed_length) {
-            size_t cur_length = max_seed_length;
-            for ( ; i + this->config_.min_seed_length <= this->query_.size(); ++i) {
-                add_seeds(i, --cur_length);
-            }
-        }
-    }
-
-    auto first_front_match = std::find_if(found_seeds.begin(), found_seeds.end(),
-        [](const auto &bucket) {
-            return bucket.size() && !bucket[0].get_clipping();
-        }
+    std::vector<std::tuple<edge_index, edge_index, TAlphabet, edge_index, edge_index>> ranges(
+        this->query_.size() - this->config_.min_seed_length + 1
     );
 
-    if (first_front_match != found_seeds.end()) {
-        std::for_each(first_front_match + 1, found_seeds.end(), [](auto &bucket) {
-            bucket.clear();
-        });
+    const auto &boss = dbg_succ.get_boss();
+    for (size_t i = 0; i + this->config_.min_seed_length <= this->query_.size(); ++i) {
+        auto &[first, last, s, first_rc, last_rc] = ranges[i];
+
+        std::string_view window(this->query_.data() + i, this->config_.min_seed_length);
+        s = boss.encode(window.back()) % boss.alph_size;
+        if (!s)
+            continue;
+
+        bool low_complexity = this->config_.seed_complexity_filter
+            ? is_low_complexity(window)
+            : false;
+        bool found = false;
+
+        std::string_view window_prefix(window.data(), window.size() - 1);
+        auto encoded = boss.encode(window_prefix);
+        auto end = encoded.begin();
+
+        std::tie(first, last, end) = boss.index_range(encoded.begin(), encoded.end());
+
+        if (end == encoded.end()) {
+            found = true;
+            first = !low_complexity ? boss.pred_last(first - 1) + 1 : 0;
+        } else {
+            first = 0;
+        }
+
+        if (dbg_succ.get_mode() == DeBruijnGraph::PRIMARY && (!low_complexity || !found)) {
+            assert(dynamic_cast<const CanonicalDBG*>(&this->graph_));
+            std::string window_rc(window);
+            ::reverse_complement(window_rc.begin(), window_rc.end());
+            auto encoded = boss.encode(window_rc);
+            auto end = encoded.begin();
+            std::tie(first_rc, last_rc, end) = boss.index_range(encoded.begin(), encoded.end());
+            if (end == encoded.end()) {
+                found = true;
+                first_rc = !low_complexity ? boss.pred_last(first_rc - 1) + 1 : 0;
+            } else {
+                first_rc = 0;
+            }
+        }
+
+        if (found) {
+            for (size_t j = i; j < i + this->config_.min_seed_length; ++j) {
+                matching[j] = true;
+            }
+        }
     }
 
-    seeds_.clear();
-    seeds_.reserve(total_seed_count);
-    for (auto &bucket : found_seeds) {
-        seeds_.insert(seeds_.end(),
-                      std::make_move_iterator(bucket.begin()),
-                      std::make_move_iterator(bucket.end()));
+    this->num_matching_ = sdsl::util::cnt_one_bits(matching);
+    if (this->num_matching_ < this->query_.size() * this->config_.min_exact_match) {
+        this->num_matching_ = 0;
+        return;
     }
 
-    this->num_matching_ = get_num_char_matches_in_seeds(seeds_.begin(), seeds_.end());
+    std::vector<tsl::hopscotch_set<node_index>> found_nodes(ranges.size());
+    for (size_t i = 0; i < ranges.size(); ++i) {
+#ifndef NDEBUG
+        std::string_view window(this->query_.data() + i, this->config_.min_seed_length);
+#endif
+        auto [first, last, s, first_rc, last_rc] = ranges[i];
+
+        std::vector<node_index> nodes;
+        if (first) {
+            for (auto e = boss.succ_W(first, s); e <= last; e = boss.succ_W(e + 1, s)) {
+                if (auto node = dbg_succ.boss_to_kmer_index(e)) {
+                    assert(dbg_succ.get_node_sequence(node).substr(dbg_succ.get_k() - window.size())
+                            == window);
+                    nodes.emplace_back(node);
+                }
+
+                if (e + 1 == boss.get_W().size())
+                    break;
+            }
+
+            s += boss.alph_size;
+            for (auto e = boss.succ_W(first, s); e <= last; e = boss.succ_W(e + 1, s)) {
+                if (auto node = dbg_succ.boss_to_kmer_index(e)) {
+                    assert(dbg_succ.get_node_sequence(node).substr(dbg_succ.get_k() - window.size())
+                            == window);
+                    nodes.emplace_back(node);
+                }
+
+                if (e + 1 == boss.get_W().size())
+                    break;
+            }
+        }
+
+        if (first_rc) {
+            const auto *canonical = dynamic_cast<const CanonicalDBG*>(&this->graph_);
+            assert(canonical);
+            suffix_to_prefix(dbg_succ,
+                std::make_tuple(first_rc, last_rc, this->config_.min_seed_length),
+                [&](node_index node) {
+                    node = canonical->reverse_complement(node);
+                    assert(canonical->get_node_sequence(node).substr(dbg_succ.get_k() - window.size())
+                            == window);
+                    nodes.emplace_back(node);
+                }
+            );
+        }
+
+        for (node_index node : nodes) {
+            assert(node);
+            if (!found_nodes[i].emplace(node).second)
+                continue;
+
+            std::vector<node_index> path;
+            path.emplace_back(node);
+            size_t end_i = i + this->config_.min_seed_length;
+            if (this->config_.max_seed_length > this->config_.min_seed_length
+                    && end_i < this->query_.size()) {
+                std::string_view rest(this->query_.data() + end_i,
+                                      this->query_.size() - end_i);
+                this->graph_.traverse(node, rest.begin(), rest.end(),
+                    [&](node_index next) {
+                        found_nodes[i + path.size()].emplace(next);
+                        path.emplace_back(next);
+                    },
+                    [&]() {
+                        return this->config_.min_seed_length + path.size() - 1
+                                    >= this->config_.max_seed_length
+                            || this->graph_.has_multiple_outgoing(path.back())
+                            || !this->graph_.has_single_incoming(path.back());
+                    }
+                );
+            }
+
+            std::string_view seed_window(this->query_.data() + i,
+                                         this->config_.min_seed_length + path.size() - 1);
+
+            size_t offset = this->graph_.get_k() - this->config_.min_seed_length;
+            if (path.size() > 1 && offset) {
+                if (path.size() - 1 <= offset) {
+                    offset -= path.size() - 1;
+                    path.assign(1, path.back());
+                } else {
+                    path.erase(path.begin(), path.begin() + offset);
+                    offset = 0;
+                }
+            }
+
+            seeds_.emplace_back(
+                seed_window,
+                std::move(path),
+                this->orientation_,
+                offset,
+                i,
+                this->query_.size() - i - seed_window.size()
+            );
+        }
+    }
+
+    if (seeds_.empty())
+        this->num_matching_ = 0;
 }
 
 auto MEMSeeder::get_seeds() const -> std::vector<Seed> {

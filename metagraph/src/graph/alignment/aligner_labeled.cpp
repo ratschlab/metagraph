@@ -475,7 +475,7 @@ LabeledAligner<Seeder, Extender, AlignmentCompare>
     }
 
     this->config_.min_seed_length = std::min(graph.get_k(), this->config_.min_seed_length);
-    this->config_.max_seed_length = std::min(graph.get_k(), this->config_.max_seed_length);
+    this->config_.max_seed_length = this->config_.min_seed_length;
 }
 
 template <class Seeder, class Extender, class AlignmentCompare>
@@ -504,6 +504,8 @@ auto LabeledAligner<Seeder, Extender, AlignmentCompare>
 
     size_t num_seeds = 0;
     size_t num_seeds_rc = 0;
+    size_t covered = 0;
+    size_t covered_rc = 0;
 
 #if ! _PROTEIN_GRAPH
     std::vector<bool> has_rc;
@@ -511,6 +513,7 @@ auto LabeledAligner<Seeder, Extender, AlignmentCompare>
 #endif
 
     for (auto &[seeder, seeder_rc] : seeders) {
+        covered = seeder->get_num_matches();
         counted_seeds.emplace_back(seeder->get_seeds(), seeder->get_num_matches());
         seeder.reset();
         num_seeds += counted_seeds.back().first.size();
@@ -526,6 +529,7 @@ auto LabeledAligner<Seeder, Extender, AlignmentCompare>
 #if ! _PROTEIN_GRAPH
         has_rc.emplace_back(seeder_rc);
         if (seeder_rc) {
+            covered_rc = seeder_rc->get_num_matches();
             counted_seeds_rc.emplace_back(seeder_rc->get_seeds(),
                                           seeder_rc->get_num_matches());
             seeder_rc.reset();
@@ -535,8 +539,10 @@ auto LabeledAligner<Seeder, Extender, AlignmentCompare>
 #endif
     }
 
-    logger->trace("Prefetching labels for {} seeds. Cur mem usage {} MB",
-                  num_seeds + num_seeds_rc, get_curr_RSS() / 1e6);
+    logger->trace("Prefetching labels for {} seeds covering {} characters. Cur mem usage {} MB",
+                  num_seeds + num_seeds_rc,
+                  std::max(covered, covered_rc),
+                  get_curr_RSS() / 1e6);
     annotation_buffer_.fetch_queued_annotations();
     logger->trace("Done prefetching. Cur mem usage {} MB", get_curr_RSS() / 1e6);
 
@@ -548,7 +554,10 @@ auto LabeledAligner<Seeder, Extender, AlignmentCompare>
         auto &[seeder, seeder_rc] = seeders[i];
         auto &[seeds, num_matching] = counted_seeds[i];
         if (seeds.size()) {
-            num_matching = filter_seeds(seeds, discarded_seeds[i].first);
+            filter_seeds(seeds, discarded_seeds[i].first);
+            if (seeds.empty())
+                num_matching = 0;
+
             num_seeds_left += seeds.size();
         }
 
@@ -558,7 +567,10 @@ auto LabeledAligner<Seeder, Extender, AlignmentCompare>
         if (has_rc[i]) {
             auto &[seeds, num_matching] = counted_seeds_rc[i];
             if (seeds.size()) {
-                num_matching = filter_seeds(seeds, discarded_seeds[i].second);
+                filter_seeds(seeds, discarded_seeds[i].second);
+                if (seeds.empty())
+                    num_matching = 0;
+
                 num_seeds_rc_left += seeds.size();
             }
 
@@ -628,23 +640,11 @@ void matched_intersection(AIt a_begin, AIt a_end, BIt a_c_begin,
 }
 
 template <class Seeder, class Extender, class AlignmentCompare>
-size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
+void LabeledAligner<Seeder, Extender, AlignmentCompare>
 ::filter_seeds(std::vector<Seed> &seeds,
                std::vector<Seed> &discarded_seeds) const {
     if (seeds.empty())
-        return 0;
-
-    size_t num_matches = get_num_char_matches_in_seeds(seeds.begin(), seeds.end());
-
-    if (this->config_.seed_complexity_filter) {
-        seeds.erase(std::remove_if(seeds.begin(), seeds.end(), [](const auto &seed) {
-                                       return is_low_complexity(seed.get_query_view());
-                                   }),
-                    seeds.end());
-
-        if (seeds.empty())
-            return 0;
-    }
+        return;
 
     size_t query_size = seeds[0].get_clipping() + seeds[0].get_end_clipping()
                             + seeds[0].get_query_view().size();
@@ -675,7 +675,7 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
 
         if (label_mapper.empty()) {
             seeds.clear();
-            return 0;
+            return;
         }
 
         std::vector<std::pair<Column, uint64_t>> label_counts;
@@ -809,8 +809,6 @@ size_t LabeledAligner<Seeder, Extender, AlignmentCompare>
             }
         );
     }));
-
-    return num_matches;
 }
 
 template class LabeledAligner<>;
