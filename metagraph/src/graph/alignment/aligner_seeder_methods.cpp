@@ -189,7 +189,9 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
     seeds_.clear();
     const auto &boss = dbg_succ.get_boss();
 
-    auto generate_from_query = [&](std::string_view query, auto find_nodes) {
+    sdsl::bit_vector matched(this->query_.size(), false);
+
+    auto generate_from_query = [&](std::string_view query, auto find_nodes, bool is_rc) {
         std::vector<std::vector<std::pair<edge_index, edge_index>>> ranges(
             query.size() - this->config_.min_seed_length + 1
         );
@@ -208,7 +210,9 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
                 continue;
 
             first = boss.pred_last(first - 1) + 1;
-            auto last_it = std::min(begin + dbg_succ.get_k(), encoded.end());
+            auto last_it = std::min({ begin + dbg_succ.get_k(),
+                                      encoded.end(),
+                                      begin + this->config_.max_seed_length });
             for (size_t j = i; it != last_it; ++j, ++it) {
                 assert(it <= begin + boss.get_k());
                 edge_index first_next = first;
@@ -218,10 +222,27 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
                         ranges[j].resize(j - i + 1);
 
                     ranges[j][j - i] = std::make_pair(first, last);
+
+                    // TODO: how do we deal with this for the rc strand?
+                    if (is_rc)
+                        break;
+
                     first = first_next;
                     last = last_next;
                 } else {
                     break;
+                }
+            }
+
+            if (ranges[i].size()) {
+                if (is_rc) {
+                    std::fill(matched.end() - i - this->config_.min_seed_length,
+                              matched.end() - i,
+                              true);
+                } else {
+                    std::fill(matched.begin() + i,
+                              matched.begin() + i + this->config_.min_seed_length,
+                              true);
                 }
             }
         }
@@ -229,6 +250,8 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
         for (size_t i = 0; i < ranges.size(); ++i) {
             if (ranges[i].empty())
                 continue;
+
+            assert(!is_rc || ranges[i].size() == 1);
 
             size_t added_length = 0;
 
@@ -279,13 +302,16 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
         assert(i >= added_length);
         std::vector<node_index> path;
         path.emplace_back(node);
+        assert(this->config_.min_seed_length + added_length <= this->graph_.get_k());
         size_t offset = this->graph_.get_k() - this->config_.min_seed_length - added_length;
+        assert(i - added_length < query.size());
+        assert(query.size() - (i - added_length) - seed_window.size() < query.size());
         seeds_.emplace_back(seed_window,
                             std::move(path),
                             this->orientation_,
                             offset,
                             i - added_length,
-                            query.size() - i - seed_window.size());
+                            query.size() - (i - added_length) - seed_window.size());
         assert(Alignment(seeds_.back(), this->config_).is_valid(this->graph_, &this->config_));
     };
 
@@ -299,14 +325,14 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
         }
     };
 
-    generate_from_query(this->query_, find_nodes_fwd);
+    generate_from_query(this->query_, find_nodes_fwd, false);
 
     if (dbg_succ.get_mode() == DeBruijnGraph::PRIMARY) {
         const auto &canonical = static_cast<const CanonicalDBG&>(this->graph_);
         std::string query_rc(this->query_);
         ::reverse_complement(query_rc.begin(), query_rc.end());
         auto find_nodes_bwd = [&](std::string_view, size_t i, std::string_view rc_seed_window, auto first, auto last, auto s) {
-            if (!boss.tighten_range(&first, &last, s))
+            if (s >= boss.alph_size || !boss.tighten_range(&first, &last, s))
                 return;
 
             size_t rc_begin = i - (rc_seed_window.size() - this->config_.min_seed_length);
@@ -321,11 +347,15 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
                 }
             );
         };
-        generate_from_query(query_rc, find_nodes_bwd);
+        generate_from_query(query_rc, find_nodes_bwd, true);
     }
 
-    if (seeds_.empty())
+    this->num_matching_ = seeds_.empty() ? 0 : sdsl::util::cnt_one_bits(matched);
+
+    if (this->num_matching_ < this->query_.size() * this->config_.min_exact_match) {
         this->num_matching_ = 0;
+        seeds_.clear();
+    }
 }
 
 auto MEMSeeder::get_seeds() const -> std::vector<Seed> {
