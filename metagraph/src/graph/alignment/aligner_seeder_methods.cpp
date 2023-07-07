@@ -187,163 +187,141 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
         logger->warn("Graph has a dummy k-mer mask. Seeds containing dummy k-mers will be missed.");
 
     seeds_.clear();
-    sdsl::bit_vector matching(this->query_.size(), false);
-
-    std::vector<std::tuple<edge_index, edge_index, TAlphabet, edge_index, edge_index>> ranges(
-        this->query_.size() - this->config_.min_seed_length + 1
-    );
-
     const auto &boss = dbg_succ.get_boss();
-    for (size_t i = 0; i + this->config_.min_seed_length <= this->query_.size(); ++i) {
-        auto &[first, last, s, first_rc, last_rc] = ranges[i];
 
-        std::string_view window(this->query_.data() + i, this->config_.min_seed_length);
-        s = boss.encode(window.back()) % boss.alph_size;
-        if (!s)
-            continue;
+    auto generate_from_query = [&](std::string_view query, auto find_nodes) {
+        std::vector<std::vector<std::pair<edge_index, edge_index>>> ranges(
+            query.size() - this->config_.min_seed_length + 1
+        );
 
-        bool low_complexity = this->config_.seed_complexity_filter
-            ? is_low_complexity(window)
-            : false;
-        bool found = false;
+        auto encoded = boss.encode(query);
+        for (size_t i = 0; i + this->config_.min_seed_length <= query.size(); ++i) {
+            auto begin = encoded.begin() + i;
+            auto end = begin + this->config_.min_seed_length - 1;
 
-        std::string_view window_prefix(window.data(), window.size() - 1);
-        auto encoded = boss.encode(window_prefix);
-        auto end = encoded.begin();
-
-        std::tie(first, last, end) = boss.index_range(encoded.begin(), encoded.end());
-
-        if (end == encoded.end()) {
-            found = true;
-            first = !low_complexity ? boss.pred_last(first - 1) + 1 : 0;
-        } else {
-            first = 0;
-        }
-
-        if (dbg_succ.get_mode() == DeBruijnGraph::PRIMARY && (!low_complexity || !found)) {
-            assert(dynamic_cast<const CanonicalDBG*>(&this->graph_));
-            std::string window_rc(window);
-            ::reverse_complement(window_rc.begin(), window_rc.end());
-            auto encoded = boss.encode(window_rc);
-            auto end = encoded.begin();
-            std::tie(first_rc, last_rc, end) = boss.index_range(encoded.begin(), encoded.end());
-            if (end == encoded.end()) {
-                found = true;
-                first_rc = !low_complexity ? boss.pred_last(first_rc - 1) + 1 : 0;
-            } else {
-                first_rc = 0;
-            }
-        }
-
-        if (found) {
-            for (size_t j = i; j < i + this->config_.min_seed_length; ++j) {
-                matching[j] = true;
-            }
-        }
-    }
-
-    this->num_matching_ = sdsl::util::cnt_one_bits(matching);
-    if (this->num_matching_ < this->query_.size() * this->config_.min_exact_match) {
-        this->num_matching_ = 0;
-        return;
-    }
-
-    std::vector<tsl::hopscotch_set<node_index>> found_nodes(ranges.size());
-    for (size_t i = 0; i < ranges.size(); ++i) {
-#ifndef NDEBUG
-        std::string_view window(this->query_.data() + i, this->config_.min_seed_length);
-#endif
-        auto [first, last, s, first_rc, last_rc] = ranges[i];
-
-        std::vector<node_index> nodes;
-        if (first) {
-            for (auto e = boss.succ_W(first, s); e <= last; e = boss.succ_W(e + 1, s)) {
-                if (auto node = dbg_succ.boss_to_kmer_index(e)) {
-                    assert(dbg_succ.get_node_sequence(node).substr(dbg_succ.get_k() - window.size())
-                            == window);
-                    nodes.emplace_back(node);
-                }
-
-                if (e + 1 == boss.get_W().size())
-                    break;
-            }
-
-            s += boss.alph_size;
-            for (auto e = boss.succ_W(first, s); e <= last; e = boss.succ_W(e + 1, s)) {
-                if (auto node = dbg_succ.boss_to_kmer_index(e)) {
-                    assert(dbg_succ.get_node_sequence(node).substr(dbg_succ.get_k() - window.size())
-                            == window);
-                    nodes.emplace_back(node);
-                }
-
-                if (e + 1 == boss.get_W().size())
-                    break;
-            }
-        }
-
-        if (first_rc) {
-            const auto *canonical = dynamic_cast<const CanonicalDBG*>(&this->graph_);
-            assert(canonical);
-            suffix_to_prefix(dbg_succ,
-                std::make_tuple(first_rc, last_rc, this->config_.min_seed_length),
-                [&](node_index node) {
-                    node = canonical->reverse_complement(node);
-                    assert(canonical->get_node_sequence(node).substr(dbg_succ.get_k() - window.size())
-                            == window);
-                    nodes.emplace_back(node);
-                }
-            );
-        }
-
-        for (node_index node : nodes) {
-            assert(node);
-            if (!found_nodes[i].emplace(node).second)
+            if (!((*end) % boss.alph_size))
                 continue;
 
-            std::vector<node_index> path;
-            path.emplace_back(node);
-            size_t end_i = i + this->config_.min_seed_length;
-            if (this->config_.max_seed_length > this->config_.min_seed_length
-                    && end_i < this->query_.size()) {
-                std::string_view rest(this->query_.data() + end_i,
-                                      this->query_.size() - end_i);
-                this->graph_.traverse(node, rest.begin(), rest.end(),
-                    [&](node_index next) {
-                        found_nodes[i + path.size()].emplace(next);
-                        path.emplace_back(next);
-                    },
-                    [&]() {
-                        return this->config_.min_seed_length + path.size() - 1
-                                    >= this->config_.max_seed_length
-                            || this->graph_.has_multiple_outgoing(path.back())
-                            || !this->graph_.has_single_incoming(path.back());
-                    }
-                );
-            }
+            auto [first, last, it] = boss.index_range(begin, end);
 
-            std::string_view seed_window(this->query_.data() + i,
-                                         this->config_.min_seed_length + path.size() - 1);
+            if (it != end)
+                continue;
 
-            size_t offset = this->graph_.get_k() - this->config_.min_seed_length;
-            if (path.size() > 1 && offset) {
-                if (path.size() - 1 <= offset) {
-                    offset -= path.size() - 1;
-                    path.assign(1, path.back());
+            first = boss.pred_last(first - 1) + 1;
+            auto last_it = std::min(begin + dbg_succ.get_k(), encoded.end());
+            for (size_t j = i; it != last_it; ++j, ++it) {
+                assert(it <= begin + boss.get_k());
+                edge_index first_next = first;
+                edge_index last_next = last;
+                if (boss.tighten_range(&first_next, &last_next, *it)) {
+                    if (ranges[j].size() <= j - i)
+                        ranges[j].resize(j - i + 1);
+
+                    ranges[j][j - i] = std::make_pair(first, last);
+                    first = first_next;
+                    last = last_next;
                 } else {
-                    path.erase(path.begin(), path.begin() + offset);
-                    offset = 0;
+                    break;
+                }
+            }
+        }
+
+        for (size_t i = 0; i < ranges.size(); ++i) {
+            if (ranges[i].empty())
+                continue;
+
+            size_t added_length = 0;
+
+            auto s = encoded[i + this->config_.min_seed_length - 1];
+            for (auto begin = ranges[i].begin(); begin + 1 != ranges[i].end(); ++begin, ++added_length) {
+                auto [first, last] = *begin;
+                assert(first);
+                assert(last);
+
+                auto [first_next, last_next] = *(begin + 1);
+                assert(first <= first_next);
+                assert(last >= last_next);
+
+                std::string_view seed_window(query.data() + i - added_length,
+                                             this->config_.min_seed_length + added_length);
+
+                if (this->config_.seed_complexity_filter && is_low_complexity(seed_window))
+                    continue;
+
+                if (first != first_next) {
+                    find_nodes(query, i, seed_window, first, first_next - 1, s);
+                    find_nodes(query, i, seed_window, first, first_next - 1, s + boss.alph_size);
+                }
+
+                if (last_next != last) {
+                    find_nodes(query, i, seed_window, last_next + 1, last, s);
+                    find_nodes(query, i, seed_window, last_next + 1, last, s + boss.alph_size);
                 }
             }
 
-            seeds_.emplace_back(
-                seed_window,
-                std::move(path),
-                this->orientation_,
-                offset,
-                i,
-                this->query_.size() - i - seed_window.size()
-            );
+            std::string_view seed_window(query.data() + i - added_length,
+                                         this->config_.min_seed_length + added_length);
+
+            if (this->config_.seed_complexity_filter && is_low_complexity(seed_window))
+                return;
+
+            auto [first, last] = ranges[i].back();
+            assert(first);
+            assert(last);
+            find_nodes(query, i, seed_window, first, last, s);
+            find_nodes(query, i, seed_window, first, last, s + boss.alph_size);
         }
+    };
+
+    auto add_seed = [&](std::string_view query, size_t i, std::string_view seed_window, node_index node) {
+        assert(node);
+        size_t added_length = seed_window.size() - this->config_.min_seed_length;
+        assert(i >= added_length);
+        std::vector<node_index> path;
+        path.emplace_back(node);
+        size_t offset = this->graph_.get_k() - this->config_.min_seed_length - added_length;
+        seeds_.emplace_back(seed_window,
+                            std::move(path),
+                            this->orientation_,
+                            offset,
+                            i - added_length,
+                            query.size() - i - seed_window.size());
+        assert(Alignment(seeds_.back(), this->config_).is_valid(this->graph_, &this->config_));
+    };
+
+    auto find_nodes_fwd = [&](std::string_view query, size_t i, std::string_view seed_window, auto first, auto last, auto s) {
+        for (auto e = boss.succ_W(first, s); e <= last; e = boss.succ_W(e + 1, s)) {
+            if (auto node = dbg_succ.boss_to_kmer_index(e))
+                add_seed(query, i, seed_window, node);
+
+            if (e + 1 == boss.get_W().size())
+                break;
+        }
+    };
+
+    generate_from_query(this->query_, find_nodes_fwd);
+
+    if (dbg_succ.get_mode() == DeBruijnGraph::PRIMARY) {
+        const auto &canonical = static_cast<const CanonicalDBG&>(this->graph_);
+        std::string query_rc(this->query_);
+        ::reverse_complement(query_rc.begin(), query_rc.end());
+        auto find_nodes_bwd = [&](std::string_view, size_t i, std::string_view rc_seed_window, auto first, auto last, auto s) {
+            if (!boss.tighten_range(&first, &last, s))
+                return;
+
+            size_t rc_begin = i - (rc_seed_window.size() - this->config_.min_seed_length);
+            size_t rc_end = rc_begin + rc_seed_window.size();
+
+            i = this->query_.size() - rc_end;
+            std::string_view seed_window(this->query_.data() + i, rc_seed_window.size());
+
+            suffix_to_prefix(dbg_succ, std::make_tuple(first, last, seed_window.size()),
+                [&](node_index node) {
+                    add_seed(this->query_, i, seed_window, canonical.reverse_complement(node));
+                }
+            );
+        };
+        generate_from_query(query_rc, find_nodes_bwd);
     }
 
     if (seeds_.empty())
