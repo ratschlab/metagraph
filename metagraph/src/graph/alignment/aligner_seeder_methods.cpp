@@ -177,6 +177,7 @@ const DBGSuccinct& get_base_dbg_succ(const DeBruijnGraph *graph) {
 template <class BaseSeeder>
 void SuffixSeeder<BaseSeeder>::generate_seeds() {
     assert(this->config_.min_seed_length);
+    assert(this->config_.min_seed_length <= this->config_.max_seed_length);
     typedef typename BaseSeeder::node_index node_index;
 
     // this method assumes that seeds from the BaseSeeder are exact match only
@@ -208,6 +209,9 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
         for (size_t i = 0; i + this->config_.min_seed_length <= query.size(); ++i) {
             auto begin = encoded.begin() + i;
             auto end = begin + this->config_.min_seed_length - 1;
+            auto last_it = std::min(begin + std::min(boss.get_k(), this->config_.max_seed_length),
+                                    encoded.end());
+            assert(end <= last_it);
 
             if (!((*end) % boss.alph_size))
                 continue;
@@ -218,9 +222,8 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
                 continue;
 
             first = boss.pred_last(first - 1) + 1;
-            auto last_it = std::min({ begin + dbg_succ.get_k(),
-                                      encoded.end(),
-                                      begin + this->config_.max_seed_length });
+
+            assert(it <= last_it);
             for (size_t j = i; it != last_it; ++j, ++it) {
                 assert(it <= begin + boss.get_k());
                 edge_index first_next = first;
@@ -231,7 +234,6 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
 
                     ranges[j][j - i] = std::make_pair(first, last);
 
-                    // TODO: how do we deal with this for the rc strand?
                     if (is_rc)
                         break;
 
