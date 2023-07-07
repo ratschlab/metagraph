@@ -513,7 +513,7 @@ auto LabeledAligner<Seeder, Extender, AlignmentCompare>
 #endif
 
     for (auto &[seeder, seeder_rc] : seeders) {
-        covered = seeder->get_num_matches();
+        covered += seeder->get_num_matches();
         counted_seeds.emplace_back(seeder->get_seeds(), seeder->get_num_matches());
         seeder.reset();
         num_seeds += counted_seeds.back().first.size();
@@ -529,7 +529,7 @@ auto LabeledAligner<Seeder, Extender, AlignmentCompare>
 #if ! _PROTEIN_GRAPH
         has_rc.emplace_back(seeder_rc);
         if (seeder_rc) {
-            covered_rc = seeder_rc->get_num_matches();
+            covered_rc += seeder_rc->get_num_matches();
             counted_seeds_rc.emplace_back(seeder_rc->get_seeds(),
                                           seeder_rc->get_num_matches());
             seeder_rc.reset();
