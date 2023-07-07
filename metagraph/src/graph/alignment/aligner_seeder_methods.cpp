@@ -93,8 +93,9 @@ auto ExactSeeder::get_seeds() const -> std::vector<Seed> {
 
 template <class BOSSEdgeRange>
 void suffix_to_prefix(const DBGSuccinct &dbg_succ,
+                      std::string_view rest,
                       const BOSSEdgeRange &index_range,
-                      const std::function<void(DBGSuccinct::node_index)> &callback) {
+                      const std::function<void(DBGSuccinct::node_index, size_t)> &callback) {
     const auto &boss = dbg_succ.get_boss();
     assert(std::get<0>(index_range));
     assert(std::get<1>(index_range));
@@ -112,29 +113,31 @@ void suffix_to_prefix(const DBGSuccinct &dbg_succ,
         || boss.get_node_str(std::get<1>(index_range) + 1).substr(offset) != check_str);
 #endif
 
-    auto call_nodes_in_range = [&](const BOSSEdgeRange &final_range) {
+    auto call_nodes_in_range = [&](size_t num_exact_match, const BOSSEdgeRange &final_range) {
         const auto &[first, last, seed_length] = final_range;
         assert(seed_length == boss.get_k());
+        assert(num_exact_match <= seed_length);
         for (boss::BOSS::edge_index i = first; i <= last; ++i) {
             assert(boss.get_node_str(i).substr(0, std::get<2>(index_range)) == check_str);
             if (auto node = dbg_succ.boss_to_kmer_index(i)) {
                 assert(dbg_succ.get_node_sequence(node).substr(0, std::get<2>(index_range))
                     == check_str);
-                callback(node);
+                callback(node, num_exact_match);
             }
         }
     };
 
     if (std::get<2>(index_range) == boss.get_k()) {
-        call_nodes_in_range(index_range);
+        call_nodes_in_range(boss.get_k(), index_range);
         return;
     }
 
-    std::vector<BOSSEdgeRange> range_stack;
-    range_stack.emplace_back(index_range);
+    auto encoded = boss.encode(rest);
+    std::vector<std::tuple<size_t, bool, BOSSEdgeRange>> range_stack;
+    range_stack.emplace_back(0, true, index_range);
 
     while (range_stack.size()) {
-        BOSSEdgeRange cur_range = std::move(range_stack.back());
+        auto [num_extra_match, is_exact_match, cur_range] = std::move(range_stack.back());
         range_stack.pop_back();
         assert(std::get<2>(cur_range) < boss.get_k());
         ++std::get<2>(cur_range);
@@ -145,9 +148,14 @@ void suffix_to_prefix(const DBGSuccinct &dbg_succ,
 
             if (boss.tighten_range(&first, &last, s)) {
                 if (seed_length == boss.get_k()) {
-                    call_nodes_in_range(next_range);
+                    call_nodes_in_range(std::get<2>(index_range) + num_extra_match, next_range);
                 } else {
-                    range_stack.emplace_back(std::move(next_range));
+                    bool next_exact_match = is_exact_match && (s == encoded[num_extra_match]);
+                    range_stack.emplace_back(
+                        num_extra_match + next_exact_match,
+                        next_exact_match,
+                        std::move(next_range)
+                    );
                 }
             }
         }
@@ -331,23 +339,52 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
         const auto &canonical = static_cast<const CanonicalDBG&>(this->graph_);
         std::string query_rc(this->query_);
         ::reverse_complement(query_rc.begin(), query_rc.end());
+        std::vector<tsl::hopscotch_map<node_index, size_t>> nodes(
+            this->query_.size() - this->config_.min_seed_length + 1
+        );
         auto find_nodes_bwd = [&](std::string_view, size_t i, std::string_view rc_seed_window, auto first, auto last, auto s) {
-            if (s >= boss.alph_size || !boss.tighten_range(&first, &last, s))
+            assert(rc_seed_window.size() == this->config_.min_seed_length);
+            if (s >= boss.alph_size)
                 return;
 
-            size_t rc_begin = i - (rc_seed_window.size() - this->config_.min_seed_length);
-            size_t rc_end = rc_begin + rc_seed_window.size();
+            bool check = boss.tighten_range(&first, &last, s);
+            std::ignore = check;
+            assert(check);
+            assert(boss.get_node_str(first).substr(boss.get_k() - rc_seed_window.size())
+                == rc_seed_window);
 
-            i = this->query_.size() - rc_end;
-            std::string_view seed_window(this->query_.data() + i, rc_seed_window.size());
+            std::string_view rest(rc_seed_window.data() + rc_seed_window.size(),
+                                  boss.get_k() - rc_seed_window.size());
+            i = this->query_.size() - (i + rc_seed_window.size());
 
-            suffix_to_prefix(dbg_succ, std::make_tuple(first, last, seed_window.size()),
-                [&](node_index node) {
-                    add_seed(this->query_, i, seed_window, canonical.reverse_complement(node));
+            suffix_to_prefix(dbg_succ,
+                rest,
+                std::make_tuple(first, last, rc_seed_window.size()),
+                [&](node_index node, size_t num_matches) {
+                    assert(num_matches >= this->config_.min_seed_length);
+                    assert(num_matches <= boss.get_k());
+                    node = canonical.reverse_complement(node);
+                    size_t added_length = num_matches - this->config_.min_seed_length;
+                    std::string_view seed_window(this->query_.data() + i - added_length,
+                                                 num_matches);
+                    assert(canonical.get_node_sequence(node).substr(dbg_succ.get_k() - num_matches)
+                        == seed_window);
+                    size_t end_clipping = this->query_.size() - (i - added_length) - seed_window.size();
+                    auto it = nodes[end_clipping].try_emplace(node, num_matches).first;
+                    it.value() = std::max(it.value(), num_matches);
                 }
             );
         };
         generate_from_query(query_rc, find_nodes_bwd, true);
+        for (size_t end_clipping = 0; end_clipping < nodes.size(); ++end_clipping) {
+            for (const auto &[node, seed_length] : nodes[end_clipping]) {
+                size_t clipping = this->query_.size() - end_clipping - seed_length;
+                std::string_view seed_window(this->query_.data() + clipping,
+                                             seed_length);
+                size_t num_added = seed_length - this->config_.min_seed_length;
+                add_seed(this->query_, clipping + num_added, seed_window, node);
+            }
+        }
     }
 
     this->num_matching_ = seeds_.empty() ? 0 : sdsl::util::cnt_one_bits(matched);
