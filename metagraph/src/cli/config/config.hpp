@@ -113,6 +113,7 @@ class Config {
     bool alignment_chain = false;
     bool alignment_post_chain = false;
     bool alignment_seed_complexity_filter = true;
+    bool alignment_all_suffix_matches = false;
 
     int8_t alignment_match_score = 2;
     int8_t alignment_mm_transition_score = 3;

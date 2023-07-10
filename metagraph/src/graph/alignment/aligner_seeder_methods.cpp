@@ -209,7 +209,8 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
         for (size_t i = 0; i + this->config_.min_seed_length <= query.size(); ++i) {
             auto begin = encoded.begin() + i;
             auto end = begin + this->config_.min_seed_length - 1;
-            auto last_it = std::min(begin + std::min(boss.get_k(), this->config_.max_seed_length),
+            auto last_it = std::min(begin + std::min(boss.get_k(),
+                                                     this->config_.max_seed_length),
                                     encoded.end());
             assert(end <= last_it);
 
@@ -266,29 +267,31 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
             size_t added_length = 0;
 
             auto s = encoded[i + this->config_.min_seed_length - 1];
-            for (auto begin = ranges[i].begin(); begin + 1 != ranges[i].end(); ++begin, ++added_length) {
-                auto [first, last] = *begin;
-                assert(first);
-                assert(last);
+            if (this->config_.all_suffix_matches) {
+                for (auto begin = ranges[i].begin(); begin + 1 != ranges[i].end(); ++begin, ++added_length) {
+                    auto [first, last] = *begin;
+                    assert(first);
+                    assert(last);
 
-                auto [first_next, last_next] = *(begin + 1);
-                assert(first <= first_next);
-                assert(last >= last_next);
+                    auto [first_next, last_next] = *(begin + 1);
+                    assert(first <= first_next);
+                    assert(last >= last_next);
 
-                std::string_view seed_window(query.data() + i - added_length,
-                                             this->config_.min_seed_length + added_length);
+                    std::string_view seed_window(query.data() + i - added_length,
+                                                 this->config_.min_seed_length + added_length);
 
-                if (this->config_.seed_complexity_filter && is_low_complexity(seed_window))
-                    continue;
+                    if (this->config_.seed_complexity_filter && is_low_complexity(seed_window))
+                        continue;
 
-                if (first != first_next) {
-                    find_nodes(query, i, seed_window, first, first_next - 1, s);
-                    find_nodes(query, i, seed_window, first, first_next - 1, s + boss.alph_size);
-                }
+                    if (first != first_next) {
+                        find_nodes(query, i, seed_window, first, first_next - 1, s);
+                        find_nodes(query, i, seed_window, first, first_next - 1, s + boss.alph_size);
+                    }
 
-                if (last_next != last) {
-                    find_nodes(query, i, seed_window, last_next + 1, last, s);
-                    find_nodes(query, i, seed_window, last_next + 1, last, s + boss.alph_size);
+                    if (last_next != last) {
+                        find_nodes(query, i, seed_window, last_next + 1, last, s);
+                        find_nodes(query, i, seed_window, last_next + 1, last, s + boss.alph_size);
+                    }
                 }
             }
 
@@ -379,12 +382,26 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
         };
         generate_from_query(query_rc, find_nodes_bwd, true);
         for (size_t end_clipping = 0; end_clipping < nodes.size(); ++end_clipping) {
-            for (const auto &[node, seed_length] : nodes[end_clipping]) {
+            if (nodes[end_clipping].empty())
+                continue;
+
+            auto add = [&](const auto &a) {
+                const auto &[node, seed_length] = a;
                 size_t clipping = this->query_.size() - end_clipping - seed_length;
                 std::string_view seed_window(this->query_.data() + clipping,
                                              seed_length);
                 size_t num_added = seed_length - this->config_.min_seed_length;
                 add_seed(this->query_, clipping + num_added, seed_window, node);
+            };
+
+            if (this->config_.all_suffix_matches) {
+                std::for_each(nodes[end_clipping].begin(),
+                              nodes[end_clipping].end(),
+                              add);
+            } else {
+                add(*std::max_element(nodes[end_clipping].begin(),
+                                      nodes[end_clipping].end(),
+                                      utils::LessSecond()));
             }
         }
     }
