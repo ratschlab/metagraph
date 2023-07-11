@@ -1,6 +1,6 @@
 #include "alignment.hpp"
 
-#include "graph/representation/base/sequence_graph.hpp"
+#include "annotation_buffer.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/canonical_dbg.hpp"
 #include "common/algorithms.hpp"
@@ -14,6 +14,8 @@ namespace graph {
 namespace align {
 
 using mtg::common::logger;
+
+const Vector<Seed::Column> Seed::no_labels_ { std::numeric_limits<Seed::Column>::max() };
 
 std::string Alignment::format_coords() const {
     if (!label_coordinates.size())
@@ -370,11 +372,7 @@ size_t Alignment::trim_reference_prefix(size_t n,
                 if (empty())
                     return 0;
             } break;
-            case Cigar::NODE_INSERTION: {
-                score_ -= it->second - cigar_offset == 1
-                    ? config.gap_opening_penalty
-                    : config.gap_extension_penalty;
-            } break;
+            case Cigar::NODE_INSERTION: {} break;
             case Cigar::CLIPPED: {
                 assert(false && "this should not happen");
             } break;
@@ -526,8 +524,6 @@ void Alignment::reverse_complement(const DeBruijnGraph &graph,
 
             // TODO: this cascade of graph unwrapping is ugly, find a cleaner way to do it
             const DeBruijnGraph *base_graph = &graph;
-            if (const auto *rc_dbg = dynamic_cast<const RCDBG*>(base_graph))
-                base_graph = &rc_dbg->get_graph();
 
             const auto *canonical = dynamic_cast<const CanonicalDBG*>(base_graph);
             if (canonical)
@@ -641,13 +637,14 @@ void Alignment::reverse_complement(const DeBruijnGraph &graph,
         assert(graph.get_node_sequence(nodes_[0]).substr(offset_) == sequence_);
     }
 
-    std::reverse(cigar_.data().begin(), cigar_.data().end());
-    assert(query_rev_comp.size() >= get_clipping() + get_end_clipping());
+    if (!empty()) {
+        std::reverse(cigar_.data().begin(), cigar_.data().end());
+        assert(query_rev_comp.size() >= get_clipping() + get_end_clipping());
 
-    orientation_ = !orientation_;
-    query_view_ = { query_rev_comp.data() + get_clipping(),
-                    query_rev_comp.size() - get_clipping() - get_end_clipping() };
-    assert(is_valid(graph));
+        orientation_ = !orientation_;
+        query_view_ = { query_rev_comp.data() + get_clipping(),
+                        query_rev_comp.size() - get_clipping() - get_end_clipping() };
+    }
 }
 
 // derived from:
@@ -833,15 +830,15 @@ Json::Value Alignment::to_json(size_t node_size,
                                bool is_secondary,
                                const std::string &read_name,
                                const std::string &label) const {
+    if (extra_score)
+        throw std::runtime_error("Alignments from PSSMs not supported");
+
     if (sequence_.find("$") != std::string::npos
             || std::find(nodes_.begin(), nodes_.end(), DeBruijnGraph::npos) != nodes_.end()) {
         throw std::runtime_error("JSON output for chains not supported");
     }
 
-    std::string_view full_query = {
-        query_view_.data() - get_clipping(),
-        query_view_.size() + get_clipping() + get_end_clipping()
-    };
+    std::string_view full_query = get_full_query_view();
 
     // encode alignment
     Json::Value alignment;
@@ -1047,10 +1044,8 @@ void Alignment::splice_with_unknown(Alignment&& other,
         other.cigar_.data().insert(other.cigar_.data().begin(),
                                    Cigar::value_type{ Cigar::NODE_INSERTION,
                                                       node_overlap + num_unknown - other.offset_ });
+        other.score_ += config.node_insertion_penalty;
         other.query_view_ = std::string_view(start, other.query_view_.size() + query_gap);
-        other.score_ += static_cast<score_t>(config.gap_opening_penalty)
-                            + static_cast<score_t>(node_overlap + num_unknown - other.offset_ - 1)
-                                * static_cast<score_t>(config.gap_extension_penalty);
         assert(query_view_.data() + query_view_.size() == other.query_view_.data());
     } else {
         // This can happen if there's a gap in the graph (due to N) at a point
@@ -1071,18 +1066,21 @@ void Alignment::splice_with_unknown(Alignment&& other,
         if (overlap) {
             cigar_.data().emplace_back(Cigar::DELETION, overlap);
             nodes_.insert(nodes_.end(), nodes.end() - overlap, nodes.end());
+            if (extra_scores.size())
+                extra_scores.resize(nodes_.size() - 1);
+
             sequence_ += std::string_view(seq.data() + seq.size() - overlap, overlap);
         }
 
         other.cigar_.data().insert(other.cigar_.data().begin(),
                                    Cigar::value_type{ Cigar::DELETION, num_unknown });
+        other.score_ += static_cast<score_t>(config.node_insertion_penalty)
+                            + static_cast<score_t>(config.gap_opening_penalty)
+                                + static_cast<score_t>(num_unknown - 1)
+                                    * static_cast<score_t>(config.gap_extension_penalty);
         other.cigar_.data().insert(other.cigar_.data().begin(),
                                    Cigar::value_type{ Cigar::NODE_INSERTION,
                                                       node_overlap + num_unknown });
-        other.score_ += static_cast<score_t>(config.gap_opening_penalty) * 2
-                        + static_cast<score_t>(node_overlap + num_unknown - 1
-                                                + overlap + num_unknown - 1)
-                            * static_cast<score_t>(config.gap_extension_penalty);
     }
 
     other.sequence_ = std::string(num_unknown, '$') + other.sequence_;
@@ -1090,6 +1088,12 @@ void Alignment::splice_with_unknown(Alignment&& other,
     other.nodes_.insert(other.nodes_.begin(),
                         node_overlap + num_unknown - other.offset_,
                         DeBruijnGraph::npos);
+    if (other.extra_scores.size()) {
+        other.extra_scores.insert(other.extra_scores.begin(),
+                                  node_overlap + num_unknown - other.offset_,
+                                  0);
+    }
+
     other.offset_ = node_overlap;
     for (auto &tuple : other.label_coordinates) {
         for (auto &c : tuple) {
@@ -1103,6 +1107,7 @@ void Alignment::splice_with_unknown(Alignment&& other,
 void Alignment::insert_gap_prefix(ssize_t gap_length,
                                   size_t node_overlap,
                                   const DBGAlignerConfig &config) {
+    assert(size());
     size_t extra_nodes = node_overlap + 1;
 
     if (gap_length < 0) {
@@ -1123,7 +1128,18 @@ void Alignment::insert_gap_prefix(ssize_t gap_length,
             // if there are suffix-mapped nodes, only keep the ones that are
             // part of the overlap
             assert(static_cast<ssize_t>(offset_) >= -gap_length);
+            assert(nodes_.size() > offset_ + gap_length);
             nodes_.erase(nodes_.begin(), nodes_.begin() + offset_ + gap_length);
+            if (offset_ + gap_length) {
+                if (extra_scores.size()) {
+                    score_t removed = std::accumulate(extra_scores.begin(),
+                                                      extra_scores.begin() + offset_ + gap_length,
+                                                      score_t(0));
+                    extra_score -= removed;
+                    score_ -= removed;
+                    extra_scores.erase(extra_scores.begin(), extra_scores.begin() + offset_ + gap_length);
+                }
+            }
         }
 
         if (extra_nodes) {
@@ -1135,10 +1151,9 @@ void Alignment::insert_gap_prefix(ssize_t gap_length,
             //         CAAC
             //          AACG
             //           ACGA
-            score_ += config.gap_opening_penalty
-                + (extra_nodes - 1) * config.gap_extension_penalty;
             cigar_.data().insert(cigar_.data().begin(),
                                  Cigar::value_type{ Cigar::NODE_INSERTION, extra_nodes });
+            score_ += config.node_insertion_penalty;
         }
     } else {
         // no overlap
@@ -1155,6 +1170,10 @@ void Alignment::insert_gap_prefix(ssize_t gap_length,
         //           $ACG - added
         //            ACGT
 
+        trim_offset();
+        if (offset_) {
+            assert(false && "extra node addition to sub-k alignments not implemented");
+        }
         assert(get_clipping() >= gap_length);
         trim_clipping();
 
@@ -1212,15 +1231,16 @@ std::string spell_path(const DeBruijnGraph &graph,
                 seq += '$';
                 ++num_unknown;
                 std::string next_seq = graph.get_node_sequence(path[i]);
-                auto it = seq.end() - next_seq.size();
-                for (char c : next_seq) {
-                    if (*it == '$' && c != '$') {
-                        --num_unknown;
-                        *it = c;
-                    }
+                std::string_view window(next_seq);
+                if (next_seq.size() > seq.size())
+                    window.remove_prefix(next_seq.size() - seq.size());
 
-                    ++it;
-                }
+                std::transform(window.rbegin(), window.rend(), seq.rbegin(), [&](char c) {
+                    if (c != '$')
+                       --num_unknown;
+
+                    return c;
+                });
                 num_dummy = 0;
             } else {
                 char next = '\0';
@@ -1285,11 +1305,30 @@ bool Alignment::is_valid(const DeBruijnGraph &graph, const DBGAlignerConfig *con
         return false;
     }
 
+    if (extra_scores.size() && extra_scores.size() != nodes_.size() - 1) {
+        logger->error("Extra score array incorrect size: {} vs. {}\n{}",
+                      extra_scores.size(), nodes_.size() - 1, *this);
+        return false;
+    }
+
+    score_t change_score_sum = std::accumulate(extra_scores.begin(), extra_scores.end(),
+                                               score_t(0));
+    if (extra_score != change_score_sum) {
+        logger->error("Mismatch between extra score array and extra score sum: {} {} vs. {}\n{}",
+                      fmt::join(extra_scores, ","), change_score_sum, extra_score, *this);
+        return false;
+    }
+
     score_t cigar_score = config ? config->score_cigar(sequence_, query_view_, cigar_) : 0;
     cigar_score += extra_score;
     if (config && score_ != cigar_score) {
         logger->error("Mismatch between CIGAR and score\nCigar score: {} ({} from extra)\n{}\t{}",
                       cigar_score, extra_score, query_view_, *this);
+        return false;
+    }
+
+    if (label_encoder && !label_encoder->labels_valid(*this)) {
+        logger->error("Stored labels invalid\n{}", *this);
         return false;
     }
 
