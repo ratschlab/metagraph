@@ -242,6 +242,7 @@ class Alignment {
 
     size_t trim_offset(size_t num_nodes = std::numeric_limits<size_t>::max());
     void extend_offset(std::vector<node_index>&& path,
+                       std::vector<size_t>&& columns = {},
                        std::vector<score_t>&& scores = {});
 
     size_t trim_query_prefix(size_t n,
@@ -312,6 +313,7 @@ class Alignment {
 
     static bool coordinates_less(const Alignment &a, const Alignment &b);
 
+    std::vector<Columns> label_column_diffs;
     std::vector<score_t> extra_scores;
     score_t extra_score = 0;
 
