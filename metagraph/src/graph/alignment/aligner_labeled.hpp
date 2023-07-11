@@ -43,7 +43,7 @@ class LabeledExtender : public DefaultColumnExtender {
         );
 
         for (Alignment &alignment : alignments) {
-            alignment.label_encoder = &annotation_buffer_.get_annotator().get_label_encoder();
+            alignment.label_encoder = &annotation_buffer_;
         }
 
         return alignments;
@@ -72,6 +72,7 @@ class LabeledExtender : public DefaultColumnExtender {
     virtual void call_alignments(score_t end_score,
                                  const std::vector<node_index> &path,
                                  const std::vector<size_t> &trace,
+                                 const std::vector<score_t> &score_trace,
                                  const Cigar &ops,
                                  size_t clipping,
                                  size_t offset,
