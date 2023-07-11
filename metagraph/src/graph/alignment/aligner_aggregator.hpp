@@ -70,11 +70,11 @@ inline bool AlignmentAggregator<AlignmentCompare>::add_alignment(Alignment&& ali
     if (!best_alignment_ || cmp_(best_alignment_, a))
         best_alignment_ = a;
 
-    if (a->label_columns.empty()) {
+    if (!a->label_columns) {
         path_queue_[std::numeric_limits<Column>::max()].emplace(a);
 
     } else {
-        for (Column column : a->label_columns) {
+        for (Column column : a->get_columns()) {
             path_queue_[column].emplace(a);
         }
     }

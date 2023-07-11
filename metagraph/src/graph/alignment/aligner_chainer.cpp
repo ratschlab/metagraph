@@ -7,6 +7,7 @@
 #include "aligner_seeder_methods.hpp"
 #include "aligner_aggregator.hpp"
 #include "aligner_labeled.hpp"
+#include "chainer.hpp"
 
 #include "common/utils/simd_utils.hpp"
 #include "common/aligned_vector.hpp"
@@ -71,10 +72,10 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
                               const std::function<void(Chain&&, score_t)> &callback,
                               const std::function<bool(Alignment::Column)> &skip_column) {
     fwd_seeds.erase(std::remove_if(fwd_seeds.begin(), fwd_seeds.end(),
-                                   [](const auto &a) { return a.empty() || a.label_columns.empty(); }),
+                                   [](const auto &a) { return a.empty() || !a.label_columns; }),
                     fwd_seeds.end());
     bwd_seeds.erase(std::remove_if(bwd_seeds.begin(), bwd_seeds.end(),
-                                   [](const auto &a) { return a.empty() || a.label_columns.empty(); }),
+                                   [](const auto &a) { return a.empty() || !a.label_columns; }),
                     bwd_seeds.end());
 
     if (fwd_seeds.empty() && bwd_seeds.empty())
@@ -157,11 +158,11 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
 
             // if this chain has the same seeds as the last one, merge their coordinate sets
             for (size_t i = 0; i < chain.size(); ++i) {
-                Alignment::Columns columns;
+                Vector<Alignment::Column> columns;
                 if (chain[i].first.label_coordinates.size()) {
-                    assert(last_chain[i].first.label_columns.size()
+                    assert(last_chain[i].first.get_columns().size()
                             == last_chain[i].first.label_coordinates.size());
-                    assert(chain[i].first.label_columns.size()
+                    assert(chain[i].first.get_columns().size()
                             == chain[i].first.label_coordinates.size());
                     Alignment::CoordinateSet coord_union;
                     auto add_col_coords = [&](auto col, auto &coords) {
@@ -169,11 +170,11 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
                         coord_union.emplace_back(std::move(coords));
                     };
                     utils::match_indexed_values(
-                        last_chain[i].first.label_columns.begin(),
-                        last_chain[i].first.label_columns.end(),
+                        last_chain[i].first.get_columns().begin(),
+                        last_chain[i].first.get_columns().end(),
                         last_chain[i].first.label_coordinates.begin(),
-                        chain[i].first.label_columns.begin(),
-                        chain[i].first.label_columns.end(),
+                        chain[i].first.get_columns().begin(),
+                        chain[i].first.get_columns().end(),
                         chain[i].first.label_coordinates.begin(),
                         [&](auto col, const auto &coords, const auto &other_coords) {
                             columns.push_back(col);
@@ -186,14 +187,14 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
                     );
                     std::swap(last_chain[i].first.label_coordinates, coord_union);
                 } else {
-                    assert(chain[i].first.label_columns.size());
-                    std::set_union(last_chain[i].first.label_columns.begin(),
-                                   last_chain[i].first.label_columns.end(),
-                                   chain[i].first.label_columns.begin(),
-                                   chain[i].first.label_columns.end(),
+                    assert(chain[i].first.label_columns);
+                    std::set_union(last_chain[i].first.get_columns().begin(),
+                                   last_chain[i].first.get_columns().end(),
+                                   chain[i].first.get_columns().begin(),
+                                   chain[i].first.get_columns().end(),
                                    std::back_inserter(columns));
                 }
-                std::swap(last_chain[i].first.label_columns, columns);
+                last_chain[i].first.set_columns(std::move(columns));
             }
         }
 
@@ -223,7 +224,7 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
             used[i] = true;
             chain_seeds.emplace_back(seeds[seed_i], coord);
             if (has_labels) {
-                chain_seeds.back().first.label_columns.assign(1, label);
+                chain_seeds.back().first.set_columns(Vector<Alignment::Column>(1, label));
                 chain_seeds.back().first.label_coordinates.resize(1);
                 chain_seeds.back().first.label_coordinates[0].assign(1, coord);
             }
@@ -277,7 +278,7 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
         }
 
         chain_seeds[0].second = 0;
-        if (chain_seeds[0].first.label_columns.empty())
+        if (!chain_seeds[0].first.label_columns)
             continue;
 
         Chain chain;
@@ -331,8 +332,9 @@ chain_seeds(const DBGAlignerConfig &config,
     tsl::hopscotch_map<Alignment::Column, size_t> label_sizes;
 
     for (size_t i = 0; i < seeds.size(); ++i) {
+        const auto &seed_columns = seeds[i].get_columns();
         for (size_t j = 0; j < seeds[i].label_coordinates.size(); ++j) {
-            Alignment::Column c = seeds[i].label_columns[j];
+            Alignment::Column c = seed_columns[j];
             auto rbegin = seeds[i].label_coordinates[j].rbegin();
             auto rend = rbegin + std::min(seeds[i].label_coordinates[j].size(),
                                           config.max_num_seeds_per_locus);
@@ -343,7 +345,7 @@ chain_seeds(const DBGAlignerConfig &config,
                                       seeds[i].get_query_view().size(), i);
             });
         }
-        seeds[i].label_columns = Alignment::Columns{};
+        seeds[i].label_columns = 0;
         seeds[i].label_coordinates = Alignment::CoordinateSet{};
     }
 

@@ -35,6 +35,46 @@ AnnotationBuffer::AnnotationBuffer(const DeBruijnGraph &graph, const Annotator &
     }
 }
 
+bool AnnotationBuffer::labels_valid(const Alignment &alignment) const {
+    for (size_t i = 0; i < alignment.get_nodes().size(); ++i) {
+        const auto &labels = alignment.get_columns(i);
+        if (!check_node_labels_is_superset(labels, { alignment.get_nodes()[i] }))
+            return false;
+    }
+
+    return true;
+}
+
+bool AnnotationBuffer
+::check_node_labels_is_superset(const Columns &c, const std::vector<node_index> &nodes) const {
+    if (c.empty())
+        return true;
+
+    for (node_index node : nodes) {
+        const auto *labels = get_labels(node);
+        if (!labels) {
+            logger->error("Labels for node {} have not been fetched", node);
+            return false;
+        }
+
+        Columns diff;
+        std::set_difference(c.begin(), c.end(), labels->begin(), labels->end(),
+                            std::back_inserter(diff));
+        if (diff.size()) {
+            std::vector<std::string> diff_labels;
+            diff_labels.reserve(diff.size());
+            const auto &label_encoder = annotator_.get_label_encoder();
+            for (auto c : diff) {
+                diff_labels.emplace_back(label_encoder.decode(c));
+            }
+            logger->error("Node {} does not have labels: {}", node, fmt::join(diff_labels, ";"));
+            return false;
+        }
+    }
+
+    return true;
+}
+
 void AnnotationBuffer::fetch_queued_annotations() {
     assert(graph_.get_mode() != DeBruijnGraph::PRIMARY
                 && "PRIMARY graphs must be wrapped into CANONICAL");
