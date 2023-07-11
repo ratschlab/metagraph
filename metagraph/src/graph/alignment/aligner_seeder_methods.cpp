@@ -122,6 +122,14 @@ void suffix_to_prefix(const DBGSuccinct &dbg_succ,
             if (auto node = dbg_succ.boss_to_kmer_index(i)) {
                 assert(dbg_succ.get_node_sequence(node).substr(0, std::get<2>(index_range))
                     == check_str);
+                size_t num_extra_match = num_exact_match - std::get<2>(index_range);
+                assert(num_extra_match <= rest.size());
+                assert(num_exact_match < boss.get_k() || num_extra_match == rest.size()
+                        || num_extra_match + 1 == rest.size());
+                if (num_exact_match == boss.get_k() && num_extra_match < rest.size()) {
+                    num_exact_match += (boss.get_W(i) % boss.alph_size == boss.encode(rest.back()));
+                }
+
                 callback(node, num_exact_match);
             }
         }
@@ -150,7 +158,9 @@ void suffix_to_prefix(const DBGSuccinct &dbg_succ,
                 if (seed_length == boss.get_k()) {
                     call_nodes_in_range(std::get<2>(index_range) + num_extra_match, next_range);
                 } else {
-                    bool next_exact_match = is_exact_match && (s == encoded[num_extra_match]);
+                    bool next_exact_match = is_exact_match
+                                                && num_extra_match < encoded.size()
+                                                && (s == encoded[num_extra_match]);
                     range_stack.emplace_back(
                         num_extra_match + next_exact_match,
                         next_exact_match,
@@ -371,7 +381,8 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
                 == rc_seed_window);
 
             std::string_view rest(rc_seed_window.data() + rc_seed_window.size(),
-                                  boss.get_k() - rc_seed_window.size());
+                                  std::min(dbg_succ.get_k() - rc_seed_window.size(),
+                                           query_rc.size() - i - this->config_.min_seed_length));
             i = this->query_.size() - (i + rc_seed_window.size());
 
             suffix_to_prefix(dbg_succ,
