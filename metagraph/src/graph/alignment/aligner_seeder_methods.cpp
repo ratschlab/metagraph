@@ -545,8 +545,8 @@ It merge_into_unitig_mums(const DeBruijnGraph &graph,
         if (a_i.get_clipping() == a_j.get_clipping() && a_i.get_offset() == a_j.get_offset()
                 && nodes_i == nodes_j) {
             // these are the same alignment, merge their annotations
-            if (a_i.label_columns.empty() || a_j.label_columns.empty()) {
-                if (a_i.label_columns.empty())
+            if (!a_i.label_columns || !a_j.label_columns) {
+                if (!a_i.label_columns)
                     std::swap(a_i, a_j);
 
                 clear_seed(a_j);
@@ -556,10 +556,10 @@ It merge_into_unitig_mums(const DeBruijnGraph &graph,
 
             assert(a_i.label_coordinates.empty() == a_j.label_coordinates.empty());
 
-            Alignment::Columns merged_columns;
+            Vector<Alignment::Column> merged_columns;
             if (a_i.label_coordinates.empty()) {
-                std::set_union(a_i.label_columns.begin(), a_i.label_columns.end(),
-                               a_j.label_columns.begin(), a_j.label_columns.end(),
+                std::set_union(a_i.get_columns().begin(), a_i.get_columns().end(),
+                               a_j.get_columns().begin(), a_j.get_columns().end(),
                                std::back_inserter(merged_columns));
             } else {
                 Alignment::CoordinateSet merged_coords;
@@ -567,9 +567,9 @@ It merge_into_unitig_mums(const DeBruijnGraph &graph,
                     merged_columns.emplace_back(label);
                     merged_coords.emplace_back(c);
                 };
-                utils::match_indexed_values(a_i.label_columns.begin(), a_i.label_columns.end(),
+                utils::match_indexed_values(a_i.get_columns().begin(), a_i.get_columns().end(),
                                             a_i.label_coordinates.begin(),
-                                            a_j.label_columns.begin(), a_j.label_columns.end(),
+                                            a_j.get_columns().begin(), a_j.get_columns().end(),
                                             a_j.label_coordinates.begin(),
                     [&](auto label, const auto &c1, const auto &c2) {
                         merged_columns.emplace_back(label);
@@ -583,7 +583,7 @@ It merge_into_unitig_mums(const DeBruijnGraph &graph,
                 std::swap(a_i.label_coordinates, merged_coords);
             }
 
-            std::swap(a_i.label_columns, merged_columns);
+            a_i.set_columns(std::move(merged_columns));
             clear_seed(a_j);
             assert(a_i.get_nodes().size());
             continue;

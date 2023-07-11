@@ -60,6 +60,7 @@ DBGAlignerConfig initialize_aligner_config(const Config &config,
     };
 
     c.set_scoring_matrix();
+    c.set_node_insertion_penalty(graph.get_k());
 
     c.print_summary();
 
