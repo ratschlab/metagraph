@@ -103,22 +103,22 @@ std::pair<Alignment, Alignment> split_seed(const DeBruijnGraph &graph,
 }
 
 void filter_seed(const Alignment &prev, Alignment &a) {
-    if (prev.label_columns.empty()) {
+    if (!prev.label_columns) {
         a = Alignment();
         return;
     }
 
     if (prev.label_coordinates.empty()) {
         Vector<Alignment::Column> diff;
-        std::set_difference(a.label_columns.begin(),
-                            a.label_columns.end(),
-                            prev.label_columns.begin(),
-                            prev.label_columns.end(),
+        std::set_difference(a.get_columns().begin(),
+                            a.get_columns().end(),
+                            prev.get_columns().begin(),
+                            prev.get_columns().end(),
                             std::back_inserter(diff));
         if (diff.empty()) {
             a = Alignment();
         } else {
-            std::swap(a.label_columns, diff);
+            a.set_columns(std::move(diff));
         }
 
         return;
@@ -127,9 +127,9 @@ void filter_seed(const Alignment &prev, Alignment &a) {
     Vector<Alignment::Column> diff;
     Vector<Alignment::Tuple> diff_coords;
     utils::match_indexed_values(
-        a.label_columns.begin(), a.label_columns.end(),
+        a.get_columns().begin(), a.get_columns().end(),
         a.label_coordinates.begin(),
-        prev.label_columns.begin(), prev.label_columns.end(),
+        prev.get_columns().begin(), prev.get_columns().end(),
         prev.label_coordinates.begin(),
         [&](auto col, const auto &coords, const auto &other_coords) {
             Alignment::Tuple set_intersection;
@@ -149,7 +149,7 @@ void filter_seed(const Alignment &prev, Alignment &a) {
     if (diff.empty()) {
         a = Alignment();
     } else {
-        std::swap(a.label_columns, diff);
+        a.set_columns(std::move(diff));
         std::swap(a.label_coordinates, diff_coords);
     }
 }
@@ -381,21 +381,37 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
         score_t best_score = std::numeric_limits<score_t>::min();
         size_t query_coverage = 0;
 
-        for (auto&& alignment : chain_alignments<AlignmentCompare>(aggregator.get_alignments(),
-                                                                   paths[i].get_query(false),
-                                                                   paths[i].get_query(true),
-                                                                   config_,
-                                                                   graph_.get_k() - 1)) {
-            assert(alignment.is_valid(graph_, &config_));
-            if (alignment.get_score() < config_.min_path_score)
-                continue;
+        auto alns = aggregator.get_alignments();
 
-            if (alignment.get_score() > best_score) {
-                best_score = alignment.get_score();
-                query_coverage = alignment.get_query_view().size();
-            }
-            paths[i].emplace_back(std::move(alignment));
+        if (config_.post_chain_alignments) {
+            auto it = std::partition(alns.begin(), alns.end(), [](const auto &a) {
+                return !a.get_clipping() && !a.get_end_clipping();
+            });
+
+            std::vector<Alignment> rest(std::make_move_iterator(it),
+                                        std::make_move_iterator(alns.end()));
+
+            alns.erase(it, alns.end());
+            if (alns.size())
+                best_score = alns[0].get_score();
+
+            chain_alignments(*this, std::move(rest), [&](auto&& alignment) {
+                assert(alignment.is_valid(graph_, &config_));
+                if (alignment.get_score() < config_.min_path_score)
+                    return;
+
+                if (alignment.get_score() > best_score) {
+                    best_score = alignment.get_score();
+                    query_coverage = alignment.get_query_view().size();
+                    alns.clear();
+                }
+                alns.emplace_back(std::move(alignment));
+            });
         }
+
+        std::for_each(std::make_move_iterator(alns.begin()),
+                      std::make_move_iterator(alns.end()),
+                      [&](auto&& a) { paths[i].emplace_back(std::move(a)); });
 
         double explored_nodes_d = num_explored_nodes;
         double explored_nodes_per_kmer =
@@ -624,10 +640,10 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
         AlignmentAggregator<AlignmentCompare> aggregator(config_);
         tsl::hopscotch_set<Alignment::Column> all_columns;
         for (const auto &seed : fwd_seeds) {
-            all_columns.insert(seed.label_columns.begin(), seed.label_columns.end());
+            all_columns.insert(seed.get_columns().begin(), seed.get_columns().end());
         }
         for (const auto &seed : bwd_seeds) {
-            all_columns.insert(seed.label_columns.begin(), seed.label_columns.end());
+            all_columns.insert(seed.get_columns().begin(), seed.get_columns().end());
         }
 
         try {
@@ -664,7 +680,7 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
                                      : forward_extender,
                                  std::move(chain), num_extensions, num_explored_nodes,
                                  [&](Alignment&& aln) {
-                        auto cur_columns = aln.label_columns;
+                        const auto &cur_columns = aln.get_columns();
                         if (!aggregator.add_alignment(std::move(aln))) {
                             finished_columns.insert(cur_columns.begin(), cur_columns.end());
                         }

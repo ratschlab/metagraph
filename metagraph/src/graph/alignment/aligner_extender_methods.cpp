@@ -350,10 +350,9 @@ void DefaultColumnExtender
         assert(node == this->seed_->get_nodes()[node_i - 1]);
         node_index next_node = this->seed_->get_nodes()[node_i];
         char next_c = this->seed_->get_sequence()[seed_pos];
-        callback(next_node, next_c, next_node
-            ? 0
-            : (!node ? config_.gap_extension_penalty : config_.gap_opening_penalty));
-        assert(!node || next_c == boss::BOSS::kSentinel ||
+        callback(next_node, next_c,
+            (node_i - 1 < this->seed_->extra_scores.size() ? this->seed_->extra_scores[node_i - 1] : 0));
+        assert(!node || next_c == boss::BOSS::kSentinel || !next_node ||
                 graph_->traverse(node, next_c) == next_node);
     } else {
         assert(node);
@@ -748,6 +747,7 @@ Alignment DefaultColumnExtender::construct_alignment(Cigar cigar,
                                                      std::string match,
                                                      score_t score,
                                                      size_t offset,
+                                                     const std::vector<score_t> &score_trace,
                                                      score_t extra_score) const {
     assert(final_path.size());
     assert(cigar.size());
@@ -762,6 +762,11 @@ Alignment DefaultColumnExtender::construct_alignment(Cigar cigar,
     extension.extend_query_begin(query_.data());
     extension.extend_query_end(query_.data() + query_.size());
     extension.extra_score = extra_score;
+    if (extra_score) {
+        auto score_it = score_trace.rend() - extension.get_nodes().size() + 1;
+        assert(!*(score_it - 1));
+        extension.extra_scores = std::vector<score_t>(score_it, score_trace.rend());
+    }
     assert(extension.is_valid(*this->graph_, &config_));
 
     return extension;
@@ -856,6 +861,7 @@ std::vector<Alignment> DefaultColumnExtender::backtrack(score_t min_path_score,
 
         std::vector<DeBruijnGraph::node_index> path;
         std::vector<size_t> trace;
+        std::vector<score_t> score_trace;
         Cigar ops;
         std::string seq;
         score_t score = start_score;
@@ -878,7 +884,7 @@ std::vector<Alignment> DefaultColumnExtender::backtrack(score_t min_path_score,
                     ++dummy_counter;
                 } else if (dummy_counter) {
                     ops.append(Cigar::NODE_INSERTION, dummy_counter);
-                    extra_score -= config_.gap_opening_penalty + (dummy_counter - 1) * config_.gap_extension_penalty;
+                    score += config_.node_insertion_penalty;
                     dummy_counter = 0;
                 }
             }
@@ -927,6 +933,7 @@ std::vector<Alignment> DefaultColumnExtender::backtrack(score_t min_path_score,
                         + profile_score_[s][seed_clipping + pos]) {
                 // match/mismatch
                 trace.emplace_back(j);
+                score_trace.emplace_back(score_cur);
 
                 extra_score += score_cur;
                 append_node(node, c, offset, profile_op_[s][seed_clipping + pos]);
@@ -956,6 +963,7 @@ std::vector<Alignment> DefaultColumnExtender::backtrack(score_t min_path_score,
                         : Cigar::MATCH;
 
                     trace.emplace_back(j);
+                    score_trace.emplace_back(score_cur);
                     extra_score += score_cur;
                     append_node(node, c, offset, Cigar::DELETION);
 
@@ -963,7 +971,7 @@ std::vector<Alignment> DefaultColumnExtender::backtrack(score_t min_path_score,
                     j = j_prev;
                 }
             } else {
-                DEBUG_LOG("Backtracking failed, trying next start point");
+                DEBUG_LOG("\tBacktracking failed, trying next start point");
                 break;
             }
         }
@@ -971,12 +979,14 @@ std::vector<Alignment> DefaultColumnExtender::backtrack(score_t min_path_score,
         if (trace.size() >= min_trace_length && path.size() && path.back()) {
             assert(!dummy_counter);
             score_t cur_cell_score = table[j].S[pos - table[j].trim];
+            assert(extra_score == std::accumulate(score_trace.begin(), score_trace.end(),
+                                                  score_t(0)));
 
             if (score >= min_start_score
                     && (!pos || cur_cell_score == 0)
                     && (pos || cur_cell_score == table[0].S[0])
                     && (config_.allow_left_trim || !j)) {
-                call_alignments(score, path, trace, ops, pos, align_offset,
+                call_alignments(score, path, trace, score_trace, ops, pos, align_offset,
                                 window.substr(pos, end_pos - pos), seq, extra_score,
                                 [&](Alignment&& alignment) {
                     DEBUG_LOG("Extension: {}", alignment);
