@@ -583,7 +583,10 @@ void chain_alignments(const IDBGAligner &aligner,
         if (i && alignments[i - 1].get_orientation() != alignment.get_orientation())
             orientation_change = anchors.size();
 
+        auto cur = alignment;
         auto add_anchor = [&](auto begin, auto end, ssize_t node_i) {
+            assert(!alignment.label_columns || cur.label_columns
+                    || (cur.label_column_diffs.size() && cur.label_column_diffs.back()));
             ++end_counter[end];
             anchors.emplace_back(Anchor{
                 .end = end,
@@ -598,7 +601,6 @@ void chain_alignments(const IDBGAligner &aligner,
             });
         };
 
-        auto cur = alignment;
         for ( ; cur.get_nodes().size() > 1; cur.trim_query_suffix(1, config)) {
             auto it = cur.get_cigar().data().rbegin();
             if (it->first == Cigar::CLIPPED)
