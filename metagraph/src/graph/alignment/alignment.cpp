@@ -272,11 +272,14 @@ bool Alignment::append(Alignment&& other) {
 
         const auto &columns_a = label_encoder->get_cached_column_set(last_columns);
         const auto &columns_b = label_encoder->get_cached_column_set(other.label_columns);
-        std::vector<Column> diff;
-        std::set_difference(columns_b.begin(), columns_b.end(), columns_a.begin(), columns_a.end(),
-                            std::back_inserter(diff));
+        Vector<Column> intersection;
+        Vector<Column> diff;
+        utils::set_intersection_difference(columns_b.begin(), columns_b.end(),
+                                           columns_a.begin(), columns_a.end(),
+                                           std::back_inserter(intersection),
+                                           std::back_inserter(diff));
 
-        if (diff.size()) {
+        if (intersection.empty()) {
             DEBUG_LOG("Splice failed");
             *this = Alignment();
             return true;
