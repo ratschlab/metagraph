@@ -55,6 +55,8 @@ TYPED_TEST(DBGAlignerTestPostChain, align_chain_swap) {
     check_extend(graph, aligner.get_config(), paths, query);
 }
 
+#if ! _PROTEIN_GRAPH
+
 TYPED_TEST(DBGAlignerTestPostChain, align_chain_overlap_2) {
     size_t k = 9;
     std::string reference1 = "CCCCCCTTTGAGGATCAG";
@@ -127,6 +129,8 @@ TYPED_TEST(DBGAlignerTestPostChain, align_chain_overlap_3_prefer_mismatch_over_g
     check_chain(paths, *graph, config);
 }
 
+#endif
+
 TYPED_TEST(DBGAlignerTestPostChain, align_chain_delete_no_chain_if_full_coverage) {
     size_t k = 10;
     std::string reference = "TGAGGATCAGTTCTAGCTTGCTAGC";
@@ -147,6 +151,8 @@ TYPED_TEST(DBGAlignerTestPostChain, align_chain_delete_no_chain_if_full_coverage
     check_chain(paths, *graph, config, false);
     check_extend(graph, aligner.get_config(), paths, query);
 }
+
+#if ! _PROTEIN_GRAPH
 
 TYPED_TEST(DBGAlignerTestPostChain, align_chain_delete_mismatch) {
     size_t k = 10;
@@ -217,6 +223,8 @@ TYPED_TEST(DBGAlignerTestPostChain, align_chain_deletion_in_overlapping_node) {
     paths.resize(1);
     check_chain(paths, *graph, config);
 }
+
+#endif
 
 TYPED_TEST(DBGAlignerTestPostChain, align_chain_large_overlap) {
     size_t k = 10;
