@@ -248,7 +248,7 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
             if (this->config_.max_seed_length >= dbg_succ.get_k()
                     && it == begin + dbg_succ.get_k()
                     && it < encoded.end()) {
-                size_t j = i + boss.get_k() - this->config_.min_seed_length + 1;
+                size_t j = i + dbg_succ.get_k() - this->config_.min_seed_length;
                 assert(j < ranges.size());
                 assert(ranges[j].size());
                 if (auto edge = boss.pick_edge(ranges[j].back().second, *it))
