@@ -245,6 +245,19 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
                 }
             }
 
+            if (this->config_.max_seed_length >= dbg_succ.get_k()
+                    && it == begin + dbg_succ.get_k()
+                    && it < encoded.end()) {
+                size_t j = i + boss.get_k() - this->config_.min_seed_length + 1;
+                assert(j < ranges.size());
+                assert(ranges[j].size());
+                if (auto edge = boss.pick_edge(ranges[j].back().second,
+                                               *(begin + dbg_succ.get_k()))) {
+                    ranges[j].emplace_back(edge, edge);
+                }
+
+            }
+
             if (ranges[i].size()) {
                 if (is_rc) {
                     std::fill(matched.end() - i - this->config_.min_seed_length,
@@ -293,6 +306,8 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
                         find_nodes(query, i, seed_window, last_next + 1, last, s + boss.alph_size);
                     }
                 }
+            } else {
+                added_length = ranges[i].size() - 1;
             }
 
             std::string_view seed_window(query.data() + i - added_length,
