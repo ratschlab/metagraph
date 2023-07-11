@@ -94,13 +94,13 @@ void chain_anchors(const DBGAlignerConfig &config,
                     });
                 }
 
-                auto &[max_score, best_last, best_dist] = chain_scores[i - anchors_begin];
                 bool updated = false;
 
                 // align anchor i forwards
                 anchor_connector(*i, b, j, i_end, chain_scores + (j - anchors_begin),
                     [&](score_t score, const Anchor* last, size_t dist) {
                         assert(last != i);
+                        auto &[max_score, best_last, best_dist] = chain_scores[i - anchors_begin];
                         if (std::tie(score, best_dist) > std::tie(max_score, dist)) {
                             max_score = score;
                             best_last = last;
