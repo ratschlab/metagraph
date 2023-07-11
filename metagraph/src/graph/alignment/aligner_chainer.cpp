@@ -732,6 +732,8 @@ void chain_alignments(const IDBGAligner &aligner,
     size_t last_anchor;
     score_t chain_score;
     Alignment start_back_aln;
+    const auto *labeled_aligner = dynamic_cast<const ILabeledAligner*>(&aligner);
+
     chain_anchors<Alignment>(config, anchor_alns.data(), anchor_alns.data() + anchor_alns.size(),
         [&](const Alignment &a_i,
             ssize_t,
@@ -787,7 +789,17 @@ void chain_alignments(const IDBGAligner &aligner,
 
                 auto get_label_change_score = [&](auto a_i_col, auto a_j_col,
                                                   std::string_view) {
-                    return a_i_col == a_j_col ? 0 : DBGAlignerConfig::ninf;
+                    if (a_i_col == a_j_col)
+                        return 0;
+
+                    assert(labeled_aligner);
+                    const auto &buffer = labeled_aligner->get_annotation_buffer();
+                    const auto &a_i_cols = buffer.get_cached_column_set(a_i_col);
+                    const auto &a_j_cols = buffer.get_cached_column_set(a_j_col);
+
+                    return utils::share_element(a_i_cols.begin(), a_i_cols.end(),
+                                                a_j_cols.begin(), a_j_cols.end())
+                        ? 0 : DBGAlignerConfig::ninf;
                 };
 
                 if (full_query_i.end() <= full_query_j.begin()) {

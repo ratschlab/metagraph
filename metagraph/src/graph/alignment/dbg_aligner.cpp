@@ -383,17 +383,13 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
 
         auto alns = aggregator.get_alignments();
 
-        if (config_.post_chain_alignments) {
-            auto it = std::partition(alns.begin(), alns.end(), [](const auto &a) {
-                return !a.get_clipping() && !a.get_end_clipping();
-            });
-
-            std::vector<Alignment> rest(std::make_move_iterator(it),
-                                        std::make_move_iterator(alns.end()));
-
-            alns.erase(it, alns.end());
-            if (alns.size())
-                best_score = alns[0].get_score();
+        if (alns.size() && config_.post_chain_alignments) {
+            std::vector<Alignment> rest;
+            for (const auto &a : alns) {
+                best_score = std::max(best_score, a.get_score());
+                if (a.get_clipping() || a.get_end_clipping())
+                    rest.emplace_back(a);
+            }
 
             chain_alignments(*this, std::move(rest), [&](auto&& alignment) {
                 assert(alignment.is_valid(graph_, &config_));
