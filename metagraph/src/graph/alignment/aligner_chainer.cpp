@@ -544,7 +544,7 @@ void chain_alignments(const IDBGAligner &aligner,
     // preprocess alignments
     for (size_t i = 0; i < alignments.size(); ++i) {
         const auto &alignment = alignments[i];
-        DEBUG_LOG("Alignment {}:\t{}", i, alignment);
+        DEBUG_LOG("Alignment {}: {}\t{}", i, alignment.get_nodes().size(), alignment);
         std::string_view query = alignment.get_query_view();
         auto &prefix_scores_with_deletions
             = per_char_scores_prefix.emplace_back(std::vector<score_t>(query.size() + 1, 0));
