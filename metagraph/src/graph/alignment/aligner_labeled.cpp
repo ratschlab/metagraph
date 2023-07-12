@@ -374,9 +374,13 @@ void LabeledExtender::call_alignments(score_t end_score,
     };
 
     const auto &end_labels = annotation_buffer_.get_cached_column_set(node_labels_[trace[0]]);
-
     if (!annotation_buffer_.has_coordinates()) {
-        alignment.label_columns = node_labels_[trace[0]];
+        Vector<Alignment::Column> columns;
+        const auto &remaining = annotation_buffer_.get_cached_column_set(remaining_labels_i_);
+        std::set_intersection(end_labels.begin(), end_labels.end(),
+                              remaining.begin(), remaining.end(),
+                              std::back_inserter(columns));
+        alignment.label_columns = annotation_buffer_.cache_column_set(std::move(columns));
         call_alignment();
         return;
     }

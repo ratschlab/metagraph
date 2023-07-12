@@ -67,19 +67,25 @@ template <class AlignmentCompare>
 inline bool AlignmentAggregator<AlignmentCompare>::add_alignment(Alignment&& alignment) {
     // first, wrap the alignment so that duplicates are not stored in each per-label queue
     auto a = std::make_shared<Alignment>(std::move(alignment));
-    if (!best_alignment_ || cmp_(best_alignment_, a))
+    bool best_score = false;
+    bool added = false;
+    if (!best_alignment_ || cmp_(best_alignment_, a)) {
+        best_score = true;
         best_alignment_ = a;
-
-    if (!a->label_columns) {
-        path_queue_[std::numeric_limits<Column>::max()].emplace(a);
-
-    } else {
-        for (Column column : a->get_columns()) {
-            path_queue_[column].emplace(a);
-        }
     }
 
-    return true;
+    for (Column column : a->get_columns()) {
+        auto &cur_queue = path_queue_[column];
+        if (!best_score && std::find_if(cur_queue.begin(), cur_queue.end(), [&](const auto &b) {
+            return *b == *a; }) != cur_queue.end()) {
+            continue;
+        }
+
+        added = true;
+        path_queue_[column].emplace(a);
+    }
+
+    return added;
 }
 
 template <class AlignmentCompare>
