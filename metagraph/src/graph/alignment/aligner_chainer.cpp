@@ -517,13 +517,6 @@ void chain_alignments(const IDBGAligner &aligner,
                       std::vector<Alignment>&& alignments,
                       const std::function<void(Alignment&&)> &callback) {
     const auto &config = aligner.get_config();
-    if (!config.post_chain_alignments) {
-        std::for_each(std::make_move_iterator(alignments.begin()),
-                      std::make_move_iterator(alignments.end()),
-                      callback);
-
-        return;
-    }
 
     std::sort(alignments.begin(), alignments.end(), [](const auto &a, const auto &b) {
         return a.get_orientation() < b.get_orientation();
@@ -828,6 +821,7 @@ void chain_alignments(const IDBGAligner &aligner,
                         score_t updated_score = base_updated_score + label_change_score;
 
                         if (update_score(updated_score, &a_j, 0)) {
+                            assert(label_change_score != DBGAlignerConfig::ninf);
                             info_i.mem_length = query_i.size();
                         }
                     }
@@ -861,6 +855,7 @@ void chain_alignments(const IDBGAligner &aligner,
 
                     score_t updated_score = base_updated_score + label_change_score;
                     if (update_score(updated_score, &a_j, 0)) {
+                        assert(label_change_score != DBGAlignerConfig::ninf);
                         info_i.mem_length = query_i.size();
                     }
                 };
@@ -978,10 +973,14 @@ void chain_alignments(const IDBGAligner &aligner,
                 assert(alignment.size());
             }
 
+            DEBUG_LOG("\t\tA: {}", alignment);
+            DEBUG_LOG("\t\tB: {}", cur);
             alignment.splice(std::move(cur));
             DEBUG_LOG("\tCurrent: {}", alignment);
             assert(alignment.size());
             assert(alignment.is_valid(graph, &config));
+            assert(!alignments[last_index].label_columns || alignment.label_columns
+                || (alignment.label_column_diffs.size() && alignment.label_column_diffs.back()));
             callback(std::move(alignment));
         },
         [&](Alignment&& aln) {

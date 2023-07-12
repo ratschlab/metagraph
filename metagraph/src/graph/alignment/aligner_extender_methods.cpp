@@ -89,7 +89,7 @@ bool SeedFilteringExtender::check_seed(const Alignment &seed) const {
 bool SeedFilteringExtender::set_seed(const Alignment &seed) {
     assert(seed.get_query_view().size() + seed.get_clipping() + seed.get_end_clipping()
             == query_size_);
-    DEBUG_LOG("Seed: {}", seed);
+    DEBUG_LOG("Seed: {}\t{}", seed, fmt::join(seed.get_nodes(), ","));
     assert(seed.is_valid(*graph_, &config_));
     seed_ = &seed;
     clear_conv_checker();
