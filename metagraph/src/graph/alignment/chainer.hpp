@@ -151,7 +151,7 @@ void chain_anchors(const DBGAlignerConfig &config,
             continue;
 
         std::vector<std::pair<const Anchor*, size_t>> chain;
-        const auto *last_anchor = anchors_begin + i;
+        const Anchor *last_anchor = anchors_begin + i;
         chain.emplace_back(last_anchor, 0);
         auto [score, last, dist] = chain_scores[i];
         while (last != anchors_end) {
@@ -174,7 +174,10 @@ void chain_anchors(const DBGAlignerConfig &config,
             continue;
 
         std::vector<Alignment> alns;
-        alns.emplace_back(*chain.back().first, config);
+        anchor_extender(chain.back().first, Alignment(), 0, [&](Alignment&& aln) {
+            alns.emplace_back(aln);
+        });
+
         for (auto it = chain.rbegin(); it + 1 != chain.rend(); ++it) {
             std::vector<Alignment> next_alns;
             for (auto&& aln : alns) {
