@@ -204,8 +204,8 @@ bool Alignment::splice(Alignment&& other) {
 }
 
 bool Alignment::append(Alignment&& other) {
-    assert(query_view_.data() + query_view_.size() + other.get_clipping()
-            == other.query_view_.data());
+    assert(!other.get_clipping());
+    assert(query_view_.data() + query_view_.size() == other.query_view_.data());
     assert(orientation_ == other.orientation_);
     assert(nodes_.size());
     assert(other.nodes_.size());
@@ -224,8 +224,13 @@ bool Alignment::append(Alignment&& other) {
     if (label_coordinates.size()) {
         assert(label_column_diffs.empty() && other.label_column_diffs.empty()
                 && "label change not supported with coordinates");
-        const auto &columns = get_columns(0);
-        const auto &other_columns = other.get_columns(0);
+        const auto &columns = get_columns(nodes_.size() - 1);
+        const auto &other_cigar = other.get_cigar().data();
+        const auto &other_columns = other.get_columns(
+            other_cigar.front().first == Cigar::NODE_INSERTION
+                ? other_cigar.front().second
+                : 0
+        );
         assert(columns.size() == label_coordinates.size());
         Vector<Column> merged_label_columns;
         CoordinateSet merged_label_coordinates;
@@ -268,10 +273,13 @@ bool Alignment::append(Alignment&& other) {
         std::swap(label_coordinates, merged_label_coordinates);
 
     } else if (has_annotation()) {
-        auto last_columns = label_column_diffs.size() ? label_column_diffs.back() : label_columns;
-
-        const auto &columns_a = label_encoder->get_cached_column_set(last_columns);
-        const auto &columns_b = label_encoder->get_cached_column_set(other.label_columns);
+        const auto &columns_a = get_columns(nodes_.size() - 1);
+        const auto &other_cigar = other.get_cigar().data();
+        const auto &columns_b = other.get_columns(
+            other_cigar.front().first == Cigar::NODE_INSERTION
+                ? other_cigar.front().second
+                : 0
+        );
         Vector<Column> intersection;
         Vector<Column> diff;
         utils::set_intersection_difference(columns_b.begin(), columns_b.end(),

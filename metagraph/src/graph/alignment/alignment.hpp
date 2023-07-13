@@ -209,14 +209,6 @@ class Alignment {
     // complement is matched to the path.
     bool get_orientation() const { return orientation_; }
 
-    // Append |next| to the end of the current alignment. In this process, alignment
-    // labels are intersected. If coordinates are present, then the append is only
-    // successful if at least one coordinate of |next| immediately proceeds the
-    // one of the coordinates in this. If this operation is unsuccessful, then
-    // *this == {} afterwards.
-    // Returns true if the label or coordinate set of this changed.
-    bool append(Alignment&& next);
-
     bool splice(Alignment&& other);
 
     score_t get_score() const { return score_; }
@@ -338,6 +330,14 @@ class Alignment {
     std::string sequence_;
     score_t score_;
     Cigar cigar_;
+
+    // Append |next| to the end of the current alignment. In this process, alignment
+    // labels are intersected. If coordinates are present, then the append is only
+    // successful if at least one coordinate of |next| immediately proceeds the
+    // one of the coordinates in this. If this operation is unsuccessful, then
+    // *this == {} afterwards.
+    // Returns true if the label or coordinate set of this changed.
+    bool append(Alignment&& next);
 };
 
 inline std::ostream& operator<<(std::ostream &out, const Alignment &a) {

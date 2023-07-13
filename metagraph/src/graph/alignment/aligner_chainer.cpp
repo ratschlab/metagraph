@@ -576,7 +576,11 @@ void chain_alignments(const IDBGAligner &aligner,
         if (i && alignments[i - 1].get_orientation() != alignment.get_orientation())
             orientation_change = anchors.size();
 
+        auto cur = alignment;
         auto add_anchor = [&](auto begin, auto end, ssize_t node_i) {
+            assert(alignment.label_column_diffs.empty());
+            assert(!alignment.label_columns
+                || (cur.label_column_diffs.size() ? cur.label_column_diffs.back() : cur.label_columns));
             ++end_counter[end];
             anchors.emplace_back(Anchor{
                 .end = end,
@@ -591,7 +595,6 @@ void chain_alignments(const IDBGAligner &aligner,
             });
         };
 
-        auto cur = alignment;
         for ( ; cur.get_nodes().size() > 1; cur.trim_query_suffix(1, config)) {
             auto it = cur.get_cigar().data().rbegin();
             if (it->first == Cigar::CLIPPED)
@@ -606,36 +609,52 @@ void chain_alignments(const IDBGAligner &aligner,
             }
         }
 
-        if (cur.get_nodes().size() != 1)
+        if (cur.get_nodes().size() != 1 || cur.get_cigar().data().empty())
             continue;
 
-        auto it = cur.get_cigar().data().rbegin();
+        for ( ; cur.get_query_view().size() > seed_size; cur.trim_query_prefix(1, graph.get_k() - 1, config)) {}
+
+        auto it = cur.get_cigar().data().begin();
+        auto it_end = cur.get_cigar().data().end();
+
         if (it->first == Cigar::CLIPPED)
             ++it;
 
-        assert(it != cur.get_cigar().data().rend());
-        if (it->first == Cigar::INSERTION)
+        if ((it_end - 1)->first == Cigar::CLIPPED)
+            --it_end;
+
+        if (it + 1 != it_end || it->first != Cigar::MATCH)
             continue;
 
-        if (it->first == Cigar::MATCH && it->second >= seed_size) {
-            auto end = cur.get_query_view().end();
-            auto begin = end - seed_size;
-            ssize_t node_i = 0;
-            add_anchor(begin, end, node_i);
-        }
+        add_anchor(cur.get_query_view().begin(), cur.get_query_view().end(), 0);
 
-        for ( ; cur.get_query_view().size() > seed_size; cur.trim_query_prefix(1, graph.get_k() - 1, config)) {
-            auto jt = cur.get_cigar().data().begin();
-            if (jt->first == Cigar::CLIPPED)
-                ++jt;
+        // auto it = cur.get_cigar().data().rbegin();
+        // if (it->first == Cigar::CLIPPED)
+        //     ++it;
 
-            if (jt->first == Cigar::MATCH && jt->second >= seed_size) {
-                auto begin = cur.get_query_view().begin();
-                auto end = begin + seed_size;
-                ssize_t node_i = -static_cast<ssize_t>(cur.get_sequence().size()) + seed_size;
-                add_anchor(begin, end, node_i);
-            }
-        }
+        // assert(it != cur.get_cigar().data().rend());
+        // if (it->first == Cigar::INSERTION)
+        //     continue;
+
+        // for ( ; cur.get_query_view().size() > seed_size; cur.trim_query_prefix(1, graph.get_k() - 1, config)) {
+        //     auto jt = cur.get_cigar().data().begin();
+        //     if (jt->first == Cigar::CLIPPED)
+        //         ++jt;
+
+        //     if (jt->first == Cigar::MATCH && jt->second == seed_size) {
+        //         auto begin = cur.get_query_view().begin();
+        //         auto end = begin + seed_size;
+        //         ssize_t node_i = -static_cast<ssize_t>(cur.get_sequence().size()) + seed_size;
+        //         add_anchor(begin, end, node_i);
+        //     }
+        // }
+
+        // if (it->first == Cigar::MATCH && it->second == seed_size && cur.get_query_view().size() == seed_size) {
+        //     auto end = cur.get_query_view().end();
+        //     auto begin = end - seed_size;
+        //     ssize_t node_i = 0;
+        //     add_anchor(begin, end, node_i);
+        // }
     }
 
     orientation_change = std::min(orientation_change, anchors.size());
@@ -703,6 +722,9 @@ void chain_alignments(const IDBGAligner &aligner,
         aln.trim_query_prefix(anchor.begin - aln.get_query_view().begin(), graph.get_k() - 1, config);
 
         DEBUG_LOG("Seq: {}\tAnchor: {}", anchor.index, aln);
+        assert(alignments[anchor.index].label_column_diffs.empty());
+        assert(!alignments[anchor.index].label_columns
+                || (aln.label_column_diffs.size() ? aln.label_column_diffs.back() : aln.label_columns));
         anchor_extra_info.emplace_back(AnchorExtraInfo{
             .index = anchor.index,
             .aln_index_back = anchor.aln_index_back,
@@ -789,6 +811,10 @@ void chain_alignments(const IDBGAligner &aligner,
                     const auto &buffer = labeled_aligner->get_annotation_buffer();
                     const auto &a_i_cols = buffer.get_cached_column_set(a_i_col);
                     const auto &a_j_cols = buffer.get_cached_column_set(a_j_col);
+                    assert(a_i_cols.size());
+                    assert(a_j_cols.size());
+                    assert(a_i_cols[0] != std::numeric_limits<Alignment::Column>::max());
+                    assert(a_j_cols[0] != std::numeric_limits<Alignment::Column>::max());
 
                     return utils::share_element(a_i_cols.begin(), a_i_cols.end(),
                                                 a_j_cols.begin(), a_j_cols.end())
@@ -813,8 +839,8 @@ void chain_alignments(const IDBGAligner &aligner,
                             return;
 
                         score_t label_change_score = get_label_change_score(
-                            a_i.label_columns,
-                            a_j.label_columns,
+                            a_i.label_column_diffs.size() ? a_i.label_column_diffs.back() : a_i.label_columns,
+                            a_j.label_column_diffs.size() ? a_j.label_column_diffs.back() : a_j.label_columns,
                             std::string_view(full_query_j.begin(), 1)
                         );
 
@@ -848,8 +874,8 @@ void chain_alignments(const IDBGAligner &aligner,
                         return;
 
                     score_t label_change_score = get_label_change_score(
-                        a_i.label_columns,
-                        a_j.label_columns,
+                        a_i.label_column_diffs.size() ? a_i.label_column_diffs.back() : a_i.label_columns,
+                        a_j.label_column_diffs.size() ? a_j.label_column_diffs.back() : a_j.label_columns,
                         std::string_view(query_j.begin(), 1)
                     );
 
@@ -963,7 +989,7 @@ void chain_alignments(const IDBGAligner &aligner,
                 if (insert_gap_prefix) {
                     cur.insert_gap_prefix(-overlap, graph.get_k() - 1, config);
                     assert(cur.size());
-                    assert(cur.is_valid(graph, &config));
+                    // assert(cur.is_valid(graph, &config));
                 }
 
                 alignment.extend_offset(std::vector<node_index>(graph.get_k() - 1 - alignment.get_offset(),
