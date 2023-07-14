@@ -22,10 +22,14 @@ TYPED_TEST_SUITE(DBGAlignerTestPostChain, ChainGraphTypes);
 
 inline void check_chain(const AlignmentResults &paths,
                         const DeBruijnGraph &graph,
-                        const DBGAlignerConfig &config,
-                        bool has_chain = true) {
+                        const DBGAlignerConfig &config) {
     for (const auto &path : paths) {
         EXPECT_TRUE(path.is_valid(graph, &config)) << path;
+        const auto &cigar = path.get_cigar().data();
+        bool has_chain = std::find_if(cigar.begin(), cigar.end(),
+                                      [](const auto &c) {
+                                          return c.first == Cigar::NODE_INSERTION;
+                                      }) != cigar.end();
         if (has_chain) {
             EXPECT_THROW(path.to_json(graph.get_k(), false, "", ""), std::runtime_error);
         } else {
@@ -76,7 +80,6 @@ TYPED_TEST(DBGAlignerTestPostChain, align_chain_overlap_2) {
     auto paths = aligner.align(query);
     ASSERT_LE(1u, paths.size());
     EXPECT_EQ(std::string("CCCCCCTTTGAGGATCAGCTAGCTAGCTAGC"), paths[0].get_sequence());
-    paths.resize(1);
     check_chain(paths, *graph, config);
 }
 
@@ -100,7 +103,6 @@ TYPED_TEST(DBGAlignerTestPostChain, align_chain_overlap_mismatch) {
     auto paths = aligner.align(query);
     ASSERT_LE(1u, paths.size());
     EXPECT_EQ(std::string("TTTTTCCTGAGGATCAGCTAGCTAGCTAGC"), paths[0].get_sequence());
-    paths.resize(1);
     check_chain(paths, *graph, config);
 }
 
@@ -125,7 +127,6 @@ TYPED_TEST(DBGAlignerTestPostChain, align_chain_overlap_3_prefer_mismatch_over_g
     auto paths = aligner.align(query);
     ASSERT_LE(1u, paths.size());
     EXPECT_EQ(std::string("GCAAATTTTGAGGATCAGGTTTATTTAATTAGCTTGCTAGCAAAAA"), paths[0].get_sequence());
-    paths.resize(1);
     check_chain(paths, *graph, config);
 }
 
@@ -147,8 +148,7 @@ TYPED_TEST(DBGAlignerTestPostChain, align_chain_delete_no_chain_if_full_coverage
     auto paths = aligner.align(query);
     ASSERT_LE(1u, paths.size());
     EXPECT_EQ(reference, paths[0].get_sequence());
-    paths.resize(1);
-    check_chain(paths, *graph, config, false);
+    check_chain(paths, *graph, config);
     check_extend(graph, aligner.get_config(), paths, query);
 }
 
@@ -173,7 +173,6 @@ TYPED_TEST(DBGAlignerTestPostChain, align_chain_delete_mismatch) {
     auto paths = aligner.align(query);
     ASSERT_LE(1u, paths.size());
     EXPECT_EQ(std::string("AAAAAGGGTTTTTGAGGATCAGTTCTGCGCTTGCTAGCGCTAGCTAGATC"), paths[0].get_sequence());
-    paths.resize(1);
     check_chain(paths, *graph, config);
 }
 
@@ -197,7 +196,6 @@ TYPED_TEST(DBGAlignerTestPostChain, align_chain_overlap_with_insert) {
     auto paths = aligner.align(query);
     ASSERT_LE(1u, paths.size());
     EXPECT_EQ(std::string("TGAGGATCAGTTCTAGCTTGCTAGCGCTAGCTAGATC"), paths[0].get_sequence());
-    paths.resize(1);
     check_chain(paths, *graph, config);
 }
 
@@ -220,7 +218,6 @@ TYPED_TEST(DBGAlignerTestPostChain, align_chain_deletion_in_overlapping_node) {
     auto paths = aligner.align(query);
     ASSERT_LE(1u, paths.size());
     EXPECT_EQ(std::string("AAATTTTTTTGAGGATCAGTTCTAAGCTTGCTAGCGCTAGCTAGATC"), paths[0].get_sequence());
-    paths.resize(1);
     check_chain(paths, *graph, config);
 }
 
@@ -243,9 +240,8 @@ TYPED_TEST(DBGAlignerTestPostChain, align_chain_large_overlap) {
     auto paths = aligner.align(query);
     ASSERT_LE(1u, paths.size());
     EXPECT_EQ(std::string("TGAGGATCAGTTCTAGCTTGCTAGCGCTAGCTAGATC"), paths[0].get_sequence());
-    paths.resize(1);
-    check_chain(paths, *graph, config, false);
-    // check_extend(graph, aligner.get_config(), paths, query);
+    check_chain(paths, *graph, config);
+    check_extend(graph, aligner.get_config(), paths, query);
 }
 
 TYPED_TEST(DBGAlignerTestPostChain, align_chain_disjoint) {
@@ -266,9 +262,8 @@ TYPED_TEST(DBGAlignerTestPostChain, align_chain_disjoint) {
     auto paths = aligner.align(query);
     ASSERT_LE(1u, paths.size());
     EXPECT_EQ(std::string("GGGGGGGGGGAAACCCCCCCCTGAGGATCAG$TTCACTAGCTAGCCCCCCCCCGGGGGGGGGG"), paths[0].get_sequence());
-    paths.resize(1);
     check_chain(paths, *graph, config);
-    // check_extend(graph, aligner.get_config(), paths, query);
+    check_extend(graph, aligner.get_config(), paths, query);
 }
 
 TYPED_TEST(DBGAlignerTestPostChain, align_chain_gap) {
@@ -290,7 +285,6 @@ TYPED_TEST(DBGAlignerTestPostChain, align_chain_gap) {
     auto paths = aligner.align(query);
     ASSERT_LE(1u, paths.size());
     EXPECT_EQ(std::string("AAAAACCCCCTGAGGATCAG$ACTAGCTAGCCCCCCAAAAA"), paths[0].get_sequence());
-    paths.resize(1);
     check_chain(paths, *graph, config);
     check_extend(graph, aligner.get_config(), paths, query);
 }

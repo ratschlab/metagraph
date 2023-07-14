@@ -33,16 +33,19 @@ using BacktrackStarter = std::function<bool(const std::vector<std::pair<const An
                                             score_t)>;
 
 template <typename Anchor>
+using AnchorChain = std::vector<std::pair<const Anchor*, size_t>>;
+
+template <typename Anchor>
 void chain_anchors(const DBGAlignerConfig &config,
                    const Anchor *anchors_begin,
                    const Anchor *anchors_end,
                    const AnchorConnector<Anchor> &anchor_connector,
                    const BacktrackStarter<Anchor> &start_backtrack
-                       = [](const auto&, score_t) { return true; },
+                       = [](const AnchorChain<Anchor>&, score_t) { return true; },
                    bool extend_anchors = true,
                    const AnchorExtender<Anchor> &anchor_extender
-                       = [](const auto*, auto&&, size_t, const auto&) {},
-                   const AlignmentCallback &callback = [](auto&&) {},
+                       = [](const Anchor*, Alignment&&, size_t, const AlignmentCallback&) {},
+                   const AlignmentCallback &callback = [](Alignment&&) {},
                    const std::function<bool()> &terminate = []() { return false; },
                    bool allow_overlap = false,
                    ssize_t max_gap_between_anchors = 400,

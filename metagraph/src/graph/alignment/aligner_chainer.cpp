@@ -675,6 +675,7 @@ void chain_alignments(const IDBGAligner &aligner,
 
     const Anchor *last_anchor;
     score_t chain_score = 0;
+    AnchorChain<Anchor> last_chain;
 
     chain_anchors<Anchor>(config, anchors.data(), anchors.data() + anchors.size(),
         [&](const Anchor &a_i, ssize_t, const Anchor *begin, const Anchor *end, auto chain_scores, const auto &update_score) {
@@ -795,11 +796,23 @@ void chain_alignments(const IDBGAligner &aligner,
                 }
             });
         },
-        [&](const auto &chain, score_t score) {
+        [&](const AnchorChain<Anchor> &chain, score_t score) {
+            if (chain.size() <= 1)
+                return false;
+
+            if (chain_score == score && std::equal(chain.begin(), chain.end(),
+                                                   last_chain.begin(), last_chain.end(),
+                                                   [](const auto &a, const auto &b) {
+                                                       return a.first->index == b.first->index;
+                                                   })) {
+                return false;
+            }
+
+            last_chain = chain;
             chain_score = score;
             DEBUG_LOG("Chain: {}", score);
             last_anchor = chain.back().first;
-            return chain.size() > 1;
+            return true;
         },
         true /* extend_anchors */,
         [&](const Anchor *first, Alignment&& cur, size_t /* dist */, const auto &callback) {
