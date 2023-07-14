@@ -797,6 +797,11 @@ void chain_alignments(const IDBGAligner &aligner,
             if (chain.size() <= 1)
                 return false;
 
+            if (std::all_of(chain.begin() + 1, chain.end(),
+                            [&](const auto &a) { return a.first->index == chain.front().first->index; })) {
+                return false;
+            }
+
             if (chain_score == score && std::equal(chain.begin(), chain.end(),
                                                    last_chain.begin(), last_chain.end(),
                                                    [](const auto &a, const auto &b) {
