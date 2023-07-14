@@ -66,6 +66,7 @@ Config::Config(int argc, char *argv[]) {
     } else if (!strcmp(argv[1], "transform_anno")) {
         identity = TRANSFORM_ANNOTATION;
         tmp_dir = "OUTFBASE_TEMP_DIR";
+        memory_available = 1000; // 1 TB
     } else if (!strcmp(argv[1], "assemble")) {
         identity = ASSEMBLE;
     } else if (!strcmp(argv[1], "relax_brwt")) {
@@ -599,7 +600,6 @@ Config::Config(int argc, char *argv[]) {
         print_usage_and_exit = true;
 
     if (identity == TRANSFORM_ANNOTATION) {
-        memory_available = 1000; // 1 TB
         const bool to_row_diff = anno_type == RowDiff
                                     || anno_type == RowDiffBRWT
                                     || anno_type == RowDiffDisk
