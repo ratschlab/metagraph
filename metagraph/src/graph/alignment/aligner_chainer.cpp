@@ -595,22 +595,20 @@ void chain_alignments(const IDBGAligner &aligner,
             }
 
             prefix_scores_with_deletions.emplace_back(cur.get_score());
-            if (cur.get_query_view().size() >= seed_size) {
-                if (it->first == Cigar::MATCH && it->second >= seed_size) {
-                    orientation_change += is_fwd_orientation;
-                    DEBUG_LOG("Anchor from: {}\t{}", i, cur);
-                    anchors.emplace_back(Anchor{
-                        .end = cur.get_query_view().begin() + seed_size,
-                        .begin = cur.get_query_view().begin(),
-                        .index = i,
-                        .num_nodes_trimmed = alignments[i].size() - cur.size(),
-                        .spelling_length = cur.get_sequence().size(),
-                        .orientation = alignments[i].get_orientation(),
-                        .clipping = cur.get_clipping(),
-                        .end_clipping = alignments[i].get_end_clipping() + alignments[i].get_query_view().size() - seed_size,
-                        .score = cur.get_score(),
-                    });
-                }
+            if (it->first == Cigar::MATCH && it->second >= seed_size) {
+                orientation_change += is_fwd_orientation;
+                DEBUG_LOG("Anchor from: {}\t{}", i, cur);
+                anchors.emplace_back(Anchor{
+                    .end = cur.get_query_view().begin() + seed_size,
+                    .begin = cur.get_query_view().begin(),
+                    .index = i,
+                    .num_nodes_trimmed = alignments[i].size() - cur.size(),
+                    .spelling_length = cur.get_sequence().size(),
+                    .orientation = alignments[i].get_orientation(),
+                    .clipping = cur.get_clipping(),
+                    .end_clipping = alignments[i].get_end_clipping() + alignments[i].get_query_view().size() - seed_size,
+                    .score = cur.get_score(),
+                });
             }
         }
 
