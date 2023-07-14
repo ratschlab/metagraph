@@ -634,6 +634,18 @@ void chain_alignments(const IDBGAligner &aligner,
         std::sort(begin, end, [](const Anchor &a, const Anchor &b) {
             return std::tie(a.end, a.begin) > std::tie(b.end, b.begin);
         });
+
+        std::vector<tsl::hopscotch_set<size_t>> end_counters(query.size() + 1);
+        std::for_each(begin, end, [&](const Anchor &a) {
+            end_counters[a.end_clipping].emplace(a.index);
+        });
+
+        std::for_each(begin, end, [&](Anchor &a) {
+            if (end_counters[a.end_clipping].size() == 1
+                    && end_counters[a.end_clipping + 1].count(a.index)) {
+                a.index = std::numeric_limits<uint64_t>::max();
+            }
+        });
     };
 
     preprocess_range(anchors.begin(), anchors.begin() + orientation_change);
