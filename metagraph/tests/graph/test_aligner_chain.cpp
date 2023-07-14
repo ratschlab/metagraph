@@ -26,10 +26,10 @@ inline void check_chain(const AlignmentResults &paths,
     for (const auto &path : paths) {
         EXPECT_TRUE(path.is_valid(graph, &config)) << path;
         const auto &cigar = path.get_cigar().data();
-        bool has_chain = std::find_if(cigar.begin(), cigar.end(),
-                                      [](const auto &c) {
-                                          return c.first == Cigar::NODE_INSERTION;
-                                      }) != cigar.end();
+        bool has_chain = (std::find_if(cigar.begin(), cigar.end(),
+                                       [](const auto &c) {
+                                           return c.first == Cigar::NODE_INSERTION;
+                                       }) != cigar.end());
         if (has_chain) {
             EXPECT_THROW(path.to_json(graph.get_k(), false, "", ""), std::runtime_error);
         } else {

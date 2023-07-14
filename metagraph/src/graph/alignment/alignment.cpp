@@ -1072,7 +1072,7 @@ Json::Value path_json(const std::vector<DeBruijnGraph::node_index> &nodes,
                 continue;
             } break;
             case Cigar::NODE_INSERTION: {
-                assert(false && "this should not be reached");
+                assert(false && "NODE_INSERTION operation not supported in JSON");
             } break;
         }
 
@@ -1173,7 +1173,11 @@ Json::Value Alignment::to_json(size_t node_size,
         throw std::runtime_error("Alignments from PSSMs not supported");
 
     if (sequence_.find("$") != std::string::npos
-            || std::find(nodes_.begin(), nodes_.end(), DeBruijnGraph::npos) != nodes_.end()) {
+            || std::find(nodes_.begin(), nodes_.end(), DeBruijnGraph::npos) != nodes_.end()
+            || std::find_if(cigar_.data().begin(), cigar_.data().end(),
+                            [](const auto &c) {
+                                return c.first == Cigar::NODE_INSERTION;
+                            }) != cigar_.data().end()) {
         throw std::runtime_error("JSON output for chains not supported");
     }
 

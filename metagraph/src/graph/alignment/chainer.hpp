@@ -110,9 +110,9 @@ void chain_anchors(const DBGAlignerConfig &config,
                             best_dist = dist;
                             updated = true;
                             return true;
+                        } else {
+                            return false;
                         }
-
-                        return false;
                     }
                 );
 
