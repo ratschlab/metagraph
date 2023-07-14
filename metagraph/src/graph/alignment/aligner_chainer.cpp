@@ -651,7 +651,9 @@ void chain_alignments(const IDBGAligner &aligner,
     preprocess_range(anchors.begin(), anchors.begin() + orientation_change);
     preprocess_range(anchors.begin() + orientation_change, anchors.end());
 
+#ifndef NDEBUG
     size_t old_anchor_count = anchors.size();
+#endif
     anchors.erase(std::remove_if(anchors.begin(), anchors.end(),
                                  [](const auto &a) { return a.index == std::numeric_limits<uint64_t>::max(); }),
                   anchors.end());
