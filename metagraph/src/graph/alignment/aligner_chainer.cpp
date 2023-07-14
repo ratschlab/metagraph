@@ -776,27 +776,21 @@ void chain_alignments(const IDBGAligner &aligner,
                 if (base_updated_score <= score_i)
                     return;
 
-                // if (full_i.get_nodes()[node_idx_i] == full_j.get_nodes()[node_idx_j]) {
-                //     // perfect overlap, easy top connect
-                //     if (-last_dist >= graph.get_k() && update_score(base_updated_score + get_label_change_score(), &a_j, -seed_size))
-                //         logger->info("same node: {} -> {}\t{}S{}={}S -> {}S{}={}S",
-                //             &a_i - anchors.data(), &a_j - anchors.data(),
-                //                     a_i.clipping, seed_size, a_i.end_clipping,
-                //                     a_j.clipping, seed_size, a_j.end_clipping);
-                //     return;
-                // }
-
                 if (full_i.get_query_view().begin() + graph.get_k() - full_i.get_offset() > a_i.end)
                     return;
 
                 if (-last_dist < graph.get_k())
                     return;
 
-                base_updated_score += node_insert;
-                if (base_updated_score <= score_i)
+                if (full_i.get_nodes()[node_idx_i] == full_j.get_nodes()[node_idx_j]) {
+                    // perfect overlap, easy top connect
+                    update_score(base_updated_score + get_label_change_score(), &a_j, -seed_size);
                     return;
+                }
 
-                update_score(base_updated_score + get_label_change_score(), &a_j, -seed_size);
+                base_updated_score += node_insert;
+                if (base_updated_score > score_i)
+                    update_score(base_updated_score + get_label_change_score(), &a_j, -seed_size);
             });
         },
         [&](const AnchorChain<Anchor> &chain, score_t score) {
