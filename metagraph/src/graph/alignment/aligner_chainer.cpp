@@ -561,7 +561,7 @@ void chain_alignments(const IDBGAligner &aligner,
     per_char_scores_prefix.reserve(alignments.size());
     for (size_t i = 0; i < alignments.size(); ++i) {
         const auto &alignment = alignments[i];
-        logger->info("Alignment {}: {}\t{}", i, alignment.get_nodes().size(), alignment);
+        DEBUG_LOG("Alignment {}: {}\t{}", i, alignment.get_nodes().size(), alignment);
         std::string_view query = alignment.get_query_view();
         auto &prefix_scores_with_deletions = per_char_scores_prefix.emplace_back();
         prefix_scores_with_deletions.reserve(query.size() + 1);
@@ -609,7 +609,7 @@ void chain_alignments(const IDBGAligner &aligner,
 
             if (it->first == Cigar::MATCH && it->second >= seed_size) {
                 orientation_change += is_fwd_orientation;
-                logger->info("Anchor from: {}\t{}", i, cur);
+                DEBUG_LOG("Anchor from: {}\t{}", i, cur);
                 anchors.emplace_back(Anchor{
                     .end = cur.get_query_view().begin() + seed_size,
                     .begin = cur.get_query_view().begin(),
@@ -643,14 +643,16 @@ void chain_alignments(const IDBGAligner &aligner,
     anchors.erase(std::remove_if(anchors.begin(), anchors.end(),
                                  [](const auto &a) { return a.index == std::numeric_limits<uint64_t>::max(); }),
                   anchors.end());
-    logger->info("Kept {}/{} anchors", anchors.size(), old_anchor_count);
+    DEBUG_LOG("Kept {}/{} anchors", anchors.size(), old_anchor_count);
+#ifndef NDEBUG
     std::for_each(anchors.begin(), anchors.end(), [&](const auto &a) {
         auto cur = alignments[a.index];
         cur.extend_offset(std::vector<node_index>(graph.get_k() - 1 - cur.get_offset(), 0));
         cur.trim_query_suffix(cur.get_query_view().end() - a.end, config, false);
         cur.trim_query_prefix(a.begin - cur.get_query_view().begin(), graph.get_k() - 1, config);
-        logger->info("Kept Anchor: {}:{}\t{}", a.index, &a - anchors.data(), cur);
+        DEBUG_LOG("Kept Anchor: {}:{}\t{}", a.index, &a - anchors.data(), cur);
     });
+#endif
 
     assert(std::is_sorted(anchors.begin(), anchors.end(), [](const auto &a, const auto &b) {
         return std::tie(b.orientation, a.end) > std::tie(a.orientation, b.end);
@@ -739,10 +741,10 @@ void chain_alignments(const IDBGAligner &aligner,
 
                         score_t base_updated_score = score_j + gap_cost + a_i.score;
                         if (base_updated_score > score_i) {
-                            logger->info("\t{}->{}\t{}\tdisjoint",
-                                &a_i - anchors.data(),
-                                &a_j - anchors.data(),
-                                base_updated_score);
+                            // DEBUG_LOG("\t{}->{}\t{}\tdisjoint",
+                            //     &a_i - anchors.data(),
+                            //     &a_j - anchors.data(),
+                            //     base_updated_score);
                             update_score(base_updated_score + get_label_change_score(), &a_j, -a_i.spelling_length);
                         }
                     }
@@ -766,10 +768,10 @@ void chain_alignments(const IDBGAligner &aligner,
                 if (full_i.get_nodes()[node_idx_i] == full_j.get_nodes()[node_idx_j]) {
                     // perfect overlap, easy top connect
                     if (base_updated_score > score_i) {
-                        logger->info("\t{}->{}\t{}\texact overlap",
-                                &a_i - anchors.data(),
-                                &a_j - anchors.data(),
-                                base_updated_score);
+                        // DEBUG_LOG("\t{}->{}\t{}\texact overlap",
+                        //         &a_i - anchors.data(),
+                        //         &a_j - anchors.data(),
+                        //         base_updated_score);
                         update_score(base_updated_score + get_label_change_score(), &a_j, -seed_size);
                     }
 
@@ -779,18 +781,17 @@ void chain_alignments(const IDBGAligner &aligner,
                 base_updated_score += node_insert;
 
                 if (-last_dist >= graph.get_k() && base_updated_score > score_i) {
-                    logger->info("\t{}->{}\t{}\tinexact overlap",
-                                &a_i - anchors.data(),
-                                &a_j - anchors.data(),
-                                base_updated_score);
+                    // DEBUG_LOG("\t{}->{}\t{}\tinexact overlap",
+                    //             &a_i - anchors.data(),
+                    //             &a_j - anchors.data(),
+                    //             base_updated_score);
                     update_score(base_updated_score + get_label_change_score(), &a_j, -seed_size);
                 }
             });
         },
         [&](const auto &chain, score_t score) {
-            logger->info("foo: nodeins: {}", node_insert);
             chain_score = score;
-            logger->info("Chain: {}", score);
+            DEBUG_LOG("Chain: {}", score);
             last_anchor = chain.back().first;
             return chain.size() > 1;
         },
@@ -799,7 +800,7 @@ void chain_alignments(const IDBGAligner &aligner,
             Alignment alignment = alignments[first->index];
 
             if (cur.empty()) {
-                logger->info("\tStarting: {}", alignment);
+                DEBUG_LOG("\tStarting: {}", alignment);
                 callback(std::move(alignment));
                 return;
             }
@@ -814,7 +815,7 @@ void chain_alignments(const IDBGAligner &aligner,
 
             ssize_t overlap = first->end - std::max(cur.get_query_view().begin(), first->begin);
 
-            logger->info("\tMerging in: {}", alignment);
+            DEBUG_LOG("\tMerging in: {}", alignment);
             if (overlap <= 0) {
                 assert(alignment.get_query_view().end() <= cur.get_query_view().begin() && "Not implemented");
                 cur.insert_gap_prefix(cur.get_query_view().begin() - alignment.get_query_view().end(), graph.get_k() - 1, config);
@@ -849,7 +850,7 @@ void chain_alignments(const IDBGAligner &aligner,
             DEBUG_LOG("\t\tA: {}", alignment);
             DEBUG_LOG("\t\tB: {}", cur);
             alignment.splice(std::move(cur));
-            logger->info("\tCurrent: {}", alignment);
+            DEBUG_LOG("\tCurrent: {}", alignment);
             assert(alignment.size());
             assert(alignment.is_valid(graph, &config));
             callback(std::move(alignment));
@@ -857,17 +858,14 @@ void chain_alignments(const IDBGAligner &aligner,
         [&](Alignment&& aln) {
             ++num_found;
             aln.trim_offset();
+#ifndef NDEBUG
             const auto &last_aln = alignments[last_anchor->index];
             score_t predicted_score = chain_score
                 + last_aln.get_score()
                 - per_char_scores_prefix[last_anchor->index][last_anchor->begin - last_aln.get_query_view().begin()].first;
-            logger->info("\tFinal: {}", aln);
-            logger->info("\t\tpred score: {}", predicted_score);
             assert(aln.get_score() == predicted_score);
-            // DEBUG_LOG("\tFinal: {}\t{}", chain_score, aln);
-            // assert(anchor_alns[last_anchor].get_query_view().begin() >= aln.get_query_view().begin());
-            // assert(aln.get_score()
-            //     - per_char_scores_prefix[last_index][anchor_alns[last_anchor].get_query_view().begin() - aln.get_query_view().begin()] == chain_score);
+            DEBUG_LOG("\tFinal: {}\t{}", chain_score, aln);
+#endif
             callback(std::move(aln));
         },
         [&]() { return num_found >= 1; },
