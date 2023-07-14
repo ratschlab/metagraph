@@ -560,25 +560,42 @@ void chain_alignments(const IDBGAligner &aligner,
     size_t orientation_change = 0;
     std::vector<Anchor> anchors;
     std::vector<std::vector<score_t>> per_char_scores_prefix;
+    std::vector<std::vector<score_t>> per_char_scores_prefix_del;
     per_char_scores_prefix.reserve(alignments.size());
+    per_char_scores_prefix_del.reserve(alignments.size());
+
     for (size_t i = 0; i < alignments.size(); ++i) {
         const auto &alignment = alignments[i];
         bool is_fwd_orientation = !alignment.get_orientation();
         DEBUG_LOG("Alignment {}: {}\t{}", i, alignment.get_nodes().size(), alignment);
         std::string_view query = alignment.get_query_view();
+
         auto &prefix_scores_with_deletions = per_char_scores_prefix.emplace_back();
         prefix_scores_with_deletions.reserve(query.size() + 1);
+        auto &prefix_scores_without_deletions = per_char_scores_prefix_del.emplace_back();
+        prefix_scores_without_deletions.reserve(query.size() + 1);
 
-        for (auto cur = alignment; cur.size(); cur.trim_query_prefix(1, graph.get_k() - 1, config)) {
-            prefix_scores_with_deletions.emplace_back(cur.get_score());
-            if (cur.get_query_view().size() >= seed_size) {
-                auto it = cur.get_cigar().data().begin();
+        for (auto cur = alignment; cur.size(); cur.trim_query_prefix(1, graph.get_k() - 1, config, false)) {
+            prefix_scores_without_deletions.emplace_back(cur.get_score());
+            auto it = cur.get_cigar().data().begin();
+            assert(it != cur.get_cigar().data().end());
+            if (it->first == Cigar::CLIPPED) {
+                ++it;
+                assert(it != cur.get_cigar().data().end());
+            }
+
+            if (it->first == Cigar::DELETION) {
+                cur.trim_reference_prefix(it->second, graph.get_k() - 1, config, false);
+                it = cur.get_cigar().data().begin();
                 assert(it != cur.get_cigar().data().end());
                 if (it->first == Cigar::CLIPPED) {
                     ++it;
                     assert(it != cur.get_cigar().data().end());
                 }
+            }
 
+            prefix_scores_with_deletions.emplace_back(cur.get_score());
+            if (cur.get_query_view().size() >= seed_size) {
                 if (it->first == Cigar::MATCH && it->second >= seed_size) {
                     orientation_change += is_fwd_orientation;
                     DEBUG_LOG("Anchor from: {}\t{}", i, cur);
@@ -596,20 +613,8 @@ void chain_alignments(const IDBGAligner &aligner,
                 }
             }
         }
+
         prefix_scores_with_deletions.emplace_back(0);
-    }
-
-    std::vector<std::vector<score_t>> per_char_scores_prefix_del;
-    per_char_scores_prefix_del.reserve(alignments.size());
-    for (size_t i = 0; i < alignments.size(); ++i) {
-        const auto &alignment = alignments[i];
-        std::string_view query = alignment.get_query_view();
-        auto &prefix_scores_without_deletions = per_char_scores_prefix_del.emplace_back();
-        prefix_scores_without_deletions.reserve(query.size() + 1);
-
-        for (auto cur = alignment; cur.size(); cur.trim_query_prefix(1, graph.get_k() - 1, config, false)) {
-            prefix_scores_without_deletions.emplace_back(cur.get_score());
-        }
         prefix_scores_without_deletions.emplace_back(0);
     }
 
