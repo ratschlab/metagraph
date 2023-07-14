@@ -515,7 +515,11 @@ chain_seeds(const DBGAlignerConfig &config,
 
 void chain_alignments(const IDBGAligner &aligner,
                       std::vector<Alignment>&& alignments,
-                      const std::function<void(Alignment&&)> &callback) {
+                      const std::function<void(Alignment&&)> &callback,
+                      const std::function<bool()> &terminate) {
+    if (terminate())
+        return;
+
     const auto &config = aligner.get_config();
 
     std::sort(alignments.begin(), alignments.end(), [](const auto &a, const auto &b) {
@@ -661,7 +665,6 @@ void chain_alignments(const IDBGAligner &aligner,
         return std::tie(b.orientation, a.end) > std::tie(a.orientation, b.end);
     }));
 
-    size_t num_found = 0;
     score_t node_insert = config.node_insertion_penalty;
     score_t gap_open = config.gap_opening_penalty;
     score_t gap_ext = config.gap_extension_penalty;
@@ -859,7 +862,6 @@ void chain_alignments(const IDBGAligner &aligner,
             callback(std::move(alignment));
         },
         [&](Alignment&& aln) {
-            ++num_found;
             aln.trim_offset();
 #ifndef NDEBUG
             const auto &last_aln = alignments[last_anchor->index];
@@ -871,7 +873,7 @@ void chain_alignments(const IDBGAligner &aligner,
 #endif
             callback(std::move(aln));
         },
-        [&]() { return num_found >= 1; },
+        terminate,
         true /* allow_overlap */,
         config.max_dist_between_seeds,
         config.max_gap_shrinking_factor

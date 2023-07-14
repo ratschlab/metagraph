@@ -28,7 +28,9 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
 
 void chain_alignments(const IDBGAligner &aligner,
                       std::vector<Alignment>&& alignments,
-                      const std::function<void(Alignment&&)> &callback);
+                      const std::function<void(Alignment&&)> &callback,
+                      const std::function<bool()> &terminate
+                          = []() { return false; });
 
 } // namespace align
 } // namespace graph

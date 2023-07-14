@@ -391,18 +391,26 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
                     rest.emplace_back(a);
             }
 
-            chain_alignments(*this, std::move(rest), [&](auto&& alignment) {
-                assert(alignment.is_valid(graph_, &config_));
-                if (alignment.get_score() < config_.min_path_score)
-                    return;
+            bool found_chain = false;
 
-                if (alignment.get_score() > best_score) {
-                    best_score = alignment.get_score();
-                    query_coverage = alignment.get_query_view().size();
-                    alns.clear();
-                }
-                alns.emplace_back(std::move(alignment));
-            });
+            chain_alignments(*this, std::move(rest),
+                [&](auto&& alignment) {
+                    assert(alignment.is_valid(graph_, &config_));
+                    if (alignment.get_score() < config_.min_path_score)
+                        return;
+
+                    if (alignment.get_score() > best_score) {
+                        found_chain = true;
+                        best_score = alignment.get_score();
+                        query_coverage = alignment.get_query_view().size();
+                        alns.clear();
+                    }
+
+                    if (found_chain)
+                        alns.emplace_back(std::move(alignment));
+                },
+                [&]() { return false; }
+            );
         }
 
         std::for_each(std::make_move_iterator(alns.begin()),
