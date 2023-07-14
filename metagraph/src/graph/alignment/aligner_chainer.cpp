@@ -703,6 +703,10 @@ void chain_alignments(const IDBGAligner &aligner,
                 std::string_view query_j(a_j.begin, a_j.end - a_j.begin);
 
                 auto [score_j, last, last_dist] = *chain_scores;
+                if (last == anchors.data() + anchors.size()) {
+                    assert(last_dist == std::numeric_limits<size_t>::max());
+                    last_dist = -a_j.spelling_length;
+                }
 
                 if (a_i.index == a_j.index) {
                     assert(a_i.spelling_length > a_j.spelling_length);
@@ -752,7 +756,8 @@ void chain_alignments(const IDBGAligner &aligner,
                             //     &a_i - anchors.data(),
                             //     &a_j - anchors.data(),
                             //     base_updated_score);
-                            update_score(base_updated_score + get_label_change_score(), &a_j, -a_i.spelling_length);
+                            update_score(base_updated_score + get_label_change_score(),
+                                         &a_j, -a_i.spelling_length);
                         }
                     }
 
