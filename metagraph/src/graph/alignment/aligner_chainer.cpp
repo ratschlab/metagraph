@@ -833,6 +833,9 @@ void chain_alignments(const IDBGAligner &aligner,
             assert(chain.size());
 
             if (chain.size() > 1) {
+                if (-chain[1].second < graph.get_k())
+                    return false;
+
                 if (std::all_of(chain.begin() + 1, chain.end(),
                                 [&](const auto &a) {
                                     return a.first->index == chain.front().first->index;

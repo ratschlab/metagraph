@@ -159,6 +159,7 @@ void chain_anchors(const DBGAlignerConfig &config,
         const Anchor *last_anchor = anchors_begin + i;
         chain.emplace_back(last_anchor, 0);
         auto [score, last, dist] = chain_scores[i];
+        assert(score == -nscore);
         scores.emplace_back(score);
         while (last != anchors_end) {
             last_anchor = last;
@@ -169,8 +170,6 @@ void chain_anchors(const DBGAlignerConfig &config,
             chain.emplace_back(last_anchor, to_traverse);
             scores.emplace_back(score);
         }
-
-        assert(scores.front() == -nscore);
 
         if (!start_backtrack(chain, -nscore))
             continue;
