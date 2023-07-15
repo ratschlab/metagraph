@@ -804,7 +804,7 @@ void chain_alignments(const IDBGAligner &aligner,
                 if (base_updated_score <= score_i)
                     return;
 
-                if (a_j.node_idx >= 0 && full_i.get_nodes()[a_j.node_idx] == full_j.get_nodes()[a_j.node_idx]) {
+                if (a_j.node_idx >= 0 && full_i.get_nodes()[a_i.node_idx] == full_j.get_nodes()[a_j.node_idx]) {
                     // perfect overlap, easy top connect
                     update_score(base_updated_score + get_label_change_score(),
                                  &a_j, -seed_size);
@@ -921,15 +921,15 @@ void chain_alignments(const IDBGAligner &aligner,
                                       false);
                 assert(cur.size());
                 assert(cur.is_valid(graph, &config));
-                node_index last_front = last_anchor->node_idx >= 0
+                node_index cur_front = last_anchor->node_idx >= 0
                     ? alignments[last_anchor->index].get_nodes()[last_anchor->node_idx]
                     : DeBruijnGraph::npos;
 
-                if (alignment.get_nodes().back() != last_front) {
+                if (alignment.get_nodes().back() != cur_front) {
                     cur.insert_gap_prefix(-seed_size, graph.get_k() - 1, config);
                     assert(cur.size());
                 } else {
-                    assert(last_front);
+                    assert(cur_front);
                 }
             }
 
