@@ -708,6 +708,9 @@ void chain_alignments(const IDBGAligner &aligner,
                 ? full_i.label_column_diffs[a_i.node_idx - 1]
                 : full_i.label_columns;
 
+            score_t score_seed_i = a_i.score
+                - per_char_scores_prefix_del[a_i.index][a_i.end - full_i.get_query_view().begin()];
+
             --chain_scores;
             std::for_each(begin, end, [&](const Anchor &a_j) {
                 // try to connect a_i -> a_j
@@ -795,11 +798,10 @@ void chain_alignments(const IDBGAligner &aligner,
                 if (-last_dist < graph.get_k())
                     return;
 
-                score_t base_updated_score = score_j
-                    - a_j.score
-                    + per_char_scores_prefix_del[a_j.index][a_j.end - full_j.get_query_view().begin()]
-                    + a_i.score
-                    - per_char_scores_prefix[a_i.index][a_i.end - full_i.get_query_view().begin()];
+                score_t score_seed_j = a_j.score
+                    - per_char_scores_prefix_del[a_j.index][a_j.end - full_j.get_query_view().begin()];
+
+                score_t base_updated_score = score_j - score_seed_j + score_seed_i;
 
                 if (base_updated_score <= score_i)
                     return;
