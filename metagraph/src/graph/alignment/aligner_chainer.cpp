@@ -805,6 +805,15 @@ void chain_alignments(const IDBGAligner &aligner,
                 }
 
                 base_updated_score += node_insert;
+
+#ifndef NDEBUG
+                auto cur = full_j;
+                cur.extend_offset(std::vector<node_index>(graph.get_k() - 1 - cur.get_offset(),
+                                                          DeBruijnGraph::npos));
+                cur.insert_gap_prefix(-seed_size, graph.get_k() - 1, config);
+                assert(cur.get_score() == full_j.get_score() + node_insert);
+#endif
+
                 if (base_updated_score > score_i)
                     update_score(base_updated_score + get_label_change_score(), &a_j, -seed_size);
             });
@@ -851,13 +860,14 @@ void chain_alignments(const IDBGAligner &aligner,
 
             if (alignment.get_query_view().end() <= cur.get_query_view().begin()) {
                 // no overlap
+                assert(last_anchor->begin == cur.get_query_view().begin());
                 cur.insert_gap_prefix(cur.get_query_view().begin() - alignment.get_query_view().end(), graph.get_k() - 1, config);
                 assert(cur.size());
             } else {
                 assert(last_anchor->end == first->end);
                 alignment.extend_offset(std::vector<node_index>(graph.get_k() - 1 - alignment.get_offset(),
                                                                 DeBruijnGraph::npos));
-                alignment.trim_query_suffix(alignment.get_query_view().end() - first->end, config, false);
+                alignment.trim_query_suffix(alignment.get_query_view().end() - first->end, config);
                 assert(alignment.size());
                 assert(first->node_idx >= 0);
                 assert(alignment.get_nodes().back() == alignments[first->index].get_nodes()[first->node_idx]);
@@ -869,7 +879,8 @@ void chain_alignments(const IDBGAligner &aligner,
 
                 cur.trim_query_prefix(first->end - cur.get_query_view().begin(),
                                       graph.get_k() - 1,
-                                      config);
+                                      config,
+                                      false);
                 assert(cur.size());
                 assert(cur.is_valid(graph, &config));
 
@@ -892,6 +903,7 @@ void chain_alignments(const IDBGAligner &aligner,
             DEBUG_LOG("\tCurrent: {}", alignment);
             assert(alignment.size());
             assert(alignment.is_valid(graph, &config));
+            assert(alignment.get_clipping() == alignments[first->index].get_clipping());
             callback(std::move(alignment));
         },
         [&](Alignment&& aln) {
