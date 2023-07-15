@@ -842,18 +842,34 @@ void chain_alignments(const IDBGAligner &aligner,
             return true;
         },
         true /* extend_anchors */,
-        [&](const Anchor *first, Alignment&& cur, size_t /* dist */, const auto &callback) {
+        [&](const Anchor *first, Alignment&& cur, size_t /* dist */, score_t score_up_to_now, const auto &callback) {
             Alignment alignment = alignments[first->index];
+
+            auto check_aln = [&](Alignment aln) {
+#ifndef NDEBUG
+                aln.trim_query_prefix(first->begin - aln.get_query_view().begin(),
+                                      graph.get_k() - 1,
+                                      config);
+                DEBUG_LOG("Score to now: {}\tScore of chain: {}",
+                          score_up_to_now, aln.get_score());
+                assert(aln.get_score() == score_up_to_now);
+#else
+                std::ignore = aln;
+                std::ignore = score_up_to_now;
+#endif
+            };
 
             if (cur.empty()) {
                 assert(first == last_anchor);
                 DEBUG_LOG("\tStarting: {}", alignment);
+                check_aln(alignment);
                 callback(std::move(alignment));
                 return;
             }
 
             if (first->index == last_anchor->index) {
                 last_anchor = first;
+                check_aln(cur);
                 callback(std::move(cur));
                 return;
             }
@@ -904,6 +920,7 @@ void chain_alignments(const IDBGAligner &aligner,
             assert(alignment.size());
             assert(alignment.is_valid(graph, &config));
             assert(alignment.get_clipping() == alignments[first->index].get_clipping());
+            check_aln(alignment);
             callback(std::move(alignment));
         },
         [&](Alignment&& aln) {

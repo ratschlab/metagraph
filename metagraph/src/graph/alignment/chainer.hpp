@@ -26,6 +26,7 @@ template <typename Anchor>
 using AnchorExtender = std::function<void(const Anchor*, // first ptr,
                                           Alignment&&,   // target,
                                           size_t,        // distance,
+                                          score_t,       // chain score up to this point
                                           const AlignmentCallback&)>;
 
 template <typename Anchor>
@@ -44,7 +45,7 @@ void chain_anchors(const DBGAlignerConfig &config,
                        = [](const AnchorChain<Anchor>&, score_t) { return true; },
                    bool extend_anchors = true,
                    const AnchorExtender<Anchor> &anchor_extender
-                       = [](const Anchor*, Alignment&&, size_t, const AlignmentCallback&) {},
+                       = [](const Anchor*, Alignment&&, size_t, score_t, const AlignmentCallback&) {},
                    const AlignmentCallback &callback = [](Alignment&&) {},
                    const std::function<bool()> &terminate = []() { return false; },
                    bool allow_overlap = false,
@@ -154,9 +155,11 @@ void chain_anchors(const DBGAlignerConfig &config,
             continue;
 
         std::vector<std::pair<const Anchor*, size_t>> chain;
+        std::vector<score_t> scores;
         const Anchor *last_anchor = anchors_begin + i;
         chain.emplace_back(last_anchor, 0);
         auto [score, last, dist] = chain_scores[i];
+        scores.emplace_back(score);
         while (last != anchors_end) {
             last_anchor = last;
             size_t to_traverse = dist;
@@ -164,7 +167,10 @@ void chain_anchors(const DBGAlignerConfig &config,
 
             std::tie(score, last, dist) = chain_scores[last - anchors_begin];
             chain.emplace_back(last_anchor, to_traverse);
+            scores.emplace_back(score);
         }
+
+        assert(scores.front() == -nscore);
 
         if (!start_backtrack(chain, -nscore))
             continue;
@@ -176,14 +182,17 @@ void chain_anchors(const DBGAlignerConfig &config,
         if (!extend_anchors)
             continue;
 
+        auto jt = scores.rbegin();
         std::vector<Alignment> alns;
-        anchor_extender(chain.back().first, Alignment(), 0,
+        anchor_extender(chain.back().first, Alignment(), 0, *jt,
                         [&](Alignment&& aln) { alns.emplace_back(aln); });
+        ++jt;
 
-        for (auto it = chain.rbegin(); it + 1 != chain.rend(); ++it) {
+        for (auto it = chain.rbegin(); it + 1 != chain.rend(); ++it, ++jt) {
+            assert(jt != scores.rend());
             std::vector<Alignment> next_alns;
             for (auto&& aln : alns) {
-                anchor_extender((it + 1)->first, std::move(aln), it->second,
+                anchor_extender((it + 1)->first, std::move(aln), it->second, *jt,
                     [&](Alignment&& next_aln) {
                         next_alns.emplace_back(std::move(next_aln));
                     }
@@ -191,6 +200,8 @@ void chain_anchors(const DBGAlignerConfig &config,
             }
             std::swap(next_alns, alns);
         }
+
+        assert(jt == scores.rend());
 
         for (auto&& aln : alns) {
             if (terminate())
