@@ -828,22 +828,23 @@ void chain_alignments(const IDBGAligner &aligner,
             });
         },
         [&](const AnchorChain<Anchor> &chain, score_t score) {
-            if (chain.size() <= 1)
-                return false;
+            assert(chain.size());
 
-            if (std::all_of(chain.begin() + 1, chain.end(),
-                            [&](const auto &a) {
-                                return a.first->index == chain.front().first->index;
-                            })) {
-                return false;
-            }
+            if (chain.size() > 1) {
+                if (std::all_of(chain.begin() + 1, chain.end(),
+                                [&](const auto &a) {
+                                    return a.first->index == chain.front().first->index;
+                                })) {
+                    return false;
+                }
 
-            if (chain_score == score && std::equal(chain.begin(), chain.end(),
-                                                   last_chain.begin(), last_chain.end(),
-                                                   [](const auto &a, const auto &b) {
-                                                       return a.first->index == b.first->index;
-                                                   })) {
-                return false;
+                if (chain_score == score && std::equal(chain.begin(), chain.end(),
+                                                       last_chain.begin(), last_chain.end(),
+                                                       [](const auto &a, const auto &b) {
+                                                           return a.first->index == b.first->index;
+                                                       })) {
+                    return false;
+                }
             }
 
             last_chain = chain;
