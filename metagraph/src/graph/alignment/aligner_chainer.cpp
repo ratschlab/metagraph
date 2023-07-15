@@ -866,8 +866,8 @@ void chain_alignments(const IDBGAligner &aligner,
                 aln.trim_query_prefix(first->begin - aln.get_query_view().begin(),
                                       graph.get_k() - 1,
                                       config);
-                DEBUG_LOG("Score to now: {}\tScore of chain: {}",
-                          score_up_to_now, aln.get_score());
+                DEBUG_LOG("Score to now: {}\tScore of chain: {}\tNode insertion penalty: {}",
+                          score_up_to_now, aln.get_score(), node_insert);
                 assert(aln.get_score() == score_up_to_now);
 #else
                 std::ignore = aln;
@@ -915,25 +915,21 @@ void chain_alignments(const IDBGAligner &aligner,
 
                 cur.extend_offset(std::vector<node_index>(graph.get_k() - 1 - cur.get_offset(),
                                                           DeBruijnGraph::npos));
-                node_index cur_front
-                    = cur.get_nodes()[first->end - cur.get_query_view().begin() - 1];
-
                 cur.trim_query_prefix(first->end - cur.get_query_view().begin(),
                                       graph.get_k() - 1,
                                       config,
                                       false);
                 assert(cur.size());
                 assert(cur.is_valid(graph, &config));
+                node_index last_front = last_anchor->node_idx >= 0
+                    ? alignments[last_anchor->index].get_nodes()[last_anchor->node_idx]
+                    : DeBruijnGraph::npos;
 
-                if (cur_front != alignment.get_nodes().back()) {
+                if (alignment.get_nodes().back() != last_front) {
                     cur.insert_gap_prefix(-seed_size, graph.get_k() - 1, config);
                     assert(cur.size());
-#ifndef NDEBUG
                 } else {
-                    assert(last_anchor->node_idx >= 0);
-                    assert(cur_front
-                        == alignments[last_anchor->index].get_nodes()[last_anchor->node_idx]);
-#endif
+                    assert(last_front);
                 }
             }
 
@@ -957,17 +953,10 @@ void chain_alignments(const IDBGAligner &aligner,
                 + last_aln.get_score()
                 - per_char_scores_prefix[last_anchor->index][last_anchor->begin - last_aln.get_query_view().begin()];
 
-            auto cur = aln;
-            cur.trim_query_prefix(last_anchor->begin - aln.get_query_view().begin(),
-                                  graph.get_k() + 1,
-                                  config);
-
-            DEBUG_LOG("\tFinal: {}\tpredicted: {}\ttrimmed: {}\t{}",
+            DEBUG_LOG("\tFinal: {}\tpredicted: {}\t{}",
                 chain_score,
                 predicted_score,
-                cur.get_score(),
                 aln);
-            assert(cur.get_score() == chain_score);
 
             assert(aln.get_score() == predicted_score);
 #endif
