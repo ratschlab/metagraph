@@ -29,11 +29,11 @@ using AnchorExtender = std::function<void(const Anchor*, // first ptr,
                                           const AlignmentCallback&)>;
 
 template <typename Anchor>
-using BacktrackStarter = std::function<bool(const std::vector<std::pair<const Anchor*, size_t>>&,
-                                            score_t)>;
+using AnchorChain = std::vector<std::pair<const Anchor*, size_t>>;
 
 template <typename Anchor>
-using AnchorChain = std::vector<std::pair<const Anchor*, size_t>>;
+using BacktrackStarter = std::function<bool(const AnchorChain<Anchor>&, score_t)>;
+
 
 template <typename Anchor>
 void chain_anchors(const DBGAlignerConfig &config,
@@ -177,9 +177,8 @@ void chain_anchors(const DBGAlignerConfig &config,
             continue;
 
         std::vector<Alignment> alns;
-        anchor_extender(chain.back().first, Alignment(), 0, [&](Alignment&& aln) {
-            alns.emplace_back(aln);
-        });
+        anchor_extender(chain.back().first, Alignment(), 0,
+                        [&](Alignment&& aln) { alns.emplace_back(aln); });
 
         for (auto it = chain.rbegin(); it + 1 != chain.rend(); ++it) {
             std::vector<Alignment> next_alns;
