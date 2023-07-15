@@ -392,9 +392,11 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
             }
 
             bool found_chain = false;
+            bool chains_checked = false;
 
             chain_alignments(*this, std::move(rest),
                 [&](auto&& alignment) {
+                    chains_checked = true;
                     assert(alignment.is_valid(graph_, &config_));
                     if (alignment.get_score() < config_.min_path_score)
                         return;
@@ -409,7 +411,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
                     if (found_chain)
                         alns.emplace_back(std::move(alignment));
                 },
-                [&]() { return false; }
+                [&]() { return chains_checked && !found_chain; }
             );
         }
 
