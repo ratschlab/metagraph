@@ -539,11 +539,11 @@ void chain_alignments(const IDBGAligner &aligner,
         std::string_view::const_iterator end;
         std::string_view::const_iterator begin;
         uint64_t index;
-        uint64_t num_nodes_trimmed;
         size_t spelling_length;
         bool orientation;
         uint64_t clipping;
         uint64_t end_clipping;
+        int64_t node_idx;
         score_t score;
 
         std::string_view get_query_view() const {
@@ -571,13 +571,15 @@ void chain_alignments(const IDBGAligner &aligner,
     for (size_t i = 0; i < alignments.size(); ++i) {
         const auto &alignment = alignments[i];
         bool is_fwd_orientation = !alignment.get_orientation();
-        DEBUG_LOG("Alignment {}: {}\t{}", i, alignment.get_nodes().size(), alignment);
+        DEBUG_LOG("Alignment {}: {}\t{}\t{}", i, alignment.get_query_view(), alignment.get_nodes().size(), alignment);
         std::string_view query = alignment.get_query_view();
 
         auto &prefix_scores_with_deletions = per_char_scores_prefix.emplace_back();
         prefix_scores_with_deletions.reserve(query.size() + 1);
         auto &prefix_scores_without_deletions = per_char_scores_prefix_del.emplace_back();
         prefix_scores_without_deletions.reserve(query.size() + 1);
+
+        ssize_t start_node_idx = static_cast<ssize_t>(alignment.get_offset()) - graph.get_k() + seed_size;
 
         for (auto cur = alignment; cur.size(); cur.trim_query_prefix(1, graph.get_k() - 1, config, false)) {
             prefix_scores_without_deletions.emplace_back(cur.get_score());
@@ -598,6 +600,7 @@ void chain_alignments(const IDBGAligner &aligner,
                 }
             }
 
+            ssize_t node_idx = start_node_idx + alignment.get_sequence().size() - cur.get_sequence().size();
             prefix_scores_with_deletions.emplace_back(cur.get_score());
             if (it->first == Cigar::MATCH && it->second >= seed_size) {
                 orientation_change += is_fwd_orientation;
@@ -606,13 +609,22 @@ void chain_alignments(const IDBGAligner &aligner,
                     .end = cur.get_query_view().begin() + seed_size,
                     .begin = cur.get_query_view().begin(),
                     .index = i,
-                    .num_nodes_trimmed = alignments[i].size() - cur.size(),
                     .spelling_length = cur.get_sequence().size(),
-                    .orientation = alignments[i].get_orientation(),
+                    .orientation = alignment.get_orientation(),
                     .clipping = cur.get_clipping(),
-                    .end_clipping = alignments[i].get_end_clipping() + alignments[i].get_query_view().size() - seed_size,
+                    .end_clipping = alignment.get_full_query_view().end() - cur.get_query_view().begin() - seed_size,
+                    .node_idx = node_idx,
                     .score = cur.get_score(),
                 });
+
+#ifndef NDEBUG
+                const auto &a_i = anchors.back();
+                if (a_i.node_idx >= 0) {
+                    assert(static_cast<size_t>(a_i.node_idx) < alignment.size());
+                    assert(graph.get_node_sequence(alignment.get_nodes()[a_i.node_idx]).substr(graph.get_k() - seed_size)
+                            == std::string_view(a_i.begin, a_i.end - a_i.begin));
+                }
+#endif
             }
         }
 
@@ -685,9 +697,8 @@ void chain_alignments(const IDBGAligner &aligner,
             const Alignment &full_i = alignments[a_i.index];
             std::string_view full_query_i = full_i.get_query_view();
             std::string_view query_i(a_i.begin, a_i.end - a_i.begin);
-            size_t node_idx_i = a_i.num_nodes_trimmed;
-            auto a_i_col = full_i.label_column_diffs.size() && node_idx_i
-                ? full_i.label_column_diffs[node_idx_i - 1]
+            auto a_i_col = full_i.label_column_diffs.size() && a_i.node_idx > 0
+                ? full_i.label_column_diffs[a_i.node_idx - 1]
                 : full_i.label_columns;
 
             --chain_scores;
@@ -715,9 +726,8 @@ void chain_alignments(const IDBGAligner &aligner,
                     return;
                 }
 
-                size_t node_idx_j = a_j.num_nodes_trimmed;
-                auto a_j_col = full_j.label_column_diffs.size() && node_idx_j
-                    ? full_j.label_column_diffs[node_idx_j - 1]
+                auto a_j_col = full_j.label_column_diffs.size() && a_j.node_idx > 0
+                    ? full_j.label_column_diffs[a_j.node_idx - 1]
                     : full_j.label_columns;
 
                 auto get_label_change_score = [&]() {
@@ -750,6 +760,12 @@ void chain_alignments(const IDBGAligner &aligner,
 
                         assert(gap_cost < 0);
 
+#ifndef NDEBUG
+                        auto cur = full_j;
+                        cur.insert_gap_prefix(cur.get_query_view().begin() - full_i.get_query_view().end(), graph.get_k() - 1, config);
+                        assert(cur.get_score() == full_j.get_score() + gap_cost);
+#endif
+
                         score_t base_updated_score = score_j + gap_cost + a_i.score;
                         if (base_updated_score > score_i) {
                             update_score(base_updated_score + get_label_change_score(),
@@ -776,13 +792,13 @@ void chain_alignments(const IDBGAligner &aligner,
                 if (base_updated_score <= score_i)
                     return;
 
-                if (full_i.get_query_view().begin() + graph.get_k() - full_i.get_offset() > a_i.end)
+                if (a_i.node_idx < 0)
                     return;
 
                 if (-last_dist < graph.get_k())
                     return;
 
-                if (full_i.get_nodes()[node_idx_i] == full_j.get_nodes()[node_idx_j]) {
+                if (a_j.node_idx >= 0 && full_i.get_nodes()[a_j.node_idx] == full_j.get_nodes()[a_j.node_idx]) {
                     // perfect overlap, easy top connect
                     update_score(base_updated_score + get_label_change_score(), &a_j, -seed_size);
                     return;
@@ -841,23 +857,30 @@ void chain_alignments(const IDBGAligner &aligner,
                 assert(last_anchor->end == first->end);
                 alignment.extend_offset(std::vector<node_index>(graph.get_k() - 1 - alignment.get_offset(),
                                                                 DeBruijnGraph::npos));
-                alignment.trim_query_suffix(alignment.get_query_view().end() - first->end, config);
+                alignment.trim_query_suffix(alignment.get_query_view().end() - first->end, config, false);
                 assert(alignment.size());
+                assert(first->node_idx >= 0);
+                assert(alignment.get_nodes().back() == alignments[first->index].get_nodes()[first->node_idx]);
                 // assert(alignment.is_valid(graph, &config));
 
                 cur.extend_offset(std::vector<node_index>(graph.get_k() - 1 - cur.get_offset(),
                                                           DeBruijnGraph::npos));
                 node_index cur_front = cur.get_nodes()[first->end - cur.get_query_view().begin() - 1];
+
                 cur.trim_query_prefix(first->end - cur.get_query_view().begin(),
                                       graph.get_k() - 1,
-                                      config,
-                                      false);
+                                      config);
                 assert(cur.size());
                 assert(cur.is_valid(graph, &config));
 
                 if (cur_front != alignment.get_nodes().back()) {
                     cur.insert_gap_prefix(-seed_size, graph.get_k() - 1, config);
                     assert(cur.size());
+#ifndef NDEBUG
+                } else {
+                    assert(last_anchor->node_idx >= 0);
+                    assert(cur_front == alignments[last_anchor->index].get_nodes()[last_anchor->node_idx]);
+#endif
                 }
             }
 
@@ -878,8 +901,20 @@ void chain_alignments(const IDBGAligner &aligner,
             score_t predicted_score = chain_score
                 + last_aln.get_score()
                 - per_char_scores_prefix[last_anchor->index][last_anchor->begin - last_aln.get_query_view().begin()];
+
+            auto cur = aln;
+            cur.trim_query_prefix(last_anchor->begin - aln.get_query_view().begin(),
+                                  graph.get_k() + 1,
+                                  config);
+
+            DEBUG_LOG("\tFinal: {}\tpredicted: {}\ttrimmed: {}\t{}",
+                chain_score,
+                predicted_score,
+                cur.get_score(),
+                aln);
+            assert(cur.get_score() == chain_score);
+
             assert(aln.get_score() == predicted_score);
-            DEBUG_LOG("\tFinal: {}\t{}", chain_score, aln);
 #endif
             callback(std::move(aln));
         },

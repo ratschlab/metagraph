@@ -274,12 +274,17 @@ bool Alignment::append(Alignment&& other) {
 
     } else if (has_annotation()) {
         const auto &columns_a = get_columns(nodes_.size() - 1);
-        const auto &other_cigar = other.get_cigar().data();
-        const auto &columns_b = other.get_columns(
-            other_cigar.front().first == Cigar::NODE_INSERTION
-                ? other_cigar.front().second
-                : 0
-        );
+        size_t columns_b_idx = 0;
+        if (!other.label_columns && other.label_column_diffs.size()) {
+            auto it = std::find_if(other.label_column_diffs.begin(),
+                                   other.label_column_diffs.end(),
+                                   [](const auto &i) { return i; });
+
+            if (it != other.label_column_diffs.end())
+                columns_b_idx = it - other.label_column_diffs.begin() + 1;
+        }
+
+        const auto &columns_b = other.get_columns(columns_b_idx);
         Vector<Column> intersection;
         Vector<Column> diff;
         utils::set_intersection_difference(columns_b.begin(), columns_b.end(),
