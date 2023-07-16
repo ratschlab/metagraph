@@ -220,7 +220,7 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
             query.size() - this->config_.min_seed_length + 1
         );
 
-        auto encoded = boss.encode(query);
+        const auto encoded = boss.encode(query);
         for (size_t i = 0; i + this->config_.min_seed_length <= query.size(); ++i) {
             auto begin = encoded.begin() + i;
             auto end = begin + this->config_.min_seed_length - 1;
@@ -229,7 +229,11 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
                                     encoded.end());
             assert(end <= last_it);
 
-            if (!((*end) % boss.alph_size))
+            last_it = std::find_if(begin, last_it, [&](TAlphabet c) {
+                return !(c % boss.alph_size);
+            });
+
+            if (last_it <= end)
                 continue;
 
             auto [first, last, it] = boss.index_range(begin, end);
@@ -242,9 +246,10 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
             size_t j = i;
             for ( ; it != last_it; ++j, ++it) {
                 assert(it < begin + boss.get_k());
+                assert(j < ranges.size());
+
                 edge_index first_next = first;
                 edge_index last_next = last;
-                assert(j < ranges.size());
                 if (boss.tighten_range(&first_next, &last_next, *it)) {
                     if (ranges[j].size() <= j - i)
                         ranges[j].resize(j - i + 1);
@@ -266,10 +271,7 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
 
             assert(is_rc || std::get<2>(boss.index_range(begin, last_it)) == it);
 
-            if (it == begin + boss.get_k() && j < ranges.size()) {
-                assert(first);
-                assert(it == last_it);
-                assert(this->config_.min_seed_length + j - i == dbg_succ.get_k());
+            if (j < ranges.size() && first && it == last_it) {
                 if (ranges[j].size() <= j - i)
                     ranges[j].resize(j - i + 1);
 
