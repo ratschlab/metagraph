@@ -239,7 +239,6 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
 
             first = boss.pred_last(first - 1) + 1;
 
-            assert(it <= last_it);
             size_t j = i;
             for ( ; it != last_it; ++j, ++it) {
                 assert(it < begin + boss.get_k());
