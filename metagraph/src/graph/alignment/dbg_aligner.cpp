@@ -394,6 +394,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
             bool found_chain = false;
             bool chains_checked = false;
 
+            std::vector<Alignment> chains;
             chain_alignments(*this, std::move(rest),
                 [&](auto&& alignment) {
                     chains_checked = true;
@@ -403,16 +404,22 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
 
                     if (alignment.get_score() > best_score) {
                         found_chain = true;
-                        best_score = alignment.get_score();
-                        query_coverage = alignment.get_query_view().size();
-                        alns.clear();
+                        query_coverage = std::max(query_coverage,
+                                                  alignment.get_query_view().size());
                     }
 
                     if (found_chain)
-                        alns.emplace_back(std::move(alignment));
+                        chains.emplace_back(std::move(alignment));
                 },
                 [&]() { return chains_checked && !found_chain; }
             );
+
+            if (chains.size()) {
+                chains.insert(chains.end(),
+                              std::make_move_iterator(alns.begin()),
+                              std::make_move_iterator(alns.end()));
+                std::swap(chains, alns);
+            }
         }
 
         std::for_each(std::make_move_iterator(alns.begin()),
