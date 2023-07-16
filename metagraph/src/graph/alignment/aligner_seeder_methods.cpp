@@ -113,7 +113,9 @@ void suffix_to_prefix(const DBGSuccinct &dbg_succ,
         || boss.get_node_str(std::get<1>(index_range) + 1).substr(offset) != check_str);
 #endif
 
-    auto call_nodes_in_range = [&](size_t num_exact_match, const BOSSEdgeRange &final_range) {
+    auto encoded = boss.encode(rest);
+    auto call_nodes_in_range = [&](size_t num_exact_match,
+                                   const BOSSEdgeRange &final_range) {
         const auto &[first, last, seed_length] = final_range;
         assert(seed_length == boss.get_k());
         assert(num_exact_match <= seed_length);
@@ -126,11 +128,12 @@ void suffix_to_prefix(const DBGSuccinct &dbg_succ,
                 assert(num_extra_match <= rest.size());
                 assert(num_exact_match < boss.get_k() || num_extra_match == rest.size()
                         || num_extra_match + 1 == rest.size());
-                if (num_exact_match == boss.get_k() && num_extra_match < rest.size()) {
-                    num_exact_match += (boss.get_W(i) % boss.alph_size == boss.encode(rest.back()));
-                }
-
-                callback(node, num_exact_match);
+                callback(
+                    node,
+                    num_exact_match + (num_exact_match == boss.get_k()
+                                        && num_extra_match + 1 == rest.size()
+                                        && boss.get_W(i) % boss.alph_size == encoded.back())
+                );
             }
         }
     };
@@ -140,7 +143,6 @@ void suffix_to_prefix(const DBGSuccinct &dbg_succ,
         return;
     }
 
-    auto encoded = boss.encode(rest);
     std::vector<std::tuple<size_t, bool, BOSSEdgeRange>> range_stack;
     range_stack.emplace_back(0, true, index_range);
 
@@ -155,12 +157,15 @@ void suffix_to_prefix(const DBGSuccinct &dbg_succ,
             auto &[first, last, seed_length] = next_range;
 
             if (boss.tighten_range(&first, &last, s)) {
+                bool next_exact_match = is_exact_match
+                                            && num_extra_match < encoded.size()
+                                            && (s == encoded[num_extra_match]);
                 if (seed_length == boss.get_k()) {
-                    call_nodes_in_range(std::get<2>(index_range) + num_extra_match, next_range);
+                    call_nodes_in_range(
+                        std::get<2>(index_range) + num_extra_match + next_exact_match,
+                        next_range
+                    );
                 } else {
-                    bool next_exact_match = is_exact_match
-                                                && num_extra_match < encoded.size()
-                                                && (s == encoded[num_extra_match]);
                     range_stack.emplace_back(
                         num_extra_match + next_exact_match,
                         next_exact_match,
@@ -318,7 +323,6 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
 
         std::sort(range_coverages.begin(), range_coverages.end());
 
-        size_t last_update = 0;
         for (size_t j = 0; j < range_coverages.size(); ++j) {
             auto [begin_i, i] = range_coverages[j];
             assert(ranges[i].size());
@@ -372,23 +376,8 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
             assert(first);
             assert(last);
 
-            size_t old_size = seeds_.size();
             find_nodes(query, i, seed_window, first, last, s);
             find_nodes(query, i, seed_window, first, last, s + boss.alph_size);
-
-            if (seeds_.size() > old_size && last_update) {
-                assert(j);
-                if (range_coverages[j - 1].first > begin_i
-                        && range_coverages[j - 1].second == i - 1
-                        && ranges[i - 1].size() < ranges[i].size()) {
-                    // the current seeds are better
-                    assert(seeds_.size() >= (seeds_.size() - old_size) + last_update);
-                    seeds_.erase(seeds_.end() - (seeds_.size() - old_size) - last_update,
-                                 seeds_.end() - (seeds_.size() - old_size));
-                }
-            }
-
-            last_update = seeds_.size() - old_size;
         }
     };
 
@@ -452,7 +441,7 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
                 std::make_tuple(first, last, rc_seed_window.size()),
                 [&](node_index node, size_t num_matches) {
                     assert(num_matches >= this->config_.min_seed_length);
-                    assert(num_matches <= boss.get_k());
+                    assert(num_matches <= dbg_succ.get_k());
                     node = canonical.reverse_complement(node);
                     size_t added_length = num_matches - this->config_.min_seed_length;
                     std::string_view seed_window(this->query_.data() + i - added_length,
@@ -496,7 +485,36 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
     if (this->num_matching_ < this->query_.size() * this->config_.min_exact_match) {
         this->num_matching_ = 0;
         seeds_.clear();
+        return;
     }
+
+    if (this->config_.all_suffix_matches)
+        return;
+
+    // remove redundant seeds
+    std::sort(seeds_.begin(), seeds_.end(), [](const auto &a, const auto &b) {
+        return std::make_pair(a.get_clipping(), a.get_end_clipping())
+                < std::make_pair(b.get_clipping(), b.get_end_clipping());
+    });
+
+    size_t cur_clipping = std::numeric_limits<size_t>::max();
+    size_t last_end_clipping = 0;
+    for (auto &seed : seeds_) {
+        if (seed.empty())
+            continue;
+
+        if (seed.get_clipping() != cur_clipping) {
+            cur_clipping = seed.get_clipping();
+            last_end_clipping = seed.get_end_clipping();
+        } else if (seed.get_end_clipping() > last_end_clipping) {
+            // assert(dbg_succ.get_mode() == DeBruijnGraph::PRIMARY);
+            seed = Seed();
+        }
+    }
+
+    seeds_.erase(std::remove_if(seeds_.begin(), seeds_.end(),
+                                [](const auto &a) { return a.empty(); }),
+                 seeds_.end());
 }
 
 auto MEMSeeder::get_seeds() const -> std::vector<Seed> {
