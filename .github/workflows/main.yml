@@ -68,6 +68,8 @@ jobs:
 
     - name: install dependencies
       run: |
+        sudo apt-get update
+
         # If clang, use the default version. Otherwise the compiler install with apt-get.
         if [[ "${{ matrix.compiler }}" != "clang" ]]; then
             sudo apt-get install ${{ matrix.compiler }}
