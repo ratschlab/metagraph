@@ -754,9 +754,11 @@ void chain_alignments(const IDBGAligner &aligner,
                     assert(a_i_cols[0] != std::numeric_limits<Alignment::Column>::max());
                     assert(a_j_cols[0] != std::numeric_limits<Alignment::Column>::max());
 
-                    return utils::share_element(a_i_cols.begin(), a_i_cols.end(),
-                                                a_j_cols.begin(), a_j_cols.end())
-                        ? 0 : DBGAlignerConfig::ninf;
+                    std::vector<Alignment::Column> diff;
+                    std::set_difference(a_i_cols.begin(), a_i_cols.end(),
+                                        a_j_cols.begin(), a_j_cols.end(),
+                                        std::back_inserter(diff));
+                    return diff.size() ? DBGAlignerConfig::ninf : 0;
                 };
 
                 if (full_query_i.end() <= full_query_j.begin()) {
