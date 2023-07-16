@@ -235,34 +235,39 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
             first = boss.pred_last(first - 1) + 1;
 
             assert(it <= last_it);
-            for (size_t j = i; it != last_it; ++j, ++it) {
-                assert(it <= begin + boss.get_k());
-                edge_index first_next = first;
-                edge_index last_next = last;
-                if (boss.tighten_range(&first_next, &last_next, *it)) {
+            size_t j = i;
+            for ( ; it != last_it; ++j, ++it) {
+                assert(it < begin + boss.get_k());
+                if (boss.tighten_range(&first, &last, *it)) {
                     if (ranges[j].size() <= j - i)
                         ranges[j].resize(j - i + 1);
 
+                    assert(!ranges[j][j - i].first);
+                    assert(!ranges[j][j - i].second);
                     ranges[j][j - i] = std::make_pair(first, last);
 
                     if (is_rc)
                         break;
 
-                    first = first_next;
-                    last = last_next;
                 } else {
                     break;
                 }
             }
 
+            assert(std::get<2>(boss.index_range(begin, last_it)) == it);
+
             if (this->config_.max_seed_length >= dbg_succ.get_k()
-                    && it == begin + dbg_succ.get_k()
+                    && it == begin + boss.get_k()
                     && it < encoded.end()) {
-                size_t j = i + dbg_succ.get_k() - this->config_.min_seed_length;
                 assert(j < ranges.size());
-                assert(ranges[j].size());
-                if (auto edge = boss.pick_edge(ranges[j].back().second, *it))
-                    ranges[j].emplace_back(edge, edge);
+                assert(j - 1 - i < ranges[j - 1].size());
+                if (auto edge = boss.pick_edge(last, *it)) {
+                    if (ranges[j].size() <= j - i)
+                        ranges[j].resize(j - i + 1);
+
+                    ranges[j][j - i] = std::make_pair(edge, edge);
+                    ++it;
+                }
             }
 
             if (ranges[i].size()) {
@@ -291,7 +296,8 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
         std::sort(range_coverages.begin(), range_coverages.end());
 
         for (size_t j = 0; j < range_coverages.size(); ++j) {
-            auto [begin, i] = range_coverages[j];
+            auto [begin_i, i] = range_coverages[j];
+
             assert(ranges[i].size());
 
             assert(!is_rc || ranges[i].size() == 1);
@@ -327,15 +333,17 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
                 }
             } else {
                 added_length = ranges[i].size() - 1;
-                if (j + 1 < range_coverages.size() && range_coverages[j + 1].first <= begin)
+                if (j + 1 < range_coverages.size() && range_coverages[j + 1].first <= begin_i + added_length)
                     continue;
             }
+
+            assert(i - added_length == range_coverages[j].first);
 
             std::string_view seed_window(query.data() + i - added_length,
                                          this->config_.min_seed_length + added_length);
 
             if (this->config_.seed_complexity_filter && is_low_complexity(seed_window))
-                return;
+                continue;
 
             auto [first, last] = ranges[i].back();
             assert(first);
@@ -365,12 +373,17 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
     };
 
     auto find_nodes_fwd = [&](std::string_view query, size_t i, std::string_view seed_window, auto first, auto last, auto s) {
-        for (auto e = boss.succ_W(first, s); e <= last; e = boss.succ_W(e + 1, s)) {
-            if (auto node = dbg_succ.boss_to_kmer_index(e))
-                add_seed(query, i, seed_window, node);
+        if (seed_window.size() < dbg_succ.get_k()) {
+            for (auto e = boss.succ_W(first, s); e <= last; e = boss.succ_W(e + 1, s)) {
+                if (auto node = dbg_succ.boss_to_kmer_index(e))
+                    add_seed(query, i, seed_window, node);
 
-            if (e + 1 == boss.get_W().size())
-                break;
+                if (e + 1 == boss.get_W().size())
+                    break;
+            }
+        } else if (s == s % boss.alph_size) {
+            assert(first == last);
+            add_seed(query, i, seed_window, dbg_succ.boss_to_kmer_index(first));
         }
     };
 
