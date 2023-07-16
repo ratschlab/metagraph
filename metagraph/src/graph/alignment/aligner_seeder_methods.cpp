@@ -240,6 +240,7 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
                 assert(it < begin + boss.get_k());
                 edge_index first_next = first;
                 edge_index last_next = last;
+                assert(j < ranges.size());
                 if (boss.tighten_range(&first_next, &last_next, *it)) {
                     if (ranges[j].size() <= j - i)
                         ranges[j].resize(j - i + 1);
@@ -272,7 +273,7 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
 
             assert(is_rc || std::get<2>(boss.index_range(begin, last_it)) == it);
 
-            if (it == begin + boss.get_k()) {
+            if (it == begin + boss.get_k() && j < ranges.size()) {
                 assert(first);
                 assert(it == last_it);
                 assert(this->config_.min_seed_length + j - i == dbg_succ.get_k());
@@ -311,20 +312,16 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
         std::vector<std::pair<size_t, size_t>> range_coverages;
         range_coverages.reserve(ranges.size());
         for (size_t i = 0; i < ranges.size(); ++i) {
-            if (ranges[i].empty())
-                continue;
-
-            size_t begin = i + this->config_.min_seed_length - (this->config_.min_seed_length + ranges[i].size() - 1);
-            range_coverages.emplace_back(begin, i);
+            if (ranges[i].size())
+                range_coverages.emplace_back(i - ranges[i].size() + 1, i);
         }
 
         std::sort(range_coverages.begin(), range_coverages.end());
 
+        size_t last_update = 0;
         for (size_t j = 0; j < range_coverages.size(); ++j) {
             auto [begin_i, i] = range_coverages[j];
-
             assert(ranges[i].size());
-
             assert(!is_rc || ranges[i].size() == 1);
 
             size_t added_length = 0;
@@ -342,28 +339,25 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
                     if (this->config_.seed_complexity_filter && is_low_complexity(seed_window))
                         continue;
 
-                    auto [first_next, last_next] = *(begin + 1);
-                    if (!first_next) {
-                        find_nodes(query, i, seed_window, first, last, s);
-                        find_nodes(query, i, seed_window, first, last, s + boss.alph_size);
-                    } else {
-                        assert(first <= first_next);
-                        assert(last >= last_next);
-                        if (first != first_next) {
-                            find_nodes(query, i, seed_window, first, first_next - 1, s);
-                            find_nodes(query, i, seed_window, first, first_next - 1, s + boss.alph_size);
-                        }
+                    auto jt = std::find_if(begin + 1, ranges[i].end(),
+                                           [](const auto &a) { return a.first; });
+                    assert(jt != ranges[i].end());
 
-                        if (last_next != last) {
-                            find_nodes(query, i, seed_window, last_next + 1, last, s);
-                            find_nodes(query, i, seed_window, last_next + 1, last, s + boss.alph_size);
-                        }
+                    auto [first_next, last_next] = *jt;
+                    assert(first <= first_next);
+                    assert(last >= last_next);
+                    if (first != first_next) {
+                        find_nodes(query, i, seed_window, first, first_next - 1, s);
+                        find_nodes(query, i, seed_window, first, first_next - 1, s + boss.alph_size);
+                    }
+
+                    if (last_next != last) {
+                        find_nodes(query, i, seed_window, last_next + 1, last, s);
+                        find_nodes(query, i, seed_window, last_next + 1, last, s + boss.alph_size);
                     }
                 }
             } else {
                 added_length = ranges[i].size() - 1;
-                if (j + 1 < range_coverages.size() && range_coverages[j + 1].first <= begin_i)
-                    continue;
             }
 
             assert(i - added_length == range_coverages[j].first);
@@ -378,8 +372,23 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
             assert(first);
             assert(last);
 
+            size_t old_size = seeds_.size();
             find_nodes(query, i, seed_window, first, last, s);
             find_nodes(query, i, seed_window, first, last, s + boss.alph_size);
+
+            if (seeds_.size() > old_size && last_update) {
+                assert(j);
+                if (range_coverages[j - 1].first > begin_i
+                        && range_coverages[j - 1].second == i - 1
+                        && ranges[i - 1].size() < ranges[i].size()) {
+                    // the current seeds are better
+                    assert(seeds_.size() >= (seeds_.size() - old_size) + last_update);
+                    seeds_.erase(seeds_.end() - (seeds_.size() - old_size) - last_update,
+                                 seeds_.end() - (seeds_.size() - old_size));
+                }
+            }
+
+            last_update = seeds_.size() - old_size;
         }
     };
 
