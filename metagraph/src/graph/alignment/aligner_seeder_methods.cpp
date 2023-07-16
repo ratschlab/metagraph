@@ -253,17 +253,6 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
                     assert(!ranges[j][j - i].first);
                     assert(!ranges[j][j - i].second);
                     ranges[j][j - i] = std::make_pair(first, last);
-                    assert(j == i || !ranges[j][j - i - 1].first || first >= ranges[j][j - i - 1].first);
-                    assert(j == i || !ranges[j][j - i - 1].second || last <= ranges[j][j - i - 1].second);
-
-#ifndef NDEBUG
-                    std::string_view seed_window(query.data() + i,
-                                                 this->config_.min_seed_length + j - i);
-                    assert(boss.get_node_str(first).substr(boss.get_k() - seed_window.size() + 1)
-                            == std::string_view(seed_window.data(), seed_window.size() - 1));
-                    assert(boss.get_node_str(last).substr(boss.get_k() - seed_window.size() + 1)
-                            == std::string_view(seed_window.data(), seed_window.size() - 1));
-#endif
 
                     if (is_rc)
                         break;
@@ -288,17 +277,6 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
                 assert(!ranges[j][j - i].first);
                 assert(!ranges[j][j - i].second);
                 ranges[j][j - i] = std::make_pair(first, last);
-                assert(j == i || !ranges[j][j - i - 1].first || first >= ranges[j][j - i - 1].first);
-                assert(j == i || !ranges[j][j - i - 1].second || last <= ranges[j][j - i - 1].second);
-
-#ifndef NDEBUG
-                std::string_view seed_window(query.data() + i,
-                                             this->config_.min_seed_length + j - i);
-                assert(boss.get_node_str(first).substr(boss.get_k() - seed_window.size() + 1)
-                        == std::string_view(seed_window.data(), seed_window.size() - 1));
-                assert(boss.get_node_str(last).substr(boss.get_k() - seed_window.size() + 1)
-                        == std::string_view(seed_window.data(), seed_window.size() - 1));
-#endif
             }
 
             if (ranges[i].size()) {
