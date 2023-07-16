@@ -278,9 +278,21 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
             }
         }
 
+        std::vector<std::pair<size_t, size_t>> range_coverages;
+        range_coverages.reserve(ranges.size());
         for (size_t i = 0; i < ranges.size(); ++i) {
             if (ranges[i].empty())
                 continue;
+
+            size_t begin = i + this->config_.min_seed_length - (this->config_.min_seed_length + ranges[i].size() - 1);
+            range_coverages.emplace_back(begin, i);
+        }
+
+        std::sort(range_coverages.begin(), range_coverages.end());
+
+        for (size_t j = 0; j < range_coverages.size(); ++j) {
+            auto [begin, i] = range_coverages[j];
+            assert(ranges[i].size());
 
             assert(!is_rc || ranges[i].size() == 1);
 
@@ -315,6 +327,8 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
                 }
             } else {
                 added_length = ranges[i].size() - 1;
+                if (j + 1 < range_coverages.size() && range_coverages[j + 1].first <= begin)
+                    continue;
             }
 
             std::string_view seed_window(query.data() + i - added_length,
