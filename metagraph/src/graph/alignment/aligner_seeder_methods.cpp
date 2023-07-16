@@ -507,7 +507,30 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
             cur_clipping = seed.get_clipping();
             last_end_clipping = seed.get_end_clipping();
         } else if (seed.get_end_clipping() > last_end_clipping) {
-            // assert(dbg_succ.get_mode() == DeBruijnGraph::PRIMARY);
+            seed = Seed();
+        }
+    }
+
+    seeds_.erase(std::remove_if(seeds_.begin(), seeds_.end(),
+                                [](const auto &a) { return a.empty(); }),
+                 seeds_.end());
+
+    std::sort(seeds_.begin(), seeds_.end(), [](const auto &a, const auto &b) {
+        return std::make_pair(a.get_end_clipping(), a.get_clipping())
+                < std::make_pair(b.get_end_clipping(), b.get_clipping());
+    });
+
+    size_t cur_end_clipping = std::numeric_limits<size_t>::max();
+    size_t last_clipping = 0;
+    for (auto &seed : seeds_) {
+        if (seed.empty())
+            continue;
+
+        if (seed.get_end_clipping() != cur_end_clipping) {
+            cur_end_clipping = seed.get_end_clipping();
+            last_clipping = seed.get_clipping();
+        } else if (seed.get_clipping() > last_clipping) {
+            assert(dbg_succ.get_mode() == DeBruijnGraph::PRIMARY);
             seed = Seed();
         }
     }
