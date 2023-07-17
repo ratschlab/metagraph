@@ -118,7 +118,7 @@ void chain_anchors(const DBGAlignerConfig &config,
                 );
 
                 if (updated && allow_overlap) {
-                    while (i->get_query_view().end() == end) {
+                    while (i + 1 != anchors_begin && i->get_query_view().end() == end) {
                         --i;
                     }
                 }
