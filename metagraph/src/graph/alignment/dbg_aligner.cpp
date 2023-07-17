@@ -383,41 +383,69 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
 
         auto alns = aggregator.get_alignments();
 
+        for (const auto &aln : alns) {
+            if (aln.get_score() > best_score) {
+                best_score = aln.get_score();
+                query_coverage = aln.get_query_view().size();
+            }
+        }
+
         if (alns.size() && config_.post_chain_alignments) {
+            tsl::hopscotch_map<Alignment::Column, size_t> best_label_counts;
             std::vector<Alignment> rest;
             for (const auto &a : alns) {
-                best_score = std::max(best_score, a.get_score());
                 if (a.get_clipping() || a.get_end_clipping())
                     rest.emplace_back(a);
-            }
 
-            bool found_chain = false;
-            bool chains_checked = false;
+                for (auto c : a.get_columns()) {
+                    if (c != std::numeric_limits<Alignment::Column>::max()) {
+                        auto it = best_label_counts.try_emplace(c, a.size()).first;
+                        it.value() = std::max(it.value(), a.size());
+                    }
+                }
+            }
 
             std::vector<Alignment> chains;
             chain_alignments(*this, std::move(rest),
                 [&](auto&& alignment) {
-                    chains_checked = true;
+                    bool report = false;
                     assert(alignment.is_valid(graph_, &config_));
                     if (alignment.get_score() < config_.min_path_score)
                         return;
 
                     if (alignment.get_score() > best_score) {
-                        found_chain = true;
-                        query_coverage = std::max(query_coverage,
-                                                  alignment.get_query_view().size());
+                        report = true;
+                        query_coverage = alignment.get_query_view().size();
                     }
 
-                    if (found_chain)
+                    tsl::hopscotch_map<Alignment::Column, size_t> cur_label_counts;
+                    for (size_t j = 0; j < alignment.size(); ++j) {
+                        for (auto c : alignment.get_columns(j)) {
+                            if (c != std::numeric_limits<Alignment::Column>::max())
+                                ++cur_label_counts[c];
+                        }
+                    }
+
+                    for (const auto &[c, cnt] : cur_label_counts) {
+                        auto it = best_label_counts.find(c);
+                        assert(it != best_label_counts.end());
+                        if (cnt > it.value()) {
+                            it.value() = cnt;
+                            report = true;
+                        }
+                    }
+
+                    if (report)
                         chains.emplace_back(std::move(alignment));
-                },
-                [&]() { return chains_checked && !found_chain; }
+                }
             );
 
             if (chains.size()) {
                 chains.insert(chains.end(),
                               std::make_move_iterator(alns.begin()),
                               std::make_move_iterator(alns.end()));
+                std::sort(chains.begin(), chains.end(), AlignmentCompare());
+                std::reverse(chains.begin(), chains.end());
                 std::swap(chains, alns);
             }
         }
