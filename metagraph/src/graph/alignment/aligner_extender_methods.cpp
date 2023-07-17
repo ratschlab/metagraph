@@ -373,10 +373,10 @@ void DefaultColumnExtender
                 assert(hint == graph_->get_node_sequence(node));
             }
 
-            canonical->call_outgoing_kmers_hint(node, [&](node_index next, char c) {
+            canonical->call_outgoing_kmers(node, hint, [&](node_index next, char c) {
                 if (c != boss::BOSS::kSentinel)
                     callback(next, c, 0);
-            }, hint);
+            });
         } else {
             graph_->call_outgoing_kmers(node, [&](node_index next, char c) {
                 if (c != boss::BOSS::kSentinel)

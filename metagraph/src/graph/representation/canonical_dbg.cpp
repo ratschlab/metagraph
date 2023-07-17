@@ -152,20 +152,20 @@ void CanonicalDBG::map_to_nodes(std::string_view sequence,
 }
 
 void CanonicalDBG
-::call_outgoing_kmers_hint(node_index node,
-                           const OutgoingEdgeCallback &callback,
-                           const std::string &spelling_hint) const {
+::call_outgoing_kmers(node_index node,
+                      const std::string &spelling_hint,
+                      const OutgoingEdgeCallback &callback) const {
     assert(node);
     assert(node <= offset_ * 2);
     if (node > offset_) {
         std::string rc_hint = spelling_hint;
         ::reverse_complement(rc_hint.begin(), rc_hint.end());
-        call_incoming_kmers_hint(node - offset_, [&](node_index next, char c) {
+        call_incoming_kmers(node - offset_, rc_hint, [&](node_index next, char c) {
             c = complement(c);
             assert(c == boss::BOSS::kSentinel
                 || traverse(node, c) == reverse_complement(next));
             callback(reverse_complement(next), c);
-        }, rc_hint);
+        });
         return;
     }
 
@@ -185,43 +185,46 @@ void CanonicalDBG
     if (!max_num_edges_left)
         return;
 
-    call_outgoing_rc_strand(node, [&](node_index next, char c) {
-        assert(c == get_node_sequence(next).back());
-        auto s = alphabet_encoder_[c];
+    call_outgoing_rc_strand(node,
+        spelling_hint.size() ? spelling_hint : get_node_sequence(node),
+        [&](node_index next, char c) {
+            assert(c == get_node_sequence(next).back());
+            auto s = alphabet_encoder_[c];
 
-        if (c == boss::BOSS::kSentinel && children[s] != npos)
-            return;
+            if (c == boss::BOSS::kSentinel && children[s] != npos)
+                return;
 
-        if (children[s] == npos) {
-            assert(c == boss::BOSS::kSentinel || traverse(node, c) == next);
-            callback(next, c);
-            children[s] = next;
-            return;
+            if (children[s] == npos) {
+                assert(c == boss::BOSS::kSentinel || traverse(node, c) == next);
+                callback(next, c);
+                children[s] = next;
+                return;
+            }
+
+            assert(children[s] == get_base_node(children[s]));
+
+            if (k_odd_) {
+                logger->error(
+                    "Forward traversal: Primary graph contains both forward and reverse complement: {} {} -> {} {}\t{} {}",
+                    node, get_node_sequence(node), children[s], get_node_sequence(children[s]),
+                    next - offset_, get_node_sequence(next - offset_));
+                throw std::runtime_error("");
+            }
+
+            is_palindrome_cache_.Put(next, true);
         }
-
-        assert(children[s] == get_base_node(children[s]));
-
-        if (k_odd_) {
-            logger->error(
-                "Forward traversal: Primary graph contains both forward and reverse complement: {} {} -> {} {}\t{} {}",
-                node, get_node_sequence(node), children[s], get_node_sequence(children[s]),
-                next - offset_, get_node_sequence(next - offset_));
-            throw std::runtime_error("");
-        }
-
-        is_palindrome_cache_.Put(next, true);
-    }, spelling_hint.size() ? spelling_hint : get_node_sequence(node));
+    );
 }
 
 void CanonicalDBG
-::adjacent_outgoing_nodes_hint(node_index node,
-                               const std::function<void(node_index)> &callback,
-                               const std::string &spelling_hint) const {
+::adjacent_outgoing_nodes(node_index node,
+                          const std::string &spelling_hint,
+                          const std::function<void(node_index)> &callback) const {
     if (!k_odd_) {
         // use this function to enable checks for palindromic k-mers
-        call_outgoing_kmers_hint(node, [&](node_index next, char) {
+        call_outgoing_kmers(node, spelling_hint, [&](node_index next, char) {
             callback(next);
-        }, spelling_hint);
+        });
         return;
     }
 
@@ -230,18 +233,18 @@ void CanonicalDBG
     if (node > offset_) {
         std::string rc_hint = spelling_hint;
         ::reverse_complement(rc_hint.begin(), rc_hint.end());
-        adjacent_incoming_nodes_hint(node - offset_, [&](node_index next) {
+        adjacent_incoming_nodes(node - offset_, rc_hint, [&](node_index next) {
             callback(reverse_complement(next));
-        }, rc_hint);
+        });
         return;
     }
 
     if (has_sentinel_) {
         // we need to do extra checks to make sure we don't call dummy outgoing k-mers
         // from both strands, so use call_outgoing_kmers here
-        call_outgoing_kmers_hint(node, [&](node_index next, char) {
+        call_outgoing_kmers(node, spelling_hint, [&](node_index next, char) {
             callback(next);
-        }, spelling_hint);
+        });
     } else {
         size_t max_num_edges_left = graph_->alphabet().size();
         graph_->adjacent_outgoing_nodes(node, [&](node_index next) {
@@ -254,8 +257,8 @@ void CanonicalDBG
 
         adjacent_outgoing_rc_strand(
             node,
-            [&](node_index next, edge_index) { callback(next); },
-            spelling_hint.size() ? spelling_hint : get_node_sequence(node)
+            spelling_hint.size() ? spelling_hint : get_node_sequence(node),
+            [&](node_index next, edge_index) { callback(next); }
         );
     }
 }
@@ -289,20 +292,20 @@ bool CanonicalDBG::has_single_incoming(node_index node) const {
 }
 
 void CanonicalDBG
-::call_incoming_kmers_hint(node_index node,
-                           const IncomingEdgeCallback &callback,
-                           const std::string &spelling_hint) const {
+::call_incoming_kmers(node_index node,
+                      const std::string &spelling_hint,
+                      const IncomingEdgeCallback &callback) const {
     assert(node);
     assert(node <= offset_ * 2);
     if (node > offset_) {
         std::string rc_hint = spelling_hint;
         ::reverse_complement(rc_hint.begin(), rc_hint.end());
-        call_outgoing_kmers_hint(node - offset_, [&](node_index prev, char c) {
+        call_outgoing_kmers(node - offset_, rc_hint, [&](node_index prev, char c) {
             c = complement(c);
             assert(c == boss::BOSS::kSentinel
                 || traverse_back(node, c) == reverse_complement(prev));
             callback(reverse_complement(prev), c);
-        }, rc_hint);
+        });
         return;
     }
 
@@ -328,44 +331,47 @@ void CanonicalDBG
     if (!max_num_edges_left)
         return;
 
-    call_incoming_rc_strand(node, [&](node_index prev, char c) {
-        assert(c == get_node_sequence(prev)[0]);
-        auto s = alphabet_encoder_[c];
+    call_incoming_rc_strand(node,
+        spelling_hint.size() ? spelling_hint : get_node_sequence(node),
+        [&](node_index prev, char c) {
+            assert(c == get_node_sequence(prev)[0]);
+            auto s = alphabet_encoder_[c];
 
-        if (c == boss::BOSS::kSentinel && parents[s] != npos)
-            return;
+            if (c == boss::BOSS::kSentinel && parents[s] != npos)
+                return;
 
-        if (parents[s] == npos) {
-            assert(c == boss::BOSS::kSentinel || traverse_back(node, c) == prev);
-            callback(prev, c);
-            parents[s] = prev;
-            return;
+            if (parents[s] == npos) {
+                assert(c == boss::BOSS::kSentinel || traverse_back(node, c) == prev);
+                callback(prev, c);
+                parents[s] = prev;
+                return;
+            }
+
+            assert(parents[s] == get_base_node(parents[s]));
+
+            if (k_odd_) {
+                logger->error(
+                    "Bachward traversal: Primary graph contains both forward and reverse complement: {} {} <- {} {}\t{} {}",
+                    node, get_node_sequence(node), parents[s], get_node_sequence(parents[s]),
+                    prev - offset_, get_node_sequence(prev - offset_)
+                );
+                throw std::runtime_error("");
+            }
+
+            is_palindrome_cache_.Put(prev - offset_, true);
         }
-
-        assert(parents[s] == get_base_node(parents[s]));
-
-        if (k_odd_) {
-            logger->error(
-                "Bachward traversal: Primary graph contains both forward and reverse complement: {} {} <- {} {}\t{} {}",
-                node, get_node_sequence(node), parents[s], get_node_sequence(parents[s]),
-                prev - offset_, get_node_sequence(prev - offset_)
-            );
-            throw std::runtime_error("");
-        }
-
-        is_palindrome_cache_.Put(prev - offset_, true);
-    }, spelling_hint.size() ? spelling_hint : get_node_sequence(node));
+    );
 }
 
 void CanonicalDBG
-::adjacent_incoming_nodes_hint(node_index node,
-                               const std::function<void(node_index)> &callback,
-                               const std::string &spelling_hint) const {
+::adjacent_incoming_nodes(node_index node,
+                          const std::string &spelling_hint,
+                          const std::function<void(node_index)> &callback) const {
     if (!k_odd_) {
         // use this function to enable checks for palindromic k-mers
-        call_incoming_kmers_hint(node, [&](node_index prev, char) {
+        call_incoming_kmers(node, spelling_hint, [&](node_index prev, char) {
             callback(prev);
-        }, spelling_hint);
+        });
         return;
     }
 
@@ -374,18 +380,18 @@ void CanonicalDBG
     if (node > offset_) {
         std::string rc_hint = spelling_hint;
         ::reverse_complement(rc_hint.begin(), rc_hint.end());
-        adjacent_outgoing_nodes_hint(node - offset_, [&](node_index prev) {
+        adjacent_outgoing_nodes(node - offset_, rc_hint, [&](node_index prev) {
             callback(reverse_complement(prev));
-        }, rc_hint);
+        });
         return;
     }
 
     if (has_sentinel_) {
         // we need to do extra checks to make sure we don't call dummy incoming k-mers
         // from both strands, so use call_incoming_kmers here
-        call_incoming_kmers_hint(node, [&](node_index prev, char) {
+        call_incoming_kmers(node, spelling_hint, [&](node_index prev, char) {
             callback(prev);
-        }, spelling_hint);
+        });
     } else {
         size_t max_num_edges_left = graph_->alphabet().size();
         graph_->adjacent_incoming_nodes(node, [&](node_index prev) {
@@ -398,8 +404,8 @@ void CanonicalDBG
 
         adjacent_incoming_rc_strand(
             node,
-            [&](node_index prev) { callback(prev); },
-            spelling_hint.size() ? spelling_hint : get_node_sequence(node)
+            spelling_hint.size() ? spelling_hint : get_node_sequence(node),
+            [&](node_index prev) { callback(prev); }
         );
     }
 }
@@ -579,8 +585,8 @@ void CanonicalDBG::reverse_complement(std::string &seq,
 // rc(n)AGCCA as index(TGGCTn) + offset_
 void CanonicalDBG
 ::adjacent_incoming_rc_strand(node_index node,
-                            const std::function<void(node_index)> &callback,
-                            const std::string &spelling_hint) const {
+                              const std::string &spelling_hint,
+                              const std::function<void(node_index)> &callback) const {
     //        lshift    rc
     // AGCCAT -> *AGCCA -> TGGCT*
     if (const auto *dbg_succ_ = get_dbg_succ(*graph_)) {
@@ -648,8 +654,8 @@ void CanonicalDBG
 // TGGCTrc(n) as index(nAGCCA) + offset_
 void CanonicalDBG
 ::adjacent_outgoing_rc_strand(node_index node,
-                              const std::function<void(node_index, edge_index)> &callback,
-                              const std::string &spelling_hint) const {
+                              const std::string &spelling_hint,
+                              const std::function<void(node_index, edge_index)> &callback) const {
     //        rshift    rc
     // ATGGCT -> TGGCT* -> *AGCCA
     if (const auto *dbg_succ_ = get_dbg_succ(*graph_)) {
@@ -714,42 +720,44 @@ void CanonicalDBG
 
 void CanonicalDBG
 ::call_incoming_rc_strand(node_index node,
-                          const std::function<void(node_index, char)> &callback,
-                          const std::string &spelling_hint) const {
+                          const std::string &spelling_hint,
+                          const std::function<void(node_index, char)> &callback) const {
     if (const auto *dbg_succ_ = get_dbg_succ(*graph_)) {
         const boss::BOSS &boss = dbg_succ_->get_boss();
-        adjacent_incoming_rc_strand(node, [&](node_index prev) {
+        adjacent_incoming_rc_strand(node, spelling_hint, [&](node_index prev) {
             char c = complement(boss.decode(
                 boss.get_W(dbg_succ_->kmer_to_boss_index(prev - offset_)) % boss.alph_size
             ));
             callback(prev, c);
-        }, spelling_hint);
+        });
     } else {
-        adjacent_incoming_rc_strand(node, [&](node_index prev) {
+        adjacent_incoming_rc_strand(node, spelling_hint, [&](node_index prev) {
             char c = complement(graph_->get_node_sequence(prev - offset_).back());
             assert(c != boss::BOSS::kSentinel);
             callback(prev, c);
-        }, spelling_hint);
+        });
     }
 }
 
 void CanonicalDBG
 ::call_outgoing_rc_strand(node_index node,
-                          const std::function<void(node_index, char)> &callback,
-                          const std::string &spelling_hint) const {
+                          const std::string &spelling_hint,
+                          const std::function<void(node_index, char)> &callback) const {
     if (get_dbg_succ(*graph_)) {
         const auto *cache = get_cache();
         assert(cache);
-        adjacent_outgoing_rc_strand(node, [&](node_index next, edge_index rc_edge) {
-            char c = complement(cache->get_first_char(next - offset_, rc_edge));
-            callback(next, c);
-        }, spelling_hint);
+        adjacent_outgoing_rc_strand(node, spelling_hint,
+            [&](node_index next, edge_index rc_edge) {
+                char c = complement(cache->get_first_char(next - offset_, rc_edge));
+                callback(next, c);
+            }
+        );
     } else {
-        adjacent_outgoing_rc_strand(node, [&](node_index next, edge_index) {
+        adjacent_outgoing_rc_strand(node, spelling_hint, [&](node_index next, edge_index) {
             char c = complement(graph_->get_node_sequence(next - offset_)[0]);
             assert(c != boss::BOSS::kSentinel);
             callback(next, c);
-        }, spelling_hint);
+        });
     }
 }
 

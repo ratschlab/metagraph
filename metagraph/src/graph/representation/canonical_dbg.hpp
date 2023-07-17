@@ -59,44 +59,43 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
     // Given a node index, call the target nodes of all edges outgoing from it.
     virtual void adjacent_outgoing_nodes(node_index node,
                                          const std::function<void(node_index)> &callback) const override final {
-        adjacent_outgoing_nodes_hint(node, callback, "");
+        adjacent_outgoing_nodes(node, "", callback);
     }
 
     virtual void call_outgoing_kmers(node_index kmer,
                                      const OutgoingEdgeCallback &callback) const override final {
-        call_outgoing_kmers_hint(kmer, callback, "");
+        call_outgoing_kmers(kmer, "", callback);
     }
 
     virtual void call_incoming_kmers(node_index kmer,
                                      const IncomingEdgeCallback &callback) const override final {
-        call_incoming_kmers_hint(kmer, callback, "");
+        call_incoming_kmers(kmer, "", callback);
     }
 
     // Given a node index, call the source nodes of all edges incoming to it.
     virtual void adjacent_incoming_nodes(node_index node,
                                          const std::function<void(node_index)> &callback) const override final {
-        adjacent_incoming_nodes_hint(node, callback, "");
+        adjacent_incoming_nodes(node, "", callback);
     }
 
 
     // Given a node index, call the target nodes of all edges outgoing from it.
-    virtual void adjacent_outgoing_nodes_hint(node_index node,
-                                              const std::function<void(node_index)> &callback,
-                                              const std::string &spelling_hint) const;
+    void adjacent_outgoing_nodes(node_index node,
+                                 const std::string &spelling_hint,
+                                 const std::function<void(node_index)> &callback) const;
 
-    virtual void call_outgoing_kmers_hint(node_index kmer,
-                                          const OutgoingEdgeCallback &callback,
-                                          const std::string &spelling_hint) const;
-
-    virtual void call_incoming_kmers_hint(node_index kmer,
-                                          const IncomingEdgeCallback &callback,
-                                          const std::string &spelling_hint) const;
+    void call_outgoing_kmers(node_index kmer,
+                             const std::string &spelling_hint,
+                             const OutgoingEdgeCallback &callback) const;
 
     // Given a node index, call the source nodes of all edges incoming to it.
-    virtual void adjacent_incoming_nodes_hint(node_index node,
-                                              const std::function<void(node_index)> &callback,
-                                              const std::string &spelling_hint) const;
+    void adjacent_incoming_nodes(node_index node,
+                                 const std::string &spelling_hint,
+                                 const std::function<void(node_index)> &callback) const;
 
+    void call_incoming_kmers(node_index kmer,
+                             const std::string &spelling_hint,
+                             const IncomingEdgeCallback &callback) const;
 
     virtual void call_sequences(const CallPath &callback,
                                 size_t num_threads = 1,
@@ -148,19 +147,19 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
 
     // Find incoming nodes that are on the reverse complement strand of node
     void adjacent_incoming_rc_strand(node_index node,
-                                     const std::function<void(node_index)> &callback,
-                                     const std::string &spelling_hint) const;
+                                     const std::string &spelling_hint,
+                                     const std::function<void(node_index)> &callback) const;
     void call_incoming_rc_strand(node_index node,
-                                 const std::function<void(node_index, char)> &callback,
-                                 const std::string &spelling_hint) const;
+                                 const std::string &spelling_hint,
+                                 const std::function<void(node_index, char)> &callback) const;
 
     // Find outgoing nodes that are on the reverse complement strand of node
     void adjacent_outgoing_rc_strand(node_index node,
-                                     const std::function<void(node_index, uint64_t)> &callback,
-                                     const std::string &spelling_hint) const;
+                                     const std::string &spelling_hint,
+                                     const std::function<void(node_index, uint64_t)> &callback) const;
     void call_outgoing_rc_strand(node_index node,
-                                 const std::function<void(node_index, char)> &callback,
-                                 const std::string &spelling_hint) const;
+                                 const std::string &spelling_hint,
+                                 const std::function<void(node_index, char)> &callback) const;
 
     const NodeFirstCache* get_cache() const;
 };
