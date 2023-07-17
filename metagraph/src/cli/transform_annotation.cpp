@@ -157,11 +157,11 @@ binmat::LinkageMatrix compute_linkage(const std::vector<std::string> &files,
                                       const Config &config) {
     if (config.greedy_brwt) {
         if (config.subsample_rows) {
-            return cluster_columns<binmat::SparseColumn>(files, anno_type,
-                                                         config.num_rows_subsampled);
-        } else {
             return cluster_columns<sdsl::bit_vector>(files, anno_type,
                                                      config.num_rows_subsampled);
+        } else {
+            return cluster_columns<binmat::SparseColumn>(files, anno_type,
+                                                         config.num_rows_subsampled);
         }
     } else {
         return trivial_linkage(files, anno_type);
