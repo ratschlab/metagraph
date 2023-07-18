@@ -545,6 +545,7 @@ void chain_alignments(const IDBGAligner &aligner,
         uint64_t end_clipping;
         int64_t node_idx;
         score_t score;
+        Alignment::Column col;
 
         std::string_view get_query_view() const {
             return std::string_view(begin, end - begin);
@@ -619,6 +620,7 @@ void chain_alignments(const IDBGAligner &aligner,
                                         - cur.get_query_view().begin() - seed_size,
                     .node_idx = node_idx,
                     .score = cur.get_score(),
+                    .col = std::numeric_limits<Alignment::Column>::max(),
                 });
 
 #ifndef NDEBUG
@@ -680,6 +682,19 @@ void chain_alignments(const IDBGAligner &aligner,
     });
 #endif
 
+    const auto *labeled_aligner = dynamic_cast<const ILabeledAligner*>(&aligner);
+    if (labeled_aligner) {
+        size_t orientation_change = 0;
+        std::vector<Anchor> split_anchors;
+        for (auto &a : anchors) {
+            for (auto c : alignments[a.index].get_columns(std::max(int64_t{0}, a.node_idx))) {
+                orientation_change += !a.get_orientation();
+                split_anchors.emplace_back(a);
+                a.col = c;
+            }
+        }
+    }
+
     assert(std::is_sorted(anchors.begin(), anchors.end(), [](const auto &a, const auto &b) {
         return std::tie(b.orientation, a.end) > std::tie(a.orientation, b.end);
     }));
@@ -695,6 +710,7 @@ void chain_alignments(const IDBGAligner &aligner,
     const Anchor *last_anchor;
     score_t chain_score = 0;
     AnchorChain<Anchor> last_chain;
+    Alignment::Columns col_idx = 0;
 
     chain_anchors<Anchor>(config, anchors.data(), anchors.data() + anchors.size(),
         [&](const Anchor &a_i, ssize_t, const Anchor *begin, const Anchor *end, auto chain_scores, const auto &update_score) {
@@ -704,9 +720,6 @@ void chain_alignments(const IDBGAligner &aligner,
             const Alignment &full_i = alignments[a_i.index];
             std::string_view full_query_i = full_i.get_query_view();
             std::string_view query_i(a_i.begin, a_i.end - a_i.begin);
-            auto a_i_col = full_i.label_column_diffs.size() && a_i.node_idx > 0
-                ? full_i.label_column_diffs[a_i.node_idx - 1]
-                : full_i.label_columns;
 
             score_t score_seed_i = a_i.score
                 - per_char_scores_prefix_del[a_i.index][a_i.end - full_i.get_query_view().begin()];
@@ -737,29 +750,8 @@ void chain_alignments(const IDBGAligner &aligner,
                     return;
                 }
 
-                auto a_j_col = full_j.label_column_diffs.size() && a_j.node_idx > 0
-                    ? full_j.label_column_diffs[a_j.node_idx - 1]
-                    : full_j.label_columns;
-
-                auto get_label_change_score = [&]() {
-                    if (a_i_col == a_j_col)
-                        return 0;
-
-                    const auto &labeled_aligner = dynamic_cast<const ILabeledAligner&>(aligner);
-                    const auto &buffer = labeled_aligner.get_annotation_buffer();
-                    const auto &a_i_cols = buffer.get_cached_column_set(a_i_col);
-                    const auto &a_j_cols = buffer.get_cached_column_set(a_j_col);
-                    assert(a_i_cols.size());
-                    assert(a_j_cols.size());
-                    assert(a_i_cols[0] != std::numeric_limits<Alignment::Column>::max());
-                    assert(a_j_cols[0] != std::numeric_limits<Alignment::Column>::max());
-
-                    std::vector<Alignment::Column> diff;
-                    std::set_difference(a_i_cols.begin(), a_i_cols.end(),
-                                        a_j_cols.begin(), a_j_cols.end(),
-                                        std::back_inserter(diff));
-                    return diff.size() ? DBGAlignerConfig::ninf : 0;
-                };
+                if (a_i.col != a_j.col)
+                    return;
 
                 if (full_query_i.end() <= full_query_j.begin()) {
                     // completely disjoint
@@ -779,11 +771,8 @@ void chain_alignments(const IDBGAligner &aligner,
                         assert(cur.get_score() == full_j.get_score() + gap_cost);
 #endif
 
-                        score_t base_updated_score = score_j + gap_cost + a_i.score;
-                        if (base_updated_score > score_i) {
-                            update_score(base_updated_score + get_label_change_score(),
-                                         &a_j, -a_i.spelling_length);
-                        }
+                        update_score(score_j + gap_cost + a_i.score,
+                                     &a_j, -a_i.spelling_length);
                     }
 
                     return;
@@ -810,12 +799,9 @@ void chain_alignments(const IDBGAligner &aligner,
 
                 if (a_j.node_idx >= 0 && full_i.get_nodes()[a_i.node_idx] == full_j.get_nodes()[a_j.node_idx]) {
                     // perfect overlap, easy top connect
-                    update_score(base_updated_score + get_label_change_score(),
-                                 &a_j, -seed_size);
+                    update_score(base_updated_score, &a_j, -seed_size);
                     return;
                 }
-
-                base_updated_score += node_insert;
 
 #ifndef NDEBUG
                 auto cur = full_j;
@@ -825,10 +811,7 @@ void chain_alignments(const IDBGAligner &aligner,
                 assert(cur.get_score() == full_j.get_score() + node_insert);
 #endif
 
-                if (base_updated_score > score_i) {
-                    update_score(base_updated_score + get_label_change_score(),
-                                 &a_j, -seed_size);
-                }
+                update_score(base_updated_score + node_insert, &a_j, -seed_size);
             });
         },
         [&](const AnchorChain<Anchor> &chain, score_t score) {
@@ -848,7 +831,8 @@ void chain_alignments(const IDBGAligner &aligner,
                 if (chain_score == score && std::equal(chain.begin(), chain.end(),
                                                        last_chain.begin(), last_chain.end(),
                                                        [](const auto &a, const auto &b) {
-                                                           return a.first->index == b.first->index;
+                                                           return a.first->index == b.first->index
+                                                                    && a.first->col == b.first->col;
                                                        })) {
                     return false;
                 }
@@ -858,6 +842,12 @@ void chain_alignments(const IDBGAligner &aligner,
             chain_score = score;
             DEBUG_LOG("Chain: {}", score);
             last_anchor = chain.back().first;
+            if (labeled_aligner) {
+                col_idx = labeled_aligner->get_annotation_buffer().cache_column_set(
+                    1, last_anchor->col
+                );
+            }
+
             return true;
         },
         true /* extend_anchors */,
@@ -868,6 +858,7 @@ void chain_alignments(const IDBGAligner &aligner,
             const auto &callback) {
 
             Alignment alignment = alignments[first->index];
+            alignment.label_columns = col_idx;
 
             auto check_aln = [&](Alignment aln) {
 #ifndef NDEBUG
@@ -898,6 +889,8 @@ void chain_alignments(const IDBGAligner &aligner,
                 return;
             }
 
+            DEBUG_LOG("\t\taln: {}", alignment);
+            DEBUG_LOG("\t\tcur: {}", cur);
             if (alignment.get_query_view().end() <= cur.get_query_view().begin()) {
                 // no overlap
                 std::ignore = dist;
@@ -912,7 +905,8 @@ void chain_alignments(const IDBGAligner &aligner,
                 assert(dist == -seed_size);
                 assert(last_anchor->end == first->end);
                 alignment.extend_offset(std::vector<node_index>(graph.get_k() - 1 - alignment.get_offset(),
-                                                                DeBruijnGraph::npos));
+                                                                DeBruijnGraph::npos),
+                                        std::vector<size_t>(graph.get_k() - 1 - alignment.get_offset(), 0));
                 alignment.trim_query_suffix(alignment.get_query_view().end() - first->end,
                                             config);
                 assert(alignment.size());
@@ -922,7 +916,8 @@ void chain_alignments(const IDBGAligner &aligner,
                 // assert(alignment.is_valid(graph, &config));
 
                 cur.extend_offset(std::vector<node_index>(graph.get_k() - 1 - cur.get_offset(),
-                                                          DeBruijnGraph::npos));
+                                                          DeBruijnGraph::npos),
+                                  std::vector<size_t>(graph.get_k() - 1 - alignment.get_offset(), 0));
                 cur.trim_query_prefix(first->end - cur.get_query_view().begin(),
                                       graph.get_k() - 1,
                                       config,
@@ -955,6 +950,7 @@ void chain_alignments(const IDBGAligner &aligner,
         },
         [&](Alignment&& aln) {
             aln.trim_offset();
+
 #ifndef NDEBUG
             const auto &last_aln = alignments[last_anchor->index];
             score_t predicted_score = chain_score
