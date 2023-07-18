@@ -454,6 +454,10 @@ void AnnotationBuffer::fetch_queued_annotations() {
 auto AnnotationBuffer::get_labels_and_coords(node_index node) const
         -> std::pair<const Columns*, const CoordinateSet*> {
     std::pair<const Columns*, const CoordinateSet*> ret_val { nullptr, nullptr };
+    if (!node) {
+        ret_val.first = &column_sets_.data()[0];
+        return ret_val;
+    }
 
     if (canonical_)
         node = canonical_->get_base_node(node);

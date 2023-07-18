@@ -386,17 +386,24 @@ void Alignment::extend_offset(std::vector<node_index>&& path,
     if (path.empty())
         return;
 
-    offset_ += path.size();
-    if (columns.size()) {
-        assert(columns.size() == path.size());
-        if (label_column_diffs.empty())
-            label_column_diffs.resize(nodes_.size() - 1, label_columns);
+    if (columns.empty())
+        columns.resize(path.size(), 0);
 
-        std::rotate(columns.begin(), columns.begin() + 1, columns.end());
-        std::swap(label_columns, columns.back());
-        label_column_diffs.insert(label_column_diffs.begin(), columns.begin(), columns.end());
-    } else if (label_column_diffs.size()) {
-        label_column_diffs.insert(label_column_diffs.begin(), path.size(), label_columns);
+    offset_ += path.size();
+
+    if (has_annotation()) {
+        std::vector<size_t> next_label_column_diffs;
+        next_label_column_diffs.reserve(nodes_.size() + path.size() - 1);
+        std::copy(columns.begin() + 1, columns.end(),
+                  std::back_inserter(next_label_column_diffs));
+        next_label_column_diffs.emplace_back(label_columns);
+        std::copy(label_column_diffs.begin(), label_column_diffs.end(),
+                  std::back_inserter(next_label_column_diffs));
+        next_label_column_diffs.resize(nodes_.size() + path.size() - 1,
+                                       next_label_column_diffs.back());
+        assert(next_label_column_diffs.size() == nodes_.size() + path.size() - 1);
+        label_columns = columns[0];
+        std::swap(next_label_column_diffs, label_column_diffs);
     }
 
     if (scores.size()) {
@@ -414,17 +421,6 @@ void Alignment::extend_offset(std::vector<node_index>&& path,
 
     nodes_.insert(nodes_.begin(), path.begin(), path.end());
     assert(extra_scores.empty() || extra_scores.size() == nodes_.size() - 1);
-    if (!path[0] && label_columns) {
-        auto it = std::find_if(path.begin(), path.end(), [](const auto &a) { return a; });
-        if (label_column_diffs.empty())
-            label_column_diffs.resize(nodes_.size() - 1, label_columns);
-
-        std::fill(label_column_diffs.begin(),
-                  label_column_diffs.begin() + (it - path.begin()) - 1,
-                  0);
-
-        label_columns = 0;
-    }
 }
 
 size_t Alignment::trim_query_prefix(size_t n,
@@ -1497,8 +1493,10 @@ void Alignment::insert_gap_prefix(ssize_t gap_length,
                     extra_scores.erase(extra_scores.begin(), extra_scores.begin() + offset_ + gap_length);
                 }
 
-                if (label_column_diffs.size())
+                if (label_column_diffs.size()) {
+                    label_columns = label_column_diffs[offset_ + gap_length - 1];
                     label_column_diffs.erase(label_column_diffs.begin(), label_column_diffs.begin() + offset_ + gap_length);
+                }
             }
         }
 
@@ -1566,11 +1564,20 @@ void Alignment::insert_gap_prefix(ssize_t gap_length,
         if (label_column_diffs.empty()) {
             label_column_diffs.resize(nodes_.size() - 1);
             std::fill(label_column_diffs.begin() + extra_nodes - 1, label_column_diffs.end(), label_columns);
-            label_columns = 0;
         } else {
-            label_column_diffs.insert(label_column_diffs.begin(), extra_nodes, 0);
-            std::swap(label_column_diffs[extra_nodes - 1], label_columns);
+            assert(nodes_.size() >= label_column_diffs.size() + 2);
+
+            std::vector<size_t> next_label_column_diffs;
+            next_label_column_diffs.reserve(nodes_.size() - 1);
+            next_label_column_diffs.resize(nodes_.size() - 2 - label_column_diffs.size(), 0);
+            next_label_column_diffs.emplace_back(label_columns);
+            std::copy(label_column_diffs.begin(), label_column_diffs.end(),
+                      std::back_inserter(next_label_column_diffs));
+            std::swap(label_column_diffs, next_label_column_diffs);
+            assert(label_column_diffs.size() == nodes_.size() - 1);
         }
+
+        label_columns = 0;
     }
     offset_ = node_overlap;
 
