@@ -730,8 +730,6 @@ void chain_alignments(const IDBGAligner &aligner,
 
         chain_anchors<Anchor>(config, last_anchor_it, anchor_it,
             [&](const Anchor &a_i, ssize_t, const Anchor *begin, const Anchor *end, auto *chain_scores, const auto &update_score) {
-                assert(a_i.col != std::numeric_limits<Alignment::Column>::max());
-
                 score_t &score_i = std::get<0>(*(
                     chain_scores - (begin - last_anchor_it) + (&a_i - last_anchor_it)
                 ));
@@ -750,7 +748,6 @@ void chain_alignments(const IDBGAligner &aligner,
                     if (&a_i == &a_j)
                         return;
 
-                    assert(a_j.col != std::numeric_limits<Alignment::Column>::max());
                     const Alignment &full_j = alignments[a_j.index];
                     std::string_view full_query_j = full_j.get_query_view();
                     std::string_view query_j(a_j.begin, a_j.end - a_j.begin);

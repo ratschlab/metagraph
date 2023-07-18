@@ -586,12 +586,13 @@ template class SuffixSeeder<ExactSeeder>;
 template class SuffixSeeder<UniMEMSeeder>;
 
 template <typename It>
-It merge_into_unitig_mums(const DeBruijnGraph &graph,
-                          const DBGAlignerConfig &config,
-                          It begin,
-                          It end,
-                          ssize_t min_seed_size,
-                          size_t max_seed_size) {
+It merge_into_mums(const DeBruijnGraph &graph,
+                   const DBGAlignerConfig &config,
+                   It begin,
+                   It end,
+                   ssize_t min_seed_size,
+                   bool force_to_unitigs,
+                   size_t max_seed_size) {
     if (begin == end)
         return end;
 
@@ -796,6 +797,7 @@ It merge_into_unitig_mums(const DeBruijnGraph &graph,
 
         int64_t coord_dist = nodes_j.size() - a_j_node_idx;
         int64_t dist = query_j.end() - query_i.end();
+
         if (coord_dist != dist)
             continue;
 
@@ -810,9 +812,10 @@ It merge_into_unitig_mums(const DeBruijnGraph &graph,
         if (!unique)
             continue;
 
-        if (graph.has_multiple_outgoing(nodes_i.back())
-                || !graph.has_single_incoming(nodes_i.back()))
+        if (force_to_unitigs && (graph.has_multiple_outgoing(nodes_i.back())
+                                    || !graph.has_single_incoming(nodes_i.back()))) {
             continue;
+        }
 
         char next_c = *(query_i.data() + query_i.size());
 
@@ -853,7 +856,9 @@ It merge_into_unitig_mums(const DeBruijnGraph &graph,
         assert(jt == a_j.label_coordinates.end());
 
         // we have a MUM
-        std::vector<Alignment::node_index> added_nodes(nodes_j.begin() + a_j_node_idx, nodes_j.end());
+        std::vector<Alignment::node_index> added_nodes(nodes_j.begin() + a_j_node_idx,
+                                                       nodes_j.end());
+
         if constexpr(std::is_same_v<seed_t, Seed>) {
             a_i.expand(std::move(added_nodes));
             assert(Alignment(a_i, config).is_valid(graph, &config));
@@ -861,7 +866,8 @@ It merge_into_unitig_mums(const DeBruijnGraph &graph,
         }
 
         if constexpr(std::is_same_v<seed_t, Alignment>) {
-            std::string_view added_query(query_j.data() + query_j.size() - added_nodes.size(), added_nodes.size());
+            std::string_view added_query(query_j.data() + query_j.size() - added_nodes.size(),
+                                         added_nodes.size());
             Alignment inserted_seed(
                 Seed(added_query,
                      std::move(added_nodes),
@@ -873,6 +879,7 @@ It merge_into_unitig_mums(const DeBruijnGraph &graph,
             );
             inserted_seed.label_columns = a_j.label_columns;
             inserted_seed.label_coordinates = a_j.label_coordinates;
+            inserted_seed.label_encoder = a_j.label_encoder;
             size_t coord_diff = inserted_seed.get_clipping() - a_j.get_clipping();
             for (auto &tuple : inserted_seed.label_coordinates) {
                 for (auto &c : tuple) {
@@ -882,6 +889,8 @@ It merge_into_unitig_mums(const DeBruijnGraph &graph,
             assert(inserted_seed.is_valid(graph, &config));
             a_i.splice(std::move(inserted_seed));
             assert(a_i.is_valid(graph, &config));
+            assert(a_i.size());
+            assert(a_i.label_column_diffs.empty());
             clear_seed(a_j);
         }
     }
@@ -889,25 +898,28 @@ It merge_into_unitig_mums(const DeBruijnGraph &graph,
     return std::remove_if(begin, end, [](const auto &a) { return a.empty(); });
 }
 
-template Seed* merge_into_unitig_mums(const DeBruijnGraph &,
-                                      const DBGAlignerConfig &,
-                                      Seed*,
-                                      Seed*,
-                                      ssize_t,
-                                      size_t);
-template std::vector<Seed>::iterator merge_into_unitig_mums(const DeBruijnGraph &,
-                                                            const DBGAlignerConfig &,
-                                                            std::vector<Seed>::iterator,
-                                                            std::vector<Seed>::iterator,
-                                                            ssize_t,
-                                                            size_t);
+template Seed* merge_into_mums(const DeBruijnGraph &,
+                               const DBGAlignerConfig &,
+                               Seed*,
+                               Seed*,
+                               ssize_t,
+                               bool,
+                               size_t);
+template std::vector<Seed>::iterator merge_into_mums(const DeBruijnGraph &,
+                                                     const DBGAlignerConfig &,
+                                                     std::vector<Seed>::iterator,
+                                                     std::vector<Seed>::iterator,
+                                                     ssize_t,
+                                                     bool,
+                                                     size_t);
 
-template std::vector<Alignment>::iterator merge_into_unitig_mums(const DeBruijnGraph &,
-                                                                 const DBGAlignerConfig &,
-                                                                 std::vector<Alignment>::iterator,
-                                                                 std::vector<Alignment>::iterator,
-                                                                 ssize_t,
-                                                                 size_t);
+template std::vector<Alignment>::iterator merge_into_mums(const DeBruijnGraph &,
+                                                          const DBGAlignerConfig &,
+                                                          std::vector<Alignment>::iterator,
+                                                          std::vector<Alignment>::iterator,
+                                                          ssize_t,
+                                                          bool,
+                                                          size_t);
 
 } // namespace align
 } // namespace graph

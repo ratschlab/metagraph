@@ -366,12 +366,51 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
 #endif
 
         for (size_t i = 0; i < 2; ++i) {
-            auto end = merge_into_unitig_mums(graph_, config_,
-                                              discarded_alignments[i].begin(),
-                                              discarded_alignments[i].end(),
-                                              config_.min_seed_length);
-            std::for_each(std::make_move_iterator(discarded_alignments[i].begin()),
-                          std::make_move_iterator(end), add_alignment);
+            if (discarded_alignments[i].empty())
+                continue;
+
+            DEBUG_LOG("Merging discarded seeds into MEMs per label");
+            std::vector<Alignment> split_seeds;
+            for (auto &a : discarded_alignments[i]) {
+                if (!a.has_annotation()) {
+                    split_seeds.emplace_back(std::move(a));
+                } else {
+                    for (auto c : a.get_columns()) {
+                        auto &seed = split_seeds.emplace_back(a);
+                        seed.set_columns(Vector<Alignment::Column>(1, c));
+                    }
+                }
+            }
+            discarded_alignments[i].clear();
+
+            std::sort(split_seeds.begin(), split_seeds.end(), [](const auto &a, const auto &b) {
+                return a.label_columns < b.label_columns;
+            });
+
+            auto last_it = split_seeds.begin();
+            while (last_it != split_seeds.end()) {
+                auto cur_it = last_it + 1;
+                while (cur_it != split_seeds.end() && cur_it->label_columns == last_it->label_columns) {
+                    ++cur_it;
+                }
+
+                auto end = merge_into_mums(graph_, config_, last_it, cur_it,
+                                           config_.min_seed_length);
+
+                last_it = cur_it;
+            }
+
+            auto end = std::remove_if(split_seeds.begin(), split_seeds.end(),
+                                      [](const auto &a) { return a.empty(); });
+
+            DEBUG_LOG("Merging MEMs by label");
+            if (!config_.post_chain_alignments && end != split_seeds.end() && split_seeds[0].has_annotation())
+                end = merge_exact_match_alignments_by_label(split_seeds.begin(), end);
+
+            DEBUG_LOG("Done merging");
+            std::for_each(std::make_move_iterator(split_seeds.begin()),
+                          std::make_move_iterator(end),
+                          add_alignment);
         }
 
         num_explored_nodes += extender.num_explored_nodes();

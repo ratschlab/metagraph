@@ -154,12 +154,13 @@ class SuffixSeeder : public BaseSeeder {
 };
 
 template <typename It>
-It merge_into_unitig_mums(const DeBruijnGraph &graph,
-                          const DBGAlignerConfig &config,
-                          It begin,
-                          It end,
-                          ssize_t min_seed_size,
-                          size_t max_seed_size = std::numeric_limits<size_t>::max());
+It merge_into_mums(const DeBruijnGraph &graph,
+                   const DBGAlignerConfig &config,
+                   It begin,
+                   It end,
+                   ssize_t min_seed_size,
+                   bool force_to_unitigs = false,
+                   size_t max_seed_size = std::numeric_limits<size_t>::max());
 
 bool is_low_complexity(std::string_view s, int T = 20, int W = 64);
 

@@ -1,5 +1,7 @@
 #include "alignment.hpp"
 
+#include <tsl/hopscotch_set.h>
+
 #include "annotation_buffer.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/canonical_dbg.hpp"
@@ -273,35 +275,29 @@ bool Alignment::append(Alignment&& other) {
         std::swap(label_coordinates, merged_label_coordinates);
 
     } else if (has_annotation()) {
-        const auto &columns_a = get_columns(nodes_.size() - 1);
-        size_t columns_b_idx = 0;
-        if (!other.label_columns && other.label_column_diffs.size()) {
+        size_t columns_a_idx = label_column_diffs.size()
+            ? label_column_diffs.back()
+            : label_columns;
+        size_t columns_b_idx = other.label_columns;
+        if (!columns_b_idx && other.label_column_diffs.size()) {
             auto it = std::find_if(other.label_column_diffs.begin(),
                                    other.label_column_diffs.end(),
                                    [](const auto &i) { return i; });
 
             if (it != other.label_column_diffs.end())
-                columns_b_idx = it - other.label_column_diffs.begin() + 1;
+                columns_b_idx = *it;
         }
 
-        const auto &columns_b = other.get_columns(columns_b_idx);
-        Vector<Column> intersection;
-        Vector<Column> diff;
-        utils::set_intersection_difference(columns_b.begin(), columns_b.end(),
-                                           columns_a.begin(), columns_a.end(),
-                                           std::back_inserter(intersection),
-                                           std::back_inserter(diff));
-
-        if (intersection.empty()) {
+        if (columns_a_idx != columns_b_idx) {
             DEBUG_LOG("Splice failed");
             *this = Alignment();
             return true;
         }
 
-        if (other.label_column_diffs.empty()) {
-            other.label_column_diffs.resize(other.nodes_.size(), other.label_columns);
-        } else {
+        if (other.label_column_diffs.size()) {
             other.label_column_diffs.insert(other.label_column_diffs.begin(), other.label_columns);
+        } else if (label_column_diffs.size()) {
+            other.label_column_diffs.resize(other.nodes_.size(), other.label_columns);
         }
 
         if (other.extra_scores.empty()) {
@@ -1774,6 +1770,65 @@ AlignmentResults::AlignmentResults(std::string_view query) {
 
     // reverse complement
     reverse_complement(query_rc_.begin(), query_rc_.end());
+}
+
+std::vector<Alignment>::iterator
+merge_exact_match_alignments_by_label(std::vector<Alignment>::iterator begin,
+                                      std::vector<Alignment>::iterator end) {
+    // merge identical alignments with different label
+    if (begin == end || !begin->has_annotation())
+        return end;
+
+    if (std::any_of(begin, end, [](const auto &a) { return a.label_coordinates.size(); })) {
+        throw std::runtime_error("Merging not implemented for coordintes");
+    }
+
+    begin = std::partition(begin, end, [](const auto &a) {
+        auto it = a.get_cigar().data().begin();
+        if (it == a.get_cigar().data().end())
+            return true;
+
+        if (it->first == Cigar::CLIPPED)
+            ++it;
+
+        if (it->first != Cigar::MATCH)
+            return true;
+
+        ++it;
+
+        return it != a.get_cigar().data().end() && it->first != Cigar::CLIPPED;
+    });
+
+    if (std::any_of(begin, end, [](const auto &a) { return a.label_column_diffs.size(); })) {
+        throw std::runtime_error("Merging not implemented for multi-label alignments");
+    }
+
+    std::sort(begin, end);
+
+    auto last_it = begin;
+    while (last_it != end) {
+        auto cur_it = last_it + 1;
+        while (cur_it != end && *last_it == *cur_it) {
+            ++cur_it;
+        }
+
+        if (cur_it - last_it > 1) {
+            tsl::hopscotch_set<Alignment::Column> columns;
+            std::for_each(last_it, cur_it, [&](const auto &a) {
+                for (auto c : a.get_columns()) {
+                    columns.emplace(c);
+                }
+            });
+            Vector<Alignment::Column> col_vec(columns.begin(), columns.end());
+            std::sort(col_vec.begin(), col_vec.end());
+            last_it->set_columns(std::move(col_vec));
+            std::fill(last_it + 1, cur_it, Alignment());
+        }
+
+        last_it = cur_it;
+    }
+
+    return std::remove_if(begin, end, [](const auto &a) { return a.empty(); });
 }
 
 } // namespace align
