@@ -384,22 +384,22 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
         auto alns = aggregator.get_alignments();
 
         for (const auto &aln : alns) {
-            if (aln.get_score() > best_score) {
-                best_score = aln.get_score();
-                query_coverage = aln.get_query_view().size();
-            }
+            best_score = std::max(best_score, aln.get_score());
+            query_coverage = std::max(query_coverage,
+                                      aln.get_query_view().size());
         }
 
         if (alns.size() && config_.post_chain_alignments) {
             tsl::hopscotch_map<Alignment::Column, size_t> best_label_counts;
             std::vector<Alignment> rest;
             for (const auto &a : alns) {
-                if (a.get_clipping() || a.get_end_clipping())
+                if (a.get_clipping() || a.get_end_clipping()) {
                     rest.emplace_back(a);
 
-                for (auto c : a.get_columns()) {
-                    auto it = best_label_counts.try_emplace(c, a.get_sequence().size()).first;
-                    it.value() = std::max(it.value(), a.get_sequence().size());
+                    for (auto c : a.get_columns()) {
+                        auto it = best_label_counts.try_emplace(c, a.get_sequence().size()).first;
+                        it.value() = std::max(it.value(), a.get_sequence().size());
+                    }
                 }
             }
 

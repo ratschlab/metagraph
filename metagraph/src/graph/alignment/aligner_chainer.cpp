@@ -644,61 +644,66 @@ void chain_alignments(const IDBGAligner &aligner,
             return;
 
         std::sort(begin, end, [](const Anchor &a, const Anchor &b) {
-            return std::tie(a.end, a.begin) > std::tie(b.end, b.begin);
+            return std::tie(b.col, a.end, a.begin) > std::tie(a.col, b.end, b.begin);
         });
 
+        auto last_it = begin;
         std::vector<tsl::hopscotch_set<size_t>> end_counters(query.size() + 1);
-        std::for_each(begin, end, [&](const Anchor &a) {
-            end_counters[a.end_clipping].emplace(a.index);
-        });
 
-        std::for_each(begin, end, [&](Anchor &a) {
-            if (end_counters[a.end_clipping].size() == 1
-                    && end_counters[a.end_clipping + 1].count(a.index)) {
-                a.index = std::numeric_limits<uint64_t>::max();
+        while (last_it != end) {
+            auto it = last_it + 1;
+            while (it != end && it->col == last_it->col) {
+                ++it;
             }
-        });
+
+            for (auto &c : end_counters) {
+                c.clear();
+            }
+
+            std::for_each(last_it, it, [&](const Anchor &a) {
+                end_counters[a.end_clipping].emplace(a.index);
+            });
+
+            std::for_each(last_it, it, [&](Anchor &a) {
+                if (end_counters[a.end_clipping].size() == 1
+                        && end_counters[a.end_clipping + 1].count(a.index)) {
+                    a.index = std::numeric_limits<uint64_t>::max();
+                }
+            });
+
+            last_it = it;
+        }
     };
 
     preprocess_range(anchors.begin(), anchors.begin() + orientation_change);
     preprocess_range(anchors.begin() + orientation_change, anchors.end());
 
-#ifndef NDEBUG
-    size_t old_anchor_count = anchors.size();
-#endif
-    anchors.erase(std::remove_if(anchors.begin(), anchors.end(),
-                                 [](const auto &a) {
-                                     return a.index == std::numeric_limits<uint64_t>::max();
-                                 }),
-                  anchors.end());
-    DEBUG_LOG("Kept {}/{} anchors", anchors.size(), old_anchor_count);
-#ifndef NDEBUG
-    std::for_each(anchors.begin(), anchors.end(), [&](const auto &a) {
-        auto cur = alignments[a.index];
-        cur.extend_offset(std::vector<node_index>(graph.get_k() - 1 - cur.get_offset(), 0));
-        cur.trim_query_suffix(cur.get_query_view().end() - a.end, config, false);
-        cur.trim_query_prefix(a.begin - cur.get_query_view().begin(),
-                              graph.get_k() - 1, config);
-        DEBUG_LOG("Kept Anchor: {}:{}\t{}", a.index, &a - anchors.data(), cur);
-    });
-#endif
-
     const auto *labeled_aligner = dynamic_cast<const ILabeledAligner*>(&aligner);
     if (labeled_aligner) {
-        size_t orientation_change = 0;
         std::vector<Anchor> split_anchors;
         for (auto &a : anchors) {
-            for (auto c : alignments[a.index].get_columns(std::max(int64_t{0}, a.node_idx))) {
-                orientation_change += !a.get_orientation();
-                split_anchors.emplace_back(a);
-                a.col = c;
+            if (a.index != std::numeric_limits<uint64_t>::max()) {
+                assert(alignments[a.index].label_columns);
+                assert(alignments[a.index].label_column_diffs.empty());
+                for (auto c : alignments[a.index].get_columns()) {
+                    assert(c != std::numeric_limits<Alignment::Column>::max());
+                    split_anchors.emplace_back(a);
+                    split_anchors.back().col = c;
+                }
             }
         }
+        std::swap(split_anchors, anchors);
+    } else {
+        anchors.erase(std::remove_if(anchors.begin(), anchors.end(),
+                                     [](const auto &a) {
+                                         return a.index == std::numeric_limits<uint64_t>::max();
+                                     }),
+                      anchors.end());
     }
 
-    assert(std::is_sorted(anchors.begin(), anchors.end(), [](const auto &a, const auto &b) {
-        return std::tie(b.orientation, a.end) > std::tie(a.orientation, b.end);
-    }));
+    std::sort(anchors.begin(), anchors.end(), [](const auto &a, const auto &b) {
+        return std::tie(b.col, b.orientation, a.end) > std::tie(a.col, a.orientation, b.end);
+    });
 
     score_t node_insert = config.node_insertion_penalty;
     score_t gap_open = config.gap_opening_penalty;
@@ -708,275 +713,290 @@ void chain_alignments(const IDBGAligner &aligner,
     assert(gap_ext >= gap_open);
     assert(node_insert < 0);
 
-    const Anchor *last_anchor;
-    score_t chain_score = 0;
-    AnchorChain<Anchor> last_chain;
-    Alignment::Columns col_idx = 0;
-    score_t full_score = 0;
+    auto last_anchor_it = anchors.data();
+    while (!terminate() && last_anchor_it != anchors.data() + anchors.size()) {
+        auto anchor_it = last_anchor_it + 1;
+        while (anchor_it != anchors.data() + anchors.size()
+                && anchor_it->col == last_anchor_it->col
+                && anchor_it->orientation == last_anchor_it->orientation) {
+            ++anchor_it;
+        }
 
-    chain_anchors<Anchor>(config, anchors.data(), anchors.data() + anchors.size(),
-        [&](const Anchor &a_i, ssize_t, const Anchor *begin, const Anchor *end, auto chain_scores, const auto &update_score) {
-            score_t &score_i = std::get<0>(*(
-                chain_scores - (begin - anchors.data()) + (&a_i - anchors.data())
-            ));
-            const Alignment &full_i = alignments[a_i.index];
-            std::string_view full_query_i = full_i.get_query_view();
-            std::string_view query_i(a_i.begin, a_i.end - a_i.begin);
+        const Anchor *last_anchor;
+        score_t chain_score = 0;
+        AnchorChain<Anchor> last_chain;
+        Alignment::Columns col_idx = 0;
+        score_t full_score = 0;
 
-            score_t score_seed_i = a_i.score
-                - per_char_scores_prefix_del[a_i.index][a_i.end - full_i.get_query_view().begin()];
+        chain_anchors<Anchor>(config, last_anchor_it, anchor_it,
+            [&](const Anchor &a_i, ssize_t, const Anchor *begin, const Anchor *end, auto *chain_scores, const auto &update_score) {
+                assert(a_i.col != std::numeric_limits<Alignment::Column>::max());
 
-            --chain_scores;
-            std::for_each(begin, end, [&](const Anchor &a_j) {
-                // try to connect a_i -> a_j
-                ++chain_scores;
+                score_t &score_i = std::get<0>(*(
+                    chain_scores - (begin - last_anchor_it) + (&a_i - last_anchor_it)
+                ));
+                const Alignment &full_i = alignments[a_i.index];
+                std::string_view full_query_i = full_i.get_query_view();
+                std::string_view query_i(a_i.begin, a_i.end - a_i.begin);
 
-                if (&a_i == &a_j)
-                    return;
+                score_t score_seed_i = a_i.score
+                    - per_char_scores_prefix_del[a_i.index][a_i.end - full_i.get_query_view().begin()];
 
-                const Alignment &full_j = alignments[a_j.index];
-                std::string_view full_query_j = full_j.get_query_view();
-                std::string_view query_j(a_j.begin, a_j.end - a_j.begin);
+                --chain_scores;
+                std::for_each(begin, end, [&](const Anchor &a_j) {
+                    // try to connect a_i -> a_j
+                    ++chain_scores;
 
-                auto [score_j, last, last_dist] = *chain_scores;
-                if (last == anchors.data() + anchors.size()) {
-                    assert(last_dist == std::numeric_limits<size_t>::max());
-                    last_dist = -a_j.spelling_length;
-                }
+                    if (&a_i == &a_j)
+                        return;
 
-                if (a_i.index == a_j.index) {
-                    assert(a_i.spelling_length > a_j.spelling_length);
-                    size_t added_length = a_i.spelling_length - a_j.spelling_length;
-                    update_score(score_j + a_i.score - a_j.score,
-                                 &a_j, last_dist - added_length);
-                    return;
-                }
+                    assert(a_j.col != std::numeric_limits<Alignment::Column>::max());
+                    const Alignment &full_j = alignments[a_j.index];
+                    std::string_view full_query_j = full_j.get_query_view();
+                    std::string_view query_j(a_j.begin, a_j.end - a_j.begin);
 
-                if (a_i.col != a_j.col)
-                    return;
-
-                if (full_query_i.end() <= full_query_j.begin()) {
-                    // completely disjoint
-                    if (a_j.clipping == full_j.get_clipping()
-                            && -last_dist >= graph.get_k()
-                            && a_i.spelling_length >= graph.get_k()) {
-                        score_t gap = full_query_j.begin() - full_query_i.end();
-                        score_t gap_cost = node_insert + gap_open;
-                        if (gap > 0)
-                            gap_cost += gap_open + (gap - 1) * gap_ext;
-
-                        assert(gap_cost < 0);
-
-#ifndef NDEBUG
-                        auto cur = full_j;
-                        cur.insert_gap_prefix(cur.get_query_view().begin() - full_i.get_query_view().end(), graph.get_k() - 1, config);
-                        assert(cur.get_score() == full_j.get_score() + gap_cost);
-#endif
-
-                        update_score(score_j + gap_cost + a_i.score,
-                                     &a_j, -a_i.spelling_length);
+                    auto [score_j, last, last_dist] = *chain_scores;
+                    if (last == anchor_it) {
+                        assert(last_dist == std::numeric_limits<size_t>::max());
+                        last_dist = -a_j.spelling_length;
                     }
 
-                    return;
-                }
+                    if (a_i.index == a_j.index) {
+                        assert(a_i.spelling_length > a_j.spelling_length);
+                        size_t added_length = a_i.spelling_length - a_j.spelling_length;
+                        update_score(score_j + a_i.score - a_j.score,
+                                     &a_j, last_dist - added_length);
+                        return;
+                    }
 
-                if (query_j.end() != query_i.end())
-                    return;
+                    if (a_i.col != a_j.col)
+                        return;
 
-                assert(query_i.begin() == query_j.begin());
+                    if (full_query_i.end() <= full_query_j.begin()) {
+                        // completely disjoint
+                        if (a_j.clipping == full_j.get_clipping()
+                                && -last_dist >= graph.get_k()
+                                && a_i.spelling_length >= graph.get_k()) {
+                            score_t gap = full_query_j.begin() - full_query_i.end();
+                            score_t gap_cost = node_insert + gap_open;
+                            if (gap > 0)
+                                gap_cost += gap_open + (gap - 1) * gap_ext;
 
-                if (a_i.node_idx < 0)
-                    return;
-
-                if (-last_dist < graph.get_k())
-                    return;
-
-                score_t score_seed_j = a_j.score
-                    - per_char_scores_prefix_del[a_j.index][a_j.end - full_j.get_query_view().begin()];
-
-                score_t base_updated_score = score_j - score_seed_j + score_seed_i;
-
-                if (base_updated_score <= score_i)
-                    return;
-
-                if (a_j.node_idx >= 0 && full_i.get_nodes()[a_i.node_idx] == full_j.get_nodes()[a_j.node_idx]) {
-                    // perfect overlap, easy top connect
-                    update_score(base_updated_score, &a_j, -seed_size);
-                    return;
-                }
+                            assert(gap_cost < 0);
 
 #ifndef NDEBUG
-                auto cur = full_j;
-                cur.extend_offset(std::vector<node_index>(graph.get_k() - 1 - cur.get_offset(),
-                                                          DeBruijnGraph::npos));
-                cur.insert_gap_prefix(-seed_size, graph.get_k() - 1, config);
-                assert(cur.get_score() == full_j.get_score() + node_insert);
+                            auto cur = full_j;
+                            cur.insert_gap_prefix(cur.get_query_view().begin() - full_i.get_query_view().end(), graph.get_k() - 1, config);
+                            assert(cur.get_score() == full_j.get_score() + gap_cost);
 #endif
 
-                update_score(base_updated_score + node_insert, &a_j, -seed_size);
-            });
-        },
-        [&](const AnchorChain<Anchor> &chain, score_t score) {
-            assert(chain.size());
-            if (chain_score == score && std::equal(chain.begin(), chain.end(),
-                                                   last_chain.begin(), last_chain.end(),
-                                                   [](const auto &a, const auto &b) {
-                                                       return a.first->index == b.first->index
-                                                                && a.first->col == b.first->col;
-                                                   })) {
-                return false;
-            }
+                            update_score(score_j + gap_cost + a_i.score,
+                                         &a_j, -a_i.spelling_length);
+                        }
 
-            if (chain.size() > 1) {
-                if (-chain[1].second < graph.get_k())
-                    return false;
+                        return;
+                    }
 
-                if (std::all_of(chain.begin() + 1, chain.end(),
-                                [&](const auto &a) {
-                                    return a.first->index == chain.front().first->index;
-                                })) {
-                    return false;
-                }
-            }
+                    if (query_j.end() != query_i.end())
+                        return;
 
-            const auto &first_anchor = *chain.front().first;
-            const auto &first_aln = alignments[first_anchor.index];
-            full_score = score
-                + first_aln.get_score()
-                - per_char_scores_prefix[first_anchor.index][first_anchor.begin - first_aln.get_query_view().begin()];
+                    assert(query_i.begin() == query_j.begin());
 
-            size_t aln_size = 0;
-            for (const auto &[ptr, d] : chain) {
-                aln_size += -d;
-            }
+                    if (a_i.node_idx < 0)
+                        return;
 
-            if (start_backtrack(chain[0].first->col, aln_size, full_score)) {
-                last_chain = chain;
-                chain_score = score;
-                DEBUG_LOG("Chain: {}", score);
-                last_anchor = chain.back().first;
-                if (labeled_aligner) {
-                    col_idx = labeled_aligner->get_annotation_buffer().cache_column_set(
-                        1, last_anchor->col
-                    );
-                }
+                    if (-last_dist < graph.get_k())
+                        return;
 
-                return true;
-            } else {
-                return false;
-            }
-        },
-        true /* extend_anchors */,
-        [&](const Anchor *first,
-            Alignment&& cur,
-            size_t dist,
-            score_t score_up_to_now,
-            const auto &callback) {
+                    score_t score_seed_j = a_j.score
+                        - per_char_scores_prefix_del[a_j.index][a_j.end - full_j.get_query_view().begin()];
 
-            Alignment alignment = alignments[first->index];
-            alignment.label_columns = col_idx;
+                    score_t base_updated_score = score_j - score_seed_j + score_seed_i;
 
-            auto check_aln = [&](Alignment aln) {
+                    if (base_updated_score <= score_i)
+                        return;
+
+                    if (a_j.node_idx >= 0 && full_i.get_nodes()[a_i.node_idx] == full_j.get_nodes()[a_j.node_idx]) {
+                        // perfect overlap, easy top connect
+                        update_score(base_updated_score, &a_j, -seed_size);
+                        return;
+                    }
+
 #ifndef NDEBUG
-                aln.trim_query_prefix(first->begin - aln.get_query_view().begin(),
-                                      graph.get_k() - 1,
-                                      config);
-                DEBUG_LOG("Score to now: {}\tScore of chain: {}\tNode insertion penalty: {}",
-                          score_up_to_now, aln.get_score(), node_insert);
-                assert(aln.get_score() == score_up_to_now);
-#else
-                std::ignore = aln;
-                std::ignore = score_up_to_now;
-#endif
-            };
-
-            if (cur.empty()) {
-                assert(first == last_anchor);
-                DEBUG_LOG("\tStarting: {}", alignment);
-                check_aln(alignment);
-                callback(std::move(alignment));
-                return;
-            }
-
-            if (first->index == last_anchor->index) {
-                last_anchor = first;
-                check_aln(cur);
-                callback(std::move(cur));
-                return;
-            }
-
-            DEBUG_LOG("\t\taln: {}", alignment);
-            DEBUG_LOG("\t\tcur: {}", cur);
-            if (alignment.get_query_view().end() <= cur.get_query_view().begin()) {
-                // no overlap
-                std::ignore = dist;
-                assert(dist == -first->spelling_length);
-                assert(last_anchor->begin == cur.get_query_view().begin());
-                cur.insert_gap_prefix(
-                    cur.get_query_view().begin() - alignment.get_query_view().end(),
-                    graph.get_k() - 1, config
-                );
-                assert(cur.size());
-            } else {
-                assert(dist == -seed_size);
-                assert(last_anchor->end == first->end);
-                alignment.extend_offset(std::vector<node_index>(graph.get_k() - 1 - alignment.get_offset(),
-                                                                DeBruijnGraph::npos),
-                                        std::vector<size_t>(graph.get_k() - 1 - alignment.get_offset(), 0));
-                alignment.trim_query_suffix(alignment.get_query_view().end() - first->end,
-                                            config);
-                assert(alignment.size());
-                assert(first->node_idx >= 0);
-                assert(alignment.get_nodes().back()
-                    == alignments[first->index].get_nodes()[first->node_idx]);
-                // assert(alignment.is_valid(graph, &config));
-
-                cur.extend_offset(std::vector<node_index>(graph.get_k() - 1 - cur.get_offset(),
-                                                          DeBruijnGraph::npos),
-                                  std::vector<size_t>(graph.get_k() - 1 - alignment.get_offset(), 0));
-                cur.trim_query_prefix(first->end - cur.get_query_view().begin(),
-                                      graph.get_k() - 1,
-                                      config,
-                                      false);
-                assert(cur.size());
-                assert(cur.is_valid(graph, &config));
-                node_index cur_front = last_anchor->node_idx >= 0
-                    ? alignments[last_anchor->index].get_nodes()[last_anchor->node_idx]
-                    : DeBruijnGraph::npos;
-
-                if (alignment.get_nodes().back() != cur_front) {
+                    auto cur = full_j;
+                    cur.extend_offset(std::vector<node_index>(graph.get_k() - 1 - cur.get_offset(),
+                                                              DeBruijnGraph::npos));
                     cur.insert_gap_prefix(-seed_size, graph.get_k() - 1, config);
+                    assert(cur.get_score() == full_j.get_score() + node_insert);
+#endif
+
+                    update_score(base_updated_score + node_insert, &a_j, -seed_size);
+                });
+            },
+            [&](const AnchorChain<Anchor> &chain, score_t score) {
+                assert(chain.size());
+                if (chain_score == score && std::equal(chain.begin(), chain.end(),
+                                                       last_chain.begin(), last_chain.end(),
+                                                       [](const auto &a, const auto &b) {
+                                                           return a.first->index == b.first->index
+                                                                    && a.first->col == b.first->col;
+                                                       })) {
+                    return false;
+                }
+
+                if (chain.size() > 1) {
+                    if (-chain[1].second < graph.get_k())
+                        return false;
+
+                    if (std::all_of(chain.begin() + 1, chain.end(),
+                                    [&](const auto &a) {
+                                        return a.first->index == chain.front().first->index;
+                                    })) {
+                        return false;
+                    }
+                }
+
+                const auto &first_anchor = *chain.front().first;
+                const auto &first_aln = alignments[first_anchor.index];
+                full_score = score
+                    + first_aln.get_score()
+                    - per_char_scores_prefix[first_anchor.index][first_anchor.begin - first_aln.get_query_view().begin()];
+
+                size_t aln_size = 0;
+                for (const auto &[ptr, d] : chain) {
+                    aln_size += -d;
+                }
+
+                if (start_backtrack(chain[0].first->col, aln_size, full_score)) {
+                    last_chain = chain;
+                    chain_score = score;
+                    DEBUG_LOG("Chain: {}", score);
+                    last_anchor = chain.back().first;
+                    if (labeled_aligner) {
+                        col_idx = labeled_aligner->get_annotation_buffer().cache_column_set(
+                            1, last_anchor->col
+                        );
+                    }
+
+                    return true;
+                } else {
+                    return false;
+                }
+            },
+            true /* extend_anchors */,
+            [&](const Anchor *first,
+                Alignment&& cur,
+                size_t dist,
+                score_t score_up_to_now,
+                const auto &callback) {
+
+                Alignment alignment = alignments[first->index];
+                alignment.label_columns = col_idx;
+
+                auto check_aln = [&](Alignment aln) {
+#ifndef NDEBUG
+                    aln.trim_query_prefix(first->begin - aln.get_query_view().begin(),
+                                          graph.get_k() - 1,
+                                          config);
+                    DEBUG_LOG("Score to now: {}\tScore of chain: {}\tNode insertion penalty: {}",
+                              score_up_to_now, aln.get_score(), node_insert);
+                    assert(aln.get_score() == score_up_to_now);
+#else
+                    std::ignore = aln;
+                    std::ignore = score_up_to_now;
+#endif
+                };
+
+                if (cur.empty()) {
+                    assert(first == last_anchor);
+                    DEBUG_LOG("\tStarting: {}", alignment);
+                    check_aln(alignment);
+                    callback(std::move(alignment));
+                    return;
+                }
+
+                if (first->index == last_anchor->index) {
+                    last_anchor = first;
+                    check_aln(cur);
+                    callback(std::move(cur));
+                    return;
+                }
+
+                DEBUG_LOG("\t\taln: {}", alignment);
+                DEBUG_LOG("\t\tcur: {}", cur);
+                if (alignment.get_query_view().end() <= cur.get_query_view().begin()) {
+                    // no overlap
+                    std::ignore = dist;
+                    assert(dist == -first->spelling_length);
+                    assert(last_anchor->begin == cur.get_query_view().begin());
+                    cur.insert_gap_prefix(
+                        cur.get_query_view().begin() - alignment.get_query_view().end(),
+                        graph.get_k() - 1, config
+                    );
                     assert(cur.size());
                 } else {
-                    assert(cur_front);
+                    assert(dist == -seed_size);
+                    assert(last_anchor->end == first->end);
+                    alignment.extend_offset(std::vector<node_index>(graph.get_k() - 1 - alignment.get_offset(),
+                                                                    DeBruijnGraph::npos),
+                                            std::vector<size_t>(graph.get_k() - 1 - alignment.get_offset(), 0));
+                    alignment.trim_query_suffix(alignment.get_query_view().end() - first->end,
+                                                config);
+                    assert(alignment.size());
+                    assert(first->node_idx >= 0);
+                    assert(alignment.get_nodes().back()
+                        == alignments[first->index].get_nodes()[first->node_idx]);
+                    // assert(alignment.is_valid(graph, &config));
+
+                    cur.extend_offset(std::vector<node_index>(graph.get_k() - 1 - cur.get_offset(),
+                                                              DeBruijnGraph::npos),
+                                      std::vector<size_t>(graph.get_k() - 1 - alignment.get_offset(), 0));
+                    cur.trim_query_prefix(first->end - cur.get_query_view().begin(),
+                                          graph.get_k() - 1,
+                                          config,
+                                          false);
+                    assert(cur.size());
+                    assert(cur.is_valid(graph, &config));
+                    node_index cur_front = last_anchor->node_idx >= 0
+                        ? alignments[last_anchor->index].get_nodes()[last_anchor->node_idx]
+                        : DeBruijnGraph::npos;
+
+                    if (alignment.get_nodes().back() != cur_front) {
+                        cur.insert_gap_prefix(-seed_size, graph.get_k() - 1, config);
+                        assert(cur.size());
+                    } else {
+                        assert(cur_front);
+                    }
                 }
-            }
 
-            last_anchor = first;
+                last_anchor = first;
 
-            DEBUG_LOG("\t\tA: {}", alignment);
-            DEBUG_LOG("\t\tB: {}", cur);
-            alignment.splice(std::move(cur));
-            DEBUG_LOG("\tCurrent: {}", alignment);
-            assert(alignment.size());
-            assert(alignment.is_valid(graph, &config));
-            assert(alignment.get_clipping() == alignments[first->index].get_clipping());
-            check_aln(alignment);
-            callback(std::move(alignment));
-        },
-        [&](Alignment&& aln) {
-            aln.trim_offset();
+                DEBUG_LOG("\t\tA: {}", alignment);
+                DEBUG_LOG("\t\tB: {}", cur);
+                alignment.splice(std::move(cur));
+                DEBUG_LOG("\tCurrent: {}", alignment);
+                assert(alignment.size());
+                assert(alignment.is_valid(graph, &config));
+                assert(alignment.get_clipping() == alignments[first->index].get_clipping());
+                check_aln(alignment);
+                callback(std::move(alignment));
+            },
+            [&](Alignment&& aln) {
+                aln.trim_offset();
 
-            DEBUG_LOG("\tFinal: {}\tfull_score: {}\t{}", chain_score, full_score, aln);
-            assert(aln.get_score() == full_score);
+                DEBUG_LOG("\tFinal: {}\tfull_score: {}\t{}", chain_score, full_score, aln);
+                assert(aln.get_score() == full_score);
 
-            callback(std::move(aln));
-        },
-        terminate,
-        true /* allow_overlap */,
-        config.max_dist_between_seeds,
-        config.max_gap_shrinking_factor
-    );
+                callback(std::move(aln));
+            },
+            terminate,
+            true /* allow_overlap */,
+            config.max_dist_between_seeds,
+            config.max_gap_shrinking_factor
+        );
+
+        last_anchor_it = anchor_it;
+    }
 }
 
 } // namespace align
