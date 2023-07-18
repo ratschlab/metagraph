@@ -403,8 +403,12 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
                                       [](const auto &a) { return a.empty(); });
 
             DEBUG_LOG("Merging MEMs by label");
-            if (!config_.post_chain_alignments && end != split_seeds.end() && split_seeds[0].has_annotation())
-                end = merge_exact_match_alignments_by_label(split_seeds.begin(), end);
+            if (end != split_seeds.end() && split_seeds[0].has_annotation()) {
+                end = merge_alignments_by_label(split_seeds.begin(), end);
+                assert(std::all_of(split_seeds.begin(), end, [this](const auto &a) {
+                    return a.is_valid(graph_, &config_);
+                }));
+            }
 
             DEBUG_LOG("Done merging");
             std::for_each(std::make_move_iterator(split_seeds.begin()),
@@ -442,6 +446,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
             }
 
             std::vector<Alignment> chains;
+            size_t last_size = 0;
             chain_alignments(*this, std::move(rest),
                 [&](Alignment::Column col, size_t aln_size, score_t score) {
                     if (score < config_.min_path_score)
@@ -454,13 +459,25 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
                         return true;
                     }
 
-                    return score > best_score;
+                    return score >= best_score;
                 },
                 [&](auto&& alignment) {
                     assert(alignment.is_valid(graph_, &config_));
                     assert(alignment.get_score() >= config_.min_path_score);
+                    best_score = std::max(best_score, alignment.get_score());
                     query_coverage = std::max(query_coverage,
                                               alignment.get_query_view().size());
+                    if (chains.size() && alignment.get_score() < chains[last_size].get_score()) {
+                        chains.erase(merge_alignments_by_label(chains.begin() + last_size,
+                                                               chains.end()),
+                                     chains.end());
+                        assert(std::all_of(chains.begin() + last_size, chains.end(),
+                                           [this](const auto &a) {
+                                               return a.is_valid(graph_, &config_);
+                                           }));
+                        last_size = chains.size();
+                    }
+
                     chains.emplace_back(std::move(alignment));
                 }
             );

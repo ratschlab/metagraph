@@ -122,8 +122,8 @@ class Seed {
 };
 
 std::vector<Alignment>::iterator
-merge_exact_match_alignments_by_label(std::vector<Alignment>::iterator begin,
-                                      std::vector<Alignment>::iterator end);
+merge_alignments_by_label(std::vector<Alignment>::iterator begin,
+                          std::vector<Alignment>::iterator end);
 
 template <class It>
 inline size_t get_num_char_matches_in_seeds(It begin, It end) {
@@ -274,23 +274,14 @@ class Alignment {
     Cigar::LengthType get_end_clipping() const { return cigar_.get_end_clipping(); }
 
     bool operator<(const Alignment &b) const {
-        auto a_stats = std::make_tuple(orientation_,
-                                       get_clipping(), get_end_clipping(),
-                                       nodes_.size(), offset_, sequence_);
-        auto b_stats = std::make_tuple(b.orientation_,
-                                       b.get_clipping(), b.get_end_clipping(),
-                                       b.size(), b.offset_, b.sequence_);
-
-        if (a_stats < b_stats)
-            return true;
-
-        if (a_stats > b_stats)
-            return false;
-
-        auto [it, jt] = std::mismatch(nodes_.begin(), nodes_.end(),
-                                      b.nodes_.begin(), b.nodes_.end());
-
-        return it != nodes_.end() && *it < *jt;
+        return std::make_tuple(orientation_,
+                               get_clipping(), get_end_clipping(),
+                               nodes_.size(), offset_, sequence_, nodes_,
+                               cigar_.data())
+                < std::make_tuple(b.orientation_,
+                                  b.get_clipping(), b.get_end_clipping(),
+                                  b.size(), b.offset_, b.sequence_, b.nodes_,
+                                  b.cigar_.data());
     }
 
     bool operator==(const Alignment &other) const {
