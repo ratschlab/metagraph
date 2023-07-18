@@ -398,45 +398,32 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
                     rest.emplace_back(a);
 
                 for (auto c : a.get_columns()) {
-                    if (c != std::numeric_limits<Alignment::Column>::max()) {
-                        auto it = best_label_counts.try_emplace(c, a.size()).first;
-                        it.value() = std::max(it.value(), a.size());
-                    }
+                    auto it = best_label_counts.try_emplace(c, a.get_sequence().size()).first;
+                    it.value() = std::max(it.value(), a.get_sequence().size());
                 }
             }
 
             std::vector<Alignment> chains;
             chain_alignments(*this, std::move(rest),
+                [&](Alignment::Column col, size_t aln_size, score_t score) {
+                    if (score < config_.min_path_score)
+                        return false;
+
+                    auto it = best_label_counts.find(col);
+                    assert(it != best_label_counts.end());
+                    if (aln_size > it.value()) {
+                        it.value() = aln_size;
+                        return true;
+                    }
+
+                    return score > best_score;
+                },
                 [&](auto&& alignment) {
-                    bool report = false;
                     assert(alignment.is_valid(graph_, &config_));
-                    if (alignment.get_score() < config_.min_path_score)
-                        return;
-
-                    if (alignment.get_score() > best_score) {
-                        report = true;
-                        query_coverage = alignment.get_query_view().size();
-                    }
-
-                    tsl::hopscotch_map<Alignment::Column, size_t> cur_label_counts;
-                    for (size_t j = 0; j < alignment.size(); ++j) {
-                        for (auto c : alignment.get_columns(j)) {
-                            if (c != std::numeric_limits<Alignment::Column>::max())
-                                ++cur_label_counts[c];
-                        }
-                    }
-
-                    for (const auto &[c, cnt] : cur_label_counts) {
-                        auto it = best_label_counts.find(c);
-                        assert(it != best_label_counts.end());
-                        if (cnt > it.value()) {
-                            it.value() = cnt;
-                            report = true;
-                        }
-                    }
-
-                    if (report)
-                        chains.emplace_back(std::move(alignment));
+                    assert(alignment.get_score() >= config_.min_path_score);
+                    query_coverage = std::max(query_coverage,
+                                              alignment.get_query_view().size());
+                    chains.emplace_back(std::move(alignment));
                 }
             );
 

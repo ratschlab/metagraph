@@ -515,6 +515,7 @@ chain_seeds(const DBGAlignerConfig &config,
 
 void chain_alignments(const IDBGAligner &aligner,
                       std::vector<Alignment>&& alignments,
+                      const std::function<bool(Alignment::Column, size_t, score_t)> &start_backtrack,
                       const std::function<void(Alignment&&)> &callback,
                       const std::function<bool()> &terminate) {
     if (terminate())
@@ -816,6 +817,14 @@ void chain_alignments(const IDBGAligner &aligner,
         },
         [&](const AnchorChain<Anchor> &chain, score_t score) {
             assert(chain.size());
+            if (chain_score == score && std::equal(chain.begin(), chain.end(),
+                                                   last_chain.begin(), last_chain.end(),
+                                                   [](const auto &a, const auto &b) {
+                                                       return a.first->index == b.first->index
+                                                                && a.first->col == b.first->col;
+                                                   })) {
+                return false;
+            }
 
             if (chain.size() > 1) {
                 if (-chain[1].second < graph.get_k())
@@ -827,28 +836,34 @@ void chain_alignments(const IDBGAligner &aligner,
                                 })) {
                     return false;
                 }
+            }
 
-                if (chain_score == score && std::equal(chain.begin(), chain.end(),
-                                                       last_chain.begin(), last_chain.end(),
-                                                       [](const auto &a, const auto &b) {
-                                                           return a.first->index == b.first->index
-                                                                    && a.first->col == b.first->col;
-                                                       })) {
-                    return false;
+            const auto &first_anchor = *chain.front().first;
+            const auto &first_aln = alignments[first_anchor.index];
+            score_t full_score = score
+                + first_aln.get_score()
+                - per_char_scores_prefix[first_anchor.index][first_anchor.begin - first_aln.get_query_view().begin()];
+
+            size_t aln_size = 0;
+            for (const auto &[ptr, d] : chain) {
+                aln_size += -d;
+            }
+
+            if (start_backtrack(chain[0].first->col, aln_size, full_score)) {
+                last_chain = chain;
+                chain_score = score;
+                DEBUG_LOG("Chain: {}", score);
+                last_anchor = chain.back().first;
+                if (labeled_aligner) {
+                    col_idx = labeled_aligner->get_annotation_buffer().cache_column_set(
+                        1, last_anchor->col
+                    );
                 }
-            }
 
-            last_chain = chain;
-            chain_score = score;
-            DEBUG_LOG("Chain: {}", score);
-            last_anchor = chain.back().first;
-            if (labeled_aligner) {
-                col_idx = labeled_aligner->get_annotation_buffer().cache_column_set(
-                    1, last_anchor->col
-                );
+                return true;
+            } else {
+                return false;
             }
-
-            return true;
         },
         true /* extend_anchors */,
         [&](const Anchor *first,

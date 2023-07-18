@@ -28,6 +28,7 @@ call_seed_chains_both_strands(const IDBGAligner &aligner,
 
 void chain_alignments(const IDBGAligner &aligner,
                       std::vector<Alignment>&& alignments,
+                      const std::function<bool(Alignment::Column, size_t, score_t)> &start_backtrack,
                       const std::function<void(Alignment&&)> &callback,
                       const std::function<bool()> &terminate
                           = []() { return false; });
