@@ -712,6 +712,7 @@ void chain_alignments(const IDBGAligner &aligner,
     score_t chain_score = 0;
     AnchorChain<Anchor> last_chain;
     Alignment::Columns col_idx = 0;
+    score_t full_score = 0;
 
     chain_anchors<Anchor>(config, anchors.data(), anchors.data() + anchors.size(),
         [&](const Anchor &a_i, ssize_t, const Anchor *begin, const Anchor *end, auto chain_scores, const auto &update_score) {
@@ -840,7 +841,7 @@ void chain_alignments(const IDBGAligner &aligner,
 
             const auto &first_anchor = *chain.front().first;
             const auto &first_aln = alignments[first_anchor.index];
-            score_t full_score = score
+            full_score = score
                 + first_aln.get_score()
                 - per_char_scores_prefix[first_anchor.index][first_anchor.begin - first_aln.get_query_view().begin()];
 
@@ -966,19 +967,9 @@ void chain_alignments(const IDBGAligner &aligner,
         [&](Alignment&& aln) {
             aln.trim_offset();
 
-#ifndef NDEBUG
-            const auto &last_aln = alignments[last_anchor->index];
-            score_t predicted_score = chain_score
-                + last_aln.get_score()
-                - per_char_scores_prefix[last_anchor->index][last_anchor->begin - last_aln.get_query_view().begin()];
+            DEBUG_LOG("\tFinal: {}\tfull_score: {}\t{}", chain_score, full_score, aln);
+            assert(aln.get_score() == full_score);
 
-            DEBUG_LOG("\tFinal: {}\tpredicted: {}\t{}",
-                chain_score,
-                predicted_score,
-                aln);
-
-            assert(aln.get_score() == predicted_score);
-#endif
             callback(std::move(aln));
         },
         terminate,
