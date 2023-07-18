@@ -1776,7 +1776,7 @@ std::vector<Alignment>::iterator
 merge_alignments_by_label(std::vector<Alignment>::iterator begin,
                           std::vector<Alignment>::iterator end) {
     // merge identical alignments with different label
-    if (begin == end || !begin->has_annotation())
+    if (begin == end)
         return end;
 
     if (std::any_of(begin, end, [](const auto &a) { return a.label_coordinates.size(); })) {
@@ -1793,49 +1793,51 @@ merge_alignments_by_label(std::vector<Alignment>::iterator begin,
         }
 
         if (cur_it - last_it > 1) {
-            if (std::any_of(last_it, cur_it, [](const auto &a) { return a.label_column_diffs.size(); })) {
-                std::for_each(last_it, cur_it, [](auto &a) {
-                    assert(a.label_column_diffs.empty()
-                            || a.label_column_diffs.size() == a.size() - 1);
-                    a.label_column_diffs.resize(a.size() - 1, a.label_columns);
-                });
-            }
-
-            auto merge_annots = [&](size_t i) {
-                if (last_it->get_nodes()[i] == DeBruijnGraph::npos) {
-                    assert(std::all_of(last_it, cur_it, [&](const auto &a) {
-                        if (!i || a.label_column_diffs.empty())
-                            return !a.label_columns;
-
-                        return !a.label_column_diffs[i - 1];
-                    }));
-
-                    return Vector<Alignment::Column>{};
+            if (std::all_of(last_it, cur_it, [](const auto &a) { return a.has_annotation(); })) {
+                if (std::any_of(last_it, cur_it, [](const auto &a) { return a.label_column_diffs.size(); })) {
+                    std::for_each(last_it, cur_it, [](auto &a) {
+                        assert(a.label_column_diffs.empty()
+                                || a.label_column_diffs.size() == a.size() - 1);
+                        a.label_column_diffs.resize(a.size() - 1, a.label_columns);
+                    });
                 }
 
-                assert(std::all_of(last_it, cur_it, [&](const auto &a) {
-                    if (!i || a.label_column_diffs.empty())
-                        return a.label_columns;
+                auto merge_annots = [&](size_t i) {
+                    if (last_it->get_nodes()[i] == DeBruijnGraph::npos) {
+                        assert(std::all_of(last_it, cur_it, [&](const auto &a) {
+                            if (!i || a.label_column_diffs.empty())
+                                return !a.label_columns;
 
-                    return a.label_column_diffs[i - 1];
-                }));
-                tsl::hopscotch_set<Alignment::Column> columns;
-                std::for_each(last_it, cur_it, [&](const auto &a) {
-                    for (auto c : a.get_columns(i)) {
-                        columns.emplace(c);
+                            return !a.label_column_diffs[i - 1];
+                        }));
+
+                        return Vector<Alignment::Column>{};
                     }
-                });
-                Vector<Alignment::Column> col_vec(columns.begin(), columns.end());
-                std::sort(col_vec.begin(), col_vec.end());
-                return col_vec;
-            };
 
-            last_it->set_columns(merge_annots(0));
+                    assert(std::all_of(last_it, cur_it, [&](const auto &a) {
+                        if (!i || a.label_column_diffs.empty())
+                            return a.label_columns;
 
-            if (last_it->label_column_diffs.size()) {
-                for (size_t i = 0; i < last_it->label_column_diffs.size(); ++i) {
-                    last_it->label_column_diffs[i]
-                        = last_it->label_encoder->cache_column_set(merge_annots(i + 1));
+                        return a.label_column_diffs[i - 1];
+                    }));
+                    tsl::hopscotch_set<Alignment::Column> columns;
+                    std::for_each(last_it, cur_it, [&](const auto &a) {
+                        for (auto c : a.get_columns(i)) {
+                            columns.emplace(c);
+                        }
+                    });
+                    Vector<Alignment::Column> col_vec(columns.begin(), columns.end());
+                    std::sort(col_vec.begin(), col_vec.end());
+                    return col_vec;
+                };
+
+                last_it->set_columns(merge_annots(0));
+
+                if (last_it->label_column_diffs.size()) {
+                    for (size_t i = 0; i < last_it->label_column_diffs.size(); ++i) {
+                        last_it->label_column_diffs[i]
+                            = last_it->label_encoder->cache_column_set(merge_annots(i + 1));
+                    }
                 }
             }
 
