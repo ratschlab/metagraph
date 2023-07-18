@@ -394,8 +394,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
                     ++cur_it;
                 }
 
-                auto end = merge_into_mums(graph_, config_, last_it, cur_it,
-                                           config_.min_seed_length);
+                merge_into_mums(graph_, config_, last_it, cur_it, config_.min_seed_length);
 
                 last_it = cur_it;
             }
