@@ -464,12 +464,6 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
 
     this->num_matching_ = seeds_.empty() ? 0 : sdsl::util::cnt_one_bits(matched);
 
-    if (this->num_matching_ < this->query_.size() * this->config_.min_exact_match) {
-        this->num_matching_ = 0;
-        seeds_.clear();
-        return;
-    }
-
     if (this->config_.all_suffix_matches)
         return;
 
