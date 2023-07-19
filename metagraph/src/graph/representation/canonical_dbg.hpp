@@ -80,6 +80,8 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
 
 
     // Given a node index, call the target nodes of all edges outgoing from it.
+    // If an empty spelling hint is provided, the node spelling will be computed
+    // from the graph.
     void adjacent_outgoing_nodes(node_index node,
                                  const std::string &spelling_hint,
                                  const std::function<void(node_index)> &callback) const;
@@ -89,6 +91,8 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
                              const OutgoingEdgeCallback &callback) const;
 
     // Given a node index, call the source nodes of all edges incoming to it.
+    // If an empty spelling hint is provided, the node spelling will be computed
+    // from the graph.
     void adjacent_incoming_nodes(node_index node,
                                  const std::string &spelling_hint,
                                  const std::function<void(node_index)> &callback) const;
