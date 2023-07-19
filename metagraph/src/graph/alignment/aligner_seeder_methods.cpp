@@ -227,7 +227,7 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
             auto last_it = std::min(begin + std::min(boss.get_k(),
                                                      this->config_.max_seed_length),
                                     encoded.end());
-            assert(end <= last_it);
+            assert(end < last_it);
 
             last_it = std::find_if(begin, last_it, [&](TAlphabet c) {
                 return !(c % boss.alph_size);
@@ -243,63 +243,67 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
 
             first = boss.pred_last(first - 1) + 1;
 
-            size_t j = i;
-            for ( ; it != last_it; ++j, ++it) {
-                assert(it < begin + boss.get_k());
+            size_t end_clipping = query.size() - i - this->config_.min_seed_length;
+            assert(end_clipping < ranges.size());
+            size_t added_length = 0;
 
-                size_t end_clipping = query.size() - j - this->config_.min_seed_length;
-                assert(end_clipping < ranges.size());
-
-                size_t added_length = j - i;
-                edge_index first_next = first;
-                edge_index last_next = last;
-                if (boss.tighten_range(&first_next, &last_next, *it)) {
-                    if (ranges[end_clipping].size() <= added_length)
-                        ranges[end_clipping].resize(added_length + 1);
-
-                    assert(!ranges[end_clipping][added_length].first);
-                    assert(!ranges[end_clipping][added_length].second);
-                    ranges[end_clipping][added_length] = std::make_pair(first, last);
-
-                    if (is_rc)
-                        break;
-
-                    first = first_next;
-                    last = last_next;
-                } else {
-                    first = 0;
-                    break;
-                }
-            }
-
-            assert(is_rc || std::get<2>(boss.index_range(begin, last_it)) == it);
-
-            size_t end_clipping = query.size() - j - this->config_.min_seed_length;
-            if (end_clipping < ranges.size() && first && it == last_it) {
-                size_t added_length = j - i;
-                if (ranges[end_clipping].size() <= added_length)
-                    ranges[end_clipping].resize(added_length + 1);
-
-                assert(!ranges[end_clipping][added_length].first);
-                assert(!ranges[end_clipping][added_length].second);
+            DEBUG_LOG("Checking: {}S{}={}S", i,
+                      this->config_.min_seed_length + added_length,
+                      end_clipping);
+            if (ranges[end_clipping].empty()) {
+                ranges[end_clipping].emplace_back(first, last);
+            } else {
                 ranges[end_clipping][added_length] = std::make_pair(first, last);
             }
 
-            if (ranges[i].size()) {
-                if (is_rc) {
-                    std::fill(matched.end() - i - this->config_.min_seed_length,
-                              matched.end() - i,
-                              true);
-                } else {
+            if (!is_rc) {
+                for (size_t j = i; it != last_it; ++j, ++it) {
+                    assert(it < begin + boss.get_k());
+
+                    if (boss.tighten_range(&first, &last, *it)) {
+                        if (end_clipping) {
+                            --end_clipping;
+                            ++added_length;
+                            DEBUG_LOG("\t->\t{}S{}={}S", i,
+                                      this->config_.min_seed_length + added_length,
+                                      end_clipping);
+
+                            assert(end_clipping < ranges.size());
+                            if (ranges[end_clipping].size() <= added_length)
+                                ranges[end_clipping].resize(added_length + 1);
+
+                            assert(!ranges[end_clipping][added_length].first);
+                            assert(!ranges[end_clipping][added_length].second);
+                            ranges[end_clipping][added_length] = std::make_pair(first, last);
+                        }
+                    } else {
+                        ranges[end_clipping][added_length] = std::make_pair(0, 0);
+                        break;
+                    }
+                }
+
+                assert(std::get<2>(boss.index_range(begin, last_it)) == it);
+
+                if (ranges[query.size() - i - this->config_.min_seed_length][0].first) {
                     std::fill(matched.begin() + i,
                               matched.begin() + i + this->config_.min_seed_length,
                               true);
                 }
+            } else if (boss.tighten_range(&first, &last, *it)) {
+                std::fill(matched.end() - i - this->config_.min_seed_length,
+                          matched.end() - i,
+                          true);
+            } else {
+                ranges[end_clipping][added_length] = std::make_pair(0, 0);
             }
         }
 
         for (size_t end_clipping = 0; end_clipping < ranges.size(); ++end_clipping) {
             assert(end_clipping < encoded.size());
+            while (ranges[end_clipping].size() && !ranges[end_clipping].back().first) {
+                ranges[end_clipping].pop_back();
+            }
+
             if (ranges[end_clipping].empty())
                 continue;
 
@@ -382,6 +386,7 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
                             i - added_length,
                             query.size() - (i - added_length) - seed_window.size());
         assert(Alignment(seeds_.back(), this->config_).is_valid(this->graph_, &this->config_));
+        DEBUG_LOG("Added seed: {}", Alignment(seeds_.back(), this->config_));
     };
 
     auto find_nodes_fwd = [&](std::string_view query, size_t i, std::string_view seed_window, auto first, auto last, auto s) {
@@ -412,6 +417,7 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
             bool check = boss.tighten_range(&first, &last, s);
             std::ignore = check;
             assert(check);
+
             assert(boss.get_node_str(first).substr(boss.get_k() - rc_seed_window.size())
                 == rc_seed_window);
 
