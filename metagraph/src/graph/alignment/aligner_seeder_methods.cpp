@@ -95,12 +95,15 @@ template <class BOSSEdgeRange>
 void suffix_to_prefix(const DBGSuccinct &dbg_succ,
                       std::string_view rest,
                       const BOSSEdgeRange &index_range,
+                      bool seed_complexity_filter,
                       const std::function<void(DBGSuccinct::node_index, size_t)> &callback) {
     const auto &boss = dbg_succ.get_boss();
     assert(std::get<0>(index_range));
     assert(std::get<1>(index_range));
     assert(std::get<2>(index_range));
     assert(std::get<2>(index_range) < dbg_succ.get_k());
+    std::string_view full(rest.data() - std::get<2>(index_range),
+                          rest.size() + std::get<2>(index_range));
 
 #ifndef NDEBUG
     size_t offset = boss.get_k() - std::get<2>(index_range);
@@ -128,18 +131,21 @@ void suffix_to_prefix(const DBGSuccinct &dbg_succ,
                 assert(num_extra_match <= rest.size());
                 assert(num_exact_match < boss.get_k() || num_extra_match == rest.size()
                         || num_extra_match + 1 == rest.size());
-                callback(
-                    node,
-                    num_exact_match + (num_exact_match == boss.get_k()
+                size_t num_matches = num_exact_match + (num_exact_match == boss.get_k()
                                         && num_extra_match + 1 == rest.size()
-                                        && boss.get_W(i) % boss.alph_size == encoded.back())
-                );
+                                        && boss.get_W(i) % boss.alph_size == encoded.back());
+                if (num_matches == dbg_succ.get_k() || !seed_complexity_filter
+                        || !is_low_complexity(std::string_view(full.data(), num_matches))) {
+                    callback(node, num_matches);
+                }
             }
         }
     };
 
     if (std::get<2>(index_range) == boss.get_k()) {
-        call_nodes_in_range(boss.get_k(), index_range);
+        if (!seed_complexity_filter || !is_low_complexity(full))
+            call_nodes_in_range(boss.get_k(), index_range);
+
         return;
     }
 
@@ -160,6 +166,12 @@ void suffix_to_prefix(const DBGSuccinct &dbg_succ,
                 bool next_exact_match = is_exact_match
                                             && num_extra_match < encoded.size()
                                             && (s == encoded[num_extra_match]);
+                if (is_exact_match && !next_exact_match && seed_complexity_filter
+                        && is_low_complexity(std::string_view(full.data(),
+                                                              std::get<2>(index_range) + num_extra_match))) {
+                    continue;
+                }
+
                 if (seed_length == boss.get_k()) {
                     call_nodes_in_range(
                         std::get<2>(index_range) + num_extra_match + next_exact_match,
@@ -435,6 +447,7 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
             suffix_to_prefix(dbg_succ,
                 rest,
                 std::make_tuple(first, last, rc_seed_window.size()),
+                this->config_.seed_complexity_filter,
                 [&](node_index node, size_t num_matches) {
                     assert(num_matches >= this->config_.min_seed_length);
                     assert(num_matches <= dbg_succ.get_k());
@@ -442,11 +455,6 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
                     size_t added_length = num_matches - this->config_.min_seed_length;
                     std::string_view seed_window(this->query_.data() + i - added_length,
                                                  num_matches);
-                    if (this->config_.seed_complexity_filter
-                            && seed_window.size() != dbg_succ.get_k()
-                            && is_low_complexity(seed_window)) {
-                        return;
-                    }
 
                     assert(canonical.get_node_sequence(node).substr(dbg_succ.get_k() - num_matches)
                         == seed_window);
