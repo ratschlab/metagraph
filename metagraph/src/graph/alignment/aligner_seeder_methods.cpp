@@ -278,16 +278,15 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
                         }
                     } else {
                         ranges[end_clipping][added_length] = std::make_pair(0, 0);
+                        assert(i + dbg_succ.get_k() > query.size()
+                            || map_to_nodes_sequentially(dbg_succ,
+                                   std::string_view(query.data() + i, dbg_succ.get_k()))[0]
+                                       == DeBruijnGraph::npos);
                         break;
                     }
                 }
 
                 assert(std::get<2>(boss.index_range(begin, last_it)) == it);
-                assert(this->config_.min_seed_length + added_length == dbg_succ.get_k()
-                    || i + dbg_succ.get_k() > query.size()
-                    || map_to_nodes_sequentially(dbg_succ,
-                           std::string_view(query.data() + i, dbg_succ.get_k()))[0]
-                               == DeBruijnGraph::npos);
 
                 if (ranges[query.size() - i - this->config_.min_seed_length][0].first) {
                     std::fill(matched.begin() + i,
