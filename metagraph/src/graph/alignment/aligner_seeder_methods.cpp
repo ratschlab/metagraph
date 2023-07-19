@@ -348,8 +348,11 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
             std::string_view seed_window(query.data() + i - added_length,
                                          this->config_.min_seed_length + added_length);
 
-            if (this->config_.seed_complexity_filter && is_low_complexity(seed_window))
+            if (this->config_.seed_complexity_filter
+                    && seed_window.size() != dbg_succ.get_k()
+                    && is_low_complexity(seed_window)) {
                 continue;
+            }
 
             auto [first, last] = ranges[i].back();
             assert(first);
