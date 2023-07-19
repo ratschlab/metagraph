@@ -865,8 +865,6 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
                     continue;
                 }
 
-                // Remove any character skipping from the end so that the
-                // alignment can proceed
                 assert(path.get_end_clipping());
                 assert(path.is_valid(rc_graph, &config_));
 

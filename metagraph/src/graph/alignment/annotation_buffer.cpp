@@ -53,7 +53,8 @@ bool AnnotationBuffer
     for (node_index node : nodes) {
         const auto *labels = get_labels(node);
         if (!labels) {
-            logger->error("Labels for node {} have not been fetched", node);
+            logger->error("Labels for node {} ({}) have not been fetched",
+                          node, canonical_ ? canonical_->get_base_node(node) : node);
             return false;
         }
 
@@ -277,14 +278,23 @@ void AnnotationBuffer::fetch_queued_annotations() {
         size_t labels_i = cache_column_set(std::move(labels));;
         do_push(find_base, labels_i);
 
-        if (canonical_ || graph_.get_mode() == DeBruijnGraph::BASIC || base_node == node)
+        if (canonical_ || graph_.get_mode() == DeBruijnGraph::BASIC)
             return;
 
-        auto find = node_to_cols_.find(node);
-        assert(find != node_to_cols_.end());
-        assert(find->second == nannot);
-        assert(find_base->second != nannot);
-        do_push(find, labels_i);
+        if (node != base_node) {
+            auto find = node_to_cols_.find(node);
+            assert(find != node_to_cols_.end());
+            assert(find->second == nannot);
+            assert(find_base->second != nannot);
+            do_push(find, labels_i);
+        }
+
+        if (!canonical_ && graph_.get_mode() == DeBruijnGraph::CANONICAL && base_node == node) {
+            auto spelling = graph_.get_node_sequence(node);
+            reverse_complement(spelling.begin(), spelling.end());
+            if (node_index rc_node = map_to_nodes_sequentially(graph_, spelling)[0])
+                do_push(node_to_cols_.try_emplace(rc_node, nannot).first, labels_i);
+        }
     };
 
     auto row_it = queued_rows.begin();
