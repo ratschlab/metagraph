@@ -246,17 +246,20 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
             size_t j = i;
             for ( ; it != last_it; ++j, ++it) {
                 assert(it < begin + boss.get_k());
-                assert(j < ranges.size());
 
+                size_t end_clipping = query.size() - j - this->config_.min_seed_length;
+                assert(end_clipping < ranges.size());
+
+                size_t added_length = j - i;
                 edge_index first_next = first;
                 edge_index last_next = last;
                 if (boss.tighten_range(&first_next, &last_next, *it)) {
-                    if (ranges[j].size() <= j - i)
-                        ranges[j].resize(j - i + 1);
+                    if (ranges[end_clipping].size() <= added_length)
+                        ranges[end_clipping].resize(added_length + 1);
 
-                    assert(!ranges[j][j - i].first);
-                    assert(!ranges[j][j - i].second);
-                    ranges[j][j - i] = std::make_pair(first, last);
+                    assert(!ranges[end_clipping][added_length].first);
+                    assert(!ranges[end_clipping][added_length].second);
+                    ranges[end_clipping][added_length] = std::make_pair(first, last);
 
                     if (is_rc)
                         break;
@@ -271,13 +274,15 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
 
             assert(is_rc || std::get<2>(boss.index_range(begin, last_it)) == it);
 
-            if (j < ranges.size() && first && it == last_it) {
-                if (ranges[j].size() <= j - i)
-                    ranges[j].resize(j - i + 1);
+            size_t end_clipping = query.size() - j - this->config_.min_seed_length;
+            if (end_clipping < ranges.size() && first && it == last_it) {
+                size_t added_length = j - i;
+                if (ranges[end_clipping].size() <= added_length)
+                    ranges[end_clipping].resize(added_length + 1);
 
-                assert(!ranges[j][j - i].first);
-                assert(!ranges[j][j - i].second);
-                ranges[j][j - i] = std::make_pair(first, last);
+                assert(!ranges[end_clipping][added_length].first);
+                assert(!ranges[end_clipping][added_length].second);
+                ranges[end_clipping][added_length] = std::make_pair(first, last);
             }
 
             if (ranges[i].size()) {
@@ -293,60 +298,57 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
             }
         }
 
-        std::vector<std::pair<size_t, size_t>> range_coverages;
-        range_coverages.reserve(ranges.size());
-        for (size_t i = 0; i < ranges.size(); ++i) {
-            if (ranges[i].size())
-                range_coverages.emplace_back(i - ranges[i].size() + 1, i);
-        }
+        for (size_t end_clipping = 0; end_clipping < ranges.size(); ++end_clipping) {
+            assert(end_clipping < encoded.size());
+            if (ranges[end_clipping].empty())
+                continue;
 
-        std::sort(range_coverages.begin(), range_coverages.end());
-
-        for (size_t j = 0; j < range_coverages.size(); ++j) {
-            auto [begin_i, i] = range_coverages[j];
-            assert(ranges[i].size());
-            assert(!is_rc || ranges[i].size() == 1);
+            assert(!is_rc || ranges[end_clipping].size() == 1);
 
             size_t added_length = 0;
-
-            auto s = encoded[i + this->config_.min_seed_length - 1];
+            auto s = *(encoded.rbegin() + end_clipping);
+            size_t max_seed_clipping = query.size() - end_clipping - this->config_.min_seed_length;
             if (this->config_.all_suffix_matches) {
-                for (auto begin = ranges[i].begin(); begin + 1 != ranges[i].end(); ++begin, ++added_length) {
+                for (auto begin = ranges[end_clipping].begin(); begin + 1 != ranges[end_clipping].end(); ++begin, ++added_length) {
                     auto [first, last] = *begin;
                     if (!first)
                         continue;
 
-                    std::string_view seed_window(query.data() + i - added_length,
-                                                 this->config_.min_seed_length + added_length);
+                    size_t seed_length = this->config_.min_seed_length + added_length;
+                    assert(seed_length <= dbg_succ.get_k());
+                    std::string_view seed_window(query.data() + query.size()
+                                                    - end_clipping - seed_length,
+                                                 seed_length);
 
                     if (this->config_.seed_complexity_filter && is_low_complexity(seed_window))
                         continue;
 
-                    auto jt = std::find_if(begin + 1, ranges[i].end(),
+                    auto jt = std::find_if(begin + 1, ranges[end_clipping].end(),
                                            [](const auto &a) { return a.first; });
-                    assert(jt != ranges[i].end());
+                    assert(jt != ranges[end_clipping].end());
 
                     auto [first_next, last_next] = *jt;
                     assert(first <= first_next);
                     assert(last >= last_next);
                     if (first != first_next) {
-                        find_nodes(query, i, seed_window, first, first_next - 1, s);
-                        find_nodes(query, i, seed_window, first, first_next - 1, s + boss.alph_size);
+                        find_nodes(query, max_seed_clipping, seed_window, first, first_next - 1, s);
+                        find_nodes(query, max_seed_clipping, seed_window, first, first_next - 1, s + boss.alph_size);
                     }
 
                     if (last_next != last) {
-                        find_nodes(query, i, seed_window, last_next + 1, last, s);
-                        find_nodes(query, i, seed_window, last_next + 1, last, s + boss.alph_size);
+                        find_nodes(query, max_seed_clipping, seed_window, last_next + 1, last, s);
+                        find_nodes(query, max_seed_clipping, seed_window, last_next + 1, last, s + boss.alph_size);
                     }
                 }
             } else {
-                added_length = ranges[i].size() - 1;
+                added_length = ranges[end_clipping].size() - 1;
             }
 
-            assert(i - added_length == range_coverages[j].first);
-
-            std::string_view seed_window(query.data() + i - added_length,
-                                         this->config_.min_seed_length + added_length);
+            size_t seed_length = this->config_.min_seed_length + added_length;
+            assert(seed_length <= dbg_succ.get_k());
+            std::string_view seed_window(query.data() + query.size()
+                                            - end_clipping - seed_length,
+                                         seed_length);
 
             if (this->config_.seed_complexity_filter
                     && seed_window.size() != dbg_succ.get_k()
@@ -354,12 +356,12 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
                 continue;
             }
 
-            auto [first, last] = ranges[i].back();
+            auto [first, last] = ranges[end_clipping].back();
             assert(first);
             assert(last);
 
-            find_nodes(query, i, seed_window, first, last, s);
-            find_nodes(query, i, seed_window, first, last, s + boss.alph_size);
+            find_nodes(query, max_seed_clipping, seed_window, first, last, s);
+            find_nodes(query, max_seed_clipping, seed_window, first, last, s + boss.alph_size);
         }
     };
 
