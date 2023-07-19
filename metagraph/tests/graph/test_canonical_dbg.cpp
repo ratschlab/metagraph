@@ -1377,6 +1377,65 @@ TYPED_TEST(CanonicalDBGTest, TraverseNoDualDummy) {
     }
 }
 
+TYPED_TEST(CanonicalDBGTest, TraverseNoDuplicateDummySink) {
+    if (!std::is_base_of_v<DBGSuccinct, TypeParam>) {
+        common::logger->warn("Dummy k-mers only supported for DBGSuccinct");
+        return;
+    }
+
+    // meant to make sure that the reverse complements of dummy k-mers are not present
+    // CCTGCGCTTCGTACATATTCCCGCCGCACT$ and $AGTGCGGCGGGAATATGTACGAAGCGCAGG
+    std::vector<std::string> sequences {
+        "TCCTGCGCTTCGTACATATTCCCGCCGCACT",
+        "AGTGCGGCGGGAATATGTACGAAGCGCAGGC",
+    };
+
+    auto graph = std::make_shared<DBGSuccinct>(31, DeBruijnGraph::PRIMARY);
+    for (const auto &sequence : sequences) {
+        graph->add_sequence(sequence);
+    }
+
+    DBGSuccinct &dbg_succ = *dynamic_cast<DBGSuccinct*>(graph.get());
+
+    if (std::is_same_v<TypeParam, DBGSuccinctCached>)
+        graph->add_extension(std::make_shared<graph::NodeFirstCache>(dbg_succ));
+
+    CanonicalDBG canonical(graph);
+
+    {
+        std::string query = "TCCTGCGCTTCGTACATATTCCCGCCGCACT";
+        DeBruijnGraph::node_index start_node = map_to_nodes_sequentially(canonical, query)[0];
+        DeBruijnGraph::node_index last_node = 0;
+        canonical.call_outgoing_kmers(start_node, [&](auto node, char c) {
+            ASSERT_EQ(boss::BOSS::kSentinel, c);
+            EXPECT_NE(last_node, node);
+            last_node = node;
+        });
+
+        last_node = 0;
+        canonical.adjacent_outgoing_nodes(start_node, [&](auto node) {
+            EXPECT_NE(last_node, node);
+            last_node = node;
+        });
+    }
+    {
+        std::string query = "AGTGCGGCGGGAATATGTACGAAGCGCAGGC";
+        DeBruijnGraph::node_index start_node = map_to_nodes_sequentially(canonical, query)[0];
+        DeBruijnGraph::node_index last_node = 0;
+        canonical.call_incoming_kmers(start_node, [&](auto node, char c) {
+            ASSERT_EQ(boss::BOSS::kSentinel, c);
+            EXPECT_NE(last_node, node);
+            last_node = node;
+        });
+
+        last_node = 0;
+        canonical.adjacent_incoming_nodes(start_node, [&](auto node) {
+            EXPECT_NE(last_node, node);
+            last_node = node;
+        });
+    }
+}
+
 #endif // ! _PROTEIN_GRAPH
 
 } // namespace

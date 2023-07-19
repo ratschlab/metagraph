@@ -191,6 +191,8 @@ void CanonicalDBG
             assert(c == get_node_sequence(next).back());
             auto s = alphabet_encoder_[c];
 
+            // if a dummy sink k-mer exists in the underlying graph and its reverse
+            // complement is found, skip it
             if (c == boss::BOSS::kSentinel && children[s] != npos)
                 return;
 
@@ -337,6 +339,8 @@ void CanonicalDBG
             assert(c == get_node_sequence(prev)[0]);
             auto s = alphabet_encoder_[c];
 
+            // if a dummy source k-mer exists in the underlying graph and its reverse
+            // complement is found, skip it
             if (c == boss::BOSS::kSentinel && parents[s] != npos)
                 return;
 
