@@ -216,6 +216,7 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
     sdsl::bit_vector matched(this->query_.size(), false);
 
     auto generate_from_query = [&](std::string_view query, auto find_nodes, bool is_rc) {
+        DEBUG_LOG("is_rc: {}\tnodes: [{}]", is_rc, fmt::join(map_to_nodes_sequentially(dbg_succ, query), ", "));
         std::vector<std::vector<std::pair<edge_index, edge_index>>> ranges(
             query.size() - this->config_.min_seed_length + 1
         );
@@ -359,12 +360,6 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
                                             - end_clipping - seed_length,
                                          seed_length);
 
-            if (this->config_.seed_complexity_filter
-                    && seed_window.size() != dbg_succ.get_k()
-                    && is_low_complexity(seed_window)) {
-                continue;
-            }
-
             auto [first, last] = ranges[end_clipping].back();
             assert(first);
             assert(last);
@@ -396,6 +391,12 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
 
     auto find_nodes_fwd = [&](std::string_view query, size_t i, std::string_view seed_window, auto first, auto last, auto s) {
         assert(seed_window.size() <= dbg_succ.get_k());
+        if (this->config_.seed_complexity_filter
+                && seed_window.size() != dbg_succ.get_k()
+                && is_low_complexity(seed_window)) {
+            return;
+        }
+
         for (auto e = boss.succ_W(first, s); e <= last; e = boss.succ_W(e + 1, s)) {
             if (auto node = dbg_succ.boss_to_kmer_index(e))
                 add_seed(query, i, seed_window, node);
@@ -441,6 +442,12 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
                     size_t added_length = num_matches - this->config_.min_seed_length;
                     std::string_view seed_window(this->query_.data() + i - added_length,
                                                  num_matches);
+                    if (this->config_.seed_complexity_filter
+                            && seed_window.size() != dbg_succ.get_k()
+                            && is_low_complexity(seed_window)) {
+                        return;
+                    }
+
                     assert(canonical.get_node_sequence(node).substr(dbg_succ.get_k() - num_matches)
                         == seed_window);
                     size_t end_clipping = this->query_.size() - (i - added_length) - seed_window.size();
