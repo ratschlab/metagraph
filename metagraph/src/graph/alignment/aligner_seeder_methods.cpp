@@ -283,12 +283,18 @@ void SuffixSeeder<BaseSeeder>::generate_seeds() {
                 }
 
                 assert(std::get<2>(boss.index_range(begin, last_it)) == it);
+                assert(this->config_.min_seed_length + added_length == dbg_succ.get_k()
+                    || i + dbg_succ.get_k() > query.size()
+                    || map_to_nodes_sequentially(dbg_succ,
+                           std::string_view(query.data() + i, dbg_succ.get_k()))[0]
+                               == DeBruijnGraph::npos);
 
                 if (ranges[query.size() - i - this->config_.min_seed_length][0].first) {
                     std::fill(matched.begin() + i,
                               matched.begin() + i + this->config_.min_seed_length,
                               true);
                 }
+
             } else if (boss.tighten_range(&first, &last, *it)) {
                 std::fill(matched.end() - i - this->config_.min_seed_length,
                           matched.end() - i,
