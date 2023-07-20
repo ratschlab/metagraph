@@ -24,8 +24,7 @@ class CSRMatrix : public IntMatrix {
     // row is in [0, num_rows), column is in [0, num_columns)
     RowValues get_row_values(Row row) const { return vector_[row]; }
 
-    std::vector<RowValues>
-    get_row_values(const std::vector<Row> &rows) const;
+    std::vector<RowValues> get_row_values(const std::vector<Row> &rows) const;
 
     uint64_t num_columns() const { return num_columns_; }
     uint64_t num_rows() const { return vector_.size(); }
@@ -34,6 +33,7 @@ class CSRMatrix : public IntMatrix {
     // row is in [0, num_rows), column is in [0, num_columns)
     bool get(Row row, Column column) const;
     SetBitPositions get_row(Row row) const;
+    SetBitPositions slice_rows(const std::vector<Row> &row_ids) const;
     std::vector<Row> get_column(Column column) const;
 
     bool load(std::istream &in);

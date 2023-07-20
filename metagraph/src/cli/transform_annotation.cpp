@@ -551,9 +551,7 @@ int transform_annotation(Config *config) {
                     col.emplace_back(i, 1);
                 });
                 // TODO: make parallel (call sum_rows on batches)
-                auto row_sum = annotator->get_matrix().sum_rows(std::move(col),
-                                                                config->min_count,
-                                                                config->max_count);
+                auto row_sum = annotator->get_matrix().sum_rows(col, config->min_count);
 
                 std::cout << fmt::format("({}<{}>, {}<*>):", config->intersected_columns,
                                          base_label, file);

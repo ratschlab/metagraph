@@ -36,7 +36,7 @@ class BinaryMatrix {
     virtual std::vector<Row> get_column(Column column) const = 0;
 
     // get all selected rows appended with -1 and concatenated
-    virtual std::vector<Column> slice_rows(const std::vector<Row> &rows) const;
+    virtual SetBitPositions slice_rows(const std::vector<Row> &rows) const = 0;
 
     // For each column id in columns, run callback on its respective index in columns
     // and a bitmap represnting the column
@@ -51,11 +51,9 @@ class BinaryMatrix {
     virtual uint64_t num_relations() const = 0;
 
     // Return all columns for which counts are greater than or equal to |min_count|.
-    // Stop counting if count is greater than |count_cap|.
     virtual std::vector<std::pair<Column, size_t /* count */>>
     sum_rows(const std::vector<std::pair<Row, size_t>> &index_counts,
-             size_t min_count = 1,
-             size_t count_cap = std::numeric_limits<size_t>::max()) const;
+             size_t min_count = 1) const;
 };
 
 
@@ -71,15 +69,15 @@ class RainbowMatrix : public BinaryMatrix {
 
     // Return unique rows (in arbitrary order) and update the row indexes
     // in |rows| to point to their respective rows in the vector returned.
-    virtual std::vector<SetBitPositions>
-    get_rows(std::vector<Row> *rows, size_t num_threads = 1) const;
+    virtual std::vector<SetBitPositions> get_rows(std::vector<Row> *rows, size_t num_threads = 1) const;
+    virtual std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const;
+    virtual SetBitPositions slice_rows(const std::vector<Row> &rows) const;
+
 
     // Return all columns for which counts are greater than or equal to |min_count|.
-    // Stop counting if count is greater than |count_cap|.
     virtual std::vector<std::pair<Column, size_t /* count */>>
     sum_rows(const std::vector<std::pair<Row, size_t>> &index_counts,
-             size_t min_count = 1,
-             size_t count_cap = std::numeric_limits<size_t>::max()) const;
+             size_t min_count = 1) const;
 
     virtual uint64_t num_distinct_rows() const = 0;
 

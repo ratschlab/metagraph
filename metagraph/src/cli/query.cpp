@@ -698,8 +698,7 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
         #pragma omp critical
         {
             for (uint64_t i = batch_begin; i < batch_end; ++i) {
-                const auto &row = rows[i - batch_begin];
-                auto it = unique_rows.emplace(row).first;
+                auto it = unique_rows.emplace(std::move(rows[i - batch_begin])).first;
                 row_rank[full_to_small[i].second] = it - unique_rows.begin();
                 if (unique_rows.size() == std::numeric_limits<uint32_t>::max())
                     throw std::runtime_error("There must be less than 2^32 unique rows."

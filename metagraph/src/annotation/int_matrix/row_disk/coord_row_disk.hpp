@@ -27,6 +27,7 @@ class CoordRowDisk : public MultiIntMatrix {
 
     bool get(Row i, Column j) const { return get_view().get(i, j); }
     SetBitPositions get_row(Row i) const { return get_view().get_row(i); }
+    SetBitPositions slice_rows(const std::vector<Row> &rows) const { return get_view().slice_rows(rows); }
     // FYI: `get_column` is very inefficient, consider using column-major formats
     std::vector<Row> get_column(Column j) const { return get_view().get_column(j); }
     std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const {
@@ -87,9 +88,10 @@ class CoordRowDisk : public MultiIntMatrix {
               bits_for_single_value_(bits_for_single_value) {}
 
         bool get(Row i, Column j) const;
-        BinaryMatrix::SetBitPositions get_row(Row i) const;
+        SetBitPositions get_row(Row i) const;
+        SetBitPositions slice_rows(const std::vector<Row> &rows) const;
         std::vector<SetBitPositions> get_rows(const std::vector<Row> &row_ids) const;
-        std::vector<BinaryMatrix::Row> get_column(Column j) const;
+        std::vector<Row> get_column(Column j) const;
 
         RowValues get_row_values(Row i) const;
         std::vector<RowValues> get_row_values(const std::vector<Row> &row_ids) const;

@@ -51,6 +51,8 @@ class IntRowDiff : public binmat::IRowDiff, public IntMatrix {
         : diffs_(std::forward<Args>(args)...) { graph_ = graph; }
 
     bool get(Row i, Column j) const override;
+    SetBitPositions get_row(Row row) const override { return get_rows({ row })[0]; }
+    SetBitPositions slice_rows(const std::vector<Row> &row_ids) const override;
     std::vector<Row> get_column(Column j) const override;
     // query integer values
     RowValues get_row_values(Row i) const override;
@@ -148,6 +150,22 @@ IntRowDiff<BaseMatrix>::get_row_values(const std::vector<Row> &row_ids) const {
     }
 
     return rows;
+}
+
+template <class BaseMatrix>
+typename IntRowDiff<BaseMatrix>::SetBitPositions
+IntRowDiff<BaseMatrix>::slice_rows(const std::vector<Row> &row_ids) const {
+    SetBitPositions slice;
+    slice.reserve(row_ids.size() * 2);
+
+    for (const auto &row : get_row_values(row_ids)) {
+        for (const auto [j, value] : row) {
+            slice.push_back(j);
+        }
+        slice.push_back(std::numeric_limits<Column>::max());
+    }
+
+    return slice;
 }
 
 template <class BaseMatrix>

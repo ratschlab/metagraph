@@ -89,9 +89,10 @@ ColumnMajor::get_column_ranks(const std::vector<Row> &row_ids) const {
     return result;
 }
 
-std::vector<ColumnMajor::Column>
+ColumnMajor::SetBitPositions
 ColumnMajor::slice_rows(const std::vector<Row> &row_ids) const {
-    std::vector<Column> slice;
+    SetBitPositions slice;
+    slice.reserve(row_ids.size() * 2);
 
     for (const auto &row : get_rows(row_ids)) {
         for (uint64_t j : row) {
@@ -172,13 +173,7 @@ uint64_t ColumnMajor::num_relations() const {
 
 std::vector<std::pair<ColumnMajor::Column, size_t /* count */>>
 ColumnMajor::sum_rows(const std::vector<std::pair<Row, size_t>> &index_counts,
-                       size_t min_count,
-                       size_t count_cap) const {
-    assert(count_cap >= min_count);
-
-    if (!count_cap)
-        return {};
-
+                       size_t min_count) const {
     min_count = std::max(min_count, size_t(1));
 
     size_t total_sum_count = 0;
@@ -202,13 +197,12 @@ ColumnMajor::sum_rows(const std::vector<std::pair<Row, size_t>> &index_counts,
             total_checked += count;
             total_matched += count * column[i];
 
-            if (total_matched >= count_cap
-                    || total_matched + (total_sum_count - total_checked) < min_count)
+            if (total_matched + (total_sum_count - total_checked) < min_count)
                 break;
         }
 
         if (total_matched >= min_count)
-            result.emplace_back(j, std::min(total_matched, count_cap));
+            result.emplace_back(j, total_matched);
     }
 
     return result;

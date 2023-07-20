@@ -24,6 +24,7 @@ class BinRelWT_sdsl : public BinaryMatrix {
 
     bool get(Row row, Column column) const override;
     SetBitPositions get_row(Row row) const override;
+    SetBitPositions slice_rows(const std::vector<Row> &row_ids) const override;
     std::vector<Row> get_column(Column column) const override;
 
     bool load(std::istream &in) override;

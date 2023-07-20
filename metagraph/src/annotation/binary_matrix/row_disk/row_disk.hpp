@@ -22,6 +22,7 @@ class RowDisk : public BinaryMatrix {
 
     bool get(Row i, Column j) const { return get_view().get(i, j); }
     SetBitPositions get_row(Row i) const { return get_view().get_row(i); }
+    SetBitPositions slice_rows(const std::vector<Row> &rows) const { return get_view().slice_rows(rows); }
     // FYI: `get_column` is very inefficient, consider using column-major formats
     std::vector<Row> get_column(Column j) const { return get_view().get_column(j); }
     std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const {
@@ -55,9 +56,10 @@ class RowDisk : public BinaryMatrix {
               set_bits_(filename, std::ios::in, buff_size, 0, false, offset) {}
 
         bool get(Row i, Column j) const;
-        BinaryMatrix::SetBitPositions get_row(Row i) const;
+        SetBitPositions get_row(Row i) const;
+        SetBitPositions slice_rows(const std::vector<Row> &rows) const;
         std::vector<SetBitPositions> get_rows(const std::vector<Row> &row_ids) const;
-        std::vector<BinaryMatrix::Row> get_column(Column j) const;
+        std::vector<Row> get_column(Column j) const;
 
       private:
         const bit_vector_small &boundary_;

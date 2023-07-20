@@ -66,21 +66,6 @@ bool UniqueRowBinmat::get(Row i, Column j) const {
     return std::find(row.begin(), row.end(), j) != row.end();
 }
 
-std::vector<BinaryMatrix::SetBitPositions>
-UniqueRowBinmat::get_rows(const std::vector<Row> &row_ids) const {
-    std::vector<SetBitPositions> rows;
-    std::vector<size_t> ranks;
-    rows.reserve(row_ids.size());
-    ranks.reserve(row_ids.size());
-    for (Row i : row_ids) {
-        ranks.push_back(row_rank_[i]);
-    }
-    for (size_t r : ranks) {
-        rows.push_back(unique_rows_[r]);
-    }
-    return rows;
-}
-
 std::vector<UniqueRowBinmat::Row> UniqueRowBinmat::get_column(Column j) const {
     // first, find all unique rows with `1` in the j-th column
     tsl::ordered_set<uint32_t> row_ranks;

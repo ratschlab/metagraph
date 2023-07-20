@@ -173,35 +173,6 @@ bool Rainbowfish::get(Row row, Column column) const {
     return reduced_matrix_[code / buffer_size_]->get(code % buffer_size_, column);
 }
 
-std::vector<Rainbowfish::SetBitPositions>
-Rainbowfish::get_rows(const std::vector<Row> &rows) const {
-    std::vector<std::pair<uint64_t, /* code */
-                          uint64_t /* row */>> row_codes(rows.size());
-
-    for (size_t i = 0; i < rows.size(); ++i) {
-        row_codes[i] = { get_code(rows[i]), i };
-    }
-
-    std::sort(row_codes.begin(), row_codes.end(), utils::LessFirst());
-
-    std::vector<SetBitPositions> result(rows.size());
-
-    SetBitPositions *last_row = nullptr;
-    uint64_t last_code = std::numeric_limits<uint64_t>::max();
-
-    for (const auto &[code, row] : row_codes) {
-        if (code == last_code) {
-            result[row] = *last_row;
-        } else {
-            result[row] = code_to_row(code);
-            last_row = &result[row];
-            last_code = code;
-        }
-    }
-
-    return result;
-}
-
 std::vector<Rainbowfish::Row> Rainbowfish::get_column(Column column) const {
     sdsl::bit_vector distinct_row_indices(num_distinct_rows(), false);
     uint64_t offset = 0;

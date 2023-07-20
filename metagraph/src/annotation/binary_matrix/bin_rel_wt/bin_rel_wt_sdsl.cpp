@@ -86,6 +86,45 @@ BinRelWT_sdsl::SetBitPositions BinRelWT_sdsl::get_row(Row row) const {
     return SetBitPositions(label_indices.begin(), label_indices.end());
 }
 
+BinRelWT_sdsl::SetBitPositions BinRelWT_sdsl::slice_rows(const std::vector<Row> &row_ids) const {
+    SetBitPositions slice;
+    slice.reserve(row_ids.size() * 2);
+
+    // Get label indices from the base string stored in wt_.
+    typedef sdsl::int_vector<>::size_type size_type;
+    typedef typename decltype(wt_)::value_type value_type;
+    std::vector<value_type> label_indices;
+    std::vector<size_type> rank_c_i;
+    std::vector<size_type> rank_c_j;
+
+    for (uint64_t row : row_ids) {
+        uint64_t first_string_index = delimiters_.select1(row + 1) - row;
+        uint64_t last_string_index = delimiters_.select1(row + 2) - (row + 1);
+
+        size_type num_row_set_bits;
+
+        rank_c_i.resize(last_string_index - first_string_index);
+        rank_c_j.resize(last_string_index - first_string_index);
+
+        label_indices.resize(last_string_index - first_string_index);
+
+        wt_.interval_symbols(first_string_index,
+                             last_string_index,
+                             num_row_set_bits,
+                             label_indices,
+                             rank_c_i,
+                             rank_c_j);
+
+        for (Column j : label_indices) {
+            slice.push_back(j);
+        }
+
+        slice.push_back(std::numeric_limits<Column>::max());
+    }
+
+    return slice;
+}
+
 std::vector<BinRelWT_sdsl::Row> BinRelWT_sdsl::get_column(Column column) const {
     assert(column < num_columns_);
 

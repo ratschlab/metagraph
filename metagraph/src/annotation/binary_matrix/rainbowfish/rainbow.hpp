@@ -32,7 +32,7 @@ class Rainbow : public RainbowMatrix {
 
     // row is in [0, num_rows), column is in [0, num_columns)
     bool get(Row row, Column column) const override;
-    std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const override;
+    using RainbowMatrix::get_rows;
     // Return unique rows (in arbitrary order) and update the row indexes
     // in |rows| to point to their respective rows in the vector returned.
     std::vector<SetBitPositions> get_rows(std::vector<Row> *rows,

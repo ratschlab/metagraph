@@ -97,7 +97,7 @@ class RowDiff : public IRowDiff, public BinaryMatrix {
     std::vector<Row> get_column(Column column) const override;
 
     SetBitPositions get_row(Row row) const override;
-
+    SetBitPositions slice_rows(const std::vector<Row> &row_ids) const override;
     std::vector<SetBitPositions> get_rows(const std::vector<Row> &row_ids) const override;
 
     bool load(std::istream &f) override;
@@ -212,6 +212,22 @@ RowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
     assert(times_traversed == std::vector<size_t>(rd_rows.size(), 0));
 
     return rows;
+}
+
+template <class BaseMatrix>
+BinaryMatrix::SetBitPositions
+RowDiff<BaseMatrix>::slice_rows(const std::vector<Row> &row_ids) const {
+    SetBitPositions slice;
+    slice.reserve(row_ids.size() * 2);
+
+    for (const auto &row : get_rows(row_ids)) {
+        for (uint64_t j : row) {
+            slice.push_back(j);
+        }
+        slice.push_back(std::numeric_limits<Column>::max());
+    }
+
+    return slice;
 }
 
 template <class BaseMatrix>

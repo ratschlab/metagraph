@@ -29,7 +29,7 @@ class ColumnMajor : public BinaryMatrix {
     get_column_ranks(const std::vector<Row> &rows) const;
     std::vector<Row> get_column(Column column) const override;
     // get all selected rows appended with -1 and concatenated
-    std::vector<Column> slice_rows(const std::vector<Row> &rows) const override;
+    SetBitPositions slice_rows(const std::vector<Row> &rows) const override;
 
     void call_columns(const std::vector<Column> &columns,
                       const std::function<void(size_t, const bitmap&)> &callback,
@@ -42,11 +42,9 @@ class ColumnMajor : public BinaryMatrix {
     uint64_t num_relations() const override;
 
     // Return all columns for which counts are greater than or equal to |min_count|.
-    // Stop counting if count is greater than |count_cap|.
     std::vector<std::pair<Column, size_t /* count */>>
     sum_rows(const std::vector<std::pair<Row, size_t>> &index_counts,
-             size_t min_count = 1,
-             size_t count_cap = std::numeric_limits<size_t>::max()) const override;
+             size_t min_count = 1) const override;
 
     auto& data() { return columns_; }
     const auto& data() const { return columns_; }

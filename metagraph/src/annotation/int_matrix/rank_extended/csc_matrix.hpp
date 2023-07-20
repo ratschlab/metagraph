@@ -48,7 +48,7 @@ class CSCMatrix : public IntMatrix {
         return binary_matrix_.get_column(column);
     }
     // get all selected rows appended with -1 and concatenated
-    std::vector<Column> slice_rows(const std::vector<Row> &rows) const {
+    SetBitPositions slice_rows(const std::vector<Row> &rows) const {
         return binary_matrix_.slice_rows(rows);
     }
 

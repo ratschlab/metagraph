@@ -267,11 +267,7 @@ AnnotatedDBG::get_labels(const std::vector<std::pair<row_index, size_t>> &index_
                          size_t min_count) const {
     assert(check_compatibility());
 
-    auto code_counts = annotator_->get_matrix().sum_rows(
-        index_counts,
-        min_count,
-        std::max(min_count, size_t(1))
-    );
+    auto code_counts = annotator_->get_matrix().sum_rows(index_counts, min_count);
 
     std::vector<Label> labels;
     labels.reserve(code_counts.size());

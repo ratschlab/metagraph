@@ -21,15 +21,11 @@ class Rainbowfish : public RainbowMatrix {
                 uint64_t buffer_size = static_cast<uint64_t>(-1));
 
     uint64_t num_columns() const { return num_columns_; }
-
     uint64_t num_rows() const;
-
     uint64_t num_distinct_rows() const;
 
     // row is in [0, num_rows), column is in [0, num_columns)
     bool get(Row row, Column column) const;
-    using RainbowMatrix::get_rows;
-    std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const;
     std::vector<Row> get_column(Column column) const;
 
     bool load(std::istream &in);

@@ -66,6 +66,27 @@ BinaryMatrix::SetBitPositions RowSparse::get_row(Row row) const {
     return result;
 }
 
+BinaryMatrix::SetBitPositions RowSparse::slice_rows(const std::vector<Row> &row_ids) const {
+    SetBitPositions slice;
+    slice.reserve(row_ids.size() * 2);
+
+    for (uint64_t row : row_ids) {
+        assert(boundary_[boundary_.size() - 1] == 1);
+        uint64_t start_idx = row == 0 ? 0 : boundary_.select1(row) + 1;
+        uint64_t end_idx = boundary_.next1(start_idx);
+        // In each row, the first value in `set_bits_` stores the first set bit,
+        // and all next ones store deltas pos[i] - pos[i-1].
+        uint64_t last = 0;
+        for (uint64_t i = start_idx; i != end_idx; ++i) {
+            slice.push_back(last += set_bits_[i - row]);
+        }
+
+        slice.push_back(std::numeric_limits<Column>::max());
+    }
+
+    return slice;
+}
+
 bool RowSparse::load(std::istream &f) {
     try {
         f.read(reinterpret_cast<char *>(&num_columns_), sizeof(uint64_t));

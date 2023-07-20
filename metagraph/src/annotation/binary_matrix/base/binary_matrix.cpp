@@ -1,6 +1,7 @@
 #include "binary_matrix.hpp"
 
 #include <ips4o.hpp>
+#include <tsl/hopscotch_map.h>
 
 #include "common/vectors/bitmap.hpp"
 #include "common/serialization.hpp"
@@ -16,25 +17,21 @@ std::vector<BinaryMatrix::SetBitPositions>
 BinaryMatrix::get_rows(const std::vector<Row> &row_ids) const {
     std::vector<SetBitPositions> rows(row_ids.size());
 
-    for (size_t i = 0; i < row_ids.size(); ++i) {
-        rows[i] = get_row(row_ids[i]);
+    auto slice = slice_rows(row_ids);
+
+    assert(slice.size() >= row_ids.size());
+
+    auto row_begin = slice.begin();
+
+    for (size_t i = 0; i < rows.size(); ++i) {
+        // every row in `slice` ends with `-1`
+        auto row_end = std::find(row_begin, slice.end(),
+                                 std::numeric_limits<Column>::max());
+        rows[i].assign(row_begin, row_end);
+        row_begin = row_end + 1;
     }
 
     return rows;
-}
-
-std::vector<BinaryMatrix::Column>
-BinaryMatrix::slice_rows(const std::vector<Row> &row_ids) const {
-    std::vector<BinaryMatrix::Column> slice;
-
-    for (uint64_t i : row_ids) {
-        for (uint64_t j : get_row(i)) {
-            slice.push_back(j);
-        }
-        slice.push_back(std::numeric_limits<Column>::max());
-    }
-
-    return slice;
 }
 
 void BinaryMatrix::call_columns(const std::vector<Column> &column_ids,
@@ -48,54 +45,34 @@ void BinaryMatrix::call_columns(const std::vector<Column> &column_ids,
 
 std::vector<std::pair<BinaryMatrix::Column, size_t /* count */>>
 BinaryMatrix::sum_rows(const std::vector<std::pair<Row, size_t>> &index_counts,
-                       size_t min_count,
-                       size_t count_cap) const {
-    assert(count_cap >= min_count);
-
-    if (!count_cap)
-        return {};
-
+                       size_t min_count) const {
     min_count = std::max(min_count, size_t(1));
 
     size_t total_sum_count = 0;
-    for (const auto &pair : index_counts) {
-        total_sum_count += pair.second;
+    for (auto [i, count] : index_counts) {
+        total_sum_count += count;
     }
 
     if (total_sum_count < min_count)
         return {};
 
-    std::vector<size_t> col_counts(num_columns(), 0);
-    size_t max_matched = 0;
-    size_t total_checked = 0;
+    // TODO: call slice_rows
+
+    VectorMap<Column, size_t> col_counts;
 
     for (auto [i, count] : index_counts) {
-        if (max_matched + (total_sum_count - total_checked) < min_count)
-            break;
-
         for (size_t j : get_row(i)) {
-            assert(j < col_counts.size());
-
             col_counts[j] += count;
-            max_matched = std::max(max_matched, col_counts[j]);
-        }
-
-        total_checked += count;
-    }
-
-    if (max_matched < min_count)
-        return {};
-
-    std::vector<std::pair<uint64_t, size_t>> result;
-    result.reserve(col_counts.size());
-
-    for (size_t j = 0; j < num_columns(); ++j) {
-        if (col_counts[j] >= min_count) {
-            result.emplace_back(j, std::min(col_counts[j], count_cap));
         }
     }
 
-    return result;
+    auto &result = const_cast<std::vector<std::pair<Column, size_t>>&>(col_counts.values_container());
+
+    result.erase(std::remove_if(result.begin(), result.end(),
+                                [&](const auto &p) { return p.second < min_count; }),
+                 result.end());
+
+    return std::move(result);
 }
 
 
@@ -136,15 +113,39 @@ RainbowMatrix::get_rows(std::vector<Row> *rows, size_t num_threads) const {
     return unique_rows;
 }
 
+// TODO: improve
+RainbowMatrix::SetBitPositions
+RainbowMatrix::slice_rows(const std::vector<Row> &rows) const {
+    SetBitPositions slice;
+    slice.reserve(rows.size() * 2);
+
+    for (const auto &row : get_rows(rows)) {
+        for (uint64_t j : row) {
+            slice.push_back(j);
+        }
+        slice.push_back(std::numeric_limits<Column>::max());
+    }
+
+    return slice;
+}
+
+std::vector<RainbowMatrix::SetBitPositions>
+RainbowMatrix::get_rows(const std::vector<Row> &rows) const {
+    std::vector<Row> pointers = rows;
+    auto distinct_rows = get_rows(&pointers);
+
+    std::vector<SetBitPositions> result(rows.size());
+    for (size_t i = 0; i < pointers.size(); ++i) {
+        result[i] = distinct_rows[pointers[i]];
+    }
+
+    return result;
+}
+
+// TODO: merge with BinaryMatrix::sum_rows
 std::vector<std::pair<RainbowMatrix::Column, size_t /* count */>>
 RainbowMatrix::sum_rows(const std::vector<std::pair<Row, size_t>> &index_counts,
-                        size_t min_count,
-                        size_t count_cap) const {
-    assert(count_cap >= min_count);
-
-    if (!count_cap)
-        return {};
-
+                        size_t min_count) const {
     min_count = std::max(min_count, size_t(1));
 
     size_t total_sum_count = 0;
@@ -155,43 +156,27 @@ RainbowMatrix::sum_rows(const std::vector<std::pair<Row, size_t>> &index_counts,
     if (total_sum_count < min_count)
         return {};
 
-    VectorMap<size_t, size_t> code_count;
+    tsl::hopscotch_map<size_t, size_t> code_count;
     code_count.reserve(index_counts.size());
     for (auto [i, count] : index_counts) {
         code_count[get_code(i)] += count;
     }
 
-    std::vector<size_t> col_counts(num_columns(), 0);
-    size_t max_matched = 0;
-    size_t total_checked = 0;
+    VectorMap<Column, size_t> col_counts;
 
     for (auto [c, count] : code_count) {
-        if (max_matched + (total_sum_count - total_checked) < min_count)
-            break;
-
         for (size_t j : code_to_row(c)) {
-            assert(j < col_counts.size());
-
             col_counts[j] += count;
-            max_matched = std::max(max_matched, col_counts[j]);
-        }
-
-        total_checked += count;
-    }
-
-    if (max_matched < min_count)
-        return {};
-
-    std::vector<std::pair<uint64_t, size_t>> result;
-    result.reserve(col_counts.size());
-
-    for (size_t j = 0; j < num_columns(); ++j) {
-        if (col_counts[j] >= min_count) {
-            result.emplace_back(j, std::min(col_counts[j], count_cap));
         }
     }
 
-    return result;
+    auto &result = const_cast<std::vector<std::pair<Column, size_t>>&>(col_counts.values_container());
+
+    result.erase(std::remove_if(result.begin(), result.end(),
+                                [&](const auto &p) { return p.second < min_count; }),
+                 result.end());
+
+    return std::move(result);
 }
 
 

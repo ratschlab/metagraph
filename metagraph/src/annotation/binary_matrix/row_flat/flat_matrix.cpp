@@ -52,6 +52,22 @@ RowFlat<BitVector>::get_row(Row row) const {
 }
 
 template <typename BitVector>
+typename RowFlat<BitVector>::SetBitPositions
+RowFlat<BitVector>::slice_rows(const std::vector<Row> &row_ids) const {
+    SetBitPositions slice;
+    slice.reserve(row_ids.size() * 2);
+
+    for (uint64_t i : row_ids) {
+        const uint64_t offset = i * num_columns_;
+        compressed_rows_->call_ones_in_range(offset, offset + num_columns_,
+                                             [&](uint64_t j) { slice.push_back(j - offset); });
+        slice.push_back(std::numeric_limits<Column>::max());
+    }
+
+    return slice;
+}
+
+template <typename BitVector>
 std::vector<typename RowFlat<BitVector>::Row>
 RowFlat<BitVector>::get_column(Column column) const {
     assert(compressed_rows_.get());

@@ -50,20 +50,6 @@ bool Rainbow<MatrixType>::get(Row row, Column column) const {
 
 template <class MatrixType>
 std::vector<BinaryMatrix::SetBitPositions>
-Rainbow<MatrixType>::get_rows(const std::vector<Row> &rows) const {
-    std::vector<Row> pointers = rows;
-    auto distinct_rows = get_rows(&pointers);
-
-    std::vector<SetBitPositions> result(rows.size());
-    for (size_t i = 0; i < pointers.size(); ++i) {
-        result[i] = distinct_rows[pointers[i]];
-    }
-
-    return result;
-}
-
-template <class MatrixType>
-std::vector<BinaryMatrix::SetBitPositions>
 Rainbow<MatrixType>::get_rows(std::vector<Row> *rows, size_t num_threads) const {
     assert(rows);
 

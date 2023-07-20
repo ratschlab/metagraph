@@ -11,6 +11,7 @@ namespace annot {
 
 // TODO: implement this as an annotation matrix
 // StaticBinRelAnnotator<VectorRowBinMat>
+// TODO: remove?
 template <typename Label = std::string>
 class RowCompressed : public MultiLabelEncoded<Label> {
   public:

@@ -49,6 +49,34 @@ IntMatrix::SetBitPositions CoordRowDisk::View::get_row(Row row) const {
     return result;
 }
 
+IntMatrix::SetBitPositions
+CoordRowDisk::View::slice_rows(const std::vector<Row> &row_ids) const {
+    SetBitPositions slice;
+    slice.reserve(row_ids.size() * 2);
+
+    for (uint64_t row : row_ids) {
+        assert(boundary_[boundary_.size() - 1] == 1);
+        uint64_t pos = row == 0 ? 0 : boundary_.select1(row) + 1 - row;
+        uint64_t end = boundary_.select1(row + 1) - row;
+
+        while (pos < end) {
+            set_bits_.start_reading_at(pos);
+            Column col_id = set_bits_.get(bits_for_col_id_);
+            pos += bits_for_col_id_;
+
+            uint64_t num_values = set_bits_.get(bits_for_number_of_vals_);
+
+            pos += bits_for_number_of_vals_;
+            pos += bits_for_single_value_ * num_values;
+            slice.emplace_back(col_id);
+        }
+
+        slice.push_back(std::numeric_limits<Column>::max());
+    }
+
+    return slice;
+}
+
 std::vector<IntMatrix::SetBitPositions>
 CoordRowDisk::View::get_rows(const std::vector<Row> &row_ids) const {
     std::vector<SetBitPositions> rows(row_ids.size());
