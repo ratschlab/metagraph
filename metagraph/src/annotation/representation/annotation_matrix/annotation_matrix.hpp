@@ -29,7 +29,6 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<Label> {
         : StaticBinRelAnnotator(std::make_unique<BinaryMatrixType>(std::forward<Args>(args)...),
                                 label_encoder) {}
 
-    bool has_label(Index i, const Label &label) const override;
     bool has_labels(Index i, const VLabels &labels) const override;
 
     void serialize(const std::string &filename) const override;

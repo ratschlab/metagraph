@@ -9,9 +9,9 @@
 
 namespace mtg {
 namespace annot {
-namespace binmat {
+namespace matrix {
 
-class ColumnMajor : public BinaryMatrix {
+class ColumnMajor : public BinaryMatrix, public GetEntrySupport {
   public:
     ColumnMajor() {}
     ColumnMajor(std::vector<std::unique_ptr<bit_vector>>&& columns)
@@ -21,7 +21,6 @@ class ColumnMajor : public BinaryMatrix {
     uint64_t num_rows() const override;
 
     bool get(Row row, Column column) const override;
-    SetBitPositions get_row(Row row) const override;
     std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const override;
     // query row and get ranks of each set bit in its column
     Vector<std::pair<Column, uint64_t>> get_column_ranks(Row row) const;
@@ -53,7 +52,7 @@ class ColumnMajor : public BinaryMatrix {
     std::vector<std::unique_ptr<bit_vector>> columns_;
 };
 
-} // namespace binmat
+} // namespace matrix
 } // namespace annot
 } // namespace mtg
 

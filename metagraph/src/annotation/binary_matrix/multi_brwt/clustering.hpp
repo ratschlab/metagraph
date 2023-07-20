@@ -10,7 +10,7 @@
 
 namespace mtg {
 namespace annot {
-namespace binmat {
+namespace matrix {
 
 typedef Eigen::Matrix<uint64_t, Eigen::Dynamic, 4> LinkageMatrix;
 
@@ -49,7 +49,7 @@ random_submatrix(const std::vector<const bit_vector *> &columns,
                  uint64_t num_rows_sampled,
                  size_t num_threads = 1, int seed = 1);
 
-} // namespace binmat
+} // namespace matrix
 } // namespace annot
 } // namespace mtg
 

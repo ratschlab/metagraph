@@ -26,37 +26,37 @@
 namespace mtg {
 namespace annot {
 
-typedef StaticBinRelAnnotator<binmat::RowFlat<>, std::string> RowFlatAnnotator;
+typedef StaticBinRelAnnotator<matrix::RowFlat<>, std::string> RowFlatAnnotator;
 
-typedef StaticBinRelAnnotator<binmat::RowSparse, std::string> RowSparseAnnotator;
+typedef StaticBinRelAnnotator<matrix::RowSparse, std::string> RowSparseAnnotator;
 
-typedef StaticBinRelAnnotator<binmat::Rainbowfish, std::string> RainbowfishAnnotator;
+typedef StaticBinRelAnnotator<matrix::Rainbowfish, std::string> RainbowfishAnnotator;
 
-typedef StaticBinRelAnnotator<binmat::BRWT, std::string> MultiBRWTAnnotator;
+typedef StaticBinRelAnnotator<matrix::BRWT, std::string> MultiBRWTAnnotator;
 
-typedef StaticBinRelAnnotator<binmat::BinRelWT_sdsl, std::string> BinRelWT_sdslAnnotator;
+typedef StaticBinRelAnnotator<matrix::BinRelWT_sdsl, std::string> BinRelWT_sdslAnnotator;
 
-typedef StaticBinRelAnnotator<binmat::BinRelWT, std::string> BinRelWTAnnotator;
+typedef StaticBinRelAnnotator<matrix::BinRelWT, std::string> BinRelWTAnnotator;
 
-typedef StaticBinRelAnnotator<binmat::UniqueRowBinmat, std::string> UniqueRowAnnotator;
+typedef StaticBinRelAnnotator<matrix::UniqueRowBinmat, std::string> UniqueRowAnnotator;
 
-typedef StaticBinRelAnnotator<binmat::Rainbow<binmat::BRWT>, std::string> RbBRWTAnnotator;
+typedef StaticBinRelAnnotator<matrix::Rainbow<matrix::BRWT>, std::string> RbBRWTAnnotator;
 
-typedef StaticBinRelAnnotator<binmat::RowDiff<binmat::ColumnMajor>, std::string> RowDiffColumnAnnotator;
+typedef StaticBinRelAnnotator<matrix::RowDiff<matrix::ColumnMajor>, std::string> RowDiffColumnAnnotator;
 
-typedef StaticBinRelAnnotator<binmat::RowDiff<binmat::BRWT>, std::string> RowDiffBRWTAnnotator;
+typedef StaticBinRelAnnotator<matrix::RowDiff<matrix::BRWT>, std::string> RowDiffBRWTAnnotator;
 
-typedef StaticBinRelAnnotator<binmat::RowDiff<binmat::RowFlat<>>, std::string> RowDiffRowFlatAnnotator;
+typedef StaticBinRelAnnotator<matrix::RowDiff<matrix::RowFlat<>>, std::string> RowDiffRowFlatAnnotator;
 
-typedef StaticBinRelAnnotator<binmat::RowDiff<binmat::RowSparse>, std::string> RowDiffRowSparseAnnotator;
+typedef StaticBinRelAnnotator<matrix::RowDiff<matrix::RowSparse>, std::string> RowDiffRowSparseAnnotator;
 
-typedef StaticBinRelAnnotator<binmat::RowDiff<binmat::RowDisk>, std::string> RowDiffDiskAnnotator;
+typedef StaticBinRelAnnotator<matrix::RowDiff<matrix::RowDisk>, std::string> RowDiffDiskAnnotator;
 
 typedef sdsl::dac_vector_dp<> CountsVector;
 
-typedef StaticBinRelAnnotator<matrix::CSCMatrix<binmat::BRWT, CountsVector>, std::string> IntMultiBRWTAnnotator;
+typedef StaticBinRelAnnotator<matrix::CSCMatrix<matrix::BRWT, CountsVector>, std::string> IntMultiBRWTAnnotator;
 
-typedef StaticBinRelAnnotator<matrix::IntRowDiff<matrix::CSCMatrix<binmat::BRWT, CountsVector>>, std::string> IntRowDiffBRWTAnnotator;
+typedef StaticBinRelAnnotator<matrix::IntRowDiff<matrix::CSCMatrix<matrix::BRWT, CountsVector>>, std::string> IntRowDiffBRWTAnnotator;
 
 typedef StaticBinRelAnnotator<matrix::CSRMatrix, std::string> IntRowAnnotator;
 
@@ -64,13 +64,13 @@ typedef StaticBinRelAnnotator<matrix::IntRowDiff<matrix::IntRowDisk>, std::strin
 
 typedef StaticBinRelAnnotator<matrix::TupleRowDiff<matrix::CoordRowDisk>, std::string> RowDiffDiskCoordAnnotator;
 
-typedef StaticBinRelAnnotator<matrix::TupleCSCMatrix<binmat::ColumnMajor>, std::string> ColumnCoordAnnotator;
+typedef StaticBinRelAnnotator<matrix::TupleCSCMatrix<matrix::ColumnMajor>, std::string> ColumnCoordAnnotator;
 
-typedef StaticBinRelAnnotator<matrix::TupleCSCMatrix<binmat::BRWT>, std::string> MultiBRWTCoordAnnotator;
+typedef StaticBinRelAnnotator<matrix::TupleCSCMatrix<matrix::BRWT>, std::string> MultiBRWTCoordAnnotator;
 
-typedef StaticBinRelAnnotator<matrix::TupleRowDiff<matrix::TupleCSCMatrix<binmat::ColumnMajor>>, std::string> RowDiffCoordAnnotator;
+typedef StaticBinRelAnnotator<matrix::TupleRowDiff<matrix::TupleCSCMatrix<matrix::ColumnMajor>>, std::string> RowDiffCoordAnnotator;
 
-typedef StaticBinRelAnnotator<matrix::TupleRowDiff<matrix::TupleCSCMatrix<binmat::BRWT>>, std::string> RowDiffBRWTCoordAnnotator;
+typedef StaticBinRelAnnotator<matrix::TupleRowDiff<matrix::TupleCSCMatrix<matrix::BRWT>>, std::string> RowDiffBRWTCoordAnnotator;
 
 
 template <>

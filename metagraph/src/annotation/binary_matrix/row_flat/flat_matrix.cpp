@@ -10,7 +10,7 @@
 
 namespace mtg {
 namespace annot {
-namespace binmat {
+namespace matrix {
 
 template <typename BitVector>
 RowFlat<BitVector>::RowFlat(const std::function<void(const RowCallback&)> &call_rows,
@@ -31,12 +31,6 @@ RowFlat<BitVector>::RowFlat(const std::function<void(const RowCallback&)> &call_
         }, num_columns_ * num_rows_, num_set_bits)
     );
     num_relations_ = num_set_bits;
-}
-
-template <typename BitVector>
-bool RowFlat<BitVector>::get(Row row, Column column) const {
-    assert(compressed_rows_.get());
-    return (*compressed_rows_)[row * num_columns_ + column];
 }
 
 template <typename BitVector>
@@ -137,6 +131,6 @@ void RowFlat<BitVector>::serialize(const std::function<void(const RowCallback&)>
 template class RowFlat<bit_vector_sd>;
 template class RowFlat<bit_vector_small>;
 
-} // namespace binmat
+} // namespace matrix
 } // namespace annot
 } // namespace mtg

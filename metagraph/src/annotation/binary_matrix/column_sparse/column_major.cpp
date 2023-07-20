@@ -6,7 +6,7 @@
 
 namespace mtg {
 namespace annot {
-namespace binmat {
+namespace matrix {
 
 uint64_t ColumnMajor::num_rows() const {
     if (!columns_.size()) {
@@ -22,19 +22,6 @@ bool ColumnMajor::get(Row row, Column column) const {
     assert(columns_[column]);
     assert(row < columns_[column]->size());
     return (*columns_[column])[row];
-}
-
-ColumnMajor::SetBitPositions ColumnMajor::get_row(Row row) const {
-    assert(row < num_rows() || !columns_.size());
-
-    SetBitPositions result;
-    for (size_t i = 0; i < columns_.size(); ++i) {
-        assert(columns_[i]);
-
-        if ((*columns_[i])[row])
-            result.push_back(i);
-    }
-    return result;
 }
 
 std::vector<ColumnMajor::SetBitPositions>
@@ -208,6 +195,6 @@ ColumnMajor::sum_rows(const std::vector<std::pair<Row, size_t>> &index_counts,
     return result;
 }
 
-} // namespace binmat
+} // namespace matrix
 } // namespace annot
 } // namespace mtg

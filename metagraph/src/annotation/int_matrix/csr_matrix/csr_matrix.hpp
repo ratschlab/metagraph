@@ -15,7 +15,7 @@ namespace matrix {
  *
  * Matrix which stores the non-zero values in row-major order.
  */
-class CSRMatrix : public IntMatrix {
+class CSRMatrix : public IntMatrix, public GetRowSupport {
   public:
     explicit CSRMatrix(uint64_t num_rows = 0) : vector_(num_rows) {}
 
@@ -31,7 +31,6 @@ class CSRMatrix : public IntMatrix {
     uint64_t num_relations() const;
 
     // row is in [0, num_rows), column is in [0, num_columns)
-    bool get(Row row, Column column) const;
     SetBitPositions get_row(Row row) const;
     SetBitPositions slice_rows(const std::vector<Row> &row_ids) const;
     std::vector<Row> get_column(Column column) const;

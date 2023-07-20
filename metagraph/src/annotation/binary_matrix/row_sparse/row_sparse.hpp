@@ -11,9 +11,9 @@
 
 namespace mtg {
 namespace annot {
-namespace binmat {
+namespace matrix {
 
-class RowSparse : public BinaryMatrix {
+class RowSparse : public BinaryMatrix, public GetRowSupport {
   public:
     RowSparse() {}
     RowSparse(const std::function<void(const RowCallback&)> &call_rows,
@@ -24,7 +24,6 @@ class RowSparse : public BinaryMatrix {
     uint64_t num_columns() const override { return num_columns_; }
     uint64_t num_rows() const override { return num_rows_; }
 
-    bool get(Row row, Column column) const override;
     SetBitPositions get_row(Row row) const override;
     SetBitPositions slice_rows(const std::vector<Row> &rows) const override;
     std::vector<Row> get_column(Column column) const override;
@@ -42,6 +41,6 @@ class RowSparse : public BinaryMatrix {
     uint64_t num_rows_ = 0;
 };
 
-} // namespace binmat
+} // namespace matrix
 } // namespace annot
 } // namespace mtg

@@ -9,7 +9,7 @@
 
 namespace mtg {
 namespace annot {
-namespace binmat {
+namespace matrix {
 
 template <class MatrixType>
 class Rainbow : public RainbowMatrix {
@@ -31,7 +31,6 @@ class Rainbow : public RainbowMatrix {
     uint64_t num_distinct_rows() const override { return reduced_matrix_.num_rows(); }
 
     // row is in [0, num_rows), column is in [0, num_columns)
-    bool get(Row row, Column column) const override;
     using RainbowMatrix::get_rows;
     // Return unique rows (in arbitrary order) and update the row indexes
     // in |rows| to point to their respective rows in the vector returned.
@@ -56,12 +55,13 @@ class Rainbow : public RainbowMatrix {
     MatrixType reduced_matrix_;
 
     uint64_t get_code(Row row) const override;
+    // TODO: query array
     SetBitPositions code_to_row(uint64_t c) const override {
-        return reduced_matrix_.get_row(c);
+        return reduced_matrix_.get_rows({ c })[0];
     }
 };
 
-} // namespace binmat
+} // namespace matrix
 } // namespace annot
 } // namespace mtg
 

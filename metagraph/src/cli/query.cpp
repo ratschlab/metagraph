@@ -32,9 +32,8 @@ const size_t kRowBatchSize = 100'000;
 const bool kPrefilterWithBloom = true;
 const char ALIGNED_SEQ_HEADER_FORMAT[] = "{}:{}:{}:{}";
 
-using namespace mtg::annot::binmat;
-using namespace mtg::annot::matrix;
 using namespace mtg::graph;
+using namespace mtg::annot::matrix;
 
 using mtg::common::logger;
 using mtg::graph::boss::BOSS;

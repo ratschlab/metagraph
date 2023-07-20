@@ -502,26 +502,6 @@ add_dependencies(metagraph link_target)
 
 
 #-------------------
-# Experiments
-#-------------------
-file(GLOB experiment_files
-  "experiments/*.cpp"
-)
-list(FILTER experiment_files EXCLUDE REGEX ".*\\._.*")
-
-include_directories(
-  experiments
-  external-libraries/tclap/include
-)
-
-link_directories(
-  external-libraries/sdsl-lite/lib
-)
-add_executable(run_experiments ${experiment_files})
-
-target_link_libraries(run_experiments metagraph-core metagraph-cli)
-
-#-------------------
 # install library
 #-------------------
 

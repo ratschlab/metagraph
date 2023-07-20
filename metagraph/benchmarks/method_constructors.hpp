@@ -13,7 +13,7 @@
 namespace mtg {
 namespace experiments {
 
-using namespace mtg::annot::binmat;
+using namespace mtg::annot::matrix;
 
 
 template <typename T>

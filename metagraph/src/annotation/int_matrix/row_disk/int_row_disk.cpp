@@ -9,18 +9,14 @@ namespace matrix {
 
 using mtg::common::logger;
 
-bool IntRowDisk::View::get(Row row, Column column) const {
-    SetBitPositions set_bits = get_row(row);
-    return std::binary_search(set_bits.begin(), set_bits.end(), column);
-}
-
 std::vector<IntMatrix::Row> IntRowDisk::View::get_column(Column column) const {
     logger->warn("get_column is extremely inefficient for IntRowDisk, consider"
                  " using a column-major format");
     const uint64_t num_rows = boundary_.num_set_bits();
     std::vector<Row> result;
     for (Row row = 0; row < num_rows; ++row) {
-        if (get(row, column))
+        SetBitPositions set_bits = get_row(row);
+        if (std::binary_search(set_bits.begin(), set_bits.end(), column))
             result.push_back(row);
     }
     return result;
@@ -210,6 +206,6 @@ void IntRowDisk::serialize(
     serialize_number(outstream, boundary_start);
 }
 
-} // namespace binmat
+} // namespace matrix
 } // namespace annot
 } // namespace mtg

@@ -97,13 +97,13 @@ void MultiLabelEncoded<LabelType>
     }
 }
 
-// calls get_row(i)
+// TODO: remove?
 template <typename LabelType>
 typename MultiLabelEncoded<LabelType>::VLabels
 MultiLabelEncoded<LabelType>::get(Index i) const {
     assert(i < this->num_objects());
 
-    const auto &label_codes = get_matrix().get_row(i);
+    auto label_codes = get_matrix().get_rows({ i })[0];
 
     VLabels labels(label_codes.size());
 

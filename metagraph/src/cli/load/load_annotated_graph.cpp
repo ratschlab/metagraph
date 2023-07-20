@@ -53,7 +53,7 @@ std::unique_ptr<AnnotatedDBG> initialize_annotated_dbg(std::shared_ptr<DeBruijnG
         }
 
         // row_diff annotation is special, as it must know the graph structure
-        using namespace annot::binmat;
+        using namespace annot::matrix;
         BinaryMatrix &matrix = const_cast<BinaryMatrix &>(annotation_temp->get_matrix());
         if (IRowDiff *row_diff = dynamic_cast<IRowDiff*>(&matrix)) {
             if (!dbg_graph) {

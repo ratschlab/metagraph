@@ -194,18 +194,9 @@ void ColumnCompressed<Label>::add_label_coords(const std::vector<std::pair<Index
 }
 
 template <typename Label>
-bool ColumnCompressed<Label>::has_label(Index i, const Label &label) const {
-    try {
-        return get_column(label)[i];
-    } catch (...) {
-        return false;
-    }
-}
-
-template <typename Label>
 bool ColumnCompressed<Label>::has_labels(Index i, const VLabels &labels) const {
     for (const auto &label : labels) {
-        if (!has_label(i, label))
+        if (!get_column(label)[i])
             return false;
     }
     return true;
@@ -1176,16 +1167,16 @@ const bitmap& ColumnCompressed<Label>::get_column(const Label &label) const {
 }
 
 template <typename Label>
-const binmat::ColumnMajor& ColumnCompressed<Label>::get_matrix() const {
+const matrix::ColumnMajor& ColumnCompressed<Label>::get_matrix() const {
     flush();
     return matrix_;
 }
 
 template <typename Label>
-std::unique_ptr<binmat::ColumnMajor> ColumnCompressed<Label>::release_matrix() {
+std::unique_ptr<matrix::ColumnMajor> ColumnCompressed<Label>::release_matrix() {
     flush();
     label_encoder_.clear();
-    return std::make_unique<binmat::ColumnMajor>(std::move(matrix_));
+    return std::make_unique<matrix::ColumnMajor>(std::move(matrix_));
 }
 
 template <typename Label>

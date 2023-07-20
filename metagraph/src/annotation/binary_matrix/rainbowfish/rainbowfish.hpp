@@ -11,7 +11,7 @@
 
 namespace mtg {
 namespace annot {
-namespace binmat {
+namespace matrix {
 
 class Rainbowfish : public RainbowMatrix {
   public:
@@ -25,7 +25,6 @@ class Rainbowfish : public RainbowMatrix {
     uint64_t num_distinct_rows() const;
 
     // row is in [0, num_rows), column is in [0, num_columns)
-    bool get(Row row, Column column) const;
     std::vector<Row> get_column(Column column) const;
 
     bool load(std::istream &in);
@@ -53,12 +52,13 @@ class Rainbowfish : public RainbowMatrix {
     std::vector<std::unique_ptr<BinaryMatrix>> reduced_matrix_;
 
     uint64_t get_code(Row row) const;
+    // TODO: query array
     SetBitPositions code_to_row(uint64_t c) const {
-        return reduced_matrix_[c / buffer_size_]->get_row(c % buffer_size_);
+        return reduced_matrix_[c / buffer_size_]->get_rows({ c % buffer_size_ })[0];
     }
 };
 
-} // namespace binmat
+} // namespace matrix
 } // namespace annot
 } // namespace mtg
 

@@ -8,7 +8,7 @@
 
 namespace mtg {
 namespace annot {
-namespace binmat {
+namespace matrix {
 
 class UniqueRowBinmat : public RainbowMatrix {
   public:
@@ -25,7 +25,6 @@ class UniqueRowBinmat : public RainbowMatrix {
     uint64_t num_rows() const { return row_rank_.size(); }
     uint64_t num_distinct_rows() const { return unique_rows_.size(); }
 
-    bool get(Row row, Column column) const;
     std::vector<Row> get_column(Column column) const;
 
     bool load(std::istream &in);
@@ -46,7 +45,7 @@ class UniqueRowBinmat : public RainbowMatrix {
     std::vector<uint32_t> row_rank_;
 };
 
-} // namespace binmat
+} // namespace matrix
 } // namespace annot
 } // namespace mtg
 

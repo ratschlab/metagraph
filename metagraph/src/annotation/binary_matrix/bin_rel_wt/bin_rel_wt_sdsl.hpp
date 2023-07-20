@@ -9,9 +9,9 @@
 
 namespace mtg {
 namespace annot {
-namespace binmat {
+namespace matrix {
 
-class BinRelWT_sdsl : public BinaryMatrix {
+class BinRelWT_sdsl : public BinaryMatrix, public GetEntrySupport, public GetRowSupport {
   public:
     BinRelWT_sdsl() : delimiters_(1, 1) {};
 
@@ -39,7 +39,7 @@ class BinRelWT_sdsl : public BinaryMatrix {
     uint64_t num_columns_ = 0;
 };
 
-} // namespace binmat
+} // namespace matrix
 } // namespace annot
 } // namespace mtg
 

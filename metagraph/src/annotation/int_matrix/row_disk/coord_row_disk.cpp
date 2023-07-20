@@ -9,11 +9,6 @@ namespace matrix {
 
 using mtg::common::logger;
 
-bool CoordRowDisk::View::get(Row row, Column column) const {
-    SetBitPositions set_bits = get_row(row);
-    return std::binary_search(set_bits.begin(), set_bits.end(), column);
-}
-
 std::vector<IntMatrix::Row>
 CoordRowDisk::View::get_column(Column column) const {
     logger->warn("get_column is extremely inefficient for CoordRowDisk, consider"
@@ -21,7 +16,8 @@ CoordRowDisk::View::get_column(Column column) const {
     const uint64_t num_rows = boundary_.num_set_bits();
     std::vector<Row> result;
     for (Row row = 0; row < num_rows; ++row) {
-        if (get(row, column))
+        SetBitPositions set_bits = get_row(row);
+        if (std::binary_search(set_bits.begin(), set_bits.end(), column))
             result.push_back(row);
     }
     return result;
@@ -275,6 +271,6 @@ void CoordRowDisk::serialize(
     serialize_number(outstream, boundary_start);
 }
 
-} // namespace binmat
+} // namespace matrix
 } // namespace annot
 } // namespace mtg

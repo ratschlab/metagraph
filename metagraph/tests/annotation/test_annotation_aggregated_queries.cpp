@@ -26,8 +26,8 @@ std::vector<std::string> get_labels(const MultiLabelEncoded<std::string> &annota
         label_counts.emplace_back(label_encoder.decode(j), 0);
     }
 
-    for (auto i : indices) {
-        for (auto j : annotator.get_matrix().get_row(i)) {
+    for (const auto &row : annotator.get_matrix().get_rows(indices)) {
+        for (auto j : row) {
             label_counts[j].second++;
         }
     }
@@ -206,8 +206,8 @@ get_top_labels(const MultiLabelEncoded<std::string> &annotator,
         label_counts.emplace_back(label_encoder.decode(i), 0);
     }
 
-    for (auto i : indices) {
-        for (auto j : annotator.get_matrix().get_row(i)) {
+    for (const auto &row : annotator.get_matrix().get_rows(indices)) {
+        for (auto j : row) {
             label_counts[j].second++;
         }
     }

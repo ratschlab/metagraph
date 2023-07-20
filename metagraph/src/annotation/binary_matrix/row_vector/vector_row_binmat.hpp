@@ -9,7 +9,7 @@
 
 namespace mtg {
 namespace annot {
-namespace binmat {
+namespace matrix {
 
 template <typename RowType = SmallVector<uint32_t>>
 class VectorRowBinMat : public BinaryMatrixRowDynamic {
@@ -23,7 +23,6 @@ class VectorRowBinMat : public BinaryMatrixRowDynamic {
     uint64_t num_columns() const { return num_columns_; }
     uint64_t num_rows() const { return vector_.size(); }
 
-    bool get(Row row, Column column) const;
     SetBitPositions get_row(Row row) const;
     SetBitPositions slice_rows(const std::vector<Row> &rows) const;
     std::vector<Row> get_column(Column column) const;
@@ -51,7 +50,7 @@ class VectorRowBinMat : public BinaryMatrixRowDynamic {
     Vector<RowType> vector_;
 };
 
-} // namespace binmat
+} // namespace matrix
 } // namespace annot
 } // namespace mtg
 

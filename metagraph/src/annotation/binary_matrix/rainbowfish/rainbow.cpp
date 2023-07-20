@@ -13,7 +13,7 @@
 
 namespace mtg {
 namespace annot {
-namespace binmat {
+namespace matrix {
 
 const size_t kRowBatchSize = 1'000'000;
 
@@ -41,11 +41,6 @@ uint64_t Rainbow<MatrixType>::get_code(Row row) const {
     assert(begin + width <= row_codes_.size());
 
     return row_codes_.get_int(begin, width);
-}
-
-template <class MatrixType>
-bool Rainbow<MatrixType>::get(Row row, Column column) const {
-    return reduced_matrix_.get(get_code(row), column);
 }
 
 template <class MatrixType>
@@ -134,6 +129,6 @@ void Rainbow<MatrixType>::serialize(std::ostream &out) const {
 
 template class Rainbow<BRWT>;
 
-} // namespace binmat
+} // namespace matrix
 } // namespace annot
 } // namespace mtg

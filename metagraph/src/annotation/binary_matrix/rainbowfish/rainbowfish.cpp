@@ -16,7 +16,7 @@
 
 namespace mtg {
 namespace annot {
-namespace binmat {
+namespace matrix {
 
 Rainbowfish::Rainbowfish(const std::function<void(RowCallback)> &call_rows,
                          uint64_t num_columns,
@@ -167,12 +167,6 @@ uint64_t Rainbowfish::get_code(Row row) const {
     return row_codes_.get_int(begin, width);
 }
 
-// row is in [0, num_rows), column is in [0, num_columns)
-bool Rainbowfish::get(Row row, Column column) const {
-    uint64_t code = get_code(row);
-    return reduced_matrix_[code / buffer_size_]->get(code % buffer_size_, column);
-}
-
 std::vector<Rainbowfish::Row> Rainbowfish::get_column(Column column) const {
     sdsl::bit_vector distinct_row_indices(num_distinct_rows(), false);
     uint64_t offset = 0;
@@ -234,6 +228,6 @@ uint64_t Rainbowfish::num_relations() const {
     return num_relations_;
 }
 
-} // namespace binmat
+} // namespace matrix
 } // namespace annot
 } // namespace mtg

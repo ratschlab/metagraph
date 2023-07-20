@@ -21,7 +21,7 @@ namespace matrix {
 template <class BaseMatrix,
           class Values = sdsl::int_vector<>,
           class Delims = bit_vector_smart>
-class TupleCSCMatrix : public MultiIntMatrix {
+class TupleCSCMatrix : public MultiIntMatrix, public GetEntrySupport {
   public:
     TupleCSCMatrix() {}
 
@@ -55,7 +55,6 @@ class TupleCSCMatrix : public MultiIntMatrix {
 
     // row is in [0, num_rows), column is in [0, num_columns)
     bool get(Row row, Column column) const { return binary_matrix_.get(row, column); }
-    SetBitPositions get_row(Row row) const { return binary_matrix_.get_row(row); }
     std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const {
         return binary_matrix_.get_rows(rows);
     }

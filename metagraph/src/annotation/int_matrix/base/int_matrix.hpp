@@ -10,7 +10,7 @@ namespace mtg {
 namespace annot {
 namespace matrix {
 
-class IntMatrix : public binmat::BinaryMatrix {
+class IntMatrix : public BinaryMatrix {
   public:
     typedef uint64_t Value;
     typedef Vector<std::pair<Column, Value>> RowValues;
@@ -28,7 +28,7 @@ class IntMatrix : public binmat::BinaryMatrix {
     sum_row_values(const std::vector<std::pair<Row, size_t>> &index_counts,
                    size_t min_count = 1) const;
 
-    virtual const binmat::BinaryMatrix& get_binary_matrix() const { return *this; }
+    virtual const BinaryMatrix& get_binary_matrix() const { return *this; }
 };
 
 

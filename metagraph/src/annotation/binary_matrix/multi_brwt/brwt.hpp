@@ -12,10 +12,10 @@
 
 namespace mtg {
 namespace annot {
-namespace binmat {
+namespace matrix {
 
 // The Multi-BRWT compressed binary matrix representation
-class BRWT : public BinaryMatrix {
+class BRWT : public BinaryMatrix, public GetEntrySupport {
     friend class BRWTBuilder;
     friend class BRWTBottomUpBuilder;
     friend class BRWTOptimizer;
@@ -29,7 +29,6 @@ class BRWT : public BinaryMatrix {
     uint64_t num_rows() const override { return nonzero_rows_->size(); }
 
     bool get(Row row, Column column) const override;
-    SetBitPositions get_row(Row row) const override;
     std::vector<Row> get_column(Column column) const override;
     // get all selected rows appended with -1 and concatenated
     SetBitPositions slice_rows(const std::vector<Row> &rows) const override;
@@ -67,7 +66,7 @@ class BRWT : public BinaryMatrix {
     std::vector<std::unique_ptr<BRWT>> child_nodes_;
 };
 
-} // namespace binmat
+} // namespace matrix
 } // namespace annot
 } // namespace mtg
 

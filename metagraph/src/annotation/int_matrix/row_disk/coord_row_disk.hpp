@@ -16,7 +16,7 @@ namespace matrix {
 // the only difference will be that there is some additional data stored
 // for now for simplicity I just use different class
 // and also different base class
-class CoordRowDisk : public MultiIntMatrix {
+class CoordRowDisk : public MultiIntMatrix, public GetRowSupport {
   public:
     CoordRowDisk(size_t RA_ivbuffer_size = 16'384) {
         buffer_params_.buff_size = std::max((size_t)8, RA_ivbuffer_size / 8);
@@ -25,7 +25,6 @@ class CoordRowDisk : public MultiIntMatrix {
     uint64_t num_columns() const { return num_columns_; }
     uint64_t num_rows() const { return num_rows_; }
 
-    bool get(Row i, Column j) const { return get_view().get(i, j); }
     SetBitPositions get_row(Row i) const { return get_view().get_row(i); }
     SetBitPositions slice_rows(const std::vector<Row> &rows) const { return get_view().slice_rows(rows); }
     // FYI: `get_column` is very inefficient, consider using column-major formats
@@ -87,7 +86,6 @@ class CoordRowDisk : public MultiIntMatrix {
               bits_for_number_of_vals_(bits_for_number_of_vals),
               bits_for_single_value_(bits_for_single_value) {}
 
-        bool get(Row i, Column j) const;
         SetBitPositions get_row(Row i) const;
         SetBitPositions slice_rows(const std::vector<Row> &rows) const;
         std::vector<SetBitPositions> get_rows(const std::vector<Row> &row_ids) const;

@@ -33,13 +33,6 @@ uint64_t CSRMatrix::num_relations() const {
     );
 }
 
-bool CSRMatrix::get(Row row, Column column) const {
-    assert(row < vector_.size());
-    return std::find_if(vector_[row].begin(), vector_[row].end(),
-                        [&](const auto &pair) { return pair.first == column; })
-                != vector_[row].end();
-}
-
 CSRMatrix::SetBitPositions CSRMatrix::get_row(Row row) const {
     assert(row < vector_.size());
     SetBitPositions result;
@@ -68,8 +61,10 @@ CSRMatrix::SetBitPositions CSRMatrix::slice_rows(const std::vector<Row> &row_ids
 std::vector<CSRMatrix::Row> CSRMatrix::get_column(Column column) const {
     std::vector<Row> result;
     for (uint64_t i = 0; i < vector_.size(); ++i) {
-        if (get(i, column))
+        const auto &row = vector_[i];
+        if (std::find_if(row.begin(), row.end(), [&](const auto &p) { return p.first == column; }) != row.end()) {
             result.push_back(i);
+        }
     }
     return result;
 }

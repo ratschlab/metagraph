@@ -24,15 +24,15 @@ using mtg::common::get_verbose;
 
 typedef MultiLabelEncoded<std::string> Annotator;
 
-typedef matrix::TupleCSCMatrix<binmat::ColumnMajor> TupleCSC;
-typedef matrix::TupleCSCMatrix<binmat::BRWT> TupleBRWT;
+typedef matrix::TupleCSCMatrix<matrix::ColumnMajor> TupleCSC;
+typedef matrix::TupleCSCMatrix<matrix::BRWT> TupleBRWT;
 
 static const Eigen::IOFormat CSVFormat(Eigen::StreamPrecision,
                                        Eigen::DontAlignCols, " ", "\n");
 
 
 template <class T>
-binmat::LinkageMatrix cluster_columns(const std::vector<std::string> &files,
+matrix::LinkageMatrix cluster_columns(const std::vector<std::string> &files,
                                       Config::AnnotationType anno_type,
                                       uint64_t num_rows_subsampled) {
     std::vector<uint64_t> row_indexes;
@@ -58,7 +58,7 @@ binmat::LinkageMatrix cluster_columns(const std::vector<std::string> &files,
                 if (row_indexes.empty()) {
                     num_rows = column->size();
                     if (std::is_same_v<T, sdsl::bit_vector>)
-                        row_indexes = binmat::sample_row_indexes(num_rows,
+                        row_indexes = matrix::sample_row_indexes(num_rows,
                                                                  num_rows_subsampled);
                 } else if (column->size() != num_rows) {
                     logger->error("Size of column {} is {} != {}", label,
@@ -78,7 +78,7 @@ binmat::LinkageMatrix cluster_columns(const std::vector<std::string> &files,
                         (*subvector)[j] = true;
                 }
             } else {
-                static_assert(std::is_same_v<T, binmat::SparseColumn>);
+                static_assert(std::is_same_v<T, matrix::SparseColumn>);
 
                 uint64_t &size = subvector->size;
                 std::vector<uint64_t> &set_bits = subvector->set_bits;
@@ -118,7 +118,7 @@ binmat::LinkageMatrix cluster_columns(const std::vector<std::string> &files,
         subcolumns.at(column_ids[i]) = std::move(*subcolumn_ptrs[i]);
     }
 
-    return binmat::agglomerative_greedy_linkage(std::move(subcolumns), get_num_threads());
+    return matrix::agglomerative_greedy_linkage(std::move(subcolumns), get_num_threads());
 }
 
 uint64_t get_num_columns(const std::vector<std::string> &files,
@@ -141,7 +141,7 @@ uint64_t get_num_columns(const std::vector<std::string> &files,
     return num_columns;
 }
 
-binmat::LinkageMatrix trivial_linkage(const std::vector<std::string> &files,
+matrix::LinkageMatrix trivial_linkage(const std::vector<std::string> &files,
                                       Config::AnnotationType anno_type) {
     logger->trace("Computing total number of columns");
     uint64_t num_columns = get_num_columns(files, anno_type);
@@ -149,10 +149,10 @@ binmat::LinkageMatrix trivial_linkage(const std::vector<std::string> &files,
     logger->trace("Generating trivial linkage matrix for {} columns",
                   num_columns);
 
-    return binmat::agglomerative_linkage_trivial(num_columns);
+    return matrix::agglomerative_linkage_trivial(num_columns);
 }
 
-binmat::LinkageMatrix compute_linkage(const std::vector<std::string> &files,
+matrix::LinkageMatrix compute_linkage(const std::vector<std::string> &files,
                                       Config::AnnotationType anno_type,
                                       const Config &config) {
     if (config.greedy_brwt) {
@@ -160,7 +160,7 @@ binmat::LinkageMatrix compute_linkage(const std::vector<std::string> &files,
             return cluster_columns<sdsl::bit_vector>(files, anno_type,
                                                      config.num_rows_subsampled);
         } else {
-            return cluster_columns<binmat::SparseColumn>(files, anno_type,
+            return cluster_columns<matrix::SparseColumn>(files, anno_type,
                                                          config.num_rows_subsampled);
         }
     } else {
@@ -218,7 +218,7 @@ auto convert_to_MultiBRWT(const std::vector<std::string> &files,
     std::string linkage_file = config.linkage_file;
     if (!linkage_file.size()) {
         logger->trace("Generating new column linkage...");
-        binmat::LinkageMatrix linkage_matrix
+        matrix::LinkageMatrix linkage_matrix
                 = compute_linkage(files, Config::ColumnCompressed, config);
         linkage_file = config.outfbase + ".linkage";
         std::ofstream out(linkage_file);
@@ -272,7 +272,7 @@ convert_to_IntMultiBRWT(const std::vector<std::string> &files,
 
     auto multi_brwt = brwt_annotator->release_matrix();
     return IntMultiBRWTAnnotator(
-                std::make_unique<matrix::CSCMatrix<binmat::BRWT, CountsVector>>(
+                std::make_unique<matrix::CSCMatrix<matrix::BRWT, CountsVector>>(
                         std::move(*multi_brwt), std::move(column_values)),
                 brwt_annotator->get_label_encoder());
 }
@@ -579,7 +579,7 @@ int transform_annotation(Config *config) {
             exit(1);
         }
 
-        binmat::LinkageMatrix linkage_matrix
+        matrix::LinkageMatrix linkage_matrix
                 = compute_linkage(files, input_anno_type, *config);
 
         std::ofstream out(config->outfbase);
@@ -819,7 +819,7 @@ int transform_annotation(Config *config) {
                 logger->trace("Annotation converted in {} sec", timer.elapsed());
 
                 auto label_encoder = int_annotation.get_label_encoder();
-                using CSCMatrix = matrix::CSCMatrix<binmat::BRWT, CountsVector>;
+                using CSCMatrix = matrix::CSCMatrix<matrix::BRWT, CountsVector>;
                 auto matrix = std::make_unique<matrix::IntRowDiff<CSCMatrix>>(nullptr,
                                 std::move(*int_annotation.release_matrix()));
                 matrix->load_anchor(anchors_file);
@@ -859,7 +859,7 @@ int transform_annotation(Config *config) {
 
                 if (!config->linkage_file.size()) {
                     logger->trace("Generating new column linkage...");
-                    binmat::LinkageMatrix linkage_matrix
+                    matrix::LinkageMatrix linkage_matrix
                             = compute_linkage(files, input_anno_type, *config);
                     config->linkage_file = config->outfbase + ".linkage";
                     std::ofstream out(config->linkage_file);
@@ -878,9 +878,9 @@ int transform_annotation(Config *config) {
                 logger->trace("Annotation converted in {} sec", timer.elapsed());
 
                 logger->trace("Serializing to '{}'", config->outfbase);
-                const_cast<binmat::RowDiff<binmat::BRWT> &>(brwt_annotator->get_matrix())
+                const_cast<matrix::RowDiff<matrix::BRWT> &>(brwt_annotator->get_matrix())
                         .load_anchor(anchors_file);
-                const_cast<binmat::RowDiff<binmat::BRWT> &>(brwt_annotator->get_matrix())
+                const_cast<matrix::RowDiff<matrix::BRWT> &>(brwt_annotator->get_matrix())
                         .load_fork_succ(fork_succ_file);
                 brwt_annotator->serialize(config->outfbase);
 
@@ -1017,7 +1017,7 @@ int relax_multi_brwt(Config *config) {
     }
     logger->trace("Annotator loaded in {} sec", timer.elapsed());
 
-    const binmat::BinaryMatrix *mat = &annotator->get_matrix();
+    const matrix::BinaryMatrix *mat = &annotator->get_matrix();
 
     if (const auto *rd_brwt = dynamic_cast<RowDiffBRWTAnnotator *>(annotator.get())) {
         mat = &rd_brwt->get_matrix().diffs();
@@ -1027,7 +1027,7 @@ int relax_multi_brwt(Config *config) {
         mat = &rd_brwt_coord->get_matrix().diffs();
     }
 
-    if (const auto *rb_brwt = dynamic_cast<const binmat::Rainbow<binmat::BRWT> *>(mat)) {
+    if (const auto *rb_brwt = dynamic_cast<const matrix::Rainbow<matrix::BRWT> *>(mat)) {
         mat = &rb_brwt->get_reduced_matrix();
     }
 
@@ -1036,7 +1036,7 @@ int relax_multi_brwt(Config *config) {
     }
 
     logger->trace("Relaxing BRWT tree...");
-    relax_BRWT(&dynamic_cast<binmat::BRWT &>(const_cast<binmat::BinaryMatrix &>(*mat)),
+    relax_BRWT(&dynamic_cast<matrix::BRWT &>(const_cast<matrix::BinaryMatrix &>(*mat)),
                config->relax_arity_brwt, get_num_threads());
 
     annotator->serialize(config->outfbase);

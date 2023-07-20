@@ -13,7 +13,7 @@ class bitmap;
 
 namespace mtg {
 namespace annot {
-namespace binmat {
+namespace matrix {
 
 class BinaryMatrix {
   public:
@@ -30,8 +30,6 @@ class BinaryMatrix {
     virtual uint64_t num_rows() const = 0;
 
     // row is in [0, num_rows), column is in [0, num_columns)
-    virtual bool get(Row row, Column column) const = 0;
-    virtual SetBitPositions get_row(Row row) const = 0;
     virtual std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const;
     virtual std::vector<Row> get_column(Column column) const = 0;
 
@@ -61,18 +59,11 @@ class RainbowMatrix : public BinaryMatrix {
   public:
     virtual ~RainbowMatrix() {}
 
-    using BinaryMatrix::get_rows;
-
-    virtual SetBitPositions get_row(Row row) const final {
-        return code_to_row(get_code(row));
-    }
-
     // Return unique rows (in arbitrary order) and update the row indexes
     // in |rows| to point to their respective rows in the vector returned.
     virtual std::vector<SetBitPositions> get_rows(std::vector<Row> *rows, size_t num_threads = 1) const;
     virtual std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const;
     virtual SetBitPositions slice_rows(const std::vector<Row> &rows) const;
-
 
     // Return all columns for which counts are greater than or equal to |min_count|.
     virtual std::vector<std::pair<Column, size_t /* count */>>
@@ -87,7 +78,21 @@ class RainbowMatrix : public BinaryMatrix {
 };
 
 
-class BinaryMatrixRowDynamic : public BinaryMatrix {
+class GetRowSupport {
+  public:
+    virtual ~GetRowSupport() {}
+
+    virtual BinaryMatrix::SetBitPositions get_row(BinaryMatrix::Row row) const = 0;
+};
+
+class GetEntrySupport {
+  public:
+    virtual ~GetEntrySupport() {}
+
+    virtual bool get(BinaryMatrix::Row row, BinaryMatrix::Column column) const = 0;
+};
+
+class BinaryMatrixRowDynamic : public BinaryMatrix, public GetRowSupport {
   public:
     virtual ~BinaryMatrixRowDynamic() {}
 
@@ -125,7 +130,7 @@ void append_row_major(const std::string &filename,
                       const std::function<void(BinaryMatrix::RowCallback)> &call_rows,
                       uint64_t num_cols);
 
-} // namespace binmat
+} // namespace matrix
 } // namespace annot
 } // namespace mtg
 

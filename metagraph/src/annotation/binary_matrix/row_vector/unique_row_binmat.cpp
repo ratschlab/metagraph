@@ -10,7 +10,7 @@
 
 namespace mtg {
 namespace annot {
-namespace binmat {
+namespace matrix {
 
 UniqueRowBinmat::UniqueRowBinmat(uint64_t num_rows)
       : unique_rows_(1), row_rank_(num_rows, 0) {}
@@ -57,13 +57,6 @@ UniqueRowBinmat
     unique_rows_ = const_cast<std::vector<SetBitPositions>&&>(
         unique_rows.values_container()
     );
-}
-
-bool UniqueRowBinmat::get(Row i, Column j) const {
-    assert(i < row_rank_.size());
-    assert(row_rank_[i] < unique_rows_.size());
-    const auto &row = unique_rows_[row_rank_[i]];
-    return std::find(row.begin(), row.end(), j) != row.end();
 }
 
 std::vector<UniqueRowBinmat::Row> UniqueRowBinmat::get_column(Column j) const {
@@ -144,6 +137,6 @@ double UniqueRowBinmat::density() const {
     return static_cast<double>(num_relations()) / num_columns() / num_rows();
 }
 
-} // namespace binmat
+} // namespace matrix
 } // namespace annot
 } // namespace mtg

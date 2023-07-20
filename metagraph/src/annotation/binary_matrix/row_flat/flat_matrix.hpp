@@ -10,10 +10,10 @@ class bit_vector_sd;
 
 namespace mtg {
 namespace annot {
-namespace binmat {
+namespace matrix {
 
 template <typename BitVector = bit_vector_sd>
-class RowFlat : public BinaryMatrix {
+class RowFlat : public BinaryMatrix, public GetRowSupport {
   public:
     RowFlat() : compressed_rows_(new BitVector()) {}
     RowFlat(const std::function<void(const RowCallback&)> &call_rows,
@@ -26,7 +26,6 @@ class RowFlat : public BinaryMatrix {
     uint64_t num_columns() const { return num_columns_; }
     uint64_t num_rows() const { return num_rows_; }
 
-    bool get(Row row, Column column) const;
     SetBitPositions get_row(Row row) const;
     SetBitPositions slice_rows(const std::vector<Row> &rows) const;
     std::vector<Row> get_column(Column column) const;
@@ -49,7 +48,7 @@ class RowFlat : public BinaryMatrix {
     uint64_t num_rows_ = 0;
 };
 
-} // namespace binmat
+} // namespace matrix
 } // namespace annot
 } // namespace mtg
 

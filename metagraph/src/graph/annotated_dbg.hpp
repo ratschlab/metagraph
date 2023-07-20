@@ -30,8 +30,6 @@ class AnnotatedSequenceGraph {
 
     virtual std::vector<Label> get_labels(node_index index) const;
 
-    virtual bool has_label(node_index index, const Label &label) const;
-
     // thread-safe, can be called from multiple threads concurrently
     virtual void annotate_sequence(std::string_view sequence,
                                    const std::vector<Label> &labels);

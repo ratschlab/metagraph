@@ -115,28 +115,28 @@ TYPED_TEST(AnnotatorPresetTest, NumLabels) {
 }
 
 TYPED_TEST(AnnotatorPresetTest, HasLabel) {
-    EXPECT_TRUE(this->annotation->has_label(0, "Label0"));
-    EXPECT_TRUE(this->annotation->has_label(0, "Label2"));
-    EXPECT_TRUE(this->annotation->has_label(0, "Label8"));
-    EXPECT_FALSE(this->annotation->has_label(0, "Label1"));
+    EXPECT_TRUE(this->annotation->has_labels(0, {"Label0"}));
+    EXPECT_TRUE(this->annotation->has_labels(0, {"Label2"}));
+    EXPECT_TRUE(this->annotation->has_labels(0, {"Label8"}));
+    EXPECT_FALSE(this->annotation->has_labels(0, {"Label1"}));
 
-    EXPECT_FALSE(this->annotation->has_label(1, "Label0"));
+    EXPECT_FALSE(this->annotation->has_labels(1, {"Label0"}));
 
-    EXPECT_TRUE(this->annotation->has_label(2, "Label1"));
-    EXPECT_TRUE(this->annotation->has_label(2, "Label2"));
-    EXPECT_FALSE(this->annotation->has_label(2, "Label0"));
+    EXPECT_TRUE(this->annotation->has_labels(2, {"Label1"}));
+    EXPECT_TRUE(this->annotation->has_labels(2, {"Label2"}));
+    EXPECT_FALSE(this->annotation->has_labels(2, {"Label0"}));
 
-    EXPECT_TRUE(this->annotation->has_label(3, "Label1"));
-    EXPECT_TRUE(this->annotation->has_label(3, "Label2"));
-    EXPECT_TRUE(this->annotation->has_label(3, "Label8"));
-    EXPECT_FALSE(this->annotation->has_label(3, "Label0"));
+    EXPECT_TRUE(this->annotation->has_labels(3, {"Label1"}));
+    EXPECT_TRUE(this->annotation->has_labels(3, {"Label2"}));
+    EXPECT_TRUE(this->annotation->has_labels(3, {"Label8"}));
+    EXPECT_FALSE(this->annotation->has_labels(3, {"Label0"}));
 
-    EXPECT_TRUE(this->annotation->has_label(4, "Label2"))
+    EXPECT_TRUE(this->annotation->has_labels(4, {"Label2"}))
         << this->annotation->get(4)[0];
-    EXPECT_FALSE(this->annotation->has_label(4, "Label0"));
-    EXPECT_FALSE(this->annotation->has_label(4, "Label1"))
+    EXPECT_FALSE(this->annotation->has_labels(4, {"Label0"}));
+    EXPECT_FALSE(this->annotation->has_labels(4, {"Label1"}))
         << this->annotation->get(4)[0];
-    EXPECT_FALSE(this->annotation->has_label(4, "Label8"));
+    EXPECT_FALSE(this->annotation->has_labels(4, {"Label8"}));
 }
 
 TYPED_TEST(AnnotatorPresetTest, HasLabels) {

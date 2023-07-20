@@ -9,9 +9,9 @@
 
 namespace mtg {
 namespace annot {
-namespace binmat {
+namespace matrix {
 
-class RowDisk : public BinaryMatrix {
+class RowDisk : public BinaryMatrix, public GetRowSupport {
   public:
     RowDisk(size_t RA_ivbuffer_size = 16'384) {
         buffer_params_.buff_size = RA_ivbuffer_size;
@@ -20,7 +20,6 @@ class RowDisk : public BinaryMatrix {
     uint64_t num_columns() const { return num_columns_; }
     uint64_t num_rows() const { return num_rows_; }
 
-    bool get(Row i, Column j) const { return get_view().get(i, j); }
     SetBitPositions get_row(Row i) const { return get_view().get_row(i); }
     SetBitPositions slice_rows(const std::vector<Row> &rows) const { return get_view().slice_rows(rows); }
     // FYI: `get_column` is very inefficient, consider using column-major formats
@@ -36,7 +35,7 @@ class RowDisk : public BinaryMatrix {
     uint64_t num_relations() const { return num_relations_; }
 
     static void serialize(const std::string &filename,
-                          const std::function<void(binmat::BinaryMatrix::RowCallback)> &call_rows,
+                          const std::function<void(BinaryMatrix::RowCallback)> &call_rows,
                           uint64_t num_columns,
                           uint64_t num_rows,
                           uint64_t num_set_bits);
@@ -55,7 +54,6 @@ class RowDisk : public BinaryMatrix {
             : boundary_(boundary),
               set_bits_(filename, std::ios::in, buff_size, 0, false, offset) {}
 
-        bool get(Row i, Column j) const;
         SetBitPositions get_row(Row i) const;
         SetBitPositions slice_rows(const std::vector<Row> &rows) const;
         std::vector<SetBitPositions> get_rows(const std::vector<Row> &row_ids) const;
@@ -85,7 +83,7 @@ class RowDisk : public BinaryMatrix {
     size_t iv_size_on_disk_ = 0; // for non-static serialization
 };
 
-} // namespace binmat
+} // namespace matrix
 } // namespace annot
 } // namespace mtg
 

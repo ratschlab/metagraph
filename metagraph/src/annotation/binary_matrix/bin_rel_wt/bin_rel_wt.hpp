@@ -10,9 +10,9 @@ class bit_vector;
 
 namespace mtg {
 namespace annot {
-namespace binmat {
+namespace matrix {
 
-class BinRelWT : public BinaryMatrix {
+class BinRelWT : public BinaryMatrix, public GetRowSupport, public GetEntrySupport {
   public:
     BinRelWT() {}
 
@@ -46,7 +46,7 @@ class BinRelWT : public BinaryMatrix {
     uint64_t num_objects = 0;
 };
 
-} // namespace binmat
+} // namespace matrix
 } // namespace annot
 } // namespace mtg
 

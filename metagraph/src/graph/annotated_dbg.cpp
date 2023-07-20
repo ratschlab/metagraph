@@ -818,13 +818,6 @@ bool AnnotatedSequenceGraph::label_exists(const Label &label) const {
     return annotator_->label_exists(label);
 }
 
-bool AnnotatedSequenceGraph::has_label(node_index index, const Label &label) const {
-    assert(check_compatibility());
-    assert(index != SequenceGraph::npos);
-
-    return annotator_->has_label(graph_to_anno_index(index), label);
-}
-
 void AnnotatedSequenceGraph
 ::call_annotated_nodes(const Label &label,
                        std::function<void(node_index)> callback) const {

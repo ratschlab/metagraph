@@ -169,7 +169,7 @@ void print_anchor_stats(const Matrix& m) {
     }
 }
 
-void print_brwt_stats(const annot::binmat::BRWT& brwt) {
+void print_brwt_stats(const annot::matrix::BRWT& brwt) {
     std::cout << "=================== Multi-BRWT STATS ===================" << std::endl;
     std::cout << "num nodes: " << brwt.num_nodes() << std::endl;
     std::cout << "avg arity: " << brwt.avg_arity() << std::endl;
@@ -224,10 +224,10 @@ void print_annotation_stats(const std::string &fname, const Config &config) {
         exit(1);
     }
 
-    using RowDiffCol = annot::binmat::RowDiff<annot::binmat::ColumnMajor>;
+    using RowDiffCol = annot::matrix::RowDiff<annot::matrix::ColumnMajor>;
     if (auto *rd = dynamic_cast<const RowDiffCol *>(&annotation.get_matrix())) {
         std::string anchors_fname = utils::make_suffix(config.infbase,
-                                                       annot::binmat::kRowDiffAnchorExt);
+                                                       annot::matrix::kRowDiffAnchorExt);
         if (!config.infbase.empty() && std::filesystem::exists(anchors_fname)) {
             const_cast<RowDiffCol *>(rd)->load_anchor(anchors_fname);
         }
@@ -242,7 +242,7 @@ void print_annotation_stats(const std::string &fname, const Config &config) {
     std::cout << "representation: "
               << utils::split_string(annotation.file_extension(), ".").at(0) << '\n';
 
-    using namespace annot::binmat;
+    using namespace annot::matrix;
 
     const BinaryMatrix *mat = &annotation.get_matrix();
 

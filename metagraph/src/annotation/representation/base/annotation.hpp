@@ -60,7 +60,6 @@ class MultiLabelAnnotation
     virtual void add_label_coords(const std::vector<std::pair<Index, uint64_t>> &coords,
                                   const VLabels &labels);
 
-    virtual bool has_label(Index i, const Label &label) const = 0;
     virtual bool has_labels(Index i, const VLabels &labels) const = 0;
 
     virtual void insert_rows(const std::vector<Index> &rows) = 0;
@@ -168,7 +167,7 @@ class MultiLabelEncoded : public MultiLabelAnnotation<uint64_t, LabelType> {
     virtual void call_objects(const Label &label,
                               std::function<void(Index)> callback) const override;
 
-    virtual const binmat::BinaryMatrix& get_matrix() const = 0;
+    virtual const matrix::BinaryMatrix& get_matrix() const = 0;
 
   protected:
     LabelEncoder<Label> label_encoder_;

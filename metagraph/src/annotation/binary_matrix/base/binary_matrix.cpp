@@ -11,7 +11,7 @@
 
 namespace mtg {
 namespace annot {
-namespace binmat {
+namespace matrix {
 
 std::vector<BinaryMatrix::SetBitPositions>
 BinaryMatrix::get_rows(const std::vector<Row> &row_ids) const {
@@ -48,8 +48,12 @@ BinaryMatrix::sum_rows(const std::vector<std::pair<Row, size_t>> &index_counts,
                        size_t min_count) const {
     min_count = std::max(min_count, size_t(1));
 
+    std::vector<Row> row_ids;
+    row_ids.reserve(index_counts.size());
+
     size_t total_sum_count = 0;
     for (auto [i, count] : index_counts) {
+        row_ids.push_back(i);
         total_sum_count += count;
     }
 
@@ -57,12 +61,13 @@ BinaryMatrix::sum_rows(const std::vector<std::pair<Row, size_t>> &index_counts,
         return {};
 
     // TODO: call slice_rows
+    auto rows = get_rows(row_ids);
 
     VectorMap<Column, size_t> col_counts;
 
-    for (auto [i, count] : index_counts) {
-        for (size_t j : get_row(i)) {
-            col_counts[j] += count;
+    for (size_t i = 0; i < index_counts.size(); ++i) {
+        for (size_t j : rows[i]) {
+            col_counts[j] += index_counts[i].second;
         }
     }
 
@@ -257,6 +262,6 @@ void append_row_major(const std::string &filename,
     serialize_number(outstream, num_rows);
 }
 
-} // namespace binmat
+} // namespace matrix
 } // namespace annot
 } // namespace mtg

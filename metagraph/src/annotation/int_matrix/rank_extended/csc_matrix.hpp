@@ -19,7 +19,7 @@ namespace matrix {
  * on binary columns of the indexing matrix.
  */
 template <class BaseMatrix, class ColumnValues = sdsl::int_vector<>>
-class CSCMatrix : public IntMatrix {
+class CSCMatrix : public IntMatrix, public GetEntrySupport {
   public:
     CSCMatrix() {}
 
@@ -40,7 +40,6 @@ class CSCMatrix : public IntMatrix {
 
     // row is in [0, num_rows), column is in [0, num_columns)
     bool get(Row row, Column column) const { return binary_matrix_.get(row, column); }
-    SetBitPositions get_row(Row row) const { return binary_matrix_.get_row(row); }
     std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const {
         return binary_matrix_.get_rows(rows);
     }

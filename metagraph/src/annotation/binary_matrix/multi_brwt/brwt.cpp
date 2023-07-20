@@ -10,7 +10,7 @@
 
 namespace mtg {
 namespace annot {
-namespace binmat {
+namespace matrix {
 
 bool BRWT::get(Row row, Column column) const {
     assert(row < num_rows());
@@ -27,14 +27,6 @@ bool BRWT::get(Row row, Column column) const {
 
     auto child_node = assignments_.group(column);
     return child_nodes_[child_node]->get(rank - 1, assignments_.rank(column));
-}
-
-BRWT::SetBitPositions BRWT::get_row(Row row) const {
-    SetBitPositions row_set_bits;
-    for (auto [col_id, rank] : get_column_ranks(row)) {
-        row_set_bits.push_back(col_id);
-    }
-    return row_set_bits;
 }
 
 Vector<std::pair<BRWT::Column, uint64_t>> BRWT::get_column_ranks(Row i) const {
@@ -405,6 +397,6 @@ void BRWT::BFT(std::function<void(const BRWT &node)> callback) const {
     }
 }
 
-} // namespace binmat
+} // namespace matrix
 } // namespace annot
 } // namespace mtg

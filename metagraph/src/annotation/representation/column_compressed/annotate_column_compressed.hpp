@@ -25,7 +25,7 @@ namespace annot {
 template <typename Label = std::string>
 class ColumnCompressed : public MultiLabelEncoded<Label> {
   public:
-    typedef binmat::ColumnMajor binary_matrix_type;
+    typedef matrix::ColumnMajor binary_matrix_type;
     using Index = typename MultiLabelEncoded<Label>::Index;
     using VLabels = typename MultiLabelEncoded<Label>::VLabels;
 
@@ -74,7 +74,6 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
     void add_label_coords(const std::vector<std::pair<Index, uint64_t>> &coords,
                           const VLabels &labels) override;
 
-    bool has_label(Index i, const Label &label) const override;
     bool has_labels(Index i, const VLabels &labels) const override;
 
     void serialize(const std::string &filename) const override;
@@ -137,13 +136,13 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
      * Warning: The returned object doesn't own its data and will become invalid when the
      * current object is destroyed.
      */
-    const binmat::ColumnMajor& get_matrix() const override;
+    const matrix::ColumnMajor& get_matrix() const override;
 
     /**
      * Returns the current annotation matrix. The data is moved into the return value,
      * which leaves the current object empty.
      */
-    std::unique_ptr<binmat::ColumnMajor> release_matrix();
+    std::unique_ptr<matrix::ColumnMajor> release_matrix();
 
     std::string file_extension() const override { return kExtension; }
 
@@ -166,7 +165,7 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
     const std::string swap_dir_;
     const uint64_t buffer_size_bytes_;
 
-    binmat::ColumnMajor matrix_;
+    matrix::ColumnMajor matrix_;
     std::vector<std::unique_ptr<bit_vector>> &bitmatrix_ { matrix_.data() };
 
     mutable std::mutex bitmap_conversion_mu_;

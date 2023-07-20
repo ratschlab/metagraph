@@ -32,22 +32,22 @@
 namespace mtg {
 namespace annot {
 
-using namespace mtg::annot::binmat;
+using namespace mtg::annot::matrix;
 
 using mtg::common::logger;
 
 namespace fs = std::filesystem;
 
 typedef LabelEncoder<std::string> LEncoder;
-typedef matrix::TupleCSCMatrix<binmat::ColumnMajor> TupleCSC;
-typedef matrix::TupleCSCMatrix<binmat::BRWT> TupleBRWT;
+typedef TupleCSCMatrix<ColumnMajor> TupleCSC;
+typedef TupleCSCMatrix<BRWT> TupleBRWT;
 
 const size_t kNumRowsInBlock = 50'000;
 const uint64_t ROW_DIFF_BUFFER_BYTES = 8'000'000;
 
 
 template <class RowCallback>
-void call_rows(const BinaryMatrix &row_major_matrix,
+void call_rows(const BinaryMatrixRowDynamic &row_major_matrix,
                const RowCallback &callback,
                bool sort = false) {
     const auto num_rows = row_major_matrix.num_rows();
@@ -385,13 +385,13 @@ std::unique_ptr<RowDiffBRWTAnnotator> convert_to_simple_BRWT(RowDiffColumnAnnota
 }
 
 std::pair<std::string, std::string> get_anchors_and_fork_fnames(const std::string &fbase) {
-    std::string anchors_file = fbase + annot::binmat::kRowDiffAnchorExt;
+    std::string anchors_file = fbase + kRowDiffAnchorExt;
     if (!std::filesystem::exists(anchors_file)) {
         logger->error("Anchor bitmap {} does not exist. Run the row_diff"
                       " transform followed by anchor optimization.", anchors_file);
         std::exit(1);
     }
-    std::string fork_succ_file = fbase + annot::binmat::kRowDiffForkSuccExt;
+    std::string fork_succ_file = fbase + kRowDiffForkSuccExt;
     if (!std::filesystem::exists(fork_succ_file)) {
         logger->error("Fork successor bitmap {} does not exist", fork_succ_file);
         std::exit(1);
@@ -507,9 +507,9 @@ void convert_to_row_diff<RowDiffRowSparseAnnotator>(
         num_columns, num_rows, num_set_bits
     );
 
-    const_cast<binmat::RowDiff<binmat::RowSparse> &>(row_sparse.get_matrix())
+    const_cast<RowDiff<RowSparse> &>(row_sparse.get_matrix())
             .load_anchor(anchors_file);
-    const_cast<binmat::RowDiff<binmat::RowSparse> &>(row_sparse.get_matrix())
+    const_cast<RowDiff<RowSparse> &>(row_sparse.get_matrix())
             .load_fork_succ(fork_succ_file);
 
     logger->trace("Annotation converted");
@@ -620,7 +620,7 @@ convert_to_BRWT<RowDiffBRWTAnnotator>(const std::vector<std::string> &annotation
             annotator->get_label_encoder());
 }
 
-void relax_BRWT(binmat::BRWT *annotation, size_t relax_max_arity, size_t num_threads) {
+void relax_BRWT(BRWT *annotation, size_t relax_max_arity, size_t num_threads) {
     if (relax_max_arity > 1)
         BRWTOptimizer::relax(annotation, relax_max_arity, num_threads);
 }
@@ -1136,7 +1136,7 @@ uint64_t get_num_rows_from_row_diff_anno(const std::string &fname) {
         throw std::ifstream::failure("can't open file");
 
     LabelEncoder<std::string> label_encoder;
-    binmat::RowDiff<binmat::ColumnMajor> matrix;
+    RowDiff<ColumnMajor> matrix;
 
     if (!label_encoder.load(*in) || !matrix.load(*in)) {
         logger->error("Can't load {}", fname);
@@ -1258,9 +1258,9 @@ void convert_to_row_diff<IntRowDiffDiskAnnotator>(
 
     ProgressBar progress_bar(num_rows, "Serialize rows", std::cerr, !common::get_verbose());
 
-    matrix::IntRowDisk::serialize(
+    IntRowDisk::serialize(
             outfname,
-            [&](std::function<void(const matrix::IntMatrix::RowValues &)> write_row_with_values) {
+            [&](std::function<void(const IntMatrix::RowValues &)> write_row_with_values) {
                 #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic)
                 for (uint64_t begin = 0 ; begin < num_rows; begin += kNumRowsInBlock) {
                     uint64_t end = std::min(begin + kNumRowsInBlock, num_rows);
@@ -1268,7 +1268,7 @@ void convert_to_row_diff<IntRowDiffDiskAnnotator>(
                     assert(begin <= end);
                     assert(end <= num_rows);
 
-                    std::vector<matrix::IntMatrix::RowValues> rows(end - begin);
+                    std::vector<IntMatrix::RowValues> rows(end - begin);
 
                     for (size_t j = 0 ; j < columns.size() ; ++j) {
                         size_t val_idx = begin ? columns[j]->rank1(begin - 1) : 0;
@@ -1385,9 +1385,9 @@ void convert_to_row_diff<RowDiffDiskCoordAnnotator>(
 
     ProgressBar progress_bar(num_rows, "Serialize rows", std::cerr, !common::get_verbose());
 
-    matrix::CoordRowDisk::serialize(
+    CoordRowDisk::serialize(
             outfname,
-            [&](std::function<void(const matrix::MultiIntMatrix::RowTuples &)> write_row_with_tuples) {
+            [&](std::function<void(const MultiIntMatrix::RowTuples &)> write_row_with_tuples) {
                 #pragma omp parallel for ordered num_threads(num_threads) schedule(dynamic)
                 for (uint64_t begin = 0 ; begin < num_rows; begin += kNumRowsInBlock) {
                     uint64_t end = std::min(begin + kNumRowsInBlock, num_rows);
@@ -1395,7 +1395,7 @@ void convert_to_row_diff<RowDiffDiskCoordAnnotator>(
                     assert(begin <= end);
                     assert(end <= num_rows);
 
-                    std::vector<matrix::MultiIntMatrix::RowTuples> rows(end - begin);
+                    std::vector<MultiIntMatrix::RowTuples> rows(end - begin);
 
                     for (size_t j = 0 ; j < columns.size() ; ++j) {
                         size_t r = begin ? columns[j]->rank1(begin - 1) + 1 : 1;
@@ -1406,8 +1406,8 @@ void convert_to_row_diff<RowDiffDiskCoordAnnotator>(
                         columns[j]->call_ones_in_range(begin, end, [&](uint64_t i) {
                             size_t te = col_delims[j].select1(r + 1) - r;
                             rows[i - begin].emplace_back(j,
-                                    matrix::MultiIntMatrix::Tuple(col_values[j].begin() + tb,
-                                                                  col_values[j].begin() + te));
+                                    MultiIntMatrix::Tuple(col_values[j].begin() + tb,
+                                                          col_values[j].begin() + te));
                             tb = te;
                             ++r;
                         });
@@ -1519,7 +1519,7 @@ class IterateRows {
     IterateRows(const Annotator &annotator) : matrix_(annotator.get_matrix()) {};
 
     BinaryMatrix::SetBitPositions next() {
-        return matrix_.get_row(i_++);
+        return matrix_.get_rows({ i_++ })[0];
     };
 
   private:
@@ -1527,6 +1527,7 @@ class IterateRows {
     const BinaryMatrix &matrix_;
 };
 
+// TODO: remove?
 template <class ToAnnotation, typename Label>
 void merge(std::vector<std::unique_ptr<MultiLabelEncoded<Label>>>&& annotators,
            const std::vector<std::string> &filenames,
@@ -1834,7 +1835,7 @@ void convert_row_diff_to_col_compressed(const std::vector<std::string> &files,
 }
 
 template <class Annotator>
-StaticBinRelAnnotator<matrix::TupleCSCMatrix<typename Annotator::binary_matrix_type>, std::string>
+StaticBinRelAnnotator<TupleCSCMatrix<typename Annotator::binary_matrix_type>, std::string>
 load_coords(Annotator&& anno, const std::vector<std::string> &files) {
     std::vector<bit_vector_smart> delimiters(anno.num_labels());
     std::vector<sdsl::int_vector<>> column_values(anno.num_labels());
@@ -1878,8 +1879,8 @@ load_coords(Annotator&& anno, const std::vector<std::string> &files) {
 
     auto label_encoder = anno.get_label_encoder();
 
-    return StaticBinRelAnnotator<matrix::TupleCSCMatrix<typename Annotator::binary_matrix_type>, std::string>(
-            std::make_unique<matrix::TupleCSCMatrix<typename Annotator::binary_matrix_type>>(
+    return StaticBinRelAnnotator<TupleCSCMatrix<typename Annotator::binary_matrix_type>, std::string>(
+            std::make_unique<TupleCSCMatrix<typename Annotator::binary_matrix_type>>(
                     std::move(*anno.release_matrix()),
                     std::move(delimiters),
                     std::move(column_values)),

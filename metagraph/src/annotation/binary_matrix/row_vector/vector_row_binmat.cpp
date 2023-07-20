@@ -9,7 +9,7 @@
 
 namespace mtg {
 namespace annot {
-namespace binmat {
+namespace matrix {
 
 template <typename RowType>
 VectorRowBinMat<RowType>::VectorRowBinMat(Vector<RowType>&& rows,
@@ -23,18 +23,12 @@ VectorRowBinMat<RowType>::VectorRowBinMat(Vector<RowType>&& rows,
 }
 
 template <typename RowType>
-bool VectorRowBinMat<RowType>::get(Row row, Column column) const {
-    assert(row < vector_.size());
-    return std::find(vector_[row].begin(), vector_[row].end(), column)
-                != vector_[row].end();
-}
-
-template <typename RowType>
 void VectorRowBinMat<RowType>::set(Row row, Column column) {
     assert(row < vector_.size());
 
-    if (!get(row, column))
-        vector_[row].push_back(column);
+    auto &v = vector_[row];
+    if (std::find(v.begin(), v.end(), column) == v.end())
+        v.push_back(column);
 
     if (column >= num_columns_)
         num_columns_ = column + 1;
@@ -54,9 +48,9 @@ template <typename RowType>
 void VectorRowBinMat<RowType>::standardize_rows() {
     #pragma omp parallel for num_threads(get_num_threads())
     for (size_t i = 0; i < vector_.size(); ++i) {
-        std::sort(vector_[i].begin(), vector_[i].end());
-        vector_[i].erase(std::unique(vector_[i].begin(), vector_[i].end()),
-                         vector_[i].end());
+        auto &v = vector_[i];
+        std::sort(v.begin(), v.end());
+        v.erase(std::unique(v.begin(), v.end()), v.end());
     }
 }
 
@@ -99,7 +93,8 @@ std::vector<typename VectorRowBinMat<RowType>::Row>
 VectorRowBinMat<RowType>::get_column(Column column) const {
     std::vector<Row> result;
     for (uint64_t i = 0; i < vector_.size(); ++i) {
-        if (get(i, column))
+        const auto &v = vector_[i];
+        if (std::find(v.begin(), v.end(), column) != v.end())
             result.push_back(i);
     }
     return result;
@@ -178,6 +173,6 @@ double VectorRowBinMat<RowType>::density() const {
 template class VectorRowBinMat<SmallVector<uint32_t>>;
 template class VectorRowBinMat<Vector<uint64_t>>;
 
-} // namespace binmat
+} // namespace matrix
 } // namespace annot
 } // namespace mtg

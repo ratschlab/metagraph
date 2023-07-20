@@ -9,7 +9,7 @@
 
 namespace mtg {
 namespace annot {
-namespace binmat {
+namespace matrix {
 
 typedef brwt::binary_relation::object_id object_id;
 typedef brwt::binary_relation::label_id label_id;
@@ -253,6 +253,6 @@ uint64_t BinRelWT::num_relations() const {
     return binary_relation_.size();
 }
 
-} // namespace binmat
+} // namespace matrix
 } // namespace annot
 } // namespace mtg

@@ -5,7 +5,7 @@
 
 namespace mtg {
 namespace annot {
-namespace binmat {
+namespace matrix {
 
 EigenSpMat::EigenSpMat(uint64_t num_rows, uint64_t max_num_cols) {
     initialize(num_rows, max_num_cols);
@@ -141,6 +141,6 @@ double EigenSpMat::density() const {
     return static_cast<double>(num_relations()) / num_columns() / num_rows();
 }
 
-} // namespace binmat
+} // namespace matrix
 } // namespace annot
 } // namespace mtg

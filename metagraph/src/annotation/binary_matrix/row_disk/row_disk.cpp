@@ -7,14 +7,9 @@
 
 namespace mtg {
 namespace annot {
-namespace binmat {
+namespace matrix {
 
 using mtg::common::logger;
-
-bool RowDisk::View::get(Row row, Column column) const {
-    SetBitPositions set_bits = get_row(row);
-    return std::binary_search(set_bits.begin(), set_bits.end(), column);
-}
 
 std::vector<BinaryMatrix::Row> RowDisk::View::get_column(Column column) const {
     logger->warn("get_column is extremely inefficient for RowDisk, consider"
@@ -22,7 +17,8 @@ std::vector<BinaryMatrix::Row> RowDisk::View::get_column(Column column) const {
     std::vector<Row> result;
     const uint64_t num_rows = boundary_.num_set_bits();
     for (Row row = 0; row < num_rows; ++row) {
-        if (get(row, column))
+        SetBitPositions set_bits = get_row(row);
+        if (std::binary_search(set_bits.begin(), set_bits.end(), column))
             result.push_back(row);
     }
     return result;
@@ -132,7 +128,7 @@ void RowDisk::serialize(std::ostream &f) const {
 
 
 void RowDisk::serialize(const std::string &filename,
-                        const std::function<void(binmat::BinaryMatrix::RowCallback)> &call_rows,
+                        const std::function<void(BinaryMatrix::RowCallback)> &call_rows,
                         uint64_t num_columns,
                         uint64_t num_rows,
                         uint64_t num_set_bits) {
@@ -185,6 +181,6 @@ void RowDisk::serialize(const std::string &filename,
     serialize_number(outstream, boundary_start);
 }
 
-} // namespace binmat
+} // namespace matrix
 } // namespace annot
 } // namespace mtg
