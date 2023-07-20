@@ -18,7 +18,7 @@ namespace graph {
 class AnnotatedSequenceGraph {
   public:
     typedef std::string Label;
-    typedef annot::MultiLabelEncoded<Label> Annotator;
+    typedef annot::MultiLabelAnnotation<Label> Annotator;
     using node_index = SequenceGraph::node_index;
     using row_index = Annotator::Index;
 

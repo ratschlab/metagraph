@@ -29,7 +29,7 @@ class ConvertFromRowCompressed : public ::testing::Test {
   protected:
     static const uint64_t num_rows = 5;
     std::unique_ptr<RowCompressed<>> initial_annotation;
-    std::unique_ptr<MultiLabelEncoded<std::string>> annotation;
+    std::unique_ptr<MultiLabelAnnotation<std::string>> annotation;
     std::unique_ptr<graph::DBGSuccinct> graph;
 
     virtual void SetUp() {
@@ -50,11 +50,11 @@ class ConvertFromRowCompressed : public ::testing::Test {
         ASSERT_EQ(5u, annotation->num_objects());
         ASSERT_EQ(9u, annotation->num_relations());
 
-        EXPECT_THAT(annotation->get(0), UnorderedElementsAre("Label0", "Label2", "Label8"));
-        EXPECT_THAT(annotation->get(1), UnorderedElementsAre());
-        EXPECT_THAT(annotation->get(2), UnorderedElementsAre("Label1", "Label2"));
-        EXPECT_THAT(annotation->get(3), UnorderedElementsAre("Label1", "Label2", "Label8"));
-        EXPECT_THAT(annotation->get(4), UnorderedElementsAre("Label2"));
+        EXPECT_THAT(annotation->get_labels(0), UnorderedElementsAre("Label0", "Label2", "Label8"));
+        EXPECT_THAT(annotation->get_labels(1), UnorderedElementsAre());
+        EXPECT_THAT(annotation->get_labels(2), UnorderedElementsAre("Label1", "Label2"));
+        EXPECT_THAT(annotation->get_labels(3), UnorderedElementsAre("Label1", "Label2", "Label8"));
+        EXPECT_THAT(annotation->get_labels(4), UnorderedElementsAre("Label2"));
 
     }
 };
@@ -67,7 +67,7 @@ class MergeAnnotators : public ::testing::Test {
     static RowCompressed<> *input_annotation_1;
     static RowCompressed<> *input_annotation_2;
     static RowCompressed<> *merged_annotation_expected;
-    static MultiLabelEncoded<std::string> *merged_annotation;
+    static MultiLabelAnnotation<std::string> *merged_annotation;
 
     virtual void SetUp() {
 
@@ -93,8 +93,8 @@ class MergeAnnotators : public ::testing::Test {
     virtual void TearDown() {
         ASSERT_TRUE(merged_annotation);
         for (uint64_t i = 0; i < num_rows; ++i) {
-            auto row_expected = merged_annotation_expected->get(i);
-            auto row = merged_annotation->get(i);
+            auto row_expected = merged_annotation_expected->get_labels(i);
+            auto row = merged_annotation->get_labels(i);
             EXPECT_EQ(row_expected, row);
         }
 
@@ -109,13 +109,13 @@ const uint64_t MergeAnnotators::num_rows;
 RowCompressed<> *MergeAnnotators::input_annotation_1 = nullptr;
 RowCompressed<> *MergeAnnotators::input_annotation_2 = nullptr;
 RowCompressed<> *MergeAnnotators::merged_annotation_expected = nullptr;
-MultiLabelEncoded<std::string> *MergeAnnotators::merged_annotation = nullptr;
+MultiLabelAnnotation<std::string> *MergeAnnotators::merged_annotation = nullptr;
 
 
 class ConvertFromColumnCompressed : public ::testing::Test {
   protected:
     std::unique_ptr<ColumnCompressed<>> initial_annotation;
-    std::unique_ptr<MultiLabelEncoded<std::string>> annotation;
+    std::unique_ptr<MultiLabelAnnotation<std::string>> annotation;
     std::unique_ptr<graph::DBGSuccinct> graph;
 
 
@@ -137,11 +137,11 @@ class ConvertFromColumnCompressed : public ::testing::Test {
         ASSERT_EQ(5u, annotation->num_objects());
         ASSERT_EQ(9u, annotation->num_relations());
 
-        EXPECT_THAT(annotation->get(0), UnorderedElementsAre("Label0", "Label2", "Label8"));
-        EXPECT_THAT(annotation->get(1), UnorderedElementsAre());
-        EXPECT_THAT(annotation->get(2), UnorderedElementsAre("Label1", "Label2"));
-        EXPECT_THAT(annotation->get(3), UnorderedElementsAre("Label1", "Label2", "Label8"));
-        EXPECT_THAT(annotation->get(4), UnorderedElementsAre("Label2"));
+        EXPECT_THAT(annotation->get_labels(0), UnorderedElementsAre("Label0", "Label2", "Label8"));
+        EXPECT_THAT(annotation->get_labels(1), UnorderedElementsAre());
+        EXPECT_THAT(annotation->get_labels(2), UnorderedElementsAre("Label1", "Label2"));
+        EXPECT_THAT(annotation->get_labels(3), UnorderedElementsAre("Label1", "Label2", "Label8"));
+        EXPECT_THAT(annotation->get_labels(4), UnorderedElementsAre("Label2"));
     }
 
 };
@@ -285,7 +285,7 @@ TEST(RowDiff, ConvertFromColumnCompressedSameLabels) {
                       annotator.num_relations());
 
             for (uint32 i = 0; i < annotator.num_objects(); ++i) {
-                ASSERT_THAT(annotator.get(i), ContainerEq(labels));
+                ASSERT_THAT(annotator.get_labels(i), ContainerEq(labels));
             }
         }
     }
@@ -337,7 +337,7 @@ TEST(RowDiff, ConvertFromColumnCompressedSameLabelsMultipleColumns) {
                 EXPECT_EQ(expected_relations[max_depth - 1], annotator.num_relations());
 
                 for (uint32 idx = 0; idx < annotator.num_objects(); ++idx) {
-                    ASSERT_THAT(annotator.get(idx), ElementsAre(labels[i]));
+                    ASSERT_THAT(annotator.get_labels(idx), ElementsAre(labels[i]));
                 }
             }
         }
@@ -392,7 +392,7 @@ void test_row_diff(uint32_t k,
     ASSERT_EQ(graph->num_nodes(), annotator.num_objects());
 
     for (uint32_t anno_idx = 0; anno_idx < graph->num_nodes(); ++anno_idx) {
-        ASSERT_THAT(annotator.get(anno_idx),
+        ASSERT_THAT(annotator.get_labels(anno_idx),
                     UnorderedElementsAreArray(annotations[anno_idx]));
     }
 
@@ -711,7 +711,7 @@ TEST_F(MergeAnnotators, RowCompressed) {
 }
 
 TEST_F(MergeAnnotators, RowFlat_to_RowCompressed) {
-    std::vector<std::unique_ptr<MultiLabelEncoded<std::string>>> row_flat_annotators;
+    std::vector<std::unique_ptr<MultiLabelAnnotation<std::string>>> row_flat_annotators;
     {
         row_flat_annotators.push_back(convert<RowFlatAnnotator>(
             std::move(*input_annotation_1)
@@ -732,7 +732,7 @@ TEST_F(MergeAnnotators, RowFlat_to_RowCompressed) {
 }
 
 TEST_F(MergeAnnotators, RowFlat_to_RowFlat) {
-    std::vector<std::unique_ptr<MultiLabelEncoded<std::string>>> row_flat_annotators;
+    std::vector<std::unique_ptr<MultiLabelAnnotation<std::string>>> row_flat_annotators;
     {
         row_flat_annotators.push_back(convert<RowFlatAnnotator>(
             std::move(*input_annotation_1)
@@ -753,7 +753,7 @@ TEST_F(MergeAnnotators, RowFlat_to_RowFlat) {
 }
 
 TEST_F(MergeAnnotators, Mixed_to_RowFlat) {
-    std::vector<std::unique_ptr<MultiLabelEncoded<std::string>>> annotators;
+    std::vector<std::unique_ptr<MultiLabelAnnotation<std::string>>> annotators;
     std::vector<std::string> filenames;
     {
         auto annotator = convert<RowFlatAnnotator>(
@@ -817,8 +817,8 @@ TEST(ColumnCompressed, ToRowAnnotatorStreaming) {
         ASSERT_TRUE(row_annotator.load(test_dump_basename));
 
         for (size_t i = 0; i < 1; ++i) {
-            EXPECT_EQ(convert_to_set(annotation.get(i)),
-                      convert_to_set(row_annotator.get(i)));
+            EXPECT_EQ(convert_to_set(annotation.get_labels(i)),
+                      convert_to_set(row_annotator.get_labels(i)));
         }
     }
     {
@@ -831,8 +831,8 @@ TEST(ColumnCompressed, ToRowAnnotatorStreaming) {
         ASSERT_TRUE(row_annotator.load(test_dump_basename));
 
         for (size_t i = 0; i < 1; ++i) {
-            EXPECT_EQ(convert_to_set(annotation.get(i)),
-                      convert_to_set(row_annotator.get(i)));
+            EXPECT_EQ(convert_to_set(annotation.get_labels(i)),
+                      convert_to_set(row_annotator.get_labels(i)));
         }
     }
     {
@@ -849,8 +849,8 @@ TEST(ColumnCompressed, ToRowAnnotatorStreaming) {
         ASSERT_TRUE(row_annotator.load(test_dump_basename));
 
         for (size_t i = 0; i < 6; ++i) {
-            EXPECT_EQ(convert_to_set(annotation.get(i)),
-                      convert_to_set(row_annotator.get(i)));
+            EXPECT_EQ(convert_to_set(annotation.get_labels(i)),
+                      convert_to_set(row_annotator.get_labels(i)));
         }
     }
     {
@@ -865,8 +865,8 @@ TEST(ColumnCompressed, ToRowAnnotatorStreaming) {
         ASSERT_TRUE(row_annotator.load(test_dump_basename));
 
         for (size_t i = 0; i < num_rows; i += 1000) {
-            EXPECT_EQ(convert_to_set(annotation.get(i)),
-                      convert_to_set(row_annotator.get(i)));
+            EXPECT_EQ(convert_to_set(annotation.get_labels(i)),
+                      convert_to_set(row_annotator.get_labels(i)));
         }
     }
 }
@@ -893,8 +893,8 @@ TEST(ColumnCompressed, ToRowAnnotatorStreamingParallel) {
         ASSERT_TRUE(row_annotator.load(test_dump_basename));
 
         for (size_t i = 0; i < 1; ++i) {
-            EXPECT_EQ(convert_to_set(annotation.get(i)),
-                      convert_to_set(row_annotator.get(i)));
+            EXPECT_EQ(convert_to_set(annotation.get_labels(i)),
+                      convert_to_set(row_annotator.get_labels(i)));
         }
     }
     {
@@ -907,8 +907,8 @@ TEST(ColumnCompressed, ToRowAnnotatorStreamingParallel) {
         ASSERT_TRUE(row_annotator.load(test_dump_basename));
 
         for (size_t i = 0; i < 1; ++i) {
-            EXPECT_EQ(convert_to_set(annotation.get(i)),
-                      convert_to_set(row_annotator.get(i)));
+            EXPECT_EQ(convert_to_set(annotation.get_labels(i)),
+                      convert_to_set(row_annotator.get_labels(i)));
         }
     }
     {
@@ -925,8 +925,8 @@ TEST(ColumnCompressed, ToRowAnnotatorStreamingParallel) {
         ASSERT_TRUE(row_annotator.load(test_dump_basename));
 
         for (size_t i = 0; i < 6; ++i) {
-            EXPECT_EQ(convert_to_set(annotation.get(i)),
-                      convert_to_set(row_annotator.get(i)));
+            EXPECT_EQ(convert_to_set(annotation.get_labels(i)),
+                      convert_to_set(row_annotator.get_labels(i)));
         }
     }
     {
@@ -941,8 +941,8 @@ TEST(ColumnCompressed, ToRowAnnotatorStreamingParallel) {
         ASSERT_TRUE(row_annotator.load(test_dump_basename));
 
         for (size_t i = 0; i < num_rows; i += 1000) {
-            EXPECT_EQ(convert_to_set(annotation.get(i)),
-                      convert_to_set(row_annotator.get(i)));
+            EXPECT_EQ(convert_to_set(annotation.get_labels(i)),
+                      convert_to_set(row_annotator.get_labels(i)));
         }
     }
 }

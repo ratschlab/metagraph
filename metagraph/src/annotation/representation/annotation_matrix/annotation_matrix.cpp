@@ -16,29 +16,6 @@ using namespace mtg::annot::matrix;
 using utils::remove_suffix;
 using utils::make_suffix;
 
-// TODO: remove?
-template <class BinaryMatrixType, typename Label>
-bool
-StaticBinRelAnnotator<BinaryMatrixType, Label>
-::has_labels(Index i, const VLabels &labels) const {
-    assert(i < num_objects());
-
-    std::set<size_t> querying_codes;
-    try {
-        for (const auto &label : labels) {
-            querying_codes.insert(label_encoder_.encode(label));
-        }
-    } catch (...) {
-        return false;
-    }
-    std::set<size_t> encoded_labels;
-    auto row = get_matrix().get_rows({ i })[0];
-    for (uint64_t j : row) {
-        encoded_labels.insert(j);
-    }
-    return std::includes(encoded_labels.begin(), encoded_labels.end(),
-                         querying_codes.begin(), querying_codes.end());
-}
 
 template <class BinaryMatrixType, typename Label>
 void

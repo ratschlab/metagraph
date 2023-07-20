@@ -28,7 +28,7 @@ TEST(ColumnCompressed, add_label_random_with_caching) {
         annotation.add_labels({ i }, { labels[i % 2] });
     }
     for (size_t i = 0; i < 2 * graph_half_size; i+= 100) {
-        ASSERT_EQ(1u, annotation.get(i).size());
+        ASSERT_EQ(1u, annotation.get_labels(i).size());
     }
 }
 
@@ -41,11 +41,11 @@ TEST(ColumnCompressed, RenameColumnsMerge) {
     annotation.rename_labels({ { "Label2", "Merged" },
                                { "Label8", "Merged" } });
 
-    EXPECT_EQ(convert_to_set({ "Label0", "Merged" }), convert_to_set(annotation.get(0)));
-    EXPECT_EQ(convert_to_set({}), convert_to_set(annotation.get(1)));
-    EXPECT_EQ(convert_to_set({ "Label1", "Merged" }), convert_to_set(annotation.get(2)));
-    EXPECT_EQ(convert_to_set({}), convert_to_set(annotation.get(3)));
-    EXPECT_EQ(convert_to_set({ "Merged" }), convert_to_set(annotation.get(4)));
+    EXPECT_EQ(convert_to_set({ "Label0", "Merged" }), convert_to_set(annotation.get_labels(0)));
+    EXPECT_EQ(convert_to_set({}), convert_to_set(annotation.get_labels(1)));
+    EXPECT_EQ(convert_to_set({ "Label1", "Merged" }), convert_to_set(annotation.get_labels(2)));
+    EXPECT_EQ(convert_to_set({}), convert_to_set(annotation.get_labels(3)));
+    EXPECT_EQ(convert_to_set({ "Merged" }), convert_to_set(annotation.get_labels(4)));
 }
 
 TEST(ColumnCompressed, RenameColumnsMergeAll) {
@@ -59,11 +59,11 @@ TEST(ColumnCompressed, RenameColumnsMergeAll) {
                                { "Label2", "Merged" },
                                { "Label8", "Merged" }, });
 
-    EXPECT_EQ(convert_to_set({ "Merged" }), convert_to_set(annotation.get(0)));
-    EXPECT_EQ(convert_to_set({}), convert_to_set(annotation.get(1)));
-    EXPECT_EQ(convert_to_set({ "Merged" }), convert_to_set(annotation.get(2)));
-    EXPECT_EQ(convert_to_set({}), convert_to_set(annotation.get(3)));
-    EXPECT_EQ(convert_to_set({ "Merged" }), convert_to_set(annotation.get(4)));
+    EXPECT_EQ(convert_to_set({ "Merged" }), convert_to_set(annotation.get_labels(0)));
+    EXPECT_EQ(convert_to_set({}), convert_to_set(annotation.get_labels(1)));
+    EXPECT_EQ(convert_to_set({ "Merged" }), convert_to_set(annotation.get_labels(2)));
+    EXPECT_EQ(convert_to_set({}), convert_to_set(annotation.get_labels(3)));
+    EXPECT_EQ(convert_to_set({ "Merged" }), convert_to_set(annotation.get_labels(4)));
 }
 
 TEST(ColumnCompressed, GetColumn) {

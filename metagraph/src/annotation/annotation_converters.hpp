@@ -14,7 +14,7 @@ template <typename Label>
 class RowCompressed;
 
 template <typename LabelType>
-class MultiLabelEncoded;
+class MultiLabelAnnotation;
 
 
 template <class StaticAnnotation, typename Label>
@@ -88,7 +88,7 @@ void convert_to_row_diff(const std::vector<std::string> &files,
                          size_t mem_bytes);
 
 template <class ToAnnotation, typename Label>
-void merge(std::vector<std::unique_ptr<MultiLabelEncoded<Label>>>&& annotators,
+void merge(std::vector<std::unique_ptr<MultiLabelAnnotation<Label>>>&& annotators,
            const std::vector<std::string> &filenames,
            const std::string &outfile);
 

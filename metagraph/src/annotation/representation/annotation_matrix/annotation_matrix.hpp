@@ -12,11 +12,11 @@ namespace mtg {
 namespace annot {
 
 template <class BinaryMatrixType, typename Label = std::string>
-class StaticBinRelAnnotator : public MultiLabelEncoded<Label> {
+class StaticBinRelAnnotator : public MultiLabelAnnotation<Label> {
   public:
     typedef BinaryMatrixType binary_matrix_type;
-    using Index = typename MultiLabelEncoded<Label>::Index;
-    using VLabels = typename MultiLabelEncoded<Label>::VLabels;
+    using Index = typename MultiLabelAnnotation<Label>::Index;
+    using VLabels = typename MultiLabelAnnotation<Label>::VLabels;
 
     StaticBinRelAnnotator(const StaticBinRelAnnotator&) = delete;
     StaticBinRelAnnotator(StaticBinRelAnnotator&&) = default;
@@ -29,8 +29,6 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<Label> {
         : StaticBinRelAnnotator(std::make_unique<BinaryMatrixType>(std::forward<Args>(args)...),
                                 label_encoder) {}
 
-    bool has_labels(Index i, const VLabels &labels) const override;
-
     void serialize(const std::string &filename) const override;
     bool load(const std::string &filename) override;
     static LabelEncoder<Label> read_label_encoder(const std::string &filename);
@@ -40,7 +38,6 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<Label> {
     uint64_t num_objects() const override { return matrix_->num_rows(); }
     uint64_t num_relations() const override { return matrix_->num_relations(); }
 
-    void set(Index, const VLabels &) override { except_dyn(); }
     void add_labels(const std::vector<Index> &, const VLabels &) override { except_dyn(); }
     void insert_rows(const std::vector<Index> &) override { except_dyn(); }
 
@@ -57,7 +54,7 @@ class StaticBinRelAnnotator : public MultiLabelEncoded<Label> {
 
     std::unique_ptr<BinaryMatrixType> matrix_;
 
-    using MultiLabelEncoded<Label>::label_encoder_;
+    using MultiLabelAnnotation<Label>::label_encoder_;
 };
 
 using ColumnCallback = std::function<void(uint64_t index,

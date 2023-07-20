@@ -13,10 +13,10 @@ namespace annot {
 // StaticBinRelAnnotator<VectorRowBinMat>
 // TODO: remove?
 template <typename Label = std::string>
-class RowCompressed : public MultiLabelEncoded<Label> {
+class RowCompressed : public MultiLabelAnnotation<Label> {
   public:
-    using Index = typename MultiLabelEncoded<Label>::Index;
-    using VLabels = typename MultiLabelEncoded<Label>::VLabels;
+    using Index = typename MultiLabelAnnotation<Label>::Index;
+    using VLabels = typename MultiLabelAnnotation<Label>::VLabels;
 
     RowCompressed(uint64_t num_rows = 0, bool sparse = false);
 
@@ -26,14 +26,10 @@ class RowCompressed : public MultiLabelEncoded<Label> {
 
     void reinitialize(uint64_t num_rows);
 
-    void set(Index i, const VLabels &labels);
-
     void add_labels(const std::vector<Index> &indices, const VLabels &labels);
     void add_labels_fast(const std::vector<Index> &indices, const VLabels &labels);
 
     void insert_rows(const std::vector<Index> &rows);
-
-    bool has_labels(Index i, const VLabels &labels) const;
 
     uint64_t num_objects() const;
     uint64_t num_relations() const;
@@ -66,7 +62,7 @@ class RowCompressed : public MultiLabelEncoded<Label> {
     static constexpr auto kExtension = ".row.annodbg";
 
   private:
-    using MultiLabelEncoded<Label>::label_encoder_;
+    using MultiLabelAnnotation<Label>::label_encoder_;
 
     std::unique_ptr<matrix::BinaryMatrixRowDynamic> matrix_;
 

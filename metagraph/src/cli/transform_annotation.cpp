@@ -22,7 +22,7 @@ using namespace mtg::annot;
 using mtg::common::logger;
 using mtg::common::get_verbose;
 
-typedef MultiLabelEncoded<std::string> Annotator;
+typedef MultiLabelAnnotation<std::string> Annotator;
 
 typedef matrix::TupleCSCMatrix<matrix::ColumnMajor> TupleCSC;
 typedef matrix::TupleCSCMatrix<matrix::BRWT> TupleBRWT;
@@ -538,14 +538,14 @@ int transform_annotation(Config *config) {
         logger->trace("Loading input annotations and computing the inner product...");
 
         for (const auto &file : files) {
-            std::unique_ptr<MultiLabelEncoded<std::string>> annotator
+            std::unique_ptr<MultiLabelAnnotation<std::string>> annotator
                     = initialize_annotation(file, *config);
             if (!annotator->load(file)) {
                 logger->error("Cannot load annotations from file '{}'", file);
                 exit(1);
             }
 
-            for (const std::string &base_label : base_columns.get_all_labels()) {
+            for (const std::string &base_label : base_columns.get_label_encoder().get_labels()) {
                 std::vector<std::pair<uint64_t, size_t>> col;
                 base_columns.get_column(base_label).call_ones([&col](uint64_t i) {
                     col.emplace_back(i, 1);
@@ -980,7 +980,7 @@ int relax_multi_brwt(Config *config) {
 
     const std::string &fname = files.at(0);
 
-    std::unique_ptr<MultiLabelEncoded<std::string>> annotator;
+    std::unique_ptr<MultiLabelAnnotation<std::string>> annotator;
     Config::AnnotationType anno_type = parse_annotation_type(fname);
     switch (anno_type) {
         case Config::BRWT:

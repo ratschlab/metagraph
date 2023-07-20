@@ -22,9 +22,9 @@ const std::string test_dump_basename_vec_good = test_dump_basename + "_row_compr
 TEST(RowCompressed, read_label_encoder) {
     {
         RowCompressed<> annotation(5, false);
-        annotation.set(0, { "Label0", "Label2", "Label8" });
-        annotation.set(2, { "Label1", "Label2" });
-        annotation.set(4, { "Label8" });
+        annotation.add_labels({ 0 }, { "Label0", "Label2", "Label8" });
+        annotation.add_labels({ 2 }, { "Label1", "Label2" });
+        annotation.add_labels({ 4 }, { "Label8" });
 
         annotation.serialize(test_dump_basename_vec_good);
     }
@@ -37,9 +37,9 @@ TEST(RowCompressed, read_label_encoder) {
 TEST(RowCompressed, read_shape) {
     {
         RowCompressed<> annotation(5, false);
-        annotation.set(0, { "Label0", "Label2", "Label8" });
-        annotation.set(2, { "Label1", "Label2" });
-        annotation.set(4, { "Label8" });
+        annotation.add_labels({ 0 }, { "Label0", "Label2", "Label8" });
+        annotation.add_labels({ 2 }, { "Label1", "Label2" });
+        annotation.add_labels({ 4 }, { "Label8" });
 
         annotation.serialize(test_dump_basename_vec_good);
     }
@@ -54,9 +54,9 @@ TEST(RowCompressed, read_shape) {
 TEST(RowCompressed, read_label_encoder_and_read_shape) {
     {
         RowCompressed<> annotation(5, false);
-        annotation.set(0, { "Label0", "Label2", "Label8" });
-        annotation.set(2, { "Label1", "Label2" });
-        annotation.set(4, { "Label8" });
+        annotation.add_labels({ 0 }, { "Label0", "Label2", "Label8" });
+        annotation.add_labels({ 2 }, { "Label1", "Label2" });
+        annotation.add_labels({ 4 }, { "Label8" });
 
         annotation.serialize(test_dump_basename_vec_good);
     }
@@ -73,9 +73,9 @@ TEST(RowCompressed, read_label_encoder_and_read_shape) {
 TEST(RowCompressed, read_shape_and_read_label_encoder) {
     {
         RowCompressed<> annotation(5, false);
-        annotation.set(0, { "Label0", "Label2", "Label8" });
-        annotation.set(2, { "Label1", "Label2" });
-        annotation.set(4, { "Label8" });
+        annotation.add_labels({ 0 }, { "Label0", "Label2", "Label8" });
+        annotation.add_labels({ 2 }, { "Label1", "Label2" });
+        annotation.add_labels({ 4 }, { "Label8" });
 
         annotation.serialize(test_dump_basename_vec_good);
     }
@@ -92,9 +92,9 @@ TEST(RowCompressed, read_shape_and_read_label_encoder) {
 TEST(RowCompressed, SerializationExtension) {
     {
         RowCompressed<> annotation(5, false);
-        annotation.set(0, { "Label0", "Label2", "Label8" });
-        annotation.set(2, { "Label1", "Label2" });
-        annotation.set(4, { "Label8" });
+        annotation.add_labels({ 0 }, { "Label0", "Label2", "Label8" });
+        annotation.add_labels({ 2 }, { "Label1", "Label2" });
+        annotation.add_labels({ 4 }, { "Label8" });
 
         annotation.serialize(test_dump_basename_vec_good + annotation.file_extension());
     }
@@ -104,21 +104,21 @@ TEST(RowCompressed, SerializationExtension) {
         ASSERT_TRUE(annotation.load(test_dump_basename_vec_good + annotation.file_extension()));
 
         EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }),
-                  convert_to_set(annotation.get(0)));
-        EXPECT_EQ(convert_to_set({}), convert_to_set(annotation.get(1)));
+                  convert_to_set(annotation.get_labels(0)));
+        EXPECT_EQ(convert_to_set({}), convert_to_set(annotation.get_labels(1)));
         EXPECT_EQ(convert_to_set({ "Label1", "Label2" }),
-                  convert_to_set(annotation.get(2)));
-        EXPECT_EQ(convert_to_set({}), convert_to_set(annotation.get(3)));
+                  convert_to_set(annotation.get_labels(2)));
+        EXPECT_EQ(convert_to_set({}), convert_to_set(annotation.get_labels(3)));
         EXPECT_EQ(convert_to_set({ "Label8" }),
-                  convert_to_set(annotation.get(4)));
+                  convert_to_set(annotation.get_labels(4)));
     }
 }
 
 TEST(RowCompressed, RenameColumnsMerge) {
     RowCompressed<> annotation(5);
-    annotation.set(0, { "Label0", "Label2", "Label8" });
-    annotation.set(2, { "Label1", "Label2" });
-    annotation.set(4, { "Label8" });
+    annotation.add_labels({ 0 }, { "Label0", "Label2", "Label8" });
+    annotation.add_labels({ 2 }, { "Label1", "Label2" });
+    annotation.add_labels({ 4 }, { "Label8" });
 
     ASSERT_DEATH_SILENT(
         annotation.rename_labels({ { "Label2", "Merged" },
@@ -126,18 +126,18 @@ TEST(RowCompressed, RenameColumnsMerge) {
         ""
     );
 
-    // EXPECT_EQ(convert_to_set({ "Label0", "Merged" }), convert_to_set(annotation.get(0)));
-    // EXPECT_EQ(convert_to_set({}), convert_to_set(annotation.get(1)));
-    // EXPECT_EQ(convert_to_set({ "Label1", "Merged" }), convert_to_set(annotation.get(2)));
-    // EXPECT_EQ(convert_to_set({}), convert_to_set(annotation.get(3)));
-    // EXPECT_EQ(convert_to_set({ "Merged" }), convert_to_set(annotation.get(4)));
+    // EXPECT_EQ(convert_to_set({ "Label0", "Merged" }), convert_to_set(annotation.get_labels(0)));
+    // EXPECT_EQ(convert_to_set({}), convert_to_set(annotation.get_labels(1)));
+    // EXPECT_EQ(convert_to_set({ "Label1", "Merged" }), convert_to_set(annotation.get_labels(2)));
+    // EXPECT_EQ(convert_to_set({}), convert_to_set(annotation.get_labels(3)));
+    // EXPECT_EQ(convert_to_set({ "Merged" }), convert_to_set(annotation.get_labels(4)));
 }
 
 TEST(RowCompressed, RenameColumnsMergeAll) {
     RowCompressed<> annotation(5);
-    annotation.set(0, { "Label0", "Label2", "Label8" });
-    annotation.set(2, { "Label1", "Label2" });
-    annotation.set(4, { "Label8" });
+    annotation.add_labels({ 0 }, { "Label0", "Label2", "Label8" });
+    annotation.add_labels({ 2 }, { "Label1", "Label2" });
+    annotation.add_labels({ 4 }, { "Label8" });
 
     ASSERT_DEATH_SILENT(
         annotation.rename_labels({ { "Label0", "Merged" },
@@ -147,11 +147,11 @@ TEST(RowCompressed, RenameColumnsMergeAll) {
         ""
     );
 
-    // EXPECT_EQ(convert_to_set({ "Merged" }), convert_to_set(annotation.get(0)));
-    // EXPECT_EQ(convert_to_set({}), convert_to_set(annotation.get(1)));
-    // EXPECT_EQ(convert_to_set({ "Merged" }), convert_to_set(annotation.get(2)));
-    // EXPECT_EQ(convert_to_set({}), convert_to_set(annotation.get(3)));
-    // EXPECT_EQ(convert_to_set({ "Merged" }), convert_to_set(annotation.get(4)));
+    // EXPECT_EQ(convert_to_set({ "Merged" }), convert_to_set(annotation.get_labels(0)));
+    // EXPECT_EQ(convert_to_set({}), convert_to_set(annotation.get_labels(1)));
+    // EXPECT_EQ(convert_to_set({ "Merged" }), convert_to_set(annotation.get_labels(2)));
+    // EXPECT_EQ(convert_to_set({}), convert_to_set(annotation.get_labels(3)));
+    // EXPECT_EQ(convert_to_set({ "Merged" }), convert_to_set(annotation.get_labels(4)));
 }
 
 } // namespace

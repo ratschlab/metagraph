@@ -1529,7 +1529,7 @@ class IterateRows {
 
 // TODO: remove?
 template <class ToAnnotation, typename Label>
-void merge(std::vector<std::unique_ptr<MultiLabelEncoded<Label>>>&& annotators,
+void merge(std::vector<std::unique_ptr<MultiLabelAnnotation<Label>>>&& annotators,
            const std::vector<std::string> &filenames,
            const std::string &outfile) {
     static_assert(std::is_same_v<typename ToAnnotation::Label, Label>);
@@ -1548,7 +1548,7 @@ void merge(std::vector<std::unique_ptr<MultiLabelEncoded<Label>>>&& annotators,
 
     std::vector<LEncoder> label_encoders;
 
-    std::vector<IterateRows<MultiLabelEncoded<Label>>> row_iterators;
+    std::vector<IterateRows<MultiLabelAnnotation<Label>>> row_iterators;
     for (const auto &annotator : annotators) {
         if (annotator->num_objects() != num_rows)
             throw std::runtime_error("Annotators have different number of rows");
@@ -1591,7 +1591,7 @@ void merge(std::vector<std::unique_ptr<MultiLabelEncoded<Label>>>&& annotators,
 
 #define INSTANTIATE_MERGE(A, L) \
             template void \
-            merge<A, L>(std::vector<std::unique_ptr<MultiLabelEncoded<L>>>&&, \
+            merge<A, L>(std::vector<std::unique_ptr<MultiLabelAnnotation<L>>>&&, \
                         const std::vector<std::string>&, \
                         const std::string&);
 INSTANTIATE_MERGE(RowFlatAnnotator, std::string);
@@ -1603,7 +1603,7 @@ INSTANTIATE_MERGE(RowCompressed<>, std::string);
 
 template<>
 void merge<MultiBRWTAnnotator, std::string>(
-        std::vector<std::unique_ptr<MultiLabelEncoded<std::string>>>&& annotators,
+        std::vector<std::unique_ptr<MultiLabelAnnotation<std::string>>>&& annotators,
         const std::vector<std::string> &filenames,
         const std::string &outfile) {
 
@@ -1626,7 +1626,7 @@ void merge<MultiBRWTAnnotator, std::string>(
         if (annotator->num_objects() != num_rows)
             throw std::runtime_error("Annotators have different number of rows");
 
-        for (const auto &label : annotator->get_all_labels()) {
+        for (const auto &label : annotator->get_label_encoder().get_labels()) {
             if (label_encoder.label_exists(label))
                 throw std::runtime_error("merging of BRWT with same labels is not implemented");
 

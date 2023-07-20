@@ -287,7 +287,7 @@ AnnotatedSequenceGraph::get_labels(node_index index) const {
     assert(check_compatibility());
     assert(index != SequenceGraph::npos);
 
-    return annotator_->get(graph_to_anno_index(index));
+    return annotator_->get_labels(graph_to_anno_index(index));
 }
 
 std::vector<StringCountPair>
@@ -815,7 +815,7 @@ AnnotatedDBG::get_top_labels(const std::vector<std::pair<row_index, size_t>> &in
 }
 
 bool AnnotatedSequenceGraph::label_exists(const Label &label) const {
-    return annotator_->label_exists(label);
+    return annotator_->get_label_encoder().label_exists(label);
 }
 
 void AnnotatedSequenceGraph

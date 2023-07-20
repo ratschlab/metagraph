@@ -90,7 +90,7 @@ Config::AnnotationType parse_annotation_type(const std::string &filename) {
     }
 }
 
-std::unique_ptr<annot::MultiLabelEncoded<std::string>>
+std::unique_ptr<annot::MultiLabelAnnotation<std::string>>
 initialize_annotation(Config::AnnotationType anno_type,
                       size_t column_compressed_num_columns_cached,
                       bool row_compressed_sparse,
@@ -100,7 +100,7 @@ initialize_annotation(Config::AnnotationType anno_type,
                       uint8_t count_width,
                       size_t max_chunks_open,
                       size_t RA_ivbuffer_size) {
-    std::unique_ptr<annot::MultiLabelEncoded<std::string>> annotation;
+    std::unique_ptr<annot::MultiLabelAnnotation<std::string>> annotation;
 
     switch (anno_type) {
         case Config::ColumnCompressed: {

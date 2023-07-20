@@ -23,11 +23,11 @@ namespace annot {
  *  Then, any subset of the public const methods can be called concurrently.
  */
 template <typename Label = std::string>
-class ColumnCompressed : public MultiLabelEncoded<Label> {
+class ColumnCompressed : public MultiLabelAnnotation<Label> {
   public:
     typedef matrix::ColumnMajor binary_matrix_type;
-    using Index = typename MultiLabelEncoded<Label>::Index;
-    using VLabels = typename MultiLabelEncoded<Label>::VLabels;
+    using Index = typename MultiLabelAnnotation<Label>::Index;
+    using VLabels = typename MultiLabelAnnotation<Label>::VLabels;
 
     // |swap_dir| specifies a location on disk for tempprary buffers during the
     // column construction. If empty, no swap is used and all is stored in RAM.
@@ -60,8 +60,6 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
 
     ~ColumnCompressed();
 
-    void set(Index i, const VLabels &labels) override;
-
     void add_labels(const std::vector<Index> &indices,
                     const VLabels &labels) override;
     // for each label and index 'indices[i]' add count 'counts[i]'
@@ -73,8 +71,6 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
     void add_label_coord(Index i, const VLabels &labels, uint64_t coord) override;
     void add_label_coords(const std::vector<std::pair<Index, uint64_t>> &coords,
                           const VLabels &labels) override;
-
-    bool has_labels(Index i, const VLabels &labels) const override;
 
     void serialize(const std::string &filename) const override;
     bool load(const std::string &filename) override;
@@ -184,7 +180,7 @@ class ColumnCompressed : public MultiLabelEncoded<Label> {
     std::vector<uint64_t> max_coord_; // stores max coord stored in |coords_|
     size_t max_chunks_open_;
 
-    using MultiLabelEncoded<Label>::label_encoder_;
+    using MultiLabelAnnotation<Label>::label_encoder_;
 };
 
 } // namespace annot

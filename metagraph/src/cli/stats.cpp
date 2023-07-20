@@ -24,7 +24,7 @@ namespace cli {
 using mtg::common::logger;
 using mtg::common::get_verbose;
 
-typedef annot::MultiLabelEncoded<std::string> Annotator;
+typedef annot::MultiLabelAnnotation<std::string> Annotator;
 
 
 void print_boss_stats(const graph::boss::BOSS &boss_graph,
@@ -215,7 +215,7 @@ void print_annotation_stats(const std::string &fname, const Config &config) {
 
     logger->info("Statistics for annotation '{}'", fname);
 
-    std::unique_ptr<annot::MultiLabelEncoded<std::string>> anno_p
+    std::unique_ptr<annot::MultiLabelAnnotation<std::string>> anno_p
             = initialize_annotation(fname, config);
     auto &annotation = *anno_p;
 
