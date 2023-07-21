@@ -7,6 +7,10 @@ namespace mtg {
 namespace annot {
 namespace matrix {
 
+using Row = BinaryMatrix::Row;
+using Column = BinaryMatrix::Column;
+
+
 IntMatrix::RowValues
 IntMatrix::sum_row_values(const std::vector<std::pair<Row, size_t>> &index_counts,
                           size_t min_count) const {

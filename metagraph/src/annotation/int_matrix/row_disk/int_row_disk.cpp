@@ -9,7 +9,7 @@ namespace matrix {
 
 using mtg::common::logger;
 
-std::vector<IntMatrix::Row> IntRowDisk::View::get_column(Column column) const {
+std::vector<BinaryMatrix::Row> IntRowDisk::View::get_column(Column column) const {
     logger->warn("get_column is extremely inefficient for IntRowDisk, consider"
                  " using a column-major format");
     const uint64_t num_rows = boundary_.num_set_bits();

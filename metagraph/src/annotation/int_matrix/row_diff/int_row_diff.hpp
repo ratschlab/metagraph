@@ -76,7 +76,7 @@ class IntRowDiff : public IRowDiff, public BinaryMatrix, public IntMatrix {
 
 
 template <class BaseMatrix>
-std::vector<IntMatrix::Row> IntRowDiff<BaseMatrix>::get_column(Column j) const {
+std::vector<BinaryMatrix::Row> IntRowDiff<BaseMatrix>::get_column(Column j) const {
     assert(graph_ && "graph must be loaded");
     assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
 
