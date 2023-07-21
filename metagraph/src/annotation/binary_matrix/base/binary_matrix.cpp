@@ -16,7 +16,7 @@ namespace mtg {
 namespace annot {
 namespace matrix {
 
-const size_t kRowBatchSize = 100'000;
+const size_t kRowBatchSize = 10'000;
 
 
 std::vector<BinaryMatrix::SetBitPositions>
