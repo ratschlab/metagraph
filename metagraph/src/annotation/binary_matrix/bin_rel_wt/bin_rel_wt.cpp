@@ -152,29 +152,28 @@ BinRelWT::slice_rows(const std::vector<Row> &rows) const {
 
     for (Row row : rows) {
         assert(row < num_objects);
-        if (is_zero_row(row))
-            continue;
+        if (!is_zero_row(row)) {
+            auto first_label = to_label_id(0);
+            auto last_label = to_label_id(max_used_label);
+            auto cur_object = to_object_id(row);
 
-        auto first_label = to_label_id(0);
-        auto last_label = to_label_id(max_used_label);
-        auto cur_object = to_object_id(row);
+            auto num_relations_in_row = static_cast<uint64_t>(
+                binary_relation_.count_distinct_labels(cur_object,
+                                                       cur_object,
+                                                       first_label,
+                                                       last_label)
+            );
 
-        auto num_relations_in_row = static_cast<uint64_t>(
-            binary_relation_.count_distinct_labels(cur_object,
-                                                   cur_object,
-                                                   first_label,
-                                                   last_label)
-        );
-
-        for (uint64_t relation_it = 1; relation_it <= num_relations_in_row; ++relation_it) {
-            auto element =
-                binary_relation_.nth_element(cur_object,
-                                             cur_object,
-                                             first_label,
-                                             relation_it,
-                                             brwt::lab_major);
-            assert(element);
-            slice.push_back(to_index(element->label));
+            for (uint64_t relation_it = 1; relation_it <= num_relations_in_row; ++relation_it) {
+                auto element =
+                    binary_relation_.nth_element(cur_object,
+                                                 cur_object,
+                                                 first_label,
+                                                 relation_it,
+                                                 brwt::lab_major);
+                assert(element);
+                slice.push_back(to_index(element->label));
+            }
         }
 
         slice.push_back(std::numeric_limits<Column>::max());
