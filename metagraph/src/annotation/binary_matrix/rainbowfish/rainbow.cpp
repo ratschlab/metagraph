@@ -45,7 +45,7 @@ uint64_t Rainbow<MatrixType>::get_code(Row row) const {
 
 template <class MatrixType>
 std::vector<BinaryMatrix::SetBitPositions>
-Rainbow<MatrixType>::get_rows(std::vector<Row> *rows, size_t num_threads) const {
+Rainbow<MatrixType>::get_rows_dict(std::vector<Row> *rows, size_t num_threads) const {
     assert(rows);
 
     std::vector<std::pair<uint64_t, /* code */

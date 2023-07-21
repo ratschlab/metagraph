@@ -609,7 +609,7 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
         }
 
         // get unique rows and set pointers to them in |row_indexes|
-        auto unique_rows = rb->get_rows(&row_indexes, num_threads);
+        auto unique_rows = rb->get_rows_dict(&row_indexes, num_threads);
 
         if (unique_rows.size() >= std::numeric_limits<uint32_t>::max()) {
             throw std::runtime_error("There must be less than 2^32 unique rows."

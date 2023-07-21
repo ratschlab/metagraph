@@ -71,7 +71,7 @@ static void BM_anno_get_rows_unique(benchmark::State &state) {
     std::sort(rows.begin(), rows.end());
 
     for (auto _ : state) {
-        benchmark::DoNotOptimize(rb_matrix.get_rows(&rows));
+        benchmark::DoNotOptimize(rb_matrix.get_rows_dict(&rows));
     }
 }
 BENCHMARK(BM_anno_get_rows_unique) -> Unit(benchmark::kMillisecond);

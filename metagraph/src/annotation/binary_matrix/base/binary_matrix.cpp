@@ -82,7 +82,7 @@ BinaryMatrix::sum_rows(const std::vector<std::pair<Row, size_t>> &index_counts,
 
 
 std::vector<RainbowMatrix::SetBitPositions>
-RainbowMatrix::get_rows(std::vector<Row> *rows, size_t num_threads) const {
+RainbowMatrix::get_rows_dict(std::vector<Row> *rows, size_t num_threads) const {
     assert(rows);
 
     std::vector<std::pair<uint64_t, /* code */
@@ -137,7 +137,7 @@ RainbowMatrix::slice_rows(const std::vector<Row> &rows) const {
 std::vector<RainbowMatrix::SetBitPositions>
 RainbowMatrix::get_rows(const std::vector<Row> &rows) const {
     std::vector<Row> pointers = rows;
-    auto distinct_rows = get_rows(&pointers);
+    auto distinct_rows = get_rows_dict(&pointers);
 
     std::vector<SetBitPositions> result(rows.size());
     for (size_t i = 0; i < pointers.size(); ++i) {
