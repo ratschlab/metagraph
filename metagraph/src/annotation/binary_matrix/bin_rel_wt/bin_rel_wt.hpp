@@ -12,7 +12,7 @@ namespace mtg {
 namespace annot {
 namespace matrix {
 
-class BinRelWT : public BinaryMatrix, public GetRowSupport, public GetEntrySupport {
+class BinRelWT : public RowMajor, public GetEntrySupport {
   public:
     BinRelWT() {}
 
@@ -26,7 +26,6 @@ class BinRelWT : public BinaryMatrix, public GetRowSupport, public GetEntrySuppo
 
     bool get(Row row, Column column) const override;
     SetBitPositions get_row(Row row) const override;
-    SetBitPositions slice_rows(const std::vector<Row> &row_ids) const override;
     std::vector<Row> get_column(Column column) const override;
 
     bool load(std::istream &in) override;

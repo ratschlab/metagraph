@@ -22,7 +22,7 @@ std::vector<IntMatrix::Row> IntRowDisk::View::get_column(Column column) const {
     return result;
 }
 
-IntMatrix::SetBitPositions IntRowDisk::View::get_row(Row row) const {
+BinaryMatrix::SetBitPositions IntRowDisk::View::get_row(Row row) const {
     assert(boundary_[boundary_.size() - 1] == 1);
     uint64_t begin = row == 0 ? 0 : boundary_.select1(row) + 1 - row;
     uint64_t end = boundary_.select1(row + 1) - row;
@@ -41,44 +41,6 @@ IntMatrix::SetBitPositions IntRowDisk::View::get_row(Row row) const {
     }
 
     return result;
-}
-
-IntMatrix::SetBitPositions
-IntRowDisk::View::slice_rows(const std::vector<Row> &row_ids) const {
-    SetBitPositions slice;
-    slice.reserve(row_ids.size() * 2);
-
-    for (uint64_t row : row_ids) {
-        assert(boundary_[boundary_.size() - 1] == 1);
-        uint64_t begin = row == 0 ? 0 : boundary_.select1(row) + 1 - row;
-        uint64_t end = boundary_.select1(row + 1) - row;
-
-        // In each row, the first value in `set_bits_` stores the first set bit,
-        // and all next ones store deltas pos[i] - pos[i-1].
-        uint64_t last = 0;
-        set_bits_.start_reading_at(begin * (bits_for_col_id_ + bits_for_value_));
-        Column col_id;
-        for (uint64_t i = begin; i != end; ++i) {
-            col_id = set_bits_.get(bits_for_col_id_);
-            set_bits_.get(bits_for_value_);
-            slice.push_back(last += col_id);
-        }
-
-        slice.push_back(std::numeric_limits<Column>::max());
-    }
-
-    return slice;
-}
-
-std::vector<IntMatrix::SetBitPositions>
-IntRowDisk::View::get_rows(const std::vector<Row> &row_ids) const {
-    std::vector<SetBitPositions> rows(row_ids.size());
-
-    for (size_t i = 0; i < row_ids.size(); ++i) {
-        rows[i] = get_row(row_ids[i]);
-    }
-
-    return rows;
 }
 
 IntMatrix::RowValues IntRowDisk::View::get_row_values(Row row) const {

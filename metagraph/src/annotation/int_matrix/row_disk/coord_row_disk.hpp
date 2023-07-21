@@ -16,7 +16,7 @@ namespace matrix {
 // the only difference will be that there is some additional data stored
 // for now for simplicity I just use different class
 // and also different base class
-class CoordRowDisk : public MultiIntMatrix, public GetRowSupport {
+class CoordRowDisk : public RowMajor, public MultiIntMatrix {
   public:
     CoordRowDisk(size_t RA_ivbuffer_size = 16'384) {
         buffer_params_.buff_size = std::max((size_t)8, RA_ivbuffer_size / 8);
@@ -26,14 +26,9 @@ class CoordRowDisk : public MultiIntMatrix, public GetRowSupport {
     uint64_t num_rows() const { return num_rows_; }
 
     SetBitPositions get_row(Row i) const { return get_view().get_row(i); }
-    SetBitPositions slice_rows(const std::vector<Row> &rows) const { return get_view().slice_rows(rows); }
     // FYI: `get_column` is very inefficient, consider using column-major formats
     std::vector<Row> get_column(Column j) const { return get_view().get_column(j); }
-    std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const {
-        return get_view().get_rows(rows);
-    }
 
-    RowValues get_row_values(Row i) const { return get_view().get_row_values(i); }
     std::vector<RowValues> get_row_values(const std::vector<Row> &rows) const {
         return get_view().get_row_values(rows);
     }
@@ -42,7 +37,6 @@ class CoordRowDisk : public MultiIntMatrix, public GetRowSupport {
     uint64_t num_attributes() const { return num_attributes_; }
 
     // return entries of the matrix -- where each entry is a set of integers
-    RowTuples get_row_tuples(Row i) const { return get_view().get_row_tuples(i); }
     std::vector<RowTuples> get_row_tuples(const std::vector<Row> &rows) const {
         return get_view().get_row_tuples(rows);
     }
@@ -67,6 +61,8 @@ class CoordRowDisk : public MultiIntMatrix, public GetRowSupport {
             uint64_t max_val,
             uint64_t max_tuple_size);
 
+    const RowMajor& get_binary_matrix() const { return *this; }
+
   private:
     // For the multithreading to work properly, we open int_vector_buffer<> in
     // a special View class that has an actual implementation of the method.
@@ -87,15 +83,12 @@ class CoordRowDisk : public MultiIntMatrix, public GetRowSupport {
               bits_for_single_value_(bits_for_single_value) {}
 
         SetBitPositions get_row(Row i) const;
-        SetBitPositions slice_rows(const std::vector<Row> &rows) const;
-        std::vector<SetBitPositions> get_rows(const std::vector<Row> &row_ids) const;
         std::vector<Row> get_column(Column j) const;
 
         RowValues get_row_values(Row i) const;
         std::vector<RowValues> get_row_values(const std::vector<Row> &row_ids) const;
 
         RowTuples get_row_tuples(Row i) const;
-
         std::vector<RowTuples> get_row_tuples(const std::vector<Row> &rows) const;
 
       private:

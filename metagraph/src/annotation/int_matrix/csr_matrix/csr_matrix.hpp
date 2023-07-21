@@ -15,15 +15,13 @@ namespace matrix {
  *
  * Matrix which stores the non-zero values in row-major order.
  */
-class CSRMatrix : public IntMatrix, public GetRowSupport {
+class CSRMatrix : public RowMajor, public IntMatrix {
   public:
     explicit CSRMatrix(uint64_t num_rows = 0) : vector_(num_rows) {}
 
     CSRMatrix(Vector<RowValues>&& rows, uint64_t num_columns);
 
     // row is in [0, num_rows), column is in [0, num_columns)
-    RowValues get_row_values(Row row) const { return vector_[row]; }
-
     std::vector<RowValues> get_row_values(const std::vector<Row> &rows) const;
 
     uint64_t num_columns() const { return num_columns_; }
@@ -32,11 +30,12 @@ class CSRMatrix : public IntMatrix, public GetRowSupport {
 
     // row is in [0, num_rows), column is in [0, num_columns)
     SetBitPositions get_row(Row row) const;
-    SetBitPositions slice_rows(const std::vector<Row> &row_ids) const;
     std::vector<Row> get_column(Column column) const;
 
     bool load(std::istream &in);
     void serialize(std::ostream &out) const;
+
+    const BinaryMatrix& get_binary_matrix() const { return *this; }
 
   private:
     uint64_t num_columns_ = 0;

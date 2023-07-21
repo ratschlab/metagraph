@@ -43,21 +43,6 @@ CSRMatrix::SetBitPositions CSRMatrix::get_row(Row row) const {
     return result;
 }
 
-CSRMatrix::SetBitPositions CSRMatrix::slice_rows(const std::vector<Row> &row_ids) const {
-    SetBitPositions slice;
-    slice.reserve(row_ids.size() * 2);
-
-    for (uint64_t row : row_ids) {
-        for (const auto &[j, _] : vector_[row]) {
-            slice.push_back(j);
-        }
-
-        slice.push_back(std::numeric_limits<Column>::max());
-    }
-
-    return slice;
-}
-
 std::vector<CSRMatrix::Row> CSRMatrix::get_column(Column column) const {
     std::vector<Row> result;
     for (uint64_t i = 0; i < vector_.size(); ++i) {

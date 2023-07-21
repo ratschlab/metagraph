@@ -7,31 +7,55 @@
 #include "common/serialization.hpp"
 #include "common/utils/template_utils.hpp"
 #include "common/vector_map.hpp"
+#include "common/vector_set.hpp"
+#include "common/hashers/hash.hpp"
+#include "annotation/binary_matrix/row_diff/row_diff.hpp"
 
 
 namespace mtg {
 namespace annot {
 namespace matrix {
 
+const size_t kRowBatchSize = 100'000;
+
+
 std::vector<BinaryMatrix::SetBitPositions>
-BinaryMatrix::get_rows(const std::vector<Row> &row_ids) const {
-    std::vector<SetBitPositions> rows(row_ids.size());
+BinaryMatrix::get_rows_dict(std::vector<Row> *rows, size_t num_threads) const {
+    VectorSet<SetBitPositions, utils::VectorHash> unique_rows;
 
-    auto slice = slice_rows(row_ids);
-
-    assert(slice.size() >= row_ids.size());
-
-    auto row_begin = slice.begin();
-
-    for (size_t i = 0; i < rows.size(); ++i) {
-        // every row in `slice` ends with `-1`
-        auto row_end = std::find(row_begin, slice.end(),
-                                 std::numeric_limits<Column>::max());
-        rows[i].assign(row_begin, row_end);
-        row_begin = row_end + 1;
+    std::vector<std::pair<Row, size_t>> row_to_index(rows->size());
+    for (size_t i = 0; i < rows->size(); ++i) {
+        row_to_index[i] = std::make_pair((*rows)[i], i);
     }
 
-    return rows;
+    // don't break the topological order for row-diff annotation
+    if (!dynamic_cast<const IRowDiff *>(this)) {
+        ips4o::parallel::sort(row_to_index.begin(), row_to_index.end(),
+                              utils::LessFirst(), num_threads);
+    }
+
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+    for (uint64_t begin = 0; begin < row_to_index.size(); begin += kRowBatchSize) {
+        const uint64_t end = std::min(begin + kRowBatchSize,
+                                      static_cast<uint64_t>(row_to_index.size()));
+
+        std::vector<Row> ids(end - begin);
+        for (uint64_t i = begin; i < end; ++i) {
+            ids[i - begin] = row_to_index[i].first;
+        }
+
+        auto batch = get_rows(ids);
+
+        #pragma omp critical
+        {
+            for (uint64_t i = begin; i < end; ++i) {
+                auto it = unique_rows.emplace(std::move(batch[i - begin])).first;
+                (*rows)[row_to_index[i].second] = it - unique_rows.begin();
+            }
+        }
+    }
+
+    return const_cast<std::vector<SetBitPositions>&&>(unique_rows.values_container());
 }
 
 void BinaryMatrix::call_columns(const std::vector<Column> &column_ids,
@@ -60,14 +84,18 @@ BinaryMatrix::sum_rows(const std::vector<std::pair<Row, size_t>> &index_counts,
     if (total_sum_count < min_count)
         return {};
 
-    // TODO: call slice_rows
-    auto rows = get_rows(row_ids);
+    auto distinct_rows = get_rows_dict(&row_ids);
+
+    std::vector<size_t> counts(distinct_rows.size(), 0);
+    for (size_t i = 0; i < index_counts.size(); ++i) {
+        counts[row_ids[i]] += index_counts[i].second;
+    }
 
     VectorMap<Column, size_t> col_counts;
 
-    for (size_t i = 0; i < index_counts.size(); ++i) {
-        for (size_t j : rows[i]) {
-            col_counts[j] += index_counts[i].second;
+    for (size_t i = 0; i < counts.size(); ++i) {
+        for (size_t j : distinct_rows[i]) {
+            col_counts[j] += counts[i];
         }
     }
 
@@ -80,6 +108,19 @@ BinaryMatrix::sum_rows(const std::vector<std::pair<Row, size_t>> &index_counts,
     return std::move(result);
 }
 
+
+std::vector<RainbowMatrix::SetBitPositions>
+RainbowMatrix::get_rows(const std::vector<Row> &rows) const {
+    std::vector<Row> pointers = rows;
+    auto distinct_rows = get_rows_dict(&pointers);
+
+    std::vector<SetBitPositions> result(rows.size());
+    for (size_t i = 0; i < pointers.size(); ++i) {
+        result[i] = distinct_rows[pointers[i]];
+    }
+
+    return result;
+}
 
 std::vector<RainbowMatrix::SetBitPositions>
 RainbowMatrix::get_rows_dict(std::vector<Row> *rows, size_t num_threads) const {
@@ -108,80 +149,35 @@ RainbowMatrix::get_rows_dict(std::vector<Row> *rows, size_t num_threads) const {
     }
     row_codes = {};
 
+    if (num_threads <= 1)
+        return codes_to_rows(codes);
+
     std::vector<SetBitPositions> unique_rows(codes.size());
 
-    #pragma omp parallel for num_threads(num_threads)
-    for (size_t i = 0; i < codes.size(); ++i) {
-        unique_rows[i] = code_to_row(codes[i]);
+    size_t batch_size = std::min(kRowBatchSize,
+                                 (codes.size() + num_threads - 1) / num_threads);
+
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+    for (size_t i = 0; i < codes.size(); i += batch_size) {
+        std::vector<uint64_t> ids(codes.begin() + i,
+                                  codes.begin() + std::min(i + batch_size, codes.size()));
+        auto rows = codes_to_rows(ids);
+        for (size_t j = 0; j < rows.size(); ++j) {
+            unique_rows[i + j] = std::move(rows[j]);
+        }
     }
 
     return unique_rows;
 }
 
-// TODO: improve
-RainbowMatrix::SetBitPositions
-RainbowMatrix::slice_rows(const std::vector<Row> &rows) const {
-    SetBitPositions slice;
-    slice.reserve(rows.size() * 2);
 
-    for (const auto &row : get_rows(rows)) {
-        for (uint64_t j : row) {
-            slice.push_back(j);
-        }
-        slice.push_back(std::numeric_limits<Column>::max());
+std::vector<BinaryMatrix::SetBitPositions>
+RowMajor::get_rows(const std::vector<Row> &row_ids) const {
+    std::vector<SetBitPositions> rows(row_ids.size());
+    for (size_t i = 0; i < row_ids.size(); ++i) {
+        rows[i] = get_row(row_ids[i]);
     }
-
-    return slice;
-}
-
-std::vector<RainbowMatrix::SetBitPositions>
-RainbowMatrix::get_rows(const std::vector<Row> &rows) const {
-    std::vector<Row> pointers = rows;
-    auto distinct_rows = get_rows_dict(&pointers);
-
-    std::vector<SetBitPositions> result(rows.size());
-    for (size_t i = 0; i < pointers.size(); ++i) {
-        result[i] = distinct_rows[pointers[i]];
-    }
-
-    return result;
-}
-
-// TODO: merge with BinaryMatrix::sum_rows
-std::vector<std::pair<RainbowMatrix::Column, size_t /* count */>>
-RainbowMatrix::sum_rows(const std::vector<std::pair<Row, size_t>> &index_counts,
-                        size_t min_count) const {
-    min_count = std::max(min_count, size_t(1));
-
-    size_t total_sum_count = 0;
-    for (const auto &pair : index_counts) {
-        total_sum_count += pair.second;
-    }
-
-    if (total_sum_count < min_count)
-        return {};
-
-    tsl::hopscotch_map<size_t, size_t> code_count;
-    code_count.reserve(index_counts.size());
-    for (auto [i, count] : index_counts) {
-        code_count[get_code(i)] += count;
-    }
-
-    VectorMap<Column, size_t> col_counts;
-
-    for (auto [c, count] : code_count) {
-        for (size_t j : code_to_row(c)) {
-            col_counts[j] += count;
-        }
-    }
-
-    auto &result = const_cast<std::vector<std::pair<Column, size_t>>&>(col_counts.values_container());
-
-    result.erase(std::remove_if(result.begin(), result.end(),
-                                [&](const auto &p) { return p.second < min_count; }),
-                 result.end());
-
-    return std::move(result);
+    return rows;
 }
 
 

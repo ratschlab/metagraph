@@ -28,7 +28,6 @@
 namespace mtg {
 namespace cli {
 
-const size_t kRowBatchSize = 100'000;
 const bool kPrefilterWithBloom = true;
 const char ALIGNED_SEQ_HEADER_FORMAT[] = "{}:{}:{}:{}";
 
@@ -601,46 +600,13 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
                  uint64_t num_rows,
                  std::vector<std::pair<uint64_t, uint64_t>>&& full_to_small,
                  size_t num_threads) {
-    if (auto *rb = dynamic_cast<const RainbowMatrix *>(&full_annotation.get_matrix())) {
-        // shortcut construction for Rainbow<> annotation
-        std::vector<uint64_t> row_indexes(full_to_small.size());
-        for (size_t i = 0; i < full_to_small.size(); ++i) {
-            row_indexes[i] = full_to_small[i].first;
-        }
-
-        // get unique rows and set pointers to them in |row_indexes|
-        auto unique_rows = rb->get_rows_dict(&row_indexes, num_threads);
-
-        if (unique_rows.size() >= std::numeric_limits<uint32_t>::max()) {
-            throw std::runtime_error("There must be less than 2^32 unique rows."
-                                     " Reduce the query batch size.");
-        }
-
-        // insert one empty row for representing unmatched rows
-        unique_rows.emplace_back();
-        std::vector<uint32_t> row_ids(num_rows, unique_rows.size() - 1);
-        for (size_t i = 0; i < row_indexes.size(); ++i) {
-            row_ids[full_to_small[i].second] = row_indexes[i];
-        }
-
-        auto label_encoder = reencode_labels(full_annotation.get_label_encoder(), &unique_rows);
-
-        // copy annotations from the full graph to the query graph
-        return std::make_unique<annot::UniqueRowAnnotator>(
-            std::make_unique<UniqueRowBinmat>(std::move(unique_rows),
-                                              std::move(row_ids),
-                                              label_encoder.size()),
-            std::move(label_encoder)
-        );
-    }
-
-    // don't break the topological order for row-diff annotation
-    if (!dynamic_cast<const IRowDiff *>(&full_annotation.get_matrix())) {
-        ips4o::parallel::sort(full_to_small.begin(), full_to_small.end(),
-                              utils::LessFirst(), num_threads);
-    }
-
     if (const auto *mat = dynamic_cast<const IntMatrix *>(&full_annotation.get_matrix())) {
+        // don't break the topological order for row-diff annotation
+        if (!dynamic_cast<const IRowDiff *>(&full_annotation.get_matrix())) {
+            ips4o::parallel::sort(full_to_small.begin(), full_to_small.end(),
+                                  utils::LessFirst(), num_threads);
+        }
+
         std::vector<uint64_t> row_indexes;
         row_indexes.reserve(full_to_small.size());
         for (const auto &[in_full, _] : full_to_small) {
@@ -665,57 +631,33 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
         );
     }
 
-    using RowSet = tsl::ordered_set<BinaryMatrix::SetBitPositions,
-                                    utils::VectorHash,
-                                    std::equal_to<BinaryMatrix::SetBitPositions>,
-                                    std::allocator<BinaryMatrix::SetBitPositions>,
-                                    std::vector<BinaryMatrix::SetBitPositions>,
-                                    uint32_t>;
-    RowSet unique_rows { BinaryMatrix::SetBitPositions() };
-    std::vector<uint32_t> row_rank(num_rows, 0);
-
-    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
-    for (uint64_t batch_begin = 0;
-                        batch_begin < full_to_small.size();
-                                        batch_begin += kRowBatchSize) {
-        const uint64_t batch_end
-            = std::min(batch_begin + kRowBatchSize,
-                       static_cast<uint64_t>(full_to_small.size()));
-
-        std::vector<uint64_t> row_indexes;
-        row_indexes.reserve(batch_end - batch_begin);
-        for (uint64_t i = batch_begin; i < batch_end; ++i) {
-            assert(full_to_small[i].first < full_annotation.num_objects());
-
-            row_indexes.push_back(full_to_small[i].first);
-        }
-
-        auto rows = full_annotation.get_matrix().get_rows(row_indexes);
-
-        assert(rows.size() == batch_end - batch_begin);
-
-        #pragma omp critical
-        {
-            for (uint64_t i = batch_begin; i < batch_end; ++i) {
-                auto it = unique_rows.emplace(std::move(rows[i - batch_begin])).first;
-                row_rank[full_to_small[i].second] = it - unique_rows.begin();
-                if (unique_rows.size() == std::numeric_limits<uint32_t>::max())
-                    throw std::runtime_error("There must be less than 2^32 unique rows."
-                                             " Reduce the query batch size.");
-            }
-        }
+    // shortcut construction for Rainbow<> annotation
+    std::vector<uint64_t> row_indexes(full_to_small.size());
+    for (size_t i = 0; i < full_to_small.size(); ++i) {
+        row_indexes[i] = full_to_small[i].first;
     }
 
-    auto &annotation_rows = const_cast<std::vector<BinaryMatrix::SetBitPositions>&>(
-        unique_rows.values_container()
-    );
+    // get unique rows and set pointers to them in |row_indexes|
+    auto unique_rows = full_annotation.get_matrix().get_rows_dict(&row_indexes, num_threads);
 
-    auto label_encoder = reencode_labels(full_annotation.get_label_encoder(), &annotation_rows);
+    if (unique_rows.size() >= std::numeric_limits<uint32_t>::max()) {
+        throw std::runtime_error("There must be less than 2^32 unique rows."
+                                 " Reduce the query batch size.");
+    }
+
+    // insert one empty row for representing unmatched rows
+    unique_rows.emplace_back();
+    std::vector<uint32_t> row_ids(num_rows, unique_rows.size() - 1);
+    for (size_t i = 0; i < row_indexes.size(); ++i) {
+        row_ids[full_to_small[i].second] = row_indexes[i];
+    }
+
+    auto label_encoder = reencode_labels(full_annotation.get_label_encoder(), &unique_rows);
 
     // copy annotations from the full graph to the query graph
     return std::make_unique<annot::UniqueRowAnnotator>(
-        std::make_unique<UniqueRowBinmat>(std::move(annotation_rows),
-                                          std::move(row_rank),
+        std::make_unique<UniqueRowBinmat>(std::move(unique_rows),
+                                          std::move(row_ids),
                                           label_encoder.size()),
         std::move(label_encoder)
     );

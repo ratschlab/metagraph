@@ -13,6 +13,7 @@ namespace mtg {
 namespace annot {
 namespace matrix {
 
+// TODO: remove (can be replaced with Rainbow<RowFlat>)
 class Rainbowfish : public RainbowMatrix {
   public:
     Rainbowfish() {}
@@ -52,9 +53,13 @@ class Rainbowfish : public RainbowMatrix {
     std::vector<std::unique_ptr<BinaryMatrix>> reduced_matrix_;
 
     uint64_t get_code(Row row) const;
-    // TODO: query array
-    SetBitPositions code_to_row(uint64_t c) const {
-        return reduced_matrix_[c / buffer_size_]->get_rows({ c % buffer_size_ })[0];
+    std::vector<SetBitPositions> codes_to_rows(const std::vector<uint64_t> &rows) const {
+        std::vector<SetBitPositions> result;
+        result.reserve(rows.size());
+        for (uint64_t c : rows) {
+            result.push_back(reduced_matrix_[c / buffer_size_]->get_rows({ c % buffer_size_ })[0]);
+        }
+        return result;
     }
 };
 

@@ -24,7 +24,7 @@ namespace annot {
 namespace matrix {
 
 template <class BaseMatrix>
-class TupleRowDiff : public IRowDiff, public MultiIntMatrix {
+class TupleRowDiff : public IRowDiff, public BinaryMatrix, public MultiIntMatrix {
   public:
     static_assert(std::is_convertible<BaseMatrix*, MultiIntMatrix*>::value);
     static const int SHIFT = 1; // coordinates increase by 1 at each edge
@@ -33,9 +33,8 @@ class TupleRowDiff : public IRowDiff, public MultiIntMatrix {
     TupleRowDiff(const graph::DBGSuccinct *graph = nullptr, Args&&... args)
         : diffs_(std::forward<Args>(args)...) { graph_ = graph; }
 
-    SetBitPositions slice_rows(const std::vector<Row> &row_ids) const override;
     std::vector<Row> get_column(Column j) const override;
-    RowTuples get_row_tuples(Row i) const override;
+    std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const override;
     std::vector<RowTuples> get_row_tuples(const std::vector<Row> &rows) const override;
 
     uint64_t num_columns() const override { return diffs_.num_columns(); }
@@ -48,6 +47,8 @@ class TupleRowDiff : public IRowDiff, public MultiIntMatrix {
 
     const BaseMatrix& diffs() const { return diffs_; }
     BaseMatrix& diffs() { return diffs_; }
+
+    const BinaryMatrix& get_binary_matrix() const override { return *this; }
 
   private:
     static void decode_diffs(RowTuples *diffs);
@@ -83,8 +84,18 @@ std::vector<MultiIntMatrix::Row> TupleRowDiff<BaseMatrix>::get_column(Column j) 
 }
 
 template <class BaseMatrix>
-MultiIntMatrix::RowTuples TupleRowDiff<BaseMatrix>::get_row_tuples(Row row) const {
-    return get_row_tuples(std::vector<Row>{ row })[0];
+std::vector<BinaryMatrix::SetBitPositions>
+TupleRowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
+    std::vector<SetBitPositions> rows;
+    rows.reserve(row_ids.size());
+    for (const auto &row : get_row_tuples(row_ids)) {
+        rows.emplace_back();
+        rows.back().reserve(row.size());
+        for (const auto &[j, _] : row) {
+            rows.back().push_back(j);
+        }
+    }
+    return rows;
 }
 
 template <class BaseMatrix>
@@ -130,22 +141,6 @@ TupleRowDiff<BaseMatrix>::get_row_tuples(const std::vector<Row> &row_ids) const 
     }
 
     return rows;
-}
-
-template <class BaseMatrix>
-typename TupleRowDiff<BaseMatrix>::SetBitPositions
-TupleRowDiff<BaseMatrix>::slice_rows(const std::vector<Row> &row_ids) const {
-    SetBitPositions slice;
-    slice.reserve(row_ids.size() * 2);
-
-    for (const auto &row : get_row_tuples(row_ids)) {
-        for (const auto &[j, _] : row) {
-            slice.push_back(j);
-        }
-        slice.push_back(std::numeric_limits<Column>::max());
-    }
-
-    return slice;
 }
 
 template <class BaseMatrix>

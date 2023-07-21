@@ -27,8 +27,6 @@ class ColumnMajor : public BinaryMatrix, public GetEntrySupport {
     std::vector<Vector<std::pair<Column, uint64_t>>>
     get_column_ranks(const std::vector<Row> &rows) const;
     std::vector<Row> get_column(Column column) const override;
-    // get all selected rows appended with -1 and concatenated
-    SetBitPositions slice_rows(const std::vector<Row> &rows) const override;
 
     void call_columns(const std::vector<Column> &columns,
                       const std::function<void(size_t, const bitmap&)> &callback,

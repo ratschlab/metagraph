@@ -13,7 +13,7 @@ namespace mtg {
 namespace annot {
 namespace matrix {
 
-class RowSparse : public BinaryMatrix, public GetRowSupport {
+class RowSparse : public RowMajor {
   public:
     RowSparse() {}
     RowSparse(const std::function<void(const RowCallback&)> &call_rows,
@@ -25,7 +25,6 @@ class RowSparse : public BinaryMatrix, public GetRowSupport {
     uint64_t num_rows() const override { return num_rows_; }
 
     SetBitPositions get_row(Row row) const override;
-    SetBitPositions slice_rows(const std::vector<Row> &rows) const override;
     std::vector<Row> get_column(Column column) const override;
 
     bool load(std::istream &in) override;

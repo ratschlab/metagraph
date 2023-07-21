@@ -1,5 +1,7 @@
 #include "int_matrix.hpp"
 
+#include <tsl/hopscotch_map.h>
+
 
 namespace mtg {
 namespace annot {
@@ -12,6 +14,7 @@ IntMatrix::sum_row_values(const std::vector<std::pair<Row, size_t>> &index_count
 
     std::vector<Row> rows;
     rows.reserve(index_counts.size());
+
     size_t total_sum = 0;
     for (const auto &[i, count] : index_counts) {
         total_sum += count;
@@ -21,44 +24,27 @@ IntMatrix::sum_row_values(const std::vector<std::pair<Row, size_t>> &index_count
     if (total_sum < min_count)
         return {};
 
-    std::vector<size_t> sum_row(num_columns(), 0);
-    std::vector<size_t> counts(num_columns(), 0);
-
     auto row_values = get_row_values(rows);
+
+    tsl::hopscotch_map<Column, std::pair<size_t, size_t>> code_count_sum;
 
     for (size_t t = 0; t < index_counts.size(); ++t) {
         auto [i, count] = index_counts[t];
         for (const auto &[j, value] : row_values[t]) {
-            assert(j < sum_row.size());
-            sum_row[j] += count * value;
-            counts[j] += count;
+            auto &[c, s] = code_count_sum[j];
+            c += count;
+            s += count * value;
         }
     }
 
     RowValues result;
-    result.reserve(sum_row.size());
 
-    for (size_t j = 0; j < num_columns(); ++j) {
-        if (counts[j] >= min_count) {
-            result.emplace_back(j, sum_row[j]);
-        }
+    for (const auto &[j, p] : code_count_sum) {
+        if (p.first >= min_count)
+            result.emplace_back(j, p.second);
     }
 
     return result;
-}
-
-// return sizes of all non-empty tuples in the row
-MultiIntMatrix::RowValues MultiIntMatrix::get_row_values(Row row) const {
-    RowTuples row_tuples = get_row_tuples(row);
-
-    RowValues row_values(row_tuples.size());
-
-    for (size_t i = 0; i < row_tuples.size(); ++i) {
-        row_values[i].first = row_tuples[i].first;
-        row_values[i].second = row_tuples[i].second.size();
-    }
-
-    return row_values;
 }
 
 // for each row return the sizes of all non-empty tuples

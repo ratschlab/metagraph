@@ -58,6 +58,27 @@ Vector<std::pair<BRWT::Column, uint64_t>> BRWT::get_column_ranks(Row i) const {
     return row;
 }
 
+std::vector<BRWT::SetBitPositions>
+BRWT::get_rows(const std::vector<Row> &row_ids) const {
+    std::vector<SetBitPositions> rows(row_ids.size());
+
+    auto slice = slice_rows(row_ids);
+
+    assert(slice.size() >= row_ids.size());
+
+    auto row_begin = slice.begin();
+
+    for (size_t i = 0; i < rows.size(); ++i) {
+        // every row in `slice` ends with `-1`
+        auto row_end = std::find(row_begin, slice.end(),
+                                 std::numeric_limits<Column>::max());
+        rows[i].assign(row_begin, row_end);
+        row_begin = row_end + 1;
+    }
+
+    return rows;
+}
+
 BRWT::SetBitPositions BRWT::slice_rows(const std::vector<Row> &row_ids) const {
     return slice_rows<Column>(row_ids);
 }

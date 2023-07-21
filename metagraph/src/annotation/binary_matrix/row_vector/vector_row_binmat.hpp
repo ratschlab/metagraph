@@ -24,7 +24,6 @@ class VectorRowBinMat : public BinaryMatrixRowDynamic {
     uint64_t num_rows() const { return vector_.size(); }
 
     SetBitPositions get_row(Row row) const;
-    SetBitPositions slice_rows(const std::vector<Row> &rows) const;
     std::vector<Row> get_column(Column column) const;
 
     void set(Row row, Column column);

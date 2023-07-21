@@ -11,7 +11,7 @@ namespace mtg {
 namespace annot {
 namespace matrix {
 
-class RowDisk : public BinaryMatrix, public GetRowSupport {
+class RowDisk : public RowMajor {
   public:
     RowDisk(size_t RA_ivbuffer_size = 16'384) {
         buffer_params_.buff_size = RA_ivbuffer_size;
@@ -21,12 +21,8 @@ class RowDisk : public BinaryMatrix, public GetRowSupport {
     uint64_t num_rows() const { return num_rows_; }
 
     SetBitPositions get_row(Row i) const { return get_view().get_row(i); }
-    SetBitPositions slice_rows(const std::vector<Row> &rows) const { return get_view().slice_rows(rows); }
     // FYI: `get_column` is very inefficient, consider using column-major formats
     std::vector<Row> get_column(Column j) const { return get_view().get_column(j); }
-    std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const {
-        return get_view().get_rows(rows);
-    }
 
     bool load(std::istream &in);
     void serialize(std::ostream &out) const;
@@ -55,8 +51,6 @@ class RowDisk : public BinaryMatrix, public GetRowSupport {
               set_bits_(filename, std::ios::in, buff_size, 0, false, offset) {}
 
         SetBitPositions get_row(Row i) const;
-        SetBitPositions slice_rows(const std::vector<Row> &rows) const;
-        std::vector<SetBitPositions> get_rows(const std::vector<Row> &row_ids) const;
         std::vector<Row> get_column(Column j) const;
 
       private:

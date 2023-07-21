@@ -76,21 +76,6 @@ ColumnMajor::get_column_ranks(const std::vector<Row> &row_ids) const {
     return result;
 }
 
-ColumnMajor::SetBitPositions
-ColumnMajor::slice_rows(const std::vector<Row> &row_ids) const {
-    SetBitPositions slice;
-    slice.reserve(row_ids.size() * 2);
-
-    for (const auto &row : get_rows(row_ids)) {
-        for (uint64_t j : row) {
-            slice.push_back(j);
-        }
-        slice.push_back(std::numeric_limits<Column>::max());
-    }
-
-    return slice;
-}
-
 void ColumnMajor::call_columns(const std::vector<Column> &columns,
                                const std::function<void(size_t, const bitmap&)> &callback,
                                size_t num_threads) const {
@@ -160,7 +145,7 @@ uint64_t ColumnMajor::num_relations() const {
 
 std::vector<std::pair<ColumnMajor::Column, size_t /* count */>>
 ColumnMajor::sum_rows(const std::vector<std::pair<Row, size_t>> &index_counts,
-                       size_t min_count) const {
+                      size_t min_count) const {
     min_count = std::max(min_count, size_t(1));
 
     size_t total_sum_count = 0;

@@ -67,22 +67,6 @@ VectorRowBinMat<RowType>::get_row(Row row) const {
 }
 
 template <typename RowType>
-typename VectorRowBinMat<RowType>::SetBitPositions
-VectorRowBinMat<RowType>::slice_rows(const std::vector<Row> &row_ids) const {
-    SetBitPositions slice;
-    slice.reserve(row_ids.size() * 2);
-
-    for (uint64_t i : row_ids) {
-        for (uint64_t j : vector_[i]) {
-            slice.push_back(j);
-        }
-        slice.push_back(std::numeric_limits<Column>::max());
-    }
-
-    return slice;
-}
-
-template <typename RowType>
 void VectorRowBinMat<RowType>::clear_row(Row row) {
     assert(row < vector_.size());
     vector_[row].clear();

@@ -21,7 +21,6 @@ class EigenSpMat : public BinaryMatrixRowDynamic, public GetEntrySupport {
 
     bool get(Row row, Column column) const;
     SetBitPositions get_row(Row row) const;
-    SetBitPositions slice_rows(const std::vector<Row> &rows) const;
     std::vector<Row> get_column(Column column) const;
 
     void set(Row row, Column column);

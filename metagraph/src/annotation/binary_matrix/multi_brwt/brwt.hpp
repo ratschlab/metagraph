@@ -30,8 +30,9 @@ class BRWT : public BinaryMatrix, public GetEntrySupport {
 
     bool get(Row row, Column column) const override;
     std::vector<Row> get_column(Column column) const override;
+    std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const override;
     // get all selected rows appended with -1 and concatenated
-    SetBitPositions slice_rows(const std::vector<Row> &rows) const override;
+    SetBitPositions slice_rows(const std::vector<Row> &rows) const;
     // query row and get ranks of each set bit in its column
     Vector<std::pair<Column, uint64_t>> get_column_ranks(Row row) const;
     std::vector<Vector<std::pair<Column, uint64_t>>>

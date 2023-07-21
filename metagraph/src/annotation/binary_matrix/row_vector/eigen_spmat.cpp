@@ -41,21 +41,6 @@ EigenSpMat::get_row(Row row) const {
     return result;
 }
 
-EigenSpMat::SetBitPositions
-EigenSpMat::slice_rows(const std::vector<Row> &row_ids) const {
-    SetBitPositions slice;
-    slice.reserve(row_ids.size() * 2);
-
-    for (uint64_t i : row_ids) {
-        for (uint64_t j : get_row(i)) {
-            slice.push_back(j);
-        }
-        slice.push_back(std::numeric_limits<Column>::max());
-    }
-
-    return slice;
-}
-
 std::vector<EigenSpMat::Row>
 EigenSpMat::get_column(Column column) const {
     std::vector<Row> result;

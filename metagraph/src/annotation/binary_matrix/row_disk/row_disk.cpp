@@ -39,39 +39,6 @@ BinaryMatrix::SetBitPositions RowDisk::View::get_row(Row row) const {
     return result;
 }
 
-BinaryMatrix::SetBitPositions
-RowDisk::View::slice_rows(const std::vector<Row> &row_ids) const {
-    SetBitPositions slice;
-    slice.reserve(row_ids.size() * 2);
-
-    for (uint64_t row : row_ids) {
-        assert(boundary_[boundary_.size() - 1] == 1);
-        uint64_t begin = row == 0 ? 0 : boundary_.select1(row) + 1;
-        uint64_t end = boundary_.select1(row + 1);
-        // In each row, the first value in `set_bits_` stores the first set bit,
-        // and all next ones store deltas pos[i] - pos[i-1].
-        uint64_t last = 0;
-        for (uint64_t i = begin; i != end; ++i) {
-            slice.push_back(last += set_bits_[i - row]);
-        }
-
-        slice.push_back(std::numeric_limits<Column>::max());
-    }
-
-    return slice;
-}
-
-std::vector<BinaryMatrix::SetBitPositions>
-RowDisk::View::get_rows(const std::vector<Row> &row_ids) const {
-    std::vector<SetBitPositions> rows(row_ids.size());
-
-    for (size_t i = 0; i < row_ids.size(); ++i) {
-        rows[i] = get_row(row_ids[i]);
-    }
-
-    return rows;
-}
-
 bool RowDisk::load(std::istream &f) {
     auto _f = dynamic_cast<sdsl::mmap_ifstream *>(&f);
     assert(_f);
