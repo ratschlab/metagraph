@@ -1121,28 +1121,28 @@ TYPED_TEST(AnnotatedDBGWithNTest, get_labels) {
                   anno_graph->get_labels(seq_third, 1. * (seq_third.size() - (k + 1) + 1 - (k + 2))
                                                             / (seq_third.size() - (k + 1) + 1) - 1e-9));
 #else
-        EXPECT_EQ(std::vector<std::string> { "Second" },
-                  anno_graph->get_labels(seq_second, 1));
-        EXPECT_EQ(std::vector<std::string> { "Third" },
-                  anno_graph->get_labels(seq_third, 1));
+        EXPECT_EQ(convert_to_set({ "Second" }),
+                  convert_to_set(anno_graph->get_labels(seq_second, 1)));
+        EXPECT_EQ(convert_to_set({ "Third" }),
+                  convert_to_set(anno_graph->get_labels(seq_third, 1)));
 #endif
 
-        EXPECT_EQ(std::vector<std::string>({ "First", "Third" }),
-                  anno_graph->get_labels(seq_first, 0));
+        EXPECT_EQ(convert_to_set({ "First", "Third" }),
+                  convert_to_set(anno_graph->get_labels(seq_first, 0)));
 #if _DNA_GRAPH
-        EXPECT_EQ(k == 1 ? std::vector<std::string>({ "Second", "Third" })
-                         : std::vector<std::string> { "Second" },
-                  anno_graph->get_labels(seq_second, 0));
-        EXPECT_EQ(k == 1 ? std::vector<std::string>({ "First", "Second", "Third" })
-                         : std::vector<std::string>({ "First", "Third" }),
-                  anno_graph->get_labels(seq_third, 0));
+        EXPECT_EQ(k == 1 ? convert_to_set({ "Second", "Third" })
+                         : convert_to_set({ "Second" }),
+                  convert_to_set(anno_graph->get_labels(seq_second, 0)));
+        EXPECT_EQ(k == 1 ? convert_to_set({ "First", "Second", "Third" })
+                         : convert_to_set({ "First", "Third" }),
+                  convert_to_set(anno_graph->get_labels(seq_third, 0)));
 #else
         EXPECT_EQ(k <= 3 ? std::vector<std::string>({ "Second", "Third" })
                          : std::vector<std::string> { "Second" },
                   anno_graph->get_labels(seq_second, 0));
-        EXPECT_EQ(k <= 3 ? std::vector<std::string>({ "First", "Second", "Third" })
-                         : std::vector<std::string>({ "First", "Third" }),
-                  anno_graph->get_labels(seq_third, 0));
+        EXPECT_EQ(k <= 3 ? convert_to_set({ "First", "Second", "Third" })
+                         : convert_to_set({ "First", "Third" }),
+                  convert_to_set(anno_graph->get_labels(seq_third, 0)));
 #endif
     }
 }

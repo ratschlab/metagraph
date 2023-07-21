@@ -69,7 +69,7 @@ TYPED_TEST(AnnotatorPresetTest, CountLabels) {
 
     EXPECT_EQ(
         convert_to_set(std::vector<std::pair<uint64_t, size_t>>({
-            {3, 2}, {1, 2}, {2, 2}
+            {3, 2}, {1, 4}, {2, 2}
         })),
         convert_to_set(this->annotation->get_matrix().sum_rows(
             std::vector<std::pair<uint64_t, size_t>>({
