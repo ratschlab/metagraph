@@ -154,7 +154,7 @@ IntRowDiff<BaseMatrix>::slice_rows(const std::vector<Row> &row_ids) const {
     slice.reserve(row_ids.size() * 2);
 
     for (const auto &row : get_row_values(row_ids)) {
-        for (const auto [j, value] : row) {
+        for (const auto &[j, value] : row) {
             slice.push_back(j);
         }
         slice.push_back(std::numeric_limits<Column>::max());

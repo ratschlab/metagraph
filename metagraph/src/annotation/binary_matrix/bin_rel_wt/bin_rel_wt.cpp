@@ -152,9 +152,9 @@ BinRelWT::slice_rows(const std::vector<Row> &rows) const {
 
     for (Row row : rows) {
         assert(row < num_objects);
-        if (is_zero_row(row)) {
-            return {};
-        }
+        if (is_zero_row(row))
+            continue;
+
         auto first_label = to_label_id(0);
         auto last_label = to_label_id(max_used_label);
         auto cur_object = to_object_id(row);
