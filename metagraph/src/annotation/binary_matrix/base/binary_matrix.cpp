@@ -1,12 +1,10 @@
 #include "binary_matrix.hpp"
 
 #include <ips4o.hpp>
-#include <tsl/hopscotch_map.h>
 
 #include "common/vectors/bitmap.hpp"
 #include "common/serialization.hpp"
 #include "common/utils/template_utils.hpp"
-#include "common/vector_map.hpp"
 #include "common/vector_set.hpp"
 #include "common/hashers/hash.hpp"
 #include "annotation/binary_matrix/row_diff/row_diff.hpp"
@@ -16,7 +14,7 @@ namespace mtg {
 namespace annot {
 namespace matrix {
 
-const size_t kRowBatchSize = 100'000;
+const size_t kRowBatchSize = 10'000;
 
 
 std::vector<BinaryMatrix::SetBitPositions>
@@ -91,21 +89,23 @@ BinaryMatrix::sum_rows(const std::vector<std::pair<Row, size_t>> &index_counts,
         counts[row_ids[i]] += index_counts[i].second;
     }
 
-    VectorMap<Column, size_t> col_counts;
-
+    // FYI: one could use tsl::hopscotch_map for counting but it is slower
+    // than std::vector unless the number of columns is ~1M or higher
+    Vector<size_t> col_counts(num_columns(), 0);
     for (size_t i = 0; i < counts.size(); ++i) {
         for (size_t j : distinct_rows[i]) {
             col_counts[j] += counts[i];
         }
     }
 
-    auto &result = const_cast<std::vector<std::pair<Column, size_t>>&>(col_counts.values_container());
+    std::vector<std::pair<Column, size_t>> result;
+    result.reserve(col_counts.size());
+    for (Column j = 0; j < col_counts.size(); ++j) {
+        if (col_counts[j] >= min_count)
+            result.emplace_back(j, col_counts[j]);
+    }
 
-    result.erase(std::remove_if(result.begin(), result.end(),
-                                [&](const auto &p) { return p.second < min_count; }),
-                 result.end());
-
-    return std::move(result);
+    return result;
 }
 
 
