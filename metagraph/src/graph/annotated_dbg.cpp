@@ -697,11 +697,11 @@ AnnotatedDBG::get_top_label_signatures(std::string_view sequence,
     // map each label code to a k-mer presence mask and its popcount
     VectorMap<LabelCode, SignatureCount> label_codes_to_presence;
 
-    auto rows_dict = annotator_->get_matrix().get_rows_dict(&row_indices);
+    auto rows = annotator_->get_matrix().get_rows(row_indices);
 
-    for (size_t i = 0; i < row_indices.size(); ++i) {
-        for (size_t label_code : rows_dict[i]) {
-            auto &[mask, label_count] = label_codes_to_presence[label_code];
+    for (size_t i = 0; i < rows.size(); ++i) {
+        for (auto j : rows[i]) {
+            auto &[mask, label_count] = label_codes_to_presence[j];
 
             if (mask.empty())
                 mask.resize(num_kmers, 0);
