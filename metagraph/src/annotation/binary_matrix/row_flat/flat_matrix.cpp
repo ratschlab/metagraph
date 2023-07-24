@@ -34,6 +34,12 @@ RowFlat<BitVector>::RowFlat(const std::function<void(const RowCallback&)> &call_
 }
 
 template <typename BitVector>
+bool RowFlat<BitVector>::get(Row row, Column column) const {
+    assert(compressed_rows_.get());
+    return (*compressed_rows_)[row * num_columns_ + column];
+}
+
+template <typename BitVector>
 typename RowFlat<BitVector>::SetBitPositions
 RowFlat<BitVector>::get_row(Row row) const {
     assert(compressed_rows_.get());

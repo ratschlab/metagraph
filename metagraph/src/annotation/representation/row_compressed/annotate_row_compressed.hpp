@@ -3,11 +3,17 @@
 
 #include <memory>
 
+#include <sdsl/int_vector.hpp>
+#include <sdsl/int_vector_buffer.hpp>
+
 #include "annotation/representation/base/annotation.hpp"
 
 
 namespace mtg {
 namespace annot {
+
+template <typename RowType = matrix::BinaryMatrix::SetBitPositions>
+class StreamRows;
 
 // TODO: implement this as an annotation matrix
 // StaticBinRelAnnotator<VectorRowBinMat>
@@ -50,7 +56,7 @@ class RowCompressed : public MultiLabelAnnotation<Label> {
 
     static LabelEncoder<Label> read_label_encoder(const std::string &filename);
 
-    static matrix::StreamRows<matrix::BinaryMatrix::SetBitPositions>
+    static StreamRows<matrix::BinaryMatrix::SetBitPositions>
     get_row_streamer(const std::string &filename);
 
     /*****************************************************************/
@@ -68,6 +74,32 @@ class RowCompressed : public MultiLabelAnnotation<Label> {
 
     static LabelEncoder<Label> read_label_encoder(std::istream &instream);
 };
+
+
+// Row streamer -- read rows from a serialized row major binary matrix
+template <typename RowType>
+class StreamRows {
+  public:
+    StreamRows(const std::string &filename, size_t offset);
+
+    //TODO: implement constructor from stream once
+    //      it's implemented for sdsl::int_vector_buffer<>.
+    //      Then, use StreamRows to simplify load functions.
+    // StreamRows(std::istream &instream);
+
+    // return nullptr after all rows have been called
+    RowType* next_row();
+
+  private:
+    RowType row_;
+    sdsl::int_vector_buffer<> inbuf_;
+    uint64_t i_ = 0;
+};
+
+// Write matrix to the end
+void append_row_major(const std::string &filename,
+                      const std::function<void(matrix::BinaryMatrix::RowCallback)> &call_rows,
+                      uint64_t num_cols);
 
 } // namespace annot
 } // namespace mtg

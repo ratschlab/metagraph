@@ -10,15 +10,8 @@
 namespace mtg {
 namespace annot {
 
-template <typename Label>
-class RowCompressed;
-
 template <typename LabelType>
 class MultiLabelAnnotation;
-
-
-template <class StaticAnnotation, typename Label>
-std::unique_ptr<StaticAnnotation> convert(RowCompressed<Label>&& annotation);
 
 
 template <typename Label>
@@ -87,10 +80,11 @@ void convert_to_row_diff(const std::vector<std::string> &files,
                          size_t num_threads,
                          size_t mem_bytes);
 
-template <class ToAnnotation, typename Label>
-void merge(std::vector<std::unique_ptr<MultiLabelAnnotation<Label>>>&& annotators,
-           const std::vector<std::string> &filenames,
-           const std::string &outfile);
+void merge_row_compressed(const std::vector<std::string> &filenames,
+                          const std::string &outfile);
+
+void merge_brwt(const std::vector<std::string> &filenames,
+                const std::string &outfile);
 
 // transform to RowCompressed<Label>
 template <typename Label>

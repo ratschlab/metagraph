@@ -1,6 +1,6 @@
 #include "align.hpp"
 
-#include <tsl/ordered_set.h>
+#include <tsl/hopscotch_set.h>
 
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
@@ -178,7 +178,7 @@ void map_sequences_in_file(const std::string &file,
 std::string sequence_to_gfa_path(const std::string &seq,
                                  const size_t seq_id,
                                  const DeBruijnGraph &graph,
-                                 const tsl::ordered_set<uint64_t> &is_unitig_end_node,
+                                 const tsl::hopscotch_set<uint64_t> &is_unitig_end_node,
                                  const Config *config) {
     auto path_nodes = map_to_nodes_sequentially(graph, seq);
 
@@ -219,7 +219,7 @@ void gfa_map_files(const Config *config,
                    const DeBruijnGraph &graph) {
     logger->trace("Starting GFA mapping:");
 
-    tsl::ordered_set<uint64_t> is_unitig_end_node;
+    tsl::hopscotch_set<uint64_t> is_unitig_end_node;
 
     graph.call_unitigs(
         [&](const auto &, const auto &path) {

@@ -1,5 +1,7 @@
 #include "eigen_spmat.hpp"
 
+#include <sdsl/int_vector.hpp>
+
 #include "common/serialization.hpp"
 
 

@@ -13,7 +13,7 @@ namespace annot {
 namespace matrix {
 
 template <typename BitVector = bit_vector_sd>
-class RowFlat : public RowMajor {
+class RowFlat : public RowMajor, public GetEntrySupport {
   public:
     RowFlat() : compressed_rows_(new BitVector()) {}
     RowFlat(const std::function<void(const RowCallback&)> &call_rows,
@@ -26,6 +26,7 @@ class RowFlat : public RowMajor {
     uint64_t num_columns() const { return num_columns_; }
     uint64_t num_rows() const { return num_rows_; }
 
+    bool get(Row row, Column column) const;
     SetBitPositions get_row(Row row) const;
     std::vector<Row> get_column(Column column) const;
 

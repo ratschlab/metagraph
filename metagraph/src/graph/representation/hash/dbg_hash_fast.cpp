@@ -4,11 +4,10 @@
 #include <fstream>
 #include <limits>
 
-#include <tsl/ordered_set.h>
-
 #include "common/seq_tools/reverse_complement.hpp"
 #include "common/serialization.hpp"
 #include "common/hashers/hash.hpp"
+#include "common/vector_set.hpp"
 #include "common/utils/string_utils.hpp"
 #include "common/logger.hpp"
 #include "kmer/kmer_extractor.hpp"
@@ -39,12 +38,7 @@ class DBGHashFastImpl : public DBGHashFast::DBGHashFastInterface {
     static_assert(false, "invalid or undefined alphabet");
 #endif
 
-    using KmerIndex = tsl::ordered_set<KmerWord,
-                                       utils::Hash<KmerWord>,
-                                       std::equal_to<KmerWord>,
-                                       std::allocator<KmerWord>,
-                                       std::vector<KmerWord, std::allocator<KmerWord>>,
-                                       std::uint64_t>;
+    using KmerIndex = VectorSet<KmerWord, utils::Hash<KmerWord>>;
 
     using KmerConstIterator = typename KmerIndex::const_iterator;
 

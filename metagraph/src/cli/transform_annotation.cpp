@@ -920,48 +920,27 @@ int merge_annotation(Config *config) {
 
     const auto &files = config->fnames;
 
-    if (config->anno_type == Config::ColumnCompressed) {
+    if (!files.size()) {
+        logger->info("Nothing to merge");
+        return 0;
+    }
+
+    auto anno_type = parse_annotation_type(files[0]);
+
+    if (anno_type == Config::ColumnCompressed) {
         ColumnCompressed<> annotation(0, config->num_columns_cached);
         if (!annotation.merge_load(files)) {
             logger->error("Cannot load annotations");
             exit(1);
         }
         annotation.serialize(config->outfbase);
-        return 0;
-    }
-
-    std::vector<std::unique_ptr<Annotator>> annotators;
-    std::vector<std::string> stream_files;
-
-    for (const auto &filename : files) {
-        auto anno_file_type = parse_annotation_type(filename);
-        if (anno_file_type == Config::AnnotationType::RowCompressed) {
-            stream_files.push_back(filename);
-        } else {
-            auto annotator = initialize_annotation(filename, *config);
-            if (!annotator->load(filename)) {
-                logger->error("Cannot load annotations from file '{}'", filename);
-                exit(1);
-            }
-            annotators.push_back(std::move(annotator));
-        }
-    }
-
-    if (config->anno_type == Config::RowCompressed) {
-        merge<RowCompressed<>>(std::move(annotators), stream_files, config->outfbase);
-    } else if (config->anno_type == Config::RowFlat) {
-        merge<RowFlatAnnotator>(std::move(annotators), stream_files, config->outfbase);
-    } else if (config->anno_type == Config::RBFish) {
-        merge<RainbowfishAnnotator>(std::move(annotators), stream_files, config->outfbase);
-    } else if (config->anno_type == Config::BinRelWT_sdsl) {
-        merge<BinRelWT_sdslAnnotator>(std::move(annotators), stream_files, config->outfbase);
-    } else if (config->anno_type == Config::BinRelWT) {
-        merge<BinRelWTAnnotator>(std::move(annotators), stream_files, config->outfbase);
-    } else if (config->anno_type == Config::BRWT) {
-        merge<MultiBRWTAnnotator>(std::move(annotators), stream_files, config->outfbase);
+    } else if (anno_type == Config::RowCompressed) {
+        merge_row_compressed(files, config->outfbase);
+    } else if (anno_type == Config::BRWT) {
+        merge_brwt(files, config->outfbase);
     } else {
         logger->error("Merging of annotations to '{}' representation is not implemented",
-                      config->annotype_to_string(config->anno_type));
+                      config->annotype_to_string(anno_type));
         exit(1);
     }
 

@@ -1,5 +1,7 @@
 #include "csr_matrix.hpp"
 
+#include <numeric>
+
 #include "common/logger.hpp"
 
 

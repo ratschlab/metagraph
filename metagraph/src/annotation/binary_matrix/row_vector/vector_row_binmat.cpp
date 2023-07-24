@@ -2,6 +2,8 @@
 
 #include <cstdio>
 
+#include <sdsl/int_vector.hpp>
+
 #include "common/serialization.hpp"
 #include "common/threads/threading.hpp"
 #include "common/algorithms.hpp"

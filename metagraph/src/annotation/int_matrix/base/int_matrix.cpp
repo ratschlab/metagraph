@@ -1,7 +1,5 @@
 #include "int_matrix.hpp"
 
-#include <tsl/hopscotch_map.h>
-
 
 namespace mtg {
 namespace annot {
@@ -30,22 +28,25 @@ IntMatrix::sum_row_values(const std::vector<std::pair<Row, size_t>> &index_count
 
     auto row_values = get_row_values(rows);
 
-    tsl::hopscotch_map<Column, std::pair<size_t, size_t>> code_count_sum;
+    size_t n_cols = dynamic_cast<const BinaryMatrix &>(*this).num_columns();
+    Vector<std::pair<size_t, size_t>> counts(n_cols, std::make_pair(0, 0));
 
     for (size_t t = 0; t < index_counts.size(); ++t) {
         auto [i, count] = index_counts[t];
         for (const auto &[j, value] : row_values[t]) {
-            auto &[c, s] = code_count_sum[j];
-            c += count;
-            s += count * value;
+            assert(j < sum_row.size());
+            counts[j].first += count;
+            counts[j].second += count * value;
         }
     }
 
     RowValues result;
+    result.reserve(n_cols);
 
-    for (const auto &[j, p] : code_count_sum) {
-        if (p.first >= min_count)
-            result.emplace_back(j, p.second);
+    for (size_t j = 0; j < n_cols; ++j) {
+        if (counts[j].first >= min_count) {
+            result.emplace_back(j, counts[j].second);
+        }
     }
 
     return result;

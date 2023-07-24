@@ -1,5 +1,6 @@
 #include <filesystem>
 #include <random>
+#include <unordered_set>
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -23,6 +24,18 @@ const std::string test_dump_basename = test_data_dir + "/dump_test";
 const std::string test_dump_basename_row_compressed_merge = test_dump_basename + "_row_compressed_merge";
 const std::string test_dump_basename_rowflat_merge = test_dump_basename + "_rowflat_merge";
 const std::string test_dump_basename_row_compressed_to_rowflat = test_dump_basename + "_row_compressed_to_rowflat";
+
+
+template <class Annotator>
+std::unique_ptr<Annotator> convert(const std::string &fname) {
+    return annot::convert<Annotator>(fname);
+}
+
+template <class Annotator>
+std::unique_ptr<Annotator> convert(const RowCompressed<> &anno) {
+    anno.serialize(test_dump_basename);
+    return annot::convert<Annotator>(test_dump_basename);
+}
 
 
 class ConvertFromRowCompressed : public ::testing::Test {
@@ -701,98 +714,10 @@ TEST_F(MergeAnnotators, RowCompressed) {
         filenames.push_back(filename + RowCompressed<>::kExtension);
     }
 
-    merge<RowCompressed<>, std::string>(
-        {}, filenames, test_dump_basename_row_compressed_merge + "_merged"
-    );
+    merge_row_compressed(filenames, test_dump_basename_row_compressed_merge + "_merged");
 
     merged_annotation = new RowCompressed<>(num_rows);
     merged_annotation->load(test_dump_basename_row_compressed_merge + "_merged");
-    EXPECT_EQ(num_rows, merged_annotation->num_objects());
-}
-
-TEST_F(MergeAnnotators, RowFlat_to_RowCompressed) {
-    std::vector<std::unique_ptr<MultiLabelAnnotation<std::string>>> row_flat_annotators;
-    {
-        row_flat_annotators.push_back(convert<RowFlatAnnotator>(
-            std::move(*input_annotation_1)
-        ));
-    }
-    {
-        row_flat_annotators.push_back(convert<RowFlatAnnotator>(
-            std::move(*input_annotation_2)
-        ));
-    }
-
-    const auto filename = test_dump_basename_rowflat_merge + "_to_rowcompressed";
-    merge<RowFlatAnnotator, std::string>(std::move(row_flat_annotators), {}, filename);
-
-    merged_annotation = new RowCompressed<>(num_rows);
-    merged_annotation->load(filename);
-    EXPECT_EQ(num_rows, merged_annotation->num_objects());
-}
-
-TEST_F(MergeAnnotators, RowFlat_to_RowFlat) {
-    std::vector<std::unique_ptr<MultiLabelAnnotation<std::string>>> row_flat_annotators;
-    {
-        row_flat_annotators.push_back(convert<RowFlatAnnotator>(
-            std::move(*input_annotation_1)
-        ));
-    }
-    {
-        row_flat_annotators.push_back(convert<RowFlatAnnotator>(
-            std::move(*input_annotation_2)
-        ));
-    }
-
-    const auto filename = test_dump_basename_rowflat_merge + "_to_rowflat";
-    merge<RowFlatAnnotator, std::string>(std::move(row_flat_annotators), {}, filename);
-
-    merged_annotation = new RowFlatAnnotator();
-    merged_annotation->load(filename);
-    EXPECT_EQ(num_rows, merged_annotation->num_objects());
-}
-
-TEST_F(MergeAnnotators, Mixed_to_RowFlat) {
-    std::vector<std::unique_ptr<MultiLabelAnnotation<std::string>>> annotators;
-    std::vector<std::string> filenames;
-    {
-        auto annotator = convert<RowFlatAnnotator>(
-            std::move(*input_annotation_1)
-        );
-        annotators.push_back(std::move(annotator));
-    }
-    {
-        auto annotator = std::make_unique<ColumnCompressed<> >(5);
-        annotator->add_labels({ 1 }, {"Label0", "Label3"});
-        annotator->add_labels({ 2 }, {"Label0", "Label9", "Label7"});
-        annotator->add_labels({ 4 }, {"Label1", "Label3", "Label9", "Label10", "Label5", "Label6", "Label11", "Label12", "Label13", "Label14", "Label15", "Label16"});
-        annotators.push_back(std::move(annotator));
-    }
-    //TODO
-    {
-        auto annotator = std::make_unique<ColumnCompressed<> >(5);
-        annotator->add_labels({ 1 }, {"Label0", "Label3"});
-        annotator->add_labels({ 2 }, {"Label0", "Label9", "Label7"});
-        annotator->add_labels({ 4 }, {"Label1", "Label3", "Label9", "Label10", "Label5", "Label6", "Label11", "Label12", "Label13", "Label14", "Label15", "Label16"});
-        annotators.push_back(std::move(annotator));
-    }
-    {
-        //TODO: move into fixture as input_annotation_3 and make non-overlapping
-        const std::string filename = test_dump_basename_row_compressed_merge + "_mixed_2";
-        auto annotation = std::make_unique<RowCompressed<> >(num_rows);
-        annotation->add_labels({ 0 }, {"Label0"});
-        annotation->add_labels({ 2 }, {"Label1"});
-        annotation->add_labels({ 3 }, {"Label1"});
-        annotation->add_labels({ 4 }, {"Label2"});
-        annotation->serialize(filename);
-        filenames.push_back(filename + RowCompressed<>::kExtension);
-    }
-
-    const auto outfile = test_dump_basename_rowflat_merge + "_mixed_to_rowflat";
-    merge<RowFlatAnnotator, std::string>(std::move(annotators), filenames, outfile);
-
-    merged_annotation = new RowFlatAnnotator();
-    merged_annotation->load(outfile);
     EXPECT_EQ(num_rows, merged_annotation->num_objects());
 }
 

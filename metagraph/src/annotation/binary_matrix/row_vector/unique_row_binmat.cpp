@@ -1,9 +1,10 @@
 #include "unique_row_binmat.hpp"
 
+#include <tsl/hopscotch_set.h>
 #include <sdsl/int_vector.hpp>
-#include <tsl/ordered_set.h>
 
 #include "common/hashers/hash.hpp"
+#include "common/vector_set.hpp"
 #include "common/algorithms.hpp"
 #include "common/serialization.hpp"
 
@@ -38,13 +39,7 @@ UniqueRowBinmat
                   uint32_t num_columns) {
     num_columns_ = num_columns;
 
-    using RowSet = tsl::ordered_set<SetBitPositions,
-                                    utils::VectorHash,
-                                    std::equal_to<SetBitPositions>,
-                                    std::allocator<SetBitPositions>,
-                                    std::vector<SetBitPositions>,
-                                    uint32_t>;
-    RowSet unique_rows;
+    VectorSet<SetBitPositions, utils::VectorHash, uint32_t> unique_rows;
 
     call_rows([&](const SetBitPositions &row) {
         num_relations_ += row.size();
@@ -61,7 +56,7 @@ UniqueRowBinmat
 
 std::vector<UniqueRowBinmat::Row> UniqueRowBinmat::get_column(Column j) const {
     // first, find all unique rows with `1` in the j-th column
-    tsl::ordered_set<uint32_t> row_ranks;
+    tsl::hopscotch_set<uint32_t> row_ranks;
     for (uint32_t r = 0; r < unique_rows_.size(); ++r) {
         const auto &row = unique_rows_[r];
         if (std::find(row.begin(), row.end(), j) != row.end())

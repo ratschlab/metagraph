@@ -46,103 +46,7 @@ const size_t kNumRowsInBlock = 50'000;
 const uint64_t ROW_DIFF_BUFFER_BYTES = 8'000'000;
 
 
-template <class RowCallback>
-void call_rows(const BinaryMatrixRowDynamic &row_major_matrix,
-               const RowCallback &callback,
-               bool sort = false) {
-    const auto num_rows = row_major_matrix.num_rows();
-
-    for (size_t i = 0; i < num_rows; ++i) {
-        auto row = row_major_matrix.get_row(i);
-        if (sort)
-            std::sort(row.begin(), row.end());
-        callback(row);
-    }
-}
-
-
 // RowCompressed -> other
-
-template <>
-std::unique_ptr<RowFlatAnnotator>
-convert<RowFlatAnnotator, std::string>(RowCompressed<std::string>&& annotator) {
-    uint64_t num_set_bits = annotator.num_relations();
-    uint64_t num_rows = annotator.num_objects();
-    uint64_t num_columns = annotator.num_labels();
-
-    ProgressBar progress_bar(num_rows, "Processing rows",
-                             std::cerr, !common::get_verbose());
-
-    if (const auto *mat = dynamic_cast<const VectorRowBinMat<>*>(&annotator.get_matrix()))
-        const_cast<VectorRowBinMat<>*>(mat)->standardize_rows();
-
-    auto matrix = std::make_unique<RowFlat<>>(
-        [&](auto callback) {
-            call_rows(annotator.get_matrix(),
-                [&](const auto &row) {
-                    assert(std::is_sorted(row.begin(), row.end()));
-                    callback(row);
-                    ++progress_bar;
-                }
-            );
-        },
-        num_columns,
-        num_rows,
-        num_set_bits
-    );
-
-    return std::make_unique<RowFlatAnnotator>(std::move(matrix),
-                                              annotator.get_label_encoder());
-}
-
-template <>
-std::unique_ptr<RainbowfishAnnotator>
-convert<RainbowfishAnnotator, std::string>(RowCompressed<std::string>&& annotator) {
-    uint64_t num_columns = annotator.num_labels();
-
-    auto matrix = std::make_unique<Rainbowfish>([&](auto callback) {
-        call_rows(annotator.get_matrix(), callback, true);
-    }, num_columns);
-
-    return std::make_unique<RainbowfishAnnotator>(std::move(matrix),
-                                                  annotator.get_label_encoder());
-}
-
-template <>
-std::unique_ptr<BinRelWT_sdslAnnotator>
-convert<BinRelWT_sdslAnnotator, std::string>(RowCompressed<std::string>&& annotator) {
-    uint64_t num_set_bits = annotator.num_relations();
-    uint64_t num_columns = annotator.num_labels();
-
-    auto matrix = std::make_unique<BinRelWT_sdsl>(
-        [&](auto callback) {
-            call_rows(annotator.get_matrix(), callback);
-        },
-        num_set_bits,
-        num_columns
-    );
-
-    return std::make_unique<BinRelWT_sdslAnnotator>(std::move(matrix),
-                                                    annotator.get_label_encoder());
-}
-
-template <>
-std::unique_ptr<BinRelWTAnnotator>
-convert<BinRelWTAnnotator, std::string>(RowCompressed<std::string>&& annotator) {
-    uint64_t num_set_bits = annotator.num_relations();
-    uint64_t num_columns = annotator.num_labels();
-
-    auto matrix = std::make_unique<BinRelWT>(
-        [&](auto callback) {
-            call_rows(annotator.get_matrix(), callback);
-        },
-        num_set_bits,
-        num_columns
-    );
-
-    return std::make_unique<BinRelWTAnnotator>(std::move(matrix),
-                                               annotator.get_label_encoder());
-}
 
 template <class StaticAnnotation>
 std::unique_ptr<StaticAnnotation> convert(const std::string &filename) {
@@ -1512,132 +1416,69 @@ void merge_rows(const std::vector<LabelEncoder<Label>> &label_encoders,
     );
 }
 
-// TODO: move row iterators to BinaryMatrix
-template <class Annotator>
-class IterateRows {
-  public:
-    IterateRows(const Annotator &annotator) : matrix_(annotator.get_matrix()) {};
-
-    BinaryMatrix::SetBitPositions next() {
-        return matrix_.get_rows({ i_++ })[0];
-    };
-
-  private:
-    typename BinaryMatrix::Row i_ = 0;
-    const BinaryMatrix &matrix_;
-};
-
-// TODO: remove?
-template <class ToAnnotation, typename Label>
-void merge(std::vector<std::unique_ptr<MultiLabelAnnotation<Label>>>&& annotators,
-           const std::vector<std::string> &filenames,
-           const std::string &outfile) {
-    static_assert(std::is_same_v<typename ToAnnotation::Label, Label>);
-
-    assert((annotators.size() || filenames.size()) && "nothing to merge");
+void merge_row_compressed(const std::vector<std::string> &filenames,
+                          const std::string &outfile) {
+    assert(filenames.size() && "nothing to merge");
 
     uint64_t num_rows;
     uint64_t num_relations;
 
-    if (annotators.size()) {
-        num_rows = annotators.at(0)->num_objects();
-    } else {
-        RowCompressed<Label>::read_shape(filenames.at(0), &num_rows, &num_relations);
-    }
+    RowCompressed<>::read_shape(filenames.at(0), &num_rows, &num_relations);
     assert(num_rows);
 
     std::vector<LEncoder> label_encoders;
-
-    std::vector<IterateRows<MultiLabelAnnotation<Label>>> row_iterators;
-    for (const auto &annotator : annotators) {
-        if (annotator->num_objects() != num_rows)
-            throw std::runtime_error("Annotators have different number of rows");
-
-        label_encoders.push_back(annotator->get_label_encoder());
-        row_iterators.emplace_back(*annotator);
-    }
-
     std::vector<std::unique_ptr<StreamRows<>>> streams;
+
     for (auto filename : filenames) {
-        if (utils::ends_with(filename, RowCompressed<Label>::kExtension)) {
+        if (!utils::ends_with(filename, RowCompressed<>::kExtension))
+            throw std::runtime_error("Can't merge annotations of mixed types");
 
-            label_encoders.emplace_back(RowCompressed<Label>::read_label_encoder(filename));
+        label_encoders.emplace_back(RowCompressed<>::read_label_encoder(filename));
 
-            streams.emplace_back(new StreamRows<>(RowCompressed<Label>::get_row_streamer(filename)));
-
-        } else {
-            throw std::runtime_error("streaming only supported for rowcompressed annotator");
-        }
+        streams.emplace_back(new StreamRows<>(RowCompressed<>::get_row_streamer(filename)));
     }
 
     merge_rows(
         label_encoders,
         [&](uint64_t annotator_idx) -> const BinaryMatrix::SetBitPositions {
-            if (annotator_idx < annotators.size()) {
-                return row_iterators.at(annotator_idx).next();
-            } else {
-                return *streams[annotator_idx-annotators.size()]->next_row();
-            }
+            return *streams[annotator_idx]->next_row();
         },
         num_rows,
         outfile
     );
-
-    if constexpr(!std::is_same_v<RowCompressed<Label>, ToAnnotation>) {
-        auto out_annotator = convert<ToAnnotation>(outfile);
-        out_annotator->serialize(outfile);
-    }
 }
 
-#define INSTANTIATE_MERGE(A, L) \
-            template void \
-            merge<A, L>(std::vector<std::unique_ptr<MultiLabelAnnotation<L>>>&&, \
-                        const std::vector<std::string>&, \
-                        const std::string&);
-INSTANTIATE_MERGE(RowFlatAnnotator, std::string);
-INSTANTIATE_MERGE(RainbowfishAnnotator, std::string);
-INSTANTIATE_MERGE(BinRelWTAnnotator, std::string);
-INSTANTIATE_MERGE(BinRelWT_sdslAnnotator, std::string);
-INSTANTIATE_MERGE(RowCompressed<>, std::string);
+void merge_brwt(const std::vector<std::string> &filenames,
+                const std::string &outfile) {
+    assert(filenames.size() && "nothing to merge");
 
-
-template<>
-void merge<MultiBRWTAnnotator, std::string>(
-        std::vector<std::unique_ptr<MultiLabelAnnotation<std::string>>>&& annotators,
-        const std::vector<std::string> &filenames,
-        const std::string &outfile) {
-
-    assert((annotators.size() || filenames.size()) && "nothing to merge");
-
-    if (filenames.size()) {
-        throw std::runtime_error("streaming only supported for rowcompressed annotator");
-    }
-
-    uint64_t num_rows = annotators.at(0)->num_objects();
+    uint64_t num_rows = 0;
 
     LEncoder label_encoder;
 
     std::vector<BRWT> brwts;
 
-    for (auto&& annotator : annotators) {
-        if (!dynamic_cast<MultiBRWTAnnotator*>(annotator.get()))
-            throw std::runtime_error("merging of arbitrary annotations into BRWT is not implemented");
+    for (auto filename : filenames) {
+        MultiBRWTAnnotator annotator;
+        if (!annotator.load(filename)) {
+            logger->error("Cannot load annotations from file '{}'", filename);
+            exit(1);
+        }
 
-        if (annotator->num_objects() != num_rows)
+        if (filename == filenames[0])
+            num_rows = annotator.num_objects();
+
+        if (annotator.num_objects() != num_rows)
             throw std::runtime_error("Annotators have different number of rows");
 
-        for (const auto &label : annotator->get_label_encoder().get_labels()) {
+        for (const auto &label : annotator.get_label_encoder().get_labels()) {
             if (label_encoder.label_exists(label))
                 throw std::runtime_error("merging of BRWT with same labels is not implemented");
 
             label_encoder.insert_and_encode(label);
         }
 
-        brwts.push_back(std::move(const_cast<BRWT&>(
-            dynamic_cast<MultiBRWTAnnotator&>(*annotator).get_matrix()
-        )));
-
-        annotator.reset();
+        brwts.push_back(std::move(const_cast<BRWT&>(annotator.get_matrix())));
     }
 
     MultiBRWTAnnotator annotation(
