@@ -68,38 +68,40 @@ void BinaryMatrix::call_columns(const std::vector<Column> &column_ids,
 std::vector<std::pair<BinaryMatrix::Column, size_t /* count */>>
 BinaryMatrix::sum_rows(const std::vector<std::pair<Row, size_t>> &index_counts,
                        size_t min_count) const {
-    min_count = std::max(min_count, size_t(1));
+    min_count = std::max(min_count, (size_t)1);
 
-    std::vector<Row> row_ids;
-    row_ids.reserve(index_counts.size());
-
-    size_t total_sum_count = 0;
-    for (auto [i, count] : index_counts) {
-        row_ids.push_back(i);
-        total_sum_count += count;
-    }
-
-    if (total_sum_count < min_count)
-        return {};
-
-    auto distinct_rows = get_rows_dict(&row_ids);
-
-    Vector<size_t> counts(distinct_rows.size(), 0);
-    for (size_t i = 0; i < index_counts.size(); ++i) {
-        counts[row_ids[i]] += index_counts[i].second;
-    }
+    auto ic = index_counts;
 
     // FYI: one could use tsl::hopscotch_map for counting but it is slower
     // than std::vector unless the number of columns is ~1M or higher
     Vector<size_t> col_counts(num_columns(), 0);
-    for (size_t i = 0; i < counts.size(); ++i) {
-        for (size_t j : distinct_rows[i]) {
-            col_counts[j] += counts[i];
+
+    // don't break the topological order for row-diff annotation
+    if (!dynamic_cast<const IRowDiff *>(this))
+        std::sort(ic.begin(), ic.end(), utils::LessFirst());
+
+    // limit the RAM usage by avoiding querying all the rows at once
+    for (uint64_t begin = 0; begin < ic.size(); begin += kRowBatchSize) {
+        const uint64_t end = std::min(begin + kRowBatchSize,
+                                      static_cast<uint64_t>(ic.size()));
+
+        std::vector<Row> ids(end - begin);
+        for (uint64_t i = begin; i < end; ++i) {
+            ids[i - begin] = ic[i].first;
+        }
+
+        const auto &rows = get_rows(ids);
+
+        for (uint64_t i = begin; i < end; ++i) {
+            for (size_t j : rows[i - begin]) {
+                col_counts[j] += ic[i].second;
+            }
         }
     }
 
     std::vector<std::pair<Column, size_t>> result;
     result.reserve(col_counts.size());
+
     for (Column j = 0; j < col_counts.size(); ++j) {
         if (col_counts[j] >= min_count)
             result.emplace_back(j, col_counts[j]);
@@ -168,6 +170,50 @@ RainbowMatrix::get_rows_dict(std::vector<Row> *rows, size_t num_threads) const {
     }
 
     return unique_rows;
+}
+
+std::vector<std::pair<RainbowMatrix::Column, size_t /* count */>>
+RainbowMatrix::sum_rows(const std::vector<std::pair<Row, size_t>> &index_counts,
+                        size_t min_count) const {
+    min_count = std::max(min_count, (size_t)1);
+
+    std::vector<Row> row_ids;
+    row_ids.reserve(index_counts.size());
+
+    size_t total_sum_count = 0;
+    for (auto [i, count] : index_counts) {
+        row_ids.push_back(i);
+        total_sum_count += count;
+    }
+
+    if (total_sum_count < min_count)
+        return {};
+
+    auto distinct_rows = get_rows_dict(&row_ids);
+
+    Vector<size_t> counts(distinct_rows.size(), 0);
+    for (size_t i = 0; i < index_counts.size(); ++i) {
+        counts[row_ids[i]] += index_counts[i].second;
+    }
+
+    // FYI: one could use tsl::hopscotch_map for counting but it is slower
+    // than std::vector unless the number of columns is ~1M or higher
+    Vector<size_t> col_counts(num_columns(), 0);
+    for (size_t i = 0; i < counts.size(); ++i) {
+        for (size_t j : distinct_rows[i]) {
+            col_counts[j] += counts[i];
+        }
+    }
+
+    std::vector<std::pair<Column, size_t>> result;
+    result.reserve(col_counts.size());
+
+    for (Column j = 0; j < col_counts.size(); ++j) {
+        if (col_counts[j] >= min_count)
+            result.emplace_back(j, col_counts[j]);
+    }
+
+    return result;
 }
 
 
