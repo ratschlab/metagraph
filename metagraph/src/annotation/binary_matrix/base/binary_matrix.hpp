@@ -2,6 +2,7 @@
 #define __SPARSE_MATRIX_HPP__
 
 #include <vector>
+#include <functional>
 
 #include "common/vector.hpp"
 

@@ -2,6 +2,7 @@
 #define __FLAT_MATRIX_HPP__
 
 #include <vector>
+#include <memory>
 
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
 

@@ -34,7 +34,6 @@ IntMatrix::sum_row_values(const std::vector<std::pair<Row, size_t>> &index_count
     for (size_t t = 0; t < index_counts.size(); ++t) {
         auto [i, count] = index_counts[t];
         for (const auto &[j, value] : row_values[t]) {
-            assert(j < sum_row.size());
             counts[j].first += count;
             counts[j].second += count * value;
         }
