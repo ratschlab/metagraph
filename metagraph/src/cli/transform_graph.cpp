@@ -106,14 +106,12 @@ int transform_graph(Config *config) {
                       suffix_length,
                       std::pow(dbg_succ->get_boss().alph_size - 1, suffix_length)
                             * 2. * sizeof(uint64_t) * 1e-6);
+        timer.reset();
+        dbg_succ->get_boss().index_suffix_ranges(suffix_length, get_num_threads());
         logger->trace("Compressed node ranges to approx. {:.2f} MB",
                       dbg_succ->get_boss().get_suffix_ranges_index_size() / 8e6);
-        timer.reset();
-
-        dbg_succ->get_boss().index_suffix_ranges(suffix_length, get_num_threads());
 
         logger->trace("Indexing of node ranges took {} sec", timer.elapsed());
-        timer.reset();
     }
 
     if (config->to_adj_list) {
