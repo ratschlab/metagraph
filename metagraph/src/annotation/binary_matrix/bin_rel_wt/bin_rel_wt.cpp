@@ -1,4 +1,4 @@
-#include "bin_rel_wt_sdsl.hpp"
+#include "bin_rel_wt.hpp"
 
 #include <cassert>
 #include <iterator>
@@ -12,8 +12,8 @@ namespace mtg {
 namespace annot {
 namespace matrix {
 
-BinRelWT_sdsl
-::BinRelWT_sdsl(const std::function<void(const RowCallback &)> &generate_rows,
+BinRelWT
+::BinRelWT(const std::function<void(const RowCallback &)> &generate_rows,
                 uint64_t num_relations,
                 uint64_t num_columns)
       : num_columns_(num_columns) {
@@ -43,16 +43,16 @@ BinRelWT_sdsl
     decltype(wt_)(std::move(flat)).swap(wt_);
 }
 
-uint64_t BinRelWT_sdsl::num_columns() const {
+uint64_t BinRelWT::num_columns() const {
     return num_columns_;
 }
 
-uint64_t BinRelWT_sdsl::num_rows() const {
+uint64_t BinRelWT::num_rows() const {
     assert(delimiters_.num_set_bits());
     return delimiters_.num_set_bits() - 1;
 }
 
-BinRelWT_sdsl::SetBitPositions BinRelWT_sdsl::get_row(Row row) const {
+BinRelWT::SetBitPositions BinRelWT::get_row(Row row) const {
     // delimiters_ starts with a 1 indicating the
     // beginning of first row and ends with a 1,
     // indicating the end of last line.
@@ -86,7 +86,7 @@ BinRelWT_sdsl::SetBitPositions BinRelWT_sdsl::get_row(Row row) const {
     return SetBitPositions(label_indices.begin(), label_indices.end());
 }
 
-std::vector<BinRelWT_sdsl::Row> BinRelWT_sdsl::get_column(Column column) const {
+std::vector<BinRelWT::Row> BinRelWT::get_column(Column column) const {
     assert(column < num_columns_);
 
     uint64_t num_relations_in_col = wt_.rank(wt_.size(), column);
@@ -101,7 +101,7 @@ std::vector<BinRelWT_sdsl::Row> BinRelWT_sdsl::get_column(Column column) const {
     return column_vec;
 }
 
-bool BinRelWT_sdsl::get(Row row, Column column) const {
+bool BinRelWT::get(Row row, Column column) const {
     // Not counting i first 1s indicating the boundries.
     uint64_t first_string_index = delimiters_.select1(row + 1) - row;
     // Not counting i+1 first 1s indicating the boundries.
@@ -114,7 +114,7 @@ bool BinRelWT_sdsl::get(Row row, Column column) const {
                     != wt_.rank(last_string_index, column);
 }
 
-bool BinRelWT_sdsl::load(std::istream &in) {
+bool BinRelWT::load(std::istream &in) {
     if (!in.good())
         return false;
     try {
@@ -126,7 +126,7 @@ bool BinRelWT_sdsl::load(std::istream &in) {
     }
 }
 
-void BinRelWT_sdsl::serialize(std::ostream &out) const {
+void BinRelWT::serialize(std::ostream &out) const {
     if (!out.good())
         throw std::ofstream::failure("Bad stream");
 
@@ -135,7 +135,7 @@ void BinRelWT_sdsl::serialize(std::ostream &out) const {
     delimiters_.serialize(out);
 }
 
-uint64_t BinRelWT_sdsl::num_relations() const {
+uint64_t BinRelWT::num_relations() const {
     return wt_.size();
 }
 

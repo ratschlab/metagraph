@@ -18,7 +18,7 @@ const std::string test_dump_basename_vec_good = test_dump_basename + "_matrix";
 template <typename Annotator>
 class AnnotatorPresetDumpTest : public AnnotatorPreset2Test<Annotator> { };
 
-typedef ::testing::Types<annot::BinRelWT_sdslAnnotator,
+typedef ::testing::Types<annot::BinRelWTAnnotator,
                          annot::RbBRWTAnnotator,
                          annot::MultiBRWTAnnotator,
                          annot::RainbowfishAnnotator,

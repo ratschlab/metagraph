@@ -7,7 +7,7 @@
 #include "../test_helpers.hpp"
 #include "annotation/binary_matrix/multi_brwt/brwt.hpp"
 #include "annotation/binary_matrix/multi_brwt/brwt_builders.hpp"
-#include "annotation/binary_matrix/bin_rel_wt/bin_rel_wt_sdsl.hpp"
+#include "annotation/binary_matrix/bin_rel_wt/bin_rel_wt.hpp"
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
 #include "annotation/binary_matrix/row_vector/unique_row_binmat.hpp"
 #include "annotation/binary_matrix/row_sparse/row_sparse.hpp"
@@ -63,12 +63,12 @@ build_matrix_from_rows(const std::function<void(const RowCallback &)> &generate_
 }
 
 template <>
-BinRelWT_sdsl
+BinRelWT
 build_matrix_from_rows(const std::function<void(const RowCallback &)> &generate_rows,
                        uint64_t num_columns,
                        uint64_t,
                        uint64_t num_relations) {
-    return BinRelWT_sdsl(generate_rows, num_relations, num_columns);
+    return BinRelWT(generate_rows, num_relations, num_columns);
 }
 
 
@@ -85,7 +85,7 @@ BinMat build_matrix_from_columns(const BitVectorPtrArray &columns, uint64_t num_
         num_columns, num_rows, num_set_bits
     );
 }
-template BinRelWT_sdsl build_matrix_from_columns<BinRelWT_sdsl>(const BitVectorPtrArray&, uint64_t);
+template BinRelWT build_matrix_from_columns<BinRelWT>(const BitVectorPtrArray&, uint64_t);
 template RowFlat<> build_matrix_from_columns<RowFlat<>>(const BitVectorPtrArray&, uint64_t);
 template RowSparse build_matrix_from_columns<RowSparse>(const BitVectorPtrArray&, uint64_t);
 template UniqueRowBinmat build_matrix_from_columns<UniqueRowBinmat>(const BitVectorPtrArray&, uint64_t);
@@ -308,7 +308,7 @@ void test_matrix(const TypeParam &matrix, const BitVectorPtrArray &columns) {
 template void test_matrix<BRWT>(const BRWT&, const BitVectorPtrArray &);
 template void test_matrix<BRWTOptimized>(const BRWTOptimized&, const BitVectorPtrArray &);
 template void test_matrix<ColumnMajor>(const ColumnMajor&, const BitVectorPtrArray &);
-template void test_matrix<BinRelWT_sdsl>(const BinRelWT_sdsl&, const BitVectorPtrArray &);
+template void test_matrix<BinRelWT>(const BinRelWT&, const BitVectorPtrArray &);
 template void test_matrix<RowFlat<>>(const RowFlat<>&, const BitVectorPtrArray &);
 template void test_matrix<RowSparse>(const RowSparse&, const BitVectorPtrArray &);
 template void test_matrix<UniqueRowBinmat>(const UniqueRowBinmat&, const BitVectorPtrArray &);

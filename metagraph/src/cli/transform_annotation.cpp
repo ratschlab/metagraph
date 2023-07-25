@@ -618,8 +618,8 @@ int transform_annotation(Config *config) {
                 target_annotator = std::move(annotator);
                 break;
             }
-            case Config::BinRelWT_sdsl: {
-                auto annotator = annot::convert<BinRelWT_sdslAnnotator>(files.at(0));
+            case Config::BinRelWT: {
+                auto annotator = annot::convert<BinRelWTAnnotator>(files.at(0));
                 target_annotator = std::move(annotator);
                 break;
             }
@@ -779,8 +779,8 @@ int transform_annotation(Config *config) {
                 logger->trace("Serialized to {}", config->outfbase);
                 break;
             }
-            case Config::BinRelWT_sdsl: {
-                convert<BinRelWT_sdslAnnotator>(std::move(*annotator), config->outfbase);
+            case Config::BinRelWT: {
+                convert<BinRelWTAnnotator>(std::move(*annotator), config->outfbase);
                 break;
             }
             case Config::RowFlat: {

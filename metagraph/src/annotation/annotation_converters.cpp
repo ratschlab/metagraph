@@ -82,7 +82,7 @@ std::unique_ptr<StaticAnnotation> convert(const std::string &filename) {
     } else if constexpr(std::is_same_v<MatrixType, Rainbowfish>) {
         matrix = std::make_unique<MatrixType>(call_rows, label_encoder.size());
 
-    } else if constexpr(std::is_same_v<MatrixType, BinRelWT_sdsl>) {
+    } else if constexpr(std::is_same_v<MatrixType, BinRelWT>) {
         matrix = std::make_unique<MatrixType>(call_rows, num_relations, label_encoder.size());
 
     } else if constexpr(std::is_same_v<MatrixType, RowSparse>) {
@@ -98,7 +98,7 @@ std::unique_ptr<StaticAnnotation> convert(const std::string &filename) {
 template std::unique_ptr<RowFlatAnnotator> convert(const std::string &filename);
 template std::unique_ptr<RowSparseAnnotator> convert(const std::string &filename);
 template std::unique_ptr<RainbowfishAnnotator> convert(const std::string &filename);
-template std::unique_ptr<BinRelWT_sdslAnnotator> convert(const std::string &filename);
+template std::unique_ptr<BinRelWTAnnotator> convert(const std::string &filename);
 
 
 // ColumnCompressed -> other
@@ -1343,12 +1343,12 @@ convert<RbBRWTAnnotator, std::string>(ColumnCompressed<std::string>&& annotator)
 }
 
 template <>
-std::unique_ptr<BinRelWT_sdslAnnotator>
-convert<BinRelWT_sdslAnnotator, std::string>(ColumnCompressed<std::string>&& annotator) {
+std::unique_ptr<BinRelWTAnnotator>
+convert<BinRelWTAnnotator, std::string>(ColumnCompressed<std::string>&& annotator) {
     uint64_t num_set_bits = annotator.num_relations();
     uint64_t num_columns = annotator.num_labels();
 
-    auto matrix = std::make_unique<BinRelWT_sdsl>(
+    auto matrix = std::make_unique<BinRelWT>(
         [&](auto callback) {
             utils::call_rows(annotator.get_matrix().data(), callback);
         },
@@ -1356,7 +1356,7 @@ convert<BinRelWT_sdslAnnotator, std::string>(ColumnCompressed<std::string>&& ann
         num_columns
     );
 
-    return std::make_unique<BinRelWT_sdslAnnotator>(std::move(matrix),
+    return std::make_unique<BinRelWTAnnotator>(std::move(matrix),
                                                     annotator.get_label_encoder());
 }
 

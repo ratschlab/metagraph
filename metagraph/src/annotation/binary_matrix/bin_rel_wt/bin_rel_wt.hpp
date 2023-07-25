@@ -1,5 +1,5 @@
-#ifndef __BIN_REL_WT_SDSL_HPP__
-#define __BIN_REL_WT_SDSL_HPP__
+#ifndef __BIN_REL_WT_HPP__
+#define __BIN_REL_WT_HPP__
 
 #include <sdsl/wt_int.hpp>
 
@@ -11,11 +11,11 @@ namespace mtg {
 namespace annot {
 namespace matrix {
 
-class BinRelWT_sdsl : public RowMajor, public GetEntrySupport {
+class BinRelWT : public RowMajor, public GetEntrySupport {
   public:
-    BinRelWT_sdsl() : delimiters_(1, 1) {};
+    BinRelWT() : delimiters_(1, 1) {};
 
-    BinRelWT_sdsl(const std::function<void(const RowCallback &)> &generate_rows,
+    BinRelWT(const std::function<void(const RowCallback &)> &generate_rows,
                   uint64_t num_set_bits,
                   uint64_t num_columns);
 
@@ -42,4 +42,4 @@ class BinRelWT_sdsl : public RowMajor, public GetEntrySupport {
 } // namespace annot
 } // namespace mtg
 
-#endif // __BIN_REL_WT_SDSL_HPP__
+#endif // __BIN_REL_WT_HPP__
