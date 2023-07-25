@@ -48,9 +48,6 @@ Config::AnnotationType parse_annotation_type(const std::string &filename) {
     } else if (utils::ends_with(filename, annot::BinRelWT_sdslAnnotator::kExtension)) {
         return Config::AnnotationType::BinRelWT_sdsl;
 
-    } else if (utils::ends_with(filename, annot::BinRelWTAnnotator::kExtension)) {
-        return Config::AnnotationType::BinRelWT;
-
     } else if (utils::ends_with(filename, annot::RowFlatAnnotator::kExtension)) {
         return Config::AnnotationType::RowFlat;
 
@@ -153,10 +150,6 @@ initialize_annotation(Config::AnnotationType anno_type,
         }
         case Config::BinRelWT_sdsl: {
             annotation.reset(new annot::BinRelWT_sdslAnnotator());
-            break;
-        }
-        case Config::BinRelWT: {
-            annotation.reset(new annot::BinRelWTAnnotator());
             break;
         }
         case Config::RowFlat: {

@@ -26,7 +26,6 @@ enum class MatrixType {
     BRWT,
     BRWT_EXTRA,
     BIN_REL_WT_SDSL,
-    BIN_REL_WT,
     ROW_FLAT,
     RAINBOWFISH
 };
@@ -46,9 +45,6 @@ MatrixType string_to_matrix_type(const std::string &string) {
 
     } else if (string == "bin_rel_wt_sdsl") {
         return MatrixType::BIN_REL_WT_SDSL;
-
-    } else if (string == "bin_rel_wt") {
-        return MatrixType::BIN_REL_WT;
 
     } else if (string == "flat") {
         return MatrixType::ROW_FLAT;
@@ -75,8 +71,6 @@ matrix_type_to_data(const std::string &file, MatrixType type) {
         matrix_ptr.reset(new BRWT());
     } else if (type == MatrixType::BIN_REL_WT_SDSL) {
         matrix_ptr.reset(new BinRelWT_sdsl());
-    } else if (type == MatrixType::BIN_REL_WT) {
-        matrix_ptr.reset(new BinRelWT());
     } else if (type == MatrixType::ROW_FLAT) {
         matrix_ptr.reset(new RowFlat<>());
     } else if (type == MatrixType::RAINBOWFISH) {
@@ -193,10 +187,6 @@ generate_from_rows(std::vector<std::unique_ptr<bit_vector>>&& columns,
                 num_set_bits, num_columns
             ));
 
-            break;
-        }
-        case MatrixType::BIN_REL_WT: {
-            binary_matrix.reset(new BinRelWT(std::move(columns)));
             break;
         }
         case MatrixType::ROW_FLAT: {

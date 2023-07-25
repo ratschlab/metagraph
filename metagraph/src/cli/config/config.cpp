@@ -711,8 +711,6 @@ std::string Config::annotype_to_string(AnnotationType state) {
             return "brwt";
         case BinRelWT_sdsl:
             return "bin_rel_wt_sdsl";
-        case BinRelWT:
-            return "bin_rel_wt";
         case RowFlat:
             return "flat";
         case RBFish:
@@ -760,8 +758,6 @@ Config::AnnotationType Config::string_to_annotype(const std::string &string) {
         return AnnotationType::BRWT;
     } else if (string == "bin_rel_wt_sdsl") {
         return AnnotationType::BinRelWT_sdsl;
-    } else if (string == "bin_rel_wt") {
-        return AnnotationType::BinRelWT;
     } else if (string == "flat") {
         return AnnotationType::RowFlat;
     } else if (string == "rbfish") {
@@ -898,7 +894,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
                                    "\t\t  column_coord, brwt_coord, row_diff_coord, row_diff_brwt_coord,\n"
                                    "\t\t  row_diff, row_diff_brwt, row_diff_flat, row_diff_sparse, row_diff_int_brwt,\n"
                                    "\t\t  row_diff_disk, row_diff_int_disk, row_diff_disk_coord,\n"
-                                   "\t\t  row, flat, row_sparse, rbfish, bin_rel_wt, bin_rel_wt_sdsl )";
+                                   "\t\t  row, flat, row_sparse, rbfish, bin_rel_wt_sdsl )";
 
     switch (identity) {
         case NO_IDENTITY: {

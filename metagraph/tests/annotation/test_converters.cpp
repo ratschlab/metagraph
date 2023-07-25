@@ -543,20 +543,6 @@ TEST(RowDiff, ConvertFromColumnCompressed2BigLoops) {
     test_row_diff_separate_columns(10, 3, sequences, annotations, "column.diff.2bigloops");
 }
 
-// TEST(ConvertFromColumnCompressedEmpty, to_BinRelWT) {
-//     ColumnCompressed<> empty_column_annotator(5);
-//     auto empty_annotation = convert<BinRelWTAnnotator>(
-//         std::move(empty_column_annotator)
-//     );
-//     EXPECT_EQ(0u, empty_annotation->num_labels());
-//     EXPECT_EQ(5u, empty_annotation->num_objects());
-//     EXPECT_EQ(0u, empty_annotation->num_relations());
-// }
-
-TEST_F(ConvertFromColumnCompressed, to_BinRelWT) {
-    annotation = convert<BinRelWTAnnotator>(std::move(*initial_annotation));
-}
-
 // TEST(ConvertFromColumnCompressedEmpty, to_BinRelWT_sdsl) {
 //     ColumnCompressed<> empty_column_annotator(5);
 //     auto empty_annotation = convert<BinRelWT_sdslAnnotator>(
@@ -613,20 +599,6 @@ TEST_F(ConvertFromColumnCompressed, to_GreedyBRWT) {
     annotation = convert_to_greedy_BRWT(std::move(*initial_annotation));
 }
 
-
-TEST(ConvertFromRowCompressedEmpty, to_BinRelWT) {
-    RowCompressed<> empty_column_annotator(5);
-    auto empty_annotation = convert<BinRelWTAnnotator>(
-        std::move(empty_column_annotator)
-    );
-    EXPECT_EQ(0u, empty_annotation->num_labels());
-    EXPECT_EQ(5u, empty_annotation->num_objects());
-    EXPECT_EQ(0u, empty_annotation->num_relations());
-}
-
-TEST_F(ConvertFromRowCompressed, to_BinRelWT) {
-    annotation = convert<BinRelWTAnnotator>(std::move(*initial_annotation));
-}
 
 TEST(ConvertFromRowCompressedEmpty, to_BinRelWT_sdsl) {
     RowCompressed<> empty_column_annotator(5);

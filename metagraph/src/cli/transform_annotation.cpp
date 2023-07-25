@@ -623,11 +623,6 @@ int transform_annotation(Config *config) {
                 target_annotator = std::move(annotator);
                 break;
             }
-            case Config::BinRelWT: {
-                auto annotator = annot::convert<BinRelWTAnnotator>(files.at(0));
-                target_annotator = std::move(annotator);
-                break;
-            }
             default:
                 logger->error(
                         "Streaming conversion from RowCompressed "
@@ -786,10 +781,6 @@ int transform_annotation(Config *config) {
             }
             case Config::BinRelWT_sdsl: {
                 convert<BinRelWT_sdslAnnotator>(std::move(*annotator), config->outfbase);
-                break;
-            }
-            case Config::BinRelWT: {
-                convert<BinRelWTAnnotator>(std::move(*annotator), config->outfbase);
                 break;
             }
             case Config::RowFlat: {

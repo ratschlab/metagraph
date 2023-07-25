@@ -58,7 +58,6 @@ class AnnotationFormats(Enum):
     # COLUMN = 'column' # TODO: need special case in the workflow
     ROW = 'row'
     BIN_REL_WT_SDSL = 'bin_rel_wt_sdsl'
-    BIN_REL_WT = 'bin_rel_wt'
     FLAT = 'flat'
     RBFISH = 'rbfish'
     BRWT = 'brwt'

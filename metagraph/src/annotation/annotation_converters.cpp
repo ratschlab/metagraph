@@ -82,9 +82,6 @@ std::unique_ptr<StaticAnnotation> convert(const std::string &filename) {
     } else if constexpr(std::is_same_v<MatrixType, Rainbowfish>) {
         matrix = std::make_unique<MatrixType>(call_rows, label_encoder.size());
 
-    } else if constexpr(std::is_same_v<MatrixType, BinRelWT>) {
-        matrix = std::make_unique<MatrixType>(call_rows, num_relations, label_encoder.size());
-
     } else if constexpr(std::is_same_v<MatrixType, BinRelWT_sdsl>) {
         matrix = std::make_unique<MatrixType>(call_rows, num_relations, label_encoder.size());
 
@@ -101,7 +98,6 @@ std::unique_ptr<StaticAnnotation> convert(const std::string &filename) {
 template std::unique_ptr<RowFlatAnnotator> convert(const std::string &filename);
 template std::unique_ptr<RowSparseAnnotator> convert(const std::string &filename);
 template std::unique_ptr<RainbowfishAnnotator> convert(const std::string &filename);
-template std::unique_ptr<BinRelWTAnnotator> convert(const std::string &filename);
 template std::unique_ptr<BinRelWT_sdslAnnotator> convert(const std::string &filename);
 
 
@@ -1362,19 +1358,6 @@ convert<BinRelWT_sdslAnnotator, std::string>(ColumnCompressed<std::string>&& ann
 
     return std::make_unique<BinRelWT_sdslAnnotator>(std::move(matrix),
                                                     annotator.get_label_encoder());
-}
-
-template <>
-std::unique_ptr<BinRelWTAnnotator>
-convert<BinRelWTAnnotator, std::string>(ColumnCompressed<std::string>&& annotator) {
-    auto &columns = const_cast<std::vector<std::unique_ptr<bit_vector>>&>(
-        annotator.get_matrix().data()
-    );
-
-    return std::make_unique<BinRelWTAnnotator>(
-        std::make_unique<BinRelWT>(std::move(columns)),
-        annotator.get_label_encoder()
-    );
 }
 
 template <typename Label>

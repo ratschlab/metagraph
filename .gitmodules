@@ -17,9 +17,6 @@
 [submodule "metagraph/external-libraries/KMC"]
 	path = metagraph/external-libraries/KMC
 	url = https://github.com/karasikov/KMC.git
-[submodule "metagraph/external-libraries/binrel_wt"]
-	path = metagraph/external-libraries/binrel_wt
-	url = https://github.com/sara-jvz/binrel_wt.git
 [submodule "metagraph/external-libraries/ordered-map"]
 	path = metagraph/external-libraries/ordered-map
 	url = https://github.com/Tessil/ordered-map.git

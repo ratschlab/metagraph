@@ -198,7 +198,6 @@ class Config {
         RowCompressed,
         BRWT,
         BinRelWT_sdsl,
-        BinRelWT,
         RowDiff,
         RowDiffBRWT,
         RowDiffRowFlat,
