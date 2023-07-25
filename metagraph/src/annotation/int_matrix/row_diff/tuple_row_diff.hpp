@@ -24,7 +24,7 @@ namespace annot {
 namespace matrix {
 
 template <class BaseMatrix>
-class TupleRowDiff : public binmat::IRowDiff, public MultiIntMatrix {
+class TupleRowDiff : public IRowDiff, public BinaryMatrix, public MultiIntMatrix {
   public:
     static_assert(std::is_convertible<BaseMatrix*, MultiIntMatrix*>::value);
     static const int SHIFT = 1; // coordinates increase by 1 at each edge
@@ -33,9 +33,8 @@ class TupleRowDiff : public binmat::IRowDiff, public MultiIntMatrix {
     TupleRowDiff(const graph::DBGSuccinct *graph = nullptr, Args&&... args)
         : diffs_(std::forward<Args>(args)...) { graph_ = graph; }
 
-    bool get(Row i, Column j) const override;
     std::vector<Row> get_column(Column j) const override;
-    RowTuples get_row_tuples(Row i) const override;
+    std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const override;
     std::vector<RowTuples> get_row_tuples(const std::vector<Row> &rows) const override;
 
     uint64_t num_columns() const override { return diffs_.num_columns(); }
@@ -49,6 +48,8 @@ class TupleRowDiff : public binmat::IRowDiff, public MultiIntMatrix {
     const BaseMatrix& diffs() const { return diffs_; }
     BaseMatrix& diffs() { return diffs_; }
 
+    const BinaryMatrix& get_binary_matrix() const override { return *this; }
+
   private:
     static void decode_diffs(RowTuples *diffs);
     static void add_diff(const RowTuples &diff, RowTuples *row);
@@ -58,14 +59,7 @@ class TupleRowDiff : public binmat::IRowDiff, public MultiIntMatrix {
 
 
 template <class BaseMatrix>
-bool TupleRowDiff<BaseMatrix>::get(Row i, Column j) const {
-    SetBitPositions set_bits = get_row(i);
-    auto v = std::lower_bound(set_bits.begin(), set_bits.end(), j);
-    return v != set_bits.end() && *v == j;
-}
-
-template <class BaseMatrix>
-std::vector<MultiIntMatrix::Row> TupleRowDiff<BaseMatrix>::get_column(Column j) const {
+std::vector<BinaryMatrix::Row> TupleRowDiff<BaseMatrix>::get_column(Column j) const {
     assert(graph_ && "graph must be loaded");
     assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
 
@@ -79,15 +73,29 @@ std::vector<MultiIntMatrix::Row> TupleRowDiff<BaseMatrix>::get_column(Column j) 
             graph::AnnotatedSequenceGraph::anno_to_graph_index(i)
         );
 
-        if (boss.get_W(edge) && get(i, j))
+        if (!boss.get_W(edge))
+            continue;
+
+        SetBitPositions set_bits = get_rows({ i })[0];
+        if (std::binary_search(set_bits.begin(), set_bits.end(), j))
             result.push_back(i);
     }
     return result;
 }
 
 template <class BaseMatrix>
-MultiIntMatrix::RowTuples TupleRowDiff<BaseMatrix>::get_row_tuples(Row row) const {
-    return get_row_tuples(std::vector<Row>{ row })[0];
+std::vector<BinaryMatrix::SetBitPositions>
+TupleRowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
+    std::vector<SetBitPositions> rows;
+    rows.reserve(row_ids.size());
+    for (const auto &row : get_row_tuples(row_ids)) {
+        rows.emplace_back();
+        rows.back().reserve(row.size());
+        for (const auto &[j, _] : row) {
+            rows.back().push_back(j);
+        }
+    }
+    return rows;
 }
 
 template <class BaseMatrix>

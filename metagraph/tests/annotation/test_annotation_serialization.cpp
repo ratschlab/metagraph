@@ -24,11 +24,11 @@ TYPED_TEST(AnnotatorPresetTest, SerializationAndLoad) {
     ASSERT_FALSE(this->annotation->load(test_dump_basename_vec_bad));
     ASSERT_TRUE(this->annotation->load(test_dump_basename_vec_good));
 
-    EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(this->annotation->get(0)));
-    EXPECT_EQ(convert_to_set({}),                               convert_to_set(this->annotation->get(1)));
-    EXPECT_EQ(convert_to_set({ "Label1", "Label2" }),           convert_to_set(this->annotation->get(2)));
-    EXPECT_EQ(convert_to_set({ "Label1", "Label2", "Label8" }), convert_to_set(this->annotation->get(3)));
-    EXPECT_EQ(convert_to_set({ "Label2" }),                     convert_to_set(this->annotation->get(4)));
+    EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(this->annotation->get_labels(0)));
+    EXPECT_EQ(convert_to_set({}),                               convert_to_set(this->annotation->get_labels(1)));
+    EXPECT_EQ(convert_to_set({ "Label1", "Label2" }),           convert_to_set(this->annotation->get_labels(2)));
+    EXPECT_EQ(convert_to_set({ "Label1", "Label2", "Label8" }), convert_to_set(this->annotation->get_labels(3)));
+    EXPECT_EQ(convert_to_set({ "Label2" }),                     convert_to_set(this->annotation->get_labels(4)));
 }
 
 TYPED_TEST(AnnotatorPresetTest, SerializationAndLoadExtension1) {
@@ -42,11 +42,11 @@ TYPED_TEST(AnnotatorPresetTest, SerializationAndLoadExtension1) {
     ASSERT_FALSE(this->annotation->load(test_dump_basename_vec_bad + this->annotation->file_extension()));
     ASSERT_TRUE(this->annotation->load(test_dump_basename_vec_good + this->annotation->file_extension()));
 
-    EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(this->annotation->get(0)));
-    EXPECT_EQ(convert_to_set({}),                               convert_to_set(this->annotation->get(1)));
-    EXPECT_EQ(convert_to_set({ "Label1", "Label2" }),           convert_to_set(this->annotation->get(2)));
-    EXPECT_EQ(convert_to_set({ "Label1", "Label2", "Label8" }), convert_to_set(this->annotation->get(3)));
-    EXPECT_EQ(convert_to_set({ "Label2" }),                     convert_to_set(this->annotation->get(4)));
+    EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(this->annotation->get_labels(0)));
+    EXPECT_EQ(convert_to_set({}),                               convert_to_set(this->annotation->get_labels(1)));
+    EXPECT_EQ(convert_to_set({ "Label1", "Label2" }),           convert_to_set(this->annotation->get_labels(2)));
+    EXPECT_EQ(convert_to_set({ "Label1", "Label2", "Label8" }), convert_to_set(this->annotation->get_labels(3)));
+    EXPECT_EQ(convert_to_set({ "Label2" }),                     convert_to_set(this->annotation->get_labels(4)));
 }
 
 TYPED_TEST(AnnotatorPresetTest, SerializationAndLoadExtension2) {
@@ -60,11 +60,11 @@ TYPED_TEST(AnnotatorPresetTest, SerializationAndLoadExtension2) {
     ASSERT_FALSE(this->annotation->load(test_dump_basename_vec_bad));
     ASSERT_TRUE(this->annotation->load(test_dump_basename_vec_good));
 
-    EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(this->annotation->get(0)));
-    EXPECT_EQ(convert_to_set({}),                               convert_to_set(this->annotation->get(1)));
-    EXPECT_EQ(convert_to_set({ "Label1", "Label2" }),           convert_to_set(this->annotation->get(2)));
-    EXPECT_EQ(convert_to_set({ "Label1", "Label2", "Label8" }), convert_to_set(this->annotation->get(3)));
-    EXPECT_EQ(convert_to_set({ "Label2" }),                     convert_to_set(this->annotation->get(4)));
+    EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(this->annotation->get_labels(0)));
+    EXPECT_EQ(convert_to_set({}),                               convert_to_set(this->annotation->get_labels(1)));
+    EXPECT_EQ(convert_to_set({ "Label1", "Label2" }),           convert_to_set(this->annotation->get_labels(2)));
+    EXPECT_EQ(convert_to_set({ "Label1", "Label2", "Label8" }), convert_to_set(this->annotation->get_labels(3)));
+    EXPECT_EQ(convert_to_set({ "Label2" }),                     convert_to_set(this->annotation->get_labels(4)));
 }
 
 TYPED_TEST(AnnotatorPresetTest, SerializationAndLoadExtension3) {
@@ -78,11 +78,11 @@ TYPED_TEST(AnnotatorPresetTest, SerializationAndLoadExtension3) {
     ASSERT_FALSE(this->annotation->load(test_dump_basename_vec_bad + this->annotation->file_extension()));
     ASSERT_TRUE(this->annotation->load(test_dump_basename_vec_good + this->annotation->file_extension()));
 
-    EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(this->annotation->get(0)));
-    EXPECT_EQ(convert_to_set({}),                               convert_to_set(this->annotation->get(1)));
-    EXPECT_EQ(convert_to_set({ "Label1", "Label2" }),           convert_to_set(this->annotation->get(2)));
-    EXPECT_EQ(convert_to_set({ "Label1", "Label2", "Label8" }), convert_to_set(this->annotation->get(3)));
-    EXPECT_EQ(convert_to_set({ "Label2" }),                     convert_to_set(this->annotation->get(4)));
+    EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(this->annotation->get_labels(0)));
+    EXPECT_EQ(convert_to_set({}),                               convert_to_set(this->annotation->get_labels(1)));
+    EXPECT_EQ(convert_to_set({ "Label1", "Label2" }),           convert_to_set(this->annotation->get_labels(2)));
+    EXPECT_EQ(convert_to_set({ "Label1", "Label2", "Label8" }), convert_to_set(this->annotation->get_labels(3)));
+    EXPECT_EQ(convert_to_set({ "Label2" }),                     convert_to_set(this->annotation->get_labels(4)));
 }
 
 TYPED_TEST(AnnotatorPreset2Test, SerializationAndLoad) {
@@ -95,11 +95,11 @@ TYPED_TEST(AnnotatorPreset2Test, SerializationAndLoad) {
     ASSERT_FALSE(this->annotation->load(test_dump_basename_vec_bad));
     ASSERT_TRUE(this->annotation->load(test_dump_basename_vec_good));
 
-    EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(this->annotation->get(0)));
-    EXPECT_EQ(convert_to_set({}),                               convert_to_set(this->annotation->get(1)));
-    EXPECT_EQ(convert_to_set({ "Label1", "Label2" }),           convert_to_set(this->annotation->get(2)));
-    EXPECT_EQ(convert_to_set({}),                               convert_to_set(this->annotation->get(3)));
-    EXPECT_EQ(convert_to_set({ "Label8" }),                     convert_to_set(this->annotation->get(4)));
+    EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(this->annotation->get_labels(0)));
+    EXPECT_EQ(convert_to_set({}),                               convert_to_set(this->annotation->get_labels(1)));
+    EXPECT_EQ(convert_to_set({ "Label1", "Label2" }),           convert_to_set(this->annotation->get_labels(2)));
+    EXPECT_EQ(convert_to_set({}),                               convert_to_set(this->annotation->get_labels(3)));
+    EXPECT_EQ(convert_to_set({ "Label8" }),                     convert_to_set(this->annotation->get_labels(4)));
 }
 
 TYPED_TEST(AnnotatorPreset2Test, SerializationAndLoadExtension1) {
@@ -112,11 +112,11 @@ TYPED_TEST(AnnotatorPreset2Test, SerializationAndLoadExtension1) {
     ASSERT_FALSE(this->annotation->load(test_dump_basename_vec_bad));
     ASSERT_TRUE(this->annotation->load(test_dump_basename_vec_good));
 
-    EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(this->annotation->get(0)));
-    EXPECT_EQ(convert_to_set({}),                               convert_to_set(this->annotation->get(1)));
-    EXPECT_EQ(convert_to_set({ "Label1", "Label2" }),           convert_to_set(this->annotation->get(2)));
-    EXPECT_EQ(convert_to_set({}),                               convert_to_set(this->annotation->get(3)));
-    EXPECT_EQ(convert_to_set({ "Label8" }),                     convert_to_set(this->annotation->get(4)));
+    EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(this->annotation->get_labels(0)));
+    EXPECT_EQ(convert_to_set({}),                               convert_to_set(this->annotation->get_labels(1)));
+    EXPECT_EQ(convert_to_set({ "Label1", "Label2" }),           convert_to_set(this->annotation->get_labels(2)));
+    EXPECT_EQ(convert_to_set({}),                               convert_to_set(this->annotation->get_labels(3)));
+    EXPECT_EQ(convert_to_set({ "Label8" }),                     convert_to_set(this->annotation->get_labels(4)));
 }
 
 TYPED_TEST(AnnotatorPreset2Test, SerializationAndLoadExtension2) {
@@ -129,11 +129,11 @@ TYPED_TEST(AnnotatorPreset2Test, SerializationAndLoadExtension2) {
     ASSERT_FALSE(this->annotation->load(test_dump_basename_vec_bad));
     ASSERT_TRUE(this->annotation->load(test_dump_basename_vec_good));
 
-    EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(this->annotation->get(0)));
-    EXPECT_EQ(convert_to_set({}),                               convert_to_set(this->annotation->get(1)));
-    EXPECT_EQ(convert_to_set({ "Label1", "Label2" }),           convert_to_set(this->annotation->get(2)));
-    EXPECT_EQ(convert_to_set({}),                               convert_to_set(this->annotation->get(3)));
-    EXPECT_EQ(convert_to_set({ "Label8" }),                     convert_to_set(this->annotation->get(4)));
+    EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(this->annotation->get_labels(0)));
+    EXPECT_EQ(convert_to_set({}),                               convert_to_set(this->annotation->get_labels(1)));
+    EXPECT_EQ(convert_to_set({ "Label1", "Label2" }),           convert_to_set(this->annotation->get_labels(2)));
+    EXPECT_EQ(convert_to_set({}),                               convert_to_set(this->annotation->get_labels(3)));
+    EXPECT_EQ(convert_to_set({ "Label8" }),                     convert_to_set(this->annotation->get_labels(4)));
 }
 
 TYPED_TEST(AnnotatorPreset2Test, SerializationAndLoadExtension3) {
@@ -146,11 +146,11 @@ TYPED_TEST(AnnotatorPreset2Test, SerializationAndLoadExtension3) {
     ASSERT_FALSE(this->annotation->load(test_dump_basename_vec_bad));
     ASSERT_TRUE(this->annotation->load(test_dump_basename_vec_good));
 
-    EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(this->annotation->get(0)));
-    EXPECT_EQ(convert_to_set({}),                               convert_to_set(this->annotation->get(1)));
-    EXPECT_EQ(convert_to_set({ "Label1", "Label2" }),           convert_to_set(this->annotation->get(2)));
-    EXPECT_EQ(convert_to_set({}),                               convert_to_set(this->annotation->get(3)));
-    EXPECT_EQ(convert_to_set({ "Label8" }),                     convert_to_set(this->annotation->get(4)));
+    EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(this->annotation->get_labels(0)));
+    EXPECT_EQ(convert_to_set({}),                               convert_to_set(this->annotation->get_labels(1)));
+    EXPECT_EQ(convert_to_set({ "Label1", "Label2" }),           convert_to_set(this->annotation->get_labels(2)));
+    EXPECT_EQ(convert_to_set({}),                               convert_to_set(this->annotation->get_labels(3)));
+    EXPECT_EQ(convert_to_set({ "Label8" }),                     convert_to_set(this->annotation->get_labels(4)));
 }
 
 TYPED_TEST(AnnotatorDynamicNoSparseTest, MergeLoadDisjoint) {
@@ -161,17 +161,17 @@ TYPED_TEST(AnnotatorDynamicNoSparseTest, MergeLoadDisjoint) {
 
     {
         TypeParam annotation(5);
-        annotation.set(0, { "Label0", "Label2", "Label8" });
-        annotation.set(2, { "Label1", "Label2" });
-        annotation.set(4, { "Label8" });
+        annotation.add_labels({ 0 }, { "Label0", "Label2", "Label8" });
+        annotation.add_labels({ 2 }, { "Label1", "Label2" });
+        annotation.add_labels({ 4 }, { "Label8" });
 
         annotation.serialize(test_dump_basename_vec_good + "_1");
     }
     {
         TypeParam annotation(5);
-        annotation.set(1, { "2_Label0", "2_Label2", "2_Label8" });
-        annotation.set(2, { "2_Label1", "2_Label9", "2_Label0" });
-        annotation.set(3, { "2_Label8" });
+        annotation.add_labels({ 1 }, { "2_Label0", "2_Label2", "2_Label8" });
+        annotation.add_labels({ 2 }, { "2_Label1", "2_Label9", "2_Label0" });
+        annotation.add_labels({ 3 }, { "2_Label8" });
 
         annotation.serialize(test_dump_basename_vec_good + "_2");
     }
@@ -181,11 +181,11 @@ TYPED_TEST(AnnotatorDynamicNoSparseTest, MergeLoadDisjoint) {
                                             test_dump_basename_vec_good + "_2" }));
 
         EXPECT_EQ(5u, annotation.num_objects());
-        EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(annotation.get(0)));
-        EXPECT_EQ(convert_to_set({ "2_Label0", "2_Label2", "2_Label8" }), convert_to_set(annotation.get(1)));
-        EXPECT_EQ(convert_to_set({ "Label1", "2_Label1", "Label2", "2_Label9", "2_Label0" }), convert_to_set(annotation.get(2)));
-        EXPECT_EQ(convert_to_set({ "2_Label8" }), convert_to_set(annotation.get(3)));
-        EXPECT_EQ(convert_to_set({ "Label8" }), convert_to_set(annotation.get(4)));
+        EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(annotation.get_labels(0)));
+        EXPECT_EQ(convert_to_set({ "2_Label0", "2_Label2", "2_Label8" }), convert_to_set(annotation.get_labels(1)));
+        EXPECT_EQ(convert_to_set({ "Label1", "2_Label1", "Label2", "2_Label9", "2_Label0" }), convert_to_set(annotation.get_labels(2)));
+        EXPECT_EQ(convert_to_set({ "2_Label8" }), convert_to_set(annotation.get_labels(3)));
+        EXPECT_EQ(convert_to_set({ "Label8" }), convert_to_set(annotation.get_labels(4)));
     }
 }
 
@@ -198,9 +198,9 @@ TYPED_TEST(AnnotatorDynamicNoSparseTest, MergeLoad) {
     this->annotation->serialize(test_dump_basename_vec_good + "_1");
 
     this->annotation.reset(new TypeParam(5));
-    this->annotation->set(1, { "Label0", "Label2", "Label8" });
-    this->annotation->set(2, { "Label1", "Label9", "Label0" });
-    this->annotation->set(3, { "Label8" });
+    this->annotation->add_labels({ 1 }, { "Label0", "Label2", "Label8" });
+    this->annotation->add_labels({ 2 }, { "Label1", "Label9", "Label0" });
+    this->annotation->add_labels({ 3 }, { "Label8" });
     this->annotation->serialize(test_dump_basename_vec_good + "_2");
 
     this->annotation.reset(new TypeParam(0));
@@ -208,15 +208,15 @@ TYPED_TEST(AnnotatorDynamicNoSparseTest, MergeLoad) {
                                                test_dump_basename_vec_good + "_2" }));
 
     EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }),
-              convert_to_set(this->annotation->get(0)));
+              convert_to_set(this->annotation->get_labels(0)));
     EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }),
-              convert_to_set(this->annotation->get(1)));
+              convert_to_set(this->annotation->get_labels(1)));
     EXPECT_EQ(convert_to_set({ "Label1", "Label2", "Label9", "Label0" }),
-              convert_to_set(this->annotation->get(2)));
+              convert_to_set(this->annotation->get_labels(2)));
     EXPECT_EQ(convert_to_set({ "Label8" }),
-              convert_to_set(this->annotation->get(3)));
+              convert_to_set(this->annotation->get_labels(3)));
     EXPECT_EQ(convert_to_set({ "Label8" }),
-              convert_to_set(this->annotation->get(4)));
+              convert_to_set(this->annotation->get_labels(4)));
 }
 
 } // namespace

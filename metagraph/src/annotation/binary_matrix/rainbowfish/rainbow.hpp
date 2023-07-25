@@ -9,7 +9,7 @@
 
 namespace mtg {
 namespace annot {
-namespace binmat {
+namespace matrix {
 
 template <class MatrixType>
 class Rainbow : public RainbowMatrix {
@@ -30,13 +30,6 @@ class Rainbow : public RainbowMatrix {
     uint64_t num_rows() const override;
     uint64_t num_distinct_rows() const override { return reduced_matrix_.num_rows(); }
 
-    // row is in [0, num_rows), column is in [0, num_columns)
-    bool get(Row row, Column column) const override;
-    std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const override;
-    // Return unique rows (in arbitrary order) and update the row indexes
-    // in |rows| to point to their respective rows in the vector returned.
-    std::vector<SetBitPositions> get_rows(std::vector<Row> *rows,
-                                          size_t num_threads = 1) const override;
     std::vector<Row> get_column(Column column) const override;
 
     bool load(std::istream &in) override;
@@ -56,12 +49,12 @@ class Rainbow : public RainbowMatrix {
     MatrixType reduced_matrix_;
 
     uint64_t get_code(Row row) const override;
-    SetBitPositions code_to_row(uint64_t c) const override {
-        return reduced_matrix_.get_row(c);
+    std::vector<SetBitPositions> codes_to_rows(const std::vector<uint64_t> &rows) const override {
+        return reduced_matrix_.get_rows(rows);
     }
 };
 
-} // namespace binmat
+} // namespace matrix
 } // namespace annot
 } // namespace mtg
 

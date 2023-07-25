@@ -21,7 +21,6 @@
 
 namespace mtg {
 
-using namespace mtg::annot::binmat;
 using namespace mtg::annot::matrix;
 
 namespace annot {
@@ -254,21 +253,23 @@ void test_matrix(const TypeParam &matrix, const BitVectorPtrArray &columns) {
         }
     }
 
-    // check get_row
-    for (size_t i = 0, n_rows = matrix.num_rows(); i < n_rows; ++i) {
-        auto row_set_bits = matrix.get_row(i);
+    if (const auto *m = dynamic_cast<const RowMajor*>(&matrix)) {
+        // check get_row
+        for (size_t i = 0, n_rows = matrix.num_rows(); i < n_rows; ++i) {
+            auto row_set_bits = m->get_row(i);
 
-        // make sure all returned indexes are unique
-        ASSERT_EQ(row_set_bits.size(), convert_to_set(row_set_bits).size());
+            // make sure all returned indexes are unique
+            ASSERT_EQ(row_set_bits.size(), convert_to_set(row_set_bits).size());
 
-        for (auto j : row_set_bits) {
-            ASSERT_TRUE(j < matrix.num_columns());
-            EXPECT_TRUE((*columns[j])[i]);
-        }
+            for (auto j : row_set_bits) {
+                ASSERT_TRUE(j < matrix.num_columns());
+                EXPECT_TRUE((*columns[j])[i]);
+            }
 
-        auto set_bits = convert_to_set(row_set_bits);
-        for (size_t j = 0; j < columns.size(); ++j) {
-            EXPECT_EQ((*columns[j])[i], set_bits.count(j));
+            auto set_bits = convert_to_set(row_set_bits);
+            for (size_t j = 0; j < columns.size(); ++j) {
+                EXPECT_EQ((*columns[j])[i], set_bits.count(j));
+            }
         }
     }
 
@@ -301,46 +302,13 @@ void test_matrix(const TypeParam &matrix, const BitVectorPtrArray &columns) {
         }
     }
 
-    // check slice_rows, query first |n| rows
-    for (size_t n : { size_t(0),
-                      size_t(matrix.num_rows() / 2),
-                      size_t(matrix.num_rows()) }) {
-        std::vector<uint64_t> indices(n);
-        std::iota(indices.begin(), indices.end(), 0);
-
-        auto slice = matrix.slice_rows(indices);
-
-        ASSERT_TRUE(slice.size() >= indices.size());
-
-        auto row_begin = slice.begin();
-
-        for (size_t i = 0; i < indices.size(); ++i) {
-            // every row in `slice` ends with `-1`
-            auto row_end = std::find(row_begin, slice.end(),
-                                     std::numeric_limits<BinaryMatrix::Column>::max());
-            std::vector<BinaryMatrix::Column> row_set_bits(row_begin, row_end);
-            row_begin = row_end + 1;
-
-            // make sure all returned indexes are unique
-            ASSERT_EQ(row_set_bits.size(), convert_to_set(row_set_bits).size());
-
-            for (auto j : row_set_bits) {
-                ASSERT_TRUE(j < matrix.num_columns());
-                EXPECT_TRUE((*columns[j])[i]);
+    if (const auto *m = dynamic_cast<const GetEntrySupport*>(&matrix)) {
+        // check get
+        for (size_t i = 0, n_rows = matrix.num_rows(); i < n_rows; ++i) {
+            for (size_t j = 0; j < matrix.num_columns(); ++j) {
+                EXPECT_EQ(columns[j]->operator[](i), m->get(i, j))
+                    << i << " " << j;
             }
-
-            auto set_bits = convert_to_set(row_set_bits);
-            for (size_t j = 0; j < columns.size(); ++j) {
-                EXPECT_EQ((*columns[j])[i], set_bits.count(j));
-            }
-        }
-    }
-
-    // check get
-    for (size_t i = 0, n_rows = matrix.num_rows(); i < n_rows; ++i) {
-        for (size_t j = 0; j < matrix.num_columns(); ++j) {
-            EXPECT_EQ(columns[j]->operator[](i), matrix.get(i, j))
-                << i << " " << j;
         }
     }
 

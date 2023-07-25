@@ -6,7 +6,7 @@
 
 namespace mtg {
 namespace annot {
-namespace binmat {
+namespace matrix {
 
 uint64_t ColumnMajor::num_rows() const {
     if (!columns_.size()) {
@@ -22,19 +22,6 @@ bool ColumnMajor::get(Row row, Column column) const {
     assert(columns_[column]);
     assert(row < columns_[column]->size());
     return (*columns_[column])[row];
-}
-
-ColumnMajor::SetBitPositions ColumnMajor::get_row(Row row) const {
-    assert(row < num_rows() || !columns_.size());
-
-    SetBitPositions result;
-    for (size_t i = 0; i < columns_.size(); ++i) {
-        assert(columns_[i]);
-
-        if ((*columns_[i])[row])
-            result.push_back(i);
-    }
-    return result;
 }
 
 std::vector<ColumnMajor::SetBitPositions>
@@ -87,20 +74,6 @@ ColumnMajor::get_column_ranks(const std::vector<Row> &row_ids) const {
     }
 
     return result;
-}
-
-std::vector<ColumnMajor::Column>
-ColumnMajor::slice_rows(const std::vector<Row> &row_ids) const {
-    std::vector<Column> slice;
-
-    for (const auto &row : get_rows(row_ids)) {
-        for (uint64_t j : row) {
-            slice.push_back(j);
-        }
-        slice.push_back(std::numeric_limits<Column>::max());
-    }
-
-    return slice;
 }
 
 void ColumnMajor::call_columns(const std::vector<Column> &columns,
@@ -172,13 +145,7 @@ uint64_t ColumnMajor::num_relations() const {
 
 std::vector<std::pair<ColumnMajor::Column, size_t /* count */>>
 ColumnMajor::sum_rows(const std::vector<std::pair<Row, size_t>> &index_counts,
-                       size_t min_count,
-                       size_t count_cap) const {
-    assert(count_cap >= min_count);
-
-    if (!count_cap)
-        return {};
-
+                      size_t min_count) const {
     min_count = std::max(min_count, size_t(1));
 
     size_t total_sum_count = 0;
@@ -202,18 +169,17 @@ ColumnMajor::sum_rows(const std::vector<std::pair<Row, size_t>> &index_counts,
             total_checked += count;
             total_matched += count * column[i];
 
-            if (total_matched >= count_cap
-                    || total_matched + (total_sum_count - total_checked) < min_count)
+            if (total_matched + (total_sum_count - total_checked) < min_count)
                 break;
         }
 
         if (total_matched >= min_count)
-            result.emplace_back(j, std::min(total_matched, count_cap));
+            result.emplace_back(j, total_matched);
     }
 
     return result;
 }
 
-} // namespace binmat
+} // namespace matrix
 } // namespace annot
 } // namespace mtg

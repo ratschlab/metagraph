@@ -10,51 +10,23 @@
 
 namespace mtg {
 namespace annot {
-namespace binmat {
+namespace matrix {
 
 bool BRWT::get(Row row, Column column) const {
     assert(row < num_rows());
     assert(column < num_columns());
 
+    // if this is a leaf
+    if (!child_nodes_.size())
+        return (*nonzero_rows_)[row];
+
+    uint64_t rank = nonzero_rows_->conditional_rank1(row);
     // terminate if the index bit is unset
-    if (!(*nonzero_rows_)[row])
+    if (!rank)
         return false;
 
-    // return true if this is a leaf
-    if (!child_nodes_.size())
-        return true;
-
     auto child_node = assignments_.group(column);
-    return child_nodes_[child_node]->get(nonzero_rows_->rank1(row) - 1,
-                                         assignments_.rank(column));
-}
-
-BRWT::SetBitPositions BRWT::get_row(Row row) const {
-    assert(row < num_rows());
-
-    // check if the row is empty
-    if (!(*nonzero_rows_)[row])
-        return {};
-
-    // check whether it is a leaf
-    if (!child_nodes_.size()) {
-        assert(assignments_.size() == 1);
-        // the bit is set
-        return { 0 };
-    }
-
-    // check all child nodes
-    SetBitPositions row_set_bits;
-    uint64_t index_in_child = nonzero_rows_->rank1(row) - 1;
-
-    for (size_t i = 0; i < child_nodes_.size(); ++i) {
-        const auto &child = *child_nodes_[i];
-
-        for (auto col_id : child.get_row(index_in_child)) {
-            row_set_bits.push_back(assignments_.get(i, col_id));
-        }
-    }
-    return row_set_bits;
+    return child_nodes_[child_node]->get(rank - 1, assignments_.rank(column));
 }
 
 Vector<std::pair<BRWT::Column, uint64_t>> BRWT::get_column_ranks(Row i) const {
@@ -107,7 +79,7 @@ BRWT::get_rows(const std::vector<Row> &row_ids) const {
     return rows;
 }
 
-std::vector<BRWT::Column> BRWT::slice_rows(const std::vector<Row> &row_ids) const {
+BRWT::SetBitPositions BRWT::slice_rows(const std::vector<Row> &row_ids) const {
     return slice_rows<Column>(row_ids);
 }
 
@@ -116,8 +88,8 @@ std::vector<BRWT::Column> BRWT::slice_rows(const std::vector<Row> &row_ids) cons
 // If T = std::pair<Column, uint64_t>
 //      return positions of set bits with their column ranks.
 template <typename T>
-std::vector<T> BRWT::slice_rows(const std::vector<Row> &row_ids) const {
-    std::vector<T> slice;
+Vector<T> BRWT::slice_rows(const std::vector<Row> &row_ids) const {
+    Vector<T> slice;
     // expect at least one relation per row
     slice.reserve(row_ids.size() * 2);
 
@@ -202,14 +174,14 @@ std::vector<T> BRWT::slice_rows(const std::vector<Row> &row_ids) const {
     }
 
     if (!child_row_ids.size())
-        return std::vector<T>(row_ids.size(), delim);
+        return Vector<T>(row_ids.size(), delim);
 
     // TODO: query by columns and merge them in the very end to avoid remapping
     //       the same column indexes many times when propagating to the root.
     // TODO: implement a cache efficient method for merging the columns.
 
     // query all children subtrees and get relations from them
-    std::vector<std::vector<T>> child_slices(child_nodes_.size());
+    std::vector<Vector<T>> child_slices(child_nodes_.size());
     std::vector<const T *> pos(child_nodes_.size());
 
     for (size_t j = 0; j < child_nodes_.size(); ++j) {
@@ -245,7 +217,7 @@ std::vector<Vector<std::pair<BRWT::Column, uint64_t>>>
 BRWT::get_column_ranks(const std::vector<Row> &row_ids) const {
     std::vector<Vector<std::pair<Column, uint64_t>>> rows(row_ids.size());
 
-    std::vector<std::pair<Column, uint64_t>> slice
+    Vector<std::pair<Column, uint64_t>> slice
             = slice_rows<std::pair<Column, uint64_t>>(row_ids);
 
     assert(slice.size() >= row_ids.size());
@@ -446,6 +418,6 @@ void BRWT::BFT(std::function<void(const BRWT &node)> callback) const {
     }
 }
 
-} // namespace binmat
+} // namespace matrix
 } // namespace annot
 } // namespace mtg

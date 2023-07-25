@@ -931,7 +931,7 @@ if (advanced) {
             fprintf(stderr, "\tannotate\tgiven a graph and a fast[a|q] file, annotate\n");
             fprintf(stderr, "\t\t\tthe respective kmers\n\n");
 if (advanced) {
-            fprintf(stderr, "\tmerge_anno\tmerge annotation columns\n\n");
+            fprintf(stderr, "\tmerge_anno\tmerge annotations\n\n");
 }
             fprintf(stderr, "\trelax_brwt\toptimize the tree structure in brwt annotator\n\n");
 
@@ -1227,9 +1227,6 @@ if (advanced) {
             fprintf(stderr, "Usage: %s merge_anno -o <annotation-basename> [options] ANNOT1 [[ANNOT2] ...]\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for annotate:\n");
-            fprintf(stderr, "\t   --anno-type [STR] \ttarget annotation representation [column]\n");
-            fprintf(stderr, "%s\n", annotation_list);
-            // fprintf(stderr, "\t   --sparse \t\tuse the row-major sparse matrix to annotate graph [off]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
         case TRANSFORM_ANNOTATION: {

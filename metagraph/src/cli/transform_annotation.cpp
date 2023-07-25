@@ -22,17 +22,17 @@ using namespace mtg::annot;
 using mtg::common::logger;
 using mtg::common::get_verbose;
 
-typedef MultiLabelEncoded<std::string> Annotator;
+typedef MultiLabelAnnotation<std::string> Annotator;
 
-typedef matrix::TupleCSCMatrix<binmat::ColumnMajor> TupleCSC;
-typedef matrix::TupleCSCMatrix<binmat::BRWT> TupleBRWT;
+typedef matrix::TupleCSCMatrix<matrix::ColumnMajor> TupleCSC;
+typedef matrix::TupleCSCMatrix<matrix::BRWT> TupleBRWT;
 
 static const Eigen::IOFormat CSVFormat(Eigen::StreamPrecision,
                                        Eigen::DontAlignCols, " ", "\n");
 
 
 template <class T>
-binmat::LinkageMatrix cluster_columns(const std::vector<std::string> &files,
+matrix::LinkageMatrix cluster_columns(const std::vector<std::string> &files,
                                       Config::AnnotationType anno_type,
                                       uint64_t num_rows_subsampled) {
     std::vector<uint64_t> row_indexes;
@@ -58,7 +58,7 @@ binmat::LinkageMatrix cluster_columns(const std::vector<std::string> &files,
                 if (row_indexes.empty()) {
                     num_rows = column->size();
                     if (std::is_same_v<T, sdsl::bit_vector>)
-                        row_indexes = binmat::sample_row_indexes(num_rows,
+                        row_indexes = matrix::sample_row_indexes(num_rows,
                                                                  num_rows_subsampled);
                 } else if (column->size() != num_rows) {
                     logger->error("Size of column {} is {} != {}", label,
@@ -78,7 +78,7 @@ binmat::LinkageMatrix cluster_columns(const std::vector<std::string> &files,
                         (*subvector)[j] = true;
                 }
             } else {
-                static_assert(std::is_same_v<T, binmat::SparseColumn>);
+                static_assert(std::is_same_v<T, matrix::SparseColumn>);
 
                 uint64_t &size = subvector->size;
                 std::vector<uint64_t> &set_bits = subvector->set_bits;
@@ -118,7 +118,7 @@ binmat::LinkageMatrix cluster_columns(const std::vector<std::string> &files,
         subcolumns.at(column_ids[i]) = std::move(*subcolumn_ptrs[i]);
     }
 
-    return binmat::agglomerative_greedy_linkage(std::move(subcolumns), get_num_threads());
+    return matrix::agglomerative_greedy_linkage(std::move(subcolumns), get_num_threads());
 }
 
 uint64_t get_num_columns(const std::vector<std::string> &files,
@@ -141,7 +141,7 @@ uint64_t get_num_columns(const std::vector<std::string> &files,
     return num_columns;
 }
 
-binmat::LinkageMatrix trivial_linkage(const std::vector<std::string> &files,
+matrix::LinkageMatrix trivial_linkage(const std::vector<std::string> &files,
                                       Config::AnnotationType anno_type) {
     logger->trace("Computing total number of columns");
     uint64_t num_columns = get_num_columns(files, anno_type);
@@ -149,10 +149,10 @@ binmat::LinkageMatrix trivial_linkage(const std::vector<std::string> &files,
     logger->trace("Generating trivial linkage matrix for {} columns",
                   num_columns);
 
-    return binmat::agglomerative_linkage_trivial(num_columns);
+    return matrix::agglomerative_linkage_trivial(num_columns);
 }
 
-binmat::LinkageMatrix compute_linkage(const std::vector<std::string> &files,
+matrix::LinkageMatrix compute_linkage(const std::vector<std::string> &files,
                                       Config::AnnotationType anno_type,
                                       const Config &config) {
     if (config.greedy_brwt) {
@@ -160,7 +160,7 @@ binmat::LinkageMatrix compute_linkage(const std::vector<std::string> &files,
             return cluster_columns<sdsl::bit_vector>(files, anno_type,
                                                      config.num_rows_subsampled);
         } else {
-            return cluster_columns<binmat::SparseColumn>(files, anno_type,
+            return cluster_columns<matrix::SparseColumn>(files, anno_type,
                                                          config.num_rows_subsampled);
         }
     } else {
@@ -218,7 +218,7 @@ auto convert_to_MultiBRWT(const std::vector<std::string> &files,
     std::string linkage_file = config.linkage_file;
     if (!linkage_file.size()) {
         logger->trace("Generating new column linkage...");
-        binmat::LinkageMatrix linkage_matrix
+        matrix::LinkageMatrix linkage_matrix
                 = compute_linkage(files, Config::ColumnCompressed, config);
         linkage_file = config.outfbase + ".linkage";
         std::ofstream out(linkage_file);
@@ -272,7 +272,7 @@ convert_to_IntMultiBRWT(const std::vector<std::string> &files,
 
     auto multi_brwt = brwt_annotator->release_matrix();
     return IntMultiBRWTAnnotator(
-                std::make_unique<matrix::CSCMatrix<binmat::BRWT, CountsVector>>(
+                std::make_unique<matrix::CSCMatrix<matrix::BRWT, CountsVector>>(
                         std::move(*multi_brwt), std::move(column_values)),
                 brwt_annotator->get_label_encoder());
 }
@@ -538,22 +538,20 @@ int transform_annotation(Config *config) {
         logger->trace("Loading input annotations and computing the inner product...");
 
         for (const auto &file : files) {
-            std::unique_ptr<MultiLabelEncoded<std::string>> annotator
+            std::unique_ptr<MultiLabelAnnotation<std::string>> annotator
                     = initialize_annotation(file, *config);
             if (!annotator->load(file)) {
                 logger->error("Cannot load annotations from file '{}'", file);
                 exit(1);
             }
 
-            for (const std::string &base_label : base_columns.get_all_labels()) {
+            for (const std::string &base_label : base_columns.get_label_encoder().get_labels()) {
                 std::vector<std::pair<uint64_t, size_t>> col;
                 base_columns.get_column(base_label).call_ones([&col](uint64_t i) {
                     col.emplace_back(i, 1);
                 });
                 // TODO: make parallel (call sum_rows on batches)
-                auto row_sum = annotator->get_matrix().sum_rows(std::move(col),
-                                                                config->min_count,
-                                                                config->max_count);
+                auto row_sum = annotator->get_matrix().sum_rows(col, config->min_count);
 
                 std::cout << fmt::format("({}<{}>, {}<*>):", config->intersected_columns,
                                          base_label, file);
@@ -581,7 +579,7 @@ int transform_annotation(Config *config) {
             exit(1);
         }
 
-        binmat::LinkageMatrix linkage_matrix
+        matrix::LinkageMatrix linkage_matrix
                 = compute_linkage(files, input_anno_type, *config);
 
         std::ofstream out(config->outfbase);
@@ -821,7 +819,7 @@ int transform_annotation(Config *config) {
                 logger->trace("Annotation converted in {} sec", timer.elapsed());
 
                 auto label_encoder = int_annotation.get_label_encoder();
-                using CSCMatrix = matrix::CSCMatrix<binmat::BRWT, CountsVector>;
+                using CSCMatrix = matrix::CSCMatrix<matrix::BRWT, CountsVector>;
                 auto matrix = std::make_unique<matrix::IntRowDiff<CSCMatrix>>(nullptr,
                                 std::move(*int_annotation.release_matrix()));
                 matrix->load_anchor(anchors_file);
@@ -861,7 +859,7 @@ int transform_annotation(Config *config) {
 
                 if (!config->linkage_file.size()) {
                     logger->trace("Generating new column linkage...");
-                    binmat::LinkageMatrix linkage_matrix
+                    matrix::LinkageMatrix linkage_matrix
                             = compute_linkage(files, input_anno_type, *config);
                     config->linkage_file = config->outfbase + ".linkage";
                     std::ofstream out(config->linkage_file);
@@ -880,9 +878,9 @@ int transform_annotation(Config *config) {
                 logger->trace("Annotation converted in {} sec", timer.elapsed());
 
                 logger->trace("Serializing to '{}'", config->outfbase);
-                const_cast<binmat::RowDiff<binmat::BRWT> &>(brwt_annotator->get_matrix())
+                const_cast<matrix::RowDiff<matrix::BRWT> &>(brwt_annotator->get_matrix())
                         .load_anchor(anchors_file);
-                const_cast<binmat::RowDiff<binmat::BRWT> &>(brwt_annotator->get_matrix())
+                const_cast<matrix::RowDiff<matrix::BRWT> &>(brwt_annotator->get_matrix())
                         .load_fork_succ(fork_succ_file);
                 brwt_annotator->serialize(config->outfbase);
 
@@ -922,48 +920,27 @@ int merge_annotation(Config *config) {
 
     const auto &files = config->fnames;
 
-    if (config->anno_type == Config::ColumnCompressed) {
+    if (!files.size()) {
+        logger->info("Nothing to merge");
+        return 0;
+    }
+
+    auto anno_type = parse_annotation_type(files[0]);
+
+    if (anno_type == Config::ColumnCompressed) {
         ColumnCompressed<> annotation(0, config->num_columns_cached);
         if (!annotation.merge_load(files)) {
             logger->error("Cannot load annotations");
             exit(1);
         }
         annotation.serialize(config->outfbase);
-        return 0;
-    }
-
-    std::vector<std::unique_ptr<Annotator>> annotators;
-    std::vector<std::string> stream_files;
-
-    for (const auto &filename : files) {
-        auto anno_file_type = parse_annotation_type(filename);
-        if (anno_file_type == Config::AnnotationType::RowCompressed) {
-            stream_files.push_back(filename);
-        } else {
-            auto annotator = initialize_annotation(filename, *config);
-            if (!annotator->load(filename)) {
-                logger->error("Cannot load annotations from file '{}'", filename);
-                exit(1);
-            }
-            annotators.push_back(std::move(annotator));
-        }
-    }
-
-    if (config->anno_type == Config::RowCompressed) {
-        merge<RowCompressed<>>(std::move(annotators), stream_files, config->outfbase);
-    } else if (config->anno_type == Config::RowFlat) {
-        merge<RowFlatAnnotator>(std::move(annotators), stream_files, config->outfbase);
-    } else if (config->anno_type == Config::RBFish) {
-        merge<RainbowfishAnnotator>(std::move(annotators), stream_files, config->outfbase);
-    } else if (config->anno_type == Config::BinRelWT_sdsl) {
-        merge<BinRelWT_sdslAnnotator>(std::move(annotators), stream_files, config->outfbase);
-    } else if (config->anno_type == Config::BinRelWT) {
-        merge<BinRelWTAnnotator>(std::move(annotators), stream_files, config->outfbase);
-    } else if (config->anno_type == Config::BRWT) {
-        merge<MultiBRWTAnnotator>(std::move(annotators), stream_files, config->outfbase);
+    } else if (anno_type == Config::RowCompressed) {
+        merge_row_compressed(files, config->outfbase);
+    } else if (anno_type == Config::BRWT) {
+        merge_brwt(files, config->outfbase);
     } else {
         logger->error("Merging of annotations to '{}' representation is not implemented",
-                      config->annotype_to_string(config->anno_type));
+                      config->annotype_to_string(anno_type));
         exit(1);
     }
 
@@ -982,7 +959,7 @@ int relax_multi_brwt(Config *config) {
 
     const std::string &fname = files.at(0);
 
-    std::unique_ptr<MultiLabelEncoded<std::string>> annotator;
+    std::unique_ptr<MultiLabelAnnotation<std::string>> annotator;
     Config::AnnotationType anno_type = parse_annotation_type(fname);
     switch (anno_type) {
         case Config::BRWT:
@@ -1019,7 +996,7 @@ int relax_multi_brwt(Config *config) {
     }
     logger->trace("Annotator loaded in {} sec", timer.elapsed());
 
-    const binmat::BinaryMatrix *mat = &annotator->get_matrix();
+    const matrix::BinaryMatrix *mat = &annotator->get_matrix();
 
     if (const auto *rd_brwt = dynamic_cast<RowDiffBRWTAnnotator *>(annotator.get())) {
         mat = &rd_brwt->get_matrix().diffs();
@@ -1029,7 +1006,7 @@ int relax_multi_brwt(Config *config) {
         mat = &rd_brwt_coord->get_matrix().diffs();
     }
 
-    if (const auto *rb_brwt = dynamic_cast<const binmat::Rainbow<binmat::BRWT> *>(mat)) {
+    if (const auto *rb_brwt = dynamic_cast<const matrix::Rainbow<matrix::BRWT> *>(mat)) {
         mat = &rb_brwt->get_reduced_matrix();
     }
 
@@ -1038,7 +1015,7 @@ int relax_multi_brwt(Config *config) {
     }
 
     logger->trace("Relaxing BRWT tree...");
-    relax_BRWT(&dynamic_cast<binmat::BRWT &>(const_cast<binmat::BinaryMatrix &>(*mat)),
+    relax_BRWT(&dynamic_cast<matrix::BRWT &>(const_cast<matrix::BinaryMatrix &>(*mat)),
                config->relax_arity_brwt, get_num_threads());
 
     annotator->serialize(config->outfbase);

@@ -15,7 +15,7 @@
 namespace {
 
 using namespace mtg;
-using namespace mtg::annot::binmat;
+using namespace mtg::annot::matrix;
 using namespace mtg::test;
 
 template <typename BinMat>

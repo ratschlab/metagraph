@@ -1,16 +1,17 @@
 #include "unique_row_binmat.hpp"
 
+#include <tsl/hopscotch_set.h>
 #include <sdsl/int_vector.hpp>
-#include <tsl/ordered_set.h>
 
 #include "common/hashers/hash.hpp"
+#include "common/vector_set.hpp"
 #include "common/algorithms.hpp"
 #include "common/serialization.hpp"
 
 
 namespace mtg {
 namespace annot {
-namespace binmat {
+namespace matrix {
 
 UniqueRowBinmat::UniqueRowBinmat(uint64_t num_rows)
       : unique_rows_(1), row_rank_(num_rows, 0) {}
@@ -38,13 +39,7 @@ UniqueRowBinmat
                   uint32_t num_columns) {
     num_columns_ = num_columns;
 
-    using RowSet = tsl::ordered_set<SetBitPositions,
-                                    utils::VectorHash,
-                                    std::equal_to<SetBitPositions>,
-                                    std::allocator<SetBitPositions>,
-                                    std::vector<SetBitPositions>,
-                                    uint32_t>;
-    RowSet unique_rows;
+    VectorSet<SetBitPositions, utils::VectorHash, uint32_t> unique_rows;
 
     call_rows([&](const SetBitPositions &row) {
         num_relations_ += row.size();
@@ -59,31 +54,9 @@ UniqueRowBinmat
     );
 }
 
-bool UniqueRowBinmat::get(Row i, Column j) const {
-    assert(i < row_rank_.size());
-    assert(row_rank_[i] < unique_rows_.size());
-    const auto &row = unique_rows_[row_rank_[i]];
-    return std::find(row.begin(), row.end(), j) != row.end();
-}
-
-std::vector<BinaryMatrix::SetBitPositions>
-UniqueRowBinmat::get_rows(const std::vector<Row> &row_ids) const {
-    std::vector<SetBitPositions> rows;
-    std::vector<size_t> ranks;
-    rows.reserve(row_ids.size());
-    ranks.reserve(row_ids.size());
-    for (Row i : row_ids) {
-        ranks.push_back(row_rank_[i]);
-    }
-    for (size_t r : ranks) {
-        rows.push_back(unique_rows_[r]);
-    }
-    return rows;
-}
-
 std::vector<UniqueRowBinmat::Row> UniqueRowBinmat::get_column(Column j) const {
     // first, find all unique rows with `1` in the j-th column
-    tsl::ordered_set<uint32_t> row_ranks;
+    tsl::hopscotch_set<uint32_t> row_ranks;
     for (uint32_t r = 0; r < unique_rows_.size(); ++r) {
         const auto &row = unique_rows_[r];
         if (std::find(row.begin(), row.end(), j) != row.end())
@@ -159,6 +132,6 @@ double UniqueRowBinmat::density() const {
     return static_cast<double>(num_relations()) / num_columns() / num_rows();
 }
 
-} // namespace binmat
+} // namespace matrix
 } // namespace annot
 } // namespace mtg

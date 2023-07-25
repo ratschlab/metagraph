@@ -13,7 +13,7 @@
 
 namespace mtg {
 namespace annot {
-namespace binmat {
+namespace matrix {
 
 class BRWTBottomUpBuilder {
   public:
@@ -74,7 +74,7 @@ class BRWTOptimizer {
     static double pruning_delta(const BRWT &node);
 };
 
-} // namespace binmat
+} // namespace matrix
 } // namespace annot
 } // namespace mtg
 

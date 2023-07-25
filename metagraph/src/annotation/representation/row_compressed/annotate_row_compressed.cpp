@@ -15,14 +15,15 @@ namespace mtg {
 namespace annot {
 
 using utils::make_suffix;
+using matrix::BinaryMatrix;
 
 
 template <typename Label>
 RowCompressed<Label>::RowCompressed(uint64_t num_rows, bool sparse)  {
     if (sparse) {
-        matrix_.reset(new binmat::EigenSpMat(num_rows));
+        matrix_.reset(new matrix::EigenSpMat(num_rows));
     } else {
-        matrix_.reset(new binmat::VectorRowBinMat<>(num_rows));
+        matrix_.reset(new matrix::VectorRowBinMat<>(num_rows));
     }
 }
 
@@ -30,7 +31,7 @@ template <typename Label>
 template <typename RowType>
 RowCompressed<Label>::RowCompressed(Vector<RowType>&& annotation_rows,
                                     const std::vector<Label> &labels)
-      : matrix_(new binmat::VectorRowBinMat<RowType>(std::move(annotation_rows), labels.size())) {
+      : matrix_(new matrix::VectorRowBinMat<RowType>(std::move(annotation_rows), labels.size())) {
     for (const auto &label : labels) {
         label_encoder_.insert_and_encode(label);
     }
@@ -41,24 +42,13 @@ template RowCompressed<std::string>::RowCompressed(Vector<Vector<uint64_t>>&&, c
 
 template <typename Label>
 void RowCompressed<Label>::reinitialize(uint64_t num_rows) {
-    if (dynamic_cast<binmat::EigenSpMat*>(matrix_.get())) {
-        matrix_.reset(new binmat::EigenSpMat(num_rows));
+    if (dynamic_cast<matrix::EigenSpMat*>(matrix_.get())) {
+        matrix_.reset(new matrix::EigenSpMat(num_rows));
     } else {
-        matrix_.reset(new binmat::VectorRowBinMat<>(num_rows));
+        matrix_.reset(new matrix::VectorRowBinMat<>(num_rows));
     }
 
     label_encoder_.clear();
-}
-
-template <typename Label>
-void RowCompressed<Label>::set(Index i, const VLabels &labels) {
-    assert(i < matrix_->num_rows());
-
-    matrix_->clear_row(i);
-
-    for (const auto &label : labels) {
-        matrix_->set(i, label_encoder_.insert_and_encode(label));
-    }
 }
 
 template <typename Label>
@@ -102,33 +92,6 @@ void RowCompressed<Label>::add_labels_fast(const std::vector<Index> &indices,
 }
 
 template <typename Label>
-bool RowCompressed<Label>::has_label(Index i, const Label &label) const {
-    try {
-        return matrix_->get(i, label_encoder_.encode(label));
-    } catch (...) {
-        return false;
-    }
-}
-
-template <typename Label>
-bool RowCompressed<Label>::has_labels(Index i, const VLabels &labels) const {
-    std::set<size_t> querying_codes;
-    try {
-        for (const auto &label : labels) {
-            querying_codes.insert(label_encoder_.encode(label));
-        }
-    } catch (...) {
-        return false;
-    }
-    std::set<size_t> encoded_labels;
-    for (auto col : matrix_->get_row(i)) {
-        encoded_labels.insert(col);
-    }
-    return std::includes(encoded_labels.begin(), encoded_labels.end(),
-                         querying_codes.begin(), querying_codes.end());
-}
-
-template <typename Label>
 void RowCompressed<Label>::serialize(const std::string &filename) const {
     std::ofstream outstream(make_suffix(filename, kExtension), std::ios::binary);
     if (!outstream.good()) {
@@ -152,14 +115,14 @@ bool RowCompressed<Label>::merge_load(const std::vector<std::string> &filenames)
 
         assert(filenames.size() > 1);
 
-        if (!dynamic_cast<binmat::VectorRowBinMat<>*>(matrix_.get())) {
+        if (!dynamic_cast<matrix::VectorRowBinMat<>*>(matrix_.get())) {
             std::cerr << "Error: loading from multiple row annotators is supported"
                       << " only for the VectorRowBinMat representation" << std::endl;
             exit(1);
         }
 
-        auto &matrix = dynamic_cast<binmat::VectorRowBinMat<>&>(*matrix_);
-        auto next_block = std::make_unique<binmat::VectorRowBinMat<>>(matrix_->num_rows());
+        auto &matrix = dynamic_cast<matrix::VectorRowBinMat<>&>(*matrix_);
+        auto next_block = std::make_unique<matrix::VectorRowBinMat<>>(matrix_->num_rows());
 
         for (auto filename : filenames) {
             if (filename == filenames[0])
@@ -269,21 +232,21 @@ void RowCompressed<Label>::read_shape(const std::string &filename,
 }
 
 template <typename Label>
-binmat::StreamRows<binmat::BinaryMatrix::SetBitPositions>
+StreamRows<BinaryMatrix::SetBitPositions>
 RowCompressed<Label>::get_row_streamer(const std::string &filebase) {
     std::string filename = make_suffix(filebase, kExtension);
     std::ifstream instream(filename, std::ios::binary);
     // skip header
     read_label_encoder(instream);
     // rows
-    return binmat::StreamRows<binmat::BinaryMatrix::SetBitPositions>(filename, instream.tellg());
+    return StreamRows<BinaryMatrix::SetBitPositions>(filename, instream.tellg());
 }
 
 template <typename Label>
 void RowCompressed<Label>
 ::serialize(const std::string &filebase,
             const LabelEncoder<Label> &label_encoder,
-            const std::function<void(binmat::BinaryMatrix::RowCallback)> &call_rows) {
+            const std::function<void(BinaryMatrix::RowCallback)> &call_rows) {
     auto filename = make_suffix(filebase, kExtension);
 
     std::ofstream outstream(filename, std::ios::binary);
@@ -293,10 +256,88 @@ void RowCompressed<Label>
     label_encoder.serialize(outstream);
     outstream.close();
 
-    binmat::append_row_major(filename, call_rows, label_encoder.size());
+    append_row_major(filename, call_rows, label_encoder.size());
 }
 
 template class RowCompressed<std::string>;
+
+
+template <typename RowType>
+StreamRows<RowType>::StreamRows(const std::string &filename, size_t offset) {
+    std::ifstream instream(filename, std::ios::binary);
+
+    if (!instream.good() || !instream.seekg(offset).good())
+        throw std::ifstream::failure("Cannot read rows from file " + filename);
+
+    (void)load_number(instream);
+    (void)load_number(instream);
+
+    inbuf_ = sdsl::int_vector_buffer<>(filename,
+                                       std::ios::in | std::ios::binary,
+                                       1024 * 1024,
+                                       0,
+                                       false,
+                                       instream.tellg());
+}
+
+template <typename RowType>
+RowType* StreamRows<RowType>::next_row() {
+    row_.clear();
+
+    while (i_ < inbuf_.size()) {
+        auto value = inbuf_[i_++];
+        if (value - 1 > std::numeric_limits<typename RowType::value_type>::max())
+            throw std::ifstream::failure("Integer overflow: trying to read too"
+                                         " large column index: " + std::to_string(value - 1));
+        if (value) {
+            row_.push_back(value - 1);
+        } else {
+            return &row_;
+        }
+    }
+    return nullptr;
+}
+
+template class StreamRows<BinaryMatrix::SetBitPositions>;
+
+
+void append_row_major(const std::string &filename,
+                      const std::function<void(BinaryMatrix::RowCallback)> &call_rows,
+                      uint64_t num_cols) {
+    std::ofstream outstream(filename, std::ios::binary | std::ios::app);
+
+    uint64_t num_rows = 0;
+
+    // write dummy num_rows value to fill in later
+    const uint64_t header_offs = outstream.tellp();
+    serialize_number(outstream, 0);
+    serialize_number(outstream, num_cols);
+    const uint64_t iv_offs = outstream.tellp();
+    outstream.close();
+
+    {
+        auto outbuf = sdsl::int_vector_buffer<>(filename,
+                                                std::ios::out | std::ios::binary,
+                                                1024 * 1024,
+                                                sdsl::bits::hi(num_cols) + 1,
+                                                false,
+                                                iv_offs);
+
+        call_rows([&](const auto &row) {
+            for (auto val : row) {
+                outbuf.push_back(val + 1);
+            }
+            outbuf.push_back(0);
+            num_rows++;
+        });
+
+        outbuf.close();
+    }
+
+    outstream.open(filename, std::ios::in | std::ios::out | std::ios::binary);
+    outstream.seekp(header_offs);
+    serialize_number(outstream, num_rows);
+}
 
 } // namespace annot
 } // namespace mtg

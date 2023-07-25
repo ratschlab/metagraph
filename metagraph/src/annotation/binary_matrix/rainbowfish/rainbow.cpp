@@ -13,10 +13,7 @@
 
 namespace mtg {
 namespace annot {
-namespace binmat {
-
-const size_t kRowBatchSize = 1'000'000;
-
+namespace matrix {
 
 template <class MatrixType>
 Rainbow<MatrixType>::Rainbow(MatrixType&& reduced_matrix,
@@ -41,72 +38,6 @@ uint64_t Rainbow<MatrixType>::get_code(Row row) const {
     assert(begin + width <= row_codes_.size());
 
     return row_codes_.get_int(begin, width);
-}
-
-template <class MatrixType>
-bool Rainbow<MatrixType>::get(Row row, Column column) const {
-    return reduced_matrix_.get(get_code(row), column);
-}
-
-template <class MatrixType>
-std::vector<BinaryMatrix::SetBitPositions>
-Rainbow<MatrixType>::get_rows(const std::vector<Row> &rows) const {
-    std::vector<Row> pointers = rows;
-    auto distinct_rows = get_rows(&pointers);
-
-    std::vector<SetBitPositions> result(rows.size());
-    for (size_t i = 0; i < pointers.size(); ++i) {
-        result[i] = distinct_rows[pointers[i]];
-    }
-
-    return result;
-}
-
-template <class MatrixType>
-std::vector<BinaryMatrix::SetBitPositions>
-Rainbow<MatrixType>::get_rows(std::vector<Row> *rows, size_t num_threads) const {
-    assert(rows);
-
-    std::vector<std::pair<uint64_t, /* code */
-                          uint64_t /* row */>> row_codes(rows->size());
-
-    #pragma omp parallel for num_threads(num_threads)
-    for (size_t i = 0; i < rows->size(); ++i) {
-        row_codes[i] = { get_code((*rows)[i]), i };
-    }
-
-    ips4o::parallel::sort(row_codes.begin(), row_codes.end(),
-                          utils::LessFirst(), num_threads);
-
-    std::vector<Row> unique_row_codes;
-    uint64_t last_code = std::numeric_limits<uint64_t>::max();
-
-    for (const auto &[code, i] : row_codes) {
-        if (code != last_code) {
-            unique_row_codes.push_back(code);
-            last_code = code;
-        }
-        (*rows)[i] = unique_row_codes.size() - 1;
-    }
-
-    std::vector<SetBitPositions> result(unique_row_codes.size());
-
-    uint64_t batch_size = std::max((size_t)1u,
-                                   std::min(kRowBatchSize,
-                                            unique_row_codes.size() / num_threads));
-
-    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
-    for (uint64_t i = 0; i < unique_row_codes.size(); i += batch_size) {
-        std::vector<uint64_t> indexes(unique_row_codes.begin() + i,
-                                      std::min(unique_row_codes.begin() + i + batch_size,
-                                               unique_row_codes.end()));
-        auto rows = reduced_matrix_.get_rows(indexes);
-        for (size_t j = 0; j < rows.size(); ++j) {
-            result[i + j] = std::move(rows[j]);
-        }
-    }
-
-    return result;
 }
 
 template <class MatrixType>
@@ -148,6 +79,6 @@ void Rainbow<MatrixType>::serialize(std::ostream &out) const {
 
 template class Rainbow<BRWT>;
 
-} // namespace binmat
+} // namespace matrix
 } // namespace annot
 } // namespace mtg
