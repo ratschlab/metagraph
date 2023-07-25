@@ -502,26 +502,6 @@ add_dependencies(metagraph link_target)
 
 
 #-------------------
-# Experiments
-#-------------------
-file(GLOB experiment_files
-  "experiments/*.cpp"
-)
-list(FILTER experiment_files EXCLUDE REGEX ".*\\._.*")
-
-include_directories(
-  experiments
-  external-libraries/tclap/include
-)
-
-link_directories(
-  external-libraries/sdsl-lite/lib
-)
-add_executable(run_experiments ${experiment_files})
-
-target_link_libraries(run_experiments metagraph-core metagraph-cli)
-
-#-------------------
 # install library
 #-------------------
 
@@ -630,23 +610,3 @@ file(INSTALL "${PROJECT_BINARY_DIR}/CMakeFiles/integration_tests"
                    GROUP_READ GROUP_EXECUTE
                    WORLD_READ WORLD_EXECUTE
 )
-
-#-------------------
-# Python interfaces
-#-------------------
-if(PYTHON_INTERFACE)
-  FIND_PACKAGE(SWIG REQUIRED)
-  INCLUDE(${SWIG_USE_FILE})
-
-  FIND_PACKAGE(PythonLibs)
-  INCLUDE_DIRECTORIES(${PYTHON_INCLUDE_PATH})
-
-  SET(CMAKE_SWIG_FLAGS "")
-
-  file(GLOB interface_files "interfaces/*.i")
-
-  SET_SOURCE_FILES_PROPERTIES(${interface_files} PROPERTIES CPLUSPLUS ON)
-
-  SWIG_ADD_LIBRARY(metagraph LANGUAGE python SOURCES ${interface_files})
-  SWIG_LINK_LIBRARIES(metagraph metagraph-core ${METALIBS} ${PYTHON_LIBRARIES})
-endif()

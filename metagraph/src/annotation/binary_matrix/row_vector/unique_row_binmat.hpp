@@ -8,7 +8,7 @@
 
 namespace mtg {
 namespace annot {
-namespace binmat {
+namespace matrix {
 
 class UniqueRowBinmat : public RainbowMatrix {
   public:
@@ -23,10 +23,8 @@ class UniqueRowBinmat : public RainbowMatrix {
 
     uint64_t num_columns() const { return num_columns_; }
     uint64_t num_rows() const { return row_rank_.size(); }
+    uint64_t num_distinct_rows() const { return unique_rows_.size(); }
 
-    bool get(Row row, Column column) const;
-    using RainbowMatrix::get_rows;
-    std::vector<SetBitPositions> get_rows(const std::vector<Row> &row_ids) const;
     std::vector<Row> get_column(Column column) const;
 
     bool load(std::istream &in);
@@ -37,11 +35,15 @@ class UniqueRowBinmat : public RainbowMatrix {
     // matrix density
     double density() const;
 
-    uint64_t num_distinct_rows() const { return unique_rows_.size(); }
-
   private:
     uint64_t get_code(Row row) const { return row_rank_[row]; }
-    SetBitPositions code_to_row(uint64_t c) const { return unique_rows_[c]; }
+    std::vector<SetBitPositions> codes_to_rows(const std::vector<uint64_t> &rows) const {
+        std::vector<SetBitPositions> result(rows.size());
+        for (size_t i = 0; i < rows.size(); ++i) {
+            result[i] = unique_rows_[rows[i]];
+        }
+        return result;
+    }
 
     uint32_t num_columns_ = 0;
     uint32_t num_relations_ = 0;
@@ -49,7 +51,7 @@ class UniqueRowBinmat : public RainbowMatrix {
     std::vector<uint32_t> row_rank_;
 };
 
-} // namespace binmat
+} // namespace matrix
 } // namespace annot
 } // namespace mtg
 

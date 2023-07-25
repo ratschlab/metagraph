@@ -9,24 +9,20 @@ namespace matrix {
 
 using mtg::common::logger;
 
-bool IntRowDisk::View::get(Row row, Column column) const {
-    SetBitPositions set_bits = get_row(row);
-    return std::binary_search(set_bits.begin(), set_bits.end(), column);
-}
-
-std::vector<IntMatrix::Row> IntRowDisk::View::get_column(Column column) const {
+std::vector<BinaryMatrix::Row> IntRowDisk::View::get_column(Column column) const {
     logger->warn("get_column is extremely inefficient for IntRowDisk, consider"
                  " using a column-major format");
     const uint64_t num_rows = boundary_.num_set_bits();
     std::vector<Row> result;
     for (Row row = 0; row < num_rows; ++row) {
-        if (get(row, column))
+        SetBitPositions set_bits = get_row(row);
+        if (std::binary_search(set_bits.begin(), set_bits.end(), column))
             result.push_back(row);
     }
     return result;
 }
 
-IntMatrix::SetBitPositions IntRowDisk::View::get_row(Row row) const {
+BinaryMatrix::SetBitPositions IntRowDisk::View::get_row(Row row) const {
     assert(boundary_[boundary_.size() - 1] == 1);
     uint64_t begin = row == 0 ? 0 : boundary_.select1(row) + 1 - row;
     uint64_t end = boundary_.select1(row + 1) - row;
@@ -45,17 +41,6 @@ IntMatrix::SetBitPositions IntRowDisk::View::get_row(Row row) const {
     }
 
     return result;
-}
-
-std::vector<IntMatrix::SetBitPositions>
-IntRowDisk::View::get_rows(const std::vector<Row> &row_ids) const {
-    std::vector<SetBitPositions> rows(row_ids.size());
-
-    for (size_t i = 0; i < row_ids.size(); ++i) {
-        rows[i] = get_row(row_ids[i]);
-    }
-
-    return rows;
 }
 
 IntMatrix::RowValues IntRowDisk::View::get_row_values(Row row) const {
@@ -183,6 +168,6 @@ void IntRowDisk::serialize(
     serialize_number(outstream, boundary_start);
 }
 
-} // namespace binmat
+} // namespace matrix
 } // namespace annot
 } // namespace mtg

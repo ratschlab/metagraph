@@ -66,6 +66,7 @@ Config::Config(int argc, char *argv[]) {
     } else if (!strcmp(argv[1], "transform_anno")) {
         identity = TRANSFORM_ANNOTATION;
         tmp_dir = "OUTFBASE_TEMP_DIR";
+        memory_available = 1000; // 1 TB
     } else if (!strcmp(argv[1], "assemble")) {
         identity = ASSEMBLE;
     } else if (!strcmp(argv[1], "relax_brwt")) {
@@ -599,7 +600,6 @@ Config::Config(int argc, char *argv[]) {
         print_usage_and_exit = true;
 
     if (identity == TRANSFORM_ANNOTATION) {
-        memory_available = 1000; // 1 TB
         const bool to_row_diff = anno_type == RowDiff
                                     || anno_type == RowDiffBRWT
                                     || anno_type == RowDiffDisk
@@ -931,7 +931,7 @@ if (advanced) {
             fprintf(stderr, "\tannotate\tgiven a graph and a fast[a|q] file, annotate\n");
             fprintf(stderr, "\t\t\tthe respective kmers\n\n");
 if (advanced) {
-            fprintf(stderr, "\tmerge_anno\tmerge annotation columns\n\n");
+            fprintf(stderr, "\tmerge_anno\tmerge annotations\n\n");
 }
             fprintf(stderr, "\trelax_brwt\toptimize the tree structure in brwt annotator\n\n");
 
@@ -1225,9 +1225,6 @@ if (advanced) {
             fprintf(stderr, "Usage: %s merge_anno -o <annotation-basename> [options] ANNOT1 [[ANNOT2] ...]\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for annotate:\n");
-            fprintf(stderr, "\t   --anno-type [STR] \ttarget annotation representation [column]\n");
-            fprintf(stderr, "%s\n", annotation_list);
-            // fprintf(stderr, "\t   --sparse \t\tuse the row-major sparse matrix to annotate graph [off]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
         case TRANSFORM_ANNOTATION: {

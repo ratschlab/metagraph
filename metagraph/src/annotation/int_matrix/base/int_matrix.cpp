@@ -5,6 +5,10 @@ namespace mtg {
 namespace annot {
 namespace matrix {
 
+using Row = BinaryMatrix::Row;
+using Column = BinaryMatrix::Column;
+
+
 IntMatrix::RowValues
 IntMatrix::sum_row_values(const std::vector<std::pair<Row, size_t>> &index_counts,
                           size_t min_count) const {
@@ -12,6 +16,7 @@ IntMatrix::sum_row_values(const std::vector<std::pair<Row, size_t>> &index_count
 
     std::vector<Row> rows;
     rows.reserve(index_counts.size());
+
     size_t total_sum = 0;
     for (const auto &[i, count] : index_counts) {
         total_sum += count;
@@ -21,96 +26,29 @@ IntMatrix::sum_row_values(const std::vector<std::pair<Row, size_t>> &index_count
     if (total_sum < min_count)
         return {};
 
-    std::vector<size_t> sum_row(num_columns(), 0);
-    std::vector<size_t> counts(num_columns(), 0);
-
     auto row_values = get_row_values(rows);
+
+    size_t n_cols = dynamic_cast<const BinaryMatrix &>(*this).num_columns();
+    Vector<std::pair<size_t, size_t>> counts(n_cols, std::make_pair(0, 0));
 
     for (size_t t = 0; t < index_counts.size(); ++t) {
         auto [i, count] = index_counts[t];
         for (const auto &[j, value] : row_values[t]) {
-            assert(j < sum_row.size());
-            sum_row[j] += count * value;
-            counts[j] += count;
+            counts[j].first += count;
+            counts[j].second += count * value;
         }
     }
 
     RowValues result;
-    result.reserve(sum_row.size());
+    result.reserve(n_cols);
 
-    for (size_t j = 0; j < num_columns(); ++j) {
-        if (counts[j] >= min_count) {
-            result.emplace_back(j, sum_row[j]);
+    for (size_t j = 0; j < n_cols; ++j) {
+        if (counts[j].first >= min_count) {
+            result.emplace_back(j, counts[j].second);
         }
     }
 
     return result;
-}
-
-IntMatrix::SetBitPositions IntMatrix::get_row(Row i) const {
-    RowValues row = get_row_values(i);
-    SetBitPositions result(row.size());
-    for (size_t k = 0; k < row.size(); ++k) {
-        result[k] = row[k].first;
-    }
-    return result;
-}
-
-std::vector<IntMatrix::SetBitPositions>
-IntMatrix::get_rows(const std::vector<Row> &row_ids) const {
-    std::vector<SetBitPositions> result;
-    result.reserve(row_ids.size());
-
-    for (auto&& row : get_row_values(row_ids)) {
-        result.emplace_back(row.size());
-        for (size_t k = 0; k < row.size(); ++k) {
-            result.back()[k] = row[k].first;
-        }
-        row = RowValues();
-    }
-
-    return result;
-}
-
-// return the positions of all non-empty tuples in the row
-MultiIntMatrix::SetBitPositions MultiIntMatrix::get_row(Row i) const {
-    RowTuples row = get_row_tuples(i);
-    SetBitPositions result(row.size());
-    for (size_t k = 0; k < row.size(); ++k) {
-        result[k] = row[k].first;
-    }
-    return result;
-}
-
-// for each row return the positions of all non-empty tuples
-std::vector<MultiIntMatrix::SetBitPositions>
-MultiIntMatrix::get_rows(const std::vector<Row> &row_ids) const {
-    std::vector<SetBitPositions> result;
-    result.reserve(row_ids.size());
-
-    for (auto&& row : get_row_tuples(row_ids)) {
-        result.emplace_back(row.size());
-        for (size_t k = 0; k < row.size(); ++k) {
-            result.back()[k] = row[k].first;
-        }
-        row = RowTuples();
-    }
-
-    return result;
-}
-
-// return sizes of all non-empty tuples in the row
-MultiIntMatrix::RowValues MultiIntMatrix::get_row_values(Row row) const {
-    RowTuples row_tuples = get_row_tuples(row);
-
-    RowValues row_values(row_tuples.size());
-
-    for (size_t i = 0; i < row_tuples.size(); ++i) {
-        row_values[i].first = row_tuples[i].first;
-        row_values[i].second = row_tuples[i].second.size();
-    }
-
-    return row_values;
 }
 
 // for each row return the sizes of all non-empty tuples

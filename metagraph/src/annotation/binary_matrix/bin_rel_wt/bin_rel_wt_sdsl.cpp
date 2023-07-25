@@ -10,7 +10,7 @@
 
 namespace mtg {
 namespace annot {
-namespace binmat {
+namespace matrix {
 
 BinRelWT_sdsl
 ::BinRelWT_sdsl(const std::function<void(const RowCallback &)> &generate_rows,
@@ -139,6 +139,6 @@ uint64_t BinRelWT_sdsl::num_relations() const {
     return wt_.size();
 }
 
-} // namespace binmat
+} // namespace matrix
 } // namespace annot
 } // namespace mtg

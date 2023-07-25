@@ -21,7 +21,7 @@ namespace matrix {
 template <class BaseMatrix,
           class Values = sdsl::int_vector<>,
           class Delims = bit_vector_smart>
-class TupleCSCMatrix : public MultiIntMatrix {
+class TupleCSCMatrix : public BinaryMatrix, public MultiIntMatrix, public GetEntrySupport {
   public:
     TupleCSCMatrix() {}
 
@@ -36,18 +36,12 @@ class TupleCSCMatrix : public MultiIntMatrix {
         column_values_(std::move(column_values)) {}
 
     // return tuple sizes (if not zero) at each entry
-    RowValues get_row_values(Row row) const;
-
-    std::vector<RowValues>
-    get_row_values(const std::vector<Row> &rows) const;
+    std::vector<RowValues> get_row_values(const std::vector<Row> &rows) const;
 
     uint64_t num_attributes() const;
 
     // return entries of the matrix -- where each entry is a set of integers
-    RowTuples get_row_tuples(Row row) const;
-
-    std::vector<RowTuples>
-    get_row_tuples(const std::vector<Row> &rows) const;
+    std::vector<RowTuples> get_row_tuples(const std::vector<Row> &rows) const;
 
     uint64_t num_columns() const { return binary_matrix_.num_columns(); }
     uint64_t num_rows() const { return binary_matrix_.num_rows(); }
@@ -55,16 +49,11 @@ class TupleCSCMatrix : public MultiIntMatrix {
 
     // row is in [0, num_rows), column is in [0, num_columns)
     bool get(Row row, Column column) const { return binary_matrix_.get(row, column); }
-    SetBitPositions get_row(Row row) const { return binary_matrix_.get_row(row); }
     std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const {
         return binary_matrix_.get_rows(rows);
     }
     std::vector<Row> get_column(Column column) const {
         return binary_matrix_.get_column(column);
-    }
-    // get all selected rows appended with -1 and concatenated
-    std::vector<Column> slice_rows(const std::vector<Row> &rows) const {
-        return binary_matrix_.slice_rows(rows);
     }
 
     bool load(std::istream &in);
@@ -83,20 +72,6 @@ class TupleCSCMatrix : public MultiIntMatrix {
     std::vector<Values> column_values_;
 };
 
-
-template <class BaseMatrix, class Values, class Delims>
-inline typename TupleCSCMatrix<BaseMatrix, Values, Delims>::RowValues
-TupleCSCMatrix<BaseMatrix, Values, Delims>::get_row_values(Row row) const {
-    const auto &column_ranks = binary_matrix_.get_column_ranks(row);
-    RowValues row_values;
-    row_values.reserve(column_ranks.size());
-    for (auto [j, r] : column_ranks) {
-        assert(r >= 1 && "matches can't have zero-rank");
-        size_t tuple_size = delimiters_[j].select1(r + 1) - delimiters_[j].select1(r) - 1;
-        row_values.emplace_back(j, tuple_size);
-    }
-    return row_values;
-}
 
 template <class BaseMatrix, class Values, class Delims>
 inline std::vector<typename TupleCSCMatrix<BaseMatrix, Values, Delims>::RowValues>
@@ -122,26 +97,6 @@ uint64_t TupleCSCMatrix<BaseMatrix, Values, Delims>::num_attributes() const {
         num_attributes += column_values_[j].size();
     }
     return num_attributes;
-}
-
-template <class BaseMatrix, class Values, class Delims>
-inline typename TupleCSCMatrix<BaseMatrix, Values, Delims>::RowTuples
-TupleCSCMatrix<BaseMatrix, Values, Delims>::get_row_tuples(Row row) const {
-    const auto &column_ranks = binary_matrix_.get_column_ranks(row);
-    RowTuples row_tuples;
-    row_tuples.reserve(column_ranks.size());
-    for (auto [j, r] : column_ranks) {
-        assert(r >= 1 && "matches can't have zero-rank");
-        size_t begin = delimiters_[j].select1(r) + 1 - r;
-        size_t end = delimiters_[j].select1(r + 1) - r;
-        Tuple tuple;
-        tuple.reserve(end - begin);
-        for (size_t t = begin; t < end; ++t) {
-            tuple.push_back(column_values_[j][t]);
-        }
-        row_tuples.emplace_back(j, std::move(tuple));
-    }
-    return row_tuples;
 }
 
 template <class BaseMatrix, class Values, class Delims>

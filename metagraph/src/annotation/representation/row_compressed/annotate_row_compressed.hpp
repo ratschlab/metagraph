@@ -3,19 +3,26 @@
 
 #include <memory>
 
+#include <sdsl/int_vector.hpp>
+#include <sdsl/int_vector_buffer.hpp>
+
 #include "annotation/representation/base/annotation.hpp"
 
 
 namespace mtg {
 namespace annot {
 
+template <typename RowType = matrix::BinaryMatrix::SetBitPositions>
+class StreamRows;
+
 // TODO: implement this as an annotation matrix
 // StaticBinRelAnnotator<VectorRowBinMat>
+// TODO: remove?
 template <typename Label = std::string>
-class RowCompressed : public MultiLabelEncoded<Label> {
+class RowCompressed : public MultiLabelAnnotation<Label> {
   public:
-    using Index = typename MultiLabelEncoded<Label>::Index;
-    using VLabels = typename MultiLabelEncoded<Label>::VLabels;
+    using Index = typename MultiLabelAnnotation<Label>::Index;
+    using VLabels = typename MultiLabelAnnotation<Label>::VLabels;
 
     RowCompressed(uint64_t num_rows = 0, bool sparse = false);
 
@@ -25,15 +32,10 @@ class RowCompressed : public MultiLabelEncoded<Label> {
 
     void reinitialize(uint64_t num_rows);
 
-    void set(Index i, const VLabels &labels);
-
     void add_labels(const std::vector<Index> &indices, const VLabels &labels);
     void add_labels_fast(const std::vector<Index> &indices, const VLabels &labels);
 
     void insert_rows(const std::vector<Index> &rows);
-
-    bool has_label(Index i, const Label &label) const;
-    bool has_labels(Index i, const VLabels &labels) const;
 
     uint64_t num_objects() const;
     uint64_t num_relations() const;
@@ -46,7 +48,7 @@ class RowCompressed : public MultiLabelEncoded<Label> {
 
     static void serialize(const std::string &filename,
                           const LabelEncoder<Label> &label_encoder,
-                          const std::function<void(binmat::BinaryMatrix::RowCallback)> &call_rows);
+                          const std::function<void(matrix::BinaryMatrix::RowCallback)> &call_rows);
 
     static void read_shape(const std::string &filename,
                            uint64_t *num_objects,
@@ -54,24 +56,50 @@ class RowCompressed : public MultiLabelEncoded<Label> {
 
     static LabelEncoder<Label> read_label_encoder(const std::string &filename);
 
-    static binmat::StreamRows<binmat::BinaryMatrix::SetBitPositions>
+    static StreamRows<matrix::BinaryMatrix::SetBitPositions>
     get_row_streamer(const std::string &filename);
 
     /*****************************************************************/
 
-    const binmat::BinaryMatrixRowDynamic& get_matrix() const { return *matrix_; };
+    const matrix::BinaryMatrixRowDynamic& get_matrix() const { return *matrix_; };
 
     std::string file_extension() const { return kExtension; }
 
     static constexpr auto kExtension = ".row.annodbg";
 
   private:
-    using MultiLabelEncoded<Label>::label_encoder_;
+    using MultiLabelAnnotation<Label>::label_encoder_;
 
-    std::unique_ptr<binmat::BinaryMatrixRowDynamic> matrix_;
+    std::unique_ptr<matrix::BinaryMatrixRowDynamic> matrix_;
 
     static LabelEncoder<Label> read_label_encoder(std::istream &instream);
 };
+
+
+// Row streamer -- read rows from a serialized row major binary matrix
+template <typename RowType>
+class StreamRows {
+  public:
+    StreamRows(const std::string &filename, size_t offset);
+
+    //TODO: implement constructor from stream once
+    //      it's implemented for sdsl::int_vector_buffer<>.
+    //      Then, use StreamRows to simplify load functions.
+    // StreamRows(std::istream &instream);
+
+    // return nullptr after all rows have been called
+    RowType* next_row();
+
+  private:
+    RowType row_;
+    sdsl::int_vector_buffer<> inbuf_;
+    uint64_t i_ = 0;
+};
+
+// Write matrix to the end
+void append_row_major(const std::string &filename,
+                      const std::function<void(matrix::BinaryMatrix::RowCallback)> &call_rows,
+                      uint64_t num_cols);
 
 } // namespace annot
 } // namespace mtg

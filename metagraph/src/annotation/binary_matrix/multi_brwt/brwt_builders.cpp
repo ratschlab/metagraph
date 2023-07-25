@@ -11,7 +11,7 @@
 
 namespace mtg {
 namespace annot {
-namespace binmat {
+namespace matrix {
 
 using mtg::common::logger;
 
@@ -672,6 +672,6 @@ double BRWTOptimizer::pruning_delta(const BRWT &node) {
     return delta;
 }
 
-} // namespace binmat
+} // namespace matrix
 } // namespace annot
 } // namespace mtg

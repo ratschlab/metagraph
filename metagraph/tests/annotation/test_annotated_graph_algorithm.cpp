@@ -1,5 +1,7 @@
 #include "gtest/gtest.h"
 
+#include <unordered_set>
+
 #include "../graph/all/test_dbg_helpers.hpp"
 #include "test_annotated_dbg_helpers.hpp"
 
