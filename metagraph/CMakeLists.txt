@@ -263,7 +263,6 @@ include_directories(
   external-libraries/sdsl-lite/include
   external-libraries/hopscotch-map/include
   external-libraries/ordered-map/include
-  external-libraries/binrel_wt/include
   external-libraries/cpp_progress_bar
   external-libraries/Priority-Deque
   external-libraries/rollinghashcpp
@@ -353,16 +352,6 @@ ExternalProject_Add(HTSLIB
 link_directories(${CMAKE_BINARY_DIR}/external-libraries/htslib/lib)
 include_directories(${CMAKE_BINARY_DIR}/external-libraries/htslib/include)
 
-set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH}
-  "${CMAKE_SOURCE_DIR}/external-libraries/binrel_wt/cmake/modules"
-)
-set(BRWT_INCLUDE_TESTS OFF)
-set(BRWT_INCLUDE_DOCS OFF)
-add_subdirectory(
-  external-libraries/binrel_wt EXCLUDE_FROM_ALL
-)
-brwt_target_link_flags(brwt -lsdsl)
-
 set(OTHER_COMPILER_FLAGS "")
 get_directory_property(DIRECTORY_DEFINITIONS COMPILE_DEFINITIONS)
 foreach(DEF ${DIRECTORY_DEFINITIONS})
@@ -415,7 +404,6 @@ set(METALIBS ${METALIBS}
   -lKMC
   -lhts zlib
   -lsdsl
-  brwt
   jsoncpp_lib
   progress_bar
   mersenne_twister

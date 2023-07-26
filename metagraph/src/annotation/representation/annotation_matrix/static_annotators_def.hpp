@@ -5,7 +5,6 @@
 
 #include "annotation_matrix.hpp"
 #include "annotation/binary_matrix/bin_rel_wt/bin_rel_wt.hpp"
-#include "annotation/binary_matrix/bin_rel_wt/bin_rel_wt_sdsl.hpp"
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
 #include "annotation/binary_matrix/multi_brwt/brwt.hpp"
 #include "annotation/binary_matrix/rainbowfish/rainbowfish.hpp"
@@ -33,8 +32,6 @@ typedef StaticBinRelAnnotator<matrix::RowSparse, std::string> RowSparseAnnotator
 typedef StaticBinRelAnnotator<matrix::Rainbowfish, std::string> RainbowfishAnnotator;
 
 typedef StaticBinRelAnnotator<matrix::BRWT, std::string> MultiBRWTAnnotator;
-
-typedef StaticBinRelAnnotator<matrix::BinRelWT_sdsl, std::string> BinRelWT_sdslAnnotator;
 
 typedef StaticBinRelAnnotator<matrix::BinRelWT, std::string> BinRelWTAnnotator;
 
@@ -81,8 +78,6 @@ template <>
 inline const std::string RainbowfishAnnotator::kExtension = ".rbfish.annodbg";
 template <>
 inline const std::string MultiBRWTAnnotator::kExtension = ".brwt.annodbg";
-template <>
-inline const std::string BinRelWT_sdslAnnotator::kExtension = ".bin_rel_wt_sdsl.annodbg";
 template <>
 inline const std::string BinRelWTAnnotator::kExtension = ".bin_rel_wt.annodbg";
 template <>

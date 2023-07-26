@@ -165,8 +165,6 @@ template class StaticBinRelAnnotator<BRWT, std::string>;
 
 template class StaticBinRelAnnotator<RowSparse, std::string>;
 
-template class StaticBinRelAnnotator<BinRelWT_sdsl, std::string>;
-
 template class StaticBinRelAnnotator<BinRelWT, std::string>;
 
 template class StaticBinRelAnnotator<UniqueRowBinmat, std::string>;

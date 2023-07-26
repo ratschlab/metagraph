@@ -2,200 +2,125 @@
 
 #include <cassert>
 #include <iterator>
+#include <cmath>
 
 #include "common/serialization.hpp"
-#include "common/vectors/bit_vector.hpp"
+#include "common/vectors/vector_algorithm.hpp"
 
 
 namespace mtg {
 namespace annot {
 namespace matrix {
 
-typedef brwt::binary_relation::object_id object_id;
-typedef brwt::binary_relation::label_id label_id;
+BinRelWT
+::BinRelWT(const std::function<void(const RowCallback &)> &generate_rows,
+                uint64_t num_relations,
+                uint64_t num_columns)
+      : num_columns_(num_columns) {
+    sdsl::int_vector<> flat(num_relations, 0, sdsl::bits::hi(num_columns) + 1);
 
+    // delimiters_ includes a 0 for each char in base
+    // string and a 1 for each row (objects).
+    // delimiter_ starts and ends with 1.
+    std::vector<bool> delimiters_vec = { 1, };
 
-label_id to_label_id(uint64_t x) {
-    return static_cast<label_id>(x + 1);
-}
+    uint64_t index = 0;
 
-object_id to_object_id(uint64_t x) {
-    return static_cast<object_id>(x);
-}
-
-uint64_t to_index(object_id y) {
-    return static_cast<uint64_t>(y);
-}
-
-uint64_t to_index(label_id y) {
-    return static_cast<uint64_t>(y) - 1;
-}
-
-bool BinRelWT::is_zero_row(Row row) const {
-    auto first_label = to_label_id(0);
-    auto last_label = to_label_id(max_used_label);
-    auto cur_object = to_object_id(row);
-    return (binary_relation_.size() == 0 || row > max_used_object
-        || binary_relation_.obj_rank(cur_object, first_label, last_label) == 0);
-}
-
-bool BinRelWT::is_zero_column(Column column) const {
-    auto first_object = to_object_id(0);
-    auto last_object = to_object_id(max_used_object);
-    auto cur_label = to_label_id(column);
-    return (binary_relation_.size() == 0 || column > max_used_label
-        || binary_relation_.rank(first_object, last_object, cur_label) == 0);
-}
-
-BinRelWT::BinRelWT(std::vector<std::unique_ptr<bit_vector>>&& columns)
-      : num_labels(columns.size()) {
-
-    uint64_t num_relations = 0;
-    for (const auto &col_ptr : columns) {
-        num_relations += col_ptr->num_set_bits();
-    }
-
-    std::vector<brwt::binary_relation::pair_type> relation_pairs;
-    relation_pairs.reserve(num_relations);
-
-    num_objects = columns.size() ? columns[0]->size() : 0;
-
-    for (size_t j = 0; j < columns.size(); ++j) {
-        const auto &col = *columns[j];
-
-        col.call_ones([&](auto i) {
-            brwt::binary_relation::pair_type relation = {
-                .object = to_object_id(i),
-                .label = to_label_id(j)
-            };
-
-            relation_pairs.push_back(std::move(relation));
-
-            max_used_label = std::max(max_used_label, static_cast<uint64_t>(j));
-            max_used_object = std::max(max_used_object, static_cast<uint64_t>(i));
-        });
-
-        columns[j].reset();
-    }
-
-    binary_relation_ = brwt::binary_relation(std::move(relation_pairs));
-    assert(max_used_label <= num_labels);
-}
-
-BinRelWT::BinRelWT(const std::function<void(const RowCallback &)> &generate_rows,
-                   uint64_t num_relations,
-                   uint64_t num_columns)
-      : num_labels(num_columns) {
-    std::vector<brwt::binary_relation::pair_type> relation_pairs;
-    relation_pairs.reserve(num_relations);
-
-    uint64_t row_counter = 0;
     generate_rows([&](const SetBitPositions &row_set_bits) {
         for (const auto &col_index : row_set_bits) {
-            brwt::binary_relation::pair_type relation = {
-                .object = to_object_id(row_counter),
-                .label = to_label_id(col_index)};
-            relation_pairs.push_back(relation);
-            max_used_label = std::max(max_used_label, col_index);
-            max_used_object = std::max(max_used_object, row_counter);
+            assert(col_index < num_columns);
+            assert(index < flat.size());
+            flat[index++] = col_index;
+            delimiters_vec.push_back(0);
         }
-        row_counter++;
+        delimiters_vec.push_back(1);
     });
-    num_objects = row_counter;
-    binary_relation_ = brwt::binary_relation(std::move(relation_pairs));
-    assert(max_used_label <= num_labels);
+
+    assert(index == num_relations);
+
+    delimiters_ = bit_vector_rrr<>(to_sdsl(std::move(delimiters_vec)));
+
+    decltype(wt_)(std::move(flat)).swap(wt_);
 }
 
 uint64_t BinRelWT::num_columns() const {
-    return num_labels;
+    return num_columns_;
 }
 
 uint64_t BinRelWT::num_rows() const {
-    return num_objects;
+    assert(delimiters_.num_set_bits());
+    return delimiters_.num_set_bits() - 1;
 }
 
 BinRelWT::SetBitPositions BinRelWT::get_row(Row row) const {
-    assert(row < num_objects);
-    if (is_zero_row(row)) {
-        return {};
-    }
-    auto first_label = to_label_id(0);
-    auto last_label = to_label_id(max_used_label);
-    auto cur_object = to_object_id(row);
+    // delimiters_ starts with a 1 indicating the
+    // beginning of first row and ends with a 1,
+    // indicating the end of last line.
+    // Note that wt_ stores a character for each 0 in delimiters_
+    // and no character for each 1 in delimiters_.
 
-    auto num_relations_in_row = static_cast<uint64_t>(
-        binary_relation_.count_distinct_labels(cur_object,
-                                               cur_object,
-                                               first_label,
-                                               last_label)
-    );
+    // Not counting i first 1s indicating the boundries.
+    uint64_t first_string_index = delimiters_.select1(row + 1) - row;
 
-    SetBitPositions relations_in_row;
-    relations_in_row.reserve(num_relations_in_row);
-    for (uint64_t relation_it = 1; relation_it <= num_relations_in_row; ++relation_it) {
-        auto element =
-            binary_relation_.nth_element(cur_object,
-                                         cur_object,
-                                         first_label,
-                                         relation_it,
-                                         brwt::lab_major);
-        assert(element);
-        relations_in_row.push_back(to_index(element->label));
-    }
-    return relations_in_row;
+    // Not counting i+1 first 1s indicating the boundries.
+    uint64_t last_string_index = delimiters_.select1(row + 2) - (row + 1);
+
+    // Get label indices from the base string stored in wt_.
+    typedef sdsl::int_vector<>::size_type size_type;
+    typedef typename decltype(wt_)::value_type value_type;
+
+    size_type num_row_set_bits;
+
+    std::vector<size_type> rank_c_i(last_string_index - first_string_index);
+    std::vector<size_type> rank_c_j(last_string_index - first_string_index);
+
+    std::vector<value_type> label_indices(last_string_index - first_string_index);
+
+    wt_.interval_symbols(first_string_index,
+                         last_string_index,
+                         num_row_set_bits,
+                         label_indices,
+                         rank_c_i,
+                         rank_c_j);
+
+    return SetBitPositions(label_indices.begin(), label_indices.end());
 }
 
 std::vector<BinRelWT::Row> BinRelWT::get_column(Column column) const {
-    assert(column < num_labels);
-    if (is_zero_column(column)) {
-        return {};
-    }
-    auto first_object = to_object_id(0);
-    auto last_object = to_object_id(max_used_object);
-    auto cur_label = to_label_id(column);
-    auto num_relations_in_column = (binary_relation_.size() == 0 ? 0 :
-        static_cast<uint64_t>(binary_relation_.obj_rank(last_object, cur_label)));
+    assert(column < num_columns_);
 
-    std::vector<Row> relations_in_column;
-    relations_in_column.reserve(num_relations_in_column);
-    for (uint64_t relation_it = 1; relation_it <= num_relations_in_column; ++relation_it) {
-        auto element = binary_relation_.nth_element(first_object,
-                                                    last_object,
-                                                    cur_label,
-                                                    relation_it,
-                                                    brwt::lab_major);
-        relations_in_column.push_back(to_index(element->object));
+    uint64_t num_relations_in_col = wt_.rank(wt_.size(), column);
+
+    std::vector<Row> column_vec;
+    for (uint64_t i = 0; i < num_relations_in_col; ++i) {
+        uint64_t col_index_in_wt = wt_.select(i + 1, column);
+        uint64_t col_index_in_del = delimiters_.select0(col_index_in_wt + 1);
+        uint64_t row_num = delimiters_.rank1(col_index_in_del) - 1;
+        column_vec.push_back(row_num);
     }
-    return relations_in_column;
+    return column_vec;
 }
 
 bool BinRelWT::get(Row row, Column column) const {
-    assert(column < num_labels);
-    assert(row < num_objects);
-    if (is_zero_column(column) || is_zero_row(row)) {
-        return 0;
-    }
-    auto cur_object = to_object_id(row);
-    auto cur_label = to_label_id(column);
-    auto first_relation_in_range = binary_relation_.nth_element(cur_object,
-                                                                cur_object,
-                                                                cur_label,
-                                                                1,
-                                                                brwt::lab_major);
-    return (first_relation_in_range &&
-            first_relation_in_range->object == cur_object &&
-            first_relation_in_range->label == cur_label);
+    // Not counting i first 1s indicating the boundries.
+    uint64_t first_string_index = delimiters_.select1(row + 1) - row;
+    // Not counting i+1 first 1s indicating the boundries.
+    uint64_t last_string_index = delimiters_.select1(row + 2) - row - 1;
+
+    // Rank operation in sdsl::wt_in is exclusive.
+    return first_string_index == 0
+            ? wt_.rank(last_string_index, column)
+            : wt_.rank(first_string_index, column)
+                    != wt_.rank(last_string_index, column);
 }
 
 bool BinRelWT::load(std::istream &in) {
     if (!in.good())
         return false;
     try {
-        num_labels = load_number(in);
-        num_objects = load_number(in);
-        max_used_label = load_number(in);
-        max_used_object = load_number(in);
-        return binary_relation_.load(in);
+        num_columns_ = load_number(in);
+        wt_.load(in);
+        return delimiters_.load(in);
     } catch (...) {
         return false;
     }
@@ -204,15 +129,14 @@ bool BinRelWT::load(std::istream &in) {
 void BinRelWT::serialize(std::ostream &out) const {
     if (!out.good())
         throw std::ofstream::failure("Bad stream");
-    serialize_number(out, num_labels);
-    serialize_number(out, num_objects);
-    serialize_number(out, max_used_label);
-    serialize_number(out, max_used_object);
-    binary_relation_.serialize(out);
+
+    serialize_number(out, num_columns_);
+    wt_.serialize(out);
+    delimiters_.serialize(out);
 }
 
 uint64_t BinRelWT::num_relations() const {
-    return binary_relation_.size();
+    return wt_.size();
 }
 
 } // namespace matrix

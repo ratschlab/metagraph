@@ -19,7 +19,6 @@ template <typename Annotator>
 class AnnotatorPresetDumpTest : public AnnotatorPreset2Test<Annotator> { };
 
 typedef ::testing::Types<annot::BinRelWTAnnotator,
-                         annot::BinRelWT_sdslAnnotator,
                          annot::RbBRWTAnnotator,
                          annot::MultiBRWTAnnotator,
                          annot::RainbowfishAnnotator,
