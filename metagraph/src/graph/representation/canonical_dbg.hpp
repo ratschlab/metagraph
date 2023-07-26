@@ -58,48 +58,25 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
 
     // Given a node index, call the target nodes of all edges outgoing from it.
     virtual void adjacent_outgoing_nodes(node_index node,
-                                         const std::function<void(node_index)> &callback) const override final {
-        adjacent_outgoing_nodes(node, "", callback);
-    }
+                                         const std::function<void(node_index)> &callback) const override final;
+
+    // Given a node index, call the source nodes of all edges incoming to it.
+    virtual void adjacent_incoming_nodes(node_index node,
+                                         const std::function<void(node_index)> &callback) const override final;
 
     virtual void call_outgoing_kmers(node_index kmer,
                                      const OutgoingEdgeCallback &callback) const override final {
-        call_outgoing_kmers(kmer, "", callback);
+        call_outgoing_kmers(kmer, get_node_sequence(kmer), callback);
     }
 
     virtual void call_incoming_kmers(node_index kmer,
                                      const IncomingEdgeCallback &callback) const override final {
-        call_incoming_kmers(kmer, "", callback);
+        call_incoming_kmers(kmer, get_node_sequence(kmer), callback);
     }
-
-    // Given a node index, call the source nodes of all edges incoming to it.
-    virtual void adjacent_incoming_nodes(node_index node,
-                                         const std::function<void(node_index)> &callback) const override final {
-        adjacent_incoming_nodes(node, "", callback);
-    }
-
-
-    // Given a node index, call the target nodes of all edges outgoing from it.
-    // If an empty spelling hint is provided, the node spelling will be computed
-    // from the graph.
-    void adjacent_outgoing_nodes(node_index node,
-                                 const std::string &spelling_hint,
-                                 const std::function<void(node_index)> &callback) const;
 
     void call_outgoing_kmers(node_index kmer,
                              const std::string &spelling_hint,
                              const OutgoingEdgeCallback &callback) const;
-
-    // Given a node index, call the source nodes of all edges incoming to it.
-    // If an empty spelling hint is provided, the node spelling will be computed
-    // from the graph.
-    void adjacent_incoming_nodes(node_index node,
-                                 const std::string &spelling_hint,
-                                 const std::function<void(node_index)> &callback) const;
-
-    void call_incoming_kmers(node_index kmer,
-                             const std::string &spelling_hint,
-                             const IncomingEdgeCallback &callback) const;
 
     virtual void call_sequences(const CallPath &callback,
                                 size_t num_threads = 1,
@@ -166,6 +143,10 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
                                  const std::function<void(node_index, char)> &callback) const;
 
     const NodeFirstCache* get_cache() const;
+
+    void call_incoming_kmers(node_index kmer,
+                             const std::string &spelling_hint,
+                             const IncomingEdgeCallback &callback) const;
 };
 
 } // namespace graph

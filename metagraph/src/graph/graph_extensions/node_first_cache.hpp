@@ -67,8 +67,6 @@ class NodeFirstCache : public SequenceGraph::GraphExtension {
 
     edge_index get_prefix_rc(edge_index node, const std::string &spelling) const;
     edge_index get_suffix_rc(edge_index node, const std::string &spelling) const;
-
-    void call_incoming_kmers_no_mask(edge_index edge, const IncomingEdgeCallback &callback) const;
 };
 
 } // namespace graph

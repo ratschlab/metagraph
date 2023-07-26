@@ -151,10 +151,9 @@ void CanonicalDBG::map_to_nodes(std::string_view sequence,
     }, terminate);
 }
 
-void CanonicalDBG
-::call_outgoing_kmers(node_index node,
-                      const std::string &spelling_hint,
-                      const OutgoingEdgeCallback &callback) const {
+void CanonicalDBG::call_outgoing_kmers(node_index node,
+                                       const std::string &spelling_hint,
+                                       const OutgoingEdgeCallback &callback) const {
     assert(node);
     assert(node <= offset_ * 2);
     if (node > offset_) {
@@ -186,7 +185,7 @@ void CanonicalDBG
         return;
 
     call_outgoing_rc_strand(node,
-        spelling_hint.size() ? spelling_hint : get_node_sequence(node),
+        spelling_hint,
         [&](node_index next, char c) {
             assert(c == get_node_sequence(next).back());
             auto s = alphabet_encoder_[c];
@@ -219,12 +218,55 @@ void CanonicalDBG
 }
 
 void CanonicalDBG
-::adjacent_outgoing_nodes(node_index node,
-                          const std::string &spelling_hint,
+::adjacent_incoming_nodes(node_index node,
                           const std::function<void(node_index)> &callback) const {
+
     if (!k_odd_) {
         // use this function to enable checks for palindromic k-mers
-        call_outgoing_kmers(node, spelling_hint, [&](node_index next, char) {
+        call_incoming_kmers(node, [&](node_index prev, char) {
+            callback(prev);
+        });
+        return;
+    }
+
+    assert(node);
+    assert(node <= offset_ * 2);
+    if (node > offset_) {
+        adjacent_outgoing_nodes(node - offset_, [&](node_index prev) {
+            callback(reverse_complement(prev));
+        });
+        return;
+    }
+
+    std::string node_str = get_node_sequence(node);
+
+    if (has_sentinel_) {
+        // we need to do extra checks to make sure we don't call dummy incoming k-mers
+        // from both strands, so use call_incoming_kmers here
+        call_incoming_kmers(node, node_str, [&](node_index prev, char) {
+            callback(prev);
+        });
+    } else {
+        size_t max_num_edges_left = graph_->alphabet().size();
+        graph_->adjacent_incoming_nodes(node, [&](node_index prev) {
+            callback(prev);
+            --max_num_edges_left;
+        });
+
+        if (!max_num_edges_left)
+            return;
+
+        adjacent_incoming_rc_strand(node, node_str, [&](node_index prev) { callback(prev); });
+    }
+}
+
+void CanonicalDBG
+::adjacent_outgoing_nodes(node_index node,
+                          const std::function<void(node_index)> &callback) const {
+
+    if (!k_odd_) {
+        // use this function to enable checks for palindromic k-mers
+        call_outgoing_kmers(node, [&](node_index next, char) {
             callback(next);
         });
         return;
@@ -233,18 +275,18 @@ void CanonicalDBG
     assert(node);
     assert(node <= offset_ * 2);
     if (node > offset_) {
-        std::string rc_hint = spelling_hint;
-        ::reverse_complement(rc_hint.begin(), rc_hint.end());
-        adjacent_incoming_nodes(node - offset_, rc_hint, [&](node_index next) {
+        adjacent_incoming_nodes(node - offset_, [&](node_index next) {
             callback(reverse_complement(next));
         });
         return;
     }
 
+    std::string node_str = get_node_sequence(node);
+
     if (has_sentinel_) {
         // we need to do extra checks to make sure we don't call dummy outgoing k-mers
         // from both strands, so use call_outgoing_kmers here
-        call_outgoing_kmers(node, spelling_hint, [&](node_index next, char) {
+        call_outgoing_kmers(node, node_str, [&](node_index next, char) {
             callback(next);
         });
     } else {
@@ -257,11 +299,7 @@ void CanonicalDBG
         if (!max_num_edges_left)
             return;
 
-        adjacent_outgoing_rc_strand(
-            node,
-            spelling_hint.size() ? spelling_hint : get_node_sequence(node),
-            [&](node_index next, edge_index) { callback(next); }
-        );
+        adjacent_outgoing_rc_strand(node, node_str, [&](node_index next, edge_index) { callback(next); });
     }
 }
 
@@ -334,7 +372,7 @@ void CanonicalDBG
         return;
 
     call_incoming_rc_strand(node,
-        spelling_hint.size() ? spelling_hint : get_node_sequence(node),
+        spelling_hint,
         [&](node_index prev, char c) {
             assert(c == get_node_sequence(prev)[0]);
             auto s = alphabet_encoder_[c];
@@ -365,53 +403,6 @@ void CanonicalDBG
             is_palindrome_cache_.Put(prev - offset_, true);
         }
     );
-}
-
-void CanonicalDBG
-::adjacent_incoming_nodes(node_index node,
-                          const std::string &spelling_hint,
-                          const std::function<void(node_index)> &callback) const {
-    if (!k_odd_) {
-        // use this function to enable checks for palindromic k-mers
-        call_incoming_kmers(node, spelling_hint, [&](node_index prev, char) {
-            callback(prev);
-        });
-        return;
-    }
-
-    assert(node);
-    assert(node <= offset_ * 2);
-    if (node > offset_) {
-        std::string rc_hint = spelling_hint;
-        ::reverse_complement(rc_hint.begin(), rc_hint.end());
-        adjacent_outgoing_nodes(node - offset_, rc_hint, [&](node_index prev) {
-            callback(reverse_complement(prev));
-        });
-        return;
-    }
-
-    if (has_sentinel_) {
-        // we need to do extra checks to make sure we don't call dummy incoming k-mers
-        // from both strands, so use call_incoming_kmers here
-        call_incoming_kmers(node, spelling_hint, [&](node_index prev, char) {
-            callback(prev);
-        });
-    } else {
-        size_t max_num_edges_left = graph_->alphabet().size();
-        graph_->adjacent_incoming_nodes(node, [&](node_index prev) {
-            callback(prev);
-            --max_num_edges_left;
-        });
-
-        if (!max_num_edges_left)
-            return;
-
-        adjacent_incoming_rc_strand(
-            node,
-            spelling_hint.size() ? spelling_hint : get_node_sequence(node),
-            [&](node_index prev) { callback(prev); }
-        );
-    }
 }
 
 size_t CanonicalDBG::outdegree(node_index node) const {

@@ -371,6 +371,8 @@ void DefaultColumnExtender
                     cur_table_i = i_prev;
                 }
                 assert(hint == graph_->get_node_sequence(node));
+            } else {
+                hint = canonical->get_node_sequence(node);
             }
 
             canonical->call_outgoing_kmers(node, hint, [&](node_index next, char c) {
