@@ -269,7 +269,7 @@ void CanonicalDBG::call_incoming_kmers(node_index node,
         --max_num_edges_left;
     };
 
-    if (const auto *dbg_succ_ = get_dbg_succ(*graph_)) {
+    if (get_dbg_succ(*graph_)) {
         get_cache().call_incoming_kmers(node, incoming_kmer_callback);
     } else {
         graph_->call_incoming_kmers(node, incoming_kmer_callback);
