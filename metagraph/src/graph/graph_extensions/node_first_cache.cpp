@@ -7,11 +7,9 @@ namespace graph {
 
 using namespace boss;
 
-char NodeFirstCache::get_first_char(node_index node, edge_index child_hint) const {
-    assert(dbg_succ_);
-    const BOSS &boss = dbg_succ_->get_boss();
+char NodeFirstCache::get_first_char(edge_index edge, edge_index child_hint) const {
+    const BOSS &boss = dbg_succ_.get_boss();
 
-    edge_index edge = dbg_succ_->kmer_to_boss_index(node);
     if (!cache_size_)
         return boss.decode(boss.get_minus_k_value(edge, boss.get_k() - 1).first);
 
@@ -25,9 +23,7 @@ char NodeFirstCache::get_first_char(node_index node, edge_index child_hint) cons
 
 void NodeFirstCache::call_incoming_edges(edge_index edge,
                                          const BOSS::Call<edge_index> &callback) const {
-    assert(dbg_succ_);
-
-    const BOSS &boss = dbg_succ_->get_boss();
+    const BOSS &boss = dbg_succ_.get_boss();
     edge_index bwd = cache_size_ ? get_parent_pair(edge).first : boss.bwd(edge);
 
     boss.call_incoming_to_target(bwd, boss.get_node_last_value(edge),
@@ -40,15 +36,15 @@ void NodeFirstCache::call_incoming_edges(edge_index edge,
 
 void NodeFirstCache::call_incoming_kmers(node_index node,
                                          const IncomingEdgeCallback &callback) const {
-    assert(node > 0 && node <= dbg_succ_->num_nodes());
+    assert(node > 0 && node <= dbg_succ_.num_nodes());
 
-    edge_index edge = dbg_succ_->kmer_to_boss_index(node);
+    edge_index edge = dbg_succ_.kmer_to_boss_index(node);
 
     call_incoming_edges(edge,
         [&](edge_index prev_edge) {
-            node_index prev = dbg_succ_->boss_to_kmer_index(prev_edge);
+            node_index prev = dbg_succ_.boss_to_kmer_index(prev_edge);
             if (prev != DeBruijnGraph::npos)
-                callback(prev, get_first_char(prev, edge));
+                callback(prev, get_first_char(prev_edge, edge));
         }
     );
 }
@@ -62,7 +58,7 @@ bool NodeFirstCache::is_compatible(const SequenceGraph &graph, bool verbose) con
         return false;
     }
 
-    if (dbg_succ != dbg_succ_) {
+    if (dbg_succ != &dbg_succ_) {
         if (verbose)
             std::cerr << "Graphs do not match\n";
 
@@ -74,10 +70,9 @@ bool NodeFirstCache::is_compatible(const SequenceGraph &graph, bool verbose) con
 
 auto NodeFirstCache::get_parent_pair(edge_index edge, edge_index child_hint) const
         -> std::pair<edge_index, edge_index> {
-    assert(dbg_succ_);
     assert(cache_size_);
 
-    const BOSS &boss = dbg_succ_->get_boss();
+    const BOSS &boss = dbg_succ_.get_boss();
 
     if (boss.get_k() == 1)
         return std::make_pair(boss.bwd(edge), edge);
@@ -123,10 +118,9 @@ auto NodeFirstCache
     if (auto fetch = prefix_rc_cache_.TryGet(edge))
         return *fetch;
 
-    assert(dbg_succ_);
-    const BOSS &boss = dbg_succ_->get_boss();
+    const BOSS &boss = dbg_succ_.get_boss();
 
-    assert(spelling.size() == dbg_succ_->get_k());
+    assert(spelling.size() == dbg_succ_.get_k());
     std::string rev_seq = spelling;
     rev_seq.pop_back();
 
@@ -153,10 +147,9 @@ auto NodeFirstCache
     if (auto fetch = suffix_rc_cache_.TryGet(edge))
         return *fetch;
 
-    assert(dbg_succ_);
-    const BOSS &boss = dbg_succ_->get_boss();
+    const BOSS &boss = dbg_succ_.get_boss();
 
-    assert(spelling.size() == dbg_succ_->get_k());
+    assert(spelling.size() == dbg_succ_.get_k());
     std::string rev_seq = spelling.substr(1);
 
     if (rev_seq[0] == BOSS::kSentinel) {

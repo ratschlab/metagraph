@@ -20,16 +20,12 @@ class NodeFirstCache : public SequenceGraph::GraphExtension {
     using IncomingEdgeCallback = DeBruijnGraph::IncomingEdgeCallback;
     using edge_index = boss::BOSS::edge_index;
 
-    NodeFirstCache()
-          : dbg_succ_(nullptr), cache_size_(0), first_cache_(0),
-            prefix_rc_cache_(0), suffix_rc_cache_(0) {}
-
     NodeFirstCache(const DBGSuccinct &graph, size_t cache_size = 100'000)
-          : dbg_succ_(&graph), cache_size_(cache_size), first_cache_(cache_size),
+          : dbg_succ_(graph), cache_size_(cache_size), first_cache_(cache_size),
             prefix_rc_cache_(cache_size), suffix_rc_cache_(cache_size) {}
 
     // Returns the first character of the node's sequence
-    char get_first_char(node_index node, edge_index child_hint = 0) const;
+    char get_first_char(edge_index node, edge_index child_hint = 0) const;
 
     void call_incoming_edges(edge_index node, const boss::BOSS::Call<edge_index> &callback) const;
     void call_incoming_kmers(node_index node, const IncomingEdgeCallback &callback) const;
@@ -45,7 +41,7 @@ class NodeFirstCache : public SequenceGraph::GraphExtension {
     size_t max_size() const { return cache_size_; }
 
   private:
-    const DBGSuccinct *dbg_succ_;
+    const DBGSuccinct &dbg_succ_;
     size_t cache_size_;
 
     // Maps a BOSS edge e to the pair (bwd(e), bwd^(k-1)(e)), where k is the node

@@ -639,7 +639,7 @@ void CanonicalDBG
                 if (!prev)
                     return;
 
-                char c = cache.get_first_char(prev, rc_edge);
+                char c = cache.get_first_char(prev_edge, rc_edge);
                 // meant to make sure that the following type of traversal doesn't happen
                 // $TGTGCGGCGGGAATATGTACGAAGCGCAGG -> rc(TGTGCGGCGGGAATATGTACGAAGCGCAGG$)
                 if (spelling_hint[0] == boss::BOSS::kSentinel && c == boss::BOSS::kSentinel)
