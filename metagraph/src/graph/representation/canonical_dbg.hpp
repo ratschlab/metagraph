@@ -78,6 +78,10 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
                              const std::string &spelling_hint,
                              const OutgoingEdgeCallback &callback) const;
 
+    void call_incoming_kmers(node_index kmer,
+                             const std::string &spelling_hint,
+                             const IncomingEdgeCallback &callback) const;
+
     virtual void call_sequences(const CallPath &callback,
                                 size_t num_threads = 1,
                                 bool kmers_in_single_form = false) const override final;
@@ -129,24 +133,15 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
     // Find incoming nodes that are on the reverse complement strand of node
     void adjacent_incoming_rc_strand(node_index node,
                                      const std::string &spelling_hint,
-                                     const std::function<void(node_index)> &callback) const;
-    void call_incoming_rc_strand(node_index node,
-                                 const std::string &spelling_hint,
-                                 const std::function<void(node_index, char)> &callback) const;
+                                     const std::function<void(node_index, char)> &callback) const;
 
     // Find outgoing nodes that are on the reverse complement strand of node
     void adjacent_outgoing_rc_strand(node_index node,
                                      const std::string &spelling_hint,
-                                     const std::function<void(node_index, uint64_t)> &callback) const;
-    void call_outgoing_rc_strand(node_index node,
-                                 const std::string &spelling_hint,
-                                 const std::function<void(node_index, char)> &callback) const;
+                                     const std::function<void(node_index, char)> &callback) const;
 
-    const NodeFirstCache* get_cache() const;
-
-    void call_incoming_kmers(node_index kmer,
-                             const std::string &spelling_hint,
-                             const IncomingEdgeCallback &callback) const;
+    // Can only be called when the base graph is DBGSuccinct
+    NodeFirstCache& get_cache() const;
 };
 
 } // namespace graph

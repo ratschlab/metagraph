@@ -10,15 +10,11 @@
 namespace mtg {
 namespace graph {
 
-class CanonicalDBG;
-
 // This cache stores intermediate results from BOSS bwd calls to speed up calls
 // to call_incoming_kmers in DBGSuccinct. In addition, it caches the indices
 // corresponding to the reverse complements of the k-1 prefixes and suffixes of
 // each traversed node.
 class NodeFirstCache : public SequenceGraph::GraphExtension {
-  friend CanonicalDBG;
-
   public:
     using node_index = typename SequenceGraph::node_index;
     using IncomingEdgeCallback = DeBruijnGraph::IncomingEdgeCallback;
@@ -35,7 +31,11 @@ class NodeFirstCache : public SequenceGraph::GraphExtension {
     // Returns the first character of the node's sequence
     char get_first_char(node_index node, edge_index child_hint = 0) const;
 
+    void call_incoming_edges(edge_index node, const boss::BOSS::Call<edge_index> &callback) const;
     void call_incoming_kmers(node_index node, const IncomingEdgeCallback &callback) const;
+
+    edge_index get_prefix_rc(edge_index node, const std::string &spelling) const;
+    edge_index get_suffix_rc(edge_index node, const std::string &spelling) const;
 
     bool load(const std::string &) { throw std::runtime_error("Not implemented"); }
     void serialize(const std::string &) const { throw std::runtime_error("Not implemented"); }
@@ -57,6 +57,7 @@ class NodeFirstCache : public SequenceGraph::GraphExtension {
     // Fetch or compute (bwd(edge), bwd^(k-1)(edge)), then cache the value.
     // If child_hint != 0, then check first_cache_ if child_hint_'s corresponding
     // pair is cached and compute the pair for edge using that result.
+    // FYI: can only be called when the caches are initialized
     std::pair<edge_index, edge_index>
     get_parent_pair(edge_index edge, edge_index child_hint = 0) const;
 
@@ -64,9 +65,6 @@ class NodeFirstCache : public SequenceGraph::GraphExtension {
                                       caches::LRUCachePolicy<edge_index>> prefix_rc_cache_;
     mutable caches::fixed_sized_cache<edge_index, edge_index,
                                       caches::LRUCachePolicy<edge_index>> suffix_rc_cache_;
-
-    edge_index get_prefix_rc(edge_index node, const std::string &spelling) const;
-    edge_index get_suffix_rc(edge_index node, const std::string &spelling) const;
 };
 
 } // namespace graph

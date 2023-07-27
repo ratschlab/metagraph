@@ -23,25 +23,30 @@ char NodeFirstCache::get_first_char(node_index node, edge_index child_hint) cons
     return boss.decode(s);
 }
 
-void NodeFirstCache::call_incoming_kmers(node_index node,
-                                         const IncomingEdgeCallback &callback) const {
+void NodeFirstCache::call_incoming_edges(edge_index edge,
+                                         const BOSS::Call<edge_index> &callback) const {
     assert(dbg_succ_);
-    if (!cache_size_) {
-        dbg_succ_->call_incoming_kmers(node, callback);
-        return;
-    }
 
-    assert(node > 0 && node <= dbg_succ_->num_nodes());
     const BOSS &boss = dbg_succ_->get_boss();
-    edge_index edge = dbg_succ_->kmer_to_boss_index(node);
-    edge_index bwd = get_parent_pair(edge).first;
+    edge_index bwd = cache_size_ ? get_parent_pair(edge).first : boss.bwd(edge);
 
     boss.call_incoming_to_target(bwd, boss.get_node_last_value(edge),
-        [&](BOSS::edge_index incoming_boss_edge) {
-            assert(boss.get_W(incoming_boss_edge) % boss.alph_size
-                    == boss.get_node_last_value(edge));
+        [&](BOSS::edge_index prev) {
+            assert(boss.get_W(prev) % boss.alph_size == boss.get_node_last_value(edge));
+            callback(prev);
+        }
+    );
+}
 
-            node_index prev = dbg_succ_->boss_to_kmer_index(incoming_boss_edge);
+void NodeFirstCache::call_incoming_kmers(node_index node,
+                                         const IncomingEdgeCallback &callback) const {
+    assert(node > 0 && node <= dbg_succ_->num_nodes());
+
+    edge_index edge = dbg_succ_->kmer_to_boss_index(node);
+
+    call_incoming_edges(edge,
+        [&](edge_index prev_edge) {
+            node_index prev = dbg_succ_->boss_to_kmer_index(prev_edge);
             if (prev != DeBruijnGraph::npos)
                 callback(prev, get_first_char(prev, edge));
         }
@@ -70,6 +75,8 @@ bool NodeFirstCache::is_compatible(const SequenceGraph &graph, bool verbose) con
 auto NodeFirstCache::get_parent_pair(edge_index edge, edge_index child_hint) const
         -> std::pair<edge_index, edge_index> {
     assert(dbg_succ_);
+    assert(cache_size_);
+
     const BOSS &boss = dbg_succ_->get_boss();
 
     if (boss.get_k() == 1)

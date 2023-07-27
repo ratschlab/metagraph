@@ -1209,7 +1209,7 @@ TYPED_TEST(CanonicalDBGTest, TraverseNoDummyToDummyForward) {
     }
 
     // meant to make sure that the following traversal doesn't happen
-    // $TGTGCGGCGGGAATATGTACGAAGCGCAGG -> TGTGCGGCGGGAATATGTACGAAGCGCAGG$
+    // $TGTGCGGCGGGAATATGTACGAAGCGCAGG -> rc(TGTGCGGCGGGAATATGTACGAAGCGCAGG$)
 
     std::vector<std::string> sequences {
         "TGTGCGGCGGGAATATGTACGAAGCGCAGGA",
