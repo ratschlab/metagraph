@@ -3,6 +3,8 @@
 
 #include <vector>
 #include <functional>
+#include <istream>
+#include <ostream>
 
 #include "common/vector.hpp"
 
