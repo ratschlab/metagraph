@@ -1151,6 +1151,113 @@ TYPED_TEST(CanonicalDBGTest, CallUnitigsCross) {
     }
 }
 
+TYPED_TEST(CanonicalDBGTest, TraversalDummySink) {
+    if (!std::is_base_of_v<DBGSuccinct, TypeParam>) {
+        common::logger->warn("Dummy k-mers only supported for DBGSuccinct");
+        return;
+    }
+
+    std::vector<std::string> sequences { "CTTCCTTCCTTCTTTCCTTCCTTCCTTCCTC" };
+
+    auto graph = std::make_shared<DBGSuccinct>(31, DeBruijnGraph::PRIMARY);
+    for (const auto &sequence : sequences) {
+        graph->add_sequence(sequence);
+    }
+
+    DBGSuccinct &dbg_succ = *dynamic_cast<DBGSuccinct*>(graph.get());
+
+    if (std::is_same_v<TypeParam, DBGSuccinctCached>)
+        graph->add_extension(std::make_shared<graph::NodeFirstCache>(dbg_succ));
+
+    CanonicalDBG canonical(graph);
+    std::string query = "CTTCCTTCCTTCTTTCCTTCCTTCCTTCCTC";
+    auto node = map_to_nodes_sequentially(canonical, query)[0];
+    ASSERT_NE(0u, node);
+
+    size_t num_found = 0;
+
+    graph->call_outgoing_kmers(node, [&](auto, char c) {
+        ASSERT_EQ(boss::BOSS::kSentinel, c);
+        ++num_found;
+    });
+    ASSERT_EQ(1u, num_found);
+
+    num_found = 0;
+    graph->adjacent_outgoing_nodes(node, [&](auto next) {
+        ASSERT_EQ(boss::BOSS::kSentinel, graph->get_node_sequence(next).back());
+        ++num_found;
+    });
+    ASSERT_EQ(1u, num_found);
+
+    num_found = 0;
+    canonical.call_outgoing_kmers(node, [&](auto, char c) {
+        EXPECT_EQ(boss::BOSS::kSentinel, c);
+        ++num_found;
+    });
+    EXPECT_EQ(1u, num_found);
+
+    num_found = 0;
+    canonical.adjacent_outgoing_nodes(node, [&](auto next) {
+        EXPECT_EQ(boss::BOSS::kSentinel, canonical.get_node_sequence(next).back());
+        ++num_found;
+    });
+    EXPECT_EQ(1u, num_found);
+}
+
+TYPED_TEST(CanonicalDBGTest, TraversalDummySource) {
+    if (!std::is_base_of_v<DBGSuccinct, TypeParam>) {
+        common::logger->warn("Dummy k-mers only supported for DBGSuccinct");
+        return;
+    }
+
+    std::vector<std::string> sequences { "CTTCCTTCCTTCTTTCCTTCCTTCCTTCCTC" };
+
+    auto graph = std::make_shared<DBGSuccinct>(31, DeBruijnGraph::PRIMARY);
+    for (const auto &sequence : sequences) {
+        graph->add_sequence(sequence);
+    }
+
+    DBGSuccinct &dbg_succ = *dynamic_cast<DBGSuccinct*>(graph.get());
+
+    if (std::is_same_v<TypeParam, DBGSuccinctCached>)
+        graph->add_extension(std::make_shared<graph::NodeFirstCache>(dbg_succ));
+
+    CanonicalDBG canonical(graph);
+    std::string query = "CTTCCTTCCTTCTTTCCTTCCTTCCTTCCTC";
+    auto node = map_to_nodes_sequentially(canonical, query)[0];
+    ASSERT_NE(0u, node);
+
+    size_t num_found = 0;
+
+    graph->call_incoming_kmers(node, [&](auto, char c) {
+        ASSERT_EQ(boss::BOSS::kSentinel, c);
+        ++num_found;
+    });
+    ASSERT_EQ(1u, num_found);
+
+    num_found = 0;
+    graph->adjacent_incoming_nodes(node, [&](auto prev) {
+        ASSERT_EQ(boss::BOSS::kSentinel, graph->get_node_sequence(prev).front());
+        ++num_found;
+    });
+    ASSERT_EQ(1u, num_found);
+
+    num_found = 0;
+    canonical.call_incoming_kmers(node, [&](auto, char c) {
+        EXPECT_EQ(boss::BOSS::kSentinel, c);
+        ++num_found;
+    });
+
+    EXPECT_EQ(1u, num_found);
+
+    num_found = 0;
+    canonical.adjacent_incoming_nodes(node, [&](auto prev) {
+        EXPECT_EQ(boss::BOSS::kSentinel, canonical.get_node_sequence(prev).front());
+        ++num_found;
+    });
+    EXPECT_EQ(1u, num_found);
+}
+
 TYPED_TEST(CanonicalDBGTest, TraversalDummy) {
     if (!std::is_base_of_v<DBGSuccinct, TypeParam>) {
         common::logger->warn("Dummy k-mers only supported for DBGSuccinct");
