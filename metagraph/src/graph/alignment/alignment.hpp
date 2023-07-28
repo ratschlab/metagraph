@@ -9,6 +9,7 @@
 
 #include <json/json.h>
 #include <spdlog/fmt/fmt.h>
+#include <sdsl/int_vector.hpp>
 
 #include "aligner_cigar.hpp"
 #include "aligner_config.hpp"
