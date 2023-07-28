@@ -232,7 +232,7 @@ void CanonicalDBG::call_outgoing_kmers(node_index node,
     });
 
     if (has_sentinel_ && children[alphabet_encoder_[boss::BOSS::kSentinel]]
-            && max_num_edges_left + has_sentinel_ == alphabet.size()) {
+            && max_num_edges_left + 1 == alphabet.size()) {
         callback(children[alphabet_encoder_[boss::BOSS::kSentinel]],
                  boss::BOSS::kSentinel);
     }
