@@ -224,14 +224,18 @@ void CanonicalDBG::call_outgoing_kmers(node_index node,
         // traverse works only for real edges
         assert(c == boss::BOSS::kSentinel || traverse(node, c) == next);
 
-        if (c != boss::BOSS::kSentinel)
+        if (c != boss::BOSS::kSentinel) {
             callback(next, c);
-
-        children[s] = next;
+            children[s] = next;
+            --max_num_edges_left;
+        }
     });
 
-    if (children[alphabet_encoder_[boss::BOSS::kSentinel]])
-        callback(children[alphabet_encoder_[boss::BOSS::kSentinel]], boss::BOSS::kSentinel);
+    if (has_sentinel_ && children[alphabet_encoder_[boss::BOSS::kSentinel]]
+            && max_num_edges_left + has_sentinel_ == alphabet.size()) {
+        callback(children[alphabet_encoder_[boss::BOSS::kSentinel]],
+                 boss::BOSS::kSentinel);
+    }
 }
 
 void CanonicalDBG::call_incoming_kmers(node_index node,
@@ -309,14 +313,18 @@ void CanonicalDBG::call_incoming_kmers(node_index node,
         assert(c == get_node_sequence(prev)[0]);
         assert(c == boss::BOSS::kSentinel || traverse_back(node, c) == prev);
 
-        if (c != boss::BOSS::kSentinel)
+        if (c != boss::BOSS::kSentinel) {
             callback(prev, c);
-
-        parents[s] = prev;
+            parents[s] = prev;
+            --max_num_edges_left;
+        }
     });
 
-    if (parents[alphabet_encoder_[boss::BOSS::kSentinel]])
-        callback(parents[alphabet_encoder_[boss::BOSS::kSentinel]], boss::BOSS::kSentinel);
+    if (has_sentinel_ && parents[alphabet_encoder_[boss::BOSS::kSentinel]]
+            && max_num_edges_left + has_sentinel_ == alphabet.size()) {
+        callback(parents[alphabet_encoder_[boss::BOSS::kSentinel]],
+                 boss::BOSS::kSentinel);
+    }
 }
 
 void CanonicalDBG
