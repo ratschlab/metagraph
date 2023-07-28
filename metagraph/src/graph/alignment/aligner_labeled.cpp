@@ -11,8 +11,8 @@ namespace align {
 
 using mtg::common::logger;
 
-typedef annot::binmat::BinaryMatrix::Row Row;
-typedef annot::binmat::BinaryMatrix::Column Column;
+typedef annot::matrix::BinaryMatrix::Row Row;
+typedef annot::matrix::BinaryMatrix::Column Column;
 typedef AnnotationBuffer::Columns Columns;
 typedef DeBruijnGraph::node_index node_index;
 

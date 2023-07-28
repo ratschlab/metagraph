@@ -18,7 +18,7 @@ namespace graph {
 class AnnotatedSequenceGraph {
   public:
     typedef std::string Label;
-    typedef annot::MultiLabelEncoded<Label> Annotator;
+    typedef annot::MultiLabelAnnotation<Label> Annotator;
     using node_index = SequenceGraph::node_index;
     using row_index = Annotator::Index;
 
@@ -29,8 +29,6 @@ class AnnotatedSequenceGraph {
     virtual ~AnnotatedSequenceGraph() {}
 
     virtual std::vector<Label> get_labels(node_index index) const;
-
-    virtual bool has_label(node_index index, const Label &label) const;
 
     // thread-safe, can be called from multiple threads concurrently
     virtual void annotate_sequence(std::string_view sequence,
@@ -124,14 +122,6 @@ class AnnotatedDBG : public AnnotatedSequenceGraph {
                    size_t num_top_labels,
                    size_t min_count = 0,
                    bool with_kmer_counts = false) const;
-
-    // returns tuples (label, num_kmer_matches, kmer_abundance_quantiles)
-    std::vector<std::tuple<Label, size_t, std::vector<size_t>>>
-    get_label_count_quantiles(std::string_view sequence,
-                              size_t num_top_labels,
-                              double discovery_fraction,
-                              double presence_fraction,
-                              const std::vector<double> &count_quantiles) const;
 
     // returns tuples (label, num_kmer_matches, kmer_abundances)
     std::vector<std::tuple<Label, size_t, std::vector<size_t>>>

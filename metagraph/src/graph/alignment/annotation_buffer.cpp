@@ -16,8 +16,8 @@ namespace align {
 
 using mtg::common::logger;
 
-typedef annot::binmat::BinaryMatrix::Row Row;
-typedef annot::binmat::BinaryMatrix::Column Column;
+typedef annot::matrix::BinaryMatrix::Row Row;
+typedef annot::matrix::BinaryMatrix::Column Column;
 
 // dummy index for an unfetched annotations
 static constexpr size_t nannot = std::numeric_limits<size_t>::max();

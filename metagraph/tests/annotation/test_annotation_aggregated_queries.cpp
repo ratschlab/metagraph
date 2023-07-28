@@ -11,10 +11,10 @@ namespace {
 using namespace mtg;
 using namespace mtg::test;
 
-using mtg::annot::MultiLabelEncoded;
+using mtg::annot::MultiLabelAnnotation;
 
 
-std::vector<std::string> get_labels(const MultiLabelEncoded<std::string> &annotator,
+std::vector<std::string> get_labels(const MultiLabelAnnotation<std::string> &annotator,
                                     const std::vector<uint64_t> &indices,
                                     double min_label_frequency = 0.0) {
     const auto& label_encoder = annotator.get_label_encoder();
@@ -26,8 +26,8 @@ std::vector<std::string> get_labels(const MultiLabelEncoded<std::string> &annota
         label_counts.emplace_back(label_encoder.decode(j), 0);
     }
 
-    for (auto i : indices) {
-        for (auto j : annotator.get_matrix().get_row(i)) {
+    for (const auto &row : annotator.get_matrix().get_rows(indices)) {
+        for (auto j : row) {
             label_counts[j].second++;
         }
     }
@@ -103,7 +103,7 @@ TYPED_TEST(AnnotatorPresetTest, call_rows_get_labels) {
               convert_to_set(get_labels(*this->annotation, { 0, 1, 2, 3, 4 }, 1)));
 }
 
-std::vector<std::string> get_labels_by_label(const MultiLabelEncoded<std::string> &annotator,
+std::vector<std::string> get_labels_by_label(const MultiLabelAnnotation<std::string> &annotator,
                                              const std::vector<uint64_t> &indices,
                                              double min_label_frequency = 0.0) {
     VectorMap<uint64_t, size_t> index_counts;
@@ -114,7 +114,7 @@ std::vector<std::string> get_labels_by_label(const MultiLabelEncoded<std::string
     const size_t min_count = std::max(1.0,
                                       std::ceil(min_label_frequency * indices.size()));
 
-    auto code_counts = annotator.get_matrix().sum_rows(index_counts.values_container(), min_count, min_count);
+    auto code_counts = annotator.get_matrix().sum_rows(index_counts.values_container(), min_count);
 
     std::vector<std::string> labels;
     labels.reserve(code_counts.size());
@@ -193,7 +193,7 @@ TYPED_TEST(AnnotatorPresetTest, call_rows_get_labels_by_label) {
 
 
 std::vector<std::pair<std::string, size_t>>
-get_top_labels(const MultiLabelEncoded<std::string> &annotator,
+get_top_labels(const MultiLabelAnnotation<std::string> &annotator,
                const std::vector<uint64_t> &indices,
                size_t num_top_labels = static_cast<size_t>(-1),
                double min_label_frequency = 0.0) {
@@ -206,8 +206,8 @@ get_top_labels(const MultiLabelEncoded<std::string> &annotator,
         label_counts.emplace_back(label_encoder.decode(i), 0);
     }
 
-    for (auto i : indices) {
-        for (auto j : annotator.get_matrix().get_row(i)) {
+    for (const auto &row : annotator.get_matrix().get_rows(indices)) {
+        for (auto j : row) {
             label_counts[j].second++;
         }
     }
@@ -277,7 +277,7 @@ TYPED_TEST(AnnotatorPreset3Test, call_rows_get_top_labels) {
 }
 
 std::vector<std::pair<std::string, size_t>>
-get_top_labels_by_label(const MultiLabelEncoded<std::string> &annotator,
+get_top_labels_by_label(const MultiLabelAnnotation<std::string> &annotator,
                         const std::vector<uint64_t> &indices,
                         size_t num_top_labels = static_cast<size_t>(-1),
                         double min_label_frequency = 0.0) {

@@ -85,24 +85,6 @@ ColumnCompressed<Label>::~ColumnCompressed() {
 }
 
 template <typename Label>
-void ColumnCompressed<Label>::set(Index i, const VLabels &labels) {
-    assert(i < num_rows_);
-    // add new labels
-    for (const auto &label : labels) {
-        label_encoder_.insert_and_encode(label);
-    }
-    // labels as a row
-    std::vector<bool> row(label_encoder_.size(), 0);
-    for (const auto &label : labels) {
-        row[label_encoder_.encode(label)] = 1;
-    }
-    // set bits
-    for (size_t j = 0; j < row.size(); ++j) {
-        set(i, j, row[j]);
-    }
-}
-
-template <typename Label>
 void ColumnCompressed<Label>::add_labels(const std::vector<Index> &indices,
                                          const VLabels &labels) {
     for (const auto &label : labels) {
@@ -191,24 +173,6 @@ void ColumnCompressed<Label>::add_label_coords(const std::vector<std::pair<Index
             max_coord_[j] = std::max(max_coord_[j], v.second);
         }
     }
-}
-
-template <typename Label>
-bool ColumnCompressed<Label>::has_label(Index i, const Label &label) const {
-    try {
-        return get_column(label)[i];
-    } catch (...) {
-        return false;
-    }
-}
-
-template <typename Label>
-bool ColumnCompressed<Label>::has_labels(Index i, const VLabels &labels) const {
-    for (const auto &label : labels) {
-        if (!has_label(i, label))
-            return false;
-    }
-    return true;
 }
 
 template <typename Label>
@@ -1176,16 +1140,16 @@ const bitmap& ColumnCompressed<Label>::get_column(const Label &label) const {
 }
 
 template <typename Label>
-const binmat::ColumnMajor& ColumnCompressed<Label>::get_matrix() const {
+const matrix::ColumnMajor& ColumnCompressed<Label>::get_matrix() const {
     flush();
     return matrix_;
 }
 
 template <typename Label>
-std::unique_ptr<binmat::ColumnMajor> ColumnCompressed<Label>::release_matrix() {
+std::unique_ptr<matrix::ColumnMajor> ColumnCompressed<Label>::release_matrix() {
     flush();
     label_encoder_.clear();
-    return std::make_unique<binmat::ColumnMajor>(std::move(matrix_));
+    return std::make_unique<matrix::ColumnMajor>(std::move(matrix_));
 }
 
 template <typename Label>

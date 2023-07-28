@@ -7,7 +7,6 @@
 #include "common/utils/file_utils.hpp"
 #include "common/threads/threading.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
-#include "graph/graph_extensions/node_rc.hpp"
 #include "config/config.hpp"
 #include "load/load_graph.hpp"
 
@@ -40,11 +39,6 @@ int transform_graph(Config *config) {
 
     if (!dbg_succ.get())
         throw std::runtime_error("Only implemented for DBGSuccinct");
-
-    if (config->adjrc) {
-        graph::NodeRC(*dbg_succ, true).serialize(config->outfbase + dbg_succ->file_extension());
-        return 0;
-    }
 
     if (config->initialize_bloom) {
         assert(config->bloom_fpp > 0.0 && config->bloom_fpp <= 1.0);
@@ -106,14 +100,12 @@ int transform_graph(Config *config) {
                       suffix_length,
                       std::pow(dbg_succ->get_boss().alph_size - 1, suffix_length)
                             * 2. * sizeof(uint64_t) * 1e-6);
+        timer.reset();
+        dbg_succ->get_boss().index_suffix_ranges(suffix_length, get_num_threads());
         logger->trace("Compressed node ranges to approx. {:.2f} MB",
                       dbg_succ->get_boss().get_suffix_ranges_index_size() / 8e6);
-        timer.reset();
-
-        dbg_succ->get_boss().index_suffix_ranges(suffix_length, get_num_threads());
 
         logger->trace("Indexing of node ranges took {} sec", timer.elapsed());
-        timer.reset();
     }
 
     if (config->to_adj_list) {

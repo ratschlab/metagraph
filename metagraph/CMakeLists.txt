@@ -263,7 +263,6 @@ include_directories(
   external-libraries/sdsl-lite/include
   external-libraries/hopscotch-map/include
   external-libraries/ordered-map/include
-  external-libraries/binrel_wt/include
   external-libraries/cpp_progress_bar
   external-libraries/Priority-Deque
   external-libraries/rollinghashcpp
@@ -353,16 +352,6 @@ ExternalProject_Add(HTSLIB
 link_directories(${CMAKE_BINARY_DIR}/external-libraries/htslib/lib)
 include_directories(${CMAKE_BINARY_DIR}/external-libraries/htslib/include)
 
-set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH}
-  "${CMAKE_SOURCE_DIR}/external-libraries/binrel_wt/cmake/modules"
-)
-set(BRWT_INCLUDE_TESTS OFF)
-set(BRWT_INCLUDE_DOCS OFF)
-add_subdirectory(
-  external-libraries/binrel_wt EXCLUDE_FROM_ALL
-)
-brwt_target_link_flags(brwt -lsdsl)
-
 set(OTHER_COMPILER_FLAGS "")
 get_directory_property(DIRECTORY_DEFINITIONS COMPILE_DEFINITIONS)
 foreach(DEF ${DIRECTORY_DEFINITIONS})
@@ -415,7 +404,6 @@ set(METALIBS ${METALIBS}
   -lKMC
   -lhts zlib
   -lsdsl
-  brwt
   jsoncpp_lib
   progress_bar
   mersenne_twister
@@ -500,26 +488,6 @@ add_custom_target(link_target ALL
 
 add_dependencies(metagraph link_target)
 
-
-#-------------------
-# Experiments
-#-------------------
-file(GLOB experiment_files
-  "experiments/*.cpp"
-)
-list(FILTER experiment_files EXCLUDE REGEX ".*\\._.*")
-
-include_directories(
-  experiments
-  external-libraries/tclap/include
-)
-
-link_directories(
-  external-libraries/sdsl-lite/lib
-)
-add_executable(run_experiments ${experiment_files})
-
-target_link_libraries(run_experiments metagraph-core metagraph-cli)
 
 #-------------------
 # install library
@@ -630,23 +598,3 @@ file(INSTALL "${PROJECT_BINARY_DIR}/CMakeFiles/integration_tests"
                    GROUP_READ GROUP_EXECUTE
                    WORLD_READ WORLD_EXECUTE
 )
-
-#-------------------
-# Python interfaces
-#-------------------
-if(PYTHON_INTERFACE)
-  FIND_PACKAGE(SWIG REQUIRED)
-  INCLUDE(${SWIG_USE_FILE})
-
-  FIND_PACKAGE(PythonLibs)
-  INCLUDE_DIRECTORIES(${PYTHON_INCLUDE_PATH})
-
-  SET(CMAKE_SWIG_FLAGS "")
-
-  file(GLOB interface_files "interfaces/*.i")
-
-  SET_SOURCE_FILES_PROPERTIES(${interface_files} PROPERTIES CPLUSPLUS ON)
-
-  SWIG_ADD_LIBRARY(metagraph LANGUAGE python SOURCES ${interface_files})
-  SWIG_LINK_LIBRARIES(metagraph metagraph-core ${METALIBS} ${PYTHON_LIBRARIES})
-endif()

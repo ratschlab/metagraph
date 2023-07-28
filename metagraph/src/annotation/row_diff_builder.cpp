@@ -23,7 +23,7 @@ const uint64_t MAX_COLUMNS_IN_BATCH = 1'000'000;
 namespace mtg {
 namespace annot {
 
-using namespace mtg::annot::binmat;
+using namespace mtg::annot::matrix;
 using mtg::common::logger;
 using mtg::graph::boss::BOSS;
 namespace fs = std::filesystem;

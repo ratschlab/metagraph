@@ -10,7 +10,7 @@
 
 namespace mtg {
 namespace annot {
-namespace binmat {
+namespace matrix {
 
 void IRowDiff::load_anchor(const std::string &filename) {
     if (!std::filesystem::exists(filename)) {
@@ -111,6 +111,6 @@ IRowDiff::get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids) const {
     return std::make_tuple(std::move(rd_ids), std::move(rd_paths_trunc), std::move(times_traversed));
 }
 
-} // namespace binmat
+} // namespace matrix
 } // namespace annot
 } // namespace mtg

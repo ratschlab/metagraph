@@ -19,7 +19,7 @@ namespace matrix {
  * on binary columns of the indexing matrix.
  */
 template <class BaseMatrix, class ColumnValues = sdsl::int_vector<>>
-class CSCMatrix : public IntMatrix {
+class CSCMatrix : public BinaryMatrix, public IntMatrix, public GetEntrySupport {
   public:
     CSCMatrix() {}
 
@@ -29,10 +29,7 @@ class CSCMatrix : public IntMatrix {
         column_values_(column_values) {}
 
     // row is in [0, num_rows), column is in [0, num_columns)
-    RowValues get_row_values(Row row) const;
-
-    std::vector<RowValues>
-    get_row_values(const std::vector<Row> &rows) const;
+    std::vector<RowValues> get_row_values(const std::vector<Row> &rows) const;
 
     uint64_t num_columns() const { return binary_matrix_.num_columns(); }
     uint64_t num_rows() const { return binary_matrix_.num_rows(); }
@@ -40,16 +37,11 @@ class CSCMatrix : public IntMatrix {
 
     // row is in [0, num_rows), column is in [0, num_columns)
     bool get(Row row, Column column) const { return binary_matrix_.get(row, column); }
-    SetBitPositions get_row(Row row) const { return binary_matrix_.get_row(row); }
     std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const {
         return binary_matrix_.get_rows(rows);
     }
     std::vector<Row> get_column(Column column) const {
         return binary_matrix_.get_column(column);
-    }
-    // get all selected rows appended with -1 and concatenated
-    std::vector<Column> slice_rows(const std::vector<Row> &rows) const {
-        return binary_matrix_.slice_rows(rows);
     }
 
     bool load(std::istream &in);
@@ -62,19 +54,6 @@ class CSCMatrix : public IntMatrix {
     std::vector<ColumnValues> column_values_;
 };
 
-
-template <class BaseMatrix, class ColumnValues>
-inline typename CSCMatrix<BaseMatrix, ColumnValues>::RowValues
-CSCMatrix<BaseMatrix, ColumnValues>::get_row_values(Row row) const {
-    const auto &column_ranks = binary_matrix_.get_column_ranks(row);
-    RowValues row_values;
-    row_values.reserve(column_ranks.size());
-    for (auto [j, r] : column_ranks) {
-        assert(r >= 1 && "matches can't have zero-rank");
-        row_values.emplace_back(j, column_values_[j][r - 1]);
-    }
-    return row_values;
-}
 
 template <class BaseMatrix, class ColumnValues>
 inline std::vector<typename CSCMatrix<BaseMatrix, ColumnValues>::RowValues>

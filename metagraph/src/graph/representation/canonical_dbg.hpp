@@ -9,6 +9,7 @@
 
 #include "common/vector.hpp"
 #include "graph/representation/base/dbg_wrapper.hpp"
+#include "graph/graph_extensions/node_first_cache.hpp"
 
 
 namespace mtg {
@@ -59,15 +60,27 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
     virtual void adjacent_outgoing_nodes(node_index node,
                                          const std::function<void(node_index)> &callback) const override final;
 
-    virtual void call_outgoing_kmers(node_index kmer,
-                                     const OutgoingEdgeCallback &callback) const override final;
-
-    virtual void call_incoming_kmers(node_index kmer,
-                                     const IncomingEdgeCallback &callback) const override final;
-
     // Given a node index, call the source nodes of all edges incoming to it.
     virtual void adjacent_incoming_nodes(node_index node,
                                          const std::function<void(node_index)> &callback) const override final;
+
+    virtual void call_outgoing_kmers(node_index kmer,
+                                     const OutgoingEdgeCallback &callback) const override final {
+        call_outgoing_kmers(kmer, get_node_sequence(kmer), callback);
+    }
+
+    virtual void call_incoming_kmers(node_index kmer,
+                                     const IncomingEdgeCallback &callback) const override final {
+        call_incoming_kmers(kmer, get_node_sequence(kmer), callback);
+    }
+
+    void call_outgoing_kmers(node_index kmer,
+                             const std::string &spelling_hint,
+                             const OutgoingEdgeCallback &callback) const;
+
+    void call_incoming_kmers(node_index kmer,
+                             const std::string &spelling_hint,
+                             const IncomingEdgeCallback &callback) const;
 
     virtual void call_sequences(const CallPath &callback,
                                 size_t num_threads = 1,
@@ -112,6 +125,23 @@ class CanonicalDBG : public DBGWrapper<DeBruijnGraph> {
     bool has_sentinel_;
 
     std::array<size_t, 256> alphabet_encoder_;
+
+    // a thread-safe 0-size NodeFirstCache to use as a fallback if another NodeFirstCache
+    // extension is not available
+    mutable std::unique_ptr<NodeFirstCache> fallback_cache_;
+
+    // Find incoming nodes that are on the reverse complement strand of node
+    void adjacent_incoming_rc_strand(node_index node,
+                                     const std::string &spelling_hint,
+                                     const std::function<void(node_index, char)> &callback) const;
+
+    // Find outgoing nodes that are on the reverse complement strand of node
+    void adjacent_outgoing_rc_strand(node_index node,
+                                     const std::string &spelling_hint,
+                                     const std::function<void(node_index, char)> &callback) const;
+
+    // Can only be called when the base graph is DBGSuccinct
+    NodeFirstCache& get_cache() const;
 };
 
 } // namespace graph

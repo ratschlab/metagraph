@@ -15,7 +15,7 @@ using ChildrenList = tsl::hopscotch_map<TaxId, std::vector<TaxId>>;
 
 class TaxonomyBase {
   public:
-    using KmerId = annot::MultiLabelEncoded<std::string>::Index;
+    using KmerId = annot::MultiLabelAnnotation<std::string>::Index;
     using node_index = graph::SequenceGraph::node_index;
 
     enum LabelType {

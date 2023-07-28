@@ -24,7 +24,7 @@ namespace cli {
 using mtg::common::logger;
 using mtg::common::get_verbose;
 
-typedef annot::MultiLabelEncoded<std::string> Annotator;
+typedef annot::MultiLabelAnnotation<std::string> Annotator;
 
 
 void print_boss_stats(const graph::boss::BOSS &boss_graph,
@@ -169,7 +169,7 @@ void print_anchor_stats(const Matrix& m) {
     }
 }
 
-void print_brwt_stats(const annot::binmat::BRWT& brwt) {
+void print_brwt_stats(const annot::matrix::BRWT& brwt) {
     std::cout << "=================== Multi-BRWT STATS ===================" << std::endl;
     std::cout << "num nodes: " << brwt.num_nodes() << std::endl;
     std::cout << "avg arity: " << brwt.avg_arity() << std::endl;
@@ -215,7 +215,7 @@ void print_annotation_stats(const std::string &fname, const Config &config) {
 
     logger->info("Statistics for annotation '{}'", fname);
 
-    std::unique_ptr<annot::MultiLabelEncoded<std::string>> anno_p
+    std::unique_ptr<annot::MultiLabelAnnotation<std::string>> anno_p
             = initialize_annotation(fname, config);
     auto &annotation = *anno_p;
 
@@ -224,10 +224,10 @@ void print_annotation_stats(const std::string &fname, const Config &config) {
         exit(1);
     }
 
-    using RowDiffCol = annot::binmat::RowDiff<annot::binmat::ColumnMajor>;
+    using RowDiffCol = annot::matrix::RowDiff<annot::matrix::ColumnMajor>;
     if (auto *rd = dynamic_cast<const RowDiffCol *>(&annotation.get_matrix())) {
         std::string anchors_fname = utils::make_suffix(config.infbase,
-                                                       annot::binmat::kRowDiffAnchorExt);
+                                                       annot::matrix::kRowDiffAnchorExt);
         if (!config.infbase.empty() && std::filesystem::exists(anchors_fname)) {
             const_cast<RowDiffCol *>(rd)->load_anchor(anchors_fname);
         }
@@ -242,7 +242,7 @@ void print_annotation_stats(const std::string &fname, const Config &config) {
     std::cout << "representation: "
               << utils::split_string(annotation.file_extension(), ".").at(0) << '\n';
 
-    using namespace annot::binmat;
+    using namespace annot::matrix;
 
     const BinaryMatrix *mat = &annotation.get_matrix();
 

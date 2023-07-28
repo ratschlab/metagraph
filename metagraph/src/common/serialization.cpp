@@ -23,17 +23,8 @@
 #endif
 
 #include <tsl/hopscotch_map.h>
-#include <tsl/ordered_set.h>
 #include <sdsl/int_vector.hpp>
 
-
-template <typename Key>
-using OrderedSet = tsl::ordered_set<Key,
-                                    std::hash<Key>,
-                                    std::equal_to<Key>,
-                                    std::allocator<Key>,
-                                    std::deque<Key, std::allocator<Key>>,
-                                    std::uint64_t>;
 
 void serialize_number(std::ostream &out, uint64_t number) {
     if (!out.good())
@@ -576,42 +567,3 @@ bool load_number_string_map(std::istream &in,
 template
 bool load_number_string_map(std::istream &in,
                             tsl::hopscotch_map<uint32_t, std::string> *map);
-
-
-template <class Set>
-void serialize_set(std::ostream &out, const Set &set) {
-    serialize_number(out, set.size());
-
-    for (const auto &value : set) {
-        serialize_string(out, value);
-    }
-}
-
-template void serialize_set(std::ostream &out,
-                            const OrderedSet<std::string> &set);
-
-template <class Set>
-bool load_set(std::istream &in, Set *set) {
-    assert(set);
-    set->clear();
-
-    auto const size = load_number(in);
-    set->reserve(size + 1);
-    set->rehash(size + 1);
-
-    try {
-        for (size_t i = 0; i < size; ++i) {
-            std::string val;
-            if (!load_string(in, &val))
-                return false;
-
-            set->insert(std::move(val));
-        }
-    } catch (...) {
-        return false;
-    }
-
-    return true;
-}
-
-template bool load_set(std::istream &in, OrderedSet<std::string> *set);

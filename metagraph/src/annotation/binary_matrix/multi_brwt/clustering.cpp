@@ -12,7 +12,7 @@
 
 namespace mtg {
 namespace annot {
-namespace binmat {
+namespace matrix {
 
 using mtg::common::logger;
 
@@ -421,6 +421,6 @@ LinkageMatrix agglomerative_linkage_trivial(size_t num_columns) {
     return linkage_matrix;
 }
 
-} // namespace binmat
+} // namespace matrix
 } // namespace annot
 } // namespace mtg

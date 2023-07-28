@@ -19,7 +19,6 @@ template <typename Annotator>
 class AnnotatorPresetDumpTest : public AnnotatorPreset2Test<Annotator> { };
 
 typedef ::testing::Types<annot::BinRelWTAnnotator,
-                         annot::BinRelWT_sdslAnnotator,
                          annot::RbBRWTAnnotator,
                          annot::MultiBRWTAnnotator,
                          annot::RainbowfishAnnotator,
@@ -92,11 +91,11 @@ TYPED_TEST(AnnotatorPresetDumpTest, SerializationAndLoadText) {
         }
     }
 
-    EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(loaded.get(0)));
-    EXPECT_EQ(convert_to_set({}),                               convert_to_set(loaded.get(1)));
-    EXPECT_EQ(convert_to_set({ "Label1", "Label2" }),           convert_to_set(loaded.get(2)));
-    EXPECT_EQ(convert_to_set({}),                               convert_to_set(loaded.get(3)));
-    EXPECT_EQ(convert_to_set({ "Label8" }),                     convert_to_set(loaded.get(4)));
+    EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(loaded.get_labels(0)));
+    EXPECT_EQ(convert_to_set({}),                               convert_to_set(loaded.get_labels(1)));
+    EXPECT_EQ(convert_to_set({ "Label1", "Label2" }),           convert_to_set(loaded.get_labels(2)));
+    EXPECT_EQ(convert_to_set({}),                               convert_to_set(loaded.get_labels(3)));
+    EXPECT_EQ(convert_to_set({ "Label8" }),                     convert_to_set(loaded.get_labels(4)));
 }
 
 TYPED_TEST(AnnotatorPresetDumpTest, SerializationAndLoadTextParallel) {
@@ -127,11 +126,11 @@ TYPED_TEST(AnnotatorPresetDumpTest, SerializationAndLoadTextParallel) {
         }
     }
 
-    EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(loaded.get(0)));
-    EXPECT_EQ(convert_to_set({}),                               convert_to_set(loaded.get(1)));
-    EXPECT_EQ(convert_to_set({ "Label1", "Label2" }),           convert_to_set(loaded.get(2)));
-    EXPECT_EQ(convert_to_set({}),                               convert_to_set(loaded.get(3)));
-    EXPECT_EQ(convert_to_set({ "Label8" }),                     convert_to_set(loaded.get(4)));
+    EXPECT_EQ(convert_to_set({ "Label0", "Label2", "Label8" }), convert_to_set(loaded.get_labels(0)));
+    EXPECT_EQ(convert_to_set({}),                               convert_to_set(loaded.get_labels(1)));
+    EXPECT_EQ(convert_to_set({ "Label1", "Label2" }),           convert_to_set(loaded.get_labels(2)));
+    EXPECT_EQ(convert_to_set({}),                               convert_to_set(loaded.get_labels(3)));
+    EXPECT_EQ(convert_to_set({ "Label8" }),                     convert_to_set(loaded.get_labels(4)));
 }
 
 } // namespace

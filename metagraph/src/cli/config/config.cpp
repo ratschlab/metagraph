@@ -705,8 +705,6 @@ std::string Config::annotype_to_string(AnnotationType state) {
             return "row";
         case BRWT:
             return "brwt";
-        case BinRelWT_sdsl:
-            return "bin_rel_wt_sdsl";
         case BinRelWT:
             return "bin_rel_wt";
         case RowFlat:
@@ -754,8 +752,6 @@ Config::AnnotationType Config::string_to_annotype(const std::string &string) {
         return AnnotationType::RowCompressed;
     } else if (string == "brwt") {
         return AnnotationType::BRWT;
-    } else if (string == "bin_rel_wt_sdsl") {
-        return AnnotationType::BinRelWT_sdsl;
     } else if (string == "bin_rel_wt") {
         return AnnotationType::BinRelWT;
     } else if (string == "flat") {
@@ -894,7 +890,7 @@ void Config::print_usage(const std::string &prog_name, IdentityType identity) {
                                    "\t\t  column_coord, brwt_coord, row_diff_coord, row_diff_brwt_coord,\n"
                                    "\t\t  row_diff, row_diff_brwt, row_diff_flat, row_diff_sparse, row_diff_int_brwt,\n"
                                    "\t\t  row_diff_disk, row_diff_int_disk, row_diff_disk_coord,\n"
-                                   "\t\t  row, flat, row_sparse, rbfish, bin_rel_wt, bin_rel_wt_sdsl )";
+                                   "\t\t  row, flat, row_sparse, rbfish, bin_rel_wt )";
 
     switch (identity) {
         case NO_IDENTITY: {
@@ -927,7 +923,7 @@ if (advanced) {
             fprintf(stderr, "\tannotate\tgiven a graph and a fast[a|q] file, annotate\n");
             fprintf(stderr, "\t\t\tthe respective kmers\n\n");
 if (advanced) {
-            fprintf(stderr, "\tmerge_anno\tmerge annotation columns\n\n");
+            fprintf(stderr, "\tmerge_anno\tmerge annotations\n\n");
 }
             fprintf(stderr, "\trelax_brwt\toptimize the tree structure in brwt annotator\n\n");
 
@@ -1048,9 +1044,7 @@ if (advanced) {
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --query-presence \t\ttest sequences for presence, report as 0 or 1 [off]\n");
             fprintf(stderr, "\t   --filter-present \t\treport only present input sequences as FASTA [off]\n");
-if (advanced) {
             fprintf(stderr, "\t   --batch-size [INT] \t\tquery batch size (number of base pairs) [100'000'000]\n");
-}
             fprintf(stderr, "\n");
             fprintf(stderr, "Available options for alignment:\n");
             fprintf(stderr, "\t-a --annotator [STR] \t\t\t\tannotator to load for label/trace-consistent alignment []\n");
@@ -1224,9 +1218,6 @@ if (advanced) {
             fprintf(stderr, "Usage: %s merge_anno -o <annotation-basename> [options] ANNOT1 [[ANNOT2] ...]\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for annotate:\n");
-            fprintf(stderr, "\t   --anno-type [STR] \ttarget annotation representation [column]\n");
-            fprintf(stderr, "%s\n", annotation_list);
-            // fprintf(stderr, "\t   --sparse \t\tuse the row-major sparse matrix to annotate graph [off]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
         case TRANSFORM_ANNOTATION: {

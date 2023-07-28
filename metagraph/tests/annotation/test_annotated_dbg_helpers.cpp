@@ -22,7 +22,6 @@ namespace test {
 
 using namespace mtg::graph;
 using namespace mtg::annot;
-using namespace mtg::annot::binmat;
 using namespace mtg::annot::matrix;
 using common::logger;
 

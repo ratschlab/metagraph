@@ -131,6 +131,31 @@ DataGenerator
                                 row_frequencies);
 }
 
+template <class BitVectorType = bit_vector_stat>
+std::vector<std::unique_ptr<bit_vector>>
+transpose(const std::vector<std::unique_ptr<bit_vector>> &matrix) {
+    std::vector<std::unique_ptr<bit_vector>> transposed;
+    if (!matrix.size())
+        return transposed;
+
+    uint64_t num_rows = matrix.size();
+    uint64_t num_columns = matrix[0]->size();
+    transposed.reserve(num_columns);
+
+    utils::call_rows<std::unique_ptr<bit_vector>, Vector<uint64_t>>(
+        matrix,
+        [&](const Vector<uint64_t> &column_indices) {
+            sdsl::bit_vector bv(num_rows, false);
+            for (const auto &row_id : column_indices) {
+                bv[row_id] = true;
+            }
+            transposed.emplace_back(new BitVectorType(std::move(bv)));
+        }
+    );
+
+    return transposed;
+}
+
 std::vector<std::unique_ptr<bit_vector>>
 DataGenerator
 ::generate_random_rows(uint64_t n_distinct,
@@ -141,12 +166,12 @@ DataGenerator
     assert(row_frequencies.size() == n_distinct);
 
     auto replicated_rows = replicate_shuffle(
-        utils::transpose<bit_vector_stat>(
+        transpose<bit_vector_stat>(
             generate_random_columns(n_distinct, m, column_densities)
         ),
         row_frequencies
     );
-    return utils::transpose<bit_vector_stat>(replicated_rows);
+    return transpose<bit_vector_stat>(replicated_rows);
 }
 
 std::vector<std::unique_ptr<bit_vector>>

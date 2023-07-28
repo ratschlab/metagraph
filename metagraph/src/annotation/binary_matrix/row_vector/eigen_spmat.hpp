@@ -10,9 +10,9 @@
 
 namespace mtg {
 namespace annot {
-namespace binmat {
+namespace matrix {
 
-class EigenSpMat : public BinaryMatrixRowDynamic {
+class EigenSpMat : public BinaryMatrixRowDynamic, public GetEntrySupport {
   public:
     EigenSpMat(uint64_t num_rows = 0, uint64_t max_num_cols = 10'000'000);
 
@@ -43,7 +43,7 @@ class EigenSpMat : public BinaryMatrixRowDynamic {
     Eigen::SparseMatrix<bool, Eigen::RowMajor> mat_;
 };
 
-} // namespace binmat
+} // namespace matrix
 } // namespace annot
 } // namespace mtg
 

@@ -42,7 +42,7 @@ inline int64_t decode_diff(uint64_t c) {
 }
 
 template <class BaseMatrix>
-class IntRowDiff : public binmat::IRowDiff, public IntMatrix {
+class IntRowDiff : public IRowDiff, public BinaryMatrix, public IntMatrix {
   public:
     static_assert(std::is_convertible<BaseMatrix*, IntMatrix*>::value);
 
@@ -50,10 +50,9 @@ class IntRowDiff : public binmat::IRowDiff, public IntMatrix {
     IntRowDiff(const graph::DBGSuccinct *graph = nullptr, Args&&... args)
         : diffs_(std::forward<Args>(args)...) { graph_ = graph; }
 
-    bool get(Row i, Column j) const override;
     std::vector<Row> get_column(Column j) const override;
+    std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const override;
     // query integer values
-    RowValues get_row_values(Row i) const override;
     std::vector<RowValues> get_row_values(const std::vector<Row> &rows) const override;
 
     uint64_t num_columns() const override { return diffs_.num_columns(); }
@@ -66,6 +65,8 @@ class IntRowDiff : public binmat::IRowDiff, public IntMatrix {
     const BaseMatrix& diffs() const { return diffs_; }
     BaseMatrix& diffs() { return diffs_; }
 
+    const BinaryMatrix& get_binary_matrix() const override { return *this; }
+
   private:
     static void decode_diffs(RowValues *diffs);
     static void add_diff(const RowValues &diff, RowValues *row);
@@ -75,14 +76,7 @@ class IntRowDiff : public binmat::IRowDiff, public IntMatrix {
 
 
 template <class BaseMatrix>
-bool IntRowDiff<BaseMatrix>::get(Row i, Column j) const {
-    SetBitPositions set_bits = get_row(i);
-    auto v = std::lower_bound(set_bits.begin(), set_bits.end(), j);
-    return v != set_bits.end() && *v == j;
-}
-
-template <class BaseMatrix>
-std::vector<IntMatrix::Row> IntRowDiff<BaseMatrix>::get_column(Column j) const {
+std::vector<BinaryMatrix::Row> IntRowDiff<BaseMatrix>::get_column(Column j) const {
     assert(graph_ && "graph must be loaded");
     assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
 
@@ -96,15 +90,29 @@ std::vector<IntMatrix::Row> IntRowDiff<BaseMatrix>::get_column(Column j) const {
             graph::AnnotatedSequenceGraph::anno_to_graph_index(i)
         );
 
-        if (boss.get_W(edge) && get(i, j))
+        if (!boss.get_W(edge))
+            continue;
+
+        SetBitPositions set_bits = get_rows({ i })[0];
+        if (std::binary_search(set_bits.begin(), set_bits.end(), j))
             result.push_back(i);
     }
     return result;
 }
 
 template <class BaseMatrix>
-IntMatrix::RowValues IntRowDiff<BaseMatrix>::get_row_values(Row row) const {
-    return get_row_values(std::vector<Row>{ row })[0];
+std::vector<BinaryMatrix::SetBitPositions>
+IntRowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
+    std::vector<SetBitPositions> rows;
+    rows.reserve(row_ids.size());
+    for (const auto &row : get_row_values(row_ids)) {
+        rows.emplace_back();
+        rows.back().reserve(row.size());
+        for (const auto &[j, _] : row) {
+            rows.back().push_back(j);
+        }
+    }
+    return rows;
 }
 
 template <class BaseMatrix>

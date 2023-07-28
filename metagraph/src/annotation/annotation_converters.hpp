@@ -10,15 +10,8 @@
 namespace mtg {
 namespace annot {
 
-template <typename Label>
-class RowCompressed;
-
 template <typename LabelType>
-class MultiLabelEncoded;
-
-
-template <class StaticAnnotation, typename Label>
-std::unique_ptr<StaticAnnotation> convert(RowCompressed<Label>&& annotation);
+class MultiLabelAnnotation;
 
 
 template <typename Label>
@@ -72,7 +65,7 @@ convert_to_BRWT(const std::vector<std::string> &annotation_files,
                 size_t num_threads = 1,
                 const std::filesystem::path &tmp_dir = "");
 
-void relax_BRWT(binmat::BRWT *annotation, size_t relax_max_arity, size_t num_threads = 1);
+void relax_BRWT(matrix::BRWT *annotation, size_t relax_max_arity, size_t num_threads = 1);
 
 template <class StaticAnnotation>
 std::unique_ptr<StaticAnnotation>
@@ -87,10 +80,11 @@ void convert_to_row_diff(const std::vector<std::string> &files,
                          size_t num_threads,
                          size_t mem_bytes);
 
-template <class ToAnnotation, typename Label>
-void merge(std::vector<std::unique_ptr<MultiLabelEncoded<Label>>>&& annotators,
-           const std::vector<std::string> &filenames,
-           const std::string &outfile);
+void merge_row_compressed(const std::vector<std::string> &filenames,
+                          const std::string &outfile);
+
+void merge_brwt(const std::vector<std::string> &filenames,
+                const std::string &outfile);
 
 // transform to RowCompressed<Label>
 template <typename Label>

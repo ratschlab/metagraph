@@ -210,7 +210,7 @@ std::string process_align_request(const std::string &received_message,
 }
 
 std::string process_column_label_request(const graph::AnnotatedDBG &anno_graph) {
-    auto labels = anno_graph.get_annotator().get_all_labels();
+    auto labels = anno_graph.get_annotator().get_label_encoder().get_labels();
 
     Json::Value root = Json::Value(Json::arrayValue);
 
