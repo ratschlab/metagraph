@@ -183,11 +183,12 @@ void CanonicalDBG::call_outgoing_kmers(node_index node,
         assert(c == boss::BOSS::kSentinel || traverse(node, c) == next);
 
         // don't call dummy sink, it will be handled in the adjacent strand below
-        if (c != boss::BOSS::kSentinel)
+        if (c != boss::BOSS::kSentinel) {
             callback(next, c);
+            --max_num_edges_left;
+        }
 
         children[alphabet_encoder_[c]] = next;
-        --max_num_edges_left;
     });
 
     if (!max_num_edges_left)
@@ -268,11 +269,12 @@ void CanonicalDBG::call_incoming_kmers(node_index node,
         assert(c == boss::BOSS::kSentinel || traverse_back(node, c) == prev);
 
         // don't call dummy source, it will be handled in the adjacent strand below
-        if (c != boss::BOSS::kSentinel)
+        if (c != boss::BOSS::kSentinel) {
             callback(prev, c);
+            --max_num_edges_left;
+        }
 
         parents[alphabet_encoder_[c]] = prev;
-        --max_num_edges_left;
     };
 
     if (get_dbg_succ(*graph_)) {
