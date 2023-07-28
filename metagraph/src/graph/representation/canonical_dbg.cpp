@@ -194,42 +194,40 @@ void CanonicalDBG::call_outgoing_kmers(node_index node,
         return;
 
     // jump to the other strand and check incoming k-mers and jump back
-    adjacent_outgoing_rc_strand(node, spelling_hint,
-        [&](node_index next, char c) {
-            assert(next <= offset_);
+    adjacent_outgoing_rc_strand(node, spelling_hint, [&](node_index next, char c) {
+        assert(next <= offset_);
 
-            // transform `c`, `next` will be transformed later
-            c = complement(c);
-            auto s = alphabet_encoder_[c];
+        // transform `c`, `next` will be transformed later
+        c = complement(c);
+        auto s = alphabet_encoder_[c];
 
-            if (children[s] != npos && c != boss::BOSS::kSentinel) {
-                // `next` must be a palindrome
-                is_palindrome_cache_.Put(next, true);
-                if (k_odd_) { // palindromes exist only for even k
-                    logger->error(
-                        "Forward traversal: Primary graph contains both forward and reverse complement: {} {} -> {} {}\t{} {}",
-                        node, get_node_sequence(node),
-                        children[s], get_node_sequence(children[s]),
-                        next, get_node_sequence(next));
-                    throw std::runtime_error("");
-                }
-                return;
+        if (children[s] != npos && c != boss::BOSS::kSentinel) {
+            // `next` must be a palindrome
+            is_palindrome_cache_.Put(next, true);
+            if (k_odd_) { // palindromes exist only for even k
+                logger->error(
+                    "Forward traversal: Primary graph contains both forward and reverse complement: {} {} -> {} {}\t{} {}",
+                    node, get_node_sequence(node),
+                    children[s], get_node_sequence(children[s]),
+                    next, get_node_sequence(next));
+                throw std::runtime_error("");
             }
-
-            is_palindrome_cache_.Put(next, false);
-
-            // transform `next` to the adj strand
-            next = reverse_complement(next);
-
-            assert(c == get_node_sequence(next).back());
-            // traverse works only for real edges
-            assert(c == boss::BOSS::kSentinel || traverse(node, c) == next);
-
-            callback(next, c);
-
-            children[s] = next;
+            return;
         }
-    );
+
+        is_palindrome_cache_.Put(next, false);
+
+        // transform `next` to the adj strand
+        next = reverse_complement(next);
+
+        assert(c == get_node_sequence(next).back());
+        // traverse works only for real edges
+        assert(c == boss::BOSS::kSentinel || traverse(node, c) == next);
+
+        callback(next, c);
+
+        children[s] = next;
+    });
 }
 
 void CanonicalDBG::call_incoming_kmers(node_index node,
@@ -278,7 +276,7 @@ void CanonicalDBG::call_incoming_kmers(node_index node,
     if (!max_num_edges_left)
         return;
 
-    auto call_adj = [&](node_index prev, char c) {
+    adjacent_incoming_rc_strand(node, spelling_hint, [&](node_index prev, char c) {
         assert(prev <= offset_);
 
         // transform `c`, `prev` will be transformed later
@@ -310,9 +308,7 @@ void CanonicalDBG::call_incoming_kmers(node_index node,
         callback(prev, c);
 
         parents[s] = prev;
-    };
-
-    adjacent_incoming_rc_strand(node, spelling_hint, call_adj);
+    });
 }
 
 void CanonicalDBG
