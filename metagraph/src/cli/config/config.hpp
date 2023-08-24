@@ -112,6 +112,7 @@ class Config {
     bool alignment_edit_distance = false;
     bool alignment_chain = false;
     bool alignment_post_chain = false;
+    bool alignment_global_xdrop = true;
     bool alignment_seed_complexity_filter = true;
     bool alignment_all_suffix_matches = false;
 

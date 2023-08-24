@@ -243,6 +243,8 @@ Config::Config(int argc, char *argv[]) {
             alignment_chain = true;
         } else if (!strcmp(argv[i], "--align-post-chain")) {
             alignment_post_chain = true;
+        } else if (!strcmp(argv[i], "--align-local-xdrop")) {
+            alignment_global_xdrop = false;
         } else if (!strcmp(argv[i], "--align-no-seed-complexity-filter")) {
             alignment_seed_complexity_filter = false;
         } else if (!strcmp(argv[i], "--max-hull-depth")) {

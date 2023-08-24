@@ -102,26 +102,36 @@ std::pair<Alignment, Alignment> split_seed(const DeBruijnGraph &graph,
     return ret_val;
 }
 
-void filter_seed(const Alignment &prev, Alignment &a) {
+Alignment filter_seed(const Alignment &prev, Alignment &a) {
     if (!prev.label_columns) {
-        a = Alignment();
-        return;
+        Alignment filtered;
+        std::swap(filtered, a);
+        return filtered;
     }
 
     if (prev.label_coordinates.empty()) {
+        Vector<Alignment::Column> inter;
         Vector<Alignment::Column> diff;
-        std::set_difference(a.get_columns().begin(),
-                            a.get_columns().end(),
-                            prev.get_columns().begin(),
-                            prev.get_columns().end(),
-                            std::back_inserter(diff));
+        utils::set_intersection_difference(a.get_columns().begin(),
+                                           a.get_columns().end(),
+                                           prev.get_columns().begin(),
+                                           prev.get_columns().end(),
+                                           std::back_inserter(inter),
+                                           std::back_inserter(diff));
+        Alignment filtered;
+
+        if (inter.size()) {
+            filtered = a;
+            filtered.set_columns(std::move(inter));
+        }
+
         if (diff.empty()) {
             a = Alignment();
         } else {
             a.set_columns(std::move(diff));
         }
 
-        return;
+        return filtered;
     }
 
     Vector<Alignment::Column> diff;
@@ -152,6 +162,9 @@ void filter_seed(const Alignment &prev, Alignment &a) {
         a.set_columns(std::move(diff));
         std::swap(a.label_coordinates, diff_coords);
     }
+
+    // TODO: fix this
+    return Alignment();
 }
 
 // Extend the alignment first until it reaches the end of the alignment second.
@@ -348,7 +361,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
             num_explored_nodes += explored_nodes + extender_rc.num_explored_nodes();
 
         } else {
-            align_core(*seeder, extender, add_alignment, get_min_path_score, false);
+            align_core(*seeder, extender, add_alignment, add_discarded, get_min_path_score, false);
         }
 #else
         if (config_.chain_alignments) {
@@ -361,7 +374,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
 
             num_seeds += seeds;
         } else {
-            align_core(*seeder, extender, add_alignment, get_min_path_score, false);
+            align_core(*seeder, extender, add_alignment, add_discarded, get_min_path_score, false);
         }
 #endif
 
@@ -519,6 +532,7 @@ template <class Seeder, class Extender>
 void align_core(const Seeder &seeder,
                 Extender &extender,
                 const std::function<void(Alignment&&)> &callback,
+                const std::function<void(Alignment&&)> &callback_discarded,
                 const std::function<score_t()> &get_min_path_score,
                 bool force_fixed_seed) {
     auto seeds = seeder.get_alignments();
@@ -538,8 +552,13 @@ void align_core(const Seeder &seeder,
         }
 
         for (size_t j = i + 1; j < seeds.size(); ++j) {
-            if (seeds[j].size() && !extender.check_seed(seeds[j]))
-                filter_seed(seeds[i], seeds[j]);
+            if (seeds[j].size() && !extender.check_seed(seeds[j])) {
+                auto filtered = filter_seed(seeds[i], seeds[j]);
+                if (filtered.size()) {
+                    callback_discarded(std::move(filtered));
+                    callback_discarded(Alignment(seeds[i]));
+                }
+            }
         }
     }
 }
@@ -889,13 +908,19 @@ DBGAligner<Seeder, Extender, AlignmentCompare>
                     assert(path.is_valid(graph_, &config_));
                     callback(std::move(path));
                 },
+                [](auto&&) {},
                 get_min_path_score,
                 true /* alignments must have the seed as a prefix */
             );
 
             for (size_t j = i + 1; j < seeds.size(); ++j) {
-                if (seeds[j].size() && !fwd_extender.check_seed(seeds[j]))
-                    filter_seed(seeds[i], seeds[j]);
+                if (seeds[j].size() && !fwd_extender.check_seed(seeds[j])) {
+                    auto filtered = filter_seed(seeds[i], seeds[j]);
+                    if (filtered.size()) {
+                        callback_discarded(std::move(filtered));
+                        callback_discarded(Alignment(seeds[i]));
+                    }
+                }
             }
         }
     };
