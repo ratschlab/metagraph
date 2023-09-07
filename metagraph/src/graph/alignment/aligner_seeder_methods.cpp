@@ -886,7 +886,6 @@ It merge_into_mums(const DeBruijnGraph &graph,
 
         if constexpr(std::is_same_v<seed_t, Seed>) {
             a_i.expand(std::move(added_nodes));
-            assert(Alignment(a_i, config).is_valid(graph, &config));
             clear_seed(a_j);
         }
 
@@ -913,14 +912,27 @@ It merge_into_mums(const DeBruijnGraph &graph,
             }
             assert(inserted_seed.is_valid(graph, &config));
             a_i.splice(std::move(inserted_seed));
-            assert(a_i.is_valid(graph, &config));
             assert(a_i.size());
             assert(a_i.label_column_diffs.empty());
             clear_seed(a_j);
         }
     }
 
-    return std::remove_if(begin, end, [](const auto &a) { return a.empty(); });
+    end = std::remove_if(begin, end, [](const auto &a) { return a.empty(); });
+
+    if constexpr(std::is_same_v<seed_t, Seed>) {
+        assert(std::all_of(begin, end, [&](const auto &a) {
+            return Alignment(a, config).is_valid(graph, &config);
+        }));
+    }
+
+    if constexpr(std::is_same_v<seed_t, Alignment>) {
+        assert(std::all_of(begin, end, [&](const auto &a) {
+            return a.is_valid(graph, &config);
+        }));
+    }
+
+    return end;
 }
 
 template Seed* merge_into_mums(const DeBruijnGraph &,
