@@ -194,7 +194,7 @@ void Alignment::merge_annotations(const Alignment &other) {
     assert(extra_scores.empty() || extra_scores.size() == nodes_.size() - 1);
 }
 
-bool Alignment::splice(Alignment&& other) {
+bool Alignment::splice(Alignment&& other, score_t label_change_score) {
     if (empty()) {
         std::swap(*this, other);
         return has_annotation();
@@ -202,10 +202,10 @@ bool Alignment::splice(Alignment&& other) {
 
     trim_end_clipping();
     other.trim_clipping();
-    return append(std::move(other));
+    return append(std::move(other), label_change_score);
 }
 
-bool Alignment::append(Alignment&& other) {
+bool Alignment::append(Alignment&& other, score_t label_change_score) {
     assert(!other.get_clipping());
     assert(query_view_.data() + query_view_.size() == other.query_view_.data());
     assert(orientation_ == other.orientation_);
@@ -288,18 +288,6 @@ bool Alignment::append(Alignment&& other) {
                 columns_b_idx = *it;
         }
 
-        if (columns_a_idx != columns_b_idx) {
-            DEBUG_LOG("Splice failed");
-            *this = Alignment();
-            return true;
-        }
-
-        if (other.label_column_diffs.size()) {
-            other.label_column_diffs.insert(other.label_column_diffs.begin(), other.label_columns);
-        } else if (label_column_diffs.size()) {
-            other.label_column_diffs.resize(other.nodes_.size(), other.label_columns);
-        }
-
         if (other.extra_scores.empty()) {
             other.extra_scores.resize(other.nodes_.size());
             other.extra_scores[0] = 0;
@@ -307,8 +295,25 @@ bool Alignment::append(Alignment&& other) {
             assert(other.extra_scores.size() == other.get_nodes().size() - 1);
             other.extra_scores.insert(other.extra_scores.begin(), 0);
         }
+
+        if (columns_a_idx != columns_b_idx) {
+            if (label_change_score == DBGAlignerConfig::ninf) {
+                DEBUG_LOG("Splice failed");
+                *this = Alignment();
+                return true;
+            } else {
+                other.extra_scores[0] = label_change_score;
+            }
+        }
+
         other.extra_score += other.extra_scores[0];
         other.score_ += other.extra_scores[0];
+
+        if (other.label_column_diffs.size()) {
+            other.label_column_diffs.insert(other.label_column_diffs.begin(), other.label_columns);
+        } else if (label_column_diffs.size()) {
+            other.label_column_diffs.resize(other.nodes_.size(), other.label_columns);
+        }
     }
 
     if (other.extra_scores.size() && extra_scores.empty()) {

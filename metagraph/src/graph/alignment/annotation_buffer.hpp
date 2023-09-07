@@ -68,6 +68,9 @@ class AnnotationBuffer {
     bool labels_valid(const Alignment &alignment) const;
     bool check_node_labels_is_superset(const Columns &c, const std::vector<node_index> &nodes) const;
 
+    Alignment::score_t get_label_change_score(Alignment::Column col_a,
+                                              Alignment::Column col_b) const;
+
   private:
     const DeBruijnGraph &graph_;
     const Annotator &annotator_;

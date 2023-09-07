@@ -704,9 +704,17 @@ void chain_alignments(const IDBGAligner &aligner,
                       anchors.end());
     }
 
-    std::sort(anchors.begin(), anchors.end(), [](const auto &a, const auto &b) {
-        return std::tie(b.col, b.orientation, a.end) > std::tie(a.col, a.orientation, b.end);
-    });
+    bool allow_label_change = false;
+
+    if (!allow_label_change) {
+        std::sort(anchors.begin(), anchors.end(), [](const auto &a, const auto &b) {
+            return std::tie(b.col, b.orientation, a.end) > std::tie(a.col, a.orientation, b.end);
+        });
+    } else {
+        std::sort(anchors.begin(), anchors.end(), [](const auto &a, const auto &b) {
+            return std::tie(b.orientation, a.end) > std::tie(a.orientation, b.end);
+        });
+    }
 
     score_t node_insert = config.node_insertion_penalty;
     score_t gap_open = config.gap_opening_penalty;
@@ -769,8 +777,19 @@ void chain_alignments(const IDBGAligner &aligner,
                         return;
                     }
 
-                    if (a_i.col != a_j.col)
-                        return;
+                    if (a_i.col != a_j.col) {
+                        if (!labeled_aligner)
+                            return;
+
+                        score_t label_change_score = anno_buffer->get_label_change_score(
+                            a_i.col, a_j.col
+                        );
+
+                        if (label_change_score == DBGAlignerConfig::ninf)
+                            return;
+
+                        score_j += label_change_score;
+                    }
 
                     if (full_query_i.end() <= full_query_j.begin()) {
                         // completely disjoint
@@ -972,11 +991,20 @@ void chain_alignments(const IDBGAligner &aligner,
                     }
                 }
 
+                score_t label_change_score = DBGAlignerConfig::ninf;
+                if (alignment.label_columns != cur.label_columns) {
+                    if (const auto *labeled_aligner = dynamic_cast<const ILabeledAligner*>(&aligner)) {
+                        label_change_score = labeled_aligner->get_annotation_buffer().get_label_change_score(
+                            first->col, last_anchor->col
+                        );
+                    }
+                }
+
                 last_anchor = first;
 
                 DEBUG_LOG("\t\tA: {}", alignment);
                 DEBUG_LOG("\t\tB: {}", cur);
-                alignment.splice(std::move(cur));
+                alignment.splice(std::move(cur), label_change_score);
                 DEBUG_LOG("\tCurrent: {}", alignment);
                 assert(alignment.size());
                 assert(alignment.is_valid(graph, &config));

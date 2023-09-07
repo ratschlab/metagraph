@@ -489,6 +489,11 @@ auto AnnotationBuffer::get_labels_and_coords(node_index node) const
     return ret_val;
 }
 
+Alignment::score_t AnnotationBuffer::get_label_change_score(Alignment::Column col_a,
+                                                            Alignment::Column col_b) const {
+    return col_a == col_b ? 0 : DBGAlignerConfig::ninf;
+}
+
 } // namespace align
 } // namespace graph
 } // namespace mtg

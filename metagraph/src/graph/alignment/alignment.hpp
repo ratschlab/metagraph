@@ -214,7 +214,7 @@ class Alignment {
     // complement is matched to the path.
     bool get_orientation() const { return orientation_; }
 
-    bool splice(Alignment&& other);
+    bool splice(Alignment&& other, score_t label_change_score = DBGAlignerConfig::ninf);
 
     score_t get_score() const { return score_; }
     score_t get_score(const DBGAlignerConfig&) const { return score_; }
@@ -353,7 +353,7 @@ class Alignment {
     // one of the coordinates in this. If this operation is unsuccessful, then
     // *this == {} afterwards.
     // Returns true if the label or coordinate set of this changed.
-    bool append(Alignment&& next);
+    bool append(Alignment&& next, score_t label_change_score = DBGAlignerConfig::ninf);
 };
 
 inline std::ostream& operator<<(std::ostream &out, const Alignment &a) {
