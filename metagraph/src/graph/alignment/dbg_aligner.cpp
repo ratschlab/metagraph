@@ -291,7 +291,8 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
 
         auto add_alignment = [&](Alignment&& alignment) {
             assert(alignment.is_valid(graph_, &config_));
-            aggregator.add_alignment(std::move(alignment));
+            if (alignment.get_score() >= config_.min_path_score)
+                aggregator.add_alignment(std::move(alignment));
         };
 
         std::vector<Alignment> discarded_alignments[2];
