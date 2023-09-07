@@ -136,6 +136,8 @@ Alignment filter_seed(const Alignment &prev, Alignment &a) {
 
     Vector<Alignment::Column> diff;
     Vector<Alignment::Tuple> diff_coords;
+    Vector<Alignment::Column> inter;
+    Vector<Alignment::Tuple> inter_coords;
     utils::match_indexed_values(
         a.get_columns().begin(), a.get_columns().end(),
         a.label_coordinates.begin(),
@@ -146,15 +148,34 @@ Alignment filter_seed(const Alignment &prev, Alignment &a) {
             Alignment::Tuple set_diff;
             // filter_seed: clear the seed a if it has no unexplored labels or coordinates
             // relative to the seed prev
-            std::set_difference(coords.begin(), coords.end(),
-                                other_coords.begin(), other_coords.end(),
-                                std::back_inserter(set_diff));
+            utils::set_intersection_difference(coords.begin(), coords.end(),
+                                               other_coords.begin(), other_coords.end(),
+                                               std::back_inserter(set_intersection),
+                                               std::back_inserter(set_diff));
+            if (set_intersection.size()) {
+                inter.push_back(col);
+                inter_coords.push_back(std::move(set_intersection));
+            }
+
             if (set_diff.size()) {
                 diff.push_back(col);
                 diff_coords.push_back(std::move(set_diff));
             }
-        }
+        },
+        [&](auto col, const auto &coords) {
+            diff.push_back(col);
+            diff_coords.push_back(coords);
+        },
+        [&](auto, const auto&) {}
     );
+
+    Alignment filtered;
+
+    if (inter.size()) {
+        filtered = a;
+        filtered.set_columns(std::move(inter));
+        std::swap(filtered.label_coordinates, inter_coords);
+    }
 
     if (diff.empty()) {
         a = Alignment();
@@ -163,8 +184,7 @@ Alignment filter_seed(const Alignment &prev, Alignment &a) {
         std::swap(a.label_coordinates, diff_coords);
     }
 
-    // TODO: fix this
-    return Alignment();
+    return filtered;
 }
 
 // Extend the alignment first until it reaches the end of the alignment second.
