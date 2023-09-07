@@ -679,7 +679,10 @@ void chain_alignments(const IDBGAligner &aligner,
     preprocess_range(anchors.begin() + orientation_change, anchors.end());
 
     const auto *labeled_aligner = dynamic_cast<const ILabeledAligner*>(&aligner);
+    AnnotationBuffer *anno_buffer = nullptr;
+
     if (labeled_aligner) {
+        anno_buffer = &labeled_aligner->get_annotation_buffer();
         std::vector<Anchor> split_anchors;
         for (auto &a : anchors) {
             if (a.index != std::numeric_limits<uint64_t>::max()) {
@@ -783,7 +786,11 @@ void chain_alignments(const IDBGAligner &aligner,
 
 #ifndef NDEBUG
                             auto cur = full_j;
-                            cur.insert_gap_prefix(cur.get_query_view().begin() - full_i.get_query_view().end(), graph.get_k() - 1, config);
+                            cur.insert_gap_prefix(
+                                cur.get_query_view().begin() - full_i.get_query_view().end(),
+                                graph.get_k() - 1,
+                                config
+                            );
                             assert(cur.get_score() == full_j.get_score() + gap_cost);
 #endif
 
@@ -821,8 +828,10 @@ void chain_alignments(const IDBGAligner &aligner,
 
 #ifndef NDEBUG
                     auto cur = full_j;
-                    cur.extend_offset(std::vector<node_index>(graph.get_k() - 1 - cur.get_offset(),
-                                                              DeBruijnGraph::npos));
+                    cur.extend_offset(
+                        std::vector<node_index>(graph.get_k() - 1 - cur.get_offset(),
+                                                DeBruijnGraph::npos)
+                    );
                     cur.insert_gap_prefix(-seed_size, graph.get_k() - 1, config);
                     assert(cur.get_score() == full_j.get_score() + node_insert);
 #endif
@@ -869,11 +878,8 @@ void chain_alignments(const IDBGAligner &aligner,
                     chain_score = score;
                     DEBUG_LOG("Chain: {}", score);
                     last_anchor = chain.back().first;
-                    if (labeled_aligner) {
-                        col_idx = labeled_aligner->get_annotation_buffer().cache_column_set(
-                            1, last_anchor->col
-                        );
-                    }
+                    if (labeled_aligner)
+                        col_idx = anno_buffer->cache_column_set(1, last_anchor->col);
 
                     return true;
                 } else {
