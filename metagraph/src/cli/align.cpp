@@ -11,6 +11,7 @@
 #include "graph/alignment/aligner_labeled.hpp"
 #include "graph/annotated_dbg.hpp"
 #include "graph/graph_extensions/node_first_cache.hpp"
+#include "graph/graph_extensions/hll_wrapper.hpp"
 #include "seq_io/sequence_io.hpp"
 #include "config/config.hpp"
 #include "load/load_graph.hpp"
@@ -307,6 +308,18 @@ int align_to_graph(Config *config) {
         return 0;
     }
 
+    auto hll = std::make_shared<HLLWrapper<>>();
+    if (config->alignment_post_chain) {
+        if (hll->load(utils::remove_suffix(config->infbase, graph->file_extension()))) {
+            logger->trace("Loaded HLL sketch with {} columns", hll->data().num_columns());
+        } else {
+            logger->warn("HLL sketch not present or failed to load");
+            hll.reset();
+        }
+    } else {
+        hll.reset();
+    }
+
     // For graphs which still feature a mask, this speeds up mapping and allows
     // for dummy nodes to be matched by suffix seeding
     auto dbg_succ = std::dynamic_pointer_cast<DBGSuccinct>(graph);
@@ -371,8 +384,11 @@ int align_to_graph(Config *config) {
     };
 
     // if using a small number of threads, use a shared cache for all threads
-    if (get_num_threads() <= SEPARATE_CACHES_SWITCHOVER_THREADS)
+    if (get_num_threads() <= SEPARATE_CACHES_SWITCHOVER_THREADS) {
         graph = wrap_graph(graph);
+        if (hll)
+            graph->add_extension(hll);
+    }
 
     timer.reset();
 
@@ -423,6 +439,8 @@ int align_to_graph(Config *config) {
                 if (aln_graph->get_mode() == DeBruijnGraph::PRIMARY) {
                     assert(get_num_threads() > SEPARATE_CACHES_SWITCHOVER_THREADS);
                     aln_graph = wrap_graph(aln_graph);
+                    if (hll)
+                        aln_graph->add_extension(hll);
                 }
 
                 std::unique_ptr<IDBGAligner> aligner;

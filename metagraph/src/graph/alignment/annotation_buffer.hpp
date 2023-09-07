@@ -77,6 +77,8 @@ class AnnotationBuffer {
     const annot::matrix::MultiIntMatrix *multi_int_;
     const CanonicalDBG *canonical_;
 
+    mutable tsl::hopscotch_map<Alignment::Column, tsl::hopscotch_map<Alignment::Column, double>> cache_;
+
     // keep a unique set of annotation rows
     // the first element is the empty label set
     VectorSet<Columns, utils::VectorHash> column_sets_;

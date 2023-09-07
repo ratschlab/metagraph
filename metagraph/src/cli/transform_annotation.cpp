@@ -8,6 +8,7 @@
 #include "annotation/representation/row_compressed/annotate_row_compressed.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 #include "annotation/representation/annotation_matrix/static_annotators_def.hpp"
+#include "annotation/binary_matrix/hll/hll_matrix.hpp"
 #include "annotation/binary_matrix/multi_brwt/clustering.hpp"
 #include "annotation/annotation_converters.hpp"
 #include "config/config.hpp"
@@ -586,6 +587,22 @@ int transform_annotation(Config *config) {
         out << linkage_matrix.format(CSVFormat) << std::endl;
 
         logger->trace("Linkage matrix is written to {}", config->outfbase);
+        return 0;
+    }
+
+    if (config->sketch_precision != 0.0) {
+        if (input_anno_type != Config::ColumnCompressed) {
+            throw std::runtime_error("Only conversion from ColumnCompressed");
+        }
+
+        auto annotator = std::make_unique<ColumnCompressed<>>(0);
+
+        logger->trace("Sketching annotator");
+        annot::matrix::HLLMatrix<> hll(files, config->sketch_precision, get_num_threads());
+        std::ofstream fout(config->outfbase + ".hll", std::ios::binary);
+        hll.serialize(fout);
+        logger->trace("Done");
+
         return 0;
     }
 

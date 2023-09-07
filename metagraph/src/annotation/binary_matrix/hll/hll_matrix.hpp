@@ -8,7 +8,7 @@
 
 namespace mtg {
 namespace annot {
-namespace binmat {
+namespace matrix {
 
 template <typename T>
 struct IntHash {
@@ -108,19 +108,19 @@ class HLLMatrix : public BinaryMatrix {
     uint64_t num_columns() const override { return columns_.size(); }
     uint64_t num_rows() const override { return num_rows_; }
 
-    bool get(Row row, Column column) const override {
-        return get_column_sketch(column).check(hasher_(row));
-    }
-
-    SetBitPositions get_row(Row row) const override {
-        SetBitPositions result;
-        uint64_t row_hash = hasher_(row);
-        for (Column i = 0; i < columns_.size(); ++i) {
-            if (columns_[i].check(row_hash))
-                result.emplace_back(i);
+    std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const override {
+        std::vector<SetBitPositions> results;
+        results.reserve(rows.size());
+        for (auto row : rows) {
+            auto &result = results.emplace_back();
+            uint64_t row_hash = hasher_(row);
+            for (Column i = 0; i < columns_.size(); ++i) {
+                if (columns_[i].check(row_hash))
+                    result.emplace_back(i);
+            }
         }
 
-        return result;
+        return results;
     }
 
     std::vector<Row> get_column(Column column) const override {
@@ -190,7 +190,7 @@ class HLLMatrix : public BinaryMatrix {
     inline uint64_t hash(Row row) { return hasher_(row); }
 };
 
-} // namespace binmat
+} // namespace matrix
 } // namespace annot
 } // namespace mtg
 

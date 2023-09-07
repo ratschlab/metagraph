@@ -9,6 +9,7 @@
 #include "common/utils/template_utils.hpp"
 #include "common/vector_set.hpp"
 #include "common/algorithms.hpp"
+#include "graph/graph_extensions/hll_wrapper.hpp"
 
 namespace mtg {
 namespace graph {
@@ -489,9 +490,41 @@ auto AnnotationBuffer::get_labels_and_coords(node_index node) const
     return ret_val;
 }
 
-Alignment::score_t AnnotationBuffer::get_label_change_score(Alignment::Column col_a,
-                                                            Alignment::Column col_b) const {
-    return col_a == col_b ? 0 : DBGAlignerConfig::ninf;
+Alignment::score_t AnnotationBuffer
+::get_label_change_score(Alignment::Column col_a, Alignment::Column col_b) const {
+    if (col_a == col_b)
+        return 0;
+
+    Alignment::score_t label_change_score = DBGAlignerConfig::ninf;
+
+    if (const auto *hll_wrapper = graph_.get_extension_threadsafe<HLLWrapper<>>()) {
+        const auto &hll = hll_wrapper->data();
+        uint64_t a_size = hll.num_relations_in_column(col_a);
+        uint64_t b_size = hll.num_relations_in_column(col_b);
+
+        double dbsize = b_size;
+        double logdbsize = log2(dbsize);
+
+        auto first = std::min(col_a, col_b);
+        auto second = std::max(col_a, col_b);
+        auto &cache_first = cache_[first];
+        auto [cache_find, cache_inserted] = cache_first.try_emplace(second, 0.0);
+
+        double union_size;
+        if (cache_inserted) {
+            union_size = hll.estimate_column_union_cardinality(col_a, col_b);
+            cache_find.value() = union_size;
+        } else {
+            union_size = cache_find->second;
+        }
+
+        uint64_t size_sum = a_size + b_size;
+        if (union_size < size_sum)
+            label_change_score = log2(std::min(dbsize, size_sum - union_size)) - logdbsize;
+    }
+
+    assert(label_change_score <= 0);
+    return label_change_score;
 }
 
 } // namespace align
