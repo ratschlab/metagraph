@@ -490,6 +490,10 @@ auto AnnotationBuffer::get_labels_and_coords(node_index node) const
     return ret_val;
 }
 
+bool AnnotationBuffer::allow_label_change() const {
+    return graph_.get_extension_threadsafe<HLLWrapper<>>();
+}
+
 Alignment::score_t AnnotationBuffer
 ::get_label_change_score(Alignment::Column col_a, Alignment::Column col_b) const {
     if (col_a == col_b)

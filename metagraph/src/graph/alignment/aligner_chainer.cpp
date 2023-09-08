@@ -533,6 +533,7 @@ void chain_alignments(const IDBGAligner &aligner,
         return;
     }
 
+    logger->trace("Chaining alignments");
     const DeBruijnGraph &graph = aligner.get_graph();
     std::string_view query = alignments[0].get_full_query_view();
 
@@ -680,9 +681,14 @@ void chain_alignments(const IDBGAligner &aligner,
 
     const auto *labeled_aligner = dynamic_cast<const ILabeledAligner*>(&aligner);
     AnnotationBuffer *anno_buffer = nullptr;
+    bool allow_label_change = false;
 
     if (labeled_aligner) {
         anno_buffer = &labeled_aligner->get_annotation_buffer();
+        allow_label_change = anno_buffer->allow_label_change();
+        if (allow_label_change)
+            logger->trace("\tAllowing label changes");
+
         std::vector<Anchor> split_anchors;
         for (auto &a : anchors) {
             if (a.index != std::numeric_limits<uint64_t>::max()) {
@@ -696,6 +702,7 @@ void chain_alignments(const IDBGAligner &aligner,
             }
         }
         std::swap(split_anchors, anchors);
+
     } else {
         anchors.erase(std::remove_if(anchors.begin(), anchors.end(),
                                      [](const auto &a) {
@@ -703,8 +710,6 @@ void chain_alignments(const IDBGAligner &aligner,
                                      }),
                       anchors.end());
     }
-
-    bool allow_label_change = false;
 
     if (!allow_label_change) {
         std::sort(anchors.begin(), anchors.end(), [](const auto &a, const auto &b) {
