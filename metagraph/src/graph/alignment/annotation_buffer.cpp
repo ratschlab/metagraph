@@ -509,10 +509,8 @@ Alignment::score_t AnnotationBuffer
         double dbsize = b_size;
         double logdbsize = log2(dbsize);
 
-        auto first = std::min(col_a, col_b);
-        auto second = std::max(col_a, col_b);
-        auto &cache_first = cache_[first];
-        auto [cache_find, cache_inserted] = cache_first.try_emplace(second, 0.0);
+        auto &cache_a = cache_[col_a];
+        auto [cache_find, cache_inserted] = cache_a.try_emplace(col_b, 0.0);
 
         double union_size;
         if (cache_inserted) {

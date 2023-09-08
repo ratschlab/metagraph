@@ -712,6 +712,14 @@ void chain_alignments(const IDBGAligner &aligner,
                       anchors.end());
     }
 
+    auto get_label_change_score = [anno_buffer](auto col_a, auto col_b) {
+        if (col_a == col_b)
+            return 0;
+
+        assert(anno_buffer);
+        return anno_buffer->get_label_change_score(col_a, col_b);
+    };
+
     if (!allow_label_change) {
         std::sort(anchors.begin(), anchors.end(), [](const auto &a, const auto &b) {
             return std::tie(b.col, b.orientation, a.end) > std::tie(a.col, a.orientation, b.end);
@@ -788,20 +796,8 @@ void chain_alignments(const IDBGAligner &aligner,
                         return;
                     }
 
-                    if (a_i.col != a_j.col) {
-                        if (!allow_label_change)
-                            return;
-
-                        assert(anno_buffer);
-                        score_t label_change_score = anno_buffer->get_label_change_score(
-                            a_i.col, a_j.col
-                        );
-
-                        if (label_change_score == DBGAlignerConfig::ninf)
-                            return;
-
-                        score_j += label_change_score;
-                    }
+                    if (a_i.col != a_j.col && !allow_label_change)
+                        return;
 
                     if (full_query_i.end() <= full_query_j.begin()) {
                         // completely disjoint
@@ -825,7 +821,7 @@ void chain_alignments(const IDBGAligner &aligner,
                             assert(cur.get_score() == full_j.get_score() + gap_cost);
 #endif
 
-                            update_score(score_j + gap_cost + a_i.score,
+                            update_score(score_j + gap_cost + a_i.score + get_label_change_score(a_i.col, a_j.col),
                                          &a_j, -a_i.spelling_length);
                         }
 
@@ -846,7 +842,7 @@ void chain_alignments(const IDBGAligner &aligner,
                     score_t score_seed_j = a_j.score
                         - per_char_scores_prefix_del[a_j.index][a_j.end - full_j.get_query_view().begin()];
 
-                    score_t base_updated_score = score_j - score_seed_j + score_seed_i;
+                    score_t base_updated_score = score_j - score_seed_j + score_seed_i + get_label_change_score(a_i.col, a_j.col);
 
                     if (base_updated_score <= score_i)
                         return;
@@ -1019,9 +1015,7 @@ void chain_alignments(const IDBGAligner &aligner,
                 if (first->col != last_anchor->col) {
                     assert(anno_buffer);
                     assert(allow_label_change);
-                    label_change_score = anno_buffer->get_label_change_score(
-                        first->col, last_anchor->col
-                    );
+                    label_change_score = get_label_change_score(first->col, last_anchor->col);
                     DEBUG_LOG("\t\t\tLabel change: {} ({}) -> {} ({})\t{}",
                         first->col, anno_buffer->get_annotator().get_label_encoder().decode(first->col),
                         last_anchor->col, anno_buffer->get_annotator().get_label_encoder().decode(last_anchor->col),
