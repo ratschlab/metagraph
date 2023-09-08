@@ -821,7 +821,12 @@ void chain_alignments(const IDBGAligner &aligner,
                             assert(cur.get_score() == full_j.get_score() + gap_cost);
 #endif
 
-                            update_score(score_j + gap_cost + a_i.score + get_label_change_score(a_i.col, a_j.col),
+                            score_t base_updated_score = score_j + gap_cost + a_i.score;
+
+                            if (base_updated_score < score_i)
+                                return;
+
+                            update_score(base_updated_score + get_label_change_score(a_i.col, a_j.col),
                                          &a_j, -a_i.spelling_length);
                         }
 
