@@ -533,7 +533,6 @@ void chain_alignments(const IDBGAligner &aligner,
         return;
     }
 
-    logger->trace("Chaining alignments");
     const DeBruijnGraph &graph = aligner.get_graph();
     std::string_view query = alignments[0].get_full_query_view();
 
@@ -683,6 +682,8 @@ void chain_alignments(const IDBGAligner &aligner,
     AnnotationBuffer *anno_buffer = nullptr;
     bool allow_label_change = false;
 
+    logger->trace("Chaining alignments using {} anchors for a query of length {}",
+                  anchors.size(), query.size());
     if (labeled_aligner) {
         anno_buffer = &labeled_aligner->get_annotation_buffer();
         allow_label_change = anno_buffer->allow_label_change();
@@ -908,8 +909,10 @@ void chain_alignments(const IDBGAligner &aligner,
                     chain_score = score;
                     DEBUG_LOG("Chain: {}", score);
                     last_anchor = chain.back().first;
-                    if (labeled_aligner)
+                    if (labeled_aligner) {
+                        assert(anno_buffer);
                         col_idx = anno_buffer->cache_column_set(1, last_anchor->col);
+                    }
 
                     return true;
                 } else {
@@ -924,19 +927,26 @@ void chain_alignments(const IDBGAligner &aligner,
                 const auto &callback) {
 
                 Alignment alignment = alignments[first->index];
+                if (first->col != last_anchor->col) {
+                    assert(anno_buffer);
+                    col_idx = anno_buffer->cache_column_set(1, first->col);
+                }
+
                 alignment.label_columns = col_idx;
 
-                auto check_aln = [&](Alignment aln) {
+                auto check_aln = [&](Alignment aln, score_t label_change_score = 0) {
 #ifndef NDEBUG
+                    assert(first->begin >= aln.get_query_view().begin());
                     aln.trim_query_prefix(first->begin - aln.get_query_view().begin(),
                                           graph.get_k() - 1,
                                           config);
-                    DEBUG_LOG("Score to now: {}\tScore of chain: {}\tNode insertion penalty: {}",
-                              score_up_to_now, aln.get_score(), node_insert);
+                    DEBUG_LOG("Score to now: {}\tScore of chain: {}\tNode insertion penalty: {}\tLabel change score: {}",
+                              score_up_to_now, aln.get_score(), node_insert, label_change_score);
                     assert(aln.get_score() == score_up_to_now);
 #else
                     std::ignore = aln;
                     std::ignore = score_up_to_now;
+                    std::ignore = label_change_score;
 #endif
                 };
 
@@ -1002,25 +1012,30 @@ void chain_alignments(const IDBGAligner &aligner,
                     }
                 }
 
+                DEBUG_LOG("\t\tA: {}", alignment);
+                DEBUG_LOG("\t\tB: {}", cur);
+
                 score_t label_change_score = DBGAlignerConfig::ninf;
-                if (alignment.label_columns != cur.label_columns) {
-                    if (const auto *labeled_aligner = dynamic_cast<const ILabeledAligner*>(&aligner)) {
-                        label_change_score = labeled_aligner->get_annotation_buffer().get_label_change_score(
-                            first->col, last_anchor->col
-                        );
-                    }
+                if (first->col != last_anchor->col) {
+                    assert(anno_buffer);
+                    assert(allow_label_change);
+                    label_change_score = anno_buffer->get_label_change_score(
+                        first->col, last_anchor->col
+                    );
+                    DEBUG_LOG("\t\t\tLabel change: {} ({}) -> {} ({})\t{}",
+                        first->col, anno_buffer->get_annotator().get_label_encoder().decode(first->col),
+                        last_anchor->col, anno_buffer->get_annotator().get_label_encoder().decode(last_anchor->col),
+                        label_change_score);
                 }
 
                 last_anchor = first;
 
-                DEBUG_LOG("\t\tA: {}", alignment);
-                DEBUG_LOG("\t\tB: {}", cur);
                 alignment.splice(std::move(cur), label_change_score);
                 DEBUG_LOG("\tCurrent: {}", alignment);
                 assert(alignment.size());
                 assert(alignment.is_valid(graph, &config));
                 assert(alignment.get_clipping() == alignments[first->index].get_clipping());
-                check_aln(alignment);
+                check_aln(alignment, label_change_score);
                 callback(std::move(alignment));
             },
             [&](Alignment&& aln) {
