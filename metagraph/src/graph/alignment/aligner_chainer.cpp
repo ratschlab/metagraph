@@ -733,7 +733,7 @@ void chain_alignments(const IDBGAligner &aligner,
     while (!terminate() && last_anchor_it != anchors.data() + anchors.size()) {
         auto anchor_it = last_anchor_it + 1;
         while (anchor_it != anchors.data() + anchors.size()
-                && anchor_it->col == last_anchor_it->col
+                && (allow_label_change || anchor_it->col == last_anchor_it->col)
                 && anchor_it->orientation == last_anchor_it->orientation) {
             ++anchor_it;
         }
@@ -775,7 +775,12 @@ void chain_alignments(const IDBGAligner &aligner,
                     }
 
                     if (a_i.index == a_j.index) {
-                        assert(a_i.spelling_length > a_j.spelling_length);
+                        if (a_i.spelling_length <= a_j.spelling_length) {
+                            assert(allow_label_change);
+                            assert(a_i.col != a_j.col);
+                            return;
+                        }
+
                         size_t added_length = a_i.spelling_length - a_j.spelling_length;
                         update_score(score_j + a_i.score - a_j.score,
                                      &a_j, last_dist - added_length);
@@ -783,9 +788,10 @@ void chain_alignments(const IDBGAligner &aligner,
                     }
 
                     if (a_i.col != a_j.col) {
-                        if (!labeled_aligner)
+                        if (!allow_label_change)
                             return;
 
+                        assert(anno_buffer);
                         score_t label_change_score = anno_buffer->get_label_change_score(
                             a_i.col, a_j.col
                         );
