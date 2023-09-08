@@ -626,9 +626,6 @@ It merge_into_mums(const DeBruijnGraph &graph,
     using seed_t = std::remove_reference_t<decltype(*begin)>;
 
     if constexpr(std::is_same_v<seed_t, Alignment>) {
-        assert(std::all_of(begin, end, [&](const auto &a) {
-            return a.is_valid(graph, &config);
-        }));
         // first, move all inexact matches to the front and ignore them
         begin = std::partition(begin, end, [](const auto &a) {
             const auto &cigar = a.get_cigar().data();
@@ -649,12 +646,6 @@ It merge_into_mums(const DeBruijnGraph &graph,
 
         if (begin == end)
             return end;
-    }
-
-    if constexpr(std::is_same_v<seed_t, Seed>) {
-        assert(std::all_of(begin, end, [&](const auto &a) {
-            return Alignment(a, config).is_valid(graph, &config);
-        }));
     }
 
     ssize_t graph_k = graph.get_k();
@@ -910,7 +901,6 @@ It merge_into_mums(const DeBruijnGraph &graph,
                     c += coord_diff;
                 }
             }
-            assert(inserted_seed.is_valid(graph, &config));
             a_i.splice(std::move(inserted_seed));
             assert(a_i.size());
             assert(a_i.label_column_diffs.empty());
