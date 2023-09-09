@@ -204,7 +204,7 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr, // Myrthe: t
             [&](const ColumnCallback &column_callback) {
             if (config.count_kmers) {
                 assert(files.size() > 0);
-                annot::ColumnCompressed<>::load_columns_and_values(files,
+                annot::ColumnCompressed<>::load_columns_and_values(files,  // TODO instead of looping per column, m_buffersize. Give an extra argument to the load_cols_and_vals.
                     [&](uint64_t offset, const Label &label, std::unique_ptr<bit_vector> && column, auto&& column_values) {
                         column_callback(offset, label, [&](const ValueCallback &value_callback) {
                             assert(std::accumulate(column_values.begin(), column_values.end(), 0) > 0);
@@ -215,7 +215,7 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr, // Myrthe: t
                             auto normalization_factor = normalization_constant / total_kmers;
                             int min_col_width = std::pow(2, 16); //column_values = std::min((int) std::ceil((*column_values)*normalization_factor), min_column_width); // limit to a certain number of bits.
                             call_ones(*column, [&](uint64_t i) {
-                                // TODO instead of looping per column, m_buffersize
+                                // OR TODO instead of looping per column, m_buffersize. Give an extra argument to the call_ones for the range (is already implemented to be possible). But then we have to keep the threads in sync.
                                 auto column_value = column_values[column->rank1(i)-1];
                                 column_value = std::min((int) std::ceil(column_value*normalization_factor), min_col_width); // normalize value
                                 value_callback(i, column_value);
@@ -244,7 +244,7 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr, // Myrthe: t
 
     auto &[counts, init_mask, other_labels, total_kmers] = count_vector;
 
-    if (config.evaluate_assembly){     // Myrthe temporary: evaluate what k-mers overlap
+    if (config.evaluate_assembly){     // Myrthe temporary: evaluate what k-mers overlap. Run with one thread
 
         logger->trace("Evaluate confusion table");
         assert(counts.size() > 1);
@@ -366,8 +366,10 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                       call_ones(b, [&](size_t i) {
                           if (id_map[i]) {
                               set_bit(a.data(), id_map[i], parallel, MO_RELAXED);
-
-                              counts[id_map[i] * 2 + offset] += 1;//atomic_fetch_and_add(counts, id_map[i] * 2 + offset, 1, vector_backup_mutex, MO_RELAXED);
+                              { // here want no multiple threads working at once
+                                  std::lock_guard<std::mutex> lock(vector_backup_mutex);
+                                  counts[id_map[i] * 2 + offset] += 1;//atomic_fetch_and_add(counts, id_map[i] * 2 + offset, 1, vector_backup_mutex, MO_RELAXED);
+                              }
                           }
                       });
                   };
@@ -406,7 +408,7 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
     if (config.count_kmers) {
         auto &[in_total_kmers, out_total_kmers] = total_kmers;
 
-        if (config.test_by_unitig == false) { // Statistical testing part when k-mer counts are included. // TODO change to test_by_unitig
+        if (config.test_by_unitig == false) { // Statistical testing part when k-mer counts are included.
             auto total_hypotheses = counts.size()/2; // the total number of hypotheses tested.
             auto statistical_model = DifferentialTest(config.family_wise_error_rate, total_hypotheses, config.pvalue,
                                                       in_total_kmers, out_total_kmers); // similar to the width of the counts vector, the size of the log-factorial table should be the maximum joint coverage over the in_labels resp. out_labels. Convert the width from bits to the number of stored values.
@@ -415,8 +417,11 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             size_t total_nodes = masked_graph->num_nodes();
             size_t kept_nodes = 0;
             call_ones(in_mask, [&](node_index node) {
-                uint64_t in_sum = counts[node * 2];
-                uint64_t out_sum = counts[node * 2 + 1];
+                //{ // here want no multiple threads working at once
+                    //std::lock_guard<std::mutex> lock(vector_backup_mutex);
+                    uint64_t in_sum = counts[node * 2];
+                    uint64_t out_sum = counts[node * 2 + 1];
+                //}
                 if (std::get<0>(statistical_model.likelihood_ratio_test(in_sum, out_sum)))
                     ++kept_nodes;
                 else
@@ -436,26 +441,28 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             });
             auto statistical_model = DifferentialTest(config.family_wise_error_rate, total_unitigs, // total number of hypotheses equals the number of unitigs
                                                config.pvalue, in_total_kmers, out_total_kmers);
+            { // here want no multiple threads working at once TODO luck thread.
+             //   std::lock_guard<std::mutex> lock(vector_backup_mutex);
             update_masked_graph_by_unitig(*masked_graph, // intitial mask
                 [&](const std::string &, const std::vector<node_index> &path) -> Intervals { // return a set of intervals to keep in the graph
                     int in_kmer_count_unitig = 0;
                     int out_kmer_count_unitig = 0;
                     for (size_t i = 0; i < path.size(); ++i) {
-                        in_kmer_count_unitig += counts[path[i] * 2];
-                        out_kmer_count_unitig += counts[path[i] * 2 + 1];
+                            in_kmer_count_unitig += counts[path[i] * 2];
+                            out_kmer_count_unitig += counts[path[i] * 2 + 1];
                     }
                     auto [significance, likelihood_ratio] = statistical_model.likelihood_ratio_test(in_kmer_count_unitig, out_kmer_count_unitig);
 
-                    if (significance){
-                        for (size_t i = 0; i < path.size(); ++i) { // if significant add the likelihood ratio or the effect (in_kmer_count_unitig - out_kmer_count_unitig) to the likelihood_ratios vector. This is a temporary solution
-                            masked_graph->likelihood_ratios[path[i]] = in_kmer_count_unitig - out_kmer_count_unitig; //likelihood_ratio;
-                        }
+                    if (significance){// if significant add the likelihood ratio or the effect (in_kmer_count_unitig - out_kmer_count_unitig) to the likelihood_ratios vector. This is a temporary solution
+                        masked_graph->likelihood_ratios.at(path[0]) = in_kmer_count_unitig - out_kmer_count_unitig; //likelihood_ratio;
+                        masked_graph->likelihood_ratios.at(path[path.size()-1]) = in_kmer_count_unitig - out_kmer_count_unitig; //likelihood_ratio;
                         return { std::make_pair(0, path.size()) };
                     }
                     else
                         return {};
                 },
                 num_threads);
+            }
             }
             return masked_graph;
     }
@@ -476,15 +483,17 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
         // TODO: make this part multithreaded
         size_t kept_nodes = 0;
-        call_ones(in_mask, [&](node_index node) {
-            uint64_t in_count = counts[node * 2];
-            uint64_t out_count = counts[node * 2 + 1];
-
+        //{ // here want no multiple threads working at once TODO lock thread
+         //   std::lock_guard<std::mutex> lock(vector_backup_mutex);
+        call_ones(in_mask, [&](node_index node) { // TODO alternatively, input a mutex argument to the call_back.
+                uint64_t in_count = counts[node * 2];
+                uint64_t out_count = counts[node * 2 + 1];
             if (in_count >= min_label_in_count && out_count <= max_label_out_count) {
                 ++kept_nodes;
             } else {
                 mask[node] = false;
             }
+        //}
         });
 
 
@@ -588,12 +597,14 @@ make_initial_masked_graph(std::shared_ptr<const DeBruijnGraph> graph_ptr,
             auto it = rc_path.rbegin();
             for (size_t i = 0; i < path.size(); ++i, ++it) {
                 if (*it) {
-                    uint64_t in_count = counts[path[i] * 2]; //atomic_fetch(counts, path[i] * 2, vector_backup_mutex, MO_RELAXED);
-                    uint64_t out_count = counts[path[i] * 2 + 1]; //atomic_fetch(counts, path[i] * 2 + 1, vector_backup_mutex, MO_RELAXED);
-                    counts[*it * 2] += in_count; //atomic_fetch_and_add(counts, *it * 2, in_count, vector_backup_mutex, MO_RELAXED);
-                    counts[*it * 2 + 1] += out_count; //atomic_fetch_and_add(counts, *it * 2 + 1, out_count, vector_backup_mutex, MO_RELAXED);
-
-                    set_bit(mask.data(), *it, in_count, MO_RELAXED);
+                    { // here want no multiple threads working at once
+                        std::lock_guard<std::mutex> lock(vector_backup_mutex);
+                        uint64_t in_count = counts[path[i] * 2]; //atomic_fetch(counts, path[i] * 2, vector_backup_mutex, MO_RELAXED);
+                        uint64_t out_count = counts[path[i] * 2 + 1]; //atomic_fetch(counts, path[i] * 2 + 1, vector_backup_mutex, MO_RELAXED);
+                        counts[*it * 2] += in_count; //atomic_fetch_and_add(counts, *it * 2, in_count, vector_backup_mutex, MO_RELAXED);
+                        counts[*it * 2 + 1] += out_count; //atomic_fetch_and_add(counts, *it * 2 + 1, out_count, vector_backup_mutex, MO_RELAXED);
+                        set_bit(mask.data(), *it, in_count, MO_RELAXED);
+                    }
                 }
             }
         }, num_threads, true);
@@ -651,10 +662,6 @@ construct_diff_label_count_vector(const ColumnGenerator &generate_columns,
 
     logger->trace("Allocating count vector"); // the in and out counts are stored interleaved
 
-    // TODO In that case the function also to be a template too, or a template based argument, previously: sdsl::int_vector<> counts = aligned_int_vector(indicator.size() * 2, 0, width, 16);
-    // Myrthe later: For the buffered_int_vector we would have to use operators [ ] [ ], but it might be problematic if it runs out of memory and push_back would need to be used instead.
-    // Myrthe later: The second problem with buffered_int_vector might be that it is expensive, because we do random access on it. Instead a solution might be to use a piority queue of L columns, storing the smallest element as a triple (column , index, value), such that always k-mers in row x are processed before row x + 1.
-
     std::string filename = std::tmpnam(nullptr);
     sdsl::int_vector_buffer<> counts(filename, std::ios::out, 1024*1024, width);
     for (size_t i = 0; i < length; ++i) counts.push_back(0); // set the size of the count vector using push backs
@@ -662,7 +669,7 @@ construct_diff_label_count_vector(const ColumnGenerator &generate_columns,
     logger->trace("done");
 
     sdsl::bit_vector other_labels(num_labels, false);
-    std::mutex vector_backup_mutex;
+    std::mutex vector_backup_mutex; // a mutex variable declared before the multi-threaded part starts
 
     logger->trace("Populating count vector");
     std::atomic_thread_fence(std::memory_order_release);
@@ -682,7 +689,10 @@ construct_diff_label_count_vector(const ColumnGenerator &generate_columns,
             i = AnnotatedDBG::anno_to_graph_index(i); // indices in the annotation matrix have an offset of 1 compared to those in the graph. Since the mask should be compatible with the graph, we have to convert the index.
             assert(i != DeBruijnGraph::npos);
             set_bit(indicator.data(), i, parallel, MO_RELAXED); // set the corresponding bit to true in the mask, with the 'indicator' representing the mask.
-            counts[i * 2] += value; //atomic_fetch_and_add(counts, i * 2, value, vector_backup_mutex, MO_RELAXED);
+            { // here want no multiple threads working at once
+                std::lock_guard<std::mutex> lock(vector_backup_mutex);
+                counts[i * 2] += value; //atomic_fetch_and_add(counts, i * 2, value, vector_backup_mutex, MO_RELAXED);
+            }
             in_total_kmers += value;
         };
 
@@ -691,7 +701,10 @@ construct_diff_label_count_vector(const ColumnGenerator &generate_columns,
             assert(i != DeBruijnGraph::npos);
             if (add_out_labels_to_mask)
                 set_bit(indicator.data(), i, parallel, MO_RELAXED);
-            counts[i * 2 + 1] += value; //atomic_fetch_and_add(counts, i * 2 + 1, value, vector_backup_mutex, MO_RELAXED);
+            { // here want no multiple threads working at once
+                std::lock_guard<std::mutex> lock(vector_backup_mutex);
+                counts[i * 2 + 1] += value; // atomic_fetch_and_add(counts, i * 2 + 1, value, vector_backup_mutex, MO_RELAXED);
+            }
             out_total_kmers += value;
         };
 
@@ -699,8 +712,11 @@ construct_diff_label_count_vector(const ColumnGenerator &generate_columns,
             i = AnnotatedDBG::anno_to_graph_index(i);
             assert(i != DeBruijnGraph::npos);
             set_bit(indicator.data(), i, parallel, MO_RELAXED);
-            counts[i * 2] += value; //atomic_fetch_and_add(counts, i * 2, value, vector_backup_mutex, MO_RELAXED);
-            counts[i * 2 + 1] += value; //atomic_fetch_and_add(counts, i * 2 + 1, value, vector_backup_mutex, MO_RELAXED);
+            { // here want no multiple threads working at once
+                std::lock_guard<std::mutex> lock(vector_backup_mutex);
+                counts[i * 2] += value; // atomic_fetch_and_add(counts, i * 2, value, vector_backup_mutex, MO_RELAXED);
+                counts[i * 2 + 1] += value; // atomic_fetch_and_add(counts, i * 2 + 1, value, vector_backup_mutex, MO_RELAXED);
+            }
             out_total_kmers += value;
             in_total_kmers += value;
         };
