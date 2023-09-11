@@ -557,6 +557,7 @@ void chain_alignments(const IDBGAligner &aligner,
         int64_t node_idx;
         score_t score;
         Alignment::Column col;
+        bool left;
 
         std::string_view get_query_view() const {
             return std::string_view(begin, end - begin);
@@ -632,6 +633,7 @@ void chain_alignments(const IDBGAligner &aligner,
                     .node_idx = node_idx,
                     .score = cur.get_score(),
                     .col = std::numeric_limits<Alignment::Column>::max(),
+                    .left = true,
                 });
 
 #ifndef NDEBUG
@@ -732,6 +734,16 @@ void chain_alignments(const IDBGAligner &aligner,
         });
     }
 
+    {
+        std::vector<Anchor> left_right_anchors;
+        left_right_anchors.reserve(anchors.size());
+        for (auto&& anchor : anchors) {
+            left_right_anchors.emplace_back(std::move(anchor));
+            left_right_anchors.emplace_back(left_right_anchors.back()).left = false;
+        }
+        std::swap(left_right_anchors, anchors);
+    }
+
     score_t node_insert = config.node_insertion_penalty;
     score_t gap_open = config.gap_opening_penalty;
     score_t gap_ext = config.gap_extension_penalty;
@@ -757,9 +769,13 @@ void chain_alignments(const IDBGAligner &aligner,
 
         chain_anchors<Anchor>(config, last_anchor_it, anchor_it,
             [&](const Anchor &a_i, ssize_t, const Anchor *begin, const Anchor *end, auto *chain_scores, const auto &update_score) {
-                score_t &score_i = std::get<0>(*(
+                const auto &[score_i, last_j, last_dist] = *(
                     chain_scores - (begin - last_anchor_it) + (&a_i - last_anchor_it)
-                ));
+                );
+
+                if (last_j == anchor_it && a_i.left)
+                    return;
+
                 const Alignment &full_i = alignments[a_i.index];
                 std::string_view full_query_i = full_i.get_query_view();
                 std::string_view query_i(a_i.begin, a_i.end - a_i.begin);
@@ -770,9 +786,10 @@ void chain_alignments(const IDBGAligner &aligner,
                 --chain_scores;
                 std::for_each(begin, end, [&](const Anchor &a_j) {
                     // try to connect a_i -> a_j
+                    assert(&a_i != &a_j);
                     ++chain_scores;
 
-                    if (&a_i == &a_j)
+                    if (a_i.left != a_j.left)
                         return;
 
                     const Alignment &full_j = alignments[a_j.index];
@@ -785,10 +802,13 @@ void chain_alignments(const IDBGAligner &aligner,
                         last_dist = -a_j.spelling_length;
                     }
 
+                    if (a_i.col != a_j.col && !allow_label_change)
+                        return;
+
                     if (a_i.index == a_j.index) {
                         if (a_i.spelling_length <= a_j.spelling_length) {
-                            assert(allow_label_change);
-                            assert(a_i.col != a_j.col);
+                            // TODO: is this test still valid?
+                            // assert(a_i.col != a_j.col);
                             return;
                         }
 
@@ -797,9 +817,6 @@ void chain_alignments(const IDBGAligner &aligner,
                                      &a_j, last_dist - added_length);
                         return;
                     }
-
-                    if (a_i.col != a_j.col && !allow_label_change)
-                        return;
 
                     if (full_query_i.end() <= full_query_j.begin()) {
                         // completely disjoint
@@ -860,6 +877,9 @@ void chain_alignments(const IDBGAligner &aligner,
             },
             [&](const AnchorChain<Anchor> &chain, score_t score) {
                 assert(chain.size());
+                if (chain.back().first->left)
+                    return false;
+
                 if (chain_score == score && std::equal(chain.begin(), chain.end(),
                                                        last_chain.begin(), last_chain.end(),
                                                        [](const auto &a, const auto &b) {
@@ -1033,7 +1053,6 @@ void chain_alignments(const IDBGAligner &aligner,
                 callback(std::move(aln));
             },
             terminate,
-            true /* allow_overlap */,
             config.max_dist_between_seeds,
             config.max_gap_shrinking_factor
         );

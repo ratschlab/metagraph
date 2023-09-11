@@ -48,7 +48,6 @@ void chain_anchors(const DBGAlignerConfig &config,
                        = [](const Anchor*, Alignment&&, size_t, score_t, const AlignmentCallback&) {},
                    const AlignmentCallback &callback = [](Alignment&&) {},
                    const std::function<bool()> &terminate = []() { return false; },
-                   bool allow_overlap = false,
                    ssize_t max_gap_between_anchors = 400,
                    ssize_t max_gap_shrink_factor = 4) {
     if (terminate() || anchors_begin == anchors_end)
@@ -85,19 +84,13 @@ void chain_anchors(const DBGAlignerConfig &config,
         ssize_t b_last;
         do {
             auto j = anchors_begin;
-            for (auto i = anchors_begin + !allow_overlap; i != anchors_end; ++i) {
+            for (auto i = anchors_begin + 1; i != anchors_end; ++i) {
                 auto end = i->get_query_view().end();
                 j = std::find_if(j, anchors_end, [&](const auto &s_j) {
                     return s_j.get_query_view().end() - end <= b;
                 });
 
                 auto i_end = i;
-                if (allow_overlap) {
-                    i_end = std::find_if(i_end, anchors_end, [&](const auto &s_i_end) {
-                        return s_i_end.get_query_view().end() != end;
-                    });
-                }
-
                 bool updated = false;
 
                 // align anchor i forwards
@@ -116,12 +109,6 @@ void chain_anchors(const DBGAlignerConfig &config,
                         }
                     }
                 );
-
-                if (updated && allow_overlap) {
-                    while (i + 1 != anchors_begin && i->get_query_view().end() == end) {
-                        --i;
-                    }
-                }
             }
             b_last = b;
             b *= max_gap_shrink_factor;
@@ -164,8 +151,6 @@ void chain_anchors(const DBGAlignerConfig &config,
         while (last != anchors_end) {
             last_anchor = last;
             size_t to_traverse = dist;
-            assert(allow_overlap || to_traverse > 0);
-
             std::tie(score, last, dist) = chain_scores[last - anchors_begin];
             chain.emplace_back(last_anchor, to_traverse);
             scores.emplace_back(score);
