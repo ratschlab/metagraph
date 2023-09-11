@@ -513,6 +513,16 @@ chain_seeds(const DBGAlignerConfig &config,
     return std::make_tuple(std::move(dp_table), std::move(backtrace), num_seeds, num_nodes);
 }
 
+Alignment::score_t get_label_change_score(const AnnotationBuffer *anno_buffer,
+                                          Alignment::Column col_a,
+                                          Alignment::Column col_b) {
+    if (col_a == col_b)
+        return 0;
+
+    assert(anno_buffer);
+    return anno_buffer->get_label_change_score(col_a, col_b) * 2;
+};
+
 void chain_alignments(const IDBGAligner &aligner,
                       std::vector<Alignment>&& alignments,
                       const std::function<bool(Alignment::Column, size_t, score_t)> &start_backtrack,
@@ -712,14 +722,6 @@ void chain_alignments(const IDBGAligner &aligner,
                       anchors.end());
     }
 
-    auto get_label_change_score = [anno_buffer](auto col_a, auto col_b) {
-        if (col_a == col_b)
-            return 0;
-
-        assert(anno_buffer);
-        return anno_buffer->get_label_change_score(col_a, col_b);
-    };
-
     if (!allow_label_change) {
         std::sort(anchors.begin(), anchors.end(), [](const auto &a, const auto &b) {
             return std::tie(b.col, b.orientation, a.end) > std::tie(a.col, a.orientation, b.end);
@@ -811,23 +813,13 @@ void chain_alignments(const IDBGAligner &aligner,
 
                             assert(gap_cost < 0);
 
-#ifndef NDEBUG
-                            auto cur = full_j;
-                            cur.insert_gap_prefix(
-                                cur.get_query_view().begin() - full_i.get_query_view().end(),
-                                graph.get_k() - 1,
-                                config
-                            );
-                            assert(cur.get_score() == full_j.get_score() + gap_cost);
-#endif
-
                             score_t base_updated_score = score_j + gap_cost + a_i.score;
 
                             if (base_updated_score < score_i)
                                 return;
 
-                            update_score(base_updated_score + get_label_change_score(a_i.col, a_j.col),
-                                         &a_j, -a_i.spelling_length);
+                            base_updated_score += get_label_change_score(anno_buffer, a_i.col, a_j.col);
+                            update_score(base_updated_score, &a_j, -a_i.spelling_length);
                         }
 
                         return;
@@ -847,7 +839,12 @@ void chain_alignments(const IDBGAligner &aligner,
                     score_t score_seed_j = a_j.score
                         - per_char_scores_prefix_del[a_j.index][a_j.end - full_j.get_query_view().begin()];
 
-                    score_t base_updated_score = score_j - score_seed_j + score_seed_i + get_label_change_score(a_i.col, a_j.col);
+                    score_t base_updated_score = score_j - score_seed_j + score_seed_i;
+
+                    if (base_updated_score <= score_i)
+                        return;
+
+                    base_updated_score += get_label_change_score(anno_buffer, a_i.col, a_j.col);
 
                     if (base_updated_score <= score_i)
                         return;
@@ -857,16 +854,6 @@ void chain_alignments(const IDBGAligner &aligner,
                         update_score(base_updated_score, &a_j, -seed_size);
                         return;
                     }
-
-#ifndef NDEBUG
-                    auto cur = full_j;
-                    cur.extend_offset(
-                        std::vector<node_index>(graph.get_k() - 1 - cur.get_offset(),
-                                                DeBruijnGraph::npos)
-                    );
-                    cur.insert_gap_prefix(-seed_size, graph.get_k() - 1, config);
-                    assert(cur.get_score() == full_j.get_score() + node_insert);
-#endif
 
                     update_score(base_updated_score + node_insert, &a_j, -seed_size);
                 });
@@ -1020,7 +1007,7 @@ void chain_alignments(const IDBGAligner &aligner,
                 if (first->col != last_anchor->col) {
                     assert(anno_buffer);
                     assert(allow_label_change);
-                    label_change_score = get_label_change_score(first->col, last_anchor->col);
+                    label_change_score = get_label_change_score(anno_buffer, first->col, last_anchor->col);
                     DEBUG_LOG("\t\t\tLabel change: {} ({}) -> {} ({})\t{}",
                         first->col, anno_buffer->get_annotator().get_label_encoder().decode(first->col),
                         last_anchor->col, anno_buffer->get_annotator().get_label_encoder().decode(last_anchor->col),
