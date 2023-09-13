@@ -129,6 +129,18 @@ void chain_anchors(const DBGAlignerConfig &config,
             // otherwise, use this algorithm
             for (const Anchor *i = anchors_begin + 1; i != anchors_end; ++i) {
                 const Anchor *j = std::max(i - config.chaining_bandwidth, anchors_begin);
+                auto end = i->get_query_view().end();
+                for (size_t k = 0; k < config.chaining_bandwidth; ++k) {
+                    while (j != anchors_begin && j->get_query_view().end() == end) {
+                        --j;
+                    }
+
+                    if (j == anchors_begin)
+                        break;
+
+                    end = j->get_query_view().end();
+                }
+
                 anchor_connector(*i, std::numeric_limits<ssize_t>::max(), j, i,
                                  chain_scores + (j - anchors_begin),
                                  make_anchor_connector(i));
