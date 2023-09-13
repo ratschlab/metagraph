@@ -47,9 +47,7 @@ void chain_anchors(const DBGAlignerConfig &config,
                    const AnchorExtender<Anchor> &anchor_extender
                        = [](const Anchor*, Alignment&&, size_t, score_t, const AlignmentCallback&) {},
                    const AlignmentCallback &callback = [](Alignment&&) {},
-                   const std::function<bool()> &terminate = []() { return false; },
-                   ssize_t max_gap_between_anchors = 400,
-                   ssize_t max_gap_shrink_factor = 4) {
+                   const std::function<bool()> &terminate = []() { return false; }) {
     if (terminate() || anchors_begin == anchors_end)
         return;
 
@@ -64,7 +62,7 @@ void chain_anchors(const DBGAlignerConfig &config,
     const Anchor *orientation_change = anchors_end;
     ChainScores<Anchor> chain_scores;
     chain_scores.reserve(anchors_end - anchors_begin);
-    for (auto it = anchors_begin; it != anchors_end; ++it) {
+    for (const auto *it = anchors_begin; it != anchors_end; ++it) {
         chain_scores.emplace_back(it->get_score(config), anchors_end, std::numeric_limits<size_t>::max());
         if (it != anchors_begin && (it - 1)->get_orientation() != it->get_orientation()) {
             assert(it->get_orientation());
@@ -73,47 +71,67 @@ void chain_anchors(const DBGAlignerConfig &config,
     }
 
     // forward pass
-    max_gap_between_anchors = std::min(max_gap_between_anchors, query_size);
+    ssize_t max_gap_between_anchors = std::min(
+        static_cast<ssize_t>(config.max_dist_between_seeds),
+        query_size
+    );
+
     auto forward_pass = [&](const Anchor *anchors_begin,
                             const Anchor *anchors_end,
                             auto *chain_scores) {
         if (anchors_begin == anchors_end)
             return;
 
-        ssize_t b = max_gap_between_anchors;
-        ssize_t b_last;
-        do {
-            auto j = anchors_begin;
-            for (auto i = anchors_begin + 1; i != anchors_end; ++i) {
-                auto end = i->get_query_view().end();
-                j = std::find_if(j, anchors_end, [&](const auto &s_j) {
-                    return s_j.get_query_view().end() - end <= b;
-                });
+        auto make_anchor_connector = [&](const Anchor *i) {
+            return [&,i](score_t score, const Anchor* last, size_t dist) {
+                assert(last != i);
+                auto &[max_score, best_last, best_dist] = chain_scores[i - anchors_begin];
+                if (std::tie(score, best_dist) > std::tie(max_score, dist)) {
+                    max_score = score;
+                    best_last = last;
+                    best_dist = dist;
+                    return true;
+                } else {
+                    return false;
+                }
+            };
+        };
 
-                auto i_end = i;
-                bool updated = false;
+        if (static_cast<double>(anchors_end - anchors_begin) / query_size
+                <= config.chaining_algorithm_switch_cutoff) {
+            // if there are fewer seeds, this algorithm is faster
+            ssize_t b = max_gap_between_anchors;
+            ssize_t b_last;
+            do {
+                auto j = anchors_begin;
+                for (const auto *i = anchors_begin + 1; i != anchors_end; ++i) {
+                    auto end = i->get_query_view().end();
+                    j = std::find_if(j, anchors_end, [&](const auto &s_j) {
+                        return s_j.get_query_view().end() - end <= b;
+                    });
 
-                // align anchor i forwards
-                anchor_connector(*i, b, j, i_end, chain_scores + (j - anchors_begin),
-                    [&](score_t score, const Anchor* last, size_t dist) {
-                        assert(last != i);
-                        auto &[max_score, best_last, best_dist] = chain_scores[i - anchors_begin];
-                        if (std::tie(score, best_dist) > std::tie(max_score, dist)) {
-                            max_score = score;
-                            best_last = last;
-                            best_dist = dist;
-                            updated = true;
-                            return true;
-                        } else {
-                            return false;
-                        }
-                    }
+                    auto i_end = i;
+
+                    // align anchor i forwards
+                    anchor_connector(*i, b, j, i_end, chain_scores + (j - anchors_begin),
+                                     make_anchor_connector(i));
+                }
+                b_last = b;
+                b *= config.max_gap_shrinking_factor;
+            } while (std::get<0>(chain_scores[anchors_end - anchors_begin - 1])
+                        < query_size - b_last / 2);
+        } else {
+            // otherwise, use this algorithm
+            for (const auto *i = anchors_begin + 1; i != anchors_end; ++i) {
+                const auto *j = std::max(i - max_gap_between_anchors, anchors_begin);
+                anchor_connector(
+                    *i, std::numeric_limits<ssize_t>::max(),
+                    j, i,
+                    chain_scores + (j - anchors_begin),
+                    make_anchor_connector(i)
                 );
             }
-            b_last = b;
-            b *= max_gap_shrink_factor;
-        } while (std::get<0>(chain_scores[anchors_end - anchors_begin - 1])
-                    < query_size - b_last / 2);
+        }
     };
 
     size_t num_forward = orientation_change - anchors_begin;

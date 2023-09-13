@@ -1052,9 +1052,7 @@ void chain_alignments(const IDBGAligner &aligner,
 
                 callback(std::move(aln));
             },
-            terminate,
-            config.max_dist_between_seeds,
-            config.max_gap_shrinking_factor
+            terminate
         );
 
         last_anchor_it = anchor_it;
