@@ -45,7 +45,11 @@ void chain_anchors(const DBGAlignerConfig &config,
                        = [](const AnchorChain<Anchor>&, score_t) { return true; },
                    bool extend_anchors = true,
                    const AnchorExtender<Anchor> &anchor_extender
-                       = [](const Anchor*, Alignment&&, size_t, score_t, const AlignmentCallback&) {},
+                       = [](const Anchor*,
+                            Alignment&&,
+                            size_t,
+                            score_t,
+                            const AlignmentCallback&) {},
                    const AlignmentCallback &callback = [](Alignment&&) {},
                    const std::function<bool()> &terminate = []() { return false; }) {
     if (terminate() || anchors_begin == anchors_end)
@@ -54,7 +58,8 @@ void chain_anchors(const DBGAlignerConfig &config,
     ssize_t query_size = anchors_begin->get_clipping() + anchors_begin->get_end_clipping()
                             + anchors_begin->get_query_view().size();
 
-    assert(std::is_sorted(anchors_begin, anchors_end, [&](const auto &a, const auto &b) {
+    assert(std::is_sorted(anchors_begin, anchors_end, [&](const Anchor &a,
+                                                          const Anchor &b) {
         return std::make_pair(b.get_orientation(), a.get_query_view().end())
              > std::make_pair(a.get_orientation(), b.get_query_view().end());
     }));
@@ -62,8 +67,10 @@ void chain_anchors(const DBGAlignerConfig &config,
     const Anchor *orientation_change = anchors_end;
     ChainScores<Anchor> chain_scores;
     chain_scores.reserve(anchors_end - anchors_begin);
-    for (const auto *it = anchors_begin; it != anchors_end; ++it) {
-        chain_scores.emplace_back(it->get_score(config), anchors_end, std::numeric_limits<size_t>::max());
+    for (const Anchor *it = anchors_begin; it != anchors_end; ++it) {
+        chain_scores.emplace_back(it->get_score(config),
+                                  anchors_end,
+                                  std::numeric_limits<size_t>::max());
         if (it != anchors_begin && (it - 1)->get_orientation() != it->get_orientation()) {
             assert(it->get_orientation());
             orientation_change = it;
@@ -103,17 +110,15 @@ void chain_anchors(const DBGAlignerConfig &config,
             ssize_t b = max_gap_between_anchors;
             ssize_t b_last;
             do {
-                auto j = anchors_begin;
-                for (const auto *i = anchors_begin + 1; i != anchors_end; ++i) {
+                const Anchor *j = anchors_begin;
+                for (const Anchor *i = anchors_begin + 1; i != anchors_end; ++i) {
                     auto end = i->get_query_view().end();
-                    j = std::find_if(j, anchors_end, [&](const auto &s_j) {
+                    j = std::find_if(j, anchors_end, [&](const Anchor &s_j) {
                         return s_j.get_query_view().end() - end <= b;
                     });
 
-                    auto i_end = i;
-
                     // align anchor i forwards
-                    anchor_connector(*i, b, j, i_end, chain_scores + (j - anchors_begin),
+                    anchor_connector(*i, b, j, i, chain_scores + (j - anchors_begin),
                                      make_anchor_connector(i));
                 }
                 b_last = b;
@@ -122,14 +127,11 @@ void chain_anchors(const DBGAlignerConfig &config,
                         < query_size - b_last / 2);
         } else {
             // otherwise, use this algorithm
-            for (const auto *i = anchors_begin + 1; i != anchors_end; ++i) {
-                const auto *j = std::max(i - max_gap_between_anchors, anchors_begin);
-                anchor_connector(
-                    *i, std::numeric_limits<ssize_t>::max(),
-                    j, i,
-                    chain_scores + (j - anchors_begin),
-                    make_anchor_connector(i)
-                );
+            for (const Anchor *i = anchors_begin + 1; i != anchors_end; ++i) {
+                const Anchor *j = std::max(i - config.chaining_bandwidth, anchors_begin);
+                anchor_connector(*i, std::numeric_limits<ssize_t>::max(), j, i,
+                                 chain_scores + (j - anchors_begin),
+                                 make_anchor_connector(i));
             }
         }
     };

@@ -361,7 +361,7 @@ chain_seeds(const DBGAlignerConfig &config,
     std::sort(dp_table.begin(), dp_table.end(), std::greater<TableElem>());
     logger->trace("Chaining anchors");
 
-    size_t bandwidth = 65;
+    size_t bandwidth = config.chaining_bandwidth;
 
     // scoring function derived from minimap2
     // https://academic.oup.com/bioinformatics/article/34/18/3094/4994778

@@ -27,6 +27,7 @@ struct DBGAlignerConfig {
 
     size_t max_dist_between_seeds = 400;
     size_t max_gap_shrinking_factor = 4;
+    size_t chaining_bandwidth = 65;
 
     // Lowest possible score. 100 is added to prevent underflow during operations.
     // For this to work, all penalties should be less than 100.
