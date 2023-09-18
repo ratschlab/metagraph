@@ -16,7 +16,7 @@ using mtg::common::logger;
 typedef AnnotatedDBG::node_index node_index;
 typedef AnnotatedDBG::Annotator Annotator;
 typedef AnnotatedDBG::Annotator::Label Label;
-using Column = annot::binmat::BinaryMatrix::Column;
+using Column = annot::matrix::BinaryMatrix::Column;
 
 typedef std::function<size_t()> LabelCountCallback;
 

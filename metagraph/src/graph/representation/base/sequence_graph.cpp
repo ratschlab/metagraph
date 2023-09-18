@@ -185,7 +185,7 @@ void call_sequences_from(const DeBruijnGraph &graph,
             }
 
             node_index next_node = DeBruijnGraph::npos;
-            char next_c;
+            char next_c = '\0';
             //  _____.___
             //      \.___
 
