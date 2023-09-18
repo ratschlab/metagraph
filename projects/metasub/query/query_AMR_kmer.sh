@@ -24,4 +24,4 @@ pmem=$((${mem} / ${threads}))
 
 log=${outdir}/amr_CARD_nucleotide_fasta_protein_homolog_model_k${K}.kmer_based.log
 out=${outdir}/amr_CARD_nucleotide_fasta_protein_homolog_model_k${K}.kmer_based.tsv
-echo "/usr/bin/time -v $metagraph query -i $graph -a ${annotation} --count-labels --discovery-fraction 0.1 -p ${threads} ${query} > $out" | bsub -J ms_q_amr${K} -oo ${log} -We 24:00 -n $threads -M ${mem} -R "rusage[mem=${pmem}]" -R "span[hosts=1]"
+echo "/usr/bin/time -v $metagraph query -i $graph -a ${annotation} --query-mode matches --min-kmers-fraction-label 0.1 -p ${threads} ${query} > $out" | bsub -J ms_q_amr${K} -oo ${log} -We 24:00 -n $threads -M ${mem} -R "rusage[mem=${pmem}]" -R "span[hosts=1]"

@@ -57,7 +57,6 @@ Before compiling MetaGraph, install the following dependencies:
 - cmake 3.10 or higher
 - GNU GCC with C++17 (gcc-8.0.1 or higher), LLVM Clang (clang-7 or higher), or AppleClang
 - bzip2
-- HTSlib
 
 *Optional:*
 
@@ -73,37 +72,36 @@ Before compiling MetaGraph, install the following dependencies:
 
         For compiling with **AppleClang**, the prerequisites can be installed as easy as::
 
-            brew install libomp cmake make bzip2 htslib boost jemalloc
+            brew install libomp cmake make bzip2 boost jemalloc
 
 
     .. group-tab:: Ubuntu / Debian
 
         For **Ubuntu** (20.04 LTS or higher) or **Debian** (10 or higher)::
 
-            sudo apt-get install cmake libbz2-dev libhts-dev libjemalloc-dev libboost-all-dev
+            sudo apt-get install cmake libbz2-dev libjemalloc-dev libboost-all-dev
 
 
     .. group-tab:: CentOS
 
         For **CentOS** (8 or higher)::
 
-            yum install cmake bzip2-devel htslib-devel jemalloc-devel boost-devel
+            yum install cmake bzip2-devel jemalloc-devel boost-devel
 
 
     .. group-tab:: brew + GNU gcc
 
         GNU GCC and all the prerequisites can be installed with `brew <https://brew.sh/>`_ as follows::
 
-            brew install gcc autoconf automake libtool cmake make htslib
+            brew install gcc autoconf automake libtool cmake make
             [[ "$OSTYPE" == "darwin"* ]] \
-                && brew remove -f boost double-conversion gflags glog lz4 snappy zstd folly \
-                && brew install --cc=gcc-7 boost folly \
+                && brew remove -f boost \
+                && brew install --cc=gcc-7 boost \
                 && brew install gcc@9
             [[ "$OSTYPE" != "darwin"* ]] \
                 && brew install gcc@9 libomp \
-                && brew remove -f openssl@1.1 boost double-conversion gflags glog lz4 snappy zstd folly \
-                && brew install --cc=gcc-5 glog zstd \
-                && brew install --cc=gcc-9 openssl@1.1 boost folly
+                && brew remove -f openssl@1.1 boost \
+                && brew install --cc=gcc-9 openssl@1.1 boost
 
         Then, the following environment variables have to be set::
 
@@ -117,7 +115,7 @@ Before compiling MetaGraph, install the following dependencies:
 
         For compiling with LLVM Clang installed with `brew <https://brew.sh/>`_, the prerequisites can be installed with::
 
-            brew install llvm libomp autoconf automake libtool cmake make htslib boost folly
+            brew install llvm libomp autoconf automake libtool cmake make boost
 
         Then, the following environment variables have to be set::
 

@@ -4,7 +4,6 @@
 
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/canonical_dbg.hpp"
-#include "graph/graph_extensions/node_rc.hpp"
 #include "graph/graph_extensions/node_first_cache.hpp"
 
 
@@ -99,16 +98,6 @@ DEFINE_BOSS_BENCHMARK(pred_last,           pred_last,           get_last, size);
 DEFINE_BOSS_BENCHMARK(succ_last,           succ_last,           get_last, size);
 DEFINE_BOSS_BENCHMARK(bwd,                 bwd,                 get_W,    size);
 
-void load_noderc(benchmark::State &state, DBGSuccinct &graph) {
-    std::string path = std::getenv("GRAPH");
-    auto node_rc = std::make_shared<NodeRC>(graph);
-    if (node_rc->load(path)) {
-        graph.add_extension(node_rc);
-        return;
-    }
-
-    state.SkipWithError((std::string("Can't load the RC index for graph ") + path).c_str());
-}
 
 #define DEFINE_BOSS_PATH_BENCHMARK(NAME, OPERATION, BWD_CACHE, RC_INDEX) \
 static void BM_BOSS_##NAME(benchmark::State& state) { \
@@ -118,10 +107,7 @@ static void BM_BOSS_##NAME(benchmark::State& state) { \
 \
     std::shared_ptr<DeBruijnGraph> graph = base_graph; \
     if (base_graph->get_mode() == DeBruijnGraph::PRIMARY) { \
-        if (RC_INDEX) \
-            load_noderc(state, *base_graph); \
-\
-        auto canonical = std::make_shared<CanonicalDBG>(base_graph); \
+        auto canonical = std::make_shared<CanonicalDBG>(base_graph, RC_INDEX ? 100'000 : 0); \
         if (BWD_CACHE) \
             canonical->add_extension(std::make_shared<NodeFirstCache>(*base_graph)); \
 \

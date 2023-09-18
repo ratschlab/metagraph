@@ -6,36 +6,55 @@
 #include "common/vectors/bitmap.hpp"
 #include "common/serialization.hpp"
 #include "common/utils/template_utils.hpp"
-#include "common/vector_map.hpp"
+#include "common/vector_set.hpp"
+#include "common/hashers/hash.hpp"
+#include "annotation/binary_matrix/row_diff/row_diff.hpp"
 
 
 namespace mtg {
 namespace annot {
-namespace binmat {
+namespace matrix {
+
+const size_t kRowBatchSize = 10'000;
+
 
 std::vector<BinaryMatrix::SetBitPositions>
-BinaryMatrix::get_rows(const std::vector<Row> &row_ids) const {
-    std::vector<SetBitPositions> rows(row_ids.size());
+BinaryMatrix::get_rows_dict(std::vector<Row> *rows, size_t num_threads) const {
+    VectorSet<SetBitPositions, utils::VectorHash> unique_rows;
 
-    for (size_t i = 0; i < row_ids.size(); ++i) {
-        rows[i] = get_row(row_ids[i]);
+    std::vector<std::pair<Row, size_t>> row_to_index(rows->size());
+    for (size_t i = 0; i < rows->size(); ++i) {
+        row_to_index[i] = std::make_pair((*rows)[i], i);
     }
 
-    return rows;
-}
+    // don't break the topological order for row-diff annotation
+    if (!dynamic_cast<const IRowDiff *>(this)) {
+        ips4o::parallel::sort(row_to_index.begin(), row_to_index.end(),
+                              utils::LessFirst(), num_threads);
+    }
 
-std::vector<BinaryMatrix::Column>
-BinaryMatrix::slice_rows(const std::vector<Row> &row_ids) const {
-    std::vector<BinaryMatrix::Column> slice;
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+    for (uint64_t begin = 0; begin < row_to_index.size(); begin += kRowBatchSize) {
+        const uint64_t end = std::min(begin + kRowBatchSize,
+                                      static_cast<uint64_t>(row_to_index.size()));
 
-    for (uint64_t i : row_ids) {
-        for (uint64_t j : get_row(i)) {
-            slice.push_back(j);
+        std::vector<Row> ids(end - begin);
+        for (uint64_t i = begin; i < end; ++i) {
+            ids[i - begin] = row_to_index[i].first;
         }
-        slice.push_back(std::numeric_limits<Column>::max());
+
+        auto batch = get_rows(ids);
+
+        #pragma omp critical
+        {
+            for (uint64_t i = begin; i < end; ++i) {
+                auto it = unique_rows.emplace(std::move(batch[i - begin])).first;
+                (*rows)[row_to_index[i].second] = it - unique_rows.begin();
+            }
+        }
     }
 
-    return slice;
+    return const_cast<std::vector<SetBitPositions>&&>(unique_rows.values_container());
 }
 
 void BinaryMatrix::call_columns(const std::vector<Column> &column_ids,
@@ -52,51 +71,44 @@ void BinaryMatrix::call_columns(const std::vector<Column> &column_ids,
 
 std::vector<std::pair<BinaryMatrix::Column, size_t /* count */>>
 BinaryMatrix::sum_rows(const std::vector<std::pair<Row, size_t>> &index_counts,
-                       size_t min_count,
-                       size_t count_cap) const {
-    assert(count_cap >= min_count);
+                       size_t min_count) const {
+    min_count = std::max(min_count, (size_t)1);
 
-    if (!count_cap)
-        return {};
+    auto ic = index_counts;
 
-    min_count = std::max(min_count, size_t(1));
+    // FYI: one could use tsl::hopscotch_map for counting but it is slower
+    // than std::vector unless the number of columns is ~1M or higher
+    Vector<size_t> col_counts(num_columns(), 0);
 
-    size_t total_sum_count = 0;
-    for (const auto &pair : index_counts) {
-        total_sum_count += pair.second;
-    }
+    // don't break the topological order for row-diff annotation
+    if (!dynamic_cast<const IRowDiff *>(this))
+        std::sort(ic.begin(), ic.end(), utils::LessFirst());
 
-    if (total_sum_count < min_count)
-        return {};
+    // limit the RAM usage by avoiding querying all the rows at once
+    for (uint64_t begin = 0; begin < ic.size(); begin += kRowBatchSize) {
+        const uint64_t end = std::min(begin + kRowBatchSize,
+                                      static_cast<uint64_t>(ic.size()));
 
-    std::vector<size_t> col_counts(num_columns(), 0);
-    size_t max_matched = 0;
-    size_t total_checked = 0;
-
-    for (auto [i, count] : index_counts) {
-        if (max_matched + (total_sum_count - total_checked) < min_count)
-            break;
-
-        for (size_t j : get_row(i)) {
-            assert(j < col_counts.size());
-
-            col_counts[j] += count;
-            max_matched = std::max(max_matched, col_counts[j]);
+        std::vector<Row> ids(end - begin);
+        for (uint64_t i = begin; i < end; ++i) {
+            ids[i - begin] = ic[i].first;
         }
 
-        total_checked += count;
+        const auto &rows = get_rows(ids);
+
+        for (uint64_t i = begin; i < end; ++i) {
+            for (size_t j : rows[i - begin]) {
+                col_counts[j] += ic[i].second;
+            }
+        }
     }
 
-    if (max_matched < min_count)
-        return {};
-
-    std::vector<std::pair<uint64_t, size_t>> result;
+    std::vector<std::pair<Column, size_t>> result;
     result.reserve(col_counts.size());
 
-    for (size_t j = 0; j < num_columns(); ++j) {
-        if (col_counts[j] >= min_count) {
-            result.emplace_back(j, std::min(col_counts[j], count_cap));
-        }
+    for (Column j = 0; j < col_counts.size(); ++j) {
+        if (col_counts[j] >= min_count)
+            result.emplace_back(j, col_counts[j]);
     }
 
     return result;
@@ -104,7 +116,20 @@ BinaryMatrix::sum_rows(const std::vector<std::pair<Row, size_t>> &index_counts,
 
 
 std::vector<RainbowMatrix::SetBitPositions>
-RainbowMatrix::get_rows(std::vector<Row> *rows, size_t num_threads) const {
+RainbowMatrix::get_rows(const std::vector<Row> &rows) const {
+    std::vector<Row> pointers = rows;
+    auto distinct_rows = get_rows_dict(&pointers);
+
+    std::vector<SetBitPositions> result(rows.size());
+    for (size_t i = 0; i < pointers.size(); ++i) {
+        result[i] = distinct_rows[pointers[i]];
+    }
+
+    return result;
+}
+
+std::vector<RainbowMatrix::SetBitPositions>
+RainbowMatrix::get_rows_dict(std::vector<Row> *rows, size_t num_threads) const {
     assert(rows);
 
     std::vector<std::pair<uint64_t, /* code */
@@ -130,11 +155,22 @@ RainbowMatrix::get_rows(std::vector<Row> *rows, size_t num_threads) const {
     }
     row_codes = {};
 
+    if (num_threads <= 1)
+        return codes_to_rows(codes);
+
     std::vector<SetBitPositions> unique_rows(codes.size());
 
-    #pragma omp parallel for num_threads(num_threads)
-    for (size_t i = 0; i < codes.size(); ++i) {
-        unique_rows[i] = code_to_row(codes[i]);
+    size_t batch_size = std::min(kRowBatchSize,
+                                 (codes.size() + num_threads - 1) / num_threads);
+
+    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
+    for (size_t i = 0; i < codes.size(); i += batch_size) {
+        std::vector<uint64_t> ids(codes.begin() + i,
+                                  codes.begin() + std::min(i + batch_size, codes.size()));
+        auto rows = codes_to_rows(ids);
+        for (size_t j = 0; j < rows.size(); ++j) {
+            unique_rows[i + j] = std::move(rows[j]);
+        }
     }
 
     return unique_rows;
@@ -142,140 +178,58 @@ RainbowMatrix::get_rows(std::vector<Row> *rows, size_t num_threads) const {
 
 std::vector<std::pair<RainbowMatrix::Column, size_t /* count */>>
 RainbowMatrix::sum_rows(const std::vector<std::pair<Row, size_t>> &index_counts,
-                        size_t min_count,
-                        size_t count_cap) const {
-    assert(count_cap >= min_count);
+                        size_t min_count) const {
+    min_count = std::max(min_count, (size_t)1);
 
-    if (!count_cap)
-        return {};
-
-    min_count = std::max(min_count, size_t(1));
+    std::vector<Row> row_ids;
+    row_ids.reserve(index_counts.size());
 
     size_t total_sum_count = 0;
-    for (const auto &pair : index_counts) {
-        total_sum_count += pair.second;
+    for (auto [i, count] : index_counts) {
+        row_ids.push_back(i);
+        total_sum_count += count;
     }
 
     if (total_sum_count < min_count)
         return {};
 
-    VectorMap<size_t, size_t> code_count;
-    code_count.reserve(index_counts.size());
-    for (auto [i, count] : index_counts) {
-        code_count[get_code(i)] += count;
+    auto distinct_rows = get_rows_dict(&row_ids);
+
+    Vector<size_t> counts(distinct_rows.size(), 0);
+    for (size_t i = 0; i < index_counts.size(); ++i) {
+        counts[row_ids[i]] += index_counts[i].second;
     }
 
-    std::vector<size_t> col_counts(num_columns(), 0);
-    size_t max_matched = 0;
-    size_t total_checked = 0;
-
-    for (auto [c, count] : code_count) {
-        if (max_matched + (total_sum_count - total_checked) < min_count)
-            break;
-
-        for (size_t j : code_to_row(c)) {
-            assert(j < col_counts.size());
-
-            col_counts[j] += count;
-            max_matched = std::max(max_matched, col_counts[j]);
+    // FYI: one could use tsl::hopscotch_map for counting but it is slower
+    // than std::vector unless the number of columns is ~1M or higher
+    Vector<size_t> col_counts(num_columns(), 0);
+    for (size_t i = 0; i < counts.size(); ++i) {
+        for (size_t j : distinct_rows[i]) {
+            col_counts[j] += counts[i];
         }
-
-        total_checked += count;
     }
 
-    if (max_matched < min_count)
-        return {};
-
-    std::vector<std::pair<uint64_t, size_t>> result;
+    std::vector<std::pair<Column, size_t>> result;
     result.reserve(col_counts.size());
 
-    for (size_t j = 0; j < num_columns(); ++j) {
-        if (col_counts[j] >= min_count) {
-            result.emplace_back(j, std::min(col_counts[j], count_cap));
-        }
+    for (Column j = 0; j < col_counts.size(); ++j) {
+        if (col_counts[j] >= min_count)
+            result.emplace_back(j, col_counts[j]);
     }
 
     return result;
 }
 
 
-template <typename RowType>
-StreamRows<RowType>::StreamRows(const std::string &filename, size_t offset) {
-    std::ifstream instream(filename, std::ios::binary);
-
-    if (!instream.good() || !instream.seekg(offset).good())
-        throw std::ifstream::failure("Cannot read rows from file " + filename);
-
-    (void)load_number(instream);
-    (void)load_number(instream);
-
-    inbuf_ = sdsl::int_vector_buffer<>(filename,
-                                       std::ios::in | std::ios::binary,
-                                       1024 * 1024,
-                                       0,
-                                       false,
-                                       instream.tellg());
-}
-
-template <typename RowType>
-RowType* StreamRows<RowType>::next_row() {
-    row_.clear();
-
-    while (i_ < inbuf_.size()) {
-        auto value = inbuf_[i_++];
-        if (value - 1 > std::numeric_limits<typename RowType::value_type>::max())
-            throw std::ifstream::failure("Integer overflow: trying to read too"
-                                         " large column index: " + std::to_string(value - 1));
-        if (value) {
-            row_.push_back(value - 1);
-        } else {
-            return &row_;
-        }
+std::vector<BinaryMatrix::SetBitPositions>
+RowMajor::get_rows(const std::vector<Row> &row_ids) const {
+    std::vector<SetBitPositions> rows(row_ids.size());
+    for (size_t i = 0; i < row_ids.size(); ++i) {
+        rows[i] = get_row(row_ids[i]);
     }
-    return nullptr;
+    return rows;
 }
 
-template class StreamRows<BinaryMatrix::SetBitPositions>;
-
-
-void append_row_major(const std::string &filename,
-                      const std::function<void(BinaryMatrix::RowCallback)> &call_rows,
-                      uint64_t num_cols) {
-    std::ofstream outstream(filename, std::ios::binary | std::ios::app);
-
-    uint64_t num_rows = 0;
-
-    // write dummy num_rows value to fill in later
-    const uint64_t header_offs = outstream.tellp();
-    serialize_number(outstream, 0);
-    serialize_number(outstream, num_cols);
-    const uint64_t iv_offs = outstream.tellp();
-    outstream.close();
-
-    {
-        auto outbuf = sdsl::int_vector_buffer<>(filename,
-                                                std::ios::out | std::ios::binary,
-                                                1024 * 1024,
-                                                sdsl::bits::hi(num_cols) + 1,
-                                                false,
-                                                iv_offs);
-
-        call_rows([&](const auto &row) {
-            for (auto val : row) {
-                outbuf.push_back(val + 1);
-            }
-            outbuf.push_back(0);
-            num_rows++;
-        });
-
-        outbuf.close();
-    }
-
-    outstream.open(filename, std::ios::in | std::ios::out | std::ios::binary);
-    outstream.seekp(header_offs);
-    serialize_number(outstream, num_rows);
-}
-
-} // namespace binmat
+} // namespace matrix
 } // namespace annot
 } // namespace mtg

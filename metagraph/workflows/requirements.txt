@@ -1,1 +1,2 @@
 snakemake>=5
+pandas

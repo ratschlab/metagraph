@@ -1,6 +1,6 @@
 #include "align.hpp"
 
-#include <tsl/ordered_set.h>
+#include <tsl/hopscotch_set.h>
 
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
@@ -10,7 +10,6 @@
 #include "graph/alignment/dbg_aligner.hpp"
 #include "graph/alignment/aligner_labeled.hpp"
 #include "graph/annotated_dbg.hpp"
-#include "graph/graph_extensions/node_rc.hpp"
 #include "graph/graph_extensions/node_first_cache.hpp"
 #include "seq_io/sequence_io.hpp"
 #include "config/config.hpp"
@@ -25,6 +24,10 @@ using namespace mtg::graph::align;
 
 using mtg::seq_io::kseq_t;
 using mtg::common::logger;
+
+// after how many threads should per-thread traversal caches be used instead of
+// a single shared cache
+const size_t SEPARATE_CACHES_SWITCHOVER_THREADS = 8;
 
 
 DBGAlignerConfig initialize_aligner_config(const Config &config,
@@ -178,7 +181,7 @@ void map_sequences_in_file(const std::string &file,
 std::string sequence_to_gfa_path(const std::string &seq,
                                  const size_t seq_id,
                                  const DeBruijnGraph &graph,
-                                 const tsl::ordered_set<uint64_t> &is_unitig_end_node,
+                                 const tsl::hopscotch_set<uint64_t> &is_unitig_end_node,
                                  const Config *config) {
     auto path_nodes = map_to_nodes_sequentially(graph, seq);
 
@@ -219,7 +222,7 @@ void gfa_map_files(const Config *config,
                    const DeBruijnGraph &graph) {
     logger->trace("Starting GFA mapping:");
 
-    tsl::ordered_set<uint64_t> is_unitig_end_node;
+    tsl::hopscotch_set<uint64_t> is_unitig_end_node;
 
     graph.call_unitigs(
         [&](const auto &, const auto &path) {
@@ -278,7 +281,7 @@ std::string format_alignment(const std::string &header,
         }
 
         if (paths.empty()) {
-            Json::Value json_line = Alignment().to_json(graph.get_k(), secondary, header);
+            Json::Value json_line = graph::align::Alignment().to_json(graph.get_k(), secondary, header);
             sout += fmt::format("{}\n", Json::writeString(builder, json_line));
         }
     }
@@ -304,20 +307,8 @@ int align_to_graph(Config *config) {
     // For graphs which still feature a mask, this speeds up mapping and allows
     // for dummy nodes to be matched by suffix seeding
     auto dbg_succ = std::dynamic_pointer_cast<DBGSuccinct>(graph);
-    if (dbg_succ) {
+    if (dbg_succ)
         dbg_succ->reset_mask();
-        if (dbg_succ->get_mode() == DeBruijnGraph::PRIMARY) {
-            auto node_rc = std::make_shared<NodeRC>(*dbg_succ);
-            if (node_rc->load(config->infbase)) {
-                logger->trace("Loaded the adj-rc index (adjacent to reverse-complement nodes)");
-                dbg_succ->add_extension(node_rc);
-            } else {
-                logger->warn("adj-rc index missing or failed to load. "
-                             "Alignment speed will be significantly slower. "
-                             "Use metagraph transform to generate an adj-rc index.");
-            }
-        }
-    }
 
     Timer timer;
     ThreadPool thread_pool(get_num_threads());
@@ -362,6 +353,26 @@ int align_to_graph(Config *config) {
         anno_dbg = initialize_annotated_dbg(graph, *config);
     }
 
+    auto wrap_graph = [&](auto graph) {
+        if (graph->get_mode() == DeBruijnGraph::PRIMARY) {
+            graph = std::make_shared<CanonicalDBG>(graph);
+            logger->trace("Primary graph wrapped into canonical");
+        }
+
+        // If backwards traversal on DBGSuccinct will be needed, then add a cache
+        // to speed it up.
+        if (dbg_succ)
+            graph->add_extension(std::make_shared<NodeFirstCache>(*dbg_succ));
+
+        return graph;
+    };
+
+    // if using a small number of threads, use a shared cache for all threads
+    if (get_num_threads() <= SEPARATE_CACHES_SWITCHOVER_THREADS)
+        graph = wrap_graph(graph);
+
+    timer.reset();
+
     for (const auto &file : files) {
         logger->trace("Align sequences from file {}", file);
         seq_io::FastaParser fasta_parser(file, config->forward_and_reverse);
@@ -374,12 +385,12 @@ int align_to_graph(Config *config) {
 
         std::ostream *out = ofile ? ofile.get() : &std::cout;
 
-        const uint64_t batch_size = config->query_batch_size_in_bytes;
+        const uint64_t batch_size = config->query_batch_size;
 
         auto it = fasta_parser.begin();
         auto end = fasta_parser.end();
 
-        size_t num_batches = 0;
+        size_t num_bp = 0;
 
         while (it != end) {
             uint64_t num_bytes_read = 0;
@@ -399,21 +410,16 @@ int align_to_graph(Config *config) {
                 num_bytes_read += it->seq.l;
             }
 
-            ++num_batches;
             thread_pool.enqueue([&,graph,batch=std::move(seq_batch)]() {
                 // Make a dummy shared_ptr
                 auto aln_graph
                     = std::shared_ptr<DeBruijnGraph>(std::shared_ptr<DeBruijnGraph>{}, graph.get());
 
-                // Wrap it in CanonicalDBG if needed. This way, each thread gets its
-                // own wrapper (and more importantly, its own local cache).
+                // Give each thread a separate cache if using many threads to avoid
+                // contention
                 if (aln_graph->get_mode() == DeBruijnGraph::PRIMARY) {
-                    aln_graph = std::make_shared<CanonicalDBG>(aln_graph);
-                    logger->trace("Primary graph wrapped into canonical");
-                    // If backwards traversal on DBGSuccinct will be needed, then
-                    // add a cache to speed it up.
-                    if (dbg_succ)
-                        aln_graph->add_extension(std::make_shared<NodeFirstCache>(*dbg_succ));
+                    assert(get_num_threads() > SEPARATE_CACHES_SWITCHOVER_THREADS);
+                    aln_graph = wrap_graph(aln_graph);
                 }
 
                 std::unique_ptr<IDBGAligner> aligner;
@@ -433,14 +439,16 @@ int align_to_graph(Config *config) {
                     }
                 );
             });
+
+            num_bp += num_bytes_read;
         };
 
         thread_pool.join();
 
-        logger->trace("File {} processed in {} sec, "
-                      "num batches: {}, batch size: {} KB, "
+        auto time = data_reading_timer.elapsed();
+        logger->trace("File {} with {} base pairs was processed in {} sec, throughput: {:.1f} bp/s, "
                       "current mem usage: {} MB, total time {} sec",
-                      file, data_reading_timer.elapsed(), num_batches, batch_size / 1e3,
+                      file, num_bp, time, (double)num_bp / time,
                       get_curr_RSS() / 1e6, timer.elapsed());
     }
 

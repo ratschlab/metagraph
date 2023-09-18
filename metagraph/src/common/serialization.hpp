@@ -58,12 +58,6 @@ template <class Map>
 bool load_number_string_map(std::istream &in, Map *map);
 
 
-template <class Set>
-void serialize_set(std::ostream &out, const Set &set);
-
-template <class Set>
-bool load_set(std::istream &in, Set *set);
-
 class Serializer {
   public:
     explicit Serializer(std::ostream &os) : os_(os) {}

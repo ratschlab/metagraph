@@ -87,16 +87,11 @@ int augment_graph(Config *config) {
         on_node_insert = [&](uint64_t new_node) { inserted_nodes->insert_bit(new_node, 1); };
 
     for (const auto &file : files) {
-        parse_sequences(file, *config,
-            [&](std::string_view seq) {
-                graph->add_sequence(seq, on_node_insert);
-            },
+        parse_sequences_and_log(file, *config, graph->get_k(),
             [&](std::string_view seq, uint32_t /*count*/) {
                 graph->add_sequence(seq, on_node_insert);
             }
         );
-        logger->trace("Extracted all sequences from file '{}' in {} sec",
-                      file, timer.elapsed());
     }
     assert(!inserted_nodes || inserted_nodes->size() == graph->max_index() + 1);
 
@@ -112,20 +107,13 @@ int augment_graph(Config *config) {
             config->forward_and_reverse = true;
 
         for (const auto &file : files) {
-            parse_sequences(file, *config,
-                [&graph,&node_weights](std::string_view seq) {
-                    graph->map_to_nodes_sequentially(seq,
-                        [&](auto node) { node_weights->add_weight(node, 1); }
-                    );
-                },
+            parse_sequences_and_log(file, *config, graph->get_k(),
                 [&graph,&node_weights](std::string_view seq, uint32_t count) {
                     graph->map_to_nodes_sequentially(seq,
                         [&](auto node) { node_weights->add_weight(node, count); }
                     );
                 }
             );
-            logger->trace("Extracted all sequences from file '{}' in {} sec",
-                          file, timer.elapsed());
         }
     }
 

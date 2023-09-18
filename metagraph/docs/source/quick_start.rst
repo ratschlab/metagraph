@@ -151,11 +151,8 @@ The assembled contigs are written to a compressed FASTA file, which can be inspe
 To extract all unitigs (linear paths in the graph) instead of contigs, add flag ``--unitigs`` to the same ``metagraph transform`` command.
 
 .. note::
-    Extraction of contigs with k-mer counts from a *weighted* de Bruijn graph (see section :ref:`construct_weighted_graph`),
-    is currently only possible with the command ``metagraph clean`` instead of ``metagraph transform``. Note, however, that this will actually perform
-    no cleaning or k-mer filtering unless additional cleaning parameters are passed (see more details in :ref:`graph_cleaning`).
-    Instead, this will simply extract a set of contigs (written to file ``*.fasta.gz``) covering all the k-mers from
-    the graph and write counts of their constituting k-mers to file ``*.kmer_counts.gz``.
+    If the source de Bruijn graph is *weighted* (see section :ref:`construct_weighted_graph`), the contigs (written to file ``*.fasta.gz``)
+    will be extracted along with the counts of their constituting k-mers, written to file ``*.kmer_counts.gz``.
 
 
 Construct canonical graph
@@ -380,12 +377,7 @@ label (typically, sequencing sample) before annotating it. This technique consis
 (see :ref:`construct_weighted_graph` and note that it can be constructed from raw input sequences as well as from pre-computed KMC counters)
 and transforming it to contigs with counts associated with their constituting k-mers::
 
-    metagraph clean -v -p 4 --to-fasta -o contigs sample_graph.dbg
-
-.. note::
-    As noted above in section :ref:`graph_cleaning`, the command ``metagraph clean`` does not actually do any cleaning or k-mer filtering
-    unless additional cleaning parameters are passed to it. Thus, the set of contigs extracted by the command above will cover
-    all the k-mers from the de Bruijn graph ``graph.dbg``.
+    metagraph transform -v -p 4 --to-fasta -o contigs sample_graph.dbg
 
 Then, the contigs written to ``contigs.fasta.gz`` and the counts associated with their k-mers written to ``contigs.kmer_counts.gz``
 can be used when constructing a count-aware graph annotation::
@@ -408,9 +400,9 @@ For more details, see section :ref:`transform_count_annotations`.
 
 Once the annotation is transformed, k-mer abundances can be queried with::
 
-    metagraph query --query-counts ...
+    metagraph query --query-mode counts ...
 
-Note that if flag ``--query-counts`` is not passed, the index will be queried in the default k-mer presence/absence regime.
+Note that if flag ``--query-mode counts`` is not passed, the index will be queried in the default k-mer presence/absence regime.
 
 
 .. _indexing coordinates:
@@ -446,10 +438,10 @@ Query k-mer coordinates
 Once a coordinate-aware annotation is constructed, it can be transformed into a more memory-efficient representation supporting
 querying (see :ref:`transform_coord_annotations` below) and then queried with::
 
-    metagraph query --query-coords ...
+    metagraph query --query-mode coords ...
 
-As the coordinate-aware annotations also contain the information about k-mer abundance, they can be queried to retrieve k-mer counts (simply pass ``--query-counts`` instead of ``--query-coords``).
-Note that if neither ``--query-coords`` nor ``--query-counts`` is passed, the index will be queried in the default k-mer presence/absence regime.
+As the coordinate-aware annotations also contain the information about k-mer abundance, they can be queried to retrieve k-mer counts (simply pass ``--query-mode counts`` instead of ``--query-mode coords``).
+Note that if neither ``--query-mode coords`` nor ``--query-mode counts`` is passed, the index will be queried in the default k-mer presence/absence regime.
 
 .. _transform annotation:
 
@@ -465,6 +457,7 @@ compression performance and the complexity of the construction algorithm.
 In contrast, ``RowDiff<Multi-BRWT>`` typically achieves
 the best compression while still providing a good query performance, and thus, it is
 recommended for very large problem instances.
+Finally, ``RowDiff<RowSparse>`` provides a good trade-off between the query speed and compression performance.
 
 Convert annotation to Rainbowfish
 """""""""""""""""""""""""""""""""
@@ -493,12 +486,12 @@ The conversion to ``Multi-BRWT`` can be done either
 *   with a single command, e.g.::
 
         find . -name "*.column.annodbg" | metagraph transform_anno -v -p 18 --anno-type brwt \
-                                                        --greedy --fast -o anno
+                                                        --greedy -o anno
 
 *   or with pre-computing a column clustering with::
 
         find . -name "*.column.annodbg" | metagraph transform_anno -v -p 18 --anno-type brwt \
-                                                        --linkage --greedy --fast -o linkage.txt
+                                                        --linkage --greedy -o linkage.txt
 
     and next converting the annotation to Multi-BRWT according to the pre-computed clustering (linkage)::
 
@@ -545,6 +538,7 @@ The conversion to ``RowDiff<Multi-BRWT>`` is done in two steps.
 2.  Transform the diff-transformed columns ``*.row_diff.annodbg`` to ``Multi-BRWT``::
 
         find . -name "*.row_diff.annodbg" | metagraph transform_anno -v -p 18 \
+                                                        -i graph.dbg \
                                                         --anno-type row_diff_brwt \
                                                         --greedy ...
         metagraph relax_brwt -v -p 18 \
@@ -553,6 +547,19 @@ The conversion to ``RowDiff<Multi-BRWT>`` is done in two steps.
                              annotation.row_diff_brwt.annodbg
 
     Also see the above paragraph :ref:`to_multi_brwt` for other options.
+
+
+.. _to_row_diff_sparse:
+
+Convert annotation to RowDiff<RowSparse>
+"""""""""""""""""""""""""""""""""""""""""
+The conversion to ``RowDiff<RowSparse>`` is similar to :ref:`to_row_diff_brwt`. The first step is the same.
+In the second step, the diff-transformed columns ``*.row_diff.annodbg`` are converted to ``RowSparse``::
+
+        find . -name "*.row_diff.annodbg" | metagraph transform_anno -v -p 18 \
+                                                        -i graph.dbg \
+                                                        --anno-type row_diff_sparse
+
 
 .. _transform_count_annotations:
 
@@ -563,7 +570,7 @@ Converting a graph annotation supplemented with k-mer counts (``*.column.annodbg
 to Int-Multi-BRWT (``int_brwt``) is done exactly the same way as converting a binary annotation to Multi-BRWT (see :ref:`to_multi_brwt`),
 with simply replacing ``--anno-type brwt`` with ``--anno-type int_brwt``::
 
-    metagraph transform_anno --anno-type int_brwt --greedy --fast ...
+    metagraph transform_anno --anno-type int_brwt --greedy ...
 
 For converting to RowDiff<Int-Multi-BRWT> (``row_diff_int_brwt``), perform the same steps as when
 :ref:`converting to RowDiff\<Multi-BRWT\> <to_row_diff_brwt>` with the following exceptions.
@@ -597,8 +604,7 @@ To query a MetaGraph index (graph + annotation) using the command line interface
 
     metagraph query -i graph.dbg \
                     -a annotation.column.annodbg \
-                    --count-kmers \
-                    --discovery-fraction 0.1 \
+                    --min-kmers-fraction-label 0.1 \
                     transcripts_1000.fa
 
 For alignment, see ``metagraph align``.

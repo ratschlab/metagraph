@@ -125,12 +125,12 @@ class GraphClientJson:
 
         return self._do_request(endpoint, payload)
 
-    def _do_request(self, endpoint, payload, post_req=True) -> Tuple[JsonDict, str]:
+    def _do_request(self, endpoint, payload, post_req=True, timeout=None) -> Tuple[JsonDict, str]:
         url = f'{self.server}/{endpoint}'
         if post_req:
-            ret = requests.post(url=url, json=payload)
+            ret = requests.post(url=url, json=payload, timeout=timeout)
         else:
-            ret = requests.get(url=url)
+            ret = requests.get(url=url, timeout=timeout)
 
         try:
             json_obj = ret.json()
@@ -153,8 +153,8 @@ class GraphClientJson:
         """
         return self._do_request("column_labels", {}, post_req=False)
 
-    def stats(self) -> Tuple[dict, str]:
-        return self._do_request("stats", {}, post_req=False)
+    def stats(self, timeout=None) -> Tuple[dict, str]:
+        return self._do_request("stats", {}, post_req=False, timeout=timeout)
 
     def ready(self) -> bool:
         try:

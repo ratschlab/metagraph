@@ -1,25 +1,23 @@
 #ifndef __BIN_REL_WT_HPP__
 #define __BIN_REL_WT_HPP__
 
-#include <brwt/binary_relation.h>
+#include <sdsl/wt_int.hpp>
 
+#include "common/vectors/bit_vector_sdsl.hpp"
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
-
-class bit_vector;
 
 
 namespace mtg {
 namespace annot {
-namespace binmat {
+namespace matrix {
 
-class BinRelWT : public BinaryMatrix {
+class BinRelWT : public RowMajor, public GetEntrySupport {
   public:
-    BinRelWT() {}
+    BinRelWT() : delimiters_(1, 1) {};
 
     BinRelWT(const std::function<void(const RowCallback &)> &generate_rows,
-             uint64_t num_set_bits, uint64_t num_columns);
-
-    BinRelWT(std::vector<std::unique_ptr<bit_vector>>&& columns);
+                  uint64_t num_set_bits,
+                  uint64_t num_columns);
 
     uint64_t num_columns() const override;
     uint64_t num_rows() const override;
@@ -35,17 +33,12 @@ class BinRelWT : public BinaryMatrix {
     uint64_t num_relations() const override;
 
   private:
-    bool is_zero_row(Row row) const;
-    bool is_zero_column(Column column) const;
-
-    brwt::binary_relation binary_relation_;
-    uint64_t num_labels = 0;
-    uint64_t max_used_label = 0;
-    uint64_t max_used_object = 0;
-    uint64_t num_objects = 0;
+    sdsl::wt_int<sdsl::rrr_vector<63>> wt_;
+    bit_vector_rrr<> delimiters_;
+    uint64_t num_columns_ = 0;
 };
 
-} // namespace binmat
+} // namespace matrix
 } // namespace annot
 } // namespace mtg
 

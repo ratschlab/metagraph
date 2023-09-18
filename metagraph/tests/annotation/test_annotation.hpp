@@ -48,13 +48,13 @@ class AnnotatorTest : public ::testing::Test {
         } else if constexpr(std::is_same_v<Annotator, RowCompressedDynamic<>>) {
             annotation.reset(new RowCompressedDynamic<>(column_annotator.num_objects()));
             for (RowCompressedDynamic<>::Index i = 0; i < column_annotator.num_objects(); ++i) {
-                annotation->add_labels({ i }, std::move(column_annotator.get(i)));
+                annotation->add_labels({ i }, std::move(column_annotator.get_labels(i)));
             }
 
         } else if constexpr(std::is_same_v<Annotator, RowCompressedSparse<>>) {
             annotation.reset(new RowCompressedSparse<>(column_annotator.num_objects()));
             for (RowCompressedSparse<>::Index i = 0; i < column_annotator.num_objects(); ++i) {
-                annotation->add_labels({ i }, std::move(column_annotator.get(i)));
+                annotation->add_labels({ i }, std::move(column_annotator.get_labels(i)));
             }
 
         } else if constexpr(std::is_same_v<Annotator, annot::ColumnCompressed<>>) {
@@ -62,7 +62,7 @@ class AnnotatorTest : public ::testing::Test {
             //annotation.reset(new annot::ColumnCompressed<>(std::move(column_annotator)));
             annotation.reset(new annot::ColumnCompressed<>(column_annotator.num_objects()));
             for (annot::ColumnCompressed<>::Index i = 0; i < column_annotator.num_objects(); ++i) {
-                annotation->add_labels({ i }, std::move(column_annotator.get(i)));
+                annotation->add_labels({ i }, std::move(column_annotator.get_labels(i)));
             }
         } else {
             annotation = annot::convert<Annotator>(std::move(column_annotator));
@@ -121,7 +121,6 @@ class AnnotatorDynamicNoSparseTest : public AnnotatorPreset2Test<Annotator> { };
 
 
 typedef ::testing::Types<annot::BinRelWTAnnotator,
-                         annot::BinRelWT_sdslAnnotator,
                          annot::RbBRWTAnnotator,
                          annot::MultiBRWTAnnotator,
                          annot::RainbowfishAnnotator,
@@ -134,7 +133,6 @@ typedef ::testing::Types<annot::BinRelWTAnnotator,
                          RowCompressedSparse<>> AnnotatorTypes;
 
 typedef ::testing::Types<annot::BinRelWTAnnotator,
-                         annot::BinRelWT_sdslAnnotator,
                          annot::RbBRWTAnnotator,
                          annot::RainbowfishAnnotator,
                          annot::RowFlatAnnotator,

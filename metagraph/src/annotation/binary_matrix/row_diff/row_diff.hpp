@@ -19,7 +19,7 @@
 
 namespace mtg {
 namespace annot {
-namespace binmat {
+namespace matrix {
 
 const std::string kRowDiffAnchorExt = ".anchors";
 const std::string kRowDiffForkSuccExt = ".rd_succ";
@@ -46,7 +46,7 @@ class IRowDiff {
 
   protected:
     // get row-diff paths starting at |row_ids|
-    std::pair<std::vector<BinaryMatrix::Row>, std::vector<std::vector<size_t>>>
+    std::tuple<std::vector<BinaryMatrix::Row>, std::vector<std::vector<size_t>>, std::vector<size_t>>
     get_rd_ids(const std::vector<BinaryMatrix::Row> &row_ids) const;
 
     const graph::DBGSuccinct *graph_ = nullptr;
@@ -89,14 +89,10 @@ class RowDiff : public IRowDiff, public BinaryMatrix {
     uint64_t num_columns() const override { return diffs_.num_columns(); }
     uint64_t num_rows() const override { return diffs_.num_rows(); }
 
-    bool get(Row row, Column column) const override;
-
     /**
      * Returns the given column.
      */
     std::vector<Row> get_column(Column column) const override;
-
-    SetBitPositions get_row(Row row) const override;
 
     std::vector<SetBitPositions> get_rows(const std::vector<Row> &row_ids) const override;
 
@@ -111,16 +107,6 @@ class RowDiff : public IRowDiff, public BinaryMatrix {
 
     BaseMatrix diffs_;
 };
-
-template <class BaseMatrix>
-bool RowDiff<BaseMatrix>::get(Row row, Column column) const {
-    assert(graph_ && "graph must be loaded");
-    assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
-    assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());
-
-    SetBitPositions set_bits = get_row(row);
-    return std::binary_search(set_bits.begin(), set_bits.end(), column);
-}
 
 
 /**
@@ -141,37 +127,13 @@ std::vector<BinaryMatrix::Row> RowDiff<BaseMatrix>::get_column(Column column) co
             graph::AnnotatedSequenceGraph::anno_to_graph_index(row)
         );
 
-        if (boss.get_W(edge) && get(row, column))
+        if (!boss.get_W(edge))
+            continue;
+
+        SetBitPositions set_bits = get_rows({ row })[0];
+        if (std::binary_search(set_bits.begin(), set_bits.end(), column))
             result.push_back(row);
     }
-    return result;
-}
-
-template <class BaseMatrix>
-BinaryMatrix::SetBitPositions RowDiff<BaseMatrix>::get_row(Row row) const {
-    assert(graph_ && "graph must be loaded");
-    assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
-    assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());
-
-    Vector<uint64_t> result = diffs_.get_row(row);
-    std::sort(result.begin(), result.end());
-
-    uint64_t boss_edge = graph_->kmer_to_boss_index(
-            graph::AnnotatedSequenceGraph::anno_to_graph_index(row));
-    const graph::boss::BOSS &boss = graph_->get_boss();
-    const bit_vector &rd_succ = fork_succ_.size() ? fork_succ_ : boss.get_last();
-
-    while (!anchor_[row]) {
-        boss_edge = boss.row_diff_successor(boss_edge, rd_succ);
-
-        row = graph::AnnotatedSequenceGraph::graph_to_anno_index(
-                graph_->boss_to_kmer_index(boss_edge));
-
-        auto diff_row = diffs_.get_row(row);
-        std::sort(diff_row.begin(), diff_row.end());
-        add_diff(diff_row, &result);
-    }
-
     return result;
 }
 
@@ -182,59 +144,8 @@ RowDiff<BaseMatrix>::get_rows(const std::vector<Row> &row_ids) const {
     assert(anchor_.size() == diffs_.num_rows() && "anchors must be loaded");
     assert(!fork_succ_.size() || fork_succ_.size() == graph_->get_boss().get_last().size());
 
-    // diff rows annotating nodes along the row-diff paths
-    std::vector<Row> rd_ids;
-    rd_ids.reserve(row_ids.size() * RD_PATH_RESERVE_SIZE);
-
-    // map row index to its index in |rd_rows|
-    VectorMap<Row, size_t> node_to_rd;
-    node_to_rd.reserve(row_ids.size() * RD_PATH_RESERVE_SIZE);
-
-    // keeps how many times rows in |rd_rows| will be queried
-    std::vector<size_t> times_traversed;
-    times_traversed.reserve(row_ids.size() * RD_PATH_RESERVE_SIZE);
-
-    // Truncated row-diff paths, indexes to |rd_rows|.
-    // The last index in each path points to an anchor or to a row which had
-    // been reached before, and thus, will be reconstructed before this one.
-    std::vector<std::vector<size_t>> rd_paths_trunc(row_ids.size());
-
-    const graph::boss::BOSS &boss = graph_->get_boss();
-    const bit_vector &rd_succ = fork_succ_.size() ? fork_succ_ : boss.get_last();
-
-    for (size_t i = 0; i < row_ids.size(); ++i) {
-        Row row = row_ids[i];
-
-        graph::boss::BOSS::edge_index boss_edge = graph_->kmer_to_boss_index(
-                graph::AnnotatedSequenceGraph::anno_to_graph_index(row));
-
-        while (true) {
-            row = graph::AnnotatedSequenceGraph::graph_to_anno_index(
-                    graph_->boss_to_kmer_index(boss_edge));
-
-            auto [it, is_new] = node_to_rd.try_emplace(row, rd_ids.size());
-            rd_paths_trunc[i].push_back(it.value());
-
-            // If a node had been reached before, we interrupt the diff path.
-            // The annotation for that node will have been reconstructed earlier
-            // than for other nodes in this path as well. Thus, we will start
-            // reconstruction from that node and don't need its successors.
-            if (!is_new) {
-                times_traversed[it.value()]++;
-                break;
-            }
-
-            rd_ids.push_back(row);
-            times_traversed.push_back(1);
-
-            if (anchor_[row])
-                break;
-
-            boss_edge = boss.row_diff_successor(boss_edge, rd_succ);
-        }
-    }
-
-    node_to_rd = VectorMap<Row, size_t>();
+    // get row-diff paths
+    auto [rd_ids, rd_paths_trunc, times_traversed] = get_rd_ids(row_ids);
 
     std::vector<SetBitPositions> rd_rows = diffs_.get_rows(rd_ids);
     DEBUG_LOG("Queried batch of {} diffed rows", rd_ids.size());
@@ -316,6 +227,6 @@ void RowDiff<BaseMatrix>::add_diff(const Vector<uint64_t> &diff, Vector<uint64_t
     row->swap(result);
 }
 
-} // namespace binmat
+} // namespace matrix
 } // namespace annot
 } // namespace mtg

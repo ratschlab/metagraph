@@ -4,7 +4,6 @@
 #include <sstream>
 
 #include <ips4o.hpp>
-#include <tsl/ordered_set.h>
 
 #include "common/logger.hpp"
 #include "common/unix_tools.hpp"
@@ -17,7 +16,6 @@
 #include "graph/representation/hash/dbg_hash_ordered.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/succinct/boss_construct.hpp"
-#include "graph/graph_extensions/node_rc.hpp"
 #include "seq_io/sequence_io.hpp"
 #include "config/config.hpp"
 #include "load/load_graph.hpp"
@@ -28,13 +26,11 @@
 namespace mtg {
 namespace cli {
 
-const size_t kRowBatchSize = 100'000;
 const bool kPrefilterWithBloom = true;
 const char ALIGNED_SEQ_HEADER_FORMAT[] = "{}:{}:{}:{}";
 
-using namespace mtg::annot::binmat;
-using namespace mtg::annot::matrix;
 using namespace mtg::graph;
+using namespace mtg::annot::matrix;
 
 using mtg::common::logger;
 using mtg::graph::boss::BOSS;
@@ -360,56 +356,64 @@ std::string SeqSearchResult::to_string(const std::string delimiter,
 
 
 SeqSearchResult QueryExecutor::execute_query(QuerySequence&& sequence,
-                                             bool count_labels,
-                                             bool print_signature,
+                                             QueryMode query_mode,
                                              size_t num_top_labels,
                                              double discovery_fraction,
                                              double presence_fraction,
-                                             const graph::AnnotatedDBG &anno_graph,
-                                             bool with_kmer_counts,
-                                             const std::vector<double> &count_quantiles,
-                                             bool query_counts,
-                                             bool query_coords) {
+                                             const graph::AnnotatedDBG &anno_graph) {
     // Perform a different action depending on the type (specified by config flags)
     SeqSearchResult::result_type result;
 
-    if (print_signature) {
-        // Get labels with presence/absence signatures
-        result = anno_graph.get_top_label_signatures(sequence.sequence,
+    switch (query_mode) {
+        case SIGNATURE: {
+            // Get labels with presence/absence signatures
+            result = anno_graph.get_top_label_signatures(sequence.sequence,
+                                                         num_top_labels,
+                                                         discovery_fraction,
+                                                         presence_fraction);
+            break;
+        }
+        case COORDS: {
+            // Get labels with k-mer coordinates
+            result = anno_graph.get_kmer_coordinates(sequence.sequence,
                                                      num_top_labels,
                                                      discovery_fraction,
                                                      presence_fraction);
-    } else if (query_coords) {
-        // Get labels with k-mer coordinates
-        result = anno_graph.get_kmer_coordinates(sequence.sequence,
-                                                 num_top_labels,
-                                                 discovery_fraction,
-                                                 presence_fraction);
-    } else if (query_counts) {
-        // Get labels with k-mer counts
-        result = anno_graph.get_kmer_counts(sequence.sequence,
-                                            num_top_labels,
-                                            discovery_fraction,
-                                            presence_fraction);
-    } else if (count_quantiles.size()) {
-        // Get labels with count quantiles
-        result = anno_graph.get_label_count_quantiles(sequence.sequence,
-                                                      num_top_labels,
-                                                      discovery_fraction,
-                                                      presence_fraction,
-                                                      count_quantiles);
-    } else if (count_labels || with_kmer_counts) {
-        // Get labels with label counts / kmer counts
-        result = anno_graph.get_top_labels(sequence.sequence,
-                                           num_top_labels,
+            break;
+        }
+        case COUNTS: {
+            // Get labels with k-mer counts
+            result = anno_graph.get_kmer_counts(sequence.sequence,
+                                                num_top_labels,
+                                                discovery_fraction,
+                                                presence_fraction);
+            break;
+        }
+        case MATCHES: {
+            // Get labels with label counts
+            result = anno_graph.get_top_labels(sequence.sequence,
+                                               num_top_labels,
+                                               discovery_fraction,
+                                               presence_fraction,
+                                               false);
+            break;
+        }
+        case COUNTS_SUM: {
+            // Get labels with label counts / kmer counts
+            result = anno_graph.get_top_labels(sequence.sequence,
+                                               num_top_labels,
+                                               discovery_fraction,
+                                               presence_fraction,
+                                               true);
+            break;
+        }
+        case LABELS: {
+            // Default, just get labels
+            result = anno_graph.get_labels(sequence.sequence,
                                            discovery_fraction,
-                                           presence_fraction,
-                                           with_kmer_counts);
-    } else {
-        // Default, just get labels
-        result = anno_graph.get_labels(sequence.sequence,
-                                       discovery_fraction,
-                                       presence_fraction);
+                                           presence_fraction);
+            break;
+        }
     }
 
     // Create seq search instance and move sequence into it
@@ -594,46 +598,13 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
                  uint64_t num_rows,
                  std::vector<std::pair<uint64_t, uint64_t>>&& full_to_small,
                  size_t num_threads) {
-    if (auto *rb = dynamic_cast<const RainbowMatrix *>(&full_annotation.get_matrix())) {
-        // shortcut construction for Rainbow<> annotation
-        std::vector<uint64_t> row_indexes(full_to_small.size());
-        for (size_t i = 0; i < full_to_small.size(); ++i) {
-            row_indexes[i] = full_to_small[i].first;
-        }
-
-        // get unique rows and set pointers to them in |row_indexes|
-        auto unique_rows = rb->get_rows(&row_indexes, num_threads);
-
-        if (unique_rows.size() >= std::numeric_limits<uint32_t>::max()) {
-            throw std::runtime_error("There must be less than 2^32 unique rows."
-                                     " Reduce the query batch size.");
-        }
-
-        // insert one empty row for representing unmatched rows
-        unique_rows.emplace_back();
-        std::vector<uint32_t> row_ids(num_rows, unique_rows.size() - 1);
-        for (size_t i = 0; i < row_indexes.size(); ++i) {
-            row_ids[full_to_small[i].second] = row_indexes[i];
-        }
-
-        auto label_encoder = reencode_labels(full_annotation.get_label_encoder(), &unique_rows);
-
-        // copy annotations from the full graph to the query graph
-        return std::make_unique<annot::UniqueRowAnnotator>(
-            std::make_unique<UniqueRowBinmat>(std::move(unique_rows),
-                                              std::move(row_ids),
-                                              label_encoder.size()),
-            std::move(label_encoder)
-        );
-    }
-
-    // don't break the topological order for row-diff annotation
-    if (!dynamic_cast<const IRowDiff *>(&full_annotation.get_matrix())) {
-        ips4o::parallel::sort(full_to_small.begin(), full_to_small.end(),
-                              utils::LessFirst(), num_threads);
-    }
-
     if (const auto *mat = dynamic_cast<const IntMatrix *>(&full_annotation.get_matrix())) {
+        // don't break the topological order for row-diff annotation
+        if (!dynamic_cast<const IRowDiff *>(&full_annotation.get_matrix())) {
+            ips4o::parallel::sort(full_to_small.begin(), full_to_small.end(),
+                                  utils::LessFirst(), num_threads);
+        }
+
         std::vector<uint64_t> row_indexes;
         row_indexes.reserve(full_to_small.size());
         for (const auto &[in_full, _] : full_to_small) {
@@ -658,58 +629,33 @@ slice_annotation(const AnnotatedDBG::Annotator &full_annotation,
         );
     }
 
-    using RowSet = tsl::ordered_set<BinaryMatrix::SetBitPositions,
-                                    utils::VectorHash,
-                                    std::equal_to<BinaryMatrix::SetBitPositions>,
-                                    std::allocator<BinaryMatrix::SetBitPositions>,
-                                    std::vector<BinaryMatrix::SetBitPositions>,
-                                    uint32_t>;
-    RowSet unique_rows { BinaryMatrix::SetBitPositions() };
-    std::vector<uint32_t> row_rank(num_rows, 0);
-
-    #pragma omp parallel for num_threads(num_threads) schedule(dynamic)
-    for (uint64_t batch_begin = 0;
-                        batch_begin < full_to_small.size();
-                                        batch_begin += kRowBatchSize) {
-        const uint64_t batch_end
-            = std::min(batch_begin + kRowBatchSize,
-                       static_cast<uint64_t>(full_to_small.size()));
-
-        std::vector<uint64_t> row_indexes;
-        row_indexes.reserve(batch_end - batch_begin);
-        for (uint64_t i = batch_begin; i < batch_end; ++i) {
-            assert(full_to_small[i].first < full_annotation.num_objects());
-
-            row_indexes.push_back(full_to_small[i].first);
-        }
-
-        auto rows = full_annotation.get_matrix().get_rows(row_indexes);
-
-        assert(rows.size() == batch_end - batch_begin);
-
-        #pragma omp critical
-        {
-            for (uint64_t i = batch_begin; i < batch_end; ++i) {
-                const auto &row = rows[i - batch_begin];
-                auto it = unique_rows.emplace(row).first;
-                row_rank[full_to_small[i].second] = it - unique_rows.begin();
-                if (unique_rows.size() == std::numeric_limits<uint32_t>::max())
-                    throw std::runtime_error("There must be less than 2^32 unique rows."
-                                             " Reduce the query batch size.");
-            }
-        }
+    // shortcut construction for Rainbow<> annotation
+    std::vector<uint64_t> row_indexes(full_to_small.size());
+    for (size_t i = 0; i < full_to_small.size(); ++i) {
+        row_indexes[i] = full_to_small[i].first;
     }
 
-    auto &annotation_rows = const_cast<std::vector<BinaryMatrix::SetBitPositions>&>(
-        unique_rows.values_container()
-    );
+    // get unique rows and set pointers to them in |row_indexes|
+    auto unique_rows = full_annotation.get_matrix().get_rows_dict(&row_indexes, num_threads);
 
-    auto label_encoder = reencode_labels(full_annotation.get_label_encoder(), &annotation_rows);
+    if (unique_rows.size() >= std::numeric_limits<uint32_t>::max()) {
+        throw std::runtime_error("There must be less than 2^32 unique rows."
+                                 " Reduce the query batch size.");
+    }
+
+    // insert one empty row for representing unmatched rows
+    unique_rows.emplace_back();
+    std::vector<uint32_t> row_ids(num_rows, unique_rows.size() - 1);
+    for (size_t i = 0; i < row_indexes.size(); ++i) {
+        row_ids[full_to_small[i].second] = row_indexes[i];
+    }
+
+    auto label_encoder = reencode_labels(full_annotation.get_label_encoder(), &unique_rows);
 
     // copy annotations from the full graph to the query graph
     return std::make_unique<annot::UniqueRowAnnotator>(
-        std::make_unique<UniqueRowBinmat>(std::move(annotation_rows),
-                                          std::move(row_rank),
+        std::make_unique<UniqueRowBinmat>(std::move(unique_rows),
+                                          std::move(row_ids),
                                           label_encoder.size()),
         std::move(label_encoder)
     );
@@ -997,7 +943,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
                                    std::lock_guard<std::mutex> lock(seq_mutex);
                                    contigs.emplace_back(contig, std::vector<node_index>{});
                                },
-                               get_num_threads(),
+                               num_threads,
                                // pull only primary contigs when building canonical query graph
                                full_dbg.get_mode() == DeBruijnGraph::CANONICAL);
 
@@ -1006,7 +952,7 @@ construct_query_graph(const AnnotatedDBG &anno_graph,
 
     logger->trace("[Query graph construction] Mapping k-mers back to full graph...");
     // map from nodes in query graph to full graph
-    #pragma omp parallel for num_threads(get_num_threads())
+    #pragma omp parallel for num_threads(num_threads)
     for (size_t i = 0; i < contigs.size(); ++i) {
         contigs[i].second.reserve(contigs[i].first.length() - graph_init->get_k() + 1);
         full_dbg.map_to_nodes(contigs[i].first,
@@ -1143,26 +1089,9 @@ int query_graph(Config *config) {
     assert(config->infbase_annotators.size() == 1);
 
     std::shared_ptr<DeBruijnGraph> graph = load_critical_dbg(config->infbase);
-
-    if (auto dbg_succ = std::dynamic_pointer_cast<DBGSuccinct>(graph)) {
-        if (config->align_sequences && dbg_succ->get_mode() == DeBruijnGraph::PRIMARY) {
-            auto node_rc = std::make_shared<NodeRC>(*dbg_succ);
-            if (node_rc->load(config->infbase)) {
-                logger->trace("Loaded the adj-rc index (adjacent to reverse-complement nodes)");
-                dbg_succ->add_extension(node_rc);
-            } else {
-                logger->warn("adj-rc index missing or failed to load. "
-                             "Alignment speed will be significantly slower. "
-                             "Run `metagraph transform --adj-rc ...` to generate the adj-rc index.");
-            }
-        }
-    }
-
     std::unique_ptr<AnnotatedDBG> anno_graph = initialize_annotated_dbg(graph, *config);
 
     ThreadPool thread_pool(std::max(1u, get_num_threads()) - 1, 1000);
-
-    Timer timer;
 
     std::unique_ptr<align::DBGAlignerConfig> aligner_config;
     if (config->align_sequences) {
@@ -1182,25 +1111,25 @@ int query_graph(Config *config) {
 
         // Callback, which captures the config pointer and a const reference to the anno_graph
         // instance pointed to by our unique_ptr...
-        executor.query_fasta(file,
-                             [config, &anno_graph = std::as_const(*anno_graph)]
-                             (const SeqSearchResult &result) {
+        auto query_callback = [config, &anno_graph=std::as_const(*anno_graph)](const SeqSearchResult &result) {
             if (config->output_json) {
                 std::ostringstream ss;
                 ss << result.to_json(config->verbose_output
-                                         || !(config->query_counts || config->query_coords),
+                                         || !(config->query_mode == COUNTS || config->query_mode == COORDS),
                                      anno_graph) << "\n";
                 std::cout << ss.str();
             } else {
                 std::cout << result.to_string(config->anno_labels_delimiter,
                                               config->suppress_unlabeled,
                                               config->verbose_output
-                                                || !(config->query_counts || config->query_coords),
+                                                || !(config->query_mode == COUNTS || config->query_mode == COORDS),
                                               anno_graph) + "\n";
             }
-        });
-        logger->trace("File '{}' was processed in {} sec, total time: {}", file,
-                      curr_timer.elapsed(), timer.elapsed());
+        };
+        size_t num_bp = executor.query_fasta(file, query_callback);
+        auto time = curr_timer.elapsed();
+        logger->trace("File '{}' with {} base pairs was processed in {} sec, throughput: {:.1f} bp/s",
+                      file, num_bp, time, (double)num_bp / time);
     }
 
     return 0;
@@ -1257,11 +1186,9 @@ SeqSearchResult query_sequence(QuerySequence&& sequence,
 
     // Get sequence search result by executing query
     SeqSearchResult result = QueryExecutor::execute_query(std::move(sequence),
-            config.count_labels, config.print_signature,
+            config.query_mode,
             config.num_top_labels, config.discovery_fraction,
-            config.presence_fraction, anno_graph,
-            config.count_kmers, config.count_quantiles,
-            config.query_counts, config.query_coords);
+            config.presence_fraction, anno_graph);
 
     if (aligner_config)
         result.get_alignment() = alignment;
@@ -1270,15 +1197,16 @@ SeqSearchResult query_sequence(QuerySequence&& sequence,
 }
 
 
-void QueryExecutor::query_fasta(const string &file,
-                                const std::function<void(const SeqSearchResult &)> &callback) {
+size_t QueryExecutor::query_fasta(const string &file,
+                                  const std::function<void(const SeqSearchResult &)> &callback) {
     logger->trace("Parsing sequences from file '{}'", file);
 
     seq_io::FastaParser fasta_parser(file, config_.forward_and_reverse);
 
     // Only query_coords/count_kmers if using coord/count aware index.
-    if (this->config_.query_coords && !(dynamic_cast<const annot::matrix::MultiIntMatrix *>(
-            &this->anno_graph_.get_annotator().get_matrix()))) {
+    if (config_.query_mode == COORDS
+            && !dynamic_cast<const annot::matrix::MultiIntMatrix *>(
+                    &this->anno_graph_.get_annotator().get_matrix())) {
         logger->error("Annotation does not support k-mer coordinate queries. "
                       "First transform this annotation to include coordinate data "
                       "(e.g., {}, {}, {}, {}, {}).",
@@ -1290,8 +1218,9 @@ void QueryExecutor::query_fasta(const string &file,
         exit(1);
     }
 
-    if (this->config_.count_kmers && !(dynamic_cast<const annot::matrix::IntMatrix *>(
-            &this->anno_graph_.get_annotator().get_matrix()))) {
+    if ((config_.query_mode == COUNTS || config_.query_mode == COUNTS_SUM)
+            && !dynamic_cast<const annot::matrix::IntMatrix *>(
+                    &this->anno_graph_.get_annotator().get_matrix())) {
         logger->error("Annotation does not support k-mer count queries. "
                       "First transform this annotation to include count data "
                       "(e.g., {}, {}, {}).",
@@ -1301,19 +1230,19 @@ void QueryExecutor::query_fasta(const string &file,
         exit(1);
     }
 
-    if (config_.fast) {
-        // TODO: Implement batch mode for query_coords queries
-        if (config_.query_coords) {
-            logger->error("Querying coordinates in batch mode is currently not supported");
-            exit(1);
+    if (config_.query_batch_size) {
+        if (config_.query_mode != COORDS) {
+            // Construct a query graph and query against it
+            return batched_query_fasta(fasta_parser, callback);
+        } else {
+            // TODO: Implement batch mode for query_coords queries
+            logger->warn("Querying coordinates in batch mode is currently not supported. Querying sequentially...");
         }
-        // Construct a query graph and query against it
-        batched_query_fasta(fasta_parser, callback);
-        return;
     }
 
     // Query sequences independently
     size_t seq_count = 0;
+    size_t num_bp = 0;
 
     for (const seq_io::kseq_t &kseq : fasta_parser) {
         thread_pool_.enqueue([&](QuerySequence &sequence) {
@@ -1321,21 +1250,25 @@ void QueryExecutor::query_fasta(const string &file,
             callback(query_sequence(std::move(sequence), anno_graph_,
                                     config_, aligner_config_.get()));
         }, QuerySequence { seq_count++, std::string(kseq.name.s), std::string(kseq.seq.s) });
+        num_bp += kseq.seq.l;
     }
 
     // wait while all threads finish processing the current file
     thread_pool_.join();
+
+    return num_bp;
 }
 
-void
+size_t
 QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
                                    const std::function<void(const SeqSearchResult &)> &callback) {
     auto it = fasta_parser.begin();
     auto end = fasta_parser.end();
 
-    const uint64_t batch_size = config_.query_batch_size_in_bytes;
+    const uint64_t batch_size = config_.query_batch_size;
 
     size_t seq_count = 0;
+    size_t num_bp = 0;
 
     while (it != end) {
         Timer batch_timer;
@@ -1381,9 +1314,7 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
             aligner_config_ && config_.batch_align ? &config_ : NULL
         );
 
-        logger->trace("Query graph constructed for batch of sequences"
-                      " with {} bases from '{}' in {} sec",
-                      num_bytes_read, fasta_parser.get_filename(), batch_timer.elapsed());
+        auto query_graph_construction = batch_timer.elapsed();
         batch_timer.reset();
 
         #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic)
@@ -1398,9 +1329,16 @@ QueryExecutor::batched_query_fasta(seq_io::FastaParser &fasta_parser,
             callback(search_result);
         }
 
-        logger->trace("Batch of {} bytes from '{}' queried in {} sec", num_bytes_read,
-                      fasta_parser.get_filename(), batch_timer.elapsed());
+        logger->trace("Query graph constructed for batch of sequences"
+                      " with {} bases from '{}' in {:.5f} sec, query redundancy: {:.2f} bp/kmer, queried in {:.5f} sec",
+                      num_bytes_read, fasta_parser.get_filename(), query_graph_construction,
+                      (double)num_bytes_read / query_graph->get_graph().num_nodes(),
+                      batch_timer.elapsed());
+
+        num_bp += num_bytes_read;
     }
+
+    return num_bp;
 }
 
 } // namespace cli

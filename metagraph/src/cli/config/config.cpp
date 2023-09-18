@@ -55,8 +55,6 @@ Config::Config(int argc, char *argv[]) {
         identity = STATS;
     } else if (!strcmp(argv[1], "annotate")) {
         identity = ANNOTATE;
-    } else if (!strcmp(argv[1], "coordinate")) {
-        identity = ANNOTATE_COORDINATES;
     } else if (!strcmp(argv[1], "merge_anno")) {
         identity = MERGE_ANNOTATIONS;
     } else if (!strcmp(argv[1], "query")) {
@@ -68,6 +66,7 @@ Config::Config(int argc, char *argv[]) {
     } else if (!strcmp(argv[1], "transform_anno")) {
         identity = TRANSFORM_ANNOTATION;
         tmp_dir = "OUTFBASE_TEMP_DIR";
+        memory_available = 1000; // 1 TB
     } else if (!strcmp(argv[1], "assemble")) {
         identity = ASSEMBLE;
     } else if (!strcmp(argv[1], "relax_brwt")) {
@@ -144,6 +143,8 @@ Config::Config(int argc, char *argv[]) {
             forward_and_reverse = true;
         } else if (!strcmp(argv[i], "--mode")) {
             graph_mode = string_to_graphmode(get_value(i++));
+        } else if (!strcmp(argv[i], "--query-mode")) {
+            query_mode = string_to_querymode(get_value(i++));
         } else if (!strcmp(argv[i], "--complete")) {
             complete = true;
         } else if (!strcmp(argv[i], "--dynamic")) {
@@ -166,10 +167,8 @@ Config::Config(int argc, char *argv[]) {
             sparse = true;
         } else if (!strcmp(argv[i], "--cache")) {
             num_columns_cached = atoi(get_value(i++));
-        } else if (!strcmp(argv[i], "--fast")) {
-            fast = true;
         } else if (!strcmp(argv[i], "--batch-size")) {
-            query_batch_size_in_bytes = atoll(get_value(i++));
+            query_batch_size = atoll(get_value(i++));
         } else if (!strcmp(argv[i], "-p") || !strcmp(argv[i], "--parallel")) {
             set_num_threads(atoi(get_value(i++)));
         } else if (!strcmp(argv[i], "--parallel-nodes")) {
@@ -218,26 +217,18 @@ Config::Config(int argc, char *argv[]) {
             memory_available = atof(get_value(i++));
         } else if (!strcmp(argv[i], "--dump-text-anno")) {
             dump_text_anno = true;
-        } else if (!strcmp(argv[i], "--discovery-fraction")) {
+        } else if (!strcmp(argv[i], "--min-kmers-fraction-label")) {
             discovery_fraction = std::stof(get_value(i++));
         } else if (!strcmp(argv[i], "--align-rel-score-cutoff")) {
             alignment_rel_score_cutoff = std::stof(get_value(i++));
-        } else if (!strcmp(argv[i], "--presence-fraction")) {
+        } else if (!strcmp(argv[i], "--min-kmers-fraction-graph")) {
             presence_fraction = std::stof(get_value(i++));
         } else if (!strcmp(argv[i], "--query-presence")) {
             query_presence = true;
-        } else if (!strcmp(argv[i], "--query-counts")) {
-            query_counts = true;
-        } else if (!strcmp(argv[i], "--query-coords")) {
-            query_coords = true;
         } else if (!strcmp(argv[i], "--verbose-output")) {
             verbose_output = true;
         } else if (!strcmp(argv[i], "--filter-present")) {
             filter_present = true;
-        } else if (!strcmp(argv[i], "--count-labels")) {
-            count_labels = true;
-        } else if (!strcmp(argv[i], "--print-signature")) {
-            print_signature = true;
         } else if (!strcmp(argv[i], "--map")) {
             map_sequences = true;
         } else if (!strcmp(argv[i], "--align")) {
@@ -391,6 +382,8 @@ Config::Config(int argc, char *argv[]) {
             cluster_linkage = true;
         } else if (!strcmp(argv[i], "--subsample")) {
             num_rows_subsampled = atoll(get_value(i++));
+        } else if (!strcmp(argv[i], "--subsample-rows")) {
+            subsample_rows = true;
         } else if (!strcmp(argv[i], "--linkage-file")) {
             linkage_file = get_value(i++);
         } else if (!strcmp(argv[i], "--arity")) {
@@ -422,7 +415,7 @@ Config::Config(int argc, char *argv[]) {
         parallel_nodes = get_num_threads();
 
     if (identity == TRANSFORM && to_fasta)
-        identity = ASSEMBLE;
+        identity = CLEAN;
 
     if (!xdrop_override && alignment_chain)
         alignment_xdrop = 100;
@@ -560,12 +553,7 @@ Config::Config(int argc, char *argv[]) {
     if (identity == ANNOTATE && infbase.empty())
         print_usage_and_exit = true;
 
-    if (identity == ANNOTATE_COORDINATES && infbase.empty())
-        print_usage_and_exit = true;
-
-    if ((identity == ANNOTATE_COORDINATES
-            || identity == ANNOTATE
-            || identity == EXTEND) && infbase_annotators.size() > 1) {
+    if ((identity == ANNOTATE || identity == EXTEND) && infbase_annotators.size() > 1) {
         std::cerr << "Error: one annotator at most is allowed for extension." << std::endl;
         print_usage_and_exit = true;
     }
@@ -576,18 +564,12 @@ Config::Config(int argc, char *argv[]) {
         print_usage_and_exit = true;
     }
 
-    if ((identity == ASSEMBLE || identity == TRANSFORM)
+    if (identity == ASSEMBLE
             && (infbase_annotators.size() && assembly_config_file.empty())) {
         std::cerr << "Error: annotator passed, but no differential assembly rule config file provided" << std::endl;
         print_usage_and_exit = true;
     }
 
-    if (identity == ANNOTATE_COORDINATES && outfbase.empty())
-        outfbase = utils::remove_suffix(infbase, ".dbg",
-                                                 ".orhashdbg",
-                                                 ".hashstrdbg",
-                                                 ".hashfastdbg",
-                                                 ".bitmapdbg");
     if (identity == EXTEND && infbase.empty())
         print_usage_and_exit = true;
 
@@ -727,8 +709,6 @@ std::string Config::annotype_to_string(AnnotationType state) {
             return "row";
         case BRWT:
             return "brwt";
-        case BinRelWT_sdsl:
-            return "bin_rel_wt_sdsl";
         case BinRelWT:
             return "bin_rel_wt";
         case RowFlat:
@@ -776,8 +756,6 @@ Config::AnnotationType Config::string_to_annotype(const std::string &string) {
         return AnnotationType::RowCompressed;
     } else if (string == "brwt") {
         return AnnotationType::BRWT;
-    } else if (string == "bin_rel_wt_sdsl") {
-        return AnnotationType::BinRelWT_sdsl;
     } else if (string == "bin_rel_wt") {
         return AnnotationType::BinRelWT;
     } else if (string == "flat") {
@@ -873,13 +851,50 @@ DeBruijnGraph::Mode Config::string_to_graphmode(const std::string &string) {
     }
 }
 
+std::string Config::querymode_to_string(QueryMode mode) {
+    switch (mode) {
+        case QueryMode::LABELS:
+                return "labels";
+        case QueryMode::MATCHES:
+                return "matches";
+        case QueryMode::COUNTS_SUM:
+                return "counts-sum";
+        case QueryMode::COUNTS:
+                return "counts";
+        case QueryMode::COORDS:
+                return "coords";
+        case QueryMode::SIGNATURE:
+                return "signature";
+    }
+    throw std::runtime_error("Never happens");
+}
+
+QueryMode Config::string_to_querymode(const std::string &string) {
+    if (string == "labels") {
+        return QueryMode::LABELS;
+    } else if (string == "matches") {
+        return QueryMode::MATCHES;
+    } else if (string == "counts-sum") {
+        return QueryMode::COUNTS_SUM;
+    } else if (string == "counts") {
+        return QueryMode::COUNTS;
+    } else if (string == "coords") {
+        return QueryMode::COORDS;
+    } else if (string == "signature") {
+        return QueryMode::SIGNATURE;
+    } else {
+        std::cerr << "Error: unknown query mode. Check value passed with flag '--query-mode'." << std::endl;
+        exit(1);
+    }
+}
+
 
 void Config::print_usage(const std::string &prog_name, IdentityType identity) {
     const char annotation_list[] = "\t\t( column, brwt, rb_brwt, int_brwt,\n"
                                    "\t\t  column_coord, brwt_coord, row_diff_coord, row_diff_brwt_coord,\n"
                                    "\t\t  row_diff, row_diff_brwt, row_diff_flat, row_diff_sparse, row_diff_int_brwt,\n"
                                    "\t\t  row_diff_disk, row_diff_int_disk, row_diff_disk_coord,\n"
-                                   "\t\t  row, flat, row_sparse, rbfish, bin_rel_wt, bin_rel_wt_sdsl )";
+                                   "\t\t  row, flat, row_sparse, rbfish, bin_rel_wt )";
 
     switch (identity) {
         case NO_IDENTITY: {
@@ -912,10 +927,7 @@ if (advanced) {
             fprintf(stderr, "\tannotate\tgiven a graph and a fast[a|q] file, annotate\n");
             fprintf(stderr, "\t\t\tthe respective kmers\n\n");
 if (advanced) {
-            fprintf(stderr, "\tcoordinate\tgiven a graph and a fast[a|q] file, annotate\n");
-            fprintf(stderr, "\t\t\tkmers with their respective coordinates in genomes\n\n");
-
-            fprintf(stderr, "\tmerge_anno\tmerge annotation columns\n\n");
+            fprintf(stderr, "\tmerge_anno\tmerge annotations\n\n");
 }
             fprintf(stderr, "\trelax_brwt\toptimize the tree structure in brwt annotator\n\n");
 
@@ -1036,9 +1048,7 @@ if (advanced) {
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --query-presence \t\ttest sequences for presence, report as 0 or 1 [off]\n");
             fprintf(stderr, "\t   --filter-present \t\treport only present input sequences as FASTA [off]\n");
-if (advanced) {
-            fprintf(stderr, "\t   --batch-size \t\tquery batch size (number of base pairs) [100000000]\n");
-}
+            fprintf(stderr, "\t   --batch-size [INT] \t\tquery batch size (number of base pairs) [100'000'000]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "Available options for alignment:\n");
             fprintf(stderr, "\t-a --annotator [STR] \t\t\t\tannotator to load for label/trace-consistent alignment []\n");
@@ -1073,7 +1083,7 @@ if (advanced) {
             fprintf(stderr, "\n");
             fprintf(stderr, "Advanced options for seeding:\n");
             fprintf(stderr, "\t   --align-min-seed-length [INT]\t\tmin length of a seed [19]\n");
-            fprintf(stderr, "\t   --align-max-seed-length [INT]\t\tmax length of a seed [graph k]\n");
+            fprintf(stderr, "\t   --align-max-seed-length [INT]\t\tmax length of a seed [inf]\n");
 if (advanced) {
             fprintf(stderr, "\t   --align-min-exact-match [FLOAT] \t\tfraction of matching nucleotides required to align sequence [0.7]\n");
             fprintf(stderr, "\t   --align-max-num-seeds-per-locus [INT]\tmaximum number of allowed inexact seeds per locus [1000]\n");
@@ -1206,28 +1216,11 @@ if (advanced) {
             fprintf(stderr, "\t   --coordinates \tannotate coordinates as multi-integer attributes [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
-            // fprintf(stderr, "\t   --fast \t\t\tannotate in fast regime (leads to repeated labels and bigger annotation) [off]\n");
-        } break;
-        case ANNOTATE_COORDINATES: {
-            fprintf(stderr, "Usage: %s coordinate -i <GRAPH> [options] FASTA1 [[FASTA2] ...]\n\n", prog_name.c_str());
-
-            fprintf(stderr, "Available options for annotate:\n");
-#if ! _PROTEIN_GRAPH
-            fprintf(stderr, "\t   --fwd-and-reverse \t\tprocess both forward and reverse complement sequences [off]\n");
-#endif
-            fprintf(stderr, "\t-a --annotator [STR] \t\tannotator to update []\n");
-            fprintf(stderr, "\t-o --outfile-base [STR] \tbasename of output file [<GRAPH>]\n");
-            fprintf(stderr, "\t   --coord-binsize [INT]\tstepsize for k-mer coordinates in input sequences from the fasta files [1000]\n");
-            fprintf(stderr, "\t   --fast \t\t\tannotate in fast regime [off]\n");
-            fprintf(stderr, "\t-p --parallel [INT] \t\tuse multiple threads for computation [1]\n");
         } break;
         case MERGE_ANNOTATIONS: {
             fprintf(stderr, "Usage: %s merge_anno -o <annotation-basename> [options] ANNOT1 [[ANNOT2] ...]\n\n", prog_name.c_str());
 
             fprintf(stderr, "Available options for annotate:\n");
-            fprintf(stderr, "\t   --anno-type [STR] \ttarget annotation representation [column]\n");
-            fprintf(stderr, "%s\n", annotation_list);
-            // fprintf(stderr, "\t   --sparse \t\tuse the row-major sparse matrix to annotate graph [off]\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
         } break;
         case TRANSFORM_ANNOTATION: {
@@ -1258,13 +1251,13 @@ if (advanced) {
             fprintf(stderr, "\t                       \texample: '0 1 <dist> 4\n");
             fprintf(stderr, "\t                       \t          2 3 <dist> 5\n");
             fprintf(stderr, "\t                       \t          4 5 <dist> 6'\n");
-            fprintf(stderr, "\t   --fast \t\tuse sparse subsampling of columns for clustering [off]\n");
-            fprintf(stderr, "\t   --subsample [INT] \tnumber of rows subsampled for distance estimation in column clustering [1000000]\n");
+            fprintf(stderr, "\t   --subsample [INT] \tnumber of bits subsampled for distance estimation in column clustering [1'000'000]\n");
+            fprintf(stderr, "\t   --subsample-rows \tsubsample rows (the same positions in all columns) instead of only set bits [off]\n");
             fprintf(stderr, "\t   --dump-text-anno \tdump the columns of the annotator as separate text files [off]\n");
             fprintf(stderr, "\n");
             fprintf(stderr, "\t   --row-diff-stage [0|1|2] \tstage of the row_diff construction [0]\n");
             fprintf(stderr, "\t   --max-path-length [INT] \tmaximum path length in row_diff annotation [100]\n");
-            fprintf(stderr, "\t   --mem-cap-gb [FLOAT]\tmemory in GB available for the transform [1]\n");
+            fprintf(stderr, "\t   --mem-cap-gb [FLOAT]\tmemory in GB available for the transform [1000]\n");
             fprintf(stderr, "\t-i --infile-base [STR] \t\tgraph for generating succ/pred/anchors (for row_diff types) []\n");
             fprintf(stderr, "\t   --count-kmers \t\tadd k-mer counts to the row_diff annotation [off]\n");
             fprintf(stderr, "\t   --coordinates \t\tadd k-mer coordinates to the row_diff annotation [off]\n");
@@ -1296,30 +1289,28 @@ if (advanced) {
 }
             fprintf(stderr, "\t   --json \t\toutput query results in JSON format [off]\n");
             fprintf(stderr, "\n");
-            // TODO: remove flag `--count-labels` (do always)?
-            fprintf(stderr, "\t   --count-labels \t\tprint number of k-mer matches for every label with enough matches [off]\n");
+            fprintf(stderr, "\t   --query-mode \tquery mode (only labels with enough k-mer matches are reported) [%s]\n", querymode_to_string(LABELS).c_str());
+            fprintf(stderr, "\t       Available modes:\n");
+            fprintf(stderr, "\t                %s \t\tprint labels (with enough k-mer matches)\n", querymode_to_string(LABELS).c_str());
+            fprintf(stderr, "\t                %s \tprint number of k-mer matches (for every label with enough k-mer matches)\n", querymode_to_string(MATCHES).c_str());
 if (advanced) {
-            fprintf(stderr, "\t   --count-kmers \t\tweight k-mers with their annotated counts (requires count annotation) [off]\n");
+            fprintf(stderr, "\t                %s \tprint masks indicating present/absent k-mers (...)\n", querymode_to_string(SIGNATURE).c_str());
+            fprintf(stderr, "\t                %s \tprint sum of counts for the matched k-mers, requires count or coord annotation (...)\n", querymode_to_string(COUNTS_SUM).c_str());
 }
-            fprintf(stderr, "\t   --count-quantiles ['FLOAT ...'] \tprint k-mer count quantiles (requires count or coord annotation) [off]\n"
-                            "\t                                 \t\tExample: --count-quantiles '0 0.33 0.5 0.66 1'\n"
-                            "\t                                 \t\t(0 corresponds to MIN, 1 corresponds to MAX)\n"
-                            "\t                                 \t\tRequires count or coord annotation\n");
-            fprintf(stderr, "\t   --query-counts \t\tprint k-mer counts (requires count or coord annotation) [off]\n"
-                            "\t                  \t\t\tOutput format: '<pos in query>=<abundance>' (single k-mer match)\n"
-                            "\t                  \t\t\t    or '<first pos>-<last pos>=<abundance>' (segment match)\n"
-                            "\t                  \t\t\tAll positions start with 0\n");
-            fprintf(stderr, "\t   --query-coords \t\tprint k-mer coordinates (requires coord annotation) [off]\n"
-                            "\t                  \t\t\tOutput format: '<pos in query>-<pos in sample>' (single k-mer match)\n"
-                            "\t                  \t\t\t    or '<start pos in query>-<first pos in sample>-<last pos in sample>' (segment match)\n"
-                            "\t                  \t\t\tAll positions start with 0\n");
-            fprintf(stderr, "\t   --print-signature \t\tprint vectors indicating present/absent k-mers [off]\n");
+            fprintf(stderr, "\t                %s \t\tprint k-mer counts, requires count or coord annotation (...)\n", querymode_to_string(COUNTS).c_str());
+            fprintf(stderr, "\t                \t\t\t\tOutput format: '<pos in query>=<abundance>' (single k-mer match)\n"
+                            "\t                \t\t\t\t    or '<first pos>-<last pos>=<abundance>' (segment match)\n"
+                            "\t                \t\t\t\tAll positions start with 0\n");
+            fprintf(stderr, "\t                %s \t\tprint k-mer coordinates, requires coord annotation (...)\n", querymode_to_string(COORDS).c_str());
+            fprintf(stderr, "\t                \t\t\t\tOutput format: '<pos in query>-<pos in sample>' (single k-mer match)\n"
+                            "\t                \t\t\t\t    or '<start pos in query>-<first pos in sample>-<last pos in sample>' (segment match)\n"
+                            "\t                \t\t\t\tAll positions start with 0\n");
 if (advanced) {
-            fprintf(stderr, "\t   --verbose-output \t\tdo not collapse continuous coord or count ranges (for query-coords and query-counts) [off]\n");
+            fprintf(stderr, "\t   --verbose-output \t\tdo not collapse continuous coord or count ranges (for query coords and counts) [off]\n");
 }
-            fprintf(stderr, "\t   --num-top-labels [INT] \tmaximum number of top labels to output [inf]\n");
-            fprintf(stderr, "\t   --discovery-fraction [FLOAT] min fraction of k-mers from the query required to be present in a label [0.7]\n");
-            fprintf(stderr, "\t   --presence-fraction [FLOAT] \tmin fraction of k-mers from the query required to be present in the graph [0.0]\n");
+            fprintf(stderr, "\t   --num-top-labels [INT] \t\tmaximum number of top labels to output [inf]\n");
+            fprintf(stderr, "\t   --min-kmers-fraction-label [FLOAT] \tmin fraction of k-mers from the query required to be present in a label [0.7]\n");
+            fprintf(stderr, "\t   --min-kmers-fraction-graph [FLOAT] \tmin fraction of k-mers from the query required to be present in the graph [0.0]\n");
 if (advanced) {
             fprintf(stderr, "\t   --labels-delimiter [STR]\tdelimiter for annotation labels [\":\"]\n");
             fprintf(stderr, "\t   --suppress-unlabeled \tdo not show results for sequences missing in graph [off]\n");
@@ -1328,8 +1319,7 @@ if (advanced) {
             fprintf(stderr, "\n");
             fprintf(stderr, "\t-p --parallel [INT] \tuse multiple threads for computation [1]\n");
             // fprintf(stderr, "\t   --cache-size [INT] \tnumber of uncompressed rows to store in the cache [0]\n");
-            fprintf(stderr, "\t   --fast \t\tquery in batches [off]\n");
-            fprintf(stderr, "\t   --batch-size \tquery batch size (number of base pairs) [100000000]\n");
+            fprintf(stderr, "\t   --batch-size [INT] \tquery batch size in bp (0 to disable batch query) [100'000'000]\n");
 if (advanced) {
             fprintf(stderr, "\t   --RA-ivbuff-size [INT] \tsize (in bytes) of int_vector_buffer used in random access mode (e.g. by row disk annotator) [16384]\n");
 }
@@ -1366,7 +1356,7 @@ if (advanced) {
             fprintf(stderr, "\n");
             fprintf(stderr, "Advanced options for seeding:\n");
             fprintf(stderr, "\t   --align-min-seed-length [INT]\t\tmin length of a seed [19]\n");
-            fprintf(stderr, "\t   --align-max-seed-length [INT]\t\tmax length of a seed [graph k]\n");
+            fprintf(stderr, "\t   --align-max-seed-length [INT]\t\tmax length of a seed [inf]\n");
             fprintf(stderr, "\t   --align-min-exact-match [FLOAT]\t\tfraction of matching nucleotides required to align sequence [0.7]\n");
 if (advanced) {
             fprintf(stderr, "\t   --align-max-num-seeds-per-locus [INT]\tmaximum number of allowed inexact seeds per locus [1000]\n");

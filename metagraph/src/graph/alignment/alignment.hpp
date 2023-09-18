@@ -31,7 +31,7 @@ namespace align {
 class Seed {
   public:
     typedef DeBruijnGraph::node_index node_index;
-    typedef annot::binmat::BinaryMatrix::Column Column;
+    typedef annot::matrix::BinaryMatrix::Column Column;
     typedef SmallVector<int64_t> Tuple;
     typedef Vector<Column> Columns;
     typedef Vector<Tuple> CoordinateSet;
@@ -131,7 +131,7 @@ inline size_t get_num_char_matches_in_seeds(It begin, It end) {
 class Alignment {
   public:
     typedef DeBruijnGraph::node_index node_index;
-    typedef annot::binmat::BinaryMatrix::Column Column;
+    typedef annot::matrix::BinaryMatrix::Column Column;
     typedef SmallVector<int64_t> Tuple;
     typedef Vector<Column> Columns;
     typedef Vector<Tuple> CoordinateSet;

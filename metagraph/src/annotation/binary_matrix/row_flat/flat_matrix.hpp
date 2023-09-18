@@ -2,6 +2,7 @@
 #define __FLAT_MATRIX_HPP__
 
 #include <vector>
+#include <memory>
 
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
 
@@ -10,10 +11,10 @@ class bit_vector_sd;
 
 namespace mtg {
 namespace annot {
-namespace binmat {
+namespace matrix {
 
 template <typename BitVector = bit_vector_sd>
-class RowFlat : public BinaryMatrix {
+class RowFlat : public RowMajor, public GetEntrySupport {
   public:
     RowFlat() : compressed_rows_(new BitVector()) {}
     RowFlat(const std::function<void(const RowCallback&)> &call_rows,
@@ -48,7 +49,7 @@ class RowFlat : public BinaryMatrix {
     uint64_t num_rows_ = 0;
 };
 
-} // namespace binmat
+} // namespace matrix
 } // namespace annot
 } // namespace mtg
 

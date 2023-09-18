@@ -58,32 +58,6 @@ void call_rows(const std::vector<BitmapPtr> &columns,
     }
 }
 
-
-template <class BitVectorType = bit_vector_stat>
-std::vector<std::unique_ptr<bit_vector>>
-transpose(const std::vector<std::unique_ptr<bit_vector>> &matrix) {
-    std::vector<std::unique_ptr<bit_vector>> transposed;
-    if (!matrix.size())
-        return transposed;
-
-    uint64_t num_rows = matrix.size();
-    uint64_t num_columns = matrix[0]->size();
-    transposed.reserve(num_columns);
-
-    call_rows<std::unique_ptr<bit_vector>, Vector<uint64_t>>(
-        matrix,
-        [&](const Vector<uint64_t> &column_indices) {
-            sdsl::bit_vector bv(num_rows, false);
-            for (const auto &row_id : column_indices) {
-                bv[row_id] = true;
-            }
-            transposed.emplace_back(new BitVectorType(std::move(bv)));
-        }
-    );
-
-    return transposed;
-}
-
 } // namespace utils
 
 #endif // __BIT_VECTOR_UTILS_HPP__

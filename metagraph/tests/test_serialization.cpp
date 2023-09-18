@@ -1,8 +1,6 @@
 #include "gtest/gtest.h"
 
 #include <fstream>
-#include <brwt/bit_vector.h>
-#include <brwt/int_vector.h>
 
 #include "common/serialization.hpp"
 
@@ -123,44 +121,6 @@ TEST(Serialization, SerializationRandomUInt8Vector1000000) {
 
 TEST(Serialization, SerializationRandomUInt8Vector10000000) {
     test_random_vector(10000000);
-}
-
-TEST(int_vector, SerializeAndLoad) {
-    brwt::int_vector seq = {10, 20, 30, 40, 50};
-
-    std::ofstream outstream(test_dump_basename, std::ios::binary);
-    seq.serialize(outstream);
-    outstream.close();
-
-    std::ifstream instream(test_dump_basename, std::ios::binary);
-    brwt::int_vector seq_loaded;
-    EXPECT_TRUE(seq_loaded.load(instream));
-    instream.close();
-
-    EXPECT_TRUE(seq.size() == seq_loaded.size());
-    EXPECT_TRUE(seq.get_bpe() == seq_loaded.get_bpe());
-    EXPECT_TRUE(seq == seq_loaded);
-}
-
-TEST(bit_vector, SerializeAndLoad) {
-    brwt::bit_vector v(100, 0xFF00'4FF4'FF11'33AA);
-    std::ofstream outstream(test_dump_basename, std::ios::binary);
-    v.serialize(outstream);
-    outstream.close();
-
-    std::ifstream instream(test_dump_basename, std::ios::binary);
-    brwt::bit_vector v_loaded;
-    EXPECT_TRUE(v_loaded.load(instream));
-    instream.close();
-
-    EXPECT_EQ(v_loaded.length(), v.length());
-    EXPECT_EQ(v_loaded.size(), v.size());
-    EXPECT_EQ(v_loaded.num_blocks(), v.num_blocks());
-    EXPECT_EQ(v_loaded.allocated_bytes(), v.allocated_bytes());
-
-    for (brwt::bit_vector::size_type i = 0; i < v.num_blocks(); ++i) {
-        EXPECT_EQ(v_loaded.get_block(i), v.get_block(i));
-    }
 }
 
 } // namespace

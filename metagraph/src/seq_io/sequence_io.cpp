@@ -36,11 +36,11 @@ FastaWriter::FastaWriter(const std::string &filebase,
       : header_(header),
         enumerate_sequences_(enumerate_sequences),
         worker_(async, kWorkerQueueSize) {
-    auto filename = utils::remove_suffix(filebase, ".gz", ".fasta") + ".fasta.gz";
+    fname_ = utils::remove_suffix(filebase, ".gz", ".fasta") + ".fasta.gz";
 
-    gz_out_ = gzopen(filename.c_str(), mode);
+    gz_out_ = gzopen(fname_.c_str(), mode);
     if (gz_out_ == Z_NULL) {
-        std::cerr << "ERROR: Can't write to " << filename << std::endl;
+        std::cerr << "ERROR: Can't write to " << fname_ << std::endl;
         exit(1);
     }
 
@@ -101,15 +101,15 @@ ExtendedFastaWriter<T>::ExtendedFastaWriter(const std::string &filebase,
         worker_(async, kWorkerQueueSize) {
     assert(feature_name.size());
 
-    auto filename = utils::remove_suffix(filebase, ".gz", ".fasta") + ".fasta.gz";
+    fasta_fname_ = utils::remove_suffix(filebase, ".gz", ".fasta") + ".fasta.gz";
 
-    fasta_gz_out_ = gzopen(filename.c_str(), mode);
+    fasta_gz_out_ = gzopen(fasta_fname_.c_str(), mode);
     if (fasta_gz_out_ == Z_NULL) {
-        std::cerr << "ERROR: Can't write to " << filename << std::endl;
+        std::cerr << "ERROR: Can't write to " << fasta_fname_ << std::endl;
         exit(1);
     }
 
-    filename = utils::remove_suffix(filebase, ".gz", ".fasta") + "." + feature_name + ".gz";
+    auto filename = utils::remove_suffix(filebase, ".gz", ".fasta") + "." + feature_name + ".gz";
 
     feature_gz_out_ = gzopen(filename.c_str(), "w");
     if (feature_gz_out_ == Z_NULL
@@ -364,8 +364,6 @@ template <class Callback>
 void read_fasta_file_critical(gzFile input_p,
                               Callback callback,
                               bool with_reverse) {
-    size_t seq_count = 0;
-
     if (input_p == Z_NULL) {
         std::cerr << "ERROR: Null file descriptor" << std::endl;
         exit(1);
@@ -383,8 +381,6 @@ void read_fasta_file_critical(gzFile input_p,
             reverse_complement(read_stream->seq);
             callback(read_stream);
         }
-
-        seq_count++;
     }
 
     kseq_destroy(read_stream);

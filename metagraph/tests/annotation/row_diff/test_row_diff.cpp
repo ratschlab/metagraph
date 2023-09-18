@@ -14,8 +14,8 @@ namespace {
 using namespace mtg;
 using namespace testing;
 using ::testing::_;
-using mtg::annot::binmat::RowDiff;
-using mtg::annot::binmat::ColumnMajor;
+using mtg::annot::matrix::RowDiff;
+using mtg::annot::matrix::ColumnMajor;
 
 typedef RowDiff<ColumnMajor>::anchor_bv_type anchor_bv_type;
 
@@ -150,28 +150,28 @@ TEST(RowDiff, GetAnnotation) {
     annot.load_anchor(fterm_temp.name());
 
     EXPECT_EQ("CTAG", graph.get_node_sequence(4));
-    ASSERT_THAT(annot.get_row(3), ElementsAre(0, 1));
+    ASSERT_THAT(annot.get_rows({3})[0], ElementsAre(0, 1));
 
     EXPECT_EQ("AGCT", graph.get_node_sequence(6));
-    ASSERT_THAT(annot.get_row(5), ElementsAre(1));
+    ASSERT_THAT(annot.get_rows({5})[0], ElementsAre(1));
 
     EXPECT_EQ("CTCT", graph.get_node_sequence(7));
-    ASSERT_THAT(annot.get_row(6), ElementsAre(0));
+    ASSERT_THAT(annot.get_rows({6})[0], ElementsAre(0));
 
     EXPECT_EQ("TAGC", graph.get_node_sequence(8));
-    ASSERT_THAT(annot.get_row(7), ElementsAre(1));
+    ASSERT_THAT(annot.get_rows({7})[0], ElementsAre(1));
 
     EXPECT_EQ("ACTA", graph.get_node_sequence(9));
-    ASSERT_THAT(annot.get_row(8), ElementsAre(1));
+    ASSERT_THAT(annot.get_rows({8})[0], ElementsAre(1));
 
     EXPECT_EQ("ACTC", graph.get_node_sequence(10));
-    ASSERT_THAT(annot.get_row(9), ElementsAre(0));
+    ASSERT_THAT(annot.get_rows({9})[0], ElementsAre(0));
 
     EXPECT_EQ("GCTA", graph.get_node_sequence(11));
-    ASSERT_THAT(annot.get_row(10), ElementsAre(1));
+    ASSERT_THAT(annot.get_rows({10})[0], ElementsAre(1));
 
     EXPECT_EQ("TCTA", graph.get_node_sequence(12));
-    ASSERT_THAT(annot.get_row(11), ElementsAre(0));
+    ASSERT_THAT(annot.get_rows({11})[0], ElementsAre(0));
 }
 
 /**
@@ -206,28 +206,28 @@ TEST(RowDiff, GetAnnotationMasked) {
     annot.load_anchor(fterm_temp.name());
 
     EXPECT_EQ("CTAG", graph.get_node_sequence(1));
-    ASSERT_THAT(annot.get_row(0), ElementsAre(0, 1));
+    ASSERT_THAT(annot.get_rows({0})[0], ElementsAre(0, 1));
 
     EXPECT_EQ("AGCT", graph.get_node_sequence(2));
-    ASSERT_THAT(annot.get_row(1), ElementsAre(1));
+    ASSERT_THAT(annot.get_rows({1})[0], ElementsAre(1));
 
     EXPECT_EQ("CTCT", graph.get_node_sequence(3));
-    ASSERT_THAT(annot.get_row(2), ElementsAre(0));
+    ASSERT_THAT(annot.get_rows({2})[0], ElementsAre(0));
 
     EXPECT_EQ("TAGC", graph.get_node_sequence(4));
-    ASSERT_THAT(annot.get_row(3), ElementsAre(1));
+    ASSERT_THAT(annot.get_rows({3})[0], ElementsAre(1));
 
     EXPECT_EQ("ACTA", graph.get_node_sequence(5));
-    ASSERT_THAT(annot.get_row(4), ElementsAre(1));
+    ASSERT_THAT(annot.get_rows({4})[0], ElementsAre(1));
 
     EXPECT_EQ("ACTC", graph.get_node_sequence(6));
-    ASSERT_THAT(annot.get_row(5), ElementsAre(0));
+    ASSERT_THAT(annot.get_rows({5})[0], ElementsAre(0));
 
     EXPECT_EQ("GCTA", graph.get_node_sequence(7));
-    ASSERT_THAT(annot.get_row(6), ElementsAre(1));
+    ASSERT_THAT(annot.get_rows({6})[0], ElementsAre(1));
 
     EXPECT_EQ("TCTA", graph.get_node_sequence(8));
-    ASSERT_THAT(annot.get_row(7), ElementsAre(0));
+    ASSERT_THAT(annot.get_rows({7})[0], ElementsAre(0));
 }
 
 /**
@@ -261,34 +261,34 @@ TEST(RowDiff, GetAnnotationBifurcation) {
     annot.load_anchor(fterm_temp.name());
 
     EXPECT_EQ("CTAG", graph.get_node_sequence(4));
-    ASSERT_THAT(annot.get_row(3), ElementsAre(0, 1));
+    ASSERT_THAT(annot.get_rows({3})[0], ElementsAre(0, 1));
 
     EXPECT_EQ("CTAT", graph.get_node_sequence(5));
-    ASSERT_THAT(annot.get_row(4), ElementsAre(1));
+    ASSERT_THAT(annot.get_rows({4})[0], ElementsAre(1));
 
     EXPECT_EQ("TACT", graph.get_node_sequence(6));
-    ASSERT_THAT(annot.get_row(5), ElementsAre(0));
+    ASSERT_THAT(annot.get_rows({5})[0], ElementsAre(0));
 
     EXPECT_EQ("AGCT", graph.get_node_sequence(7));
-    ASSERT_THAT(annot.get_row(6), ElementsAre(0, 1));
+    ASSERT_THAT(annot.get_rows({6})[0], ElementsAre(0, 1));
 
     EXPECT_EQ("CTCT", graph.get_node_sequence(8));
-    ASSERT_THAT(annot.get_row(7), ElementsAre(1));
+    ASSERT_THAT(annot.get_rows({7})[0], ElementsAre(1));
 
     EXPECT_EQ("TAGC", graph.get_node_sequence(9));
-    ASSERT_THAT(annot.get_row(8), ElementsAre(0, 1));
+    ASSERT_THAT(annot.get_rows({8})[0], ElementsAre(0, 1));
 
     EXPECT_EQ("ACTA", graph.get_node_sequence(12));
-    ASSERT_THAT(annot.get_row(11), ElementsAre(0));
+    ASSERT_THAT(annot.get_rows({11})[0], ElementsAre(0));
 
     EXPECT_EQ("ACTC", graph.get_node_sequence(13));
-    ASSERT_THAT(annot.get_row(12), ElementsAre(1));
+    ASSERT_THAT(annot.get_rows({12})[0], ElementsAre(1));
 
     EXPECT_EQ("GCTA", graph.get_node_sequence(14));
-    ASSERT_THAT(annot.get_row(13), ElementsAre(0, 1));
+    ASSERT_THAT(annot.get_rows({13})[0], ElementsAre(0, 1));
 
     EXPECT_EQ("TCTA", graph.get_node_sequence(15));
-    ASSERT_THAT(annot.get_row(14), ElementsAre(1));
+    ASSERT_THAT(annot.get_rows({14})[0], ElementsAre(1));
 }
 
 TEST(RowDiff, GetAnnotationBifurcationMasked) {
@@ -322,34 +322,34 @@ TEST(RowDiff, GetAnnotationBifurcationMasked) {
     annot.load_anchor(fterm_temp.name());
 
     EXPECT_EQ("CTAG", graph.get_node_sequence(1));
-    ASSERT_THAT(annot.get_row(0), ElementsAre(0, 1));
+    ASSERT_THAT(annot.get_rows({0})[0], ElementsAre(0, 1));
 
     EXPECT_EQ("CTAT", graph.get_node_sequence(2));
-    ASSERT_THAT(annot.get_row(1), ElementsAre(1));
+    ASSERT_THAT(annot.get_rows({1})[0], ElementsAre(1));
 
     EXPECT_EQ("TACT", graph.get_node_sequence(3));
-    ASSERT_THAT(annot.get_row(2), ElementsAre(0));
+    ASSERT_THAT(annot.get_rows({2})[0], ElementsAre(0));
 
     EXPECT_EQ("AGCT", graph.get_node_sequence(4));
-    ASSERT_THAT(annot.get_row(3), ElementsAre(0, 1));
+    ASSERT_THAT(annot.get_rows({3})[0], ElementsAre(0, 1));
 
     EXPECT_EQ("CTCT", graph.get_node_sequence(5));
-    ASSERT_THAT(annot.get_row(4), ElementsAre(1));
+    ASSERT_THAT(annot.get_rows({4})[0], ElementsAre(1));
 
     EXPECT_EQ("TAGC", graph.get_node_sequence(6));
-    ASSERT_THAT(annot.get_row(5), ElementsAre(0, 1));
+    ASSERT_THAT(annot.get_rows({5})[0], ElementsAre(0, 1));
 
     EXPECT_EQ("ACTA", graph.get_node_sequence(7));
-    ASSERT_THAT(annot.get_row(6), ElementsAre(0));
+    ASSERT_THAT(annot.get_rows({6})[0], ElementsAre(0));
 
     EXPECT_EQ("ACTC", graph.get_node_sequence(8));
-    ASSERT_THAT(annot.get_row(7), ElementsAre(1));
+    ASSERT_THAT(annot.get_rows({7})[0], ElementsAre(1));
 
     EXPECT_EQ("GCTA", graph.get_node_sequence(9));
-    ASSERT_THAT(annot.get_row(8), ElementsAre(0, 1));
+    ASSERT_THAT(annot.get_rows({8})[0], ElementsAre(0, 1));
 
     EXPECT_EQ("TCTA", graph.get_node_sequence(10));
-    ASSERT_THAT(annot.get_row(9), ElementsAre(1));
+    ASSERT_THAT(annot.get_rows({9})[0], ElementsAre(1));
 }
 
 } // namespace

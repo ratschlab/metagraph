@@ -13,7 +13,7 @@
 namespace mtg {
 namespace experiments {
 
-using namespace mtg::annot::binmat;
+using namespace mtg::annot::matrix;
 
 
 template <typename T>
@@ -25,7 +25,6 @@ enum class MatrixType {
     COLUMN,
     BRWT,
     BRWT_EXTRA,
-    BIN_REL_WT_SDSL,
     BIN_REL_WT,
     ROW_FLAT,
     RAINBOWFISH
@@ -43,9 +42,6 @@ MatrixType string_to_matrix_type(const std::string &string) {
 
     } else if (string == "brwt_extra") {
         return MatrixType::BRWT_EXTRA;
-
-    } else if (string == "bin_rel_wt_sdsl") {
-        return MatrixType::BIN_REL_WT_SDSL;
 
     } else if (string == "bin_rel_wt") {
         return MatrixType::BIN_REL_WT;
@@ -73,8 +69,6 @@ matrix_type_to_data(const std::string &file, MatrixType type) {
         matrix_ptr.reset(new BRWT());
     } else if (type == MatrixType::BRWT_EXTRA) {
         matrix_ptr.reset(new BRWT());
-    } else if (type == MatrixType::BIN_REL_WT_SDSL) {
-        matrix_ptr.reset(new BinRelWT_sdsl());
     } else if (type == MatrixType::BIN_REL_WT) {
         matrix_ptr.reset(new BinRelWT());
     } else if (type == MatrixType::ROW_FLAT) {
@@ -180,7 +174,7 @@ generate_from_rows(std::vector<std::unique_ptr<bit_vector>>&& columns,
             ));
             break;
         }
-        case MatrixType::BIN_REL_WT_SDSL: {
+        case MatrixType::BIN_REL_WT: {
             uint64_t num_set_bits = 0;
             uint64_t num_columns = columns.size();
 
@@ -188,15 +182,11 @@ generate_from_rows(std::vector<std::unique_ptr<bit_vector>>&& columns,
                 num_set_bits += vector_ptr->num_set_bits();
             }
 
-            binary_matrix.reset(new BinRelWT_sdsl(
+            binary_matrix.reset(new BinRelWT(
                 [&](const auto &callback) { utils::call_rows(columns, callback); },
                 num_set_bits, num_columns
             ));
 
-            break;
-        }
-        case MatrixType::BIN_REL_WT: {
-            binary_matrix.reset(new BinRelWT(std::move(columns)));
             break;
         }
         case MatrixType::ROW_FLAT: {

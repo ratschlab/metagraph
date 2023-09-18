@@ -1,9 +1,10 @@
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
+#include <unordered_set>
+
 #include <zlib.h>
 #include <htslib/kseq.h>
-#include <unordered_set>
 
 #include "graph/representation/succinct/boss.hpp"
 #include "graph/representation/succinct/boss_construct.hpp"

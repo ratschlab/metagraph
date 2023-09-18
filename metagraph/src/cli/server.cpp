@@ -62,32 +62,31 @@ std::string process_search_request(const std::string &received_message,
                 + std::to_string(config.alignment_min_exact_match));
     }
 
-    config.count_labels = true;
     config.num_top_labels = json.get("num_labels", config.num_top_labels).asInt();
-    config.fast = json.get("fast", config.fast).asBool();
-    config.print_signature = json.get("with_signature", config.print_signature).asBool();
-    config.query_coords = json.get("query_coords", config.query_coords).asBool();
-    config.count_kmers = json.get("abundance_sum", config.count_kmers).asBool();
-    config.query_counts = json.get("query_counts", config.query_counts).asBool();
+
+    if (json.get("query_coords", false).asBool()) {
+        config.query_mode = COORDS;
+    } else if (json.get("query_counts", false).asBool()) {
+        config.query_mode = COUNTS;
+    } else if (json.get("with_signature", false).asBool()) {
+        config.query_mode = SIGNATURE;
+    } else if (json.get("abundance_sum", false).asBool()) {
+        config.query_mode = COUNTS_SUM;
+    } else {
+        config.query_mode = MATCHES;
+    }
 
     // Throw client an error if they try to query coordinates/kmer-counts on unsupported indexes
-    if ((config.count_kmers || config.query_counts)
-            && !(dynamic_cast<const annot::matrix::IntMatrix *>(
-                            &anno_graph.get_annotator().get_matrix()))) {
+    if ((config.query_mode == COUNTS || config.query_mode == COUNTS_SUM)
+            && !dynamic_cast<const annot::matrix::IntMatrix *>(
+                            &anno_graph.get_annotator().get_matrix())) {
         throw std::invalid_argument("Annotation does not support k-mer count queries");
     }
 
-    if (config.query_coords) {
-        if (!dynamic_cast<const annot::matrix::MultiIntMatrix *>(
-                        &anno_graph.get_annotator().get_matrix())) {
-            throw std::invalid_argument("Annotation does not support k-mer coordinate queries");
-        }
-
-        if (config.fast) {
-            config.fast = false;
-            logger->warn("Attempted to query k-mer coordinates in batch mode. "
-                         "Defaulted to basic query mode.");
-        }
+    if (config.query_mode == COORDS
+            && !dynamic_cast<const annot::matrix::MultiIntMatrix *>(
+                            &anno_graph.get_annotator().get_matrix())) {
+        throw std::invalid_argument("Annotation does not support k-mer coordinate queries");
     }
 
     std::unique_ptr<align::DBGAlignerConfig> aligner_config;
@@ -104,7 +103,7 @@ std::string process_search_request(const std::string &received_message,
     // writing to temporary file in order to reuse query code. This is not optimal and
     // may turn out to be an issue in production. However, adapting FastaParser to
     // work on strings seems non-trivial. An alternative would be to use
-    // read_fasta_from_string for non fast queries.
+    // read_fasta_from_string.
     utils::TempFile tf(config.tmp_dir);
     tf.ofstream() << fasta.asString();
     tf.ofstream().close();
@@ -211,7 +210,7 @@ std::string process_align_request(const std::string &received_message,
 }
 
 std::string process_column_label_request(const graph::AnnotatedDBG &anno_graph) {
-    auto labels = anno_graph.get_annotator().get_all_labels();
+    auto labels = anno_graph.get_annotator().get_label_encoder().get_labels();
 
     Json::Value root = Json::Value(Json::arrayValue);
 
@@ -295,7 +294,6 @@ int run_server(Config *config) {
 
     // defaults for the server
     config->num_top_labels = 10000;
-    config->fast = true;
 
     // the actual server
     HttpServer server;

@@ -21,6 +21,6 @@ do
     then
         graph=${basedir}/gtex/graphs/output_k${K}_merged/all_merged_k${K}.dbg
         annotation=${basedir}/gtex/graphs/output_k${K}_merged.anno.brwt.annodbg
-        $metagraph query -p ${threads} --discovery-fraction 1.0 -i ${graph} -a ${annotation} ${fname} > $outfile
+        $metagraph query -p ${threads} --min-kmers-fraction-label 1.0 -i ${graph} -a ${annotation} ${fname} > $outfile
     fi
 done

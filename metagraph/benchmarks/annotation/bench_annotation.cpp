@@ -15,7 +15,7 @@ namespace {
 using namespace mtg;
 
 
-std::unique_ptr<annot::MultiLabelEncoded<std::string>> load_annotation() {
+std::unique_ptr<annot::MultiLabelAnnotation<std::string>> load_annotation() {
     if (!std::getenv("ANNO")) {
         std::cerr << "Set environment variable ANNO" << std::endl;
         exit(1);
@@ -45,22 +45,9 @@ std::vector<uint64_t> random_numbers(size_t size, uint64_t min, uint64_t max) {
 }
 
 
-static void BM_anno_get_row(benchmark::State &state) {
-    auto anno = load_annotation();
-    const annot::binmat::BinaryMatrix &annotation_matrix = anno->get_matrix();
-
-    auto rows = random_numbers(100'000, 0, annotation_matrix.num_rows() - 1);
-
-    size_t i = 0;
-    for (auto _ : state) {
-        benchmark::DoNotOptimize(annotation_matrix.get_row(rows[i++ % rows.size()]));
-    }
-}
-BENCHMARK(BM_anno_get_row) -> Unit(benchmark::kMicrosecond);
-
 static void BM_anno_get_rows(benchmark::State &state) {
     auto anno = load_annotation();
-    const annot::binmat::BinaryMatrix &annotation_matrix = anno->get_matrix();
+    const annot::matrix::BinaryMatrix &annotation_matrix = anno->get_matrix();
 
     auto rows = random_numbers(100'000, 0, annotation_matrix.num_rows() - 1);
     std::sort(rows.begin(), rows.end());
@@ -73,18 +60,18 @@ BENCHMARK(BM_anno_get_rows) -> Unit(benchmark::kMillisecond);
 
 static void BM_anno_get_rows_unique(benchmark::State &state) {
     auto anno = load_annotation();
-    if (!dynamic_cast<const annot::binmat::RainbowMatrix*>(&anno->get_matrix())) {
+    if (!dynamic_cast<const annot::matrix::RainbowMatrix*>(&anno->get_matrix())) {
         state.SkipWithError("This is not a Rainbow type of matrix. Skipped.");
         return;
     }
-    const annot::binmat::RainbowMatrix &rb_matrix
-        = dynamic_cast<const annot::binmat::RainbowMatrix&>(anno->get_matrix());
+    const annot::matrix::RainbowMatrix &rb_matrix
+        = dynamic_cast<const annot::matrix::RainbowMatrix&>(anno->get_matrix());
 
     auto rows = random_numbers(100'000, 0, rb_matrix.num_rows() - 1);
     std::sort(rows.begin(), rows.end());
 
     for (auto _ : state) {
-        benchmark::DoNotOptimize(rb_matrix.get_rows(&rows));
+        benchmark::DoNotOptimize(rb_matrix.get_rows_dict(&rows));
     }
 }
 BENCHMARK(BM_anno_get_rows_unique) -> Unit(benchmark::kMillisecond);

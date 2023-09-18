@@ -7,14 +7,9 @@
 
 namespace mtg {
 namespace annot {
-namespace binmat {
+namespace matrix {
 
 using mtg::common::logger;
-
-bool RowDisk::View::get(Row row, Column column) const {
-    SetBitPositions set_bits = get_row(row);
-    return std::binary_search(set_bits.begin(), set_bits.end(), column);
-}
 
 std::vector<BinaryMatrix::Row> RowDisk::View::get_column(Column column) const {
     logger->warn("get_column is extremely inefficient for RowDisk, consider"
@@ -22,7 +17,8 @@ std::vector<BinaryMatrix::Row> RowDisk::View::get_column(Column column) const {
     std::vector<Row> result;
     const uint64_t num_rows = boundary_.num_set_bits();
     for (Row row = 0; row < num_rows; ++row) {
-        if (get(row, column))
+        SetBitPositions set_bits = get_row(row);
+        if (std::binary_search(set_bits.begin(), set_bits.end(), column))
             result.push_back(row);
     }
     return result;
@@ -41,17 +37,6 @@ BinaryMatrix::SetBitPositions RowDisk::View::get_row(Row row) const {
         result.push_back(last += set_bits_[i - row]);
     }
     return result;
-}
-
-std::vector<BinaryMatrix::SetBitPositions>
-RowDisk::View::get_rows(const std::vector<Row> &row_ids) const {
-    std::vector<SetBitPositions> rows(row_ids.size());
-
-    for (size_t i = 0; i < row_ids.size(); ++i) {
-        rows[i] = get_row(row_ids[i]);
-    }
-
-    return rows;
 }
 
 bool RowDisk::load(std::istream &f) {
@@ -110,7 +95,7 @@ void RowDisk::serialize(std::ostream &f) const {
 
 
 void RowDisk::serialize(const std::string &filename,
-                        const std::function<void(binmat::BinaryMatrix::RowCallback)> &call_rows,
+                        const std::function<void(BinaryMatrix::RowCallback)> &call_rows,
                         uint64_t num_columns,
                         uint64_t num_rows,
                         uint64_t num_set_bits) {
@@ -163,6 +148,6 @@ void RowDisk::serialize(const std::string &filename,
     serialize_number(outstream, boundary_start);
 }
 
-} // namespace binmat
+} // namespace matrix
 } // namespace annot
 } // namespace mtg

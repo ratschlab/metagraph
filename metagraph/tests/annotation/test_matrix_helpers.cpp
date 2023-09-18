@@ -8,7 +8,6 @@
 #include "annotation/binary_matrix/multi_brwt/brwt.hpp"
 #include "annotation/binary_matrix/multi_brwt/brwt_builders.hpp"
 #include "annotation/binary_matrix/bin_rel_wt/bin_rel_wt.hpp"
-#include "annotation/binary_matrix/bin_rel_wt/bin_rel_wt_sdsl.hpp"
 #include "annotation/binary_matrix/column_sparse/column_major.hpp"
 #include "annotation/binary_matrix/row_vector/unique_row_binmat.hpp"
 #include "annotation/binary_matrix/row_sparse/row_sparse.hpp"
@@ -21,7 +20,6 @@
 
 namespace mtg {
 
-using namespace mtg::annot::binmat;
 using namespace mtg::annot::matrix;
 
 namespace annot {
@@ -73,15 +71,6 @@ build_matrix_from_rows(const std::function<void(const RowCallback &)> &generate_
     return BinRelWT(generate_rows, num_relations, num_columns);
 }
 
-template <>
-BinRelWT_sdsl
-build_matrix_from_rows(const std::function<void(const RowCallback &)> &generate_rows,
-                       uint64_t num_columns,
-                       uint64_t,
-                       uint64_t num_relations) {
-    return BinRelWT_sdsl(generate_rows, num_relations, num_columns);
-}
-
 
 template <typename BinMat>
 BinMat build_matrix_from_columns(const BitVectorPtrArray &columns, uint64_t num_rows) {
@@ -97,7 +86,6 @@ BinMat build_matrix_from_columns(const BitVectorPtrArray &columns, uint64_t num_
     );
 }
 template BinRelWT build_matrix_from_columns<BinRelWT>(const BitVectorPtrArray&, uint64_t);
-template BinRelWT_sdsl build_matrix_from_columns<BinRelWT_sdsl>(const BitVectorPtrArray&, uint64_t);
 template RowFlat<> build_matrix_from_columns<RowFlat<>>(const BitVectorPtrArray&, uint64_t);
 template RowSparse build_matrix_from_columns<RowSparse>(const BitVectorPtrArray&, uint64_t);
 template UniqueRowBinmat build_matrix_from_columns<UniqueRowBinmat>(const BitVectorPtrArray&, uint64_t);
@@ -254,21 +242,23 @@ void test_matrix(const TypeParam &matrix, const BitVectorPtrArray &columns) {
         }
     }
 
-    // check get_row
-    for (size_t i = 0, n_rows = matrix.num_rows(); i < n_rows; ++i) {
-        auto row_set_bits = matrix.get_row(i);
+    if (const auto *m = dynamic_cast<const RowMajor*>(&matrix)) {
+        // check get_row
+        for (size_t i = 0, n_rows = matrix.num_rows(); i < n_rows; ++i) {
+            auto row_set_bits = m->get_row(i);
 
-        // make sure all returned indexes are unique
-        ASSERT_EQ(row_set_bits.size(), convert_to_set(row_set_bits).size());
+            // make sure all returned indexes are unique
+            ASSERT_EQ(row_set_bits.size(), convert_to_set(row_set_bits).size());
 
-        for (auto j : row_set_bits) {
-            ASSERT_TRUE(j < matrix.num_columns());
-            EXPECT_TRUE((*columns[j])[i]);
-        }
+            for (auto j : row_set_bits) {
+                ASSERT_TRUE(j < matrix.num_columns());
+                EXPECT_TRUE((*columns[j])[i]);
+            }
 
-        auto set_bits = convert_to_set(row_set_bits);
-        for (size_t j = 0; j < columns.size(); ++j) {
-            EXPECT_EQ((*columns[j])[i], set_bits.count(j));
+            auto set_bits = convert_to_set(row_set_bits);
+            for (size_t j = 0; j < columns.size(); ++j) {
+                EXPECT_EQ((*columns[j])[i], set_bits.count(j));
+            }
         }
     }
 
@@ -301,46 +291,13 @@ void test_matrix(const TypeParam &matrix, const BitVectorPtrArray &columns) {
         }
     }
 
-    // check slice_rows, query first |n| rows
-    for (size_t n : { size_t(0),
-                      size_t(matrix.num_rows() / 2),
-                      size_t(matrix.num_rows()) }) {
-        std::vector<uint64_t> indices(n);
-        std::iota(indices.begin(), indices.end(), 0);
-
-        auto slice = matrix.slice_rows(indices);
-
-        ASSERT_TRUE(slice.size() >= indices.size());
-
-        auto row_begin = slice.begin();
-
-        for (size_t i = 0; i < indices.size(); ++i) {
-            // every row in `slice` ends with `-1`
-            auto row_end = std::find(row_begin, slice.end(),
-                                     std::numeric_limits<BinaryMatrix::Column>::max());
-            std::vector<BinaryMatrix::Column> row_set_bits(row_begin, row_end);
-            row_begin = row_end + 1;
-
-            // make sure all returned indexes are unique
-            ASSERT_EQ(row_set_bits.size(), convert_to_set(row_set_bits).size());
-
-            for (auto j : row_set_bits) {
-                ASSERT_TRUE(j < matrix.num_columns());
-                EXPECT_TRUE((*columns[j])[i]);
+    if (const auto *m = dynamic_cast<const GetEntrySupport*>(&matrix)) {
+        // check get
+        for (size_t i = 0, n_rows = matrix.num_rows(); i < n_rows; ++i) {
+            for (size_t j = 0; j < matrix.num_columns(); ++j) {
+                EXPECT_EQ(columns[j]->operator[](i), m->get(i, j))
+                    << i << " " << j;
             }
-
-            auto set_bits = convert_to_set(row_set_bits);
-            for (size_t j = 0; j < columns.size(); ++j) {
-                EXPECT_EQ((*columns[j])[i], set_bits.count(j));
-            }
-        }
-    }
-
-    // check get
-    for (size_t i = 0, n_rows = matrix.num_rows(); i < n_rows; ++i) {
-        for (size_t j = 0; j < matrix.num_columns(); ++j) {
-            EXPECT_EQ(columns[j]->operator[](i), matrix.get(i, j))
-                << i << " " << j;
         }
     }
 
@@ -352,7 +309,6 @@ template void test_matrix<BRWT>(const BRWT&, const BitVectorPtrArray &);
 template void test_matrix<BRWTOptimized>(const BRWTOptimized&, const BitVectorPtrArray &);
 template void test_matrix<ColumnMajor>(const ColumnMajor&, const BitVectorPtrArray &);
 template void test_matrix<BinRelWT>(const BinRelWT&, const BitVectorPtrArray &);
-template void test_matrix<BinRelWT_sdsl>(const BinRelWT_sdsl&, const BitVectorPtrArray &);
 template void test_matrix<RowFlat<>>(const RowFlat<>&, const BitVectorPtrArray &);
 template void test_matrix<RowSparse>(const RowSparse&, const BitVectorPtrArray &);
 template void test_matrix<UniqueRowBinmat>(const UniqueRowBinmat&, const BitVectorPtrArray &);

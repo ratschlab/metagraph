@@ -12,10 +12,10 @@
 
 namespace mtg {
 namespace annot {
-namespace binmat {
+namespace matrix {
 
 // The Multi-BRWT compressed binary matrix representation
-class BRWT : public BinaryMatrix {
+class BRWT : public BinaryMatrix, public GetEntrySupport {
     friend class BRWTBuilder;
     friend class BRWTBottomUpBuilder;
     friend class BRWTOptimizer;
@@ -29,11 +29,10 @@ class BRWT : public BinaryMatrix {
     uint64_t num_rows() const override { return nonzero_rows_->size(); }
 
     bool get(Row row, Column column) const override;
-    SetBitPositions get_row(Row row) const override;
-    std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const override;
     std::vector<Row> get_column(Column column) const override;
+    std::vector<SetBitPositions> get_rows(const std::vector<Row> &rows) const override;
     // get all selected rows appended with -1 and concatenated
-    std::vector<Column> slice_rows(const std::vector<Row> &rows) const override;
+    SetBitPositions slice_rows(const std::vector<Row> &rows) const;
     // query row and get ranks of each set bit in its column
     Vector<std::pair<Column, uint64_t>> get_column_ranks(Row row) const;
     std::vector<Vector<std::pair<Column, uint64_t>>>
@@ -59,7 +58,7 @@ class BRWT : public BinaryMatrix {
     void BFT(std::function<void(const BRWT &node)> callback) const;
     // helper function for querying rows in batches
     template <typename T>
-    std::vector<T> slice_rows(const std::vector<Row> &rows) const;
+    Vector<T> slice_rows(const std::vector<Row> &rows) const;
 
     // assigns columns to the child nodes
     RangePartition assignments_;
@@ -68,7 +67,7 @@ class BRWT : public BinaryMatrix {
     std::vector<std::unique_ptr<BRWT>> child_nodes_;
 };
 
-} // namespace binmat
+} // namespace matrix
 } // namespace annot
 } // namespace mtg
 
