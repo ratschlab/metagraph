@@ -520,7 +520,7 @@ Alignment::score_t get_label_change_score(const AnnotationBuffer *anno_buffer,
         return 0;
 
     assert(anno_buffer);
-    return anno_buffer->get_label_change_score(col_a, col_b) * 2;
+    return anno_buffer->get_label_change_score(col_a, col_b);
 };
 
 void chain_alignments(const IDBGAligner &aligner,
@@ -802,7 +802,7 @@ void chain_alignments(const IDBGAligner &aligner,
                         last_dist = -a_j.spelling_length;
                     }
 
-                    if (a_i.col != a_j.col && !allow_label_change)
+                    if (a_i.col != a_j.col && (!allow_label_change || a_i.index == a_j.index))
                         return;
 
                     if (a_i.index == a_j.index) {
@@ -937,6 +937,9 @@ void chain_alignments(const IDBGAligner &aligner,
                 Alignment alignment = alignments[first->index];
                 if (first->col != last_anchor->col) {
                     assert(anno_buffer);
+                    DEBUG_LOG("\tSwitching {} -> {}",
+                              anno_buffer->get_annotator().get_label_encoder().decode(last_anchor->col),
+                              anno_buffer->get_annotator().get_label_encoder().decode(first->col));
                     col_idx = anno_buffer->cache_column_set(1, first->col);
                 }
 
@@ -948,7 +951,7 @@ void chain_alignments(const IDBGAligner &aligner,
                     aln.trim_query_prefix(first->begin - aln.get_query_view().begin(),
                                           graph.get_k() - 1,
                                           config);
-                    DEBUG_LOG("Score to now: {}\tScore of chain: {}\tNode insertion penalty: {}\tLabel change score: {}",
+                    DEBUG_LOG("\tScore to now: {}\tScore of chain: {}\tNode insertion penalty: {}\tLabel change score: {}",
                               score_up_to_now, aln.get_score(), node_insert, label_change_score);
                     assert(aln.get_score() == score_up_to_now);
 #else
@@ -960,13 +963,15 @@ void chain_alignments(const IDBGAligner &aligner,
 
                 if (cur.empty()) {
                     assert(first == last_anchor);
-                    DEBUG_LOG("\tStarting: {}", alignment);
+                    DEBUG_LOG("\tStarting: {}\tfrom {}", alignment, alignments[first->index]);
                     check_aln(alignment);
                     callback(std::move(alignment));
                     return;
                 }
 
                 if (first->index == last_anchor->index) {
+                    // TODO: for now, don't allow chaining multi-label alignments
+                    assert(first->col == last_anchor->col);
                     last_anchor = first;
                     check_aln(cur);
                     callback(std::move(cur));
@@ -1033,6 +1038,9 @@ void chain_alignments(const IDBGAligner &aligner,
                         last_anchor->col, anno_buffer->get_annotator().get_label_encoder().decode(last_anchor->col),
                         label_change_score);
                 }
+
+                assert(first->col == last_anchor->col ||
+                        label_change_score != DBGAlignerConfig::ninf);
 
                 last_anchor = first;
 
