@@ -465,7 +465,11 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
                                       aln.get_query_view().size());
         }
 
-        if (alns.size() && config_.post_chain_alignments) {
+        if (alns.size() && config_.post_chain_alignments
+                && std::all_of(alns.begin(), alns.end(),
+                               [&](const auto &a) {
+                                   return a.get_clipping() || a.get_end_clipping();
+                               })) {
             tsl::hopscotch_map<Alignment::Column, size_t> best_label_counts;
             std::vector<Alignment> rest;
             for (const auto &a : alns) {
@@ -479,6 +483,7 @@ void DBGAligner<Seeder, Extender, AlignmentCompare>
                 }
             }
 
+            assert(rest.size());
             std::vector<Alignment> chains;
             size_t last_size = 0;
             chain_alignments(*this, std::move(rest),
