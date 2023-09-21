@@ -464,6 +464,8 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
                 num_threads);
             }
             }
+
+            counts.close(true);
             return masked_graph;
     }
 
@@ -502,6 +504,7 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
 
         logger->trace("Kept {} out of {} nodes", kept_nodes, total_nodes);
 
+        counts.close(true);
         return masked_graph;
     }
 
@@ -556,6 +559,7 @@ mask_nodes_by_label(std::shared_ptr<const DeBruijnGraph> graph_ptr,
         num_threads
     );
 
+    counts.close(true);
     return masked_graph;
 }
 
