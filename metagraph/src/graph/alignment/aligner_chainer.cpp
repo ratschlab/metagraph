@@ -734,13 +734,26 @@ void chain_alignments(const IDBGAligner &aligner,
         });
     }
 
-    {
+    if (anchors.size()) {
         std::vector<Anchor> left_right_anchors;
-        left_right_anchors.reserve(anchors.size());
-        for (auto&& anchor : anchors) {
-            left_right_anchors.emplace_back(std::move(anchor));
-            left_right_anchors.emplace_back(left_right_anchors.back()).left = false;
+        left_right_anchors.reserve(anchors.size() * 2);
+        auto last_it = anchors.begin();
+        auto it = anchors.begin();
+        for ( ; it != anchors.end(); ++it) {
+            if (it->orientation != last_it->orientation || it->end != last_it->end) {
+                while (last_it != it) {
+                    left_right_anchors.emplace_back(*last_it).left = false;
+                    ++last_it;
+                }
+            }
+            left_right_anchors.emplace_back(*it);
         }
+
+        while (last_it != it) {
+            left_right_anchors.emplace_back(*last_it).left = false;
+            ++last_it;
+        }
+
         std::swap(left_right_anchors, anchors);
     }
 
@@ -773,9 +786,6 @@ void chain_alignments(const IDBGAligner &aligner,
                     chain_scores - (begin - last_anchor_it) + (&a_i - last_anchor_it)
                 );
 
-                if (last_j == anchor_it && a_i.left)
-                    return;
-
                 const Alignment &full_i = alignments[a_i.index];
                 std::string_view full_query_i = full_i.get_query_view();
                 std::string_view query_i(a_i.begin, a_i.end - a_i.begin);
@@ -789,7 +799,7 @@ void chain_alignments(const IDBGAligner &aligner,
                     assert(&a_i != &a_j);
                     ++chain_scores;
 
-                    if (a_i.left != a_j.left)
+                    if (a_i.left == a_j.left)
                         return;
 
                     const Alignment &full_j = alignments[a_j.index];
@@ -877,9 +887,6 @@ void chain_alignments(const IDBGAligner &aligner,
             },
             [&](const AnchorChain<Anchor> &chain, score_t score) {
                 assert(chain.size());
-                if (chain.back().first->left)
-                    return false;
-
                 if (chain_score == score && std::equal(chain.begin(), chain.end(),
                                                        last_chain.begin(), last_chain.end(),
                                                        [](const auto &a, const auto &b) {
