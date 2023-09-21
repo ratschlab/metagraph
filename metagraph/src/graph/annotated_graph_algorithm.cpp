@@ -667,6 +667,7 @@ construct_diff_label_count_vector(const ColumnGenerator &generate_columns,
     logger->trace("Allocating count vector"); // the in and out counts are stored interleaved
 
     std::string filename = std::tmpnam(nullptr);
+    logger->trace("Initializing tmp counts file {}", filename);
     sdsl::int_vector_buffer<> counts(filename, std::ios::out, 1024*1024, width);
     for (size_t i = 0; i < length; ++i) counts.push_back(0); // set the size of the count vector using push backs
 

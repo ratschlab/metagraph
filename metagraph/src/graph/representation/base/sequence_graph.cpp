@@ -211,6 +211,7 @@ void call_sequences_from(const DeBruijnGraph &graph,
                     }
                     if (!call_unitigs // In the unitig mode (i.e. if call_unitigs is true), simply the unitigs must be returned, rather than longer contigs
                         && downcasted_graph // TODO if not a downcasted graph it doesnt work anymore, make a seperate method.
+                        && downcasted_graph->likelihood_ratios.size()
                         && downcasted_graph->likelihood_ratios[next] > next_likelihood){ // If the likelihood of this unitig is better than the current likelihood
                         next_likelihood = downcasted_graph->likelihood_ratios[next];
                         next_node = next;
