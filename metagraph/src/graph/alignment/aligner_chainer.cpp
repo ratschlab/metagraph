@@ -694,8 +694,6 @@ void chain_alignments(const IDBGAligner &aligner,
     AnnotationBuffer *anno_buffer = nullptr;
     bool allow_label_change = false;
 
-    logger->trace("Chaining alignments using {} anchors for a query of length {}",
-                  anchors.size(), query.size());
     if (labeled_aligner) {
         anno_buffer = &labeled_aligner->get_annotation_buffer();
         allow_label_change = anno_buffer->allow_label_change();
@@ -756,6 +754,9 @@ void chain_alignments(const IDBGAligner &aligner,
 
         std::swap(left_right_anchors, anchors);
     }
+
+    logger->trace("Chaining alignments using {} anchors for a query of length {}",
+                  anchors.size(), query.size());
 
     score_t node_insert = config.node_insertion_penalty;
     score_t gap_open = config.gap_opening_penalty;
