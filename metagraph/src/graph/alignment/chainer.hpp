@@ -109,6 +109,7 @@ void chain_anchors(const DBGAlignerConfig &config,
             // if there are fewer seeds, this algorithm is faster
             ssize_t b = max_gap_between_anchors;
             ssize_t b_last;
+            score_t best_score = std::get<0>(chain_scores[0]);
             do {
                 const Anchor *j = anchors_begin;
                 for (const Anchor *i = anchors_begin + 1; i != anchors_end; ++i) {
@@ -120,27 +121,15 @@ void chain_anchors(const DBGAlignerConfig &config,
                     // align anchor i forwards
                     anchor_connector(*i, b, j, i, chain_scores + (j - anchors_begin),
                                      make_anchor_connector(i));
+                    best_score = std::max(best_score, std::get<0>(chain_scores[i - anchors_begin]));
                 }
                 b_last = b;
                 b *= config.max_gap_shrinking_factor;
-            } while (std::get<0>(chain_scores[anchors_end - anchors_begin - 1])
-                        < query_size - b_last / 2);
+            } while (best_score < query_size - b_last / 2);
         } else {
             // otherwise, use this algorithm
             for (const Anchor *i = anchors_begin + 1; i != anchors_end; ++i) {
                 const Anchor *j = std::max(i - config.chaining_bandwidth, anchors_begin);
-                auto end = i->get_query_view().end();
-                for (size_t k = 0; k < config.chaining_bandwidth; ++k) {
-                    while (j != anchors_begin && j->get_query_view().end() == end) {
-                        --j;
-                    }
-
-                    if (j == anchors_begin)
-                        break;
-
-                    end = j->get_query_view().end();
-                }
-
                 anchor_connector(*i, std::numeric_limits<ssize_t>::max(), j, i,
                                  chain_scores + (j - anchors_begin),
                                  make_anchor_connector(i));
