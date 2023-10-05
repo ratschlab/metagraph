@@ -1,6 +1,8 @@
 #ifndef __HLL_MATRIX_HPP__
 #define __HLL_MATRIX_HPP__
 
+#include <progress_bar.hpp>
+
 #include "annotation/binary_matrix/base/binary_matrix.hpp"
 #include "annotation/representation/column_compressed/annotate_column_compressed.hpp"
 #include "common/hashers/hll_counter.hpp"
@@ -40,8 +42,13 @@ class HLLMatrix : public BinaryMatrix {
         }
 
         size_t num_labels = 0;
-        for (const auto &file : files) {
-            num_labels += ColumnCompressed<>::read_num_labels(file);
+        {
+            ProgressBar progress_bar(files.size(), "Computing number of columns",
+                                     std::cerr, !common::get_verbose());
+            for (const auto &file : files) {
+                num_labels += ColumnCompressed<>::read_num_labels(file);
+                ++progress_bar;
+            }
         }
 
         columns_.resize(num_labels, precision_);
