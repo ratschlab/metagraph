@@ -751,7 +751,7 @@ void chain_alignments(const IDBGAligner &aligner,
     assert(gap_ext >= gap_open);
     assert(node_insert < 0);
 
-    auto get_overlapping_prev = [](const Anchor &a_i, const Anchor &a_j) -> size_t {
+    auto get_overlapping_prev = [&](const Anchor &a_i, const Anchor &a_j) -> size_t {
         // check if there is a previous seed a_last from in a_i.index s.t. a_last.end == a_j.end
         auto find_last = coord_map[a_i.index].find(a_j.end);
         if (find_last == coord_map[a_i.index].end())
@@ -762,10 +762,16 @@ void chain_alignments(const IDBGAligner &aligner,
         if (find_last_col == find_last->second.end())
             return std::numeric_limits<size_t>::max();
 
-        assert(anchors[find_last_col->second].index == a_i.index);
-        assert(anchors[find_last_col->second].end == a_j.end);
+        size_t last_overlap_i = find_last_col->second;
+        const Anchor &a_last = anchors[last_overlap_i];
 
-        return find_last_col->second;
+        assert(a_last.index == a_i.index);
+        assert(a_last.end == a_j.end);
+
+        if (a_last.node_idx < 0 || a_i.spelling_length <= a_last.spelling_length)
+            return std::numeric_limits<size_t>::max();
+
+        return last_overlap_i;
     };
 
     auto last_anchor_it = anchors.data();
@@ -826,12 +832,41 @@ void chain_alignments(const IDBGAligner &aligner,
                         return;
                     }
 
-                    const auto &[score_i, last_j, last_dist_i] = *chain_scores_i;
+                    if (-last_dist < graph.get_k())
+                        return;
 
-                    // TODO: only do this if an intermediate doesn't exist
-                    if (full_query_i.end() <= full_query_j.begin()
+                    const auto &[score_i, last_j, last_dist_i] = *chain_scores_i;
+                    size_t last_overlap_i = get_overlapping_prev(a_i, a_j);
+                    if (last_overlap_i != std::numeric_limits<size_t>::max()) {
+                        const Anchor &a_last = anchors[last_overlap_i];
+
+                        // a_i -> a_last score
+                        score_t a_i_updated_score = a_i.score - a_last.score;
+
+                        // compute rest of the score
+                        score_t score_seed_j = a_j.score
+                            - per_char_scores_prefix_del[a_j.index][a_j.end - full_j.get_query_view().begin()];
+
+                        const Alignment &full_last = alignments[a_last.index];
+                        score_t score_seed_last = a_last.score
+                            - per_char_scores_prefix_del[a_last.index][a_last.end - full_last.get_query_view().begin()];
+
+                        score_t updated_score = score_j - score_seed_j + score_seed_last + a_i_updated_score;
+
+                        if (a_j.node_idx < 0 || full_last.get_nodes()[a_last.node_idx] != full_j.get_nodes()[a_j.node_idx]) {
+                            // nodes are different, add a node insertion penalty
+                            updated_score += node_insert;
+                        }
+
+                        if (updated_score < score_i)
+                            return;
+
+                        updated_score += get_label_change_score(anno_buffer, a_last.col, a_j.col);
+
+                        update_score(updated_score, &a_j,
+                                     -seed_size - (a_i.spelling_length - a_last.spelling_length));
+                    } else if (full_query_i.end() <= full_query_j.begin()
                             && a_j.clipping == full_j.get_clipping()
-                            && -last_dist >= graph.get_k()
                             && a_i.spelling_length >= graph.get_k()) {
                         // completely disjoint
                         score_t gap = full_query_j.begin() - full_query_i.end();
@@ -849,47 +884,6 @@ void chain_alignments(const IDBGAligner &aligner,
                         base_updated_score += get_label_change_score(anno_buffer, a_i.col, a_j.col);
                         update_score(base_updated_score, &a_j, -a_i.spelling_length);
                     }
-
-                    if (-last_dist < graph.get_k())
-                        return;
-
-                    size_t last_overlap_i = get_overlapping_prev(a_i, a_j);
-                    if (last_overlap_i == std::numeric_limits<size_t>::max())
-                        return;
-
-                    const auto &a_last = anchors[last_overlap_i];
-
-                    if (a_last.node_idx < 0)
-                        return;
-
-                    if (a_i.spelling_length <= a_last.spelling_length)
-                        return;
-
-                    // a_i -> a_last score
-                    score_t a_i_updated_score = a_i.score - a_last.score;
-
-                    // compute rest of the score
-                    score_t score_seed_j = a_j.score
-                        - per_char_scores_prefix_del[a_j.index][a_j.end - full_j.get_query_view().begin()];
-
-                    const Alignment &full_last = alignments[a_last.index];
-                    score_t score_seed_last = a_last.score
-                        - per_char_scores_prefix_del[a_last.index][a_last.end - full_last.get_query_view().begin()];
-
-                    score_t updated_score = score_j - score_seed_j + score_seed_last + a_i_updated_score;
-
-                    if (a_j.node_idx < 0 || full_last.get_nodes()[a_last.node_idx] != full_j.get_nodes()[a_j.node_idx]) {
-                        // nodes are different, add a node insertion penalty
-                        updated_score += node_insert;
-                    }
-
-                    if (updated_score < score_i)
-                        return;
-
-                    updated_score += get_label_change_score(anno_buffer, a_last.col, a_j.col);
-
-                    update_score(updated_score, &a_j,
-                                 -seed_size - (a_i.spelling_length - a_last.spelling_length));
                 });
             },
             [&](const AnchorChain<Anchor> &chain, score_t score) {
