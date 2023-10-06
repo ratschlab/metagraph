@@ -978,7 +978,6 @@ void chain_alignments(const IDBGAligner &aligner,
                 }
 
                 if (first->index == last_anchor->index) {
-                    // TODO: for now, don't allow chaining multi-label alignments
                     assert(first->col == last_anchor->col);
                     last_anchor = first;
                     check_aln(cur);
@@ -986,14 +985,16 @@ void chain_alignments(const IDBGAligner &aligner,
                     return;
                 }
 
+                std::ignore = dist;
+                assert(-dist >= graph.get_k());
+
                 DEBUG_LOG("\t\taln: {}", alignment);
                 DEBUG_LOG("\t\tcur: {}", cur);
 
-                // TODO: what if no overlap, but it connected through an intermediate
-
-                if (alignment.get_query_view().end() <= cur.get_query_view().begin()) {
+                size_t last_overlap_i = get_overlapping_prev(*first, *last_anchor);
+                if (last_overlap_i == std::numeric_limits<size_t>::max()) {
                     // no overlap
-                    std::ignore = dist;
+                    assert(alignment.get_query_view().end() <= cur.get_query_view().begin());
                     assert(dist == -first->spelling_length);
                     assert(last_anchor->begin == cur.get_query_view().begin());
                     cur.insert_gap_prefix(
@@ -1002,23 +1003,26 @@ void chain_alignments(const IDBGAligner &aligner,
                     );
                     assert(cur.size());
                 } else {
-                    assert(dist == -seed_size);
-                    assert(last_anchor->end == first->end);
+                    assert(-dist > seed_size);
+                    const Anchor &a_o = anchors[last_overlap_i];
+
+                    assert(last_anchor->end == a_o.end);
+                    assert(first->col == a_o.col);
                     alignment.extend_offset(std::vector<node_index>(graph.get_k() - 1 - alignment.get_offset(),
                                                                     DeBruijnGraph::npos),
                                             std::vector<size_t>(graph.get_k() - 1 - alignment.get_offset(), 0));
-                    alignment.trim_query_suffix(alignment.get_query_view().end() - first->end,
+                    alignment.trim_query_suffix(alignment.get_query_view().end() - a_o.end,
                                                 config);
                     assert(alignment.size());
-                    assert(first->node_idx >= 0);
+                    assert(a_o.node_idx >= 0);
                     assert(alignment.get_nodes().back()
-                        == alignments[first->index].get_nodes()[first->node_idx]);
+                        == alignments[a_o.index].get_nodes()[a_o.node_idx]);
                     // assert(alignment.is_valid(graph, &config));
 
                     cur.extend_offset(std::vector<node_index>(graph.get_k() - 1 - cur.get_offset(),
                                                               DeBruijnGraph::npos),
                                       std::vector<size_t>(graph.get_k() - 1 - alignment.get_offset(), 0));
-                    cur.trim_query_prefix(first->end - cur.get_query_view().begin(),
+                    cur.trim_query_prefix(a_o.end - cur.get_query_view().begin(),
                                           graph.get_k() - 1,
                                           config,
                                           false);
