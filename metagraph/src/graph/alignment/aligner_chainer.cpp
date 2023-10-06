@@ -557,7 +557,6 @@ void chain_alignments(const IDBGAligner &aligner,
         int64_t node_idx;
         score_t score;
         Alignment::Column col;
-        bool left;
 
         std::string_view get_query_view() const {
             return std::string_view(begin, end - begin);
@@ -632,8 +631,7 @@ void chain_alignments(const IDBGAligner &aligner,
                                         - cur.get_query_view().begin() - seed_size,
                     .node_idx = node_idx,
                     .score = cur.get_score(),
-                    .col = std::numeric_limits<Alignment::Column>::max(),
-                    .left = true,
+                    .col = std::numeric_limits<Alignment::Column>::max()
                 });
 
 #ifndef NDEBUG
@@ -732,27 +730,14 @@ void chain_alignments(const IDBGAligner &aligner,
         });
     }
 
-    if (anchors.size()) {
-        std::vector<Anchor> left_right_anchors;
-        left_right_anchors.reserve(anchors.size() * 2);
-        auto last_it = anchors.begin();
-        auto it = anchors.begin();
-        for ( ; it != anchors.end(); ++it) {
-            if (it->orientation != last_it->orientation || it->end != last_it->end) {
-                while (last_it != it) {
-                    left_right_anchors.emplace_back(*last_it).left = false;
-                    ++last_it;
-                }
-            }
-            left_right_anchors.emplace_back(*it);
-        }
-
-        while (last_it != it) {
-            left_right_anchors.emplace_back(*last_it).left = false;
-            ++last_it;
-        }
-
-        std::swap(left_right_anchors, anchors);
+    // construct index to seed map
+    std::vector<tsl::hopscotch_map<std::string_view::const_iterator,
+                                   tsl::hopscotch_map<Alignment::Column, size_t>>> coord_map(alignments.size());
+    for (size_t i = 0; i < anchors.size(); ++i) {
+        const auto &a = anchors[i];
+        auto &bucket = coord_map[a.index][a.end];
+        assert(bucket.find(a.col) == bucket.end());
+        bucket[a.col] = i;
     }
 
     logger->trace("Chaining alignments using {} anchors for a query of length {}",
@@ -765,6 +750,23 @@ void chain_alignments(const IDBGAligner &aligner,
     assert(gap_ext < 0);
     assert(gap_ext >= gap_open);
     assert(node_insert < 0);
+
+    auto get_overlapping_prev = [](const Anchor &a_i, const Anchor &a_j) -> size_t {
+        // check if there is a previous seed a_last from in a_i.index s.t. a_last.end == a_j.end
+        auto find_last = coord_map[a_i.index].find(a_j.end);
+        if (find_last == coord_map[a_i.index].end())
+            return std::numeric_limits<size_t>::max();
+
+        auto find_last_col = find_last->second.find(a_i.col);
+
+        if (find_last_col == find_last->second.end())
+            return std::numeric_limits<size_t>::max();
+
+        assert(anchors[find_last_col->second].index == a_i.index);
+        assert(anchors[find_last_col->second].end == a_j.end);
+
+        return find_last_col->second;
+    };
 
     auto last_anchor_it = anchors.data();
     while (!terminate() && last_anchor_it != anchors.data() + anchors.size()) {
@@ -783,16 +785,11 @@ void chain_alignments(const IDBGAligner &aligner,
 
         chain_anchors<Anchor>(config, last_anchor_it, anchor_it,
             [&](const Anchor &a_i, ssize_t, const Anchor *begin, const Anchor *end, auto *chain_scores, const auto &update_score) {
-                const auto &[score_i, last_j, last_dist] = *(
-                    chain_scores - (begin - last_anchor_it) + (&a_i - last_anchor_it)
-                );
+                const auto *chain_scores_i = chain_scores - (begin - last_anchor_it) + (&a_i - last_anchor_it);
 
                 const Alignment &full_i = alignments[a_i.index];
                 std::string_view full_query_i = full_i.get_query_view();
                 std::string_view query_i(a_i.begin, a_i.end - a_i.begin);
-
-                score_t score_seed_i = a_i.score
-                    - per_char_scores_prefix_del[a_i.index][a_i.end - full_i.get_query_view().begin()];
 
                 --chain_scores;
                 std::for_each(begin, end, [&](const Anchor &a_j) {
@@ -800,12 +797,12 @@ void chain_alignments(const IDBGAligner &aligner,
                     assert(&a_i != &a_j);
                     ++chain_scores;
 
-                    if (a_i.left == a_j.left)
-                        return;
-
                     const Alignment &full_j = alignments[a_j.index];
                     std::string_view full_query_j = full_j.get_query_view();
                     std::string_view query_j(a_j.begin, a_j.end - a_j.begin);
+
+                    if (query_j.end() == query_i.end())
+                        return;
 
                     auto [score_j, last, last_dist] = *chain_scores;
                     if (last == anchor_it) {
@@ -829,61 +826,70 @@ void chain_alignments(const IDBGAligner &aligner,
                         return;
                     }
 
-                    if (full_query_i.end() <= full_query_j.begin()) {
+                    const auto &[score_i, last_j, last_dist_i] = *chain_scores_i;
+
+                    // TODO: only do this if an intermediate doesn't exist
+                    if (full_query_i.end() <= full_query_j.begin()
+                            && a_j.clipping == full_j.get_clipping()
+                            && -last_dist >= graph.get_k()
+                            && a_i.spelling_length >= graph.get_k()) {
                         // completely disjoint
-                        if (a_j.clipping == full_j.get_clipping()
-                                && -last_dist >= graph.get_k()
-                                && a_i.spelling_length >= graph.get_k()) {
-                            score_t gap = full_query_j.begin() - full_query_i.end();
-                            score_t gap_cost = node_insert + gap_open;
-                            if (gap > 0)
-                                gap_cost += gap_open + (gap - 1) * gap_ext;
+                        score_t gap = full_query_j.begin() - full_query_i.end();
+                        score_t gap_cost = node_insert + gap_open;
+                        if (gap > 0)
+                            gap_cost += gap_open + (gap - 1) * gap_ext;
 
-                            assert(gap_cost < 0);
+                        assert(gap_cost < 0);
 
-                            score_t base_updated_score = score_j + gap_cost + a_i.score;
+                        score_t base_updated_score = score_j + gap_cost + a_i.score;
 
-                            if (base_updated_score < score_i)
-                                return;
+                        if (base_updated_score < score_i)
+                            return;
 
-                            base_updated_score += get_label_change_score(anno_buffer, a_i.col, a_j.col);
-                            update_score(base_updated_score, &a_j, -a_i.spelling_length);
-                        }
-
-                        return;
+                        base_updated_score += get_label_change_score(anno_buffer, a_i.col, a_j.col);
+                        update_score(base_updated_score, &a_j, -a_i.spelling_length);
                     }
-
-                    if (query_j.end() != query_i.end())
-                        return;
-
-                    assert(query_i.begin() == query_j.begin());
-
-                    if (a_i.node_idx < 0)
-                        return;
 
                     if (-last_dist < graph.get_k())
                         return;
 
+                    size_t last_overlap_i = get_overlapping_prev(a_i, a_j);
+                    if (last_overlap_i == std::numeric_limits<size_t>::max())
+                        return;
+
+                    const auto &a_last = anchors[last_overlap_i];
+
+                    if (a_last.node_idx < 0)
+                        return;
+
+                    if (a_i.spelling_length <= a_last.spelling_length)
+                        return;
+
+                    // a_i -> a_last score
+                    score_t a_i_updated_score = a_i.score - a_last.score;
+
+                    // compute rest of the score
                     score_t score_seed_j = a_j.score
                         - per_char_scores_prefix_del[a_j.index][a_j.end - full_j.get_query_view().begin()];
 
-                    score_t base_updated_score = score_j - score_seed_j + score_seed_i;
+                    const Alignment &full_last = alignments[a_last.index];
+                    score_t score_seed_last = a_last.score
+                        - per_char_scores_prefix_del[a_last.index][a_last.end - full_last.get_query_view().begin()];
 
-                    if (base_updated_score <= score_i)
-                        return;
+                    score_t updated_score = score_j - score_seed_j + score_seed_last + a_i_updated_score;
 
-                    base_updated_score += get_label_change_score(anno_buffer, a_i.col, a_j.col);
-
-                    if (base_updated_score <= score_i)
-                        return;
-
-                    if (a_j.node_idx >= 0 && full_i.get_nodes()[a_i.node_idx] == full_j.get_nodes()[a_j.node_idx]) {
-                        // perfect overlap, easy top connect
-                        update_score(base_updated_score, &a_j, -seed_size);
-                        return;
+                    if (a_j.node_idx < 0 || full_last.get_nodes()[a_last.node_idx] != full_j.get_nodes()[a_j.node_idx]) {
+                        // nodes are different, add a node insertion penalty
+                        updated_score += node_insert;
                     }
 
-                    update_score(base_updated_score + node_insert, &a_j, -seed_size);
+                    if (updated_score < score_i)
+                        return;
+
+                    updated_score += get_label_change_score(anno_buffer, a_last.col, a_j.col);
+
+                    update_score(updated_score, &a_j,
+                                 -seed_size - (a_i.spelling_length - a_last.spelling_length));
                 });
             },
             [&](const AnchorChain<Anchor> &chain, score_t score) {
@@ -988,6 +994,9 @@ void chain_alignments(const IDBGAligner &aligner,
 
                 DEBUG_LOG("\t\taln: {}", alignment);
                 DEBUG_LOG("\t\tcur: {}", cur);
+
+                // TODO: what if no overlap, but it connected through an intermediate
+
                 if (alignment.get_query_view().end() <= cur.get_query_view().begin()) {
                     // no overlap
                     std::ignore = dist;
