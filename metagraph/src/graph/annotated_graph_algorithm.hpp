@@ -59,6 +59,12 @@ mask_nodes_by_label(const AnnotatedDBG &anno_graph,
                     const DifferentialAssemblyConfig &config,
                     size_t num_threads = 1);
 
+using StringGenerator = std::function<void(const std::function<void(std::string_view)>)>;
+void assemble_superbubbles(const StringGenerator &generate,
+                           size_t k,
+                           const std::function<void(const std::string&, size_t)> &callback,
+                           size_t num_threads = 1);
+
 } // namespace graph
 } // namespace mtg
 

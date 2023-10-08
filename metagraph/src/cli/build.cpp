@@ -11,6 +11,8 @@
 #include "graph/representation/bitmap/dbg_bitmap_construct.hpp"
 #include "graph/representation/succinct/dbg_succinct.hpp"
 #include "graph/representation/succinct/boss_construct.hpp"
+#include "graph/annotated_graph_algorithm.hpp"
+#include "seq_io/sequence_io.hpp"
 #include "graph/graph_extensions/node_weights.hpp"
 #include "config/config.hpp"
 #include "parse_sequences.hpp"
@@ -86,6 +88,36 @@ int build_graph(Config *config) {
                               " by definition can't contain both strands.");
                 exit(1);
         }
+    }
+
+    if (config->superbubbles) {
+        logger->trace("Assembling superbubbles...");
+        #pragma omp parallel for num_threads(get_num_threads()) schedule(dynamic, 1)
+        for (size_t i = 0; i < files.size(); ++i) {
+            std::string fname = utils::remove_suffix(config->outfbase, ".gz", ".fasta") + ".fasta.gz";
+            gzFile gz_out;
+            gz_out = gzopen(fname.c_str(), "w");
+            if (gz_out == Z_NULL) {
+                logger->error("Can't write to {}", fname);
+                exit(1);
+            }
+            assemble_superbubbles(
+                [&](const auto &callback) {
+                    parse_sequences_and_log(files[i], *config, config->k,
+                        [&](std::string_view seq, uint32_t) { callback(seq); }
+                    );
+                },
+                config->k,
+                [&](const std::string &unitig, size_t cluster_id) {
+                    write_fasta(gz_out, std::to_string(cluster_id), unitig);
+                }
+            );
+
+            gzclose(gz_out);
+        }
+
+        logger->trace("Assembly finished in {} sec", timer.elapsed());
+        return 0;
     }
 
     if (config->complete) {

@@ -290,6 +290,8 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
             },
             batch_size, batch_length, batch_size
         );
+        std::string last_header = "0";
+        std::string last_seq = "";
         call_annotations(
             file,
             config.refpath,
@@ -304,11 +306,32 @@ void annotate_data(std::shared_ptr<graph::DeBruijnGraph> graph,
             config.anno_labels,
             [&](std::string sequence, auto labels) {
                 if (sequence.size() >= k) {
-                    batcher.push_and_pay(sequence.size(),
-                                         std::move(sequence), std::move(labels));
+                    if (config.superbubbles) {
+                        if (config.annotate_sequence_headers) {
+                            if (labels.back() != last_header) {
+                                batcher.push_and_pay(k, std::move(last_seq),
+                                                     std::vector<std::string>{ file });
+                                last_header = std::move(labels.back());
+                            }
+
+                            last_seq = sequence.substr(sequence.size() - k);
+                        } else {
+                            assert(config.filename_anno);
+                            batcher.push_and_pay(k, sequence.substr(sequence.size() - k),
+                                                 std::move(labels));
+                        }
+                    } else {
+                        batcher.push_and_pay(sequence.size(), std::move(sequence),
+                                             std::move(labels));
+                    }
                 }
             }
         );
+
+        if (last_seq.size()) {
+            assert(config.annotate_sequence_headers);
+            batcher.push_and_pay(k, std::move(last_seq), std::vector<std::string>{ file });
+        }
     }
 
     thread_pool.join();

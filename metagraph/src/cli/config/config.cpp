@@ -341,6 +341,8 @@ Config::Config(int argc, char *argv[]) {
             enumerate_out_sequences = true;
         } else if (!strcmp(argv[i], "--to-gfa")) {
             to_gfa = true;
+        } else if (!strcmp(argv[i], "--superbubbles")) {
+            superbubbles = true;
         } else if (!strcmp(argv[i], "--adj-rc")) {
             adjrc = true;
         } else if (!strcmp(argv[i], "--compacted")) {

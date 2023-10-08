@@ -40,4 +40,4 @@ class HLLWrapper : public SequenceGraph::GraphExtension {
 } // namespace graph
 } // namespace mtg
 
-#endif // __MER_DISTANCES_HPP__
+#endif // __HLL_WRAPPER_HPP__

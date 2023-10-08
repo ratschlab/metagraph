@@ -11,6 +11,7 @@
 
 #include "common/utils/simd_utils.hpp"
 #include "common/aligned_vector.hpp"
+#include "graph/graph_extensions/graph_topology.hpp"
 
 namespace mtg {
 namespace graph {
@@ -512,6 +513,26 @@ chain_seeds(const DBGAlignerConfig &config,
 
     return std::make_tuple(std::move(dp_table), std::move(backtrace), num_seeds, num_nodes);
 }
+
+
+void cluster_seeds(const IDBGAligner &aligner,
+                   std::string_view forward,
+                   std::string_view reverse,
+                   const DBGAlignerConfig &config,
+                   std::vector<Seed>&& fwd_seeds,
+                   std::vector<Seed>&& bwd_seeds,
+                   const std::function<void(Chain&&, score_t)> &callback,
+                   const std::function<bool(Alignment::Column)> &skip_column) {
+    std::ignore = aligner;
+    std::ignore = forward;
+    std::ignore = reverse;
+    std::ignore = config;
+    std::ignore = fwd_seeds;
+    std::ignore = bwd_seeds;
+    std::ignore = callback;
+    std::ignore = skip_column;
+}
+
 
 Alignment::score_t get_label_change_score(const AnnotationBuffer *anno_buffer,
                                           Alignment::Column col_a,

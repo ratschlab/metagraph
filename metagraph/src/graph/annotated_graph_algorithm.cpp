@@ -4,6 +4,7 @@
 #include "common/vectors/vector_algorithm.hpp"
 #include "common/vectors/bitmap.hpp"
 #include "graph/representation/masked_graph.hpp"
+#include "graph/representation/hash/dbg_hash_fast.hpp"
 
 
 namespace mtg {
@@ -436,6 +437,188 @@ void update_masked_graph_by_unitig(MaskedDeBruijnGraph &masked_graph,
                   kept_unitigs, total_unitigs,
                   static_cast<double>(num_kept_nodes + kept_unitigs * (masked_graph.get_k() - 1))
                       / kept_unitigs);
+}
+
+void assemble_superbubbles(const StringGenerator &generate,
+                           size_t k,
+                           const std::function<void(const std::string&, size_t)> &callback,
+                           size_t num_threads) {
+    // assemble graph
+    DBGHashFast dbg(k);
+    generate([&dbg](std::string_view seq) { dbg.add_sequence(seq); });
+
+    using unitig_index = node_index;
+    using superbubble_index = node_index;
+
+    // assemble unitigs
+    std::vector<std::tuple<node_index, node_index, size_t, std::string>> unitigs;
+    std::atomic<unitig_index> num_unitigs { 0 };
+    std::vector<unitig_index> node_to_unitig(dbg.num_nodes() + 1);
+    std::mutex mu;
+
+    dbg.call_unitigs([&](const std::string &seq, const auto &path) {
+        unitig_index unitig_id = num_unitigs.fetch_add(1, std::memory_order_relaxed) + 1;
+        for (node_index node : path) {
+            node_to_unitig[node] = unitig_id;
+        }
+
+        std::lock_guard<std::mutex> lock(mu);
+        unitigs.emplace_back(path.front(), path.back(), path.size(), seq);
+    }, num_threads);
+
+    // assemble superbubbles
+    superbubble_index num_superbubbles = 0;
+    std::vector<std::tuple<superbubble_index, superbubble_index, superbubble_index, uint64_t, uint64_t>> unitig_to_superbubble(unitigs.size() + 1);
+    std::vector<std::pair<std::vector<unitig_index>, bool>> superbubbles;
+
+    #pragma omp parallel for num_threads(num_threads)
+    for (size_t unitig_id = 1; unitig_id <= unitigs.size(); ++unitig_id) {
+        const auto &[front, back, size, seq] = unitigs[unitig_id - 1];
+
+        if (dbg.outdegree(back) <= 1)
+            continue;
+
+        // start superbubble search
+        bool has_tips = false;
+        bool found_cycle = false;
+        std::vector<node_index> S { unitig_id };
+
+        std::vector<unitig_index> visited;
+        tsl::hopscotch_map<unitig_index, bool> seen;
+
+        while (S.size()) {
+            unitig_index unitig = S.back();
+            S.pop_back();
+
+            visited.emplace_back(unitig);
+            seen[unitig] = true;
+
+            node_index node = std::get<1>(unitigs[unitig - 1]);
+
+            bool has_children = false;
+            dbg.adjacent_outgoing_nodes(node, [&](node_index next_front) {
+                has_children = true;
+                if (found_cycle)
+                    return;
+
+                bool all_visited = true;
+                unitig_index next_unitig = node_to_unitig[next_front];
+
+                if (next_unitig == unitig_id) {
+                    // cycle detected
+                    found_cycle = true;
+                    return;
+                }
+
+                auto [find, inserted] = seen.try_emplace(next_unitig, false);
+                if (find->second) {
+                    visited.emplace_back(next_unitig);
+                } else {
+                    dbg.adjacent_incoming_nodes(next_front, [&](node_index sibling_back) {
+                        if (all_visited) {
+                            unitig_index sibling_unitig = node_to_unitig[sibling_back];
+                            auto find = seen.find(sibling_unitig);
+                            if (find != seen.end() && !find->second)
+                                all_visited = false;
+                        }
+                    });
+
+                    if (all_visited)
+                        S.push_back(next_unitig);
+                }
+            });
+
+            if (found_cycle)
+                break;
+
+            has_tips |= !has_children;
+
+            if (S.size() == 1 && seen.size() == visited.size() + 1) {
+                dbg.adjacent_outgoing_nodes(std::get<1>(unitigs[S[0] - 1]), [&](node_index next_front) {
+                    const auto &[front, back, size, seq] = unitigs[unitig_id - 1];
+                    if (next_front == front) {
+                        // TODO: still keep these?
+                        found_cycle = true;
+                    }
+                });
+
+                if (!found_cycle) {
+                    // found a superbubble
+                    #pragma omp critical
+                    {
+                    size_t superbubble_id = ++num_superbubbles;
+                    uint64_t coord = 1;
+
+                    auto &[start_sb, mid_sb, term_sb, mid_c, term_c] = unitig_to_superbubble[visited[0]];
+                    start_sb = superbubble_id;
+
+                    for (size_t i = 1; i < visited.size(); ++i) {
+                        coord += std::get<2>(unitigs[visited[i] - 1]);
+                        auto &[start_sb, mid_sb, term_sb, mid_c, term_c] = unitig_to_superbubble[visited[i]];
+                        if (coord > mid_c) {
+                            mid_sb = superbubble_id;
+                            mid_c = coord;
+                        }
+                    }
+
+                    {
+                       auto &[start_sb, mid_sb, term_sb, mid_c, term_c] = unitig_to_superbubble[S[0]];
+                       term_sb = superbubble_id;
+                       term_c = coord;
+                    }
+
+                    superbubbles.emplace_back(std::move(visited), has_tips).first.emplace_back(S[0]);
+                    }
+                }
+
+                S.clear();
+            }
+        }
+    }
+
+    // find chains and print non-chained unitigs
+    size_t cluster_id = 0;
+    sdsl::bit_vector in_chain(superbubbles.size() + 1);
+    std::vector<std::vector<superbubble_index>> chains;
+    for (unitig_index unitig_id = 1; unitig_id < unitig_to_superbubble.size(); ++unitig_id) {
+        const auto &[start_sb, mid_sb, term_sb, mid_c, term_c] = unitig_to_superbubble[unitig_id];
+        if (!mid_sb && start_sb && !term_sb && !in_chain[start_sb]) {
+            // start of a chain
+            auto &chain = chains.emplace_back();
+            in_chain[start_sb] = true;
+            chain.emplace_back(start_sb);
+            auto cur_start_sb = start_sb;
+            while (cur_start_sb) {
+                cur_start_sb = 0;
+                const auto &[superbubble, has_tips] = superbubbles[cur_start_sb - 1];
+                const auto &[next_start_sb, next_mid_sb, next_term_sb, next_mid_c, next_term_c] = unitig_to_superbubble[superbubble.back()];
+                if (next_start_sb && !next_mid_sb) {
+                    chain.emplace_back(next_start_sb);
+                    in_chain[next_start_sb] = true;
+                    if (!has_tips)
+                        cur_start_sb = next_start_sb;
+                }
+            }
+        }
+
+        if (!start_sb && !mid_sb && !term_sb) {
+            const auto &[front, back, size, seq] = unitigs[unitig_id - 1];
+            callback(seq, cluster_id++);
+        }
+    }
+
+    // outputting superbubbles
+    for (const auto &chain : chains) {
+        for (superbubble_index superbubble_id : chain) {
+            const auto &[unitig_ids, has_tips] = superbubbles[superbubble_id - 1];
+            for (unitig_index unitig_id : unitig_ids) {
+                const auto &[front, back, size, seq] = unitigs[unitig_id - 1];
+                callback(seq, cluster_id);
+            }
+        }
+
+        ++cluster_id;
+    }
 }
 
 } // namespace graph
