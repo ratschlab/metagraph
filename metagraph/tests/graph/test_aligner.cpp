@@ -18,6 +18,7 @@ using namespace mtg::graph;
 using namespace mtg::graph::align;
 using namespace mtg::test;
 using namespace mtg::kmer;
+using common::logger;
 
 const std::string test_data_dir = "../tests/data";
 const bool PICK_REV_COMP = true;
@@ -1421,12 +1422,16 @@ TYPED_TEST(DBGAlignerTest, align_low_similarity4) {
 }
 
 TYPED_TEST(DBGAlignerTest, align_low_similarity5) {
+    if constexpr(!std::is_base_of_v<DBGSuccinct, TypeParam>) {
+        logger->warn("Skipping test for non-succinct graph");
+        return;
+    }
+
     size_t k = 31;
     std::string reference = "GTCGTCAGATCGGAAGAGCGTCGTGTAGGGAAAGGTCTTCGCCTGTGTAGATCTCGGTGGTCG";
     std::string query =     "GTCAGATCGGAAGAGCGTCGTGTAGGGAAAGAGTGTTCCTGGTGGTGTAGATC";
 
-    auto graph = std::make_shared<DBGSuccinct>(k);
-    graph->add_sequence(reference);
+    auto graph = build_graph<TypeParam>(k, { reference }, DeBruijnGraph::BASIC, false);
 
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
@@ -1441,14 +1446,18 @@ TYPED_TEST(DBGAlignerTest, align_low_similarity5) {
 
 }
 
-TEST(DBGAlignerTest, align_suffix_seed_snp_min_seed_length) {
+TYPED_TEST(DBGAlignerTest, align_suffix_seed_snp_min_seed_length) {
+    if constexpr(!std::is_base_of_v<DBGSuccinct, TypeParam>) {
+        logger->warn("Skipping test for non-succinct graph");
+        return;
+    }
+
     size_t k = 7;
     std::string reference = "AAAAGCTTTCGAGGCCAA";
     std::string query =        "ACCTTTCGAGGCCAA";
     //                          SS
 
-    auto graph = std::make_shared<DBGSuccinct>(k);
-    graph->add_sequence(reference);
+    auto graph = build_graph<TypeParam>(k, { reference }, DeBruijnGraph::BASIC, false);
 
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
@@ -1477,7 +1486,12 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_min_seed_length) {
 }
 
 #if ! _PROTEIN_GRAPH
-TEST(DBGAlignerTest, align_suffix_seed_snp_canonical) {
+TYPED_TEST(DBGAlignerTest, align_suffix_seed_snp_canonical) {
+    if constexpr(!std::is_base_of_v<DBGSuccinct, TypeParam>) {
+        logger->warn("Skipping test for non-succinct graph");
+        return;
+    }
+
     size_t k = 18;
     std::string reference = "AAAAACTTTCGAGGCCAA";
     std::string query =     "GGGGGCTTTCGAGGCCAA";
@@ -1487,15 +1501,10 @@ TEST(DBGAlignerTest, align_suffix_seed_snp_canonical) {
     std::string query_rc     = "TTGGCCTCGAAAGCCCCC";
 
     for (auto mode : { DeBruijnGraph::PRIMARY, DeBruijnGraph::CANONICAL }) {
-        auto dbg_succ = std::make_shared<DBGSuccinct>(k, mode);
-        dbg_succ->add_sequence(reference_rc);
-
-        std::shared_ptr<DeBruijnGraph> graph = dbg_succ;
-        if (mode == DeBruijnGraph::PRIMARY)
-            graph = std::make_shared<CanonicalDBG>(graph);
+        auto graph = build_graph<TypeParam>(k, { reference_rc }, mode, false);
 
         DBGAlignerConfig config;
-    config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
+        config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
         config.max_num_seeds_per_locus = std::numeric_limits<size_t>::max();
         config.min_cell_score = std::numeric_limits<score_t>::min() + 100;
         config.min_path_score = std::numeric_limits<score_t>::min() + 100;
@@ -1710,17 +1719,21 @@ TYPED_TEST(DBGAlignerTest, align_bfs_vs_dfs_xdrop) {
     check_json_dump_load(*graph, path, paths.get_query(), paths.get_query(PICK_REV_COMP));
 }
 
-TEST(DBGAlignerTest, align_dummy) {
+TYPED_TEST(DBGAlignerTest, align_dummy) {
+    if constexpr(!std::is_base_of_v<DBGSuccinct, TypeParam>) {
+        logger->warn("Skipping test for non-succinct graph");
+        return;
+    }
+
     size_t k = 7;
     std::string reference = "AAAAGCTTTCGAGGCCAA";
     std::string query =     "AAAAGTTTTCGAGGCCAA";
     //                            X
 
-    auto graph = std::make_shared<DBGSuccinct>(k);
+    auto graph = build_graph<TypeParam>(k, { reference }, DeBruijnGraph::BASIC, false);
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
     config.min_seed_length = 5;
-    graph->add_sequence(reference);
 
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
@@ -1742,17 +1755,22 @@ TEST(DBGAlignerTest, align_dummy) {
     check_extend(graph, aligner.get_config(), paths, query);
 }
 
-TEST(DBGAlignerTest, align_extended_insert_after_match) {
+TYPED_TEST(DBGAlignerTest, align_extended_insert_after_match) {
+    if constexpr(!std::is_base_of_v<DBGSuccinct, TypeParam>) {
+        logger->warn("Skipping test for non-succinct graph");
+        return;
+    }
+
     size_t k = 27;
     std::string reference_1 = "CGTGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAAGCC";
     std::string reference_2 = "CGTGGCCCAGGCCCAGGCCCAGCCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAGGCCCAAGCC";
     std::string query =       "CGTGGCCCAGGCCCAGGCCCAGTGGGCGTTGGCCCAGGCGGCCACGGTGGCTGCGCAGGCCCGCCTGGCACAAGCCACGCTG";
-    auto graph = std::make_shared<DBGSuccinct>(k);
+
+    auto graph = build_graph<TypeParam>(k, { reference_1, reference_2 },
+                                        DeBruijnGraph::BASIC, false);
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -3, -3);
     config.min_seed_length = 15;
-    graph->add_sequence(reference_1);
-    graph->add_sequence(reference_2);
 
     DBGAligner<> aligner(*graph, config);
     auto paths = aligner.align(query);
@@ -1768,14 +1786,17 @@ TEST(DBGAlignerTest, align_extended_insert_after_match) {
 }
 
 #if ! _PROTEIN_GRAPH
-TEST(DBGAlignerTest, align_suffix_seed_no_full_seeds) {
+TYPED_TEST(DBGAlignerTest, align_suffix_seed_no_full_seeds) {
+    if constexpr(!std::is_base_of_v<DBGSuccinct, TypeParam>) {
+        logger->warn("Skipping test for non-succinct graph");
+        return;
+    }
+
     size_t k = 31;
     std::string reference = "CTGCTGCGCCATCGCAACCCACGGTTGCTTTTTGAGTCGCTGCTCACGTTAGCCATCACACTGACGTTAAGCTGGCTTTCGATGCTGTATC";
     std::string query     = "CTTACTGCTGCGCTCTTCGCAAACCCCACGGTTTCTTGTTTTGAGCTCGCCTGCTCACGATACCCATACACACTGACGTTCAAGCTGGCTTTCGATGTTGTATC";
 
-    auto dbg_succ = std::make_shared<DBGSuccinct>(k, DeBruijnGraph::PRIMARY);
-    dbg_succ->add_sequence(reference);
-    auto graph = std::make_shared<CanonicalDBG>(dbg_succ);
+    auto graph = build_graph<TypeParam>(k, { reference }, DeBruijnGraph::PRIMARY, false);
 
     DBGAlignerConfig config;
     config.score_matrix = DBGAlignerConfig::dna_scoring_matrix(2, -1, -2);
